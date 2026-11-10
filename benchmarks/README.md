@@ -34,6 +34,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
+| **Structured scalar emitter pilot** | `js-structured-pilot.ts` | CE (self; ordinary JavaScript target vs the scalar fragment target, both emitters) | `docs/plans/2026-11-09-js-structured-pilot-measure.md` |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 | **Finite groups** | `run-group-theory.mjs finite` (`group-theory-finite.ts`) | CE (self; table validation, subgroup structure, automorphisms) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
@@ -828,6 +829,42 @@ Every control and emitted-source digest was rechecked after the review tightened
 the counter boundaries and removed the ignored `hideValues` option. Counts and
 source digests did not change. The archive retains the measured harness and its
 hash; timing statements are unchanged by those instrumentation fixes.
+
+## Structured scalar emitter pilot (`js-structured-pilot.ts`)
+
+A paired source harness for step 4 of
+`docs/plans/2026-11-09-js-compiler-status-and-plan.md`. On one engine and one
+boxed expression it compiles with the ordinary JavaScript target (default
+options, and `cse: false, constantFold: false`), with the scalar fragment
+target on its existing emitter and on its structured emitter, and with a
+second copy of the default configuration as the calibration. It checks that
+all of them give the same values on every input before it times anything. It
+times the first compilation on a fresh engine (and, with `COLD_PROCESS=n`, in
+`n` fresh processes), warm compilation, the six phases of the structured
+route, and warm execution of `run()`. The configurations of each round run in
+a rotating order; ratios are computed per round. The fixtures are the step 3
+fixtures, two trees of about 200 operations, and the corpus programs in
+`js-structured-pilot-corpus.json`, which `MODE=extract` writes from the Tycho
+codegen audit artifacts. `MODE=lines` gives the line counts and `MODE=deps`
+the functions of the existing compiler that the structured route runs. The
+script header lists the modes and variables.
+
+```sh
+# Default, a few minutes: the fixtures and a sample of 40 corpus programs
+# (the first program of each of the first 40 rows), one GC per round.
+node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+# The full corpus (546 programs), fresh processes, one GC per batch: more
+# than an hour.
+CORPUS=all COLD_PROCESS=5 GC=batch node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+# Value agreement of all programs, no timing.
+CORPUS=all MODE=check node --import tsx benchmarks/js-structured-pilot.ts
+```
+
+Hold the box lock for a timing run. The configurations of each round run in
+a new random order: a fixed rotation made the calibration A2/A 0.83, because
+a batch that follows a batch of the same compiler runs faster. The results
+are in `docs/plans/2026-11-09-js-structured-pilot-measure.md`; no complete
+run of the random-order design exists yet.
 
 ## Closed constant folding (`closed-folding.mjs`)
 

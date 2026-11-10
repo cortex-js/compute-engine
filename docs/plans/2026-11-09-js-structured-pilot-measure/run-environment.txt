@@ -1,0 +1,79 @@
+--- ps before
+ %CPU COMM
+104.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+ 98.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+ 38.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+ 23.3 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 15.3 node
+ 14.7 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+ 11.8 /Users/arno/.local/bin/claude
+--- jest
+none
+EXIT=124
+--- ps after
+ %CPU COMM
+ 97.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+ 95.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+ 32.7 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+  4.1 /usr/sbin/bluetoothd
+  3.6 /usr/libexec/sharingd
+  2.0 /Users/arno/dev/tycho/workers/api/node_modules/wrangler/node_modules/@esbuild/darwin-arm64/bin/esbuild
+  2.0 /usr/libexec/nearbyd
+--- jest
+none
+box-lock: RELEASED by compute-engine-ec:step4
+box-lock: now reserved for tycho-f8 for 3 min (first in the queue)
+box-lock: load 5.6 / 6.7 / 7.2 on 18 cores at release
+21:59:18
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~18 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~17 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~16 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~15 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~14 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~13 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~12 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~11 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~10 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~9 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~8 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~7 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~6 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~5 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~4 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~3 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~2 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~1 min left
+box-lock: waiting, number 3 in the queue — HELD by compute-engine-1d (session compute-engine-1d, ttys002) — binding-units decision-6 measurement, full suite in worktree — ~0 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-a3:showcase (session tycho-a3, ttys006) — build, outline spec, showcase thumbnails — ~60 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-a3:showcase (session tycho-a3, ttys006) — build, outline spec, showcase thumbnails — ~59 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-a3:showcase (session tycho-a3, ttys006) — build, outline spec, showcase thumbnails — ~58 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-a3:showcase (session tycho-a3, ttys006) — build, outline spec, showcase thumbnails — ~57 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-a3:showcase (session tycho-a3, ttys006) — build, outline spec, showcase thumbnails — ~56 min left
+box-lock: waiting, number 2 in the queue — HELD by tycho-a3:showcase (session tycho-a3, ttys006) — build, outline spec, showcase thumbnails — ~55 min left
+box-lock: box free for compute-engine-ec:step4 after 1485 s
+box-lock: ACQUIRED by compute-engine-ec:step4 for 100 min — js-structured-pilot timing run2 run3
+box-lock: load 3.8 / 5.9 / 7.0 on 18 cores at acquire — record this with your results
+--- ps before
+ %CPU COMM
+101.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpe
+ 94.9 /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtectRemediatorMRTv3
+ 80.4 /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtectRemediatorPirrit
+ 25.7 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+  9.0 /Applications/Visual Studio Code.app/Contents/MacOS/Code
+  5.6 /Users/arno/.local/share/uv/tools/claude-swap/bin/python
+  4.8 /Users/arno/.local/bin/claude
+--- jest
+none
+EXIT=0
+22:31:48
+--- ps after
+ %CPU COMM
+143.8 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 97.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpe
+ 43.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+ 29.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpe
+ 24.8 /sbin/launchd
+ 13.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpe
+  6.6 /System/Library/CoreServices/talagentd
+--- jest
+none

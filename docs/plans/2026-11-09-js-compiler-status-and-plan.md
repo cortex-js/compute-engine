@@ -383,6 +383,31 @@ representation is built for GLSL and `interval-js`: that question was left
 open until the result of this pilot
 (`docs/plans/2026-11-08-compile-targets-implementation-plan.md`, step 7).
 
+**Result of steps 2 to 4 (2026-11-09).** Steps 2 and 3 are in
+`javascript-structured-ir.ts`, `javascript-structured-lower.ts` and
+`javascript-structured-emit.ts`; `new ScalarFragmentJavaScriptTarget('structured')`
+selects the new emitter. The measure is
+[the pilot measure](2026-11-09-js-structured-pilot-measure.md). In short:
+
+- No value differs between the four configurations on 8,809 inputs of 546
+  corpus programs and the fixtures.
+- Compilation with the new emitter takes 30% to 68% of the time of the
+  ordinary target with the same options on the fixtures, and is not slower
+  on the corpus.
+- Execution time: no difference was resolved.
+- The new emitter writes 2.5 to 6.7 times more code, because it binds each
+  value to a `const` and writes `If`, `And` and `Or` as statements.
+- The pilot is 1,539 counted lines. The handlers of the existing emitter for
+  the same operators are at most 907 lines, and about 190 by estimate for
+  the scalar cases alone.
+- Applied to these numbers, the rules of step 4 say: no correctness stop, no
+  cost above the budgets, and neither condition for a proposal to expand
+  holds (the pilot is not smaller, and it removed no class of defect that
+  has a `corpus` or `plausible` witness). The compile-time gain is a result
+  that the rules did not foresee.
+
+The decision to expand, to revise or to stop is the user's, and is open.
+
 ### Step 5 — Recover the existing internal slice coverage
 
 **Deliver, in order:** Sqrt and other justified scalar operations; typed function

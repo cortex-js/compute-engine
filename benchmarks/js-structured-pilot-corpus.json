@@ -1,0 +1,9889 @@
+{
+ "provenance": {
+  "description": "The scalar programs of the Tycho codegen audit records that the structured route admits: each `input` (the LaTeX serialization of the compiled expression) parsed on a fresh engine with the recorded free-symbol types, compiled by ScalarFragmentJavaScriptTarget(\"structured\") with cse: false and constantFold: false. Programs with at least one operation and one free symbol, deduplicated by canonical MathJSON and the types of the symbols read.",
+  "extractedAt": "2026-11-10T04:49:14.560Z",
+  "sources": [
+   {
+    "file": "ce-0.184.0.json",
+    "sha256": "4d15c703e169e8ddc1a9bad93b4513562c1d9a8ada730a7933d564d32ddbfaed",
+    "generatedAt": "2026-11-08T23:57:41.281Z",
+    "computeEngine": "0.184.0",
+    "tychoCommit": "a40372202",
+    "records": 1101
+   },
+   {
+    "file": "ce-0.185.0-all.json",
+    "sha256": "1323eda2cc6d727688a0173dae8809ed01d6736678d34c06030f462eef1cb008",
+    "generatedAt": "2026-11-09T19:49:51.661Z",
+    "computeEngine": "0.185.0",
+    "tychoCommit": "e7acb26e0",
+    "records": 17421
+   }
+  ],
+  "counts": {
+   "records": 18522,
+   "javascriptSucceeded": 9595,
+   "distinctInputs": 8950,
+   "parseErrors": 0,
+   "admitted": 608,
+   "literal": 41,
+   "closed": 14,
+   "symbolOnly": 7,
+   "programs": 546,
+   "declined": 8342
+  },
+  "declineReasons": {
+   "JS scalar fragment: unsupported head <name>": 7673,
+   "JS scalar fragment: unsupported arity": 346,
+   "JS scalar fragment: unsupported binding <name>": 274,
+   "JS scalar fragment: invalid expression": 23,
+   "JS scalar fragment: <operator> reads no symbol": 21,
+   "JS scalar fragment: Less with 3 operands is not in the structured route, which admits two": 5
+  }
+ },
+ "programs": [
+  {
+   "id": "corpus-0",
+   "doc": "exoplanet-transit",
+   "row": "y_o + y_p",
+   "input": "y_{o}+y_{p}",
+   "json": [
+    "Add",
+    "y_o",
+    "y_p"
+   ],
+   "declare": {
+    "y_o": "real",
+    "y_p": "real"
+   }
+  },
+  {
+   "id": "corpus-1",
+   "doc": "kelvin-wake",
+   "row": "\\frac{x}{2\\sqrt{2}}",
+   "input": "\\frac{\\sqrt{2}}{4}x",
+   "json": [
+    "Multiply",
+    [
+     "Divide",
+     [
+      "Sqrt",
+      2
+     ],
+     4
+    ],
+    "x"
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-2",
+   "doc": "kelvin-wake",
+   "row": "-\\frac{x}{2\\sqrt{2}}",
+   "input": "-\\frac{\\sqrt{2}}{4}x",
+   "json": [
+    "Multiply",
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       2
+      ],
+      4
+     ]
+    ],
+    "x"
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-3",
+   "doc": "hyvhlz4chj",
+   "row": "-1\\lt x\\lt1\\keyword{where}-2\\lt z\\lt2, -0.8\\lt y\\lt0.8",
+   "input": "\\max(\\max(-x-1, x-1), \\max(-z-2, z-2), \\max(-y-0.8, y-0.8))",
+   "json": [
+    "Max",
+    [
+     "Max",
+     [
+      "Add",
+      [
+       "Negate",
+       "x"
+      ],
+      -1
+     ],
+     [
+      "Add",
+      "x",
+      -1
+     ]
+    ],
+    [
+     "Max",
+     [
+      "Add",
+      [
+       "Negate",
+       "z"
+      ],
+      -2
+     ],
+     [
+      "Add",
+      "z",
+      -2
+     ]
+    ],
+    [
+     "Max",
+     [
+      "Add",
+      [
+       "Negate",
+       "y"
+      ],
+      -0.8
+     ],
+     [
+      "Add",
+      "y",
+      -0.8
+     ]
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-4",
+   "doc": "hyvhlz4chj",
+   "row": "x^2+y^2=0.2\\keyword{where}2.3\\gt z\\gt2",
+   "input": "2\\lt z\\land z\\lt2.3",
+   "json": [
+    "And",
+    [
+     "Less",
+     2,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     2.3
+    ]
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-5",
+   "doc": "hyvhlz4chj",
+   "row": "x^2+y^2+4(z-2.3)^2\\lt0.3\\keyword{where}2.3\\lt z",
+   "input": "2.3\\lt z",
+   "json": [
+    "Less",
+    2.3,
+    "z"
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-6",
+   "doc": "heat-spread",
+   "row": "\\operatorname{polygon}((16,0),(17,0),(17,13),(16,13))\\{o>0.5\\}",
+   "input": "0.5\\lt o",
+   "json": [
+    "Less",
+    0.5,
+    "o"
+   ],
+   "declare": {
+    "o": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-7",
+   "doc": "60bekaymzz",
+   "row": "zz\\ge-1\\keyword{where}f(T)+2\\lt z\\lt f(T)+3.5, 8.3\\lt x\\lt8.5, -0.5\\lt y\\lt-0.3",
+   "input": "-(zz)-1",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     [
+      "Multiply",
+      "z",
+      "z"
+     ]
+    ],
+    -1
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-8",
+   "doc": "cy55etqze6",
+   "row": "xxxxxx+yyyyyy+zzzzzz\\le4^2\\keyword{where}((z+2.3))^2+(1.3y)^2+(\\frac{x}{1.5})^2\\gt1",
+   "input": "xxxxxx+yyyyyy+zzzzzz-16",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     "x",
+     "x",
+     "x",
+     "x",
+     "x",
+     "x"
+    ],
+    [
+     "Multiply",
+     "y",
+     "y",
+     "y",
+     "y",
+     "y",
+     "y"
+    ],
+    [
+     "Multiply",
+     "z",
+     "z",
+     "z",
+     "z",
+     "z",
+     "z"
+    ],
+    -16
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-9",
+   "doc": "cy55etqze6",
+   "row": "xx+yy\\le1\\keyword{where}1.8\\lt z\\lt2.11, xx+yy\\gt0.7",
+   "input": "xx+yy-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     "x",
+     "x"
+    ],
+    [
+     "Multiply",
+     "y",
+     "y"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-10",
+   "doc": "cy55etqze6",
+   "row": "xx+yy\\le1\\keyword{where}1.8\\lt z\\lt2.11, xx+yy\\gt0.7",
+   "input": "0.7\\lt xx+yy\\land1.8\\lt z\\land z\\lt2.11",
+   "json": [
+    "And",
+    [
+     "Less",
+     0.7,
+     [
+      "Add",
+      [
+       "Multiply",
+       "x",
+       "x"
+      ],
+      [
+       "Multiply",
+       "y",
+       "y"
+      ]
+     ]
+    ],
+    [
+     "Less",
+     1.8,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     2.11
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-11",
+   "doc": "cy55etqze6",
+   "row": "xx+yy\\le1\\keyword{where}1.8\\lt z\\lt2",
+   "input": "1.8\\lt z\\land z\\lt2",
+   "json": [
+    "And",
+    [
+     "Less",
+     1.8,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     2
+    ]
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-12",
+   "doc": "cy55etqze6",
+   "row": "\\frac{x^{10}}{1\\,000}+(y+1.3)^2+(z+0.4)^2\\le0.6^2\\keyword{where}-1\\lt x\\lt-1+0.3",
+   "input": "-1\\lt x\\land x\\lt-0.7",
+   "json": [
+    "And",
+    [
+     "Less",
+     -1,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     -0.7
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-13",
+   "doc": "cy55etqze6",
+   "row": "\\frac{x^{10}}{1\\,000}+(y+1.3)^2+(z+0.4)^2\\le0.6^2\\keyword{where}-0.15\\lt x\\lt-0.15+0.3",
+   "input": "-0.15\\lt x\\land x\\lt0.15",
+   "json": [
+    "And",
+    [
+     "Less",
+     -0.15,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     0.15
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-14",
+   "doc": "cy55etqze6",
+   "row": "\\frac{x^{10}}{1\\,000}+(y+1.3)^2+(z+0.4)^2\\le0.6^2\\keyword{where}0.7\\lt x\\lt0.7+0.3",
+   "input": "0.7\\lt x\\land x\\lt1",
+   "json": [
+    "And",
+    [
+     "Less",
+     0.7,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     1
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-15",
+   "doc": "cy55etqze6",
+   "row": "yy+zz\\le1\\keyword{where}1.65\\gt x\\gt1",
+   "input": "yy+zz-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     "y",
+     "y"
+    ],
+    [
+     "Multiply",
+     "z",
+     "z"
+    ],
+    -1
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-16",
+   "doc": "cy55etqze6",
+   "row": "yy+zz\\le1\\keyword{where}1.65\\gt x\\gt1",
+   "input": "1\\lt x\\land x\\lt1.65",
+   "json": [
+    "And",
+    [
+     "Less",
+     1,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     1.65
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-17",
+   "doc": "cy55etqze6",
+   "row": "\\vert x+1\\vert\\le1\\keyword{where}2.5\\vert y\\vert\\le1\\land\\vert z\\vert\\le1\\land-z\\lt5(x+1.7)+\\frac{zz}{2}\\land a=0",
+   "input": "a=0",
+   "json": [
+    "Equal",
+    "a",
+    0
+   ],
+   "declare": {
+    "a": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-18",
+   "doc": "cy55etqze6",
+   "row": "\\vert x+1\\vert\\le1\\keyword{where}2.5\\vert y\\vert\\le1\\land\\vert z\\vert\\le1\\land z\\lt6(x+1.7)+\\frac{zz}{2}\\land a=1",
+   "input": "a=1",
+   "json": [
+    "Equal",
+    "a",
+    1
+   ],
+   "declare": {
+    "a": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-19",
+   "doc": "epq7yidtim",
+   "row": "\\operatorname{sphere}(p, \\left(0.25\\keyword{where}G_{ameOver}\\lt1\\right))",
+   "input": "G_{ameOver}\\lt1",
+   "json": [
+    "Less",
+    "G_ameOver",
+    1
+   ],
+   "declare": {
+    "G_ameOver": "real<0..1>"
+   }
+  },
+  {
+   "id": "corpus-20",
+   "doc": "epq7yidtim",
+   "row": "\\operatorname{sphere}(p, \\mathrm{If}(G_{ameOver}=1, 0.25))",
+   "input": "G_{ameOver}=1",
+   "json": [
+    "Equal",
+    "G_ameOver",
+    1
+   ],
+   "declare": {
+    "G_ameOver": "real<0..1>"
+   }
+  },
+  {
+   "id": "corpus-21",
+   "doc": "epq7yidtim",
+   "row": "\\vert x\\vert=4.99\\keyword{where}z\\lt0.1",
+   "input": "z\\lt0.1",
+   "json": [
+    "Less",
+    "z",
+    0.1
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-22",
+   "doc": "hejpzl6eku",
+   "row": "\\vert y\\vert+0.2\\gt7z\\keyword{where}z\\gt-0.01, -0.497\\lt y\\lt0.497",
+   "input": "-0.01\\lt z\\land-0.497\\lt y\\land y\\lt0.497",
+   "json": [
+    "And",
+    [
+     "Less",
+     -0.01,
+     "z"
+    ],
+    [
+     "Less",
+     -0.497,
+     "y"
+    ],
+    [
+     "Less",
+     "y",
+     0.497
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-23",
+   "doc": "hejpzl6eku",
+   "row": "z\\lt0\\keyword{where}z\\gt-0.02, -0.1\\lt y\\lt0.1",
+   "input": "\\max(z, -z-0.02, \\max(-y-0.1, y-0.1))",
+   "json": [
+    "Max",
+    "z",
+    [
+     "Add",
+     [
+      "Negate",
+      "z"
+     ],
+     -0.02
+    ],
+    [
+     "Max",
+     [
+      "Add",
+      [
+       "Negate",
+       "y"
+      ],
+      -0.1
+     ],
+     [
+      "Add",
+      "y",
+      -0.1
+     ]
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-24",
+   "doc": "hejpzl6eku",
+   "row": "z\\lt0\\keyword{where}z\\gt-0.01",
+   "input": "\\max(z, -z-0.01)",
+   "json": [
+    "Max",
+    "z",
+    [
+     "Add",
+     [
+      "Negate",
+      "z"
+     ],
+     -0.01
+    ]
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-25",
+   "doc": "hejpzl6eku",
+   "row": "y=(z-0.03)b\\keyword{where}z\\gt0.01, z^2+y^2\\lt0.52^2",
+   "input": "y-b\\times(z-0.03)",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     [
+      "Multiply",
+      "b",
+      [
+       "Add",
+       "z",
+       -0.03
+      ]
+     ]
+    ],
+    "y"
+   ],
+   "declare": {
+    "b": "real<-10..9>",
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-26",
+   "doc": "hktx2hjnni",
+   "row": "\\rho=\\theta\\phi",
+   "input": "\\phi\\theta",
+   "json": [
+    "Multiply",
+    "phi",
+    "theta"
+   ],
+   "declare": {
+    "phi": "real",
+    "theta": "real"
+   }
+  },
+  {
+   "id": "corpus-27",
+   "doc": "jaayqz1o06",
+   "row": "z\\gt-5\\keyword{where}\\begin{cases}1&x^2+y^2+z^2\\lt r_{sphere}^2\\\\0&\\top\\end{cases}=1",
+   "input": "-z-5",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     "z"
+    ],
+    -5
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-28",
+   "doc": "jaayqz1o06",
+   "row": "z\\lt\\infty\\keyword{where}\\lbrace equation\\mid1\\land0\\rbrace=1",
+   "input": "z-\\infty",
+   "json": [
+    "Add",
+    "z",
+    "NegativeInfinity"
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-29",
+   "doc": "kkkzhe6bsl",
+   "row": "xy",
+   "input": "xy",
+   "json": [
+    "Multiply",
+    "x",
+    "y"
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-30",
+   "doc": "mavxszbvzk",
+   "row": "z+7\\le\\min((x-20)+3, 3-(x-20), 0)\\keyword{where}z\\gt-10, 0\\le-y\\le-0.8(z+7)+4.5",
+   "input": "z-\\min(x-17, 23-x, 0)+7",
+   "json": [
+    "Add",
+    "z",
+    [
+     "Negate",
+     [
+      "Min",
+      [
+       "Add",
+       "x",
+       -17
+      ],
+      [
+       "Add",
+       [
+        "Negate",
+        "x"
+       ],
+       23
+      ],
+      0
+     ]
+    ],
+    7
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-31",
+   "doc": "nxlddeh5zv",
+   "row": "z\\lt(l_{ayerBaseLevel})\\keyword{where}-\\frac{s_{ize}}{2}\\lt x\\lt\\frac{s_{ize}}{2}, -\\frac{s_{ize}}{2}\\lt y\\lt\\frac{s_{ize}}{2}",
+   "input": "\\max(z-l_{ayerBaseLevel}, \\max(-\\frac{s_{ize}}{2}-x, x-\\frac{s_{ize}}{2}), \\max(-\\frac{s_{ize}}{2}-y, y-\\frac{s_{ize}}{2}))",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "l_ayerBaseLevel"
+     ],
+     "z"
+    ],
+    [
+     "Max",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Rational",
+        -1,
+        2
+       ],
+       "s_ize"
+      ],
+      [
+       "Negate",
+       "x"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Rational",
+        -1,
+        2
+       ],
+       "s_ize"
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Max",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Rational",
+        -1,
+        2
+       ],
+       "s_ize"
+      ],
+      [
+       "Negate",
+       "y"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Rational",
+        -1,
+        2
+       ],
+       "s_ize"
+      ],
+      "y"
+     ]
+    ]
+   ],
+   "declare": {
+    "l_ayerBaseLevel": "real<-16..8>",
+    "s_ize": "integer<32..64>",
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-32",
+   "doc": "nxlddeh5zv",
+   "row": "z\\lt(l_{ayerBaseLevel})\\keyword{where}-\\frac{s_{ize}}{2}\\lt x\\lt\\frac{s_{ize}}{2}, -\\frac{s_{ize}}{2}\\lt y\\lt\\frac{s_{ize}}{2}",
+   "input": "-\\frac{s_{ize}}{2}",
+   "json": [
+    "Multiply",
+    [
+     "Rational",
+     -1,
+     2
+    ],
+    "s_ize"
+   ],
+   "declare": {
+    "s_ize": "integer<32..64>"
+   }
+  },
+  {
+   "id": "corpus-33",
+   "doc": "nxlddeh5zv",
+   "row": "z\\lt(l_{ayerBaseLevel})\\keyword{where}-\\frac{s_{ize}}{2}\\lt x\\lt\\frac{s_{ize}}{2}, -\\frac{s_{ize}}{2}\\lt y\\lt\\frac{s_{ize}}{2}",
+   "input": "\\frac{s_{ize}}{2}",
+   "json": [
+    "Multiply",
+    [
+     "Rational",
+     1,
+     2
+    ],
+    "s_ize"
+   ],
+   "declare": {
+    "s_ize": "integer<32..64>"
+   }
+  },
+  {
+   "id": "corpus-34",
+   "doc": "synthetic-d28d-zip",
+   "row": "y=Ax+B",
+   "input": "x+10",
+   "json": [
+    "Add",
+    "x",
+    10
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-35",
+   "doc": "synthetic-d28d-zip",
+   "row": "y=Ax+B",
+   "input": "2x+20",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    20
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-36",
+   "doc": "tqh2yxz8gf",
+   "row": "\\mathrm{If}(z=-5.5, (x)^2+(y)^2\\lt9)",
+   "input": "z+5.5",
+   "json": [
+    "Add",
+    "z",
+    5.5
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-37",
+   "doc": "tqh2yxz8gf",
+   "row": "(x)^2+(y)^2=64\\keyword{where}0\\lt z\\lt1",
+   "input": "0\\lt z\\land z\\lt1",
+   "json": [
+    "And",
+    [
+     "Less",
+     0,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     1
+    ]
+   ],
+   "declare": {
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-38",
+   "doc": "yl5e43erwh",
+   "row": "y=0.4e^{-(6(x+2.28))^{30}}-0.3\\keyword{where}-1.89\\lt z\\lt1.89, -2.47\\lt x\\lt-1.9",
+   "input": "-1.89\\lt z\\land z\\lt1.89\\land-2.47\\lt x\\land x\\lt-1.9",
+   "json": [
+    "And",
+    [
+     "Less",
+     -1.89,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     1.89
+    ],
+    [
+     "Less",
+     -2.47,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     -1.9
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-39",
+   "doc": "yl5e43erwh",
+   "row": "y=0.4e^{-(6(x-2.28))^{30}}-0.3\\keyword{where}-1.89\\lt z\\lt1.89, 1.9\\lt x\\lt2.47",
+   "input": "-1.89\\lt z\\land z\\lt1.89\\land1.9\\lt x\\land x\\lt2.47",
+   "json": [
+    "And",
+    [
+     "Less",
+     -1.89,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     1.89
+    ],
+    [
+     "Less",
+     1.9,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     2.47
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-40",
+   "doc": "yl5e43erwh",
+   "row": "y=0.4e^{-(6(z+1.745))^{30}}-0.3\\keyword{where}-1.924\\lt z\\lt-1.4, -2.3\\lt x\\lt2.3",
+   "input": "-1.924\\lt z\\land z\\lt-1.4\\land-2.3\\lt x\\land x\\lt2.3",
+   "json": [
+    "And",
+    [
+     "Less",
+     -1.924,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     -1.4
+    ],
+    [
+     "Less",
+     -2.3,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     2.3
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-41",
+   "doc": "yl5e43erwh",
+   "row": "y=0.4e^{-(6(z-1.745))^{30}}-0.3\\keyword{where}1.4\\lt z\\lt1.924, -2.3\\lt x\\lt2.3",
+   "input": "1.4\\lt z\\land z\\lt1.924\\land-2.3\\lt x\\land x\\lt2.3",
+   "json": [
+    "And",
+    [
+     "Less",
+     1.4,
+     "z"
+    ],
+    [
+     "Less",
+     "z",
+     1.924
+    ],
+    [
+     "Less",
+     -2.3,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     2.3
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "z": "real"
+   }
+  },
+  {
+   "id": "corpus-42",
+   "doc": "yl5e43erwh",
+   "row": "\\mathrm{If}(y=0.101, (x+1.9)^2+(z+2.11)^2\\le0.01)",
+   "input": "y-0.101",
+   "json": [
+    "Add",
+    "y",
+    -0.101
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-43",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "x\\lt-0.5",
+   "json": [
+    "Less",
+    "x",
+    -0.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-44",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-0.2",
+   "json": [
+    "Add",
+    "y",
+    -0.2
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-45",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-0.4",
+   "json": [
+    "Add",
+    "y",
+    -0.4
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-46",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-0.600\\,000\\,000\\,000\\,000\\,1",
+   "json": [
+    "Add",
+    "y",
+    -0.6000000000000001
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-47",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-0.8",
+   "json": [
+    "Add",
+    "y",
+    -0.8
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-48",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-1",
+   "json": [
+    "Add",
+    "y",
+    -1
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-49",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-1.200\\,000\\,000\\,000\\,000\\,2",
+   "json": [
+    "Add",
+    "y",
+    -1.2000000000000002
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-50",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-1.400\\,000\\,000\\,000\\,000\\,1",
+   "json": [
+    "Add",
+    "y",
+    -1.4000000000000001
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-51",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-1.6",
+   "json": [
+    "Add",
+    "y",
+    -1.6
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-52",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-1.8",
+   "json": [
+    "Add",
+    "y",
+    -1.8
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-53",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-2",
+   "json": [
+    "Add",
+    "y",
+    -2
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-54",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-2.2",
+   "json": [
+    "Add",
+    "y",
+    -2.2
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-55",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-2.400\\,000\\,000\\,000\\,000\\,4",
+   "json": [
+    "Add",
+    "y",
+    -2.4000000000000004
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-56",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-2.6",
+   "json": [
+    "Add",
+    "y",
+    -2.6
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-57",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-2.800\\,000\\,000\\,000\\,000\\,3",
+   "json": [
+    "Add",
+    "y",
+    -2.8000000000000003
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-58",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-3",
+   "json": [
+    "Add",
+    "y",
+    -3
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-59",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-3.2",
+   "json": [
+    "Add",
+    "y",
+    -3.2
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-60",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-3.400\\,000\\,000\\,000\\,000\\,4",
+   "json": [
+    "Add",
+    "y",
+    -3.4000000000000004
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-61",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-3.6",
+   "json": [
+    "Add",
+    "y",
+    -3.6
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-62",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-3.800\\,000\\,000\\,000\\,000\\,3",
+   "json": [
+    "Add",
+    "y",
+    -3.8000000000000003
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-63",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-4",
+   "json": [
+    "Add",
+    "y",
+    -4
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-64",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-4.2",
+   "json": [
+    "Add",
+    "y",
+    -4.2
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-65",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-4.4",
+   "json": [
+    "Add",
+    "y",
+    -4.4
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-66",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-4.600\\,000\\,000\\,000\\,000\\,5",
+   "json": [
+    "Add",
+    "y",
+    -4.6000000000000005
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-67",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-4.800\\,000\\,000\\,000\\,001",
+   "json": [
+    "Add",
+    "y",
+    -4.800000000000001
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-68",
+   "doc": "2agcgxq87y",
+   "row": "y=y_{r}\\keyword{where}x\\lt-0.5",
+   "input": "y-5",
+   "json": [
+    "Add",
+    "y",
+    -5
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-69",
+   "doc": "3mhkarzpoz",
+   "row": "\\mathrm{If}(x=x, 0\\lt1)",
+   "input": "x=x",
+   "json": [
+    "Equal",
+    "x",
+    "x"
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-70",
+   "doc": "3qkygakl9m",
+   "row": "0\\le y\\le\\frac{1}{100}K\\keyword{where}40\\lt-x\\lt50",
+   "input": "\\max(-y, y-\\frac{K}{100})",
+   "json": [
+    "Max",
+    [
+     "Negate",
+     "y"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Rational",
+       -1,
+       100
+      ],
+      "K"
+     ],
+     "y"
+    ]
+   ],
+   "declare": {
+    "K": "real<0..150000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-71",
+   "doc": "3qkygakl9m",
+   "row": "0\\le y\\le\\frac{1}{100}(NR-K)\\keyword{where}30\\lt-x\\lt40",
+   "input": "\\max(-y, y-\\frac{NR-K}{100})",
+   "json": [
+    "Max",
+    [
+     "Negate",
+     "y"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Rational",
+       -1,
+       100
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "N",
+        "R"
+       ],
+       [
+        "Negate",
+        "K"
+       ]
+      ]
+     ],
+     "y"
+    ]
+   ],
+   "declare": {
+    "K": "real<0..150000>",
+    "N": "real<-10..>",
+    "R": "real<0..10000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-72",
+   "doc": "3wffq3o9po",
+   "row": "(x-x_0)^2+(y-y_0)^2=R_0^2\\keyword{where}x\\gt x_0",
+   "input": "x_0\\lt x",
+   "json": [
+    "Less",
+    "x_0",
+    "x"
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "x_0": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-73",
+   "doc": "4bxr9em1mk",
+   "row": "x=\\frac{2\\pi}{0.017\\,2}\\keyword{where}y\\gt0, y\\lt0.232",
+   "input": "0\\lt y\\land y\\lt0.232",
+   "json": [
+    "And",
+    [
+     "Less",
+     0,
+     "y"
+    ],
+    [
+     "Less",
+     "y",
+     0.232
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-74",
+   "doc": "4bxr9em1mk",
+   "row": "x=\\frac{2\\pi}{0.044}\\keyword{where}y\\gt0, y\\lt0.178",
+   "input": "0\\lt y\\land y\\lt0.178",
+   "json": [
+    "And",
+    [
+     "Less",
+     0,
+     "y"
+    ],
+    [
+     "Less",
+     "y",
+     0.178
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-75",
+   "doc": "4k1u9kihfg",
+   "row": "\\begin{cases}\\operatorname{polygon}(P_0)&T\\lt2\\end{cases}",
+   "input": "T\\lt2",
+   "json": [
+    "Less",
+    "T",
+    2
+   ],
+   "declare": {
+    "T": "real<0..7>"
+   }
+  },
+  {
+   "id": "corpus-76",
+   "doc": "5qn5kcrszu",
+   "row": "\\operatorname{PointList}(P, \\mathrm{If}(M_{ode}=1, M(\\lfloor t\\rfloor, \\lfloor t\\rfloor+1, t\\bmod1)))",
+   "input": "M_{ode}=1",
+   "json": [
+    "Equal",
+    "M_ode",
+    1
+   ],
+   "declare": {
+    "M_ode": "integer<0..1>"
+   }
+  },
+  {
+   "id": "corpus-77",
+   "doc": "5qn5kcrszu",
+   "row": "\\operatorname{PointList}(\\bigl\\lbrack-5, 5, 5, -5, -5\\bigr\\rbrack, \\mathrm{If}(M_{ode}=0, \\bigl\\lbrack-5, -5, 5, 5, -5\\bigr\\rbrack))",
+   "input": "M_{ode}=0",
+   "json": [
+    "Equal",
+    "M_ode",
+    0
+   ],
+   "declare": {
+    "M_ode": "integer<0..1>"
+   }
+  },
+  {
+   "id": "corpus-78",
+   "doc": "6jg0ickfex",
+   "row": "y=kx",
+   "input": "kx",
+   "json": [
+    "Multiply",
+    "k",
+    "x"
+   ],
+   "declare": {
+    "k": "real<-1..1>",
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-79",
+   "doc": "6kalzeiedk",
+   "row": "-0.01\\le y\\le0.01\\keyword{where}-x_{M}\\le x\\le x_{M}",
+   "input": "\\max(-y-0.01, y-0.01)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "y"
+     ],
+     -0.01
+    ],
+    [
+     "Add",
+     "y",
+     -0.01
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-80",
+   "doc": "6lef3qguea",
+   "row": "-0.5+2\\lt y\\lt0.5+2\\keyword{where}-0.5\\lt x+2\\lt0.5",
+   "input": "\\max(-y+2-0.5, y-2-0.5)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "y"
+     ],
+     2,
+     -0.5
+    ],
+    [
+     "Add",
+     "y",
+     -2,
+     -0.5
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-81",
+   "doc": "7fz4ugr5wz",
+   "row": "x\\times(1-x)=0\\keyword{where}0\\le y\\le1",
+   "input": "x\\times(1-x)",
+   "json": [
+    "Multiply",
+    "x",
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-82",
+   "doc": "7fz4ugr5wz",
+   "row": "y\\times(1-y)=0\\keyword{where}0\\le x\\le1",
+   "input": "y\\times(1-y)",
+   "json": [
+    "Multiply",
+    "y",
+    [
+     "Add",
+     [
+      "Negate",
+      "y"
+     ],
+     1
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-83",
+   "doc": "7fz4ugr5wz",
+   "row": "\\frac{1}{2}-\\frac{r_{v}}{2}\\le x\\le\\frac{1}{2}+\\frac{r_{v}}{2}\\keyword{where}0\\le y\\le1",
+   "input": "\\max(-\\frac{r_{v}}{2}-x+\\frac{1}{2}, -\\frac{r_{v}}{2}+x-\\frac{1}{2})",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Rational",
+       -1,
+       2
+      ],
+      "r_v"
+     ],
+     [
+      "Negate",
+      "x"
+     ],
+     [
+      "Rational",
+      1,
+      2
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Rational",
+       -1,
+       2
+      ],
+      "r_v"
+     ],
+     "x",
+     [
+      "Rational",
+      -1,
+      2
+     ]
+    ]
+   ],
+   "declare": {
+    "r_v": "real<0..0.5>",
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-84",
+   "doc": "7fz4ugr5wz",
+   "row": "(x-1.1)(2.1-x)=0\\keyword{where}0\\le y\\le1",
+   "input": "(x-1.1)(2.1-x)",
+   "json": [
+    "Multiply",
+    [
+     "Add",
+     "x",
+     -1.1
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     2.1
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-85",
+   "doc": "7vqnkhdhoj",
+   "row": "x=x_0",
+   "input": "x-x_0",
+   "json": [
+    "Add",
+    "x",
+    [
+     "Negate",
+     "x_0"
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "x_0": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-86",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-1.833\\,5",
+   "json": [
+    "Add",
+    "x",
+    -1.8335
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-87",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-1.361\\,722\\,249\\,999\\,999\\,7",
+   "json": [
+    "Add",
+    "x",
+    -1.3617222499999997
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-88",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x+0.145\\,712\\,513\\,854\\,938\\,44",
+   "json": [
+    "Add",
+    "x",
+    0.14571251385493844
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-89",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x+1.978\\,767\\,863\\,306\\,074\\,3",
+   "json": [
+    "Add",
+    "x",
+    1.9787678633060743
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-90",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-1.915\\,522\\,256\\,852\\,887\\,1",
+   "json": [
+    "Add",
+    "x",
+    -1.9155222568528871
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-91",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-1.669\\,225\\,516\\,498\\,778",
+   "json": [
+    "Add",
+    "x",
+    -1.669225516498778
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-92",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-0.786\\,313\\,824\\,930\\,612\\,1",
+   "json": [
+    "Add",
+    "x",
+    -0.7863138249306121
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-93",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x+1.381\\,710\\,568\\,722\\,990\\,7",
+   "json": [
+    "Add",
+    "x",
+    1.3817105687229907
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-94",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x+0.090\\,875\\,904\\,279\\,189\\,57",
+   "json": [
+    "Add",
+    "x",
+    0.09087590427918957
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-95",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x+1.991\\,741\\,570\\,021\\,439\\,6",
+   "json": [
+    "Add",
+    "x",
+    1.9917415700214396
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-96",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-1.967\\,034\\,481\\,751\\,469\\,3",
+   "json": [
+    "Add",
+    "x",
+    -1.9670344817514693
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-97",
+   "doc": "816bd7kfyr",
+   "row": "x=X\\keyword{where}\\min(X, f(X))\\lt y\\lt\\max(X, f(X))",
+   "input": "x-1.869\\,224\\,652\\,399\\,271\\,5",
+   "json": [
+    "Add",
+    "x",
+    -1.8692246523992715
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-98",
+   "doc": "91lvyfqcdd",
+   "row": "2\\operatorname{PointList}(6+\\cos(t), 2+\\sin(t))\\keyword{where}T_2\\gt0",
+   "input": "0\\lt T_2",
+   "json": [
+    "Less",
+    0,
+    "T_2"
+   ],
+   "declare": {
+    "T_2": "integer<0..1>"
+   }
+  },
+  {
+   "id": "corpus-99",
+   "doc": "9jlo0hocyt",
+   "row": "xx\\keyword{where}0\\le x, x\\lt1",
+   "input": "xx",
+   "json": [
+    "Multiply",
+    "x",
+    "x"
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-100",
+   "doc": "9pbfczbtp6",
+   "row": "h_2(x,y)\\lt\\frac{x+1}{5}\\keyword{where}y\\lt-0.6",
+   "input": "y\\lt-0.6",
+   "json": [
+    "Less",
+    "y",
+    -0.6
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-101",
+   "doc": "a9s8kymc0h",
+   "row": "\\bigl\\lbrack1, 0\\bigr\\rbrack=C_{mul}(A,X)",
+   "input": "0.875x+0.895y+1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     0.875,
+     "x"
+    ],
+    [
+     "Multiply",
+     0.895,
+     "y"
+    ],
+    1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-102",
+   "doc": "a9s8kymc0h",
+   "row": "\\bigl\\lbrack1, 0\\bigr\\rbrack=C_{mul}(A,X)",
+   "input": "0.875y-0.895x",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     -0.895,
+     "x"
+    ],
+    [
+     "Multiply",
+     0.875,
+     "y"
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-103",
+   "doc": "akconkhexx",
+   "row": "\\vert y\\vert\\le0.2\\keyword{where}x\\gt0, x\\lt4",
+   "input": "0\\lt x\\land x\\lt4",
+   "json": [
+    "And",
+    [
+     "Less",
+     0,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     4
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-104",
+   "doc": "akconkhexx",
+   "row": "\\vert y+2\\vert\\le0.2\\keyword{where}x\\gt2\\lor y+2\\gt0, x\\lt2\\lor y+2\\lt0",
+   "input": "(2\\lt x\\lor0\\lt y+2)\\land(x\\lt2\\lor y+2\\lt0)",
+   "json": [
+    "And",
+    [
+     "Or",
+     [
+      "Less",
+      2,
+      "x"
+     ],
+     [
+      "Less",
+      0,
+      [
+       "Add",
+       "y",
+       2
+      ]
+     ]
+    ],
+    [
+     "Or",
+     [
+      "Less",
+      "x",
+      2
+     ],
+     [
+      "Less",
+      [
+       "Add",
+       "y",
+       2
+      ],
+      0
+     ]
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-105",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-10.379\\,797\\,201\\,650\\,945",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -10.379797201650945
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-106",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-10.310\\,478\\,748\\,009\\,7",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -10.3104787480097
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-107",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-9.864\\,941\\,313\\,235\\,25",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -9.86494131323525
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-108",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-9.646\\,496\\,294\\,059\\,034",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -9.646496294059034
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-109",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-9.620\\,151\\,825\\,889\\,48",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -9.62015182588948
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-110",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-9.846\\,876\\,307\\,005\\,004",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -9.846876307005004
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-111",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-10.469\\,719\\,720\\,698\\,777",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -10.469719720698777
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-112",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-9.877\\,966\\,667\\,572\\,764",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -9.877966667572764
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-113",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-9.702\\,637\\,099\\,206\\,186",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -9.702637099206186
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-114",
+   "doc": "al4ge7kevw",
+   "row": "2x=F+d\\times(R(1..N)-0.5)\\keyword{where}-0.1\\lt y-2\\lt0.1",
+   "input": "2x-10.149\\,782\\,870\\,706\\,986",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     2,
+     "x"
+    ],
+    -10.149782870706986
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-115",
+   "doc": "buzq5x2t5n",
+   "row": "y=y_{r}\\keyword{where}x\\lt-5",
+   "input": "x\\lt-5",
+   "json": [
+    "Less",
+    "x",
+    -5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-116",
+   "doc": "cqtegkotx1",
+   "row": "x=-2\\keyword{where}0\\le y\\le s",
+   "input": "x+2",
+   "json": [
+    "Add",
+    "x",
+    2
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-117",
+   "doc": "crmswfhqrd",
+   "row": "y=-0.238\\,2x+1.257",
+   "input": "1.257-0.238\\,2x",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     -0.2382,
+     "x"
+    ],
+    1.257
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-118",
+   "doc": "cujx614bx0",
+   "row": "f(x)=R\\keyword{where}x\\lt-\\cos(R)",
+   "input": "y+0.8",
+   "json": [
+    "Add",
+    "y",
+    0.8
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-119",
+   "doc": "cujx614bx0",
+   "row": "f(x)=R\\keyword{where}x\\lt-\\cos(R)",
+   "input": "y+0.6",
+   "json": [
+    "Add",
+    "y",
+    0.6
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-120",
+   "doc": "cujx614bx0",
+   "row": "f(x)=R\\keyword{where}x\\lt-\\cos(R)",
+   "input": "y+0.4",
+   "json": [
+    "Add",
+    "y",
+    0.4
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-121",
+   "doc": "cujx614bx0",
+   "row": "f(x)=R\\keyword{where}x\\lt-\\cos(R)",
+   "input": "y+0.2",
+   "json": [
+    "Add",
+    "y",
+    0.2
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-122",
+   "doc": "cujx614bx0",
+   "row": "f(x)=R\\keyword{where}x\\lt-\\cos(R)",
+   "input": "y-0.6",
+   "json": [
+    "Add",
+    "y",
+    -0.6
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-123",
+   "doc": "cujx614bx0",
+   "row": "y=\\bigl\\lbrack-1, 1\\bigr\\rbrack\\keyword{where}x\\lt0",
+   "input": "x\\lt0",
+   "json": [
+    "Less",
+    "x",
+    0
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-124",
+   "doc": "cujx614bx0",
+   "row": "y=\\bigl\\lbrack-1, 1\\bigr\\rbrack\\keyword{where}x\\lt0",
+   "input": "y+1",
+   "json": [
+    "Add",
+    "y",
+    1
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-125",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+2.4",
+   "json": [
+    "Add",
+    "x",
+    2.4
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-126",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+2.3",
+   "json": [
+    "Add",
+    "x",
+    2.3
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-127",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+2.2",
+   "json": [
+    "Add",
+    "x",
+    2.2
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-128",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+2.1",
+   "json": [
+    "Add",
+    "x",
+    2.1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-129",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+2.0",
+   "json": [
+    "Add",
+    "x",
+    {
+     "num": "2.0"
+    }
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-130",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+1.9",
+   "json": [
+    "Add",
+    "x",
+    1.9
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-131",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+1.799\\,999\\,999\\,999\\,999\\,8",
+   "json": [
+    "Add",
+    "x",
+    1.7999999999999998
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-132",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+1.7",
+   "json": [
+    "Add",
+    "x",
+    1.7
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-133",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+1.6",
+   "json": [
+    "Add",
+    "x",
+    1.6
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-134",
+   "doc": "cv6jlbwj0w",
+   "row": "x=k-2.5\\keyword{where}-1\\le y\\le1",
+   "input": "x+1.5",
+   "json": [
+    "Add",
+    "x",
+    1.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-135",
+   "doc": "cvwtsabmtb",
+   "row": "x=A",
+   "input": "x-A",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     "A"
+    ],
+    "x"
+   ],
+   "declare": {
+    "A": "real<-1.5707963267948966..1.5707963267948966>",
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-136",
+   "doc": "dbnlpfkqmo",
+   "row": "-0.6\\le x\\le0.25-0.6\\keyword{where}0\\le y\\le\\frac{n}{4}",
+   "input": "\\max(-x-0.6, x-0.25+0.6)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     -0.6
+    ],
+    [
+     "Add",
+     "x",
+     -0.25,
+     0.6
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-137",
+   "doc": "digxkh3uk8",
+   "row": "0\\lt1\\keyword{where}-1\\lt x\\lt11, -0.7\\lt y\\lt3",
+   "input": "-1\\lt x\\land x\\lt11\\land-0.7\\lt y\\land y\\lt3",
+   "json": [
+    "And",
+    [
+     "Less",
+     -1,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     11
+    ],
+    [
+     "Less",
+     -0.7,
+     "y"
+    ],
+    [
+     "Less",
+     "y",
+     3
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-138",
+   "doc": "dzwvofwbnu",
+   "row": "x=-0.7\\keyword{where}0\\le y\\le\\frac{p}{4}",
+   "input": "x+0.7",
+   "json": [
+    "Add",
+    "x",
+    0.7
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-139",
+   "doc": "dzwvofwbnu",
+   "row": "0\\le x\\le1\\keyword{where}0\\le y\\le1",
+   "input": "\\max(-x, x-1)",
+   "json": [
+    "Max",
+    [
+     "Negate",
+     "x"
+    ],
+    [
+     "Add",
+     "x",
+     -1
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-140",
+   "doc": "dzwvofwbnu",
+   "row": "1.2\\le x\\le2.2\\keyword{where}0\\le y\\le1",
+   "input": "\\max(1.2-x, x-2.2)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     1.2
+    ],
+    [
+     "Add",
+     "x",
+     -2.2
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-141",
+   "doc": "fqyrerxwpl",
+   "row": "y\\le\\cos(x-t)+\\cos(x+t)\\keyword{where}x\\lt2\\pi",
+   "input": "x\\lt6.283\\,185\\,307\\,179\\,586",
+   "json": [
+    "Less",
+    "x",
+    6.283185307179586
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-142",
+   "doc": "gwncjxc6jg",
+   "row": "x=16\\,000",
+   "input": "x-16\\,000",
+   "json": [
+    "Add",
+    "x",
+    -16000
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-143",
+   "doc": "gwncjxc6jg",
+   "row": "x=11\\,000",
+   "input": "x-11\\,000",
+   "json": [
+    "Add",
+    "x",
+    -11000
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-144",
+   "doc": "gxl63jjike",
+   "row": "(x\\bmod2L-\\frac{L}{2}-r\\sin(\\frac{a}{2}))^2+(y+r\\cos(\\frac{a}{2}))^2=r^2\\keyword{where}y\\gt0",
+   "input": "0\\lt y",
+   "json": [
+    "Less",
+    0,
+    "y"
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-145",
+   "doc": "gxl63jjike",
+   "row": "((x+L)\\bmod2L-\\frac{L}{2}-r\\sin(\\frac{a}{2}))^2+(y-r\\cos(\\frac{a}{2}))^2=r^2\\keyword{where}y\\lt0",
+   "input": "y\\lt0",
+   "json": [
+    "Less",
+    "y",
+    0
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-146",
+   "doc": "h2sajw9hdv",
+   "row": "2+\\frac{A}{2}\\le y\\le2.5\\keyword{where}\\vert x+2\\vert\\le E\\frac{A}{2}",
+   "input": "\\max(\\frac{A}{2}-y+2, y-2.5)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Rational",
+       1,
+       2
+      ],
+      "A"
+     ],
+     [
+      "Negate",
+      "y"
+     ],
+     2
+    ],
+    [
+     "Add",
+     "y",
+     -2.5
+    ]
+   ],
+   "declare": {
+    "A": "real<0..1>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-147",
+   "doc": "h2sajw9hdv",
+   "row": "1.5\\le y\\le2-\\frac{A}{2}\\keyword{where}\\vert x+2\\vert\\le E\\frac{A}{2}",
+   "input": "\\max(1.5-y, \\frac{A}{2}+y-2)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "y"
+     ],
+     1.5
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Rational",
+       1,
+       2
+      ],
+      "A"
+     ],
+     "y",
+     -2
+    ]
+   ],
+   "declare": {
+    "A": "real<0..1>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-148",
+   "doc": "h2sajw9hdv",
+   "row": "\\max(1.5, -\\frac{1}{2}\\frac{S(a)}{\\cos(a)}+2-(x+2)\\tan(a))\\le y\\le\\min(2.5, \\frac{1}{2}\\frac{S(a)}{\\cos(a)}+2-(x+2)\\tan(a))\\keyword{where}-2.5\\lt x\\lt-1.5, S(a)\\gt0",
+   "input": "-2.5\\lt x\\land x\\lt-1.5",
+   "json": [
+    "And",
+    [
+     "Less",
+     -2.5,
+     "x"
+    ],
+    [
+     "Less",
+     "x",
+     -1.5
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-149",
+   "doc": "hqdhicjyjj",
+   "row": "L(x+d_{x}, y-d)=R\\keyword{where}y\\lt d",
+   "input": "y\\lt d",
+   "json": [
+    "Less",
+    "y",
+    "d"
+   ],
+   "declare": {
+    "d": "real<0..10>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-150",
+   "doc": "hx00a7rvhd",
+   "row": "x+y\\gt1",
+   "input": "-x-y+1",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     "x"
+    ],
+    [
+     "Negate",
+     "y"
+    ],
+    1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-151",
+   "doc": "igjip6q4ta",
+   "row": "y=-A",
+   "input": "-A",
+   "json": [
+    "Negate",
+    "A"
+   ],
+   "declare": {
+    "A": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-152",
+   "doc": "igjip6q4ta",
+   "row": "3A+A\\times(1-x)\\keyword{where}0\\lt x\\lt1",
+   "input": "A\\times(1-x)+3A",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     "A",
+     [
+      "Add",
+      [
+       "Negate",
+       "x"
+      ],
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     3,
+     "A"
+    ]
+   ],
+   "declare": {
+    "A": "real<-10..10>",
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-153",
+   "doc": "igjip6q4ta",
+   "row": "3A+Ax\\keyword{where}0\\lt x\\lt1",
+   "input": "Ax+3A",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     "A",
+     "x"
+    ],
+    [
+     "Multiply",
+     3,
+     "A"
+    ]
+   ],
+   "declare": {
+    "A": "real<-10..10>",
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-154",
+   "doc": "igjip6q4ta",
+   "row": "y=3A",
+   "input": "3A",
+   "json": [
+    "Multiply",
+    3,
+    "A"
+   ],
+   "declare": {
+    "A": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-155",
+   "doc": "igjip6q4ta",
+   "row": "y=5A",
+   "input": "5A",
+   "json": [
+    "Multiply",
+    5,
+    "A"
+   ],
+   "declare": {
+    "A": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-156",
+   "doc": "igjip6q4ta",
+   "row": "y=7A",
+   "input": "7A",
+   "json": [
+    "Multiply",
+    7,
+    "A"
+   ],
+   "declare": {
+    "A": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-157",
+   "doc": "igjip6q4ta",
+   "row": "y=-3A",
+   "input": "-3A",
+   "json": [
+    "Multiply",
+    -3,
+    "A"
+   ],
+   "declare": {
+    "A": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-158",
+   "doc": "igjip6q4ta",
+   "row": "y=-3A+\\frac{A}{\\sqrt{2}}",
+   "input": "\\frac{\\sqrt{2}}{2}A-3A",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     -3,
+     "A"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       2
+      ],
+      2
+     ],
+     "A"
+    ]
+   ],
+   "declare": {
+    "A": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-159",
+   "doc": "iqnkdz3ptt",
+   "row": "x\\gt-100",
+   "input": "-x-100",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     "x"
+    ],
+    -100
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-160",
+   "doc": "j3q9xikler",
+   "row": "x=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le y\\le3.5",
+   "input": "x+0.5",
+   "json": [
+    "Add",
+    "x",
+    0.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-161",
+   "doc": "j3q9xikler",
+   "row": "x=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le y\\le3.5",
+   "input": "x-0.5",
+   "json": [
+    "Add",
+    "x",
+    -0.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-162",
+   "doc": "j3q9xikler",
+   "row": "x=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le y\\le3.5",
+   "input": "x-1.5",
+   "json": [
+    "Add",
+    "x",
+    -1.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-163",
+   "doc": "j3q9xikler",
+   "row": "x=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le y\\le3.5",
+   "input": "x-2.5",
+   "json": [
+    "Add",
+    "x",
+    -2.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-164",
+   "doc": "j3q9xikler",
+   "row": "x=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le y\\le3.5",
+   "input": "x-3.5",
+   "json": [
+    "Add",
+    "x",
+    -3.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-165",
+   "doc": "j3q9xikler",
+   "row": "y=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le x\\le3.5",
+   "input": "y+0.5",
+   "json": [
+    "Add",
+    "y",
+    0.5
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-166",
+   "doc": "j3q9xikler",
+   "row": "y=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le x\\le3.5",
+   "input": "y-0.5",
+   "json": [
+    "Add",
+    "y",
+    -0.5
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-167",
+   "doc": "j3q9xikler",
+   "row": "y=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le x\\le3.5",
+   "input": "y-1.5",
+   "json": [
+    "Add",
+    "y",
+    -1.5
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-168",
+   "doc": "j3q9xikler",
+   "row": "y=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le x\\le3.5",
+   "input": "y-2.5",
+   "json": [
+    "Add",
+    "y",
+    -2.5
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-169",
+   "doc": "j3q9xikler",
+   "row": "y=-0.5+\\bigl\\lbrack0, 1, 2, 3, 4\\bigr\\rbrack\\keyword{where}-0.5\\le x\\le3.5",
+   "input": "y-3.5",
+   "json": [
+    "Add",
+    "y",
+    -3.5
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-170",
+   "doc": "ju1torzojf",
+   "row": "-0.6\\le x\\le\\frac{1}{4}-0.6\\keyword{where}0\\le y\\le\\frac{n}{4}",
+   "input": "\\max(-x-0.6, x-\\frac{1}{4}+0.6)",
+   "json": [
+    "Max",
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     -0.6
+    ],
+    [
+     "Add",
+     "x",
+     [
+      "Rational",
+      -1,
+      4
+     ],
+     0.6
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-171",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-0.125",
+   "json": [
+    "Add",
+    "x",
+    -0.125
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-172",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-0.25",
+   "json": [
+    "Add",
+    "x",
+    -0.25
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-173",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-0.375",
+   "json": [
+    "Add",
+    "x",
+    -0.375
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-174",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-0.625",
+   "json": [
+    "Add",
+    "x",
+    -0.625
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-175",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-0.75",
+   "json": [
+    "Add",
+    "x",
+    -0.75
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-176",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-0.875",
+   "json": [
+    "Add",
+    "x",
+    -0.875
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-177",
+   "doc": "krawhvq4jd",
+   "row": "x=s\\times(0..8)",
+   "input": "x-1.0",
+   "json": [
+    "Add",
+    "x",
+    {
+     "num": "-1.0"
+    }
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-178",
+   "doc": "lydg98uard",
+   "row": "r\\le0.2(\\theta-t)",
+   "input": "0.2(\\theta-t)",
+   "json": [
+    "Multiply",
+    0.2,
+    [
+     "Add",
+     [
+      "Negate",
+      "t"
+     ],
+     "theta"
+    ]
+   ],
+   "declare": {
+    "t": "real<-10..10>",
+    "theta": "real<-1.8849555921538759..39.58406743523139>"
+   }
+  },
+  {
+   "id": "corpus-179",
+   "doc": "marqx3jmvx",
+   "row": "y=y_{r}\\keyword{where}x\\lt-10",
+   "input": "x\\lt-10",
+   "json": [
+    "Less",
+    "x",
+    -10
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-180",
+   "doc": "mwz9fi7w4q",
+   "row": "x\\times(2-x)\\keyword{where}0\\le x\\le1",
+   "input": "x\\times(2-x)",
+   "json": [
+    "Multiply",
+    "x",
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     2
+    ]
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-181",
+   "doc": "nuxs5yi8wp",
+   "row": "x=x_{m}",
+   "input": "x-x_{m}",
+   "json": [
+    "Add",
+    "x",
+    [
+     "Negate",
+     "x_m"
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "x_m": "real"
+   }
+  },
+  {
+   "id": "corpus-182",
+   "doc": "nuxs5yi8wp",
+   "row": "x=x_{M}",
+   "input": "x-x_{M}",
+   "json": [
+    "Add",
+    "x",
+    [
+     "Negate",
+     "x_M"
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "x_M": "real"
+   }
+  },
+  {
+   "id": "corpus-183",
+   "doc": "nyhvir7uj2",
+   "row": "y\\le2\\keyword{where}y\\lt0.1",
+   "input": "y\\lt0.1",
+   "json": [
+    "Less",
+    "y",
+    0.1
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-184",
+   "doc": "pixe2ayhtt",
+   "row": "0.628+0.534x",
+   "input": "0.534x+0.628",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     0.534,
+     "x"
+    ],
+    0.628
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-185",
+   "doc": "pixe2ayhtt",
+   "row": "0.95+0.587\\,5(x-1)",
+   "input": "0.587\\,5(x-1)+0.95",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     0.5875,
+     [
+      "Add",
+      "x",
+      -1
+     ]
+    ],
+    0.95
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-186",
+   "doc": "pqcfxbki7y",
+   "row": "(x-x_0)^2+(y-y_0)^2=R_0^2\\keyword{where}x\\lt x_0",
+   "input": "x\\lt x_0",
+   "json": [
+    "Less",
+    "x",
+    "x_0"
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "x_0": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-187",
+   "doc": "pqcfxbki7y",
+   "row": "(x-x_1)^2+(y-y_1)^2=R_1^2\\keyword{where}x\\gt x_1",
+   "input": "x_1\\lt x",
+   "json": [
+    "Less",
+    "x_1",
+    "x"
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "x_1": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-188",
+   "doc": "raqj4m1lc8",
+   "row": "0.5+0.5x\\keyword{where}0\\lt x\\lt1",
+   "input": "0.5x+0.5",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     0.5,
+     "x"
+    ],
+    0.5
+   ],
+   "declare": {
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-189",
+   "doc": "raqj4m1lc8",
+   "row": "1-(x-1)a",
+   "input": "1-a\\times(x-1)",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     [
+      "Multiply",
+      "a",
+      [
+       "Add",
+       "x",
+       -1
+      ]
+     ]
+    ],
+    1
+   ],
+   "declare": {
+    "a": "real<0.05..0.1>",
+    "x": "real"
+   }
+  },
+  {
+   "id": "corpus-190",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-191",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-192",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-193",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-194",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-195",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-196",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-197",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{2}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -2,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-198",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-199",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-200",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-201",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-202",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-203",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-204",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-205",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{4}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -4,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-206",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-207",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-208",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-209",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-210",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-211",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-212",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-213",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{2}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -2,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-214",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{12}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     12
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-215",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-216",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{9}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -9,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-217",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-218",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-219",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{10}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     10
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-220",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{31}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -31,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-221",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{8}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -8,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-222",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-223",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-224",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-225",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-226",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{37}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -37,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-227",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-228",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-229",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{2}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -2,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-230",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{41}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -41,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-231",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-232",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{43}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -43,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-233",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-234",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-235",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-236",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{47}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -47,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-237",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{4}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -4,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-238",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{49}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -49,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-239",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{6}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     6
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-240",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-241",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-242",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{53}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -53,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-243",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{9}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -9,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-244",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-245",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{14}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -14,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-246",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-247",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-248",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{59}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -59,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-249",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{5}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     5
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-250",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{61}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -61,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-251",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{31}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -31,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-252",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{21}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -21,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-253",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{16}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -16,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-254",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-255",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-256",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{67}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -67,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-257",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-258",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-259",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-260",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{71}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -71,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-261",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{6}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -6,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-262",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{73}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -73,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-263",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{37}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -37,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-264",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{4}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     4
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-265",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-266",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{77}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -77,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-267",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-268",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{79}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -79,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-269",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{4}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -4,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-270",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{27}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -27,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-271",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{41}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -41,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-272",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{83}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -83,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-273",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-274",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-275",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{43}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -43,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-276",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-277",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{22}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -22,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-278",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{89}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -89,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-279",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{10}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     10
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-280",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{91}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -91,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-281",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-282",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{31}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -31,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-283",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{47}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -47,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-284",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-285",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{8}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -8,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-286",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{97}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -97,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-287",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{49}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -49,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-288",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{33}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -33,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-289",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{3}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     3
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-290",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{101}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -101,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-291",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-292",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{103}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -103,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-293",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{26}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -26,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-294",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-295",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{53}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -53,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-296",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{107}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -107,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-297",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{9}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -9,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-298",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{109}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -109,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-299",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-300",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{37}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -37,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-301",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{28}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -28,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-302",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{113}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -113,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-303",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-304",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-305",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-306",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{39}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -39,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-307",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{59}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -59,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-308",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{119}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -119,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-309",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{2}{5}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -2,
+     5
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-310",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{121}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -121,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-311",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{61}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -61,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-312",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{41}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -41,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-313",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{31}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -31,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-314",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{5}{12}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -5,
+     12
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-315",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{21}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -21,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-316",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{127}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -127,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-317",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{32}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -32,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-318",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{43}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -43,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-319",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-320",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{131}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -131,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-321",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-322",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{133}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -133,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-323",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{67}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -67,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-324",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{9}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -9,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-325",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{34}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -34,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-326",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{137}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -137,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-327",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-328",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{139}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -139,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-329",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-330",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{47}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -47,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-331",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{71}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -71,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-332",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{143}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -143,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-333",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{12}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -12,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-334",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-335",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{73}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -73,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-336",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{49}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -49,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-337",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{37}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -37,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-338",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{149}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -149,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-339",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{1}{2}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -1,
+     2
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-340",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{151}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -151,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-341",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{38}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -38,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-342",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{51}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -51,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-343",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{77}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -77,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-344",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{31}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -31,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-345",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-346",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{157}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -157,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-347",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{79}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -79,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-348",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{53}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -53,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-349",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{8}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -8,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-350",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{161}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -161,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-351",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{27}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -27,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-352",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{163}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -163,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-353",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{41}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -41,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-354",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-355",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{83}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -83,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-356",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{167}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -167,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-357",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{14}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -14,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-358",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{169}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -169,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-359",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-360",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{57}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -57,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-361",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{43}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -43,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-362",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{173}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -173,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-363",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-364",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{12}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     12
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-365",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{44}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -44,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-366",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{59}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -59,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-367",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{89}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -89,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-368",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{179}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -179,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-369",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{5}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     5
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-370",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{181}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -181,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-371",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{91}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -91,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-372",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{61}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -61,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-373",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{46}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -46,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-374",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{37}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -37,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-375",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{31}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -31,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-376",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{187}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -187,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-377",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{47}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -47,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-378",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{63}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -63,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-379",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-380",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{191}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -191,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-381",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{16}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -16,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-382",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{193}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -193,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-383",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{97}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -97,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-384",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-385",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{49}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -49,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-386",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{197}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -197,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-387",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{33}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -33,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-388",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{199}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -199,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-389",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{2}{3}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -2,
+     3
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-390",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{67}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -67,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-391",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{101}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -101,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-392",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{203}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -203,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-393",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-394",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{41}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -41,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-395",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{103}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -103,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-396",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{69}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -69,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-397",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{52}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -52,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-398",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{209}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -209,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-399",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{7}{10}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -7,
+     10
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-400",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{211}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -211,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-401",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{53}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -53,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-402",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{71}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -71,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-403",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{107}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -107,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-404",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{43}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -43,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-405",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{18}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -18,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-406",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{217}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -217,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-407",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{109}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -109,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-408",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{73}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -73,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-409",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-410",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{221}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -221,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-411",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{37}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -37,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-412",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{223}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -223,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-413",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{56}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -56,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-414",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{3}{4}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -3,
+     4
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-415",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{113}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -113,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-416",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{227}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -227,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-417",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-418",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{229}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -229,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-419",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-420",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{77}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -77,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-421",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{58}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -58,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-422",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{233}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -233,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-423",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{39}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -39,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-424",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{47}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -47,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-425",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{59}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -59,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-426",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{79}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -79,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-427",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{119}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -119,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-428",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{239}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -239,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-429",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{4}{5}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -4,
+     5
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-430",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{241}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -241,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-431",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{121}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -121,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-432",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{81}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -81,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-433",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{61}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -61,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-434",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{49}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -49,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-435",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{41}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -41,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-436",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{247}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -247,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-437",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{62}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -62,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-438",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{83}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -83,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-439",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{5}{6}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -5,
+     6
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-440",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{251}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -251,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-441",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{21}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -21,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-442",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{253}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -253,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-443",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{127}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -127,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-444",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{17}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -17,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-445",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{64}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -64,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-446",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{257}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -257,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-447",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{43}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -43,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-448",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{259}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -259,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-449",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{13}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -13,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-450",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{87}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -87,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-451",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{131}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -131,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-452",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{263}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -263,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-453",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{22}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -22,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-454",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{53}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -53,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-455",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{133}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -133,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-456",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{89}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -89,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-457",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{67}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -67,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-458",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{269}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -269,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-459",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{9}{10}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -9,
+     10
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-460",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{271}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -271,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-461",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{68}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -68,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-462",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{91}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -91,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-463",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{137}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -137,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-464",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{11}{12}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -11,
+     12
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-465",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{23}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -23,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-466",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{277}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -277,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-467",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{139}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -139,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-468",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{93}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -93,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-469",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{14}{15}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -14,
+     15
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-470",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{281}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -281,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-471",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{47}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -47,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-472",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{283}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -283,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-473",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{71}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -71,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-474",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{19}{20}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -19,
+     20
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-475",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{143}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -143,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-476",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{287}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -287,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-477",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{24}{25}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -24,
+     25
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-478",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{289}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -289,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-479",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{29}{30}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -29,
+     30
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-480",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{97}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -97,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-481",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{73}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -73,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-482",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{293}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -293,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-483",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{49}{50}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -49,
+     50
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-484",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{59}{60}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -59,
+     60
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-485",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{74}{75}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -74,
+     75
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-486",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{99}{100}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -99,
+     100
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-487",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{149}{150}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -149,
+     150
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-488",
+   "doc": "rmoigzwr8h",
+   "row": "y=L(300)",
+   "input": "y-\\frac{299}{300}",
+   "json": [
+    "Add",
+    "y",
+    [
+     "Rational",
+     -299,
+     300
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-489",
+   "doc": "s4h8jurofe",
+   "row": "x=2\\keyword{where}-1\\le y\\le1",
+   "input": "x-2",
+   "json": [
+    "Add",
+    "x",
+    -2
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-490",
+   "doc": "s4h8jurofe",
+   "row": "y+3=x+3\\keyword{where}-1\\le x+3\\le1",
+   "input": "y-x",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     "x"
+    ],
+    "y"
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-491",
+   "doc": "s4h8jurofe",
+   "row": "y+3=-(x+3)\\keyword{where}-1\\le x+3\\le1",
+   "input": "x+y+6",
+   "json": [
+    "Add",
+    "x",
+    "y",
+    6
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>",
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-492",
+   "doc": "sjjo3qgnfp",
+   "row": "x=1",
+   "input": "x-1",
+   "json": [
+    "Add",
+    "x",
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-493",
+   "doc": "skz0syspxp",
+   "row": "x=-1\\keyword{where}0\\le y\\le2",
+   "input": "x+1",
+   "json": [
+    "Add",
+    "x",
+    1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-494",
+   "doc": "skz0syspxp",
+   "row": "(x-2.2)(3.2-x)=0\\keyword{where}0\\le y\\le1",
+   "input": "(x-2.2)(3.2-x)",
+   "json": [
+    "Multiply",
+    [
+     "Add",
+     "x",
+     -2.2
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "x"
+     ],
+     3.2
+    ]
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-495",
+   "doc": "skz0syspxp",
+   "row": "(y+1.2)(1-y-1.2)=0\\keyword{where}1.1\\le x\\le2.1",
+   "input": "(-y+1-1.2)(y+1.2)",
+   "json": [
+    "Multiply",
+    [
+     "Add",
+     [
+      "Negate",
+      "y"
+     ],
+     1,
+     -1.2
+    ],
+    [
+     "Add",
+     "y",
+     1.2
+    ]
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-496",
+   "doc": "skz0syspxp",
+   "row": "x=2.05\\keyword{where}1.02\\le y+1.2\\le1.082",
+   "input": "x-2.05",
+   "json": [
+    "Add",
+    "x",
+    -2.05
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-497",
+   "doc": "skz0syspxp",
+   "row": "x=3.15\\keyword{where}1.02\\le y+1.2\\le1.082",
+   "input": "x-3.15",
+   "json": [
+    "Add",
+    "x",
+    -3.15
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-498",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.0x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     {
+      "num": "1.0"
+     },
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-499",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.122\\,424\\,798\\,379\\,391x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.122424798379391,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-500",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.259\\,909\\,031\\,838\\,856\\,4x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.2599090318388564,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-501",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.334\\,823\\,988\\,074\\,762x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.334823988074762,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-502",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.498\\,299\\,124\\,718\\,113\\,4x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.4982991247181134,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-503",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.681\\,764\\,323\\,663\\,188\\,5x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.6817643236631885,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-504",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.887\\,704\\,009\\,479\\,035\\,4x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.8877040094790354,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-505",
+   "doc": "t29yxijse7",
+   "row": "\\frac{T}{T_0}x=1",
+   "input": "1.999\\,961\\,778\\,083\\,553\\,2x-1",
+   "json": [
+    "Add",
+    [
+     "Multiply",
+     1.9999617780835532,
+     "x"
+    ],
+    -1
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-506",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-3",
+   "json": [
+    "Add",
+    "x",
+    -3
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-507",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-4",
+   "json": [
+    "Add",
+    "x",
+    -4
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-508",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-5",
+   "json": [
+    "Add",
+    "x",
+    -5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-509",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-6",
+   "json": [
+    "Add",
+    "x",
+    -6
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-510",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-7",
+   "json": [
+    "Add",
+    "x",
+    -7
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-511",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-8",
+   "json": [
+    "Add",
+    "x",
+    -8
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-512",
+   "doc": "t29yxijse7",
+   "row": "x=2..9",
+   "input": "x-9",
+   "json": [
+    "Add",
+    "x",
+    -9
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-513",
+   "doc": "tntes1kniz",
+   "row": "x=-5",
+   "input": "x+5",
+   "json": [
+    "Add",
+    "x",
+    5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-514",
+   "doc": "ubbblax35h",
+   "row": "x=-6\\keyword{where}-1\\le y-y_{L}\\le1",
+   "input": "x+6",
+   "json": [
+    "Add",
+    "x",
+    6
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-515",
+   "doc": "w8btu661zd",
+   "row": "y=-0.2((-1)..4)",
+   "input": "y+0.600\\,000\\,000\\,000\\,000\\,1",
+   "json": [
+    "Add",
+    "y",
+    0.6000000000000001
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-516",
+   "doc": "xz3378v3ae",
+   "row": "y=\\bigl\\lbrack-1, 1\\bigr\\rbrack N(200)",
+   "input": "y+1.600\\,523\\,677\\,023\\,518",
+   "json": [
+    "Add",
+    "y",
+    1.600523677023518
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-517",
+   "doc": "xz3378v3ae",
+   "row": "y=\\bigl\\lbrack-1, 1\\bigr\\rbrack N(200)",
+   "input": "y-1.600\\,523\\,677\\,023\\,518",
+   "json": [
+    "Add",
+    "y",
+    -1.600523677023518
+   ],
+   "declare": {
+    "y": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-518",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-10",
+   "json": [
+    "Add",
+    "x",
+    -10
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-519",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-11",
+   "json": [
+    "Add",
+    "x",
+    -11
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-520",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-12",
+   "json": [
+    "Add",
+    "x",
+    -12
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-521",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-13",
+   "json": [
+    "Add",
+    "x",
+    -13
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-522",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-14",
+   "json": [
+    "Add",
+    "x",
+    -14
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-523",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-15",
+   "json": [
+    "Add",
+    "x",
+    -15
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-524",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-16",
+   "json": [
+    "Add",
+    "x",
+    -16
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-525",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-17",
+   "json": [
+    "Add",
+    "x",
+    -17
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-526",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-18",
+   "json": [
+    "Add",
+    "x",
+    -18
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-527",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-19",
+   "json": [
+    "Add",
+    "x",
+    -19
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-528",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-20",
+   "json": [
+    "Add",
+    "x",
+    -20
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-529",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-21",
+   "json": [
+    "Add",
+    "x",
+    -21
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-530",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-22",
+   "json": [
+    "Add",
+    "x",
+    -22
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-531",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-23",
+   "json": [
+    "Add",
+    "x",
+    -23
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-532",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-24",
+   "json": [
+    "Add",
+    "x",
+    -24
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-533",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-25",
+   "json": [
+    "Add",
+    "x",
+    -25
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-534",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-26",
+   "json": [
+    "Add",
+    "x",
+    -26
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-535",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-27",
+   "json": [
+    "Add",
+    "x",
+    -27
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-536",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-28",
+   "json": [
+    "Add",
+    "x",
+    -28
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-537",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-29",
+   "json": [
+    "Add",
+    "x",
+    -29
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-538",
+   "doc": "xzthjohswn",
+   "row": "x=0..30\\keyword{where}y\\gt P(x+0.5, x)",
+   "input": "x-30",
+   "json": [
+    "Add",
+    "x",
+    -30
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-539",
+   "doc": "y1zk3dl7v2",
+   "row": "l_0(x)=x_{M}-x\\keyword{where}-x_{M}\\le x\\le x_{M}",
+   "input": "x_{M}-x",
+   "json": [
+    "Add",
+    [
+     "Negate",
+     "x"
+    ],
+    "x_M"
+   ],
+   "declare": {
+    "x": "real",
+    "x_M": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-540",
+   "doc": "y1zk3dl7v2",
+   "row": "l_{p}(x)=x_{M}+x\\keyword{where}-x_{M}\\le x\\le x_{M}",
+   "input": "x+x_{M}",
+   "json": [
+    "Add",
+    "x",
+    "x_M"
+   ],
+   "declare": {
+    "x": "real",
+    "x_M": "real<-10..10>"
+   }
+  },
+  {
+   "id": "corpus-541",
+   "doc": "yuog2hc9tu",
+   "row": "x=-2.5\\keyword{where}-\\pi\\le y\\le\\pi",
+   "input": "x+2.5",
+   "json": [
+    "Add",
+    "x",
+    2.5
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-542",
+   "doc": "yvwfq1kpio",
+   "row": "x=\\bigl\\lbrack x_0, x_1, x_2\\bigr\\rbrack",
+   "input": "x-7.075\\,830\\,861\\,536\\,207\\,5",
+   "json": [
+    "Add",
+    "x",
+    -7.0758308615362075
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-543",
+   "doc": "yvwfq1kpio",
+   "row": "x=\\bigl\\lbrack x_0, x_1, x_2\\bigr\\rbrack",
+   "input": "x-1.807\\,834\\,335\\,871\\,165\\,3",
+   "json": [
+    "Add",
+    "x",
+    -1.8078343358711653
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-544",
+   "doc": "yvwfq1kpio",
+   "row": "x=\\bigl\\lbrack x_0, x_1, x_2\\bigr\\rbrack",
+   "input": "x+1.230\\,706\\,729\\,321\\,438\\,9",
+   "json": [
+    "Add",
+    "x",
+    1.2307067293214389
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  },
+  {
+   "id": "corpus-545",
+   "doc": "z2t9fsjiod",
+   "row": "x=55",
+   "input": "x-55",
+   "json": [
+    "Add",
+    "x",
+    -55
+   ],
+   "declare": {
+    "x": "real<-1000000000000000..1000000000000000>"
+   }
+  }
+ ]
+}
