@@ -42,6 +42,13 @@
  *            route calls (V8 precise coverage, function granularity).
  *   extract  write `js-structured-pilot-corpus.json` from the Tycho codegen
  *            audit artifacts (CORPUS_DIR, CORPUS_FILES).
+ *   heat     the arrays made per call of `heatstep`, the time of 100 steps
+ *            in sequence, and the answers of `analyzeExecution()` for the
+ *            heat functions (`modeHeat()`).
+ *   workers  `heatstep` on a larger grid (GRID, default 128), CALLS calls
+ *            (default 16) in sequence and split over 2 and 4
+ *            `worker_threads` workers; values must be equal
+ *            (`modeWorkers()`).
  *   cold-child  internal: one first compilation in this process.
  *
  * Other variables: ONLY (comma-separated fixture ids, or `corpus`,
@@ -68,7 +75,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpus, loadavg } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { dirname, resolve } from 'node:path';
 import { Session } from 'node:inspector';
 // The rule against bare package imports is written for `src/`, whose
@@ -77,13 +85,22 @@ import { Session } from 'node:inspector';
 // oxlint-disable-next-line no-restricted-imports
 import ts from 'typescript';
 
-import { ComputeEngine, compile } from '../src/compute-engine';
+import {
+  ComputeEngine,
+  compile,
+  createKernelPool,
+  type KernelPool,
+} from '../src/compute-engine';
 import { executeEpsil } from '../src/epsil/execute-epsil';
 import { JavaScriptTarget } from '../src/compute-engine/compilation/javascript-target';
 import {
   ScalarFragmentJavaScriptTarget,
   type StructuredPhase,
 } from '../src/compute-engine/compilation/javascript-fragment-target';
+import { lowerStructuredFragment } from '../src/compute-engine/compilation/javascript-structured-lower';
+import { analyzeExecution } from '../src/compute-engine/compilation/structured-execution';
+import { SYS_HELPERS } from '../src/compute-engine/compilation/javascript-runtime';
+import { callPool, type StoredResult } from '../src/compute-engine/kernel-pool';
 import type { Expression } from '../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../src/math-json/types';
 
@@ -489,9 +506,16 @@ function step6Fixtures(): Fixture[] {
           typed('obstacle', 'real'),
         ]);
       },
-      inputs: product<number>([3, 0, 31, -1, 32, 16], [4, 0, 31, -1, 15], [0, 1], [0, 1]).map(
-        ([c, r, boundary, obstacle]) => ({ H: HEAT_FIELD, c, r, center: 0.75, boundary, obstacle })
-      ),
+      inputs: [
+        ...product<number>([3, 0, 31, -1, 32, 16], [4, 0, 31, -1, 15], [0, 1], [0, 1]).map(
+          ([c, r, boundary, obstacle]) => ({ H: HEAT_FIELD, c, r, center: 0.75, boundary, obstacle })
+        ),
+        // The inputs of the heat test
+        // (test/compute-engine/compile-javascript-structured-heat.test.ts).
+        ...[[3, 4], [-1, 4], [16, 5], [31, 31], [4, 32]].flatMap(([c, r]) =>
+          [0, 1].map((boundary) => ({ H: HEAT_SEED, c, r, center: 0.75, boundary, obstacle: 1 }))
+        ),
+      ],
     },
     {
       // One step of Tycho's heat showcase on a 32 × 32 grid: a list made by
@@ -503,12 +527,9 @@ function step6Fixtures(): Fixture[] {
       json: heatLiteral('heatstep'),
       declare: {},
       setup: (ce) => void executeEpsil(ce, HEAT_PRELUDE),
-      inputs: product<number>([0.22, 0, 10], [0, 1], [0, 1]).map(([a, boundary, obstacle]) => [
-        HEAT_FIELD,
-        a,
-        boundary,
-        obstacle,
-      ]),
+      // The inputs of the heat test: every field, wall on and off,
+      // insulated and cooled, diffusivity 0.22, 0 and 10 (clamped to 0.25).
+      inputs: product<unknown>([...HEAT_FIELDS], [0.22, 0, 10], [0, 1], [0, 1]) as Inputs[],
     },
     {
       // The brush of the heat showcase: a comprehension over the 32 × 32
@@ -518,12 +539,13 @@ function step6Fixtures(): Fixture[] {
       json: heatLiteral('heatpaint'),
       declare: {},
       setup: (ce) => void executeEpsil(ce, HEAT_PRELUDE),
-      inputs: product<number>([23, 16.5, 0], [16, 5.5], [0, 1]).map(([p, q, obstacle]) => [
-        HEAT_FIELD,
-        p,
-        q,
-        obstacle,
-      ]),
+      // The brushes of the heat test, on the seed field, wall on and off.
+      inputs: [
+        ...product<number>([23, 16.5, 0], [16, 5.5], [0, 1]).map(([p, q, obstacle]) => [HEAT_FIELD, p, q, obstacle]),
+        ...[[23, 16], [16.5, 10], [0, 0], [31.5, 31.5], [-5, 40]].flatMap(([p, q]) =>
+          [0, 1].map((obstacle) => [HEAT_SEED, p, q, obstacle])
+        ),
+      ],
     },
   ];
 }
@@ -590,6 +612,25 @@ const HEAT_FIELD: readonly number[] = Array.from(
   { length: 1024 },
   (_, k) => Math.round((Math.sin(0.37 * (k + 1)) + (k + 1) / 1000) * 2 ** 20) / 2 ** 20
 );
+
+/** The fields of the heat test
+ *  (test/compute-engine/compile-javascript-structured-heat.test.ts). The
+ *  seed field is the value of `heatseed()` of the showcase, computed here in
+ *  JavaScript (the structured route declines `heatseed`: `exp` is not in
+ *  it); it can differ from the value of the interpreter in the last bits,
+ *  which does not matter for an input. */
+const HEAT_SEED: readonly number[] = Array.from({ length: 1024 }, (_, i) =>
+  Math.exp(-(((i % 32) - 9) ** 2 + (Math.floor(i / 32) - 15.5) ** 2) / 32)
+);
+const HEAT_FIELDS: readonly (readonly number[])[] = [
+  HEAT_SEED,
+  // A uniform field.
+  Array(1024).fill(0.7),
+  // One hot cell in a corner.
+  Array.from({ length: 1024 }, (_, i) => (i === 0 ? 1 : 0)),
+  // One hot cell beside the wall (column 15, row 4).
+  Array.from({ length: 1024 }, (_, i) => (i === 15 + 32 * 4 ? 1 : 0)),
+];
 
 /** The square root that `sqrt-repeat` repeats. */
 const SQRT_REPEATED: MathJsonExpression = [
@@ -1439,6 +1480,192 @@ function modeExtract(): void {
 }
 
 //
+// The heat functions (step 6)
+//
+
+/** The heat fixtures, prepared: A, A2, B and D compile them, C does not. */
+function heatPrepared(): Prepared[] {
+  return step6Fixtures()
+    .filter((f) => f.id.startsWith('heat'))
+    .map(prepare);
+}
+
+/**
+ * MODE=heat: for `heatstep`, the arrays made per call, counted as the heat
+ * test counts them (the array literals `[]` of the code, and the calls of
+ * the runtime helpers `_SYS.replaceAt`, which copies the array, and
+ * `_SYS.replaceAtInPlace`, which does not); the time of 100 steps in
+ * sequence, each step on the field of the previous one; and the answers of
+ * `analyzeExecution()` for the three heat functions. The times are rounds
+ * of the configurations in the seeded random order, with a full collection
+ * before each batch.
+ */
+function modeHeat(): void {
+  const prepared = heatPrepared();
+  for (const p of prepared)
+    if (p.agreement.differences.length > 0)
+      throw new Error(`values differ on ${p.fixture.id}: ${p.agreement.differences[0]}`);
+  const step = prepared.find((p) => p.fixture.id === 'heatstep')!;
+  const configs = step.configs.filter((c) => c !== 'Dp' && c !== 'C');
+
+  // Arrays made per call.
+  const helpers = SYS_HELPERS as unknown as Record<string, (...a: unknown[]) => unknown>;
+  const allocations: Record<string, unknown> = {};
+  for (const c of configs) {
+    const counts: Record<string, number> = { replaceAt: 0, replaceAtInPlace: 0 };
+    const originals = Object.keys(counts).map((name) => [name, helpers[name]] as const);
+    for (const [name, original] of originals)
+      helpers[name] = (...a: unknown[]) => {
+        counts[name]++;
+        return original(...a);
+      };
+    try {
+      callRun(step.results[c]!, step.fixture.inputs[0]);
+    } finally {
+      for (const [name, original] of originals) helpers[name] = original;
+    }
+    allocations[c] = {
+      arrayLiterals: (step.results[c]!.code.match(/\[\]/g) ?? []).length,
+      ...counts,
+    };
+  }
+
+  // 100 steps in sequence.
+  const [field, a, boundary, obstacle] = step.fixture.inputs[0] as [number[], number, number, number];
+  const hundred = (c: Config) => {
+    const run = step.results[c]!.run as unknown as (...x: unknown[]) => number[];
+    let H: number[] = field;
+    for (let n = 0; n < 100; n++) H = run(H, a, boundary, obstacle);
+    return H;
+  };
+  const finals = configs.map((c) => hundred(c));
+  const sameFinal = finals.every((f) => sameValue(f, finals[0]));
+  if (!sameFinal) throw new Error('100 steps differ between the configurations');
+  const series: Series = {};
+  for (let round = 0; round < RUNS; round++)
+    for (const c of roundOrder(configs)) {
+      gc();
+      const t0 = now();
+      sink += hundred(c)[0];
+      (series[c] ??= []).push(now() - t0);
+    }
+
+  // The analysis.
+  const analysis: Record<string, unknown> = {};
+  for (const p of prepared) {
+    const preparation = new ScalarFragmentJavaScriptTarget('structured').prepareStructured(p.expr, PILOT_OPTIONS);
+    const answer = analyzeExecution(lowerStructuredFragment(preparation));
+    analysis[p.fixture.id] = {
+      independentCalls: answer.independentCalls.holds,
+      independentCallsBlockers: answer.independentCalls.blockers.map((b) => b.reason),
+      caveats: answer.independentCalls.caveats.map((c) => c.name),
+      workerPortable: answer.workerPortable.holds,
+      workerPortableBlockers: answer.workerPortable.blockers.map((b) => b.reason),
+      loops: answer.parallelLoops.map((j) =>
+        j.candidate
+          ? { candidate: true, updates: j.updates.map((u) => [u.list.toString(), u.index.toString()]) }
+          : { candidate: false, reason: j.reason.reason }
+      ),
+    };
+  }
+  console.log(
+    JSON.stringify(
+      {
+        mode: 'heat',
+        environment: environment(),
+        allocationsPerCall: allocations,
+        hundredSteps: { input: 'the seed field, diffusivity 0.22, insulated, wall off', ms: summarize(series) },
+        analysis,
+        loadavgEnd: loadavg(),
+      },
+      null,
+      1
+    )
+  );
+}
+
+/**
+ * MODE=workers: `heatstep` on a grid of GRID × GRID cells (default 128),
+ * compiled once on the structured route, called on CALLS different fields
+ * (default 16): in sequence on this thread, then with the calls split over
+ * 2 and 4 `worker_threads` workers of a kernel pool. Each worker rebuilds the
+ * function from its stored form (`createJavaScriptRuntime().load()` in
+ * `src/kernel-worker.ts`). The mode shows that the calls are independent in
+ * practice: every value equals the value of the call in sequence. Its times
+ * are an observation: the pool copies each field to the worker and the
+ * result back, and nothing is tuned for a parallel run.
+ */
+async function modeWorkers(): Promise<void> {
+  const grid = Number(process.env.GRID ?? 128);
+  const callCount = Number(process.env.CALLS ?? 16);
+  const ce = new ComputeEngine();
+  executeEpsil(ce, HEAT_PRELUDE.replace('const N = 32', `const N = ${grid}`));
+  const definition = ce.lookupDefinition('heatstep') as { operator?: { _lambdaLiteral?: Expression } };
+  const result = new ScalarFragmentJavaScriptTarget('structured').compile(
+    definition.operator!._lambdaLiteral!,
+    PILOT_OPTIONS
+  );
+  const run = result.run as unknown as (...x: unknown[]) => number[];
+  const fields = Array.from({ length: callCount }, (_, s) =>
+    Array.from({ length: grid * grid }, (_, k) => Math.round((Math.sin(0.37 * (k + 1) + s) + 1) * 2 ** 20) / 2 ** 21)
+  );
+  const args = fields.map((H, i) => [H, [0.22, 0.1, 0.25, 0][i % 4], i % 2, (i >> 1) % 2]);
+  const sequential = () => args.map((x) => run(...x));
+  const expected = sequential();
+
+  const workerUrl = pathToFileURL(resolve(ROOT, 'src/kernel-worker.ts'));
+  const report: Record<string, unknown> = {};
+  const times: Record<string, number[]> = { sequential: [] };
+  const pools = new Map<number, KernelPool>();
+  try {
+    for (const size of [2, 4]) {
+      const pool = createKernelPool({
+        size,
+        create: () => {
+          const w = new Worker(workerUrl, { execArgv: ['--import', 'tsx'] });
+          return {
+            postMessage: (m: unknown, transfer?: ArrayBuffer[]) => w.postMessage(m, transfer ?? []),
+            terminate: () => w.terminate(),
+            on: (event, handler) => w.on(event as 'message', handler),
+          };
+        },
+      });
+      pools.set(size, pool);
+      await pool.prewarm();
+      times[`workers ${size}`] = [];
+    }
+    const parallel = async (size: number) => {
+      const calls = callPool(pools.get(size))!;
+      return (await Promise.all(
+        args.map((x) => calls.runCall(result as unknown as StoredResult, x, undefined, undefined))
+      )) as number[][];
+    };
+    // Warm up, and check every value.
+    for (const size of pools.keys())
+      for (let k = 0; k < 2; k++) {
+        const values = await parallel(size);
+        if (!values.every((v, i) => sameValue([...v], expected[i])))
+          throw new Error(`a value of ${size} workers differs from the sequential value`);
+      }
+    report.valuesEqual = true;
+    for (let round = 0; round < RUNS; round++)
+      for (const c of roundOrder(Object.keys(times))) {
+        gc();
+        const t0 = now();
+        if (c === 'sequential') sink += sequential()[0][0];
+        else sink += (await parallel(Number(c.split(' ')[1])))[0][0];
+        times[c].push(now() - t0);
+      }
+  } finally {
+    for (const pool of pools.values()) pool.dispose();
+  }
+  report.ms = Object.fromEntries(Object.entries(times).map(([k, v]) => [k, stat(v)]));
+  console.log(
+    JSON.stringify({ mode: 'workers', environment: environment(), grid, calls: callCount, ...report }, null, 1)
+  );
+}
+
+//
 // Line counts
 //
 
@@ -1516,6 +1743,8 @@ function modeLines(): void {
   const pilotFiles = [
     'structured-ir.ts',
     'structured-verify.ts',
+    'structured-in-place.ts',
+    'structured-execution.ts',
     'javascript-structured-policy.ts',
     'javascript-structured-lower.ts',
     'javascript-structured-emit.ts',
@@ -1526,11 +1755,34 @@ function modeLines(): void {
   const source = (f: string) =>
     rev === 'worktree'
       ? readFileSync(resolve(COMPILATION, f), 'utf8')
-      : execFileSync('git', ['show', `${rev}:src/compute-engine/compilation/${f}`], { cwd: ROOT, encoding: 'utf8' });
-  for (const f of pilotFiles) pilot[f] = codeLines(source(f));
-  // The commits of the pilot (steps 2 and 3), of the first change of step 5
-  // (local writes), and, with REV=worktree, the uncommitted lines.
-  const commits = ['4c4f1c163', '7939b5fac', '5e496c6ad', ...(rev === 'worktree' ? ['0000000'] : [])];
+      : execFileSync('git', ['show', `${rev}:src/compute-engine/compilation/${f}`], {
+          cwd: ROOT,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+  // A file that does not exist at `rev` counts 0 lines.
+  const exists = (f: string) => {
+    try {
+      source(f);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const f of pilotFiles) pilot[f] = exists(f) ? codeLines(source(f)) : 0;
+  // The commits of the pilot (steps 2 and 3), of the two changes of step 5,
+  // of the three changes of step 6 (6a, 6b, 6c part 1), and, with
+  // REV=worktree, the uncommitted lines.
+  const commits = [
+    '4c4f1c163',
+    '7939b5fac',
+    '5e496c6ad',
+    '571be48ca',
+    '111ef6da5',
+    '567f7d53f',
+    '6f4d798e4',
+    ...(rev === 'worktree' ? ['0000000'] : []),
+  ];
   for (const f of ['javascript-fragment-target.ts', 'javascript-target.ts'])
     pilot[`${f} (lines of ${commits.join(', ')})`] = blamedLines(`src/compute-engine/compilation/${f}`, rev, commits);
   const pilotTotal = Object.values(pilot).reduce((a, b) => a + b, 0);
@@ -1555,6 +1807,24 @@ function modeLines(): void {
   existing['JAVASCRIPT_FUNCTIONS.Sqrt'] = spanLines(jsTarget, findEntry(jsTarget, 'JAVASCRIPT_FUNCTIONS', 'Sqrt'));
   for (const fn of ['complexSqrtLiteral', 'promotesToComplexLane'])
     existing[`${fn} (javascript-target.ts)`] = spanLines(jsTarget, findFunction(jsTarget, fn));
+  // Step 6: the handlers of `At`, `Length`, `ReplaceAt`, `Mod` and `Floor`,
+  // and the functions of compile-loops.ts that compile a `Loop` over a range
+  // and a `Comprehension`. Each is counted whole, as the handlers above: it
+  // also covers forms that the structured route does not admit, so the
+  // count is an upper bound of what the route replaces.
+  for (const op of ['At', 'Length', 'ReplaceAt', 'Mod', 'Floor'])
+    existing[`JAVASCRIPT_FUNCTIONS.${op}`] = spanLines(jsTarget, findEntry(jsTarget, 'JAVASCRIPT_FUNCTIONS', op));
+  const loops = parse('compile-loops.ts');
+  for (const fn of [
+    'compileLoop',
+    'compileLoopBound',
+    'compileForLoop',
+    'compileCountedRange',
+    'loopPassCount',
+    'loopPassHelpers',
+    'compileComprehension',
+  ])
+    existing[`${fn} (compile-loops.ts)`] = spanLines(loops, findFunction(loops, fn));
   const existingTotal = Object.values(existing).reduce((a, b) => a + b.code, 0);
   console.log(JSON.stringify({ mode: 'lines', rev, pilot, pilotTotal, existing, existingTotal }, null, 1));
 }
@@ -1596,13 +1866,15 @@ async function coveredFunctions(config: Config, prepared: Prepared[]): Promise<M
 }
 
 async function modeDeps(): Promise<void> {
-  const prepared = [...namedFixtures(), ...deepFixtures()].map(prepare);
+  const prepared = [...namedFixtures(), ...step5Fixtures(), ...step6Fixtures(), ...deepFixtures()].map(prepare);
   // Warm both configurations first, so that lazily compiled modules load.
   const d = await coveredFunctions('D', prepared);
   const b = await coveredFunctions('B', prepared);
   const PILOT = new Set([
     'structured-ir.ts',
     'structured-verify.ts',
+    'structured-in-place.ts',
+    'structured-execution.ts',
     'javascript-structured-policy.ts',
     'javascript-structured-lower.ts',
     'javascript-structured-emit.ts',
@@ -1649,6 +1921,12 @@ switch (MODE) {
     break;
   case 'extract':
     modeExtract();
+    break;
+  case 'heat':
+    modeHeat();
+    break;
+  case 'workers':
+    await modeWorkers();
     break;
   case 'cold-child':
     coldChild();

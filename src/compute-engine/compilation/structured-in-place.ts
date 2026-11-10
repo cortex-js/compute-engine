@@ -171,7 +171,30 @@ function order(
  * cannot prove copies, and gives the same values.
  */
 export function inPlaceUpdates(program: IRProgram): ReadonlySet<IROperation> {
+  return analyzeInPlace(program).inPlace;
+}
+
+/**
+ * For each `loop` of `program`, and for each of its carried values in the
+ * order of `results`: whether the initial value is consumable by the loop,
+ * by the rule of `inPlaceUpdates()` (unique, and with no other use that runs
+ * after the loop or that holds the array). When it is true, the first
+ * iteration may write the array of the initial value; when it is false, the
+ * array can be an input, a capture, a parameter of a function or a value
+ * that other code reads, and a write needs a copy first.
+ */
+export function consumableLoopInitials(
+  program: IRProgram
+): ReadonlyMap<IROperation, readonly boolean[]> {
+  return analyzeInPlace(program).loopInitials;
+}
+
+function analyzeInPlace(program: IRProgram): {
+  inPlace: Set<IROperation>;
+  loopInitials: Map<IROperation, boolean[]>;
+} {
   const inPlace = new Set<IROperation>();
+  const loopInitials = new Map<IROperation, boolean[]>();
   /** Whether the body of each function yields a unique value. */
   const yieldsUnique: boolean[] = [];
   const analyze = (body: IRRegion, parameters: readonly IRValue[]): boolean => {
@@ -288,6 +311,13 @@ export function inPlaceUpdates(program: IRProgram): ReadonlySet<IROperation> {
           consumable(op.operands[0], op, position)
         )
           inPlace.add(op);
+        if (op.kind === 'loop')
+          loopInitials.set(
+            op,
+            op.results.map((_, i) =>
+              consumable(op.operands[i + 2], op, position)
+            )
+          );
         for (const inner of regionsOf(op)) visit(inner, position);
       });
     visit(body, []);
@@ -300,7 +330,7 @@ export function inPlaceUpdates(program: IRProgram): ReadonlySet<IROperation> {
     yieldsUnique[i] = analyze(fn.body, fn.parameters);
   });
   analyze(program.root, []);
-  return inPlace;
+  return { inPlace, loopInitials };
 }
 
 /**

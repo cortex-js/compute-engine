@@ -516,6 +516,59 @@ product fixtures agree with independent oracles. Do not equate list shape with
 fixed length or numeric vocabulary with purity. Each extension gets its own
 admission boundary before another is added.
 
+**Result of step 6 (2026-11-10).** The three changes of
+[the design of step 6](2026-11-10-structured-ir-loops-and-lists.md) are
+done; the analysis for concurrency is not yet committed.
+
+- 6a (`111ef6da5`): a `loop` over an integer range, with each carried value
+  a parameter of its body region and a result of the loop; a loop with an
+  iteration budget records that it can abort; `LessEqual`, `Mod`, `Floor`,
+  `Divide`, `Power` with the exponent 2, and integer `let` locals.
+- 6b (`567f7d53f`): lists of numbers as inputs and parameters, read with
+  `at` and `length`. `heatneighbor` compiles.
+- 6c part 1 (`6f4d798e4`): lists that the program makes (`build` for a
+  comprehension over a range, `replace-at`), as a local, a carried value, the
+  value of an `If`, of a helper and of the program; the update in place is
+  decided on the representation (`inPlaceUpdates()` in
+  `structured-in-place.ts`). `heatstep` and `heatpaint` compile, with one
+  array per call of `heatstep`.
+- 6c part 2: `analyzeExecution()` in `structured-execution.ts`, internal,
+  with no compile option: whether two calls can run at the same time,
+  whether the code can be sent to a worker, and for each loop whether its
+  iterations are a candidate to run in any order (a pure body whose only
+  carried values are lists updated at the loop index and not read). A
+  candidate says whether its initial list must be copied once, and carries
+  the run-time check `bounds-at-least-one` when the analysis cannot prove
+  that both bounds of the range are at least 1.
+
+Declines, each with a test: `heatseed`, which needs `exp`; `Break`,
+`Continue` and a `Return` in a branch; a loop or a comprehension over a list,
+and a loop with a step; nested lists; an index of the type `real` for `At`
+or `ReplaceAt`; a helper whose definition states an effect. CE-1191 (the
+rounding of a product with a local that holds an exact fraction is 1 too
+small) is open and has the same limit on both routes.
+
+The measure is the section "After step 6 (2026-11-10)" of
+[the pilot measure](2026-11-09-js-structured-pilot-measure.md), one run:
+
+- No value differs on 57 programs (1,034 inputs).
+- Compilation takes 38% to 55% of the time of the ordinary target with the
+  same options on the step 6 fixtures, and 79% on the corpus sample.
+- `heatstep` runs in 53% of that time over 100 steps, with one array per
+  call on both routes; `heatpaint` costs 6% against the default options
+  (2% against the same options), seen once and not yet resolved.
+- 16 calls of `heatstep` on a 128 × 128 grid in 2 and 4 workers give the
+  values of the calls in sequence.
+- The route is 4,874 counted lines (1,469 of them core); the handlers of the
+  existing emitter for the same operators are at most 1,616.
+
+The analysis answers, for `heatneighbor`, `heatstep` and `heatpaint`: the
+calls are independent and the code is worker portable; the loop of
+`heatstep` is a candidate, with the carried list `L` updated at the index
+`k`, an initial list that this call made (no copy needed), no run-time
+condition (both bounds, 1 and `N^2` with the capture `N = 32`, are proved at
+least 1) and no abort. The other two have no loop.
+
 ### Step 7 — Specify profiles and migrate individual consumers
 
 **Deliver:** exact public numeric-kernel semantics, diagnostics, execution

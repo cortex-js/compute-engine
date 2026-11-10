@@ -1202,3 +1202,276 @@ Not resolved: the execution cost of emitting without common subexpressions
 for a costly repeated operation (see above); execution differences below
 about 5% through `run()` and about 2% on the body; a second run of this
 code; the 546-program corpus.
+
+## After step 6 (2026-11-10)
+
+Step 6 adds to the structured route a loop over an integer range with
+carried values (6a, `111ef6da5`), lists as inputs and parameters read with
+`At` and `Length` (6b, `567f7d53f`), and lists that the program builds and
+updates, with update in place decided on the representation (6c part 1,
+`6f4d798e4`). This section measures that code, with the first analysis for
+concurrency (`analyzeExecution()` in `structured-execution.ts`, uncommitted
+when measured).
+
+### Fixtures
+
+| Fixture | What it measures |
+| --- | --- |
+| `loop-sum` | `s := s + k²` for `k` from 1 to `n`: a carried scalar. |
+| `loop-complex-iteration` | `z := z² + c`, sixteen times, complex. |
+| `heatneighbor` | The neighbour read of Tycho's heat showcase: a list input of 32 × 32 cells, the capture `N`, a call of `heatwall`. |
+| `heatstep` | One step of the heat showcase as `executeEpsil()` defines it: a list built by a comprehension, carried by a loop and updated in place. |
+| `heatpaint` | The brush of the showcase: a comprehension over the 32 × 32 cells. |
+
+The heat fixtures now include the inputs of the heat test
+(`test/compute-engine/compile-javascript-structured-heat.test.ts`): for
+`heatstep`, the seed, uniform, corner and spot fields, wall on and off,
+insulated and cooled, diffusivity 0.22, 0 and 10 (48 inputs); for
+`heatneighbor` and `heatpaint`, the cells and the brushes of that test on
+the seed field. The seed field is computed in JavaScript (the structured
+route declines `heatseed`). C declines the three heat fixtures. The
+benchmark compares A, B and D with each other; the comparison with the
+interpreter is in the heat test, which passes.
+
+### The run
+
+One complete run of the default mode
+(`node --expose-gc --import tsx benchmarks/js-structured-pilot.ts`): 17
+named and deep fixtures and the 40-program corpus sample, in the seeded
+random order, one garbage collection per round, 9 rounds. Then `MODE=heat`
+and `MODE=workers`. It ran under the box lock, from 17:31:54 to 17:33:45 UTC
+(the default mode 108 s), in a worktree at base `6f4d798e4` with
+`structured-execution.ts` uncommitted. The load average was 19.3 / 21.7 /
+17.2 at the start of the default mode, from processes that do not take the
+lock (no Jest process of this session ran), and 7.0 / 16.6 / 15.7 at its
+end. A second run was not made: another session was waiting for the lock.
+
+**Values.** No value differs between A, A2, B, C and D on the 57 programs
+(17 fixtures and 40 corpus programs, 1,034 inputs), with the sign of each
+zero. D admits all 40 corpus programs; C admits 6.
+
+### Calibration
+
+A2/A, the median per fixture (the range over the rounds in parentheses):
+
+| Measure | Per fixture |
+| --- | --- |
+| Warm compilation | 0.84 to 1.08 (0.74 to 1.30) |
+| Warm execution, `run()` | 0.91 to 1.02; `heatstep` 0.93 (0.46 to 2.02) |
+| Cold, fresh engine | 0.92 to 1.05 |
+| Corpus totals, warm compilation | 1.00 (0.92 to 1.08) |
+| Corpus totals, execution | 0.99 (0.98 to 1.01) |
+
+The execution of `heatstep` through the default mode has a wide spread: one
+call takes about 30 to 60 µs and makes an array of 1,024 numbers, so a batch
+of 2 ms holds few calls and a collection can fall in it. The time of 100
+steps below is the better measure for it.
+
+### Emitted bytes (code and preamble)
+
+| Fixture | A | B | D | D/B |
+| --- | ---: | ---: | ---: | ---: |
+| `loop-sum` | 326 | 326 | 194 | 0.60 |
+| `loop-complex-iteration` | 319 | 319 | 327 | 1.03 |
+| `heatneighbor` | 404 | 404 | 375 | 0.93 |
+| `heatstep` | 1,186 | 1,596 | 1,296 | 0.81 |
+| `heatpaint` | 472 | 675 | 604 | 0.89 |
+
+The other fixtures have the bytes of the section "After step 5".
+
+### Warm compilation (ms per compilation; ratios: median and range over the rounds)
+
+| Fixture | A | B | D | D/B | D/A |
+| --- | ---: | ---: | ---: | --- | --- |
+| `loop-sum` | 0.450 | 0.364 | 0.192 | 0.55 (0.42 to 0.64) | 0.41 (0.37 to 0.49) |
+| `loop-complex-iteration` | 0.394 | 0.330 | 0.183 | 0.52 (0.45 to 0.72) | 0.46 (0.35 to 0.62) |
+| `heatneighbor` | 1.346 | 1.097 | 0.470 | 0.44 (0.35 to 0.49) | 0.36 (0.28 to 0.37) |
+| `heatstep` | 3.340 | 2.751 | 1.125 | 0.42 (0.39 to 0.43) | 0.33 (0.30 to 0.36) |
+| `heatpaint` | 1.858 | 1.437 | 0.539 | 0.38 (0.36 to 0.44) | 0.29 (0.28 to 0.34) |
+| Corpus totals | 7.21 | 6.09 | 4.77 | 0.79 (0.73 to 0.88) | 0.65 (0.62 to 0.72) |
+
+On the older fixtures, D/B is 0.40 to 0.82 per fixture. Per corpus program,
+D/B has the median 0.84 (0.56 to 1.18), and D/A 0.72 (0.48 to 1.08); 10% of
+the programs have D/B above 1.07. Cold, on a fresh engine, D/B is 0.50 to
+0.91 per fixture.
+
+### Warm execution
+
+Through `run()`, ns per call:
+
+| Fixture | A | B | D | D/B | D/A |
+| --- | ---: | ---: | ---: | --- | --- |
+| `loop-sum` | 57 | 60 | 33 | 0.56 (0.54 to 0.59) | 0.59 (0.54 to 0.61) |
+| `loop-complex-iteration` | 138 | 140 | 107 | 0.76 (0.69 to 0.79) | 0.77 (0.72 to 0.80) |
+| `heatneighbor` | 65 | 65 | 66 | 1.01 (0.93 to 1.10) | 1.02 (0.91 to 1.10) |
+| `heatstep` | 62,316 | 59,439 | 31,253 | 0.59 (0.38 to 0.70) | 0.50 (0.36 to 0.85) |
+| `heatpaint` | 8,180 | 8,453 | 8,635 | 1.02 (0.98 to 1.08) | 1.06 (1.01 to 1.10) |
+
+On the older fixtures, D/B is 0.94 to 1.02 and D/A 0.90 to 1.05; on the
+corpus totals, D/B is 1.00 (0.99 to 1.02).
+
+**`heatstep`, 100 steps in sequence** (`MODE=heat`; each step on the field
+of the previous one, from the seed field, diffusivity 0.22, insulated, wall
+off; ms per 100 steps, 9 rounds):
+
+| A | A2 | B | D | D/B | D/A | A2/A |
+| ---: | ---: | ---: | ---: | --- | --- | --- |
+| 5.40 | 5.47 | 5.68 | 3.02 | 0.53 (0.50 to 0.55) | 0.56 (0.54 to 1.04) | 1.02 (0.98 to 1.89) |
+
+The final fields of A, A2, B and D are equal. In one round A took 2.99 ms,
+the time of D; the run does not show why.
+
+**Arrays made per call of `heatstep`**, counted as the heat test counts them
+(the `[]` literals of the code, and the calls of the runtime helpers
+`_SYS.replaceAt`, which copies, and `_SYS.replaceAtInPlace`, which does
+not): A, B and D each write one array literal, copy no array, and write
+1,024 elements in place. One array per call on every configuration. So the
+difference in time does not come from allocations; this run does not show
+where it comes from.
+
+### Independent calls in practice (`MODE=workers`)
+
+`heatstep` on a grid of 128 × 128 cells (the prelude with `N = 128`),
+compiled once by D, called on 16 different fields: in sequence on the main
+thread, and split over 2 and over 4 `worker_threads` workers of a kernel
+pool. Each worker rebuilds the function from its stored form
+(`createJavaScriptRuntime().load()` in `src/kernel-worker.ts`). Every value
+from the workers equals the value of the call in sequence. Times, ms for the
+16 calls, median and range over 9 rounds:
+
+| Sequential | 2 workers | 4 workers |
+| ---: | ---: | ---: |
+| 6.64 (6.56 to 7.05) | 6.90 (6.80 to 7.25) | 4.31 (4.10 to 4.81) |
+
+An observation, not a measure of parallel speed: the pool copies each field
+of 16,384 numbers to a worker and the result back, and nothing is tuned for
+a parallel run.
+
+### The analysis for the heat functions
+
+`analyzeExecution()` on the programs of D:
+
+| Function | Independent calls | Worker portable | Loops |
+| --- | --- | --- | --- |
+| `heatneighbor` | yes | yes | none |
+| `heatstep` | yes, no caveat (no iteration budget) | yes | one, a candidate: carried list `L`, index `k`, initial list unique, no run-time condition, cannot abort |
+| `heatpaint` | yes | yes | none (the comprehension is a `build`, not a `loop`) |
+
+The run measured the analysis before six review fixes. The fixes add the
+fields `initialUnique` and `conditions` of a candidate (the row of
+`heatstep` gives their values after the fixes, from the tests), and make the
+rule refuse more loops; they change no answer for the heat functions and no
+emitted code. The line count of `structured-execution.ts` below is the one
+before the fixes.
+
+### Line counts
+
+`MODE=lines`, by the rule of the first measure. `javascript-fragment-target.ts`
+and `javascript-target.ts` count the lines of the commits of the pilot, of
+step 5 (`5e496c6ad`, `571be48ca`) and of step 6 (`111ef6da5`, `567f7d53f`,
+`6f4d798e4`); the last column also counts the uncommitted lines
+(`REV=worktree`).
+
+| Part | End of step 5 (`571be48ca`) | `6f4d798e4` | With the analysis |
+| --- | ---: | ---: | ---: |
+| `structured-ir.ts` (core) | 143 | 191 | 191 |
+| `structured-verify.ts` (core) | 417 | 700 | 700 |
+| `structured-in-place.ts` (core) | — | 222 | 222 |
+| `structured-execution.ts` (core) | — | — | 356 |
+| `javascript-structured-policy.ts` | 37 | 58 | 58 |
+| `javascript-structured-lower.ts` | 629 | 1,055 | 1,055 |
+| `javascript-structured-emit.ts` | 297 | 459 | 459 |
+| `javascript-fragment-target.ts`, lines of the commits above | 863 | 1,747 | 1,747 |
+| `javascript-target.ts`, lines of the commits above | 88 | 86 | 86 |
+| **Total** | **2,474** | **4,518** | **4,874** |
+
+The core is 560 lines at the end of step 5, 1,113 at `6f4d798e4` and 1,469
+with the analysis; the JavaScript files 1,914 and 3,405.
+
+The handlers of the existing emitter for the operators now covered are at
+most 1,616 lines: the 942 of the section "After step 5", and 674 for step 6.
+`JAVASCRIPT_FUNCTIONS.At` 135, `Length` 38, `ReplaceAt` 19, `Mod` 30, `Floor`
+7; in `compile-loops.ts`, `compileLoop` 135, `compileLoopBound` 27,
+`compileForLoop` 101, `compileCountedRange` 93, `loopPassCount` 5,
+`loopPassHelpers` 8 and `compileComprehension` 76. Each is counted whole, as
+before: each also handles forms that the structured route declines (a loop
+over a list, a step, `Break`, nested lists, a comprehension over a list), so
+the count is an upper bound of what the route would replace. The runtime
+helpers that both routes call (`_SYS.atNumeric`, `_SYS.replaceAtInPlace`,
+`_SYS.floorMod`) are not counted.
+
+### Dependencies of the structured route on the existing compiler
+
+`MODE=deps` now compiles the named, step 5, step 6 and deep fixtures (16
+programs; the first measure compiled 5, so the counts are not comparable
+with it). Run on D, it finds 315 functions:
+
+| Group | Functions |
+| --- | ---: |
+| The structured files (`structured-ir.ts` 7, `structured-verify.ts` 6, `structured-in-place.ts` 5, `javascript-structured-policy.ts` 2, `-lower.ts` 35, `-emit.ts` 18) | 73 |
+| The route and the annotation (`javascript-fragment-target.ts` 51, `fragment.ts` 23, `javascript-fragment-facts.ts` 3) | 77 |
+| The existing compiler, 39 files | 165 |
+
+Run on B, the count is 742. The groups of the existing compiler are those of
+the first measure, preparation and assembly: `javascript-target.ts` 28,
+`fixed-width-unroll.ts` 19, `compile-references.ts` 10,
+`compile-declarations.ts` 7, `javascript-runtime.ts` 7. Two are new with
+step 6, and neither is an emitter: `compile-loops.ts` 3
+(`loopPassHelpers`, `loopPassReset`, `loopPassResetCall`: the assembly writes
+the reset of the iteration budget at the start of a call when the code counts
+passes) and `in-place-update.ts` 1 (`copyingUpdateWarnings`, in preparation).
+`isComplexValued()` still runs in assembly only, as in the first measure.
+`structured-execution.ts` does not run: no compilation calls the analysis.
+
+### The decision rules of step 4, applied again
+
+**1. "A wrong value, a wrong shape or a hidden use of the existing emitter:
+correct it, or stop."** Does not hold. No value differs on the 57 programs
+(1,034 inputs). The heat tests compare D with the interpreter on the heat
+fields and pass, and the test that makes the readers of the existing
+compiler throw from preparation to emission passes on `heatstep`.
+
+**2a. "A reproducible cost above 10% in total compilation, against the
+ordinary target with the same options."** Does not hold. Warm D/B is 0.38 to
+0.55 on the step 6 fixtures and 0.40 to 0.82 on the others; 0.79 on the
+corpus totals. Cold D/B is 0.50 to 0.91. Per corpus program, D/B is above
+1.07 for 10% of the programs (maximum 1.18); the totals and the median (0.84)
+are below 1.
+
+**2b. "A reproducible cost above 5% in warm execution."** Not resolved. On
+one fixture a cost above 5% was seen once: `heatpaint`, D/A 1.06 (1.01 to
+1.10), above its calibration (A2/A 1.01, 0.96 to 1.04); against B, the
+configuration with the same options, D/B is 1.02 (0.98 to 1.08). A second
+run is needed to know whether it is reproducible. D is faster on the loops:
+`loop-sum` D/B 0.56, `loop-complex-iteration` 0.76, `heatstep` 0.59 per call
+and 0.53 on 100 steps, with the same number of arrays made per call.
+
+**3. "A difference smaller than the variability of the harness: time is then
+not a reason for either choice. The two line counts decide."** For the
+programs where execution does not differ:
+
+- **"The pilot is smaller than the handlers it would replace."** Does not
+  hold. The structured route is 4,874 lines with the analysis (4,518
+  without); the handlers that it covers are at most 1,616.
+- **"It removed a class of defect that has a `corpus` or `plausible`
+  witness."** Does not hold. The route gives the same values as the existing
+  route on the heat functions; CE-1191 (a rounding of a product with a local
+  that holds an exact fraction is 1 too small) has the same limit on both
+  routes.
+
+**4. "Stop means: the structured emitter and its representation are
+deleted; the annotation and the rule of step 1 stay."** Unchanged. The
+decision to expand (approved 2026-11-10) was made for the compile-time
+result and the objectives of the representation; this run adds a faster
+execution on the loops, and nothing that changes the facts of that decision.
+
+### What is resolved and what is not
+
+Resolved: the compile time of D on loops and lists keeps the ratio of the
+earlier fixtures; D makes one array per call of `heatstep`, as A and B do;
+the calls of `heatstep` give the same values in two and four workers as in
+sequence.
+
+Not resolved: whether the cost of D on `heatpaint` against A (6%) is
+reproducible; why D runs the loops faster; a second run of this code; the
+546-program corpus.
