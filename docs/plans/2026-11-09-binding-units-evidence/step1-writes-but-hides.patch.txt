@@ -1,0 +1,1687 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2db084dab..f5ec68dd9 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,32 @@
+ 
+ ### Breaking Changes
+ 
++- **The result of `ce.parse()`, `ce.expr()` and `ce.function()` no longer
++  depends on the expressions parsed or boxed before.** A use of a name with
++  no declaration infers a type for it (`x + 1` requires a number). Before,
++  that type was written on the name and the next expression read it:
++  `ce.parse('x(3)')` after `ce.parse('x + 1')` was the product `3x`, and in
++  the other order `x + 1` was an `incompatible-type` error. Now each of
++  these calls reads only the declared types of such names, and the types
++  that it infers itself. `x(3)` is the call `["x", 3]` in both orders, and
++  `x + 1` is valid. To read `x(3)` as a product, declare `x`
++  (`ce.declare('x', 'real')`) or write the product (`x\cdot(3)`). The name
++  is still declared by its first use, and outside a parse its type is what
++  the uses require together: after `ce.parse('x + 1')`, `ce.box('x').type`
++  is `number`. An Epsil program is not affected: its statements read the
++  types that the statements before them inferred. An operation on an
++  existing expression (an evaluation, a simplification, a compilation)
++  reads the types as before.
++
++- **Two expressions that require types that conflict leave the name
++  `unknown`.** After `ce.parse('x + 1')` and `ce.parse('x(3)')`, in either
++  order, `ce.box('x').type` is `unknown` (it was `number` or `function`,
++  whichever came first). A numeric use under an operator that maps over a
++  collection and a collection use give the collection, in either order:
++  after `["Add", "v", 1]` and `["Add", ["At", "v", 1], ["At", "v", 2]]`,
++  `v` is `indexed_collection<number>`. An inferred type never refuses an
++  assignment or a declaration.
++
+ - **The `BaseCompiler` static member `compileMatchTernary` is removed**, with
+   the type `MatchStatementClause` of its `statement` option. It compiled a
+   `Match` to nested conditional expressions for the GLSL target, and GLSL now
+diff --git a/src/common/computation-depth.ts b/src/common/computation-depth.ts
+index dfbff3288..b2899e7fd 100644
+--- a/src/common/computation-depth.ts
++++ b/src/common/computation-depth.ts
+@@ -23,6 +23,12 @@ export function runWhenIdle(fn: () => void): void {
+   else _whenIdle.push(fn);
+ }
+ 
++/** True while a cached computation (`cachedValue`: the lazy type, value or
++ * sign of an expression) or a type handler runs. */
++export function computationRunning(): boolean {
++  return _computing > 0;
++}
++
+ /** Count `fn` as a running computation for `runWhenIdle`. */
+ export function asComputation<T>(fn: () => T): T {
+   _computing += 1;
+diff --git a/src/compute-engine/boxed-expression/box.ts b/src/compute-engine/boxed-expression/box.ts
+index 926b6b767..d2590f699 100644
+--- a/src/compute-engine/boxed-expression/box.ts
++++ b/src/compute-engine/boxed-expression/box.ts
+@@ -69,6 +69,14 @@ import { recordCanonicalFailure } from './canonical-failure.js';
+ import { multiClauseState } from '../multi-clause.js';
+ 
+ import { _BoxedExpression } from './abstract-boxed-expression.js';
++import { HostBoxingRecord } from '../host-boxing.js';
++import { computationRunning } from '../../common/computation-depth.js';
++import type { HostBoxing } from './boxed-value-definition.js';
++import {
++  endHostBoxing,
++  noteHostCall,
++  noteHostDeclaration,
++} from './boxed-symbol.js';
+ import { evidenceAdmissionOf } from './value-membership.js';
+ import {
+   BoxedFunction,
+@@ -453,8 +461,11 @@ export function boxFunction(
+   // A construction that starts here starts at the root of the JS stack too,
+   // so the nesting counter starts over (see `boxingDepth`).
+   boxingDepth = 0;
+-  return withDevolveRepair(ce, options?.scope, () =>
+-    boxFunctionInternal(ce, name, ops, options)
++  return withDevolveRepair(
++    ce,
++    options?.scope,
++    () => boxFunctionInternal(ce, name, ops, options),
++    !holdsBoxedExpression(ops)
+   );
+ }
+ 
+@@ -1457,11 +1468,21 @@ function stringifyForError(value: unknown): string {
+  * rebuilds against the same scope.
+  *
+  * `build` must be free of side effects other than boxing: it is called twice.
++ *
++ * `fromHost` is true when the input of the construction holds no boxed
++ * expression: the construction is then a boxing that the host starts, and
++ * the inferred types of the names of the host's scopes are read and written
++ * as `host-boxing.ts` describes. The test depends only on the input, so it
++ * needs no list of the operations that box: an operation on an existing
++ * expression boxes from that expression's parts, and a raw input that an
++ * operation boxes (a symbol made from a name alone) reads the types without
++ * the requirements of earlier boxings, the conservative answer.
+  */
+ function withDevolveRepair(
+   ce: ComputeEngine,
+   scope: Scope | undefined,
+-  build: () => Expression
++  build: () => Expression,
++  fromHost = false
+ ): Expression {
+   // Nested constructions join the active root (withRootRepair returns
+   // build() directly), so the persistence classifier below would be built
+@@ -1469,6 +1490,83 @@ function withDevolveRepair(
+   if (ce._boxingState.isRootActive)
+     return ce._boxingState.withRootRepair(build);
+ 
++  if (!fromHost) return withRootConstruction(ce, scope, build);
++  return withHostBoxing(ce, () => withRootConstruction(ce, scope, build));
++}
++
++/**
++ * Run `fn` as a step of a boxing that the host starts (`host-boxing.ts`):
++ * while it runs, the type of a host name with requirements of earlier
++ * boxings is read without them, and when it ends, the requirements of this
++ * boxing join them (`endHostBoxing()`). Used for the outermost boxing of a
++ * raw input, and by `ce.parse()` for the LaTeX parse that comes before the
++ * boxing: the parser reads the types of the names (a name of a function type
++ * before a parenthesis is applied), and the reading must not depend on an
++ * earlier expression either.
++ *
++ * A step that starts while another one runs, or while an outermost boxing
++ * that is not of the host runs, joins it.
++ *
++ * A boxing made while an Epsil program runs (its static check or its
++ * evaluation: `ce._epsilBatchId` is set) is a statement of the program, not
++ * a boxing of the host: a program commits its inferences statement by
++ * statement, so a statement reads the types that the statements before it
++ * inferred, in the scope of the program.
++ *
++ * A boxing made while a cached computation or a type handler runs
++ * (`computationRunning()`: the lazy type, value or sign of an existing
++ * expression, such as the derivation of the signature of a function, which
++ * boxes its body again) is part of that computation, not a boxing of the
++ * host: it reads the types that the definitions report. A boxing of the
++ * host would send a state event when it ends, and a type handler must not
++ * move the engine's versions.
++ */
++export function withHostBoxing<T>(ce: ComputeEngine, fn: () => T): T {
++  const state = ce._boxingState;
++  if (
++    state.host !== null ||
++    state.isRootActive ||
++    ce._epsilBatchId !== undefined ||
++    computationRunning()
++  )
++    return fn();
++  const host: HostBoxing = new HostBoxingRecord();
++  state.host = host;
++  try {
++    return fn();
++  } finally {
++    state.host = null;
++    endHostBoxing(ce, host);
++  }
++}
++
++/** True when `input`, a boxing input, holds a boxed expression at any depth
++ * (an operand of a MathJSON function or a value of a dictionary). A loop,
++ * not a recursion: a MathJSON tree can be deeper than the stack. */
++function holdsBoxedExpression(input: unknown): boolean {
++  const pending: unknown[] = [input];
++  while (pending.length > 0) {
++    const x = pending.pop();
++    if (x === null || typeof x !== 'object') continue;
++    if (x instanceof _BoxedExpression) return true;
++    if (Array.isArray(x)) {
++      for (const item of x) pending.push(item);
++      continue;
++    }
++    if ('fn' in x) pending.push(x.fn);
++    else if ('dict' in x && typeof x.dict === 'object' && x.dict !== null)
++      for (const item of Object.values(x.dict)) pending.push(item);
++  }
++  return false;
++}
++
++/** The outermost construction of `withDevolveRepair()`, with the persistence
++ * classifier of its scopes. */
++function withRootConstruction(
++  ce: ComputeEngine,
++  scope: Scope | undefined,
++  build: () => Expression
++): Expression {
+   // Persistence classifier for the first-boxing binding-divergence repair
+   // (`EngineBoxingState.noteDeclarationIn`): a scope outlives this
+   // construction iff it is on a lexical chain that existed when the
+@@ -1557,8 +1655,11 @@ export function box(
+     // A construction that starts here starts at the root of the JS stack too,
+     // so the nesting counter starts over (see `boxingDepth`).
+     boxingDepth = 0;
+-    return withDevolveRepair(ce, options?.scope, () =>
+-      boxInternal(ce, expr, options)
++    return withDevolveRepair(
++      ce,
++      options?.scope,
++      () => boxInternal(ce, expr, options),
++      !holdsBoxedExpression(expr)
+     );
+   } finally {
+     endInferenceTransaction(ce);
+@@ -3322,6 +3423,7 @@ function makeCanonicalFunctionCore(
+         autoScope = autoScope.parent;
+       ce.declare(name, { type: 'function', inferred: true }, autoScope);
+       const declared = autoScope.bindings.get(name);
++      if (declared !== undefined) noteHostDeclaration(ce, name, declared);
+       if (declared !== undefined && !ce._isShadowedParameter(name))
+         markForwardCallReference(declared, autoScope);
+       if (declared !== undefined && ce._isShadowedParameter(name))
+@@ -3725,6 +3827,11 @@ function makeCanonicalFunctionCore(
+     // We construct the function expression and will check its value
+     // is a function literal when evaluating it.
+     //
++    // A host name whose type is `unknown` in this boxing only because the
++    // requirements of earlier boxings are hidden is required to be a
++    // function, as an undeclared head is declared one above.
++    noteHostCall(ce, name, def);
++    //
+     // Before ANY operand is boxed: a declared arrow-typed parameter annotates
+     // an inline `Function` literal passed at that position (the
+     // signature-driven trigger), so the literal canonicalizes once, already
+diff --git a/src/compute-engine/boxed-expression/boxed-symbol.ts b/src/compute-engine/boxed-expression/boxed-symbol.ts
+index 5490fe46b..edd56caa7 100644
+--- a/src/compute-engine/boxed-expression/boxed-symbol.ts
++++ b/src/compute-engine/boxed-expression/boxed-symbol.ts
+@@ -58,6 +58,14 @@ import type {
+ 
+ import { activeRollbackFrame } from '../inference-rollback.js';
+ import { contractTupleOfNarrow } from './index-read-tuple.js';
++import {
++  _BoxedValueDefinition,
++  hostBoxingOf,
++  journalDefinitionRecord,
++  type HostBoxing,
++} from './boxed-value-definition.js';
++import type { HostRequirement } from '../host-boxing.js';
++import { typeToString } from '../../common/type/serialize.js';
+ import {
+   collectionTypeBesideAbsence,
+   isUnresolvedList,
+@@ -310,6 +318,304 @@ function inferenceCauseMaps(ce: ComputeEngine): boolean {
+   return def !== undefined && isOperatorDef(def) && def.operator.broadcastable;
+ }
+ 
++/** The value half of `def`, as the class that holds the host requirements
++ * (`_hostFold`). */
++function valueDefinitionOf(def: BoxedDefinition): _BoxedValueDefinition {
++  return (def as { value: _BoxedValueDefinition }).value;
++}
++
++/**
++ * The state of the running host boxing (`host-boxing.ts`) when the
++ * narrowing of `name`, bound to `def`, is a requirement of that boxing on a
++ * host name: the name is bound in a scope that existed before the boxing
++ * started (`EngineBoxingState.isPersistentScope()`). `undefined` when no
++ * host boxing runs, or for a name that the expression binds itself: a
++ * parameter, a local, the variable of a binder, a binding of a scratch
++ * scope, or a binding in a scope that the boxing created. Those keep the
++ * narrowing on the definition, as for any other boxing.
++ */
++function hostBoxingFor(
++  ce: ComputeEngine,
++  name: string,
++  def: BoxedDefinition
++): HostBoxing | undefined {
++  const host = hostBoxingOf(ce);
++  if (host === null || !isValueDef(def)) return undefined;
++  // A name that starts with `_` is a hole or a wildcard (`_` in the tables
++  // of `derivative.ts`, `_x` in a rule): library code boxes it from a name
++  // alone, it is not a name of the host.
++  if (name.startsWith('_')) return undefined;
++  const value = def.value;
++  if (
++    isFunctionLiteralParameter(value) ||
++    value._blockLocal === true ||
++    isDeclaredLocal(value) ||
++    isScratchBinding(ce, def)
++  )
++    return undefined;
++  for (
++    let scope: Scope | null | undefined = ce.context?.lexicalScope;
++    scope;
++    scope = scope.parent
++  ) {
++    if (scope.bindings.get(name) !== def) continue;
++    if (scope.binderNames?.has(name) === true) return undefined;
++    return ce._boxingState.isPersistentScope(scope) === true ? host : undefined;
++  }
++  return undefined;
++}
++
++/**
++ * The engine declared `name` with an inferred type (`declared`) while the
++ * host boxes an expression: a free name of the body of a function literal
++ * declared in the scope of the literal (`_inferOnOuterBinding()`), or an
++ * undeclared call head declared a function (`box.ts`). When the name is a
++ * host name, that type is the requirement of this boxing, as a narrowing of
++ * an existing binding is (`host-boxing.ts`): it joins the requirements of
++ * the name when the boxing ends, from the base `unknown`.
++ */
++export function noteHostDeclaration(
++  ce: ComputeEngine,
++  name: string,
++  declared: BoxedDefinition
++): void {
++  const host = hostBoxingFor(ce, name, declared);
++  if (host === undefined) return;
++  const target = valueDefinitionOf(declared);
++  const started = host.started;
++  if (started.has(target)) return;
++  started.set(target, BoxedType.unknown);
++  activeRollbackFrame(ce)?.record({ undo: () => started.delete(target) });
++}
++
++/**
++ * A call of `name`, bound to the value definition `def`, while the host
++ * boxes an expression: when the type of `def` is `unknown` only because the
++ * requirements of earlier boxings are hidden (`host-boxing.ts`), the call
++ * requires a function, as the call of an undeclared name declares one
++ * (`box.ts`). Without this, the call of `y` after `x ↦ x + y` added no
++ * requirement, and the type of `y` depended on the order of the two
++ * expressions.
++ */
++export function noteHostCall(
++  ce: ComputeEngine,
++  name: string,
++  def: BoxedDefinition
++): void {
++  if (!isValueDef(def) || hostBoxingFor(ce, name, def) === undefined) return;
++  const value = valueDefinitionOf(def);
++  if (
++    !value._hostFoldIsCurrent() ||
++    value.storedValue !== undefined ||
++    !value.type.isUnknown
++  )
++    return;
++  for (
++    let scope: Scope | null | undefined = ce.context?.lexicalScope;
++    scope;
++    scope = scope.parent
++  ) {
++    if (scope.bindings.get(name) !== def) continue;
++    ce._bindingSymbol(name, scope)?._infer(() => 'function', 'narrow');
++    return;
++  }
++}
++
++/** Write the requirement of the running host boxing on `target`, with a
++ * rollback entry that puts the previous one back. */
++function setHostRequirement(
++  ce: ComputeEngine,
++  own: HostBoxing['own'],
++  target: _BoxedValueDefinition,
++  requirement: { type: BoxedType; maps: boolean | undefined }
++): void {
++  const before = own.get(target);
++  own.set(target, requirement);
++  target._noteHostViewChange();
++  activeRollbackFrame(ce)?.record({
++    undo: () => {
++      if (before === undefined) own.delete(target);
++      else own.set(target, before);
++      target._noteHostViewChange();
++      ce._noteStateEvent({
++        kind: 'inference',
++        valueType: true,
++        widening: true,
++      });
++    },
++  });
++}
++
++/** The meet of a list of types, with the tuple rule of a narrow write
++ * (`contractTupleOfNarrow()`). */
++function meetOfRequirements(types: ReadonlyArray<Type>): Type {
++  let meet: Type = 'unknown';
++  for (const t of types) meet = contractTupleOfNarrow(narrow(meet, t), t);
++  return meet;
++}
++
++/**
++ * The type that the requirements of the host boxings on one name give
++ * together (`host-boxing.ts`): their meet, or `unknown` when they conflict
++ * (the meet is `never`). After `x + 1` and `x(3)`, `x` is `unknown`.
++ *
++ * The exception of `narrowInferredType()` applies, in a form that does not
++ * depend on the order of the requirements: when every numeric requirement
++ * comes from uses that map over a collection (`x + 1`), and the other
++ * requirements meet in a type that can be a numeric collection (`x[1]`
++ * requires `indexed_collection<number>`), that type is the result. In one
++ * expression, the use of the collection after the numeric use gives this
++ * type, and the other order gives it too (`excludedFromScalarInference()`,
++ * `validate.ts`); two expressions in either order give it as well.
++ */
++export function combineHostRequirements(
++  requirements: ReadonlyArray<HostRequirement<Type>>
++): Type {
++  const meet = meetOfRequirements(requirements.map((r) => r.type));
++  if (meet !== 'never') return meet;
++  const numeric = requirements.filter((r) => isSubtype(r.type, 'number'));
++  const others = requirements.filter((r) => !isSubtype(r.type, 'number'));
++  if (
++    numeric.length > 0 &&
++    others.length > 0 &&
++    numeric.every((r) => r.maps === true)
++  ) {
++    const collection = meetOfRequirements(others.map((r) => r.type));
++    if (collection !== 'never' && typeCouldBeNumericCollection(collection))
++      return collection;
++  }
++  return 'unknown';
++}
++
++/** True when the types `a` and `b` are the same type: the same object, or
++ * the same printed form and each a subtype of the other. */
++function sameType(a: Type, b: Type): boolean {
++  if (a === b) return true;
++  return (
++    typeToString(a) === typeToString(b) && isSubtype(a, b) && isSubtype(b, a)
++  );
++}
++
++/** `requirements` with `added`, unless a requirement with the same type and
++ * the same mapping record is there already. */
++function withRequirement(
++  requirements: ReadonlyArray<HostRequirement<Type>>,
++  added: HostRequirement<Type>
++): ReadonlyArray<HostRequirement<Type>> {
++  const key = typeToString(added.type);
++  if (
++    requirements.some(
++      (r) => r.maps === added.maps && typeToString(r.type) === key
++    )
++  )
++    return requirements;
++  return [...requirements, added];
++}
++
++/**
++ * End a host boxing (`host-boxing.ts`): add its requirement on each host
++ * name it narrowed to the set of that name, and write the type that the set
++ * gives (`combineHostRequirements()`) on the definition.
++ *
++ * Each write records a rollback entry that restores the type, the value
++ * slots and the set together (`_typeSlotSnapshot()` holds the set), and a
++ * checkpoint entry (`journalDefinitionRecord()`). The values cached while a
++ * name showed the type without the earlier requirements are made outdated.
++ */
++export function endHostBoxing(ce: ComputeEngine, host: HostBoxing): void {
++  let changed = false;
++  for (const target of host.touched)
++    if (target._hostFoldIsCurrent()) target._noteHostViewChange();
++
++  // A host name with no earlier requirement: the narrowings of this boxing
++  // were written on the definition. They are its first requirement.
++  for (const [target, base] of host.started) {
++    if (
++      target.isConstant ||
++      !target.inferredType ||
++      target.storedValue !== undefined ||
++      target._hostFoldIsCurrent()
++    )
++      continue;
++    const type = target.declaredType;
++    if (type.isUnknown) continue;
++    recordFoldRollback(ce, target);
++    journalDefinitionRecord(ce, target, 'type-write');
++    target._hostFold = {
++      requirements: [{ type: type.type, maps: SCALAR_USES_MAP.get(target) }],
++      base,
++    };
++    target._hostFoldVersion = target._writeVersion;
++  }
++
++  // A host name with earlier requirements: the requirement of this boxing
++  // joins them, and the definition gets the type of the set.
++  for (const [target, own] of host.own) {
++    if (!target._hostFoldIsCurrent()) continue;
++    const fold = target._hostFold!;
++    const requirements = withRequirement(fold.requirements, {
++      type: own.type.type,
++      maps: own.maps,
++    });
++    // The same requirement as an earlier boxing: nothing changes, and no
++    // event is sent (a repeated boxing must not make the caches outdated).
++    if (requirements === fold.requirements) continue;
++    const type = combineHostRequirements(requirements);
++    recordFoldRollback(ce, target);
++    if (sameType(target.declaredType.type, type)) {
++      journalDefinitionRecord(ce, target, 'type-write');
++    } else {
++      target._setType(() => type);
++      target.inferredType = true;
++      changed = true;
++    }
++    target._hostFold = { requirements, base: fold.base };
++    target._hostFoldVersion = target._writeVersion;
++    // The record of `SCALAR_USES_MAP` for a narrowing made later outside a
++    // boxing of the host: every numeric requirement maps.
++    const maps = requirements
++      .filter((r) => isSubtype(r.type, 'number'))
++      .map((r) => r.maps);
++    if (isSubtype(type, 'number') && maps.some((m) => m !== undefined))
++      SCALAR_USES_MAP.set(
++        target,
++        maps.every((m) => m !== false)
++      );
++    else SCALAR_USES_MAP.delete(target);
++  }
++  // A type read while the boxing ran, and cached on an expression that it
++  // built, used the type without the earlier requirements: when the boxing
++  // ends, that cache is outdated too (`ce.box(['List', 'x']).type` must
++  // read the type that `x` reports).
++  if (changed || host.touched.size > 0)
++    ce._noteStateEvent({ kind: 'inference', valueType: true, widening: true });
++}
++
++/** Record a rollback entry that restores the type, the value slots and the
++ * host requirements of `target` (`_typeSlotSnapshot()`). */
++function recordFoldRollback(
++  ce: ComputeEngine,
++  target: _BoxedValueDefinition
++): void {
++  const frame = activeRollbackFrame(ce);
++  if (frame === undefined) return;
++  const slots = target._typeSlotSnapshot();
++  const maps = SCALAR_USES_MAP.get(target);
++  const hadMaps = SCALAR_USES_MAP.has(target);
++  frame.record({
++    undo: () => {
++      target._restoreTypeSlots(slots);
++      if (hadMaps) SCALAR_USES_MAP.set(target, maps!);
++      else SCALAR_USES_MAP.delete(target);
++      ce._noteStateEvent({
++        kind: 'inference',
++        valueType: true,
++        widening: true,
++      });
++    },
++  });
++}
++
+ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+   override readonly _kind = 'symbol';
+ 
+@@ -941,9 +1247,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+       return;
+     // The binding is marked: it is not a declaration for an assignment in
+     // the body (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+-    markFreeSymbolDeclaration(
+-      ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope)
++    const declared = ce._declareSymbolValue(
++      name,
++      { type: t, inferred: true },
++      outerScope
+     );
++    markFreeSymbolDeclaration(declared);
++    // Without this, a later boxing read `t` as a declared type: after
++    // `x ↦ x + y`, the call `y(2)` gave an error.
++    noteHostDeclaration(ce, name, declared);
+   }
+ 
+   private _inferWithoutFacts(
+@@ -984,6 +1296,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+         return false;
+       if (def.value.inferredType || def.value.type.isUnknown) {
+         const previousType = def.value.type;
++        // A narrowing of a host name while the host boxes an expression
++        // (`host-boxing.ts`). When the name has requirements of earlier
++        // boxings, the narrowing is the requirement of this boxing, kept in
++        // `host.own` and written on the definition when the boxing ends.
++        const host =
++          inferenceMode === 'narrow'
++            ? hostBoxingFor(this.engine, this._id, def)
++            : undefined;
++        const hostValue = host !== undefined ? valueDefinitionOf(def) : undefined;
++        const ownRequirement =
++          host !== undefined && hostValue!._hostFoldIsCurrent()
++            ? host.own
++            : undefined;
++        const scalarUsesMap =
++          ownRequirement !== undefined
++            ? ownRequirement.get(hostValue!)?.maps === true
++            : SCALAR_USES_MAP.get(def.value) === true;
+         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
+         // to apply the type effect of a top-level assignment, whose runtime
+         // counterpart replaces rather than merges (`x = f(); x = g()` leaves
+@@ -993,17 +1322,27 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+             ? t
+             : inferenceMode === 'widen'
+               ? widen(def.value.type.type, t)
+-              : narrowInferredType(
+-                  def.value.type.type,
+-                  t,
+-                  SCALAR_USES_MAP.get(def.value) === true
+-                )
++              : narrowInferredType(def.value.type.type, t, scalarUsesMap)
+         );
+         // Record whether the uses that require a number map over a
+         // collection (`SCALAR_USES_MAP`). The record is written before the
+         // no-op test below: a use of `Range` after `n + 1` does not change
+-        // the type `number`, but it is a use that does not map.
+-        if (inferenceMode === 'narrow') {
++        // the type `number`, but it is a use that does not map. For the
++        // requirement of a host boxing, the record is that of the
++        // requirement, written with it below.
++        let ownMaps: boolean | undefined;
++        if (ownRequirement !== undefined) {
++          const before = ownRequirement.get(hostValue!);
++          ownMaps = before?.maps;
++          if (isSubtype(t, 'number'))
++            ownMaps = (ownMaps ?? true) && inferenceCauseMaps(this.engine);
++          else if (!isSubtype(inferred.type, 'number')) ownMaps = undefined;
++          if (before !== undefined && before.maps !== ownMaps)
++            setHostRequirement(this.engine, ownRequirement, hostValue!, {
++              type: before.type,
++              maps: ownMaps,
++            });
++        } else if (inferenceMode === 'narrow') {
+           if (isSubtype(t, 'number'))
+             SCALAR_USES_MAP.set(
+               def.value,
+@@ -1070,7 +1409,37 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+         // only from/to types and cannot capture them. Restore is verbatim
+         // and setter-bypassing (`_restoreTypeSlots`).
+         const rollbackFrame = activeRollbackFrame(this.engine);
+-        if (rollbackFrame !== undefined) {
++        // A requirement of this host boxing that the requirements of the
++        // earlier boxings already imply does not change the definition: it
++        // records no provenance entry (`_noteInferenceWrite()`).
++        let unchangedDefinition = false;
++        if (ownRequirement !== undefined) {
++          // The requirement of this host boxing: the definition is written
++          // when the boxing ends (`endHostBoxing()`). `setHostRequirement()`
++          // records its own rollback entry.
++          setHostRequirement(this.engine, ownRequirement, hostValue!, {
++            type: inferred,
++            maps: ownMaps,
++          });
++          unchangedDefinition = sameType(
++            combineHostRequirements(
++              withRequirement(hostValue!._hostFold!.requirements, {
++                type: inferred.type,
++                maps: ownMaps,
++              })
++            ),
++            hostValue!._reportedType().type
++          );
++        } else if (host !== undefined && !host.started.has(hostValue!)) {
++          // The first narrowing of a host name with no earlier requirement
++          // in this boxing: the type before it is the base of the fold that
++          // `endHostBoxing()` writes.
++          const started = host.started;
++          const target = hostValue!;
++          started.set(target, previousType);
++          rollbackFrame?.record({ undo: () => started.delete(target) });
++        }
++        if (ownRequirement === undefined && rollbackFrame !== undefined) {
+           const target = def.value;
+           const slots = target._typeSlotSnapshot();
+           rollbackFrame.record({
+@@ -1089,7 +1458,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+             },
+           });
+         }
+-        def.value._setType(() => inferred);
++        if (ownRequirement === undefined) def.value._setType(() => inferred);
+         // A type this method writes is INFERRED, never a contract. Without
+         // this the `type.isUnknown` arm of the guard above turned a guess
+         // into a hard declaration: a binding created as
+@@ -1150,6 +1519,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+           from: previousType,
+           to: inferred,
+           kind: 'inferred',
++          ...(unchangedDefinition ? { unchangedDefinition: true } : {}),
+         });
+         // The FIRST narrowing of a valueless block local that an untyped
+         // `let` initialized from a bare untyped symbol (`let out = acc`) is
+diff --git a/src/compute-engine/boxed-expression/boxed-value-definition.ts b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+index 2a106ff0d..c42c33b93 100644
+--- a/src/compute-engine/boxed-expression/boxed-value-definition.ts
++++ b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+@@ -99,6 +99,7 @@ import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
+ import { ConfigurationChangeListener } from '../../common/configuration-change.js';
+ import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
+ import type { CheckpointHookKind } from '../checkpoint-journal.js';
++import type { HostBoxingRecord, HostFold } from '../host-boxing.js';
+ import { noteSymbolValue } from './residue-class-value-hook.js';
+ 
+ /**
+@@ -136,6 +137,15 @@ export function journalDefinitionRecord(
+   w.push(() => def._restoreCheckpointSnapshot(snapshot));
+ }
+ 
++/** The state of a boxing that the host starts (`host-boxing.ts`). */
++export type HostBoxing = HostBoxingRecord<_BoxedValueDefinition, BoxedType>;
++
++/** The state of the boxing that the host started and that is running now,
++ * or `null` (`EngineBoxingState.host`). */
++export function hostBoxingOf(ce: ComputeEngine): HostBoxing | null {
++  return ce._boxingState.host as HostBoxing | null;
++}
++
+ /** The single journal key under which a definition record's whole mutable
+  * field set is recorded — see {@link journalDefinitionRecord}. Shared with the
+  * operator-definition hook so that a record whose two halves are both written
+@@ -479,6 +489,26 @@ export class _BoxedValueDefinition
+   // engine-global invalidation.
+   _writeVersion = 0;
+ 
++  /**
++   * For a name of a scope that existed before the boxings that used it (a
++   * host name, `host-boxing.ts`): the requirements of those boxings, one per
++   * boxing, and the type the name had before the first of them. `_type`
++   * then holds the type that the requirements give together
++   * (`combineHostRequirements()`, `boxed-symbol.ts`), and a boxing that the
++   * host starts reads `base` instead (`declaredType`).
++   *
++   * The fold is current only while `_hostFoldVersion` equals
++   * `_writeVersion`: any other write to this definition (an assignment, a
++   * declaration, an inference outside a boxing of the host) bumps
++   * `_writeVersion`, and the definition then is what that write made it.
++   * @internal
++   */
++  _hostFold: HostFold<Type, BoxedType> | undefined = undefined;
++
++  /** The `_writeVersion` at which {@link _hostFold} was written; see there.
++   * @internal */
++  _hostFoldVersion = -1;
++
+   // If 'never', the symbol is replaced by its value during canonicalization.
+   // If 'evaluate', the symbol is replaced by its value during evaluation.
+   // If 'N', the symbol is replaced during a numeric evaluation.
+@@ -953,6 +983,11 @@ export class _BoxedValueDefinition
+       // completeness), so a restore without it would leave the contract
+       // bit stale.
+       effectsDeclared: this.effectsDeclared,
++      // The requirements of the host boxings decide the type, so they are
++      // restored with it, and the fold is current after the restore only if
++      // it was current when the snapshot was taken.
++      _hostFold: this._hostFold,
++      hostFoldCurrent: this._hostFoldVersion === this._writeVersion,
+     };
+   }
+ 
+@@ -983,6 +1018,8 @@ export class _BoxedValueDefinition
+       _signatureSkeleton: Type | undefined;
+       _assignmentEvidence: boolean;
+       effectsDeclared: boolean;
++      _hostFold: HostFold<Type, BoxedType> | undefined;
++      hostFoldCurrent: boolean;
+     };
+     this._type = s._type;
+     this._assignmentEvidence = s._assignmentEvidence;
+@@ -994,6 +1031,8 @@ export class _BoxedValueDefinition
+     this._isSelfReferential = s._isSelfReferential;
+     this.effectsDeclared = s.effectsDeclared;
+     this._writeVersion += 1;
++    this._hostFold = s._hostFold;
++    this._hostFoldVersion = s.hostFoldCurrent ? this._writeVersion : -1;
+   }
+ 
+   /**
+@@ -1067,6 +1106,10 @@ export class _BoxedValueDefinition
+       cmp: this.cmp,
+       collection: this.collection,
+       subscriptEvaluate: this.subscriptEvaluate,
++      _hostFold: this._hostFold,
++      // Stored as a flag, not as the version: `_writeVersion` is bumped by
++      // the restore, so the fold is made current again only if it was.
++      _hostFoldVersion: this._hostFoldVersion === this._writeVersion,
+     };
+   }
+ 
+@@ -1140,6 +1183,9 @@ export class _BoxedValueDefinition
+     this.subscriptEvaluate =
+       s.subscriptEvaluate as typeof this.subscriptEvaluate;
+     this._writeVersion += 1;
++    this._hostFold = s._hostFold as HostFold<Type, BoxedType> | undefined;
++    this._hostFoldVersion =
++      s._hostFoldVersion === true ? this._writeVersion : -1;
+   }
+ 
+   /**
+@@ -1152,6 +1198,10 @@ export class _BoxedValueDefinition
+    * {@link type} for what is known in the current state.
+    */
+   get declaredType(): BoxedType {
++    if (this._hostFold !== undefined) {
++      const hidden = this._typeInHostBoxing();
++      if (hidden !== undefined) return hidden;
++    }
+     const t = this._type;
+     if (t === undefined || t === null)
+       return this.storedValue?.type ?? BoxedType.unknown;
+@@ -1160,6 +1210,62 @@ export class _BoxedValueDefinition
+     return this._reviseInferredType(t);
+   }
+ 
++  /** True when {@link _hostFold} describes this definition: no other write
++   * was made since the fold was written.
++   * @internal */
++  _hostFoldIsCurrent(): boolean {
++    return (
++      this._hostFold !== undefined &&
++      this._hostFoldVersion === this._writeVersion
++    );
++  }
++
++  /** The type this definition reports outside a boxing of the host: the
++   * type that the requirements of the host boxings give together, not the
++   * type that a running boxing of the host reads (`host-boxing.ts`). Only
++   * for a definition with a current fold, which holds no value.
++   * @internal */
++  _reportedType(): BoxedType {
++    return this._type ?? BoxedType.unknown;
++  }
++
++  /** Mark that the type this definition shows changed, without a write to
++   * its slots (the requirements of earlier boxings are hidden or shown
++   * again, or the requirement of the running boxing changed): the memos
++   * that record this definition with its `_writeVersion` (the dependency
++   * snapshots of `collection-element-memo.ts`) are outdated. The fold stays
++   * current.
++   *
++   * No state event is sent: a read of a type can happen inside a type
++   * handler, which must not move the engine's versions. The values cached
++   * on the expressions boxed before the boxing keep the type that their own
++   * boxing gave the name, which is what an expression keeps (its inferred
++   * types are its own).
++   * @internal */
++  _noteHostViewChange(): void {
++    const current = this._hostFoldIsCurrent();
++    this._writeVersion += 1;
++    if (current) this._hostFoldVersion = this._writeVersion;
++  }
++
++  /** While the host boxes an expression (`host-boxing.ts`), the type of a
++   * definition with current requirements of earlier boxings: the type it
++   * had before the first of them, narrowed by the uses of the running
++   * boxing. `undefined` outside such a boxing, or when the requirements are
++   * not current. */
++  private _typeInHostBoxing(): BoxedType | undefined {
++    const host = hostBoxingOf(this._engine);
++    if (host === null || !this._hostFoldIsCurrent()) return undefined;
++    // The first read in this boxing makes the memos that recorded the
++    // reported type outdated: they were computed with the requirements of
++    // the earlier boxings, which this boxing does not see.
++    if (!host.touched.has(this)) {
++      host.touched.add(this);
++      this._noteHostViewChange();
++    }
++    return host.own.get(this)?.type ?? this._hostFold!.base;
++  }
++
+   /** The signature skeleton refined from the stored value's CURRENT type.
+    * Nothing is written. The value is a function literal, or a symbol that
+    * names a function (`f := g`). The value's type is itself a memo that a
+diff --git a/src/compute-engine/engine-boxing-state.ts b/src/compute-engine/engine-boxing-state.ts
+index 864c9d599..06faed0f7 100644
+--- a/src/compute-engine/engine-boxing-state.ts
++++ b/src/compute-engine/engine-boxing-state.ts
+@@ -42,6 +42,15 @@ export class EngineBoxingState<Scope extends object> {
+    */
+   private _transientAutoDeclares: Set<string> | null = null;
+ 
++  /**
++   * The state of the outermost boxing when the host started it (its input
++   * holds no boxed expression), or `null`. Set and cleared by
++   * `withDevolveRepair()` (`box.ts`); read by the type of a value definition
++   * and by the inference write (`host-boxing.ts`). Typed `unknown` here
++   * because this class does not know the definition classes.
++   */
++  host: unknown = null;
++
+   withRootRepair<T>(
+     build: () => T,
+     isPersistentScope?: (scope: Scope) => boolean
+diff --git a/src/compute-engine/index.ts b/src/compute-engine/index.ts
+index c43f9f9a0..9d22285eb 100755
+--- a/src/compute-engine/index.ts
++++ b/src/compute-engine/index.ts
+@@ -162,6 +162,7 @@ import {
+   boxFunction,
+   optionsToInternal,
+   rebind,
++  withHostBoxing,
+ } from './boxed-expression/box.js';
+ import type { FormOption } from './types-serialization.js';
+ import { boxRules } from './boxed-expression/rules.js';
+@@ -1727,19 +1728,21 @@ export class ComputeEngine implements IComputeEngine {
+     // the first write that records it. Raw-form boxing binds nothing and
+     // canonicalizes nothing, so this cannot recurse into inference.
+     const ctx = this._inferenceCause;
+-    if (ctx && ctx.expr === undefined)
+-      ctx.expr = this._fn(
+-        ctx.operator,
+-        ctx.ops.map((o) => this.expr(o, { form: 'raw' })),
+-        { canonical: false }
+-      );
+-    recordTypeProvenance(this, event.target, {
+-      type: event.to,
+-      kind: event.kind,
+-      axis: 'type',
+-      cause: ctx?.expr,
+-      epoch: currentBoxingEpoch(this),
+-    });
++    if (event.unchangedDefinition !== true) {
++      if (ctx && ctx.expr === undefined)
++        ctx.expr = this._fn(
++          ctx.operator,
++          ctx.ops.map((o) => this.expr(o, { form: 'raw' })),
++          { canonical: false }
++        );
++      recordTypeProvenance(this, event.target, {
++        type: event.to,
++        kind: event.kind,
++        axis: 'type',
++        cause: ctx?.expr,
++        epoch: currentBoxingEpoch(this),
++      });
++    }
+ 
+     if (
+       event.valueDef !== undefined &&
+@@ -1759,12 +1762,13 @@ export class ComputeEngine implements IComputeEngine {
+       set.add(event.valueDef);
+     }
+ 
+-    this._narrowingSink?._recordNarrowing(
+-      event.name,
+-      event.binding,
+-      event.from,
+-      event.to
+-    );
++    if (event.unchangedDefinition !== true)
++      this._narrowingSink?._recordNarrowing(
++        event.name,
++        event.binding,
++        event.from,
++        event.to
++      );
+   }
+ 
+   /** In strict mode (the default) the Compute Engine performs
+@@ -4515,7 +4519,10 @@ export class ComputeEngine implements IComputeEngine {
+                   // inferred type, so the flag is not what makes the shadow
+                   // narrowable.
+                   inferred: incumbent.value.inferredType,
+-                  type: incumbent.value.type.type,
++                  // The type that the normal parse reads, in a boxing of
++                  // the host: without the requirements of earlier boxings
++                  // (`host-boxing.ts`).
++                  type: withHostBoxing(this, () => incumbent.value.type.type),
+                   // Parse-affecting metadata must survive onto the shadow, or
+                   // the speculative parse diverges from a normal one: the
+                   // parser's symbol oracle reads `subscriptEvaluate` through
+@@ -4629,18 +4636,23 @@ export class ComputeEngine implements IComputeEngine {
+     this._activeSymbolOracle = userResolve;
+     beginInferenceTransaction(this);
+     try {
+-      const result = syntax.parse(latex, {
+-        tolerance: this.tolerance,
+-        ...this._latexOptions,
+-        ...parseOpts,
+-        resolveSymbol,
+-        resolveApplication,
+-        // Resolved diagnostics wiring wins over both spreads.
+-        diagnostics: wantDiagnostics,
+-        onDiagnostic,
+-        onBoundVariable,
+-        isLibraryFunction: (id) => this._isLibraryFunction(id),
+-      });
++      // The parser reads the types of the names (`resolveSymbol`), so it
++      // reads them as a boxing of the host does: without the requirements
++      // of earlier boxings (`host-boxing.ts`).
++      const result = withHostBoxing(this, () =>
++        syntax.parse(latex, {
++          tolerance: this.tolerance,
++          ...this._latexOptions,
++          ...parseOpts,
++          resolveSymbol,
++          resolveApplication,
++          // Resolved diagnostics wiring wins over both spreads.
++          diagnostics: wantDiagnostics,
++          onDiagnostic,
++          onBoundVariable,
++          isLibraryFunction: (id) => this._isLibraryFunction(id),
++        })
++      );
+ 
+       if (result === null) return null;
+ 
+diff --git a/src/compute-engine/types-engine.ts b/src/compute-engine/types-engine.ts
+index 88b4df08b..4095b2383 100644
+--- a/src/compute-engine/types-engine.ts
++++ b/src/compute-engine/types-engine.ts
+@@ -250,6 +250,13 @@ export type InferenceWriteEvent = {
+   /** `'inferred'` for `_infer()` writes. The only kind: an assumption never
+    * writes a type, so it never reports one here. */
+   kind: 'inferred';
++  /** True for the requirement of a boxing of the host on a name whose
++   * requirements of earlier boxings are hidden (`host-boxing.ts`), when the
++   * requirement does not change the type that the definition reports: the
++   * definition is not written, so the write records no provenance entry
++   * and reports no narrowing. The fresh-inference set still records it: in
++   * this boxing, the type moved from `unknown`. */
++  unchangedDefinition?: true;
+ };
+ 
+ /**
+diff --git a/test/compute-engine/apply-held-callee.test.ts b/test/compute-engine/apply-held-callee.test.ts
+index 0c68f1826..d1da6ec63 100644
+--- a/test/compute-engine/apply-held-callee.test.ts
++++ b/test/compute-engine/apply-held-callee.test.ts
+@@ -57,11 +57,13 @@ describe('Apply with a callee of unknown type (issue #426)', () => {
+       'x',
+     ]);
+     // A pipe into a stage of unknown type stays a `Pipe`, as a pipe into an
+-    // undefined symbol does.
++    // undefined symbol does. The parse does not read the type `function`
++    // that the parses above inferred for `g`, so the stage is the
++    // juxtaposition that the pipe holds, as in a fresh engine.
+     expect(ce.parse('x \\rhd g(f)').evaluate().json).toEqual([
+       'Pipe',
+       'x',
+-      ['g', 'f'],
++      ['InvisibleOperator', 'g', ['Delimiter', 'f']],
+     ]);
+   });
+ 
+diff --git a/test/compute-engine/bigop-symbol-body-infers-collection.test.ts b/test/compute-engine/bigop-symbol-body-infers-collection.test.ts
+index fc47caf2f..b6157dca2 100644
+--- a/test/compute-engine/bigop-symbol-body-infers-collection.test.ts
++++ b/test/compute-engine/bigop-symbol-body-infers-collection.test.ts
+@@ -22,11 +22,12 @@ describe('a big op over an untyped symbol infers a collection', () => {
+     // (CE-961); the declared type is not changed to `collection`.
+     expect(ce.box(['Sum', 'r']).evaluate().toString()).toBe('sum(r)');
+     expect(ce.symbol('r').type.toString()).toBe('real');
+-    // `y` is a number by its first use, so `Sum(y)` does not change its type
+-    // to `collection`.
++    // `Sum(y)` does not read the type `number` that `y + 1` inferred. The
++    // numeric use maps over a collection, so the two requirements give a
++    // collection, as in the other order.
+     ce.parse('y + 1');
+     ce.box(['Sum', 'y']);
+-    expect(ce.symbol('y').type.matches('collection')).toBe(false);
++    expect(ce.symbol('y').type.matches('collection')).toBe(true);
+   });
+ 
+   test('a user function over an unannotated scalar parameter still maps', () => {
+diff --git a/test/compute-engine/callback-last-function-body.test.ts b/test/compute-engine/callback-last-function-body.test.ts
+index 2d488875e..568fc57ae 100644
+--- a/test/compute-engine/callback-last-function-body.test.ts
++++ b/test/compute-engine/callback-last-function-body.test.ts
+@@ -91,12 +91,13 @@ describe('A CALLBACK IN THE WRONG POSITION IN THE BODY OF A FUNCTION', () => {
+     );
+   });
+ 
+-  test('a global inferred as a number by `2n` is not a domain: `ArgMax(f, n)`', () => {
++  test('a global inferred as a number by `2n` is still a domain: `ArgMax(f, n)`', () => {
++    // A later expression does not read the type that `2n` inferred: `n` is
++    // a domain of `ArgMax`, as it is in a fresh engine.
+     const ce = new ComputeEngine();
+     ce.box(['Multiply', 2, 'n']);
+     const e = ce.box(['ArgMax', F, 'n']);
+-    expect(e.isValid).toBe(false);
+-    expect(e.toString()).toMatch(/^ArgMax\(Error\(ErrorCode\("incompatible-type", "indexed_collection"/);
++    expect(e.isValid).toBe(true);
+   });
+ 
+   test('a global domain keeps its type: `S`, then `ArgMax(f, S)`', () => {
+diff --git a/test/compute-engine/ce-39-literal-cell-types.test.ts b/test/compute-engine/ce-39-literal-cell-types.test.ts
+index fd442e8ae..7af49df60 100644
+--- a/test/compute-engine/ce-39-literal-cell-types.test.ts
++++ b/test/compute-engine/ce-39-literal-cell-types.test.ts
+@@ -166,7 +166,11 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
+       ce.box([op, ['List', 'p', 'q']]);
+       expect(ce.box('p').type.toString()).toBe('number');
+       expect(ce.box('q').type.toString()).toBe('number');
+-      expect(ce.box(['And', 'p', 'q']).isValid).toBe(false);
++      // A later expression does not read the type that this one inferred:
++      // `And(p, q)` is valid, and its requirement `boolean` conflicts with
++      // `number`, so the names are `unknown`.
++      expect(ce.box(['And', 'p', 'q']).isValid).toBe(true);
++      expect(ce.box('p').type.toString()).toBe('unknown');
+     }
+   );
+ 
+diff --git a/test/compute-engine/ce-597-unknowns-library-letter-operand.test.ts b/test/compute-engine/ce-597-unknowns-library-letter-operand.test.ts
+index cc287ec24..d88597af9 100644
+--- a/test/compute-engine/ce-597-unknowns-library-letter-operand.test.ts
++++ b/test/compute-engine/ce-597-unknowns-library-letter-operand.test.ts
+@@ -537,15 +537,15 @@ describe('CE-597: `IdenticallyEqual` compares values', () => {
+ });
+ 
+ // The LaTeX parser reads `N(2.3)` as a call or a product from the binding of
+-// `N`. Once a value use has made `N` a variable typed as a number (`x + N`),
+-// the product is the consistent reading (user decision 2026-10-28). A
+-// variable that is not typed as a number (the operand of `N = 2`, of `f(N)`,
+-// the coordinate of a tuple, the element of a list) is not, so the parser
+-// still reads the call of the library `N`. A list literal does not infer its
++// `N`. A value use (`x + N`, the operand of `N = 2`, of `f(N)`, the
++// coordinate of a tuple, the element of a list) makes `N` a variable, but a
++// later parse does not read the type that an earlier expression inferred
++// (`docs/plans/2026-11-09-inference-as-a-result.md`), so the parser still
++// reads the call of the library `N`. A list literal does not infer its
+ // elements (ROADMAP CE-663, user decision 2026-10-30).
+ describe('CE-597: the LaTeX `N(2.3)` after a value use of `N`', () => {
+   test.each([
+-    ['x+N', ['Multiply', 2.3, 'N']],
++    ['x+N', ['N', 2.3]],
+     ['[N,1]', ['N', 2.3]],
+     ['(N,1)', ['N', 2.3]],
+     ['N=2', ['N', 2.3]],
+diff --git a/test/compute-engine/collections.test.ts b/test/compute-engine/collections.test.ts
+index 5bacaf7fc..bfed9b3eb 100644
+--- a/test/compute-engine/collections.test.ts
++++ b/test/compute-engine/collections.test.ts
+@@ -210,14 +210,9 @@ describe('COUNT', () => {
+     `));
+ 
+   test('Count symbol', () =>
+-    expect(evaluate(['Count', symbol])).toMatchInlineSnapshot(`
+-      [
+-        "Error",
+-        ["ErrorCode", "incompatible-type", "'collection'", "'number'"],
+-        "x",
+-        ["ErrorTrace", ["ErrorFrame", "'Count'", 1]]
+-      ]
+-    `));
++    expect(evaluate(['Count', symbol])).toMatchInlineSnapshot(
++      `["Count", "x"]`
++    ));
+ 
+   test('Count dict', () => {
+     expect(evaluate(['Count', dict])).toMatchInlineSnapshot(`3`);
+@@ -397,12 +392,15 @@ describe('COUNT — 2-argument value and predicate forms', () => {
+     // counted nor skipped. The walk records that it missed an element, and
+     // the count is not known, so `Count` stays unevaluated (it threw before
+     // 2026-10-18).
++    // A fresh engine: the type of `x` in the shared engine is what the
++    // earlier tests of this file required of it together (a collection).
++    const ce = new ComputeEngine();
+     const pred: Expression = ['Function', ['Greater', '_', 1], '_'];
+     expect(
+-      engine.expr(['Count', ['List', 1, 'x', 3], pred]).evaluate().operator
++      ce.expr(['Count', ['List', 1, 'x', 3], pred]).evaluate().operator
+     ).toBe('Count');
+     expect(
+-      engine.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
++      ce.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
+     ).toBeUndefined();
+   });
+ 
+@@ -488,39 +486,13 @@ describe('TAKE', () => {
+     expect(evaluate(['Take', tuple, 1])).toMatchInlineSnapshot(`["List", 7]`));
+ 
+   test('invalid argument', () => {
+-    expect(evaluate(['Take', expression, 1])).toMatchInlineSnapshot(`
+-      [
+-        "Take",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          ["Add", ["Multiply", 3, "x"], 2]
+-        ],
+-        1
+-      ]
+-    `);
++    expect(evaluate(['Take', expression, 1])).toMatchInlineSnapshot(
++      `["Take", ["Add", ["Multiply", 3, "x"], 2], 1]`
++    );
+ 
+-    expect(evaluate(['Take', symbol, 1])).toMatchInlineSnapshot(`
+-      [
+-        "Take",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          "x"
+-        ],
+-        1
+-      ]
+-    `);
++    expect(evaluate(['Take', symbol, 1])).toMatchInlineSnapshot(
++      `["Take", "x", 1]`
++    );
+ 
+     expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`
+       [
+@@ -756,39 +728,13 @@ describe('DROP 2', () => {
+     expect(evaluate(['Drop', tuple, 2])).toMatchInlineSnapshot(`["List", 13]`));
+ 
+   test('invalid argument', () => {
+-    expect(evaluate(['Drop', expression, 2])).toMatchInlineSnapshot(`
+-      [
+-        "Drop",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          ["Add", ["Multiply", 3, "x"], 2]
+-        ],
+-        2
+-      ]
+-    `);
++    expect(evaluate(['Drop', expression, 2])).toMatchInlineSnapshot(
++      `["Drop", ["Add", ["Multiply", 3, "x"], 2], 2]`
++    );
+ 
+-    expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(`
+-      [
+-        "Drop",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          "x"
+-        ],
+-        2
+-      ]
+-    `);
++    expect(evaluate(['Drop', symbol, 2])).toMatchInlineSnapshot(
++      `["Drop", "x", 2]`
++    );
+ 
+     expect(evaluate(['Drop', dict, 2])).toMatchInlineSnapshot(`
+       [
+@@ -893,41 +839,13 @@ describe('SLICE (2,3)', () => {
+     ));
+ 
+   test('invalid argument', () => {
+-    expect(evaluate(['Slice', expression, 2, 3])).toMatchInlineSnapshot(`
+-      [
+-        "Slice",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          ["Add", ["Multiply", 3, "x"], 2]
+-        ],
+-        2,
+-        3
+-      ]
+-    `);
++    expect(evaluate(['Slice', expression, 2, 3])).toMatchInlineSnapshot(
++      `["Slice", ["Add", ["Multiply", 3, "x"], 2], 2, 3]`
++    );
+ 
+-    expect(evaluate(['Slice', symbol, 2, 3])).toMatchInlineSnapshot(`
+-      [
+-        "Slice",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          "x"
+-        ],
+-        2,
+-        3
+-      ]
+-    `);
++    expect(evaluate(['Slice', symbol, 2, 3])).toMatchInlineSnapshot(
++      `["Slice", "x", 2, 3]`
++    );
+ 
+     expect(evaluate(['Slice', dict, 2, 3])).toMatchInlineSnapshot(`
+       [
+@@ -1145,42 +1063,14 @@ describe('SLICE -1,1', () => {
+     )); // Reversed bounds (last to first) yield an empty slice, like other collections
+ 
+   test('expression', () =>
+-    expect(evaluate(['Slice', expression, -1, 1])).toMatchInlineSnapshot(`
+-      [
+-        "Slice",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          ["Add", ["Multiply", 3, "x"], 2]
+-        ],
+-        -1,
+-        1
+-      ]
+-    `));
++    expect(evaluate(['Slice', expression, -1, 1])).toMatchInlineSnapshot(
++      `["Slice", ["Add", ["Multiply", 3, "x"], 2], -1, 1]`
++    ));
+ 
+   test('symbol', () =>
+-    expect(evaluate(['Slice', symbol, -1, 1])).toMatchInlineSnapshot(`
+-      [
+-        "Slice",
+-        [
+-          "Error",
+-          [
+-            "ErrorCode",
+-            "incompatible-type",
+-            "'indexed_collection'",
+-            "'number'"
+-          ],
+-          "x"
+-        ],
+-        -1,
+-        1
+-      ]
+-    `));
++    expect(evaluate(['Slice', symbol, -1, 1])).toMatchInlineSnapshot(
++      `["Slice", "x", -1, 1]`
++    ));
+ 
+   test('dict', () =>
+     expect(evaluate(['Slice', dict, -1, 1])).toMatchInlineSnapshot(`
+@@ -2424,7 +2314,14 @@ describe('SCAN / DIFFERENCES / TAKEWHILE / DROPWHILE / FLATMAP', () => {
+     ).toEqual('[1/4]'));
+ 
+   test('Differences of a single-element list is empty', () =>
+-    expect(str(['Differences', ['List', 'x']])).toEqual('[]'));
++    // A fresh engine: the type of `x` in the shared engine is what the
++    // earlier tests of this file required of it together (a collection).
++    expect(
++      new ComputeEngine()
++        .box(['Differences', ['List', 'x']])
++        .evaluate({ materialization: true })
++        .toString()
++    ).toEqual('[]'));
+ 
+   // As with Scan above: returning a count at all proves the 10⁹-element source
+   // was not walked, since walking it does not terminate. The jest per-test
+diff --git a/test/compute-engine/compile-glsl-structures.test.ts b/test/compute-engine/compile-glsl-structures.test.ts
+index 2634bac88..6ed7ed596 100644
+--- a/test/compute-engine/compile-glsl-structures.test.ts
++++ b/test/compute-engine/compile-glsl-structures.test.ts
+@@ -951,6 +951,10 @@ describe('GLSL block local with disagreeing binding shapes fails closed', () =>
+   });
+ 
+   it('two different vector widths fail closed', () => {
++    // The boxing does not read the types that earlier tests inferred for
++    // `x`, `y` and `t`, so the two tuples have no known widths there and the
++    // block is valid. The compile reads the types the names report, and
++    // declines the second binding.
+     const expr = ce.box([
+       'Block',
+       ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
+@@ -958,7 +962,7 @@ describe('GLSL block local with disagreeing binding shapes fails closed', () =>
+       'p',
+     ]);
+     expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
+-      /The head `Error` is outside the GLSL fragment/
++      /writes a value of the type `point<3>` to the local `p` of the type `point<2>`/
+     );
+   });
+ 
+diff --git a/test/compute-engine/effects-call-boundary.test.ts b/test/compute-engine/effects-call-boundary.test.ts
+index d19fcb413..5d02b6c9e 100644
+--- a/test/compute-engine/effects-call-boundary.test.ts
++++ b/test/compute-engine/effects-call-boundary.test.ts
+@@ -144,7 +144,7 @@ describe('timing is the timing of argument validation — no new pass', () => {
+ });
+ 
+ describe('the narrowing branch does not narrow AWAY an effect', () => {
+-  it('an inferred `random` signature is not admitted at a pure bound', () => {
++  it('an inferred `random` signature of an earlier expression is not read at a pure bound', () => {
+     const ce = engine();
+     ce.declare('needsRandom', {
+       signature: '((any) random -> number) -> real',
+@@ -153,9 +153,11 @@ describe('the narrowing branch does not narrow AWAY an effect', () => {
+     // `k` is inferred as `(any) random -> number` by the first call…
+     expect(ce.box(['needsRandom', 'k']).isValid).toBe(true);
+     expect(ce.box('k').type.toString()).toBe('(any) random -> number');
+-    // …and the pure bound must REJECT it rather than narrow the symbol.
+-    expect(ce.box(['integ', 'k', 0, 1]).isValid).toBe(false);
+-    expect(ce.box('k').type.toString()).toBe('(any) random -> number');
++    // …but a later expression does not read that type, so the pure bound
++    // admits `k`. The two requirements meet in the pure signature, which a
++    // function that both calls accept has.
++    expect(ce.box(['integ', 'k', 0, 1]).isValid).toBe(true);
++    expect(ce.box('k').type.toString()).toBe('(any) -> number');
+   });
+ 
+   it('narrowing on a non-effect axis is unaffected', () => {
+diff --git a/test/compute-engine/ellipsis-product-coefficient.test.ts b/test/compute-engine/ellipsis-product-coefficient.test.ts
+index 3fae1d4b5..077101950 100644
+--- a/test/compute-engine/ellipsis-product-coefficient.test.ts
++++ b/test/compute-engine/ellipsis-product-coefficient.test.ts
+@@ -80,8 +80,10 @@ describe('A product with an ellipsis in a sum', () => {
+   test('x(2 · 4 · … · 2n) + (2 · 4 · … · 2n)', () => {
+     const expected = ['Add', ['Multiply', 'x', NOTATION], NOTATION];
+     for (const expr of [
++      // An explicit product: `x(…)` is a call when `x` has no declared
++      // type, whatever an earlier parse inferred.
+       ce.parse(
+-        'x(2\\cdot4\\cdot\\dots\\cdot2n)+(2\\cdot4\\cdot\\dots\\cdot2n)'
++        'x\\cdot(2\\cdot4\\cdot\\dots\\cdot2n)+(2\\cdot4\\cdot\\dots\\cdot2n)'
+       ),
+       ce.box(['Add', ['Multiply', 'x', NOTATION], NOTATION] as any),
+     ]) {
+diff --git a/test/compute-engine/factor.test.ts b/test/compute-engine/factor.test.ts
+index b6adebe12..df7083bc2 100644
+--- a/test/compute-engine/factor.test.ts
++++ b/test/compute-engine/factor.test.ts
+@@ -944,9 +944,11 @@ describe('Together reduces to lowest terms', () => {
+ // full common factor `y·(x+1)`, reducing all the way to `1 / (x+1)`.
+ describe('cancelCommonFactors: nonconstant-but-incomplete univariate GCD', () => {
+   test('y(x+1)/(y(x+1)^2) reduces to lowest terms 1/(x+1)', () => {
++    // Explicit products: `y(x+1)` is a call when `y` has no declared type,
++    // whatever an earlier parse inferred.
+     const expr = ce.function('Divide', [
+-      parse('y(x+1)'),
+-      parse('y(x+1)^2'),
++      parse('y\\cdot(x+1)'),
++      parse('y\\cdot(x+1)^2'),
+     ]);
+     expect(cancelCommonFactors(expr, 'x').toString()).toBe('1 / (x + 1)');
+   });
+diff --git a/test/compute-engine/juxtaposition-application.test.ts b/test/compute-engine/juxtaposition-application.test.ts
+index b795b43ee..cef9967b2 100644
+--- a/test/compute-engine/juxtaposition-application.test.ts
++++ b/test/compute-engine/juxtaposition-application.test.ts
+@@ -644,9 +644,12 @@ describe('JUXTAPOSITION WITH A FUNCTION-TYPED OPERAND', () => {
+     name,
+   ];
+ 
+-  test('parse route: the juxtaposition gives the error of the explicit operator', () => {
++  test('parse route: the juxtaposition reads as the explicit operator', () => {
++    // `f(x)` infers `f` as a function, but a later parse does not read that
++    // type: the juxtaposition is the product of the explicit operator, and
++    // it is valid.
+     const ce = new ComputeEngine();
+-    ce.parse('f(x)'); // Infers `f` as a function.
++    ce.parse('f(x)');
+     for (const [juxtaposed, explicit] of [
+       ['fy', 'f\\times y'],
+       ['f y', 'f\\cdot y'],
+@@ -657,10 +660,10 @@ describe('JUXTAPOSITION WITH A FUNCTION-TYPED OPERAND', () => {
+       const a = ce.parse(juxtaposed);
+       const b = ce.parse(explicit);
+       expect([juxtaposed, a.json]).toEqual([juxtaposed, b.json]);
+-      expect(a.isValid).toBe(false);
++      expect(a.isValid).toBe(true);
+     }
+-    expect(ce.parse('fy').json).toEqual(['Multiply', fError(), 'y']);
+-    expect(ce.parse('2f').json).toEqual(['Multiply', 2, fError()]);
++    expect(ce.parse('fy').json).toEqual(['Multiply', 'f', 'y']);
++    expect(ce.parse('2f').json).toEqual(['Multiply', 2, 'f']);
+   });
+ 
+   test('a declared function type', () => {
+diff --git a/test/compute-engine/latex-syntax/lenient-ambiguity-c.test.ts b/test/compute-engine/latex-syntax/lenient-ambiguity-c.test.ts
+index 9fbfceaaa..d4de14ade 100644
+--- a/test/compute-engine/latex-syntax/lenient-ambiguity-c.test.ts
++++ b/test/compute-engine/latex-syntax/lenient-ambiguity-c.test.ts
+@@ -286,20 +286,12 @@ describe('a name in parentheses is a factor, not a function head', () => {
+   });
+ 
+   test('a function inferred from an earlier use is still a factor', () => {
+-    // The factor `h` is a function, not a number, so the product checks it
+-    // against the signature of `Multiply` and makes it an `incompatible-type`
+-    // error, as the explicit operator does (`(h)\times(x)`).
++    // A later parse does not read the type `function` that `h(x)` inferred,
++    // so the factor `h` is a valid factor, as with the explicit operator
++    // (`(h)\times(x)`).
+     const local = new ComputeEngine();
+     local.parse('h(x)');
+-    expect(local.parse('(h)(x)').json).toEqual([
+-      'Multiply',
+-      [
+-        'Error',
+-        ['ErrorCode', "'incompatible-type'", "'number'", "'function'"],
+-        'h',
+-      ],
+-      'x',
+-    ]);
++    expect(local.parse('(h)(x)').json).toEqual(['Multiply', 'h', 'x']);
+     expect(local.parse('(h)(x)').json).toEqual(
+       local.parse('(h)\\times(x)').json
+     );
+diff --git a/test/compute-engine/latex-syntax/logic.test.ts b/test/compute-engine/latex-syntax/logic.test.ts
+index 5b7ede2e6..72970bffc 100644
+--- a/test/compute-engine/latex-syntax/logic.test.ts
++++ b/test/compute-engine/latex-syntax/logic.test.ts
+@@ -29,8 +29,17 @@ describe('Logic', () => {
+     `);
+     expect(ce.parse('\\operatorname{not} p').json).toMatchInlineSnapshot(`
+       [
+-        Tuple,
+-        Not,
++        Multiply,
++        [
++          Error,
++          [
++            ErrorCode,
++            'incompatible-type',
++            'number',
++            '(boolean) -> boolean',
++          ],
++          Not,
++        ],
+         p,
+       ]
+     `);
+diff --git a/test/compute-engine/latex-syntax/parsing.test.ts b/test/compute-engine/latex-syntax/parsing.test.ts
+index 3be0dccf2..e9b011167 100755
+--- a/test/compute-engine/latex-syntax/parsing.test.ts
++++ b/test/compute-engine/latex-syntax/parsing.test.ts
+@@ -253,7 +253,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
+     test('Strict mode rejects bare function names', () => {
+       // In strict mode, 'sin' should be parsed as individual symbols
+       expect(parse('sin(x)')).toMatchInlineSnapshot(
+-        `["Multiply", ["Complex", 0, 1], "n", "s", "x"]`
++        `["Multiply", ["Complex", 0, 1], "s", ["n", "x"]]`
+       );
+     });
+ 
+diff --git a/test/compute-engine/matrix-operator-typing.test.ts b/test/compute-engine/matrix-operator-typing.test.ts
+index 1358799b0..9d6d3a691 100644
+--- a/test/compute-engine/matrix-operator-typing.test.ts
++++ b/test/compute-engine/matrix-operator-typing.test.ts
+@@ -133,12 +133,14 @@ describe('Matrix-operator typing (undeclared symbols)', () => {
+     expect(ce.symbol('B').type.toString()).toBe('matrix');
+   });
+ 
+-  test('does not rewrite an inference made by an earlier expression', () => {
++  test('does not read an inference made by an earlier expression', () => {
++    // `\det(A)` does not see the type `number` that `A + 1` inferred. The
++    // two requirements give `matrix`: `A + 1` maps over a matrix.
+     const ce = new ComputeEngine();
+     ce.parse('A+1');
+     const e = ce.parse('\\det(A)');
+-    expect(e.isValid).toBe(false);
+-    expect(ce.symbol('A').type.matches('number')).toBe(true);
++    expect(e.isValid).toBe(true);
++    expect(ce.symbol('A').type.toString()).toBe('matrix');
+   });
+ 
+   test('fails closed for an ambiguous product of fresh symbols', () => {
+@@ -179,11 +181,13 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
+     expect(sym(ce, 'B')).toBe('matrix');
+   });
+ 
+-  test('P2: prior numeric inference wins — invalid, A stays number', () => {
++  test('P2: a prior numeric inference is not read — valid, A matrix', () => {
++    // The boxing of `Det(A + B)` does not see the type that `A + 1` inferred
++    // earlier; the two requirements give `matrix`.
+     const ce = new ComputeEngine();
+     ce.box(['Add', 'A', 1]).evaluate();
+-    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(false);
+-    expect(sym(ce, 'A')).toBe('number');
++    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(true);
++    expect(sym(ce, 'A')).toBe('matrix');
+   });
+ 
+   test('P3: Det(a·A), both fresh → ambiguous product never guessed', () => {
+diff --git a/test/compute-engine/matrix-unknown-factor-order.test.ts b/test/compute-engine/matrix-unknown-factor-order.test.ts
+index 034e70119..cc491373d 100644
+--- a/test/compute-engine/matrix-unknown-factor-order.test.ts
++++ b/test/compute-engine/matrix-unknown-factor-order.test.ts
+@@ -661,7 +661,10 @@ describe('NESTED PRODUCTS: TIME, REPLACED DEFINITIONS, NEGATION, INVALID OPERAND
+         ])
+       )
+     ).toBe('-(A * g(x) * k(x))');
+-    expect(str(ce.parse('A\\cdot(-g(x)k(x))'))).toBe('-(A * g(x) * k(x))');
++    // The negation is written around the product: `-g(x)` reads `g` as a
++    // factor when `g` has no declared type, whatever an earlier expression
++    // inferred.
++    expect(str(ce.parse('A\\cdot(-(g(x)k(x)))'))).toBe('-(A * g(x) * k(x))');
+     expect(
+       str(
+         ce.box([
+diff --git a/test/compute-engine/rule-purpose.test.ts b/test/compute-engine/rule-purpose.test.ts
+index a4d443daf..8d9fdcf6e 100644
+--- a/test/compute-engine/rule-purpose.test.ts
++++ b/test/compute-engine/rule-purpose.test.ts
+@@ -116,7 +116,11 @@ describe('cost gate: no rewrite may make the expression more expensive', () => {
+     // `expand` now declines a negated sum. A negated *product* must still
+     // reach `expand`.
+     expect(ce.parse('-(x+1)').simplify().toString()).toBe('-x - 1');
+-    expect(ce.parse('-(x(y+1))').simplify().toString()).toBe('-x * y - x');
++    // An explicit product: `x(y+1)` is a call when `x` has no declared type,
++    // whatever an earlier parse inferred.
++    expect(ce.parse('-(x\\cdot(y+1))').simplify().toString()).toBe(
++      '-x * y - x'
++    );
+   });
+ 
+   it("'transform' exempts a rewrite that grows the expression", () => {
+diff --git a/test/compute-engine/simplify.test.ts b/test/compute-engine/simplify.test.ts
+index 28884339d..5e3d59202 100755
+--- a/test/compute-engine/simplify.test.ts
++++ b/test/compute-engine/simplify.test.ts
+@@ -104,7 +104,7 @@ describe('Canonicalization: Others', () => {
+   test('2(13.1+x)-(26.2+2x) = 0', () =>
+     checkSimplify('2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0));
+   test('sqrt(3)(sqrt(2)x+x)', () =>
+-    checkSimplify('\\sqrt{3}(\\sqrt2x + x)', '\\sqrt{3}x(1+\\sqrt2)'));
++    checkSimplify('\\sqrt{3}(\\sqrt2x + x)', '\\sqrt{3}(1+\\sqrt2)x'));
+   test('Add(1,2,1.0001) = 4.0001', () =>
+     checkSimplify(['Add', 1, 2, 1.0001], 4.0001));
+   test('2a < 4b simplifies to a < 2b', () =>
+@@ -140,7 +140,9 @@ describe('Canonicalization: Double Powers', () => {
+ 
+ describe('Canonicalization: Negative Signs and Multiplication and Division', () => {
+   test('-(-x) = x', () => checkSimplify('-(-x)', 'x'));
+-  test('x(-2) = -2x', () => checkSimplify('x(-2)', '-2x'));
++  // An explicit product: `x(-2)` is a call when `x` has no declared type,
++  // whatever an earlier parse inferred.
++  test('x(-2) = -2x', () => checkSimplify('x\\cdot(-2)', '-2x'));
+   test('(-x)(2) = -2x', () => checkSimplify('(-x)(2)', '-2x'));
+   test('(-x)(-2) = 2x', () => checkSimplify('(-x)(-2)', '2x'));
+   test('(-x)/(-2) = x/2', () => checkSimplify('(-x)/(-2)', 'x/2'));
+diff --git a/test/compute-engine/use-driven-element-inference.test.ts b/test/compute-engine/use-driven-element-inference.test.ts
+index b43ec1685..680fd2590 100644
+--- a/test/compute-engine/use-driven-element-inference.test.ts
++++ b/test/compute-engine/use-driven-element-inference.test.ts
+@@ -231,15 +231,16 @@ describe('declined and guarded cases', () => {
+ });
+ 
+ describe('R2: a boolean use commits the element like a scalar', () => {
+-  test('And(b[1], B) writes a boolean element; a later numeric use is an error', () => {
++  test('And(b[1], B) writes a boolean element; a later numeric use conflicts', () => {
++    // The later expression does not read the element type that the first
++    // one inferred, so it is valid. The two requirements conflict, and the
++    // name is `unknown`.
+     const ce = new ComputeEngine();
+     ce.box(['And', ['At', 'b1', 1], 'B']);
+     expect(typeOf(ce, 'b1')).toBe('indexed_collection<boolean>');
+     const e = ce.box(['Add', ['At', 'b1', 1], 1]);
+-    expect(e.isValid).toBe(false);
+-    expect(e.toString()).toContain('incompatible-type');
+-    // The conflicting requirement wrote nothing.
+-    expect(typeOf(ce, 'b1')).toBe('indexed_collection<boolean>');
++    expect(e.isValid).toBe(true);
++    expect(typeOf(ce, 'b1')).toBe('unknown');
+   });
+ 
+   test('the same conflict through a two-arm base', () => {
+@@ -248,10 +249,8 @@ describe('R2: a boolean use commits the element like a scalar', () => {
+     expect(typeOf(ce, 'i2')).toBe(
+       'dictionary<boolean> | indexed_collection<boolean>'
+     );
+-    expect(ce.box(['Add', ['At', 'i2', 'j2'], 1]).isValid).toBe(false);
+-    expect(typeOf(ce, 'i2')).toBe(
+-      'dictionary<boolean> | indexed_collection<boolean>'
+-    );
++    expect(ce.box(['Add', ['At', 'i2', 'j2'], 1]).isValid).toBe(true);
++    expect(typeOf(ce, 'i2')).toBe('unknown');
+   });
+ });
+ 

@@ -1,0 +1,10 @@
+import { registerHooks } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const target = pathToFileURL('<WORKTREE>/src/compute-engine.ts').href;
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === '@cortex-js/compute-engine')
+      return { url: target, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+});

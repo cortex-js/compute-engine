@@ -1,0 +1,39 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
+import '@cortex-js/compute-engine';
+import { convertDesmosState } from '/Users/arno/dev/tycho/src/graph-paper/desmos-import/index.js';
+import { DocumentCEManager } from '/Users/arno/dev/tycho/src/graph-paper/graph/document-ce-manager.js';
+const CONFIG = { numericPrecision: 'machine', angleUnit: 'radians', decimalSeparator: '.', digitGroupSeparator: '\\,', numberNotation: 'auto', digits: 'auto', repeatingDecimal: 'auto', fractionStyle: 'quotient', rootStyle: 'radical', logicStyle: 'word', multiplySymbol: 'cross', prettify: true, avoidExponentsInRange: { min: -4, max: 5 }, dmsFormat: false };
+const dir = '/Users/arno/dev/tycho/_TASK/requirements/neyret-corpus/states';
+const step = Number(process.argv[2] ?? 6);
+const ids = readdirSync(dir).filter((f) => f.endsWith('.json')).sort().filter((_, i) => i % step === 0);
+const g = globalThis as any;
+let docs = 0, failed = 0, rows = 0, withRecordDocs = 0, ms = 0;
+const perDoc: number[] = [];
+for (const file of ids) {
+  let doc: any;
+  try {
+    const r = convertDesmosState(JSON.parse(readFileSync(`${dir}/${file}`, 'utf8')));
+    if (!r?.ok) { failed++; continue; }
+    doc = r.document;
+  } catch { failed++; continue; }
+  const eq = doc.cells.filter((c: any) => c.type === 'equation').map((c: any) => ({ latex: c.latex, visible: c.visible !== false }));
+  const before = g.__C?.literalsWithRecord ?? 0;
+  const rb = g.__C?.rebuilds ?? 0;
+  try {
+    const m = new DocumentCEManager(CONFIG as never);
+    m.setRejectOutOfRangeListIndexes(doc.rejectOutOfRangeListIndexes as never);
+    m.setAngleUnit((doc.angleUnit ?? null) as never);
+    m.setComplexMode(doc.complexMode === true);
+    m.setVariableNames(doc.cells.flatMap((c: any) => c.type === 'variable' ? [c.name] : c.type === 'point-variable' ? [c.xName, c.yName] : []));
+    const t = performance.now();
+    m.setCells(eq); m.evaluate();
+    m.setCells([...eq, { latex: 'k_{kp}=1', visible: true }]); m.evaluate();
+    ms += performance.now() - t;
+  } catch { failed++; continue; }
+  docs++; rows += eq.length;
+  if ((g.__C?.literalsWithRecord ?? 0) > before) withRecordDocs++;
+  perDoc.push((g.__C?.rebuilds ?? 0) - rb);
+}
+perDoc.sort((a, b) => a - b);
+console.log(JSON.stringify({ sampled: ids.length, docs, failed, rows, docsWithARecord: withRecordDocs, ms: Math.round(ms), rebuildsPerDoc: { median: perDoc[perDoc.length >> 1], p90: perDoc[Math.floor(perDoc.length * 0.9)], max: perDoc[perDoc.length - 1] }, counters: g.__C }, null, 1));

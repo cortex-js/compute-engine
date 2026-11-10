@@ -1,0 +1,327 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression as MathJson } from '../../src/math-json/types';
+
+// A use of a free name narrows the inferred type of its definition. For a
+// name of a scope that existed before the boxing (a name of the host), the
+// definition keeps one requirement per boxing, and a boxing that the host
+// starts reads the type without the requirements of earlier boxings
+// (`src/compute-engine/host-boxing.ts`). So the result of boxing an
+// expression does not depend on the expressions boxed before it, and the
+// type that a name reports is the meet of the requirements, or `unknown`
+// when two requirements conflict.
+// (`docs/plans/2026-11-09-inference-as-a-result.md`, step 1.)
+
+type Input = string | MathJson;
+
+function box(ce: ComputeEngine, input: Input) {
+  return typeof input === 'string' ? ce.parse(input) : ce.box(input);
+}
+
+function typeOf(ce: ComputeEngine, name: string): string {
+  return ce.box(name).type.toString();
+}
+
+describe('A READING DOES NOT DEPEND ON AN EARLIER EXPRESSION', () => {
+  test('`x(3)` after `x + 1` is a call', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('x + 1').json).toEqual(['Add', 'x', 1]);
+    expect(ce.parse('x(3)').json).toEqual(['x', 3]);
+  });
+
+  test('`x + 1` after `x(3)` is a sum, not an error', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('x(3)').json).toEqual(['x', 3]);
+    const sum = ce.parse('x + 1');
+    expect(sum.json).toEqual(['Add', 'x', 1]);
+    expect(sum.isValid).toBe(true);
+  });
+
+  test('a speculative parse reads as the normal parse', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    expect(ce.parse('x(3)', { speculative: true }).json).toEqual(['x', 3]);
+    // The speculative parse leaves no requirement.
+    expect(typeOf(ce, 'x')).toBe('number');
+  });
+
+  test('the name stays declared after the first parse', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    expect(ce.lookupDefinition('x')).toBeDefined();
+    expect(typeOf(ce, 'x')).toBe('number');
+  });
+
+  test('two conflicting requirements give the type `unknown`, in either order', () => {
+    for (const order of [
+      ['x + 1', 'x(3)'],
+      ['x(3)', 'x + 1'],
+    ]) {
+      const ce = new ComputeEngine();
+      for (const latex of order) ce.parse(latex);
+      expect(typeOf(ce, 'x')).toBe('unknown');
+    }
+  });
+
+  test('requirements that agree give their meet', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    ce.parse('\\sin(x)');
+    expect(typeOf(ce, 'x')).toBe('number');
+  });
+
+  test('a numeric use that maps and a collection use give the collection', () => {
+    // The scalar exception of the narrowing (`narrowInferredType()`): `x + 1`
+    // maps over a numeric collection, so it does not prove that `x` is a
+    // scalar.
+    for (const order of [
+      [['Add', 'v', 1], ['Add', ['At', 'v', 1], ['At', 'v', 2]]],
+      [['Add', ['At', 'v', 1], ['At', 'v', 2]], ['Add', 'v', 1]],
+    ] as MathJson[][]) {
+      const ce = new ComputeEngine();
+      for (const input of order) ce.box(input);
+      expect(typeOf(ce, 'v')).toBe('indexed_collection<number>');
+    }
+  });
+
+  test('a numeric use that does not map and a collection use conflict', () => {
+    for (const order of [
+      [['Range', 'n'], ['At', 'n', 1]],
+      [['At', 'n', 1], ['Range', 'n']],
+    ] as MathJson[][]) {
+      const ce = new ComputeEngine();
+      for (const input of order) ce.box(input);
+      expect(typeOf(ce, 'n')).toBe('unknown');
+    }
+  });
+
+  test('the call of a library operator after a numeric use of its name', () => {
+    // `N + 1` declares a variable `N`; `N(3.14159, 2)` still calls the
+    // library operator, as it does in a fresh engine.
+    const ce = new ComputeEngine();
+    ce.parse('N + 1');
+    expect(ce.parse('N(3.14159, 2)').evaluate().json).toBe(3.1);
+    ce.parse('x + N');
+    expect(ce.parse('N(2.3)').evaluate().json).toBe(2.3);
+  });
+
+  test('a boxing inside an evaluation reads the reported type', () => {
+    // The evaluation of an expression boxed earlier is not a boxing of the
+    // host: it keeps the type that its own boxing inferred.
+    const ce = new ComputeEngine();
+    const expr = ce.parse('x^2 + 2x');
+    ce.parse('x(3)');
+    expect(expr.subs({ x: 3 }).evaluate().json).toBe(15);
+  });
+});
+
+describe('AN INFERRED TYPE DOES NOT REFUSE AN ASSIGNMENT', () => {
+  test('after one requirement', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    ce.assign('x', ce.string('hello'));
+    expect(ce.box('x').evaluate().json).toBe("'hello'");
+  });
+
+  test('after two conflicting requirements', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    ce.parse('x(3)');
+    ce.assign('x', 5);
+    expect(ce.parse('x + 1').evaluate().json).toBe(6);
+  });
+
+  test('a declaration replaces the inferred type', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    ce.declare('x', 'string');
+    expect(typeOf(ce, 'x')).toBe('string');
+    // The requirements of the earlier boxings no longer apply.
+    expect(ce.parse('x').type.toString()).toBe('string');
+  });
+});
+
+describe('ROLLBACK AND CHECKPOINT', () => {
+  test('a rollback frame removes the requirements its boxings added', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    ce._withBoxingPassWindow(() =>
+      ce._withRolledBackInference(() => {
+        ce.parse('x(3)');
+        expect(typeOf(ce, 'x')).toBe('unknown');
+      })
+    );
+    expect(typeOf(ce, 'x')).toBe('number');
+    // The requirement of `x + 1` is still the only one: a boxing that
+    // agrees with it keeps the type.
+    ce.parse('2x');
+    expect(typeOf(ce, 'x')).toBe('number');
+  });
+
+  test('a checkpoint restore removes the requirements', () => {
+    const ce = new ComputeEngine();
+    ce.parse('x + 1');
+    const cp = ce.checkpoint();
+    ce.parse('x(3)');
+    expect(typeOf(ce, 'x')).toBe('unknown');
+    ce.restore(cp);
+    expect(typeOf(ce, 'x')).toBe('number');
+    ce.parse('\\cos(x)');
+    expect(typeOf(ce, 'x')).toBe('number');
+  });
+});
+
+// Each pair is boxed in both orders, each order in a fresh engine. The
+// canonical form of each expression and the type of each free name must not
+// depend on the order.
+const F: MathJson = ['Function', ['Add', '_', 1], '_'];
+const PAIRS: [Input, Input][] = [
+  ['x+1', 'x(3)'],
+  ['x+1', ['At', 'x', 1]],
+  ['2x', '\\det(x)'],
+  ['x^2', 'f(x)'],
+  ['f(x)+1', 'f(2,3)'],
+  ['n+1', '\\sum_{k=1}^{n} k'],
+  [
+    ['Take', 'x', 1],
+    ['Add', 'x', 1],
+  ],
+  [
+    ['And', 'p', 'q'],
+    ['Add', 'p', 1],
+  ],
+  [
+    ['Mean', ['List', 'p', 'q']],
+    ['And', 'p', 'q'],
+  ],
+  ['xy', 'x(y)'],
+  [
+    ['Length', 'L'],
+    ['Add', 'L', 1],
+  ],
+  [
+    ['Add', ['At', 'v', 1], ['At', 'v', 2]],
+    ['Multiply', 2, 'v'],
+  ],
+  [
+    ['Multiply', 't', 'P'],
+    ['At', 'P', 1],
+  ],
+  [
+    ['Range', 'n'],
+    ['At', 'n', 1],
+  ],
+  ['\\sin(x)', '\\cos(x)'],
+  ['x+y', 'x-y'],
+  [
+    ['Map', 'L', F],
+    ['Add', 'L', 1],
+  ],
+  [
+    ['Count', 'S'],
+    ['Multiply', 'S', 2],
+  ],
+  ['N+1', 'N(3.14159, 2)'],
+  ['x+N', 'N(2.3)'],
+  ['g(x)', 'g+1'],
+  ['\\sqrt{x}', 'x(2)'],
+  [
+    ['Floor', 'x'],
+    ['And', 'x', 'True'],
+  ],
+  [
+    ['Not', 'b'],
+    ['Add', 'b', 1],
+  ],
+  [
+    ['Length', 's'],
+    ['Not', 's'],
+  ],
+  [
+    ['Dot', 'u', 'v'],
+    ['Add', 'u', 1],
+  ],
+  [
+    ['Determinant', 'A'],
+    ['Add', 'A', 'B'],
+  ],
+  [
+    ['Determinant', ['Add', 'A', 'B']],
+    ['Add', 'A', 1],
+  ],
+  ['a(b+c)', 'a+1'],
+  [
+    ['Max', 'L'],
+    ['Add', 'L', 1],
+  ],
+  [
+    ['Filter', 'L', ['Function', ['Greater', '_', 1], '_']],
+    ['Multiply', 'L', 2],
+  ],
+  [
+    ['Sum', 'x', ['Limits', 'k', 1, 10]],
+    ['At', 'x', 1],
+  ],
+  [
+    ['Integrate', ['Multiply', 'a', 't'], 't'],
+    ['a', 2],
+  ],
+  ['e^{x}', 'x(1)'],
+  [
+    ['Equal', 'x', 'y'],
+    ['And', 'x', 'y'],
+  ],
+  [
+    ['Less', 'x', 1],
+    ['At', 'x', 2],
+  ],
+  [
+    ['Abs', 'z'],
+    ['Not', 'z'],
+  ],
+  ['h(1)+h(2)', '2h'],
+  [
+    ['Tuple', 'x', 'y'],
+    ['Add', 'x', 1],
+  ],
+  ['q(2q)', 'q(3)'],
+  [
+    ['Factorial', 'n'],
+    ['At', 'n', 1],
+  ],
+  [
+    ['GCD', 'a', 'b'],
+    ['And', 'a', 'b'],
+  ],
+  ['pq', 'p(q)'],
+  [
+    ['List', 'x', 'y'],
+    ['Multiply', 'x', ['List', 1, 2]],
+  ],
+  ['\\frac{tP}{P_1-1}', 'P+1'],
+  [
+    ['Function', ['Add', 'x', 'y'], 'x'],
+    ['y', 2],
+  ],
+];
+
+describe('THE RESULT OF A BOXING DOES NOT DEPEND ON THE ORDER', () => {
+  test.each(PAIRS.map(([a, b]) => [JSON.stringify(a), JSON.stringify(b), a, b]))(
+    '%s and %s',
+    (_a, _b, a, b) => {
+      const first = new ComputeEngine();
+      const a1 = box(first, a as Input);
+      const b1 = box(first, b as Input);
+      const second = new ComputeEngine();
+      const b2 = box(second, b as Input);
+      const a2 = box(second, a as Input);
+      expect(a1.json).toEqual(a2.json);
+      expect(b1.json).toEqual(b2.json);
+      const names = [
+        ...new Set([...a1.unknowns, ...b1.unknowns, ...a2.unknowns]),
+      ].sort();
+      expect(names.map((n) => [n, typeOf(first, n)])).toEqual(
+        names.map((n) => [n, typeOf(second, n)])
+      );
+    }
+  );
+});

@@ -1,0 +1,10 @@
+const root = process.argv[2];
+const { ComputeEngine } = await import(root + '/src/compute-engine.ts');
+const exprs = ['x + 1', 'x^2 + y', '\\sin(x) + \\cos(y)', '\\frac{x}{y} + z', 'x y z + 2x', '\\sqrt{x^2+y^2}', 'a x^2 + b x + c', '\\int x^2 dx', '(x+1)(x-1)', 'e^{x} \\ln(y)'];
+for (const rounds of [200, 2000]) {
+  const ce = new ComputeEngine();
+  const t = performance.now();
+  let n = 0;
+  for (let i = 0; i < rounds; i++) for (const e of exprs) { const b = ce.parse(e); b.simplify(); n += b.type.toString().length; }
+  console.log(rounds, 'rounds:', Math.round(performance.now() - t), 'ms');
+}

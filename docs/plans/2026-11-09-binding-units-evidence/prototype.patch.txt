@@ -1,0 +1,960 @@
+diff --git a/src/compute-engine/binding-unit.ts b/src/compute-engine/binding-unit.ts
+new file mode 100644
+index 000000000..2a713d125
+--- /dev/null
++++ b/src/compute-engine/binding-unit.ts
+@@ -0,0 +1,168 @@
++// PROTOTYPE, not to ship: section 7 of
++// `docs/plans/2026-11-09-binding-units-model.md`.
++//
++// A binding unit is one outermost boxing (`ce.parse()`, `ce.box()`,
++// `ce.function()` from raw input). Its environment holds, for each free name
++// (a name that only a boxing declared, with no value and no declared type),
++// the type that the uses in the unit require. A symbol occurrence keeps a
++// reference to the environment of the boxing that made it
++// (`BoxedSymbol._env`).
++//
++// Two environment variables control the prototype:
++// - `CE_BINDING_UNITS=1`: the environment is the answer of
++//   `BoxedSymbol.type` for a free name, and the narrowing write on the shared
++//   definition is not made. Without it (compare mode), the write of today is
++//   made and is the answer, and the environment is built beside it.
++// - `CE_BU_COUNT=1`: each read of the type of a free name computes both
++//   answers and counts the reads where they differ, by read site and by
++//   cause, in `globalThis.__C`.
++
++import { BoxedType } from '../common/type/boxed-type.js';
++
++const ENV: Record<string, string | undefined> =
++  typeof process !== 'undefined' && process.env ? process.env : {};
++
++/** True when the environment is the answer and the shared write is not
++ * made. */
++export const BU_ON = ENV.CE_BINDING_UNITS === '1';
++
++/** Experiment: true when a write in an environment sends no state event. */
++export const BU_NO_EVENT = ENV.CE_BU_NO_EVENT === '1';
++
++/** True when the reads are counted. */
++export const BU_COUNT = ENV.CE_BU_COUNT === '1';
++
++/** The types that one binding unit requires of its free names. The key is
++ * the value definition of the name: a name with no explicit definition is
++ * the same symbol in every unit of a scope, and only its inferred type
++ * belongs to the unit. */
++export class UnitEnvironment {
++  private _types: Map<object, BoxedType> | undefined = undefined;
++  private _scalarUsesMap: Map<object, boolean> | undefined = undefined;
++
++  get(def: object): BoxedType | undefined {
++    return this._types?.get(def);
++  }
++
++  set(def: object, type: BoxedType): void {
++    (this._types ??= new Map()).set(def, type);
++  }
++
++  /** The record that `SCALAR_USES_MAP` (`boxed-symbol.ts`) keeps for a
++   * shared definition, kept here for the unit. */
++  scalarUsesMap(def: object): boolean | undefined {
++    return this._scalarUsesMap?.get(def);
++  }
++
++  setScalarUsesMap(def: object, value: boolean | undefined): void {
++    if (value === undefined) this._scalarUsesMap?.delete(def);
++    else (this._scalarUsesMap ??= new Map()).set(def, value);
++  }
++}
++
++/**
++ * With `CE_BINDING_UNITS=1` the shared definition of a free name keeps the
++ * type `unknown`, so the answer of today is no longer on it. This table
++ * keeps the type that the writes of today would have given, for the counts
++ * only: no read of the engine is answered from it.
++ */
++export const LEGACY = new UnitEnvironment();
++
++/** Greater than zero while the prototype itself reads the type of a value
++ * definition: such a read is not a read site of the engine. */
++export const internalRead = { depth: 0 };
++
++type Counters = Record<string, number>;
++
++function counters(): Counters {
++  const g = globalThis as { __C?: Counters };
++  return (g.__C ??= {});
++}
++
++export function count(key: string, n = 1): void {
++  const c = counters();
++  c[key] = (c[key] ?? 0) + n;
++}
++
++/**
++ * The function that called the getter in which a read was counted, as
++ * `<file under src>:<class>.<function>`. `skipFile` names the file of the
++ * getter: its frames are skipped (`all`), or only the first one (`one`).
++ */
++function readSite(skipFile: string, skip: 'one' | 'all'): string {
++  const prepare = Error.prepareStackTrace;
++  const limit = Error.stackTraceLimit;
++  Error.stackTraceLimit = 14;
++  Error.prepareStackTrace = (_e, frames) => frames;
++  const holder: { stack?: unknown } = {};
++  Error.captureStackTrace(holder);
++  const frames = holder.stack as NodeJS.CallSite[];
++  Error.prepareStackTrace = prepare;
++  Error.stackTraceLimit = limit;
++  let skipped = 0;
++  for (const frame of frames) {
++    const file = frame.getFileName() ?? '';
++    if (file.includes('binding-unit')) continue;
++    if (file.includes(skipFile) && (skip === 'all' || skipped === 0)) {
++      skipped += 1;
++      continue;
++    }
++    const name =
++      frame.getFunctionName() ?? frame.getMethodName() ?? '<anonymous>';
++    return `${file.replace(/^.*\/(src|test)\//, '$1/')}:${name}`;
++  }
++  return '<top>';
++}
++
++/** The relation of the answer of the environment to the answer of today. */
++function relation(envType: BoxedType, today: BoxedType): string {
++  if (envType.isUnknown) return 'env-unknown';
++  if (today.type === 'never') return 'today-never';
++  if (today.isUnknown) return 'today-unknown';
++  if (today.matches(envType)) return 'env-wider';
++  if (envType.matches(today)) return 'env-narrower';
++  return 'unrelated';
++}
++
++/**
++ * Count a read of the type of a free name through a symbol occurrence.
++ * `envType` is the answer of the environment, `today` the answer of the
++ * shared definition, `hasEnv` whether the occurrence has an environment
++ * (false for a symbol made from a name alone, outside a boxing).
++ */
++export function countSymbolRead(
++  envType: BoxedType,
++  today: BoxedType,
++  hasEnv: boolean
++): void {
++  count('reads/symbol/total');
++  if (
++    envType.type === today.type ||
++    envType.toString() === today.toString()
++  )
++    return;
++  const cause = !hasEnv
++    ? 'no-environment'
++    : `environment/${relation(envType, today)}`;
++  count(`diff/symbol/${cause}`);
++  count(`site/symbol/${cause}/${readSite('boxed-symbol', 'one')}`);
++}
++
++/** Count a read of the type of a free name on its value definition, with no
++ * symbol occurrence at hand. The answer with the switch on is `unknown`. */
++export function countDirectRead(today: BoxedType): void {
++  count('reads/direct/total');
++  if (today.isUnknown) return;
++  count('diff/direct');
++  count(`site/direct/${readSite('boxed-value-definition', 'all')}`);
++}
++
++/** Take the counters and reset them. */
++export function takeCounters(): Counters | undefined {
++  const g = globalThis as { __C?: Counters };
++  const c = g.__C;
++  if (c === undefined) return undefined;
++  g.__C = undefined;
++  for (const _k in c) return c;
++  return undefined;
++}
+diff --git a/src/compute-engine/boxed-expression/boxed-symbol.ts b/src/compute-engine/boxed-expression/boxed-symbol.ts
+index 5490fe46b..1433d79b2 100644
+--- a/src/compute-engine/boxed-expression/boxed-symbol.ts
++++ b/src/compute-engine/boxed-expression/boxed-symbol.ts
+@@ -58,6 +58,15 @@ import type {
+ 
+ import { activeRollbackFrame } from '../inference-rollback.js';
+ import { contractTupleOfNarrow } from './index-read-tuple.js';
++import {
++  BU_COUNT,
++  BU_NO_EVENT,
++  BU_ON,
++  LEGACY,
++  UnitEnvironment,
++  countSymbolRead,
++  internalRead,
++} from '../binding-unit.js';
+ import {
+   collectionTypeBesideAbsence,
+   isUnresolvedList,
+@@ -358,6 +367,103 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     );
+     this._id = name;
+     this._def = options?.def;
++    this._env = ce._boxingState.unitEnvironment();
++  }
++
++  /**
++   * PROTOTYPE (`binding-unit.ts`). The environment of the binding unit of
++   * this occurrence: that of the outermost boxing that made it. `undefined`
++   * for a symbol made outside a boxing (from a name alone); such a symbol
++   * gets an environment of its own at the first inference written on it.
++   */
++  _env: UnitEnvironment | undefined;
++
++  /**
++   * PROTOTYPE (`binding-unit.ts`). Write the requirement `t` of a use of
++   * this occurrence, a free name with the value definition of `def`, in the
++   * environment of its unit. The steps are those of the write on the shared
++   * definition in `_inferWithoutFacts()`.
++   *
++   * In compare mode only the environment is written here, and the caller
++   * then makes the write of today. With `CE_BINDING_UNITS=1` this is the
++   * whole write: the state event (the caches of types are keyed on the
++   * versions that it advances), the observers, and the write on the outer
++   * binding. The result is the result of `_infer()`.
++   */
++  private _inferInEnvironment(
++    def: BoxedDefinition & { value: BoxedValueDefinition },
++    t: Type,
++    inferenceMode: 'narrow' | 'widen' | 'replace'
++  ): boolean {
++    const v = def.value;
++    const result = this._narrowIn((this._env ??= new UnitEnvironment()), v, t, inferenceMode);
++    if (!BU_ON) return result !== undefined;
++    // The type that the writes of today would give, for the counts only.
++    if (BU_COUNT) this._narrowIn(LEGACY, v, t, inferenceMode);
++    if (result === undefined) return false;
++    if (result.changed) {
++      if (!result.equalType && !BU_NO_EVENT)
++        this.engine._noteStateEvent({
++          kind: 'inference',
++          valueType: true,
++          widening:
++            inferenceMode !== 'narrow' ||
++            !isSubtype(result.to.type, result.from.type),
++          ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
++        });
++      this.engine._noteInferenceWrite({
++        name: this._id,
++        binding: def,
++        target: v,
++        valueDef: v,
++        from: result.from,
++        to: result.to,
++        kind: 'inferred',
++      });
++      if (inferenceMode === 'narrow') this._inferOnOuterBinding(result.to.type);
++    }
++    return true;
++  }
++
++  /** The narrowing of `_inferWithoutFacts()`, applied to the entry of the
++   * value definition `v` in `env`. `undefined` when the requirement adds no
++   * information (the result of `_infer()` is then false). */
++  private _narrowIn(
++    env: UnitEnvironment,
++    v: BoxedValueDefinition,
++    t: Type,
++    inferenceMode: 'narrow' | 'widen' | 'replace'
++  ):
++    | { changed: boolean; equalType: boolean; from: BoxedType; to: BoxedType }
++    | undefined {
++    const from = env.get(v) ?? BoxedType.unknown;
++    const to = this.engine.type(
++      inferenceMode === 'replace'
++        ? t
++        : inferenceMode === 'widen'
++          ? widen(from.type, t)
++          : narrowInferredType(from.type, t, env.scalarUsesMap(v) === true)
++    );
++    if (inferenceMode === 'narrow') {
++      if (isSubtype(t, 'number'))
++        env.setScalarUsesMap(
++          v,
++          (env.scalarUsesMap(v) ?? true) && inferenceCauseMaps(this.engine)
++        );
++      else if (!isSubtype(to.type, 'number'))
++        env.setScalarUsesMap(v, undefined);
++    }
++    if (to.isUnknown && inferenceMode !== 'replace') return undefined;
++    if (to.type === from.type)
++      return { changed: false, equalType: true, from, to };
++    const equalType =
++      typeof to.type === 'object' &&
++      typeof from.type === 'object' &&
++      to.toString() === from.toString() &&
++      isSubtype(to.type, from.type) &&
++      isSubtype(from.type, to.type);
++    env.set(v, to);
++    return { changed: true, equalType, from, to };
+   }
+ 
+   get json(): MathJsonExpression {
+@@ -801,9 +907,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     // the narrow/widen and the no-op comparison — runs with the assumptions
+     // hidden: what this method writes is stored on a definition and must stay
+     // true after a `forget()`.
+-    return this.engine._withoutFacts(() =>
+-      this._inferWithoutFacts(t(), inferenceMode)
+-    );
++    return this.engine._withoutFacts(() => {
++      const requirement = t();
++      // PROTOTYPE (`binding-unit.ts`): the reads that the write makes are
++      // not read sites of the engine.
++      internalRead.depth += 1;
++      try {
++        return this._inferWithoutFacts(requirement, inferenceMode);
++      } finally {
++        internalRead.depth -= 1;
++      }
++    });
+   }
+ 
+   /** True when the nearest scope of the current context that binds this
+@@ -941,9 +1055,22 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+       return;
+     // The binding is marked: it is not a declaration for an assignment in
+     // the body (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+-    markFreeSymbolDeclaration(
+-      ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope)
++    // PROTOTYPE (`binding-unit.ts`): the outer binding is a free name. Its
++    // type `t` goes in the environment of the unit; with
++    // `CE_BINDING_UNITS=1` the declaration has the type `unknown`.
++    const outer = ce._declareSymbolValue(
++      name,
++      { type: BU_ON ? 'unknown' : t, inferred: true },
++      outerScope
+     );
++    if (isValueDef(outer)) {
++      outer.value._freeNameMark = true;
++      if (t !== 'unknown') {
++        ce._boxingState.unitEnvironment()?.set(outer.value, ce.type(t));
++        if (BU_ON && BU_COUNT) LEGACY.set(outer.value, ce.type(t));
++      }
++    }
++    markFreeSymbolDeclaration(outer);
+   }
+ 
+   private _inferWithoutFacts(
+@@ -982,6 +1109,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+         isDeclaredLocal(def.value)
+       )
+         return false;
++      // PROTOTYPE (`binding-unit.ts`): the requirement of a use of a free
++      // name goes in the environment of the unit. With `CE_BINDING_UNITS=1`
++      // nothing is written on the shared definition.
++      if (def.value._isFreeName) {
++        const written = this._inferInEnvironment(def, t, inferenceMode);
++        if (BU_ON) return written;
++      }
+       if (def.value.inferredType || def.value.type.isUnknown) {
+         const previousType = def.value.type;
+         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
+@@ -1536,7 +1670,34 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     // display projection with the `callback<S>` constructor: an honest arrow
+     // slot displays as itself
+     // (`docs/TYPE-SYSTEM.md`).
+-    if (isValueDef(def)) return def.value.type;
++    if (isValueDef(def)) {
++      const v = def.value;
++      // PROTOTYPE (`binding-unit.ts`): the type of a free name is the type
++      // that the uses in the unit of this occurrence require.
++      if (v._freeNameMark && v._isFreeName) {
++        const envType = this._env?.get(v) ?? BoxedType.unknown;
++        if (BU_COUNT) {
++          internalRead.depth += 1;
++          try {
++            countSymbolRead(
++              envType,
++              BU_ON ? (LEGACY.get(v) ?? BoxedType.unknown) : v.declaredType,
++              this._env !== undefined
++            );
++          } finally {
++            internalRead.depth -= 1;
++          }
++        }
++        if (BU_ON) return v._typeFrom(envType, false);
++        internalRead.depth += 1;
++        try {
++          return v.type;
++        } finally {
++          internalRead.depth -= 1;
++        }
++      }
++      return v.type;
++    }
+     if (isOperatorDef(def)) return def.operator.signature;
+     return BoxedType.unknown;
+   }
+diff --git a/src/compute-engine/boxed-expression/boxed-value-definition.ts b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+index 2a106ff0d..5a7db78c8 100644
+--- a/src/compute-engine/boxed-expression/boxed-value-definition.ts
++++ b/src/compute-engine/boxed-expression/boxed-value-definition.ts
+@@ -100,6 +100,7 @@ import { ConfigurationChangeListener } from '../../common/configuration-change.j
+ import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
+ import type { CheckpointHookKind } from '../checkpoint-journal.js';
+ import { noteSymbolValue } from './residue-class-value-hook.js';
++import { BU_COUNT, countDirectRead, internalRead } from '../binding-unit.js';
+ 
+ /**
+  * Record this definition record's mutable state in the active checkpoint
+@@ -285,6 +286,23 @@ export class _BoxedValueDefinition
+   // If true, the `_type` is inferred
+   inferredType = false;
+ 
++  /** PROTOTYPE (`binding-unit.ts`). True for a definition that the boxing of
++   * a free symbol made in a scope that existed before that boxing. */
++  _freeNameMark = false;
++
++  /** PROTOTYPE (`binding-unit.ts`). True for a free name: a definition that
++   * only a boxing made, and that has since received no value and no
++   * declared type. Its inferred type belongs to the environment of each
++   * binding unit, not to this definition. */
++  get _isFreeName(): boolean {
++    return (
++      this._freeNameMark &&
++      this.inferredType &&
++      this._value === undefined &&
++      this._defValue === undefined
++    );
++  }
++
+   /** True for a block-local binding that `canonicalBlock` hoisted for a
+    * `let` (or a block-introducing assignment) before the block's statements
+    * were canonicalized, so that a reference from a nested block finds it. Such
+@@ -762,6 +780,7 @@ export class _BoxedValueDefinition
+     if (this.url) result.url = this.url;
+     if (this._type) result.type = this._type.toString();
+     result.inferredType = this.inferredType;
++    result._freeNameMark = this._freeNameMark;
+     result.holdUntil = this.holdUntil;
+     if (this.collection) result.collection = this.collection;
+ 
+@@ -1152,6 +1171,10 @@ export class _BoxedValueDefinition
+    * {@link type} for what is known in the current state.
+    */
+   get declaredType(): BoxedType {
++    if (BU_COUNT && internalRead.depth === 0 && this._isFreeName) {
++      const recorded = this._type;
++      countDirectRead(recorded ?? BoxedType.unknown);
++    }
+     const t = this._type;
+     if (t === undefined || t === null)
+       return this.storedValue?.type ?? BoxedType.unknown;
+@@ -1563,7 +1586,23 @@ export class _BoxedValueDefinition
+    * shape a disequality fact contributes.
+    */
+   get type(): BoxedType {
+-    const declared = this.declaredType;
++    internalRead.depth += 1;
++    let declared: BoxedType;
++    try {
++      declared = this.declaredType;
++    } finally {
++      internalRead.depth -= 1;
++    }
++    if (BU_COUNT && internalRead.depth === 0 && this._isFreeName)
++      countDirectRead(declared);
++    return this._typeFrom(declared, true);
++  }
++
++  /** PROTOTYPE (`binding-unit.ts`). The type in the current state for the
++   * recorded type `declared`: the facts of the context are merged in.
++   * `BoxedSymbol.type` passes the type of its environment, with
++   * `memoize` false: the memo is keyed on this definition alone. */
++  _typeFrom(declared: BoxedType, memoize: boolean): BoxedType {
+     const ce = this._engine;
+     if (contextAssumptions(ce).size === 0) return declared;
+     // A constant is never a fact's subject (`soleSelfSubject` filters it out),
+@@ -1583,7 +1622,7 @@ export class _BoxedValueDefinition
+     // or a mutation of the store), so keying on its identity is what heals
+     // this cache on `assume()`, `forget()`, a scope change and a checkpoint
+     // restore alike; `_writeVersion` covers a write to the declaration.
+-    const cached = this._effectiveType;
++    const cached = memoize ? this._effectiveType : undefined;
+     if (
+       cached !== undefined &&
+       cached.index === index &&
+@@ -1598,11 +1637,12 @@ export class _BoxedValueDefinition
+       }),
+       ce._typeResolver
+     );
+-    this._effectiveType = {
+-      index,
+-      writeVersion: this._writeVersion,
+-      type: merged,
+-    };
++    if (memoize)
++      this._effectiveType = {
++        index,
++        writeVersion: this._writeVersion,
++        type: merged,
++      };
+     return merged;
+   }
+ 
+diff --git a/src/compute-engine/engine-boxing-state.ts b/src/compute-engine/engine-boxing-state.ts
+index 864c9d599..2f86c6a59 100644
+--- a/src/compute-engine/engine-boxing-state.ts
++++ b/src/compute-engine/engine-boxing-state.ts
+@@ -1,3 +1,5 @@
++import { UnitEnvironment } from './binding-unit.js';
++
+ type DevolveRepairFrame<Scope extends object> = {
+   scope: Scope | undefined;
+   repairRequested: boolean;
+@@ -42,6 +44,21 @@ export class EngineBoxingState<Scope extends object> {
+    */
+   private _transientAutoDeclares: Set<string> | null = null;
+ 
++  /**
++   * PROTOTYPE (`binding-unit.ts`). The environment of the root construction
++   * in progress: the types that its uses require of the free names. Made on
++   * the first request, and made again for each build pass (a rebuild binds
++   * every occurrence again).
++   */
++  private _unitEnvironment: UnitEnvironment | null = null;
++
++  /** The environment of the root construction in progress, or `undefined`
++   * when no root construction is active. */
++  unitEnvironment(): UnitEnvironment | undefined {
++    if (!this._rootActive) return undefined;
++    return (this._unitEnvironment ??= new UnitEnvironment());
++  }
++
+   withRootRepair<T>(
+     build: () => T,
+     isPersistentScope?: (scope: Scope) => boolean
+@@ -53,12 +70,14 @@ export class EngineBoxingState<Scope extends object> {
+     try {
+       return this._withRepairFrame(undefined, () => {
+         this._transientAutoDeclares = null;
++        this._unitEnvironment = null;
+         return build();
+       });
+     } finally {
+       this._rootActive = false;
+       this._isPersistentScope = null;
+       this._transientAutoDeclares = null;
++      this._unitEnvironment = null;
+     }
+   }
+ 
+diff --git a/src/compute-engine/engine-expression-entrypoints.ts b/src/compute-engine/engine-expression-entrypoints.ts
+index 8561c4a03..f9d52ecef 100644
+--- a/src/compute-engine/engine-expression-entrypoints.ts
++++ b/src/compute-engine/engine-expression-entrypoints.ts
+@@ -362,7 +362,7 @@ export function createSymbolExpression(
+   if (engine._boxingState.isPersistentScope(autoScope) === false) {
+     engine._boxingState.noteTransientAutoDeclare(name);
+     markFreeSymbolDeclaration(def);
+-  }
++  } else if (isValueDef(def)) def.value._freeNameMark = true;
+   const freeSym = new BoxedSymbol(engine, name, { metadata, def });
+   // Provenance: binding created as a side effect of boxing a free symbol —
+   // see the annotated-parameter branch above for the contract (creation
+diff --git a/src/compute-engine/types-definitions.ts b/src/compute-engine/types-definitions.ts
+index 8b024fab3..d9030a162 100644
+--- a/src/compute-engine/types-definitions.ts
++++ b/src/compute-engine/types-definitions.ts
+@@ -2625,6 +2625,13 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
+    */
+   inferredType: boolean;
+ 
++  /** PROTOTYPE (`binding-unit.ts`). @internal */
++  _freeNameMark: boolean;
++  /** PROTOTYPE (`binding-unit.ts`). @internal */
++  readonly _isFreeName: boolean;
++  /** PROTOTYPE (`binding-unit.ts`). @internal */
++  _typeFrom(declared: BoxedType, memoize: boolean): BoxedType;
++
+   /** True for a block-local binding hoisted by a `Block` for a `let` or a
+    * block-introducing assignment before the statement that gives it a value
+    * runs. Not a free mathematical symbol: the generic-symbol fold of a list
+diff --git a/src/compute-engine/types-expression.ts b/src/compute-engine/types-expression.ts
+index 1bd9bcc9a..ca10932c2 100644
+--- a/src/compute-engine/types-expression.ts
++++ b/src/compute-engine/types-expression.ts
+@@ -224,6 +224,12 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
+   neq?: (a: Expression) => boolean | undefined;
+   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
+   inferredType: boolean;
++  /** PROTOTYPE (`binding-unit.ts`). @internal */
++  _freeNameMark: boolean;
++  /** PROTOTYPE (`binding-unit.ts`). @internal */
++  readonly _isFreeName: boolean;
++  /** PROTOTYPE (`binding-unit.ts`). @internal */
++  _typeFrom(declared: BoxedType, memoize: boolean): BoxedType;
+   /** A hoisted block local (see `types-definitions.ts`). @internal */
+   _blockLocal: boolean;
+   /** History of writes to this definition's type. Structural mirror of
+diff --git a/test/compute-engine/inference-order-independence.test.ts b/test/compute-engine/inference-order-independence.test.ts
+new file mode 100644
+index 000000000..944aeb534
+--- /dev/null
++++ b/test/compute-engine/inference-order-independence.test.ts
+@@ -0,0 +1,327 @@
++import { ComputeEngine } from '../../src/compute-engine';
++import type { Expression as MathJson } from '../../src/math-json/types';
++
++// A use of a free name narrows the inferred type of its definition. For a
++// name of a scope that existed before the boxing (a name of the host), the
++// definition keeps one requirement per boxing, and a boxing that the host
++// starts reads the type without the requirements of earlier boxings
++// (`src/compute-engine/host-boxing.ts`). So the result of boxing an
++// expression does not depend on the expressions boxed before it, and the
++// type that a name reports is the meet of the requirements, or `unknown`
++// when two requirements conflict.
++// (`docs/plans/2026-11-09-inference-as-a-result.md`, step 1.)
++
++type Input = string | MathJson;
++
++function box(ce: ComputeEngine, input: Input) {
++  return typeof input === 'string' ? ce.parse(input) : ce.box(input);
++}
++
++function typeOf(ce: ComputeEngine, name: string): string {
++  return ce.box(name).type.toString();
++}
++
++describe('A READING DOES NOT DEPEND ON AN EARLIER EXPRESSION', () => {
++  test('`x(3)` after `x + 1` is a call', () => {
++    const ce = new ComputeEngine();
++    expect(ce.parse('x + 1').json).toEqual(['Add', 'x', 1]);
++    expect(ce.parse('x(3)').json).toEqual(['x', 3]);
++  });
++
++  test('`x + 1` after `x(3)` is a sum, not an error', () => {
++    const ce = new ComputeEngine();
++    expect(ce.parse('x(3)').json).toEqual(['x', 3]);
++    const sum = ce.parse('x + 1');
++    expect(sum.json).toEqual(['Add', 'x', 1]);
++    expect(sum.isValid).toBe(true);
++  });
++
++  test('a speculative parse reads as the normal parse', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    expect(ce.parse('x(3)', { speculative: true }).json).toEqual(['x', 3]);
++    // The speculative parse leaves no requirement.
++    expect(typeOf(ce, 'x')).toBe('number');
++  });
++
++  test('the name stays declared after the first parse', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    expect(ce.lookupDefinition('x')).toBeDefined();
++    expect(typeOf(ce, 'x')).toBe('number');
++  });
++
++  test('two conflicting requirements give the type `unknown`, in either order', () => {
++    for (const order of [
++      ['x + 1', 'x(3)'],
++      ['x(3)', 'x + 1'],
++    ]) {
++      const ce = new ComputeEngine();
++      for (const latex of order) ce.parse(latex);
++      expect(typeOf(ce, 'x')).toBe('unknown');
++    }
++  });
++
++  test('requirements that agree give their meet', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    ce.parse('\\sin(x)');
++    expect(typeOf(ce, 'x')).toBe('number');
++  });
++
++  test('a numeric use that maps and a collection use give the collection', () => {
++    // The scalar exception of the narrowing (`narrowInferredType()`): `x + 1`
++    // maps over a numeric collection, so it does not prove that `x` is a
++    // scalar.
++    for (const order of [
++      [['Add', 'v', 1], ['Add', ['At', 'v', 1], ['At', 'v', 2]]],
++      [['Add', ['At', 'v', 1], ['At', 'v', 2]], ['Add', 'v', 1]],
++    ] as MathJson[][]) {
++      const ce = new ComputeEngine();
++      for (const input of order) ce.box(input);
++      expect(typeOf(ce, 'v')).toBe('indexed_collection<number>');
++    }
++  });
++
++  test('a numeric use that does not map and a collection use conflict', () => {
++    for (const order of [
++      [['Range', 'n'], ['At', 'n', 1]],
++      [['At', 'n', 1], ['Range', 'n']],
++    ] as MathJson[][]) {
++      const ce = new ComputeEngine();
++      for (const input of order) ce.box(input);
++      expect(typeOf(ce, 'n')).toBe('unknown');
++    }
++  });
++
++  test('the call of a library operator after a numeric use of its name', () => {
++    // `N + 1` declares a variable `N`; `N(3.14159, 2)` still calls the
++    // library operator, as it does in a fresh engine.
++    const ce = new ComputeEngine();
++    ce.parse('N + 1');
++    expect(ce.parse('N(3.14159, 2)').evaluate().json).toBe(3.1);
++    ce.parse('x + N');
++    expect(ce.parse('N(2.3)').evaluate().json).toBe(2.3);
++  });
++
++  test('a boxing inside an evaluation reads the reported type', () => {
++    // The evaluation of an expression boxed earlier is not a boxing of the
++    // host: it keeps the type that its own boxing inferred.
++    const ce = new ComputeEngine();
++    const expr = ce.parse('x^2 + 2x');
++    ce.parse('x(3)');
++    expect(expr.subs({ x: 3 }).evaluate().json).toBe(15);
++  });
++});
++
++describe('AN INFERRED TYPE DOES NOT REFUSE AN ASSIGNMENT', () => {
++  test('after one requirement', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    ce.assign('x', ce.string('hello'));
++    expect(ce.box('x').evaluate().json).toBe("'hello'");
++  });
++
++  test('after two conflicting requirements', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    ce.parse('x(3)');
++    ce.assign('x', 5);
++    expect(ce.parse('x + 1').evaluate().json).toBe(6);
++  });
++
++  test('a declaration replaces the inferred type', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    ce.declare('x', 'string');
++    expect(typeOf(ce, 'x')).toBe('string');
++    // The requirements of the earlier boxings no longer apply.
++    expect(ce.parse('x').type.toString()).toBe('string');
++  });
++});
++
++describe('ROLLBACK AND CHECKPOINT', () => {
++  test('a rollback frame removes the requirements its boxings added', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    ce._withBoxingPassWindow(() =>
++      ce._withRolledBackInference(() => {
++        ce.parse('x(3)');
++        expect(typeOf(ce, 'x')).toBe('unknown');
++      })
++    );
++    expect(typeOf(ce, 'x')).toBe('number');
++    // The requirement of `x + 1` is still the only one: a boxing that
++    // agrees with it keeps the type.
++    ce.parse('2x');
++    expect(typeOf(ce, 'x')).toBe('number');
++  });
++
++  test('a checkpoint restore removes the requirements', () => {
++    const ce = new ComputeEngine();
++    ce.parse('x + 1');
++    const cp = ce.checkpoint();
++    ce.parse('x(3)');
++    expect(typeOf(ce, 'x')).toBe('unknown');
++    ce.restore(cp);
++    expect(typeOf(ce, 'x')).toBe('number');
++    ce.parse('\\cos(x)');
++    expect(typeOf(ce, 'x')).toBe('number');
++  });
++});
++
++// Each pair is boxed in both orders, each order in a fresh engine. The
++// canonical form of each expression and the type of each free name must not
++// depend on the order.
++const F: MathJson = ['Function', ['Add', '_', 1], '_'];
++const PAIRS: [Input, Input][] = [
++  ['x+1', 'x(3)'],
++  ['x+1', ['At', 'x', 1]],
++  ['2x', '\\det(x)'],
++  ['x^2', 'f(x)'],
++  ['f(x)+1', 'f(2,3)'],
++  ['n+1', '\\sum_{k=1}^{n} k'],
++  [
++    ['Take', 'x', 1],
++    ['Add', 'x', 1],
++  ],
++  [
++    ['And', 'p', 'q'],
++    ['Add', 'p', 1],
++  ],
++  [
++    ['Mean', ['List', 'p', 'q']],
++    ['And', 'p', 'q'],
++  ],
++  ['xy', 'x(y)'],
++  [
++    ['Length', 'L'],
++    ['Add', 'L', 1],
++  ],
++  [
++    ['Add', ['At', 'v', 1], ['At', 'v', 2]],
++    ['Multiply', 2, 'v'],
++  ],
++  [
++    ['Multiply', 't', 'P'],
++    ['At', 'P', 1],
++  ],
++  [
++    ['Range', 'n'],
++    ['At', 'n', 1],
++  ],
++  ['\\sin(x)', '\\cos(x)'],
++  ['x+y', 'x-y'],
++  [
++    ['Map', 'L', F],
++    ['Add', 'L', 1],
++  ],
++  [
++    ['Count', 'S'],
++    ['Multiply', 'S', 2],
++  ],
++  ['N+1', 'N(3.14159, 2)'],
++  ['x+N', 'N(2.3)'],
++  ['g(x)', 'g+1'],
++  ['\\sqrt{x}', 'x(2)'],
++  [
++    ['Floor', 'x'],
++    ['And', 'x', 'True'],
++  ],
++  [
++    ['Not', 'b'],
++    ['Add', 'b', 1],
++  ],
++  [
++    ['Length', 's'],
++    ['Not', 's'],
++  ],
++  [
++    ['Dot', 'u', 'v'],
++    ['Add', 'u', 1],
++  ],
++  [
++    ['Determinant', 'A'],
++    ['Add', 'A', 'B'],
++  ],
++  [
++    ['Determinant', ['Add', 'A', 'B']],
++    ['Add', 'A', 1],
++  ],
++  ['a(b+c)', 'a+1'],
++  [
++    ['Max', 'L'],
++    ['Add', 'L', 1],
++  ],
++  [
++    ['Filter', 'L', ['Function', ['Greater', '_', 1], '_']],
++    ['Multiply', 'L', 2],
++  ],
++  [
++    ['Sum', 'x', ['Limits', 'k', 1, 10]],
++    ['At', 'x', 1],
++  ],
++  [
++    ['Integrate', ['Multiply', 'a', 't'], 't'],
++    ['a', 2],
++  ],
++  ['e^{x}', 'x(1)'],
++  [
++    ['Equal', 'x', 'y'],
++    ['And', 'x', 'y'],
++  ],
++  [
++    ['Less', 'x', 1],
++    ['At', 'x', 2],
++  ],
++  [
++    ['Abs', 'z'],
++    ['Not', 'z'],
++  ],
++  ['h(1)+h(2)', '2h'],
++  [
++    ['Tuple', 'x', 'y'],
++    ['Add', 'x', 1],
++  ],
++  ['q(2q)', 'q(3)'],
++  [
++    ['Factorial', 'n'],
++    ['At', 'n', 1],
++  ],
++  [
++    ['GCD', 'a', 'b'],
++    ['And', 'a', 'b'],
++  ],
++  ['pq', 'p(q)'],
++  [
++    ['List', 'x', 'y'],
++    ['Multiply', 'x', ['List', 1, 2]],
++  ],
++  ['\\frac{tP}{P_1-1}', 'P+1'],
++  [
++    ['Function', ['Add', 'x', 'y'], 'x'],
++    ['y', 2],
++  ],
++];
++
++describe('THE RESULT OF A BOXING DOES NOT DEPEND ON THE ORDER', () => {
++  test.each(PAIRS.map(([a, b]) => [JSON.stringify(a), JSON.stringify(b), a, b]))(
++    '%s and %s',
++    (_a, _b, a, b) => {
++      const first = new ComputeEngine();
++      const a1 = box(first, a as Input);
++      const b1 = box(first, b as Input);
++      const second = new ComputeEngine();
++      const b2 = box(second, b as Input);
++      const a2 = box(second, a as Input);
++      expect(a1.json).toEqual(a2.json);
++      expect(b1.json).toEqual(b2.json);
++      const names = [
++        ...new Set([...a1.unknowns, ...b1.unknowns, ...a2.unknowns]),
++      ].sort();
++      expect(names.map((n) => [n, typeOf(first, n)])).toEqual(
++        names.map((n) => [n, typeOf(second, n)])
++      );
++    }
++  );
++});
+diff --git a/test/jest-config.ts b/test/jest-config.ts
+index 9c74256e2..66f725501 100644
+--- a/test/jest-config.ts
++++ b/test/jest-config.ts
+@@ -166,3 +166,26 @@ global.console = new EpsilConsole(
+   process.stderr,
+   simpleFormatter
+ ) as Console;
++
++// PROTOTYPE (`src/compute-engine/binding-unit.ts`): write the counters of the
++// reads of free-name types after each test, one JSON line per test, in the
++// directory `CE_BU_OUT`.
++import { appendFileSync as buAppend } from 'node:fs';
++import { takeCounters as buTake } from '../src/compute-engine/binding-unit';
++if (process.env.CE_BU_OUT) {
++  const buFlush = (): void => {
++    const c = buTake();
++    if (c === undefined) return;
++    const state = expect.getState();
++    buAppend(
++      `${process.env.CE_BU_OUT}/${process.pid}.jsonl`,
++      JSON.stringify({
++        file: (state.testPath ?? '').replace(/^.*\/test\//, 'test/'),
++        test: state.currentTestName ?? '',
++        c,
++      }) + '\n'
++    );
++  };
++  afterEach(buFlush);
++  afterAll(buFlush);
++}
