@@ -406,7 +406,20 @@ selects the new emitter. The measure is
   has a `corpus` or `plausible` witness). The compile-time gain is a result
   that the rules did not foresee.
 
-The decision to expand, to revise or to stop is the user's, and is open.
+**Revision of the emitter (2026-11-10).** The user chose to revise and
+measure again. The emitter now writes a pure value with one use at that use,
+and `If`, `And` and `Or` as expressions when their regions are expressions.
+The new route then writes about as much code as the ordinary target with
+the same options (`heatwall` 56 bytes against 62; the 40-program corpus
+sample 1,204 against 1,215; a complex sum stays 36% larger). Compilation is
+unchanged: 32% to 69% of the time of the ordinary target with the same
+options, 27% to 53% with its default options, and 68% on the corpus sample.
+Execution: no difference was resolved, also on two fixtures where the CSE
+and the folding of the ordinary target apply; the vocabulary has no costly
+operation to repeat. The pilot is now 1,628 counted lines. The numbers are in
+the section "The revised emitter (2026-11-10)" of the measure.
+
+The decision to expand or to stop is the user's, and is open.
 
 ### Step 5 — Recover the existing internal slice coverage
 

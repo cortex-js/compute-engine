@@ -842,8 +842,10 @@ all of them give the same values on every input before it times anything. It
 times the first compilation on a fresh engine (and, with `COLD_PROCESS=n`, in
 `n` fresh processes), warm compilation, the six phases of the structured
 route, and warm execution of `run()`. The configurations of each round run in
-a rotating order; ratios are computed per round. The fixtures are the step 3
-fixtures, two trees of about 200 operations, and the corpus programs in
+a new random order (fixed seed); ratios are computed per round. The fixtures
+are the step 3 fixtures, three fixtures where the common-subexpression pass
+and the constant folding of the default options matter (`cse-repeat`, `fold`,
+`local-reads`), two trees of about 200 operations, and the corpus programs in
 `js-structured-pilot-corpus.json`, which `MODE=extract` writes from the Tycho
 codegen audit artifacts. `MODE=lines` gives the line counts and `MODE=deps`
 the functions of the existing compiler that the structured route runs. The
@@ -863,8 +865,9 @@ CORPUS=all MODE=check node --import tsx benchmarks/js-structured-pilot.ts
 Hold the box lock for a timing run. The configurations of each round run in
 a new random order: a fixed rotation made the calibration A2/A 0.83, because
 a batch that follows a batch of the same compiler runs faster. The results
-are in `docs/plans/2026-11-09-js-structured-pilot-measure.md`; no complete
-run of the random-order design exists yet.
+are in `docs/plans/2026-11-09-js-structured-pilot-measure.md`; its section
+"The revised emitter (2026-11-10)" has three complete runs of the default
+mode with the random order (about 90 seconds each).
 
 ## Closed constant folding (`closed-folding.mjs`)
 

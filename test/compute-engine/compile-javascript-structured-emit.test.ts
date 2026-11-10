@@ -444,7 +444,12 @@ describe('laziness and order, with the test operation', () => {
     expect(traces).toEqual(['trace(1)', 'trace(2)']);
   });
 
-  test('only the inputs of the selected branch are read, in order', () => {
+  // The order of the reads is not asserted: compiled code treats an input as
+  // a value, and the order and the number of the reads of a getter are
+  // unspecified (neither the entry check nor `rawCall` makes a snapshot of
+  // the vars object). The emitter may write a read at its use, after other
+  // pure operations.
+  test('only the inputs of the selected branch are read', () => {
     const result = compileTrace(['If', 'C', 'x', ['Add', 'x', 'y']]);
     const reads: string[] = [];
     const vars = (C: boolean) => ({
@@ -463,10 +468,154 @@ describe('laziness and order, with the test operation', () => {
     });
     const raw = (result.run as unknown as { rawCall(v: unknown): unknown }).rawCall;
     expect(raw(vars(true))).toBe(1);
-    expect(reads).toEqual(['C', 'x']);
+    expect([...reads].sort()).toEqual(['C', 'x']);
     reads.length = 0;
     expect(raw(vars(false))).toBe(3);
-    expect(reads).toEqual(['C', 'x', 'y']);
+    expect([...reads].sort()).toEqual(['C', 'x', 'y']);
+  });
+
+  /** A vars object whose getters write each read in the trace. */
+  const tracedVars = (values: Record<string, number | boolean>) =>
+    Object.defineProperties(
+      {},
+      Object.fromEntries(
+        Object.entries(values).map(([name, v]) => [
+          name,
+          {
+            get: () => {
+              traces.push(`get ${name}`);
+              return v;
+            },
+            enumerable: true,
+          },
+        ])
+      )
+    );
+
+  test('a pure value between two effectful operations is not moved across them', () => {
+    // A made program (the structured route admits no top-level `Block`, and
+    // a `Function` literal has no getters): `t1 = Trace(x); v = y;
+    // t2 = Trace(x); t1 + t2 + v`. The read `v` is pure and has one use,
+    // after `t2`. Written at its use, it would run after the second trace.
+    const owner = {};
+    let id = 0;
+    const origin = engine().expr('x');
+    const value = (): IRValue => ({ owner, revision: 1, id: id++, type: 'real', representation: 'number' });
+    const [x1, t1, v, x2, t2, sum] = [value(), value(), value(), value(), value(), value()];
+    const read = (input: number, result: IRValue): IROperation => ({ kind: 'input', input, result, operands: [], effect: 'pure', origin });
+    const trace = (result: IRValue, x: IRValue): IROperation => ({ kind: 'trace', trace: 'trace', result, operands: [x], effect: 'effectful', origin });
+    const program: IRProgram = {
+      owner,
+      revision: 1,
+      inputs: [
+        { name: 'x', type: 'real', representation: 'number' },
+        { name: 'y', type: 'real', representation: 'number' },
+      ],
+      numericPolicy: 'strict',
+      functions: [],
+      root: {
+        operations: [
+          read(0, x1),
+          trace(t1, x1),
+          read(1, v),
+          read(0, x2),
+          trace(t2, x2),
+          { kind: 'add', result: sum, operands: [t1, t2, v], effect: 'pure', origin },
+          { kind: 'yield', operands: [sum], effect: 'pure', origin },
+        ],
+        effect: 'effectful',
+      },
+    };
+    verifyProgram(program, new Set([origin]));
+    let n = 0;
+    const e = emitStructuredProgram(
+      program,
+      { input: (name) => `_.${name}`, fresh: () => `_v${++n}` },
+      { trace: TRACE_SOURCE }
+    );
+    expect(e.statements).toEqual([
+      'const _v1 = globalThis.__ceTrace("trace", _.x);',
+      'const _v2 = _.y;',
+      'const _v3 = globalThis.__ceTrace("trace", _.x);',
+    ]);
+    const result = new Function('_SYS', '_', `${e.statements.join(' ')} return ${e.value};`)(
+      createSysRuntime(),
+      tracedVars({ x: 1, y: 2 })
+    );
+    expect(result).toBe(4);
+    // The order of the getter reads is unspecified; the statements above
+    // show where the read of `y` is.
+    expect(traces.filter((t) => !t.startsWith('get '))).toEqual(['trace(1)', 'trace(1)']);
+  });
+
+  test('an effectful operation is a statement even with only pure operations before its use', () => {
+    // A made program `t = Trace(x); -t`: `t` has one use, and no operation
+    // lies between its definition and that use. Only its effect keeps it a
+    // statement.
+    const owner = {};
+    let id = 0;
+    const origin = engine().expr('x');
+    const value = (): IRValue => ({ owner, revision: 1, id: id++, type: 'real', representation: 'number' });
+    const [x, t, negated] = [value(), value(), value()];
+    const program: IRProgram = {
+      owner,
+      revision: 1,
+      inputs: [{ name: 'x', type: 'real', representation: 'number' }],
+      numericPolicy: 'strict',
+      functions: [],
+      root: {
+        operations: [
+          { kind: 'input', input: 0, result: x, operands: [], effect: 'pure', origin },
+          { kind: 'trace', trace: 'trace', result: t, operands: [x], effect: 'effectful', origin },
+          { kind: 'negate', result: negated, operands: [t], effect: 'pure', origin },
+          { kind: 'yield', operands: [negated], effect: 'pure', origin },
+        ],
+        effect: 'effectful',
+      },
+    };
+    verifyProgram(program, new Set([origin]));
+    let n = 0;
+    const e = emitStructuredProgram(
+      program,
+      { input: (name) => `_.${name}`, fresh: () => `_v${++n}` },
+      { trace: TRACE_SOURCE }
+    );
+    expect(e.statements).toEqual(['const _v1 = globalThis.__ceTrace("trace", _.x);']);
+    expect(e.value).toBe('-_v1');
+  });
+
+  test('an effectful local whose use comes after another effectful operation keeps its order', () => {
+    // `a = Trace(x)` has one use, the second argument of `h`, after
+    // `Trace(y)`. Written at its use, it would run after `Trace(y)`.
+    const ce = engine();
+    const json: MathJsonExpression = [
+      'Function',
+      ['Block', ['Declare', 'a', "'real'", ['Trace', 'x']], ['h', ['Trace', 'y'], 'a']],
+      typed('x', 'real'),
+      typed('y', 'real'),
+    ];
+    const result = structured().compile(ce.expr(json), OPTIONS);
+    expect(run(result, [1, 2])).toBe(4);
+    expect(traces).toEqual(['trace(1)', 'trace(2)']);
+  });
+
+  test('a value used in a nested region keeps its binding', () => {
+    // `a` has one use, in a branch of the If: it is computed before the If,
+    // as the program says, and not moved into the branch.
+    const ce = engine();
+    const json: MathJsonExpression = [
+      'Function',
+      ['Block', ['Declare', 'a', "'real'", ['Max', 0, 'x']], ['If', 'C', 'a', 'y']],
+      typed('x', 'real'),
+      typed('y', 'real'),
+      typed('C', 'boolean'),
+    ];
+    const result = structured().compile(ce.expr(json), OPTIONS);
+    expect(result.code).toBe(
+      '(x, y, C) => { const _tv1 = Math.max(0, x); return C ? _tv1 : y; }'
+    );
+    expect(run(result, [-1, 2, true])).toBe(0);
+    expect(run(result, [-1, 2, false])).toBe(2);
   });
 
   test('control: the instrument detects an eager branch', () => {
@@ -669,6 +818,267 @@ describe('made programs with helpers', () => {
       origin: engine().expr('x'),
     };
     expect(m.runMade(m.program([f0]), 3.5)).toBe(0.5);
+  });
+});
+
+//
+// The emitted code
+//
+
+describe('the emitted code', () => {
+  // The exact code, so that a change of its size shows here. The existing
+  // emitter writes 62 bytes for `heatwall` with the same options.
+  test('heatwall', () => {
+    const result = structured().compile(engine().expr(HEATWALL_BODY), OPTIONS);
+    expect(result.code).toBe('0.5 < _.obstacle && _.c === 16 && (_.r < 13 || 18 < _.r)');
+  });
+
+  test('heatcell', () => {
+    // `a` is read twice, in the else branch: it keeps its `const`.
+    const result = structured().compile(engine().expr(HEATCELL), OPTIONS);
+    expect(result.code).toBe(
+      '(v, s, d, c, r, obstacle) => { function _tv1(_tv2, _tv3, _tv4) { return 0.5 < _tv4 && _tv2 === 16 && (_tv3 < 13 || 18 < _tv3); }\n' +
+        'const _tv5 = Math.min(0.25, Math.max(0, d)); return _tv1(c, r, obstacle) ? v : _tv5 * (s + -4 * v) + v; }'
+    );
+  });
+
+  test('a complex sum: each operand is written twice, so it binds a const', () => {
+    // A made program `convert(max(x, y)) + z`, with `z` a complex input. The
+    // `max` has one use, in the conversion, and is written there; the
+    // conversion and the read of `z` are each read twice by the sum.
+    const owner = {};
+    let id = 0;
+    const origin = engine().expr('x');
+    const value = (type: ScalarKind): IRValue => ({
+      owner,
+      revision: 1,
+      id: id++,
+      type,
+      representation: type === 'complex' ? 'complex' : 'number',
+    });
+    const [x, y, m, c, z, sum] = [
+      value('real'),
+      value('real'),
+      value('real'),
+      value('complex'),
+      value('complex'),
+      value('complex'),
+    ];
+    const program: IRProgram = {
+      owner,
+      revision: 1,
+      inputs: [
+        { name: 'x', type: 'real', representation: 'number' },
+        { name: 'y', type: 'real', representation: 'number' },
+        { name: 'z', type: 'complex', representation: 'complex' },
+      ],
+      numericPolicy: 'complex',
+      functions: [],
+      root: {
+        operations: [
+          { kind: 'input', input: 0, result: x, operands: [], effect: 'pure', origin },
+          { kind: 'input', input: 1, result: y, operands: [], effect: 'pure', origin },
+          { kind: 'max', result: m, operands: [x, y], effect: 'pure', origin },
+          { kind: 'convert', conversion: 'real-to-complex', result: c, operands: [m], effect: 'pure', origin },
+          { kind: 'input', input: 2, result: z, operands: [], effect: 'pure', origin },
+          { kind: 'add', result: sum, operands: [c, z], effect: 'pure', origin },
+          { kind: 'yield', operands: [sum], effect: 'pure', origin },
+        ],
+        effect: 'pure',
+      },
+    };
+    verifyProgram(program, new Set([origin]));
+    let n = 0;
+    const e = emitStructuredProgram(program, { input: (name) => `_.${name}`, fresh: () => `_v${++n}` });
+    expect(e.statements).toEqual([
+      'const _v1 = ({ re: Math.max(_.x, _.y), im: 0 });',
+      'const _v2 = _.z;',
+    ]);
+    expect(e.value).toBe('({ re: _v1.re + _v2.re, im: _v1.im + _v2.im })');
+    const result = new Function('_SYS', '_', `${e.statements.join(' ')} return ${e.value};`)(
+      createSysRuntime(),
+      { x: 1, y: 2, z: { re: 3, im: 4 } }
+    );
+    expect(result).toEqual({ re: 5, im: 4 });
+  });
+});
+
+describe('parentheses, on made programs', () => {
+  // Made programs over the inputs x, y (real) and C, D (boolean), with pure
+  // operations only, so that the canonical form does not rewrite them. Each
+  // is checked for its exact code and for its value against a JavaScript
+  // function written by hand.
+  type Builder = {
+    input(name: 'x' | 'y' | 'C' | 'D'): IRValue;
+    literal(n: number): IRValue;
+    op(kind: 'add' | 'negate' | 'multiply' | 'less', ...operands: IRValue[]): IRValue;
+    if(c: IRValue, a: () => IRValue, b: () => IRValue, type?: ScalarKind): IRValue;
+    logic(kind: 'and' | 'or', first: IRValue, ...rest: (() => IRValue)[]): IRValue;
+  };
+  const INPUTS = [
+    { name: 'x', type: 'real', representation: 'number' },
+    { name: 'y', type: 'real', representation: 'number' },
+    { name: 'C', type: 'boolean', representation: 'boolean' },
+    { name: 'D', type: 'boolean', representation: 'boolean' },
+  ] as const;
+
+  function emit(body: (b: Builder) => IRValue) {
+    const owner = {};
+    let id = 0;
+    const origin = engine().expr('x');
+    let ops: IROperation[] = [];
+    const push = (kind: string, operands: IRValue[], type: ScalarKind, extra = {}) => {
+      const result: IRValue = {
+        owner,
+        revision: 1,
+        id: id++,
+        type,
+        representation: type === 'boolean' ? 'boolean' : 'number',
+      };
+      ops.push({ kind, result, operands, effect: 'pure', origin, ...extra } as IROperation);
+      return result;
+    };
+    const region = (f: () => IRValue) => {
+      const saved = ops;
+      ops = [];
+      const v = f();
+      ops.push({ kind: 'yield', operands: [v], effect: 'pure', origin });
+      const r = { operations: ops, effect: 'pure' as const };
+      ops = saved;
+      return r;
+    };
+    const b: Builder = {
+      input: (name) => {
+        const input = INPUTS.findIndex((i) => i.name === name);
+        return push('input', [], INPUTS[input].type, { input });
+      },
+      literal: (n) => push('literal', [], 'real', { value: n }),
+      op: (kind, ...operands) => push(kind, operands, kind === 'less' ? 'boolean' : 'real'),
+      if: (c, a, e, type = 'real') => push('if', [c], type, { then: region(a), else: region(e) }),
+      logic: (kind, first, ...rest) => push(kind, [first], 'boolean', { rest: rest.map(region) }),
+    };
+    const root = region(() => body(b));
+    const program: IRProgram = {
+      owner,
+      revision: 1,
+      inputs: INPUTS,
+      numericPolicy: 'strict',
+      functions: [],
+      root,
+    };
+    verifyProgram(program, new Set([origin]));
+    let n = 0;
+    const e = emitStructuredProgram(program, { input: (name) => `_.${name}`, fresh: () => `_v${++n}` });
+    const code = [...e.statements, `return ${e.value};`].join(' ');
+    const fn = new Function('_SYS', '_', code) as (sys: unknown, vars: unknown) => unknown;
+    return { code, run: (vars: Record<string, number | boolean>) => fn(createSysRuntime(), vars) };
+  }
+
+  const VARS = product<number | boolean>([2, -0.5, 0], [3, -0.5], [true, false], [true, false]).map(
+    ([x, y, C, D]) => ({ x, y, C, D }) as { x: number; y: number; C: boolean; D: boolean }
+  );
+
+  const CASES: [
+    string,
+    (b: Builder) => IRValue,
+    string,
+    (v: { x: number; y: number; C: boolean; D: boolean }) => unknown,
+  ][] = [
+    ['-(-x)', (b) => b.op('negate', b.op('negate', b.input('x'))), 'return -(-_.x);', ({ x }) => -(-x)],
+    ['-(-0)', (b) => b.op('negate', b.literal(-0)), 'return -(-0);', () => 0],
+    ['-(-3)', (b) => b.op('negate', b.literal(-3)), 'return -(-3);', () => 3],
+    ['-(-Infinity)', (b) => b.op('negate', b.literal(-Infinity)), 'return -(-Infinity);', () => Infinity],
+    ['-1 · x', (b) => b.op('multiply', b.literal(-1), b.input('x')), 'return -1 * _.x;', ({ x }) => -1 * x],
+    ['x · -0.5', (b) => b.op('multiply', b.input('x'), b.literal(-0.5)), 'return _.x * -0.5;', ({ x }) => x * -0.5],
+    ['x + -y', (b) => b.op('add', b.input('x'), b.op('negate', b.input('y'))), 'return _.x + -_.y;', ({ x, y }) => x + -y],
+    ['-x · y', (b) => b.op('multiply', b.op('negate', b.input('x')), b.input('y')), 'return -_.x * _.y;', ({ x, y }) => -x * y],
+    ['-(x + y)', (b) => b.op('negate', b.op('add', b.input('x'), b.input('y'))), 'return -(_.x + _.y);', ({ x, y }) => -(x + y)],
+    [
+      'x + (y + -3)',
+      (b) => b.op('add', b.input('x'), b.op('add', b.input('y'), b.literal(-3))),
+      'return _.x + (_.y + -3);',
+      ({ x, y }) => x + (y + -3),
+    ],
+    [
+      '(x + y) + -0',
+      (b) => b.op('add', b.op('add', b.input('x'), b.input('y')), b.literal(-0)),
+      'return _.x + _.y + -0;',
+      ({ x, y }) => x + y + -0,
+    ],
+    [
+      'x · (y + 1)',
+      (b) => b.op('multiply', b.input('x'), b.op('add', b.input('y'), b.literal(1))),
+      'return _.x * (_.y + 1);',
+      ({ x, y }) => x * (y + 1),
+    ],
+    [
+      '-x < -0',
+      (b) => b.op('less', b.op('negate', b.input('x')), b.literal(-0)),
+      'return -_.x < -0;',
+      ({ x }) => -x < -0,
+    ],
+    [
+      'nested conditionals in both branches',
+      (b) =>
+        b.if(
+          b.input('C'),
+          () => b.if(b.input('D'), () => b.input('x'), () => b.input('y')),
+          () => b.if(b.input('D'), () => b.input('y'), () => b.op('negate', b.input('x')))
+        ),
+      'return _.C ? _.D ? _.x : _.y : _.D ? _.y : -_.x;',
+      ({ x, y, C, D }) => (C ? (D ? x : y) : D ? y : -x),
+    ],
+    [
+      'a conditional as a condition',
+      (b) =>
+        b.if(
+          b.if(b.input('C'), () => b.input('D'), () => b.input('C'), 'boolean'),
+          () => b.input('x'),
+          () => b.input('y')
+        ),
+      'return (_.C ? _.D : _.C) ? _.x : _.y;',
+      ({ x, y, C, D }) => ((C ? D : C) ? x : y),
+    ],
+    [
+      'a conditional as an operand of a sum',
+      (b) => b.op('add', b.input('x'), b.if(b.input('C'), () => b.input('x'), () => b.input('y'))),
+      'return _.x + (_.C ? _.x : _.y);',
+      ({ x, y, C }) => x + (C ? x : y),
+    ],
+    [
+      '&& inside ||',
+      (b) =>
+        b.logic('or', b.input('C'), () =>
+          b.logic('and', b.input('D'), () => b.op('less', b.input('x'), b.input('y')))
+        ),
+      'return _.C || _.D && _.x < _.y;',
+      ({ x, y, C, D }) => C || (D && x < y),
+    ],
+    [
+      '|| inside &&',
+      (b) =>
+        b.logic('and', b.input('C'), () =>
+          b.logic('or', b.input('D'), () => b.op('less', b.input('x'), b.input('y')))
+        ),
+      'return _.C && (_.D || _.x < _.y);',
+      ({ x, y, C, D }) => C && (D || x < y),
+    ],
+    [
+      '|| as the first operand of &&',
+      (b) =>
+        b.logic('and', b.logic('or', b.input('C'), () => b.input('D')), () =>
+          b.op('less', b.input('x'), b.input('y'))
+        ),
+      'return (_.C || _.D) && _.x < _.y;',
+      ({ x, y, C, D }) => (C || D) && x < y,
+    ],
+  ];
+
+  test.each(CASES)('%s', (_name, body, code, reference) => {
+    const e = emit(body);
+    expect(e.code).toBe(code);
+    for (const vars of VARS)
+      expect([vars, Object.is(e.run(vars), reference(vars))]).toEqual([vars, true]);
   });
 });
 

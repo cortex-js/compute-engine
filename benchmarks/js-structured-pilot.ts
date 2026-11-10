@@ -15,6 +15,11 @@
  *       clock twelve times per compilation, so its total is not the total
  *       of D.
  *
+ * The fixtures: the step 3 fixtures (`heatwall`, `heatcell`, `complex-if`);
+ * three where the common-subexpression pass and the constant folding of A
+ * matter (`cse-repeat`, `fold`, `local-reads`); two generated trees of about
+ * 200 operations; and the corpus programs.
+ *
  * The ordinary target is called as `new JavaScriptTarget().compile()`, the
  * method that the fragment target extends, and not through the public
  * `compile()`, which adds its own option checks. MODE=check verifies that
@@ -268,8 +273,68 @@ function namedFixtures(): Fixture[] {
       declare: { C: 'boolean', x: 'real', y: 'real', z: 'complex' },
       inputs: [true, false].map((C) => ({ C, x: 1, y: 2, z: { re: 3, im: 4 } })),
     },
+    // The fixtures where the common-subexpression pass and the constant
+    // folding of A matter: D (and B) do neither.
+    {
+      // `x·y + max(s, t)` four times, in four different operators, so that
+      // the canonical form does not merge the occurrences. A computes it
+      // once (`_cse1`); B and D four times.
+      id: 'cse-repeat',
+      kind: 'named',
+      json: [
+        'Add',
+        ['Max', REPEATED, 's'],
+        ['Min', REPEATED, 't'],
+        ['Multiply', 'y', REPEATED],
+        ['Negate', REPEATED],
+      ],
+      declare: REAL_DECLARE,
+      inputs: deepInputs(16),
+    },
+    {
+      // `min(0.25, max(0, 0.5))` is a constant subtree that the canonical
+      // form keeps: A writes `0.25`, B and D the two calls.
+      id: 'fold',
+      kind: 'named',
+      json: ['Add', 'x', ['Multiply', ['Min', 0.25, ['Max', 0, 0.5]], 'y']],
+      declare: REAL_DECLARE,
+      inputs: deepInputs(16),
+    },
+    {
+      // A local read four times: every configuration computes it once.
+      id: 'local-reads',
+      kind: 'named',
+      json: [
+        'Function',
+        [
+          'Block',
+          ['Declare', 'a', "'real'", ['Max', 0, ['Add', 'x', 'y']]],
+          [
+            'Add',
+            ['Multiply', 'a', 'x'],
+            ['Multiply', 'a', 'y'],
+            ['Max', 'a', 's'],
+            ['Min', 'a', 't'],
+          ],
+        ],
+        typed('x', 'real'),
+        typed('y', 'real'),
+        typed('s', 'real'),
+        typed('t', 'real'),
+      ],
+      declare: {},
+      inputs: deepInputs(16).map((v) => {
+        const r = v as Record<string, Value>;
+        return [r.x, r.y, r.s, r.t];
+      }),
+    },
   ];
 }
+
+/** The subexpression that `cse-repeat` repeats. */
+const REPEATED: MathJsonExpression = ['Add', ['Multiply', 'x', 'y'], ['Max', 's', 't']];
+
+const REAL_DECLARE = { x: 'real', y: 'real', s: 'real', t: 'real' };
 
 /** The deep trees: the seed and the budget give about 200 operations
  *  after canonicalization (the count is measured and reported). */

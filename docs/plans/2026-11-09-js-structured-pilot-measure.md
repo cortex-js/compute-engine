@@ -2,6 +2,9 @@
 
 **Status: measured 2026-11-09 at `7939b5fac2207d8e69178caab0974d0bb36ea3b5`.
 Documentation and a benchmark harness only; no compiler source changed.**
+**Revised 2026-11-10: the emitter writes expressions, and the measure was
+repeated (section "The revised emitter (2026-11-10)"). The sections before
+that one are the record of the first measure.**
 
 This is the measurement of step 4 of
 [the JavaScript compiler plan](2026-11-09-js-compiler-status-and-plan.md). It
@@ -623,3 +626,371 @@ that compiles faster than the existing JavaScript emitter, gives the same
 values, does not change execution time measurably, writes 2.5 to 6.7 times
 more code, and is larger in source than the code it would replace. They
 contain no measurement of either other target.
+
+## The revised emitter (2026-11-10)
+
+### What changed
+
+Only the emitter (`javascript-structured-emit.ts`) changed. The
+representation, the lowering and the verifier are as before. The rules of the
+revised emitter:
+
+- The value of an operation is written at its use, as part of the
+  expression of the use, when the operation is `pure`, the value has exactly
+  one use, that use is in the region of the definition (not in a nested
+  region), and every operation between the definition and the use is `pure`.
+  Every other value binds a `const`. An operation whose effect is
+  `effectful` or `unknown` is always a statement, and no value moves across
+  it.
+- A read of an input has the effect `pure` (the annotation gives it that
+  fact, and the entry of the compiled function normalizes the inputs before
+  the body runs), so it is written at its use.
+- An operand of a complex sum counts as two uses, because its text is
+  written once per component: it binds a `const` and is evaluated once.
+- An `if` whose two regions are one expression each is `c ? a : b`; an
+  `and` or `or` whose regions after the first operand are one expression each
+  is `&&` or `||`. A region that still needs statements keeps the block form
+  of the first version. When the whole body is one expression, the assembly
+  (`emitDelegatedBody()`, unchanged) writes it with no arrow function around
+  it.
+- Parentheses come from the precedence of the JavaScript operators. A
+  negative literal, `-0` and `-Infinity` have the precedence of a unary
+  minus (`x + -1`, `-1 * x`, `-(-1)`). The operand of a unary minus is in
+  parentheses unless it is a name, a non-negative literal or a call, so
+  `-(-x)` is never `--x`. An operand after the first of `+`, `*`, `<`, `===`,
+  `&&` and `||` is in parentheses when its precedence is the same, so
+  `a + (b + c)` keeps the order of a floating-point sum. An object literal is
+  in parentheses.
+
+The design choices and their alternatives:
+
+| Choice | Alternative not taken | Reason |
+| --- | --- | --- |
+| Parentheses from precedence | Parentheses around every compound operand | Fewer bytes; the made-program tests check each precedence case (negative literals, unary minus after a binary operator, `-0`, nested conditionals, `&&` inside `||` and the reverse). |
+| An operation with one use in a nested region keeps its `const` | Move it into the region | The task rule. Moving a pure value into a branch would also skip work when the branch is not taken, but it changes where the program evaluates the value. |
+| An `and` or `or` with one region that needs statements is written whole as statements | A partial expression (`let t = a && b; if (t) {...}`) | Simpler; no fixture or corpus program reaches this case. |
+| A complex-sum operand counts as two uses | Write the operand twice | Writing it twice evaluates it twice, and reads an input twice. |
+
+**The test changes.** In
+`test/compute-engine/compile-javascript-structured-emit.test.ts`:
+
+- The step 3 test "only the inputs of the selected branch are read, in
+  order" is now "only the inputs of the selected branch are read". It
+  compares the set of the reads, not their order: the order of the reads of
+  inputs is no longer a property of the emitted code.
+- New order tests with the traced test operation: a pure value between two
+  effectful operations is not moved across them (a made program, because
+  the structured route admits no top-level `Block`; the test asserts the
+  statements and the trace entries, not the order of the getter reads); an
+  effectful operation is a statement even when only pure operations lie
+  between it and its one use (a made program); an effectful local whose use
+  comes after another effectful operation keeps its order; a value used in
+  a nested region keeps its binding. With the "pure" condition of the
+  emitter removed, the first two fail (checked once, then restored).
+- A made program of a complex sum: each operand is read twice, so the
+  conversion and the complex input each bind a `const`, and the sum is the
+  object literal with `.re` and `.im` reads.
+- The exact emitted code of `heatwall` and `heatcell`, so that a change of
+  size shows.
+- 19 made programs that check the parentheses, each with its exact code and
+  its value on 24 inputs against a JavaScript function written by hand.
+- All 27 differential fixtures of step 3 pass unchanged in value.
+
+### The code of `heatwall`
+
+```js
+// B (62 bytes)
+0.5 < _.obstacle && ((_.c) === (16)) && (_.r < 13 || 18 < _.r)
+
+// D before the revision (322 bytes)
+(() => { const _tv1 = _.obstacle; const _tv2 = 0.5 < _tv1; let _tv3 = _tv2; if (_tv3) { const _tv4 = _.c; const _tv5 = _tv4 === 16; _tv3 = _tv5; if (_tv3) { const _tv6 = _.r; const _tv7 = _tv6 < 13; let _tv8 = _tv7; if (!_tv8) { const _tv9 = _.r; const _tv10 = 18 < _tv9; _tv8 = _tv10; } _tv3 = _tv8; } } return _tv3; })()
+
+// D after the revision (56 bytes)
+0.5 < _.obstacle && _.c === 16 && (_.r < 13 || 18 < _.r)
+```
+
+The code of `heatcell` after the revision (234 bytes; 747 before, B 262).
+The local `a` has one use, in the else branch, so it keeps its `const`:
+
+```js
+(v, s, d, c, r, obstacle) => { function _tv1(_tv2, _tv3, _tv4) { return 0.5 < _tv4 && _tv2 === 16 && (_tv3 < 13 || 18 < _tv3); }
+const _tv5 = Math.min(0.25, Math.max(0, d)); return _tv1(c, r, obstacle) ? v : _tv5 * (s + -4 * v) + v; }
+```
+
+### New fixtures
+
+Three named fixtures where the common-subexpression pass and the constant
+folding of A matter. B and D do neither.
+
+| Fixture | Ops | Program | A writes | B and D write |
+| --- | ---: | --- | --- | --- |
+| `cse-repeat` | 17 | `x·y + max(s, t)` four times, under `Max`, `Min`, `Multiply` and `Negate`, so that the canonical form does not merge them | one `_cse1`, read four times | the subexpression four times |
+| `fold` | 4 | `x + min(0.25, max(0, 0.5))·y` | `_.x + _.y * 0.25` | the two calls |
+| `local-reads` | 7 | a `Function` literal with a local `a = max(0, x + y)` read four times | one `let a` | one `let a` (B) or `const` (D) |
+
+The structured route admits the constant subtree `min(0.25, max(0, 0.5))`
+(admission refuses only a comparison that reads no symbol), so no nearer form
+was needed. The deep trees of the first measure are unchanged.
+
+### Runs
+
+Three complete runs of the default mode (the 8 named and deep fixtures and
+the 40-program corpus sample), each with the seeded random order for every
+timing, one garbage collection per round, 9 rounds, under the box lock. No
+Jest process ran. In the process snapshots, a Tycho `esbuild` used about 27%
+of one core and two Chrome helpers about 8% each (snapshots in
+[`2026-11-09-js-structured-pilot-measure/revised-run-environment.txt`](2026-11-09-js-structured-pilot-measure/revised-run-environment.txt);
+raw outputs `revised-run1.jsonl.gz` to `revised-run3.jsonl.gz` in the same
+directory).
+
+| Run | Emitter | Start (UTC) | Load at start (1/5/15 min) | Duration |
+| --- | --- | --- | --- | --- |
+| R1 | first version of the revision | 13:17:28 | 2.4 / 2.2 / 1.9 | 89 s |
+| R2 | first version of the revision | 13:19:01 | 3.6 / 2.7 / 2.1 | 87 s |
+| R3 | final structure of the code (`operation()` returns the expression) | 13:21:57 | 2.7 / 2.7 / 2.2 | 87 s |
+
+The command was
+`node --expose-gc --import tsx benchmarks/js-structured-pilot.ts` at base
+`52f112927818ed72e78c85d13705f6ae6e961617` with the revised emitter, in a
+worktree. R1, R2 and R3 write the same code, byte for byte, for every
+fixture. After R3, one change made negative literals unparenthesized
+(`x + -1` instead of `x + (-1)`). It changes only the bytes (the tables of
+"Emitted bytes" below are for the final code); V8 parses both texts to the
+same tree, so it cannot change execution. A fourth run on the final code
+was not made: another session took the box lock for about 90 minutes after
+R3.
+
+### Calibration
+
+A2/A, per fixture: the median and the range over the rounds.
+
+| Measure | R1 | R2 | R3 |
+| --- | --- | --- | --- |
+| Warm compilation | 0.93 to 1.07 (0.75 to 1.25) | 0.87 to 1.05 (0.71 to 1.29) | 0.90 to 1.05 (0.77 to 1.30) |
+| Warm execution, `run()` | 0.93 to 1.05 (0.87 to 1.19) | 0.93 to 1.03 (0.86 to 1.15) | 0.95 to 1.05 (0.86 to 1.16) |
+| Warm execution, body | 1.00 to 1.01 (0.93 to 1.12) | 0.99 to 1.00 (0.90 to 1.25) | 0.99 to 1.01 (0.90 to 1.08) |
+| Cold, fresh engine | 0.96 to 1.02 (0.81 to 1.35) | 0.93 to 1.04 (0.79 to 1.23) | 0.99 to 1.06 (0.61 to 1.42) |
+| Corpus totals, warm compilation | 0.98 (0.92 to 1.06) | 0.98 (0.94 to 1.06) | 0.97 (0.93 to 1.07) |
+
+With the random order, A2/A is about 1.00 on the corpus totals, where the
+rotating order of the first measure gave 0.83. The order bias of the first
+measure does not appear here.
+
+### Emitted bytes, before and after the revision
+
+UTF-8 bytes of `result.code`; no configuration writes a preamble. "D before"
+is the emitter of `52f112927`, measured with the same harness (`MODE=check`).
+
+| Fixture | A | B | D before | D after | D/B before | D/B after | D/A after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| heatwall | 62 | 62 | 322 | 56 | 5.2 | 0.90 | 0.90 |
+| heatcell | 262 | 262 | 747 | 234 | 2.9 | 0.89 | 0.89 |
+| complex-if | 113 | 113 | 288 | 154 | 2.5 | 1.36 | 1.36 |
+| cse-repeat | 134 | 170 | 926 | 170 | 5.4 | 1.00 | 1.27 |
+| fold | 16 | 44 | 180 | 44 | 4.1 | 1.00 | 2.75 |
+| local-reads | 112 | 112 | 356 | 120 | 3.2 | 1.07 | 1.07 |
+| deep-full | 2,062 | 2,032 | 11,059 | 1,838 | 5.4 | 0.90 | 0.89 |
+| deep-add-if | 1,743 | 1,743 | 11,719 | 1,363 | 6.7 | 0.78 | 0.78 |
+| corpus sample, 40 programs | 1,215 | 1,215 | 7,021 | 1,204 | 5.8 | 0.99 | 0.99 |
+
+On the corpus sample, D writes the same code length as B for 36 programs,
+less for 3 and more for 1. `complex-if` is the largest D/B:
+
+```js
+// B (113 bytes)
+(() => { const _tv1 = ((_.C) ? (({ re: _.x, im: 0 })) : (_.z)); return ({ re: _.y + _tv1.re, im: _tv1.im }); })()
+// D (154 bytes)
+(() => { const _tv1 = ({ re: _.y, im: 0 }); const _tv2 = _.C ? ({ re: _.x, im: 0 }) : _.z; return ({ re: _tv1.re + _tv2.re, im: _tv1.im + _tv2.im }); })()
+```
+
+The lowering converts the real `y` to a complex value before the sum, and
+the sum reads each operand twice, so both operands bind a `const`. B adds
+the real number to the real part directly. That is a difference of the
+lowering, which this revision does not change. The 546-program corpus was
+not run again; the first measure gave D/B 4.8 on it.
+
+### Warm compilation (ms per compilation)
+
+R3 (the final structure). The bold ratios lie outside the A2/A range of
+their fixture.
+
+| Fixture | Ops | A | B | D | A2/A | D/B | D/A |
+| --- | ---: | --- | --- | --- | --- | --- | --- |
+| heatwall | 6 | 0.319 (0.302–0.346) | 0.258 (0.235–0.288) | 0.128 (0.120–0.163) | 1.03 (0.94–1.14) | **0.51** (0.46–0.62) | **0.40** (0.35–0.52) |
+| heatcell | 8 | 1.02 (0.972–1.31) | 0.846 (0.771–1.11) | 0.277 (0.232–0.355) | 0.97 (0.89–1.01) | **0.33** (0.23–0.40) | **0.27** (0.20–0.30) |
+| complex-if | 2 | 0.182 (0.160–0.210) | 0.130 (0.123–0.232) | 0.0887 (0.0849–0.106) | 0.93 (0.79–1.13) | **0.68** (0.46–0.71) | **0.52** (0.44–0.58) |
+| cse-repeat | 17 | 0.493 (0.444–0.546) | 0.463 (0.443–0.506) | 0.221 (0.212–0.276) | 1.04 (0.90–1.14) | **0.49** (0.42–0.60) | **0.48** (0.43–0.60) |
+| fold | 4 | 0.295 (0.253–0.349) | 0.172 (0.156–0.219) | 0.0889 (0.0780–0.0967) | 0.90 (0.77–1.30) | **0.51** (0.36–0.57) | **0.28** (0.26–0.36) |
+| local-reads | 7 | 0.493 (0.447–0.544) | 0.390 (0.377–0.418) | 0.142 (0.124–0.194) | 1.05 (0.87–1.16) | **0.37** (0.32–0.46) | **0.29** (0.23–0.43) |
+| deep-full | 198 | 4.33 (4.11–4.90) | 3.63 (3.33–3.73) | 1.69 (1.55–1.81) | 1.01 (0.89–1.14) | **0.49** (0.43–0.51) | **0.37** (0.35–0.42) |
+| deep-add-if | 200 | 3.60 (3.38–3.88) | 2.83 (2.65–2.99) | 1.64 (1.49–1.72) | 1.02 (0.93–1.09) | **0.58** (0.52–0.63) | **0.45** (0.41–0.48) |
+
+D/B in the three runs:
+
+| Fixture | R1 | R2 | R3 |
+| --- | --- | --- | --- |
+| heatwall | 0.52 (0.46–0.64) | 0.51 (0.45–0.59) | 0.51 (0.46–0.62) |
+| heatcell | 0.32 (0.26–0.37) | 0.33 (0.27–0.35) | 0.33 (0.23–0.40) |
+| complex-if | 0.69 (0.50–0.75) | 0.68 (0.52–0.73) | 0.68 (0.46–0.71) |
+| cse-repeat | 0.49 (0.42–0.57) | 0.49 (0.42–0.59) | 0.49 (0.42–0.60) |
+| fold | 0.51 (0.42–0.59) | 0.52 (0.40–0.55) | 0.51 (0.36–0.57) |
+| local-reads | 0.37 (0.32–0.50) | 0.37 (0.32–0.49) | 0.37 (0.32–0.46) |
+| deep-full | 0.47 (0.44–0.52) | 0.49 (0.44–0.52) | 0.49 (0.43–0.51) |
+| deep-add-if | 0.57 (0.52–0.62) | 0.57 (0.53–0.64) | 0.58 (0.52–0.63) |
+
+The three runs agree within 0.02. The D/B ratios are those of the first
+measure (0.30 to 0.68): the revision did not change the cost of
+compilation. In R1 and R2 the emission phase of D is 0.007 ms
+(`complex-if`) to 0.22 ms (the deep trees), as in the first measure (0.006
+to 0.22 ms).
+
+On the cold measure (first compilation on a fresh engine), D/B is 0.45 to
+0.85 and D/A 0.36 to 0.68 in all three runs; every median except
+`complex-if` in R1 (0.82, inside its A2/A range 0.82 to 1.35) lies outside
+the A2/A range.
+
+### Warm execution (ns per call)
+
+Through `run()`, R3:
+
+| Fixture | A | B | D | A2/A | D/B | D/A |
+| --- | --- | --- | --- | --- | --- | --- |
+| heatwall | 43.3 (39.4–44.9) | 42.2 (39.0–62.1) | 39.9 (39.1–44.4) | 0.99 (0.89–1.10) | 0.93 (0.67–1.14) | 0.93 (0.89–1.13) |
+| heatcell | 48.1 (46.8–51.0) | 50.2 (46.4–51.4) | 49.1 (46.7–50.8) | 1.04 (0.97–1.07) | 1.01 (0.91–1.05) | 1.03 (0.93–1.08) |
+| complex-if | 47.7 (42.3–52.2) | 44.9 (42.2–46.3) | 44.4 (41.7–55.1) | 0.95 (0.86–1.05) | 1.00 (0.91–1.25) | 0.96 (0.86–1.14) |
+| cse-repeat | 45.1 (42.8–48.7) | 45.4 (42.7–49.1) | 47.1 (43.7–49.2) | 1.00 (0.92–1.09) | 1.02 (0.91–1.13) | 1.00 (0.92–1.13) |
+| fold | 37.0 (35.7–38.0) | 37.0 (36.4–37.9) | 37.3 (34.4–38.3) | 0.97 (0.95–1.03) | 0.99 (0.94–1.03) | 1.01 (0.92–1.05) |
+| local-reads | 46.4 (42.7–49.6) | 44.7 (41.9–48.2) | 45.7 (41.9–49.3) | 0.97 (0.89–1.16) | 1.00 (0.94–1.08) | 0.95 (0.88–1.16) |
+| deep-full | 68.3 (63.9–70.6) | 69.3 (64.5–71.0) | 65.9 (64.9–71.0) | 0.96 (0.91–1.09) | 0.94 (0.92–1.10) | 1.00 (0.92–1.10) |
+| deep-add-if | 60.8 (59.4–66.5) | 60.9 (59.6–65.5) | 60.5 (58.6–65.4) | 1.05 (0.92–1.09) | 1.01 (0.91–1.08) | 0.99 (0.91–1.09) |
+
+The body alone (`rawCall`), R3 (a `Function` literal has no body measure):
+
+| Fixture | A | B | D | A2/A | D/B | D/A |
+| --- | --- | --- | --- | --- | --- | --- |
+| heatwall | 6.03 (5.96–6.25) | 5.99 (5.96–6.11) | 5.99 (5.95–6.18) | 1.00 (0.96–1.04) | 1.00 (0.99–1.01) | 0.99 (0.97–1.02) |
+| complex-if | 7.21 (7.11–7.37) | 7.24 (7.20–7.34) | 7.20 (7.18–7.40) | 0.99 (0.98–1.05) | 1.00 (0.99–1.01) | 1.00 (0.98–1.03) |
+| cse-repeat | 7.51 (7.38–7.69) | 7.46 (7.38–8.10) | 7.51 (7.41–7.66) | 1.01 (0.98–1.01) | 1.00 (0.93–1.02) | 1.00 (0.97–1.01) |
+| fold | 6.76 (6.62–6.94) | 6.85 (6.62–6.99) | 6.73 (6.56–7.13) | 1.00 (0.96–1.08) | 0.99 (0.96–1.03) | 1.00 (0.97–1.03) |
+| deep-full | 12.9 (12.8–14.0) | 13.1 (12.4–14.1) | 13.3 (12.3–13.6) | 1.00 (0.90–1.05) | 1.02 (0.89–1.09) | 1.01 (0.89–1.06) |
+| deep-add-if | 8.65 (8.51–9.02) | 8.92 (8.52–9.53) | 8.82 (8.51–9.10) | 1.00 (0.96–1.07) | 0.96 (0.91–1.05) | 1.02 (0.94–1.06) |
+
+R1 and R2 give the same picture: through `run()`, D/B 0.91 to 1.05 and D/A
+0.92 to 1.04; on the body, D/B 0.98 to 1.01 and D/A 0.99 to 1.10. Every
+median lies inside the A2/A range of its fixture, with two exceptions that
+the other runs do not repeat: `heatwall` through `run()` in R1 (D/B 0.91 and
+D/A 0.93, just below the A2/A range 0.94 to 1.19; R2 gives D/B 0.98 and D/A
+0.92, and R3 0.93 and 0.93, inside their ranges), and none on the body. `deep-full` body
+D/A is 1.10 in R2, inside its A2/A range (0.90 to 1.25), and 1.02 and 1.01
+in R1 and R3.
+
+**The common-subexpression pass and constant folding of A make no measured
+difference to execution on these fixtures.** On `cse-repeat`, A computes the
+subexpression once and D four times; on `fold`, A writes `0.25` and D two
+calls of `Math`. D/A is 0.99 to 1.01 on the body in all three runs (A2/A
+ranges 0.96 to 1.08). The subexpression of `cse-repeat` is three cheap
+operations; the pilot vocabulary has no costly operation (a transcendental
+function, a call that loops) to repeat, so a case where the pass matters
+more cannot be written in it.
+
+### The corpus sample (40 programs, one per row)
+
+Totals per round, R3 (median and range of 9 rounds):
+
+| Measure | A | B | D | A2/A | D/B | D/A |
+| --- | --- | --- | --- | --- | --- | --- |
+| Warm compilation, ms | 7.01 (6.38–7.22) | 5.68 (5.31–5.95) | 3.77 (3.66–3.85) | 0.97 (0.93–1.07) | **0.68** (0.63–0.70) | **0.54** (0.52–0.60) |
+| Cold, fresh engine, ms | 27.2 (26.7–28.6) | 23.0 (22.5–23.2) | 19.0 (18.6–19.0) | 1.02 (0.99–1.02) | **0.83** (0.82–0.83) | **0.69** (0.67–0.70) |
+| Execution `run()`, ns summed | 1,442 (1,433–1,451) | 1,444 (1,417–1,480) | 1,455 (1,440–1,469) | 1.00 (0.99–1.01) | 1.00 (0.98–1.04) | 1.01 (1.00–1.02) |
+| Execution body, ns summed | 253 (251–257) | 253 (252–257) | 256 (252–258) | 1.00 (0.99–1.01) | 1.00 (1.00–1.01) | 1.01 (1.00–1.01) |
+
+R1 and R2 give warm compilation D/B 0.68 and 0.68, cold D/B 0.84 and 0.81,
+and execution D/B 1.00 on both measures. Per program (median, 10th to 90th
+percentile, R3): warm compilation D/B 0.72 (0.58–0.90) with A2/A 0.95
+(0.79–1.32); execution of the body D/B 1.00 (0.98–1.01) with A2/A 1.00
+(0.99–1.01). **With the random order, the corpus compilation result is
+resolved: D compiles the 40 programs in 0.68 of the time of B**, outside the
+A2/A range of the totals. The 546-program corpus was not run (the task
+limits this measure to the default mode).
+
+### Line counts
+
+`MODE=lines` on the final code, by the rule of the first measure:
+
+| Part | First measure | Revised |
+| --- | ---: | ---: |
+| `javascript-structured-ir.ts` | 417 | 417 |
+| `javascript-structured-lower.ts` | 436 | 436 |
+| `javascript-structured-emit.ts` | 187 | 276 |
+| `javascript-fragment-target.ts`, lines of `4c4f1c163` or `7939b5fac` | 411 | 411 |
+| `javascript-target.ts`, lines of `4c4f1c163` or `7939b5fac` | 88 | 88 |
+| **Total** | **1,539** | **1,628** |
+
+The existing handlers for the same operators are unchanged: at most 907
+lines, and about 190 by estimate.
+
+### The decision rules of step 4, applied again
+
+**1. "A wrong value, a wrong shape or a hidden use of the existing emitter:
+correct it, or stop."** Does not hold. On the 48 fixtures of the default mode
+(761 inputs), no value differs between A, A2, B, C and D, with the sign of
+each zero. The step 3 differential tests against the interpreter pass on all
+27 fixtures; the test that makes the readers of the existing emitter throw
+from preparation to emission passes. The revision added no import to the
+emitter.
+
+**2a. "A reproducible cost above 10% in total compilation, against the
+ordinary target with the same options."** Does not hold. Warm D/B is 0.32 to
+0.69 on every fixture in three runs, cold D/B 0.45 to 0.85, and 0.68 on the
+corpus sample totals. Each is outside the calibration range except one cold
+median. D is faster.
+
+**2b. "A reproducible cost above 5% in warm execution."** Not resolved, and
+no such cost was seen. On the body, every D/B median is 0.96 to 1.02 and
+every D/A median 0.99 to 1.10, and each lies inside its A2/A range; the one
+value above 1.05 (`deep-full` D/A 1.10 in R2) is not reproduced in R1 or R3.
+Through `run()`, the medians are 0.91 to 1.05, inside the calibration range
+except `heatwall` in R1, which is below 1 and not reproduced.
+
+**3. "A difference smaller than the variability of the harness: time is then
+not a reason for either choice. The two line counts decide."** For
+execution, this rule applies. Its two conditions:
+
+- **"The pilot is smaller than the handlers it would replace."** Does not
+  hold. The pilot is now 1,628 lines; the handlers are at most 907, and
+  about 190 by estimate. The emitted code is no longer a cost: D writes
+  0.78 to 1.36 times the bytes of B per fixture, and 0.99 on the corpus
+  sample, against 2.5 to 6.7 times in the first measure.
+- **"It removed a class of defect that has a `corpus` or `plausible`
+  witness."** Does not hold, as in the first measure.
+
+By this rule, expansion is not proposed.
+
+**4. "Stop means: the structured emitter and its representation are
+deleted; the annotation and the rule of step 1 stay."** Unchanged: the
+rules above do not decide between stopping and keeping the pilot.
+
+### What is resolved and what is not
+
+Resolved:
+
+- The size of the emitted code. It was the one measured cost of D in the
+  first measure; after the revision D writes about as many bytes as B.
+- The corpus compilation ratio. With the random order, A2/A is about 1.00,
+  and D/B 0.68 on the 40-program sample is outside its range.
+- The cost of the absence of common subexpressions and folding in D, on
+  `cse-repeat` and `fold`: no difference in execution (D/A 0.99 to 1.01 on
+  the body).
+
+Not resolved:
+
+- Execution differences below about 5% through `run()` and about 2% on the
+  body.
+- The bytes and the timings on the 546-program corpus (not run).
+- A second complete run of the final code: R3 is the only run of the final
+  structure of the emitter, and no run measured the last change (negative
+  literals without parentheses), which changes only bytes.
+- The cost of the absence of common subexpressions for a costly repeated
+  operation: the pilot vocabulary has none.
+- Parse time and memory of the emitted code (not measured; the code is now
+  about the size of B's).

@@ -1,0 +1,63 @@
+--- revised run 1
+start 2026-11-10T13:17:28Z
+ 5:17  up 1 day, 20:40, 7 users, load averages: 2.40 2.18 1.90
+ %CPU COMM
+ 28.7 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 21.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+ 18.7 node
+ 12.3 /Users/arno/.local/bin/claude
+  8.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+  8.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+  3.6 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+end 2026-11-10T13:18:57Z exit=0 seconds=89
+ 5:18  up 1 day, 20:42, 7 users, load averages: 3.74 2.67 2.11
+ %CPU COMM
+ 26.5 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 21.3 /System/Library/PrivateFrameworks/ReplicatorCore.framework/Support/replicatord
+  5.8 /usr/libexec/sysmond
+  5.4 node
+  4.3 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+  4.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+  3.3 /usr/sbin/bluetoothd
+--- revised run 2
+start 2026-11-10T13:19:01Z
+ 5:19  up 1 day, 20:42, 7 users, load averages: 3.60 2.66 2.11
+ %CPU COMM
+ 34.2 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 13.7 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+ 13.4 node
+ 12.4 /Users/arno/.nvm/versions/node/v26.13.0/bin/node
+ 10.5 /System/Library/PrivateFrameworks/ReplicatorCore.framework/Support/replicatord
+  9.3 /Users/arno/.local/bin/claude
+  8.6 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+end 2026-11-10T13:20:28Z exit=0 seconds=87
+ 5:20  up 1 day, 20:43, 7 users, load averages: 3.29 2.81 2.22
+ %CPU COMM
+ 30.0 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 17.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+  6.0 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper
+  2.3 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+  2.2 /usr/sbin/bluetoothd
+  1.8 /Users/arno/.local/bin/claude
+  1.7 /usr/libexec/sharingd
+--- revised run 3
+start 2026-11-10T13:21:57Z
+ 5:21  up 1 day, 20:45, 7 users, load averages: 2.67 2.74 2.25
+ %CPU COMM
+ 29.7 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 26.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+ 16.8 node
+ 11.2 /Users/arno/.local/bin/claude
+  9.2 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper
+  4.0 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+  3.9 /usr/libexec/sysmond
+end 2026-11-10T13:23:24Z exit=0 seconds=87
+ 5:23  up 1 day, 20:46, 7 users, load averages: 2.93 2.82 2.33
+ %CPU COMM
+ 13.5 /Users/arno/dev/tycho/node_modules/@esbuild/darwin-arm64/bin/esbuild
+ 10.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+  6.9 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+  3.5 /usr/sbin/bluetoothd
+  3.0 /Applications/Dropbox.app/Contents/MacOS/Dropbox
+  2.9 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+  2.7 /usr/libexec/sharingd
