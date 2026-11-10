@@ -810,16 +810,15 @@ with its fragment type. The WGSL target goes. A session reads the spec, then
 its step in the implementation plan. One sub-item per session.
 
 - **CE-1166.1** Remove the WGSL target: code and tests, then documents
-  (plan, step 1). Done: committed in `ceaff236b` and `d1ab4f05f`; not in a
-  release yet.
+  (plan, step 1). Done: committed in `ceaff236b` and `d1ab4f05f`; released
+  in 0.185.1.
 - **CE-1166.3** `canCompile()` as a typing pass, called first by `compile()`
   to `glsl` (plan, step 3). Done: committed in six phases, `1e5d675b7` (A),
   `c726cde71` (B), `bb6247991` (C), `9c126c5d8` (C2), `ede66c90d` (D),
-  `43679ce5d` (E); not in a release yet. Spec decisions 11 to 18 came from
+  `43679ce5d` (E); released in 0.185.1. Spec decisions 11 to 18 came from
   this step; decision 19 is CE-1180.
 - **CE-1166.4a** Tycho's audit calls `canCompile()` before each GLSL compile
-  and records a disagreement (plan, step 4). The request to Tycho is
-  `issues/CE-1181.md`.
+  and records a disagreement (plan, step 4). Done: CE-1181 is closed.
 - **CE-1166.4** Remove the shader statement machinery that the predicate
   makes unreachable, one module per session, after a first session that
   measures which functions still serve a function body (plan, step 5). The

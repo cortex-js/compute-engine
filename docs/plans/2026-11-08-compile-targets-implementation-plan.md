@@ -817,6 +817,15 @@ on the textual expansion, a row that is out ships on its CPU legs at resolve
 time, and the sidebar badge shows the diagnostic. `gpuImplicitEligibility()`
 does not change.
 
+**Done by another method** (approved 2026-11-09). Tycho does not call
+`canCompile()`. On CE 0.185.1, a row whose `glsl` compile declines with
+`outside-fragment` goes to its CPU legs and is not compiled again at each
+render (`src/plot/glsl-fragment-refusal.ts` in the Tycho repo). `compile()`
+runs the same check as `canCompile()` first and stops there, so a refused
+compile costs about as much as the check, and a check before each compile
+would add its cost to every row that compiles. The Tycho browser bundle also
+does not contain the `/compile` subpath that exports `canCompile()`.
+
 ## Step 7. Measure again, then decide
 
 After steps 1, 3 and 5: the line counts of `compilation/` by target family
