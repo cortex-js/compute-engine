@@ -567,6 +567,101 @@ slower, `interval-js`, 1.2 to 270 ms; two faster, `interval-js` and
 `javascript`) are on targets that this change does not touch. They were
 measured on a shared machine.
 
+**The result of the first "Also in this step" session** (2026-11-09, base
+`c9a14db67`). Two parts.
+
+The documentation. `docs/COMPILATION-MODEL.md`: "Statement order on the
+shader targets" is now "Statement order on GLSL". It states where the
+fragment has a list of statements (a block in a function body or at the
+root, with a counted loop, a selection, a nested block and `Break`), and
+shows the hoist of a block used as a value with its code. Its caller-code
+part, written by the CE-1176 change, did not change. "`Break` and
+`Continue` on the shader targets" is now "`Break` on GLSL", rewritten from a
+probe of each form with `canCompile()` and `compile()` at `c9a14db67`:
+
+- A `Break` in a loop of a user function body compiles now (the section
+  said it declines), and so does a `Break` in a nested `Block` and in an
+  inner loop.
+- `If(c, Break(), Nothing)` declines now (the section said it compiles): the
+  fragment gives `Nothing` no type. The witness strength is `crafted`, so
+  the decline stays and the section states it.
+- A `Break` in a `Sum` body does not reach the compiler: the boxing writes
+  an `Error` node. A `Loop` over several `Element` clauses declines with or
+  without a `Break`. `Match` is outside the fragment, so its line went.
+- The example loop now shows the pass-cap statement.
+
+The compile guide of the site (`13-guide-compile.md`) said that `Continue`
+compiles on GLSL; it now says that `Continue` and `Return` decline.
+
+The first question of the design note, section 6, "In step 5":
+`gpuOperandShape()`. It was measured, not moved: the move is more than one
+session. The measure, at `c9a14db67` in a scratch worktree: a probe wrapped
+`gpuOperandShape()`, recorded the two calling functions of each call, and
+looked the node up in the last six annotations that `typeFragment()` built
+(the root scope, the scopes of the function entries, and their inner
+scopes). This lookup is an approximation: the emitter has no target at most
+of these calls, so the probe cannot know the scope of the call. It ran the
+240 test files that name GLSL (239 run, 11,387 tests pass).
+
+- **The readers.** 46 call sites in 26 calling functions of 8 files
+  (`findReferences` and `incomingCalls`; the 15 calls in the GLSL lowering
+  table of `gpu-functions.ts` count as one caller). Through
+  `gpuBinaryVectorWidth()` and `gpuWidenToVector()`, which call it, the
+  readers reach more lowerings. Most callers already have a target in
+  scope (`gpuProvablyFinite()`, `gpuNaNSafeUnary()`,
+  `gpuScalarComponents()`, `gpuRoundToStep()`, the lowering table);
+  `gpuReduceTrigOffsetOf()`, `gpuPiMultiple()` and
+  `gpuImaginaryPiMultiple()` take it as an optional parameter;
+  `gpuFiniteRealCells()` and `gpuFloorModCall()` have none. So
+  `gpuOperandShape()`, `gpuBinaryVectorWidth()` and `gpuWidenToVector()`
+  get the target as a parameter, and two helpers and the callers of the
+  optional ones pass it.
+- **The calls.** 44,640 calls. The annotation gives the same shape for
+  43,361 (97.1%), no facts for 1,268 (2.8%), and another shape for 11. The
+  largest readers: `gpuFiniteRealCells()` 13,980, an anonymous `Array.map`
+  callback 9,222 (the probe names no function for it),
+  `gpuReduceTrigOffsetOf()` 6,326, `gpuNaNSafeUnary()` 5,789, the
+  `loweredSymbolType` hook 3,791, `gpuBinaryVectorWidth()` 2,230,
+  `gpuProvablyFinite()` 1,049, the `Power` lowering 923; all the others
+  1,330.
+- **The calls with no facts** have three causes. (1) A reader in the
+  prepare stage, which runs before the pass: `SharedCallsPass.isShaderScalar()`
+  (`gpu-shared-calls.ts`, 192 calls through the `loweredSymbolType` hook).
+  (2) A node that is not in the typed tree: `freeSymbolTypes()`
+  (`compile-references.ts`, shared by every target) asks about
+  `ce.symbol(name)` (463 calls). (3) A node that the emission makes: the
+  angle of the trigonometric fold (`2Which(…)`, 82 and 10 calls), `ln(n)`
+  and `-x` of the `Power` lowering, a temporary `_tv2`, `V * [cos(t), -sin(t)]`
+  of a reduction. A symbol that a scope binds is in `bindings`, not under
+  the node, so a lookup by node also misses a parameter or a local read
+  through a node that the pass did not record.
+- **The 11 differences.** A colour value (`AsRgb(Hsv(x + 1, 1, 1))`, 3
+  calls in the finite proofs): `gpuOperandShape()` answers `scalar`, the
+  annotation `vec3`. A symbol `P` or `p` (8 calls): `gpuOperandShape()`
+  answers `scalar` or `array`, the annotation `vec2`; the lookup by the last
+  six annotations can find a symbol node of another compilation, so these 8
+  are not shown to be a disagreement. The move session must check both
+  against the code that is written.
+- **What moves.** The emit-stage readers can read the annotation, with the
+  target as a new parameter. `gpuOperandShape()` cannot be removed by the
+  move: the prepare-stage reader and `freeSymbolTypes()` run without an
+  annotation, and the made nodes have none until `fragmentReplaceOperands()`
+  records facts for them. The move adds a parameter to about 5 functions
+  and changes 46 call sites, and removes about 65 lines (`gpuOperandShape()`, 35 lines, and
+  `gpuIsCollectionShaped()` with its comment) only when every reader has
+  facts.
+
+Proposed order: (1) record facts for the nodes that a trusted lowering
+makes, in `fragmentReplaceOperands()`, and look a symbol up in the
+`bindings` of the scope; (2) thread the target into the emit-stage readers
+and read the facts, with the old reading for the prepare stage only;
+(3) decide the colour case. Each is one session, with a dual review, since
+kept functions change. Because the move removes almost no code, step 7 can
+also decide to leave `gpuOperandShape()` where it is.
+
+No source file changed in this session, so the GLSL tests, `npm run
+test:glsl`, the typecheck and the corpus audit were not run for it.
+
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
 in the order of the interpreter, at the start of its statement. A piece in
@@ -581,6 +676,19 @@ preparation that step 5 asks for. The `discard` case (a reserved word as a
 parameter name) is separate: the specialization decision moves out of
 `ensureSpecializedUserCallEmitted()` (size S), and it can be done at any
 time.
+
+**The result of CE-1176 option (a)** (committed in `c9a14db67`, base
+`7520d089c`). On GLSL, `gpuBindCallerCode()` of the new module
+`gpu-caller-binding.ts` binds each piece of caller code to a temporary once
+per occurrence, in the order of the interpreter. `gpu-draw-order.ts`,
+`operandsWrittenTwice()` and `callerCodeOperandWrittenTwice()` of
+`glsl-fragment.ts`, the chained-comparison check of `compile-operators.ts`
+and `isShaderVariableRead()` of `compile-folding.ts` are removed. Source:
+790 lines removed, 726 added (453 in the new module). Tycho's whole-corpus
+codegen audit: 0 records with changed code, 0 new declines, 0 `canCompile()`
+disagreements. The measures and the review are in
+`docs/plans/2026-11-09-ce1176-caller-code-binding.md`, "The result of the
+implementation".
 
 ## Step 6. Tycho calls the predicate at resolve time
 

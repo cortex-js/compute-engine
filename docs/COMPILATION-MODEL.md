@@ -2002,23 +2002,44 @@ element by element. `Which(x < 0, 1)` over `x = [−1, 1]` gives
 2026-10-18 it gave an `interval` result, a value claimed over the whole cell
 (`hullValues`, `interval/comparison.ts`).
 
-### Statement order on the shader targets
+### Statement order on GLSL
 
-GLSL has no let-expression, so a lowering that needs statements — a
-loop-form `Sum` or `Product`, a `Block` used as a value, the statement form of
-a conditional, a lowering that binds an impure operand to a temporary — is
-hoisted into the enclosing statement sink, AHEAD of the whole enclosing
-expression. An operand written EARLIER in that expression therefore runs after
-the hoisted statements where the interpreter runs it first. In the GLSL
-fragment this order cannot be observed, except for code that the caller
+In the GLSL fragment, a `Block` is a list of statements in two places: the
+body of a user function, and the root of the compiled expression. Its
+statements are a declaration, an assignment of a local of the function, a
+counted `Loop` over an integer range, an `If` or `Which` whose branches are
+statements, a nested `Block`, and `Break` in a loop (next section). Each one
+is written as a GLSL statement, in the order of the block.
+
+GLSL has no let-expression, so a lowering inside an expression that needs
+statements (a loop-form `Sum` or `Product`, a `Block` used as a value, the
+statement form of a conditional, the temporary of a piece of caller code) is
+hoisted into the enclosing statement list, ahead of the whole enclosing
+expression. With `x` declared `real`,
+`x + Block(Declare(b, "real", x²), b)` compiles to:
+
+```glsl
+float _tv1;
+{
+  float b;
+  b = (x * x);
+  _tv1 = b;
+}
+return x + _tv1;
+```
+
+An operand written earlier in that expression (here `x`) therefore runs
+after the hoisted statements, where the interpreter runs it first. In the
+GLSL fragment this order cannot be observed, except for code that the caller
 supplies (below): the fragment has no random draw (`Random` and
 `WithRandomSeed` are not in it), an assignment writes only a local of its
-function, a block used as an operand may only declare names with a value
-(the `block-value` decline of `compile-admission.ts`, which `canCompile()`
-runs too), so it writes no local declared outside
-it, and the other impure nodes are calls of functions whose body is a block,
-which write only their own locals. Pure expressions, which every corpus
-document has at this position, are unaffected.
+function, and a block used as an operand may only declare names with a value
+before its last statement (the `block-value` decline of
+`compile-admission.ts`, which `canCompile()` runs too), so it writes no local
+declared outside it. `x + Block(Assign(b, x²), b)`, where the block assigns
+`b`, declines. The other impure nodes are calls of functions whose body is a
+block, which write only their own locals. Pure expressions, which every
+corpus document has at this position, are unaffected.
 
 Code that the caller supplies runs once per occurrence, in the order of the
 interpreter. Such code is a `vars` entry whose value is shader source other
@@ -2083,19 +2104,21 @@ the `functions` entries (`Cot(W)` is `cos(W) / sin(W)` with the bare name
 `W`); a `compile` handler that reaches it is written in place, and a form
 that writes its operand twice runs the handler's code twice.
 
-### `Break` and `Continue` on the shader targets
+### `Break` on GLSL
 
 `Continue` is not in the GLSL fragment: the typing pass refuses it in every
 position, and the interpreter runs the program. A jump is a statement in
-GLSL. So `Break` compiles only
-as a statement of a `Loop` body, alone or as the branch of a selection with one
-clause: `If(c, Break())`, `If(c, Break(), Nothing)`, `Which(c, Break())`, or
-`If(c, Block(n ≔ k, Break()))`. With `a` a local of the block,
-`Block(a ≔ 0; Loop(Block(If(a > 3, Break()), a ≔ a + 1), k ∈ 1..8); a)`
-compiles to this code in the loop on GLSL:
+GLSL. So `Break` compiles only as a statement of the body of a counted
+`Loop`, in a block at the root of the compiled expression or in the body of a
+user function: alone, in a nested `Block`, or as the branch of an `If` with
+no else branch or of a `Which` with one clause: `If(c, Break())`,
+`Which(c, Break())`, `If(c, Block(m ≔ k, Break()))`. With `a` a local of the
+block, `Block(a ≔ 0; Loop(Block(If(a > 3, Break()), a ≔ a + 1), k ∈ 1..8); a)`
+compiles to this code on GLSL:
 
 ```glsl
 for (int k = 1; k <= 8; k++) {
+  if (++_gpu_passes > 10000) break;
   if (3.0 < a) {
     break;
   }
@@ -2103,20 +2126,27 @@ for (int k = 1; k <= 8; k++) {
 }
 ```
 
-Each other position declines:
+The first statement of the loop is the pass cap ("A limit on `Loop`
+passes", below). In a nested loop, `break` leaves the innermost `for`
+statement, as `Break` leaves the innermost `Loop` in the interpreter. The
+same loop in the body of a user function `f` is written in the GLSL
+definition of that function, `_fn_f`.
 
-- A selection with a second clause, `If(c, Break(), n ≔ 1)`. When the first
-  branch always leaves the loop, the else branch can be the statement after the
-  `If`.
+Each other position declines, with a diagnostic of `canCompile()`:
+
+- An `If` with an else branch: `If(c, Break(), m ≔ 1)`, and also
+  `If(c, Break(), Nothing)`, since the fragment gives `Nothing` no type. When
+  the first branch always leaves the loop, write the else branch as the
+  statement after the `If`.
 - A `Break` with a value, `Break(f(k))`. The compiled `break` has no value, and
   the interpreter evaluates the operand before it leaves the loop.
-- A jump in a value: `s ≔ If(c, Break(), 1)`, or a `Block` used as an operand.
-- A jump in a `Match` case, or in a `Sum` or `Product` body.
-- A jump with no `Loop`, and a jump in the body of a user function. A `break`
-  outside a loop is an error that only the driver reports, after the
-  compilation has reported success.
-- A `Break` in a `Loop` over several `Element` clauses: it would leave only the
-  innermost `for` statement, where the interpreter stops the whole loop.
+- A jump in a value: `s ≔ If(c, Break(), 1)`.
+- A jump with no `Loop`. A `break` outside a loop is an error that only the
+  driver reports, after the compilation has reported success.
+- A jump in a `Sum` or `Product` body: the boxing of the expression writes an
+  `Error` node for it (`incompatible-type`).
+- A `Loop` over several `Element` clauses, with or without a `Break`: the
+  fragment has only the counted loop over one integer range.
 
 On a NaN operand, the shader and the interpreter take the same action: a
 relation is `false`, so `If(v > 4, Break())` does not jump, and `≠` is `true`,

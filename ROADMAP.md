@@ -810,7 +810,8 @@ with its fragment type. The WGSL target goes. A session reads the spec, then
 its step in the implementation plan. One sub-item per session.
 
 - **CE-1166.1** Remove the WGSL target: code and tests, then documents
-  (plan, step 1). Can start at once.
+  (plan, step 1). Done: committed in `ceaff236b` and `d1ab4f05f`; not in a
+  release yet.
 - **CE-1166.3** `canCompile()` as a typing pass, called first by `compile()`
   to `glsl` (plan, step 3). Done: committed in six phases, `1e5d675b7` (A),
   `c726cde71` (B), `bb6247991` (C), `9c126c5d8` (C2), `ede66c90d` (D),
@@ -821,8 +822,16 @@ its step in the implementation plan. One sub-item per session.
   `issues/CE-1181.md`.
 - **CE-1166.4** Remove the shader statement machinery that the predicate
   makes unreachable, one module per session, after a first session that
-  measures which functions still serve a function body (plan, step 5). After
-  CE-1166.3 and after Tycho's audit calls the predicate (plan, step 4).
+  measures which functions still serve a function body (plan, step 5). The
+  removal sessions are done: committed in `d8f3e604a`, `b9b37fca6`,
+  `d43d68f25`, `7520d089c`, `21612f7d8`, `a9e36bada` and `c9a14db67`
+  (CE-1176); not in a release yet. The documentation part of "Also in this
+  step" is done. Open: the move of the shape queries
+  (`gpuOperandShape()`) to the annotation, measured as three sessions that
+  remove about 65 lines, so step 7 can decide to leave it; and the removal
+  of the table of declared types keyed by frame (`withLocalShapeFrame`),
+  which the plan allows only when no shader target pushes a shape frame,
+  not yet checked.
 - **CE-1166.5** Measure the compiler again and give the user the numbers for
   the decision on a wider intermediate representation (plan, step 7). After
   CE-1166.1, .3 and .4.
