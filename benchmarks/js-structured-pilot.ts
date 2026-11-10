@@ -2040,9 +2040,13 @@ type VariantSpec = {
  * fixture in the runs of `docs/plans/2026-11-09-js-structured-pilot-measure.md`
  * (A for `heatstep`, D for `heatpaint`); `other` is the faster one. Each
  * variant removes one difference of the code of `base` to the code of
- * `other`; `all` removes all of them. The edits are written for the code of
- * commit bce12318883b155f6631a77a6fce87022801a5a0: an edit that does not
- * match its count throws, so a change of the emitted code shows here.
+ * `other`; `all` removes all of them. `earlier-loop-header` instead
+ * puts back the loop header that D wrote before the revision of 2026-11-10
+ * (section "The loop header revised" of that document). The edits of A are
+ * written for the code of commit bce12318883b155f6631a77a6fce87022801a5a0,
+ * and the edits of D for the code of D after that revision: an edit that
+ * does not match its count throws, so a change of the emitted code shows
+ * here.
  */
 const CODE_VARIANTS: Record<string, VariantSpec> = {
   heatstep: {
@@ -2137,22 +2141,22 @@ const CODE_VARIANTS: Record<string, VariantSpec> = {
       },
       {
         id: 'loop-header',
-        note: 'the loop header of A (a counter from 0 to 1024, the index computed in the body)',
+        note: 'the loop header of A (a counter from 0 to the number 1024, the index computed in the body with the numbers 1 and 1)',
         edits: [
           {
-            from: 'for (let _tv7 = 1, _tv8 = _tv5 < _tv7 ? -1 : 1, _tv9 = _tv8 * (_tv5 - _tv7); _tv9 >= 0; _tv7 += _tv8, _tv9--) {',
+            from: 'const _tv8 = _tv5 < 1 ? -1 : 1; const _tv9 = _tv8 * (_tv5 - 1); for (let _tv10 = 0; _tv10 <= _tv9; _tv10++) { const _tv7 = _tv8 < 0 ? 1 - _tv10 : 1 + _tv10;',
             to: 'for (let _i = 0; _i < 1024; _i++) { const _tv7 = 1 + (1) * _i;',
             count: 1,
           },
         ],
       },
       {
-        id: 'constant-step',
-        note: 'the loop header of D with the step and the count written as numbers (1 and 1023), not computed from the bounds',
+        id: 'earlier-loop-header',
+        note: 'the loop header of D before the revision of 2026-11-10 (index, step and count in the header)',
         edits: [
           {
-            from: 'for (let _tv7 = 1, _tv8 = _tv5 < _tv7 ? -1 : 1, _tv9 = _tv8 * (_tv5 - _tv7); _tv9 >= 0; _tv7 += _tv8, _tv9--) {',
-            to: 'for (let _tv7 = 1, _tv9 = 1023; _tv9 >= 0; _tv7 += 1, _tv9--) {',
+            from: 'const _tv8 = _tv5 < 1 ? -1 : 1; const _tv9 = _tv8 * (_tv5 - 1); for (let _tv10 = 0; _tv10 <= _tv9; _tv10++) { const _tv7 = _tv8 < 0 ? 1 - _tv10 : 1 + _tv10;',
+            to: 'for (let _tv7 = 1, _tv8 = _tv5 < _tv7 ? -1 : 1, _tv9 = _tv8 * (_tv5 - _tv7); _tv9 >= 0; _tv7 += _tv8, _tv9--) {',
             count: 1,
           },
         ],
@@ -2162,8 +2166,8 @@ const CODE_VARIANTS: Record<string, VariantSpec> = {
         note: 'the squares are calls of `_SYS.pow2`, as in A (the locals stay)',
         edits: [
           {
-            from: '_tv10 * _tv10 + _tv11 * _tv11',
-            to: '_SYS.pow2(_tv10) + _SYS.pow2(_tv11)',
+            from: '_tv11 * _tv11 + _tv12 * _tv12',
+            to: '_SYS.pow2(_tv11) + _SYS.pow2(_tv12)',
             count: 1,
           },
         ],
@@ -2173,7 +2177,7 @@ const CODE_VARIANTS: Record<string, VariantSpec> = {
         note: 'the element is one expression, as in A: `&&` instead of a local and an `if`, `_SYS.pow2` of the differences',
         edits: [
           {
-            from: /let _tv12 = (!_tv1\([^;]*\)); if \(_tv12\) \{ const _tv10 = ([^;]*); const _tv11 = ([^;]*); _tv12 = _tv10 \* _tv10 \+ _tv11 \* _tv11 <= 9; \} _tv6\.push\(_tv12 \? 1 : ([^;]*)\);/,
+            from: /let _tv13 = (!_tv1\([^;]*\)); if \(_tv13\) \{ const _tv11 = ([^;]*); const _tv12 = ([^;]*); _tv13 = _tv11 \* _tv11 \+ _tv12 \* _tv12 <= 9; \} _tv6\.push\(_tv13 \? 1 : ([^;]*)\);/,
             to: '_tv6.push(($1 && _SYS.pow2($2) + _SYS.pow2($3) <= 9) ? 1 : $4);',
             count: 1,
           },
@@ -2188,11 +2192,22 @@ const CODE_VARIANTS: Record<string, VariantSpec> = {
     variants: [
       {
         id: 'loop-header',
-        note: 'the loop header of A (a counter from 0 to 1024, the index computed in the body)',
+        note: 'the loop header of A (a counter from 0 to the number 1024, the index computed in the body with the numbers 1 and 1)',
         edits: [
           {
-            from: 'for (let _tv3 = 1, _tv4 = _tv1 < _tv3 ? -1 : 1, _tv5 = _tv4 * (_tv1 - _tv3); _tv5 >= 0; _tv3 += _tv4, _tv5--) {',
+            from: 'const _tv4 = _tv1 < 1 ? -1 : 1; const _tv5 = _tv4 * (_tv1 - 1); for (let _tv6 = 0; _tv6 <= _tv5; _tv6++) { const _tv3 = _tv4 < 0 ? 1 - _tv6 : 1 + _tv6;',
             to: 'for (let _i = 0; _i < 1024; _i++) { const _tv3 = 1 + (1) * _i;',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'earlier-loop-header',
+        note: 'the loop header of D before the revision of 2026-11-10 (index, step and count in the header)',
+        edits: [
+          {
+            from: 'const _tv4 = _tv1 < 1 ? -1 : 1; const _tv5 = _tv4 * (_tv1 - 1); for (let _tv6 = 0; _tv6 <= _tv5; _tv6++) { const _tv3 = _tv4 < 0 ? 1 - _tv6 : 1 + _tv6;',
+            to: 'for (let _tv3 = 1, _tv4 = _tv1 < _tv3 ? -1 : 1, _tv5 = _tv4 * (_tv1 - _tv3); _tv5 >= 0; _tv3 += _tv4, _tv5--) {',
             count: 1,
           },
         ],
@@ -2200,7 +2215,7 @@ const CODE_VARIANTS: Record<string, VariantSpec> = {
       {
         id: 'pow2',
         note: 'the squares are calls of `_SYS.pow2`, as in A (the locals stay)',
-        edits: [{ from: '_tv6 * _tv6 + _tv7 * _tv7', to: '_SYS.pow2(_tv6) + _SYS.pow2(_tv7)', count: 1 }],
+        edits: [{ from: '_tv7 * _tv7 + _tv8 * _tv8', to: '_SYS.pow2(_tv7) + _SYS.pow2(_tv8)', count: 1 }],
       },
     ],
     all: ['loop-header', 'pow2'],

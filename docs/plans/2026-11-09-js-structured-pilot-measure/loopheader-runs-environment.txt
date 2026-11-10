@@ -1,0 +1,35 @@
+Runs of the section "The loop header revised (2026-11-10)" of
+docs/plans/2026-11-09-js-structured-pilot-measure.md.
+Apple M5 Max, 18 cores, Node v26.13.0. All runs held the box lock (owner
+compute-engine-ec:loopheader), in a linked worktree at
+432d49f71f3eb1506a5e87d693dd170d9e466414 with the revision of
+javascript-structured-emit.ts and of the harness uncommitted.
+F = heatseed,heatpaint,heatstep,roadstep,loop-sum,loop-complex-iteration,local-writes
+
+Form 1 (the index `from + step * counter`):
+  loopheader-form1-run1.jsonl.gz
+    ORDER_SEED=20261110 ONLY=$F node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+    20:05:49 to 20:06:06 UTC; load 4.49 4.18 4.54 at the start, 4.72 4.25 4.56 at the end.
+  loopheader-form1-run2.jsonl.gz
+    ORDER_SEED=777 ONLY=$F node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+    20:06:06 to 20:06:22 UTC; load 4.72 4.25 4.56 at the start, 5.89 4.52 4.65 at the end.
+  loopheader-form1-variants-seed20261110.json.gz, loopheader-form1-variants-seed777.json.gz
+    VARIANTS=heatpaint,heatseed ORDER_SEED=<seed> MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+    20:06:22 to 20:06:47 UTC; load 5.89 4.52 4.65 at the start, 6.84 4.84 4.76 at the end.
+    The variant edits of D in these two files are for form 1 (the harness was
+    then changed to the text of form 2).
+
+Form 2 (the index `step < 0 ? from - counter : from + counter`; the delivered form):
+  loopheader-form2-run1.jsonl.gz
+    ORDER_SEED=20261110 ONLY=$F node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+    20:13:41 to 20:13:56 UTC; load 25.26 22.08 13.39 at the start, 20.49 21.18 13.22 at the end.
+  loopheader-form2-run2.jsonl.gz
+    ORDER_SEED=777 ONLY=$F node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+    20:13:56 to 20:14:13 UTC; load 20.49 21.18 13.22 at the start, 17.78 20.55 13.14 at the end.
+  loopheader-form2-variants-seed20261110.json.gz, loopheader-form2-variants-seed777.json.gz
+    VARIANTS=heatpaint,heatseed ORDER_SEED=<seed> MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+    20:14:13 to 20:14:36 UTC; load 17.78 20.55 13.14 at the start, 13.06 19.21 12.86 at the end.
+
+The high load average at the start of the form 2 runs comes from a full test
+suite of another session that held the lock just before; the load average
+is a one-minute mean and falls during the runs.

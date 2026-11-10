@@ -1823,3 +1823,122 @@ Not resolved: why `A.raw` of `heatstep` runs at two speeds; the part of
 the `heatpaint` gap that no single difference explains; why the form of
 `run()` widens the `heatpaint` gap; a run of the variants with B; the
 546-program corpus.
+
+## The loop header revised (2026-11-10)
+
+This section changes the loop header that the structured emitter writes for
+`loop` and `build` (`rangeHeader()` in `javascript-structured-emit.ts`),
+because rule 2b held for `heatseed` (section "Second run and causes"), and
+times the result. Base: `432d49f71f3eb1506a5e87d693dd170d9e466414`.
+
+### The header
+
+```js
+// Before: the index and a count of the passes left, by a variable step, in the header
+for (let k = A, s = B < k ? -1 : 1, n = s * (B - k); n >= 0; k += s, n--) { … }
+
+// Form 1 (timed, not kept)
+const s = B < A ? -1 : 1; const n = s * (B - A);
+for (let i = 0; i <= n; i++) { const k = A + s * i; … }
+
+// Form 2 (delivered)
+const s = B < A ? -1 : 1; const n = s * (B - A);
+for (let i = 0; i <= n; i++) { const k = s < 0 ? A - i : A + i; … }
+```
+
+The bounds are read once each before the loop (a bound that is not a name
+or a literal is bound to a `const` first; now `A` as well as `B`, since
+both are read more than once). The counter is the only variable that the
+header changes, as in the existing emitter (`compileCountedRange()`); the
+body does not write `k`; with an iteration budget the call of
+`_SYS.countLoopPass()` stays the second statement of each pass. The passes
+are the same as before for every pair of bounds: `n + 1` passes when
+`n >= 0`, none when `n` is `NaN`. `Range(1, 0)` visits 1 and 0, `Range(3, 1)`
+visits 3, 2, 1, `Range(2, 2)` visits 2. The form for number bounds is the
+same general form: the slow fixtures have the bound `32 * 32`, which is not a
+literal in the code, so a form for literals would not change them.
+
+**Very large ranges.** As before, the new form does not refuse a range of
+more than 2^32 − 1 passes or an infinite bound: the loop runs until the
+iteration budget stops it, or without end when there is no budget, where
+the existing emitter throws `RangeError('Invalid array length')`. No test
+checks this case on either route; the comment of `rangeHeader()` states it.
+
+**Why form 2.** Form 1 closed the gap on `heatseed` but made `loop-sum`
+slower (D/B 0.58 before, 0.92 and 0.94 with form 1, D from 33 ns to 53 ns
+per call). The inputs of `loop-sum` include `n = 0` and `n = -3`, ranges
+that count down: for the step -1 the first product `s * i` is `-1 * 0`,
+which is `-0`. This agrees with the change: after a `-0`, V8 computes the
+index as a double, not as a small integer (an explanation that agrees with
+the times; not traced). Form 2 has no product.
+
+### Execution, D/B and A2/A before and after (ns per call through `run()`)
+
+Ratios: the median and the range over the 9 rounds. "Before" is the second
+run (seed 20261110) and, where it has the fixture, the third run (seed 777)
+of section "Second run and causes"; "after" is form 2 with the same two
+seeds. The raw outputs and the environment are in
+[`2026-11-09-js-structured-pilot-measure/loopheader-runs-environment.txt`](2026-11-09-js-structured-pilot-measure/loopheader-runs-environment.txt).
+
+| Fixture | D/B before, seed 1 | D/B before, seed 2 | D/B form 1, seeds 1 and 2 | D/B after, seed 1 | D/B after, seed 2 | A2/A after, seeds 1 and 2 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `heatseed` | 1.06 (0.96 to 1.12) | 1.08 (1.01 to 1.12) | 1.00 (0.96 to 1.02), 1.01 (0.99 to 1.28) | 0.98 (0.90 to 1.01) | 1.00 (0.99 to 1.05) | 1.01 (0.72 to 1.30), 1.00 (0.99 to 1.17) |
+| `heatpaint` | 1.04 (0.97 to 1.09) | 1.04 (0.94 to 1.07) | 1.02 (0.97 to 1.07), 1.03 (0.94 to 1.21) | 1.03 (1.00 to 1.29) | 1.02 (1.00 to 1.23) | 1.00 (0.92 to 1.03), 1.01 (1.00 to 1.17) |
+| `heatstep` | 0.59 (0.34 to 0.75) | — | 0.58 (0.35 to 0.76), 0.49 (0.32 to 0.63) | 0.59 (0.33 to 1.51) | 0.56 (0.38 to 0.95) | 0.99 (0.45 to 1.83), 0.96 (0.41 to 2.32) |
+| `roadstep` | 0.46 (0.43 to 0.98) | 0.47 (0.42 to 0.79) | 0.47 (0.35 to 0.92), 0.46 (0.39 to 0.93) | 0.47 (0.43 to 0.97) | 0.46 (0.43 to 0.89) | 0.64 (0.61 to 1.62), 0.74 (0.62 to 1.61) |
+| `loop-sum` | 0.58 (0.54 to 0.70) | — | 0.92 (0.83 to 0.94), 0.94 (0.78 to 0.98) | 0.55 (0.44 to 0.66) | 0.61 (0.54 to 0.64) | 1.04 (0.89 to 1.15), 1.07 (0.92 to 1.14) |
+| `loop-complex-iteration` | 0.77 (0.72 to 0.80) | — | 0.76 (0.66 to 0.81), 0.72 (0.66 to 0.77) | 0.78 (0.72 to 0.91) | 0.75 (0.71 to 0.78) | 0.98 (0.94 to 1.06), 1.00 (0.90 to 1.09) |
+| `local-writes` (no loop; control) | 1.04 (0.85 to 1.42) | — | 1.00 (0.74 to 1.22), 1.00 (0.78 to 1.39) | 1.00 (0.84 to 1.13) | 0.99 (0.86 to 1.10) | 0.98 (0.89 to 1.14), 0.99 (0.89 to 1.16) |
+
+The form 2 runs started at a load average of 25, after a full test suite of
+another session (the load is a one-minute mean and fell to 13 during the
+runs); the form 1 runs at a load of 4.5 to 6.8. The calibration A2/A of the
+heat fixtures stays within 1.00 ± 0.01 at the median.
+
+### The variants mode after the revision
+
+`MODE=variants` now gives D of `heatpaint` and `heatseed` the variant
+`earlier-loop-header` (the header before this revision put back) next to
+`loop-header` (the header of A: the counter to the number 1024, the index
+`1 + (1) * i`). Raw functions, 20 ms batches, 15 rounds, form 2; ratios to
+`D.raw`, seed 20261110 then seed 777:
+
+| Function | `heatpaint` | `heatseed` |
+| --- | --- | --- |
+| `D.raw2` (calibration) | 1.00 (0.98 to 1.02), 1.00 (0.98 to 1.15) | 1.00 (0.97 to 1.01), 1.00 (0.95 to 1.01) |
+| `A.raw` | 0.96 (0.94 to 0.98), 0.95 (0.93 to 1.07) | 0.95 (0.93 to 0.98), 0.95 (0.91 to 0.98) |
+| `earlier-loop-header` | 1.02 (1.01 to 1.03), 1.01 (1.00 to 1.07) | 1.05 (1.03 to 1.06), 1.05 (1.01 to 1.07) |
+| `loop-header` (the header of A) | 0.99 (0.96 to 1.00), 0.99 (0.96 to 1.14) | 0.96 (0.94 to 1.00), 0.98 (0.94 to 1.01) |
+| `pow2` | 0.99 (0.97 to 1.03), 1.00 (0.91 to 1.03) | 0.98 (0.97 to 1.01), 0.98 (0.94 to 1.02) |
+| `all` | 0.96 (0.95 to 0.97), 0.96 (0.87 to 0.98) | 0.95 (0.93 to 0.97), 0.95 (0.91 to 1.02) |
+| `A.run` / `D.run` | 0.93 (0.92 to 0.96), 0.96 (0.95 to 1.17) | 0.95 (0.94 to 0.96), 0.96 (0.93 to 0.99) |
+
+The earlier header is 2% (`heatpaint`) and 5% (`heatseed`) slower than the
+delivered one. Between the raw functions, D is still about 4% to 5% slower
+than A; the header of A with the count written as the number 1024 removes
+0.36 to 0.76 of that remaining gap on `heatseed` and 0.38 to 0.40 on
+`heatpaint` (shares, medians), `pow2` about a third on `heatseed`. That
+header needs a count known at compile time, which these fixtures do not
+have in the code of D (`32 * 32`); it was not tried, by the limit of two
+forms for this task.
+
+### Rule 2b, applied again
+
+**2b. "A reproducible cost above 5% in warm execution, against the ordinary
+target with the same options" (D/B).**
+
+- `heatseed`: no longer holds. D/B 0.98 (0.90 to 1.01) and 1.00 (0.99 to
+  1.05), from 1.06 and 1.08.
+- `heatpaint`: does not hold, as before. D/B 1.03 (1.00 to 1.29) and 1.02
+  (1.00 to 1.23); the medians are below 1.05.
+- `loop-sum`, `loop-complex-iteration`, `heatstep`, `roadstep`: D stays
+  faster (D/B 0.46 to 0.78), as before the revision; form 1 had made
+  `loop-sum` 0.92 to 0.94, form 2 does not.
+- `local-writes` (no loop): 1.00 and 0.99.
+
+No fixture of this run has a reproducible cost above 5% against B. Against A
+(default options), D/A is 1.02 to 1.05 on `heatpaint` and `heatseed`;
+between the raw functions of the variants mode D is 4% to 5% slower than A
+(above). The values of every program are unchanged: the structured and
+fragment tests (exact against the existing route) and `MODE=check
+ONLY=named` (no difference on any fixture) pass.

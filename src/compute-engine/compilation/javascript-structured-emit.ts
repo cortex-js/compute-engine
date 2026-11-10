@@ -56,8 +56,12 @@
  *   the body is that variable too. The bounds are read once each before the
  *   first iteration (a bound that is not a name or a literal is bound to a
  *   `const` first, because the code reads its text more than once). The
- *   index is the counter of the `for`, from `from` to `to`, in steps of 1,
- *   or of -1 when `to` is less than `from`. At the end of the body, each
+ *   index goes from `from` to `to`, in steps of 1, or of -1 when `to` is
+ *   less than `from`: the step and the number of passes are `const`
+ *   values before the `for`, whose counter goes from 0, and the first
+ *   statement of the body computes the index from the counter, as the
+ *   existing emitter writes a range (`compileCountedRange()` in
+ *   `compile-loops.ts`). At the end of the body, each
  *   carried variable is assigned its next value; when more than one changes,
  *   each next value that could read a carried variable is first bound to a
  *   `const`, so that every next value reads the values of the iteration
@@ -295,7 +299,7 @@ function usesOf(program: IRProgram): Map<number, Use> {
       // The text of a complex operand of a complex sum is written twice,
       // once per component (a real operand once: it has no imaginary part),
       // and of a complex product four times. The code of a loop
-      // reads the text of its upper bound twice.
+      // reads the text of each of its bounds more than once.
       const complex = op.result?.representation === 'complex';
       const readsOf = (i: number) =>
         op.kind === 'add' && complex
@@ -304,7 +308,7 @@ function usesOf(program: IRProgram): Map<number, Use> {
             : 1
           : op.kind === 'multiply' && complex
             ? 4
-            : (op.kind === 'loop' || op.kind === 'build') && i === 1
+            : (op.kind === 'loop' || op.kind === 'build') && i <= 1
               ? 2
               : 1;
       for (const [i, value] of op.operands.entries()) {
@@ -613,11 +617,15 @@ class Emitter {
         if (index === undefined) return fail('a build has no index');
         const name = this.bind(op.result);
         const k = this.bind(index);
-        const header = this.rangeHeader(k, from, to);
-        const body: string[] = [];
+        const range = this.rangeHeader(k, from, to);
+        const body: string[] = [range.index];
         const [element] = this.region(op.body, body, readsInputs);
         body.push(`${name}.push(${operand(element, CONDITIONAL)});`);
-        out.push(`const ${name} = [];`, `${header} { ${body.join(' ')} }`);
+        out.push(
+          `const ${name} = [];`,
+          ...range.before,
+          `${range.header} { ${body.join(' ')} }`
+        );
         return undefined;
       }
       case 'min':
@@ -727,8 +735,8 @@ class Emitter {
       this.plain.add(p.id);
     });
     const k = this.bind(index);
-    const header = this.rangeHeader(k, from, to);
-    const body: string[] = [];
+    const range = this.rangeHeader(k, from, to);
+    const body: string[] = [range.index];
     if (op.iterationBudget !== undefined)
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
     const next = this.region(op.body, body, readsInputs);
@@ -764,22 +772,51 @@ class Emitter {
         : [
             `let ${names.map((name, i) => `${name} = ${operand(initial[i], CONDITIONAL)}`).join(', ')};`,
           ];
-    return [...declarations, `${header} { ${body.join(' ')} }`];
+    return [
+      ...declarations,
+      ...range.before,
+      `${range.header} { ${body.join(' ')} }`,
+    ];
   }
 
   /**
-   * The header of a `for` statement whose counter `k` visits each integer
-   * from `from` to `to`, both included, in steps of 1, or of -1 when `to`
-   * is less than `from`. The text of `to` is read twice.
+   * A loop whose index `k` visits each integer from `from` to `to`, both
+   * included, in steps of 1, or of -1 when `to` is less than `from`:
+   * `before`, two `const` statements that compute the step and the last
+   * value of the counter, then `header`, a `for` statement whose counter
+   * goes from 0 to that last value, and `index`, the first statement of the
+   * body, which computes `k` from the counter. This is the form of the
+   * existing emitter (`compileCountedRange()` in `compile-loops.ts`): V8
+   * runs a loop whose counter is the only variable that the header changes
+   * faster than a loop that changes the index and a count of the passes
+   * left, by a variable step, in its header
+   * (`docs/plans/2026-11-09-js-structured-pilot-measure.md`, "The loop
+   * header revised"). The index is `from - counter` or `from + counter`,
+   * not `from + step * counter`: for the step -1 and the counter 0 the
+   * product is `-0`, after which V8 computes the index as a double, not as
+   * a small integer, and a short loop that counts down runs slower (the
+   * `loop-sum` fixture of `benchmarks/js-structured-pilot.ts`). The texts
+   * of `from` and `to` are each read more than
+   * once. A bound that is not finite, or a range of more than 2^32 − 1
+   * elements, is not refused: the loop runs until the iteration budget
+   * stops it, or for ever without one, where the existing emitter throws a
+   * `RangeError`.
    */
-  private rangeHeader(k: string, from: Source, to: Source): string {
+  private rangeHeader(
+    k: string,
+    from: Source,
+    to: Source
+  ): { before: string[]; header: string; index: string } {
     const step = this.names.fresh();
-    const left = this.names.fresh();
-    return (
-      `for (let ${k} = ${operand(from, CONDITIONAL)}, ` +
-      `${step} = ${operand(to, RELATIONAL + 1)} < ${k} ? -1 : 1, ` +
-      `${left} = ${step} * (${operand(to, ADDITIVE)} - ${k}); ` +
-      `${left} >= 0; ${k} += ${step}, ${left}--)`
-    );
+    const last = this.names.fresh();
+    const counter = this.names.fresh();
+    return {
+      before: [
+        `const ${step} = ${operand(to, RELATIONAL + 1)} < ${operand(from, RELATIONAL + 1)} ? -1 : 1;`,
+        `const ${last} = ${step} * (${operand(to, ADDITIVE)} - ${operand(from, ADDITIVE + 1)});`,
+      ],
+      header: `for (let ${counter} = 0; ${counter} <= ${last}; ${counter}++)`,
+      index: `const ${k} = ${step} < 0 ? ${operand(from, ADDITIVE)} - ${counter} : ${operand(from, ADDITIVE)} + ${counter};`,
+    };
   }
 }

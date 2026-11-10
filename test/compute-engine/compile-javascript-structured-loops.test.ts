@@ -159,6 +159,27 @@ const FIXTURES: Fixture[] = [
     json: fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', 's', ['Power', 'k', 2]]], 'k', 1, 'n'), 's'),
     inputs: [[5], [1], [0], [-3]],
   },
+  // The digits of `s` are the indexes in the order of the passes.
+  {
+    name: 'number bounds: Range(1, 0) visits 1 then 0',
+    json: fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', ['Multiply', 10, 's'], 'k', 1]], 'k', 1, 0), 's'),
+    inputs: [[0]],
+  },
+  {
+    name: 'number bounds: Range(3, 1) visits 3, 2, 1',
+    json: fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', ['Multiply', 10, 's'], 'k']], 'k', 3, 1), 's'),
+    inputs: [[0]],
+  },
+  {
+    name: 'number bounds: Range(2, 2) visits 2 once',
+    json: fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', ['Multiply', 10, 's'], 'k']], 'k', 2, 2), 's'),
+    inputs: [[0]],
+  },
+  {
+    name: 'a range that counts down from n to 1',
+    json: fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', ['Multiply', 10, 's'], 'k']], 'k', 'n', 1), 's'),
+    inputs: [[4], [1], [0], [-2]],
+  },
   {
     name: 'a product',
     json: fn(N, declare('p', 'real', 1), loop(['Assign', 'p', ['Multiply', 'p', 'k']], 'k', 1, 'n'), 'p'),
@@ -450,6 +471,17 @@ describe('differential: the interpreter decides, the existing emitter checks', (
           if (existing) expect([inputs, same(value, run(existing, inputs))]).toEqual([inputs, true]);
         }
       });
+
+  test('the order of the passes over ranges with number bounds and over a range that counts down', () => {
+    const value = (name: string, inputs: Value[]) =>
+      run(structured().compile(engine().expr(fixture(name)), OPTIONS), inputs);
+    expect(value('number bounds: Range(1, 0) visits 1 then 0', [0])).toBe(21);
+    expect(value('number bounds: Range(3, 1) visits 3, 2, 1', [0])).toBe(321);
+    expect(value('number bounds: Range(2, 2) visits 2 once', [0])).toBe(2);
+    expect(value('a range that counts down from n to 1', [4])).toBe(4321);
+    // Range(-2, 1) counts up: -2, -1, 0, 1.
+    expect(value('a range that counts down from n to 1', [-2])).toBe(-2099);
+  });
 });
 
 //
@@ -779,13 +811,13 @@ describe('the emitted code', () => {
 
   test('a sum of squares', () => {
     expect(code(fixture('a sum of squares'))).toBe(
-      '(n) => { const _tv1 = n; let _tv2 = 0; for (let _tv3 = 1, _tv4 = _tv1 < _tv3 ? -1 : 1, _tv5 = _tv4 * (_tv1 - _tv3); _tv5 >= 0; _tv3 += _tv4, _tv5--) { _tv2 = _tv3 * _tv3 + _tv2; } return _tv2; }'
+      '(n) => { const _tv1 = n; let _tv2 = 0; const _tv4 = _tv1 < 1 ? -1 : 1; const _tv5 = _tv4 * (_tv1 - 1); for (let _tv6 = 0; _tv6 <= _tv5; _tv6++) { const _tv3 = _tv4 < 0 ? 1 - _tv6 : 1 + _tv6; _tv2 = _tv3 * _tv3 + _tv2; } return _tv2; }'
     );
   });
 
   test('two carried values that depend on each other: the next values are read first', () => {
     expect(code(fixture('two carried values that depend on each other'))).toBe(
-      '(n) => { const _tv1 = n; let _tv2 = 0, _tv3 = 1; for (let _tv4 = 1, _tv5 = _tv1 < _tv4 ? -1 : 1, _tv6 = _tv5 * (_tv1 - _tv4); _tv6 >= 0; _tv4 += _tv5, _tv6--) { const _tv7 = _tv3; _tv3 = _tv3 + _tv3; _tv2 = _tv7; } return _tv2 + 1000 * _tv3; }'
+      '(n) => { const _tv1 = n; let _tv2 = 0, _tv3 = 1; const _tv5 = _tv1 < 1 ? -1 : 1; const _tv6 = _tv5 * (_tv1 - 1); for (let _tv7 = 0; _tv7 <= _tv6; _tv7++) { const _tv4 = _tv5 < 0 ? 1 - _tv7 : 1 + _tv7; const _tv8 = _tv3; _tv3 = _tv3 + _tv3; _tv2 = _tv8; } return _tv2 + 1000 * _tv3; }'
     );
   });
 });

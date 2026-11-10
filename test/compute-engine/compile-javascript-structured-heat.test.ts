@@ -411,7 +411,7 @@ describe('heatstep: the interpreter decides, the existing emitter checks', () =>
 const EXPECTED_HEATSTEP =
   '(H, diffusivity, boundary, obstacle) => { function _tv1(_tv3, _tv4, _tv5) { return 0.5 < _tv5 && _tv3 === 16 && (_tv4 < 13 || 18 < _tv4); }\n' +
   'function _tv2(_tv6, _tv7, _tv8, _tv9, _tv10, _tv11) { return _tv7 < 0 || 32 <= _tv7 || _tv8 < 0 || 32 <= _tv8 ? 0.5 < _tv10 ? 0 : _tv9 : _tv1(_tv7, _tv8, _tv11) ? _tv9 : _SYS.atNumeric(_tv6, _tv7 + 32 * _tv8 + 1, "real"); }\n' +
-  'const _tv12 = Math.min(0.25, Math.max(0, diffusivity)); const _tv13 = 32 * 32; const _tv14 = []; for (let _tv15 = 1, _tv16 = _tv13 < _tv15 ? -1 : 1, _tv17 = _tv16 * (_tv13 - _tv15); _tv17 >= 0; _tv15 += _tv16, _tv17--) { _tv14.push(0); } const _tv18 = 32 * 32; let _tv19 = _tv14; for (let _tv20 = 1, _tv21 = _tv18 < _tv20 ? -1 : 1, _tv22 = _tv21 * (_tv18 - _tv20); _tv22 >= 0; _tv20 += _tv21, _tv22--) { const _tv23 = _SYS.floorMod(_tv20 + -1, 32); const _tv24 = Math.floor((_tv20 + -1) / 32); const _tv25 = _SYS.atNumeric(H, _tv20, "real"); _tv19 = _tv1(_tv23, _tv24, obstacle) ? _SYS.replaceAtInPlace(_tv19, _tv20, _tv25) : _SYS.replaceAtInPlace(_tv19, _tv20, _tv12 * (_tv2(H, _tv23 + -1, _tv24, _tv25, boundary, obstacle) + _tv2(H, _tv23 + 1, _tv24, _tv25, boundary, obstacle) + _tv2(H, _tv23, _tv24 + -1, _tv25, boundary, obstacle) + _tv2(H, _tv23, _tv24 + 1, _tv25, boundary, obstacle) + -4 * _tv25) + _tv25); } return _tv19; }';
+  'const _tv12 = Math.min(0.25, Math.max(0, diffusivity)); const _tv13 = 32 * 32; const _tv14 = []; const _tv16 = _tv13 < 1 ? -1 : 1; const _tv17 = _tv16 * (_tv13 - 1); for (let _tv18 = 0; _tv18 <= _tv17; _tv18++) { const _tv15 = _tv16 < 0 ? 1 - _tv18 : 1 + _tv18; _tv14.push(0); } const _tv19 = 32 * 32; let _tv20 = _tv14; const _tv22 = _tv19 < 1 ? -1 : 1; const _tv23 = _tv22 * (_tv19 - 1); for (let _tv24 = 0; _tv24 <= _tv23; _tv24++) { const _tv21 = _tv22 < 0 ? 1 - _tv24 : 1 + _tv24; const _tv25 = _SYS.floorMod(_tv21 + -1, 32); const _tv26 = Math.floor((_tv21 + -1) / 32); const _tv27 = _SYS.atNumeric(H, _tv21, "real"); _tv20 = _tv1(_tv25, _tv26, obstacle) ? _SYS.replaceAtInPlace(_tv20, _tv21, _tv27) : _SYS.replaceAtInPlace(_tv20, _tv21, _tv12 * (_tv2(H, _tv25 + -1, _tv26, _tv27, boundary, obstacle) + _tv2(H, _tv25 + 1, _tv26, _tv27, boundary, obstacle) + _tv2(H, _tv25, _tv26 + -1, _tv27, boundary, obstacle) + _tv2(H, _tv25, _tv26 + 1, _tv27, boundary, obstacle) + -4 * _tv27) + _tv27); } return _tv20; }';
 
 //
 // heatpaint
@@ -465,6 +465,19 @@ function f(n: integer) -> list<real> {
 
   test('a range that counts down', () => {
     differential(source('j', 'n', '1'), 'f', [[5], [1], [-2]]);
+  });
+
+  test('ranges with number bounds: 1..0 has the elements 1 and 0, 3..1 counts down, 2..2 has one element', () => {
+    for (const [a, b, elements] of [
+      ['1', '0', [1.5, 0.5]],
+      ['3', '1', [3.5, 2.5, 1.5]],
+      ['2', '2', [2.5]],
+    ] as const) {
+      const result = differential(source('j + 0.5', a, b), 'f', [[0]]);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('.push(');
+      expect(run(result, [0])).toEqual(elements);
+    }
   });
 
   test('an integer body gives the same array', () => {
