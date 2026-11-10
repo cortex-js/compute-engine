@@ -42,7 +42,13 @@
  *   for each region, and the `if` an `if` statement: one `let` per result,
  *   assigned at the end of each branch. An `if` of several results, or of
  *   none (the merged values of locals that branches write), is always an
- *   `if` statement.
+ *   `if` statement. A closed branch (`isClosedRegion()`) assigns no result:
+ *   the results of an `if` with one closed branch are assigned in the open
+ *   branch only.
+ * - An `exit` assigns each carried variable of its loop its operand, with
+ *   the order rule of the end of a loop body (below), then writes
+ *   `break;`. The `exit` is in branches of `if` statements of the body of
+ *   its loop only, so the `break` leaves that `for` statement.
  * - Parentheses come from the precedence of the JavaScript operators. A
  *   negative number literal, `-0` and `-Infinity` have the precedence of a
  *   unary minus. The operand of a unary minus is in parentheses unless it is
@@ -125,8 +131,10 @@
  */
 import {
   elementOf,
+  isClosedRegion,
   regionsOf,
   yieldedValues,
+  type IRExit,
   type IRFunction,
   type IRLoop,
   type IROperation,
@@ -268,7 +276,7 @@ export function emitStructuredProgram(
     emitter.definition(fn, i)
   );
   const statements: string[] = [];
-  const value = emitter.region(program.root, statements, true)[0].text;
+  const value = emitter.openRegion(program.root, statements, true)[0].text;
   return {
     definitions,
     statements,
@@ -354,6 +362,9 @@ class Emitter {
   private readonly elementLabels = new Map<number, string>();
   /** The `replace-at` operations that write in place (`inPlaceUpdates()`). */
   private readonly inPlace: ReadonlySet<IROperation>;
+  /** The variables of the carried values of each loop whose body is being
+   *  written, the innermost last: an `exit` assigns those of the last. */
+  private readonly loops: (readonly string[])[] = [];
 
   constructor(
     private readonly program: IRProgram,
@@ -382,19 +393,32 @@ class Emitter {
     });
     const parameters = fn.parameters.map((p) => this.bind(p));
     const statements: string[] = [];
-    const [value] = this.region(fn.body, statements, false);
+    const [value] = this.openRegion(fn.body, statements, false);
     return `function ${name}(${parameters.join(', ')}) { ${[
       ...statements,
       `return ${value.text};`,
     ].join(' ')} }`;
   }
 
+  /** `region()` of a region that is open. */
+  openRegion(region: IRRegion, out: string[], readsInputs: boolean): Source[] {
+    return (
+      this.region(region, out, readsInputs) ??
+      fail('a closed region yields no value')
+    );
+  }
+
   /**
    * Append the statements of `region` to `out` and return the sources of
-   * the values that it yields. `readsInputs` is false in the body of a
-   * helper.
+   * the values that it yields, or `undefined` for a closed region
+   * (`isClosedRegion()`), which yields none. `readsInputs` is false in the
+   * body of a helper.
    */
-  region(region: IRRegion, out: string[], readsInputs: boolean): Source[] {
+  region(
+    region: IRRegion,
+    out: string[],
+    readsInputs: boolean
+  ): Source[] | undefined {
     const operations = region.operations;
     // `impure[k]`: the number of operations before position `k` that are
     // not `pure`, or that write an array in place (`mutatesInPlace()`): a
@@ -407,6 +431,10 @@ class Emitter {
       );
     for (const [index, op] of operations.entries()) {
       if (op.kind === 'yield') return op.operands.map((v) => this.source(v));
+      if (op.kind === 'exit') {
+        this.exit(op, out);
+        return undefined;
+      }
       const code = this.operation(op, out, readsInputs);
       if (code === undefined) continue;
       const result = singleResult(op)!;
@@ -414,7 +442,61 @@ class Emitter {
         this.define(result, code);
       else out.push(`const ${this.bind(result)} = ${code.text};`);
     }
+    // An `if` whose two branches are closed ends the region.
+    if (isClosedRegion(region)) return undefined;
     return fail('a region has no yield');
+  }
+
+  /** The assignments of the carried variables of the innermost loop, then
+   *  `break;`. */
+  private exit(op: IRExit, out: string[]): void {
+    const names = this.loops[this.loops.length - 1];
+    if (names === undefined) return fail('an exit outside a loop');
+    this.assignCarried(
+      names,
+      op.operands,
+      op.operands.map((v) => this.source(v)),
+      out
+    );
+    out.push('break;');
+  }
+
+  /**
+   * Append to `out` the assignment of each carried variable `names[i]` whose
+   * next value, `values[i]` of the source `sources[i]`, is not the variable
+   * itself: at the end of a loop body and before the `break` of an `exit`.
+   * Each next value is read before any carried variable is assigned: the
+   * last one is assigned first, and every other one that could read a
+   * carried variable is first bound to a `const`.
+   */
+  private assignCarried(
+    names: readonly string[],
+    values: readonly IRValue[],
+    sources: readonly Source[],
+    out: string[]
+  ): void {
+    // The carried values whose next value is not the variable itself.
+    const changed = names.flatMap((name, i) =>
+      sources[i].text === name ? [] : [i]
+    );
+    const carried = new Set(names);
+    const assignments: string[] = [];
+    const last = changed[changed.length - 1];
+    const later: string[] = [];
+    for (const i of changed) {
+      if (i === last) {
+        assignments.push(`${names[i]} = ${sources[i].text};`);
+        continue;
+      }
+      if (this.plain.has(values[i].id) && !carried.has(sources[i].text)) {
+        later.push(`${names[i]} = ${sources[i].text};`);
+        continue;
+      }
+      const temporary = this.names.fresh();
+      out.push(`const ${temporary} = ${sources[i].text};`);
+      later.push(`${names[i]} = ${temporary};`);
+    }
+    out.push(...assignments, ...later);
   }
 
   /**
@@ -619,7 +701,7 @@ class Emitter {
         const k = this.bind(index);
         const range = this.rangeHeader(k, from, to);
         const body: string[] = [range.index];
-        const [element] = this.region(op.body, body, readsInputs);
+        const [element] = this.openRegion(op.body, body, readsInputs);
         body.push(`${name}.push(${operand(element, CONDITIONAL)});`);
         out.push(
           `const ${name} = [];`,
@@ -641,6 +723,8 @@ class Emitter {
         const elseValues = this.region(op.else, elseStatements, readsInputs);
         if (
           op.results.length === 1 &&
+          thenValues !== undefined &&
+          elseValues !== undefined &&
           thenStatements.length === 0 &&
           elseStatements.length === 0
         )
@@ -648,10 +732,14 @@ class Emitter {
             text: `${operand(operands[0], OR)} ? ${operand(thenValues[0], CONDITIONAL)} : ${operand(elseValues[0], CONDITIONAL)}`,
             precedence: CONDITIONAL,
           };
-        // One `let` per result, assigned at the end of each branch.
+        // One `let` per result, assigned at the end of each open branch. A
+        // closed branch ends in `break;` and assigns none.
         const names = op.results.map((result) => this.bind(result));
-        const block = (statements: string[], values: readonly Source[]) =>
-          `{ ${[...statements, ...names.map((name, i) => `${name} = ${values[i].text};`)].join(' ')} }`;
+        const block = (
+          statements: string[],
+          values: readonly Source[] | undefined
+        ) =>
+          `{ ${[...statements, ...(values === undefined ? [] : names.map((name, i) => `${name} = ${values[i].text};`))].join(' ')} }`;
         const test = `if (${operands[0].text}) ${block(thenStatements, thenValues)}`;
         const otherwise =
           elseStatements.length === 0 && names.length === 0
@@ -671,7 +759,7 @@ class Emitter {
       case 'or': {
         const regions = op.rest.map((region) => {
           const statements: string[] = [];
-          const [value] = this.region(region, statements, readsInputs);
+          const [value] = this.openRegion(region, statements, readsInputs);
           return { statements, value };
         });
         if (regions.every((r) => r.statements.length === 0))
@@ -739,33 +827,15 @@ class Emitter {
     const body: string[] = [range.index];
     if (op.iterationBudget !== undefined)
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
-    const next = this.region(op.body, body, readsInputs);
-    // The carried values whose next value is not the parameter itself.
-    const changed = parameters.flatMap((_, i) =>
-      next[i].text === names[i] ? [] : [i]
-    );
-    // Each next value is read before any carried variable is assigned:
-    // the last one is assigned first, and every other one that could read
-    // a carried variable is first bound to a `const`.
-    const carried = new Set(names);
-    const assignments: string[] = [];
-    const last = changed[changed.length - 1];
-    const later: string[] = [];
-    for (const i of changed) {
-      if (i === last) {
-        assignments.push(`${names[i]} = ${next[i].text};`);
-        continue;
-      }
-      const value = yieldedValues(op.body)[i];
-      if (this.plain.has(value.id) && !carried.has(next[i].text)) {
-        later.push(`${names[i]} = ${next[i].text};`);
-        continue;
-      }
-      const temporary = this.names.fresh();
-      body.push(`const ${temporary} = ${next[i].text};`);
-      later.push(`${names[i]} = ${temporary};`);
+    this.loops.push(names);
+    let next: Source[];
+    try {
+      next = this.openRegion(op.body, body, readsInputs);
+    } finally {
+      this.loops.pop();
     }
-    body.push(...assignments, ...later);
+    // At the end of the body, the next value of each carried variable.
+    this.assignCarried(names, yieldedValues(op.body), next, body);
     const declarations =
       names.length === 0
         ? []

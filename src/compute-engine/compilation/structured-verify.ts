@@ -11,12 +11,14 @@ import type { Expression } from '../global-types.js';
 import {
   definedValues,
   elementOf,
+  isClosedRegion,
   joinEffects,
   operationCanAbort,
   regionsOf,
   weakerEffect,
   yieldedValues,
   type EffectFact,
+  type IRExit,
   type IRLoop,
   type IROperation,
   type IRProgram,
@@ -161,6 +163,19 @@ export type RepresentationPolicy = {
  * it can abort exactly when one of its operations can
  * (`operationCanAbort()`).
  *
+ * For an `exit` (`IRExit`): it is the last operation of its region, and an
+ * `if` whose two branches are closed is too; only a branch of an `if` is
+ * closed (`isClosedRegion()`), so the body of a loop, of a `build`, of a
+ * function, the root and a region of `and` or `or` are open. An `exit` is
+ * in the body of a loop, or in a branch of an `if` there, at any depth of
+ * branches, with no region of a `build`, an `and` or an `or` between: it
+ * ends the innermost such loop. It has no result, is `pure`, and has one
+ * operand per result of its loop, in the order of the results, each of the
+ * representation of the carried value and of its type (an integer for a
+ * real, a list of integers for a list of reals), as a value that the body
+ * yields. An `if` with one closed branch has the results of its open
+ * branch; an `if` with two closed branches has no result.
+ *
  * A call cycle (a function that calls itself, directly or through other
  * functions) is accepted. The summary of the effects is correct for it:
  * the check of each call (its effect includes the effect of the body of
@@ -278,12 +293,35 @@ export function verifyProgram(
       fail(`the value ${value.id} is used before its definition`);
   };
 
-  /** One yield, the last operation, of `count` values. */
+  /** One yield, the last operation, of `count` values; or, for a closed
+   *  branch of an `if`, no yield. No operation follows an `exit` or an `if`
+   *  whose two branches are closed. */
   const verifyRegionShape = (
     region: IRRegion,
     count: number,
     owner?: IROperation
   ) => {
+    region.operations.forEach((op, i) => {
+      if (i === region.operations.length - 1) return;
+      if (op.kind === 'exit') fail('an operation follows an exit');
+      if (
+        op.kind === 'if' &&
+        isClosedRegion(op.then) &&
+        isClosedRegion(op.else)
+      )
+        fail('an operation follows an if whose two branches are closed');
+    });
+    if (isClosedRegion(region)) {
+      if (owner?.kind === 'loop')
+        fail('the body of a loop is closed: every pass exits');
+      if (owner?.kind !== 'if')
+        fail(
+          `a region that is not a branch of an if is closed (${owner?.kind ?? 'the body of a function or the root'})`
+        );
+      if (region.operations.some((op) => op.kind === 'yield'))
+        fail('a closed region has a yield');
+      return;
+    }
     const yields = region.operations.filter((op) => op.kind === 'yield').length;
     if (yields === 0) fail('a region has no yield');
     if (yields > 1) fail(`a region has ${yields} yields`);
@@ -304,15 +342,51 @@ export function verifyProgram(
     );
   };
 
+  /** What an `exit` of a region would end: the innermost loop whose body
+   *  holds the region, and the kind of the first region between the two that
+   *  is not a branch of an `if` (`build`, `and`, `or`), if any. */
+  type ExitScope = { readonly loop?: IRLoop; readonly barrier?: string };
+
+  /** The checks of an `exit` that read its loop (`IRExit`). */
+  const verifyExit = (op: IRExit, scope: ExitScope) => {
+    const loop = scope.loop;
+    if (loop === undefined) return fail('an exit is outside the body of a loop');
+    if (scope.barrier !== undefined)
+      fail(
+        `an exit is in a region of the operation ${scope.barrier}, between it and its loop`
+      );
+    if (op.result !== undefined) fail('an exit has a result');
+    if (op.effect !== 'pure') fail(`an exit has the effect ${op.effect}`);
+    if (op.operands.length !== loop.results.length)
+      fail(
+        `an exit has ${op.operands.length} operands, and its loop has ${loop.results.length} results`
+      );
+    const parameters = loop.body.parameters ?? [];
+    op.operands.forEach((value, i) => {
+      const parameter = parameters[i + 1];
+      if (parameter === undefined) return;
+      if (value.representation !== parameter.representation)
+        fail(
+          `the operand ${i + 1} of an exit has the representation ${value.representation}, and the carried value ${i + 1} of its loop ${parameter.representation}`
+        );
+      if (!fitsType(value.type, parameter.type))
+        fail(
+          `the operand ${i + 1} of an exit has the type ${value.type}, and the carried value ${i + 1} of its loop the type ${parameter.type}`
+        );
+    });
+  };
+
   // `inFunction`: the region is the body of a function or is nested in it.
   // Such a region reads no input of the program. `count`: the number of
-  // values that the region yields.
+  // values that the region yields. `exits`: what an `exit` of the region
+  // ends.
   const verifyRegion = (
     region: IRRegion,
     outer: readonly Frame[],
     inFunction: boolean,
     count: number,
-    owner?: IROperation
+    owner?: IROperation,
+    exits: ExitScope = {}
   ) => {
     verifyRegionShape(region, count, owner);
     if (
@@ -333,13 +407,23 @@ export function verifyProgram(
       if (!preparedNodes.has(op.origin))
         fail(`the origin of the operation ${op.kind} is not a prepared node`);
       for (const operand of op.operands) use(operand, frames);
+      if (op.kind === 'exit') verifyExit(op, exits);
+      // A loop body starts a new scope of exits; a branch of an `if` keeps
+      // the scope of its region; every other region is a barrier.
+      const innerExits: ExitScope =
+        op.kind === 'loop'
+          ? { loop: op }
+          : op.kind === 'if'
+            ? exits
+            : { ...exits, barrier: exits.barrier ?? op.kind };
       for (const inner of regionsOf(op)) {
         verifyRegion(
           inner,
           frames,
           inFunction,
           op.kind === 'if' || op.kind === 'loop' ? op.results.length : 1,
-          op
+          op,
+          innerExits
         );
         if (weakerEffect(op.effect, inner.effect))
           fail(
@@ -504,6 +588,9 @@ function verifySignature(
     case 'yield':
       // The number of its operands is checked with its region.
       if (op.result !== undefined) fail('a yield has a result');
+      return;
+    case 'exit':
+      // Checked with its loop (`verifyExit()`).
       return;
     case 'literal': {
       arity(0);
@@ -768,8 +855,19 @@ function verifySignature(
       arity(1);
       if (op.operands[0].type !== 'boolean')
         fail('the condition of an if is not a boolean');
-      const thenValues = yieldedValues(op.then);
-      const elseValues = yieldedValues(op.else);
+      // A closed branch yields nothing: the results are the values of the
+      // open branch, or there are none when both are closed.
+      const thenClosed = isClosedRegion(op.then);
+      const elseClosed = isClosedRegion(op.else);
+      if (thenClosed && elseClosed) {
+        if (op.results.length > 0)
+          fail(
+            `an if whose two branches are closed has ${op.results.length} results`
+          );
+        return;
+      }
+      const thenValues = yieldedValues(thenClosed ? op.else : op.then);
+      const elseValues = yieldedValues(elseClosed ? op.then : op.else);
       op.results.forEach((result, i) => {
         const a = thenValues[i];
         const b = elseValues[i];

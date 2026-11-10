@@ -43,6 +43,13 @@
  * after the loop: a read of it there throws. A local declared in the body
  * is a value of the body region.
  *
+ * A `Break` with no value, the last statement of a branch of an `If`
+ * statement in the body of a `Loop`, is an `exit` of the innermost loop
+ * whose operands are the current values of the carried locals of that
+ * loop: after the loop, each local has the value that it had at the
+ * `Break`. A branch that ends in `Break` is closed: the results of its `If`
+ * are the values of the other branch.
+ *
  * A list input or a list parameter of a helper is a value of a list type;
  * `At` and `Length` of it are the operations `at` and `length`.
  * `Comprehension` over a range is a `build`, `ReplaceAt` a `replace-at`. A
@@ -68,6 +75,7 @@ import type {
 } from './fragment.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
+  exitsIn,
   joinEffects,
   operationCanAbort,
   type EffectFact,
@@ -348,6 +356,16 @@ class Lowering {
   private readonly captures: IRCapture[] = [];
   /** The index of each capture in `captures`, by its binding. */
   private readonly captureIndex = new Map<object, number>();
+  /** The carried locals of each loop whose body is being lowered, the
+   *  innermost last, and the operands of each `exit` of that loop: a
+   *  `Break` reads the current value of each carried local. */
+  private loops: {
+    readonly carried: readonly {
+      readonly binder: FragmentScope<ScalarRepresentation>;
+      readonly name: string;
+    }[];
+    readonly exits: (readonly IRValue[])[];
+  }[] = [];
   /** The value of each local and parameter, by the scope that binds it. */
   private readonly bound = new Map<
     FragmentScope<ScalarRepresentation>,
@@ -396,6 +414,12 @@ class Lowering {
   ): IRRegion {
     const operands = Array.isArray(value) ? value : [value as IRValue];
     operations.push({ kind: 'yield', operands, effect: 'pure', origin });
+    return this.closedRegion(operations);
+  }
+
+  /** Summarize the effects of `operations`, which end in an `exit` or an
+   *  `if` whose two branches are closed, or in a yield (`region()`). */
+  private closedRegion(operations: IROperation[]): IRRegion {
     const canAbort = operations.some((op) =>
       operationCanAbort(op, this.functions)
     );
@@ -938,20 +962,22 @@ class Lowering {
     if (inner === undefined) return fail('no scope for a block');
     if (node.ops.length === 0) return fail('an empty block has no value');
     const last = node.ops[node.ops.length - 1];
-    this.statements(node.ops.slice(0, -1), inner, operations, namesIn(last));
+    if (this.statements(node.ops.slice(0, -1), inner, operations, namesIn(last)))
+      fail('a statement of a block that has a value is a Break');
     return this.value(last, inner, operations);
   }
 
   /**
    * The statements `statements`, in order, in `scope`. `liveOut`: the
-   * names that the code after the statements can read.
+   * names that the code after the statements can read. True when the last
+   * statement closes the region (`statement()`).
    */
   private statements(
     statements: readonly Expression[],
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
     liveOut: ReadonlySet<string>
-  ): void {
+  ): boolean {
     // The names that the code after the statement `i` can read: the names
     // in the statements after it, and `liveOut`. A name that a later
     // statement writes before it reads it counts too: the set is larger
@@ -962,7 +988,12 @@ class Lowering {
       live[i] = after;
       after = new Set([...after, ...namesIn(statements[i])]);
     }
-    statements.forEach((s, i) => this.statement(s, scope, operations, live[i]));
+    let closed = false;
+    statements.forEach((s, i) => {
+      if (closed) fail('a statement follows a Break');
+      closed = this.statement(s, scope, operations, live[i]);
+    });
+    return closed;
   }
 
   /**
@@ -972,15 +1003,18 @@ class Lowering {
    * statement merges the values of the locals that its branches write; a
    * `Loop` carries the values of the locals that its body writes
    * (`loopStatement()`); a `Block` (a branch of an `If`, the body of a
-   * `Loop`) is its statements. The admission of the structured route admits
-   * no other statement.
+   * `Loop`) is its statements; a `Break` is an `exit` of the innermost loop.
+   * The admission of the structured route admits no other statement.
+   *
+   * True when the statement closes the region: a `Break`, an `If` whose two
+   * branches close, or a `Block` whose last statement closes.
    */
   private statement(
     node: Expression,
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
     liveOut: ReadonlySet<string>
-  ): void {
+  ): boolean {
     const initializer = isFunction(node, 'Declare')
       ? declareValueOperand(node.ops)
       : undefined;
@@ -1003,7 +1037,7 @@ class Lowering {
       let locals = this.bound.get(scope);
       if (locals === undefined) this.bound.set(scope, (locals = new Map()));
       locals.set(name, value);
-      return;
+      return false;
     }
     if (isFunction(node, 'Assign') && node.nops === 2 && isSymbol(node.op1)) {
       const name = node.op1.symbol;
@@ -1027,18 +1061,32 @@ class Lowering {
       )
         fail(`a write to the local ${name} changes its representation`);
       locals.set(name, value);
-      return;
+      return false;
     }
     if (isFunction(node, 'If') && (node.nops === 2 || node.nops === 3))
       return this.ifStatement(node, scope, operations, liveOut);
-    if (isFunction(node, 'Loop') && node.nops === 2)
-      return this.loopStatement(node, scope, operations, liveOut);
+    if (isFunction(node, 'Loop') && node.nops === 2) {
+      this.loopStatement(node, scope, operations, liveOut);
+      return false;
+    }
     if (isFunction(node, 'Block')) {
       const inner = scope.inner.get(node);
       if (inner === undefined) return fail('no scope for a block');
       return this.statements(node.ops, inner, operations, liveOut);
     }
-    fail(`no lowering for the statement ${node.toString()}`);
+    if (isFunction(node, 'Break') && node.nops === 0) {
+      const loop = this.loops[this.loops.length - 1];
+      if (loop === undefined) return fail('a Break outside a loop');
+      const operands = loop.carried.map(
+        ({ binder, name }) =>
+          this.bound.get(binder)?.get(name) ??
+          fail(`the carried local ${name} has no value at a Break`)
+      );
+      loop.exits.push(operands);
+      operations.push({ kind: 'exit', operands, effect: 'pure', origin: node });
+      return true;
+    }
+    return fail(`no lowering for the statement ${node.toString()}`);
   }
 
   /**
@@ -1046,13 +1094,18 @@ class Lowering {
    * locals that a branch writes and that `liveOut` names, in the order of
    * their bindings. The `If` itself has no effect: its effect is the one
    * of its regions. A write to a local is not an effect: it makes a value.
+   *
+   * A branch that ends in `Break` is closed: the values of the locals after
+   * the `If` are those of the other branch, and the closed branch yields
+   * nothing. When both branches are closed, the `if` has no result and
+   * closes the region (true).
    */
   private ifStatement(
     node: Expression & { ops: readonly Expression[] },
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
     liveOut: ReadonlySet<string>
-  ): void {
+  ): boolean {
     // The operations of the condition, kept apart until the `If` is known
     // to be lowered.
     const condition: IROperation[] = [];
@@ -1061,13 +1114,32 @@ class Lowering {
     const branch = (statement: Expression | undefined) => {
       this.restore(before);
       const inner: IROperation[] = [];
-      if (statement !== undefined)
+      const closed =
+        statement !== undefined &&
         this.statement(statement, scope, inner, liveOut);
-      return { operations: inner, values: this.snapshot() };
+      return { operations: inner, values: this.snapshot(), closed };
     };
     const a = branch(node.ops[1]);
     const b = branch(node.ops[2]);
     this.restore(before);
+    if (a.closed && b.closed) {
+      const then = this.closedRegion(a.operations);
+      const otherwise = this.closedRegion(b.operations);
+      operations.push(...condition, {
+        kind: 'if',
+        results: [],
+        operands: [test],
+        then,
+        else: otherwise,
+        effect: joinEffects(then.effect, otherwise.effect),
+        origin: node,
+      });
+      return true;
+    }
+    // The values after the `If` of each branch: those of the other branch
+    // for a closed branch, which does not reach the code after the `If`.
+    const thenValues = a.closed ? b.values : a.values;
+    const elseValues = b.closed ? a.values : b.values;
     // The locals to merge, with their values before the `If` and in each
     // branch.
     const merged: {
@@ -1083,12 +1155,12 @@ class Lowering {
     for (const [binder, locals] of before)
       for (const name of new Set([
         ...locals.keys(),
-        ...(a.values.get(binder)?.keys() ?? []),
-        ...(b.values.get(binder)?.keys() ?? []),
+        ...(thenValues.get(binder)?.keys() ?? []),
+        ...(elseValues.get(binder)?.keys() ?? []),
       ])) {
         const value = locals.get(name);
-        const then = a.values.get(binder)?.get(name);
-        const otherwise = b.values.get(binder)?.get(name);
+        const then = thenValues.get(binder)?.get(name);
+        const otherwise = elseValues.get(binder)?.get(name);
         if (then === value && otherwise === value) continue;
         const target = this.bound.get(binder)!;
         // A local that no later statement reads has no value after the
@@ -1111,21 +1183,29 @@ class Lowering {
       return this.newValue(type, m.then.representation as ScalarRepresentation);
     });
     merged.forEach((m, i) => m.locals.set(m.name, results[i]));
-    const then = this.region(
-      a.operations,
-      node.ops[1],
-      merged.map((m) => m.then)
-    );
-    const otherwise = this.region(
-      b.operations,
-      node.ops[2] ?? node,
-      merged.map((m) => m.else)
-    );
+    const then = a.closed
+      ? this.closedRegion(a.operations)
+      : this.region(
+          a.operations,
+          node.ops[1],
+          merged.map((m) => m.then)
+        );
+    const otherwise = b.closed
+      ? this.closedRegion(b.operations)
+      : this.region(
+          b.operations,
+          node.ops[2] ?? node,
+          merged.map((m) => m.else)
+        );
     // An `If` with no result and no effect has nothing to give: it is
     // not lowered, and its condition is lowered only when it has an effect
     // (with the pure operations that the effect reads). A branch that can
-    // abort (a loop with an iteration budget) keeps the `If`.
+    // abort (a loop with an iteration budget) keeps the `If`, and so does a
+    // branch that holds an `exit`, at any depth: the exit decides which
+    // operations run after the `If`.
     if (
+      exitsIn(then).length === 0 &&
+      exitsIn(otherwise).length === 0 &&
       results.length === 0 &&
       joinEffects(then.effect, otherwise.effect) === 'pure' &&
       then.canAbort !== true &&
@@ -1133,7 +1213,7 @@ class Lowering {
     ) {
       if (joinEffects(...condition.map((op) => op.effect)) !== 'pure')
         operations.push(...condition);
-      return;
+      return false;
     }
     operations.push(...condition);
     operations.push({
@@ -1145,6 +1225,7 @@ class Lowering {
       effect: joinEffects(then.effect, otherwise.effect),
       origin: node,
     });
+    return false;
   }
 
   /**
@@ -1164,6 +1245,11 @@ class Lowering {
    * at most one pass per carried local, and one more). A local that the body writes and
    * does not carry has no value at the start of the body and after the
    * loop. The index is bound in the scope of the loop.
+   *
+   * A `Break` of the body passes the current value of each carried local to
+   * the result of the loop (an `exit`); a real value there makes the
+   * parameter real too, as a real next value does. A body that always
+   * exits throws: the admission refuses it.
    */
   private loopStatement(
     node: Expression & { ops: readonly Expression[] },
@@ -1230,7 +1316,15 @@ class Lowering {
       );
       this.bound.set(loopScope, new Map([[index, indexValue]]));
       const inner: IROperation[] = [];
-      this.statement(body, loopScope, inner, carriedNames);
+      const context = { carried, exits: [] as (readonly IRValue[])[] };
+      this.loops.push(context);
+      let closed: boolean;
+      try {
+        closed = this.statement(body, loopScope, inner, carriedNames);
+      } finally {
+        this.loops.pop();
+      }
+      if (closed) fail('the body of a loop always exits');
       const next = carried.map(({ binder, name }) => {
         const value = this.bound.get(binder)?.get(name);
         if (value === undefined)
@@ -1241,12 +1335,15 @@ class Lowering {
       });
       // A real next value of an integer parameter: lower the body again
       // with a real parameter. A parameter that is real is never changed.
-      const widened = next.map(
-        (v, i) =>
-          widerType(types[i], v.type) ??
-          fail(
-            `the carried local ${carried[i].name} has the type ${types[i]} before the loop and ${v.type} in its body`
-          )
+      const widened = next.map((v, i) =>
+        [v, ...context.exits.map((exit) => exit[i])].reduce<ValueType>(
+          (type, value) =>
+            widerType(type, value.type) ??
+            fail(
+              `the carried local ${carried[i].name} has the type ${types[i]} before the loop and ${value.type} in its body`
+            ),
+          types[i]
+        )
       );
       if (widened.some((t, i) => t !== types[i])) {
         if (pass >= carried.length)
@@ -1343,7 +1440,12 @@ class Lowering {
     );
     const operations: IROperation[] = [];
     this.lowering.add(name);
+    // A `Break` of the helper leaves a loop of the helper, never a loop of
+    // the code that calls it.
+    const loops = this.loops;
+    this.loops = [];
     const value = this.value(entry.body, entry.scope, operations);
+    this.loops = loops;
     this.lowering.delete(name);
     const result = {
       type: valueType(entry.type.result),

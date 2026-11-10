@@ -22,6 +22,11 @@
  * gives to the next one (a carried value). The body yields the next value
  * of each carried value, and the loop has one result per carried value.
  *
+ * A region is open or closed (`isClosedRegion()`). An open region ends in
+ * its yield. A closed region ends in an `exit` (`IRExit`), which leaves the
+ * innermost loop, or in an `if` whose two branches are closed; it has no
+ * yield. Only a branch of an `if` can be closed.
+ *
  * There is no common-subexpression pass, no reordering and no collection:
  * each occurrence of a prepared node gives its own operations, in the order
  * of the prepared tree.
@@ -280,8 +285,14 @@ export type IRConvert = OperationBase & {
  * `if`: the merged value of the local. A branch that does not write the
  * local yields the value of the local before the `if`. Such an `if` can
  * have no result, when its branches write no local that is read later.
+ *
+ * A branch can be closed (`isClosedRegion()`): it ends in an `exit`, and
+ * the code after the `if` does not run when it is selected. An `if` with
+ * one closed branch takes its results from the open branch only; the closed
+ * branch yields nothing. An `if` with two closed branches has no result, is
+ * closed itself, and is the last operation of its region.
  */
-export type IRIf = Omit<OperationBase, 'result'> & {
+export type IRIf =Omit<OperationBase, 'result'> & {
   readonly kind: 'if';
   readonly result?: undefined;
   readonly results: readonly IRValue[];
@@ -303,6 +314,11 @@ export type IRIf = Omit<OperationBase, 'result'> & {
  * value of each carried value, in the same order. The result `i` is the
  * value of the carried value `i` after the last iteration, or its initial
  * value when the range has no element.
+ *
+ * An `exit` in the body (`IRExit`) ends the loop before the end of its
+ * range: the result `i` is then the operand `i` of that `exit`. The body
+ * itself is open: a body that always exits is not a loop of the
+ * representation.
  *
  * `iterationBudget` is the iteration budget of the compilation, or
  * `undefined` when it has none. A target writes its own check of the
@@ -355,12 +371,33 @@ export type IRTrace = OperationBase & {
   readonly trace: string;
 };
 
-/** The last operation of a region: its operands are the values of the
- *  region. A region of an `if` yields one value per result of the `if`, and
- *  the body of a `loop` one value per result of the `loop`; every other
- *  region yields one value. */
+/** The last operation of an open region: its operands are the values of
+ *  the region. A region of an `if` yields one value per result of the `if`,
+ *  and the body of a `loop` one value per result of the `loop`; every other
+ *  region yields one value. A closed region has no yield
+ *  (`isClosedRegion()`). */
 export type IRYield = {
   readonly kind: 'yield';
+  readonly result?: undefined;
+  readonly operands: readonly IRValue[];
+  readonly effect: EffectFact;
+  readonly origin: Expression;
+};
+
+/**
+ * The second way to end a region: the last operation of a closed region,
+ * which ends the innermost `loop` that holds it. Its operands are the value,
+ * at this point, of each carried value of that loop, in the order of the
+ * results of the loop: the result `i` of the loop is the operand `i`. An
+ * `exit` defines no value and has no effect (`pure`).
+ *
+ * Between the `exit` and the body of its loop there are only branches of
+ * `if` operations: no region of a `build`, of an `and` or an `or`, and no
+ * body of a function. The `exit` passes values to the results of the loop
+ * as the yield of the body does, so each value keeps one definition.
+ */
+export type IRExit = {
+  readonly kind: 'exit';
   readonly result?: undefined;
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
@@ -383,7 +420,8 @@ export type IROperation =
   | IRShortCircuit
   | IRCall
   | IRTrace
-  | IRYield;
+  | IRYield
+  | IRExit;
 
 export type IRRegion = {
   /** The values that the region defines at its entry, before its first
@@ -517,8 +555,49 @@ export function regionsOf(op: IROperation): readonly IRRegion[] {
   return [];
 }
 
-/** The operands of the yield of `region`, the last operation of a region
- *  that the verifier accepted. */
+/** Whether `region` is closed: its last operation is an `exit`, or an `if`
+ *  whose two branches are closed. Every other region is open and ends in a
+ *  yield. */
+export function isClosedRegion(region: IRRegion): boolean {
+  const last = region.operations[region.operations.length - 1];
+  if (last === undefined) return false;
+  if (last.kind === 'exit') return true;
+  return (
+    last.kind === 'if' && isClosedRegion(last.then) && isClosedRegion(last.else)
+  );
+}
+
+/** The operands of the yield of `region`, the last operation of an open
+ *  region that the verifier accepted. A closed region yields no value: the
+ *  result is empty. */
 export function yieldedValues(region: IRRegion): readonly IRValue[] {
+  if (isClosedRegion(region)) return [];
   return region.operations[region.operations.length - 1].operands;
+}
+
+/** The `exit` operations that end `loop`: in its body, or in a branch of an
+ *  `if` there, at any depth of branches. An `exit` in the body of an inner
+ *  loop ends that loop, and is not one of these. */
+export function exitsOf(loop: IRLoop): IRExit[] {
+  return exitsIn(loop.body);
+}
+
+/** The `exit` operations in `region` that leave the loop that encloses
+ *  `region`: those of the region and of the branches of its `if`
+ *  operations, at any depth, and not those of a loop in it. A region that
+ *  holds one changes which operations run after it, also when its effect
+ *  is `pure` and it yields nothing, so it is never removed. */
+export function exitsIn(region: IRRegion): IRExit[] {
+  const exits: IRExit[] = [];
+  const visit = (r: IRRegion) => {
+    for (const op of r.operations) {
+      if (op.kind === 'exit') exits.push(op);
+      if (op.kind === 'if') {
+        visit(op.then);
+        visit(op.else);
+      }
+    }
+  };
+  visit(region);
+  return exits;
 }

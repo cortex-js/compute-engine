@@ -51,6 +51,7 @@ import {
   walkIf,
   walkBlock,
   walkAssign,
+  walkBreak,
   walkCountedLoop,
   fragmentTypeToString,
   type FragmentDeclaredInput,
@@ -1212,6 +1213,9 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Divide: divideRule,
   Power: withoutMode('Power'),
   Loop: loopRule,
+  // A `Break` with no value in a counted loop; its place in the loop is the
+  // rule of the admission (`checkStructuredStatement()`).
+  Break: { walk: walkBreak },
   And: logicalRule('And'),
   Or: logicalRule('Or'),
   Min: withRealFromRealOperands(extremumRule('Min')),
@@ -3173,11 +3177,33 @@ function attachBoundFunction(
     }
   };
   /**
+   * Whether `statement` always ends in a `Break`: a `Break`, an `If` whose
+   * two branches do, or a `Block` whose last statement does.
+   */
+  const exits = (statement: Expression): boolean => {
+    if (isFunction(statement, 'Break')) return true;
+    if (isFunction(statement, 'If'))
+      return (
+        statement.nops === 3 && exits(statement.op2) && exits(statement.op3)
+      );
+    if (isFunction(statement, 'Block'))
+      return statement.nops > 0 && exits(statement.ops[statement.nops - 1]);
+    return false;
+  };
+  /**
    * A statement of the body of the structured route. `place`: the
    * statement is in the block of the body (`top`), in a branch of an `If`
    * (`branch`), or in the body of a `Loop` (`loop`), the innermost one.
    * `inBlock`: the statement is a statement of a block, where a `Declare`
    * is admitted, and not a whole branch or a whole loop body.
+   *
+   * A `Break` with no value is admitted as the last statement of a branch of
+   * an `If` statement, or of a block that is such a branch, in the body of a
+   * `Loop`: it leaves the innermost loop. Refused: a `Break` that is a
+   * statement of the loop body itself, a statement after a `Break` or after
+   * an `If` whose two branches end in `Break`, and a loop body that always
+   * ends in `Break`. A `Break` in a value is not a statement, and the value
+   * check refuses it.
    */
   const checkStructuredStatement = (
     statement: Expression,
@@ -3245,13 +3271,32 @@ function attachBoundFunction(
       place !== 'top'
     ) {
       nested(() => {
-        for (const inner of statement.ops)
+        statement.ops.forEach((inner, i) => {
+          if (i < statement.nops - 1 && exits(inner))
+            throw new Error(
+              'JS scalar fragment: the structured route admits no statement after a Break, ' +
+                'or after an If whose two branches end in Break'
+            );
           checkStructuredStatement(inner, place, true);
+        });
       });
       return;
     }
     if (isFunction(statement, 'Loop') && isLibraryOperator(statement, 'Loop'))
       return checkLoop(statement);
+    if (
+      isFunction(statement, 'Break') &&
+      isLibraryOperator(statement, 'Break') &&
+      statement.nops === 0 &&
+      place === 'branch' &&
+      indices.size > 0
+    )
+      return;
+    if (isFunction(statement, 'Break') && place === 'loop')
+      throw new Error(
+        'JS scalar fragment: the structured route admits a Break only as the last ' +
+          'statement of a branch of an If, not as a statement of the body of a Loop'
+      );
     throw new Error(
       `JS scalar fragment: the structured route admits no statement ${head}` +
         (place === 'top'
@@ -3319,6 +3364,10 @@ function attachBoundFunction(
       indices.add(index);
       checkStructuredStatement(loop.ops[0], 'loop', false);
     });
+    if (exits(loop.ops[0]))
+      throw new Error(
+        'JS scalar fragment: the structured route admits no Loop whose body always ends in Break'
+      );
   };
   if (admission.structured)
     for (const statement of body.ops.slice(0, -1))
@@ -3391,6 +3440,8 @@ function attachBoundFunction(
         for (const s of statement.ops) checkWrites(s, inner);
         return;
       }
+      // A `Break` writes no local.
+      if (statement.operator === 'Break') return;
       if (!isSymbol(statement.op1)) return;
       const name = statement.op1.symbol;
       let binding: FragmentFacts<ScalarRepresentation> | undefined;

@@ -9,6 +9,8 @@
  * names no target.
  */
 import {
+  exitsOf,
+  isClosedRegion,
   regionsOf,
   type IROperation,
   type IRProgram,
@@ -91,6 +93,39 @@ function bodyFacts(body: IRRegion, parameters: readonly IRValue[]): BodyFacts {
   return facts;
 }
 
+/** The `exit` operations of `loop` (`exitsOf()`), each with its position,
+ *  for the loop at `position`. */
+function exitPositions(
+  loop: Extract<IROperation, { kind: 'loop' }>,
+  position: Position
+): { op: IROperation; at: Position }[] {
+  const found: { op: IROperation; at: Position }[] = [];
+  const exits = new Set<IROperation>(exitsOf(loop));
+  const visit = (region: IRRegion, outer: Position) =>
+    region.operations.forEach((op, index) => {
+      const at = [...outer, { region, index }];
+      if (exits.has(op)) found.push({ op, at });
+      if (op.kind === 'if') for (const inner of regionsOf(op)) visit(inner, at);
+    });
+  visit(loop.body, position);
+  return found;
+}
+
+/** Whether `other` is in the body of the loop that the `exit` at `exit`
+ *  ends: the innermost region of `exit` that is the body of a loop. */
+function inBodyOfExitLoop(
+  exit: Position,
+  other: Position,
+  owners: ReadonlyMap<IRRegion, IROperation>
+): boolean {
+  for (let level = exit.length - 1; level >= 0; level--) {
+    const region = exit[level].region;
+    if (owners.get(region)?.kind === 'loop')
+      return other.some((p) => p.region === region);
+  }
+  return false;
+}
+
 /**
  * When `use` runs relative to `consumer`, both positions in one body:
  * `before` or `after` in the order of evaluation, `exclusive` when they are
@@ -138,12 +173,14 @@ function order(
  *    the definition of X no other value of the program holds it. These
  *    values are unique: the result of a `build` and of a `replace-at`; the
  *    result of a call of a function whose body yields a unique value; the
- *    result `i` of an `if` when the value `i` that each branch yields is
- *    consumable by the yield of that branch; a carried value of a `loop`
- *    (its parameter in the body and its result) when its initial value is
- *    consumable by the loop and its next value by the yield of the body,
- *    with the parameter taken as unique while this is checked (each
- *    iteration starts with the array that the previous one handed over).
+ *    result `i` of an `if` when the value `i` that each open branch yields
+ *    is consumable by the yield of that branch (a closed branch yields
+ *    nothing); the parameter of a carried value of a `loop` in the body
+ *    when its initial value is consumable by the loop and its next value by
+ *    the yield of the body, with the parameter taken as unique while this
+ *    is checked (each iteration starts with the array that the previous one
+ *    handed over); the result of the carried value when, in addition, its
+ *    operand in each `exit` of the loop is consumable by that `exit`.
  *    An input, a capture, a parameter of a function, and every other value
  *    are not unique: the caller of the code, or of the function, can hold
  *    the array and read it after the call.
@@ -153,7 +190,18 @@ function order(
  * 3. C uses X once, and every other use of X either is in the other branch
  *    of an `if` that holds C (it does not run when C runs), or runs before
  *    C and is an `at` or a `length`, whose result is a number and holds no
- *    array.
+ *    array, or does not run when C runs because of an `exit` (below).
+ *
+ * An operand of an `exit` (`IRExit`) is a use, as an operand of the yield
+ * of the loop body is: the `exit` hands the array to the result of its
+ * loop. After an `exit`, the code of the body of its loop does not run
+ * again in that run of the loop, so an `exit` E and a use U that the body
+ * of the loop of E holds after E never both run with one value: U before
+ * C, or C before U, is then not a use that runs after the other. Every
+ * other order with an `exit` is a use as any other: an `exit` that runs
+ * before C, where C is outside the body of the loop of E, fails the rule.
+ * The only later uses of the operand of an `exit` are the uses of the
+ * result of its loop, which the uniqueness of that result checks.
  *
  * Soundness. By 1, when C runs, the array of X is referenced only by X and
  * by values that a use of X made. By 3, no use of X runs after C, and the
@@ -212,8 +260,11 @@ function analyzeInPlace(program: IRProgram): {
         const i = (loop.body.parameters ?? []).findIndex(
           (p) => p.id === value.id
         );
+        // The parameter holds the initial value or the next value of the
+        // previous pass, never the operand of an `exit`.
         return (
-          i > 0 && carriedUnique(loop, i - 1, definition.position.slice(0, -1))
+          i > 0 &&
+          carriedUnique(loop, i - 1, definition.position.slice(0, -1), false)
         );
       }
       const op = definition.op;
@@ -225,7 +276,9 @@ function analyzeInPlace(program: IRProgram): {
           return yieldsUnique[op.function] === true;
         case 'if': {
           const i = op.results.indexOf(value);
+          // A closed branch yields nothing to the result.
           return [op.then, op.else].every((region) => {
+            if (isClosedRegion(region)) return true;
             const last = region.operations.length - 1;
             const yieldOp = region.operations[last];
             return consumable(yieldOp.operands[i], yieldOp, [
@@ -238,18 +291,22 @@ function analyzeInPlace(program: IRProgram): {
           return carriedUnique(
             op,
             op.results.indexOf(value),
-            definition.position
+            definition.position,
+            true
           );
         default:
           return false;
       }
     };
 
-    /** Whether the carried value `i` of `loop`, at `position`, is unique. */
+    /** Whether the carried value `i` of `loop`, at `position`, is unique:
+     *  its parameter, or with `exits` its result, which can also be the
+     *  operand of an `exit`. */
     const carriedUnique = (
       loop: Extract<IROperation, { kind: 'loop' }>,
       i: number,
-      position: Position
+      position: Position,
+      exits: boolean
     ): boolean => {
       const parameter = loop.body.parameters![i + 1];
       const result = loop.results[i];
@@ -264,7 +321,12 @@ function analyzeInPlace(program: IRProgram): {
           consumable(yieldOp.operands[i], yieldOp, [
             ...position,
             { region: loop.body, index: last },
-          ])
+          ]) &&
+          // The result can also be the operand of an `exit`.
+          (!exits ||
+            exitPositions(loop, position).every(({ op, at }) =>
+              consumable(op.operands[i], op, at)
+            ))
         );
       } finally {
         assumed.delete(parameter.id);
@@ -298,7 +360,14 @@ function analyzeInPlace(program: IRProgram): {
         return (
           when === 'exclusive' ||
           (when === 'before' &&
-            (use.op.kind === 'at' || use.op.kind === 'length'))
+            (use.op.kind === 'at' || use.op.kind === 'length')) ||
+          // An `exit` and a use that the body of its loop holds after it.
+          (when === 'before' &&
+            use.op.kind === 'exit' &&
+            inBodyOfExitLoop(use.position, at, facts.owners)) ||
+          (when === 'after' &&
+            consumer.kind === 'exit' &&
+            inBodyOfExitLoop(at, use.position, facts.owners))
         );
       });
     };

@@ -33,6 +33,7 @@
 import type { Expression } from '../global-types.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
 import {
+  exitsOf,
   operationCanAbort,
   regionsOf,
   yieldedValues,
@@ -197,7 +198,10 @@ type Visit = (
  * fails). Every other use fails, among them an `at`, a `length`, an argument
  * of a call, the initial value of an inner loop, a yield at the position of
  * another carried value, and any use inside the body of an inner loop or of
- * a comprehension, or inside an operand of `and` or `or`. A body that yields
+ * a comprehension, or inside an operand of `and` or `or`. A loop whose body
+ * holds an `exit` (in its body or in a branch of an `if` there, not in an
+ * inner loop) is not a candidate: the number of its passes depends on the
+ * earlier passes; the judgment names the first such `exit`. A body that yields
  * another list in place of the carried list also fails. A carried scalar is
  * an accumulation and fails with the reason `carried scalar` (a reduction is
  * a later step). Reads of other lists are allowed.
@@ -362,7 +366,8 @@ function effectBlockers(
  * The values of `program` that can hold an array that the host or a caller
  * holds: a list input, a list parameter of a function, and every value that
  * can be the same array (a value of an `if` or of a loop that one of them
- * flows into, the result of a call of a function whose value can be its
+ * flows into, the result of a loop that an `exit` hands one of them, the
+ * result of a call of a function whose value can be its
  * parameter, the result of an update in place of such a value). A `build`
  * and a copying `replace-at` make a new array. The analysis is a may-alias
  * analysis, by ids of values: a fixed point over the functions and the root.
@@ -395,22 +400,28 @@ export function hostArrays(
             shared.has(op.operands[0].id)
           )
             add(op.result);
+          // A closed branch yields nothing (`yieldedValues()` is empty).
           if (op.kind === 'if')
             op.results.forEach((result, j) => {
               if (
-                [op.then, op.else].some((b) =>
-                  shared.has(yieldedValues(b)[j].id)
-                )
+                [op.then, op.else].some((b) => {
+                  const value = yieldedValues(b)[j];
+                  return value !== undefined && shared.has(value.id);
+                })
               )
                 add(result);
             });
           if (op.kind === 'loop') {
             const next = yieldedValues(op.body);
+            const exits = exitsOf(op);
             op.results.forEach((result, i) => {
               if (shared.has(op.operands[i + 2].id) || shared.has(next[i].id)) {
                 add(result);
                 add(op.body.parameters?.[i + 1]);
               }
+              // The operand of an `exit` flows into the result only.
+              if (exits.some((exit) => shared.has(exit.operands[i].id)))
+                add(result);
             });
           }
         }
@@ -458,6 +469,14 @@ function judgeLoop(
     candidate: false,
     reason: blocker(op, fn, reason),
   });
+
+  // An `exit` ends the loop at a pass that the earlier passes decide.
+  const [exit] = exitsOf(loop);
+  if (exit !== undefined)
+    return fail(
+      exit,
+      'the body holds an exit: the number of passes depends on the earlier passes'
+    );
 
   if (loop.body.effect !== 'pure') {
     const first = firstImpure(program, loop.body);

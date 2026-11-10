@@ -830,7 +830,13 @@ describe('refusals', () => {
   const body = (statement: MathJsonExpression) =>
     fn(N, declare('s', 'real', 0), loop(statement, 'k', 1, 'n'), 's');
   const refusals: [string, MathJsonExpression, RegExp][] = [
-    ['a Break', body(['Break']), /the structured route admits no statement Break in the body of a Loop/],
+    // A `Break` is admitted only as the last statement of a branch of an `If`
+    // (compile-javascript-structured-break.test.ts).
+    [
+      'a Break',
+      body(['Break']),
+      /the structured route admits a Break only as the last statement of a branch of an If, not as a statement of the body of a Loop/,
+    ],
     ['a Continue', body(['Continue']), /the structured route admits no statement Continue in the body of a Loop/],
     [
       'a Return in a branch of the body',

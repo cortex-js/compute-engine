@@ -108,9 +108,10 @@ function roadtrail(H: list<real>, S: list<real>) -> list<real> {
 }
 `;
 
-/** Prelude functions that the profile declines: a draw from the random
- *  stream, a `Break`, a list literal, and the function `tone` of Tycho's
- *  Buddhabrot showcase (`template-data.js`), which it admits. */
+/** Prelude functions: a draw from the random stream and a list literal,
+ *  which the profile declines, a `Break` in a branch, and the function
+ *  `tone` of Tycho's Buddhabrot showcase (`template-data.js`), which it
+ *  admits. */
 const OTHER_PRELUDE = `
 function jitter(x: real) -> real { x + random() }
 function firstover(L: list<real>, t: real) -> real {
@@ -469,14 +470,14 @@ describe('canCompile() and compile() agree', () => {
             ['Declare', 's', "'real'", 0],
             [
               'Loop',
-              ['If', ['Less', 'j', 3], ['Break']],
+              ['If', ['Less', 'j', 3], ['Continue']],
               ['Element', 'j', ['Range', 1, 'n']],
             ],
             's',
           ],
           ['n', 'integer']
         ),
-        { operator: 'Break' },
+        { operator: 'Continue' },
       ],
     ];
     for (const [json, fields] of cases) {
