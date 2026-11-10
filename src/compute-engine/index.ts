@@ -4194,6 +4194,11 @@ export class ComputeEngine implements IComputeEngine {
    * a function definition, a value that is a function, and a value that
    * `ce.assign()` refuses for the symbol.
    *
+   * When putting back a value fails, the error is thrown after every other
+   * value is put back. If `fn` threw too, the method throws an
+   * `AggregateError` whose `errors` are the error of `fn` and the error of
+   * the restore, in this order, and whose `cause` is the error of `fn`.
+   *
    * `fn` must be synchronous. The earlier values are put back when `fn`
    * returns, before a promise that it returns settles.
    */

@@ -315,4 +315,67 @@ describe('ce.withValues', () => {
       ce.withValues({ a: undefined }, () => ce.parse('a+1').evaluate().re)
     ).toBe(4);
   });
+
+  // CE-1192. No public program makes a restore fail, so the tests replace
+  // the internal restore of the value definition.
+  function breakRestore(ce: ComputeEngine, name: string): Error {
+    const def = ce.lookupDefinition(name) as unknown as {
+      value: { _restoreCheckpointSnapshot: (s: unknown) => void };
+    };
+    const restoreError = new Error('restore failed');
+    def.value._restoreCheckpointSnapshot = () => {
+      throw restoreError;
+    };
+    return restoreError;
+  }
+
+  test('a restore failure is thrown when fn returns', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    const restoreError = breakRestore(ce, 'a');
+    let thrown: unknown;
+    try {
+      ce.withValues({ a: 3 }, () => 0);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBe(restoreError);
+  });
+
+  test('when fn throws and a restore fails, both errors are thrown', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    ce.declare('b', 'real');
+    const restoreError = breakRestore(ce, 'a');
+    const fnError = new Error('fn failed');
+    let thrown: unknown;
+    try {
+      ce.withValues({ a: 3, b: 4 }, () => {
+        throw fnError;
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([fnError, restoreError]);
+    expect((thrown as AggregateError).cause).toBe(fnError);
+    // The failure of `a` does not stop the restore of `b`.
+    expect(ce.box('b').value).toBeUndefined();
+  });
+
+  test('when fn throws and every restore succeeds, its error is thrown', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    const fnError = new Error('fn failed');
+    let thrown: unknown;
+    try {
+      ce.withValues({ a: 3 }, () => {
+        throw fnError;
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBe(fnError);
+    expect(ce.box('a').value).toBeUndefined();
+  });
 });

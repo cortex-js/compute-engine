@@ -58,6 +58,14 @@
 
 ### Resolved Issues
 
+- **`ce.withValues()` reports a failed restore when its callback threw.**
+  When `fn` threw and putting back the earlier value of a symbol failed too,
+  only the error of `fn` was thrown, and the symbol could keep its temporary
+  value with no report. The method now throws an `AggregateError` whose
+  `errors` are the error of `fn` and the restore error, in this order, and
+  whose `cause` is the error of `fn`. When `fn` returns, a restore failure
+  is thrown as before (CE-1192).
+
 - **On GLSL, `canCompile()` and `compile()` agree on an applied
   derivative.** An application of a derivative, `Apply(Derivative(f), x)`,
   is now replaced by the closed form of the derivative before the check,

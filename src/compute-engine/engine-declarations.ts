@@ -4273,8 +4273,10 @@ function assignNamedValue(
  * value definition that `fn` disposes (`ce.undeclare()`) is not restored.
  *
  * A failure of the restore of one binding does not stop the restore of the
- * others. The first failure is thrown after all of them, unless `fn` threw:
- * the error of `fn` is then kept.
+ * others. The first failure is thrown after all of them. When `fn` (or the
+ * write of a value) threw too, an `AggregateError` is thrown instead: its
+ * `errors` are the error of `fn` and the first restore failure, in this
+ * order, and its `cause` is the error of `fn`.
  *
  * `fn` must be synchronous: the bindings are restored when `fn` returns,
  * before a promise that it returns settles.
@@ -4319,7 +4321,7 @@ export function withValuesFn<T>(
     });
   }
 
-  let threw = false;
+  let threw: { error: unknown } | undefined;
   try {
     const writes: {
       name: string;
@@ -4346,12 +4348,20 @@ export function withValuesFn<T>(
     }
     return fn();
   } catch (error) {
-    threw = true;
+    threw = { error };
     throw error;
   } finally {
     const failure = restoreWithValuesBindings(ce, saved);
-    // eslint-disable-next-line no-unsafe-finally
-    if (failure !== undefined && !threw) throw failure.error;
+    if (failure !== undefined) {
+      // eslint-disable-next-line no-unsafe-finally
+      if (threw === undefined) throw failure.error;
+      // eslint-disable-next-line no-unsafe-finally
+      throw new AggregateError(
+        [threw.error, failure.error],
+        'withValues(): the callback threw, and the earlier value of a symbol could not be put back',
+        { cause: threw.error }
+      );
+    }
   }
 }
 
