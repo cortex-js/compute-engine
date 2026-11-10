@@ -2979,10 +2979,14 @@ function evidenceGuardedNarrow(
   param: Type,
   noInference = false
 ): 'narrowed' | 'admitted' | 'fall-through' {
-  const def = op.valueDefinition!;
-  const held = def.value;
+  // A free name (`isFreeName()`, engine flag `_bindingUnits`) reads the
+  // definition that it resolves to, and with none it is valueless.
+  const def = resolvedValueDefinition(op);
+  const held = def?.value;
   const staticEvidence =
-    held === undefined ? ce._staticAssignmentEvidence?.get(def) : undefined;
+    held === undefined && def !== undefined
+      ? ce._staticAssignmentEvidence?.get(def)
+      : undefined;
   if (held === undefined && staticEvidence === undefined) {
     // A valueless symbol is admitted; in check-only mode it is admitted
     // without the narrowing write.

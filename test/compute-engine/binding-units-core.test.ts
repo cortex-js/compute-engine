@@ -592,11 +592,11 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
 
   test('an exception removes the requirements of the failed pass', () => {
     const ce = engine();
-    let undos = 0;
-    const state = new EngineBoxingState<object>(() => (undos += 1));
+    const state = new EngineBoxingState<object>();
     const env = new UnitEnvironment();
     const scope = {};
     env.set(scope, 'a', ce.type('real'));
+    const counter = env.counter;
     expect(() =>
       state.withRootRepair(() => {
         state.setUnitEnvironment(env);
@@ -608,14 +608,14 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     ).toThrow('failed pass');
     expect(env.get(scope, 'a')?.toString()).toBe('real');
     expect(env.get(scope, 'b')).toBeUndefined();
-    // A type entry was removed: the engine is told to widen its caches.
-    expect(undos).toBe(1);
+    // A type entry was removed: the counter moved, so a type cached from
+    // the environment is computed again. No engine-wide event is sent.
+    expect(env.counter).toBeGreaterThan(counter);
   });
 
   test('an exception removes the writes in the environments of two operands', () => {
     const ce = engine();
-    let undos = 0;
-    const state = new EngineBoxingState<object>(() => (undos += 1));
+    const state = new EngineBoxingState<object>();
     // The environments of two operands boxed in two units, as in
     // `ce.function('Add', [ce.parse('x'), ce.parse('y')])`.
     const envX = new UnitEnvironment();
@@ -635,7 +635,6 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     ).toThrow('failed pass');
     expect(envX.get(scope, 'x')?.toString()).toBe('real');
     expect(envY.get(scope, 'y')?.toString()).toBe('real');
-    expect(undos).toBe(1);
     // The journals are closed when the root construction ends.
     envY.set(scope, 'y', ce.type('integer'));
     envY.undoJournal();
@@ -673,8 +672,7 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
 
   test('the undo of the environment of a discarded pass does not widen the caches', () => {
     const ce = engine();
-    let undos = 0;
-    const state = new EngineBoxingState<object>(() => (undos += 1));
+    const state = new EngineBoxingState<object>();
     const scope = {};
     let pass = 0;
     const envs: UnitEnvironment[] = [];
@@ -690,7 +688,6 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     expect(pass).toBe(2);
     // The second pass has an environment of its own.
     expect(envs[1]).not.toBe(envs[0]);
-    expect(undos).toBe(0);
   });
 
   test('two operands from two units and a throwing pass: no requirement kept', () => {
@@ -714,8 +711,7 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
 
   test('a rebuild of a scoped frame removes only the writes of that frame', () => {
     const ce = engine();
-    let undos = 0;
-    const state = new EngineBoxingState<object>(() => (undos += 1));
+    const state = new EngineBoxingState<object>();
     const env = new UnitEnvironment();
     const root = {};
     const scope = {};
@@ -741,7 +737,6 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     expect(env.get(root, 'a')?.toString()).toBe('real');
     expect(env.get(scope, 'b')).toBeUndefined();
     expect(env.get(scope, 'c')?.toString()).toBe('string');
-    expect(undos).toBe(1);
   });
 
   test('an undo of the record of the uses only does not widen the caches', () => {

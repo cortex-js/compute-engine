@@ -125,6 +125,17 @@ export function compile<
   expr: Expression,
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
+  // A compilation is an operation: with the engine flag `_bindingUnits`, it
+  // runs in an operation environment of its own, whose parents are the
+  // environments of the occurrences of `expr`. Each occurrence of an input
+  // then reads the meet of the requirements of the units of `expr`, and an
+  // input whose units disagree has the type `unknown` and declines with
+  // `untyped-input` (rule 8 of
+  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+  // `ce._opensOperation()`).
+  const ce = expr.engine;
+  if (ce._opensOperation(false))
+    return ce._withOperation(expr, () => compile<T, R>(expr, options));
   assertCompilationOptionsContract(options);
   assertProfileTarget(options);
   // (The shared per-compilation budgets — the antiderivative pool — are NOT

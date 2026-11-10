@@ -57,7 +57,11 @@ import type {
 } from '../global-types.js';
 
 import { activeRollbackFrame } from '../inference-rollback.js';
-import { UnitEnvironment } from '../binding-unit.js';
+import {
+  UnitEnvironment,
+  noteResolutionRead,
+  operationInput,
+} from '../binding-unit.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
 import {
   collectionTypeBesideAbsence,
@@ -117,6 +121,7 @@ import {
   endObjectDeps,
   mergeObjectDeps,
   objectDepsValid,
+  recordObjectRead,
   type ObjectDeps,
 } from './object-deps.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
@@ -394,8 +399,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (ce._bindingUnits) {
       const env = ce._boxingState.unitEnvironment();
       if (env !== undefined) this._env = env;
-      if (options?.def === undefined && options?.homeScope !== undefined)
-        this._homeScope = options.homeScope;
+      if (options?.def === undefined && options?.homeScope !== undefined) {
+        // A free name that an operation makes takes the home scope of the
+        // same name in the input of the operation, when the scope it is made
+        // in is that scope or a descendant of it (rule 8 of
+        // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): a name
+        // made in a scope that the operation pushed is then the same binding
+        // as the name of the input.
+        const operation = ce._boxingState.currentOperation();
+        this._homeScope =
+          operation !== undefined
+            ? operation.homeScopeOf(name, options.homeScope)
+            : options.homeScope;
+      }
     }
   }
 
@@ -886,10 +902,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * The result is that of `_infer()`: false when the requirement adds no
    * information.
    *
-   * A write that changes the type sends the state event of an inference, as
-   * a write on a definition does: the types cached on compound expressions
-   * are keyed on the versions that this event moves. Phase C of the plan
-   * replaces that event with keys on the counter of the environment.
+   * Inside an operation, the write goes in the environment of the
+   * operation, and the requirement starts from the entry that the
+   * occurrence reads (`_unitEntry()`): the environment of the occurrence
+   * is not changed (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
+   *
+   * A write sends no engine-wide event (rule 9): it moves the counter of the
+   * environment, and a type cached from an entry keeps the counter of each
+   * environment that it read (`UnitEnvironment.lookup()`).
    */
   private _inferInEnvironment(
     home: object,
@@ -897,10 +918,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     inferenceMode: 'narrow' | 'widen' | 'replace'
   ): boolean {
     const ce = this.engine;
-    const env = (this._env ??= new UnitEnvironment());
+    const env =
+      ce._boxingState.writableOperation() ??
+      (this._env ??= new UnitEnvironment());
     ce._boxingState.noteUnitWrite(env);
     const name = this._id;
-    const from = env.get(home, name);
+    const from = this._unitEntry(home);
     const fromType: Type = from?.type ?? 'unknown';
     const to = ce.type(
       inferenceMode === 'replace'
@@ -928,23 +951,47 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
     if (to.isUnknown && inferenceMode !== 'replace') return false;
     if (from !== undefined && to.type === from.type) return true;
-    const equalType =
-      from !== undefined &&
-      typeof to.type === 'object' &&
-      typeof from.type === 'object' &&
-      to.toString() === from.toString() &&
-      isSubtype(to.type, from.type) &&
-      isSubtype(from.type, to.type);
     env.set(home, name, to);
-    if (!equalType)
-      ce._noteStateEvent({
-        kind: 'inference',
-        valueType: true,
-        widening:
-          inferenceMode !== 'narrow' ||
-          (from !== undefined && !isSubtype(to.type, from.type)),
-      });
     return true;
+  }
+
+  /**
+   * The entry that this occurrence reads under the key `key` (a home scope
+   * or a value definition): the entry of the environment of the operation
+   * in progress, through its parents, and else the entry of the environment
+   * of the occurrence, through its parents (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
+   *
+   * The read is recorded for the caches of compound expressions: the
+   * counter of each environment that it visited (`UnitEnvironment.lookup()`),
+   * and the operation in progress (`EngineBoxingState.operationToken`): a
+   * type cached in an operation is computed again after it, and a type
+   * cached outside is computed again in it. The definition that a free name resolves to is recorded in
+   * `_unitType()`. Rule 4 of the spec also keys a cached type on a counter
+   * of each name that it resolved; no such counter exists: the key of the
+   * type cache (`ce._typeCacheGeneration()`), which a declaration and a
+   * write on a definition move, stands for it.
+   */
+  private _unitEntry(key: object): BoxedType | undefined {
+    const state = this.engine._boxingState;
+    const token = state.operationToken;
+    recordObjectRead(token, token._version);
+    const operation = state.currentOperation();
+    return (
+      operation?.lookup(key, this._id) ?? this._env?.lookup(key, this._id)
+    );
+  }
+
+  /** True when the unit of this occurrence, or the operation in progress,
+   * reads the name as a variable in the scope `home` (`N` in `N + 1`,
+   * `UnitEnvironment.readsAsVariable()`). */
+  private _readsAsVariable(home: object): boolean {
+    return (
+      this.engine._boxingState
+        .currentOperation()
+        ?.readsAsVariable(home, this._id) === true ||
+      this._env?.readsAsVariable(home, this._id) === true
+    );
   }
 
   /**
@@ -987,7 +1034,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * did not make writes in the environment, also one that is not on the
    * chain of the current scope (a definition of a popped scope, or of a
    * scope that a `scope` option gave to an earlier boxing). A write outside
-   * a boxing (during an evaluation) is made on the definition.
+   * a boxing (during an evaluation) is made on the definition, also inside
+   * an operation: rule 8 of the spec writes every requirement of an
+   * operation in its environment, but the narrowing writes on definitions
+   * stay until the flag is turned on for good and they are removed (phase E
+   * of section 10 of the spec). Only a free name, and a boxing inside an
+   * operation, write in the environment of the operation.
    *
    * The key of the entry is the value definition itself: it does not depend
    * on the context of the write or of the read.
@@ -1037,9 +1089,22 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const def = this._def;
     if (def === undefined) {
       if (!this._isFreeName) return undefined;
-      const entry = this._env?.get(this._homeScope!, this._id);
-      const resolved = withStaticTypingView(this.engine, () =>
-        this._freeNameBinding()
+      const entry = this._unitEntry(this._homeScope!);
+      const ce = this.engine;
+      const name = this._id;
+      const asVariable = this._readsAsVariable(this._homeScope!);
+      const resolve = () =>
+        withStaticTypingView(ce, () =>
+          freeNameBindingInContext(ce, name, undefined, asVariable)
+        );
+      // A type cached on a compound expression is computed again when the
+      // name resolves to another definition (a declaration in a pushed
+      // scope, or the pop of that scope).
+      const resolved = noteResolutionRead(
+        ce,
+        name,
+        asVariable ? 'variable' : 'name',
+        resolve
       );
       if (resolved === undefined) return entry ?? BoxedType.unknown;
       if (isOperatorDef(resolved)) return resolved.operator.signature;
@@ -1055,14 +1120,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       !(isValueDef(resolved) && sameBindingDef(resolved.value, v))
     ) {
       if (isOperatorDef(resolved)) return resolved.operator.signature;
-      return this._typeOfDefinitionInUnit(
-        resolved.value,
-        this._env?.get(v, this._id)
-      );
+      return this._typeOfDefinitionInUnit(resolved.value, this._unitEntry(v));
     }
-    if (this._env === undefined) return undefined;
     if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
-    const entry = this._env.get(v, this._id);
+    // With no environment and no operation in progress, `_unitEntry()` is
+    // `undefined`, but the read is recorded: the type is computed again in
+    // an operation.
+    const entry = this._unitEntry(v);
     if (entry === undefined) return undefined;
     return this._typeOfDefinitionInUnit(v, entry);
   }
@@ -1146,7 +1210,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       this.engine,
       this._id,
       undefined,
-      this._env?.readsAsVariable(this._homeScope!, this._id) === true
+      this._readsAsVariable(this._homeScope!)
     );
   }
 
@@ -1211,7 +1275,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       ce,
       this._id,
       home,
-      this._env?.readsAsVariable(home, this._id) === true
+      this._readsAsVariable(home)
     );
     if (found === undefined) {
       const def = ce._declareSymbolValue(
@@ -2169,6 +2233,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(operationInput(this, pattern), () =>
+        this.match(pattern, options)
+      );
     return match(this, pattern, options);
   }
 
@@ -2495,6 +2567,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(this, () => this.simplify(options));
     return simplifyValueBlind(this, options).at(-1)?.value ?? this;
   }
 
@@ -2503,6 +2581,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(true))
+      return this.engine._withOperation(this, () => this.evaluate(options));
     // A free name evaluates through the definition that its name resolves to
     // in the current context, and stays symbolic with none
     // (`binding-unit.ts`).
@@ -2657,7 +2741,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       asyncEvaluationOf(options._contextStack) !== undefined
     )
       return options;
-    const { stack } = beginAsyncEvaluation(this.engine, options?._contextStack);
+    const { stack, evaluation } = beginAsyncEvaluation(
+      this.engine,
+      options?._contextStack
+    );
+    // With the engine flag `_bindingUnits`, the evaluation is an operation
+    // (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), as
+    // in `BoxedFunction.evaluateAsync()`.
+    this.engine._captureAsyncOperation(evaluation, this);
     return { ...options, _contextStack: stack };
   }
 
@@ -3044,6 +3135,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   N(): Expression {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(true))
+      return this.engine._withOperation(this, () => this.N());
     // A free name: see `evaluate()`.
     if (this._isFreeName) {
       const resolved = this._resolvedFreeSymbol();
@@ -3137,6 +3234,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
     options?: Partial<ReplaceOptions>
   ): Expression | null {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(operationInput(this, rules), () =>
+        this.replace(rules, options)
+      );
     return replace(this, rules, options).at(-1)?.value ?? null;
   }
 
@@ -3144,6 +3249,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(operationInput(this, sub), () =>
+        this.subs(sub, options)
+      );
     // A structural symbol with no requested form keeps the structural form:
     // its replacement is boxed structurally, which keeps the written names
     // (`_structuralForm`).

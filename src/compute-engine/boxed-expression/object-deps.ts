@@ -108,10 +108,17 @@
  * @module
  */
 
-import type { ObjectInterface } from '../global-types.js';
+/**
+ * What a dependency records of an object: its version counter. An object
+ * (`ObjectInterface._version`) is one; so are the environment of a binding
+ * unit and the current lexical scope of an engine (`binding-unit.ts`), whose
+ * versions move at a write in the environment and at a change of scope. The
+ * type is structural so that this module imports no engine module.
+ */
+export type VersionedObject = { readonly _version: number };
 
 /** One recorded read: the object, held weakly, and its version at read time. */
-export type ObjectDep = [WeakRef<ObjectInterface>, number];
+export type ObjectDep = [WeakRef<VersionedObject>, number];
 
 /** The dependency set of one cache entry. An entry with no object reads
  * carries `undefined` rather than an empty array, so the overwhelmingly
@@ -221,7 +228,10 @@ export function endObjectDeps(): ObjectDeps | undefined {
  * far the common case — is one counter increment and a single length check,
  * with no allocation and no iteration.
  */
-export function recordObjectRead(obj: ObjectInterface, version: number): void {
+export function recordObjectRead(
+  obj: VersionedObject,
+  version: number
+): void {
   _objectReads += 1;
   if (_collectors.length === 0) return;
   for (const deps of _collectors) addDep(deps, obj, version);
@@ -305,7 +315,11 @@ export function objectDepCollectorDepth(): number {
 /** Add one `(object, version)` read to a single collector, coalescing a
  * repeat read of the same object to the LOWEST version seen. Collectors hold
  * a handful of entries at most, so the linear scan beats a map. */
-function addDep(deps: ObjectDeps, obj: ObjectInterface, version: number): void {
+function addDep(
+  deps: ObjectDeps,
+  obj: VersionedObject,
+  version: number
+): void {
   for (const dep of deps) {
     if (dep[0].deref() === obj) {
       if (version < dep[1]) dep[1] = version;

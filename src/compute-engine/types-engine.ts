@@ -1,4 +1,5 @@
 import type { BigDecimal } from '../big-decimal/index.js';
+import type { AsyncEvaluation } from './boxed-expression/evaluation-epoch.js';
 import type { Complex } from 'complex.js';
 import type { OneOf } from '../common/one-of.js';
 import type { KernelPool } from './kernel-pool-types.js';
@@ -1637,6 +1638,52 @@ export interface IComputeEngine {
    * A test sets it right after the engine is made.
    * @internal */
   _bindingUnits: boolean;
+
+  /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
+   * that starts now opens an environment of its own (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the engine flag
+   * `_bindingUnits` is on, also in another operation (nested operations
+   * form a stack, `_withOperation()`). In the environment of an Epsil
+   * program (rule 10), an evaluation (`evaluation` true: `evaluate()` and
+   * `N()`) inside the evaluation of a statement by the run driver opens
+   * none: it writes in the environment of the program.
+   *
+   * An operation method starts with
+   * `if (ce._opensOperation(…)) return ce._withOperation(this, () => <the
+   * same call>)`: the call made again runs in the new environment, and its
+   * own `_opensOperation()` call is false.
+   * @internal */
+  _opensOperation(evaluation: boolean): boolean;
+
+  /** Run `fn`, an operation on `input`, in a new operation environment
+   * whose parents are the environments of the occurrences of `input`
+   * (rule 8). In an operation that is not a program, the parent of the new
+   * environment is the environment of that operation instead, and the
+   * environment is made at its first write. The environment in progress
+   * before is put back at the end, also on a throw.
+   *
+   * `reentry` (the default) states that `fn` calls the method that opened
+   * the operation again: its first `_opensOperation()` call is then false.
+   * @internal */
+  _withOperation<T>(input: unknown, fn: () => T, reentry?: boolean): T;
+
+  /** With the engine flag `_bindingUnits`: give the asynchronous
+   * evaluation `evaluation`, which starts now on `input`, its operation
+   * environment (`AsyncEvaluation.operation`), when it has none: a new
+   * environment when an operation starts now (`_opensOperation()`), else
+   * the environment in progress (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Each synchronous
+   * part of the evaluation puts it in place (`runWithEvaluationEffects()`,
+   * `effects-registry.ts`). Without the flag, nothing.
+   * @internal */
+  _captureAsyncOperation(evaluation: AsyncEvaluation, input: unknown): void;
+
+  /** With the engine flag `_bindingUnits`: run `fn`, an Epsil run or an
+   * Epsil static check, in a program environment (rule 10). Every outermost
+   * boxing during `fn` joins it. The environment is discarded at the end.
+   * Without the flag, `fn()`.
+   * @internal */
+  _withProgramEnvironment<T>(fn: () => T): T;
 
   /** Value definitions whose type was first inferred (unknown → concrete)
    * during the current top-level boxing operation — the forward-computed

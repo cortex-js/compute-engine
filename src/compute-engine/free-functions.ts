@@ -151,7 +151,24 @@ export function expand(
   expr: LatexString | ExpressionInput,
   options?: FreeFunctionOptions
 ): Expression {
-  return expandExpr(toExpression(expr, options));
+  const input = toExpression(expr, options);
+  return asOperation(input, () => expandExpr(input));
+}
+
+/**
+ * Run `fn`, an operation on `input` (`expand()`, `factor()`), in an
+ * operation environment of its own, with the engine flag `_bindingUnits`
+ * (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+ * `ce._opensOperation()`).
+ *
+ * Rule 8 names `expand()` and `factor()` as methods of an expression. They
+ * are free functions of this module, so these functions are the operations;
+ * the library code that calls `expandExpr()` or `factorExpr()` directly runs
+ * in the operation in progress, if any.
+ */
+function asOperation<T>(input: Expression, fn: () => T): T {
+  const ce = input.engine;
+  return ce._opensOperation(false) ? ce._withOperation(input, fn, false) : fn();
 }
 
 export function solve(
@@ -170,7 +187,8 @@ export function expandAll(
   expr: LatexString | ExpressionInput,
   options?: FreeFunctionOptions
 ): Expression {
-  return expandAllExpr(toExpression(expr, options));
+  const input = toExpression(expr, options);
+  return asOperation(input, () => expandAllExpr(input));
 }
 
 /** Factor an expression, optionally in a variable and an explicit number field. */
@@ -180,6 +198,10 @@ export function factor(
 ): Expression {
   validateFactorOptions(options);
   const target = toExpression(expr, options);
+  return asOperation(target, () => factorTarget(target, options));
+}
+
+function factorTarget(target: Expression, options?: FactorOptions): Expression {
   if (
     options &&
     Object.keys(options).some((k) => k.startsWith('max') || k === 'profile')

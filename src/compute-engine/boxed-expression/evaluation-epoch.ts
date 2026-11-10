@@ -33,6 +33,7 @@
  * asynchronous one is pending, each read their own number.
  */
 import type { DeadlineFrame } from '../../common/interruptible.js';
+import type { UnitEnvironment } from '../binding-unit.js';
 
 const currentEpoch = new WeakMap<object, number>();
 
@@ -67,6 +68,22 @@ export type AsyncEvaluation = {
    * `effects-registry.ts`), so the time limit applies to the whole
    * evaluation. `undefined` when no span enclosed the call. */
   deadlineFrame?: DeadlineFrame;
+  /**
+   * With the engine flag `_bindingUnits`: the environment of the operation
+   * that this evaluation is (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), captured when
+   * the evaluation starts. Each synchronous part of the evaluation that an
+   * `evaluateAsync()` call starts puts it in place, and puts back the
+   * previous one when it ends (`BoxedFunction.evaluateAsync()`): it is
+   * never left in place across an `await`, because another evaluation can
+   * run on the engine then.
+   */
+  operation?: UnitEnvironment;
+  /** True when `operation` is the environment of an Epsil program and this
+   * evaluation is the evaluation of a statement by its run driver: the
+   * evaluations nested in it then write in the environment of the program
+   * (rule 10). */
+  programStatement?: boolean;
 };
 
 /** The asynchronous evaluation of each evaluation-context stack that one
@@ -229,6 +246,12 @@ export function beginAsyncStatement<T>(stack: ReadonlyArray<T>): T[] {
   // A statement of the program keeps the time limit of the program.
   const deadlineFrame = deadlineFrameOf(stack);
   if (deadlineFrame !== undefined) evaluation.deadlineFrame = deadlineFrame;
+  // And the operation environment of the program.
+  const enclosing = asyncEvaluations.get(stack);
+  if (enclosing?.operation !== undefined) {
+    evaluation.operation = enclosing.operation;
+    if (enclosing.programStatement) evaluation.programStatement = true;
+  }
   asyncEvaluations.set(own, evaluation);
   return own;
 }

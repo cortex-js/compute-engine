@@ -7,9 +7,11 @@ import type {
 import type { PrecisionWindow } from './types-kernel-evaluation.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
 import {
+  asyncEvaluationOf,
   deadlineFrameOf,
   mergeDeadlineFrames,
 } from './boxed-expression/evaluation-epoch.js';
+import type { UnitEnvironment } from './binding-unit.js';
 
 // The host capability registry — the value behind `ce.effects`
 // (`docs/EFFECTS-MODEL.md`, "Host capabilities"). This module holds the
@@ -184,7 +186,43 @@ export function runWithEvaluationEffects<T, C>(
     _requestedPrecision?: number | undefined;
     _withTransientPrecision?: <R>(digits: number, fn: () => R) => R;
     _deadlineFrame?: DeadlineFrame | undefined;
+    _bindingUnits?: boolean;
+    _boxingState?: {
+      withOperation<R>(env: UnitEnvironment, fn: () => R): R;
+      asProgramStatement<R>(fn: () => R): R;
+    };
   },
+  effects: EffectHandlers,
+  fn: () => T,
+  contextStack?: C[],
+  precisionWindow?: PrecisionWindow
+): T {
+  // With the engine flag `_bindingUnits`, the operation environment of the
+  // asynchronous evaluation that owns `contextStack`
+  // (`AsyncEvaluation.operation`) is put in place for the slice, and the
+  // previous one is put back when it returns or throws (rule 8 of
+  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): it is never in
+  // place across an `await`.
+  if (engine._bindingUnits !== true)
+    return runSlice(engine, effects, fn, contextStack, precisionWindow);
+  const evaluation = asyncEvaluationOf(contextStack);
+  const operation = evaluation?.operation;
+  const state = engine._boxingState;
+  if (operation === undefined || state === undefined)
+    return runSlice(engine, effects, fn, contextStack, precisionWindow);
+  const slice = () =>
+    runSlice(engine, effects, fn, contextStack, precisionWindow);
+  return state.withOperation(operation, () =>
+    evaluation!.programStatement === true
+      ? state.asProgramStatement(slice)
+      : slice()
+  );
+}
+
+/** The slice of `runWithEvaluationEffects()`, with the operation
+ * environment in place. */
+function runSlice<T, C>(
+  engine: Parameters<typeof runWithEvaluationEffects<T, C>>[0],
   effects: EffectHandlers,
   fn: () => T,
   contextStack?: C[],

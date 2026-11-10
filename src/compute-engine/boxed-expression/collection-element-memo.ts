@@ -474,6 +474,7 @@ function snapshotDepsUnderChain(
    * name happened to be encountered second must still invalidate — the
    * `seenOperators` dedup above is about traversal cost only. */
   const seenOperatorNames = new Set<string>();
+  const seenFreeNames = new Set<string>();
   /** The `subscriptEvaluate` handlers whose registered reads were already
    * walked — terminates a sequence whose recurrence reads the sequence, or
    * two sequences that read each other. */
@@ -888,10 +889,21 @@ function snapshotDepsUnderChain(
         // an unresolved name keeps the instance ineligible for caching.
         // Only direct operands of the element memo use this compatibility
         // path. Raw symbols nested in other expressions stay ineligible.
+        const free = isFreeName(e);
         const resolved =
-          rawOperands && isFunction(expr) && expr.ops.includes(e)
+          free || (rawOperands && isFunction(expr) && expr.ops.includes(e))
             ? resolveDepBinding(ce, depScope, e.symbol)
             : undefined;
+        if (free && resolved === undefined) {
+          // A free name that the chain does not resolve is case (2) of
+          // `visitValueDef()`, at any depth: its dependency is the
+          // resolution, which a declaration or an assignment changes.
+          if (!seenFreeNames.has(e.symbol)) {
+            seenFreeNames.add(e.symbol);
+            deps.push({ occurrence: e, name: e.symbol, resolved: undefined });
+          }
+          return;
+        }
         if (isOperatorDef(resolved)) {
           const name = e.symbol;
           if (!seenOperatorNames.has(name)) {

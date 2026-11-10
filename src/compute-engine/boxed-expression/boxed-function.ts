@@ -1,7 +1,11 @@
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
-import { unitCounterOfOperands } from '../binding-unit.js';
+import {
+  UnitEnvironment,
+  operationInput,
+  unitCounterOfOperands,
+} from '../binding-unit.js';
 import {
   callableBindingInContext,
   freeNameBindingAndScope,
@@ -495,6 +499,7 @@ import {
   objectDepsValid,
   objectReadCount,
   engineHasObjects,
+  recordObjectRead,
   type ObjectDeps,
 } from './object-deps.js';
 import {
@@ -1418,6 +1423,9 @@ export class BoxedFunction
         call: Expression;
         scope?: Scope;
         unitCounter?: number;
+        readsOperation?: boolean;
+        operation?: number;
+        operationCounter?: number;
         typeGeneration?: number;
         definitionVersion?: number;
       }
@@ -1866,6 +1874,10 @@ export class BoxedFunction
    *   (`unitCounterOfOperands()`): the overload that the boxing selects,
    *   and the canonical handler, read the types of the operands, and a
    *   narrowing of an operand in its unit moves that sum;
+   * - when the boxing read an entry through the operation in progress, the
+   *   version of `EngineBoxingState.operationToken` and the counter of the
+   *   environment of the operation: the boxing reads the entries of that environment
+   *   first (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`);
    * - the key of the type cache of the engine (`ce._typeCacheGeneration()`),
    *   which every inference and every value write advances, also one that
    *   does not advance the definition version (a value-type inference, or
@@ -1883,6 +1895,10 @@ export class BoxedFunction
     if (!isApplicableDef(current)) return undefined;
     const scope = found!.scope;
     const unitCounter = unitCounterOfOperands(this._ops);
+    const state = ce._boxingState;
+    const operation = state.operationToken._version;
+    const operationCounter =
+      operation === 0 ? 0 : state.currentOperation()!.counter;
     const typeGeneration = ce._typeCacheGeneration();
     const definitionVersion = ce._definitionVersion;
     const memo = this._forwardRebox;
@@ -1892,17 +1908,33 @@ export class BoxedFunction
       memo.version === half._writeVersion &&
       memo.scope === scope &&
       memo.unitCounter === unitCounter &&
+      (memo.readsOperation !== true ||
+        (memo.operation === operation &&
+          memo.operationCounter === operationCounter)) &&
       memo.typeGeneration === typeGeneration &&
       memo.definitionVersion === definitionVersion
-    )
+    ) {
+      // The read of the boxing, for the caches that are being computed.
+      if (memo.readsOperation === true) {
+        const token = state.operationToken;
+        recordObjectRead(token, token._version);
+      }
       return memo.call;
+    }
     this._freeHeadReboxing = true;
     let fresh: Expression;
+    let reads: ObjectDeps | undefined;
+    beginObjectDeps();
     try {
       fresh = this._boxedForFreeHead(current);
     } finally {
       this._freeHeadReboxing = false;
+      reads = endObjectDeps();
     }
+    // A boxing that read no entry through the operation in progress gives
+    // the same call in another operation.
+    const readsOperation =
+      reads?.some(([ref]) => ref.deref() === state.operationToken) === true;
     if (
       fresh === this ||
       !fresh.isCanonical ||
@@ -1920,6 +1952,12 @@ export class BoxedFunction
       call: fresh,
       scope,
       unitCounter: unitCounterOfOperands(this._ops),
+      readsOperation,
+      operation: readsOperation ? state.operationToken._version : undefined,
+      operationCounter:
+        readsOperation && state.operationToken._version !== 0
+          ? state.currentOperation()!.counter
+          : 0,
       typeGeneration: ce._typeCacheGeneration(),
       definitionVersion: ce._definitionVersion,
     };
@@ -3348,6 +3386,14 @@ export class BoxedFunction
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(operationInput(this, sub), () =>
+        this.subs(sub, options)
+      );
     // A node met again in the same call and the same context is given the
     // result it got the first time (see `_transientSubs`).
     const canonical = options?.canonical;
@@ -3783,6 +3829,14 @@ export class BoxedFunction
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
   ): Expression | null {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(operationInput(this, rules), () =>
+        this.replace(rules, options)
+      );
     return replace(this, rules, options).at(-1)?.value ?? null;
   }
 
@@ -3790,6 +3844,14 @@ export class BoxedFunction
     pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(operationInput(this, pattern), () =>
+        this.match(pattern, options)
+      );
     return match(this, pattern, options);
   }
 
@@ -4958,6 +5020,12 @@ export class BoxedFunction
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(this, () => this.simplify(options));
     // A deadline is armed only by an enclosing `withTimeLimit` span; work
     // outside a span runs unbounded. The simplify main loop checks the
     // ambient deadline (`engine._deadlineFrame`) if one is in effect.
@@ -4976,6 +5044,12 @@ export class BoxedFunction
     if (this._declinedByHandler) return this;
     // Written-out data is its own value too: see `_isLiteralData()`.
     if (this._isLiteralData(options)) return this;
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(true))
+      return this.engine._withOperation(this, () => this.evaluate(options));
     // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
     // when a checkpoint is taken or restored — the snapshot would capture
     // state the evaluation is still about to move, and a later restore would
@@ -6472,6 +6546,12 @@ export class BoxedFunction
     // part of (see `recordLazyViewContext` below).
     const contextStackAtStart =
       options._contextStack ?? this.engine._evalContextStack;
+    // With the engine flag `_bindingUnits`, an asynchronous evaluation is an
+    // operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): it captures
+    // its operation environment when it starts, and each synchronous part
+    // of it puts that environment in place (`runWithEvaluationEffects()`).
+    this.engine._captureAsyncOperation(evaluation, this);
     let promise: Promise<Expression>;
     try {
       // The driver runs synchronously up to its first `await`, and that
@@ -6481,6 +6561,8 @@ export class BoxedFunction
       // evaluations inherit it; the slot is restored when the driver first
       // suspends (`runWithEvaluationEffects` returns when the promise is
       // created, not when it settles).
+      // The slice puts the operation environment of the evaluation in place
+      // (`AsyncEvaluation.operation`), as every slice does.
       promise = runWithEvaluationEffects(
         this.engine,
         effects,
@@ -6891,6 +6973,12 @@ export class BoxedFunction
     | ReadonlyArray<Expression>
     | Record<string, Expression>
     | Array<Record<string, Expression>> {
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(this, () => this.solve(vars));
     // An equation that holds a residue class is not solved (see
     // `evaluateSolve()`): `null`, as for any equation the solver cannot
     // solve, and not an empty list of roots.

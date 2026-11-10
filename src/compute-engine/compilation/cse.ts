@@ -25,6 +25,7 @@ import {
   isSymbol,
   isString,
   isDictionary,
+  isFreeName,
 } from '../boxed-expression/type-guards.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
@@ -2930,6 +2931,13 @@ class Harvester {
       return false;
 
     if (operand.type.matches('function')) return true;
+    // A free name (`isFreeName()`, engine flag `_bindingUnits`) has no
+    // definition of its own: its type, read above, is that of the
+    // definition that it resolves to, met with the requirements of its unit
+    // (rule 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The
+    // memo of the definition is keyed on the name, and two occurrences of
+    // one name can read two environments, so it is not used for it (rule 9).
+    if (isFreeName(operand)) return false;
     return this.opaqueSymbolDefinition(name);
   }
 

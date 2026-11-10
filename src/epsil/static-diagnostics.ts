@@ -630,9 +630,17 @@ export function staticDiagnostics(
     //
     // The frame must nest inside ONE boxing-pass window; the per-statement
     // `ce.box()` windows then nest inside it.
-    return ce._withBoxingPassWindow(() =>
-      ce._withRolledBackInference(() =>
-        canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
+    //
+    // With the engine flag `_bindingUnits`, the check has one program
+    // environment, as a run has (rule 10 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): each statement
+    // is boxed in it, so a later statement reads what an earlier one
+    // required. It is discarded when the check ends.
+    return ce._withProgramEnvironment(() =>
+      ce._withBoxingPassWindow(() =>
+        ce._withRolledBackInference(() =>
+          canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
+        )
       )
     );
   } finally {
@@ -681,6 +689,31 @@ function applyAssignmentTypeEffect(
 ): void {
   const evidence = ce._staticAssignmentEvidence;
   if (evidence === undefined) return;
+
+  // With the engine flag `_bindingUnits`, the boxing of `x = …` or `let x =
+  // …` declares no name, and the evaluation of the statement, which declares
+  // `x`, is not run by this pass. The pass declares the name here, inferred
+  // and of type `unknown`, in its home scope: the scope that the pass pushed
+  // (rule 10 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Its
+  // pop removes the declaration. The later statements of the program then
+  // see the name declared, as they do when the program runs, and the pins
+  // of this pass, which are keyed on the value definition
+  // (`_staticAssignmentEvidence`, `_staticPinnedCallees`), have a
+  // definition to key on: the definition in the home scope is the key
+  // (home scope, name) of the free name. Without the flag, the boxing of
+  // the statement declares the name.
+  if (
+    ce._bindingUnits &&
+    (isFunction(boxed, 'Assign') || isFunction(boxed, 'Declare'))
+  ) {
+    const name = boxed.ops[0];
+    if (
+      isSymbol(name) &&
+      name.symbol !== 'Nothing' &&
+      ce.lookupDefinition(name.symbol) === undefined
+    )
+      ce._declareSymbolValue(name.symbol, { type: 'unknown', inferred: true });
+  }
 
   let target: ReturnType<ComputeEngine['box']> | undefined;
   let rhs: ReturnType<ComputeEngine['box']> | undefined;

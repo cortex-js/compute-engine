@@ -1,4 +1,5 @@
 import type { MathJsonExpression } from '../math-json/types.js';
+import { UnitEnvironment } from '../compute-engine/binding-unit.js';
 import {
   operator,
   operands,
@@ -168,21 +169,30 @@ export function executeEpsil(
   source: string,
   options?: ExecuteEpsilOptions
 ): ExecuteEpsilResult {
-  const steps = executeEpsilRun(ce, source, options);
-  let step = steps.next();
-  while (!step.done) {
-    // An exception of `evaluate()` goes back into the run, at the statement
-    // that yielded: its `catch` makes the error the value of the statement.
-    let value: Expression;
-    try {
-      value = step.value.evaluate();
-    } catch (e) {
-      step = steps.throw(e);
-      continue;
+  // With the engine flag `_bindingUnits`, the run has one program
+  // environment (rule 10 of
+  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): each statement
+  // is boxed in it, and its evaluation by this driver writes in it, so a
+  // later statement reads what an earlier one required.
+  return ce._withProgramEnvironment(() => {
+    const steps = executeEpsilRun(ce, source, options);
+    let step = steps.next();
+    while (!step.done) {
+      // An exception of `evaluate()` goes back into the run, at the
+      // statement that yielded: its `catch` makes the error the value of the
+      // statement.
+      let value: Expression;
+      try {
+        const stmt = step.value;
+        value = ce._boxingState.asProgramStatement(() => stmt.evaluate());
+      } catch (e) {
+        step = steps.throw(e);
+        continue;
+      }
+      step = steps.next(value);
     }
-    step = steps.next(value);
-  }
-  return step.value;
+    return step.value;
+  });
 }
 
 /**
@@ -231,6 +241,17 @@ export async function executeEpsilAsync(
   // closed the span since).
   const runFrame = ce._deadlineFrame;
   let outsideFrame = runFrame;
+  // With the engine flag `_bindingUnits`, the program environment of the run
+  // (rule 10 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+  // `executeEpsil()`). It is put in place for each synchronous part of the
+  // run, and never across an `await`: other work can run on the engine
+  // then. The evaluation of a statement captures it when it starts
+  // (`AsyncEvaluation.operation`).
+  const program = ce._bindingUnits
+    ? UnitEnvironment.forOperation(undefined, ce.context?.lexicalScope)
+    : undefined;
+  const inProgram = <T>(fn: () => T): T =>
+    program === undefined ? fn() : ce._boxingState.withOperation(program, fn);
   // The frame outside the run is put back on every exit, an exception
   // included: the span around the call has closed, and its frame must not
   // stay on the engine.
@@ -238,15 +259,20 @@ export async function executeEpsilAsync(
     const steps = executeEpsilRun(ce, source, options);
     // The parts of the run between two statements are synchronous; each ends
     // when the generator yields the next statement to evaluate.
-    let step = steps.next();
+    let step = inProgram(() => steps.next());
     while (!step.done) {
       // The evaluation starts here, with the fields of the run in place: it
       // reads the deadline frame when it starts.
       let pending: Promise<Expression>;
       try {
-        pending = step.value.evaluateAsync({ signal });
+        const stmt = step.value;
+        pending = inProgram(() =>
+          ce._boxingState.asProgramStatement(() =>
+            stmt.evaluateAsync({ signal })
+          )
+        );
       } catch (e) {
-        step = steps.throw(e);
+        step = inProgram(() => steps.throw(e));
         continue;
       }
       ce._deadlineFrame = outsideFrame;
@@ -261,15 +287,16 @@ export async function executeEpsilAsync(
       ce._deadlineFrame = runFrame;
       if (signal?.aborted) {
         // The `finally` blocks of the run restore what it changed.
-        steps.return(undefined as never);
+        inProgram(() => steps.return(undefined as never));
         throw failure?.error instanceof CancellationError
           ? failure.error
           : aborted();
       }
       // A statement whose evaluation rejects is handled as a statement whose
       // `evaluate()` throws: its error becomes the value of the statement.
-      step =
-        failure !== undefined ? steps.throw(failure.error) : steps.next(value!);
+      step = inProgram(() =>
+        failure !== undefined ? steps.throw(failure.error) : steps.next(value!)
+      );
     }
     return step.value;
   } finally {

@@ -1,4 +1,5 @@
 import { Complex } from 'complex.js';
+import type { AsyncEvaluation } from './boxed-expression/evaluation-epoch.js';
 import { BigDecimal } from '../big-decimal/index.js';
 
 import {
@@ -303,6 +304,7 @@ import { SimplificationRuleStore } from './engine-simplification-rules.js';
 import { EngineNumericConfiguration } from './engine-numeric-configuration.js';
 import { EngineRuntimeState } from './engine-runtime-state.js';
 import { EngineBoxingState } from './engine-boxing-state.js';
+import { UnitEnvironment } from './binding-unit.js';
 import { EngineStartupCoordinator } from './engine-startup-coordinator.js';
 import { loadLibraryLate } from './engine-library-bootstrap.js';
 import { createTypeResolver } from './engine-type-resolver.js';
@@ -558,13 +560,7 @@ export class ComputeEngine implements IComputeEngine {
   private _runtimeState = new EngineRuntimeState();
 
   /** @internal Construction-local boxing repair state */
-  readonly _boxingState = new EngineBoxingState<Scope>(() =>
-    this._noteStateEvent({
-      kind: 'inference',
-      valueType: true,
-      widening: true,
-    })
-  );
+  readonly _boxingState = new EngineBoxingState<Scope>();
 
   /** @internal Configuration change generation/tracking lifecycle */
   private _configurationLifecycle = new EngineConfigurationLifecycle();
@@ -1699,6 +1695,72 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _bindingUnits = false;
+
+  /** See `IComputeEngine._opensOperation()`.
+   * @internal
+   */
+  _opensOperation(evaluation: boolean): boolean {
+    if (!this._bindingUnits) return false;
+    const state = this._boxingState;
+    // The method that opened the operation, called again in it.
+    if (state.takeReentry()) return false;
+    const current = state.currentOperation();
+    // In the environment of a program, an evaluation in the evaluation of a
+    // statement by the run driver runs in it.
+    if (current === undefined || !current.isProgram) return true;
+    return !(evaluation && state.inProgramStatement);
+  }
+
+  /** See `IComputeEngine._withOperation()`.
+   * @internal
+   */
+  _withOperation<T>(input: unknown, fn: () => T, reentry = true): T {
+    const state = this._boxingState;
+    const current = state.currentOperation();
+    // A nested operation has an environment of its own, whose parent is the
+    // environment of the enclosing operation, and which is made at its
+    // first write (`withNestedOperation()`). Library code calls
+    // `evaluate()` on each operand that it evaluates, and a walk of the
+    // input at each of these calls costs a time proportional to the size of
+    // the input at each node.
+    if (current !== undefined && !current.isProgram)
+      return state.withNestedOperation(fn, reentry);
+    return state.withOperation(
+      UnitEnvironment.forOperation(input, this.context?.lexicalScope),
+      fn,
+      reentry
+    );
+  }
+
+  /** See `IComputeEngine._captureAsyncOperation()`.
+   * @internal
+   */
+  _captureAsyncOperation(evaluation: AsyncEvaluation, input: unknown): void {
+    if (!this._bindingUnits || evaluation.operation !== undefined) return;
+    const state = this._boxingState;
+    if (this._opensOperation(true)) {
+      const current = state.currentOperation();
+      evaluation.operation =
+        current !== undefined && !current.isProgram
+          ? UnitEnvironment.forNested(current)
+          : UnitEnvironment.forOperation(input, this.context?.lexicalScope);
+      return;
+    }
+    evaluation.operation = state.currentOperation();
+    if (evaluation.operation?.isProgram && state.inProgramStatement)
+      evaluation.programStatement = true;
+  }
+
+  /** See `IComputeEngine._withProgramEnvironment()`.
+   * @internal
+   */
+  _withProgramEnvironment<T>(fn: () => T): T {
+    if (!this._bindingUnits) return fn();
+    return this._boxingState.withOperation(
+      UnitEnvironment.forOperation(undefined, this.context?.lexicalScope),
+      fn
+    );
+  }
 
   /** Value definitions whose type was first inferred (unknown → concrete)
    * during the current top-level boxing operation — forward-computed

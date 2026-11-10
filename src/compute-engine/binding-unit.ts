@@ -1,4 +1,9 @@
-import type { BoxedType } from '../common/type/boxed-type.js';
+import { BoxedType } from '../common/type/boxed-type.js';
+import { narrow } from '../common/type/utils.js';
+import { recordObjectRead } from './boxed-expression/object-deps.js';
+
+/** The last number given to an environment (`UnitEnvironment.id`). */
+let lastEnvironmentId = 0;
 
 /**
  * The environment of a binding unit.
@@ -44,20 +49,265 @@ export class UnitEnvironment {
   /** The number of writes that changed an entry. */
   private _counter = 0;
 
+  /** A number that no other environment has. The version of the token of
+   * the operation in progress (`EngineBoxingState.operationToken`). */
+  readonly id = ++lastEnvironmentId;
+
   /** While a journal is open: for each write, a function that puts back the
    * entry or the record of the uses as it was before that write, and true
    * when the write was on a type entry (not on the record of the uses). */
   private _journal: { undo: () => void; type: boolean }[] | undefined =
     undefined;
 
+  /**
+   * For the environment of an operation (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the expression
+   * that the operation runs on, until its parents are computed. The parents
+   * are the environments of the symbol occurrences of this expression, and
+   * they are computed at the first read (`parents()`): most operations read
+   * no type of a free name, and the walk of a large input costs time.
+   */
+  private _input: unknown = undefined;
+
+  /** The environments that a read continues in when this environment has
+   * no entry for a name (`lookup()`), or `undefined` when they are not
+   * computed yet. Empty for the environment of a unit. */
+  private _parents: UnitEnvironment[] | undefined = undefined;
+
+  /** For an operation: for each name of a free name of the input, the home
+   * scopes of its occurrences. A free name that the operation makes takes
+   * one of them as its home scope (`homeScopeOf()`). */
+  private _homes: Map<string, Set<object>> | undefined = undefined;
+
+  /**
+   * The environment of an operation, or of an Epsil program (`input`
+   * undefined). The parents of the environment of an operation are the
+   * environments of the occurrences of `input`, which can be several units.
+   */
+  static forOperation(input: unknown, startScope?: object): UnitEnvironment {
+    const env = new UnitEnvironment();
+    env._startScope = startScope;
+    if (input === undefined) {
+      env._parents = [];
+      env._program = true;
+    } else env._input = input;
+    return env;
+  }
+
+  /** The environment of an operation nested in the operation whose
+   * environment is `enclosing` (`EngineBoxingState.withNestedOperation()`):
+   * its only parent is `enclosing`. */
+  static forNested(enclosing: UnitEnvironment): UnitEnvironment {
+    const env = new UnitEnvironment();
+    env._parents = [enclosing];
+    env._startScope = enclosing._startScope;
+    return env;
+  }
+
+  private _program = false;
+
+  /** True for the environment of an Epsil program (rule 10): an operation
+   * that starts in it opens an environment of its own, except the
+   * evaluation of a statement by the run driver. */
+  get isProgram(): boolean {
+    return this._program;
+  }
+
   get counter(): number {
     return this._counter;
   }
 
+  /** True once `hasWrites()` found a write. A counter never decreases, so
+   * the result stays true. */
+  private _written = false;
+
+  /** True when a write moved the counter of this environment or of one of
+   * its parents, at any depth. When it is false, a read through this
+   * environment (`lookup()`) finds no entry. */
+  hasWrites(): boolean {
+    if (this._written) return true;
+    if (this._counter !== 0 || this.parents().some((p) => p.hasWrites()))
+      this._written = true;
+    return this._written;
+  }
+
+  /** The version that a cache entry keeps when it read this environment
+   * (`recordObjectRead()`, `object-deps.ts`): the counter. A cache keyed on
+   * the versions of the objects it read is computed again when a write
+   * moved the counter. */
+  get _version(): number {
+    return this._counter;
+  }
+
   /** The type that the unit requires of `name` in the scope `scope`, or
-   * `undefined` when no use wrote a requirement. */
+   * `undefined` when no use wrote a requirement. Only the entries of this
+   * environment: see `lookup()` for a read that continues in the parents. */
   get(scope: object, name: string): BoxedType | undefined {
     return this._types?.get(scope)?.get(name);
+  }
+
+  /** The parents of this environment (see `_parents`), computed at the
+   * first call for an operation. */
+  parents(): readonly UnitEnvironment[] {
+    if (this._parents === undefined) this._computeParents();
+    return this._parents!;
+  }
+
+  /**
+   * The type that a read of `name` under the key `key` finds (rule 8):
+   * - the entry of this environment, when there is one;
+   * - otherwise, from each parent, the entry for `name` under `key`, or,
+   *   when `key` is a scope, under the nearest ancestor of `key` that the
+   *   parent holds an entry for. These entries are met. When the meet is
+   *   `never`, the result is `unknown`: the units of the input disagree.
+   *
+   * `undefined` when no environment of the chain has an entry. The read is
+   * recorded for the caches that depend on the counter of each environment
+   * that it visited (`recordObjectRead()`).
+   */
+  lookup(key: object, name: string): BoxedType | undefined {
+    recordObjectRead(this, this._counter);
+    const own = this.get(key, name);
+    if (own !== undefined) return own;
+    return this._lookupInParents(key, name);
+  }
+
+  /** The meet of the entries that the parents give for `name` under `key`
+   * or its nearest ancestor (`_lookupNearest()`), as `lookup()` states. */
+  private _lookupInParents(key: object, name: string): BoxedType | undefined {
+    const parents = this.parents();
+    if (parents.length === 0) return undefined;
+    let result: BoxedType | undefined = undefined;
+    for (const parent of parents) {
+      const entry = parent._lookupNearest(key, name);
+      if (entry === undefined) continue;
+      if (result === undefined) result = entry;
+      else if (result !== entry) {
+        const meet = narrow(result.type, entry.type);
+        if (meet === 'never') return BoxedType.unknown;
+        result = new BoxedType(meet, result.typeResolver);
+      }
+    }
+    return result;
+  }
+
+  /** The entry of this environment for `name` under `key`, or, when `key`
+   * is a scope (it has a `parent`), under its nearest ancestor that has an
+   * entry; when this environment has none, the entries of its parents, the
+   * same way (`_lookupInParents()`). So an entry of an environment is read
+   * before the entries of its parents, also at a farther ancestor. */
+  private _lookupNearest(key: object, name: string): BoxedType | undefined {
+    recordObjectRead(this, this._counter);
+    for (
+      let k: object | null | undefined = key;
+      k;
+      k = (k as { parent?: object | null }).parent
+    ) {
+      const entry = this.get(k, name);
+      if (entry !== undefined) return entry;
+    }
+    return this._lookupInParents(key, name);
+  }
+
+  /**
+   * The home scope of a free name `name` that this operation makes in the
+   * scope `scope` (rule 8):
+   * - the first scope from `scope` up the chain that is the home scope of a
+   *   free name `name` of the input of the operation, or of the input of a
+   *   parent operation;
+   * - else, the first scope from `scope` up the chain that existed when the
+   *   operation started (`_startScope` and its ancestors): a scope that the
+   *   operation pushed (the scope of the variable of a nested `D`) is made
+   *   again by each operation, as a scope that a boxing makes is, and is
+   *   not a home scope;
+   * - else `scope`.
+   *
+   * So the `x` that the evaluation of `D(D(f(x, y), x), y)` makes inside the
+   * scope of the outer `D` has the same home scope as the `x` that
+   * `D(D(f(x, y), y), x)` makes, and the two results are the same
+   * (`sameBinding()`, `compare.ts`).
+   */
+  homeScopeOf<S extends object>(name: string, scope: S): S {
+    let existing: object | undefined = undefined;
+    for (
+      let s: object | null | undefined = scope;
+      s;
+      s = (s as { parent?: object | null }).parent
+    ) {
+      if (this._holdsHome(name, s)) return s as S;
+      if (existing === undefined && this._existedAtStart(s)) existing = s;
+    }
+    return (existing ?? scope) as S;
+  }
+
+  /** The lexical scope when the operation started, or `undefined` (an
+   * environment that is not that of an operation). */
+  private _startScope: object | undefined = undefined;
+
+  /** True when `scope` is the scope where the operation started, or one of
+   * its ancestors. */
+  private _existedAtStart(scope: object): boolean {
+    for (
+      let s: object | null | undefined = this._startScope;
+      s;
+      s = (s as { parent?: object | null }).parent
+    )
+      if (s === scope) return true;
+    return false;
+  }
+
+  private _holdsHome(name: string, scope: object): boolean {
+    const parents = this.parents();
+    if (this._homes?.get(name)?.has(scope) === true) return true;
+    return parents.some((parent) => parent._holdsHome(name, scope));
+  }
+
+  /** Walk the input (`_input`) once: its distinct environments are the
+   * parents, and the home scopes of its free names are kept in `_homes`. */
+  private _computeParents(): void {
+    const parents: UnitEnvironment[] = [];
+    const input = this._input;
+    this._input = undefined;
+    this._parents = parents;
+    if (input === undefined) return;
+    type Node = {
+      _kind?: string;
+      _env?: UnitEnvironment;
+      _homeScope?: object;
+      _def?: unknown;
+      _id?: string;
+      ops?: readonly unknown[];
+      values?: readonly unknown[];
+    };
+    // `isEqual()` gives its two operands as an array.
+    const stack: unknown[] = Array.isArray(input) ? [...input] : [input];
+    const visited = new Set<object>();
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (typeof node !== 'object' || node === null) continue;
+      if (visited.has(node)) continue;
+      visited.add(node);
+      const n = node as Node;
+      if (n._kind === undefined) continue;
+      if (n._kind === 'symbol') {
+        const env = n._env;
+        if (env !== undefined && env !== this && !parents.includes(env))
+          parents.push(env);
+        if (
+          n._homeScope !== undefined &&
+          n._def === undefined &&
+          n._id !== undefined
+        ) {
+          this._homes ??= new Map();
+          let homes = this._homes.get(n._id);
+          if (homes === undefined) this._homes.set(n._id, (homes = new Set()));
+          homes.add(n._homeScope);
+        }
+        continue;
+      }
+      const children = n._kind === 'dictionary' ? n.values : n.ops;
+      if (children !== undefined) for (const child of children) stack.push(child);
+    }
   }
 
   set(scope: object, name: string, type: BoxedType): void {
@@ -145,7 +395,8 @@ export class UnitEnvironment {
    * instead (`devolveUnappliedOperator()`, `validate.ts`).
    */
   readsAsVariable(scope: object, name: string): boolean {
-    return this._variableReadings?.get(scope)?.has(name) === true;
+    if (this._variableReadings?.get(scope)?.has(name) === true) return true;
+    return this.parents().some((parent) => parent.readsAsVariable(scope, name));
   }
 
   /** Record that the unit reads `name` as a variable in the scope `scope`
@@ -164,8 +415,20 @@ export class UnitEnvironment {
     }
   }
 
+  /** The record of the uses of `name` in the scope `scope` (see
+   * `_scalarUsesMap`): the record of this environment, or else the records
+   * of the parents that have one, combined: false when one of them is
+   * false. */
   scalarUsesMap(scope: object, name: string): boolean | undefined {
-    return this._scalarUsesMap?.get(scope)?.get(name);
+    const own = this._scalarUsesMap?.get(scope)?.get(name);
+    if (own !== undefined) return own;
+    let result: boolean | undefined = undefined;
+    for (const parent of this.parents()) {
+      const value = parent.scalarUsesMap(scope, name);
+      if (value === false) return false;
+      if (value === true) result = true;
+    }
+    return result;
   }
 
   /** Remove the record of the uses of `name` in the scope `scope`, or set
@@ -189,6 +452,30 @@ export class UnitEnvironment {
     this._journalWrite(entries, name, false);
     entries.set(name, value);
   }
+}
+
+/**
+ * The input of an operation on `receiver` whose argument `argument` can
+ * hold boxed expressions (`subs()`, `replace()`, `match()`, rule 8 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): `receiver`, and
+ * the boxed expressions of `argument`. These are found in its arrays and
+ * its plain objects (a substitution, a rule, a rule set), to a depth of
+ * three: the boxed `match` of a rule of a rule set is at that depth.
+ */
+export function operationInput(receiver: object, argument: unknown): unknown[] {
+  const input: unknown[] = [receiver];
+  const visit = (value: unknown, depth: number): void => {
+    if (typeof value !== 'object' || value === null) return;
+    if ((value as { _kind?: string })._kind !== undefined) {
+      input.push(value);
+      return;
+    }
+    if (depth === 0) return;
+    const children = Array.isArray(value) ? value : Object.values(value);
+    for (const child of children) visit(child, depth - 1);
+  };
+  visit(argument, 3);
+  return input;
 }
 
 /**
@@ -274,4 +561,142 @@ export function unitCounterOfOperands(ops: readonly unknown[]): number {
     if (children !== undefined) for (const child of children) stack.push(child);
   }
   return sum;
+}
+
+/** A number for each definition that a free name resolves to, given at
+ * its first read (`noteResolutionRead()`). */
+const definitionIds = new WeakMap<object, number>();
+let lastDefinitionId = 0;
+
+/**
+ * For one engine and one free name: an object whose version (`_version`) is
+ * the number of the definition that the name resolves to now, or 0 when it
+ * resolves to none. A cache entry that keeps this version
+ * (`recordObjectRead()`) is computed again when the name resolves to
+ * another definition (`objectDepsValid()`, `object-deps.ts`): after a
+ * declaration of the name in a pushed scope, and after the pop of that
+ * scope.
+ */
+class ResolutionToken {
+  constructor(private readonly _resolve: () => object | undefined) {}
+
+  get _version(): number {
+    return definitionId(this._resolve());
+  }
+}
+
+/** The number of the definition `def` (`definitionIds`), or 0 for none. */
+function definitionId(def: object | undefined): number {
+  if (def === undefined) return 0;
+  let id = definitionIds.get(def);
+  if (id === undefined) {
+    lastDefinitionId += 1;
+    id = lastDefinitionId;
+    definitionIds.set(def, id);
+  }
+  return id;
+}
+
+/** For each engine, then each key and each name, its token. */
+const resolutionTokens = new WeakMap<
+  object,
+  Map<string, Map<string, ResolutionToken>>
+>();
+
+/**
+ * Record, for the caches that are being computed, that a read depends on the
+ * definition that the free name `name` resolves to in the current context
+ * (rules 3 and 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`):
+ * a type cached on a compound expression is computed again when that
+ * definition is another one. `resolve` gives that definition; it is kept
+ * for the engine, the name and `key` (which tells apart the readings of a
+ * name, `N` as a variable or as the library operator), so it must depend on
+ * nothing else. The result is the definition that `resolve` gives now.
+ *
+ * The dependency is on the resolved definition, not on the current lexical
+ * scope: a call of a function literal pushes a scope at each call, and a
+ * type that depends on the scope would be computed again in each call.
+ */
+export function noteResolutionRead<D extends object>(
+  engine: object,
+  name: string,
+  key: string,
+  resolve: () => D | undefined
+): D | undefined {
+  let byKey = resolutionTokens.get(engine);
+  if (byKey === undefined) resolutionTokens.set(engine, (byKey = new Map()));
+  let tokens = byKey.get(key);
+  if (tokens === undefined) byKey.set(key, (tokens = new Map()));
+  let token = tokens.get(name);
+  if (token === undefined)
+    tokens.set(name, (token = new ResolutionToken(resolve)));
+  const def = resolve();
+  recordObjectRead(token, definitionId(def));
+  return def;
+}
+
+/**
+ * The environments that the type of a free name of `exprs` can read, each
+ * with its counter: a key for a cache shared between expressions whose
+ * value depends on such a type (rule 9 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). They are the
+ * environments of the symbol occurrences of `exprs` and the environment of
+ * the operation in progress (`current`), with their parents at any depth.
+ * The environment of an operation that has no entry of its own is left out,
+ * and only its parents are kept: two operations on one input then give the
+ * same key. `undefined` when there is no environment.
+ */
+export function unitEnvironmentStamp(
+  current: UnitEnvironment | undefined,
+  exprs: readonly unknown[]
+): Map<UnitEnvironment, number> | undefined {
+  const envs: UnitEnvironment[] = [];
+  if (current !== undefined) envs.push(current);
+  type Node = {
+    _kind?: string;
+    _env?: UnitEnvironment;
+    ops?: readonly unknown[];
+    values?: readonly unknown[];
+  };
+  const stack: unknown[] = [...exprs];
+  const visited = new Set<object>();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (typeof node !== 'object' || node === null) continue;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    const n = node as Node;
+    if (n._kind === undefined) continue;
+    if (n._kind === 'symbol') {
+      if (n._env !== undefined) envs.push(n._env);
+      continue;
+    }
+    const children = n._kind === 'dictionary' ? n.values : n.ops;
+    if (children !== undefined) for (const child of children) stack.push(child);
+  }
+  if (envs.length === 0) return undefined;
+  const stamp = new Map<UnitEnvironment, number>();
+  const seen = new Set<UnitEnvironment>();
+  while (envs.length > 0) {
+    const env = envs.pop()!;
+    if (seen.has(env)) continue;
+    seen.add(env);
+    const parents = env.parents();
+    if (env.counter !== 0 || parents.length === 0)
+      stamp.set(env, env.counter);
+    envs.push(...parents);
+  }
+  return stamp;
+}
+
+/** True when the two stamps of `unitEnvironmentStamp()` name the same
+ * environments, each with the same counter. */
+export function sameUnitEnvironmentStamp(
+  a: ReadonlyMap<UnitEnvironment, number> | undefined,
+  b: ReadonlyMap<UnitEnvironment, number> | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (a.size !== b.size) return false;
+  for (const [env, counter] of a) if (b.get(env) !== counter) return false;
+  return true;
 }

@@ -14,6 +14,18 @@ type DevolveRepairFrame<Scope extends object> = {
  */
 const MAX_REPAIR_REBUILDS = 3;
 
+/** See `EngineBoxingState.operationToken`. */
+function operationToken(current: () => UnitEnvironment | undefined): {
+  readonly _version: number;
+} {
+  return {
+    get _version(): number {
+      const env = current();
+      return env !== undefined && env.hasWrites() ? env.id : 0;
+    },
+  };
+}
+
 /**
  * Per-engine coordination for the un-applied-operator repair performed while
  * boxing expressions.
@@ -28,13 +40,151 @@ export class EngineBoxingState<Scope extends object> {
   private _rootActive = false;
 
   /**
-   * @param onUnitUndo Called when the undo of the writes of a discarded
-   * build pass removed or changed a type entry of the environment of a
-   * binding unit (`binding-unit.ts`). The engine sends a widening inference
-   * event: a type cached on a compound expression can depend on the entry
-   * that was removed.
+   * The operations in progress, innermost last, with the engine flag
+   * `_bindingUnits` only (rule 8 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The bottom can
+   * be the environment of an Epsil program (rule 10). A symbol made while an
+   * operation is in progress belongs to the innermost one, a boxing that
+   * starts then joins it, and a requirement is written in it.
+   *
+   * Each entry holds:
+   * - `env`: the environment of the operation, or `undefined` for a nested
+   *   operation that has made no symbol and written nothing yet
+   *   (`withNestedOperation()`);
+   * - `read`: the environment that a read starts in, `env` or, while `env`
+   *   is `undefined`, the environment of the enclosing operation. A nested
+   *   environment has the enclosing one as its only parent and no entry
+   *   until its first write, so the two give the same reads;
+   * - `programStatement`: see `inProgramStatement`;
+   * - `reentry`: true from the push until the first `takeReentry()` call:
+   *   the method that opened the operation calls itself again in it
+   *   (`ce._opensOperation()`).
    */
-  constructor(private readonly _onUnitUndo?: () => void) {}
+  private _operations: {
+    env: UnitEnvironment | undefined;
+    read: UnitEnvironment;
+    programStatement: boolean;
+    reentry: boolean;
+  }[] = [];
+
+  /**
+   * An object whose version (`_version`) is the number
+   * (`UnitEnvironment.id`) of the environment that a read starts in
+   * (`currentOperation()`), or 0 when no operation is in progress. A type
+   * that read an entry through the operation in progress
+   * (`BoxedSymbol._unitEntry()`) records it (`recordObjectRead()`), so that
+   * it is computed again in another operation, and outside one (rule 8).
+   *
+   * The version is also 0 when no write was made in that environment or in
+   * one of its parents (`UnitEnvironment.hasWrites()`): a read then finds
+   * the entry of the environment of the occurrence, as outside an
+   * operation. So a type cached in one evaluation is read in the next one
+   * when neither wrote a requirement.
+   */
+  readonly operationToken: { readonly _version: number } = operationToken(() =>
+    this.currentOperation()
+  );
+
+  /** The environment of the operation in progress, or `undefined`: the
+   * environment that a read starts in. */
+  currentOperation(): UnitEnvironment | undefined {
+    const ops = this._operations;
+    return ops.length === 0 ? undefined : ops[ops.length - 1].read;
+  }
+
+  /** The environment that a write of the operation in progress goes in, or
+   * `undefined` when no operation is in progress. The environment of a
+   * nested operation is made at its first write
+   * (`withNestedOperation()`). */
+  writableOperation(): UnitEnvironment | undefined {
+    const ops = this._operations;
+    if (ops.length === 0) return undefined;
+    const top = ops[ops.length - 1];
+    if (top.env === undefined) {
+      top.env = UnitEnvironment.forNested(top.read);
+      top.read = top.env;
+    }
+    return top.env;
+  }
+
+  /** Run `fn` with `env` as the environment of the operation in progress,
+   * and put back the previous one at the end, also on a throw. With
+   * `reentry`, see `_operations`. */
+  withOperation<T>(env: UnitEnvironment, fn: () => T, reentry = false): T {
+    return this._push(env, env, fn, reentry);
+  }
+
+  /**
+   * Run `fn`, an operation nested in the operation in progress, with an
+   * environment of its own (rule 8: nested operations form a stack). The
+   * environment has the environment of the enclosing operation as its only
+   * parent: the environments of the occurrences of the input are read
+   * through the environment of each occurrence, so no walk of the input
+   * is needed. It is made at the first write (`writableOperation()`): a
+   * nested operation that writes nothing makes nothing. The enclosing one
+   * is put back at the end, also on a throw. With no operation in
+   * progress, `fn()`.
+   */
+  withNestedOperation<T>(fn: () => T, reentry = false): T {
+    const enclosing = this.currentOperation();
+    if (enclosing === undefined) return fn();
+    return this._push(undefined, enclosing, fn, reentry);
+  }
+
+  private _push<T>(
+    env: UnitEnvironment | undefined,
+    read: UnitEnvironment,
+    fn: () => T,
+    reentry: boolean
+  ): T {
+    this._operations.push({ env, read, programStatement: false, reentry });
+    try {
+      return fn();
+    } finally {
+      this._operations.pop();
+    }
+  }
+
+  /** True once after a push with `reentry` (see `_operations`). */
+  takeReentry(): boolean {
+    const ops = this._operations;
+    if (ops.length === 0) return false;
+    const top = ops[ops.length - 1];
+    if (!top.reentry) return false;
+    top.reentry = false;
+    return true;
+  }
+
+  /**
+   * True while the run driver of an Epsil program evaluates a statement
+   * (`asProgramStatement()`) in the operation in progress. That evaluation,
+   * and the evaluations nested in it, are not operations of their own: they
+   * write in the environment of the program (rule 10). The other operations
+   * that the evaluation starts (`simplify()`, `compile()`, …) are
+   * operations (rule 8). The flag is kept on the entry of the operation, so
+   * an operation or a program that starts inside such an evaluation starts
+   * with the flag off.
+   */
+  get inProgramStatement(): boolean {
+    const ops = this._operations;
+    return ops.length !== 0 && ops[ops.length - 1].programStatement;
+  }
+
+  /** Run `fn`, the evaluation of a statement of an Epsil program by its run
+   * driver (see `inProgramStatement`). With no operation in progress,
+   * `fn()`. */
+  asProgramStatement<T>(fn: () => T): T {
+    const ops = this._operations;
+    if (ops.length === 0) return fn();
+    const top = ops[ops.length - 1];
+    const enclosing = top.programStatement;
+    top.programStatement = true;
+    try {
+      return fn();
+    } finally {
+      top.programStatement = enclosing;
+    }
+  }
 
   /**
    * Classifier for the active root construction: `true` for a scope that
@@ -62,14 +212,6 @@ export class EngineBoxingState<Scope extends object> {
    * sets it instead (`setUnitEnvironment()`).
    */
   private _unitEnvironment: UnitEnvironment | null = null;
-
-  /**
-   * The environment that `unitEnvironment()` made for the current build pass
-   * of the root, or `null`. A rebuild of the root, or an exception that ends
-   * it, discards this environment with the symbols of the pass, so the undo
-   * of its writes sends no widening event.
-   */
-  private _ownEnvironment: UnitEnvironment | null = null;
 
   /**
    * Every environment that the root construction in progress wrote in, with
@@ -119,14 +261,17 @@ export class EngineBoxingState<Scope extends object> {
     return this._madeDefinitions?.has(def) === true;
   }
 
-  /** The environment of the root construction in progress, or `undefined`
-   * when no root construction is active. */
+  /** The environment of the root construction in progress. Outside a root
+   * construction, the environment of the operation in progress, or
+   * `undefined`. A root construction that starts inside an operation joins
+   * the environment of the operation and does not start a unit (rule 8).
+   * A symbol made in a nested operation belongs to it, so its environment
+   * is made then (`writableOperation()`). */
   unitEnvironment(): UnitEnvironment | undefined {
-    if (!this._rootActive) return undefined;
+    if (!this._rootActive) return this.writableOperation();
     if (this._unitEnvironment === null) {
-      const env = new UnitEnvironment();
-      this._unitEnvironment = env;
-      this._ownEnvironment = env;
+      const operation = this.writableOperation();
+      this._unitEnvironment = operation ?? new UnitEnvironment();
     }
     return this._unitEnvironment;
   }
@@ -134,10 +279,12 @@ export class EngineBoxingState<Scope extends object> {
   /** Make `env` the environment of the root construction in progress: a
    * `ce.function()` call with a boxed operand is not a new unit, and the
    * symbols that it makes take the environment of that operand. Does nothing
-   * when no root construction is active. The writes of the construction in
-   * `env` are recorded as in every other environment (`noteUnitWrite()`). */
+   * when no root construction is active, and inside an operation, whose
+   * environment receives the writes (rule 8). The writes of the
+   * construction in `env` are recorded as in every other environment
+   * (`noteUnitWrite()`). */
   setUnitEnvironment(env: UnitEnvironment): void {
-    if (!this._rootActive) return;
+    if (!this._rootActive || this.currentOperation() !== undefined) return;
     this._unitEnvironment = env;
   }
 
@@ -178,7 +325,6 @@ export class EngineBoxingState<Scope extends object> {
         // A rebuild: remove the requirements that the discarded pass wrote.
         this._discardUnitWrites();
         this._unitEnvironment = null;
-        this._ownEnvironment = null;
         return build();
       });
       completed = true;
@@ -193,7 +339,6 @@ export class EngineBoxingState<Scope extends object> {
       this._persistentScopeOf = null;
       this._transientAutoDeclares = null;
       this._unitEnvironment = null;
-      this._ownEnvironment = null;
       this._madeDefinitions = null;
     }
   }
@@ -326,27 +471,21 @@ export class EngineBoxingState<Scope extends object> {
 
   /** Undo the writes of each journaled environment after the mark that
    * `marks` gives for it (0 when it has none: its journal was opened after
-   * the marks were taken), and call `_onUnitUndo` once when a type entry of
-   * an environment other than `discarded` was removed or changed
-   * (`UnitEnvironment.undoJournal()`). */
+   * the marks were taken). The undo sends no engine-wide event: it moves
+   * the counter of the environment (`UnitEnvironment.undoJournal()`), and a
+   * type cached from an entry of the environment keeps that counter (rule 9
+   * of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). */
   private _undoUnitWrites(
-    marks: ReadonlyMap<UnitEnvironment, number> | undefined,
-    discarded: UnitEnvironment | null = null
+    marks: ReadonlyMap<UnitEnvironment, number> | undefined
   ): void {
-    let typeChanged = false;
-    for (const env of this._journaled)
-      if (env.undoJournal(marks?.get(env) ?? 0) && env !== discarded)
-        typeChanged = true;
-    if (typeChanged) this._onUnitUndo?.();
+    for (const env of this._journaled) env.undoJournal(marks?.get(env) ?? 0);
   }
 
   /** Undo all the writes of the current build pass of the root, and close
-   * the journals. The environment that the pass made (`_ownEnvironment`) is
-   * discarded with the pass: the undo of its writes sends no widening
-   * event. */
+   * the journals. */
   private _discardUnitWrites(): void {
     if (this._journaled.length === 0) return;
-    this._undoUnitWrites(undefined, this._ownEnvironment);
+    this._undoUnitWrites(undefined);
     for (const env of this._journaled) env.endJournal();
     this._journaled = [];
   }

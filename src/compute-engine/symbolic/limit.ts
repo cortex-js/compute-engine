@@ -39,6 +39,11 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 import {
+  type UnitEnvironment,
+  sameUnitEnvironmentStamp,
+  unitEnvironmentStamp,
+} from '../binding-unit.js';
+import {
   exactlyEqual,
   hasIrrationalAlgebraic,
   isUnfoldedZero,
@@ -2730,6 +2735,12 @@ type ProbeEntry = {
   definitionVersion: number;
   factsHidden: boolean;
   deps: MemoDeps;
+  /** With the engine flag `_bindingUnits`: the environments that the types
+   * of the free names of the expression read, each with its counter
+   * (`unitEnvironmentStamp()`). A compilation reads these types, so a write
+   * in one of these environments gives a new probe (rule 9 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). */
+  units: Map<UnitEnvironment, number> | undefined;
 };
 const probeCache = new WeakMap<object, ProbeEntry>();
 
@@ -2744,12 +2755,16 @@ function compiledProbe(
 ): ((x: number) => number) | null {
   const key = e as unknown as object;
   const cached = cacheOff('limitprobe') ? undefined : probeCache.get(key);
+  const units = ce._bindingUnits
+    ? unitEnvironmentStamp(ce._boxingState.currentOperation(), [e])
+    : undefined;
   if (
     cached !== undefined &&
     cached.x === x &&
     cached.worldVersion === ce._worldVersion &&
     cached.definitionVersion === ce._definitionVersion &&
     cached.factsHidden === ce._factsHidden() &&
+    sameUnitEnvironmentStamp(cached.units, units) &&
     memoDepsStillValid(e, cached.deps)
   )
     return cached.fn;
@@ -2784,6 +2799,11 @@ function compiledProbe(
     definitionVersion,
     factsHidden,
     deps,
+    // Read after the compilation: its own requirements are written in the
+    // environment of the operation in progress.
+    units: ce._bindingUnits
+      ? unitEnvironmentStamp(ce._boxingState.currentOperation(), [e])
+      : undefined,
   });
   return fn;
 }
