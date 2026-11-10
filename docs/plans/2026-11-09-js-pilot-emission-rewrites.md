@@ -74,6 +74,8 @@ handlers of the operators decide more.
 | Call of a user function: `tryInlineUserFunctionCall()` (`compile-user-calls.ts`) and the variants by argument shape (`ensureUserFunctionVariantEmitted()`) | Replaces some calls by the body of the function, and writes one function per shape of the arguments. | The new emitter writes one JavaScript function for the resolved helper and one call. Each argument is evaluated once, in order, before the call. It does not inline and has no variants: each parameter has one scalar representation. |
 | A local with one assignment: `compileBlock()` (`compile-blocks.ts`) and the `Declare` handler (`compile-expr-handlers.ts`) | Does not substitute the value at the use. The `Declare` statement is written `let a = <initializer>` at its place in the block, so the initializer is evaluated once, before the statements that follow, and each read of the local is the name `a` (run with `cse: false, constantFold: false`: `Block(Declare(a, real, Max(0, d)), a·v + a)` compiles to `let a = Math.max(0, d); return a * v + a`). A block of one statement with no local is unwrapped and has no `let`. | The lowering (`javascript-structured-lower.ts`) lowers the initializer at the place of the `Declare`, in the region of the block, and each read of the local is that value, with no operation. This is the order of the existing emitter. The structured route refuses a local that a later statement writes, because the value of its initializer is then not the value at each read. |
 
+| `Sqrt` (`javascript-target.ts`), with `isComplexValued()` and `promotesToComplexLane()` | Writes `_SYS.csqrt(z)` for a complex operand. For a real operand: with a literal operand, writes the root as a literal also with `constantFold: false` (`tryGetConstant()`: `Sqrt(2)` is `1.4142135623730951`, `Sqrt(-2)` the complex literal of `complexSqrtLiteral()`); otherwise `_SYS.csqrt(({ re: x, im: 0 }))` when the operand is negative (`isNegative` and a non-real type) or, in the `complex` mode, not proved non-negative (`assumedRealNonNegative()`), and `Math.sqrt(x)` in the other cases. | The rule of the structured route (`structuredSqrtRule()`, `javascript-fragment-target.ts`) decides real or complex from the fact of the operand, the mode and the sign of the operand (`signOf()`: a literal, a snapshot, the declared type of a name, and `Add`, `Multiply`, `Min`, `Max` and `Sqrt` of non-negative operands), with the rules of `assumedRealNonNegative()` for these operators. It declines when the engine knows a sign that these facts do not give (`Sqrt(-n)` with `n: real<..-1>` in the `complex` mode). The lowering converts a real operand of a complex root (`real-to-complex`), and the emitter writes `Math.sqrt` or `_SYS.csqrt`. A literal operand is not folded: `Math.sqrt(2)` gives the same number as the literal, and `_SYS.csqrt` of `-2` the value of the interpreter (the differential test of step 5). |
+
 ### Places that the pilot vocabulary does not reach
 
 | Place | Why it is not reached |
@@ -85,7 +87,7 @@ handlers of the operators decide more.
 | The bigint emitter (`emitBigintLane()`) | The fragment target refuses the `bigint` mode. |
 
 Each of these becomes a row of the first table when its operator enters the
-vocabulary (step 5 of the plan for `Sqrt` and `Power`).
+vocabulary (step 5 of the plan for `Power`; `Sqrt` has its row above).
 
 ## What step 1 implements from this list
 

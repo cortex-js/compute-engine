@@ -512,6 +512,7 @@ describe('laziness and order, with the test operation', () => {
         { name: 'y', type: 'real', representation: 'number' },
       ],
       numericPolicy: 'strict',
+      captures: [],
       functions: [],
       root: {
         operations: [
@@ -562,6 +563,7 @@ describe('laziness and order, with the test operation', () => {
       revision: 1,
       inputs: [{ name: 'x', type: 'real', representation: 'number' }],
       numericPolicy: 'strict',
+      captures: [],
       functions: [],
       root: {
         operations: [
@@ -657,6 +659,7 @@ describe('laziness and order, with the test operation', () => {
           { name: 'x', type: 'real', representation: 'number' },
         ],
         numericPolicy: 'strict',
+        captures: [],
         functions: [],
         root: region([
           { kind: 'input', input: 0, result: c, operands: [], effect: 'pure', origin },
@@ -725,6 +728,7 @@ describe('made programs with helpers', () => {
         revision: 1,
         inputs: [{ name: 'x', type: 'real', representation: 'number' }],
         numericPolicy: 'strict',
+        captures: [],
         functions,
         root: region([
           op({ kind: 'input', input: 0, result: x, operands: [] } as never),
@@ -873,6 +877,7 @@ describe('the emitted code', () => {
         { name: 'z', type: 'complex', representation: 'complex' },
       ],
       numericPolicy: 'complex',
+      captures: [],
       functions: [],
       root: {
         operations: [
@@ -971,6 +976,7 @@ describe('parentheses, on made programs', () => {
       revision: 1,
       inputs: INPUTS,
       numericPolicy: 'strict',
+      captures: [],
       functions: [],
       root,
     };
@@ -1270,7 +1276,7 @@ describe('the result agrees with the existing route', () => {
 //
 
 const INTENDED_DECLINES: [string, () => Expression, Record<string, unknown>, RegExp][] = [
-  ['a head outside the vocabulary', () => engine().expr(['Sqrt', 'x']), {}, /unsupported head Sqrt/],
+  ['a head outside the vocabulary', () => engine().expr(['Sin', 'x']), {}, /unsupported head Sin/],
   ['Divide', () => engine().expr(['Divide', 'x', 'y']), {}, /unsupported head Divide/],
   ['a list', () => engine().expr(['List', 'x', 'y']), {}, /unsupported head List/],
   ['a free symbol with no scalar type', () => engine().expr('u'), {}, /unsupported binding u/],

@@ -628,6 +628,7 @@ function madeTwoResults() {
       { name: 'x', type: 'real', representation: 'number' },
     ],
     numericPolicy: 'strict',
+    captures: [],
     functions: [],
     root: region(rootOps),
   };
@@ -727,6 +728,7 @@ describe('a policy that is not the one of JavaScript', () => {
         { name: 'x', type: 'real', representation: representation('real') },
       ],
       numericPolicy: 'strict',
+      captures: [],
       functions: [],
       root: region([
         { kind: 'input', input: 0, result: c, operands: [], effect: 'pure', origin },

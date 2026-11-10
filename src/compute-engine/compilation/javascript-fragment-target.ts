@@ -12,6 +12,8 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { withoutNaNMember } from './compile-real-analysis.js';
+import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
   JavaScriptTarget,
   type JavaScriptBodyEmitter,
@@ -59,6 +61,7 @@ import {
   preparedNodesOf,
   recordStructuredPreparation,
   structuredPreparationOf,
+  type StructuredCapture,
   type StructuredInput,
   type StructuredPreparation,
 } from './javascript-structured-lower.js';
@@ -102,15 +105,14 @@ const negateRule = {
 } satisfies FragmentRule<ScalarRepresentation>;
 
 /**
- * `Sqrt` is the one operator whose result is still decided by the reader of
- * the existing compiler, `isComplexValued()`. The square root of a real
- * operand is complex when the operand is provably negative, or, in the
- * `complex` mode, when its sign is not known; that domain and promotion
- * policy is not yet a rule of this pass (step 5 of
- * `docs/plans/2026-11-09-js-compiler-status-and-plan.md`). The reader
- * depends on the compiler state of the compilation, so the annotation of a
- * program with a `Sqrt` is built under that state
- * (`withOutermostCompilerState()`).
+ * `Sqrt` on the existing route is the one operator whose result is still
+ * decided by the reader of the existing compiler, `isComplexValued()`. The
+ * square root of a real operand is complex when the operand is provably
+ * negative, or, in the `complex` mode, when its sign is not known. The
+ * reader depends on the compiler state of the compilation, so the
+ * annotation of a program with a `Sqrt` is built under that state
+ * (`withOutermostCompilerState()`). The structured route decides the same
+ * rule from facts (`structuredSqrtRule()`).
  */
 const sqrtRule = {
   walk: (node, scope, context, w) => {
@@ -310,9 +312,168 @@ function logicalRule(operator: 'And' | 'Or') {
   } satisfies FragmentRule<ScalarRepresentation>;
 }
 
-/** The rules of the structured route. `Sqrt` is not one of them: its
- *  domain and promotion policy stay with the existing emitter. */
+/** The sign of a real value, as far as the facts tell it. */
+type Sign = 'nonnegative' | 'negative' | 'unknown';
+
+/** The values of the captured bindings, by the symbol nodes that read
+ *  them (`StructuredRegistry.captures`). */
+type SnapshotOf = (symbol: Expression) => number | undefined;
+
+/**
+ * The sign of the real operand `node` of a `Sqrt`, from facts of the
+ * program: the value of a literal or of a captured snapshot (non-negative,
+ * `-0` included, or negative), the declared type of a name (a subtype of
+ * `real<0..>` is non-negative, a type whose values are all negative is
+ * negative), and the operators whose result is non-negative when their
+ * operands are: `Add` and `Multiply` of non-negative operands, `Max` with
+ * one non-negative operand, `Min` of non-negative operands, `Sqrt` of a
+ * non-negative operand. Every other node has an unknown sign. A `NaN`
+ * literal has an unknown sign.
+ *
+ * These are the rules of `assumedRealNonNegative()` (`compile-real-
+ * analysis.ts`) for the operators of the structured route, so a sign that
+ * this function finds, the existing compiler finds too. That reader also
+ * reads the sign facts of the engine (`isNonNegative`, an assumption, the
+ * range of a computed type), which this function does not model. When the
+ * engine knows a sign that this function does not find, the answer of the
+ * existing compiler can differ, and this function returns a refusal: the
+ * structured route declines the program, and never gives another value.
+ * `deep`: the check of the engine applies to the operands that the rules
+ * read too (the `complex` mode, where a non-negative sum of operands that
+ * the engine proves non-negative makes a real square root); otherwise only
+ * to `node` (the `strict` mode, where only a negative operand changes the
+ * result).
+ */
+function signOf(
+  node: Expression,
+  snapshotOf: SnapshotOf,
+  deep: boolean
+): Sign | { refusal: string } {
+  const refusal = (sign: string) => ({
+    refusal:
+      `the engine knows that the operand ${node.toString()} of Sqrt is ` +
+      `${sign}, and the structured route does not`,
+  });
+  const fromValue = (v: number): Sign =>
+    Number.isNaN(v) ? 'unknown' : v >= 0 ? 'nonnegative' : 'negative';
+  let sign: Sign | { refusal: string } = 'unknown';
+  const snapshot = isSymbol(node) ? snapshotOf(node) : undefined;
+  if (snapshot !== undefined) sign = fromValue(snapshot);
+  else if (isNumber(node)) sign = node.im === 0 ? fromValue(node.re) : 'unknown';
+  else if (isSymbol(node)) {
+    const type = withoutNaNMember(node.type.type);
+    if (type !== undefined && isSubtype(type, NON_NEGATIVE_REAL_TYPE))
+      sign = 'nonnegative';
+    else if (type !== undefined && isSubtype(type, 'real<..<0>'))
+      sign = 'negative';
+  } else if (isFunction(node)) {
+    const signs = (): (Sign | { refusal: string })[] =>
+      node.ops.map((op) => signOf(op, snapshotOf, deep));
+    const op = node.operator;
+    // With no operand, the sign is unknown, as in `assumedRealNonNegative()`.
+    if (
+      (op === 'Add' || op === 'Multiply' || op === 'Min' || op === 'Max') &&
+      node.nops > 0
+    ) {
+      const operands = signs();
+      const found = operands.find((s) => typeof s === 'object');
+      if (found !== undefined) return found;
+      const nonNegative = operands.map((s) => s === 'nonnegative');
+      if (op === 'Max' ? nonNegative.some(Boolean) : nonNegative.every(Boolean))
+        sign = 'nonnegative';
+    } else if (op === 'Sqrt' && node.nops === 1) {
+      const [operand] = signs();
+      if (typeof operand === 'object') return operand;
+      if (operand === 'nonnegative') sign = 'nonnegative';
+    }
+  }
+  if (typeof sign === 'object') return sign;
+  // The check of the sign facts of the engine (see above).
+  if (node.isNegative === true && sign !== 'negative') return refusal('negative');
+  if (sign === 'negative' && node.isNegative !== true) return refusal('not negative');
+  if (deep && sign !== 'nonnegative') {
+    const type = withoutNaNMember(node.type.type);
+    if (
+      node.isNonNegative === true ||
+      (type !== undefined && isSubtype(type, NON_NEGATIVE_REAL_TYPE))
+    )
+      return refusal('non-negative');
+  }
+  return sign;
+}
+
+/**
+ * `Sqrt` on the structured route, for the compile mode `mode`. The rule
+ * reads the fact of its operand, the sign of the operand (`signOf()`) and
+ * the mode, and calls no reader of the existing compiler. It gives the
+ * result that `isComplexValued()` gives for the same node, or declines:
+ *
+ * - A complex operand: a complex result in both modes (`Sqrt(z)` with
+ *   `z: complex` is `_SYS.csqrt(z)`).
+ * - The `strict` mode, a real operand: complex when the operand is
+ *   negative (`Sqrt(-2)`, written `_SYS.csqrt(({ re: -2, im: 0 }))`, or
+ *   `Sqrt(n)` with `n: real<..-1>`), real otherwise (`Sqrt(x)` with
+ *   `x: real` is `Math.sqrt(x)`, `NaN` for a negative `x`).
+ * - The `complex` mode, a real operand: real when the operand is
+ *   non-negative (`Sqrt(p)` with `p: real<0..>`, `Sqrt(Max(0, x))`,
+ *   `Sqrt(2)`), complex otherwise (`Sqrt(x)` with `x: real` is
+ *   `_SYS.csqrt(({ re: x, im: 0 }))`, `2i` at `x = -4`).
+ * - An operand whose sign the engine knows and `signOf()` does not find
+ *   (`Sqrt(a)` after `assume(a > 0)` is found, from the narrowed type of
+ *   `a`; `Sqrt(Add(q, 1))` for a computed `q` that the engine proves
+ *   non-negative is not): declined.
+ *
+ * The real operand of a complex square root is converted
+ * (`real-to-complex`). The result of a real square root is `real`, also
+ * for an integer operand.
+ */
+function structuredSqrtRule(mode: 'strict' | 'complex', snapshotOf: SnapshotOf) {
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || node.nops !== 1)
+        return w.refuse(
+          node,
+          'signature',
+          'Sqrt with other than one operand is not in the structured route'
+        );
+      const facts = w.value(node.op1, scope, context);
+      if (facts.type.kind === 'boolean')
+        return w.refuse(
+          node,
+          'signature',
+          'Sqrt with a boolean operand is not in the structured route'
+        );
+      let lane: 'real' | 'complex' = 'complex';
+      if (facts.representation !== 'complex') {
+        const sign = signOf(node.op1, snapshotOf, mode === 'complex');
+        if (typeof sign === 'object')
+          return w.refuse(node, 'signature', sign.refusal);
+        lane =
+          mode === 'complex'
+            ? sign === 'nonnegative'
+              ? 'real'
+              : 'complex'
+            : sign === 'negative'
+              ? 'complex'
+              : 'real';
+      }
+      return w.signatures(node, scope, context, [
+        { operands: [lane], result: lane },
+      ]);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/** The rules of the structured route. The rule of `Sqrt` reads the compile
+ *  mode and the captured values of a compilation: `annotateCalls()` puts
+ *  `structuredSqrtRule()` in its place, and this entry only admits the
+ *  head. */
 const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
+  Sqrt: {
+    walk: () => {
+      throw new Error('JS scalar fragment invariant: Sqrt without its compile mode');
+    },
+  },
   Add: addRule,
   Negate: negateRule,
   If: { walk: walkIf },
@@ -415,29 +576,28 @@ function recordStructured(
     root: Expression;
     functionRoot?: Expression;
     annotation: FragmentAnnotation<ScalarRepresentation>;
-    helper?: ResolvedHelper;
+    named: NamedCalls;
     /** Called on the structured route only. */
     inputs: () => readonly StructuredInput[];
   }
 ): void {
-  if (!admission.structured) return;
-  if (prepared.helper?.capture)
-    throw new Error(
-      'JS scalar fragment: a helper that reads a captured value is not in the structured route'
-    );
-  const mode = BaseCompiler.resolveCompileMode(target);
+  const registry = prepared.named.structured;
+  if (!admission.structured || registry === undefined) return;
   const preparation: StructuredPreparation = {
     root: prepared.root,
     functionRoot: prepared.functionRoot,
     annotation: prepared.annotation,
-    helper:
-      prepared.helper === undefined
-        ? undefined
-        : { name: prepared.helper.name, body: prepared.helper.body },
+    helpers: new Map(
+      [...registry.helpers].map(([name, helper]) => [
+        name,
+        { name, body: helper.body },
+      ])
+    ),
+    captures: [...registry.captures.values()],
     inputs: prepared.inputs(),
     effects: effectFacts(prepared.annotation),
     testOperations: admission.testOperations,
-    numericPolicy: mode === 'complex' ? 'complex' : 'strict',
+    numericPolicy: registry.mode,
   };
   recordStructuredPreparation(target, preparation);
 }
@@ -552,6 +712,16 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     const preparation = structuredPreparationOf(target);
     return (names) => {
       let time = this.clock();
+      // A captured binding that changed after the preparation fails here:
+      // the annotation typed its snapshot. The compiled code holds the
+      // snapshot, so the result depends on each captured binding and on
+      // each helper definition, as on the existing route
+      // (`CompileTarget.symbolDeps`).
+      for (const capture of preparation.captures) {
+        capture.assertCurrent();
+        target.symbolDeps?.add(capture.name);
+      }
+      for (const name of preparation.helpers.keys()) target.symbolDeps?.add(name);
       const program = lowerStructuredProgram(preparation);
       time = this.endPhase('lowering', time);
       verifyJavaScriptProgram(program, preparedNodesOf(preparation));
@@ -613,13 +783,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       ? this.endPhase('preparation', start)
       : 0;
     // The annotation, with the facts of the body of a root function and of
-    // the helper definition, is built here, before any emission.
+    // the helper definitions, is built here, before any emission.
+    const registry = structuredRegistry(admission, prepared.target);
     if (isFunction(prepared.expr, 'Function')) {
-      attachBoundFunction(prepared.expr, prepared.target, admission);
+      attachBoundFunction(prepared.expr, prepared.target, admission, registry);
       if (structured) this.endPhase('annotation', annotationStart);
       return prepared;
     }
-    const named: NamedCalls = { calls: new Set() };
+    const named: NamedCalls = { calls: new Set(), structured: registry };
     const seen = new Set<Expression>();
     let readsSqrt = false;
     const check = (node: Expression): void => {
@@ -630,6 +801,13 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (isNumber(node)) return;
       if (isSymbol(node)) {
         if (node.symbol === 'True' || node.symbol === 'False') return;
+        // The structured route reads a captured binding as its snapshot.
+        if (
+          registry &&
+          node.valueDefinition?.value !== undefined &&
+          recordCapture(registry, node)
+        )
+          return;
         if (
           node.valueDefinition?.value !== undefined ||
           definition.typeOfSymbol(node) === undefined
@@ -664,9 +842,11 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     };
     check(prepared.expr);
     const annotate = () => annotateCalls(prepared.expr, definition, named);
-    const annotation = readsSqrt
-      ? withOutermostCompilerState(prepared.target, annotate)
-      : annotate();
+    // The rule of `Sqrt` of the structured route reads no compiler state.
+    const annotation =
+      readsSqrt && !structured
+        ? withOutermostCompilerState(prepared.target, annotate)
+        : annotate();
     attachScalarFragment(prepared.target, {
       root: prepared.expr,
       helper: named.helper,
@@ -677,7 +857,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     recordStructured(prepared.target, admission, {
       root: prepared.expr,
       annotation,
-      helper: named.helper,
+      named,
       inputs: () =>
         [...annotation.scope.bindings].map(([name, facts]) =>
           structuredInput(name, facts.type)
@@ -782,7 +962,8 @@ function scalarType(type: Type) {
 function attachBoundFunction(
   fn: Expression,
   target: CompileTarget<Expression>,
-  admission: Admission
+  admission: Admission,
+  registry: StructuredRegistry | undefined
 ): void {
   if (!isFunction(fn, 'Function')) return;
   if (!isLibraryOperator(fn, 'Function'))
@@ -855,13 +1036,26 @@ function attachBoundFunction(
         )
       : []),
   ]);
-  const named: NamedCalls = { calls: new Set() };
+  const named: NamedCalls = { calls: new Set(), structured: registry };
   // The heads that are not helper calls. The existing route also keeps
   // `Sqrt` here, so that it reaches the refusal below and not the helper
-  // resolution; the structured route has no `Sqrt`.
+  // resolution.
   const operatorHeads: ReadonlySet<string> = admission.structured
     ? admission.heads
     : new Set(['Add', 'Negate', 'If', 'Sqrt']);
+  /** Refuse a helper or a captured binding whose name is a parameter or a
+   *  local of the root function. */
+  const checkCollisions = (): void => {
+    const collides = registry
+      ? [...registry.helpers.keys(), ...[...registry.captures.values()].map((c) => c.name)]
+          .some((name) => bindings.has(name))
+      : bindings.has(named.helper!.name) ||
+        [...(named.helper!.capture?.symbols ?? [])].some(
+          (symbol) => isSymbol(symbol) && bindings.has(symbol.symbol)
+        );
+    if (collides)
+      throw new Error('JS scalar fragment: helper bindings collide with the root function');
+  };
   const checkValue = (node: Expression): void => {
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
@@ -873,19 +1067,20 @@ function attachBoundFunction(
         node.symbol === 'False'
       )
         return;
+      // The structured route reads a captured binding as its snapshot.
+      if (registry && recordCapture(registry, node)) return checkCollisions();
       throw new Error(`JS scalar fragment: unsupported capture ${node.symbol}`);
     }
     if (isFunction(node) && !operatorHeads.has(node.operator)) {
       collectHelper(node, target, named, admission);
-      const helper = named.helper!;
-      if (bindings.has(helper.name) || [...(helper.capture?.symbols ?? [])]
-          .some(symbol => isSymbol(symbol) && bindings.has(symbol.symbol)))
-        throw new Error('JS scalar fragment: helper bindings collide with the root function');
+      checkCollisions();
       for (const operand of node.ops) checkValue(operand);
       return;
     }
-    // Sqrt is excluded here: a write can change the sign of a local, so its
-    // initializer cannot determine whether a later square root is complex.
+    // On the existing route, Sqrt is excluded here: a write can change the
+    // sign of a local, so its initializer cannot determine whether a later
+    // square root is complex. The rule of the structured route reads the
+    // declared type of a local, not its initializer.
     if (
       !isFunction(node) ||
       !admission.heads.has(node.operator) ||
@@ -1045,7 +1240,7 @@ function attachBoundFunction(
     root: body,
     functionRoot: fn,
     annotation,
-    helper: named.helper,
+    named,
     inputs: () =>
       inputs.map((input) => structuredInput(input.name, input.type!)),
   });
@@ -1077,9 +1272,175 @@ type ResolvedHelper = ScalarFragmentHelper & {
   readonly fragment: Omit<FragmentFunction, 'arguments'>;
 };
 
-type NamedCalls = { helper?: ResolvedHelper; calls: Set<Expression> };
+/** A captured binding of the structured route (`StructuredCapture`), with
+ *  the stored value that the fragment pass types in place of each read. */
+type CaptureEntry = StructuredCapture & {
+  readonly symbols: Set<Expression>;
+  readonly stored: Expression;
+};
+
+/**
+ * The helpers and the captures of a compilation on the structured route.
+ * Each helper is resolved once, at its first call, and can call another
+ * helper. Each captured binding has one entry, whatever the number of its
+ * reads, in the root or in a helper.
+ */
+type StructuredRegistry = {
+  readonly mode: 'strict' | 'complex';
+  readonly helpers: Map<string, ResolvedHelper>;
+  readonly captures: Map<object, CaptureEntry>;
+  /** The helpers whose body is being checked, outermost first. */
+  readonly resolving: string[];
+};
+
+/** The calls of helpers of a compilation. `helper` is the one helper of
+ *  the existing route; `structured` holds the helpers and the captures of
+ *  the structured route. */
+type NamedCalls = {
+  helper?: ResolvedHelper;
+  calls: Set<Expression>;
+  structured?: StructuredRegistry;
+};
+
+/** The registry of a compilation of `target` on the structured route, or
+ *  `undefined` on the existing route. The options check refuses the
+ *  `bigint` mode. */
+function structuredRegistry(
+  admission: Admission,
+  target: CompileTarget<Expression>
+): StructuredRegistry | undefined {
+  if (!admission.structured) return undefined;
+  const mode =
+    BaseCompiler.resolveCompileMode(target) === 'complex' ? 'complex' : 'strict';
+  return { mode, helpers: new Map(), captures: new Map(), resolving: [] };
+}
+
+/**
+ * The snapshot of the captured binding that the symbol `node` reads, or
+ * `undefined` when the binding is not one that the fragment captures: an
+ * explicitly declared real or integer binding (not inferred) that holds a
+ * finite real number literal, and that is the binding the engine finds
+ * for the name where the program is compiled (a binding of another scope
+ * with the same name is not captured). `assertCurrent()` throws when the
+ * binding, its declared type or its value changed after this call.
+ */
+function numericSnapshot(node: Expression & { symbol: string }):
+  | { binding: object; value: Expression; assertCurrent: () => void }
+  | undefined {
+  const binding = node.valueDefinition;
+  const value = binding?.value;
+  const ambient = node.engine.lookupDefinition(node.symbol);
+  if (
+    !binding ||
+    binding.inferredType ||
+    !isSubtype(binding.type.type, 'real') ||
+    !value ||
+    !isNumber(value) ||
+    !Number.isFinite(value.re) ||
+    value.im !== 0 ||
+    !ambient ||
+    !('value' in ambient) ||
+    ambient.value !== binding ||
+    node.engine._getSymbolValue(node.symbol) !== value
+  )
+    return undefined;
+  const declaredType = binding.type.type;
+  return {
+    binding,
+    value,
+    assertCurrent: () => {
+      const current = node.engine.lookupDefinition(node.symbol);
+      if (
+        !current ||
+        !('value' in current) ||
+        current.value !== binding ||
+        node.valueDefinition !== binding ||
+        binding.inferredType ||
+        binding.type.type !== declaredType ||
+        binding.value !== value ||
+        node.engine._getSymbolValue(node.symbol) !== value
+      )
+        throw new Error(
+          'JS scalar fragment invariant: different captured binding or value'
+        );
+    },
+  };
+}
+
+/** Record the read `node` of a captured binding on the structured route.
+ *  Returns false when `node` does not read a binding that the fragment
+ *  captures (`numericSnapshot()`). */
+function recordCapture(
+  registry: StructuredRegistry,
+  node: Expression & { symbol: string }
+): boolean {
+  const snapshot = numericSnapshot(node);
+  if (snapshot === undefined) return false;
+  let entry = registry.captures.get(snapshot.binding);
+  if (entry === undefined) {
+    entry = {
+      binding: snapshot.binding,
+      name: node.symbol,
+      symbols: new Set(),
+      stored: snapshot.value,
+      value: snapshot.value.re,
+      assertCurrent: snapshot.assertCurrent,
+    };
+    registry.captures.set(snapshot.binding, entry);
+  }
+  entry.symbols.add(node);
+  return true;
+}
+
+/** The snapshot read by the symbol `node`, for the rule of `Sqrt`. */
+function snapshotReader(registry: StructuredRegistry): SnapshotOf {
+  return (node) => {
+    for (const entry of registry.captures.values())
+      if (entry.symbols.has(node)) return entry.value;
+    return undefined;
+  };
+}
+
+/**
+ * Resolve the helper that `node` calls on the structured route, once per
+ * helper, and record the call. A helper that calls itself, directly or
+ * through other helpers, is refused here: the structured route has no
+ * recursion. A second call of a helper must reach the binding of the first.
+ */
+function collectStructuredHelper(
+  node: Expression,
+  target: CompileTarget<Expression>,
+  named: NamedCalls,
+  admission: Admission
+): void {
+  const registry = named.structured!;
+  if (!isFunction(node))
+    throw new Error('JS scalar fragment: expected helper call');
+  const name = node.operator;
+  if (registry.resolving.includes(name))
+    throw new Error(
+      `JS scalar fragment: the helper ${name} calls itself, directly or ` +
+        'through another helper: the structured route has no recursion'
+    );
+  const known = registry.helpers.get(name);
+  if (known === undefined) {
+    registry.resolving.push(name);
+    try {
+      registry.helpers.set(name, resolveHelper(node, target, admission, named));
+    } finally {
+      registry.resolving.pop();
+    }
+  } else {
+    if ((node.valueDefinition ?? node.operatorDefinition) !== known.binding)
+      throw new Error(`JS scalar fragment: two definitions of the helper ${name}`);
+    // `resolveHelper()` checks this at the first call.
+    BaseCompiler.assertCapturedCallableBindings(node, target);
+  }
+  named.calls.add(node);
+}
 
 function collectHelper(node: Expression, target: CompileTarget<Expression>, named: NamedCalls, admission: Admission): void {
+  if (named.structured) return collectStructuredHelper(node, target, named, admission);
   const resolved = resolveHelper(node, target, admission);
   const helper = named.helper;
   if (helper && (helper.name !== resolved.name || helper.binding !== resolved.binding ||
@@ -1100,6 +1461,8 @@ function annotateCalls(
   inputs?: FragmentDeclaredInput[],
   block?: Expression
 ) {
+  if (named.structured)
+    return annotateStructured(root, base, named, named.structured, inputs);
   const { helper, calls } = named;
   const definition = helper === undefined ? base : {
     ...base,
@@ -1136,6 +1499,80 @@ function annotateCalls(
 }
 
 /**
+ * `annotateCalls()` on the structured route: the rule of `Sqrt` for the
+ * mode of the compilation, every helper of the registry (a call in the body
+ * of a helper reaches its helper too; the pass refuses recursion), and the
+ * snapshot of every captured binding, typed in place of each of its reads.
+ * Each helper returns the representation of its declared result, and each
+ * call, in any scope, passes its arguments with no conversion.
+ */
+function annotateStructured(
+  root: Expression,
+  base: FragmentDefinition<ScalarRepresentation>,
+  named: NamedCalls,
+  registry: StructuredRegistry,
+  inputs?: FragmentDeclaredInput[]
+) {
+  const { calls } = named;
+  const captureOf = (node: Expression) => {
+    for (const entry of registry.captures.values())
+      if (entry.symbols.has(node)) return entry;
+    return undefined;
+  };
+  const definition: FragmentDefinition<ScalarRepresentation> = {
+    ...base,
+    rules: {
+      ...base.rules,
+      Block: { walk: walkBlock },
+      Sqrt: structuredSqrtRule(registry.mode, snapshotReader(registry)),
+    },
+    storedValue: (node: Expression) => {
+      const capture = captureOf(node);
+      if (capture === undefined) return undefined;
+      capture.assertCurrent();
+      return capture.stored;
+    },
+    functionOf: (call: Expression) => {
+      const helper = isFunction(call) && calls.has(call)
+        ? registry.helpers.get(call.operator) : undefined;
+      return helper === undefined || !isFunction(call)
+        ? undefined
+        : { ...helper.fragment, arguments: call.ops };
+    },
+  };
+  const annotation = typeFragment(root, definition, { inputs });
+  if (annotation.refusal)
+    throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
+  // No `refuseClosedComplex()` here: the structured route refuses constant
+  // folding, and its emitter writes each node in the representation of its
+  // fact, so a closed node with a complex fact is written complex.
+  for (const helper of registry.helpers.values()) {
+    const entry = annotation.functions.get(helper.name);
+    if (!entry || entry.body !== helper.body || entry.type.kind !== 'function' ||
+        representation(entry.type.result) !== helper.resultRepresentation)
+      throw new Error('JS scalar fragment: helper return representation differs from its signature');
+  }
+  // The facts of each call, in each scope that typed it.
+  const scopes: FragmentScope<ScalarRepresentation>[] = [];
+  const collect = (scope: FragmentScope<ScalarRepresentation>) => {
+    scopes.push(scope);
+    for (const inner of scope.inner.values()) collect(inner);
+  };
+  collect(annotation.scope);
+  for (const fn of annotation.functions.values()) collect(fn.scope);
+  for (const call of calls) {
+    const all = scopes.flatMap((scope) => {
+      const facts = scope.facts.get(call);
+      return facts === undefined ? [] : [facts];
+    });
+    if (all.length === 0 || all.some((facts) => !('representation' in facts) ||
+        facts.conversions?.some((conversion) => conversion.kind !== 'none')))
+      throw new Error('JS scalar fragment: helper arguments must preserve representation');
+  }
+  return annotation;
+}
+
+/**
  * Refuse a function node of `scope` (and of the scopes it opens) whose fact
  * is `complex` and that reads no free symbol: no input, no parameter and no
  * local (`unknowns` lists each of them, also in the body of a function).
@@ -1149,7 +1586,8 @@ function annotateCalls(
  * would read that number as `{re, im}`. For example, with
  * `p: (boolean) -> boolean`, the `If` of `x + If(p(True), 1, Sqrt(-2))` is
  * written `1`. `Sqrt` is not refused: its fact comes from
- * `isComplexValued()`, the reader that the fold also reads.
+ * `isComplexValued()`, the reader that the fold also reads. Only the
+ * existing route calls this: the structured route refuses constant folding.
  */
 function refuseClosedComplex(scope: FragmentScope<ScalarRepresentation>) {
   for (const [node, facts] of scope.facts)
@@ -1166,11 +1604,20 @@ function refuseClosedComplex(scope: FragmentScope<ScalarRepresentation>) {
   for (const inner of scope.inner.values()) refuseClosedComplex(inner);
 }
 
+/**
+ * Resolve the helper that `call` calls and check its body. On the
+ * structured route (`named.structured`), the body can call another helper
+ * (`collectStructuredHelper()`), and each read of a captured binding is
+ * recorded in the registry; the existing route admits one captured binding
+ * per helper and no call.
+ */
 function resolveHelper(
   call: Expression,
   target: CompileTarget<Expression>,
-  admission: Admission
+  admission: Admission,
+  named?: NamedCalls
 ): ResolvedHelper {
+  const registry = named?.structured;
   if (!isFunction(call))
     throw new Error('JS scalar fragment: expected helper call');
   const binding = call.valueDefinition ?? call.operatorDefinition;
@@ -1247,55 +1694,45 @@ function resolveHelper(
         node.symbol === 'False'
       )
         return;
-      const binding = node.valueDefinition;
-      const value = binding?.value;
-      const ambient = node.engine.lookupDefinition(node.symbol);
-      if (
-        !binding ||
-        binding.inferredType ||
-        !isSubtype(binding.type.type, 'real') ||
-        !value ||
-        !isNumber(value) ||
-        !Number.isFinite(value.re) ||
-        value.im !== 0 ||
-        !ambient ||
-        !('value' in ambient) ||
-        ambient.value !== binding ||
-        node.engine._getSymbolValue(node.symbol) !== value
-      )
+      if (registry) {
+        if (!recordCapture(registry, node))
+          throw new Error(
+            `JS scalar fragment: unsupported helper capture ${node.symbol}`
+          );
+        return;
+      }
+      const snapshot = numericSnapshot(node);
+      if (snapshot === undefined)
         throw new Error(
           `JS scalar fragment: unsupported helper capture ${node.symbol}`
         );
       if (
         capture &&
         !capture.symbols.has(node) &&
-        [...capture.symbols][0].valueDefinition !== binding
+        [...capture.symbols][0].valueDefinition !== snapshot.binding
       )
         throw new Error(
           'JS scalar fragment: only one numeric capture is supported'
         );
-      const declaredType = binding.type.type;
       captureSymbols.add(node);
       capture ??= {
         symbols: captureSymbols,
-        value,
-        assertCurrent: () => {
-          const current = node.engine.lookupDefinition(node.symbol);
-          if (
-            !current ||
-            !('value' in current) ||
-            current.value !== binding ||
-            node.valueDefinition !== binding ||
-            binding.inferredType ||
-            binding.type.type !== declaredType ||
-            binding.value !== value ||
-            node.engine._getSymbolValue(node.symbol) !== value
-          )
-            throw new Error(
-              'JS scalar fragment invariant: different captured binding or value'
-            );
-        },
+        value: snapshot.value,
+        assertCurrent: snapshot.assertCurrent,
       };
+      return;
+    }
+    // A call of another helper, on the structured route. A library head
+    // that the route does not admit reaches the refusal below.
+    if (
+      named !== undefined &&
+      registry !== undefined &&
+      isFunction(node) &&
+      !admission.heads.has(node.operator) &&
+      !isLibraryOperator(node, node.operator)
+    ) {
+      collectStructuredHelper(node, target, named, admission);
+      for (const operand of node.ops) check(operand);
       return;
     }
     if (

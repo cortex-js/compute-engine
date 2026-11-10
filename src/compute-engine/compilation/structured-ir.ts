@@ -75,7 +75,11 @@ export type IRInputRead = OperationBase & {
 };
 
 /** An operation of the operands, which are already in the representation
- *  of the operation. */
+ *  of the operation. `sqrt` is the principal square root of its one
+ *  operand: a real result for a real operand (not a number for a negative
+ *  one), a complex result for a complex operand. The rule of the target
+ *  decides which of the two an occurrence is, and a real operand of a
+ *  complex `sqrt` is converted first. */
 export type IRArithmetic = OperationBase & {
   readonly kind:
     | 'add'
@@ -84,7 +88,42 @@ export type IRArithmetic = OperationBase & {
     | 'less'
     | 'equal'
     | 'min'
-    | 'max';
+    | 'max'
+    | 'sqrt';
+};
+
+/**
+ * A read of the captured binding `IRProgram.captures[capture]`: a binding
+ * of the engine that the program reads and does not bind (not an input, a
+ * parameter or a local). The operation carries the identity of the binding
+ * (`binding`, the object of the engine that holds it), not only its name,
+ * and the value that the read gives (`snapshot`).
+ *
+ * A read of a snapshot is `pure`: the value is fixed when the program is
+ * compiled, and the read does not read the binding when the code runs. A
+ * later change of the binding has no effect on the compiled code; a new
+ * compilation reads the new value.
+ *
+ * Not implemented, and what each would add:
+ *
+ * - A read of a LIVE binding (the value of the binding when the code runs)
+ *   would not be pure with respect to a write of that binding. It would add
+ *   a read set to the operation: the bindings that it reads. Each region
+ *   would carry the union of the read sets of its operations, and an
+ *   operation that calls a function the read set of the body of the
+ *   function. Two operations could then be reordered, or run at the same
+ *   time, only when the read set of each is disjoint from the write set of
+ *   the other.
+ * - A WRITE of a captured binding would be an operation of its own, with a
+ *   write set (the bindings that it writes), summarized per region and per
+ *   function as the read sets are. Its effect fact would be `effectful`,
+ *   and the write set would tell which reads it orders.
+ */
+export type IRCaptureRead = OperationBase & {
+  readonly kind: 'capture';
+  readonly capture: number;
+  readonly binding: object;
+  readonly snapshot: number;
 };
 
 /** A conversion that changes the representation. An identity conversion
@@ -126,7 +165,10 @@ export type IRShortCircuit = OperationBase & {
 };
 
 /** A call of `IRProgram.functions[function]`. The operands are the
- *  arguments, evaluated once, in order, before the call. */
+ *  arguments, evaluated once, in order, before the call. The effect of the
+ *  call includes the effect of the body of the function, which includes the
+ *  effect of each call in that body: the effect of a call is the effect of
+ *  every function that it reaches. */
 export type IRCall = OperationBase & {
   readonly kind: 'call';
   readonly function: number;
@@ -154,6 +196,7 @@ export type IRYield = {
 export type IROperation =
   | IRLiteral
   | IRInputRead
+  | IRCaptureRead
   | IRArithmetic
   | IRConvert
   | IRIf
@@ -174,7 +217,22 @@ export type IRInput = {
   readonly representation: Representation;
 };
 
-/** A resolved helper, written once as a function of the program. */
+/** A binding that the program reads as a snapshot (`IRCaptureRead`). */
+export type IRCapture = {
+  /** The identity of the binding: the object of the engine that holds it.
+   *  Two captures of a program have different bindings. */
+  readonly binding: object;
+  /** The name of the binding, for a message. */
+  readonly name: string;
+  readonly type: ScalarKind;
+  readonly representation: Representation;
+  /** The value of the binding when the program was compiled. */
+  readonly snapshot: number;
+};
+
+/** A resolved helper, written once as a function of the program. A helper
+ *  can call another helper; the body of a helper reads its parameters and
+ *  the captures of the program, and no input. */
 export type IRFunction = {
   readonly name: string;
   /** Defined at the entry of the body. */
@@ -196,6 +254,9 @@ export type IRProgram = {
   readonly inputs: readonly IRInput[];
   /** The compile mode of the compilation. */
   readonly numericPolicy: 'strict' | 'complex';
+  /** The bindings that the program reads as snapshots, in the root or in
+   *  a function (`IRCaptureRead`). */
+  readonly captures: readonly IRCapture[];
   readonly functions: readonly IRFunction[];
   readonly root: IRRegion;
 };

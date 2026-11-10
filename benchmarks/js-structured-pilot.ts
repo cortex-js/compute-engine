@@ -17,8 +17,9 @@
  *
  * The fixtures: the step 3 fixtures (`heatwall`, `heatcell`, `complex-if`);
  * three where the common-subexpression pass and the constant folding of A
- * matter (`cse-repeat`, `fold`, `local-reads`); two generated trees of about
- * 200 operations; and the corpus programs.
+ * matter (`cse-repeat`, `fold`, `local-reads`); the fixtures of step 5
+ * (`sqrt-repeat`, `helper-chain`, `capture`, `local-writes`); two
+ * generated trees of about 200 operations; and the corpus programs.
  *
  * The ordinary target is called as `new JavaScriptTarget().compile()`, the
  * method that the fragment target extends, and not through the public
@@ -114,6 +115,9 @@ type Fixture = {
   declare: Record<string, string>;
   /** Assign the helper `heatwall` in the engine. */
   heatwall?: boolean;
+  /** Declare and assign the helpers and the captured bindings of the
+   *  fixture, after the free symbols. */
+  setup?: (ce: ComputeEngine) => void;
   inputs: Inputs[];
   /** Provenance of a corpus program. */
   source?: { doc: string; row: string; input: string };
@@ -331,6 +335,98 @@ function namedFixtures(): Fixture[] {
   ];
 }
 
+/** Assign the helper `name` of the signature `signature`. */
+function install(
+  ce: ComputeEngine,
+  name: string,
+  signature: string,
+  body: MathJsonExpression,
+  parameters: MathJsonExpression[]
+): void {
+  ce.declare(name, signature);
+  ce.assign(name, ce.expr(['Function', body, ...parameters]));
+}
+
+/** The fixtures of step 5: a costly operation repeated, a chain of helpers,
+ *  a captured binding, and writes of a local merged after an `If`. */
+function step5Fixtures(): Fixture[] {
+  return [
+    {
+      // `√(max(0, x) + y·s + 1)` four times, in four different operators,
+      // so that the canonical form does not merge the occurrences. A
+      // computes it once (`_cse1`); B and D four times.
+      id: 'sqrt-repeat',
+      kind: 'named',
+      json: [
+        'Add',
+        ['Max', SQRT_REPEATED, 's'],
+        ['Min', SQRT_REPEATED, 't'],
+        ['Multiply', 'y', SQRT_REPEATED],
+        ['Negate', SQRT_REPEATED],
+      ],
+      declare: REAL_DECLARE,
+      inputs: deepInputs(16),
+    },
+    {
+      // `h1(x) + h1(y)`, where `h1` calls `h2` and `h2` calls `h3`.
+      id: 'helper-chain',
+      kind: 'named',
+      json: ['Add', ['h1', 'x'], ['h1', 'y']],
+      declare: REAL_DECLARE,
+      setup: (ce) => {
+        install(ce, 'h3', '(real) -> real', ['Add', ['Max', 0, 'w'], 1], [typed('w', 'real')]);
+        install(ce, 'h2', '(real) -> real', ['Multiply', 2, ['h3', 'v']], [typed('v', 'real')]);
+        install(ce, 'h1', '(real) -> real', ['Add', ['h2', 'u'], ['Negate', 'u']], [typed('u', 'real')]);
+      },
+      inputs: deepInputs(16),
+    },
+    {
+      // `offset` read in the root and in the helper `g`.
+      id: 'capture',
+      kind: 'named',
+      json: ['Add', ['g', 'x'], ['Multiply', 'offset', 'y']],
+      declare: REAL_DECLARE,
+      setup: (ce) => {
+        ce.declare('offset', 'real');
+        ce.assign('offset', 2.5);
+        install(ce, 'g', '(real) -> real', ['Add', 'u', 'offset'], [typed('u', 'real')]);
+      },
+      inputs: deepInputs(16),
+    },
+    {
+      // A local written in both branches of an `If` statement and after
+      // it: the structured route merges the two values after the `If`.
+      id: 'local-writes',
+      kind: 'named',
+      json: [
+        'Function',
+        [
+          'Block',
+          ['Declare', 'a', "'real'", 'x'],
+          ['If', ['Less', 'x', 'y'], ['Assign', 'a', ['Add', 'a', 'y']], ['Assign', 'a', ['Multiply', 'a', 2]]],
+          ['Assign', 'a', ['Max', 'a', 's']],
+          ['Add', 'a', 't'],
+        ],
+        typed('x', 'real'),
+        typed('y', 'real'),
+        typed('s', 'real'),
+        typed('t', 'real'),
+      ],
+      declare: {},
+      inputs: deepInputs(16).map((v) => {
+        const r = v as Record<string, Value>;
+        return [r.x, r.y, r.s, r.t];
+      }),
+    },
+  ];
+}
+
+/** The square root that `sqrt-repeat` repeats. */
+const SQRT_REPEATED: MathJsonExpression = [
+  'Sqrt',
+  ['Add', ['Max', 0, 'x'], ['Multiply', 'y', 's'], 1],
+];
+
 /** The subexpression that `cse-repeat` repeats. */
 const REPEATED: MathJsonExpression = ['Add', ['Multiply', 'x', 'y'], ['Max', 's', 't']];
 
@@ -416,7 +512,12 @@ function corpusFixtures(): Fixture[] {
 }
 
 function allFixtures(): Fixture[] {
-  const all = [...namedFixtures(), ...deepFixtures(), ...corpusFixtures()];
+  const all = [
+    ...namedFixtures(),
+    ...step5Fixtures(),
+    ...deepFixtures(),
+    ...corpusFixtures(),
+  ];
   const only = process.env.ONLY?.split(',').filter((o) => o !== '');
   if (!only) return all;
   const selected = all.filter(
@@ -454,6 +555,7 @@ function engineFor(fixture: Fixture): ComputeEngine {
     );
   }
   for (const [name, type] of Object.entries(fixture.declare)) ce.declare(name, type);
+  fixture.setup?.(ce);
   return ce;
 }
 
@@ -1168,7 +1270,10 @@ const COMPILATION = resolve(ROOT, 'src/compute-engine/compilation');
 /** The code lines of `file` at `rev` whose last change is one of
  *  `commits` (git blame). */
 function blamedLines(file: string, rev: string, commits: string[]): number {
-  const out = execFileSync('git', ['blame', '--line-porcelain', rev, '--', file], {
+  // REV=worktree: the file on disk; a line that no commit holds has the
+  // hash 0000000000000000000000000000000000000000.
+  const revision = rev === 'worktree' ? [] : [rev];
+  const out = execFileSync('git', ['blame', '--line-porcelain', ...revision, '--', file], {
     cwd: ROOT,
     encoding: 'utf8',
     maxBuffer: 1 << 28,
@@ -1231,8 +1336,16 @@ function modeLines(): void {
     'javascript-structured-emit.ts',
   ];
   const pilot: Record<string, number> = {};
-  for (const f of pilotFiles) pilot[f] = codeLines(readFileSync(resolve(COMPILATION, f), 'utf8'));
-  const commits = ['4c4f1c163', '7939b5fac'];
+  // REV=worktree reads the files on disk; another REV reads them at that
+  // commit.
+  const source = (f: string) =>
+    rev === 'worktree'
+      ? readFileSync(resolve(COMPILATION, f), 'utf8')
+      : execFileSync('git', ['show', `${rev}:src/compute-engine/compilation/${f}`], { cwd: ROOT, encoding: 'utf8' });
+  for (const f of pilotFiles) pilot[f] = codeLines(source(f));
+  // The commits of the pilot (steps 2 and 3), of the first change of step 5
+  // (local writes), and, with REV=worktree, the uncommitted lines.
+  const commits = ['4c4f1c163', '7939b5fac', '5e496c6ad', ...(rev === 'worktree' ? ['0000000'] : [])];
   for (const f of ['javascript-fragment-target.ts', 'javascript-target.ts'])
     pilot[`${f} (lines of ${commits.join(', ')})`] = blamedLines(`src/compute-engine/compilation/${f}`, rev, commits);
   const pilotTotal = Object.values(pilot).reduce((a, b) => a + b, 0);
@@ -1253,6 +1366,10 @@ function modeLines(): void {
   existing['guardCondition (compile-conditions.ts)'] = spanLines(conditions, findFunction(conditions, 'guardCondition'));
   const calls = parse('compile-user-calls.ts');
   existing['emitUserFunctionCall (compile-user-calls.ts)'] = spanLines(calls, findFunction(calls, 'emitUserFunctionCall'));
+  // `Sqrt` (step 5): the handler and the functions that only it calls.
+  existing['JAVASCRIPT_FUNCTIONS.Sqrt'] = spanLines(jsTarget, findEntry(jsTarget, 'JAVASCRIPT_FUNCTIONS', 'Sqrt'));
+  for (const fn of ['complexSqrtLiteral', 'promotesToComplexLane'])
+    existing[`${fn} (javascript-target.ts)`] = spanLines(jsTarget, findFunction(jsTarget, fn));
   const existingTotal = Object.values(existing).reduce((a, b) => a + b.code, 0);
   console.log(JSON.stringify({ mode: 'lines', rev, pilot, pilotTotal, existing, existingTotal }, null, 1));
 }

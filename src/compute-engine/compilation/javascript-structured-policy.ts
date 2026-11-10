@@ -37,6 +37,8 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     equal: { results: ['boolean'], operands: ['number'] },
     and: { results: ['boolean'], operands: ['boolean'] },
     or: { results: ['boolean'], operands: ['boolean'] },
+    // `Math.sqrt` of a number, `_SYS.csqrt` of an `{re, im}` object.
+    sqrt: { results: ['number', 'complex'], operands: 'same' },
     // The test heads take real operands and have a real value.
     trace: { results: ['number'], operands: ['number'] },
   },

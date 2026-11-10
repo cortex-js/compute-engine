@@ -35,6 +35,7 @@ export type PolicyOperationKind =
   | 'max'
   | 'and'
   | 'or'
+  | 'sqrt'
   | 'trace';
 
 /** The representations of the operands and of the result of an operation
@@ -100,9 +101,21 @@ export type RepresentationPolicy = {
  * operations, and the effect of an operation that evaluates a region or
  * calls a function includes the effect of that region or of that function;
  * each function yields a value of the type and the representation of its
- * result, and its body reads no input of the program; each origin is one
- * of `preparedNodes`, the nodes of the prepared artifact that the program
- * was lowered from.
+ * result, and its body reads no input of the program; each capture of the
+ * program has its own binding, and each read of a capture names a capture
+ * of the program, with its binding, its snapshot, its type and its
+ * representation, and is `pure`, so two reads of one binding agree on the
+ * type and the representation; each origin is one of `preparedNodes`, the
+ * nodes of the prepared artifact that the program was lowered from.
+ *
+ * A call cycle (a function that calls itself, directly or through other
+ * functions) is accepted. The summary of the effects is correct for it:
+ * the check of each call (its effect includes the effect of the body of
+ * its function) and of each body (its effect is the join of its
+ * operations) hold together around the cycle only when every body of the
+ * cycle has at least the effect of every operation of the cycle, so no
+ * effect of a function that a call reaches is missing from the call. A
+ * target that cannot emit a cycle refuses it before lowering.
  */
 export function verifyProgram(
   program: IRProgram,
@@ -147,6 +160,32 @@ export function verifyProgram(
     collect(fn.body);
   }
   collect(program.root);
+
+  // The captures of the program, each with its own binding.
+  const bindings = new Set<object>();
+  for (const capture of program.captures) {
+    if (bindings.has(capture.binding))
+      fail(`the binding ${capture.name} is captured twice`);
+    bindings.add(capture.binding);
+    if (!policy.representations.has(capture.representation))
+      fail(
+        `the capture ${capture.name} has the representation ${capture.representation}, which the target does not have`
+      );
+    if (policy.representationOf(capture.type) !== capture.representation)
+      fail(
+        `the capture ${capture.name} of the type ${capture.type} has the representation ${capture.representation}`
+      );
+    // A snapshot is a finite number: a real, or an integer of the type
+    // `integer`. A capture of another type is refused, because an emitter
+    // writes the snapshot as a number literal: a `complex` capture would
+    // give a number where its reads promise a complex value.
+    if (capture.type !== 'real' && capture.type !== 'integer')
+      fail(`the capture ${capture.name} has the type ${capture.type}`);
+    if (!Number.isFinite(capture.snapshot))
+      fail(`the snapshot of the capture ${capture.name} is not finite`);
+    if (capture.type === 'integer' && !Number.isInteger(capture.snapshot))
+      fail(`the snapshot of the integer capture ${capture.name} is not an integer`);
+  }
 
   /** The regions around the current operation, outermost first, with the
    *  position of the operation that evaluates the next one. */
@@ -334,6 +373,33 @@ function verifySignature(
         fail(`a read of the input ${op.input} does not match the input`);
       return;
     }
+    case 'capture': {
+      arity(0);
+      const capture = program.captures[op.capture];
+      if (capture === undefined)
+        return fail(`a read of the capture ${op.capture}, which the program does not list`);
+      if (op.binding !== capture.binding)
+        fail(`a read of the capture ${capture.name} names another binding`);
+      if (!Object.is(op.snapshot, capture.snapshot))
+        fail(`a read of the capture ${capture.name} has another snapshot`);
+      if (
+        op.result.type !== capture.type ||
+        op.result.representation !== capture.representation
+      )
+        fail(`a read of the capture ${capture.name} does not match the capture`);
+      // A snapshot is fixed when the program is compiled.
+      if (op.effect !== 'pure')
+        fail(`a read of the capture ${capture.name} is not pure`);
+      return;
+    }
+    case 'sqrt':
+      arity(1);
+      resultIn(policy.operations.sqrt.results);
+      operandsIn(operandRule('sqrt'));
+      // A square root is not an integer, also of an integer operand.
+      if (op.result.type === 'integer')
+        fail('the operation sqrt has an integer result');
+      return;
     case 'add':
     case 'multiply':
     case 'min':

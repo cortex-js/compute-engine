@@ -424,6 +424,7 @@ function madeProgram() {
       { name: 'x', type: 'real', representation: 'number' },
     ],
     numericPolicy: 'strict',
+    captures: [],
     functions: [],
     root: region(rootOps),
   };

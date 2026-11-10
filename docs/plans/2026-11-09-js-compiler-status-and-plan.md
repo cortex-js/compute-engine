@@ -469,6 +469,36 @@ invalidation controls, and no generic emission fallback. Use single-definition
 versions for local writes and explicit branch results. Keep unresolved calls or
 shape changes as declines. General recursion and indirect calls can wait.
 
+**Result of step 5 (2026-11-10).** Both changes are done.
+
+- The core is `structured-ir.ts` and `structured-verify.ts`. It imports no
+  target; a target gives the verifier a policy
+  (`javascript-structured-policy.ts`). A test verifies a program under a
+  second policy with other representation names.
+- A write to a local makes a new value, and an `If` statement yields one
+  merged value per local that a later statement reads (`IRIf.results`).
+- `Sqrt` is decided by `structuredSqrtRule()` and `signOf()` from the facts
+  of the operand and the mode. Over 30 programs in both modes, no fact
+  differs from `isComplexValued()`; two programs decline. The structured
+  route no longer calls `isComplexValued()` before the result assembly.
+- Several helpers, and a helper that calls a helper; recursion is refused.
+- A captured numeric value is a `capture` operation that carries the
+  identity of its binding and the snapshot. The program lists its captures.
+  A read of a live binding and a write of a captured binding are described
+  in the doc comment of the operation and are not implemented.
+- The measure is the section "After step 5 (2026-11-10)" of
+  [the pilot measure](2026-11-09-js-structured-pilot-measure.md): no value
+  differs on 52 programs; compilation takes 35% to 70% of the time of the
+  ordinary target with the same options; no execution difference is
+  resolved, also on `sqrt-repeat`, where the new route computes the square
+  root four times and the ordinary target once (about 8 ns per call for
+  both; the measure does not show why). The pilot is 2,474 counted lines, of
+  which 566 are the core; the handlers of the existing emitter for the same
+  operators are at most 942.
+
+Not done in step 5: the `bigint` mode, which the fragment target still
+refuses.
+
 ### Step 6 — Build useful numeric-kernel coverage
 
 **Deliver in bounded slices:** numeric tuples and lists, indexing and explicit

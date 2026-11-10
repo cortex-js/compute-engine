@@ -52,11 +52,16 @@
  *   precedence is the same: `a + (b + c)` keeps the order of a floating-point
  *   sum.
  * - A conversion is written where its operation is, in its region.
- * - A helper is one JavaScript function, called with values. Its body reads
- *   only its parameters.
+ * - A helper is one JavaScript function declaration, called with values.
+ *   Its body reads its parameters and the snapshots of captured bindings,
+ *   and can call another helper: a declaration is hoisted, so the order of
+ *   the definitions does not matter.
+ * - A read of a captured binding is its snapshot, written as a number
+ *   literal at each use, as the existing emitter writes the stored value.
  * - Numbers are JavaScript numbers and complex numbers are `{re, im}`
  *   objects, as in the existing emitter. A complex sum is written per
- *   component and a complex negation calls the runtime helper `_SYS.cneg`,
+ *   component, a complex negation calls the runtime helper `_SYS.cneg`, a
+ *   real square root is `Math.sqrt` and a complex one calls `_SYS.csqrt`,
  *   as the existing emitter does. An object literal is in parentheses, so
  *   that it is never read as a block.
  *
@@ -92,7 +97,7 @@ export type StructuredEmitOptions = {
 /** The code of a program. */
 export type StructuredEmission = {
   /** One JavaScript function per helper, in the order of the program. Each
-   *  reads only its parameters. */
+   *  reads its parameters and the snapshots of captured bindings. */
   readonly definitions: readonly string[];
   /** The statements of the root region, in order. */
   readonly statements: readonly string[];
@@ -341,6 +346,11 @@ class Emitter {
         );
         return undefined;
       }
+      case 'capture':
+        // The snapshot is written as a number literal at each use, as the
+        // existing emitter writes the stored value of a captured binding.
+        this.define(op.result, numberSource(op.snapshot));
+        return undefined;
       case 'input': {
         if (!readsInputs) fail('the body of a helper reads an input');
         const input = this.program.inputs[op.input];
@@ -366,6 +376,11 @@ class Emitter {
         return leftAssociative(operands, RELATIONAL, '<');
       case 'equal':
         return leftAssociative(operands, EQUALITY, '===');
+      case 'sqrt':
+        if (op.result.representation !== 'complex')
+          return call('Math.sqrt', operands);
+        this.runtime.add('csqrt');
+        return call('_SYS.csqrt', operands);
       case 'min':
         return call('Math.min', operands);
       case 'max':

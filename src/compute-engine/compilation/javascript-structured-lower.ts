@@ -19,6 +19,11 @@
  * value of its initializer, which is evaluated where it is declared; each
  * read of the local is that value.
  *
+ * A read of a binding that the admission captured is a capture read
+ * (`IRCaptureRead`) of its snapshot. A helper is lowered once, at its first
+ * call, as a function of the program; a call of a helper in the body of
+ * another helper lowers the called helper first.
+ *
  * A write to a local (`Assign`) makes a new value, and each later read on
  * its path is that value: no operation writes a named variable. An `If`
  * statement whose branches write locals has one result per local that a
@@ -45,6 +50,7 @@ import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
   joinEffects,
   type EffectFact,
+  type IRCapture,
   type IRFunction,
   type IRInput,
   type IROperation,
@@ -57,6 +63,24 @@ import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 
 export type StructuredInput = IRInput;
 
+/**
+ * A binding of the engine that the program reads and does not bind, with
+ * the value that the admission found in it (a finite real number). The
+ * compiled code holds that value: a later change of the binding does not
+ * change the code.
+ */
+export type StructuredCapture = {
+  /** The identity of the binding: the value definition of the engine. */
+  readonly binding: object;
+  readonly name: string;
+  /** The symbol nodes of the prepared tree that read the binding. */
+  readonly symbols: ReadonlySet<Expression>;
+  /** The value of the binding at the admission. */
+  readonly value: number;
+  /** Throw when the binding or its value changed after the admission. */
+  readonly assertCurrent: () => void;
+};
+
 /** The facts that the preparation of the structured route records, and
  *  that the lowering reads. */
 export type StructuredPreparation = {
@@ -65,8 +89,16 @@ export type StructuredPreparation = {
   /** The root `Function` literal whose body is `root`, if any. */
   readonly functionRoot?: Expression;
   readonly annotation: FragmentAnnotation<ScalarRepresentation>;
-  /** The resolved helper. Its key in `annotation.functions` is its name. */
-  readonly helper?: { readonly name: string; readonly body: Expression };
+  /** The resolved helpers, by name. The key of each in
+   *  `annotation.functions` is its name. A helper can call another one;
+   *  the admission refuses recursion. */
+  readonly helpers: ReadonlyMap<
+    string,
+    { readonly name: string; readonly body: Expression }
+  >;
+  /** The bindings that the program reads as snapshots, in the order of
+   *  their admission. */
+  readonly captures: readonly StructuredCapture[];
   /** The parameters of the root function in order, or the free symbols of
    *  the expression in the order of their first read. */
   readonly inputs: readonly StructuredInput[];
@@ -109,8 +141,14 @@ const fail = (message: string): never => {
 
 /** The operations of the operators that map one to one. */
 const OPERATIONS: Readonly<
-  Record<string, 'add' | 'negate' | 'multiply' | 'less' | 'equal' | 'min' | 'max'>
+  Record<
+    string,
+    'add' | 'negate' | 'multiply' | 'less' | 'equal' | 'min' | 'max' | 'sqrt'
+  >
 > = {
+  // The rule of `Sqrt` (`javascript-fragment-target.ts`) records the
+  // conversion of a real operand of a complex square root.
+  Sqrt: 'sqrt',
   Add: 'add',
   Negate: 'negate',
   Multiply: 'multiply',
@@ -167,6 +205,11 @@ class Lowering {
   private nextId = 0;
   private readonly functions: IRFunction[] = [];
   private readonly functionIndex = new Map<string, number>();
+  /** The helpers whose body is being lowered. */
+  private readonly lowering = new Set<string>();
+  private readonly captures: IRCapture[] = [];
+  /** The index of each capture in `captures`, by its binding. */
+  private readonly captureIndex = new Map<object, number>();
   /** The value of each local and parameter, by the scope that binds it. */
   private readonly bound = new Map<
     FragmentScope<ScalarRepresentation>,
@@ -186,6 +229,7 @@ class Lowering {
       revision: this.revision,
       inputs: this.prep.inputs,
       numericPolicy: this.prep.numericPolicy,
+      captures: this.captures,
       functions: this.functions,
       root: this.region(operations, root, value),
     };
@@ -380,7 +424,7 @@ class Lowering {
     }
 
     const entry = this.prep.annotation.functions.get(operator);
-    if (entry !== undefined && this.prep.helper?.name === operator) {
+    if (entry !== undefined && this.prep.helpers.has(operator)) {
       const args = this.operands(node, facts, scope, operations);
       const index = this.helper(operator, args, facts, node);
       const result = this.resultOf(facts);
@@ -446,7 +490,45 @@ class Lowering {
       });
       return result;
     }
-    return fail(`no binding for the name ${name}`);
+    return this.captureRead(node, scope, operations);
+  }
+
+  /**
+   * A read of a name that no scope binds: a binding that the admission
+   * captured, read as its snapshot. The facts of the node are the facts of
+   * the snapshot value (`FragmentDefinition.storedValue`).
+   */
+  private captureRead(
+    node: Expression & { symbol: string },
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const capture = this.prep.captures.find((c) => c.symbols.has(node));
+    if (capture === undefined) return fail(`no binding for the name ${node.symbol}`);
+    const result = this.resultOf(this.facts(node, scope));
+    let index = this.captureIndex.get(capture.binding);
+    if (index === undefined) {
+      index = this.captures.length;
+      this.captures.push({
+        binding: capture.binding,
+        name: capture.name,
+        type: result.type,
+        representation: result.representation,
+        snapshot: capture.value,
+      });
+      this.captureIndex.set(capture.binding, index);
+    }
+    operations.push({
+      kind: 'capture',
+      capture: index,
+      binding: capture.binding,
+      snapshot: capture.value,
+      result,
+      operands: [],
+      effect: 'pure',
+      origin: node,
+    });
+    return result;
   }
 
   /**
@@ -648,10 +730,14 @@ class Lowering {
   }
 
   /**
-   * The index of the function of the helper `name`, lowered at its first
-   * call. Its parameters have the types and representations that the
-   * conversions of the call record (the admission requires identity
-   * conversions), and its result the representation of the call.
+   * The index of the function of the helper `name`, lowered once, at its
+   * first call, whatever the number of its calls. A call in its body of
+   * another helper lowers that helper first, so a function of the program
+   * calls only functions of a lower index. Its parameters have the types
+   * and representations that the conversions of the call record (the
+   * admission requires identity conversions), and its result the
+   * representation of the call. A helper that calls itself, directly or
+   * through other helpers, throws: the admission refuses it.
    */
   private helper(
     name: string,
@@ -661,8 +747,12 @@ class Lowering {
   ): number {
     const known = this.functionIndex.get(name);
     if (known !== undefined) return known;
+    if (this.lowering.has(name)) return fail(`the helper ${name} calls itself`);
     const entry = this.prep.annotation.functions.get(name)!;
-    if (entry.type.kind !== 'function' || entry.body !== this.prep.helper?.body)
+    if (
+      entry.type.kind !== 'function' ||
+      entry.body !== this.prep.helpers.get(name)?.body
+    )
       return fail(`the helper ${name} has no function facts`);
     const conversions = facts.conversions ?? [];
     if (
@@ -678,7 +768,9 @@ class Lowering {
       new Map(entry.type.parameters.map((p, i) => [p.name, parameters[i]]))
     );
     const operations: IROperation[] = [];
+    this.lowering.add(name);
     const value = this.value(entry.body, entry.scope, operations);
+    this.lowering.delete(name);
     const result = {
       type: scalarKind(entry.type.result),
       representation: facts.representation,

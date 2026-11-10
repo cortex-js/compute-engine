@@ -994,3 +994,211 @@ Not resolved:
   operation: the pilot vocabulary has none.
 - Parse time and memory of the emitted code (not measured; the code is now
   about the size of B's).
+
+## After step 5 (2026-11-10)
+
+The second change of step 5 adds to the structured route: `Sqrt`, with its
+real or complex result decided from facts (`structuredSqrtRule()`); helpers
+that call helpers, each lowered once; and captured bindings read as
+snapshots (`IRCaptureRead`). This section measures that code.
+
+### New fixtures
+
+| Fixture | What it measures |
+| --- | --- |
+| `sqrt-repeat` | `√(max(0, x) + y·s + 1)` four times, under `Max`, `Min`, `Multiply` and `Negate`, so that the canonical form keeps four occurrences. A computes the root once (`_cse1`); B and D four times. |
+| `helper-chain` | `h1(x) + h1(y)`, where `h1` calls `h2` and `h2` calls `h3`. |
+| `capture` | `g(x) + offset·y`, with `offset = 2.5` read in the root and in the helper `g`. |
+| `local-writes` | A local written in both branches of an `If` statement and after it, then read. |
+
+### The run
+
+One complete run of the default mode
+(`node --expose-gc --import tsx benchmarks/js-structured-pilot.ts`): the 12
+named and deep fixtures and the 40-program corpus sample, with the seeded
+random order for every timing, one garbage collection per round, 9 rounds.
+It ran under the box lock, from 14:46:43 to 14:48:21 UTC (98 s), in a
+worktree at base `5e496c6adae3b4fd52e2b6ccee6f8d5b5c3ab2dd` with the
+uncommitted change. Load at the start: 2.58 / 2.67 / 2.53. A Tycho
+`esbuild` used about 33% of one core. No Jest process ran.
+
+The run used the code before six review fixes. None of them changes the
+code emitted for a fixture: they change tests, verifier checks and
+comments; the admission of closed complex nodes, which no fixture has; and
+the sign of an `Add`, `Multiply`, `Min` or `Max` with no operand, which the
+canonical form does not make.
+
+**Values.** No value differs between A, A2, B, C and D on the 52 programs
+(12 fixtures and 40 corpus programs, 825 inputs), with the sign of each
+zero. D admits all 40 corpus programs; C admits 6.
+
+### Calibration
+
+A2/A, the median and the range over the rounds:
+
+| Measure | Per fixture |
+| --- | --- |
+| Warm compilation | 0.86 to 1.07 (0.73 to 1.30) |
+| Warm execution, `run()` | 0.94 to 1.06 (0.86 to 1.17) |
+| Warm execution, body | 0.99 to 1.03 (0.70 to 1.17) |
+| Cold, fresh engine | 0.97 to 1.06 (0.81 to 1.45) |
+| Corpus totals, warm compilation | 0.99 (0.93 to 1.07) |
+| Corpus totals, execution | 1.00 (0.98 to 1.03) |
+
+### Emitted bytes (code and preamble)
+
+| Fixture | A | B | D | D/B |
+| --- | ---: | ---: | ---: | ---: |
+| `heatwall` | 62 | 62 | 56 | 0.90 |
+| `heatcell` | 262 | 262 | 234 | 0.89 |
+| `complex-if` | 113 | 113 | 154 | 1.36 |
+| `cse-repeat` | 134 | 170 | 170 | 1.00 |
+| `fold` | 16 | 44 | 44 | 1.00 |
+| `local-reads` | 112 | 112 | 120 | 1.07 |
+| `sqrt-repeat` | 147 | 218 | 218 | 1.00 |
+| `helper-chain` | 142 | 142 | 173 | 1.22 |
+| `capture` | 52 | 52 | 64 | 1.23 |
+| `local-writes` | 112 | 112 | 88 | 0.79 |
+| `deep-full` | 2,062 | 2,032 | 1,838 | 0.90 |
+| `deep-add-if` | 1,743 | 1,743 | 1,363 | 0.78 |
+| Corpus sample (40 programs) | 1,215 | 1,215 | 1,204 | 0.99 |
+
+The old fixtures have the bytes of the revised emitter. D writes more than
+B for `helper-chain` and `capture` because each helper is a `function`
+declaration where B writes an arrow function.
+
+### Warm compilation (ms per compilation; ratios: median and range over the rounds)
+
+| Fixture | A | B | D | D/B | D/A |
+| --- | ---: | ---: | ---: | --- | --- |
+| `heatwall` | 0.314 | 0.249 | 0.144 | 0.56 (0.50 to 0.69) | 0.46 (0.37 to 0.53) |
+| `heatcell` | 1.052 | 0.874 | 0.309 | 0.36 (0.29 to 0.39) | 0.30 (0.25 to 0.36) |
+| `complex-if` | 0.187 | 0.134 | 0.099 | 0.70 (0.61 to 0.77) | 0.54 (0.43 to 0.73) |
+| `cse-repeat` | 0.513 | 0.482 | 0.239 | 0.49 (0.34 to 0.59) | 0.47 (0.42 to 0.53) |
+| `fold` | 0.311 | 0.169 | 0.096 | 0.53 (0.42 to 0.78) | 0.31 (0.25 to 0.40) |
+| `local-reads` | 0.465 | 0.387 | 0.159 | 0.40 (0.35 to 0.53) | 0.34 (0.25 to 0.43) |
+| `sqrt-repeat` | 0.565 | 0.565 | 0.282 | 0.51 (0.48 to 0.60) | 0.52 (0.45 to 0.64) |
+| `helper-chain` | 0.754 | 0.615 | 0.223 | 0.35 (0.26 to 0.38) | 0.29 (0.22 to 0.31) |
+| `capture` | 0.358 | 0.296 | 0.128 | 0.43 (0.33 to 0.62) | 0.37 (0.30 to 0.50) |
+| `local-writes` | 0.471 | 0.414 | 0.178 | 0.43 (0.37 to 0.55) | 0.37 (0.32 to 0.49) |
+| `deep-full` | 4.463 | 3.625 | 1.812 | 0.52 (0.47 to 0.56) | 0.40 (0.36 to 0.48) |
+| `deep-add-if` | 3.770 | 2.886 | 1.750 | 0.59 (0.55 to 0.69) | 0.46 (0.41 to 0.49) |
+| Corpus totals | 7.05 | 5.87 | 4.11 | 0.68 (0.66 to 0.76) | 0.57 (0.54 to 0.63) |
+
+Per corpus program, D/B has the median 0.74 (0.47 to 1.03), and D/A the
+median 0.60 (0.45 to 0.99). Cold, on a fresh engine, D/B is 0.49 to 0.82
+per fixture and 0.85 on the corpus totals.
+
+### Warm execution (ns per call)
+
+| Fixture | `run()`: A | B | D | D/B | D/A | Body: D/B | Body: D/A |
+| --- | ---: | ---: | ---: | --- | --- | --- | --- |
+| `heatwall` | 42 | 42 | 39 | 0.95 (0.91 to 1.10) | 0.93 (0.91 to 1.10) | 1.00 (0.96 to 1.02) | 1.01 (0.98 to 1.02) |
+| `heatcell` | 48 | 50 | 50 | 1.01 (0.90 to 1.05) | 1.03 (0.89 to 1.08) | — | — |
+| `complex-if` | 45 | 42 | 42 | 1.01 (0.90 to 1.16) | 0.98 (0.87 to 1.12) | 0.98 (0.90 to 1.00) | 0.99 (0.87 to 1.04) |
+| `cse-repeat` | 47 | 47 | 48 | 1.02 (0.95 to 1.10) | 1.02 (0.92 to 1.18) | 0.99 (0.93 to 1.01) | 1.00 (0.97 to 1.02) |
+| `fold` | 37 | 38 | 37 | 0.97 (0.94 to 1.01) | 0.99 (0.93 to 1.10) | 1.01 (0.96 to 1.02) | 1.00 (0.99 to 1.01) |
+| `local-reads` | 48 | 45 | 46 | 0.99 (0.92 to 1.09) | 0.96 (0.87 to 1.14) | — | — |
+| `sqrt-repeat` | 46 | 46 | 46 | 1.01 (0.91 to 1.04) | 1.01 (0.88 to 1.05) | 1.00 (0.97 to 1.02) | 0.99 (0.94 to 1.01) |
+| `helper-chain` | 40 | 41 | 38 | 0.95 (0.86 to 0.98) | 0.95 (0.90 to 0.99) | 0.93 (0.88 to 1.03) | 0.93 (0.90 to 1.04) |
+| `capture` | 37 | 37 | 37 | 0.99 (0.93 to 1.05) | 0.99 (0.93 to 1.06) | 1.00 (0.96 to 1.02) | 1.00 (0.90 to 1.01) |
+| `local-writes` | 47 | 44 | 45 | 1.03 (0.88 to 1.12) | 0.96 (0.89 to 1.05) | — | — |
+| `deep-full` | 71 | 68 | 70 | 1.01 (0.92 to 1.13) | 0.99 (0.92 to 1.14) | 0.95 (0.89 to 1.36) | 0.95 (0.91 to 1.11) |
+| `deep-add-if` | 61 | 60 | 60 | 1.01 (0.92 to 1.06) | 1.00 (0.95 to 1.08) | 0.99 (0.92 to 1.06) | 0.99 (0.95 to 1.03) |
+
+"Body" is `rawCall`, which a `Function` literal does not have (—). On the
+corpus totals, D/B is 1.01 (0.99 to 1.03) through `run()` and 1.00 (0.99
+to 1.01) on the body.
+
+**The cost of emitting without common subexpressions, on `sqrt-repeat`.**
+Not resolved. D computes the square root four times and A once, and D/A is
+0.99 (0.94 to 1.01) on the body and 1.01 (0.88 to 1.05) through `run()`:
+inside the calibration range, with all three at about 8 ns per call on the
+body. One explanation is that the JIT finds the four identical pure
+`Math.sqrt` calls and computes them once; this run does not show that it
+does. The measure therefore does not show a cost, and does not show that a
+larger repeated operation, or a call that the JIT cannot merge, has none.
+
+### Line counts
+
+`MODE=lines`, by the rule of the first measure. `javascript-fragment-target.ts`
+and `javascript-target.ts` count the lines of the pilot commits
+(`4c4f1c163`, `7939b5fac`) and of the first change of step 5 (`5e496c6ad`);
+after this change, also the uncommitted lines (`REV=worktree`), which
+include lines of the existing route that the change moved
+(`numericSnapshot()`).
+
+| Part | Base `5e496c6ad` | After the second change |
+| --- | ---: | ---: |
+| `structured-ir.ts` (core) | 127 | 143 |
+| `structured-verify.ts` (core) | 371 | 423 |
+| `javascript-structured-policy.ts` | 36 | 37 |
+| `javascript-structured-lower.ts` | 571 | 629 |
+| `javascript-structured-emit.ts` | 289 | 297 |
+| `javascript-fragment-target.ts`, lines of the commits above | 521 | 859 |
+| `javascript-target.ts`, lines of the commits above | 88 | 88 |
+| **Total** | **2,003** | **2,476** |
+
+The core is 498 lines before and 566 after; the JavaScript files 1,505 and
+1,910. After the six review fixes: `structured-verify.ts` 417,
+`javascript-fragment-target.ts` 863, total 2,474.
+
+The handlers of the existing emitter for the operators now covered are 942
+lines: the 907 of the first measure, and 35 for `Sqrt`. The `Sqrt` handler
+(`JAVASCRIPT_FUNCTIONS.Sqrt`) is 23 lines, `complexSqrtLiteral()` 4 lines and
+`promotesToComplexLane()` 8 lines (it also serves `Ln`, `Log` and `Power`).
+`isComplexValued()`, `assumedRealNonNegative()` and the capture reads of the
+existing compiler are not counted, as in the first measure.
+
+### The decision rules of step 4, applied again
+
+**1. "A wrong value, a wrong shape or a hidden use of the existing emitter:
+correct it, or stop."** Does not hold. No value differs on the 52 programs
+(825 inputs). The differential tests of step 5 against the interpreter pass
+in both modes. The facts of `Sqrt` equal `isComplexValued()` on 30 programs
+in both modes, except two programs that decline. The test that makes the
+readers of the existing compiler throw from preparation to emission passes
+on the new programs in both modes.
+
+**2a. "A reproducible cost above 10% in total compilation, against the
+ordinary target with the same options."** Does not hold. Warm D/B is 0.35
+to 0.70 per fixture, and 0.68 on the corpus totals. Each median is below the
+calibration range of its fixture; one range touches it (`fold`, D/B up
+to 0.78, A2/A from 0.78). Cold D/B is 0.49 to 0.82 per fixture. D is faster
+on each new fixture too.
+
+**2b. "A reproducible cost above 5% in warm execution."** Not resolved, and
+no such cost was seen. Through `run()`, every D/B and D/A median is 0.93 to
+1.03; on the body, 0.93 to 1.01; each lies inside its calibration range.
+This includes `sqrt-repeat`, where A computes the repeated root once.
+
+**3. "A difference smaller than the variability of the harness: time is then
+not a reason for either choice. The two line counts decide."** For
+execution, this rule applies:
+
+- **"The pilot is smaller than the handlers it would replace."** Does not
+  hold. The pilot is 2,476 lines; the handlers that it covers are 942.
+- **"It removed a class of defect that has a `corpus` or `plausible`
+  witness."** Does not hold. The structured route admits programs that the
+  existing route refuses (several captured bindings, a captured binding in
+  the root, helpers that call helpers, `Sqrt` in a bound body, `Sqrt`
+  inside another compilation), but the existing route refuses these; it
+  does not give a wrong value for them.
+
+The decision to expand (approved 2026-11-10) was made for the compile-time
+result and the objectives of the representation, not for these two rules,
+and nothing in this run changes the facts it was based on.
+
+**4. "Stop means: the structured emitter and its representation are
+deleted; the annotation and the rule of step 1 stay."** Unchanged.
+
+### What is resolved and what is not
+
+Resolved: the compile time of D on the new operations (helpers, captures,
+`Sqrt`, merges) keeps the ratio of the earlier fixtures; the emitted bytes
+of the new fixtures (D/B 0.79 to 1.23).
+
+Not resolved: the execution cost of emitting without common subexpressions
+for a costly repeated operation (see above); execution differences below
+about 5% through `run()` and about 2% on the body; a second run of this
+code; the 546-program corpus.
