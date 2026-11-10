@@ -537,9 +537,11 @@ export type FragmentDefinition<R> = {
    *  declaration with no type (the form of a `let`, `Declare(t, {value:
    *  …})`); `inferred`: the type that the engine infers for the local in
    *  its block, from its value and from every value written to it;
-   *  `name`: the name of the local. Absent: the rule of the pass. */
+   *  `name`: the name of the local; `declaration`: the `Declare`
+   *  statement. Absent: the rule of the pass. */
   localType?(local: {
     name: string;
+    declaration?: Expression;
     value: FragmentValueType | FragmentListType;
     declared: string | undefined;
     inferred: Type | undefined;
@@ -2552,6 +2554,7 @@ function walkDeclare<R>(
     type =
       w.definition.localType?.({
         name: name.symbol,
+        declaration: statement,
         value: facts.type,
         declared:
           declared === undefined ? undefined : declaredTypeSource(declared),

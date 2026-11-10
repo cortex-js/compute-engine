@@ -662,6 +662,19 @@ change; and, by the first refusals of the census table, not measured again,
 `NotEqual` (`flips`), a guarded comprehension (`legal`), a `let` in a value
 position (`play`).
 
+**Othello helpers (2026-11-10).** `NotEqual` and a `let` with a type
+(`ad4310b67f25316cc68eafba9fe2a593a1e6b787`), then a helper whose body has
+statements: one admission (`admitFunctionBody()`) for the root and for a
+helper, each helper one function of the program, not inlined; the lowering
+and the core analyses did not change. A call of a helper declared
+`-> integer` counts as an integer (the engine types it `integer | list<any>`
+when an argument is a list), and the integer-only locals are kept per
+function body. `flips`, `hasmove`, `choosecell` and `channel` compile: 18 of
+35 prelude functions. Measured first refusals of the others that were tried:
+`play`, the condition `!available` is not typed `boolean`; `c` (buddhabrot),
+a block with statements as the value of an `If`; `legal` and `stones`, a
+comprehension with a guard; `score`, the call of `stones`.
+
 ### Step 8 — Add optimizations only with measured justification
 
 Once stable value/region/effect contracts exist, consider pure-operation CSE

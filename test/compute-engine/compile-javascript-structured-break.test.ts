@@ -647,9 +647,9 @@ function ray(B: list<integer>, k: integer, p: integer, dx: integer, dy: integer)
 `;
 
 /** Tycho's `flips`, `hasmove` and `choosecell` (showcase-othello.js),
- *  unreduced, with `ray`. The route declines them: `flips` calls `ray`,
- *  and `hasmove` and `choosecell` call `flips`, a user function whose body
- *  is a block of statements, and a helper body of the route is one value. */
+ *  unreduced, with `ray`: `flips` calls `ray`, and `hasmove` and
+ *  `choosecell` call `flips`, helpers whose bodies are blocks of
+ *  statements with loops and `Break`. */
 const OTHELLO_PRELUDE = `${RAY_PRELUDE}
 function flips(B: list<integer>, k: integer, p: integer) -> integer {
   let n = 0
@@ -735,6 +735,34 @@ const board = (entries: Record<number, number>): number[] =>
 /** The initial Othello board of the showcase. */
 const START = board({ 28: -1, 37: -1, 29: 1, 36: 1, 65: 1 });
 
+/** A board whose 64 cells are filled from a fixed sequence (a linear
+ *  congruential generator from `seed`): each cell is empty with the
+ *  probability `empty`, otherwise a disc of either player. */
+function seededBoard(seed: number, empty: number, player: number): number[] {
+  let state = seed;
+  const next = () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+  return Array.from({ length: 65 }, (_, i) => {
+    if (i === 64) return player;
+    const r = next();
+    return r < empty ? 0 : r < (1 + empty) / 2 ? 1 : -1;
+  });
+}
+
+/** The boards of the agreement tests of the unreduced Othello functions:
+ *  the start, a corner and an edge position, two filled boards, a full
+ *  board, and an empty one. */
+const OTHELLO_BOARDS: readonly number[][] = [
+  START,
+  board({ 1: 1, 2: -1, 9: -1, 10: -1, 65: 1 }),
+  seededBoard(7, 0.4, -1),
+  seededBoard(42, 0.6, 1),
+  seededBoard(3, 0, 1),
+  board({ 65: -1 }),
+];
+
 describe('the witnesses', () => {
   test('B: never, at the second pass, at a middle pass', () => {
     agreeEpsil(B_PRELUDE, 'B', [
@@ -806,16 +834,53 @@ describe('the witnesses', () => {
     }
   });
 
-  test('flips, hasmove and choosecell, unreduced: a call of a function whose body is a block declines', () => {
+  test('flips, hasmove, choosecell and ray, unreduced, compile on the profile, pure and shippable', () => {
     const ce = engineWith(OTHELLO_PRELUDE);
-    for (const name of ['flips', 'hasmove', 'choosecell'])
-      expect(() =>
-        compile(literal(ce, name), { profile: 'numeric-kernel', fallback: false } as never)
-      ).toThrow("Could not compile with the profile 'numeric-kernel': unsupported helper body Block");
-    // `ray` itself compiles.
-    expect(
-      compile(literal(ce, 'ray'), { profile: 'numeric-kernel', fallback: false } as never).success
-    ).toBe(true);
+    for (const name of ['ray', 'flips', 'hasmove', 'choosecell']) {
+      const result = compile(literal(ce, name), {
+        profile: 'numeric-kernel',
+        fallback: false,
+      } as never) as CompilationResult<'javascript'> & { pure?: boolean; shippable?: boolean };
+      expect([name, result.success, result.pure, result.shippable]).toEqual([name, true, true, true]);
+    }
+  });
+
+  test('flips, unreduced: every cell and player of the boards, against the existing emitter', () => {
+    const cases: Value[][] = [];
+    for (const B of OTHELLO_BOARDS)
+      for (let k = 0; k <= 65; k++) for (const p of [1, 0, -1]) cases.push([B, k, p]);
+    agreeEpsil(OTHELLO_PRELUDE, 'flips', cases, false);
+    // The interpreter, on a few cells.
+    agreeEpsil(OTHELLO_PRELUDE, 'flips', [
+      [START, 20, 1],
+      [START, 20, -1],
+      [START, 1, 1],
+      [START, 0, 1],
+      [START, 28, 1],
+      [OTHELLO_BOARDS[2], 41, -1],
+    ]);
+  });
+
+  test('hasmove, unreduced: the boards and both players, against the existing emitter and the interpreter', () => {
+    const cases: Value[][] = [];
+    for (const B of OTHELLO_BOARDS) for (const p of [1, -1, 0]) cases.push([B, p]);
+    agreeEpsil(OTHELLO_PRELUDE, 'hasmove', cases, false);
+    agreeEpsil(OTHELLO_PRELUDE, 'hasmove', [
+      [START, 1],
+      [board({ 1: 1, 2: -1 }), 1], // one move, at the second pass from the end
+      [board({}), 1], // no move
+    ]);
+  });
+
+  test('choosecell, unreduced: every rank of the boards, against the existing emitter and the interpreter', () => {
+    const cases: Value[][] = [];
+    for (const B of OTHELLO_BOARDS) for (let rank = 0; rank <= 6; rank++) cases.push([B, rank]);
+    agreeEpsil(OTHELLO_PRELUDE, 'choosecell', cases, false);
+    agreeEpsil(OTHELLO_PRELUDE, 'choosecell', [
+      [START, 1],
+      [START, 4],
+      [START, 5], // no fifth move
+    ]);
   });
 
   test('hasmove, reduced: first pass, middle pass, last pass, never', () => {

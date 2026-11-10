@@ -1284,6 +1284,7 @@ const LIST_OPERAND_HEADS = [
 function structuredLocalType(
   local: {
     name: string;
+    declaration?: Expression;
     value: { kind: string };
     declared: string | undefined;
     inferred: Type | undefined;
@@ -1345,9 +1346,17 @@ function structuredListLocalType(local: {
  * - a symbol that `isIntegerName` accepts: at the admission, a local each
  *   of whose values is such an integer or has the type `integer`; in the
  *   pass, a name whose fact is `integer`;
+ * - a call of a helper that `isIntegerCall` accepts: at the admission, a
+ *   helper whose declared result is `integer`; in the pass, a call whose
+ *   fact is `integer`. The engine types a call of a user function with a
+ *   list argument `integer | list<any>`, and the pass gives it the fact of
+ *   the value of the helper body, which the rule of `Typed` checks against
+ *   the declared result;
  * - `Add`, `Negate`, `Multiply` or `Mod` (the library operators) whose
- *   operands each have the type `integer` or are such an integer, one of
- *   them at least being such an integer.
+ *   operands each have the type `integer`, are such an integer, or are a
+ *   symbol that `isIntegerOperand` accepts (at the admission, a local with
+ *   no value so far that is not such an integer), one of them at least being
+ *   such an integer.
  *
  * Such a node is an integer, although the engine types it otherwise: the
  * engine types `Length(L)` of a list whose length is not declared as
@@ -1363,11 +1372,15 @@ function structuredListLocalType(local: {
  */
 function integerFromListLength(
   node: Expression,
-  isIntegerName: (symbol: Expression & { symbol: string }) => boolean
+  isIntegerName: (symbol: Expression & { symbol: string }) => boolean,
+  isIntegerCall: (call: Expression) => boolean = () => false,
+  isIntegerOperand: (symbol: Expression & { symbol: string }) => boolean = () =>
+    false
 ): boolean {
   if (isSymbol(node)) return isIntegerName(node);
-  if (!isFunction(node) || !isLibraryOperator(node, node.operator))
-    return false;
+  if (isFunction(node) && !isLibraryOperator(node, node.operator))
+    return isIntegerCall(node);
+  if (!isFunction(node)) return false;
   if (node.operator === 'Length')
     return (
       node.nops === 1 &&
@@ -1378,8 +1391,15 @@ function integerFromListLength(
     return false;
   let found = false;
   for (const operand of node.ops) {
-    if (integerFromListLength(operand, isIntegerName)) found = true;
-    else if (!isSubtype(operand.type.type, 'integer')) return false;
+    if (
+      integerFromListLength(operand, isIntegerName, isIntegerCall, isIntegerOperand)
+    )
+      found = true;
+    else if (
+      !isSubtype(operand.type.type, 'integer') &&
+      !(isSymbol(operand) && isIntegerOperand(operand))
+    )
+      return false;
   }
   return found;
 }
@@ -1399,12 +1419,11 @@ function withListLengthIntegers(
       if (!('representation' in facts) || facts.type.kind !== 'real')
         return facts;
       const operands = operandFacts(node, scope, context, w);
+      const isInteger = (n: Expression) =>
+        w.value(n, scope, context).type.kind === 'integer';
       if (
         !operands.every((f) => f.type.kind === 'integer') ||
-        !integerFromListLength(
-          node,
-          (s) => w.value(s, scope, context).type.kind === 'integer'
-        )
+        !integerFromListLength(node, isInteger, isInteger)
       )
         return facts;
       return w.valueFacts(
@@ -2969,16 +2988,169 @@ function attachBoundFunction(
     }
   }
   const body = fn.op1.canonical;
+  const named: NamedCalls = { calls: new Set(), structured: registry };
+  admitFunctionBody(
+    body,
+    inputs.map((input) => input.name),
+    target,
+    admission,
+    named
+  );
+  const boundDefinition: FragmentDefinition<ScalarRepresentation> = {
+    ...admission.definition,
+    rules: {
+      ...(admission.structured
+        ? admission.definition.rules
+        : { Add: addRule, Negate: negateRule, If: { walk: walkIf } }),
+      Block: { walk: walkBlock },
+      Assign: { walk: walkAssign },
+    },
+  };
+  const annotation = annotateCalls(body, boundDefinition, named, inputs, body);
+  checkLocalWrites(body, annotation.scope);
+  attachScalarFragment(target, {
+    root: body,
+    functionRoot: fn,
+    helper: named.helper,
+    annotation,
+  });
+  // The inputs of a root function are its parameters, in their order.
+  recordStructured(target, admission, {
+    root: body,
+    functionRoot: fn,
+    annotation,
+    named,
+    inputs: () =>
+      inputs.map((input) =>
+        structuredInput(input.name, input.type!, declaredTypes.get(input.name))
+      ),
+  });
+}
+
+/**
+ * Check that each write of a local of the function body `body`, typed in
+ * `scope` (the scope of the function), preserves the representation of the
+ * local: a statement of the block, of a branch of an `If` statement, or of
+ * the body of a `Loop`, which is typed in the scope of the loop. The root
+ * function and each helper of the structured route are checked so.
+ */
+function checkLocalWrites(
+  body: Expression,
+  functionScope: FragmentScope<ScalarRepresentation>
+): void {
+  if (!isFunction(body, 'Block')) return;
+  const scope = functionScope.inner.get(body);
+  if (!scope)
+    throw new Error('JS scalar fragment invariant: missing local binding');
+  const checkWrites = (
+    statement: Expression,
+    scope: FragmentScope<ScalarRepresentation>
+  ): void => {
+    if (!isFunction(statement)) return;
+    if (statement.operator === 'If') {
+      for (const branch of statement.ops.slice(1)) checkWrites(branch, scope);
+      return;
+    }
+    if (statement.operator === 'Loop') {
+      const inner = scope.inner.get(statement);
+      if (!inner)
+        throw new Error('JS scalar fragment invariant: missing loop scope');
+      checkWrites(statement.op1, inner);
+      return;
+    }
+    if (statement.operator === 'Block') {
+      const inner = scope.inner.get(statement);
+      if (!inner)
+        throw new Error('JS scalar fragment invariant: missing block scope');
+      for (const s of statement.ops) checkWrites(s, inner);
+      return;
+    }
+    // A `Break` writes no local.
+    if (statement.operator === 'Break') return;
+    if (!isSymbol(statement.op1)) return;
+    const name = statement.op1.symbol;
+    let binding: FragmentFacts<ScalarRepresentation> | undefined;
+    for (
+      let s: FragmentScope<ScalarRepresentation> | undefined = scope;
+      s && !binding;
+      s = s.parent
+    )
+      binding = s.bindings.get(name);
+    if (!binding || !('representation' in binding))
+      throw new Error('JS scalar fragment invariant: missing local binding');
+    const value =
+      statement.operator === 'Declare'
+        ? declareValueOperand(statement.ops)
+        : statement.op2;
+    const valueFacts =
+      value === undefined ? undefined : scope.facts.get(value);
+    if (
+      !valueFacts ||
+      !('representation' in valueFacts) ||
+      valueFacts.representation !== binding.representation
+    )
+      throw new Error(
+        'JS scalar fragment: local writes must preserve representation'
+      );
+  };
+  for (const statement of body.ops.slice(0, -1)) checkWrites(statement, scope);
+}
+
+/**
+ * The admission of the body `body` of a function whose parameters are
+ * `parameters`: the root `Function` of a compilation
+ * (`attachBoundFunction()`), or, on the structured route, a helper
+ * (`resolveHelper()`), which `helper` names with its declared result. The
+ * root and every helper of the structured route have one admission: the
+ * statements of `checkStructuredStatement()` and the values of
+ * `checkValueNode()`. The body of the root is a block; the body of a helper
+ * is a block (its statements, then its value) or one value.
+ *
+ * What differs for a helper: the collisions of the names of the helpers and
+ * the captured bindings with the names that the body binds are checked for
+ * the root only (the scope of a helper is a child of the root scope, so a
+ * captured name equal to a parameter of the root would read that
+ * parameter); `Typed` around the value of the body must ascribe the
+ * declared result of the helper; a library head that the route does not
+ * admit is refused, not resolved as a helper; and the refusals of a value
+ * name the helper body.
+ *
+ * Records the declarations of the length locals of the body in the
+ * registry (`StructuredRegistry.lengthDeclarations`).
+ */
+function admitFunctionBody(
+  body: Expression,
+  parameters: readonly string[],
+  target: CompileTarget<Expression>,
+  admission: Admission,
+  named: NamedCalls,
+  helper?: {
+    readonly name: string;
+    readonly result: NonNullable<ReturnType<typeof structuredParameterType>>;
+  }
+): void {
+  const registry = named.structured;
+  const isRoot = helper === undefined;
   // The structured route also admits a block of one value, the form of the
   // body of a function of one expression that `executeEpsil()` defines.
   if (
-    !isFunction(body, 'Block') ||
-    body.nops < (admission.structured ? 1 : 2) ||
-    !isLibraryOperator(body, 'Block')
+    isRoot &&
+    (!isFunction(body, 'Block') ||
+      body.nops < (admission.structured ? 1 : 2) ||
+      !isLibraryOperator(body, 'Block'))
   )
     throw new Error(
       'JS scalar fragment: a bound body requires one straight-line block'
     );
+  /** The statements of the body and its value. */
+  const block =
+    isFunction(body, 'Block') &&
+    isLibraryOperator(body, 'Block') &&
+    body.nops >= 1
+      ? body
+      : undefined;
+  const statements = block?.ops.slice(0, -1) ?? [];
+  const bodyValue = block?.ops[block.nops - 1] ?? body;
   // The declared type of each local, by its name: `let` for a local of the
   // form `Declare(t, {value: …})`, which has the type of its value.
   const locals = new Map<string, string>();
@@ -3018,7 +3190,7 @@ function attachBoundFunction(
       !['real', 'integer', 'complex', 'boolean', 'let']
         .concat(admission.structured ? ['list<real>', 'list<integer>'] : [])
         .includes(declared) ||
-      inputs.some((input) => input.name === local) ||
+      parameters.includes(local) ||
       locals.has(local) ||
       names.has(local) ||
       local === 'True' ||
@@ -3034,20 +3206,22 @@ function attachBoundFunction(
           : declaration.op3,
     };
   };
-  const names = new Set(inputs.map((input) => input.name));
+  const names = new Set(parameters);
   // The existing route requires one first declaration. The structured route
   // checks every statement of the block (`checkStructuredStatement()`) and
   // admits more than one local: every declaration of the block, of a nested
   // block, of a branch and of a loop body, the index of each loop and of
   // each comprehension.
-  const first = admission.structured ? undefined : declareLocal(body.op1);
+  const first =
+    admission.structured || block === undefined
+      ? undefined
+      : declareLocal(block.op1);
   const local = first?.local ?? '';
   const bindings = new Set([
     ...names,
     ...(first ? [first.local] : []),
     ...(admission.structured ? boundNames(body) : []),
   ]);
-  const named: NamedCalls = { calls: new Set(), structured: registry };
   // The heads that are not helper calls. The existing route also keeps
   // `Sqrt` here, so that it reaches the refusal below and not the helper
   // resolution.
@@ -3057,6 +3231,7 @@ function attachBoundFunction(
   /** Refuse a helper or a captured binding whose name is a parameter or a
    *  local of the root function. */
   const checkCollisions = (): void => {
+    if (!isRoot) return;
     const collides = registry
       ? [
           ...registry.helpers.keys(),
@@ -3079,10 +3254,25 @@ function attachBoundFunction(
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     if (!node.isValid || node.type.type === 'error')
-      throw new Error('JS scalar fragment: invalid bound expression');
+      throw new Error(
+        `JS scalar fragment: invalid ${isRoot ? 'bound expression' : 'helper body'}`
+      );
     if (isNumber(node)) return;
     if (admission.structured && isFunction(node)) {
       const nested = structuredValueParts(node, bodyValue);
+      // The value of the body of a helper `f(…) -> T` is `Typed(value, T)`:
+      // `T` must be the declared result of the helper.
+      if (nested !== undefined && helper && node.operator === 'Typed') {
+        const ascribed = structuredParameterType(node.type.type, helper.name);
+        if (
+          ascribed === undefined ||
+          fragmentTypeToString(ascribed) !== fragmentTypeToString(helper.result)
+        )
+          throw new Error(
+            `JS scalar fragment: the body of the helper ${helper.name} has the ` +
+              `ascribed type ${node.type.toString()}, which is not its declared result type`
+          );
+      }
       if (nested !== undefined) {
         for (const operand of nested.outer) checkValue(operand);
         if (nested.index !== undefined) {
@@ -3114,9 +3304,17 @@ function attachBoundFunction(
         return;
       // The structured route reads a captured binding as its snapshot.
       if (registry && recordCapture(registry, node)) return checkCollisions();
-      throw new Error(`JS scalar fragment: unsupported capture ${node.symbol}`);
+      throw new Error(
+        `JS scalar fragment: unsupported ${isRoot ? '' : 'helper '}capture ${node.symbol}`
+      );
     }
-    if (isFunction(node) && !operatorHeads.has(node.operator)) {
+    // In the body of a helper, a library head that the route does not admit
+    // reaches the refusal below.
+    if (
+      isFunction(node) &&
+      !operatorHeads.has(node.operator) &&
+      (isRoot || !isLibraryOperator(node, node.operator))
+    ) {
       collectHelper(node, target, named, admission);
       checkCollisions();
       for (const operand of node.ops) checkValue(operand);
@@ -3134,7 +3332,7 @@ function attachBoundFunction(
       (node.operator === 'If' && node.nops !== 3)
     )
       throw new Error(
-        `JS scalar fragment: unsupported bound head ${node.operator}`
+        `JS scalar fragment: unsupported ${isRoot ? 'bound head' : 'helper body'} ${node.operator}`
       );
     checkCondition(node);
     for (const operand of admittedOperands(node)) checkValue(operand);
@@ -3149,11 +3347,32 @@ function attachBoundFunction(
   // is a length local: `isLengthLocal()`.
   const lengthWritten = new Set<string>();
   const notLength = new Set<string>();
+  /** The `Declare` statements of the body, with their locals. */
+  const declarations: { node: Expression; name: string }[] = [];
   const isLengthLocal = (name: string): boolean =>
     lengthWritten.has(name) && !notLength.has(name);
+  // A call of a helper whose declared result is `integer`, and a `let` or
+  // `integer` local that no value so far makes another number, are integers
+  // too: the rules of the pass check each of them again with the facts.
   const fromLength = (value: Expression): boolean =>
     admission.structured &&
-    integerFromListLength(value, (symbol) => isLengthLocal(symbol.symbol));
+    integerFromListLength(
+      value,
+      (symbol) => isLengthLocal(symbol.symbol),
+      (call) =>
+        isFunction(call) &&
+        registry?.helpers.has(call.operator) === true &&
+        isSubtype(
+          userFunctionSignature(call.engine, call.operator)?.result ??
+            'unknown',
+          'integer'
+        ),
+      (symbol) =>
+        (locals.get(symbol.symbol) === 'let' ||
+          locals.get(symbol.symbol) === 'integer') &&
+        names.has(symbol.symbol) &&
+        !notLength.has(symbol.symbol)
+    );
   const checkWrite = (value: Expression, name = local): void => {
     const length = fromLength(value);
     const declaredType = locals.get(name);
@@ -3245,6 +3464,7 @@ function attachBoundFunction(
       : statement.toString();
     if (isFunction(statement, 'Declare') && inBlock) {
       const declared = declareLocal(statement);
+      declarations.push({ node: statement, name: declared.local });
       locals.set(declared.local, declared.declared);
       checkValue(declared.value);
       checkWrite(declared.value, declared.local);
@@ -3268,7 +3488,7 @@ function attachBoundFunction(
         throw new Error(
           `JS scalar fragment: only writes to a declared local are supported, ` +
             `and ${name} is ` +
-            (inputs.some((input) => input.name === name)
+            (parameters.includes(name)
               ? 'a parameter'
               : 'not a local declared before the write')
         );
@@ -3392,9 +3612,9 @@ function attachBoundFunction(
       );
   };
   if (admission.structured)
-    for (const statement of body.ops.slice(0, -1))
+    for (const statement of statements)
       checkStructuredStatement(statement, 'top', true);
-  for (const statement of admission.structured ? [] : body.ops.slice(1, -1)) {
+  for (const statement of admission.structured ? [] : statements.slice(1)) {
     if (
       !isFunction(statement, 'Assign') ||
       !isLibraryOperator(statement, 'Assign') ||
@@ -3408,109 +3628,13 @@ function attachBoundFunction(
     checkValue(statement.op2);
     checkWrite(statement.op2);
   }
-  checkValue(body.ops[body.nops - 1], true);
-  const boundDefinition: FragmentDefinition<ScalarRepresentation> = {
-    ...admission.definition,
-    rules: {
-      ...(admission.structured
-        ? admission.definition.rules
-        : { Add: addRule, Negate: negateRule, If: { walk: walkIf } }),
-      Block: { walk: walkBlock },
-      Assign: { walk: walkAssign },
-    },
-    ...(admission.structured
-      ? {
-          localType: (l: Parameters<typeof structuredLocalType>[0]) =>
-            structuredLocalType(l, isLengthLocal),
-        }
-      : {}),
-  };
-  const annotation = (() => {
-    const annotation = annotateCalls(
-      body,
-      boundDefinition,
-      named,
-      inputs,
-      body
-    );
-    const scope = annotation.scope.inner.get(body);
-    if (!scope)
-      throw new Error('JS scalar fragment invariant: missing local binding');
-    // Each write of a local, in the scope where the pass typed it: a
-    // statement of the block, of a branch of an `If` statement, or of the
-    // body of a `Loop`, which is typed in the scope of the loop.
-    const checkWrites = (
-      statement: Expression,
-      scope: FragmentScope<ScalarRepresentation>
-    ): void => {
-      if (!isFunction(statement)) return;
-      if (statement.operator === 'If') {
-        for (const branch of statement.ops.slice(1)) checkWrites(branch, scope);
-        return;
-      }
-      if (statement.operator === 'Loop') {
-        const inner = scope.inner.get(statement);
-        if (!inner)
-          throw new Error('JS scalar fragment invariant: missing loop scope');
-        checkWrites(statement.op1, inner);
-        return;
-      }
-      if (statement.operator === 'Block') {
-        const inner = scope.inner.get(statement);
-        if (!inner)
-          throw new Error('JS scalar fragment invariant: missing block scope');
-        for (const s of statement.ops) checkWrites(s, inner);
-        return;
-      }
-      // A `Break` writes no local.
-      if (statement.operator === 'Break') return;
-      if (!isSymbol(statement.op1)) return;
-      const name = statement.op1.symbol;
-      let binding: FragmentFacts<ScalarRepresentation> | undefined;
-      for (
-        let s: FragmentScope<ScalarRepresentation> | undefined = scope;
-        s && !binding;
-        s = s.parent
-      )
-        binding = s.bindings.get(name);
-      if (!binding || !('representation' in binding))
-        throw new Error('JS scalar fragment invariant: missing local binding');
-      const value =
-        statement.operator === 'Declare'
-          ? declareValueOperand(statement.ops)
-          : statement.op2;
-      const valueFacts =
-        value === undefined ? undefined : scope.facts.get(value);
-      if (
-        !valueFacts ||
-        !('representation' in valueFacts) ||
-        valueFacts.representation !== binding.representation
-      )
-        throw new Error(
-          'JS scalar fragment: local writes must preserve representation'
-        );
-    };
-    for (const statement of body.ops.slice(0, -1))
-      checkWrites(statement, scope);
-    return annotation;
-  })();
-  attachScalarFragment(target, {
-    root: body,
-    functionRoot: fn,
-    helper: named.helper,
-    annotation,
-  });
-  // The inputs of a root function are its parameters, in their order.
-  recordStructured(target, admission, {
-    root: body,
-    functionRoot: fn,
-    annotation,
-    named,
-    inputs: () =>
-      inputs.map((input) =>
-        structuredInput(input.name, input.type!, declaredTypes.get(input.name))
-      ),
-  });
+  checkValue(bodyValue, true);
+  // The length locals of this body, by their declarations: the pass reads
+  // them (`annotateStructured()`), and a local of the same name in another
+  // body is another local.
+  if (registry)
+    for (const { node, name } of declarations)
+      if (isLengthLocal(name)) registry.lengthDeclarations.add(node);
 }
 
 /** The names that `statement` binds: the local of each `Declare` and the
@@ -3609,6 +3733,14 @@ type StructuredRegistry = {
   /** The form that the rule of each `Power` and `Abs` node chose
    *  (`StructuredForm`), for the lowering. */
   readonly forms: Map<Expression, StructuredForm>;
+  /** The `Declare` statements, of the root and of each helper, of the
+   *  length locals of their body (`admitFunctionBody()`, `isLengthLocal()`):
+   *  each value written to the local in its body is computed from a length
+   *  or has the type `integer`. The pass types such a `let` local as an
+   *  integer (`structuredLocalType()`), and the rule of `Assign` checks
+   *  the fact of each write again. A local whose declaration is not here is
+   *  not a length local. */
+  readonly lengthDeclarations: Set<Expression>;
 };
 
 /** The calls of helpers of a compilation. `helper` is the one helper of
@@ -3638,6 +3770,7 @@ function structuredRegistry(
     captures: new Map(),
     resolving: [],
     forms: new Map(),
+    lengthDeclarations: new Set(),
   };
 }
 
@@ -3882,17 +4015,28 @@ function annotateStructured(
       if (entry.symbols.has(node)) return entry;
     return undefined;
   };
+  const { lengthDeclarations } = registry;
   const definition: FragmentDefinition<ScalarRepresentation> = {
     ...base,
+    // A helper body, as the body of the root function, has locals and
+    // writes (`admitFunctionBody()`).
     rules: {
       ...base.rules,
       Block: { walk: walkBlock },
+      Assign: { walk: walkAssign },
       ...Object.fromEntries(
         Object.entries(
           modeRules(registry.mode, snapshotReader(registry), registry.forms)
         ).map(([head, rule]) => [head, withoutListOperands(head, rule)])
       ),
     },
+    localType: (local) =>
+      structuredLocalType(
+        local,
+        () =>
+          local.declaration !== undefined &&
+          lengthDeclarations.has(local.declaration)
+      ),
     storedValue: (node: Expression) => {
       const capture = captureOf(node);
       if (capture === undefined) return undefined;
@@ -3946,6 +4090,7 @@ function annotateStructured(
       throw new Error(
         'JS scalar fragment: helper return representation differs from its signature'
       );
+    checkLocalWrites(helper.body, entry.scope);
   }
   // The facts of each call, in each scope that typed it.
   const scopes: FragmentScope<ScalarRepresentation>[] = [];
@@ -4009,10 +4154,12 @@ function refuseClosedComplex(scope: FragmentScope<ScalarRepresentation>) {
 
 /**
  * Resolve the helper that `call` calls and check its body. On the
- * structured route (`named.structured`), the body can call another helper
+ * structured route (`named.structured`), the body has the admission of the
+ * body of the root function (`admitFunctionBody()`): locals, writes, `If`
+ * statements, loops and `Break`, or one value; it can call another helper
  * (`collectStructuredHelper()`), and each read of a captured binding is
- * recorded in the registry; the existing route admits one captured binding
- * per helper and no call.
+ * recorded in the registry. The existing route admits a body of one value,
+ * one captured binding per helper and no call.
  */
 function resolveHelper(
   call: Expression,
@@ -4108,8 +4255,7 @@ function resolveHelper(
   const body = literal.op1.canonical;
   let capture: ScalarFragmentCapture | undefined;
   const captureSymbols = new Set<Expression>();
-  /** The indexes of the comprehensions around the node being checked. */
-  const indexes = new Set<string>();
+  /** The check of the body on the existing route. */
   const check = (node: Expression, root = false): void =>
     atNode(node, () => checkNode(node, root));
   const checkNode = (node: Expression, root: boolean): void => {
@@ -4118,54 +4264,13 @@ function resolveHelper(
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid helper body');
     if (isNumber(node)) return;
-    // On the structured route: `Typed` around the value of the body, with
-    // the declared result type; a block of one value; a comprehension
-    // (`structuredValueParts()`).
-    const parts = registry ? structuredValueParts(node, root) : undefined;
-    if (parts !== undefined && isFunction(node)) {
-      if (node.operator === 'Typed') {
-        const ascribed = structuredParameterType(node.type.type, call.operator);
-        if (
-          ascribed === undefined ||
-          result === undefined ||
-          fragmentTypeToString(ascribed) !== fragmentTypeToString(result)
-        )
-          throw new Error(
-            `JS scalar fragment: the body of the helper ${call.operator} has the ` +
-              `ascribed type ${node.type.toString()}, which is not its declared result type`
-          );
-      }
-      for (const operand of parts.outer)
-        check(operand, root && node.operator === 'Block');
-      if (parts.index !== undefined) {
-        if (parameters.includes(parts.index) || indexes.has(parts.index))
-          throw new Error(
-            `JS scalar fragment: the comprehension index ${parts.index} has the name of a parameter or another index`
-          );
-        indexes.add(parts.index);
-      }
-      try {
-        for (const operand of parts.inner) check(operand);
-      } finally {
-        if (parts.index !== undefined) indexes.delete(parts.index);
-      }
-      return;
-    }
     if (isSymbol(node)) {
       if (
         parameters.includes(node.symbol) ||
-        indexes.has(node.symbol) ||
         node.symbol === 'True' ||
         node.symbol === 'False'
       )
         return;
-      if (registry) {
-        if (!recordCapture(registry, node))
-          throw new Error(
-            `JS scalar fragment: unsupported helper capture ${node.symbol}`
-          );
-        return;
-      }
       const snapshot = numericSnapshot(node);
       if (snapshot === undefined)
         throw new Error(
@@ -4187,30 +4292,11 @@ function resolveHelper(
       };
       return;
     }
-    // A call of another helper, on the structured route. A library head
-    // that the route does not admit reaches the refusal below.
-    if (
-      named !== undefined &&
-      registry !== undefined &&
-      isFunction(node) &&
-      !admission.heads.has(node.operator) &&
-      !isLibraryOperator(node, node.operator)
-    ) {
-      collectStructuredHelper(node, target, named, admission);
-      for (const operand of node.ops) check(operand);
-      return;
-    }
-    // A `Loop` is a statement of the body of a root `Function`, not of a
-    // helper body.
     if (
       !isFunction(node) ||
       node.operator === 'Loop' ||
       !isAdmittedOperator(node, admission) ||
       !(
-        (admission.structured &&
-          node.operator !== 'Negate' &&
-          node.operator !== 'If' &&
-          admission.heads.has(node.operator)) ||
         node.operator === 'Add' ||
         (node.operator === 'Negate' && node.nops === 1) ||
         (node.operator === 'If' && node.nops === 3) ||
@@ -4223,7 +4309,14 @@ function resolveHelper(
     checkCondition(node);
     for (const operand of admittedOperands(node)) check(operand);
   };
-  check(body, true);
+  // The structured route: the admission of a function body, the one of the
+  // root function (`admitFunctionBody()`).
+  if (registry !== undefined && named !== undefined)
+    admitFunctionBody(body, parameters, target, admission, named, {
+      name: call.operator,
+      result,
+    });
+  else check(body, true);
   return {
     name: call.operator,
     literal,

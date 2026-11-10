@@ -132,6 +132,65 @@ function nonzero(L: list<integer>) -> integer {
 }
 `;
 
+/** Tycho's `ray`, `flips`, `hasmove` and `choosecell` of the Othello
+ *  showcase, copied from `~/dev/tycho/src/graph-paper/onboarding/showcase-othello.js`
+ *  (`OTHELLO_ENTRY.prelude`), as in compile-javascript-structured-break.test.ts:
+ *  helpers whose bodies are blocks of statements, with loops and `Break`. */
+const OTHELLO_PRELUDE = `
+function ray(B: list<integer>, k: integer, p: integer, dx: integer, dy: integer) -> integer {
+  let col = k - 1 - 8 * floor((k - 1) / 8) + dx
+  let row = floor((k - 1) / 8) + dy
+  let n = 0
+  let found = 0
+  for j in 1..7 {
+    if col < 0 || col > 7 || row < 0 || row > 7 { break }
+    let v = B[1 + col + 8 * row]
+    if v == -p {
+      n = n + 1
+    } else {
+      if v == p { found = n }
+      break
+    }
+    col = col + dx
+    row = row + dy
+  }
+  found
+}
+function flips(B: list<integer>, k: integer, p: integer) -> integer {
+  let n = 0
+  if k >= 1 && k <= 64 && p != 0 {
+    if B[k] == 0 {
+      for dx in -1..1 {
+        for dy in -1..1 {
+          if dx != 0 || dy != 0 { n = n + ray(B, k, p, dx, dy) }
+        }
+      }
+    }
+  }
+  n
+}
+function hasmove(B: list<integer>, p: integer) -> boolean {
+  let found = false
+  for k in 1..64 {
+    let count: integer = flips(B, k, p)
+    if count > 0 { found = true; break }
+  }
+  found
+}
+function choosecell(B: list<integer>, rank: integer) -> integer {
+  let n = 0
+  let cell = 0
+  for k in 1..64 {
+    let count: integer = flips(B, k, B[65])
+    if count > 0 {
+      n = n + 1
+      if n == rank { cell = k; break }
+    }
+  }
+  cell
+}
+`;
+
 /** An engine with machine numbers that has executed `source`. */
 function engineWith(source: string): ComputeEngine {
   const ce = new ComputeEngine();
@@ -374,6 +433,7 @@ const PRELUDES: [string, string, string[]][] = [
     ['roadseed', 'roadstart', 'roadstep', 'roadtrail'],
   ],
   ['other', OTHER_PRELUDE, ['jitter', 'firstover', 'pair', 'tone', 'nonzero']],
+  ['othello', OTHELLO_PRELUDE, ['ray', 'flips', 'hasmove', 'choosecell']],
 ];
 
 /** What `compile()` gives with `fallback: false`: the result, or the
@@ -978,6 +1038,30 @@ describe('shippable, backed by a run in a worker', () => {
     expect(values.map((v) => [...(v as number[])])).toEqual(
       inputs.map((args) => [...run(...args)])
     );
+  }, 60_000);
+
+  test('choosecell, which calls helpers with statement bodies: the stored code runs in a worker', async () => {
+    const othello = engineWith(OTHELLO_PRELUDE);
+    const result = compile(literal(othello, 'choosecell'), {
+      ...PROFILE,
+      fallback: false,
+    });
+    expect([result.pure, result.shippable]).toEqual([true, true]);
+    const calls = callPool(pool);
+    if (calls === undefined) throw new Error('not a usable pool');
+    const start = Array.from({ length: 65 }, (_, i) =>
+      i === 27 || i === 36 ? -1 : i === 28 || i === 35 || i === 64 ? 1 : 0
+    );
+    const inputs = [1, 2, 3, 4, 5].map((rank) => [start, rank]);
+    const run = result.run as unknown as (...args: unknown[]) => number;
+    const values = await Promise.all(
+      inputs.map((args) =>
+        calls.runCall(result as unknown as StoredResult, args, undefined, undefined)
+      )
+    );
+    expect(values).toEqual(inputs.map((args) => run(...args)));
+    // The four legal moves of the start position, then no fifth one.
+    expect(values).toEqual([20, 27, 38, 45, 0]);
   }, 60_000);
 });
 
