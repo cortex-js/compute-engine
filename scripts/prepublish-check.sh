@@ -132,9 +132,9 @@ if [ "${1:-}" != "--after-pack" ]; then
   # found in a minute or two and not after the test run.
   release_check
   [ "$STATUS" -eq 0 ] || [ "$STATUS" -eq 3 ] || refuse_status "$STATUS"
-  if [ "$STATUS" -eq 3 ]; then
-    echo "· Full test suite: no passing run at HEAD yet; it runs after the build."
-  fi
+#  if [ "$STATUS" -eq 3 ]; then
+#    echo "· Full test suite: no passing run at HEAD yet; it runs after the build."
+#  fi
   # The checks of `npm run ci` that the full suite does not run (lint,
   # documentation references, circular imports, script tests, corpus). They
   # first format the source with Prettier and commit the files that changed,
