@@ -641,6 +641,17 @@ their own lowering. Never infer consumer eligibility solely from profile success
 and wrong values are separately reported, and rollback is simple. Broader
 corpus coverage is useful here. Public docs and examples must track the API.
 
+**Result of step 7, first part (2026-11-10).** The
+[profile spec](2026-11-10-js-numeric-kernel-profile-spec.md) is implemented:
+`compile()` and `canCompile()` take `profile: 'numeric-kernel'` for
+`to: 'javascript'`; a program outside the profile declines with the code
+`outside-profile`; the result reports `profile`, `pure` and `shippable`. The
+option is experimental and documented in `CHANGELOG.md`,
+`docs/COMPILATION-MODEL.md` and the compile guide. No consumer has moved:
+`Map`, integration, the solvers and Tycho use the existing compiler. Of the
+35 functions of Tycho's prelude showcases, 12 compile under the profile (the
+census above lists what blocks the others: `Break` first, then tuples).
+
 ### Step 8 — Add optimizations only with measured justification
 
 Once stable value/region/effect contracts exist, consider pure-operation CSE
