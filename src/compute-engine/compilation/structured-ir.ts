@@ -1,6 +1,6 @@
 /**
  * The structured representation of a program of scalars and lists that it
- * reads: its values, regions, operations and effect facts. The representation names no target: a
+ * reads and makes: its values, regions, operations and effect facts. The representation names no target: a
  * target gives each value a representation (a string that the target
  * chooses, such as `number` on JavaScript or `float` on GLSL), and the
  * verifier (`structured-verify.ts`) checks the representations against the
@@ -108,11 +108,12 @@ export type IRInputRead = OperationBase & {
  *  interpreter gives it (`Mod(-7, 3)` is `2`, `Mod(7, -3)` is `-2`,
  *  `Mod(-7.5, 2)` is `0.5`), and a zero divisor gives not a number.
  *  `floor` has an integer result. `divide` has a real result, also for
- *  integer operands. */
+ *  integer operands. `not` is the negation of one boolean operand. */
 export type IRArithmetic = OperationBase & {
   readonly kind:
     | 'add'
     | 'negate'
+    | 'not'
     | 'multiply'
     | 'less'
     | 'less-equal'
@@ -141,6 +142,42 @@ export type IRArithmetic = OperationBase & {
  */
 export type IRListRead = OperationBase & {
   readonly kind: 'at' | 'length';
+};
+
+/**
+ * A list that the program makes. Both are `pure` when their regions are: a
+ * list is a value, and the result is a new list value.
+ *
+ * - `build`: the operands are `from` and `to`, two integers evaluated once,
+ *   before the first element. The body region has one parameter, the
+ *   index, and yields one element, a real or an integer. The body is
+ *   evaluated once per integer from `from` to `to`, both included, in
+ *   steps of 1, or of -1 when `to` is less than `from`, as the interpreter
+ *   iterates `Range(from, to)`: a range always has at least one element
+ *   (`Range(1, 0)` has the elements 1 and 0). The result is the list of the
+ *   elements in that order; it is a list of integers only when the body
+ *   yields an integer. A `build` does not count passes of the iteration
+ *   budget: the interpreter and the existing compiler count the passes of
+ *   a `Loop`, not the elements of a `Comprehension`
+ *   (`docs/COMPILATION-MODEL.md`, "Not covered" of the iteration budget).
+ * - `replace-at`: the operands are a list, an integer index and an element.
+ *   The result is a new list, equal to the list but for the element at the
+ *   index, counted from 1; a negative index counts from the end. An index
+ *   out of range (0, beyond the length) has no value: the interpreter keeps
+ *   the expression unevaluated, and compiled code throws
+ *   (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). The result
+ *   is a list of integers only when the list and the element are integers.
+ *   The operand list is not changed. An emitter can write the result into
+ *   the array of the operand when no later code reads that array
+ *   (`inPlaceUpdates()` in `structured-in-place.ts`).
+ */
+export type IRBuild = OperationBase & {
+  readonly kind: 'build';
+  readonly body: IRRegion;
+};
+
+export type IRReplaceAt = OperationBase & {
+  readonly kind: 'replace-at';
 };
 
 /**
@@ -288,6 +325,8 @@ export type IROperation =
   | IRCaptureRead
   | IRArithmetic
   | IRListRead
+  | IRBuild
+  | IRReplaceAt
   | IRConvert
   | IRIf
   | IRLoop
@@ -298,7 +337,8 @@ export type IROperation =
 
 export type IRRegion = {
   /** The values that the region defines at its entry, before its first
-   *  operation: the parameters of the body of a `loop`. Each is visible in
+   *  operation: the parameters of the body of a `loop`, and the index of
+   *  the body of a `build`. Each is visible in
    *  the region and in the regions nested in it. The body of a function
    *  has none: the parameters of a function are `IRFunction.parameters`,
    *  which the verifier defines at the entry of its body in the same way. */
@@ -347,8 +387,9 @@ export type IRFunction = {
    *  helper declares (`IRInput.elementLabel`); `undefined` for another
    *  parameter. */
   readonly parameterElementLabels?: readonly (string | undefined)[];
+  /** A scalar, or a list: the body of a helper can make a list. */
   readonly result: {
-    readonly type: ScalarKind;
+    readonly type: ValueType;
     readonly representation: Representation;
   };
   readonly body: IRRegion;
@@ -421,7 +462,7 @@ export function operationCanAbort(
 /** The regions that `op` evaluates. */
 export function regionsOf(op: IROperation): readonly IRRegion[] {
   if (op.kind === 'if') return [op.then, op.else];
-  if (op.kind === 'loop') return [op.body];
+  if (op.kind === 'loop' || op.kind === 'build') return [op.body];
   if (op.kind === 'and' || op.kind === 'or') return op.rest;
   return [];
 }

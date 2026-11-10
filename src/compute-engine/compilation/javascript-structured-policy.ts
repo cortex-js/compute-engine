@@ -6,7 +6,8 @@
  * A real and an integer are a JavaScript number (`number`), a boolean is a
  * JavaScript boolean (`boolean`), and a complex number is an `{re, im}`
  * object (`complex`). A list of reals or of integers is a JavaScript array
- * of numbers (`array`), as the existing emitter holds a list input. The
+ * of numbers (`array`), as the existing emitter holds a list input and the
+ * list that a comprehension makes. The
  * target holds no list of booleans or of complex numbers: no program of the
  * structured route needs one yet. The one conversion is `real-to-complex`.
  */
@@ -67,6 +68,15 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // existing emitter writes them for a list input or parameter.
     'at': { results: ['number'], operands: ['array', 'number'] },
     'length': { results: ['number'], operands: ['array'] },
+    // `!x`, as the existing emitter writes `Not`.
+    'not': { results: ['boolean'], operands: ['boolean'] },
+    // A new array of numbers, filled in the order of the index. The
+    // operands are the two bounds.
+    'build': { results: ['array'], operands: ['number'] },
+    // `_SYS.replaceAt(list, index, value)`, or `_SYS.replaceAtInPlace` when
+    // the emitter updates the array in place, as the existing emitter
+    // writes them.
+    'replace-at': { results: ['array'], operands: ['array', 'number'] },
     // The test heads take real operands and have a real value.
     'trace': { results: ['number'], operands: ['number'] },
   },

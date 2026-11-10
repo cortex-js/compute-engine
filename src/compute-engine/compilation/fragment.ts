@@ -564,6 +564,12 @@ export type FragmentDefinition<R> = {
     argument: FragmentListType,
     parameter: FragmentListType
   ): boolean;
+  /** Whether a local can hold a list: a `Declare` whose value is a list,
+   *  and an `Assign` of a list to such a local. A list of the type
+   *  `argument` is then read as a list of the type `parameter` when
+   *  `passesListArgument()` accepts the pair, also for the two branches of
+   *  an `If`. Absent: a local is a scalar, a complex number or a point. */
+  readonly listLocals?: boolean;
 };
 
 //
@@ -1058,6 +1064,16 @@ function makeWalker<R>(
         : { kind: 'to-float', type, representation: target };
     if (isScalarNumeric(from) && type.kind === 'complex')
       return { kind: 'real-to-complex', type, representation: target };
+    // A list that the target holds as a list of another type, with no
+    // conversion (`passesListArgument`), where a local can hold a list.
+    if (
+      definition.listLocals === true &&
+      from.kind === 'list' &&
+      type.kind === 'list' &&
+      facts.representation === target &&
+      definition.passesListArgument?.(from, type) === true
+    )
+      return { kind: 'none', type, representation: target };
     return undefined;
   };
 
@@ -1104,6 +1120,16 @@ function makeWalker<R>(
       (b.kind === 'complex' && isScalarNumeric(a))
     )
       return { kind: 'complex' };
+    // Two lists, one of which the target reads as the other
+    // (`FragmentDefinition.listLocals`).
+    if (
+      definition.listLocals === true &&
+      a.kind === 'list' &&
+      b.kind === 'list'
+    ) {
+      if (definition.passesListArgument?.(a, b) === true) return b;
+      if (definition.passesListArgument?.(b, a) === true) return a;
+    }
     return undefined;
   };
 
@@ -2531,7 +2557,7 @@ function walkDeclare<R>(
           declared === undefined ? undefined : declaredTypeSource(declared),
         inferred: inferred?.(name.symbol),
       }) ?? type;
-    if (type.kind === 'list')
+    if (type.kind === 'list' && w.definition.listLocals !== true)
       return void w.refuse(
         statement,
         'signature',
@@ -2539,7 +2565,7 @@ function walkDeclare<R>(
           `${w.definition.name} fragment has scalar, complex or point locals`,
         name.symbol
       );
-    if (w.convert(facts, type as FragmentValueType) === undefined)
+    if (w.convert(facts, type) === undefined)
       return void w.refuse(
         statement,
         'signature',
@@ -3365,7 +3391,7 @@ export function walkAssign<R>(
             representation: value.representation,
           } as FragmentValueFacts<R>);
     if (
-      local.kind === 'list' ||
+      (local.kind === 'list' && w.definition.listLocals !== true) ||
       local.kind === 'statement' ||
       local.kind === 'range' ||
       local.kind === 'function' ||

@@ -46,6 +46,9 @@ export type PolicyOperationKind =
   | 'divide'
   | 'at'
   | 'length'
+  | 'not'
+  | 'build'
+  | 'replace-at'
   | 'trace';
 
 /** The representations of the operands and of the result of an operation
@@ -122,7 +125,16 @@ export type RepresentationPolicy = {
  *
  * For a list: an `at` reads a list and an integer index and has the type of
  * an element; a `length` reads a list and has the type `integer`; both are
- * `pure`. No other operation that computes a value (an arithmetic
+ * `pure`. A `build` reads two integer bounds, its body has one integer
+ * parameter (the index) and yields a real or an integer element, and its
+ * result is a list whose elements hold that element (an integer element in
+ * a list of reals is accepted, a real element in a list of integers is
+ * not). A `replace-at` reads a list, an integer index and a real or
+ * integer element, is `pure`, and has a list result that holds the
+ * elements of the list and the element by the same rule. The result of a
+ * function, of an `if`, and a carried value of a loop can be a list; a
+ * list of integers is a valid list of reals there, as an integer is a valid
+ * real. No other operation that computes a value (an arithmetic
  * operation, a comparison, `and`, `or`, a conversion, a trace) has a list
  * operand or a list result: the interpreter applies such an operation to
  * each element of a list, and the representation has no such operation.
@@ -294,8 +306,14 @@ export function verifyProgram(
     owner?: IROperation
   ) => {
     verifyRegionShape(region, count, owner);
-    if (region.parameters !== undefined && owner?.kind !== 'loop')
-      fail('a region that is not the body of a loop has parameters');
+    if (
+      region.parameters !== undefined &&
+      owner?.kind !== 'loop' &&
+      owner?.kind !== 'build'
+    )
+      fail(
+        'a region that is not the body of a loop or of a build has parameters'
+      );
     const effects: EffectFact[] = [];
     region.operations.forEach((op, index) => {
       const frames = [...outer, { region, index }];
@@ -346,8 +364,10 @@ export function verifyProgram(
         `the result of ${fn.name} has the type ${fn.result.type} and the representation ${fn.result.representation}`
       );
     const value = yieldedValues(fn.body)[0];
+    // An integer is a valid real, and a list of integers a valid list of
+    // reals, as for an argument of a call.
     if (
-      value.type !== fn.result.type ||
+      !fitsType(value.type, fn.result.type) ||
       value.representation !== fn.result.representation
     )
       fail(
@@ -360,6 +380,27 @@ export function verifyProgram(
 const isEffect = (e: unknown): e is EffectFact =>
   e === 'pure' || e === 'effectful' || e === 'unknown';
 
+/** Whether a value of the type `type` is a valid value of the type
+ *  `wider`: the same type, an integer for a real, or a list of integers
+ *  for a list of reals (the elements of a list of integers are valid
+ *  reals). A real is not an integer. */
+function fitsType(type: ValueType, wider: ValueType): boolean {
+  return (
+    type === wider ||
+    (type === 'integer' && wider === 'real') ||
+    (type === 'list<integer>' && wider === 'list<real>')
+  );
+}
+
+/** The type of a value that is either a value of the type `a` or of the
+ *  type `b` (the result of an `if`), or `undefined` when no type holds
+ *  both. */
+function mergedType(a: ValueType, b: ValueType): ValueType | undefined {
+  if (fitsType(a, b)) return b;
+  if (fitsType(b, a)) return a;
+  return undefined;
+}
+
 /** The operations that compute a value from scalar operands. The
  *  interpreter applies each to the elements of a list operand; the
  *  representation has no such operation, so none has a list operand or a
@@ -370,6 +411,7 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'literal',
   'add',
   'negate',
+  'not',
   'multiply',
   'less',
   'less-equal',
@@ -438,9 +480,9 @@ function verifySignature(
         `the operation ${op.kind} has an integer result and an operand that is not an integer`
       );
   };
-  // A list is an operand only of `at`, `length`, a call, a loop (as a
-  // carried value) and a yield, and the result only of an input, a call, an
-  // `if` and a loop.
+  // A list is an operand only of `at`, `length`, `replace-at`, a call, a
+  // loop (as a carried value) and a yield, and the result only of an input,
+  // a call, an `if`, a loop, a `build` and a `replace-at`.
   if (
     ELEMENTWISE_KINDS.has(op.kind) &&
     (op.operands.some((operand) => elementOf(operand.type) !== undefined) ||
@@ -560,6 +602,85 @@ function verifySignature(
       operandsIn(operandRule('negate'));
       integerOnlyFromIntegers();
       return;
+    case 'not':
+      arity(1);
+      resultIn(policy.operations.not.results);
+      operandsIn(operandRule('not'));
+      if (op.operands[0].type !== 'boolean' || op.result.type !== 'boolean')
+        fail(
+          'the operation not has an operand or a result that is not a boolean'
+        );
+      return;
+    case 'build': {
+      // The bounds, the index and the element.
+      arity(2);
+      const integer = policy.representationOf('integer');
+      for (const bound of op.operands)
+        if (bound.type !== 'integer' || bound.representation !== integer)
+          fail(`a bound of a build has the type ${bound.type}`);
+      const parameters = op.body.parameters ?? [];
+      if (parameters.length !== 1)
+        fail(
+          `the body of a build has ${parameters.length} parameters, not one index`
+        );
+      if (
+        parameters[0].type !== 'integer' ||
+        parameters[0].representation !== integer
+      )
+        fail(`the index of a build has the type ${parameters[0].type}`);
+      const element = elementOf(op.result.type);
+      if (element === undefined)
+        return fail(
+          `a build has a result of the type ${op.result.type}, not a list`
+        );
+      const value = yieldedValues(op.body)[0];
+      // The element is a number; an integer element is a valid element of a
+      // list of reals, a real one is not an element of a list of integers.
+      if (
+        (value.type !== 'real' && value.type !== 'integer') ||
+        !fitsType(value.type, element)
+      )
+        fail(
+          `the body of a build yields a value of the type ${value.type}, and its result has the type ${op.result.type}`
+        );
+      resultIn(policy.operations.build.results);
+      // The effect of the body is checked with the region
+      // (`verifyRegion()`).
+      operandsIn(operandRule('build'));
+      return;
+    }
+    case 'replace-at': {
+      arity(3);
+      const [list, index, value] = op.operands;
+      const element = elementOf(list.type);
+      if (element === undefined)
+        return fail(
+          `the operation replace-at reads a value of the type ${list.type}, not a list`
+        );
+      if (index.type !== 'integer')
+        fail(
+          `the index of the operation replace-at has the type ${index.type}`
+        );
+      const resultElement = elementOf(op.result.type);
+      if (resultElement === undefined)
+        return fail(
+          `the operation replace-at has a result of the type ${op.result.type}, not a list`
+        );
+      // The result holds the elements of the list and the new element: an
+      // integer fits a list of reals, a real does not fit a list of integers.
+      if (
+        (value.type !== 'real' && value.type !== 'integer') ||
+        !fitsType(value.type, resultElement) ||
+        !fitsType(element, resultElement)
+      )
+        fail(
+          `the operation replace-at writes a ${value.type} element into a ${list.type} and has a result of the type ${op.result.type}`
+        );
+      resultIn(policy.operations['replace-at'].results);
+      operandsIn(operandRule('replace-at'));
+      if (op.effect !== 'pure') fail('the operation replace-at is not pure');
+      return;
+    }
     case 'less':
     case 'less-equal':
     case 'equal':
@@ -602,12 +723,9 @@ function verifySignature(
             'the result of an if has another representation than its regions'
           );
         // The result has the type of both branches, or is `real` for an
-        // integer branch and a real one.
-        const types = new Set([a.type, b.type]);
-        if (
-          !(types.size === 1 && result.type === a.type) &&
-          !(result.type === 'real' && types.has('real') && types.has('integer'))
-        )
+        // integer branch and a real one (a list of reals for a list of
+        // integers and a list of reals).
+        if (mergedType(a.type, b.type) !== result.type)
           fail(
             `the result of an if has the type ${result.type}, and its regions the types ${a.type} and ${b.type}`
           );
@@ -668,11 +786,7 @@ function verifySignature(
         // An integer argument is a valid real, and a list of integers a
         // valid list of reals (the representations are equal, checked
         // above); a real is not an integer.
-        if (
-          operand.type !== parameter.type &&
-          !(operand.type === 'integer' && parameter.type === 'real') &&
-          !(operand.type === 'list<integer>' && parameter.type === 'list<real>')
-        )
+        if (!fitsType(operand.type, parameter.type))
           fail(
             `the argument ${i + 1} of a call of ${fn.name} has the type ${operand.type}, and its parameter the type ${parameter.type}`
           );
@@ -744,10 +858,9 @@ function verifyLoop(
       fail(
         `the carried value ${i + 1} of a loop has a parameter of the type ${parameter.type} and a result of the type ${result.type}`
       );
-    // An integer is a valid real, as for the two values of an `if`.
-    const fits = (v: IRValue) =>
-      v.type === parameter.type ||
-      (v.type === 'integer' && parameter.type === 'real');
+    // An integer is a valid real, and a list of integers a valid list of
+    // reals, as for the two values of an `if`.
+    const fits = (v: IRValue) => fitsType(v.type, parameter.type);
     if (!fits(initial))
       fail(
         `the carried value ${i + 1} of a loop has an initial value of the type ${initial.type} and a parameter of the type ${parameter.type}`

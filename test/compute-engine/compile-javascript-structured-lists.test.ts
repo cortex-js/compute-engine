@@ -544,15 +544,28 @@ describe('refusals', () => {
     ['First', body([L], ['First', 'L']), /First is not in the structured route, which reads a list with At and Length/],
     ['Last', body([L], ['Last', 'L']), /Last is not in the structured route/],
     ['Rest', body([L], ['At', ['Rest', 'L'], 1]), /Rest makes a list, which the structured route does not have/],
-    ['Comprehension', body([L], ['At', ['Comprehension', 0, ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension makes a list/],
-    ['ReplaceAt', body([L], ['At', ['ReplaceAt', 'L', 1, 2], 1]), /ReplaceAt makes a list/],
+    // The structured route admits `Comprehension` over one range and
+    // `ReplaceAt` (compile-javascript-structured-heat.test.ts; design:
+    // docs/plans/2026-11-10-structured-ir-loops-and-lists.md); these forms
+    // stay out.
+    ['Comprehension over a list', body([L], ['At', ['Comprehension', 'x', ['Element', 'x', 'L']], 1]), /Comprehension over Element\(x, L\) is not in the structured route, which admits a comprehension over Element\(j, Range\(a, b\)\) only, and not over a list/],
+    ['Comprehension with a guard', body([L], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 3], ['Less', 'j', 2]]], 1]), /Comprehension with a guard is not in the structured route/],
+    ['Comprehension with two generators', body([L], ['At', ['Comprehension', ['Add', 'j', 'm'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'm', ['Range', 1, 3]]], 1]), /Comprehension with other than one generator is not in the structured route/],
+    ['Comprehension of lists (nested lists)', body([L], ['At', ['At', ['Comprehension', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 2]]], ['Element', 'm', ['Range', 1, 3]]], 1], 1]), /Comprehension whose body is a list \(a list of lists\) is not in the structured route/],
+    ['Comprehension of booleans', body([L], ['At', ['Comprehension', ['Less', 'j', 2], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `boolean` is not in the structured route/],
+    ['Comprehension of complex numbers', body([L], ['At', ['Comprehension', ['Add', 'j', 'ImaginaryUnit'], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `complex` is not in the structured route/],
+    ['Comprehension with a real bound', body([L, typed('x', 'real')], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 'x']]], 1]), /The bound `x` of `Comprehension` does not have an integer fact/],
+    ['ReplaceAt with a real index', body([L, typed('x', 'real')], ['At', ['ReplaceAt', 'L', 'x', 2], 1]), /ReplaceAt with an index of the type `real` is not in the structured route, which reads an index of the type integer/],
+    ['ReplaceAt with a complex value', body([L], ['At', ['ReplaceAt', 'L', 1, 'ImaginaryUnit'], 1]), /ReplaceAt with a value of the type `complex` is not in the structured route/],
+    ['ReplaceAt with a boolean value', body([L, typed('C', 'boolean')], ['At', ['ReplaceAt', 'L', 1, 'C'], 1]), /ReplaceAt with a value of the type `boolean` is not in the structured route/],
+    ['ReplaceAt of a number', body([L, I], ['At', ['ReplaceAt', 'i', 1, 2], 1]), /invalid bound expression/],
+    ['Typed that is not the value of the body', body([L, I], ['Add', ['Typed', 'i', "'integer'"], 1]), /Typed is in the structured route only around the value of a function body/],
+    ['Typed with another type than its value', fn([L, I], declare('t', 'real', 0), ['Typed', 't', "'integer'"]), /Typed with the ascribed type `integer` and a value of the type `real` is not in the structured route/],
     ['a list literal', body([L, I], ['At', ['List', 1, 2], 'i']), /a list literal is not in the structured route/],
     ['a tuple literal', body([L, I], ['At', ['Tuple', 1, 2], 'i']), /a tuple is not in the structured route/],
     ['arithmetic on a list', body([L, I], ['At', ['Add', 'L', 1], 'i']), /Add with the list operand L is not in the structured route, which reads a list only with At and Length/],
     ['a product of a list', body([L], ['Multiply', 'L', 2]), /Multiply with the list operand L is not in the structured route/],
     ['a comparison of lists', body([L, typed('M', 'list<real>')], ['If', ['Equal', 'L', 'M'], 1, 0]), /Equal with the list operand L is not in the structured route/],
-    ['an If whose value is a list', body([L, I, typed('C', 'boolean')], ['At', ['If', 'C', 'L', 'L'], 'i']), /an If whose value is a list is not in the structured route/],
-    ['a let local of a list', fn([L, I], letLocal('M', 'L'), ['At', 'M', 'i']), /The local `M` is a list/],
     ['Negate of a list', body([L], ['Negate', 'L']), /Negate with the list operand L is not in the structured route/],
     ['Sqrt of a list', body([L], ['Add', ['Sqrt', 'L'], 0]), /Sqrt with the list operand L is not in the structured route/],
     ['Min of a list and a number', body([L, typed('x', 'real')], ['Min', 'L', 'x']), /Min with the list operand L is not in the structured route/],
@@ -560,8 +573,7 @@ describe('refusals', () => {
     ['And with a list', body([L, typed('C', 'boolean')], ['And', 'C', 'L']), /And with the list operand L is not in the structured route/],
     ['Or with a list', body([L, typed('C', 'boolean')], ['Or', 'C', 'L']), /Or with the list operand L is not in the structured route/],
     ['Power of a list', body([L], ['Power', 'L', 2]), /Power with the list operand L is not in the structured route/],
-    ['a local declared list<real>', fn([L, I], declare('M', 'list<real>', 'L'), ['At', 'M', 'i']), /unsupported local declaration/],
-    ['a list as the value of the program', body([L], 'L'), /the value of the program is a list, which the structured route does not have/],
+    ['a local declared list<complex>', fn([L, I], declare('M', 'list<complex>', 'L'), ['At', 'M', 'i']), /unsupported local declaration/],
   ];
   test.each(refusals)('%s', (_name, json, reason) => {
     expect(() => structured().prepareStructured(engine().expr(json), OPTIONS)).toThrow(reason);
@@ -621,10 +633,11 @@ describe('refusals', () => {
     }
   );
 
-  test('the definition that executeEpsil() makes of heatneighbor is refused', () => {
+  test('the form of a definition that executeEpsil() makes is admitted', () => {
     // `executeEpsil()` from src/epsil/execute-epsil.ts makes the body of a
-    // function `Block(Typed(If(…), 'real'))`: the ascription is not in the
-    // helper admission of the structured route.
+    // function `Block(Typed(…, 'real'))`: the structured route admits the
+    // ascription around the value of the body, with the declared result
+    // type.
     const ce = new ComputeEngine();
     ce.declare('N', 'integer');
     ce.assign('N', 32);
@@ -639,8 +652,15 @@ describe('refusals', () => {
     ]);
     ce.declare('H', 'list<real>');
     ce.declare('c', 'integer');
-    expect(() => structured().prepareStructured(ce.expr(['neighbor', 'H', 'c']), OPTIONS)).toThrow(
-      /unsupported helper body Typed/
+    const result = structured().compile(ce.expr(['neighbor', 'H', 'c']), OPTIONS);
+    expect(run(result, { H: [1.5, 2.5], c: 2 })).toBe(2.5);
+    // An ascription that is not the declared result type is refused.
+    install(ce, 'neighbor2', '(list<real>, integer) -> real', ['Block', ['Typed', ['At', 'H', 'c'], "'integer'"]], [
+      typed('H', 'list<real>'),
+      typed('c', 'integer'),
+    ]);
+    expect(() => structured().prepareStructured(ce.expr(['neighbor2', 'H', 'c']), OPTIONS)).toThrow(
+      /the body of the helper neighbor2 has the ascribed type integer, which is not its declared result type/
     );
   });
 });

@@ -44,9 +44,12 @@
  * is a value of the body region.
  *
  * A list input or a list parameter of a helper is a value of a list type;
- * `At` and `Length` of it are the operations `at` and `length`. The
- * admission keeps a list out of every other place (a local, a carried
- * value, the value of an `If` or of the program, an arithmetic operand).
+ * `At` and `Length` of it are the operations `at` and `length`.
+ * `Comprehension` over a range is a `build`, `ReplaceAt` a `replace-at`. A
+ * list can be the value of a local, a carried value, the value of an `If`,
+ * of a helper and of the program; a list of integers and a list of reals
+ * merge to a list of reals, as an integer and a real merge to a real. The
+ * admission keeps a list out of every arithmetic operand.
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
@@ -184,6 +187,8 @@ const OPERATIONS: Readonly<
     | 'divide'
     | 'at'
     | 'length'
+    | 'not'
+    | 'replace-at'
   >
 > = {
   // The rule of `Sqrt` (`javascript-fragment-target.ts`) records the
@@ -204,6 +209,10 @@ const OPERATIONS: Readonly<
   // a list input or parameter and, for `At`, one integer index.
   At: 'at',
   Length: 'length',
+  Not: 'not',
+  // The rule of `ReplaceAt` admits a list, an integer index and a real or
+  // integer element.
+  ReplaceAt: 'replace-at',
 };
 
 function scalarKind(type: { readonly kind: string }): ScalarKind {
@@ -432,6 +441,15 @@ class Lowering {
     const effect = this.effect(node);
     const operator = node.operator;
 
+    // `Typed(value, T)` around the value of a function body: the rule of
+    // `Typed` admits a value whose fact is `T`, or an integer (a list of
+    // integers) for a real (a list of reals), which is a valid value of the
+    // result of the function as it is.
+    if (operator === 'Typed') return this.value(node.ops[0], scope, operations);
+
+    if (operator === 'Comprehension')
+      return this.build(node, facts, scope, operations, effect);
+
     if (operator === 'If') {
       if (node.nops !== 3) fail('an If needs a condition and two branches');
       const [condition, a, b] = node.ops;
@@ -562,6 +580,60 @@ class Lowering {
     const operands = this.operands(node, facts, scope, operations);
     const result = this.resultOf(facts);
     operations.push({ kind, result, operands, effect, origin: node });
+    return result;
+  }
+
+  /**
+   * `Comprehension(body, Element(j, Range(a, b)))`, which the rule of
+   * `Comprehension` checked: a `build` whose bounds are the values of `a`
+   * and `b`, evaluated here, before it, and whose body region has the index
+   * `j` as its parameter and yields the value of `body`. The index is bound
+   * in the scope of the comprehension.
+   */
+  private build(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const [body, spec] = node.ops;
+    const inner = scope.inner.get(node);
+    if (
+      inner === undefined ||
+      node.ops.length !== 2 ||
+      !isFunction(spec, 'Element') ||
+      spec.nops !== 2 ||
+      !isSymbol(spec.op1) ||
+      !isFunction(spec.op2, 'Range') ||
+      spec.op2.nops !== 2
+    )
+      return fail(`no lowering for the comprehension ${node.toString()}`);
+    const bound = (b: Expression) => {
+      const value = this.value(b, scope, operations);
+      if (value.type !== 'integer')
+        fail(`the bound ${b.toString()} of a comprehension is not an integer`);
+      return value;
+    };
+    const from = bound(spec.op2.op1);
+    const to = bound(spec.op2.op2);
+    const index = this.newValue('integer', 'number');
+    this.bound.set(inner, new Map([[spec.op1.symbol, index]]));
+    const bodyOperations: IROperation[] = [];
+    const element = this.value(body, inner, bodyOperations);
+    const region: IRRegion = {
+      ...this.region(bodyOperations, body, element),
+      parameters: [index],
+    };
+    const result = this.resultOf(facts);
+    operations.push({
+      kind: 'build',
+      result,
+      operands: [from, to],
+      body: region,
+      effect: joinEffects(effect, region.effect),
+      origin: node,
+    });
     return result;
   }
 
@@ -900,17 +972,14 @@ class Lowering {
         else merged.push({ locals: target, name, then, else: otherwise });
       }
     // The merged value has the type of both branches, or is `real` for an
-    // integer and a real value.
+    // integer and a real value (a list of reals for a list of integers and
+    // a list of reals).
     const results = merged.map((m) => {
-      const types = new Set([m.then.type, m.else.type]);
       const type =
-        types.size === 1
-          ? m.then.type
-          : types.has('integer') && types.has('real') && types.size === 2
-            ? 'real'
-            : fail(
-                `the local ${m.name} has the type ${m.then.type} in one branch and ${m.else.type} in the other`
-              );
+        widerType(m.then.type, m.else.type) ??
+        fail(
+          `the local ${m.name} has the type ${m.then.type} in one branch and ${m.else.type} in the other`
+        );
       return this.newValue(type, m.then.representation as ScalarRepresentation);
     });
     merged.forEach((m, i) => m.locals.set(m.name, results[i]));
@@ -1044,16 +1113,12 @@ class Lowering {
       });
       // A real next value of an integer parameter: lower the body again
       // with a real parameter. A parameter that is real is never changed.
-      const widened = next.map((v, i) =>
-        v.type === types[i]
-          ? types[i]
-          : v.type === 'real' && types[i] === 'integer'
-            ? 'real'
-            : v.type === 'integer' && types[i] === 'real'
-              ? 'real'
-              : fail(
-                  `the carried local ${carried[i].name} has the type ${types[i]} before the loop and ${v.type} in its body`
-                )
+      const widened = next.map(
+        (v, i) =>
+          widerType(types[i], v.type) ??
+          fail(
+            `the carried local ${carried[i].name} has the type ${types[i]} before the loop and ${v.type} in its body`
+          )
       );
       if (widened.some((t, i) => t !== types[i])) {
         if (pass >= carried.length)
@@ -1153,7 +1218,7 @@ class Lowering {
     const value = this.value(entry.body, entry.scope, operations);
     this.lowering.delete(name);
     const result = {
-      type: scalarKind(entry.type.result),
+      type: valueType(entry.type.result),
       representation: facts.representation,
     };
     if (value.representation !== result.representation)
@@ -1174,6 +1239,17 @@ class Lowering {
     this.functionIndex.set(name, this.functions.length - 1);
     return this.functions.length - 1;
   }
+}
+
+/** The type that holds a value of the type `a` and a value of the type
+ *  `b`: the type of both, `real` for an integer and a real, a list of reals
+ *  for a list of integers and a list of reals; otherwise `undefined`. */
+function widerType(a: ValueType, b: ValueType): ValueType | undefined {
+  if (a === b) return a;
+  const pair = new Set([a, b]);
+  if (pair.has('integer') && pair.has('real')) return 'real';
+  if (pair.has('list<integer>') && pair.has('list<real>')) return 'list<real>';
+  return undefined;
 }
 
 /** Every node that has facts in `scope` or in a scope nested in it, and

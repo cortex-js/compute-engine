@@ -773,10 +773,11 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
       );
     },
   },
-  Add: withListLengthIntegers(addRule),
-  Negate: withListLengthIntegers(negateRule),
-  If: { walk: (node, scope, context, w) => ifRule(node, scope, context, w) },
-  Multiply: withListLengthIntegers(multiplyRule),
+  Add: withRealFromRealOperands(withListLengthIntegers(addRule)),
+  Negate: withRealFromRealOperands(withListLengthIntegers(negateRule)),
+  // The rule of the pass: the value of an `If` can be a list.
+  If: { walk: walkIf },
+  Multiply: withRealFromRealOperands(withListLengthIntegers(multiplyRule)),
   Less: comparisonRule('Less'),
   LessEqual: comparisonRule('LessEqual'),
   Equal: comparisonRule('Equal'),
@@ -787,13 +788,38 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Loop: loopRule,
   And: logicalRule('And'),
   Or: logicalRule('Or'),
-  Min: extremumRule('Min'),
-  Max: extremumRule('Max'),
+  Min: withRealFromRealOperands(extremumRule('Min')),
+  Max: withRealFromRealOperands(extremumRule('Max')),
   At: { walk: (node, scope, context, w) => atRule(node, scope, context, w) },
   Length: {
     walk: (node, scope, context, w) => lengthRule(node, scope, context, w),
   },
+  Comprehension: {
+    walk: (node, scope, context, w) =>
+      comprehensionRule(node, scope, context, w),
+  },
+  ReplaceAt: {
+    walk: (node, scope, context, w) => replaceAtRule(node, scope, context, w),
+  },
+  Not: {
+    walk: (node, scope, context, w) => notRule.walk(node, scope, context, w),
+  },
+  Typed: {
+    walk: (node, scope, context, w) => typedRule(node, scope, context, w),
+  },
 };
+
+/** The heads whose rule reads a list operand itself; every other rule of
+ *  the structured route refuses one (`withoutListOperands()`). */
+const LIST_OPERAND_HEADS = [
+  'If',
+  'Loop',
+  'At',
+  'Length',
+  'Comprehension',
+  'ReplaceAt',
+  'Typed',
+];
 
 /**
  * The type of a local on the structured route (`FragmentDefinition.localType`):
@@ -822,7 +848,8 @@ function structuredLocalType(
     inferred: Type | undefined;
   },
   isLengthLocal: (name: string) => boolean = () => false
-): { kind: 'integer' } | undefined {
+): { kind: 'integer' } | FragmentListType | undefined {
+  if (local.value.kind === 'list') return structuredListLocalType(local);
   if (local.value.kind !== 'integer') return undefined;
   if (local.declared === 'integer') return { kind: 'integer' };
   if (local.declared === undefined && isLengthLocal(local.name))
@@ -835,6 +862,37 @@ function structuredLocalType(
   )
     return { kind: 'integer' };
   return undefined;
+}
+
+/**
+ * The type of a local whose value is a list, on the structured route, by
+ * the rule of a scalar local (`structuredLocalType()`): a local declared
+ * `list<real>` or `list<integer>` has that type (a list of reals written to
+ * a `list<integer>` local is then refused); a `let` local is a list of
+ * integers when its value is one and the engine infers a subtype of
+ * `list<integer>` from every value written to it, and otherwise a list of
+ * reals (`let L = [0 for j in 1..n]` and later `L = replaceAt(L, k, x)`
+ * with `x: real`). `undefined`: the type of the value.
+ */
+function structuredListLocalType(local: {
+  value: { kind: string };
+  declared: string | undefined;
+  inferred: Type | undefined;
+}): FragmentListType | undefined {
+  if (local.declared === 'list<real>')
+    return { kind: 'list', element: { kind: 'real' } };
+  if (local.declared === 'list<integer>')
+    return { kind: 'list', element: { kind: 'integer' } };
+  const value = local.value as FragmentListType;
+  if (local.declared !== undefined || value.element.kind !== 'integer')
+    return undefined;
+  if (
+    local.inferred !== undefined &&
+    local.inferred !== 'unknown' &&
+    isSubtype(local.inferred, 'list<integer>')
+  )
+    return undefined;
+  return { kind: 'list', element: { kind: 'real' } };
 }
 
 /**
@@ -917,15 +975,49 @@ function withListLengthIntegers(
   };
 }
 
+/**
+ * The rule `rule` of `Add`, `Negate`, `Multiply`, `Min` or `Max`, with a
+ * real fact where it gives an integer fact and an operand has a fact that
+ * is not an integer. The signatures read the engine type of the node, which
+ * can be `integer` where the fact of an operand is `real`: the engine
+ * infers `list<integer>` for `let M = g(L)` with `L` a list of integers,
+ * where the fact of `M` is the declared result `list<real>` of `g`, so
+ * `M[1]` has a real fact and an integer engine type. A sum of an integer and
+ * a real is not an integer.
+ */
+function withRealFromRealOperands(
+  rule: FragmentRule<ScalarRepresentation>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const facts =
+        'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      if (!('representation' in facts) || facts.type.kind !== 'integer')
+        return facts;
+      const operands = operandFacts(node, scope, context, w);
+      if (operands.every((f) => f.type.kind === 'integer')) return facts;
+      return w.valueFacts(
+        node,
+        { kind: 'real' },
+        operands.map((f) => w.convert(f, { kind: 'real' })!)
+      );
+    },
+  };
+}
+
 //
 // Lists on the structured route
 //
 // A list input of the program and a list parameter of a helper are read
 // with `At` and `Length`, and passed whole to a helper parameter of the same
-// list type. A list is not a local, a carried value, the value of an `If` or
-// of the program, nor an operand of any other operator: the representation
-// binding refuses a list local, `ifRule()` and `annotateStructured()` refuse
-// a list value, and `withoutListOperands()` refuses a list operand.
+// list type. `Comprehension` over a range makes a list and `ReplaceAt` a new
+// list from a list. A list can be the value of a local (`listLocals`), a
+// carried value, the value of an `If`, of a helper and of the program. It is
+// not an operand of any other operator: `withoutListOperands()` refuses a
+// list operand. A list of integers is read as a list of reals where a list of
+// reals is expected (`passesListArgument`): both are one array of numbers.
 //
 
 /**
@@ -1004,9 +1096,8 @@ function structuredRepresentation(type: {
 
 /** The definition of the structured route: the existing definition, with a
  *  list input (a free symbol of a list type), and a list held as an
- *  `array` where it is an input or a parameter. A list local, a list index
- *  and every other list binding have no representation, and the refusal
- *  says why (`bindingLimit`). */
+ *  `array` where it is an input, a parameter or a local. A list index has
+ *  no representation, and the refusal says why (`bindingLimit`). */
 const structuredDefinition: Pick<
   FragmentDefinition<ScalarRepresentation>,
   | 'typeOfSymbol'
@@ -1015,6 +1106,7 @@ const structuredDefinition: Pick<
   | 'bindingLimit'
   | 'loopBoundFromFact'
   | 'passesListArgument'
+  | 'listLocals'
 > = {
   typeOfSymbol(node) {
     const scalar = definition.typeOfSymbol(node);
@@ -1022,12 +1114,13 @@ const structuredDefinition: Pick<
     const list = structuredListType(node.type.type);
     return list === undefined || 'refusal' in list ? undefined : list;
   },
+  // A list is held as an `array` where it is an input, a parameter or a
+  // local; an index is an integer.
   representationOfBinding: (type, binding) =>
-    type.kind === 'list' &&
-    binding.role !== 'input' &&
-    binding.role !== 'parameter'
+    type.kind === 'list' && binding.role === 'index'
       ? undefined
       : structuredRepresentation(type),
+  listLocals: true,
   representationOfValue: structuredRepresentation,
   // A bound computed from the length of a list with integer arithmetic,
   // whose fact is an integer (`integerFromListLength()`, with the names of
@@ -1043,7 +1136,7 @@ const structuredDefinition: Pick<
     type.kind === 'list'
       ? `The ${binding.role} \`${isSymbol(binding.symbol) ? binding.symbol.symbol : binding.symbol.toString()}\` ` +
         `has the type \`${fragmentTypeToString(type)}\`: the structured route admits a list ` +
-        `only as an input or a parameter, read by At and Length, and not as a ${binding.role}`
+        `only as an input, a parameter or a local, and not as a ${binding.role}`
       : undefined,
 };
 
@@ -1135,23 +1228,274 @@ function lengthRule(
   return w.valueFacts(node, { kind: 'integer' }, [w.convert(base, base.type)!]);
 }
 
-/** `If` on the structured route: the rule of the pass (`walkIf()`), and a
- *  value that is not a list. An `If` whose branches are lists is a list
- *  that the program makes, which the structured route does not have. */
-function ifRule(
+/**
+ * The parts of `Comprehension(body, Element(j, Range(a, b)))`, or
+ * `undefined` for another form. `Element` and `Range` are the operators of
+ * the library.
+ */
+function comprehensionParts(
+  node: Expression
+):
+  | { body: Expression; index: string; from: Expression; to: Expression }
+  | undefined {
+  if (!isFunction(node, 'Comprehension') || node.nops !== 2) return undefined;
+  const spec = node.op2;
+  if (
+    !isFunction(spec, 'Element') ||
+    !isLibraryOperator(spec, 'Element') ||
+    spec.nops !== 2 ||
+    !isSymbol(spec.op1) ||
+    !isFunction(spec.op2, 'Range') ||
+    !isLibraryOperator(spec.op2, 'Range') ||
+    spec.op2.nops !== 2
+  )
+    return undefined;
+  return {
+    body: node.op1,
+    index: spec.op1.symbol,
+    from: spec.op2.op1,
+    to: spec.op2.op2,
+  };
+}
+
+/**
+ * The message of the refusal of a `Comprehension` that is not of the form
+ * of the structured route (`comprehensionParts()`), or `undefined`.
+ */
+function comprehensionRefusal(node: Expression): string | undefined {
+  if (
+    !isFunction(node, 'Comprehension') ||
+    comprehensionParts(node) !== undefined
+  )
+    return undefined;
+  if (node.nops !== 2)
+    return 'Comprehension with other than one generator is not in the structured route, which admits Comprehension(body, Element(j, Range(a, b)))';
+  const spec = node.op2;
+  if (isFunction(spec, 'Element') && spec.nops === 3)
+    return 'Comprehension with a guard is not in the structured route, which admits Comprehension(body, Element(j, Range(a, b)))';
+  return (
+    `Comprehension over ${spec.toString()} is not in the structured route, ` +
+    `which admits a comprehension over Element(j, Range(a, b)) only, and not over a list`
+  );
+}
+
+/**
+ * `Comprehension(body, Element(j, Range(a, b)))` on the structured route:
+ * the list of the values of `body` for `j` from `a` to `b`, in steps of 1,
+ * or of -1 when `b` is less than `a`, as the interpreter iterates
+ * `Range(a, b)` (`Range(1, 0)` has the two elements 1 and 0). The bounds
+ * have integer facts (an integer capture, `Power(N, 2)` of one, an integer
+ * computed from the length of a list); the index is an integer in the
+ * scope of the comprehension; the body has a real or an integer fact. The
+ * result is a list of integers when the body is an integer, otherwise a
+ * list of reals; both are a JavaScript array of numbers, as the existing
+ * emitter makes it. Refused: a bound with a real fact, a body that is a
+ * list (a list of lists), a complex or a boolean body. The admission
+ * refuses another form before this rule (`comprehensionRefusal()`).
+ */
+function comprehensionRule(
   node: Expression,
   scope: FragmentScope<ScalarRepresentation>,
   context: FragmentContext<ScalarRepresentation>,
   w: FragmentWalker<ScalarRepresentation>
 ): FragmentFacts<ScalarRepresentation> {
-  const facts = walkIf(node, scope, context, w);
-  if (facts.type.kind === 'list')
+  const parts = comprehensionParts(node);
+  if (parts === undefined || !isFunction(node))
     return w.refuse(
       node,
       'signature',
-      'an If whose value is a list is not in the structured route'
+      comprehensionRefusal(node) ??
+        'Comprehension is not of the form of the structured route'
     );
-  return facts;
+  for (const bound of [parts.from, parts.to])
+    if (w.value(bound, scope, context).type.kind !== 'integer')
+      return w.refuse(
+        node,
+        'signature',
+        `The bound \`${bound.toString()}\` of \`Comprehension\` does not have an ` +
+          `integer fact: the structured route reads a bound as an integer`
+      );
+  const inner = w.open(node, scope);
+  const spec = node.op2 as Expression & { op1: Expression };
+  w.bind(spec.op1, inner, parts.index, { kind: 'integer' }, 'index');
+  const body = w.value(parts.body, inner, { ...context, loop: undefined });
+  const kind = body.type.kind;
+  if (kind !== 'real' && kind !== 'integer')
+    return w.refuse(
+      node,
+      'signature',
+      kind === 'list'
+        ? 'Comprehension whose body is a list (a list of lists) is not in the structured route'
+        : `Comprehension whose body has the type \`${fragmentTypeToString(body.type)}\` is ` +
+            `not in the structured route, which makes a list of reals or of integers`
+    );
+  return w.valueFacts(node, { kind: 'list', element: { kind } });
+}
+
+/**
+ * The operands that the admission of the structured route checks for a
+ * value `node` that holds other values, or `undefined` for every other
+ * node: `outer`, checked where `node` is; `inner`, checked with the name
+ * `index` bound.
+ *
+ * - `Typed(value, T)`: `value`. It is admitted only as the value of a
+ *   function body (`bodyValue`), where `executeEpsil()` writes it; anywhere
+ *   else it throws.
+ * - `Block(value)`, a block of one value (`executeEpsil()` writes each
+ *   branch of an `If` so): `value`.
+ * - `Comprehension(body, Element(j, Range(a, b)))`: `a` and `b`, then
+ *   `body` with `j` bound. `refuseListHead()` refused another form.
+ *
+ * Each head is the operator of the library: a user function of one of
+ * these names is a helper call.
+ */
+function structuredValueParts(
+  node: Expression,
+  bodyValue: boolean
+):
+  | {
+      outer: readonly Expression[];
+      inner: readonly Expression[];
+      index?: string;
+    }
+  | undefined {
+  if (!isFunction(node) || !isLibraryOperator(node, node.operator))
+    return undefined;
+  if (node.operator === 'Typed') {
+    if (!bodyValue)
+      throw new Error(
+        'JS scalar fragment: Typed is in the structured route only around the value of a function body'
+      );
+    return { outer: [node.ops[0]], inner: [] };
+  }
+  if (node.operator === 'Block' && node.nops === 1)
+    return { outer: [node.op1], inner: [] };
+  const parts = comprehensionParts(node);
+  if (parts !== undefined)
+    return {
+      outer: [parts.from, parts.to],
+      inner: [parts.body],
+      index: parts.index,
+    };
+  return undefined;
+}
+
+/**
+ * `ReplaceAt(L, k, v)` on the structured route: a new list, equal to `L`
+ * but for the element at the index `k`, counted from 1 (a negative index
+ * counts from the end), which is `v`. `L` is a list of reals or of
+ * integers, `k` has an integer fact and `v` a real or an integer one. The
+ * result is a list of integers when `L` and `v` are integers, otherwise a
+ * list of reals. The lowering writes it as the existing emitter does, with
+ * `_SYS.replaceAt` (a copy) or `_SYS.replaceAtInPlace`: an index out of
+ * range (0, beyond the length) throws a `RangeError` there, where the
+ * interpreter keeps the expression unevaluated (`docs/COMPILATION-MODEL.md`,
+ * "Caveats of compiled code"). Refused: an index with a real fact (the
+ * interpreter refuses a non-integer index; round it with `Floor`), an
+ * element that is complex, boolean or a list, a list of another type.
+ */
+function replaceAtRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  if (!isFunction(node) || node.nops !== 3)
+    return w.refuse(
+      node,
+      'signature',
+      'ReplaceAt with other than a list, one index and a value is not in the structured route'
+    );
+  const [list, index, value] = operandFacts(node, scope, context, w);
+  if (list.type.kind !== 'list' || list.representation !== 'array')
+    return w.refuse(
+      node,
+      'signature',
+      `ReplaceAt in the structured route writes into a list of reals or ` +
+        `integers, and its first operand has the type \`${fragmentTypeToString(list.type)}\``
+    );
+  if (index.type.kind !== 'integer')
+    return w.refuse(
+      node,
+      'signature',
+      `ReplaceAt with an index of the type \`${fragmentTypeToString(index.type)}\` is ` +
+        `not in the structured route, which reads an index of the type integer`
+    );
+  const kind = value.type.kind;
+  if (kind !== 'real' && kind !== 'integer')
+    return w.refuse(
+      node,
+      'signature',
+      `ReplaceAt with a value of the type \`${fragmentTypeToString(value.type)}\` is ` +
+        `not in the structured route, which writes a real or an integer`
+    );
+  const element =
+    list.type.element.kind === 'integer' && kind === 'integer'
+      ? 'integer'
+      : 'real';
+  return w.valueFacts(node, { kind: 'list', element: { kind: element } }, [
+    w.convert(list, list.type)!,
+    w.convert(index, index.type)!,
+    w.convert(value, value.type)!,
+  ]);
+}
+
+/** `Not`: one boolean operand, a boolean result, written `!x` as the
+ *  existing emitter writes it. */
+const notRule = {
+  walk: (node, scope, context, w) => {
+    if (!isFunction(node) || node.nops !== 1)
+      return w.refuse(
+        node,
+        'signature',
+        'Not with other than one operand is not in the structured route'
+      );
+    return w.signatures(node, scope, context, [
+      { operands: ['boolean'], result: 'boolean' },
+    ]);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
+
+/**
+ * `Typed(value, T)` on the structured route, which the admission admits
+ * only around the value of a function body (`executeEpsil()` writes the
+ * body of a function `f(…) -> T` as `Block(Typed(value, T))`): the fact of
+ * `T`, when the fact of `value` is `T`, or an integer where `T` is `real`,
+ * or a list of integers where `T` is a list of reals (the same number, the
+ * same array). Any other pair is refused.
+ */
+function typedRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  if (!isFunction(node) || node.nops !== 2)
+    return w.refuse(
+      node,
+      'signature',
+      'Typed is in the structured route only as Typed(value, T)'
+    );
+  const value = w.value(node.op1, scope, context);
+  const ascribed = node.type.type;
+  const type = scalarType(ascribed) ?? structuredListType(ascribed);
+  const conversion =
+    type === undefined || 'refusal' in type
+      ? undefined
+      : w.convert(value, type);
+  if (
+    type === undefined ||
+    'refusal' in type ||
+    conversion === undefined ||
+    conversion.kind !== 'none'
+  )
+    return w.refuse(
+      node,
+      'signature',
+      `Typed with the ascribed type \`${typeToString(ascribed)}\` and a value of ` +
+        `the type \`${fragmentTypeToString(value.type)}\` is not in the structured route`
+    );
+  return w.valueFacts(node, type, [conversion]);
 }
 
 /**
@@ -1159,8 +1503,7 @@ function ifRule(
  * interpreter applies an arithmetic operator or a function of a number to
  * each element of a list (`L + 1` is a list), and compares two lists as
  * values (`Equal(L, M)`); the structured route has neither. Every rule of
- * the structured route but those of `If`, `Loop`, `At` and `Length` is
- * wrapped.
+ * the structured route but those of `LIST_OPERAND_HEADS` is wrapped.
  */
 function withoutListOperands(
   operator: string,
@@ -1198,22 +1541,16 @@ const LIST_HEAD_REFUSALS: ReadonlyMap<string, string> = new Map([
     'Last is not in the structured route, which reads a list with At and Length',
   ],
   ['Rest', 'Rest makes a list, which the structured route does not have'],
-  [
-    'Comprehension',
-    'Comprehension makes a list, which the structured route does not have',
-  ],
-  [
-    'ReplaceAt',
-    'ReplaceAt makes a list, which the structured route does not have',
-  ],
   ['List', 'a list literal is not in the structured route'],
   ['Tuple', 'a tuple is not in the structured route'],
 ]);
 
 /**
  * The message of the refusal of `node` on the structured route, for a
- * library head of `LIST_HEAD_REFUSALS` and for an `At` with other than one
- * index, a `Range` index (a slice) or a string index; otherwise
+ * library head of `LIST_HEAD_REFUSALS`, for a `Comprehension` that is not
+ * over one `Element(j, Range(a, b))` (`comprehensionRefusal()`), and for
+ * an `At` with other than one index, a `Range` index (a slice) or a string
+ * index; otherwise
  * `undefined`. The admission checks this before it reads the operands, so
  * that the message names the list operation, and not an operand that the
  * route does not have (`Range`, `Element`, a string).
@@ -1221,7 +1558,8 @@ const LIST_HEAD_REFUSALS: ReadonlyMap<string, string> = new Map([
 function structuredListRefusal(node: Expression): string | undefined {
   if (!isFunction(node) || !isLibraryOperator(node, node.operator))
     return undefined;
-  const message = LIST_HEAD_REFUSALS.get(node.operator);
+  const message =
+    LIST_HEAD_REFUSALS.get(node.operator) ?? comprehensionRefusal(node);
   if (message !== undefined) return message;
   if (node.operator !== 'At') return undefined;
   if (node.nops !== 2)
@@ -1272,11 +1610,12 @@ function structuredAdmission(
     rules[name] = {
       signatures: [{ operands: [], rest: 'real', result: 'real' }],
     };
-  // A list is an operand of `At`, `Length` and a helper call only. The
-  // rules of `If` and `Loop` read no list operand: a branch or a body that
-  // reads one is typed by the rule of its own head.
+  // A list is an operand of `At`, `Length`, `ReplaceAt`, `Typed`, a
+  // helper call and the branches of an `If` only. The rules of `Loop` and
+  // `Comprehension` read no list operand: a body that reads one is typed by
+  // the rule of its own head.
   for (const [name, rule] of Object.entries(rules))
-    if (!['If', 'Loop', 'At', 'Length'].includes(name))
+    if (!LIST_OPERAND_HEADS.includes(name))
       rules[name] = withoutListOperands(name, rule);
   return {
     structured: true,
@@ -1572,6 +1911,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
      *  input (`elementLabel()`). */
     const symbolTypes = new Map<string, Type>();
     let readsSqrt = false;
+    /** The indexes of the comprehensions around the node being checked. */
+    const indexes = new Set<string>();
     const check = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
@@ -1579,8 +1920,28 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (!node.isValid || node.type.type === 'error')
         throw new Error('JS scalar fragment: invalid expression');
       if (isNumber(node)) return;
+      // A block of one value and a comprehension, on the structured route
+      // (`structuredValueParts()`); `Typed` is not the value of a body here.
+      const parts = structured ? structuredValueParts(node, false) : undefined;
+      if (parts !== undefined) {
+        for (const operand of parts.outer) check(operand);
+        if (parts.index !== undefined) {
+          if (indexes.has(parts.index))
+            throw new Error(
+              `JS scalar fragment: the comprehension index ${parts.index} has the name of another index`
+            );
+          indexes.add(parts.index);
+        }
+        try {
+          for (const operand of parts.inner) check(operand);
+        } finally {
+          if (parts.index !== undefined) indexes.delete(parts.index);
+        }
+        return;
+      }
       if (isSymbol(node)) {
         if (node.symbol === 'True' || node.symbol === 'False') return;
+        if (indexes.has(node.symbol)) return;
         symbolTypes.set(node.symbol, node.type.type);
         // The structured route reads a captured binding as its snapshot.
         if (
@@ -1794,9 +2155,11 @@ function attachBoundFunction(
     if (declared !== undefined) declaredTypes.set(name, declared);
   }
   const body = fn.op1.canonical;
+  // The structured route also admits a block of one value, the form of the
+  // body of a function of one expression that `executeEpsil()` defines.
   if (
     !isFunction(body, 'Block') ||
-    body.nops < 2 ||
+    body.nops < (admission.structured ? 1 : 2) ||
     !isLibraryOperator(body, 'Block')
   )
     throw new Error(
@@ -1826,9 +2189,13 @@ function attachBoundFunction(
       );
     const local = declaration.op1.symbol;
     const declared = letForm ? 'let' : declaredTypeSource(declaration.op2);
+    // The structured route also admits a local declared as a list
+    // (`structuredListLocalType()`).
     if (
       !declared ||
-      !['real', 'integer', 'complex', 'boolean', 'let'].includes(declared) ||
+      !['real', 'integer', 'complex', 'boolean', 'let']
+        .concat(admission.structured ? ['list<real>', 'list<integer>'] : [])
+        .includes(declared) ||
       inputs.some((input) => input.name === local) ||
       locals.has(local) ||
       names.has(local) ||
@@ -1843,14 +2210,16 @@ function attachBoundFunction(
     };
   };
   const names = new Set(inputs.map((input) => input.name));
-  const declaration = body.op1;
-  const { local, declared, value: initializer } = declareLocal(declaration);
-  // The structured route admits more than one local: every declaration of
-  // the block, of a nested block, of a branch and of a loop body, and the
-  // index of each loop.
+  // The existing route requires one first declaration. The structured route
+  // checks every statement of the block (`checkStructuredStatement()`) and
+  // admits more than one local: every declaration of the block, of a nested
+  // block, of a branch and of a loop body, the index of each loop and of
+  // each comprehension.
+  const first = admission.structured ? undefined : declareLocal(body.op1);
+  const local = first?.local ?? '';
   const bindings = new Set([
     ...names,
-    local,
+    ...(first ? [first.local] : []),
     ...(admission.structured ? boundNames(body) : []),
   ]);
   const named: NamedCalls = { calls: new Set(), structured: registry };
@@ -1877,11 +2246,32 @@ function attachBoundFunction(
         'JS scalar fragment: helper bindings collide with the root function'
       );
   };
-  const checkValue = (node: Expression): void => {
+  /** `bodyValue`: `node` is the value of the body, where the structured
+   *  route admits `Typed(value, T)` (`typedRule()`). */
+  const checkValue = (node: Expression, bodyValue = false): void => {
     refuseListHead(node, admission);
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
     if (isNumber(node)) return;
+    if (admission.structured && isFunction(node)) {
+      const nested = structuredValueParts(node, bodyValue);
+      if (nested !== undefined) {
+        for (const operand of nested.outer) checkValue(operand);
+        if (nested.index !== undefined) {
+          if (names.has(nested.index) || locals.has(nested.index))
+            throw new Error(
+              `JS scalar fragment: the comprehension index ${nested.index} has the name of a parameter, a local or another index`
+            );
+          names.add(nested.index);
+        }
+        try {
+          for (const operand of nested.inner) checkValue(operand);
+        } finally {
+          if (nested.index !== undefined) names.delete(nested.index);
+        }
+        return;
+      }
+    }
     if (admission.structured && isFunction(node, 'Loop'))
       throw new Error(
         'JS scalar fragment: a Loop used as a value is not in the structured ' +
@@ -1952,10 +2342,12 @@ function attachBoundFunction(
           `does not have the type integer`
       );
   };
-  locals.set(local, declared);
-  checkValue(initializer);
-  checkWrite(initializer);
-  names.add(local);
+  if (first !== undefined) {
+    locals.set(first.local, first.declared);
+    checkValue(first.value);
+    checkWrite(first.value);
+    names.add(first.local);
+  }
   // The structured route: more declarations, writes to the declared locals,
   // `If` statements and counted loops (`checkStructuredStatement()`). Each
   // write makes a new value in the lowering.
@@ -2119,7 +2511,7 @@ function attachBoundFunction(
     });
   };
   if (admission.structured)
-    for (const statement of body.ops.slice(1, -1))
+    for (const statement of body.ops.slice(0, -1))
       checkStructuredStatement(statement, 'top', true);
   for (const statement of admission.structured ? [] : body.ops.slice(1, -1)) {
     if (
@@ -2135,7 +2527,7 @@ function attachBoundFunction(
     checkValue(statement.op2);
     checkWrite(statement.op2);
   }
-  checkValue(body.ops[body.nops - 1]);
+  checkValue(body.ops[body.nops - 1], true);
   const boundDefinition: FragmentDefinition<ScalarRepresentation> = {
     ...admission.definition,
     rules: {
@@ -2625,11 +3017,6 @@ function annotateStructured(
   const annotation = typeFragment(root, definition, { inputs });
   if (annotation.refusal)
     throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
-  // A list is read, not made: the value of the program is not a list.
-  if (annotation.scope.facts.get(root)?.type.kind === 'list')
-    throw new Error(
-      'JS scalar fragment: the value of the program is a list, which the structured route does not have'
-    );
   // No `refuseClosedComplex()` here: the structured route refuses constant
   // folding, and its emitter writes each node in the representation of its
   // fact, so a closed node with a complex fact is written complex.
@@ -2639,7 +3026,8 @@ function annotateStructured(
       !entry ||
       entry.body !== helper.body ||
       entry.type.kind !== 'function' ||
-      representation(entry.type.result) !== helper.resultRepresentation
+      structuredRepresentation(entry.type.result) !==
+        helper.resultRepresentation
     )
       throw new Error(
         'JS scalar fragment: helper return representation differs from its signature'
@@ -2733,8 +3121,13 @@ function resolveHelper(
   if (literal !== held)
     throw new Error('JS scalar fragment: helper definition identity differs');
   const signature = userFunctionSignature(call.engine, call.operator);
+  // The structured route also admits a list result (`structuredListType()`).
   const result =
-    signature === undefined ? undefined : scalarType(signature.result);
+    signature === undefined
+      ? undefined
+      : registry
+        ? structuredParameterType(signature.result, call.operator)
+        : scalarType(signature.result);
   if (
     !signature ||
     !result ||
@@ -2801,14 +3194,50 @@ function resolveHelper(
   const body = literal.op1.canonical;
   let capture: ScalarFragmentCapture | undefined;
   const captureSymbols = new Set<Expression>();
+  /** The indexes of the comprehensions around the node being checked. */
+  const indexes = new Set<string>();
   const check = (node: Expression, root = false): void => {
     refuseListHead(node, admission);
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid helper body');
     if (isNumber(node)) return;
+    // On the structured route: `Typed` around the value of the body, with
+    // the declared result type; a block of one value; a comprehension
+    // (`structuredValueParts()`).
+    const parts = registry ? structuredValueParts(node, root) : undefined;
+    if (parts !== undefined && isFunction(node)) {
+      if (node.operator === 'Typed') {
+        const ascribed = structuredParameterType(node.type.type, call.operator);
+        if (
+          ascribed === undefined ||
+          result === undefined ||
+          fragmentTypeToString(ascribed) !== fragmentTypeToString(result)
+        )
+          throw new Error(
+            `JS scalar fragment: the body of the helper ${call.operator} has the ` +
+              `ascribed type ${node.type.toString()}, which is not its declared result type`
+          );
+      }
+      for (const operand of parts.outer)
+        check(operand, root && node.operator === 'Block');
+      if (parts.index !== undefined) {
+        if (parameters.includes(parts.index) || indexes.has(parts.index))
+          throw new Error(
+            `JS scalar fragment: the comprehension index ${parts.index} has the name of a parameter or another index`
+          );
+        indexes.add(parts.index);
+      }
+      try {
+        for (const operand of parts.inner) check(operand);
+      } finally {
+        if (parts.index !== undefined) indexes.delete(parts.index);
+      }
+      return;
+    }
     if (isSymbol(node)) {
       if (
         parameters.includes(node.symbol) ||
+        indexes.has(node.symbol) ||
         node.symbol === 'True' ||
         node.symbol === 'False'
       )
@@ -2884,7 +3313,9 @@ function resolveHelper(
     body,
     binding,
     capture,
-    resultRepresentation: representation(result)!,
+    resultRepresentation: (registry
+      ? structuredRepresentation(result)
+      : representation(result))!,
     parameterElementLabels,
     fragment: {
       key: call.operator,

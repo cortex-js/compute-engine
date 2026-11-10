@@ -19,7 +19,8 @@
  * three where the common-subexpression pass and the constant folding of A
  * matter (`cse-repeat`, `fold`, `local-reads`); the fixtures of step 5
  * (`sqrt-repeat`, `helper-chain`, `capture`, `local-writes`); the
- * fixtures of step 6 (`loop-sum`, `loop-complex-iteration`, `heatneighbor`); two
+ * fixtures of step 6 (`loop-sum`, `loop-complex-iteration`, `heatneighbor`,
+ * `heatstep`, `heatpaint`); two
  * generated trees of about 200 operations; and the corpus programs.
  *
  * The ordinary target is called as `new JavaScriptTarget().compile()`, the
@@ -77,6 +78,7 @@ import { Session } from 'node:inspector';
 import ts from 'typescript';
 
 import { ComputeEngine, compile } from '../src/compute-engine';
+import { executeEpsil } from '../src/epsil/execute-epsil';
 import { JavaScriptTarget } from '../src/compute-engine/compilation/javascript-target';
 import {
   ScalarFragmentJavaScriptTarget,
@@ -491,7 +493,86 @@ function step6Fixtures(): Fixture[] {
         ([c, r, boundary, obstacle]) => ({ H: HEAT_FIELD, c, r, center: 0.75, boundary, obstacle })
       ),
     },
+    {
+      // One step of Tycho's heat showcase on a 32 × 32 grid: a list made by
+      // a comprehension, carried by a loop and updated in place, as
+      // `executeEpsil()` defines `heatstep` (design:
+      // docs/plans/2026-11-10-structured-ir-loops-and-lists.md).
+      id: 'heatstep',
+      kind: 'named',
+      json: heatLiteral('heatstep'),
+      declare: {},
+      setup: (ce) => void executeEpsil(ce, HEAT_PRELUDE),
+      inputs: product<number>([0.22, 0, 10], [0, 1], [0, 1]).map(([a, boundary, obstacle]) => [
+        HEAT_FIELD,
+        a,
+        boundary,
+        obstacle,
+      ]),
+    },
+    {
+      // The brush of the heat showcase: a comprehension over the 32 × 32
+      // cells with a call of `heatwall`.
+      id: 'heatpaint',
+      kind: 'named',
+      json: heatLiteral('heatpaint'),
+      declare: {},
+      setup: (ce) => void executeEpsil(ce, HEAT_PRELUDE),
+      inputs: product<number>([23, 16.5, 0], [16, 5.5], [0, 1]).map(([p, q, obstacle]) => [
+        HEAT_FIELD,
+        p,
+        q,
+        obstacle,
+      ]),
+    },
   ];
+}
+
+/** The functions of the prelude of Tycho's heat showcase that the
+ *  structured route compiles, copied from `~/dev/tycho/src/graph-paper/onboarding/showcase-heat.js`
+ *  (`heatseed` is left out: `exp` is not in the structured route). */
+const HEAT_PRELUDE = `
+const N = 32
+function heatwall(c: integer, r: integer, obstacle: real) -> boolean {
+  obstacle > 0.5 && c == 16 && (r < 13 || r > 18)
+}
+function heatneighbor(H: list<real>, c: integer, r: integer, center: real, boundary: real, obstacle: real) -> real {
+  if c < 0 || c >= N || r < 0 || r >= N {
+    if boundary > 0.5 { 0 } else { center }
+  } else if heatwall(c, r, obstacle) { center } else { H[1 + c + N*r] }
+}
+function heatstep(H: list<real>, diffusivity: real, boundary: real, obstacle: real) -> list<real> {
+  let a = min(0.25, max(0, diffusivity))
+  let L = [0 for j in 1..N^2]
+  for k in 1..N^2 {
+    let c = ((k - 1) % N)
+    let r = floor((k - 1)/N)
+    let v = H[k]
+    if heatwall(c, r, obstacle) {
+      L = replaceAt(L, k, v)
+    } else {
+      let neighbors = heatneighbor(H, c-1, r, v, boundary, obstacle) + heatneighbor(H, c+1, r, v, boundary, obstacle) + heatneighbor(H, c, r-1, v, boundary, obstacle) + heatneighbor(H, c, r+1, v, boundary, obstacle)
+      L = replaceAt(L, k, v + a*(neighbors - 4*v))
+    }
+  }
+  L
+}
+function heatpaint(H: list<real>, p: real, q: real, obstacle: real) -> list<real> {
+  [if !heatwall(((k-1) % N), floor((k-1)/N), obstacle) && (((k-1) % N)+0.5-p)^2 + (floor((k-1)/N)+0.5-q)^2 <= 9 { 1 } else { H[k] } for k in 1..N^2]
+}
+`;
+
+/** The MathJSON of the `Function` literal that `executeEpsil()` makes for
+ *  the function `name` of `HEAT_PRELUDE`. */
+function heatLiteral(name: string): MathJsonExpression {
+  const ce = new ComputeEngine();
+  executeEpsil(ce, HEAT_PRELUDE);
+  const definition = ce.lookupDefinition(name) as
+    | { operator?: { _lambdaLiteral?: Expression } }
+    | undefined;
+  const literal = definition?.operator?._lambdaLiteral;
+  if (literal === undefined) throw new Error(`no function literal for ${name}`);
+  return literal.json;
 }
 
 /** The body of `heatneighbor` in Tycho's heat showcase, in the canonical
@@ -697,9 +778,16 @@ function callRun(result: Result, inputs: Inputs): unknown {
 }
 
 /** Same value: numbers by `Object.is` (NaN equals NaN, 0 differs from
- *  -0), complex values by part, booleans by `===`. */
+ *  -0), complex values by part, lists by element, booleans by `===`. */
 function sameValue(a: unknown, b: unknown): boolean {
   if (typeof a === 'number' && typeof b === 'number') return Object.is(a, b);
+  if (Array.isArray(a) || Array.isArray(b))
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((x, i) => sameValue(x, b[i]))
+    );
   if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
     const p = a as { re: number; im: number };
     const q = b as { re: number; im: number };
@@ -712,6 +800,13 @@ function sameValue(a: unknown, b: unknown): boolean {
 function sameUpToZeroSign(a: unknown, b: unknown): boolean {
   if (typeof a === 'number' && typeof b === 'number')
     return a === b || (Number.isNaN(a) && Number.isNaN(b));
+  if (Array.isArray(a) || Array.isArray(b))
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((x, i) => sameUpToZeroSign(x, b[i]))
+    );
   if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
     const p = a as { re: number; im: number };
     const q = b as { re: number; im: number };

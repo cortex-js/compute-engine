@@ -93,6 +93,21 @@
  *   type in the message of that throw: the element type that the program
  *   declares for the list input or parameter (`IRInput.elementLabel`), as
  *   the existing emitter writes it.
+ * - A `build` is `const r = [];` and a `for` statement over its range, with
+ *   the header of a `loop`, whose body ends with `r.push(element)`: one
+ *   array, filled in the order of the index, as the existing emitter writes
+ *   a comprehension over a range (`compileComprehension()` in
+ *   `compile-loops.ts`). Like the existing emitter, it counts no pass of the
+ *   iteration budget.
+ * - A `replace-at` calls `_SYS.replaceAt(list, index, value)`, which copies
+ *   the array, or `_SYS.replaceAtInPlace(list, index, value)`, which writes
+ *   the array of the operand and returns it, when `inPlaceUpdates()`
+ *   (`structured-in-place.ts`) admits the operation. These are the helpers
+ *   of the existing emitter, so the values and the throw of an index out of
+ *   range agree. A value is not moved to its use across an operation that
+ *   writes in place (`mutatesInPlace()`), as across an effect: it can read
+ *   the array before the write.
+ * - `not` is `!x`.
  *
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Integration with existing JavaScript compilation".
@@ -108,6 +123,7 @@ import {
   type IRRegion,
   type IRValue,
 } from './structured-ir.js';
+import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
 
 /** The names that the assembly of the result gives to the emitter. */
 export type StructuredEmitNames = {
@@ -251,7 +267,7 @@ function usesOf(program: IRProgram): Map<number, Use> {
           ? 2
           : op.kind === 'multiply' && complex
             ? 4
-            : op.kind === 'loop' && i === 1
+            : (op.kind === 'loop' || op.kind === 'build') && i === 1
               ? 2
               : 1;
       for (const [i, value] of op.operands.entries()) {
@@ -289,6 +305,8 @@ class Emitter {
   /** The declared element type of each list value that is an input or a
    *  parameter, by its id (`IRInput.elementLabel`). */
   private readonly elementLabels = new Map<number, string>();
+  /** The `replace-at` operations that write in place (`inPlaceUpdates()`). */
+  private readonly inPlace: ReadonlySet<IROperation>;
 
   constructor(
     private readonly program: IRProgram,
@@ -296,6 +314,7 @@ class Emitter {
     private readonly options: StructuredEmitOptions
   ) {
     this.uses = usesOf(program);
+    this.inPlace = inPlaceUpdates(program);
   }
 
   /**
@@ -331,10 +350,14 @@ class Emitter {
   region(region: IRRegion, out: string[], readsInputs: boolean): Source[] {
     const operations = region.operations;
     // `impure[k]`: the number of operations before position `k` that are
-    // not `pure`.
+    // not `pure`, or that write an array in place (`mutatesInPlace()`): a
+    // value is not moved across them.
     const impure = [0];
     for (const op of operations)
-      impure.push(impure[impure.length - 1] + (op.effect === 'pure' ? 0 : 1));
+      impure.push(
+        impure[impure.length - 1] +
+          (op.effect === 'pure' && !mutatesInPlace(op, this.inPlace) ? 0 : 1)
+      );
     for (const [index, op] of operations.entries()) {
       if (op.kind === 'yield') return op.operands.map((v) => this.source(v));
       const code = this.operation(op, out, readsInputs);
@@ -490,6 +513,29 @@ class Emitter {
           text: `${operand(operands[0], CALL)}.length`,
           precedence: CALL,
         };
+      case 'not':
+        return { text: `!${operand(operands[0], UNARY)}`, precedence: UNARY };
+      case 'replace-at': {
+        const helper = this.inPlace.has(op) ? 'replaceAtInPlace' : 'replaceAt';
+        this.runtime.add(helper);
+        return call(`_SYS.${helper}`, operands);
+      }
+      case 'build': {
+        // `const r = []; for (…) { …; r.push(element); }`: one array, filled
+        // in the order of the index, as the existing emitter writes a
+        // comprehension.
+        const [from, to] = operands;
+        const [index] = op.body.parameters ?? [];
+        if (index === undefined) return fail('a build has no index');
+        const name = this.bind(op.result);
+        const k = this.bind(index);
+        const header = this.rangeHeader(k, from, to);
+        const body: string[] = [];
+        const [element] = this.region(op.body, body, readsInputs);
+        body.push(`${name}.push(${operand(element, CONDITIONAL)});`);
+        out.push(`const ${name} = [];`, `${header} { ${body.join(' ')} }`);
+        return undefined;
+      }
       case 'min':
         return call('Math.min', operands);
       case 'max':
@@ -597,8 +643,7 @@ class Emitter {
       this.plain.add(p.id);
     });
     const k = this.bind(index);
-    const step = this.names.fresh();
-    const left = this.names.fresh();
+    const header = this.rangeHeader(k, from, to);
     const body: string[] = [];
     if (op.iterationBudget !== undefined)
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
@@ -629,11 +674,6 @@ class Emitter {
       later.push(`${names[i]} = ${temporary};`);
     }
     body.push(...assignments, ...later);
-    const header =
-      `for (let ${k} = ${operand(from, CONDITIONAL)}, ` +
-      `${step} = ${operand(to, RELATIONAL + 1)} < ${k} ? -1 : 1, ` +
-      `${left} = ${step} * (${operand(to, ADDITIVE)} - ${k}); ` +
-      `${left} >= 0; ${k} += ${step}, ${left}--)`;
     const declarations =
       names.length === 0
         ? []
@@ -641,5 +681,21 @@ class Emitter {
             `let ${names.map((name, i) => `${name} = ${operand(initial[i], CONDITIONAL)}`).join(', ')};`,
           ];
     return [...declarations, `${header} { ${body.join(' ')} }`];
+  }
+
+  /**
+   * The header of a `for` statement whose counter `k` visits each integer
+   * from `from` to `to`, both included, in steps of 1, or of -1 when `to`
+   * is less than `from`. The text of `to` is read twice.
+   */
+  private rangeHeader(k: string, from: Source, to: Source): string {
+    const step = this.names.fresh();
+    const left = this.names.fresh();
+    return (
+      `for (let ${k} = ${operand(from, CONDITIONAL)}, ` +
+      `${step} = ${operand(to, RELATIONAL + 1)} < ${k} ? -1 : 1, ` +
+      `${left} = ${step} * (${operand(to, ADDITIVE)} - ${k}); ` +
+      `${left} >= 0; ${k} += ${step}, ${left}--)`
+    );
   }
 }

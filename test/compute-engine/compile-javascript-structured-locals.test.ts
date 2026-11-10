@@ -707,6 +707,9 @@ const FLOAT_POLICY: RepresentationPolicy = {
     sqrt: { results: ['float'], operands: 'same' },
     at: { results: ['float'], operands: ['float'] },
     length: { results: ['float'], operands: ['float'] },
+    not: { results: ['bool'], operands: ['bool'] },
+    build: { results: ['float'], operands: ['float'] },
+    'replace-at': { results: ['float'], operands: ['float'] },
     trace: { results: ['float'], operands: ['float'] },
   },
 };
