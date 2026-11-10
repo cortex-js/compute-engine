@@ -1,10 +1,9 @@
 # CE-1176 option (a): caller code bound to temporaries on the GLSL target
 
-**Status:** proposed 2026-11-09, waits for the user's approval. Issue
-`issues/CE-1176.md`. It changes a documented contract
-(`docs/COMPILATION-MODEL.md`, "Code that the caller supplies is held to the
-interpreter's order"), so no code is written for delivery before the
-approval. A prototype was measured (below).
+**Status:** approved 2026-11-09. Issue `issues/CE-1176.md`. It changes a
+documented contract (`docs/COMPILATION-MODEL.md`, "Code that the caller
+supplies is held to the interpreter's order"). A prototype was measured
+(below).
 
 ## The problem
 
