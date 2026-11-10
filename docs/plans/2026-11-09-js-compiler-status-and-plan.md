@@ -419,14 +419,50 @@ and the folding of the ordinary target apply; the vocabulary has no costly
 operation to repeat. The pilot is now 1,628 counted lines. The numbers are in
 the section "The revised emitter (2026-11-10)" of the measure.
 
-The decision to expand or to stop is the user's, and is open.
+**Decision: expand, approved 2026-11-10.** Step 5 starts. The size condition
+of step 4 did not hold; the user expands for the compile-time result and for
+the objectives below.
+
+### Objectives for the representation, approved 2026-11-10
+
+The representation is to become general: used by more than one target, able
+to carry what a proof about concurrent execution needs, and close enough to
+SSA for optimizations. Three rules follow for every later step:
+
+1. **No target in the core.** The values, regions, operations, effect facts
+   and the verifier import nothing from a target and name no target
+   representation. A target supplies its representations (`number` and
+   `{re, im}` on JavaScript; `float`, `int`, `vec2` on GLSL) and the legal
+   conversions between them as a policy that the verifier is given. The
+   emitter and the lowering rules of an operator are per target.
+2. **One definition per value.** A write to a local makes a new value. An
+   `If` whose branches write a local yields the merged value as a result of
+   the `If`; a loop carries a value from one iteration to the next as a
+   parameter of its body region. No operation writes a named variable. This
+   is the structured form of SSA: no control-flow graph and no phi placement.
+3. **Effects name what they touch.** `pure`, `effectful` and `unknown` are
+   enough to keep an order. A proof that two calls are independent, or that
+   a kernel can run in a worker, needs more: which captured binding an
+   operation reads or writes, and whether a called function is known. These
+   facts are added with the first operation that needs them (captures in
+   step 5, list writes in step 6), on the operation, not in a side table.
+
+These rules do not start a conversion of the GLSL emitter or any
+optimization pass. Each is a later step with its own measure.
 
 ### Step 5 — Recover the existing internal slice coverage
 
-**Deliver, in order:** Sqrt and other justified scalar operations; typed function
-entry/return; resolved named helpers; capture snapshots/dependencies; fixed-shape
-local writes and branch merges. Reuse the prior slice fixtures so the independent
-emitter reaches the behavior already demonstrated through legacy emission.
+**Deliver, in two changes.** First: the core of the representation moves
+out of the JavaScript files (objective 1), and local writes with branch
+merges are added as single-definition values (objective 2). Second: `Sqrt`
+with its domain and promotion rule decided from facts, helpers that call
+helpers, and captured values with their binding recorded on the operation
+that reads them (objective 3). Typed function entry and one resolved helper
+are already done in steps 2 and 3. Reuse the prior slice fixtures so the
+independent emitter reaches the behavior already demonstrated through legacy
+emission. The step ends with the paired measure of step 4, with a fixture in
+which a costly operation (`Sqrt`) is repeated, so that the cost of emitting
+without CSE is measured.
 
 **Pass when:** every migrated feature has differential coverage, binding and
 invalidation controls, and no generic emission fallback. Use single-definition
