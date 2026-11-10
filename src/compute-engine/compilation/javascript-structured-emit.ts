@@ -51,6 +51,23 @@
  *   the first of a left-associative operator are in parentheses when their
  *   precedence is the same: `a + (b + c)` keeps the order of a floating-point
  *   sum.
+ * - A `loop` is a `for` statement with one `let` per result, declared
+ *   before it with the initial value; the parameter of a carried value in
+ *   the body is that variable too. The bounds are read once each before the
+ *   first iteration (a bound that is not a name or a literal is bound to a
+ *   `const` first, because the code reads its text more than once). The
+ *   index is the counter of the `for`, from `from` to `to`, in steps of 1,
+ *   or of -1 when `to` is less than `from`. At the end of the body, each
+ *   carried variable is assigned its next value; when more than one changes,
+ *   each next value that could read a carried variable is first bound to a
+ *   `const`, so that every next value reads the values of the iteration
+ *   that ends. With an iteration budget, each iteration first calls
+ *   `_SYS.countLoopPass()` with the floored budget, as the existing emitter
+ *   writes it (`loopPassCount()` in `compile-loops.ts`), and the assembly of
+ *   the result starts each call with `_SYS.resetLoopPasses()`. A value of
+ *   the body is never written outside it, and a value defined before the
+ *   loop that the body uses is a name or a literal (the rule above: its use
+ *   is in a nested region).
  * - A conversion is written where its operation is, in its region.
  * - A helper is one JavaScript function declaration, called with values.
  *   Its body reads its parameters and the snapshots of captured bindings,
@@ -62,15 +79,19 @@
  *   objects, as in the existing emitter. A complex sum is written per
  *   component, a complex negation calls the runtime helper `_SYS.cneg`, a
  *   real square root is `Math.sqrt` and a complex one calls `_SYS.csqrt`,
- *   as the existing emitter does. An object literal is in parentheses, so
- *   that it is never read as a block.
+ *   a complex product is written per component, `mod` calls
+ *   `_SYS.floorMod`, `floor` is `Math.floor` and `divide` is `/`, as the
+ *   existing emitter does. An object literal is in parentheses, so that it
+ *   is never read as a block.
  *
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Integration with existing JavaScript compilation".
  */
 import {
   regionsOf,
+  yieldedValues,
   type IRFunction,
+  type IRLoop,
   type IROperation,
   type IRProgram,
   type IRRegion,
@@ -198,9 +219,19 @@ function usesOf(program: IRProgram): Map<number, Use> {
   const visit = (region: IRRegion) => {
     region.operations.forEach((op, index) => {
       // The text of an operand of a complex sum is written twice, once per
-      // component.
-      const reads = op.kind === 'add' && op.result.representation === 'complex' ? 2 : 1;
-      for (const value of op.operands) {
+      // component, and of a complex product four times. The code of a loop
+      // reads the text of its upper bound twice.
+      const complex = op.result?.representation === 'complex';
+      const readsOf = (i: number) =>
+        op.kind === 'add' && complex
+          ? 2
+          : op.kind === 'multiply' && complex
+            ? 4
+            : op.kind === 'loop' && i === 1
+              ? 2
+              : 1;
+      for (const [i, value] of op.operands.entries()) {
+        const reads = readsOf(i);
         const use = uses.get(value.id);
         if (use === undefined) uses.set(value.id, { count: reads, region, index });
         else {
@@ -224,6 +255,10 @@ class Emitter {
   /** The name of the JavaScript function of each helper, by its index. */
   private readonly functionNames: string[] = [];
   private readonly uses: Map<number, Use>;
+  /** The values whose source is a name that the emitter binds, or a
+   *  literal: a source that reads no variable that a loop assigns, other
+   *  than its own name. */
+  private readonly plain = new Set<number>();
   readonly inputs = new Set<string>();
   readonly runtime = new Set<string>();
 
@@ -301,6 +336,7 @@ class Emitter {
   private bind(value: IRValue): string {
     const name = this.names.fresh();
     this.define(value, atom(name));
+    this.plain.add(value.id);
     return name;
   }
 
@@ -333,6 +369,7 @@ class Emitter {
     });
     switch (op.kind) {
       case 'literal': {
+        this.plain.add(op.result.id);
         const value = op.value;
         this.define(
           op.result,
@@ -349,6 +386,7 @@ class Emitter {
       case 'capture':
         // The snapshot is written as a number literal at each use, as the
         // existing emitter writes the stored value of a captured binding.
+        this.plain.add(op.result.id);
         this.define(op.result, numberSource(op.snapshot));
         return undefined;
       case 'input': {
@@ -370,10 +408,27 @@ class Emitter {
           return { text: `-${operand(operands[0], CALL)}`, precedence: UNARY };
         this.runtime.add('cneg');
         return call('_SYS.cneg', operands);
-      case 'multiply':
-        return leftAssociative(operands, MULTIPLICATIVE, '*');
+      case 'multiply': {
+        if (op.result.representation !== 'complex')
+          return leftAssociative(operands, MULTIPLICATIVE, '*');
+        // `(a.re b.re - a.im b.im) + i (a.re b.im + a.im b.re)`, the text
+        // of the existing emitter.
+        const [a, b] = operands.map((o) => operand(o, CALL));
+        return atom(
+          `({ re: ${a}.re * ${b}.re - ${a}.im * ${b}.im, im: ${a}.re * ${b}.im + ${a}.im * ${b}.re })`
+        );
+      }
+      case 'divide':
+        return leftAssociative(operands, MULTIPLICATIVE, '/');
+      case 'mod':
+        this.runtime.add('floorMod');
+        return call('_SYS.floorMod', operands);
+      case 'floor':
+        return call('Math.floor', operands);
       case 'less':
         return leftAssociative(operands, RELATIONAL, '<');
+      case 'less-equal':
+        return leftAssociative(operands, RELATIONAL, '<=');
       case 'equal':
         return leftAssociative(operands, EQUALITY, '===');
       case 'sqrt':
@@ -417,6 +472,9 @@ class Emitter {
         );
         return undefined;
       }
+      case 'loop':
+        out.push(...this.loop(op, operands, readsInputs));
+        return undefined;
       case 'and':
       case 'or': {
         const regions = op.rest.map((region) => {
@@ -461,5 +519,63 @@ class Emitter {
       default:
         return fail(`no emission for the operation ${(op as { kind: string }).kind}`);
     }
+  }
+
+  /**
+   * The statements of `op`, whose operands have the sources `operands`:
+   * the `let` of each carried value, then the `for` statement.
+   */
+  private loop(op: IRLoop, operands: readonly Source[], readsInputs: boolean): string[] {
+    const [from, to, ...initial] = operands;
+    const [index, ...parameters] = op.body.parameters ?? [];
+    if (index === undefined) return fail('a loop has no index');
+    // One variable per carried value: the parameter in the body, the
+    // result after the loop.
+    const names = op.results.map((result) => this.bind(result));
+    parameters.forEach((p, i) => {
+      this.define(p, atom(names[i]));
+      this.plain.add(p.id);
+    });
+    const k = this.bind(index);
+    const step = this.names.fresh();
+    const left = this.names.fresh();
+    const body: string[] = [];
+    if (op.iterationBudget !== undefined)
+      body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
+    const next = this.region(op.body, body, readsInputs);
+    // The carried values whose next value is not the parameter itself.
+    const changed = parameters.flatMap((_, i) => (next[i].text === names[i] ? [] : [i]));
+    // Each next value is read before any carried variable is assigned:
+    // the last one is assigned first, and every other one that could read
+    // a carried variable is first bound to a `const`.
+    const carried = new Set(names);
+    const assignments: string[] = [];
+    const last = changed[changed.length - 1];
+    const later: string[] = [];
+    for (const i of changed) {
+      if (i === last) {
+        assignments.push(`${names[i]} = ${next[i].text};`);
+        continue;
+      }
+      const value = yieldedValues(op.body)[i];
+      if (this.plain.has(value.id) && !carried.has(next[i].text)) {
+        later.push(`${names[i]} = ${next[i].text};`);
+        continue;
+      }
+      const temporary = this.names.fresh();
+      body.push(`const ${temporary} = ${next[i].text};`);
+      later.push(`${names[i]} = ${temporary};`);
+    }
+    body.push(...assignments, ...later);
+    const header =
+      `for (let ${k} = ${operand(from, CONDITIONAL)}, ` +
+      `${step} = ${operand(to, RELATIONAL + 1)} < ${k} ? -1 : 1, ` +
+      `${left} = ${step} * (${operand(to, ADDITIVE)} - ${k}); ` +
+      `${left} >= 0; ${k} += ${step}, ${left}--)`;
+    const declarations =
+      names.length === 0
+        ? []
+        : [`let ${names.map((name, i) => `${name} = ${operand(initial[i], CONDITIONAL)}`).join(', ')};`];
+    return [...declarations, `${header} { ${body.join(' ')} }`];
   }
 }

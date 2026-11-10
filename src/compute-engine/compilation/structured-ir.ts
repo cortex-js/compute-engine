@@ -17,9 +17,14 @@
  * branch leaves the branch only through its `yield`: an `if` whose branches
  * write locals has one result per merged local.
  *
- * There is no common-subexpression pass, no reordering, no loop and no
- * collection: each occurrence of a prepared node gives its own operations,
- * in the order of the prepared tree.
+ * A `loop` runs its body region once per integer of a range. The body has
+ * parameters: the index, and one parameter per value that an iteration
+ * gives to the next one (a carried value). The body yields the next value
+ * of each carried value, and the loop has one result per carried value.
+ *
+ * There is no common-subexpression pass, no reordering and no collection:
+ * each occurrence of a prepared node gives its own operations, in the order
+ * of the prepared tree.
  *
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Representation and verifier" and "Effects are part of the prepared
@@ -79,17 +84,28 @@ export type IRInputRead = OperationBase & {
  *  operand: a real result for a real operand (not a number for a negative
  *  one), a complex result for a complex operand. The rule of the target
  *  decides which of the two an occurrence is, and a real operand of a
- *  complex `sqrt` is converted first. */
+ *  complex `sqrt` is converted first.
+ *
+ *  `multiply` of a complex result has two complex operands. `mod` is the
+ *  floored remainder: its result has the sign of the divisor, as the
+ *  interpreter gives it (`Mod(-7, 3)` is `2`, `Mod(7, -3)` is `-2`,
+ *  `Mod(-7.5, 2)` is `0.5`), and a zero divisor gives not a number.
+ *  `floor` has an integer result. `divide` has a real result, also for
+ *  integer operands. */
 export type IRArithmetic = OperationBase & {
   readonly kind:
     | 'add'
     | 'negate'
     | 'multiply'
     | 'less'
+    | 'less-equal'
     | 'equal'
     | 'min'
     | 'max'
-    | 'sqrt';
+    | 'sqrt'
+    | 'mod'
+    | 'floor'
+    | 'divide';
 };
 
 /**
@@ -154,6 +170,43 @@ export type IRIf = Omit<OperationBase, 'result'> & {
 };
 
 /**
+ * A loop over the integers from `from` to `to`, both included, in steps of
+ * 1, or of -1 when `to` is less than `from`, as the interpreter iterates
+ * `Range(from, to)`: the range from 1 to 0 has the two elements 1 and 0.
+ * The operands are `from`, `to` and the initial value of each carried
+ * value, evaluated once, before the first iteration.
+ *
+ * The parameters of the body region are the index, then one parameter per
+ * carried value, in the order of `results`. Each iteration evaluates the
+ * body with the index and the values that the previous iteration yielded
+ * (the initial values for the first iteration). The body yields the next
+ * value of each carried value, in the same order. The result `i` is the
+ * value of the carried value `i` after the last iteration, or its initial
+ * value when the range has no element.
+ *
+ * `iterationBudget` is the iteration budget of the compilation, or
+ * `undefined` when it has none. A target writes its own check of the
+ * budget, with the rule of the existing compiler of that target.
+ *
+ * A loop with a budget can abort: over the budget, the call of the
+ * compiled code ends with an error. An abort is not an effect: it changes
+ * no state that the program reads, so the effect of the loop is the effect
+ * of its body, and a pure value can move across the loop (computed before
+ * or after it gives the same value when the loop does not abort, and no
+ * value when it does). The region that holds such a loop records that it
+ * can abort (`IRRegion.canAbort`). A transformation must not delete an
+ * operation that can abort, run it when the program would not, or run it
+ * more times than the program does: each changes whether the call aborts.
+ */
+export type IRLoop = Omit<OperationBase, 'result'> & {
+  readonly kind: 'loop';
+  readonly result?: undefined;
+  readonly results: readonly IRValue[];
+  readonly body: IRRegion;
+  readonly iterationBudget?: number;
+};
+
+/**
  * `and` and `or`. The operand is the first operand of the source. Each
  * region of `rest` is the next operand: it is evaluated only when the
  * earlier operands do not decide the result (`false` for `and`, `true` for
@@ -183,8 +236,9 @@ export type IRTrace = OperationBase & {
 };
 
 /** The last operation of a region: its operands are the values of the
- *  region. A region of an `if` yields one value per result of the `if`;
- *  every other region yields one value. */
+ *  region. A region of an `if` yields one value per result of the `if`, and
+ *  the body of a `loop` one value per result of the `loop`; every other
+ *  region yields one value. */
 export type IRYield = {
   readonly kind: 'yield';
   readonly result?: undefined;
@@ -200,13 +254,24 @@ export type IROperation =
   | IRArithmetic
   | IRConvert
   | IRIf
+  | IRLoop
   | IRShortCircuit
   | IRCall
   | IRTrace
   | IRYield;
 
 export type IRRegion = {
+  /** The values that the region defines at its entry, before its first
+   *  operation: the parameters of the body of a `loop`. Each is visible in
+   *  the region and in the regions nested in it. The body of a function
+   *  has none: the parameters of a function are `IRFunction.parameters`,
+   *  which the verifier defines at the entry of its body in the same way. */
+  readonly parameters?: readonly IRValue[];
   readonly operations: readonly IROperation[];
+  /** True when the evaluation of the region can abort
+   *  (`operationCanAbort()` for one of its operations); absent otherwise.
+   *  A region that can abort is never removed, also when it is `pure`. */
+  readonly canAbort?: true;
   /** The join of the effects of the operations (`joinEffects()`). */
   readonly effect: EffectFact;
 };
@@ -287,16 +352,31 @@ export function joinEffects(...effects: readonly EffectFact[]): EffectFact {
   return result;
 }
 
-/** The values that `op` defines: the results of an `if`, the result of
- *  every other operation but a yield. */
+/** The values that `op` defines: the results of an `if` or a `loop`, the
+ *  result of every other operation but a yield. */
 export function definedValues(op: IROperation): readonly IRValue[] {
-  if (op.kind === 'if') return op.results;
+  if (op.kind === 'if' || op.kind === 'loop') return op.results;
   return op.result === undefined ? [] : [op.result];
+}
+
+/** Whether the evaluation of `op` can abort: a `loop` with an iteration
+ *  budget, an operation whose region can abort, or a call of a function
+ *  whose body can abort (`IRLoop`). `functions`: the functions of the
+ *  program. */
+export function operationCanAbort(
+  op: IROperation,
+  functions: readonly IRFunction[]
+): boolean {
+  if (op.kind === 'loop' && op.iterationBudget !== undefined) return true;
+  if (op.kind === 'call' && functions[op.function]?.body.canAbort === true)
+    return true;
+  return regionsOf(op).some((region) => region.canAbort === true);
 }
 
 /** The regions that `op` evaluates. */
 export function regionsOf(op: IROperation): readonly IRRegion[] {
   if (op.kind === 'if') return [op.then, op.else];
+  if (op.kind === 'loop') return [op.body];
   if (op.kind === 'and' || op.kind === 'or') return op.rest;
   return [];
 }

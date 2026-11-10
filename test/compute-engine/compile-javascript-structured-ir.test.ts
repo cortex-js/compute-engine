@@ -785,7 +785,7 @@ describe('admission of the structured route', () => {
     // the witness is a made node.
     ['And with a real operand', () => made('And'), /And with an operand that is not a boolean/],
     ['Or with a real operand', () => made('Or'), /Or with an operand that is not a boolean/],
-    ['Multiply with a complex operand', () => scalarEngine().expr(['Multiply', 'x', 'z']), /a product with a complex operand is not in the structured route/],
+    ['Multiply of a real and a complex operand', () => scalarEngine().expr(['Multiply', 'x', 'z']), /a product with a complex operand is in the structured route only as the product of two complex operands/],
     // The canonical form keeps `Min(x)`, `And(C)` and `Or(C)`, and writes
     // `Multiply(x)` as `x`: the unary product is a made node.
     ['Min of one operand', () => scalarEngine().expr(['Min', 'x']), /Min of fewer than two operands/],

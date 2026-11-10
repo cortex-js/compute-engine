@@ -526,6 +526,19 @@ export type FragmentDefinition<R> = {
    *  terms written out one by one): its bounds then need not fit the loop
    *  counter. */
   aggregateHasNoLoop?(node: Expression, lower: number, upper: number): boolean;
+  /** The type of the local that a `Declare` with a value declares, or
+   *  `undefined` for the rule of the pass, `localType()`, which widens an
+   *  integer to a real. `value`: the type of the value; `declared`: the
+   *  spelling of the declared type (`integer`), or `undefined` for a
+   *  declaration with no type (the form of a `let`, `Declare(t, {value:
+   *  …})`); `inferred`: the type that the engine infers for the local in
+   *  its block, from its value and from every value written to it.
+   *  Absent: the rule of the pass. */
+  localType?(local: {
+    value: FragmentValueType | FragmentListType;
+    declared: string | undefined;
+    inferred: Type | undefined;
+  }): FragmentValueType | FragmentListType | undefined;
 };
 
 //
@@ -2402,12 +2415,15 @@ function componentTypes<R>(
   return undefined;
 }
 
-/** A `Declare` statement of a block, which `walkBlock` reads. */
+/** A `Declare` statement of a block, which `walkBlock` reads. `inferred`:
+ * the type that the engine infers for a local of the block
+ * (`FragmentDefinition.localType`). */
 function walkDeclare<R>(
   statement: Expression,
   scope: FragmentScope<R>,
   context: FragmentContext<R>,
-  w: FragmentWalker<R>
+  w: FragmentWalker<R>,
+  inferred?: (name: string) => Type | undefined
 ): void {
   const names = declaredNames(statement);
   if (names === undefined)
@@ -2467,6 +2483,13 @@ function walkDeclare<R>(
           name.symbol
         );
     }
+    type =
+      w.definition.localType?.({
+        value: facts.type,
+        declared:
+          declared === undefined ? undefined : declaredTypeSource(declared),
+        inferred: inferred?.(name.symbol),
+      }) ?? type;
     if (type.kind === 'list')
       return void w.refuse(
         statement,
@@ -2603,7 +2626,12 @@ export function walkBlock<R>(
       return;
     }
     if (isFunction(s, 'Declare')) {
-      walkDeclare(s, inner, { ...context, place: 'value' }, w);
+      walkDeclare(s, inner, { ...context, place: 'value' }, w, (name) => {
+        const definition = blockScope?.bindings.get(name);
+        return definition !== undefined && 'value' in definition
+          ? definition.value.type.type
+          : undefined;
+      });
       inner.statements.add(s);
       last = { type: { kind: 'statement' } };
       if (place !== 'statement')

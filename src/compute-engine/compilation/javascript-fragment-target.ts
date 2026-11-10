@@ -19,13 +19,20 @@ import {
   type JavaScriptBodyEmitter,
 } from './javascript-target.js';
 import { BaseCompiler } from './base-compiler.js';
+import { exactRationalDivisor } from './compiler-type-facts.js';
+import { SHIFT_JUMP_HEADS } from './compile-folding.js';
+import { exactDoubleValue } from '../numeric-value/exact-integer-value.js';
 import { CompilerState } from './compiler-state.js';
 import { realOnlyLoweringOf } from './compiler-core.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
 } from '../boxed-expression/function-literal.js';
-import { declaredTypeSource } from './compile-declarations.js';
+import {
+  declaredTypeSource,
+  declareTypeOperand,
+  declareValueOperand,
+} from './compile-declarations.js';
 import {
   userFunctionLiteral,
   userFunctionSignature,
@@ -36,7 +43,9 @@ import {
   walkIf,
   walkBlock,
   walkAssign,
+  walkCountedLoop,
   type FragmentDeclaredInput,
+  type FragmentValueFacts,
   type FragmentDefinition,
   type FragmentRule,
   type FragmentFunction,
@@ -180,11 +189,18 @@ function readsNoSymbol(node: Expression): boolean {
 }
 
 /**
- * `Multiply`: real operands only. The JavaScript code of a complex product
- * is not one call of a runtime helper: the existing emitter binds each
- * operand to a temporary and writes the real and imaginary parts
- * (`Multiply` in `javascript-target.ts`). A complex product enters the
- * structured route with an emitter for it.
+ * `Multiply`: real operands, or two complex operands. A product with an
+ * exact rational factor `p/q` whose denominator is not a power of two
+ * (`exactRationalDivisor()`: the canonical form writes `x/49` as
+ * `Multiply(1/49, x)`) has a real result, and the lowering writes it as the
+ * existing emitter does, a division by `q` (`multiplyByRational()`). The code of a complex
+ * product is the one of the existing emitter (`Multiply` in
+ * `javascript-target.ts`): each operand is read once, and the real and the
+ * imaginary parts are written from its components. The product of a real
+ * and a complex operand, and a complex product of more than two operands,
+ * are not in the structured route: the existing emitter writes the first
+ * with no conversion of the real operand, which the structured route has
+ * no operation for.
  */
 const multiplyRule = {
   walk: (node, scope, context, w) => {
@@ -194,12 +210,34 @@ const multiplyRule = {
         'signature',
         'a product of fewer than two operands is not in the structured route'
       );
-    if (operandFacts(node, scope, context, w).some((f) => f.type.kind === 'complex'))
-      return w.refuse(
+    const facts = operandFacts(node, scope, context, w);
+    if (facts.some((f) => f.type.kind === 'complex')) {
+      if (node.nops !== 2 || facts.some((f) => f.type.kind !== 'complex'))
+        return w.refuse(
+          node,
+          'signature',
+          'a product with a complex operand is in the structured route only as ' +
+            'the product of two complex operands'
+        );
+      return w.signatures(node, scope, context, [
+        { operands: ['complex', 'complex'], result: 'complex' },
+      ]);
+    }
+    // A product with an exact rational factor `p/q` is a division by `q`
+    // (`multiplyByRational()` in the lowering): its result is real.
+    if (node.ops.some((op) => exactRationalDivisor(op) !== undefined)) {
+      if (facts.some((f) => f.type.kind === 'boolean'))
+        return w.refuse(
+          node,
+          'signature',
+          'a product with a boolean operand is not in the structured route'
+        );
+      return w.valueFacts(
         node,
-        'signature',
-        'a product with a complex operand is not in the structured route'
+        { kind: 'real' },
+        facts.map((f) => w.convert(f, { kind: 'real' })!)
       );
+    }
     return w.signatures(node, scope, context, [
       { operands: ['real'], rest: 'real', result: 'real' },
     ]);
@@ -207,7 +245,8 @@ const multiplyRule = {
 } satisfies FragmentRule<ScalarRepresentation>;
 
 /**
- * `Less` and `Equal`: two real operands, a boolean result. A comparison
+ * `Less`, `LessEqual` and `Equal`: two real operands, a boolean result. The
+ * canonical form writes `GreaterEqual(a, b)` as `LessEqual(b, a)`. A comparison
  * that reads no symbol is refused: its value is fixed at compile time, and
  * the existing emitter writes it as a literal also with `constantFold:
  * false`. A comparison of three operands or more is a conjunction of pairs
@@ -215,7 +254,7 @@ const multiplyRule = {
  * comparison `===` of two numbers; a complex operand needs a comparison per
  * component, which the structured route does not have.
  */
-function comparisonRule(operator: 'Less' | 'Equal') {
+function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal') {
   return {
     walk: (node, scope, context, w) => {
       const nops = isFunction(node) ? node.nops : 0;
@@ -238,11 +277,11 @@ function comparisonRule(operator: 'Less' | 'Equal') {
           'signature',
           `${operator} with a complex operand is not in the structured route`
         );
-      if (operator === 'Less' && facts.some((f) => f.type.kind === 'boolean'))
+      if (operator !== 'Equal' && facts.some((f) => f.type.kind === 'boolean'))
         return w.refuse(
           node,
           'signature',
-          'Less with a boolean operand is not in the structured route'
+          `${operator} with a boolean operand is not in the structured route`
         );
       return w.signatures(node, scope, context, [
         { operands: ['real', 'real'], result: 'boolean' },
@@ -250,6 +289,242 @@ function comparisonRule(operator: 'Less' | 'Equal') {
     },
   } satisfies FragmentRule<ScalarRepresentation>;
 }
+
+/**
+ * The facts of `node` for an operator of real operands (`Mod`, `Floor`,
+ * `Divide`): `operands` operands, none complex and none boolean. The type
+ * of the result is `type` of the facts of the operands, and each operand is
+ * read as itself, or as a real when the result is real. The type is read
+ * from the facts, not from the engine type of the node: an operand that
+ * reads a local has a real fact also when the local is declared `integer`.
+ */
+function realOperatorFacts(
+  operator: string,
+  operands: number,
+  type: (facts: readonly FragmentValueFacts<ScalarRepresentation>[]) => 'real' | 'integer'
+) {
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || node.nops !== operands)
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with other than ${operands} operand${operands === 1 ? '' : 's'} is not in the structured route`
+        );
+      const facts = operandFacts(node, scope, context, w);
+      for (const kind of ['complex', 'boolean'] as const)
+        if (facts.some((f) => f.type.kind === kind))
+          return w.refuse(
+            node,
+            'signature',
+            `${operator} with a ${kind} operand is not in the structured route`
+          );
+      const result = type(facts);
+      return w.valueFacts(
+        node,
+        { kind: result },
+        facts.map(
+          (f) => w.convert(f, result === 'integer' ? f.type : { kind: 'real' })!
+        )
+      );
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+const integerWhenAll = (
+  facts: readonly FragmentValueFacts<ScalarRepresentation>[]
+): 'real' | 'integer' =>
+  facts.every((f) => f.type.kind === 'integer') ? 'integer' : 'real';
+
+/**
+ * `Mod`: the floored remainder of two real operands, written
+ * `_SYS.floorMod(a, b)` as by the existing emitter. Its result has the sign
+ * of the divisor, as the interpreter gives it: `Mod(-7, 3)` is `2`,
+ * `Mod(7, -3)` is `-2`, `Mod(-7.5, 2)` is `0.5`, and `Mod(5, 0)` is not a
+ * number. An operand beyond the safe integer range throws, as on the
+ * existing route. The result is an integer when both operands are.
+ */
+const modRule = realOperatorFacts('Mod', 2, integerWhenAll);
+
+/**
+ * `Floor`: the greatest integer not greater than its real operand, written
+ * `Math.floor(x)`. The result is an integer, as the engine type of
+ * `Floor(x)` is: `Floor(-2.5)` is `-3`. `Floor(-0)` is `-0`, where the
+ * interpreter gives `0`, as on the existing route.
+ */
+const floorFacts = realOperatorFacts('Floor', 1, () => 'integer');
+const floorRule = {
+  walk: (node, scope, context, w) => {
+    const constant = isFunction(node) ? inexactJumpConstant(node.ops) : undefined;
+    if (constant !== undefined)
+      return w.refuse(
+        node,
+        'signature',
+        `Floor of an operand with the exact constant ${constant.toString()}, ` +
+          `which no double holds exactly, is not in the structured route: the ` +
+          `existing compiler rewrites such a node or declines it ` +
+          `(inexact-jump-operand)`
+      );
+    return floorFacts.walk(node, scope, context, w);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
+
+/**
+ * A closed subtree of `operands` whose exact value no double holds, or
+ * `undefined`. The existing compiler rewrites a rounding function whose
+ * operand adds such a constant to integer variables, so that the constant
+ * is rounded alone, and declines the other shapes of integer variables and
+ * such a constant (`jumpShiftRewrite()` in `compile-folding.ts`): with a
+ * double of the constant, `Floor(k + 2/3)` at `k = 2^52` is `2^52 + 1`,
+ * where the exact value is `2^52`. The structured route has neither the
+ * rewrite nor its decline, and refuses every operand with such a constant:
+ * this is wider than the existing rule, which keeps the structural code of
+ * an operand with a real variable (`Floor(x + 1/3)`).
+ *
+ * Three closed nodes are not such constants. A number literal that a
+ * double holds (an integer of the significand, `1/2`) or that is a float.
+ * A rational literal that is the factor of a product which the lowering
+ * writes as a division (`multiplyByRational()`: the first factor of the
+ * product for which `exactRationalDivisor()` answers), because the code
+ * divides by the denominator: `Floor(k/49)`, `Floor(29n/50)`. A captured
+ * symbol whose value is an integer that a double holds
+ * (`Floor((k - 1)/N)` with `N = 32`). A rounding node inside the operand
+ * is judged on its own.
+ *
+ * Every other closed node is such a constant: `Sqrt(2)`, a second rational
+ * factor of a product, and a captured symbol whose value is a rational or
+ * a float. The emitter writes the value of a capture as a number literal,
+ * so a capture `N = 1/49` in `Floor(N * k)` would be the rounded double
+ * `0.0204…`, and the code would give 0 at `k = 49`, where the value is 1.
+ * The existing rule gives its exemptions to literals only, too.
+ */
+function inexactJumpConstant(
+  operands: readonly Expression[]
+): Expression | undefined {
+  const exact = (n: Expression): boolean => {
+    if (!isNumber(n)) return false;
+    if (!n.isExact) return true;
+    const nv = n.numericValue;
+    return typeof nv === 'number' || exactDoubleValue(nv) !== undefined;
+  };
+  /** `node` is the factor of `parent` that the lowering divides by. */
+  const divisionFactor = (
+    node: Expression,
+    parent: Expression | undefined
+  ): boolean =>
+    isFunction(parent, 'Multiply') &&
+    parent.ops.find((op) => exactRationalDivisor(op) !== undefined) === node;
+  /** An integer that a double holds, as the value of a captured symbol. */
+  const safeInteger = (value: Expression | undefined): boolean =>
+    value !== undefined &&
+    isNumber(value) &&
+    value.isExact &&
+    value.im === 0 &&
+    Number.isSafeInteger(value.re);
+  const visit = (node: Expression, parent: Expression | undefined): Expression | undefined => {
+    if (node.unknowns.length === 0) {
+      if (isNumber(node))
+        return exact(node) || divisionFactor(node, parent) ? undefined : node;
+      // `True` and `False` are not numbers: the rule of `Floor` refuses a
+      // boolean operand.
+      if (isSymbol(node, 'True') || isSymbol(node, 'False')) return undefined;
+      if (isSymbol(node) && safeInteger(node.valueDefinition?.value))
+        return undefined;
+      return node;
+    }
+    if (!isFunction(node) || SHIFT_JUMP_HEADS.has(node.operator)) return undefined;
+    for (const op of node.ops) {
+      const found = visit(op, node);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  for (const op of operands) {
+    const found = visit(op, undefined);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * `Divide`: the real quotient of two real operands, written `a / b`. The
+ * result is real, also for integer operands. A zero divisor gives
+ * `±Infinity` or `NaN`, where the interpreter gives `ComplexInfinity` or
+ * `NaN`, as on the existing route. The canonical form writes a quotient by
+ * a number literal as a product (`Divide(k, 2)` is `Multiply(1/2, k)`).
+ */
+const divideRule = realOperatorFacts('Divide', 2, () => 'real');
+
+/**
+ * `Power` with the literal exponent 2: the product of the operand with
+ * itself, the operand evaluated once (the lowering writes a `multiply` of
+ * one value by itself). A real operand gives a real result, an integer one
+ * an integer, a complex one a complex result. The existing emitter writes
+ * `_SYS.pow2(x)` (`x * x`) for a real operand and the same components for
+ * a complex one. Every other exponent is refused.
+ */
+const powerRule = {
+  walk: (node, scope, context, w) => {
+    if (
+      !isFunction(node) ||
+      node.nops !== 2 ||
+      !isNumber(node.op2) ||
+      node.op2.re !== 2 ||
+      node.op2.im !== 0
+    )
+      return w.refuse(
+        node,
+        'signature',
+        'Power is in the structured route only with the literal exponent 2'
+      );
+    const [base, exponent] = operandFacts(node, scope, context, w);
+    if (base.type.kind === 'boolean')
+      return w.refuse(
+        node,
+        'signature',
+        'Power with a boolean operand is not in the structured route'
+      );
+    const type = base.type.kind === 'integer' ? { kind: 'integer' as const }
+      : base.type.kind === 'complex' ? { kind: 'complex' as const }
+      : { kind: 'real' as const };
+    return w.valueFacts(node, type, [
+      w.convert(base, base.type)!,
+      w.convert(exponent, exponent.type)!,
+    ]);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
+
+/**
+ * `Loop` over `Element(k, Range(a, b))`, as a statement: the rule of a
+ * counted loop of the pass (`walkCountedLoop()`), and bounds whose facts
+ * are integers. The admission of the structured route checks the rest of
+ * the form (no step, no guard, the statements of the body).
+ */
+const loopRule = {
+  walk: (node, scope, context, w) => {
+    const spec = isFunction(node) && node.nops === 2 ? node.op2 : undefined;
+    if (
+      !isFunction(spec, 'Element') ||
+      spec.nops !== 2 ||
+      !isFunction(spec.op2, 'Range') ||
+      spec.op2.nops !== 2
+    )
+      return w.refuse(
+        node,
+        'signature',
+        'Loop is in the structured route only over Element(k, Range(a, b))'
+      );
+    for (const bound of spec.op2.ops)
+      if (w.value(bound, scope, context).type.kind !== 'integer')
+        return w.refuse(
+          node,
+          'signature',
+          `The bound \`${bound.toString()}\` of \`Loop\` does not have an integer ` +
+            `fact: the structured route reads a bound as an integer`
+        );
+    return walkCountedLoop(node, scope, context, w);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
 
 /** `Min` and `Max`: real operands, written `Math.min()` and `Math.max()`. */
 function extremumRule(operator: 'Min' | 'Max') {
@@ -479,12 +754,48 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   If: { walk: walkIf },
   Multiply: multiplyRule,
   Less: comparisonRule('Less'),
+  LessEqual: comparisonRule('LessEqual'),
   Equal: comparisonRule('Equal'),
+  Mod: modRule,
+  Floor: floorRule,
+  Divide: divideRule,
+  Power: powerRule,
+  Loop: loopRule,
   And: logicalRule('And'),
   Or: logicalRule('Or'),
   Min: extremumRule('Min'),
   Max: extremumRule('Max'),
 };
+
+/**
+ * The type of a local on the structured route (`FragmentDefinition.localType`):
+ * `integer` for a local declared `integer` with an integer value, and for a
+ * local declared with no type (`Declare(c, {value: Mod(k, 3)})`, a `let`)
+ * whose value is an integer and whose type, as the engine infers it from
+ * every value written to it, is `integer`. Every other local has the rule of
+ * the pass, which widens an integer to a real: a local declared `real`, and
+ * a `let` local written later with a real value (`let c = 1` then
+ * `c := c + x` with `x: real`), which the interpreter accepts and for which
+ * the engine infers `real`. A write of a real value to an integer local is
+ * refused by the rule of `Assign`. With an integer local, a loop bound
+ * (`Range(1, m)`) and an integer parameter of a helper can read the local.
+ */
+function structuredLocalType(local: {
+  value: { kind: string };
+  declared: string | undefined;
+  inferred: Type | undefined;
+}): { kind: 'integer' } | undefined {
+  if (local.value.kind !== 'integer') return undefined;
+  if (local.declared === 'integer') return { kind: 'integer' };
+  if (
+    local.declared === undefined &&
+    local.inferred !== undefined &&
+    local.inferred !== 'unknown' &&
+    isSubtype(local.inferred, 'integer')
+  )
+    return { kind: 'integer' };
+  return undefined;
+}
 
 /**
  * What a route admits. The existing route keeps the definition, the heads
@@ -519,7 +830,7 @@ function structuredAdmission(
     };
   return {
     structured: true,
-    definition: { ...definition, rules },
+    definition: { ...definition, rules, localType: structuredLocalType },
     heads: new Set(Object.keys(rules)),
     testOperations,
   };
@@ -598,6 +909,7 @@ function recordStructured(
     effects: effectFacts(prepared.annotation),
     testOperations: admission.testOperations,
     numericPolicy: registry.mode,
+    iterationBudget: target.iterationBudget,
   };
   recordStructuredPreparation(target, preparation);
 }
@@ -817,6 +1129,12 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           );
         return;
       }
+      // A `Loop` is a statement of the body of a root `Function`.
+      if (structured && isFunction(node, 'Loop'))
+        throw new Error(
+          'JS scalar fragment: the structured route admits a Loop only as a ' +
+            'statement of the body of a root Function'
+        );
       if (isFunction(node) && !Object.hasOwn(definition.rules, node.operator)) {
         collectHelper(node, prepared.target, named, admission);
         for (const operand of node.ops) check(operand);
@@ -996,45 +1314,56 @@ function attachBoundFunction(
     throw new Error(
       'JS scalar fragment: a bound body requires one straight-line block'
     );
-  // The declared type of each local, by its name.
+  // The declared type of each local, by its name: `let` for a local of the
+  // form `Declare(t, {value: …})`, which has the type of its value.
   const locals = new Map<string, string>();
-  /** The local that `declaration` declares, with its declared type. */
+  /** The local that `declaration` declares, with its declared type. The
+   *  structured route also admits the form of a `let`,
+   *  `Declare(t, {value: …})`, which `parseEpsil()` gives. */
   const declareLocal = (declaration: Expression) => {
+    const letForm =
+      admission.structured &&
+      isFunction(declaration, 'Declare') &&
+      declaration.nops === 2 &&
+      declareTypeOperand(declaration.ops) === undefined &&
+      declareValueOperand(declaration.ops) !== undefined;
     if (
       !isFunction(declaration, 'Declare') ||
       !isLibraryOperator(declaration, 'Declare') ||
-      declaration.nops !== 3 ||
+      (declaration.nops !== 3 && !letForm) ||
       !isSymbol(declaration.op1)
     )
       throw new Error(
         'JS scalar fragment: one explicit initialized local required'
       );
     const local = declaration.op1.symbol;
-    const declared = declaredTypeSource(declaration.op2);
+    const declared = letForm ? 'let' : declaredTypeSource(declaration.op2);
     if (
       !declared ||
-      !['real', 'integer', 'complex', 'boolean'].includes(declared) ||
+      !['real', 'integer', 'complex', 'boolean', 'let'].includes(declared) ||
       inputs.some((input) => input.name === local) ||
       locals.has(local) ||
+      names.has(local) ||
       local === 'True' ||
       local === 'False'
     )
       throw new Error('JS scalar fragment: unsupported local declaration');
-    return { local, declared, value: declaration.op3 };
+    return {
+      local,
+      declared,
+      value: letForm ? declareValueOperand(declaration.ops)! : declaration.op3,
+    };
   };
+  const names = new Set(inputs.map((input) => input.name));
   const declaration = body.op1;
   const { local, declared, value: initializer } = declareLocal(declaration);
-  const names = new Set(inputs.map((input) => input.name));
-  // The structured route admits more than one local: every top-level
-  // declaration of the block.
+  // The structured route admits more than one local: every declaration of
+  // the block, of a nested block, of a branch and of a loop body, and the
+  // index of each loop.
   const bindings = new Set([
     ...names,
     local,
-    ...(admission.structured
-      ? body.ops.flatMap((s) =>
-          isFunction(s, 'Declare') && isSymbol(s.op1) ? [s.op1.symbol] : []
-        )
-      : []),
+    ...(admission.structured ? boundNames(body) : []),
   ]);
   const named: NamedCalls = { calls: new Set(), structured: registry };
   // The heads that are not helper calls. The existing route also keeps
@@ -1060,6 +1389,11 @@ function attachBoundFunction(
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
     if (isNumber(node)) return;
+    if (admission.structured && isFunction(node, 'Loop'))
+      throw new Error(
+        'JS scalar fragment: a Loop used as a value is not in the structured ' +
+          'route: the interpreter gives a Loop the value Nothing'
+      );
     if (isSymbol(node)) {
       if (
         names.has(node.symbol) ||
@@ -1109,15 +1443,42 @@ function attachBoundFunction(
   checkValue(initializer);
   checkWrite(initializer);
   names.add(local);
-  // The structured route: more declarations, writes to the declared locals
-  // at the top level of the block, and `If` statements whose branches
-  // write them (`checkStructuredStatement()`). Each write makes a new value
-  // in the lowering.
-  /** A statement of the body of the structured route. `top`: a statement
-   *  of the block of the body, not of a branch. */
-  const checkStructuredStatement = (statement: Expression, top: boolean): void => {
+  // The structured route: more declarations, writes to the declared locals,
+  // `If` statements and counted loops (`checkStructuredStatement()`). Each
+  // write makes a new value in the lowering.
+  /** The index of each loop around the current statement. */
+  const indices = new Set<string>();
+  /** Run `check` on the statements of a nested block or loop body: the
+   *  locals that it declares are not visible after it. */
+  const nested = (check: () => void): void => {
+    const outerNames = new Set(names);
+    const outerLocals = new Map(locals);
+    const outerIndices = new Set(indices);
+    try {
+      check();
+    } finally {
+      names.clear();
+      for (const n of outerNames) names.add(n);
+      locals.clear();
+      for (const [n, t] of outerLocals) locals.set(n, t);
+      indices.clear();
+      for (const n of outerIndices) indices.add(n);
+    }
+  };
+  /**
+   * A statement of the body of the structured route. `place`: the
+   * statement is in the block of the body (`top`), in a branch of an `If`
+   * (`branch`), or in the body of a `Loop` (`loop`), the innermost one.
+   * `inBlock`: the statement is a statement of a block, where a `Declare`
+   * is admitted, and not a whole branch or a whole loop body.
+   */
+  const checkStructuredStatement = (
+    statement: Expression,
+    place: 'top' | 'branch' | 'loop',
+    inBlock: boolean
+  ): void => {
     const head = isFunction(statement) ? statement.operator : statement.toString();
-    if (isFunction(statement, 'Declare') && top) {
+    if (isFunction(statement, 'Declare') && inBlock) {
       const declared = declareLocal(statement);
       locals.set(declared.local, declared.declared);
       checkValue(declared.value);
@@ -1128,6 +1489,12 @@ function attachBoundFunction(
     if (isFunction(statement, 'Assign') && isLibraryOperator(statement, 'Assign') &&
         statement.nops === 2 && isSymbol(statement.op1)) {
       const name = statement.op1.symbol;
+      // The interpreter gives the index the next element of the range at
+      // the next iteration, whatever the body writes to it.
+      if (indices.has(name))
+        throw new Error(
+          `JS scalar fragment: the structured route admits no write to the loop index ${name}`
+        );
       if (!locals.has(name) || !names.has(name))
         throw new Error(
           `JS scalar fragment: only writes to a declared local are supported, ` +
@@ -1144,21 +1511,79 @@ function attachBoundFunction(
         (statement.nops === 2 || statement.nops === 3)) {
       checkValue(statement.op1);
       checkCondition(statement);
-      for (const branch of statement.ops.slice(1)) checkStructuredStatement(branch, false);
+      for (const branch of statement.ops.slice(1))
+        nested(() => checkStructuredStatement(branch, 'branch', false));
       return;
     }
-    if (isFunction(statement, 'Block') && isLibraryOperator(statement, 'Block') && !top) {
-      for (const inner of statement.ops) checkStructuredStatement(inner, false);
+    if (isFunction(statement, 'Block') && isLibraryOperator(statement, 'Block') &&
+        place !== 'top') {
+      nested(() => {
+        for (const inner of statement.ops) checkStructuredStatement(inner, place, true);
+      });
       return;
     }
+    if (isFunction(statement, 'Loop') && isLibraryOperator(statement, 'Loop'))
+      return checkLoop(statement);
     throw new Error(
       `JS scalar fragment: the structured route admits no statement ${head}` +
-        (top ? '' : ' in a branch of an If')
+        (place === 'top'
+          ? ''
+          : place === 'branch'
+            ? ' in a branch of an If'
+            : ' in the body of a Loop')
     );
+  };
+  /**
+   * A `Loop` statement: `Loop(body, Element(k, Range(a, b)))`, with bounds
+   * of the type `integer` and an index that names no parameter, local or
+   * other index. The interpreter evaluates the bounds once and visits each
+   * integer from `a` to `b`, in steps of -1 when `b` is less than `a`. A
+   * loop with no index set, with a step or a guard, or over another
+   * collection is refused.
+   */
+  const checkLoop = (loop: Expression & { ops: readonly Expression[] }): void => {
+    const spec = loop.ops[1];
+    if (loop.ops.length !== 2)
+      throw new Error(
+        'JS scalar fragment: the structured route admits a Loop only with one index set, ' +
+          'Element(k, Range(a, b))'
+      );
+    // `Element` and `Range` are the operators of the library: a user
+    // function of one of these names is not an index set.
+    if (
+      !isFunction(spec, 'Element') ||
+      !isLibraryOperator(spec, 'Element') ||
+      spec.nops !== 2 ||
+      !isSymbol(spec.op1) ||
+      !isFunction(spec.op2, 'Range') ||
+      !isLibraryOperator(spec.op2, 'Range') ||
+      spec.op2.nops !== 2
+    )
+      throw new Error(
+        `JS scalar fragment: the structured route admits a Loop only over ` +
+          `Element(k, Range(a, b)), with no step and no guard, and not over ${spec.toString()}`
+      );
+    for (const bound of spec.op2.ops) {
+      checkValue(bound);
+      if (!isSubtype(bound.type.type, 'integer'))
+        throw new Error(
+          `JS scalar fragment: the bound ${bound.toString()} of a Loop does not have the type integer`
+        );
+    }
+    const index = spec.op1.symbol;
+    if (names.has(index) || locals.has(index) || index === 'True' || index === 'False')
+      throw new Error(
+        `JS scalar fragment: the loop index ${index} has the name of a parameter, a local or another index`
+      );
+    nested(() => {
+      names.add(index);
+      indices.add(index);
+      checkStructuredStatement(loop.ops[0], 'loop', false);
+    });
   };
   if (admission.structured)
     for (const statement of body.ops.slice(1, -1))
-      checkStructuredStatement(statement, true);
+      checkStructuredStatement(statement, 'top', true);
   for (const statement of admission.structured ? [] : body.ops.slice(1, -1)) {
     if (
       !isFunction(statement, 'Assign') ||
@@ -1190,7 +1615,8 @@ function attachBoundFunction(
       if (!scope)
         throw new Error('JS scalar fragment invariant: missing local binding');
       // Each write of a local, in the scope where the pass typed it: a
-      // statement of the block, or of a branch of an `If` statement.
+      // statement of the block, of a branch of an `If` statement, or of the
+      // body of a `Loop`, which is typed in the scope of the loop.
       const checkWrites = (
         statement: Expression,
         scope: FragmentScope<ScalarRepresentation>
@@ -1198,6 +1624,13 @@ function attachBoundFunction(
         if (!isFunction(statement)) return;
         if (statement.operator === 'If') {
           for (const branch of statement.ops.slice(1)) checkWrites(branch, scope);
+          return;
+        }
+        if (statement.operator === 'Loop') {
+          const inner = scope.inner.get(statement);
+          if (!inner)
+            throw new Error('JS scalar fragment invariant: missing loop scope');
+          checkWrites(statement.op1, inner);
           return;
         }
         if (statement.operator === 'Block') {
@@ -1215,8 +1648,10 @@ function attachBoundFunction(
         if (!binding || !('representation' in binding))
           throw new Error('JS scalar fragment invariant: missing local binding');
         const value =
-          statement.operator === 'Declare' ? statement.op3 : statement.op2;
-        const valueFacts = scope.facts.get(value);
+          statement.operator === 'Declare'
+            ? declareValueOperand(statement.ops)
+            : statement.op2;
+        const valueFacts = value === undefined ? undefined : scope.facts.get(value);
         if (
           !valueFacts ||
           !('representation' in valueFacts) ||
@@ -1244,6 +1679,23 @@ function attachBoundFunction(
     inputs: () =>
       inputs.map((input) => structuredInput(input.name, input.type!)),
   });
+}
+
+/** The names that `statement` binds: the local of each `Declare` and the
+ *  index of each `Loop`, in a nested block, branch or loop body too. */
+function boundNames(statement: Expression, names: string[] = []): string[] {
+  if (!isFunction(statement)) return names;
+  if (statement.operator === 'Declare' && isSymbol(statement.op1))
+    names.push(statement.op1.symbol);
+  if (
+    statement.operator === 'Loop' &&
+    isFunction(statement.op2, 'Element') &&
+    isSymbol(statement.op2.op1)
+  )
+    names.push(statement.op2.op1.symbol);
+  if (['Block', 'If', 'Loop'].includes(statement.operator))
+    for (const s of statement.ops) boundNames(s, names);
+  return names;
 }
 
 /** The input `name` of the structured route, with the type `type`. */
@@ -1735,8 +2187,11 @@ function resolveHelper(
       for (const operand of node.ops) check(operand);
       return;
     }
+    // A `Loop` is a statement of the body of a root `Function`, not of a
+    // helper body.
     if (
       !isFunction(node) ||
+      node.operator === 'Loop' ||
       !isAdmittedOperator(node, admission) ||
       !(
         (admission.structured &&

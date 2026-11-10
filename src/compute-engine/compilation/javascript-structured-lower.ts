@@ -32,9 +32,21 @@
  * A local that no later statement reads is not merged; a read of it after
  * the `If` throws. An `If` statement with no merged value and no effect is
  * not lowered.
+ *
+ * A `Loop` over `Element(k, Range(a, b))` is a `loop` whose bounds are
+ * evaluated once, before it. A local declared outside the loop and written
+ * in its body is a carried value when a later statement reads it, or when
+ * the body reads it before it writes it in the same iteration; its
+ * parameter in the body is its value at the start of an iteration, and the
+ * result of the loop is its value after the loop. A local written in the
+ * body that is not carried has no value at the start of an iteration and
+ * after the loop: a read of it there throws. A local declared in the body
+ * is a value of the body region.
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
+import { declareValueOperand } from './compile-declarations.js';
+import { exactRationalDivisor } from './compiler-type-facts.js';
 import {
   isFunction,
   isNumber,
@@ -49,6 +61,7 @@ import type {
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
   joinEffects,
+  operationCanAbort,
   type EffectFact,
   type IRCapture,
   type IRFunction,
@@ -108,6 +121,9 @@ export type StructuredPreparation = {
    *  trace id of each. */
   readonly testOperations: ReadonlyMap<string, string>;
   readonly numericPolicy: 'strict' | 'complex';
+  /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
+   *  recorded on each `loop`. */
+  readonly iterationBudget?: number;
 };
 
 const PREPARATIONS = new WeakMap<
@@ -143,7 +159,18 @@ const fail = (message: string): never => {
 const OPERATIONS: Readonly<
   Record<
     string,
-    'add' | 'negate' | 'multiply' | 'less' | 'equal' | 'min' | 'max' | 'sqrt'
+    | 'add'
+    | 'negate'
+    | 'multiply'
+    | 'less'
+    | 'less-equal'
+    | 'equal'
+    | 'min'
+    | 'max'
+    | 'sqrt'
+    | 'mod'
+    | 'floor'
+    | 'divide'
   >
 > = {
   // The rule of `Sqrt` (`javascript-fragment-target.ts`) records the
@@ -153,9 +180,13 @@ const OPERATIONS: Readonly<
   Negate: 'negate',
   Multiply: 'multiply',
   Less: 'less',
+  LessEqual: 'less-equal',
   Equal: 'equal',
   Min: 'min',
   Max: 'max',
+  Mod: 'mod',
+  Floor: 'floor',
+  Divide: 'divide',
 };
 
 function scalarKind(type: { readonly kind: string }): ScalarKind {
@@ -258,9 +289,11 @@ class Lowering {
   ): IRRegion {
     const operands = Array.isArray(value) ? value : [value as IRValue];
     operations.push({ kind: 'yield', operands, effect: 'pure', origin });
+    const canAbort = operations.some((op) => operationCanAbort(op, this.functions));
     return {
       operations,
       effect: joinEffects(...operations.map((op) => op.effect)),
+      ...(canAbort ? { canAbort: true as const } : {}),
     };
   }
 
@@ -447,12 +480,94 @@ class Lowering {
       return result;
     }
 
+    // `Power(x, 2)`: the product of the operand with itself. The operand is
+    // evaluated once. The rule of `Power` admits only the literal exponent
+    // 2, which has no operation.
+    if (operator === 'Power') {
+      const operand = this.convert(
+        this.value(node.ops[0], scope, operations),
+        facts.conversions?.[0],
+        node,
+        operations
+      );
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'multiply',
+        result,
+        operands: [operand, operand],
+        effect,
+        origin: node,
+      });
+      return result;
+    }
+
+    if (
+      operator === 'Multiply' &&
+      facts.representation !== 'complex' &&
+      node.ops.some((op) => exactRationalDivisor(op) !== undefined)
+    )
+      return this.multiplyByRational(node, facts, scope, operations, effect);
+
     const kind = Object.hasOwn(OPERATIONS, operator) ? OPERATIONS[operator] : undefined;
     if (kind === undefined) return fail(`no lowering for the head ${operator}`);
     const operands = this.operands(node, facts, scope, operations);
     const result = this.resultOf(facts);
     operations.push({ kind, result, operands, effect, origin: node });
     return result;
+  }
+
+  /**
+   * A product with an exact rational factor `p/q` (`exactRationalDivisor()`:
+   * `q` is not 1 nor a power of two), lowered as the existing emitter
+   * writes it (`Multiply` in `compile-operators.ts`): the product of the
+   * other factors, in order, divided by `q`, then multiplied by `p` when `p`
+   * is not 1, or negated when `p` is -1. So `Multiply(1/49, k)` is
+   * `k / 49`, `Multiply(29/50, n)` is `n / 50 * 29` and `Multiply(2/3, x,
+   * y)` is `x * y / 3 * 2`. A division is correctly rounded, so `k / 49` is
+   * exactly 1 at `k = 49`, where the product by the rounded `1/49` is
+   * `0.9999999999999999`. The first such factor is the divisor; another
+   * rational factor is a number literal of the product.
+   */
+  private multiplyByRational(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const index = node.ops.findIndex((op) => exactRationalDivisor(op) !== undefined);
+    const rational = node.ops[index];
+    const { p, q } = exactRationalDivisor(rational)!;
+    const factors = node.ops.flatMap((operand, i) =>
+      i === index
+        ? []
+        : [this.convert(this.value(operand, scope, operations), facts.conversions?.[i], node, operations)]
+    );
+    const literal = (value: number): IRValue => {
+      const result = this.newValue('integer', 'number');
+      operations.push({ kind: 'literal', value, result, operands: [], effect: 'pure', origin: rational });
+      return result;
+    };
+    const push = (
+      kind: 'multiply' | 'divide' | 'negate',
+      operands: IRValue[],
+      result: IRValue
+    ): IRValue => {
+      operations.push({ kind, result, operands, effect, origin: node });
+      return result;
+    };
+    const numerator =
+      factors.length > 1
+        ? push(
+            'multiply',
+            factors,
+            this.newValue(factors.every((f) => f.type === 'integer') ? 'integer' : 'real', 'number')
+          )
+        : factors[0];
+    const quotient = push('divide', [numerator, literal(q)], this.newValue('real', 'number'));
+    if (p === 1) return quotient;
+    if (p === -1) return push('negate', [quotient], this.newValue('real', 'number'));
+    return push('multiply', [quotient, literal(p)], this.newValue('real', 'number'));
   }
 
   /**
@@ -573,10 +688,13 @@ class Lowering {
 
   /**
    * A statement: a `Declare` binds its local to the value of its
-   * initializer; an `Assign` gives the local a new value; an `If` statement
-   * merges the values of the locals that its branches write; a `Block` (a
-   * branch of an `If`) is its statements. The admission of the structured
-   * route admits no other statement.
+   * initializer (`Declare(t, type, value)`, or `Declare(t, {value: …})`,
+   * the form of a `let`); an `Assign` gives the local a new value; an `If`
+   * statement merges the values of the locals that its branches write; a
+   * `Loop` carries the values of the locals that its body writes
+   * (`loopStatement()`); a `Block` (a branch of an `If`, the body of a
+   * `Loop`) is its statements. The admission of the structured route admits
+   * no other statement.
    */
   private statement(
     node: Expression,
@@ -584,10 +702,13 @@ class Lowering {
     operations: IROperation[],
     liveOut: ReadonlySet<string>
   ): void {
-    if (isFunction(node, 'Declare') && node.nops === 3 && isSymbol(node.op1)) {
+    const initializer = isFunction(node, 'Declare')
+      ? declareValueOperand(node.ops)
+      : undefined;
+    if (isFunction(node, 'Declare') && initializer !== undefined && isSymbol(node.op1)) {
       const name = node.op1.symbol;
       const binding = scope.bindings.get(name);
-      const value = this.value(node.op3, scope, operations);
+      const value = this.value(initializer, scope, operations);
       if (
         binding === undefined ||
         !('representation' in binding) ||
@@ -606,8 +727,14 @@ class Lowering {
       const locals = binder === undefined ? undefined : this.bound.get(binder);
       const binding = binder?.bindings.get(name);
       // The admission and the pass refuse a write to a name that is not a
-      // local; an input of the program has no value in `bound`.
-      if (locals === undefined || !locals.has(name) || binding === undefined)
+      // local; an input of the program is bound in the root scope. A local
+      // can have no value before the write: a local that a loop body writes
+      // and does not carry (`loopStatement()`).
+      if (
+        locals === undefined ||
+        binder === this.prep.annotation.scope ||
+        binding === undefined
+      )
         return fail(`the name ${name} is not a declared local`);
       if (!('representation' in binding) || binding.representation !== value.representation)
         fail(`a write to the local ${name} changes its representation`);
@@ -616,6 +743,8 @@ class Lowering {
     }
     if (isFunction(node, 'If') && (node.nops === 2 || node.nops === 3))
       return this.ifStatement(node, scope, operations, liveOut);
+    if (isFunction(node, 'Loop') && node.nops === 2)
+      return this.loopStatement(node, scope, operations, liveOut);
     if (isFunction(node, 'Block')) {
       const inner = scope.inner.get(node);
       if (inner === undefined) return fail('no scope for a block');
@@ -658,8 +787,17 @@ class Lowering {
       then: IRValue;
       else: IRValue;
     }[] = [];
+    // The names of each scope that has values before the `If`: a name with
+    // no value before it (a local that a loop body writes and does not
+    // carry, `loopStatement()`) has a value after it when both branches
+    // write it. A scope that a branch opens is not visible after the `If`.
     for (const [binder, locals] of before)
-      for (const [name, value] of locals) {
+      for (const name of new Set([
+        ...locals.keys(),
+        ...(a.values.get(binder)?.keys() ?? []),
+        ...(b.values.get(binder)?.keys() ?? []),
+      ])) {
+        const value = locals.get(name);
         const then = a.values.get(binder)?.get(name);
         const otherwise = b.values.get(binder)?.get(name);
         if (then === value && otherwise === value) continue;
@@ -699,8 +837,14 @@ class Lowering {
     );
     // An `If` with no result and no effect has nothing to give: it is
     // not lowered, and its condition is lowered only when it has an effect
-    // (with the pure operations that the effect reads).
-    if (results.length === 0 && joinEffects(then.effect, otherwise.effect) === 'pure') {
+    // (with the pure operations that the effect reads). A branch that can
+    // abort (a loop with an iteration budget) keeps the `If`.
+    if (
+      results.length === 0 &&
+      joinEffects(then.effect, otherwise.effect) === 'pure' &&
+      then.canAbort !== true &&
+      otherwise.canAbort !== true
+    ) {
       if (joinEffects(...condition.map((op) => op.effect)) !== 'pure')
         operations.push(...condition);
       return;
@@ -717,15 +861,138 @@ class Lowering {
     });
   }
 
+  /**
+   * A `Loop` statement over `Element(k, Range(a, b))`, which the admission
+   * of the structured route checked: a `loop` whose operands are the values
+   * of `a` and `b`, evaluated here, before the loop, and the value before
+   * the loop of each carried local.
+   *
+   * The carried locals are the locals declared outside the loop that the
+   * body writes, and that `liveOut` names or that the body reads before it
+   * writes them in an iteration (`exposedReads()`), in the order of their
+   * bindings. The parameter of a carried local has the type of its value
+   * before the loop; when the body yields a real value for an integer
+   * parameter, the body is lowered again with a real parameter, as the two
+   * values of an `If` merge to `real`, until no parameter changes (each
+   * pass but the last makes at least one more parameter real, so there are
+   * at most one pass per carried local, and one more). A local that the body writes and
+   * does not carry has no value at the start of the body and after the
+   * loop. The index is bound in the scope of the loop.
+   */
+  private loopStatement(
+    node: Expression & { ops: readonly Expression[] },
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    liveOut: ReadonlySet<string>
+  ): void {
+    const [body, spec] = node.ops;
+    const loopScope = scope.inner.get(node);
+    if (
+      loopScope === undefined ||
+      !isFunction(spec, 'Element') ||
+      spec.nops !== 2 ||
+      !isSymbol(spec.op1) ||
+      !isFunction(spec.op2, 'Range') ||
+      spec.op2.nops !== 2
+    )
+      return fail(`no lowering for the loop ${node.toString()}`);
+    const index = spec.op1.symbol;
+    const bound = (b: Expression) => {
+      const value = this.value(b, scope, operations);
+      if (value.type !== 'integer')
+        fail(`the bound ${b.toString()} of a loop is not an integer`);
+      return value;
+    };
+    const from = bound(spec.op2.op1);
+    const to = bound(spec.op2.op2);
+
+    // The locals of the scopes around the loop that the body writes.
+    const written = assignedNames(body);
+    const candidates: { binder: FragmentScope<ScalarRepresentation>; name: string }[] = [];
+    for (const name of written) {
+      const binder = bindingScope(scope, name);
+      if (binder !== undefined && this.bound.get(binder)?.has(name))
+        candidates.push({ binder, name });
+    }
+    const exposed = exposedReads(body);
+    const carried = candidates.filter(
+      ({ name }) => liveOut.has(name) || exposed.has(name)
+    );
+    const initial = carried.map(({ binder, name }) => this.bound.get(binder)!.get(name)!);
+    const carriedNames = new Set(carried.map((c) => c.name));
+
+    const before = this.snapshot();
+    let types = initial.map((v) => v.type);
+    for (let pass = 0; ; pass++) {
+      this.restore(before);
+      const indexValue = this.newValue('integer', 'number');
+      const parameters = carried.map((c, i) =>
+        this.newValue(types[i], initial[i].representation as ScalarRepresentation)
+      );
+      for (const { binder, name } of candidates) this.bound.get(binder)!.delete(name);
+      carried.forEach(({ binder, name }, i) =>
+        this.bound.get(binder)!.set(name, parameters[i])
+      );
+      this.bound.set(loopScope, new Map([[index, indexValue]]));
+      const inner: IROperation[] = [];
+      this.statement(body, loopScope, inner, carriedNames);
+      const next = carried.map(({ binder, name }) => {
+        const value = this.bound.get(binder)?.get(name);
+        if (value === undefined)
+          return fail(`the carried local ${name} has no value at the end of the loop body`);
+        return value;
+      });
+      // A real next value of an integer parameter: lower the body again
+      // with a real parameter. A parameter that is real is never changed.
+      const widened = next.map((v, i) =>
+        v.type === types[i]
+          ? types[i]
+          : v.type === 'real' && types[i] === 'integer'
+            ? 'real'
+            : v.type === 'integer' && types[i] === 'real'
+              ? 'real'
+              : fail(
+                  `the carried local ${carried[i].name} has the type ${types[i]} before the loop and ${v.type} in its body`
+                )
+      );
+      if (widened.some((t, i) => t !== types[i])) {
+        if (pass >= carried.length)
+          fail('the types of the carried locals of a loop do not settle');
+        types = widened;
+        continue;
+      }
+      const region: IRRegion = {
+        ...this.region(inner, body, next),
+        parameters: [indexValue, ...parameters],
+      };
+      this.restore(before);
+      const results = parameters.map((p) => this.newValue(p.type, p.representation as ScalarRepresentation));
+      for (const { binder, name } of candidates) this.bound.get(binder)!.delete(name);
+      carried.forEach(({ binder, name }, i) => this.bound.get(binder)!.set(name, results[i]));
+      operations.push({
+        kind: 'loop',
+        results,
+        operands: [from, to, ...initial],
+        body: region,
+        effect: region.effect,
+        iterationBudget: this.prep.iterationBudget,
+        origin: node,
+      });
+      return;
+    }
+  }
+
   /** The value of each local and parameter, copied. */
   private snapshot(): Map<FragmentScope<ScalarRepresentation>, Map<string, IRValue>> {
     return new Map([...this.bound].map(([scope, locals]) => [scope, new Map(locals)]));
   }
 
-  /** Make the values of `snapshot` the values of the locals again. */
+  /** Make the values of `snapshot` the values of the locals again. A
+   *  scope that has no values in `snapshot` has none after. */
   private restore(
     snapshot: ReadonlyMap<FragmentScope<ScalarRepresentation>, ReadonlyMap<string, IRValue>>
   ): void {
+    this.bound.clear();
     for (const [scope, locals] of snapshot) this.bound.set(scope, new Map(locals));
   }
 
@@ -808,6 +1075,70 @@ function bindingScope(
   for (let s: FragmentScope<ScalarRepresentation> | undefined = scope; s; s = s.parent)
     if (s.bindings.has(name)) return s;
   return undefined;
+}
+
+/** The names that an `Assign` of `statement` writes, in a nested block,
+ *  branch or loop too. */
+function assignedNames(statement: Expression, names = new Set<string>()): Set<string> {
+  if (!isFunction(statement)) return names;
+  if (statement.operator === 'Assign' && isSymbol(statement.op1))
+    names.add(statement.op1.symbol);
+  else if (statement.operator === 'Block' || statement.operator === 'If')
+    for (const s of statement.ops) assignedNames(s, names);
+  else if (statement.operator === 'Loop') assignedNames(statement.op1, names);
+  return names;
+}
+
+/**
+ * The names that `statement` can read before it writes them, when it runs
+ * from its start: a read on a path where no earlier statement of the path
+ * wrote the name. After an `If`, a name is written when both branches write
+ * it; after a `Loop`, the names that its body writes are not written,
+ * because the body can run no time. A read in the body of a nested `Loop`
+ * counts when no statement before it in the body, nor before the loop,
+ * writes the name. The admission of the structured route admits the
+ * statements `Block`, `Declare`, `Assign`, `If` and `Loop`; any other node
+ * is read as an expression.
+ */
+function exposedReads(statement: Expression): Set<string> {
+  const exposed = new Set<string>();
+  const reads = (node: Expression | undefined, written: ReadonlySet<string>) => {
+    if (node === undefined) return;
+    for (const name of namesIn(node)) if (!written.has(name)) exposed.add(name);
+  };
+  const visit = (node: Expression, written: Set<string>): Set<string> => {
+    if (!isFunction(node)) {
+      reads(node, written);
+      return written;
+    }
+    switch (node.operator) {
+      case 'Block':
+        return node.ops.reduce((w, s) => visit(s, w), written);
+      case 'Declare':
+        reads(declareValueOperand(node.ops), written);
+        return isSymbol(node.op1) ? new Set([...written, node.op1.symbol]) : written;
+      case 'Assign':
+        reads(node.op2, written);
+        return isSymbol(node.op1) ? new Set([...written, node.op1.symbol]) : written;
+      case 'If': {
+        reads(node.op1, written);
+        const a = visit(node.op2, new Set(written));
+        const b = node.nops === 3 ? visit(node.op3, new Set(written)) : written;
+        return new Set([...a].filter((name) => b.has(name)));
+      }
+      case 'Loop': {
+        // The bounds, then the body, which can run no time.
+        if (node.nops === 2) reads(node.op2, written);
+        visit(node.op1, new Set(written));
+        return written;
+      }
+      default:
+        reads(node, written);
+        return written;
+    }
+  };
+  visit(statement, new Set());
+  return exposed;
 }
 
 /** The names of the symbols of `node`, read or written. */

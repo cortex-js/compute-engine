@@ -11,10 +11,12 @@ import type { Expression } from '../global-types.js';
 import {
   definedValues,
   joinEffects,
+  operationCanAbort,
   regionsOf,
   weakerEffect,
   yieldedValues,
   type EffectFact,
+  type IRLoop,
   type IROperation,
   type IRProgram,
   type IRRegion,
@@ -30,12 +32,16 @@ export type PolicyOperationKind =
   | 'negate'
   | 'multiply'
   | 'less'
+  | 'less-equal'
   | 'equal'
   | 'min'
   | 'max'
   | 'and'
   | 'or'
   | 'sqrt'
+  | 'mod'
+  | 'floor'
+  | 'divide'
   | 'trace';
 
 /** The representations of the operands and of the result of an operation
@@ -108,6 +114,19 @@ export type RepresentationPolicy = {
  * type and the representation; each origin is one of `preparedNodes`, the
  * nodes of the prepared artifact that the program was lowered from.
  *
+ * For a `loop`: its bounds are integers; only the body of a loop has
+ * parameters, each defined once, at the entry of the body, and visible in
+ * the body and the regions nested in it only; the first parameter is the
+ * index, an integer; then, for each carried value, the loop has one
+ * initial value (an operand after the bounds), one parameter, one value
+ * that the body yields, and one result, in the same order, and the four
+ * have one representation; the parameter and the result have one type, and
+ * the initial value and the yielded value have that type, or are integers
+ * when it is `real` (as the two values of an `if` merge to `real`); the
+ * iteration budget is absent or a positive number. A region records that
+ * it can abort exactly when one of its operations can
+ * (`operationCanAbort()`).
+ *
  * A call cycle (a function that calls itself, directly or through other
  * functions) is accepted. The summary of the effects is correct for it:
  * the check of each call (its effect includes the effect of the body of
@@ -152,9 +171,14 @@ export function verifyProgram(
   const collect = (region: IRRegion) => {
     region.operations.forEach((op, index) => {
       for (const value of definedValues(op)) define(value, region, index);
-      for (const inner of regionsOf(op)) collect(inner);
+      for (const inner of regionsOf(op)) {
+        // The parameters of a region are defined at its entry (-1).
+        for (const parameter of inner.parameters ?? []) define(parameter, inner, -1);
+        collect(inner);
+      }
     });
   };
+  // The parameters of a function are the parameters of its body.
   for (const fn of program.functions) {
     for (const parameter of fn.parameters) define(parameter, fn.body, -1);
     collect(fn.body);
@@ -223,6 +247,10 @@ export function verifyProgram(
       fail(
         `a region of an if yields ${last.operands.length} values, and the if has ${count} results`
       );
+    if (owner?.kind === 'loop')
+      fail(
+        `the body of a loop yields ${last.operands.length} values, and the loop has ${count} results`
+      );
     fail(`the operation yield has ${last.operands.length} operands, not ${count}`);
   };
 
@@ -237,6 +265,8 @@ export function verifyProgram(
     owner?: IROperation
   ) => {
     verifyRegionShape(region, count, owner);
+    if (region.parameters !== undefined && owner?.kind !== 'loop')
+      fail('a region that is not the body of a loop has parameters');
     const effects: EffectFact[] = [];
     region.operations.forEach((op, index) => {
       const frames = [...outer, { region, index }];
@@ -252,7 +282,7 @@ export function verifyProgram(
           inner,
           frames,
           inFunction,
-          op.kind === 'if' ? op.results.length : 1,
+          op.kind === 'if' || op.kind === 'loop' ? op.results.length : 1,
           op
         );
         if (weakerEffect(op.effect, inner.effect))
@@ -264,6 +294,12 @@ export function verifyProgram(
       effects.push(op.effect);
     });
     if (!isEffect(region.effect)) fail('a region has no effect fact');
+    // The abort fact, checked as the effect fact is.
+    const aborts = region.operations.some((op) => operationCanAbort(op, program.functions));
+    if ((region.canAbort === true) !== aborts)
+      fail(
+        `the abort fact of a region (${region.canAbort === true}) does not agree with its operations (${aborts})`
+      );
     const joined = joinEffects(...effects);
     if (region.effect !== joined)
       fail(
@@ -408,6 +444,34 @@ function verifySignature(
       resultIn(policy.operations[op.kind].results);
       operandsIn(operandRule(op.kind));
       integerOnlyFromIntegers();
+      // A complex product is the product of two complex operands.
+      if (
+        op.kind === 'multiply' &&
+        op.result.type === 'complex' &&
+        (op.operands.length !== 2 || op.operands.some((o) => o.type !== 'complex'))
+      )
+        fail('a complex multiply does not have two complex operands');
+      return;
+    case 'mod':
+      arity(2);
+      resultIn(policy.operations.mod.results);
+      operandsIn(operandRule('mod'));
+      integerOnlyFromIntegers();
+      return;
+    case 'floor':
+      arity(1);
+      resultIn(policy.operations.floor.results);
+      operandsIn(operandRule('floor'));
+      if (op.result.type !== 'integer')
+        fail(`the operation floor has a result of the type ${op.result.type}`);
+      return;
+    case 'divide':
+      arity(2);
+      resultIn(policy.operations.divide.results);
+      operandsIn(operandRule('divide'));
+      // A quotient of integers is not an integer.
+      if (op.result.type === 'integer')
+        fail('the operation divide has an integer result');
       return;
     case 'negate':
       arity(1);
@@ -416,6 +480,7 @@ function verifySignature(
       integerOnlyFromIntegers();
       return;
     case 'less':
+    case 'less-equal':
     case 'equal':
       arity(2);
       resultIn(policy.operations[op.kind].results);
@@ -466,6 +531,8 @@ function verifySignature(
       });
       return;
     }
+    case 'loop':
+      return verifyLoop(op, policy, fail);
     case 'and':
     case 'or': {
       arity(1);
@@ -519,4 +586,60 @@ function verifySignature(
     default:
       return fail(`an operation of the unknown kind ${(op as { kind: string }).kind}`);
   }
+}
+
+/** The checks of a `loop` that are not checks of its regions
+ *  (`verifyProgram()`). */
+function verifyLoop(
+  op: IRLoop,
+  policy: RepresentationPolicy,
+  fail: (message: string) => never
+): void {
+  const count = op.results.length;
+  if (op.operands.length !== count + 2)
+    fail(
+      `a loop has ${op.operands.length} operands and ${count} results: it reads two bounds and one initial value per result`
+    );
+  const integer = policy.representationOf('integer');
+  for (const bound of op.operands.slice(0, 2))
+    if (bound.type !== 'integer' || bound.representation !== integer)
+      fail(`a bound of a loop has the type ${bound.type}`);
+  const parameters = op.body.parameters ?? [];
+  if (parameters.length !== count + 1)
+    fail(
+      `the body of a loop has ${parameters.length} parameters, and the loop has ${count} results: it needs the index and one parameter per result`
+    );
+  if (parameters[0].type !== 'integer' || parameters[0].representation !== integer)
+    fail(`the index of a loop has the type ${parameters[0].type}`);
+  const next = yieldedValues(op.body);
+  op.results.forEach((result, i) => {
+    const initial = op.operands[i + 2];
+    const parameter = parameters[i + 1];
+    const value = next[i];
+    const representations = new Set(
+      [initial, parameter, value, result].map((v) => v.representation)
+    );
+    if (representations.size !== 1)
+      fail(
+        `the carried value ${i + 1} of a loop has the representations ${[...representations].join(', ')}`
+      );
+    if (result.type !== parameter.type)
+      fail(
+        `the carried value ${i + 1} of a loop has a parameter of the type ${parameter.type} and a result of the type ${result.type}`
+      );
+    // An integer is a valid real, as for the two values of an `if`.
+    const fits = (v: IRValue) =>
+      v.type === parameter.type || (v.type === 'integer' && parameter.type === 'real');
+    if (!fits(initial))
+      fail(
+        `the carried value ${i + 1} of a loop has an initial value of the type ${initial.type} and a parameter of the type ${parameter.type}`
+      );
+    if (!fits(value))
+      fail(
+        `the carried value ${i + 1} of a loop has a next value of the type ${value.type} and a parameter of the type ${parameter.type}`
+      );
+  });
+  const budget = op.iterationBudget;
+  if (budget !== undefined && !(typeof budget === 'number' && budget > 0))
+    fail(`a loop has the iteration budget ${String(budget)}`);
 }

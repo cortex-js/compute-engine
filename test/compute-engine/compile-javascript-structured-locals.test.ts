@@ -470,7 +470,7 @@ describe('refusals', () => {
     [
       'a loop',
       fn(declare('t', 'real', 'w'), ['Loop', ['Assign', 't', ['Add', 't', 1]]], 't'),
-      /the structured route admits no statement Loop/,
+      /the structured route admits a Loop only with one index set/,
     ],
     [
       'a Return in a branch',
@@ -482,13 +482,12 @@ describe('refusals', () => {
       fn(declare('t', 'real', 'w'), ['If', 'C', ['Break']], 't'),
       /the structured route admits no statement Break in a branch of an If/,
     ],
+    // A declaration in a block of a branch is admitted
+    // (compile-javascript-structured-loops.test.ts); a branch that is a
+    // declaration has no block to declare in.
     [
-      'a declaration in a branch',
-      fn(
-        declare('t', 'real', 'w'),
-        ['If', 'C', ['Block', declare('s', 'real', 1), ['Assign', 't', 's']]],
-        't'
-      ),
+      'a branch that is a declaration',
+      fn(declare('t', 'real', 'w'), ['If', 'C', declare('s', 'real', 1)], 't'),
       /the structured route admits no statement Declare in a branch of an If/,
     ],
   ];
@@ -695,9 +694,13 @@ const FLOAT_POLICY: RepresentationPolicy = {
     min: { results: ['float'], operands: ['float'] },
     max: { results: ['float'], operands: ['float'] },
     less: { results: ['bool'], operands: ['float'] },
+    'less-equal': { results: ['bool'], operands: ['float'] },
     equal: { results: ['bool'], operands: ['float'] },
     and: { results: ['bool'], operands: ['bool'] },
     or: { results: ['bool'], operands: ['bool'] },
+    mod: { results: ['float'], operands: ['float'] },
+    floor: { results: ['float'], operands: ['float'] },
+    divide: { results: ['float'], operands: ['float'] },
     trace: { results: ['float'], operands: ['float'] },
   },
 };

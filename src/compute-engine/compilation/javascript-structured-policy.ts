@@ -30,11 +30,19 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   operations: {
     add: { results: ['number', 'complex'], operands: 'same' },
     negate: { results: ['number', 'complex'], operands: 'same' },
-    multiply: { results: ['number'], operands: ['number'] },
+    // A complex product is written per component, as the existing emitter
+    // writes it.
+    multiply: { results: ['number', 'complex'], operands: 'same' },
     min: { results: ['number'], operands: ['number'] },
     max: { results: ['number'], operands: ['number'] },
     less: { results: ['boolean'], operands: ['number'] },
+    'less-equal': { results: ['boolean'], operands: ['number'] },
     equal: { results: ['boolean'], operands: ['number'] },
+    // `_SYS.floorMod`, `Math.floor` and `/`, as the existing emitter writes
+    // them.
+    mod: { results: ['number'], operands: ['number'] },
+    floor: { results: ['number'], operands: ['number'] },
+    divide: { results: ['number'], operands: ['number'] },
     and: { results: ['boolean'], operands: ['boolean'] },
     or: { results: ['boolean'], operands: ['boolean'] },
     // `Math.sqrt` of a number, `_SYS.csqrt` of an `{re, im}` object.

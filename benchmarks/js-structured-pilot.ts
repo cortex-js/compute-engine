@@ -18,7 +18,8 @@
  * The fixtures: the step 3 fixtures (`heatwall`, `heatcell`, `complex-if`);
  * three where the common-subexpression pass and the constant folding of A
  * matter (`cse-repeat`, `fold`, `local-reads`); the fixtures of step 5
- * (`sqrt-repeat`, `helper-chain`, `capture`, `local-writes`); two
+ * (`sqrt-repeat`, `helper-chain`, `capture`, `local-writes`); the
+ * fixtures of step 6 (`loop-sum`, `loop-complex-iteration`); two
  * generated trees of about 200 operations; and the corpus programs.
  *
  * The ordinary target is called as `new JavaScriptTarget().compile()`, the
@@ -421,6 +422,52 @@ function step5Fixtures(): Fixture[] {
   ];
 }
 
+/** The fixtures of step 6, change 6a: a counted loop with carried values. */
+function step6Fixtures(): Fixture[] {
+  const counts = [0, 1, 7, 32, -3];
+  return [
+    {
+      // `s := s + k^2` for `k` in `1..n`.
+      id: 'loop-sum',
+      kind: 'named',
+      json: [
+        'Function',
+        [
+          'Block',
+          ['Declare', 's', "'real'", 0],
+          ['Loop', ['Assign', 's', ['Add', 's', ['Power', 'k', 2]]], ['Element', 'k', ['Range', 1, 'n']]],
+          's',
+        ],
+        typed('n', 'integer'),
+      ],
+      declare: {},
+      inputs: counts.map((n) => [n]),
+    },
+    {
+      // `z := z^2 + c`, sixteen times, with complex `z` and `c`.
+      id: 'loop-complex-iteration',
+      kind: 'named',
+      json: [
+        'Function',
+        [
+          'Block',
+          ['Declare', 'z', "'complex'", 'c'],
+          ['Loop', ['Assign', 'z', ['Add', ['Multiply', 'z', 'z'], 'c']], ['Element', 'k', ['Range', 1, 16]]],
+          'z',
+        ],
+        typed('c', 'complex'),
+      ],
+      declare: {},
+      inputs: [
+        [{ re: 0.25, im: 0.5 }],
+        [{ re: -0.75, im: 0.125 }],
+        [{ re: 0, im: 0 }],
+        [{ re: -1.25, im: 0 }],
+      ],
+    },
+  ];
+}
+
 /** The square root that `sqrt-repeat` repeats. */
 const SQRT_REPEATED: MathJsonExpression = [
   'Sqrt',
@@ -515,6 +562,7 @@ function allFixtures(): Fixture[] {
   const all = [
     ...namedFixtures(),
     ...step5Fixtures(),
+    ...step6Fixtures(),
     ...deepFixtures(),
     ...corpusFixtures(),
   ];

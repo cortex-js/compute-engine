@@ -1277,7 +1277,7 @@ describe('the result agrees with the existing route', () => {
 
 const INTENDED_DECLINES: [string, () => Expression, Record<string, unknown>, RegExp][] = [
   ['a head outside the vocabulary', () => engine().expr(['Sin', 'x']), {}, /unsupported head Sin/],
-  ['Divide', () => engine().expr(['Divide', 'x', 'y']), {}, /unsupported head Divide/],
+  ['Power with an exponent other than 2', () => engine().expr(['Power', 'x', 3]), {}, /Power is in the structured route only with the literal exponent 2/],
   ['a list', () => engine().expr(['List', 'x', 'y']), {}, /unsupported head List/],
   ['a free symbol with no scalar type', () => engine().expr('u'), {}, /unsupported binding u/],
   ['cse not false', () => engine().expr(['Add', 'x', 'y']), { cse: undefined }, /requires cse: false/],
