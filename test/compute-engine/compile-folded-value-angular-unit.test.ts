@@ -372,13 +372,10 @@ describe('AbsArg in degree mode', () => {
 
   for (const [label, json] of CASES)
     test.each(TARGETS)(`${label}: %s refuses`, (to) => {
-      // The GLSL fragment has no `AbsArg` head, so the refusal of a stored
-      // value reaches that message first.
-      const expected =
-        to === 'glsl' && label === 'a stored value'
-          ? /The head `AbsArg` is outside the GLSL fragment/
-          : REFUSAL;
-      expect(refusal(engineWithK(), json, to)).toMatch(expected);
+      // On GLSL the typing pass reads a stored value in the radian
+      // convention, as the emitter writes it (`foldedValueInRadians()`), so
+      // the refusal of the angular unit comes first there too.
+      expect(refusal(engineWithK(), json, to)).toMatch(REFUSAL);
     });
 
   // The refusal is thrown at the entry of the target, before the outermost

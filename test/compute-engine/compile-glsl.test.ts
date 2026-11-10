@@ -839,12 +839,12 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('compiles the prime of a library function from its closed form', () => {
     expect(glsl.compile(ce.parse("\\sin'(t)")).code).toBe('_gpu_cos(t)');
-    expect(glsl.compile(ce.parse("\\sin''(t)")).code).toBe('(-_gpu_sin(t))');
+    expect(glsl.compile(ce.parse("\\sin''(t)")).code).toBe('-_gpu_sin(t)');
   });
 
   it('compiles the prime of a user function from its closed form', () => {
     const code = glsl.compile(ce.parse("h'(x)")).code!;
-    expect(code).toBe('(3.0 * (x * x) + _gpu_cos(x))');
+    expect(code).toBe('3.0 * (x * x) + _gpu_cos(x)');
     for (const x of [-2, 0.5, 3])
       expect(run(code, x)).toBeCloseTo(
         ce.parse("h'(x)").subs({ x }).N().re,
@@ -856,27 +856,27 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     const result = glsl.compile(ce.parse('f(x)'));
     expect(result.code).toBe('_fn_f(x)');
     expect(result.preamble).toContain(
-      'float _fn_f(float t) {\n  return (3.0 * (t * t) + _gpu_cos(t));\n}'
+      'float _fn_f(float t) {\n  return 3.0 * (t * t) + _gpu_cos(t);\n}'
     );
   });
 
   it('declines a derivative with no closed form', () => {
     expect(() => glsl.compile(ce.parse("g'(t)"))).toThrow(
-      /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+      /`Apply` of this derivative is outside the GLSL fragment: the derivative has no closed form/
     );
     expect(() =>
       glsl.compile(ce.box(['Apply', ['Derivative', 'BesselJ', 1, 0], 'n', 'x']))
-    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
+    ).toThrow(/`Apply` of this derivative is outside the GLSL fragment: the derivative has no closed form/);
   });
 
   it('compiles a partial derivative of a function of two arguments', () => {
     const code = (f: string, k1: number, k2: number) =>
       glsl.compile(ce.box(['Apply', ['Derivative', f, k1, k2], 'x', 'y'])).code;
-    expect(code('Power', 1, 0)).toBe('(y * pow(x, y + -1.0))');
-    expect(code('Power', 0, 1)).toBe('(log(x) * pow(x, y))');
-    expect(code('Arctan2', 1, 0)).toBe('(y / ((x * x) + (y * y)))');
-    expect(code('Arctan2', 0, 1)).toBe('(-x / ((x * x) + (y * y)))');
-    expect(code('Mod', 0, 1)).toBe('(-floor(x / y))');
+    expect(code('Power', 1, 0)).toBe('y * pow(x, y + -1.0)');
+    expect(code('Power', 0, 1)).toBe('log(x) * pow(x, y)');
+    expect(code('Arctan2', 1, 0)).toBe('y / ((x * x) + (y * y))');
+    expect(code('Arctan2', 0, 1)).toBe('-x / ((x * x) + (y * y))');
+    expect(code('Mod', 0, 1)).toBe('-floor(x / y)');
   });
 
   it('declines an application that would repeat an effect', () => {

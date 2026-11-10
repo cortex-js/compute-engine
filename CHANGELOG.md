@@ -58,6 +58,35 @@
 
 ### Resolved Issues
 
+- **On GLSL, `canCompile()` and `compile()` agree on an applied
+  derivative.** An application of a derivative, `Apply(Derivative(f), x)`,
+  is now replaced by the closed form of the derivative before the check,
+  so `canCompile()` checks the code that is written:
+  - With a list argument, `Apply(Derivative(u ↦ 7u), [x, y]) + 1` is
+    typed as a `vec2`, as its code is; the check typed it as a `float`.
+  - With an argument that has an effect,
+    `Apply(Derivative(u ↦ u^2), x + Random())`, `canCompile()` answered
+    `{ ok: true }` and `compile()` declined; both now decline.
+  - With an argument that is not valid, the closed form could leave out the
+    argument (the derivative of `u ↦ u` is `1`), so the code gave `1.0`
+    where the interpreter gives an error; it now declines.
+  - With an argument that runs code that the caller supplies (a `vars`
+    entry such as `t: 'nextValue()'`, or a `functions` entry that is not
+    declared pure), the application now declines: the closed form can read
+    the argument several times, in another order, or not at all, so the
+    code cannot run once, in the order of the interpreter.
+
+- **On GLSL, `canCompile()` and `compile()` agree on a call of a function
+  with a parameter named by a reserved GLSL word** (`f(discard) :=
+  discard^2`). Such a call is written in place, and it is now written before
+  the check, so the check sees the code that is written. `f(f(u))` and a call
+  inside the body of a function that is written as a shader function were
+  accepted by `canCompile()` and declined by `compile()`; the first now
+  compiles, and the second declines in both. A call whose argument or whose
+  function body runs code that the caller supplies, or whose argument type
+  is not the declared parameter type, now declines in both: written in place,
+  such code could run a different number of times than in the interpreter.
+
 - **On GLSL, `compile()` no longer declines expressions with caller code that
   `canCompile()` accepts.** With
   `vars: { W: 'nextValue()', V: 'vec3(nextValue())' }`, `W + Max(V)`,

@@ -756,6 +756,141 @@ describe('review fixes', () => {
     }
   );
 
+  // CE-1166 step 5. A call of a function with a parameter that GLSL
+  // reserves is written in place in the prepare stage
+  // (`inlineReservedParameterCalls()`), so the typing pass types the tree
+  // that the emitter writes, and `canCompile()` and `compile()` agree.
+  describe('a parameter named `discard`', () => {
+    ce.assign(
+      'discardSquare',
+      ce.box(['Function', ['Multiply', 'discard', 'discard'], 'discard'])
+    );
+    const code = (json: unknown, options: Record<string, unknown> = {}) =>
+      compile(ce.box(json as any), { to: 'glsl', fallback: false, ...options })
+        .code;
+
+    test('a call in the root is in, and is written in place', () => {
+      expectIn(['discardSquare', 'x']);
+      expect(code(['discardSquare', 'x'])).toBe('x * x');
+    });
+
+    test('a call whose argument is a call of the same function is in', () => {
+      expectIn(['discardSquare', ['discardSquare', 'x']]);
+      expect(code(['discardSquare', ['discardSquare', 'x']])).not.toContain(
+        'discard'
+      );
+    });
+
+    test('a call in a loop body is in', () =>
+      expectIn([
+        'Sum',
+        ['discardSquare', ['Multiply', 'k', 'x']],
+        ['Limits', 'k', 1, 'n'],
+      ]));
+
+    // One call object at three places, two of them under the index of a
+    // `Sum`: the rewrite keeps a memo per set of bound names, so each place
+    // is written in place, and no parameter name reaches the code.
+    test('a call object shared under a loop index and outside it is in', () => {
+      const call = ce.box(['discardSquare', 'x']);
+      const expr = ce.function('Add', [
+        call,
+        ce.function('Sum', [
+          ce.function('Add', [call, call, ce.symbol('k')]),
+          ce.box(['Limits', 'k', 1, 'n']),
+        ]),
+      ]);
+      expect(check(expr.json, {})).toEqual({ ok: true });
+      const result = compile(expr, { to: 'glsl', fallback: false });
+      expect(result.success).toBe(true);
+      expect(result.code).not.toContain('discard');
+    });
+
+    // The substituted body can run the code of an argument zero times,
+    // several times or in a short-circuit operand, where the interpreter
+    // runs it once per call: the call stays a call, which is out.
+    const expectCallStays = (
+      json: unknown,
+      options: Record<string, unknown> = {}
+    ) => {
+      const r = expectOut(json, undefined, options);
+      expect(r.diagnostic.binding).toBe('discard');
+      expect(() => code(json, options)).toThrow(r.diagnostic.message);
+    };
+
+    test('an argument that is caller code is out', () =>
+      expectCallStays(['discardSquare', 'v'], { vars: { v: 'myFn(1.0)' } }));
+
+    test('an argument that is caller code in an `If` body is out', () => {
+      ce.assign(
+        'discardIf',
+        ce.box([
+          'Function',
+          ['If', ['Greater', 'x', 0], 'discard', 0],
+          'discard',
+        ])
+      );
+      expectCallStays(['discardIf', 'v'], { vars: { v: 'myFn(1.0)' } });
+    });
+
+    test('an argument that is caller code in an `And` body is out', () => {
+      ce.assign(
+        'discardAnd',
+        ce.box([
+          'Function',
+          ['And', ['Greater', 'x', 0], ['Greater', 'discard', 1]],
+          'discard',
+        ])
+      );
+      expectCallStays(['discardAnd', 'v'], { vars: { v: 'myFn(1.0)' } });
+    });
+
+    test('a callee body that reads caller code is out', () => {
+      // Two substituted copies would share the one node of `v`, and its
+      // code would run once where the interpreter runs it once per call.
+      ce.assign(
+        'discardPlusV',
+        ce.box(['Function', ['Add', 'discard', 'v'], 'discard'])
+      );
+      expectCallStays(
+        ['Add', ['discardPlusV', 'x'], ['discardPlusV', 'y']],
+        { vars: { v: 'nextValue()' } }
+      );
+    });
+
+    test('an argument whose type cannot match the declared parameter type is out', () => {
+      ce.assign(
+        'discardMagnitude',
+        ce.box([
+          'Function',
+          ['Abs', 'discard'],
+          ['Typed', 'discard', "'real'"],
+        ])
+      );
+      expectCallStays(['discardMagnitude', 'z']);
+    });
+
+    test('an argument that calls a caller function that is not pure is out', () => {
+      const options = { functions: { effectG: 'myG' } };
+      const call = ['discardSquare', ['effectG', 'x']];
+      const r = expectOut(call, undefined, options);
+      expect(r.diagnostic.binding).toBe('discard');
+      expect(() => code(call, options)).toThrow(r.diagnostic.message);
+    });
+
+    test('a call in the body of an emitted function is out', () => {
+      // The body of `callsDiscard` is emitted as a shader function, and the
+      // prepare stage writes in place only the calls of the root.
+      ce.assign(
+        'callsDiscard',
+        ce.box(['Function', ['Add', ['discardSquare', 'w'], 1], 'w'])
+      );
+      const r = expectOut(['callsDiscard', 'x']);
+      expect(r.diagnostic.binding).toBe('discard');
+      expect(() => code(['callsDiscard', 'x'])).toThrow(r.diagnostic.message);
+    });
+  });
+
   test('a gamut that the shader has no helper for is out', () => {
     expectOut(['GamutMap', ['Rgb', 'x', 0, 0], { str: 'rec2020' }], 'GamutMap');
     expectIn(['GamutMap', ['Rgb', 'x', 0, 0], { str: 'display-p3' }]);

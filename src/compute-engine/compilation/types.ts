@@ -1470,6 +1470,17 @@ export interface CompileTarget<Expr = unknown> {
   unrollComprehensions?: boolean;
 
   /**
+   * Rewrite each application of a derivative in the body of a user
+   * function before the body is typed and emitted: `definitionBodyExpr()`
+   * and `inlinedUserFunctionCall()` call it on the prepared body. The GLSL
+   * target sets it (`gpuApplyDerivatives()`, `gpu-applied-derivative.ts`):
+   * a shader has no function values, and the call is replaced by the
+   * closed form of the derivative applied to its arguments. Absent means
+   * the body keeps its applications.
+   */
+  applyDerivatives?: (expr: Expr, target: CompileTarget<Expr>) => Expr;
+
+  /**
    * The set of names currently **bound** by an enclosing binding form — lambda
    * parameters, `Sum`/`Product`/`Loop` indices, `Block` locals, comprehension
    * variables, `Match` captures. A bound name shadows any same-named engine
@@ -2022,7 +2033,10 @@ export interface CompileTarget<Expr = unknown> {
      * body beta-reduced at the call site because the target could not emit
      * the definition (`BaseCompiler.tryInlineUserFunctionCall`). A call to a
      * function already on this set is a cycle (mutual recursion through an
-     * inlined body) and declines instead of inlining again. Populated lazily.
+     * inlined body) and declines instead of inlining again. The prepare
+     * stage of the GLSL target also adds a function here while it rewrites
+     * a body that it wrote in place of a call
+     * (`inlineReservedParameterCalls()`). Populated lazily.
      */
     inlining?: Set<string>;
     /**
@@ -2141,8 +2155,9 @@ export interface CompileTarget<Expr = unknown> {
        * Whether `define` refuses a definition with a parameter named
        * `name`: a GLSL reserved word (`filter`, `input`, `sample`) cannot
        * be the name of a parameter, and the language has no renaming. A
-       * call of such a function is written in place when the substitution
-       * is sound (`tryInlineUserFunctionCall()`), and it takes no copy of
+       * call of such a function in the root is written in place in the
+       * prepare stage when the substitution is sound
+       * (`inlineReservedParameterCalls()`), and it takes no copy of
        * the function typed by its arguments (`userCallSpecialization()`),
        * since `define` would refuse the copy too.
        */

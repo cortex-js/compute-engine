@@ -85,7 +85,13 @@ export function tryFoldKnownSymbol(
   // degree mode `c := sin(x)` compiles to the sine of `x` degrees, as
   // `evaluate()` computes it, and the code around `c` is not converted a
   // second time.
-  const value = foldedValueInRadians(stored, target);
+  // On a target that writes each application of a derivative as the closed
+  // form applied to its arguments in the prepare stage
+  // (`CompileTarget.applyDerivatives`), the stored value is not prepared, so
+  // it is rewritten here as well: the typing pass of the GLSL fragment types
+  // the value in that form.
+  const inRadians = foldedValueInRadians(stored, target);
+  const value = target.applyDerivatives?.(inRadians, target) ?? inRadians;
   // The generated code bakes this symbol's current value: record it in the
   // capture set (see `CompileTarget.symbolDeps`). Nested symbols inside the
   // value are recorded by the recursive compile below.

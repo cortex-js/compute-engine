@@ -34,10 +34,7 @@ import {
 } from '../boxed-expression/function-literal.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
-import {
-  inlinedUserFunctionCall,
-  userFunctionParamType,
-} from './compile-user-calls.js';
+import { userFunctionParamType } from './compile-user-calls.js';
 import { definitionBodyExpr, userFunctionIsGeneric } from './compile-cse.js';
 import { constantFoldValue, userCallSpecialization } from './compiler-core.js';
 import { core } from './compiler-core-hooks.js';
@@ -51,11 +48,15 @@ import {
   bodyWithParallelHeadsLowered,
   sumAssignedNames,
 } from './parallel-lowering.js';
-import { gpuCheckIdentifier, gpuIsReservedWord } from './gpu-reserved.js';
+import { gpuCheckIdentifier } from './gpu-reserved.js';
 import { GPU_BINOMIAL_UNROLL_LIMIT, GPU_UNROLL_LIMIT } from './gpu-reduce.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
-import { appliedDerivativeLiteral } from './compile-callbacks.js';
+import { foldedValueInRadians } from './compile-folded-values.js';
+import {
+  gpuAppliedBody,
+  gpuApplyDerivatives,
+} from './gpu-applied-derivative.js';
 import { parseColorString } from '../library/colors.js';
 import { GPU_MAX_INLINE_ELEMENTS } from './gpu-functions.js';
 import { gpuStorageAtBaseShape } from './gpu-at.js';
@@ -69,7 +70,10 @@ import {
 } from './compiler-type-facts.js';
 import { gpuNormalizeShaderType } from './gpu-declared-types.js';
 import { tryGetConstant } from './constant-folding.js';
-import { assertSafeBigOpBounds } from './compile-folding.js';
+import {
+  assertSafeBigOpBounds,
+  reachesCallerCodeOn,
+} from './compile-folding.js';
 import { complexContinuation } from './complex-continuation.js';
 import { gpuShaderLoopJumps } from './gpu-statements.js';
 import { shadowedLibraryLoweringError } from './compile-definitions.js';
@@ -801,42 +805,41 @@ function walkDerivative(
   return w.type(closed, scope, context);
 }
 
-/** `Apply(Derivative(f, …), x…)`: the body of the closed form
- * (`appliedDerivativeLiteral()`), with the arguments in place of its
- * parameters, typed in place of the node. */
-function walkAppliedDerivative(
+/** `Apply(…)`: the prepare stage writes each application of a derivative
+ * that it can as the closed form applied to its arguments
+ * (`gpuApplyDerivatives()`), so an `Apply` that is still in the tree is
+ * outside the fragment. For a derivative, the refusal gives the reason that
+ * the rewrite found (`gpuAppliedBody()`), or that an argument runs code
+ * that the caller supplies (`reachesCallerCodeOn()` on `target`), or a
+ * neutral reason (an argument that is not valid, for example). */
+function walkApply(
   node: Expression,
-  scope: FragmentScope<GlslRepresentation>,
-  context: FragmentContext<GlslRepresentation>,
-  w: FragmentWalker<GlslRepresentation>
+  _scope: FragmentScope<GlslRepresentation>,
+  _context: FragmentContext<GlslRepresentation>,
+  w: FragmentWalker<GlslRepresentation>,
+  target?: CompileTarget<Expression>
 ): FragmentFacts<GlslRepresentation> {
   const ops = isFunction(node) ? node.ops : [];
-  const literal = appliedDerivativeLiteral(ops);
-  const args = ops.slice(1);
-  if (
-    literal === undefined ||
-    !isFunction(literal, 'Function') ||
-    literal.nops - 1 !== args.length
-  )
+  if (!isFunction(ops[0], 'Derivative'))
     return w.refuse(
       node,
       'head',
       `\`Apply\` is in the GLSL fragment only as the application of a ` +
         `derivative whose closed form the engine finds at compile time`
     );
-  const names = literal.ops
-    .slice(1)
-    .map((p) => functionLiteralParameterName(p));
-  if (names.some((n) => n === ''))
-    return w.refuse(
-      node,
-      'head',
-      `\`Apply\` of this derivative is outside the GLSL fragment`
-    );
-  const body = literal.ops[0].subs(
-    Object.fromEntries(names.map((n, i) => [n, args[i]]))
+  const body = gpuAppliedBody(ops, 'glsl');
+  return w.refuse(
+    node,
+    'head',
+    `\`Apply\` of this derivative is outside the GLSL fragment: ` +
+      (typeof body === 'string'
+        ? body.replace(/\.$/, '')
+        : target !== undefined &&
+            ops.slice(1).some((x) => reachesCallerCodeOn(x, target))
+          ? `an argument contains code that the caller supplies, which the ` +
+            `closed form could run in another order or not at all`
+          : `the application was not rewritten in the prepare stage`)
   );
-  return w.type(body, scope, context);
 }
 
 const walk = (
@@ -1114,10 +1117,11 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   // The closed-form derivative is compile-time work: a `D` that the engine
   // differentiates has the type of its derivative.
   D: walk(walkDerivative),
-  // `Apply(Derivative(f, …), x…)`: the closed form of the derivative, a
-  // function literal that the engine computes at compile time, applied to
-  // the arguments. Any other `Apply` is outside.
-  Apply: walk(walkAppliedDerivative),
+  // `Apply(Derivative(f, …), x…)` is written in the prepare stage as the
+  // closed form of the derivative applied to its arguments
+  // (`gpuApplyDerivatives()`). An `Apply` that is left is outside, with
+  // its reason.
+  Apply: walk(walkApply),
 
   // Elementary and special functions of the shared GPU table
   Sin: ELEMENTARY,
@@ -1393,6 +1397,10 @@ export function glslFragmentDefinition(
 ): FragmentDefinition<GlslRepresentation> {
   const storage = target.storage;
   const vars = options.vars;
+  /** The stored values of symbols, by value, with each application of a
+   *  derivative rewritten (`storedValue` below): a value read at many places
+   *  is rewritten once. */
+  const appliedStoredValues = new Map<Expression, Expression>();
   /** The `vars` replacement of an input, or `undefined`. */
   const varsReplacement = (binding: {
     role: string;
@@ -1560,6 +1568,13 @@ export function glslFragmentDefinition(
   const rules: Record<string, FragmentRule<GlslRepresentation>> = {};
   for (const [name, rule] of Object.entries(GLSL_FRAGMENT_RULES))
     rules[name] = shadowChecked(rule);
+  // The refusal of an `Apply` asks whether an argument runs code that the
+  // caller supplies, which only this target knows.
+  rules.Apply = shadowChecked(
+    walk((node, scope, context, w) =>
+      walkApply(node, scope, context, w, target)
+    )
+  );
   const declaredVectors = options.declaredVectors;
   if (declaredVectors !== undefined && declaredVectors.size > 0) {
     rules.Add = shadowChecked(
@@ -1603,12 +1618,29 @@ export function glslFragmentDefinition(
 
     // The compiler writes the stored value of a free symbol in place of the
     // symbol (`tryFoldKnownSymbol()`), unless the `vars` option maps the
-    // symbol: the caller then gives its value.
+    // symbol: the caller then gives its value. The emitter writes each
+    // application of a derivative in the value as the closed form applied
+    // to its arguments (`gpuApplyDerivatives()`, which
+    // `tryFoldKnownSymbol()` calls), so the value is typed in that form.
+    // The emitter rewrites the value for the engine's angular unit first
+    // (`foldedValueInRadians()`), and so does the pass: in degree mode the
+    // unit factor is in the body of the derivative, and the closed form of
+    // the larger body can decline, so both must see the same tree.
     storedValue: (symbol) => {
       if (!isSymbol(symbol)) return undefined;
       const name = symbol.symbol;
       if (vars !== undefined && Object.hasOwn(vars, name)) return undefined;
-      return symbol.engine._getSymbolValue(name);
+      const value = symbol.engine._getSymbolValue(name);
+      if (value === undefined) return undefined;
+      let applied = appliedStoredValues.get(value);
+      if (applied === undefined) {
+        applied = gpuApplyDerivatives(
+          foldedValueInRadians(value, target),
+          target
+        );
+        appliedStoredValues.set(value, applied);
+      }
+      return applied;
     },
 
     representationOfBinding: (type, binding) => {
@@ -1948,26 +1980,6 @@ function glslFunctionOf(
           (declared === undefined || isSubtype('list<number>', declared))))
   );
 
-  // The emitter writes each parameter name unchanged into the shader
-  // function, and refuses a name that GLSL reserves (the `define` hook of
-  // `gpu-shader-target.ts`, `gpuCheckIdentifier()`). When it refuses, it
-  // writes the body at the call site with the arguments in place of the
-  // parameters, if the call allows it (`tryInlineUserFunctionCall()`: pure
-  // scalar or literal-point arguments, no recursion, no captured name), and
-  // the parameter names are then never written. For such a call, the
-  // parameters are bound with no symbol, so the pass does not check their
-  // names. The entry has its own key, because another call of the same
-  // function may not allow the substitution.
-  const reservedParameter = parameterNames.some((name) =>
-    gpuIsReservedWord(name, 'glsl')
-  );
-  const substituted =
-    reservedParameter && key === h
-      ? inlinedUserFunctionCall(engine, h, args, target)
-      : undefined;
-  const inlined = substituted !== undefined;
-  if (inlined) key = `${h}#inlined`;
-
   // The body that the emitter compiles, prepared by the same two functions
   // as the emission: `definitionBodyExpr()` (the angular unit, the `parallel
   // for` heads and `+=` lowered, the collection-valued calls inlined, the
@@ -1989,9 +2001,7 @@ function glslFunctionOf(
   // would prepare it. The entry of the function keeps the body of the
   // first call that the pass types, and the `define` hook of the shader
   // targets compiles that body, whichever call emits the definition: the
-  // emitter writes the tree that the pass typed. A call that is written in
-  // place (the key `h#inlined` above) takes no copy: the emitter
-  // substitutes its arguments into the body of the literal.
+  // emitter writes the tree that the pass typed.
   if (registry !== undefined && key === h) {
     const specialization = userCallSpecialization(
       engine,
@@ -2022,7 +2032,6 @@ function glslFunctionOf(
     broadcasts,
     // The symbol of a parameter: `u`, or the `u` of `Typed(u, 'real')`.
     parameterSymbols: kept.map((i) => {
-      if (inlined) return undefined;
       const p = params[i];
       if (isSymbol(p)) return p;
       return isFunction(p) && isSymbol(p.op1) ? p.op1 : undefined;
@@ -2032,15 +2041,14 @@ function glslFunctionOf(
     arguments: args.length === params.length ? kept.map((i) => args[i]) : args,
     body: prepared,
     // The tree whose size `compile()` checks (`checkDefinitionBody`): the
-    // body written at the call site, with no node shared, or the body of
-    // the definition before `shaderFunctionBody()`, which the common-
-    // subexpression pass of the definition can share. With no registry of
-    // user functions, `compile()` writes no definition and checks nothing.
-    sizeCheck: inlined
-      ? { body: substituted, shared: false }
-      : definitionBody === undefined
+    // body of the definition before `shaderFunctionBody()`, which the
+    // common-subexpression pass of the definition can share. With no
+    // registry of user functions, `compile()` writes no definition and
+    // checks nothing.
+    sizeCheck:
+      definitionBody === undefined
         ? undefined
-        : { body: definitionBody, shared: true },
+        : { body: definitionBody },
     // Read on the body before its preparation, where a `+=` is an `AddTo`.
     sumAssigned: sumAssignedNames(body),
   };

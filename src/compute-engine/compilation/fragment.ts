@@ -434,12 +434,11 @@ export type FragmentFunction = {
   readonly arguments: readonly Expression[];
   /** The prepared body. */
   readonly body: Expression;
-  /** The tree whose size the emitter checks, and whether the check counts
-   *  a node that several paths reach once (the body of a definition, which
-   *  has a common-subexpression pass of its own) or once per path (a body
-   *  written at the call site). `undefined` when the emitter checks no
-   *  size for this function. */
-  readonly sizeCheck?: { body: Expression; shared: boolean };
+  /** The tree whose size the emitter checks: the body of a definition,
+   *  which has a common-subexpression pass of its own, so the check counts
+   *  a node that several paths reach once. `undefined` when the emitter
+   *  checks no size for this function. */
+  readonly sizeCheck?: { body: Expression };
   /** The names `s` of the statements `s = s + e` of the body as the
    *  program wrote it (`sumAssignedNames()`), or `undefined` when they are
    *  not known: the pass then reads no `Assign` of the body as a lowered
@@ -1763,7 +1762,6 @@ function makeWalker<R>(
     const mapped = args.map(
       (a) =>
         fn.broadcasts === true &&
-        !fn.key.endsWith('#inlined') &&
         a.type.kind === 'list' &&
         isScalarNumeric(a.type.element) &&
         a.type.count !== undefined &&

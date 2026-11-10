@@ -1513,15 +1513,18 @@ export function inlinedUserFunctionCall(
     admits
   );
   if (substituted === undefined) return undefined;
+  const nested = inlineCollectionValuedCalls(
+    engine,
+    substituted,
+    target,
+    new Set([h]),
+    { left: MAX_NESTED_INLINES },
+    enclosing
+  );
+  // The applications of a derivative, as in `definitionBodyExpr()`
+  // (`CompileTarget.applyDerivatives`).
   const inlined = unrollFixedWidthCollections(
-    inlineCollectionValuedCalls(
-      engine,
-      substituted,
-      target,
-      new Set([h]),
-      { left: MAX_NESTED_INLINES },
-      enclosing
-    ),
+    target.applyDerivatives?.(nested, target) ?? nested,
     {
       // The accessor reads a point SUBSTITUTED for a parameter, in a body
       // the target could not emit as a definition; folding it to the

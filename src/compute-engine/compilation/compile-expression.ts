@@ -172,7 +172,7 @@ export function compile<
         options.operators,
         options.functions
       );
-      const rewritten = unrollFixedWidthCollections(
+      const unrolled = unrollFixedWidthCollections(
         rewritePartialApplications(rewriteAngularUnit(expr), skipHeads),
         {
           skipHeads,
@@ -183,6 +183,15 @@ export function compile<
           readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
         }
       );
+      // A target that has no lowering of `Apply` writes each application of
+      // a derivative as the closed form applied to its arguments
+      // (`CompileTarget.applyDerivatives`, the GLSL target). Its check
+      // (`rawTargetCheck()` below) types the tree of its own preparation,
+      // which has this rewrite, so the tree written here has it too. An
+      // application that the rewrite leaves is refused by the check.
+      const rewritten =
+        options.target.applyDerivatives?.(unrolled, options.target) ??
+        unrolled;
       // Install a fresh naming context for generated temporaries on every call,
       // so a target the caller reuses never carries stale numbering into the
       // next compilation; `compileRoot`'s signature is unchanged — this is the

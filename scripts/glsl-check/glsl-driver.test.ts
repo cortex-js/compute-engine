@@ -331,6 +331,26 @@ const LOWERINGS: ReadonlyArray<{
     ],
     marker: /3\.0 \* \(x \* x\) \+ cos\(x\)/,
   },
+  {
+    // An applied derivative with a list argument: the interpreter applies
+    // the closed form to each element, and the prepare stage writes one body
+    // for each element (`gpuApplyDerivatives()`). The value is the norm of
+    // `[3x² + cos x, 3y² + cos y]`.
+    name: 'an applied derivative over a list argument',
+    expr: [
+      'Norm',
+      [
+        'Apply',
+        [
+          'Derivative',
+          ['Function', ['Add', ['Power', 't', 3], ['Sin', 't']], 't'],
+          1,
+        ],
+        ['List', 'x', 'y'],
+      ],
+    ],
+    marker: /length\(vec2\(3\.0 \* \(x \* x\) \+ cos\(x\), 3\.0 \* \(y \* y\)/,
+  },
   // `gpuPiMultiple()` and `gpuImaginaryPiMultiple()` make `u` with the
   // canonical constructors, which distribute a negation over a sum and box
   // a denominator again: the check accepts these forms.
@@ -397,7 +417,29 @@ const LOWERINGS: ReadonlyArray<{
     ],
     marker: /_tv\d+ = a \+ b;/,
   },
+  {
+    // `inlineReservedParameterCalls()`: a function whose parameter is named
+    // `discard`, a reserved word of GLSL, cannot be emitted as a shader
+    // function, so the prepare stage writes its body in place of the call.
+    // The argument `sin(x)` is read three times in the body.
+    name: 'a call of a function with a reserved parameter name',
+    expr: ['discardPoly', ['Sin', 'x']],
+    marker: /^(?![\s\S]*discard)[\s\S]*sin\(x\)/,
+  },
 ];
+ce.assign(
+  'discardPoly',
+  ce.box([
+    'Function',
+    [
+      'Add',
+      ['Multiply', 'discard', 'discard'],
+      ['Multiply', 2, 'discard'],
+      ['Cos', 'discard'],
+    ],
+    'discard',
+  ])
+);
 
 /** A list input of six reals, held as a `float[6]` uniform array. */
 ce.declare('L', 'list<real^6>');

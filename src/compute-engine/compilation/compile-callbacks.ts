@@ -1117,7 +1117,7 @@ export function appliedDerivativeTooLarge(
  * a collection that is not indexed, as the run-time broadcast does. When
  * it is false, each argument is bound whole and its own type is checked.
  *
- * The shader targets (`gpuAppliedBody`, `gpu-functions.ts`) and the
+ * The shader targets (`gpuAppliedBody`, `gpu-applied-derivative.ts`) and the
  * JavaScript target (`Apply`, `javascript-target.ts`) use this check.
  */
 export function appliedArgumentTypeMismatch(

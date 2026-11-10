@@ -10,7 +10,10 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import {
+  canCompile,
+  compile,
+} from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const ce = new ComputeEngine();
@@ -95,6 +98,165 @@ describe('COMPILE DERIVATIVE — glsl', () => {
   test('\\frac{d}{dx}(x^3 + \\cos(x)) compiles on glsl', () => {
     expect(glsl.compile(ce.parse('\\frac{d}{dx}(x^3+\\cos(x))')).code).toBe(
       '3.0 * (x * x) + -_gpu_sin(x)'
+    );
+  });
+});
+
+/**
+ * On the GLSL target, the prepare stage writes `Apply(Derivative(f), x)` as
+ * the closed form of the derivative applied to its arguments
+ * (`gpuApplyDerivatives()`, `gpu-applied-derivative.ts`), so `canCompile()`
+ * types the tree that `compile()` writes. When the parameter of the closed
+ * form is scalar and the argument is a list, the interpreter applies the
+ * function to each element, and the pass sees a `List` with one body for
+ * each element. When the pass typed the application itself, it put the whole
+ * list in place of the parameter: `(u ↦ 7u)'` applied to `[x, y]`, plus 1,
+ * was a `float` to the pass and a `vec2` in the code.
+ */
+describe('COMPILE DERIVATIVE — glsl, an applied derivative in the prepare stage', () => {
+  const ce2 = new ComputeEngine();
+  for (const name of ['x', 'y', 't']) ce2.declare(name, 'real');
+  const glsl = ce2._getCompilationTarget('glsl') as unknown as {
+    _fragmentAnnotationForTest(
+      expr: unknown,
+      options: Record<string, unknown>
+    ): {
+      root: unknown;
+      scope: { facts: Map<unknown, { representation?: string }> };
+    };
+  };
+  const representationOf = (expr: unknown): string | undefined => {
+    const a = glsl._fragmentAnnotationForTest(expr, { to: 'glsl' });
+    return a.scope.facts.get(a.root)?.representation;
+  };
+  const derivative = (body: unknown) => [
+    'Derivative',
+    ['Function', body, 'u'],
+    1,
+  ];
+
+  test('a list argument whose body does not read the parameter', () => {
+    const expr = ce2.box([
+      'Add',
+      ['Apply', derivative(['Multiply', 7, 'u']), ['List', 'x', 'y']],
+      1,
+    ] as any);
+    expect(canCompile(expr, { to: 'glsl' }).ok).toBe(true);
+    expect(representationOf(expr)).toBe('vec2');
+    const result = compile(expr, { to: 'glsl', fallback: false });
+    expect(result.success).toBe(true);
+    expect(result.code).toBe('vec2(8.0, 8.0)');
+    expect(expr.evaluate().json).toEqual(['List', 8, 8]);
+  });
+
+  test('a list argument: one body for each element', () => {
+    const expr = ce2.box([
+      'Apply',
+      derivative(['Power', 'u', 2]),
+      ['List', 'x', 'y'],
+    ] as any);
+    expect(canCompile(expr, { to: 'glsl' }).ok).toBe(true);
+    expect(representationOf(expr)).toBe('vec2');
+    const result = compile(expr, { to: 'glsl', fallback: false });
+    expect(result.code).toBe('vec2(2.0 * x, 2.0 * y)');
+    for (const [x, y] of [
+      [0.5, 2],
+      [-1.5, 3],
+    ]) {
+      // eslint-disable-next-line no-new-func
+      const value = new Function('x', 'y', 'vec2', `return ${result.code};`)(
+        x,
+        y,
+        (a: number, b: number) => [a, b]
+      );
+      const want = expr
+        .subs({ x: ce2.number(x), y: ce2.number(y) })
+        .N()
+        .ops!.map((op) => op.re);
+      expect(value).toEqual(want);
+    }
+  });
+
+  test('an argument with an effect declines in canCompile() and compile()', () => {
+    // The closed form `2u` reads the parameter once, but the substitution
+    // requires a pure argument.
+    const expr = ce2.box([
+      'Apply',
+      derivative(['Power', 'u', 2]),
+      ['Add', 'x', ['Random']],
+    ] as any);
+    const check = canCompile(expr, { to: 'glsl' });
+    expect(check.ok).toBe(false);
+    expect(() => new GLSLTarget().compile(expr)).toThrow(
+      'an argument has an effect, which the substitution would repeat'
+    );
+  });
+
+  test('an argument with code that the caller supplies declines', () => {
+    // The interpreter evaluates the argument once, before the body. The
+    // closed form can read it in another place, or not at all, so the
+    // application is not rewritten, and the fragment refuses it.
+    const expr = ce2.box([
+      'Apply',
+      derivative(['Multiply', 'u', ['Sin', 'u']]),
+      't',
+    ] as any);
+    const options = { to: 'glsl', vars: { t: 'nextValue()' } } as const;
+    expect(canCompile(expr, options).ok).toBe(false);
+    expect(() =>
+      compile(expr, { ...options, fallback: false } as never)
+    ).toThrow('an argument contains code that the caller supplies');
+    // A `vars` entry that is a plain read is not code of the caller.
+    expect(compile(expr, { to: 'glsl', vars: { t: 'u_t' } }).code).toBe(
+      'u_t * _gpu_cos(u_t) + _gpu_sin(u_t)'
+    );
+  });
+
+  test('an argument that is not valid declines, also when the closed form does not read it', () => {
+    // The derivative of `u ↦ u` is `1`, which does not read the argument.
+    // The rewrite must not drop the `Error` argument.
+    const expr = ce2.box([
+      'Apply',
+      ['Derivative', ['Function', 'u', 'u'], 1],
+      ['Error', "'missing'"],
+    ] as any);
+    expect(canCompile(expr, { to: 'glsl' }).ok).toBe(false);
+    expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
+      'the application was not rewritten in the prepare stage'
+    );
+  });
+
+  test('a derivative applied in the stored value of a symbol', () => {
+    // The pass and the emitter read the value in place of the symbol, and
+    // both rewrite the application in it.
+    const ce3 = new ComputeEngine();
+    ce3.declare('x', 'real');
+    ce3.assign('a', ce3.box(['Apply', ['Derivative', 'Sin', 1], 'x']));
+    const options = { to: 'glsl', constantFold: false } as const;
+    const expr = ce3.box('a');
+    expect(canCompile(expr, options).ok).toBe(true);
+    const direct = compile(
+      ce3.box(['Apply', ['Derivative', 'Sin', 1], 'x']),
+      { ...options, fallback: false }
+    );
+    expect(compile(expr, { ...options, fallback: false }).code).toBe(
+      direct.code
+    );
+  });
+
+  test('a target object passed as `target` writes the closed form', () => {
+    const expr = ce2.box([
+      'Apply',
+      derivative(['Power', 'u', 2]),
+      'x',
+    ] as any);
+    const result = compile(expr, {
+      target: new GLSLTarget().createTarget(),
+      fallback: false,
+    } as never);
+    expect(result.success).toBe(true);
+    expect(result.code).toBe(
+      compile(expr, { to: 'glsl', fallback: false }).code
     );
   });
 });
@@ -268,10 +430,11 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     ['Gamma', 'glsl'],
   ])('Derivative(%s, 1, 0) with no closed form declines on %s', (f, to) => {
     const expr = ce.box(['Apply', ['Derivative', f, 1, 0], 's', 'x']);
-    // The GLSL fragment refuses it with its own message.
+    // The GLSL fragment refuses it with its own message, which gives the
+    // same reason.
     expect(declineMessage(expr, to)).toMatch(
       to === 'glsl'
-        ? /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+        ? /`Apply` of this derivative is outside the GLSL fragment: the derivative has no closed form/
         : /Could not compile `Apply`: the derivative has no closed form/
     );
   });
@@ -298,7 +461,7 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
       const start = Date.now();
       expect(declineMessage(expr, to)).toMatch(
         to === 'glsl'
-          ? /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+          ? /`Apply` of this derivative is outside the GLSL fragment: the closed form of the derivative is too large to write out/
           : /Could not compile `Apply`: the closed form of the derivative is too large to write out/
       );
       // The decline with the interpreter fallback does not compute the
@@ -334,21 +497,13 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
           ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x']),
           to
         )
-      ).toContain(
-        to === 'glsl'
-          ? '`Apply` is in the GLSL fragment only as the application of a derivative whose closed form'
-          : 'takes 2 parameter(s) but 1 argument(s)'
-      );
+      ).toContain('takes 2 parameter(s) but 1 argument(s)');
       expect(
         declineMessage(
           ce.box(['Apply', ['Derivative', 'Sin', 1], 'x', 'y']),
           to
         )
-      ).toContain(
-        to === 'glsl'
-          ? '`Apply` is in the GLSL fragment only as the application of a derivative whose closed form'
-          : 'takes 1 parameter(s) but 2 argument(s)'
-      );
+      ).toContain('takes 1 parameter(s) but 2 argument(s)');
     }
     // A third derivative of a large body has a closed form, but it is too
     // large to write out. The javascript target compiles it with
@@ -358,9 +513,7 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     const big = ceBig.box(['Apply', ['Derivative', 'f', 3], 'x']);
     for (const to of ['interval-js', 'glsl'])
       expect(declineMessage(big, to)).toMatch(
-        to === 'glsl'
-          ? /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
-          : /the closed form of the derivative is too large to write out/
+        /the closed form of the derivative is too large to write out/
       );
   });
 

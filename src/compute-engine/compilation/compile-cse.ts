@@ -758,22 +758,26 @@ export function definitionBodyExpr(
   registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
   h?: string
 ): Expression {
-  return unrollFixedWidthCollections(
-    inlineCollectionValuedCallsInDefinitionBody(
-      // Exact factors on `interval-js`, as at the compile entry of that
-      // target.
-      rewriteAngularUnit(
-        bodyWithParallelHeadsLowered(literal.ops[0].canonical, target),
-        { exactFactors: target.language === 'interval-javascript' }
-      ),
-      target,
-      registry,
-      enclosingDefinitionOf(
-        literal.engine as unknown as ComputeEngine,
-        h,
-        literal
-      )
+  const inlined = inlineCollectionValuedCallsInDefinitionBody(
+    // Exact factors on `interval-js`, as at the compile entry of that
+    // target.
+    rewriteAngularUnit(
+      bodyWithParallelHeadsLowered(literal.ops[0].canonical, target),
+      { exactFactors: target.language === 'interval-javascript' }
     ),
+    target,
+    registry,
+    enclosingDefinitionOf(
+      literal.engine as unknown as ComputeEngine,
+      h,
+      literal
+    )
+  );
+  // The applications of a derivative, after the nested calls are inlined,
+  // so that the inlined bodies are rewritten too
+  // (`CompileTarget.applyDerivatives`).
+  return unrollFixedWidthCollections(
+    target.applyDerivatives?.(inlined, target) ?? inlined,
     {
       skipHeads: target.unrollSkipHeads,
       overridesHead: target.overridesHead,

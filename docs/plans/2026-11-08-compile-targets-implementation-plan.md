@@ -690,6 +690,125 @@ disagreements. The measures and the review are in
 `docs/plans/2026-11-09-ce1176-caller-code-binding.md`, "The result of the
 implementation".
 
+**The inventory of the rewrites that emission does** (2026-11-09, base
+`68672e1b1`, read-only, session compute-engine-8d). `fragmentReplaceOperands()`
+has 9 calls (LSP `findReferences`): `gpu-functions.ts` 6, `gpu-shapes.ts` 3.
+
+- Two calls only documented a rewrite whose made node is never compiled:
+  `First`/`Last` read as `At(xs, n)` (the operand and a literal go to
+  `compileGPUAt()`), and a `Range` index set read as `Limits(k, a, b)`
+  (only the operands of the made node are read). Both calls are removed;
+  the rewrites stay, with comments that state why no node is typed. The
+  two nodes of `gpu-exact-trig.ts` are not compiled either (a coefficient
+  that `float32Parts` reads, and a string of a report).
+- Can move to stage 1: the nest of a multi-index `Sum`/`Product` (the
+  inner aggregate needs a scope of its own); the applied derivative
+  (`Apply(Derivative(f), x)`, with `gpuAppliedBody()`; `walkAppliedDerivative()`
+  of `glsl-fragment.ts` then goes, and the pass stops typing a list
+  argument as one value where the emitter maps over its elements); the trig
+  offset (`gpuReduceTrigOffset()`; CSE then sees `u + c'` instead of
+  `u + c`, so the corpus code can change); the inlined copy of a call with
+  a reserved parameter name (the `discard` case: the specialization
+  decision is now in `userCallSpecialization()`, after CE-1184, and what
+  remains is the second copy that the emitter inlines).
+- Cannot move as MathJSON: the half-turn operands of `gpuPiMultiple()`,
+  `gpuImaginaryPiMultiple()` and the Euler split (`u` is valid only as the
+  operand of a helper that has no head). They hold 5 of the 7 calls left,
+  so `fragmentReplaceOperands()` stays unless internal heads are added.
+- Outside the contract: the emit-time rewrites of the shared compiler
+  (constant folds, `jumpShiftRewrite`, `knownExponentPower`, the
+  temporaries of `desugarPatternAssign()`, the unrolled terms of an inlined
+  call). They make most of the 171 made-node compilations of step 3 (an
+  estimate: the probe of step 3 is not in the tree).
+- Estimate if every movable rewrite moves: about 230 lines removed, about
+  400 moved, about 110 added in stage 1.
+
+The removal of the two calls: −33 lines, +19. The 241 test files that name
+GLSL pass (11,392 tests); `npm run test:glsl`: 0 disagreements (966
+expressions accepted by `canCompile()`). No compiled node changed, so the
+corpus audit was not run.
+
+**The result of the move of the applied derivative** (2026-11-09, base
+`a81590bce`, session compute-engine-8d). On GLSL, `Apply(Derivative(f),
+x…)` is replaced by the closed form applied to its arguments in stage 1:
+`gpuApplyDerivatives()` of the new module `gpu-applied-derivative.ts`, run
+by `prepareRoot()` (before and after `inlineSharedUserFunctionCalls`), by
+`compileDeclaredFunctionBody()`, `compileToSource()` and `compileShader()`,
+by the direct-target route of `compile-expression.ts`, and, through the new
+member `CompileTarget.applyDerivatives` (set by GLSL only), on user-function
+bodies (`definitionBodyExpr()`, `inlinedUserFunctionCall()`) and stored
+values (`tryFoldKnownSymbol()`, and the `storedValue` callback of the pass,
+both after the angular-unit rewrite). `gpuAppliedBody()` and its helpers
+moved to the new module. The `Apply` entry of `GPU_FUNCTIONS` with its
+`fragmentReplaceOperands()` call and `walkAppliedDerivative()` are removed;
+the `Apply` rule of the pass (`walkApply()`) now only refuses. An application
+is not rewritten, and declines, when an argument has an effect, runs caller
+code, is not valid, or holds a node of static type `error`.
+
+- Fixed: the pass typed `Apply(Derivative(u ↦ 7u), [x, y]) + 1` as a
+  `float`, while the code is a `vec2` (the value was right); for an
+  argument with an effect `canCompile()` accepted and `compile()` declined.
+- New decline: an argument with caller code (`vars: { t: 'nextValue()' }`),
+  which compiled before.
+- Source: 594 lines added (387 in the new module, of which 255 moved from
+  `gpu-functions.ts`), 424 removed. The move adds code: the rewrite now
+  runs on each route that prepares a tree (listed above), where the emitter
+  had one entry.
+- Tests: `compile-derivative.test.ts` (seven new cases), one new value test
+  in `scripts/glsl-check/glsl-driver.test.ts`; in `compile-glsl.test.ts` 7
+  expectations lose the outer parentheses of a substituted body, and 2
+  decline messages give the new reason.
+- Measures: the 241 test files that name GLSL pass (11,399 tests); `npm run
+  test:glsl`: 0 disagreements (966 expressions accepted); `check:deps`
+  passes. Tycho's whole-corpus codegen audit through `CE_ALT_PKG` (17,421
+  records), base `a81590bce` with the two-call removal against the final
+  tree: 0 changed code, 0 new declines, 0 disagreements of `canCompile()`
+  with `compile()` (3,661 GLSL records, 46 refused). Dual review, two
+  rounds: round 1 found three medium defects (an invalid argument dropped
+  by the closed form; a stored value not rewritten; the direct-target route
+  not rewritten) and two small ones, all fixed; round 2, no finding from
+  Codex and two low findings from Claude, fixed.
+
+**The result of the move of the `discard` case** (2026-11-09, base: the
+applied-derivative move above, session compute-engine-8d). A call of a user
+function with a parameter name that GLSL reserves (`f(discard) :=
+discard^2`) is written in place in stage 1 by `inlineReservedParameterCalls()`
+of the new module `gpu-reserved-parameter-calls.ts`, called by `prepareRoot()`
+inside a common-subexpression session (`withRewriteSession()` of
+`gpu-shader-target.ts`). The substitution is the emitter's
+`inlinedUserFunctionCall()`. The pass's own inlined copy (the key
+`h#inlined` in `glsl-fragment.ts` and its test in `fragment.ts`) is removed;
+a call that stays a call is refused by the pass's check of reserved names.
+The call stays a call when an argument or the callee body reaches caller
+code, or when an argument type is not a subtype of the declared parameter
+type. `SharedCallsPass` was not extended: it acts only on calls that several
+bodies share, on a pure root, and outside loops.
+
+- Fixed: `f(f(u))`, and a call of `f` in the body of a function that is
+  emitted as a shader function, were accepted by `canCompile()` and
+  declined by `compile()`; the first now compiles, the second declines in
+  both. `f(sin(u))` computes `sin(u)` once.
+- New declines: a call whose argument or body reaches caller code, and a
+  call whose argument type is not the declared parameter type (with
+  `discard: real`, a complex argument), which compiled before.
+- Not removed: the emit-time inlining (`tryInlineUserFunctionCall()`) serves
+  other routes and targets; `refusesParameterName` in
+  `userCallSpecialization()` is probably unreachable on GLSL now, and stays.
+- Source: 292 lines added (241 in the new module), 61 removed. Tests: 11
+  new cases in `compile-glsl-fragment.test.ts`, one value test in
+  `scripts/glsl-check/glsl-driver.test.ts`.
+- Measures: the 241 test files that name GLSL pass (11,409 tests); `npm run
+  test:glsl`: 0 disagreements (966 expressions accepted). Tycho's
+  whole-corpus codegen audit against the applied-derivative move, of the
+  first version and of the final tree: 0 changed code, 0 new declines, 0
+  disagreements of `canCompile()` with `compile()` (17,421 records). Dual review, two
+  rounds: round 1 found one high defect (an argument with caller code
+  substituted where the body reads it 0 times, several times, or in an
+  `And`), two medium (caller code of the body shared by two copies; the
+  declared parameter type not checked) and one low (the memo off under a
+  binder), all fixed; round 2, no finding from Codex and three small ones
+  from Claude, fixed.
+
 ## Step 6. Tycho calls the predicate at resolve time
 
 Tycho's work, on the release that has step 3: `compileDeferredGlsl()` and

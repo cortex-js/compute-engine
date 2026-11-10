@@ -58,6 +58,7 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { inlineSharedUserFunctionCalls } from './gpu-shared-calls.js';
+import { inlineReservedParameterCalls } from './gpu-reserved-parameter-calls.js';
 import { GPU_MAX_WRITTEN_NODES, gpuWrittenSize } from './gpu-written-size.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
@@ -129,6 +130,7 @@ import {
   gpuBindCallerCode,
   gpuSeparateCallerCode,
 } from './gpu-caller-binding.js';
+import { gpuApplyDerivatives } from './gpu-applied-derivative.js';
 import {
   GLSL_STAGE_BUILTINS,
   GLSL_STAGE_BUILTIN_OUTPUTS,
@@ -468,11 +470,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // definition body or an inlined body as at the entry
       // (`CompileTarget.unrollComprehensions`).
       unrollComprehensions: true,
-      // Only a function-LITERAL callee compiles here: the `Apply` entry of
-      // the function table substitutes the arguments into the literal's body
-      // (`gpuAppliedBody`). The reference analysis must stop at any other
-      // application rather than walk into a callee this target never
-      // compiles (`CompileTarget.appliesFunctionLiteralsOnly`).
+      // Only a derivative with a closed form compiles here as a callee: the
+      // prepare stage substitutes the arguments into the body of the closed
+      // form (`gpuApplyDerivatives()`). The reference analysis must stop at
+      // any other application rather than walk into a callee this target
+      // never compiles (`CompileTarget.appliesFunctionLiteralsOnly`).
       appliesFunctionLiteralsOnly: true,
       assignmentValue: (value, code, current) =>
         isSubtype(gpuType(value), 'color')
@@ -512,6 +514,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // (`gpu-caller-binding.ts`).
       bindStatementEffects:
         this.languageId === 'glsl' ? gpuBindCallerCode : undefined,
+      // An application of a derivative in the body of a user function is
+      // written as the closed form applied to its arguments before the body
+      // is typed (`gpu-applied-derivative.ts`).
+      applyDerivatives: gpuApplyDerivatives,
       // A multi-statement `Block` used as a VALUE — a `with` clause as the
       // term of a `Sum`, or as an operand of an addition — becomes one
       // compound statement in the enclosing sink: the block's locals are
@@ -1592,21 +1598,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // A point value is written in place of its symbol, as in `compile()`
     // (`inlinePointValues`). The declared parameters are bound, so they are
     // not replaced.
-    const prepared = inlinePointValues(
-      inlinePointCalls(
-        expr,
+    const prepared = gpuApplyDerivatives(
+      inlinePointValues(
+        inlinePointCalls(
+          expr,
+          target,
+          {
+            scalarNames: new Set<string>(),
+            localNames: new Set(declarations.map((d) => d.name)),
+          },
+          gpuPointCallsOverBudget
+        ),
         target,
-        {
-          scalarNames: new Set<string>(),
-          localNames: new Set(declarations.map((d) => d.name)),
-        },
-        gpuPointCallsOverBudget
+        new Set([
+          ...declarations.map((d) => d.name),
+          ...reachableSymbolNames(expr).written,
+        ])
       ),
-      target,
-      new Set([
-        ...declarations.map((d) => d.name),
-        ...reachableSymbolNames(expr).written,
-      ])
+      target
     );
     // The body is in the fragment, with the declared parameters as its
     // inputs, before any code is written.
@@ -1754,12 +1763,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // `createTargetFor()`). It measures the body of a definition,
           // before the point calls and values are written in place, with
           // the nodes that its common-subexpression pass can bind shared
-          // when the `cse` option is not false, and a body written in place
-          // of a call with no node shared. The pass records that tree and
-          // that setting for each function (`sizeCheck`), and the same
-          // measure is made here. A function with no record is not measured
-          // by `compile()` either. The sum of the bodies written in place of
-          // their calls is not checked here.
+          // when the `cse` option is not false. The pass records that tree
+          // for each function (`sizeCheck`), and the same measure is made
+          // here. A function with no record is not measured by `compile()`
+          // either.
           for (const { sizeCheck } of annotation.functions.values()) {
             if (sizeCheck === undefined) continue;
             const body = sizeCheck.body;
@@ -1768,7 +1775,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 ...prepared.cseOptions,
                 admitPureUserFunctions: true,
               }),
-              share: sizeCheck.shared && options.cse !== false,
+              share: options.cse !== false,
             };
             if (gpuWrittenSize(body, rules) > GPU_MAX_WRITTEN_NODES)
               throw new Error(userFunctionsTooLarge(this.languageId));
@@ -1953,8 +1960,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * The rewrites run in this order: `rewriteAngularUnit()`,
    * `lowerParallelHeads()`, `gpuSeparateCallerCode()`,
    * `unrollFixedWidthCollections()`, `inlinePointCalls()`,
-   * `inlinePointValues()`, `BaseCompiler.inlineCollectionValuedCallsAtRoot()`,
-   * `inlineSharedUserFunctionCalls()`, `unrollFixedWidthCollections()`.
+   * `inlinePointValues()`, `inlineReservedParameterCalls()`,
+   * `BaseCompiler.inlineCollectionValuedCallsAtRoot()`,
+   * `gpuApplyDerivatives()`, `inlineSharedUserFunctionCalls()`,
+   * `gpuApplyDerivatives()` again when that pass changed the tree,
+   * `unrollFixedWidthCollections()`.
    *
    * The stage throws for an expression that the target cannot compile. A
    * caller that wants to know only whether the expression compiles can call
@@ -2160,21 +2170,53 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target,
       reachable().written
     );
-    expr = unrollFixedWidthCollections(
-      inlineSharedUserFunctionCalls(
-        BaseCompiler.inlineCollectionValuedCallsAtRoot(
-          expr,
-          target,
-          'list<any>'
-        ),
+    // An application of a derivative is written as the closed form applied
+    // to its arguments (`gpu-applied-derivative.ts`), before the shared
+    // calls are substituted, so that pass sees the calls of the closed form,
+    // and again after, for the bodies that pass writes in place of their
+    // calls. The rewrite asks which arguments hold code that the caller
+    // supplies (`reachesCallerCodeOn()`), which reads the predicates of the
+    // caller's options from the session of the common-subexpression pass.
+    // The emit stage opens that session, so a session with no sharing holds
+    // them during the rewrite, as in `prepareAndType()`.
+    const withRewriteSession = <T>(rewrite: () => T): T => {
+      const outerCse = target.cse;
+      target.cse ??= {
+        enabled: false,
+        harvestOptions: { ...cseOptions },
+        instances: [],
+      };
+      try {
+        return rewrite();
+      } finally {
+        target.cse = outerCse;
+      }
+    };
+    const applyDerivatives = (x: Expression): Expression =>
+      withRewriteSession(() => gpuApplyDerivatives(x, target));
+    const isOverridden = (name: string): boolean =>
+      (userFunctions !== undefined && Object.hasOwn(userFunctions, name)) ||
+      (vars !== undefined && Object.hasOwn(vars, name));
+    // A call of a user function with a parameter name that GLSL reserves
+    // (`discard`) is written in place here, so that the typing pass of the
+    // fragment types the tree that the emitter writes
+    // (`gpu-reserved-parameter-calls.ts`). The substitution applies the
+    // derivatives of the body, so it runs in the same session.
+    const reservedInlined = withRewriteSession(() =>
+      inlineReservedParameterCalls(expr, target, isOverridden)
+    );
+    const applied = applyDerivatives(
+      BaseCompiler.inlineCollectionValuedCallsAtRoot(
+        reservedInlined,
         target,
-        {
-          isOverridden: (name) =>
-            (userFunctions !== undefined &&
-              Object.hasOwn(userFunctions, name)) ||
-            (vars !== undefined && Object.hasOwn(vars, name)),
-        }
-      ),
+        'list<any>'
+      )
+    );
+    const shared = inlineSharedUserFunctionCalls(applied, target, {
+      isOverridden,
+    });
+    expr = unrollFixedWidthCollections(
+      shared === applied ? shared : applyDerivatives(shared),
       {
         skipHeads: unrollSkipHeads,
         iterationBudget: options.iterationBudget,
@@ -2565,10 +2607,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     });
     // A point value is written in place of its symbol, as in `compile()`
     // (`inlinePointValues`).
-    const inlined = inlinePointValues(
-      expr,
-      sourceTarget,
-      reachableSymbolNames(expr).written
+    const inlined = gpuApplyDerivatives(
+      inlinePointValues(expr, sourceTarget, reachableSymbolNames(expr).written),
+      sourceTarget
     );
     // This route has no common-subexpression pass, so a node that several
     // paths reach is written once for each path. A point value written in
@@ -2830,18 +2871,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // A point value is written in place of its symbol, as in
           // `compile()` (`inlinePointValues`).
           BaseCompiler.beginRootPreprocessing(assignment.expression, target);
-          const expression = inlinePointValues(
-            inlinePointCalls(
-              assignment.expression,
+          const expression = gpuApplyDerivatives(
+            inlinePointValues(
+              inlinePointCalls(
+                assignment.expression,
+                target,
+                { scalarNames: new Set<string>(), localNames: shaderNames },
+                gpuPointCallsOverBudget
+              ),
               target,
-              { scalarNames: new Set<string>(), localNames: shaderNames },
-              gpuPointCallsOverBudget
+              new Set([
+                ...shaderNames,
+                ...reachableSymbolNames(assignment.expression).written,
+              ])
             ),
-            target,
-            new Set([
-              ...shaderNames,
-              ...reachableSymbolNames(assignment.expression).written,
-            ])
+            target
           );
           inlined[i] = expression;
           // The statement is in the fragment, with the declarations of the
