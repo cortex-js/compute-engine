@@ -26,6 +26,7 @@ import {
   type SysHelpers,
   kindBroadcastError,
   bigintBroadcastError,
+  SYS_HELPERS,
 } from './javascript-runtime.js';
 import type {
   Expression,
@@ -11269,7 +11270,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         options.entryChecks !== false,
         options.broadcast === true
           ? (names) => this.compileBatchBody(expr, options, names)
-          : undefined
+          : undefined,
+        this.bodyEmitter(prepared.target)
       );
     } finally {
       endPoolLoopCollection(poolLoops);
@@ -11561,6 +11563,20 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       ...(split.hoisted ? { preambleOnce: split.hoisted } : {}),
       ...(perCall ? { preamblePerCall: perCall } : {}),
     };
+  }
+
+  /**
+   * The emitter that writes the body of the compilation whose prepared
+   * target is `target`, in place of the existing emitter, or `undefined`
+   * for the existing emitter. This target always gives `undefined`. The
+   * internal scalar fragment target (`javascript-fragment-target.ts`)
+   * gives its structured emitter on its structured route. It is not a
+   * member of `CompileTarget` and not a compile option.
+   */
+  protected bodyEmitter(
+    _target: CompileTarget<Expression>
+  ): JavaScriptBodyEmitter | undefined {
+    return undefined;
   }
 
   /**
@@ -12415,11 +12431,87 @@ function defaultFillFunction(
   return `((...$args) => { let [${bound.join(', ')}] = $args; ${body} })`;
 }
 
+/** The names that `compileToTarget()` gives to a `JavaScriptBodyEmitter`. */
+export type JavaScriptBodyNames = {
+  /** The source of a read of the input `name`: the parameter of that name
+   *  of a root `Function` literal, or the entry of the vars object. */
+  readonly input: (name: string) => string;
+  /** A name that no other name of the compilation uses. */
+  readonly fresh: () => string;
+};
+
+/** The body of a compilation that a `JavaScriptBodyEmitter` writes. */
+export type JavaScriptBody = {
+  /** Function definitions that the statements call. Each reads no input.
+   *  They go in the preamble (for a root `Function` literal, at the start
+   *  of the body of the arrow function) and run on each call: they are
+   *  never hoisted into `preambleOnce`. */
+  readonly definitions: readonly string[];
+  /** The statements of the body, in order, then the value of the body. */
+  readonly statements: readonly string[];
+  readonly value: string;
+  /** The names of the inputs that the body reads. */
+  readonly inputs: ReadonlySet<string>;
+  /** The helpers of the runtime object `_SYS` that the body calls. */
+  readonly runtime: ReadonlySet<string>;
+  /** The compile mode that the result reports (`CompilationResult.mode`). */
+  readonly mode: 'strict' | 'complex';
+};
+
+/**
+ * An emitter that writes the body of a compilation in place of the existing
+ * emitter (`JavaScriptTarget.bodyEmitter()`). `compileToTarget()` calls it
+ * where it would compile the body, and builds the result from its body as
+ * from the body of the existing emitter.
+ */
+export type JavaScriptBodyEmitter = (names: JavaScriptBodyNames) => JavaScriptBody;
+
+/**
+ * Call `emit` with the names of the compilation of `target`, and give the
+ * body as `compileToTarget()` uses it: `code`, an expression (the value, or
+ * the statements in one arrow function that is called at once);
+ * `statementBody`, the statements and a `return` of the value, which the
+ * runner runs; the definitions; and the inputs that it reads. The state
+ * that the outermost compilation of the existing emitter writes and that the
+ * assembly reads is written here: the mode report, and no value kind.
+ */
+function emitDelegatedBody(
+  emit: JavaScriptBodyEmitter,
+  target: CompileTarget<Expression>,
+  input: (name: string) => string
+): {
+  code: string;
+  statementBody: string;
+  definitions: string;
+  inputs: ReadonlySet<string>;
+} {
+  const body = emit({ input, fresh: () => BaseCompiler.tempVar(target) });
+  for (const helper of body.runtime)
+    if (!Object.hasOwn(SYS_HELPERS, helper))
+      throw new Error(`The runtime has no helper _SYS.${helper}`);
+  BaseCompiler._lastReport = { mode: body.mode };
+  BaseCompiler._lastKindLowering = undefined;
+  const statements = body.statements.join(' ');
+  return {
+    code:
+      statements === ''
+        ? body.value
+        : `(() => { ${statements} return ${body.value}; })()`,
+    statementBody:
+      statements === ''
+        ? `return ${body.value};`
+        : `${statements} return ${body.value};`,
+    definitions: body.definitions.map((d) => `${d}\n`).join(''),
+    inputs: body.inputs,
+  };
+}
+
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
   entryChecks = true,
-  batchBody?: (names: ReadonlySet<string>) => StoredBatchBody | undefined
+  batchBody?: (names: ReadonlySet<string>) => StoredBatchBody | undefined,
+  bodyEmitter?: JavaScriptBodyEmitter
 ): CompilationResult<'javascript'> {
   // The discipline this compilation runs under, for the D3 entry plans built
   // after the compilation proper (when `BaseCompiler.mode` is restored).
@@ -12502,7 +12594,18 @@ function compileToTarget(
     //
     // A write to a parameter with a generated name writes that name
     // (`withWritableLoopIndices` makes `assignLValue` accept it).
-    const body = BaseCompiler.withWritableLoopIndices(
+    //
+    // With `bodyEmitter`, that emitter writes the body; an input is the
+    // parameter of its name.
+    const emitted =
+      bodyEmitter === undefined
+        ? undefined
+        : emitDelegatedBody(bodyEmitter, target, (name) => {
+            const i = declared.indexOf(name);
+            if (i < 0) throw new Error(`No parameter ${name} to read`);
+            return params[i];
+          });
+    const body = emitted?.code ?? BaseCompiler.withWritableLoopIndices(
       params.filter((p, i) => p !== declared[i]),
       () =>
         BaseCompiler.withEnforcedParams(
@@ -12545,7 +12648,8 @@ function compileToTarget(
         javascriptStatements(target)
       );
     }
-    const definitions = BaseCompiler.userFunctionsPreamble(target);
+    const definitions =
+      emitted?.definitions ?? BaseCompiler.userFunctionsPreamble(target);
     // With the `iterationBudget` option, code that counts `Loop` passes starts
     // each call of the lambda with a count of 0. The reset comes before the
     // definitions, which can run a loop when they hold a value.
@@ -12570,9 +12674,12 @@ function compileToTarget(
     // The definitions that read no lambda parameter are evaluated once per
     // artifact; the rest stay inside the per-call body (see
     // `splitPreambleDefs`). `toString()` and `code` keep the single-body form.
-    const definitionSplit = target.userFunctions
-      ? splitPreambleDefs(target.userFunctions, params, false)
-      : { hoisted: '', perCall: '', perCallNames: [] };
+    // The definitions of `bodyEmitter` run on each call.
+    const definitionSplit = emitted
+      ? { hoisted: '', perCall: emitted.definitions, perCallNames: [] }
+      : target.userFunctions
+        ? splitPreambleDefs(target.userFunctions, params, false)
+        : { hoisted: '', perCall: '', perCallNames: [] };
     const split = {
       ...definitionSplit,
       perCall: passReset + definitionSplit.perCall,
@@ -12598,9 +12705,9 @@ function compileToTarget(
         ? aroundDefaultFill(split.perCallNames)
         : { before: split.perCall, after: '' };
     const statements = javascriptStatements(target);
-    const statementBody = statements?.has(body)
-      ? statements.functionBody(body)
-      : undefined;
+    const statementBody =
+      emitted?.statementBody ??
+      (statements?.has(body) ? statements.functionBody(body) : undefined);
     const entryPlan = entryChecks
       ? lambdaEntryPlan(args.slice(1), mode)
       : undefined;
@@ -12700,7 +12807,16 @@ function compileToTarget(
     }
   }
 
-  const js = BaseCompiler.compileCseRoot(expr, target);
+  // With `bodyEmitter`, that emitter writes the body; an input is the entry
+  // of its name of the vars object, and each input that the body reads is
+  // recorded as such a read.
+  const emitted =
+    bodyEmitter === undefined
+      ? undefined
+      : emitDelegatedBody(bodyEmitter, target, varsObjectAccess);
+  if (emitted)
+    for (const name of emitted.inputs) target.varsObjectRefs?.add(name);
+  const js = emitted?.code ?? BaseCompiler.compileCseRoot(expr, target);
   // The value kinds whose compile contracts the code reads or makes: the
   // value of a call is then returned raw, the code cannot be stored, and it
   // is shippable only when every contract says so (below).
@@ -12723,7 +12839,8 @@ function compileToTarget(
       javascriptStatements(target)
     );
   }
-  const userDefs = BaseCompiler.userFunctionsPreamble(target);
+  const userDefs =
+    emitted?.definitions ?? BaseCompiler.userFunctionsPreamble(target);
   // With the `iterationBudget` option, code that counts `Loop` passes starts
   // each call with a count of 0. The reset comes first in the preamble, which
   // runs on every call, because a definition can run a loop when it holds a
@@ -12746,9 +12863,12 @@ function compileToTarget(
   // value reaching caller-supplied source is not on `userFunctions.hoistable`.
   // `preamble` above, the text a consumer splices itself, keeps the
   // single-body form.
-  const split = target.userFunctions
-    ? splitPreambleDefs(target.userFunctions, [], true)
-    : { hoisted: '', perCall: '' };
+  // The definitions of `bodyEmitter` run on each call.
+  const split = emitted
+    ? { hoisted: '', perCall: emitted.definitions }
+    : target.userFunctions
+      ? splitPreambleDefs(target.userFunctions, [], true)
+      : { hoisted: '', perCall: '' };
   const perCall = target.preamble
     ? `${target.preamble}\n${split.perCall}`
     : split.perCall || undefined;
@@ -12757,7 +12877,8 @@ function compileToTarget(
     : undefined;
   const broadcastOutputs = broadcastStrideOfType(expr.type.type);
   const reconstructionDigits = realPowerReconstructionDigits();
-  const statementBody = javascriptStatements(target)?.functionBody(js);
+  const statementBody =
+    emitted?.statementBody ?? javascriptStatements(target)?.functionBody(js);
   const fn = new ComputeEngineFunction(
     expr.engine,
     js,

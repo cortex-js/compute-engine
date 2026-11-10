@@ -125,15 +125,30 @@ function scalarKind(type: { readonly kind: string }): ScalarKind {
 export function lowerStructuredFragment(
   preparation: StructuredPreparation
 ): IRProgram {
-  const program = new Lowering(preparation).program();
-  // The origin of each operation must be a node that the annotation of the
-  // preparation types, in its root scope, a nested scope or a function.
+  const program = lowerStructuredProgram(preparation);
+  verifyProgram(program, preparedNodesOf(preparation));
+  return program;
+}
+
+/** Lower the program that `preparation` describes, without verifying it:
+ *  the caller verifies it (`lowerStructuredFragment()` does both). */
+export function lowerStructuredProgram(
+  preparation: StructuredPreparation
+): IRProgram {
+  return new Lowering(preparation).program();
+}
+
+/** The nodes that the annotation of `preparation` types, in its root
+ *  scope, a nested scope or a function: the origin of each operation must
+ *  be one of them. */
+export function preparedNodesOf(
+  preparation: StructuredPreparation
+): Set<Expression> {
   const preparedNodes = new Set<Expression>();
   collectOrigins(preparation.annotation.scope, preparedNodes);
   for (const fn of preparation.annotation.functions.values())
     collectOrigins(fn.scope, preparedNodes);
-  verifyProgram(program, preparedNodes);
-  return program;
+  return preparedNodes;
 }
 
 class Lowering {

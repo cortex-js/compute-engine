@@ -238,7 +238,8 @@ function yielded(region: IRRegion): IRValue {
  * the effects of its operations, and the effect of an operation that
  * evaluates a region or calls a function includes the effect of that region
  * or of that function; each function yields a value of the type and the
- * representation of its result; each origin is one of `preparedNodes`, the
+ * representation of its result, and its body reads no input of the
+ * program; each origin is one of `preparedNodes`, the
  * nodes of the prepared artifact that the program was lowered from.
  */
 export function verifyProgram(
@@ -300,18 +301,26 @@ export function verifyProgram(
       fail(`the value ${value.id} is used before its definition`);
   };
 
-  const verifyRegion = (region: IRRegion, outer: readonly Frame[]) => {
+  // `inFunction`: the region is the body of a function or is nested in it.
+  // Such a region reads no input of the program.
+  const verifyRegion = (
+    region: IRRegion,
+    outer: readonly Frame[],
+    inFunction: boolean
+  ) => {
     verifyRegionShape(region);
     const effects: EffectFact[] = [];
     region.operations.forEach((op, index) => {
       const frames = [...outer, { region, index }];
+      if (inFunction && op.kind === 'input')
+        fail(`the body of a function reads the input ${op.input}`);
       if (!isEffect(op.effect))
         fail(`the operation ${op.kind} has no effect fact`);
       if (!preparedNodes.has(op.origin))
         fail(`the origin of the operation ${op.kind} is not a prepared node`);
       for (const operand of op.operands) use(operand, frames);
       for (const inner of regionsOf(op)) {
-        verifyRegion(inner, frames);
+        verifyRegion(inner, frames, inFunction);
         if (EFFECT_RANK[op.effect] < EFFECT_RANK[inner.effect])
           fail(
             `the effect of the operation ${op.kind} (${op.effect}) omits the effect of its region (${inner.effect})`
@@ -330,7 +339,7 @@ export function verifyProgram(
 
   // A function body sees its parameters and its own values only.
   for (const fn of program.functions) {
-    verifyRegion(fn.body, []);
+    verifyRegion(fn.body, [], true);
     if (representationOfKind(fn.result.type) !== fn.result.representation)
       fail(
         `the result of ${fn.name} has the type ${fn.result.type} and the representation ${fn.result.representation}`
@@ -344,7 +353,7 @@ export function verifyProgram(
         `the body of ${fn.name} yields a ${value.type} value, and its result is a ${fn.result.type}`
       );
   }
-  verifyRegion(program.root, []);
+  verifyRegion(program.root, [], false);
 }
 
 /** One yield, and it is the last operation. */

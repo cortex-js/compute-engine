@@ -12,7 +12,10 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { JavaScriptTarget } from './javascript-target.js';
+import {
+  JavaScriptTarget,
+  type JavaScriptBodyEmitter,
+} from './javascript-target.js';
 import { BaseCompiler } from './base-compiler.js';
 import { CompilerState } from './compiler-state.js';
 import { realOnlyLoweringOf } from './compiler-core.js';
@@ -48,13 +51,16 @@ import {
 } from './javascript-fragment-facts.js';
 import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
-import type { EffectFact } from './javascript-structured-ir.js';
+import { verifyProgram, type EffectFact } from './javascript-structured-ir.js';
 import {
+  lowerStructuredProgram,
+  preparedNodesOf,
   recordStructuredPreparation,
   structuredPreparationOf,
   type StructuredInput,
   type StructuredPreparation,
 } from './javascript-structured-lower.js';
+import { emitStructuredProgram } from './javascript-structured-emit.js';
 
 // Each operator states its own rule for a real or a complex result. There
 // is no shared default: a rule that reads "a complex operand gives a complex
@@ -437,14 +443,45 @@ function recordStructured(
 /**
  * The route of the fragment target. `existing`: the existing emitter of the
  * fragment writes the code. `structured`: the program is lowered to the
- * structured representation (`javascript-structured-lower.ts`); this route
- * admits more operators and requires `cse: false` and `constantFold:
- * false`. It has no emitter yet, so its `compile()` throws.
+ * structured representation (`javascript-structured-lower.ts`), verified,
+ * and written by the structured emitter (`javascript-structured-emit.ts`);
+ * the existing assembly of `JavaScriptTarget` builds the result from that
+ * body. This route admits more operators and requires `cse: false` and
+ * `constantFold: false`. A failure of a phase throws: nothing falls back to
+ * the existing emitter.
  */
 export type ScalarFragmentRoute = 'existing' | 'structured';
 
+/** The phases of a compilation on the structured route, in order. */
+export type StructuredPhase =
+  | 'preparation'
+  | 'annotation'
+  | 'lowering'
+  | 'verification'
+  | 'emission'
+  | 'assembly';
+
+/** What a test or a benchmark can observe of the structured route. */
+export type StructuredRouteHooks = {
+  /**
+   * Called at the end of each phase, with its duration in milliseconds.
+   * `preparation` is `JavaScriptTarget.prepareCompilation()` and the checks
+   * of the options; `annotation` is the admission, the annotation and the
+   * facts of the route; `assembly`, reported last by `compile()`, is the
+   * rest of the compilation (the wrappers of `compile()`, the code of
+   * `compileToTarget()` around the emission, and the references of the
+   * result). Without this hook, no time is read.
+   */
+  readonly onPhase?: (phase: StructuredPhase, milliseconds: number) => void;
+  /** For tests only: the source of the operation that exists only for
+   *  tests (`StructuredEmitOptions.trace`). */
+  readonly trace?: (id: string, operands: readonly string[]) => string;
+};
+
 export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
   private readonly admission: Admission;
+  /** The sum of the phases reported in the current `compile()`. */
+  private phaseSum = 0;
 
   /**
    * @param route The route of this target (`ScalarFragmentRoute`).
@@ -453,10 +490,13 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
    * only for tests, with the trace id of each. Such a head takes real
    * operands and has a real value; its effect fact comes from its
    * declaration.
+   * @param hooks On the structured route: the observer of the phases and
+   * the source of the test operation (`StructuredRouteHooks`).
    */
   constructor(
     readonly route: ScalarFragmentRoute = 'existing',
-    testOperations: ReadonlyMap<string, string> = new Map()
+    testOperations: ReadonlyMap<string, string> = new Map(),
+    private readonly hooks: StructuredRouteHooks = {}
   ) {
     super();
     if (route === 'existing' && testOperations.size > 0)
@@ -469,15 +509,57 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         : EXISTING_ADMISSION;
   }
 
+  /** The time now, when a hook observes the phases; otherwise 0. */
+  private clock(): number {
+    return this.hooks.onPhase ? globalThis.performance.now() : 0;
+  }
+
+  /** Report the end of `phase`, which started at `since` (`clock()`), and
+   *  return the time now. Does nothing without an observer. */
+  private endPhase(phase: StructuredPhase, since: number): number {
+    const onPhase = this.hooks.onPhase;
+    if (!onPhase) return 0;
+    const now = globalThis.performance.now();
+    this.phaseSum += now - since;
+    onPhase(phase, now - since);
+    return now;
+  }
+
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
-    if (this.route === 'structured')
-      throw new Error(
-        'JS scalar fragment: the structured route has no emitter yet'
-      );
-    return super.compile(expr, options);
+    const onPhase = this.hooks.onPhase;
+    if (this.route !== 'structured' || !onPhase)
+      return super.compile(expr, options);
+    this.phaseSum = 0;
+    const start = globalThis.performance.now();
+    const result = super.compile(expr, options);
+    onPhase('assembly', globalThis.performance.now() - start - this.phaseSum);
+    return result;
+  }
+
+  /**
+   * On the structured route, the emitter of the body: lower the program of
+   * the preparation recorded on `target`, verify it and emit it.
+   */
+  protected bodyEmitter(
+    target: CompileTarget<Expression>
+  ): JavaScriptBodyEmitter | undefined {
+    if (this.route !== 'structured') return undefined;
+    const preparation = structuredPreparationOf(target);
+    return (names) => {
+      let time = this.clock();
+      const program = lowerStructuredProgram(preparation);
+      time = this.endPhase('lowering', time);
+      verifyProgram(program, preparedNodesOf(preparation));
+      time = this.endPhase('verification', time);
+      const emission = emitStructuredProgram(program, names, {
+        trace: this.hooks.trace,
+      });
+      this.endPhase('emission', time);
+      return { ...emission, mode: program.numericPolicy };
+    };
   }
 
   /**
@@ -499,6 +581,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     options: CompilationOptions<Expression>,
     batch?: unknown
   ): { expr: Expression; target: CompileTarget<Expression> } {
+    const structured = this.admission.structured;
+    const start = structured ? this.clock() : 0;
     if (
       batch !== undefined ||
       options.broadcast ||
@@ -523,10 +607,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       );
     const definition = admission.definition;
     const prepared = super.prepareCompilation(expr, options);
+    const annotationStart = structured
+      ? this.endPhase('preparation', start)
+      : 0;
     // The annotation, with the facts of the body of a root function and of
     // the helper definition, is built here, before any emission.
     if (isFunction(prepared.expr, 'Function')) {
       attachBoundFunction(prepared.expr, prepared.target, admission);
+      if (structured) this.endPhase('annotation', annotationStart);
       return prepared;
     }
     const named: NamedCalls = { calls: new Set() };
@@ -593,6 +681,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           structuredInput(name, facts.type)
         ),
     });
+    if (structured) this.endPhase('annotation', annotationStart);
     return prepared;
   }
 }

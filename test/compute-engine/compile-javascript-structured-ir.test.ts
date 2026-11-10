@@ -642,6 +642,22 @@ describe('the verifier', () => {
     );
   });
 
+  test('a function body that reads an input of the program', () => {
+    const f = madeFunctionProgram();
+    const read = f.value('real');
+    const fnOps: Op[] = [
+      { kind: 'input', input: 1, result: read, operands: [], effect: 'pure', origin: f.origin },
+      f.yieldOf(read),
+    ];
+    const program: IRProgram = {
+      ...f.program,
+      functions: [{ ...f.fn, body: f.region(fnOps, 'pure') }],
+    };
+    expect(() => verifyProgram(program, f.prepared)).toThrow(
+      /the body of a function reads the input 1/
+    );
+  });
+
   test('a function parameter used in the root region', () => {
     const f = madeFunctionProgram();
     f.rootOps[2] = f.yieldOf(f.p);
@@ -814,9 +830,9 @@ describe('admission of the structured route', () => {
     );
   });
 
-  test('the structured route has no emitter yet', () => {
+  test('the structured route compiles', () => {
     const expr = scalarEngine().expr(['Add', 'x', 'y']);
-    expect(() => structured().compile(expr, OPTIONS)).toThrow(/has no emitter yet/);
+    expect(structured().compile(expr, OPTIONS).run!({ x: 1, y: 2 })).toBe(3);
   });
 
   test('the existing route still refuses the new operators', () => {
