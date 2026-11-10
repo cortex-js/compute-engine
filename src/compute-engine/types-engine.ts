@@ -1,5 +1,4 @@
 import type { BigDecimal } from '../big-decimal/index.js';
-import type { AsyncEvaluation } from './boxed-expression/evaluation-epoch.js';
 import type { Complex } from 'complex.js';
 import type { OneOf } from '../common/one-of.js';
 import type { KernelPool } from './kernel-pool-types.js';
@@ -490,6 +489,34 @@ export type DeclareOptions = {
 };
 
 /**
+ * The result of `ce.infer()`.
+ *
+ * - `declared`: each name that `ce.infer()` declared in its home scope, or
+ *   whose inferred definition it narrowed there, with the type it has now.
+ * - `skipped`: each name that it did not change, with the reason:
+ *   - `'conflict'`: the expressions require types that have no common
+ *     subtype (`x + 1` and `x(3)`), or a type that has none in common with
+ *     the inferred definition of the name;
+ *   - `'untyped'`: the requirements give the type `unknown`;
+ *   - `'defined'`: the home scope holds a definition of the name that is not
+ *     inferred (a `ce.declare()`, for example);
+ *   - `'out-of-scope'`: the home scope is not the current scope or one of its
+ *     ancestors (it was popped).
+ *
+ * Each list is sorted by name, then by the depth of the scope.
+ *
+ * @category Definitions
+ */
+export type InferResult = {
+  declared: { name: string; scope: Scope; type: Type }[];
+  skipped: {
+    name: string;
+    scope: Scope;
+    reason: 'conflict' | 'untyped' | 'defined' | 'out-of-scope';
+  }[];
+};
+
+/**
  * The patch `ce.declare(id, patch, { extend: true })` applies to the operator
  * definition currently visible for `id`.
  *
@@ -918,6 +945,11 @@ export interface IComputeEngine {
    * `CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
    * {@link restore} additionally requires the same scope stack the
    * checkpoint was taken on.
+   *
+   * @deprecated Checkpoints are removed in a later release. To give names
+   * values for one computation, use `ce.withValues()`; to make declarations
+   * that are undone together, declare them in a scope pushed with
+   * `ce.pushScope()` and remove them with `ce.popScope()`.
    */
   checkpoint(label?: string): EngineCheckpoint;
 
@@ -953,12 +985,23 @@ export interface IComputeEngine {
    * restore is false. Do not keep such an expression: build it again to
    * read the new definition, and cache a cell output as a serialized
    * artifact rather than as a live boxed node.
+   *
+   * @deprecated Checkpoints are removed in a later release. To give names
+   * values for one computation, use `ce.withValues()`; to make declarations
+   * that are undone together, declare them in a scope pushed with
+   * `ce.pushScope()` and remove them with `ce.popScope()`.
    */
   restore(cp: EngineCheckpoint): void;
 
   /** Release `cp`'s restore capability. Restoring past a discarded INTERIOR
    * checkpoint stays possible through any earlier live one; discarding the
-   * OLDEST makes the state before the next-younger one unreachable. */
+   * OLDEST makes the state before the next-younger one unreachable.
+   *
+   * @deprecated Checkpoints are removed in a later release. To give names
+   * values for one computation, use `ce.withValues()`; to make declarations
+   * that are undone together, declare them in a scope pushed with
+   * `ce.pushScope()` and remove them with `ce.popScope()`.
+   */
   discard(cp: EngineCheckpoint): void;
 
   /**
@@ -1676,7 +1719,10 @@ export interface IComputeEngine {
    * part of the evaluation puts it in place (`runWithEvaluationEffects()`,
    * `effects-registry.ts`). Without the flag, nothing.
    * @internal */
-  _captureAsyncOperation(evaluation: AsyncEvaluation, input: unknown): void;
+  _captureAsyncOperation(
+    evaluation: { operation?: unknown },
+    input: unknown
+  ): void;
 
   /** With the engine flag `_bindingUnits`: run `fn`, an Epsil run or an
    * Epsil static check, in a program environment (rule 10). Every outermost
@@ -2864,6 +2910,35 @@ export interface IComputeEngine {
   libraryOf(name: MathJsonSymbol): string | undefined;
 
   assume(predicate: Expression | string): AssumeResult;
+
+  /**
+   * Declare the names that `exprs` use, with the types that their uses
+   * require.
+   *
+   * Each name is declared, marked as inferred, in its home scope: the scope
+   * that a declaration of the name would go in when the expression that uses
+   * it was boxed. When the home scope already holds an inferred definition
+   * of the name, that definition is narrowed instead. The type is the meet of
+   * the types that the uses in `exprs` require, met with the type of that
+   * inferred definition. The order of `exprs` does not change the result.
+   *
+   * A name is not changed, and is reported in `skipped`, when the uses
+   * require types that have no common subtype (`x + 1` and `x(3)`), when
+   * they require no type, when the home scope holds a definition of the name
+   * that is not inferred, and when the home scope is not the current scope
+   * or one of its ancestors. Each expression then keeps the type that its
+   * own uses require.
+   *
+   * A library name used as a value (`N` in `N + 1`) is declared as a
+   * variable, which shadows the library definition in the home scope. A
+   * call head (`f` in `f(x)`) is declared with a function type.
+   *
+   * A checkpoint (`ce.checkpoint()`) records the declarations, as it records
+   * those of `ce.declare()`.
+   *
+   * @experimental
+   */
+  infer(exprs: ReadonlyArray<Expression>): InferResult;
 
   /**
    * Declare a sequence with a recurrence relation.

@@ -560,7 +560,13 @@ old mechanism, and updates the tests. The flag exists only during the work.
     `test/compute-engine/binding-units-core.test.ts`.
 - **C, operations, programs and caches:** rules 8, 9 and 10.
 - **D, commits and state:** rules 11 to 13 (`ce.infer()`, `ce.assume()`,
-  trials, the deprecation of checkpoints, the two library loads).
+  trials, the deprecation of checkpoints, the two library loads). The
+  group-theory registration checks its input in the order and with the
+  messages of `declareType()`, and on any other throw removes what it
+  declared. `loadLibrary()` keeps its internal checkpoint until the release
+  that removes the API: only `ce.declare()` knows everything that it
+  refuses, so an exact pre-check would duplicate it. That release replaces
+  the checkpoint with the removal of what the failed load declared.
 - **E, the switch:** the flag on, then removed. The removed code is the
   declaration at boxing, the narrowing writes on definitions, and the
   capture of narrowings. Also: the test updates for the breaking changes,

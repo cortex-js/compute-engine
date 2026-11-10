@@ -793,7 +793,9 @@ describe('BINDING UNITS: FREE CALL HEADS AND HOST WRITES', () => {
     const ce = engine();
     const call = ce.box(['f', 'x']);
     ce.declare('f', '((integer) -> integer) & ((string) -> boolean)');
-    expect(call.type.toString()).toBe('integer');
+    // Both arms are viable for the free `x`, as without the flag. The trial
+    // of each arm runs in an environment of its own (rule 13).
+    expect(call.type.toString()).toBe('boolean | integer');
     ce.assign('x', ce.string('hello'));
     expect(call.type.toString()).toBe(ce.box(['f', 'x']).type.toString());
     expect(call.type.toString()).toBe('boolean');

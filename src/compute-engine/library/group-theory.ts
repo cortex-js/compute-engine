@@ -82,6 +82,10 @@
 // permutation query.
 
 import { collectedPcDefinitions } from './pc-group-theory.js';
+import { checkTypeConstructorNamespace } from '../type-constructors.js';
+import { isRegisteredKindTypeRecord } from '../boxed-expression/value-kinds.js';
+import { forwardArities } from '../../common/type/reference.js';
+import { TypeVariableError } from '../../common/type/instantiate.js';
 import {
   exactGroupDefinitions,
   finiteGroupLimits,
@@ -1115,74 +1119,119 @@ export function loadGroupTheory(
   for (const name of Object.keys(definitions)) {
     if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
   }
-  // Roll back both types and operators if any registration fails. Checkpoints
-  // also own the installed definitions; no module-global registry is needed.
-  const checkpoint = ce.checkpoint();
-  try {
-    // `mint: false`: the type declaration does not also declare a
-    // constructor operator of the same name. The operators `Permutation`,
-    // `PermutationAction` and `PermutationGroup` declared below are the
-    // constructors, with the validation above.
-    ce.declareType('Permutation', 'tuple<images: list<integer>>', {
-      mint: false,
-    });
-    ce.declareType('PermutationAction', 'tuple<degree: integer>', {
-      mint: false,
-    });
-    ce.declareType(
+  // `mint: false`: the type declaration does not also declare a constructor
+  // operator of the same name. The operators `Permutation`,
+  // `PermutationAction` and `PermutationGroup` declared below are the
+  // constructors, with the validation above. The union aliases allow
+  // representation-specific methods to share honest signatures.
+  const types: [string, string, { mint?: boolean; alias?: boolean }][] = [
+    ['Permutation', 'tuple<images: list<integer>>', { mint: false }],
+    ['PermutationAction', 'tuple<degree: integer>', { mint: false }],
+    [
       'PermutationGroup',
       'tuple<generators: list<Permutation>, action: PermutationAction>',
-      { mint: false }
-    );
-    ce.declareType(
+      { mint: false },
+    ],
+    [
       'GroupMatrix',
       'tuple<characteristic: integer, rows: list<list<rational>>>',
-      { mint: false }
-    );
-    ce.declareType(
+      { mint: false },
+    ],
+    [
       'MatrixGroup',
       'tuple<dimension: integer, characteristic: integer, generators: list<GroupMatrix>>',
-      { mint: false }
-    );
-    // Union aliases allow representation-specific methods to share honest signatures.
-    ce.declareType('GroupDescriptor', 'PermutationGroup | MatrixGroup', {
-      alias: true,
-    });
-    ce.declareType('GroupElement', 'Permutation | GroupMatrix', {
-      alias: true,
-    });
-    ce.declareType(
+      { mint: false },
+    ],
+    ['GroupDescriptor', 'PermutationGroup | MatrixGroup', { alias: true }],
+    ['GroupElement', 'Permutation | GroupMatrix', { alias: true }],
+    [
       'GroupPcSequence',
       'tuple<group: GroupDescriptor, sequence: list<GroupElement>>',
-      { mint: false }
-    );
-    ce.declareType(
+      { mint: false },
+    ],
+    [
       'GroupHomomorphism',
       'tuple<source: GroupDescriptor, target: GroupDescriptor, images: list<tuple<GroupElement, GroupElement>>>',
-      { mint: false }
-    );
-    ce.declareType(
+      { mint: false },
+    ],
+    [
       'GroupQuotientValue',
       'tuple<source: GroupDescriptor, kernel: GroupDescriptor, projection: GroupHomomorphism>',
-      { mint: false }
-    );
-    ce.declareType(
+      { mint: false },
+    ],
+    [
       'PcGroup',
       'tuple<orders: list<integer>, powers: list<list<integer>>, conjugates: list<list<list<integer>>>, inverseConjugates: list<list<list<integer>>>>',
-      { mint: false }
-    );
-    ce.declareType(
+      { mint: false },
+    ],
+    [
       'PcElement',
       'tuple<group: PcGroup, coordinates: list<integer>>',
-      { mint: false }
-    );
+      { mint: false },
+    ],
+  ];
+  // The registration is all or nothing, with no checkpoint (rule 13 of
+  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The definitions
+  // are those of this module, so the input that a declaration below can
+  // refuse is the set of names: the names of the definitions, checked above,
+  // and the names of the types, checked here with the tests of
+  // `declareType()`, in its order and with its errors. A type with a minted
+  // constructor (an alias row: `mint` is not `false`) also claims its name in
+  // the value namespace of the scope of the constructor.
+  const constructorScope =
+    ce._evalContextStack[1]?.lexicalScope ?? ce.context.lexicalScope;
+  for (const [name, , options] of types) {
+    const mint = options.mint ?? true;
+    if (ce._protocolRegistry[name] !== undefined)
+      throw new Error(
+        `The type name "${name}" is already a protocol; protocols and types share no names`
+      );
+    const record = ce._typeRegistry[name];
+    if (
+      record !== undefined &&
+      isRegisteredKindTypeRecord(ce, record) &&
+      (options.alias === true || mint)
+    )
+      throw new Error(
+        `The type "${name}" is the type of a value kind: it can only be declared again as a nominal type defined as exactly \`value\`, without type parameters and with \`{ mint: false }\``
+      );
+    if (record !== undefined && record.def === undefined) {
+      const mismatch = [...(forwardArities(record) ?? [])].find((n) => n !== 0);
+      if (mismatch !== undefined)
+        throw new TypeVariableError(
+          'generic-alias-arity',
+          `The type "${name}" is declared with 0 type parameters, but an earlier forward reference applies it to ${mismatch} type argument${mismatch === 1 ? '' : 's'}`
+        );
+    }
+    if (record?.def !== undefined)
+      throw new Error(`The type "${name}" is already defined`);
+    if (mint) checkTypeConstructorNamespace(constructorScope, name);
+  }
+  // Any other refusal is a defect of this module or of the engine. The
+  // declarations made before it are then undone here: the bindings that this
+  // call added (the operators, and the constructors that the types minted)
+  // are removed, and the type registry is put back.
+  const restoreTypes = ce._typeRegistryRollbackPoint();
+  const declaringScope = ce.context.lexicalScope;
+  const scopes = [...new Set([declaringScope, constructorScope])];
+  const names = [...types.map(([name]) => name), ...Object.keys(definitions)];
+  const boundBefore = scopes.map(
+    (scope) => new Set(names.filter((name) => scope.bindings.has(name)))
+  );
+  try {
+    for (const [name, type, options] of types)
+      ce.declareType(name, type, options);
     for (const [name, definition] of Object.entries(definitions))
       ce.declare(name, definition);
   } catch (error) {
-    ce.restore(checkpoint);
+    scopes.forEach((scope, i) => {
+      const added = names.filter(
+        (name) => scope.bindings.has(name) && !boundBefore[i].has(name)
+      );
+      if (added.length > 0) ce._inScope(scope, () => ce.undeclare(added));
+    });
+    restoreTypes();
     throw error;
-  } finally {
-    ce.discard(checkpoint);
   }
   const report = { operatorCount: Object.keys(definitions).length };
   loaded.set(ce, {

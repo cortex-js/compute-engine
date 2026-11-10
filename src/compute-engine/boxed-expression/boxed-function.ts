@@ -1811,6 +1811,18 @@ export class BoxedFunction
   declare _freeHeadScope?: Scope;
 
   /**
+   * With the engine flag `_bindingUnits`: for a free call head
+   * (`_freeHeadScope`), the environment that holds the `function` reading of
+   * the head (rule 2 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`):
+   * the environment of the unit, or of the operation, that boxed the call.
+   * `ce.infer()` reads it (rule 11): a call whose operands have no free name
+   * (`x(3)`) has no other occurrence that holds the environment. Declared,
+   * not initialized, as `_freeHeadScope` is.
+   * @internal
+   */
+  declare _freeHeadEnv?: UnitEnvironment;
+
+  /**
    * The definition of the head of this call: its own definition, or, for a
    * free call head (`_freeHeadScope`), the definition that its name
    * resolves to in the current context (`freeNameBindingInContext()`). The
@@ -2023,8 +2035,11 @@ export class BoxedFunction
         options?.canonical === true &&
         options.freeHead !== undefined &&
         ce._bindingUnits
-      )
+      ) {
         this._freeHeadScope = options.freeHead;
+        const env = ce._boxingState.unitEnvironment();
+        if (env !== undefined) this._freeHeadEnv = env;
+      }
       // An assignment or a declaration is a statement, never a value:
       // `f(Assign(a, 2))` and `Assign(t, Assign(u, v))` are static errors.
       // It is valid only at an operand whose role, in the definition that
@@ -5401,6 +5416,8 @@ export class BoxedFunction
     result._def = this._def;
     if (this._freeHeadScope !== undefined)
       result._freeHeadScope = this._freeHeadScope;
+    if (this._freeHeadEnv !== undefined)
+      result._freeHeadEnv = this._freeHeadEnv;
     // The node has the binding of this node, so it is a library call when
     // this node is one (`isLibraryCall()`).
     if (isLibraryCall(this)) markLibraryCall(result);

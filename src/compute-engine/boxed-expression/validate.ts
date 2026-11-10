@@ -185,6 +185,21 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 // result typing.
 
 /**
+ * The trial `trial` of an arm of an overloaded operator. With the engine
+ * flag `_bindingUnits`, it runs in a trial environment
+ * (`EngineBoxingState.withTrial()`), which is thrown away when the trial
+ * ends: a requirement that the trial writes on an operand is not kept, and
+ * does not refuse the trial of the next arm (rule 13 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). A rollback frame
+ * does not undo a write in an environment. Without the flag, `trial`.
+ */
+function inTrialEnvironment(ce: ComputeEngine, trial: ArmTrialFn): ArmTrialFn {
+  if (!ce._bindingUnits) return trial;
+  return (declared, instance, solution, ops) =>
+    ce._boxingState.withTrial(() => trial(declared, instance, solution, ops));
+}
+
+/**
  * Exclusion gate for scalar numeric INFERENCE — deliberately WIDER than
  * broadcast admission (`couldBeUnkeyedCollectionOperand`). The hazard the
  * gate prevents is keyedness-independent: `x._infer('real')` on an operand
@@ -4419,7 +4434,11 @@ export function validateArguments(
     // mode and assert they never execute here. This replaced the write-free
     // mirror filter, whose gate conditions had to track this function's
     // admission logic by hand.
-    const mkTrial =
+    //
+    // With the engine flag `_bindingUnits`, each trial also runs in an
+    // environment of its own (`inTrialEnvironment()`), which is thrown away
+    // when it ends.
+    const mkArmTrial =
       (overlapTrial: boolean): ArmTrialFn =>
       (declared, _instance, solution, armOps) =>
         ce._withBoxingPassWindow(() =>
@@ -4472,6 +4491,8 @@ export function validateArguments(
             { forbidsRepairs: true }
           )
         );
+    const mkTrial = (overlapTrial: boolean): ArmTrialFn =>
+      inTrialEnvironment(ce, mkArmTrial(overlapTrial));
     const trial = mkTrial(false);
     const resolution = resolveOverload(
       ce,

@@ -43,6 +43,7 @@ import type {
   RoundingTies,
   AssignValue,
   AssumeResult,
+  InferResult,
   Expression,
   BoxedRule,
   BoxedRuleSet,
@@ -269,6 +270,7 @@ import {
   assumeFn as assumeFnImpl,
   forget as forgetImpl,
 } from './engine-assumptions.js';
+import { inferFn } from './engine-infer.js';
 
 import {
   declareSequence as declareSequenceImpl,
@@ -1631,6 +1633,9 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Throws a `CheckpointError` (`checkpoint-not-quiescent`) if called while an
    * evaluation, static pre-pass or declaration batch is in progress.
+   *
+   * @deprecated Checkpoints are removed in a later release. Use
+   * `ce.withValues()`, or `ce.pushScope()` and `ce.popScope()`.
    */
   checkpoint(label?: string): EngineCheckpoint {
     return takeCheckpoint(this, label);
@@ -1645,6 +1650,9 @@ export class ComputeEngine implements IComputeEngine {
    * rewound window are NOT: they may reference disposed definition halves, and
    * evaluating, typing or serializing one is undefined behavior. Cache cell
    * outputs as serialized artifacts, not as live boxed nodes.
+   *
+   * @deprecated Checkpoints are removed in a later release. Use
+   * `ce.withValues()`, or `ce.pushScope()` and `ce.popScope()`.
    */
   restore(cp: EngineCheckpoint): void {
     restoreCheckpoint(this, cp);
@@ -1653,7 +1661,11 @@ export class ComputeEngine implements IComputeEngine {
   /** Release `cp`'s restore capability. Restoring past a discarded INTERIOR
    * checkpoint stays possible through any earlier live one; discarding the
    * OLDEST live checkpoint makes the state before the next-younger one
-   * unreachable. */
+   * unreachable.
+   *
+   * @deprecated Checkpoints are removed in a later release. Use
+   * `ce.withValues()`, or `ce.pushScope()` and `ce.popScope()`.
+   */
   discard(cp: EngineCheckpoint): void {
     discardCheckpoint(this, cp);
   }
@@ -5383,6 +5395,16 @@ export class ComputeEngine implements IComputeEngine {
    */
   assume(predicate: Expression | string): AssumeResult {
     return assumeFnImpl(this, predicate);
+  }
+
+  /**
+   * Declare the names that `exprs` use, in their home scopes, with the types
+   * that their uses require. See `IComputeEngine.infer()` for the contract.
+   *
+   * @experimental
+   */
+  infer(exprs: ReadonlyArray<Expression>): InferResult {
+    return inferFn(this, exprs);
   }
 
   /**

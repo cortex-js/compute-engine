@@ -15,11 +15,16 @@ type DevolveRepairFrame<Scope extends object> = {
 const MAX_REPAIR_REBUILDS = 3;
 
 /** See `EngineBoxingState.operationToken`. */
-function operationToken(current: () => UnitEnvironment | undefined): {
+function operationToken(
+  current: () => UnitEnvironment | undefined,
+  trial: () => UnitEnvironment | undefined
+): {
   readonly _version: number;
 } {
   return {
     get _version(): number {
+      const t = trial();
+      if (t !== undefined && t.hasWrites()) return t.id;
       const env = current();
       return env !== undefined && env.hasWrites() ? env.id : 0;
     },
@@ -80,10 +85,56 @@ export class EngineBoxingState<Scope extends object> {
    * the entry of the environment of the occurrence, as outside an
    * operation. So a type cached in one evaluation is read in the next one
    * when neither wrote a requirement.
+   *
+   * During a trial (`withTrial()`) whose environment has a write, the
+   * version is the number of that environment: a type cached before the
+   * trial is computed again in it, and a type cached in it is computed
+   * again after it.
    */
-  readonly operationToken: { readonly _version: number } = operationToken(() =>
-    this.currentOperation()
+  readonly operationToken: { readonly _version: number } = operationToken(
+    () => this.currentOperation(),
+    () => this.trialEnvironment()
   );
+
+  /**
+   * The environments of the trials in progress, innermost last (rule 13 of
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), with the engine
+   * flag `_bindingUnits` only. A trial is a computation whose writes are not
+   * kept: the admission of an arm of an overloaded operator
+   * (`validate.ts`). Every requirement written during a trial goes in its
+   * environment, and a read takes the entry of that environment first. The
+   * environment is thrown away when the trial ends. The environment of a
+   * nested trial has the environment of the enclosing trial as its only
+   * parent.
+   *
+   * A trial is not an operation: a symbol made during a trial belongs to
+   * the unit or the operation in progress, as outside the trial.
+   */
+  private _trials: UnitEnvironment[] = [];
+
+  /** The environment of the innermost trial in progress, or `undefined`. */
+  trialEnvironment(): UnitEnvironment | undefined {
+    const trials = this._trials;
+    return trials.length === 0 ? undefined : trials[trials.length - 1];
+  }
+
+  /** Run `fn`, a trial (see `_trials`), in an environment of its own, which
+   * is thrown away at the end, also on a throw. */
+  withTrial<T>(fn: () => T): T {
+    const enclosing = this.trialEnvironment();
+    const env =
+      enclosing === undefined
+        ? new UnitEnvironment()
+        : UnitEnvironment.forNested(enclosing);
+    this._trials.push(env);
+    try {
+      return fn();
+    } finally {
+      const popped = this._trials.pop();
+      console.assert(popped === env, 'Unbalanced trial environment');
+      env.discard();
+    }
+  }
 
   /** The environment of the operation in progress, or `undefined`: the
    * environment that a read starts in. */

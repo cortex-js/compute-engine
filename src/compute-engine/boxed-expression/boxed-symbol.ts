@@ -59,6 +59,8 @@ import type {
 import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   UnitEnvironment,
+  definitionHome,
+  noteDefinitionHome,
   noteResolutionRead,
   operationInput,
 } from '../binding-unit.js';
@@ -911,6 +913,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * A write sends no engine-wide event (rule 9): it moves the counter of the
    * environment, and a type cached from an entry keeps the counter of each
    * environment that it read (`UnitEnvironment.lookup()`).
+   *
+   * During a trial (`EngineBoxingState.withTrial()`), the write goes in the
+   * environment of the trial, which is thrown away when the trial ends
+   * (rule 13).
    */
   private _inferInEnvironment(
     home: object,
@@ -918,10 +924,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     inferenceMode: 'narrow' | 'widen' | 'replace'
   ): boolean {
     const ce = this.engine;
+    const state = ce._boxingState;
+    const trial = state.trialEnvironment();
     const env =
-      ce._boxingState.writableOperation() ??
+      trial ??
+      state.writableOperation() ??
       (this._env ??= new UnitEnvironment());
-    ce._boxingState.noteUnitWrite(env);
+    if (trial === undefined) state.noteUnitWrite(env);
     const name = this._id;
     const from = this._unitEntry(home);
     const fromType: Type = from?.type ?? 'unknown';
@@ -971,6 +980,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * of each name that it resolved; no such counter exists: the key of the
    * type cache (`ce._typeCacheGeneration()`), which a declaration and a
    * write on a definition move, stands for it.
+   *
+   * During a trial (`EngineBoxingState.withTrial()`), the entry of the
+   * environment of the trial is read first (rule 13).
    */
   private _unitEntry(key: object): BoxedType | undefined {
     const state = this.engine._boxingState;
@@ -978,7 +990,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     recordObjectRead(token, token._version);
     const operation = state.currentOperation();
     return (
-      operation?.lookup(key, this._id) ?? this._env?.lookup(key, this._id)
+      state.trialEnvironment()?.lookup(key, this._id) ??
+      operation?.lookup(key, this._id) ??
+      this._env?.lookup(key, this._id)
     );
   }
 
@@ -1042,19 +1056,28 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * operation, write in the environment of the operation.
    *
    * The key of the entry is the value definition itself: it does not depend
-   * on the context of the write or of the read.
+   * on the context of the write or of the read. The scope that holds the
+   * definition is recorded at the first write (`noteDefinitionHome()`):
+   * `ce.infer()` reads it as the home scope of the key, also after that
+   * scope was popped or the definition was replaced.
    */
   private _unitWriteScope(def: BoxedDefinition): object | undefined {
     if (!this.engine._bindingUnits || !isValueDef(def)) return undefined;
     const state = this.engine._boxingState;
     if (!state.isRootActive) return undefined;
+    let scope: Scope | undefined = undefined;
     if (state.isDefinitionMade(def.value)) {
-      const scope = this._scopeOfDefinition(def);
+      scope = this._scopeOfDefinition(def);
       const persistent =
         scope !== undefined
           ? state.isPersistentScope(scope) === true
           : state.persistentScopeOf(this._id, def) !== undefined;
       if (!persistent) return undefined;
+    }
+    if (definitionHome(def.value) === undefined) {
+      scope ??=
+        this._scopeOfDefinition(def) ?? state.persistentScopeOf(this._id, def);
+      if (scope !== undefined) noteDefinitionHome(def.value, scope);
     }
     return def.value;
   }

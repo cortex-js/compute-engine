@@ -399,6 +399,32 @@ export class UnitEnvironment {
     return this.parents().some((parent) => parent.readsAsVariable(scope, name));
   }
 
+  /** Each type entry of this environment, as (key, name, type): the key is
+   * a home scope or a value definition (see the class comment). Only the
+   * entries of this environment, not those of its parents. */
+  *entries(): IterableIterator<[object, string, BoxedType]> {
+    if (this._types === undefined) return;
+    for (const [key, names] of this._types)
+      for (const [name, type] of names) yield [key, name, type];
+  }
+
+  /** Each (scope, name) that this environment reads as a variable
+   * (`readsAsVariable()`). Only the records of this environment, not those
+   * of its parents. */
+  *variableReadings(): IterableIterator<[object, string]> {
+    if (this._variableReadings === undefined) return;
+    for (const [scope, names] of this._variableReadings)
+      for (const name of names) yield [scope, name];
+  }
+
+  /** The end of a trial (`EngineBoxingState.withTrial()`): the environment
+   * is thrown away. When a write was made in it, the counter moves, so a
+   * type cached from one of its entries is computed again
+   * (`recordObjectRead()`). */
+  discard(): void {
+    if (this._counter !== 0) this._counter += 1;
+  }
+
   /** Record that the unit reads `name` as a variable in the scope `scope`
    * (`readsAsVariable()`). */
   setReadsAsVariable(scope: object, name: string): void {
@@ -521,6 +547,73 @@ export function unitEnvironmentOfOperands(
       for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
   }
   return undefined;
+}
+
+/** For a value definition that is the key of an entry of a unit
+ * environment: the scope that held it when the first entry was written
+ * (`BoxedSymbol._unitWriteScope()`). */
+const definitionHomes = new WeakMap<object, object>();
+
+/** Record that `scope` holds the value definition `def`, the key of an entry
+ * of a unit environment. */
+export function noteDefinitionHome(def: object, scope: object): void {
+  definitionHomes.set(def, scope);
+}
+
+/** The scope recorded for the value definition `def` by
+ * `noteDefinitionHome()`, or `undefined`. */
+export function definitionHome<S extends object = object>(
+  def: object
+): S | undefined {
+  return definitionHomes.get(def) as S | undefined;
+}
+
+/**
+ * The environments that the occurrences of `exprs` read, with their parents
+ * at any depth (rule 11 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the environment
+ * of each symbol occurrence, and the environment of each call whose head is
+ * a free name (`BoxedFunction._freeHeadEnv`), which holds the `function`
+ * reading of the head. The walk is that of `unitEnvironmentOfOperands()`.
+ */
+export function unitEnvironmentsOf(
+  exprs: readonly unknown[]
+): UnitEnvironment[] {
+  type Node = {
+    _kind?: string;
+    _env?: UnitEnvironment;
+    _freeHeadEnv?: UnitEnvironment;
+    ops?: readonly unknown[];
+    values?: readonly unknown[];
+  };
+  const found: UnitEnvironment[] = [];
+  const stack: unknown[] = [...exprs];
+  const visited = new Set<object>();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (typeof node !== 'object' || node === null) continue;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    const n = node as Node;
+    if (n._kind === undefined) continue;
+    if (n._kind === 'symbol') {
+      if (n._env !== undefined) found.push(n._env);
+      continue;
+    }
+    if (n._freeHeadEnv !== undefined) found.push(n._freeHeadEnv);
+    const children = n._kind === 'dictionary' ? n.values : n.ops;
+    if (children !== undefined) for (const child of children) stack.push(child);
+  }
+  const result: UnitEnvironment[] = [];
+  const seen = new Set<UnitEnvironment>();
+  while (found.length > 0) {
+    const env = found.pop()!;
+    if (seen.has(env)) continue;
+    seen.add(env);
+    result.push(env);
+    found.push(...env.parents());
+  }
+  return result;
 }
 
 /**
