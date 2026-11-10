@@ -1,8 +1,9 @@
 # A `numeric-kernel` profile for the JavaScript target (step 7, first part)
 
-**Status: proposed 2026-11-10. Not approved. No code is written from this
-document before the user approves it, because it adds public compile options
-and changes the documented answer of `canCompile()`.**
+**Status: proposed 2026-11-10. Two of its three choices are decided (see
+"Choices for the user"); the names of the options are not. No code is written
+from this document before the names are approved, because it adds public
+compile options and changes the documented answer of `canCompile()`.**
 
 ## The situation
 
@@ -43,9 +44,9 @@ call that does not pass the new options.
    any parallel execution.
 
 Under the profile, the options `cse` and `constantFold` have no effect on the
-code: the route does neither. Passing `cse: true` or `constantFold: true`
-with the profile is an error of the options, not a silent difference. The
-modes are `strict` and `complex`; `bigint` declines.
+code: the route does neither, and it ignores both options while the profile
+is experimental. The guide says so. The modes are `strict` and `complex`;
+`bigint` declines.
 
 ## Example
 
@@ -72,6 +73,11 @@ heatstep(H: list<real>, diffusivity: real, boundary: real, obstacle: real) -> li
 
 ## Choices for the user
 
+Decisions: choice 1, the `profile` option of the `javascript` target:
+approved 2026-11-10. Choice 3, `cse` and `constantFold` are ignored under the
+profile during the experimental phase: approved 2026-11-10. Choice 2, the
+names: open.
+
 **1. An option of the `javascript` target, or a separate target name.**
 The original proposal named a separate registry key, `javascript-fragment`.
 This document proposes an option instead (recommended): the emitted language,
@@ -89,6 +95,30 @@ public and documented; changing them later is a breaking change.
 ignored.** An error is proposed: a host that passes them expects their
 effect. Ignoring them makes the profile a drop-in option for existing call
 sites, at the price of an option that silently does nothing.
+
+## The two requirements, defined
+
+**`independentCalls`.** Two calls of the compiled function, with any
+arguments, give the same results whether they run one after the other or at
+the same time in two workers. It holds when no operation of the program or of
+a function it calls has an effect or an unknown effect, and no array that
+the host passed in is written (a list argument is only read; an update in
+place writes only into a list that the call built itself). A captured value
+is a number copied at compile time, so no call can change it. It does not
+say that the host may change an input array while a call reads it, that the
+calls will run in parallel, or anything about a function passed at run time.
+With an iteration budget, a yes carries a caveat: the pass counter belongs
+to the runtime; calls are synchronous, so two calls on one thread cannot
+interleave, and each worker has its own runtime.
+
+**`workerPortable`.** The compiled code, sent to another worker as text,
+computes the same results there. It holds when every function it calls is
+compiled into the same program, every captured value is a number written
+into the code, and no operation has an effect or an unknown effect (an
+unknown operation can be a host closure, which a worker does not have; for a
+known effect the facts do not yet say whether a worker has it, so the answer
+is no). It does not say that the arguments can be transferred cheaply, or
+that the calls are independent: that is the other property.
 
 If nothing is decided, the route stays internal and steps 5 and 6 remain
 available only to tests.
