@@ -454,9 +454,8 @@ describe('PointList evaluate path is unchanged', () => {
 // Tycho item 158: `Dot` accepts fixed numeric `Tuple`/`PointList` operands
 // (the sanctioned spelling of the Desmos point inner product), and the GPU
 // targets lower it to the native `dot()` builtin. The lowering itself
-// predates the item — the `Dot: 'dot'` GPU table entry and the generic
-// operand-shape gate (`gpuCheckOperandShapes`) — but was unreachable for
-// tuples while validation rejected them; these tests pin the now-reachable
+// predates the item — the `Dot: 'dot'` GPU table entry — but was
+// unreachable for tuples while validation rejected them; these tests pin the now-reachable
 // route on every target.
 describe('Dot over points — compile targets (Tycho item 158)', () => {
   const ce = freshEngine();
@@ -527,10 +526,10 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
 
 // Tycho item 159: a point whose SCALAR component is itself an inner product.
 // `Dot` reduces its `vecN` operands to a `float`, so the enclosing `vec2(…)`
-// constructor is handed two scalars — but the shape gate's `gpuReshapesOperands`
-// scanned the constructor's argument text for an aggregate constructor ANYWHERE,
-// found the inner `vec3(…)`, and declined the source it had just emitted
-// correctly. This is the gradient-noise shape: a 2-D point product whose
+// constructor is handed two scalars — but an older check of the emitted
+// source scanned the constructor's argument text for an aggregate
+// constructor ANYWHERE, found the inner `vec3(…)`, and declined the source it
+// had just emitted correctly. This is the gradient-noise shape: a 2-D point product whose
 // components are 3-D hash products.
 describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
   const ce = freshEngine();

@@ -185,15 +185,12 @@ export function gpuType(expr: Expression): Type {
 /**
  * An aggregate CONSTRUCTOR of GLSL (`vec3`, `bvec2`, `mat2`, `float[5]`).
  * Such a lowering BUILDS a shape from its operands instead of acting on them,
- * so the componentwise gate does not apply to it; the constructors have their
- * own guards (`assertGPUScalarComponents`, `gpuValueHasVectorComponents`).
+ * so its emission is an aggregate value even when every operand is a scalar;
+ * the constructors have their own guards (`assertGPUScalarComponents`,
+ * `gpuValueHasVectorComponents`).
  */
 export const GPU_AGGREGATE_CONSTRUCTOR =
   /^(?:[iub]?vec[234]|mat[234]|(?:float|int|uint|bool)\s*\[)/;
-
-/** The callee of an array-of-vectors constructor: `vec3[12]`, the lowering
- * of a written list of points. */
-export const GPU_VECTOR_ARRAY_CONSTRUCTOR = /^(?:[iub]?vec[234]\s*\[)/;
 
 /**
  * `GPU_AGGREGATE_CONSTRUCTOR` unanchored: does an aggregate constructor appear

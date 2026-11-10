@@ -10,7 +10,7 @@ import { gpuProvablyFinite } from './gpu-finite-proof.js';
 
 /**
  * The vector widths of the per-width shader helpers below: one declaration
- * per width, because the operand-shape check reads a helper's own declaration (`gpuHelperIsScalarOnly`).
+ * per width, because GLSL has no generic function over the genType.
  */
 const GPU_HELPER_WIDTHS = [2, 3, 4] as const;
 
@@ -265,8 +265,8 @@ function gpuNaNSafeLibrary(): string {
 /**
  * A call of the NaN-safe helper `_gpu_<name>` (`gpuNaNSafeLibrary`) on one
  * operand: the scalar helper for a scalar operand, the helper of width N for
- * a `vecN` operand, and the built-in `<name>` for a matrix or an array, so
- * that the operand-shape gate gives its reason for a decline. A complex
+ * a `vecN` operand, and the built-in `<name>` for a matrix or an array (the
+ * GLSL fragment pass refuses those operands before the emitter runs). A complex
  * operand never reaches it: `Sin` and `Cos` lower a complex operand through
  * `_gpu_csin`/`_gpu_ccos` first, and `Sign` is a real-only lowering
  * (`GPU_REAL_ONLY_LOWERINGS`), whose complex operand the base compiler

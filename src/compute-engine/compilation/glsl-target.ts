@@ -9,9 +9,7 @@ import {
   gpuUniformVectorWidth,
   gpuAssertExpressionBody,
   gpuOperandShape,
-  gpuAbsorbedConstant,
   gpuFloorModCall,
-  markOperandConsuming,
   type GPUShapeRules,
 } from './gpu-target.js';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
@@ -77,17 +75,12 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // outside the range [0, 1); the interpreter's `Mod` maps a result equal
       // to the divisor to 0. The second `fract` maps 1.0 to 0 and leaves every
       // other result unchanged. CE-511 (`CHANGELOG.md`).
-      //
-      // The divisor is left out of the emitted call, which the lowering
-      // declares after this table (`markOperandConsuming`). So the
-      // operand-shape check judges `fract(v)` against the dividend alone, and
-      // a `vecN` dividend takes the peephole too.
       if (tryGetConstant(b) === 1) return `fract(fract(${compile(a)}))`;
       // The general case calls a `_gpu_fmod` helper, which keeps the result
       // in the range of the divisor where the built-in `mod` does not, and
       // receives each operand once (`gpuFloorModLibrary`, CE-511). A shape
-      // with no helper (a matrix, an array) keeps the built-in, and the
-      // operand-shape check then judges it.
+      // with no helper (a matrix, an array) keeps the built-in; the GLSL
+      // fragment pass refuses such operands before the emitter runs.
       return (
         gpuFloorModCall(a, b, compile) ?? `mod(${compile(a)}, ${compile(b)})`
       );
@@ -133,11 +126,6 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return compileGLSLList(args, compile, 'PointList');
   },
 };
-
-// `Mod(a, 1)` emits `fract(fract(a))` and leaves the divisor out of the
-// emitted call;
-// the operand-shape check reads that declaration (`markOperandConsuming`).
-markOperandConsuming(GLSL_FUNCTIONS.Mod, gpuAbsorbedConstant('fract', 1, 1));
 
 /**
  * Where GLSL admits a SCALAR among otherwise-`vecN` operands.

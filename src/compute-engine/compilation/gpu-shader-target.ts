@@ -38,6 +38,7 @@ import type {
   FragmentDeclaredInput,
   FragmentTargetFields,
 } from './fragment.js';
+import { setRawTargetCheck } from './raw-target-check.js';
 import { assertAdmitted, unsettledShapeIn } from './compile-admission.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import {
@@ -85,7 +86,6 @@ import {
 } from './gpu-functions.js';
 import {
   gpuCertainValueType,
-  gpuCheckOperandShapes,
   gpuIsRealOnlyLowering,
   gpuLoweredSymbolTypeHook,
 } from './gpu-shapes.js';
@@ -465,9 +465,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // collection the `Range` handler would have accepted.
       maxInlineElements: GPU_MAX_INLINE_ELEMENTS,
       // Carried on the target so a LOWERING can validate the calls it
-      // generates against the same table the generic gate uses — the variadic
-      // `min`/`max` fold, whose nested calls no longer line up with the CE
-      // operand positions (`foldNaryBuiltin`).
+      // generates against the table — the variadic `min`/`max` fold, whose
+      // nested calls no longer line up with the CE operand positions
+      // (`foldNaryBuiltin`).
       gpuShapeRules: rules,
       // Restart the numbering of the generated temporaries (`_tv1`, `_tv2`,
       // …) at each compilation boundary, so that a target the caller reuses
@@ -578,23 +578,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // vector shape.
       broadcastUnary: (head, operand, lowering, unaryTarget) =>
         compileGPUBroadcastUnary(head, operand, lowering, unaryTarget),
-      // The same defect class on every emission that does NOT go through the
-      // fan-out hook (the generic function-codegen and string-helper paths):
-      // a collection, matrix or array operand reaching a lowering the shader
-      // type system cannot give it to. Fails closed instead of emitting
-      // source no driver accepts.
-      checkOperandShapes: (h, opArgs, emitted) =>
-        gpuCheckOperandShapes(
-          h,
-          opArgs,
-          emitted,
-          rules,
-          (c) => this.preambleFor(c),
-          // The head's own lowering, so a DECLARED aggregate-consuming one
-          // (`Max`/`Min`) can step the gate aside — see
-          // `GPU_AGGREGATE_CONSUMING`.
-          functions[h]
-        ),
+      // No `checkOperandShapes` hook: the GLSL fragment pass gives each
+      // operator a signature over the operand types (`glsl-fragment.ts`), and
+      // `compile()` with `to: 'glsl'` runs the pass before the emitter, so
+      // an operand whose shape the shader call cannot take is refused there.
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       constant: (id) =>
@@ -696,6 +683,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target.foldEmittedConstant = (_expr, code) =>
         foldEmittedGPUCode(code, splices);
     }
+    // The lowerings of this target do not check the operand shapes: the
+    // fragment pass refuses an expression whose operand types an operator
+    // cannot take, before the emitter runs. A caller that passes this
+    // object to `compile()` as `target` skips `this.compile()`, so the
+    // object carries the pass for that route (`raw-target-check.ts`). The
+    // check runs the preparation and the pass of `canCompile()`, without
+    // its catch: a refusal is a decline, and any other error propagates.
+    setRawTargetCheck(target, (expr, checkOptions) =>
+      this.preparedAndTypedForCheck(expr, checkOptions, ({ annotation }) => {
+        if (annotation.refusal !== undefined)
+          throw new CompileDeclineError(
+            fragmentRefusalDiagnostic(annotation.refusal)
+          );
+      })
+    );
     return target;
   }
 

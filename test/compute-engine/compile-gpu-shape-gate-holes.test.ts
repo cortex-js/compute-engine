@@ -213,11 +213,8 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
   });
 
   it('a DESTRUCTURING consumer of a literal list is left alone', () => {
-    // `Median` and `Variance` flatten a single `List` operand into one scalar
-    // per element, so the emission carries none of the operand's `array`
-    // shape. They DECLARE that (`markAggregateConsuming`); the gate must not
-    // infer it, nor decline them.
-    // The GLSL fragment has neither head, so both decline.
+    // The GLSL fragment has neither `Median` nor `Variance`, so both
+    // decline.
     expect(() => g(['Median', ['List', 1, 5, 3, 2, 4]])).toThrow(
       /The head `Median` is outside the GLSL fragment/
     );
@@ -249,11 +246,8 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
   });
 });
 
-describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', () => {
-  // `compileGPUExtremum` used to rely on the gate reading its parentheses as
-  // "not a call, so a deliberate aggregate consumer". The capability is now
-  // declared on the handler (`markAggregateConsuming`), and the reduction must
-  // keep compiling AND keep reducing to the interpreter's value.
+describe('GPU Max/Min reduction of collection operands', () => {
+  // The reduction must compile AND reduce to the interpreter's value.
   const runShader = (code: string): number => {
     const js = code
       .replace(/\b(?:_gpu_)?max\s*\(/g, 'Math.max(')

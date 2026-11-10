@@ -57,17 +57,16 @@ function gpuRepeatableSource(
  * Each GENERATED call is validated as it is produced, against the ORIGINAL
  * operand shapes (`gpuOperandShape`) rather than against the emitted source:
  * once the fold has nested the calls, the CE operand positions no longer line
- * up with the emitted argument positions, and the generic gate's source-level
- * reconstruction (`gpuSourceIsVector`) cannot see a vector in a BARE
- * IDENTIFIER at all — so `ElementMax(2, v, w)` over two declared `vector<3>`
- * symbols emitted `max(max(2.0, v), w)`, which no GLSL driver accepts, behind
- * `success: true`. The accumulator's shape is exact by construction: it is a
- * vector as soon as any operand folded into it is one.
+ * up with the emitted argument positions, and the source cannot show a vector
+ * in a BARE IDENTIFIER at all — so `ElementMax(2, v, w)` over two declared
+ * `vector<3>` symbols emitted `max(max(2.0, v), w)`, which no GLSL driver
+ * accepts, behind `success: true`. The accumulator's shape is exact by
+ * construction: it is a vector as soon as any operand folded into it is one.
  *
- * With TWO operands the emission passes them through ONE FOR ONE, so the
- * generic gate already judges it on the same exact shapes (and phrases the
- * diagnostic in its own positional terms); only the nested calls of a longer
- * fold need the shapes carried in here.
+ * With TWO operands the emission passes them through ONE FOR ONE, and the
+ * GLSL fragment pass judges their types against the signature of the head
+ * before the emitter runs; only the nested calls of a longer fold are
+ * checked here.
  */
 function foldNaryBuiltin(
   name: string,
@@ -89,10 +88,9 @@ function foldNaryBuiltin(
     return gpuIdentityPassthrough(args[0], compile, target);
   const shapes = args.map(gpuOperandShape);
   const slots = rules?.scalarGenTypeSlots.get(name);
-  // A builtin the language gives no scalar/genType overload AT ALL is judged
-  // exactly by the generic gate already (it compares the CE operand shapes, not
-  // the source, to reach its `requires MATCHING genType` verdict), so the fold
-  // leaves that case — and the one-for-one two-operand case — to it.
+  // A builtin the language gives no scalar/genType overload AT ALL, and the
+  // one-for-one two-operand case, are left to the GLSL fragment pass, which
+  // refuses mixed operand shapes by the signature of the head.
   const check = slots !== undefined && args.length > 2;
   let acc = `${name}(${compile(args[0])}, ${compile(args[1])})`;
   let accShape = shapes[0];
@@ -129,9 +127,9 @@ function foldNaryBuiltin(
  * Each operand is compiled once.
  *
  * Other operand shapes (a matrix, an array, a complex operand, vectors of
- * different widths) keep the built-in fold of `foldNaryBuiltin`, so that the
- * operand-shape gate gives its reason for the decline. So does a single
- * operand, which `foldNaryBuiltin` passes through unchanged.
+ * different widths) keep the built-in fold of `foldNaryBuiltin`; the GLSL
+ * fragment pass refuses those shapes before the emitter runs. So does a
+ * single operand, which `foldNaryBuiltin` passes through unchanged.
  */
 export function compileGPUElementExtremum(
   name: 'max' | 'min',
@@ -317,8 +315,7 @@ export function gpuScalarComponents(
  * componentwise, so collection operands must first be expanded into their
  * statically known scalar components. Each operand is compiled once, empty
  * collections contribute no components, and an all-empty reduction yields
- * NaN. `markAggregateConsuming` tells the generic shape gate that the original
- * aggregate shapes are absent from the emitted expression.
+ * NaN.
  */
 export function compileGPUExtremum(
   name: 'max' | 'min',

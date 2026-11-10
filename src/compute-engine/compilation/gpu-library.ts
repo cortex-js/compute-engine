@@ -240,9 +240,9 @@ export function gpuRoundToStep(
   // result stays `NaN`.
   const big = c !== undefined ? `abs(${q0})` : `(abs(${q0}) * sign(${kv}))`;
   // Parenthesized: the outer call does not take the operands of the
-  // rounding head one for one, and the operand-shape check
-  // (`gpuCheckOperandShapes()`) reads an emission that starts with a call
-  // as such a call.
+  // rounding head one for one, so the emission must not read as that call
+  // (`gpuTopLevelCall()` reads an emission that starts with a call as such
+  // a call).
   return `(${choose(m, xv, big, '>', `${vt}(3.4e38)`)})`;
 }
 
@@ -302,12 +302,11 @@ export function gpuRoundToInteger(
  * `_gpu_powiN` overload family (`_gpu_powi2`, `_gpu_powi3`, `_gpu_powi4`).
  *
  * The scalar `_gpu_powi` is declared with `float` parameters, so a
- * vector base has no lowering through it and the operand-shape gate declines
- * the call. The widened bodies are the same computation over the genType:
- * `pow` and `abs` are componentwise in GLSL, and the exponent stays
- * a SCALAR at every call site (the operand-shape gate declines a vector
- * exponent), so both `if` conditions remain the scalar `bool` a shader
- * requires. As in the scalar helper, `n` may be NEGATIVE and the parity test
+ * vector base has no lowering through it. The widened bodies are the same
+ * computation over the genType: `pow` and `abs` are componentwise in GLSL,
+ * and the exponent stays a SCALAR at every call site (the `Power` lowering
+ * calls the helper only for an exponent whose shape is a scalar), so both
+ * `if` conditions remain the scalar `bool` a shader requires. As in the scalar helper, `n` may be NEGATIVE and the parity test
  * is taken on `abs(n)`, as in the scalar helper.
  *
  * The per-component sign is restored by multiplying `r` with `-1` where
@@ -349,8 +348,8 @@ ${v} _gpu_powi${n}(${v} x, float n) {
  * matches `_gpu_powi3(`, and a compilation that uses only the vector form
  * would get the scalar declaration it never calls.
  *
- * A caller holding only a helper NAME (the operand-shape gate, asking what
- * declaration the helper has) spells a synthetic call site, `${name}(`.
+ * A caller holding only a helper NAME spells a synthetic call site,
+ * `${name}(`.
  */
 export function gpuPowiHelperForms(code: string): Array<'scalar' | number> {
   const scalar = /(?<![\w$])_gpu_powi\s*\(/.test(code);

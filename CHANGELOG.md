@@ -13,12 +13,32 @@
   `Random`, `WithRandomSeed`, `RandomChoice`, `RandomSample` and
   `RandomShuffle` are not in the GLSL fragment, so `compile()` to `glsl`
   already declined them. A GLSL target object passed to `compile()` as the
-  `target` option, which skips the fragment check, compiled a draw to a
-  PCG3D hash in the shader; it now declines with "target 'glsl' has no
-  lowering for it". A seeded frame with a constant value
+  `target` option compiled a draw to a PCG3D hash in the shader; it now
+  declines too. A seeded frame with a constant value
   (`WithRandomSeed(42, Random())`) still folds to the number it draws.
 
+- **A GLSL target object passed to `compile()` as the `target` option runs
+  the GLSL fragment check.** An object made by `GLSLTarget.createTarget()`
+  skipped the check of `compile(expr, { to: 'glsl' })`, and the code that
+  checked operand shapes after emission is removed. On that route,
+  `compile()` now declines what `canCompile()` refuses, with the same
+  diagnostic: for `v` of type `list<real^3>` and `x` of type `real`,
+  `Arctan2(v, x)` declines instead of writing `atan(v, x)`, which no shader
+  compiler accepts. Forms that this route accepted before and that the
+  fragment refuses now decline there too, as they do with `to: 'glsl'`: for
+  example `Log(v, 10)`, the negation of a matrix, and a list of more than
+  256 elements read as a uniform array.
+
 ### Resolved Issues
+
+- **On GLSL, the code can no longer call a user function that its preamble
+  does not define.** A check of the emitted code built a preamble in the
+  middle of the compilation, and that step removed the definitions of user
+  functions that its partial code did not name. In one document of the
+  Desmos corpus, the row `l(I(x, y) mod 2 - 1) - 0.99` compiled to a call of
+  `_fn_l` with no definition of `_fn_l`, which no shader compiler accepts;
+  the definition is now in the preamble. The check is removed: the GLSL
+  fragment check refuses the same operand shapes before any code is written.
 
 - **On GLSL, `canCompile()` and `compile()` agree on a block used as a
   value, and on a call of a function whose body is a block, next to code

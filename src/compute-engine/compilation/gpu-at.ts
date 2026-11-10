@@ -504,9 +504,9 @@ export function gpuAtSlot(i: number, n: number): number | null {
  * 2)` → `20.0`, not `vec3(…).y`) — zero runtime cost. Otherwise a base of
  * width 2–4 is a `vecN` and takes a component swizzle; a wider one is a
  * `float[N]` and takes a direct subscript. The
- * atomic-emission rule (the sibling point-list as-built note) keeps a bare
- * identifier unparenthesized so the emission stays atomic for the operand-
- * shape gate; anything else is parenthesized and judged as the compound it is.
+ * atomic-emission rule (`gpuIsAtomicEmission()`) keeps a bare identifier
+ * unparenthesized so the emission stays atomic; anything else is
+ * parenthesized.
  */
 export function gpuAtElement(
   base: Expression,

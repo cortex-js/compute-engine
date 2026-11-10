@@ -435,6 +435,82 @@ release, on 18 cores): 0 changed code, 0 new declines, 0 resolved declines,
 refused). The corpus has no GLSL record with caller code or a draw, so no
 order of function definitions changed.
 
+**The result of the `gpu-shapes.ts` session** (2026-11-09, base
+`d43d68f25`). Removed from `gpu-shapes.ts`: `gpuCheckOperandShapes()` and
+the helpers that only it used, `gpuMisplacedScalarArgument()`,
+`gpuSourceIsVector()`, `gpuConstructedVectorWidth()`,
+`gpuReshapesOperands()`, `gpuWithoutScalarReductions()` with
+`GPU_SCALAR_REDUCING_BUILTINS`, and `gpuHelperIsScalarOnly()`; with the
+`checkOperandShapes` hook of the GLSL target. `findReferences` confirmed
+each one. Two differences from the measure:
+
+- `gpuMatrixDims()` stays: `gpuLoweredSymbolTypeHook()` and
+  `gpuCertainValueType()` call it too.
+- The tables that the measure listed as staying (`markAggregateConsuming()`,
+  `markOperandConsuming()`, `gpuAbsorbedConstant()`) are removed: the check
+  was their only reader, so after it they were written and never read. Their
+  predicates (`gpuDestructuresListOperand`, `gpuIsCollectionReduceForm`,
+  `isBroadcastPointNormOperand()`, `gpuBroadcastScalars()`), the 17
+  `markAggregateConsuming()` wrappers of `gpu-functions.ts`, the four
+  `markOperandConsuming()` calls and `GPU_VECTOR_ARRAY_CONSTRUCTOR` went with
+  them.
+
+The field `CompileTarget.checkOperandShapes` and its three calls stay (it is
+in the exported type; no built-in target sets it now), and so does the type
+`GPUShapeRules` with its four fields that nothing reads now (it is the
+return type of the protected `getShapeRules()` of the exported classes).
+The shape queries did not move to the annotation in this session.
+`gpu-shapes.ts` went from 2,104 to 1,358 lines; the source lost 1,028 lines
+and gained 203.
+
+The measure missed one route. A target object of `createTarget()` passed to
+`compile()` as the `target` option skips the pass, and on that route the
+removed check was the only guard: with `v: list<real^3>` and `x: real`,
+`Arctan2(v, x)` gave `atan(v, x)`, which no shader compiler accepts, behind
+`success: true` (13 of 21 probe cases). The target object now carries the
+preparation and the pass (`raw-target-check.ts`, an own property with a
+symbol key, so that a spread copy keeps it), and `compile()` runs it first on
+that route: a refusal declines with the diagnostic of `canCompile()`. The
+raw route now gives the verdict of `to: 'glsl'` in the 21 cases. It declines
+four forms that it accepted before (`Hypot(v, v)`, `Mod(x, v)`,
+`Log(v, 10)`, the negation of a matrix) and a list of 1,600 elements read as
+a uniform array. `BaseCompiler.compile(expr, target)` runs no pass; that case
+is a line of the known limitations of `docs/COMPILATION-MODEL.md`.
+
+Measures: the test files that name GLSL pass (237 files, 236 run and 1
+skipped; 11,377 tests, 7 of them new in
+`glsl-raw-target-runs-fragment-pass.test.ts`). Two tests of the raw route
+changed: `at-gpu-sampler-storage.test.ts` (the 1,600-element list now
+declines) and `random-gpu.test.ts` (a draw declines with the refusal of the
+pass). The check does not take the `mode` option, so a mode that the target
+does not offer still gives `unsupported-mode`
+(`unknown-param-call-site-refinement.test.ts`). `npm run test:glsl`: 0 disagreements (966
+expressions accepted by `canCompile()`); typecheck and `check:deps` pass.
+Dual review, two rounds. Tycho's whole-corpus codegen audit through
+`CE_ALT_PKG` (764 documents, 17,421 records; production builds of the base
+and of the change; load 4.4 at the start, 3.4 at the end, on 18 cores): 0 new
+declines, 0 resolved declines, 0 disagreements of `canCompile()` with
+`compile()` (3,661 GLSL records, 46 refused), and 6 records with changed
+code, all `glsl`:
+
+- `neyret/b166fa3eba`, row `l(I(x, y) mod 2 - 1) - 0.99`: the base wrote a
+  call of `_fn_l` and no definition of it, which no shader compiler accepts;
+  the change writes the definition. Cause: for the helper call
+  `_gpu_fmod2(…)`, the removed check built a preamble with
+  `preambleFor('_gpu_fmod2(')`, and `userFunctionDefs()` then ran
+  `pruneUnreferencedVariantBases()` against that short string. The prune
+  deletes a definition that was written early for a lane query when neither
+  the code nor another definition names it, so it deleted `_fn_l` before
+  the call of `_fn_l` was written. A CHANGELOG entry.
+- `neyret/0et6fx01id` (2 rows) and `neyret/74cc5c82a3` (3 rows): the same
+  lines in another order. `_fn_d` now comes before `_fn_f` and
+  `_fn_f_each2_1`; in the base the same prune deleted `_fn_d` and it was
+  written again at the end of the table. No definition calls a later one.
+
+Two timing lines (`interval-js` and `javascript` records, 15 to 392 ms and
+1.3 to 455 ms) are on targets that this change does not touch, measured on a
+shared machine.
+
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
 in the order of the interpreter, at the start of its statement. A piece in

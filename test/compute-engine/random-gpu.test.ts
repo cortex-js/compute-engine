@@ -238,9 +238,11 @@ describe('seed ABI — once-evaluation and the deferred host-uniform row', () =>
 });
 
 describe('a draw on a GLSL target object passed to compile()', () => {
-  // A target object passed as the `target` option is compiled without the
-  // fragment pass. The GLSL target has no lowering for `Random`, so the
-  // draw declines there too.
+  // `compile()` runs the fragment pass on a GLSL target object passed as
+  // the `target` option, also on a spread copy of it, so the draw declines
+  // with the refusal of the pass. `BaseCompiler.compile()` runs no pass;
+  // the GLSL target has no lowering for `Random`, so the draw declines
+  // there too.
   it('declines', () => {
     const target: any = { ...glsl.createTarget(), ...NO_FOLD };
     expect(() =>
@@ -249,7 +251,7 @@ describe('a draw on a GLSL target object passed to compile()', () => {
         fallback: false,
         ...NO_FOLD,
       })
-    ).toThrow(/target 'glsl' has no lowering for it/);
+    ).toThrow(FRAGMENT);
     expect(() =>
       BaseCompiler.compile(framed(42, ce.expr(['Random'])) as any, target)
     ).toThrow(/target 'glsl' has no lowering for it/);

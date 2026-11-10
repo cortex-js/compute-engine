@@ -499,15 +499,20 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
     expect(() =>
       ce._compile(ce.box('S'), { target: direct, ...SAMPLER, fallback: false })
     ).toThrow(/`storage` option is not supported on direct custom targets/);
-    // An empty hint set is fine, and the field is cleared on the reused target.
+    // An empty hint set is accepted, and the field is cleared on the reused
+    // target. Without a hint, `S` is a uniform array of 1600 elements, more
+    // than the limit of a shader array: the fragment pass that the raw route
+    // runs (`raw-target-check.ts`) refuses it, as the registered route does.
     direct.storage = new Map([['S', 'sampler2D']]);
     const r = ce._compile(read(ce), {
       target: direct,
       storage: {},
       ...NO_FOLD,
-      fallback: false,
     });
-    expect(r.code).toBe('_gpu_at1600(S, k)');
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.message).toMatch(
+      /The list `S` has 1600 elements, more than the limit of 256 elements/
+    );
     expect(direct.storage).toBeUndefined();
   });
 

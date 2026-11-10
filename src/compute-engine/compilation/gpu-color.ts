@@ -153,8 +153,8 @@ export function gpuColorOperand(
     );
   assertNoGPUAlpha(head, ops);
   // The `vec3` constructor below is built here rather than by the `Tuple`
-  // lowering, so the shape gate that lowering applies has to be applied here
-  // too: a vector-valued component emitted `vec3(1.0, vec2(0.0, 1.0), 0.0)`,
+  // lowering, so the component check that lowering applies has to be applied
+  // here too: a vector-valued component emitted `vec3(1.0, vec2(0.0, 1.0), 0.0)`,
   // which no driver accepts.
   assertGPUScalarComponents(ops.slice(0, 3), gpuVec3());
   return `_gpu_srgb_to_oklch(${gpuVec3()}(${ops

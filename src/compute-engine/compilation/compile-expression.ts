@@ -4,6 +4,7 @@ import type { Expression, JSSource } from '../global-types.js';
 import type {
   CompileMode,
   CompileTarget,
+  CompilationOptions,
   CompilationResult,
   DefaultRunnerResult,
   StorageHint,
@@ -13,6 +14,7 @@ import { withDirectLoopPassReset } from './compile-loops.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { compileDiagnosticOf, isKindDeclineError } from './diagnostics.js';
+import { rawTargetCheck } from './raw-target-check.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { rewritePartialApplications } from './partial-application.js';
 import {
@@ -235,6 +237,39 @@ export function compile<
       // is the `unsupported-mode` decline, raised by `BaseCompiler.compile`
       // when it latches the mode.
       options.target.mode = options.mode;
+      // A target object made by a language target whose emitter relies on a
+      // typing pass (the GLSL target) carries that pass
+      // (`raw-target-check.ts`). It runs on the expression as the caller
+      // wrote it, with the preparation and the pass of `canCompile()`, and a
+      // refusal declines with the diagnostic of `canCompile()`; any other
+      // error propagates (a cancellation reaches the catch below as itself).
+      // It runs after the per-call fields above are reset, so that a reused
+      // target object keeps no field of a previous call after a decline.
+      //
+      // The options are those that the raw route applies: `vars` (whose
+      // values the pass hides, as the raw route does below), the budget of
+      // the target object, no common-subexpression pass, and the
+      // constant-folding choice. `functions` and `preamble` are not passed:
+      // the raw route does not install them, so the stock lowering of each
+      // head is written, and the pass must judge that head by its own
+      // signature. `mode` is not passed: a mode that the target does not
+      // offer is the `unsupported-mode` decline of `BaseCompiler.compile`
+      // below.
+      //
+      // The pass judges the tree of its own preparation (which also writes
+      // point values and some calls of user functions in place), while the
+      // raw route writes `rewritten`, which is prepared less. The check
+      // makes the raw route decline what `compile()` with `to: 'glsl'`
+      // declines; it does not judge each emission. Its cost is one
+      // preparation and one pass in addition to the compilation.
+      const check = rawTargetCheck(options.target);
+      if (check !== undefined)
+        check(expr, {
+          vars: options.vars,
+          iterationBudget: options.target.iterationBudget,
+          cse: false,
+          constantFold: options.constantFold,
+        } as CompilationOptions<Expression>);
       // A `vars`-mapped symbol is compiled as the valueless input of its
       // declared type (`withVarsValuesHidden`), as on a registered target.
       // The `vars` keys also ride on the target (`varsKeys`), so neither the

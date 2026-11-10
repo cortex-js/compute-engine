@@ -64,14 +64,11 @@ import { rangeCount } from '../numerics/range-count.js';
 import {
   assertGPUScalarComponents,
   declineComplexContinuation,
-  gpuAbsorbedConstant,
   gpuBinaryVectorWidth,
   gpuComplexOperand,
   gpuComplexPowLiteral,
   gpuComponentCount,
-  gpuDestructuresListOperand,
   gpuImaginaryPiMultiple,
-  gpuIsCollectionReduceForm,
   gpuIsComponentwise,
   gpuNaNFor,
   gpuOperandShape,
@@ -82,9 +79,6 @@ import {
   gpuTopLevelCall,
   gpuTupleWithoutShaderType,
   gpuWidenToVector,
-  isBroadcastPointNormOperand,
-  markAggregateConsuming,
-  markOperandConsuming,
 } from './gpu-shapes.js';
 import {
   GPU_POWI_INLINE_LIMIT,
@@ -520,7 +514,7 @@ function compileGPUAt(
   target: CompileTarget<Expression>
 ): string {
   // Annotated (rather than inferred) so a `decline(…)` call narrows what
-  // follows it — the `gpuCheckOperandShapes` convention.
+  // follows it.
   const decline: (reason: string) => never = (reason) => {
     throw new Error(`Could not compile \`At\`: ${reason}.`);
   };
@@ -1665,14 +1659,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_catan(${compile(args[0])})`;
     return `atan(${compile(args[0])})`;
   },
-  // Positional access. The lowering CONSUMES its aggregate base — it indexes
-  // INTO it — so the operand shapes it was handed are no longer in the
-  // emission (a `vec3` base becomes a scalar `v.y`, a `float[7]` base a
-  // `_gpu_at7(…)` call), and it declares that with `markAggregateConsuming`
-  // rather than letting the gate infer it. See `compileGPUAt`.
-  At: markAggregateConsuming((args, compile, target) =>
-    compileGPUAt(args, compile, target)
-  ),
+  // Positional access. The lowering indexes INTO its aggregate base, so the
+  // emission has the shape of an element (a `vec3` base becomes a scalar
+  // `v.y`, a `float[7]` base a `_gpu_at7(…)` call). See `compileGPUAt`.
+  At: (args, compile, target) =>
+    compileGPUAt(args, compile, target),
   Ceil: (args, compile, target) => {
     if (args.length > 1 && args[1] !== null)
       return gpuRoundToStep('ceil', args[0], args[1], compile, target);
@@ -1684,8 +1675,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // for a NaN operand and computes CE's `min(max(x, lo), hi)` (see
   // `gpuNaNSafeLibrary`), or the built-ins `min(max(x, lo), hi)` when every
   // operand is finite for certain (`gpuNaNSafeTernaryCall`). Other shapes
-  // keep the built-in `clamp`, so that the shape gate gives its reason for a
-  // decline.
+  // keep the built-in `clamp`; the GLSL fragment pass refuses the operand
+  // shapes that the built-in cannot take before the emitter runs.
   Clamp: (args, compile, target) =>
     gpuNaNSafeTernaryCall('clamp', 0, args, compile, target) ??
     `clamp(${args.map((a) => compile(a)).join(', ')})`,
@@ -1716,20 +1707,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Positional access at a fixed position: `At` with a constant index, which
   // reads a `vecN` with a swizzle and an array (a list of points, a list of
   // 5 or more numbers) with a subscript. See `compileGPUPositional`. Like
-  // `At`, these lowerings index INTO their operand, so they are declared
-  // aggregate-consuming.
-  First: markAggregateConsuming((args, compile, target) =>
-    compileGPUPositional('First', args[0], compile, target)
-  ),
-  Second: markAggregateConsuming((args, compile, target) =>
-    compileGPUPositional('Second', args[0], compile, target)
-  ),
-  Third: markAggregateConsuming((args, compile, target) =>
-    compileGPUPositional('Third', args[0], compile, target)
-  ),
-  Last: markAggregateConsuming((args, compile, target) =>
-    compileGPUPositional('Last', args[0], compile, target)
-  ),
+  // `At`, these lowerings index INTO their operand, so the emission has the
+  // shape of an element.
+  First: (args, compile, target) =>
+    compileGPUPositional('First', args[0], compile, target),
+  Second: (args, compile, target) =>
+    compileGPUPositional('Second', args[0], compile, target),
+  Third: (args, compile, target) =>
+    compileGPUPositional('Third', args[0], compile, target),
+  Last: (args, compile, target) =>
+    compileGPUPositional('Last', args[0], compile, target),
   // Point-coordinate accessors. On the GPU a point is a `vec2`/`vec3`/`vec4`,
   // so a single point maps to the same swizzle as First/Second/Third. A list of
   // points is not a GPU value: emitting a swizzle on it produces invalid shader
@@ -1787,23 +1774,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // 2-argument calls of the NaN-safe helpers, `_gpu_max(_gpu_max(a, b), c)`
   // (`gpuNaNSafeLibrary`). A COLLECTION operand makes these a
   // reduction rather than a componentwise fold — see `compileGPUExtremum`.
-  // `markAggregateConsuming`: the reduction DESTRUCTURES its collection
-  // operands, so the generic shape gate must not judge the emission against
-  // operand shapes the emission no longer contains (`GPU_AGGREGATE_CONSUMING`).
-  Max: markAggregateConsuming((args, compile, target) =>
-    compileGPUExtremum('max', 'Max', args, compile, target)
-  ),
-  Min: markAggregateConsuming((args, compile, target) =>
-    compileGPUExtremum('min', 'Min', args, compile, target)
-  ),
+  Max: (args, compile, target) =>
+    compileGPUExtremum('max', 'Max', args, compile, target),
+  Min: (args, compile, target) =>
+    compileGPUExtremum('min', 'Min', args, compile, target),
   // `Mean` has no lowering: the entry gives the message of an operator with
   // no lowering.
-  Mean: markAggregateConsuming((_args, _compile, target) => {
+  Mean: (_args, _compile, target) => {
     throw new Error(
       `Could not compile \`Mean\`: the operator is known to the engine but ` +
         `target '${target.language ?? 'unknown'}' has no lowering for it.`
     );
-  }),
+  },
   // Element-wise max/min — genuinely COMPONENTWISE, unlike `Max`/`Min` above,
   // so a `vecN` operand stays a vector. Both require at least two operands (a
   // lone collection is a `Max`/`Min`, and CE rejects `ElementMax([1,2,3])` as
@@ -2127,8 +2109,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // genType), so the vector case needs only two adjustments: a piece that
     // would emit a bare scalar has to be widened to the same `vecN`, and the
     // scalar-declared `_gpu_powi` helper has to be swapped for its `vecN`
-    // overload. A width MISMATCH between the two operands is left to the
-    // operand-shape gate, which declines it with a width diagnostic.
+    // overload. The GLSL fragment pass refuses a width MISMATCH between the
+    // two operands before the emitter runs.
     const powWidth = gpuBinaryVectorWidth(base, exp);
     if (eConst === 0) {
       // `x⁰` is ONE for every component, so the emission must have the shape
@@ -2139,11 +2121,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (typeof zeroShape === 'number') return `${gpuFVec(zeroShape)}(1.0)`;
       // A `matN` or an ARRAY base has no constructor this lowering can use,
       // and a bare `1.0` there is a silent scalar where the caller is owed an
-      // aggregate — which the operand-shape gate cannot catch, because it
-      // reads a lone literal as an emission that combines nothing
-      // (`gpuIsAtomicEmission`) and steps aside. Route through the scalar
-      // helper, whose declaration makes the gate decline with the shape
-      // diagnostic it owns.
+      // aggregate. The GLSL fragment pass refuses such a base; the call of
+      // the scalar helper is kept so that this branch never writes a value
+      // of the wrong shape.
       return `_gpu_powi(${compile(base)}, 0.0)`;
     }
     if (eConst === 1) return gpuGroup(compile(base));
@@ -2157,12 +2137,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Base two is the hardware's own exponential: GLSL declares
     // `exp2` over the genType, and `pow(2.0, y)` is itself specified as
     // `exp2(y * log2(2.0))`, so this drops a logarithm the compiler would
-    // otherwise have to fold.
-    //
-    // The base is left out of the emitted call, which is declared after this
-    // table (`markOperandConsuming`). So the operand-shape check judges
-    // `exp2(v)` against the exponent alone, and a `vecN` exponent compiles
-    // too.
+    // otherwise have to fold. A `vecN` exponent compiles too (`exp2(v)`).
     if (bConst === 2) return `exp2(${compile(exp)})`;
     // Literal integer exponent: emit sign-preserving code. GLSL `pow(x, y)`
     // is spec-defined as `exp2(y·log2(x))` and is undefined for a negative base
@@ -2283,8 +2258,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // A scalar or `vecN` `x` calls a `_gpu_smoothstep` helper, which gives NaN
   // for a NaN operand; the built-in gives 0 on Apple GPUs (CE-520). Other
-  // shapes keep the built-in, so that the shape gate gives its reason for a
-  // decline.
+  // shapes keep the built-in; the GLSL fragment pass refuses the operand
+  // shapes that the built-in cannot take before the emitter runs.
   Smoothstep: (args, compile, target) =>
     gpuNaNSafeTernaryCall('smoothstep', 2, args, compile, target) ??
     `smoothstep(${args.map((a) => compile(a)).join(', ')})`,
@@ -3030,15 +3005,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       target
     )}, ${gpuColorOperand('ColorContrast', fg, compile, target)})`;
   },
-  // `markAggregateConsuming`: every colour operand goes through
-  // `gpuColorOperand`, which checks its shape and converts it to an OKLCh
-  // `vec3` itself. The emitted `(cond ? fg1 : fg2)` has the converted
-  // colours and a boolean condition as its operands, not the operands of the
-  // head. Judged against the
-  // operand shapes, a colour literal such as `Rgb(1, 0, 0)` (a scalar shape)
-  // beside a tuple background (a `vec3` shape) made the shape check refuse
-  // valid source. CE-241.2.
-  ContrastingColor: markAggregateConsuming((args, compile, target) => {
+  // Every colour operand goes through `gpuColorOperand`, which checks its
+  // shape and converts it to an OKLCh `vec3` itself. The emitted
+  // `(cond ? fg1 : fg2)` has the converted colours and a boolean condition as
+  // its operands, not the operands of the head.
+  ContrastingColor: (args, compile, target) => {
     if (args.length === 0)
       throw new Error('Could not compile `ContrastingColor`: no argument');
     // GLSL keeps the EXACT `?:` text it has always emitted (pinned).
@@ -3118,7 +3089,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       white,
       black
     );
-  }),
+  },
   ColorToColorspace: ([color, space], compile, target) => {
     if (color === null || space === null)
       throw new Error(
@@ -3191,8 +3162,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `ColorFromColorspace(Rgb(1, 0, 0), 'rgb')` answered a color that was
     // not red.
     // The `vec3` constructor is built here rather than by the head's own
-    // lowering, so the shape gate that lowering applies has to be applied
-    // here too: a vector-valued component emitted
+    // lowering, so the component check that lowering applies has to be
+    // applied here too: a vector-valued component emitted
     // `vec3(1.0, vec2(0.0, 1.0), 0.0)`, which no driver accepts.
     if (typedHead)
       assertGPUScalarComponents(typedHead.ops.slice(0, 3), gpuVec3());
@@ -3384,11 +3355,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // and fail closed for arity ≥ 5 or a norm-type argument rather than
   // reporting success on invalid shader source.
   //
-  // `markAggregateConsuming` for a point with a broadcasting component only:
-  // that form compiles the explicit norm, whose own nodes pass the shape
-  // gates, and the emission no longer contains the point operand, which has
-  // no shader shape of its own (it reads as an array).
-  Norm: markAggregateConsuming((args, compile, target) => {
+  // A point with a broadcasting component compiles as its explicit norm
+  // (`explicitBroadcastPointNorm()`): the emission no longer contains the
+  // point operand, which has no shader shape of its own (it reads as an
+  // array).
+  Norm: (args, compile, target) => {
     if (args.length > 1)
       throw new Error(
         `Could not compile \`Norm\`: only the default L2 norm compiles on the ` +
@@ -3452,12 +3423,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // Non-literal operand (e.g. a vec-typed symbol): `length()` applies.
     return `length(${compile(arg)})`;
-  }, isBroadcastPointNormOperand),
-  // `markAggregateConsuming`: the operand is not written. The count of a
+  },
+  // The operand is not written. The count of a
   // point or a list with a static count is a constant: the fragment pass
   // recorded the type of the operand (`fragmentFactsUnder()`). Any other
   // operand declines.
-  Length: markAggregateConsuming((args, _compile, target) => {
+  Length: (args, _compile, target) => {
     const facts = fragmentFactsUnder(
       (target as FragmentTargetFields<string>).fragmentScope,
       args[0]
@@ -3471,28 +3442,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +
         `'length()' builtin is the Euclidean norm (CE 'Norm'), not a count.`
     );
-  }),
+  },
   Normalize: 'normalize',
   Reflect: 'reflect',
   Refract: 'refract',
 
   // Sum/Product — unrolled or for-loop (indexed form), or a fold over the
   // operand's components (collection form).
-  //
-  // `markAggregateConsuming` for the COLLECTION form only: there the reduction
-  // DESTRUCTURES its operand into scalars, so the emission carries none of the
-  // operand's `vecN`/array shape and must not be judged against it. The
-  // indexed form's operands (a scalar body and a `Limits`) stay gated.
-  Sum: markAggregateConsuming(
-    (args, compile, target) =>
-      compileGPUSumProduct('Sum', args, compile, target),
-    gpuIsCollectionReduceForm
-  ),
-  Product: markAggregateConsuming(
-    (args, compile, target) =>
-      compileGPUSumProduct('Product', args, compile, target),
-    gpuIsCollectionReduceForm
-  ),
+  Sum: (args, compile, target) =>
+    compileGPUSumProduct('Sum', args, compile, target),
+  Product: (args, compile, target) =>
+    compileGPUSumProduct('Product', args, compile, target),
 
   // Range — inline constant array literal (bounds must be compile-time constants)
   Range: (args, _compile, target) => {
@@ -3781,16 +3741,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * GCD and LCM of any number of scalar, vector or literal-list operands: a
    * fold of the two-argument preamble helpers `_gpu_gcd` (Euclidean algorithm
    * via `mod`) and `_gpu_lcm` over the components (`compileGPUGcdLcm`).
-   *
-   * `markAggregateConsuming`: the fold DESTRUCTURES its collection operands
-   * into scalar components, as the `Max`/`Min` reduction does.
+   * The fold destructures its collection operands into scalar components,
+   * as the `Max`/`Min` reduction does.
    */
-  GCD: markAggregateConsuming((args, compile, target) =>
-    compileGPUGcdLcm('GCD', args, compile, target)
-  ),
-  LCM: markAggregateConsuming((args, compile, target) =>
-    compileGPUGcdLcm('LCM', args, compile, target)
-  ),
+  GCD: (args, compile, target) =>
+    compileGPUGcdLcm('GCD', args, compile, target),
+  LCM: (args, compile, target) =>
+    compileGPUGcdLcm('LCM', args, compile, target),
 
   /**
    * Variance of a compile-time-known list.
@@ -3798,13 +3755,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * Accepts either a single `List(...)` argument or N scalar arguments.
    * Generates fully inline code: computes mean then sum of squared deviations,
    * divided by (N-1) for sample variance (matches JS `_SYS.variance`).
-   *
-   * `markAggregateConsuming`: with a single `List` operand the elements are
-   * DESTRUCTURED into scalars, so the emission contains no aggregate at all
-   * and must not be judged against the operand's `array`/`vecN` shape. The
-   * N-scalar-argument form passes its operands through and stays gated.
+   * With a single `List` operand the elements are destructured into scalars;
+   * the N-scalar-argument form passes its operands through.
    */
-  Variance: markAggregateConsuming((args, compile, target) => {
+  Variance: (args, compile, target) => {
     // Normalise: if single List arg, use its elements; else use args directly.
     let elems: ReadonlyArray<Expression>;
     if (args.length === 1 && isFunction(args[0], 'List')) {
@@ -3836,7 +3790,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       .join(' + ');
     // sample variance: sum / (N - 1)
     return `((${sqDiffs}) / ${formatGPUNumber(n - 1)})`;
-  }, gpuDestructuresListOperand),
+  },
 
   /**
    * Median of a compile-time-known list.
@@ -3848,12 +3802,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * The sorting network uses the "odd-even merge sort" comparator pattern
    * inlined as `min`/`max` calls — no GPU statements required.
    *
-   * `markAggregateConsuming`: a single `List` operand is DESTRUCTURED into one
-   * scalar per element (`_gpu_median_5(1.0, 5.0, …)`), so the emission carries
-   * none of the operand's aggregate shape. The N-scalar-argument form passes
-   * its operands through and stays gated.
+   * A single `List` operand is destructured into one scalar per element
+   * (`_gpu_median_5(1.0, 5.0, …)`); the N-scalar-argument form passes its
+   * operands through.
    */
-  Median: markAggregateConsuming((args, compile, target) => {
+  Median: (args, compile, target) => {
     // Normalise to element list
     let elems: ReadonlyArray<Expression>;
     if (args.length === 1 && isFunction(args[0], 'List')) {
@@ -3907,7 +3860,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // We emit a per-size preamble (GPU_MEDIAN_PREAMBLE_N_GLSL)
     // and return a call to `_gpu_median_N(v0, v1, ..., vN-1)`.
     return `_gpu_median_${n}(${compiled.join(', ')})`;
-  }, gpuDestructuresListOperand),
+  },
 
 
   // `Apply(callee, args…)`: the parse of `f'(x)` is
@@ -3957,58 +3910,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
 };
-
-// `Power(2, y)` emits `exp2(y)` and leaves the base out of the emitted call;
-// the operand-shape check reads that declaration (`GPU_OPERAND_CONSUMING`).
-markOperandConsuming(GPU_FUNCTIONS.Power, gpuAbsorbedConstant('exp2', 0, 2));
-
-// `Clamp`, `ElementMax` and `ElementMin` of finite operands emit the built-in
-// `min`/`max` with each scalar operand broadcast to the vector width
-// (`Clamp(v, 0, 1)` → `min(max(v, vec3(0.0)), vec3(1.0))`). The scalar
-// operands do not reach the emitted calls, so the operand-shape check judges
-// the vector operands only (`GPU_OPERAND_CONSUMING`, `gpuBroadcastScalars`).
-markOperandConsuming(GPU_FUNCTIONS.Clamp, gpuBroadcastScalars('min', 0));
-markOperandConsuming(GPU_FUNCTIONS.ElementMax, gpuBroadcastScalars('max'));
-markOperandConsuming(GPU_FUNCTIONS.ElementMin, gpuBroadcastScalars('min'));
-
-/**
- * The `consumed` predicate (`GPU_OPERAND_CONSUMING`) of a lowering that
- * broadcasts its scalar operands itself, with the vector constructor, before
- * it calls the built-in `callee`: the 0-based positions of the scalar
- * operands, or `undefined` for every other form. That form is a call of
- * `callee` (not of a `_gpu_` helper) on non-complex operands that are scalars
- * and `vecN` values of ONE width, with at least one of each, and a vector at
- * position `main` when it is given (`Clamp` broadcasts only its bounds).
- *
- * Without it the check reads the nested call `max(v, vec3(0.0))` of a
- * three-operand `Clamp` as a scalar `v` (a bare identifier has no shape in the
- * source, `gpuSourceIsVector`) beside a vector, and declines valid source.
- */
-function gpuBroadcastScalars(
-  callee: 'min' | 'max',
-  main?: number
-): (
-  args: ReadonlyArray<Expression>,
-  code: string
-) => ReadonlySet<number> | undefined {
-  return (args, code) => {
-    if (gpuTopLevelCall(code)?.callee !== callee) return undefined;
-    if (args.some((a) => a === null || a === undefined)) return undefined;
-    if (args.some((a) => BaseCompiler.isComplexValued(a))) return undefined;
-    const shapes = args.map(gpuOperandShape);
-    if (main !== undefined && typeof shapes[main] !== 'number')
-      return undefined;
-    const widths = new Set(shapes.filter((s) => typeof s === 'number'));
-    if (widths.size !== 1) return undefined;
-    if (!shapes.every((s) => s === 'scalar' || typeof s === 'number'))
-      return undefined;
-    const scalars = new Set<number>();
-    shapes.forEach((s, i) => {
-      if (s === 'scalar') scalars.add(i);
-    });
-    return scalars.size > 0 ? scalars : undefined;
-  };
-}
 
 /**
  * The body of the callee of `Apply(callee, args…)` with the arguments

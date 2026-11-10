@@ -113,18 +113,9 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
     expect(g(['Min', 5])).toBe('5.0');
   });
 
-  it('the PARENTHESES are what keep the operand-shape gate out', () => {
-    // `compileGPUExtremum` parenthesizes its reduced emission so that
-    // `gpuTopLevelCall` reports "not a call" and `gpuCheckOperandShapes` takes
-    // its `call === undefined` branch — its documented behaviour for a head
-    // that consumes a collection on purpose, recognized by `Max`/`Min` being
-    // absent from `GPU_OPERATORS`. Two unrelated properties, coupled
-    // implicitly; these are the witnesses that THROW (not merely differ) if
-    // the parentheses are dropped, because the gate would then judge a bare
-    // `max(…)`/`_gpu_nan()` call against operand shapes the emission no
-    // longer contains:
-    //   - a 5-element list is an `array` operand, and no builtin has an array
-    //     overload.
+  it('the reduction of a 5-element list compiles to the interpreter value', () => {
+    // A 5-element list is an `array` operand, which no shader builtin takes:
+    // `compileGPUExtremum` reduces it to its scalar components.
     expect(() => g(['Max', ['List', 1, 2, 3, 4, 5]])).not.toThrow();
     expect(runShader(g(['Max', ['List', 1, 2, 3, 4, 5]]))).toBe(
       interp(['Max', ['List', 1, 2, 3, 4, 5]])

@@ -17,8 +17,6 @@ export {
   gpuUniformVectorWidth,
   assertGPUScalarComponents,
   gpuOperandShape,
-  markOperandConsuming,
-  gpuAbsorbedConstant,
 } from './gpu-shapes.js';
 export type { GPUShapeRules } from './gpu-shapes.js';
 export {

@@ -138,8 +138,7 @@ describe('identity lowerings keep the grouping of their operand (CE-251.1)', () 
 });
 
 // CE-254: the `fract` and `exp2` peepholes leave an operand out of the
-// emitted call. The lowerings declare it (`markOperandConsuming`), so a
-// vector operand takes the peephole too.
+// emitted call, and a vector operand takes the peephole too.
 describe('the fract and exp2 peepholes apply to a vector operand (CE-254)', () => {
   test.each(TARGETS)('%s', (to) => {
     expect(shader(['Mod', 'v', 1], to).code).toBe('fract(fract(v))');
