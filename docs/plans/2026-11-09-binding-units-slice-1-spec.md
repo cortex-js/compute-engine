@@ -502,3 +502,56 @@ the implementation follows the recommendation.
    - Recommended: yes. Breaking change 2 needs them.
    - Without them, the three order cases of acceptance item 3 keep depending
      on the order of the parses.
+
+## 10. Implementation
+
+### Step 1, result (2026-11-10)
+
+None of the stop conditions of acceptance item 1 was met.
+
+- **The hang** of `find-fit-pool` and `find-fit-global-grid` is not a loop.
+  `findFit()` compiles its model (`implicitCompileNumericResult()`,
+  `nonlinear-fit.ts:665`). With no type for the free parameters, the
+  compilation declines, and the fit runs each step through the interpreted
+  `subs()` and `N()`. That makes it too slow for the time limit. Rule 8
+  covers this: the compilation is an operation, and it reads the
+  environments of its input.
+- **The out-of-memory failure** of `dag-shared-walks` (test "a binder over a
+  tower that holds its index rebuilds each node once") is a site of rule 7.
+  `rebindToBindings()` (`binders.ts`) does not rebind a symbol with no
+  definition, so the index `k` of a `Sum` built from a boxed body stayed
+  free, and a later walk unfolded the shared tower. When the experiment
+  rebinds a free name, the 19 tests of the file pass.
+- **The registry of waiting definitions** needs no declaration step:
+  - It records a head by name (`noteProvisionalApplication(name)`). It does
+    so when `couldBecomeFunction(ce.lookupDefinition(name))` is true, and
+    that is true for a name with no definition (`invisible-operator.ts`).
+  - The repair runs at a later declaration and finds its dependents by name
+    and scope (`utils.ts`, `repairProvisionalDependents()`).
+  - The sites that decide the reading read `ce.lookupDefinition()` without
+    the occurrence. These are rule 7 sites: they take the occurrence and
+    read its type (rule 4).
+
+### Phases
+
+Each phase is committed with the full suite green. The new behavior is
+behind an internal engine flag, `ce._bindingUnits`, which is off by default.
+Tests turn it on per engine. The last phase turns it on, removes it and the
+old mechanism, and updates the tests. The flag exists only during the work.
+
+- **A, the core:** free names (rule 1); the unit environment with (home
+  scope, name) keys and counters (rule 2, requirements on types);
+  resolution, type reads and evaluation (rules 3 to 5); `isFreeName()`;
+  rule 6.
+- **B, the sites:** rule 7 (`sameBinding()`, `rebindToBindings()`, the 53,
+  47 and 41 sites, the getters, the setters); the other readings of rule 2
+  (`N`, `f`, the free name of a function body); the order-independence
+  test.
+- **C, operations, programs and caches:** rules 8, 9 and 10.
+- **D, commits and state:** rules 11 to 13 (`ce.infer()`, `ce.assume()`,
+  trials, the deprecation of checkpoints, the two library loads).
+- **E, the switch:** the flag on, then removed. The removed code is the
+  declaration at boxing, the narrowing writes on definitions, and the
+  capture of narrowings. Also: the test updates for the breaking changes,
+  `CHANGELOG.md`, the documents of section 5, the timing of acceptance
+  item 10, and the result paragraph of section 8 of the model.
