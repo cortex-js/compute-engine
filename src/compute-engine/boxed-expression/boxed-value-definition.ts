@@ -517,6 +517,9 @@ export class _BoxedValueDefinition
   ) {
     this._engine = ce;
     this.name = name;
+    // With the engine flag `_bindingUnits`, a definition made during a
+    // boxing is narrowed by the uses of that boxing (`binding-unit.ts`).
+    if (ce._bindingUnits) ce._boxingState.noteDefinitionMade(this);
     // The whole constructor is a type WRITE: the `declare(name, { value })`
     // route derives `_type` from the value it is handed, and that derived type
     // is a contract the next `forget()` must not falsify. Running the body
@@ -1563,7 +1566,16 @@ export class _BoxedValueDefinition
    * shape a disequality fact contributes.
    */
   get type(): BoxedType {
-    const declared = this.declaredType;
+    return this._typeWithFacts(this.declaredType, true);
+  }
+
+  /** The type `declared` with the facts of the current context merged in,
+   * as {@link type} merges them into the declared type. `memoize` is false
+   * when `declared` is not the declared type of this definition: the type
+   * that a binding unit reads for an occurrence (`BoxedSymbol.type`). The
+   * memo is keyed on this definition alone, so such a read neither reads nor
+   * writes it. */
+  _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType {
     const ce = this._engine;
     if (contextAssumptions(ce).size === 0) return declared;
     // A constant is never a fact's subject (`soleSelfSubject` filters it out),
@@ -1583,7 +1595,7 @@ export class _BoxedValueDefinition
     // or a mutation of the store), so keying on its identity is what heals
     // this cache on `assume()`, `forget()`, a scope change and a checkpoint
     // restore alike; `_writeVersion` covers a write to the declaration.
-    const cached = this._effectiveType;
+    const cached = memoize ? this._effectiveType : undefined;
     if (
       cached !== undefined &&
       cached.index === index &&
@@ -1598,11 +1610,12 @@ export class _BoxedValueDefinition
       }),
       ce._typeResolver
     );
-    this._effectiveType = {
-      index,
-      writeVersion: this._writeVersion,
-      type: merged,
-    };
+    if (memoize)
+      this._effectiveType = {
+        index,
+        writeVersion: this._writeVersion,
+        type: merged,
+      };
     return merged;
   }
 

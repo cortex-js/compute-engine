@@ -340,6 +340,18 @@ export function createSymbolExpression(
   let autoScope = engine.context.lexicalScope;
   while (autoScope.noAutoDeclare && autoScope.parent)
     autoScope = autoScope.parent;
+  // With the engine flag `_bindingUnits`, boxing declares no name
+  // (`binding-unit.ts`): a name with no definition is a free name, a
+  // canonical symbol with no definition, whose home scope is the scope that
+  // the declaration below would go in. This applies to a scope that existed
+  // before the boxing started, and to a symbol made outside a boxing. A
+  // scope that the boxing made (the body of a function literal) still gets
+  // the declaration below.
+  if (
+    engine._bindingUnits &&
+    engine._boxingState.isPersistentScope(autoScope) !== false
+  )
+    return new BoxedSymbol(engine, name, { metadata, homeScope: autoScope });
   def = engine._declareSymbolValue(
     name,
     { type: 'unknown', inferred: true },

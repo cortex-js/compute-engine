@@ -224,6 +224,8 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
   inferredType: boolean;
+  /** See `types-definitions.ts`. @internal */
+  _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType;
   /** A hoisted block local (see `types-definitions.ts`). @internal */
   _blockLocal: boolean;
   /** History of writes to this definition's type. Structural mirror of

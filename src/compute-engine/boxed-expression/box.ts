@@ -191,6 +191,7 @@ import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
 } from './provisional-application.js';
+import { unitEnvironmentOfOperands } from '../binding-unit.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -453,6 +454,16 @@ export function boxFunction(
   // A construction that starts here starts at the root of the JS stack too,
   // so the nesting counter starts over (see `boxingDepth`).
   boxingDepth = 0;
+  // With the engine flag `_bindingUnits`, a call with a boxed operand is not
+  // a new binding unit: the symbols that it makes take the environment of
+  // its first boxed operand (`binding-unit.ts`). A call whose operands are
+  // all raw is a unit, with an environment of its own.
+  const env = ce._bindingUnits ? unitEnvironmentOfOperands(ops) : undefined;
+  if (env !== undefined)
+    return withDevolveRepair(ce, options?.scope, () => {
+      ce._boxingState.setUnitEnvironment(env);
+      return boxFunctionInternal(ce, name, ops, options);
+    });
   return withDevolveRepair(ce, options?.scope, () =>
     boxFunctionInternal(ce, name, ops, options)
   );
@@ -1485,19 +1496,37 @@ function withDevolveRepair(
   // captured here.
   const bases: Scope[] = [ce.context.lexicalScope];
   if (scope !== undefined) bases.push(scope);
-  return ce._boxingState.withRootRepair(build, (s) => {
-    for (const base of bases) {
-      // A chain may terminate with `parent: undefined` rather than `null`
-      // (`pushScope` builds scopes with `ce.context?.lexicalScope`), so test
-      // truthiness, not `!== null`.
-      let cur: Scope | null | undefined = base;
-      while (cur) {
-        if (cur === s) return true;
-        cur = cur.parent;
+  return ce._boxingState.withRootRepair(
+    build,
+    (s) => {
+      for (const base of bases) {
+        // A chain may terminate with `parent: undefined` rather than `null`
+        // (`pushScope` builds scopes with `ce.context?.lexicalScope`), so test
+        // truthiness, not `!== null`.
+        let cur: Scope | null | undefined = base;
+        while (cur) {
+          if (cur === s) return true;
+          cur = cur.parent;
+        }
       }
-    }
-    return false;
-  });
+      return false;
+    },
+    // With the engine flag `_bindingUnits` only: the scope of these chains
+    // whose bindings hold the definition `def` under `name`
+    // (`BoxedSymbol._unitWriteScope()`).
+    ce._bindingUnits
+      ? (name, def) => {
+          for (const base of bases) {
+            let cur: Scope | null | undefined = base;
+            while (cur) {
+              if (cur.bindings.get(name) === def) return cur;
+              cur = cur.parent;
+            }
+          }
+          return undefined;
+        }
+      : undefined
+  );
 }
 
 /**

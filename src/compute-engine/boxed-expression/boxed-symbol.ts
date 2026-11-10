@@ -57,6 +57,7 @@ import type {
 } from '../global-types.js';
 
 import { activeRollbackFrame } from '../inference-rollback.js';
+import { UnitEnvironment } from '../binding-unit.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
 import {
   collectionTypeBesideAbsence,
@@ -124,6 +125,8 @@ import {
   evaluateInOwnBindings,
   evaluateInOwnBindingsAsync,
   bindingInContext,
+  freeNameBindingInContext,
+  sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
 } from './binders.js';
@@ -132,6 +135,7 @@ import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { beginStoreGuard } from './store-guard.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
+import { withStaticTypingView } from '../static-typing-view.js';
 import {
   assignmentLocalsOf,
   markFreeSymbolDeclaration,
@@ -341,13 +345,40 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * `_structuralForm`, made on the first read. */
   private _canonicalOfStructural: BoxedSymbol | undefined;
 
-  /** Note: to indicate that the symbol should be canonical, pass a def. */
+  /**
+   * The environment of the binding unit of this occurrence: that of the
+   * outermost boxing that made it (`binding-unit.ts`). Set only when the
+   * engine flag `_bindingUnits` is true. A symbol made outside a boxing gets
+   * an environment of its own at the first requirement written on it.
+   * Declared, not initialized, so that a symbol carries no own property for
+   * it while the flag is off.
+   * @internal
+   */
+  declare _env?: UnitEnvironment;
+
+  /**
+   * The home scope of a free name (a canonical symbol with no definition),
+   * with the engine flag `_bindingUnits` only. It is set at construction: the
+   * first scope up the chain that existed before the boxing and is not
+   * `noAutoDeclare`, where a declaration of the name would go. The entry of
+   * `_env` for a free name is keyed on (home scope, name). A symbol with a
+   * definition has no home scope: its entry is keyed on (definition, name).
+   * @internal
+   */
+  declare _homeScope?: Scope;
+
+  /** Note: to indicate that the symbol should be canonical, pass a def, or,
+   * with the engine flag `_bindingUnits`, a `homeScope` for a free name. */
   constructor(
     ce: ComputeEngine,
     name: MathJsonSymbol,
     options?: {
       metadata?: Metadata;
       def?: BoxedDefinition;
+      /** The home scope of a free name (`binding-unit.ts`): the symbol is
+       * canonical and has no definition. Read only with the engine flag
+       * `_bindingUnits`, and only when `def` is undefined. */
+      homeScope?: Scope;
     }
   ) {
     super(ce, options?.metadata);
@@ -358,6 +389,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
     this._id = name;
     this._def = options?.def;
+    if (ce._bindingUnits) {
+      const env = ce._boxingState.unitEnvironment();
+      if (env !== undefined) this._env = env;
+      if (options?.def === undefined && options?.homeScope !== undefined)
+        this._homeScope = options.homeScope;
+    }
+  }
+
+  /**
+   * True for a free name: a canonical symbol that has no definition, made
+   * with the engine flag `_bindingUnits` when its name had no definition.
+   * It stays true after a later declaration of the name: the occurrence then
+   * reads that declaration (`_resolvedFreeDefinition()`).
+   * @internal
+   */
+  get _isFreeName(): boolean {
+    return this._def === undefined && this._homeScope !== undefined;
   }
 
   get json(): MathJsonExpression {
@@ -393,6 +441,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       },
       def: this._def,
     });
+    // A copy is the same occurrence: it keeps the unit and the home scope.
+    if (this.engine._bindingUnits) {
+      result._env = this._env;
+      if (this._homeScope !== undefined) result._homeScope = this._homeScope;
+    }
     result._parseScope = this._parseScope;
     // A copy for diagnostics keeps the structural form of its source.
     if (this._structuralForm) result._structuralForm = true;
@@ -443,7 +496,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   _reset(): void {}
 
   get isCanonical(): boolean {
-    return this._def !== undefined;
+    return this._def !== undefined || this._isFreeName;
   }
   set isCanonical(val: boolean) {
     throw new Error(
@@ -463,8 +516,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       }
       return this._canonicalOfStructural;
     }
-    // The symbol is canonical if it has a definition
-    if (this._def) return this;
+    // The symbol is canonical if it has a definition, or if it is a free
+    // name (`binding-unit.ts`)
+    if (this._def || this._isFreeName) return this;
 
     // Return a new canonical symbol, scoped in the current context. The
     // source position rides along (a bare-symbol statement is the idiomatic
@@ -759,7 +813,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     t: () => Type,
     inferenceMode: 'narrow' | 'widen' | 'replace' = 'narrow'
   ): boolean {
-    if (!this._def) return false;
+    if (!this._def) {
+      // A free name (`binding-unit.ts`) has no definition to write on: the
+      // requirement goes in the environment of its unit. Inside a
+      // resolve-only region (serialization), a read writes nothing.
+      if (!this._isFreeName || this.engine._resolveOnlyDepth > 0) return false;
+      const home = this._homeScope!;
+      return this.engine._withoutFacts(() =>
+        this._inferInEnvironment(home, t(), inferenceMode)
+      );
+    }
 
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
     // serialization) a read must not write inference onto a definition —
@@ -804,6 +867,250 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.engine._withoutFacts(() =>
       this._inferWithoutFacts(t(), inferenceMode)
     );
+  }
+
+  /**
+   * Write the requirement `t` of a use of this occurrence in the environment
+   * of its unit, under the key (`home`, name) (`binding-unit.ts`): `home` is
+   * the home scope of a free name, or the value definition of the
+   * occurrence (`_unitWriteScope()`). The steps
+   * are those of the write on a definition in `_inferWithoutFacts()`: the
+   * narrowing of `narrowInferredType()` for a use, a widening for a result,
+   * and a replacement for the Epsil static pre-pass. The entry holds only
+   * what the uses of the unit require: it starts from `unknown`, not from
+   * the type of a definition. A type read meets the two
+   * (`_typeOfDefinitionInUnit()`).
+   *
+   * The result is that of `_infer()`: false when the requirement adds no
+   * information.
+   *
+   * A write that changes the type sends the state event of an inference, as
+   * a write on a definition does: the types cached on compound expressions
+   * are keyed on the versions that this event moves. Phase C of the plan
+   * replaces that event with keys on the counter of the environment.
+   */
+  private _inferInEnvironment(
+    home: object,
+    t: Type,
+    inferenceMode: 'narrow' | 'widen' | 'replace'
+  ): boolean {
+    const ce = this.engine;
+    const env = (this._env ??= new UnitEnvironment());
+    ce._boxingState.noteUnitWrite(env);
+    const name = this._id;
+    const from = env.get(home, name);
+    const fromType: Type = from?.type ?? 'unknown';
+    const to = ce.type(
+      inferenceMode === 'replace'
+        ? t
+        : inferenceMode === 'widen'
+          ? widen(fromType, t)
+          : narrowInferredType(
+              fromType,
+              t,
+              env.scalarUsesMap(home, name) === true
+            )
+    );
+    // The record of the uses that require a number, as `SCALAR_USES_MAP`
+    // keeps it for a definition. It is written before the no-op test, for
+    // the same reason.
+    if (inferenceMode === 'narrow') {
+      if (isSubtype(t, 'number'))
+        env.setScalarUsesMap(
+          home,
+          name,
+          (env.scalarUsesMap(home, name) ?? true) && inferenceCauseMaps(ce)
+        );
+      else if (!isSubtype(to.type, 'number'))
+        env.setScalarUsesMap(home, name, undefined);
+    }
+    if (to.isUnknown && inferenceMode !== 'replace') return false;
+    if (from !== undefined && to.type === from.type) return true;
+    const equalType =
+      from !== undefined &&
+      typeof to.type === 'object' &&
+      typeof from.type === 'object' &&
+      to.toString() === from.toString() &&
+      isSubtype(to.type, from.type) &&
+      isSubtype(from.type, to.type);
+    env.set(home, name, to);
+    if (!equalType)
+      ce._noteStateEvent({
+        kind: 'inference',
+        valueType: true,
+        widening:
+          inferenceMode !== 'narrow' ||
+          (from !== undefined && !isSubtype(to.type, from.type)),
+      });
+    return true;
+  }
+
+  /**
+   * The scope that holds the definition `def` of this occurrence, found by a
+   * walk from the current scope, or `undefined` when `def` is not on the
+   * chain of the current scope.
+   */
+  private _scopeOfDefinition(def: BoxedDefinition): Scope | undefined {
+    for (
+      let s: Scope | null | undefined = this.engine.context?.lexicalScope;
+      s;
+      s = s.parent
+    )
+      if (s.bindings.get(this._id) === def) return s;
+    return undefined;
+  }
+
+  /**
+   * With the engine flag `_bindingUnits`: the home scope under which a
+   * requirement on the definition `def` of this occurrence is written in the
+   * environment of the unit, or `undefined` when it is written on the
+   * definition, as without the flag.
+   *
+   * Boxing writes no requirement on a definition that it did not make. A
+   * definition that the root construction in progress made in a scope that
+   * the construction created (a parameter of a function literal, the index
+   * of a `Sum`, a local of a block) is still narrowed by its uses, as without
+   * the flag: the boxing state records each definition made during the
+   * construction (`EngineBoxingState.noteDefinitionMade()`). A definition
+   * that the construction made in a scope that existed before it (the
+   * declaration of a free name of the body of a function literal in the
+   * scope that the literal is written in, `_inferOnOuterBinding()`) outlives
+   * the construction, and its uses write in the environment. The scope of a
+   * made definition is found on the chain of the current scope; when it is
+   * not there, on the lexical chains that existed when the construction
+   * began (the chain of the engine and the chain of the `scope` option of
+   * the boxing, `EngineBoxingState.persistentScopeOf()`). A made definition
+   * that is on none of these chains is in a scope that the construction
+   * created, and its uses narrow it. Every definition that the construction
+   * did not make writes in the environment, also one that is not on the
+   * chain of the current scope (a definition of a popped scope, or of a
+   * scope that a `scope` option gave to an earlier boxing). A write outside
+   * a boxing (during an evaluation) is made on the definition.
+   *
+   * The key of the entry is the value definition itself: it does not depend
+   * on the context of the write or of the read.
+   */
+  private _unitWriteScope(def: BoxedDefinition): object | undefined {
+    if (!this.engine._bindingUnits || !isValueDef(def)) return undefined;
+    const state = this.engine._boxingState;
+    if (!state.isRootActive) return undefined;
+    if (state.isDefinitionMade(def.value)) {
+      const scope = this._scopeOfDefinition(def);
+      const persistent =
+        scope !== undefined
+          ? state.isPersistentScope(scope) === true
+          : state.persistentScopeOf(this._id, def) !== undefined;
+      if (!persistent) return undefined;
+    }
+    return def.value;
+  }
+
+  /**
+   * With the engine flag `_bindingUnits`: the type of this occurrence when
+   * it reads the environment of its unit, or `undefined` when it reads the
+   * type of its definition, as without the flag (`binding-unit.ts`).
+   *
+   * - A free name reads the definition that its name resolves to in the
+   *   current context (`freeNameBindingInContext()`, in the static view of
+   *   the bindings, as below), met with the entry of its unit (`_typeOfDefinitionInUnit()`). With no definition, it reads
+   *   the entry, or `unknown`.
+   * - An occurrence with a value definition reads the definition that it
+   *   resolves to in the current context (`_contextBinding()`, which skips
+   *   the variable of a binder that is not its own). The lookup runs in the
+   *   static view of the bindings (`withStaticTypingView()`), as a type
+   *   computation reads them: outside that view, a parameter of a function
+   *   literal can resolve to a global definition of the same name. When the
+   *   result is another definition (a declaration of the name in a pushed
+   *   scope), the occurrence reads that definition, met with the entry of
+   *   its unit. A constant, or a definition with an explicit type, also
+   *   needs the walk: a declaration in a pushed scope can hide it. This is
+   *   true of a constant of the library too (a declaration shadows a
+   *   definition of the library, it does not replace it), so no constant is
+   *   exempt.
+   * - An occurrence whose own definition has an inferred type, or the type
+   *   `unknown`, reads the meet of that type and the entry of its unit.
+   * - Any other occurrence reads the type of its definition.
+   */
+  private _unitType(): BoxedType | undefined {
+    const def = this._def;
+    if (def === undefined) {
+      if (!this._isFreeName) return undefined;
+      const entry = this._env?.get(this._homeScope!, this._id);
+      const resolved = withStaticTypingView(this.engine, () =>
+        freeNameBindingInContext(this.engine, this._id)
+      );
+      if (resolved === undefined) return entry ?? BoxedType.unknown;
+      if (isOperatorDef(resolved)) return resolved.operator.signature;
+      return this._typeOfDefinitionInUnit(resolved.value, entry);
+    }
+    if (!isValueDef(def)) return undefined;
+    const v = def.value;
+    const resolved = withStaticTypingView(this.engine, () =>
+      this._contextBinding()
+    );
+    if (
+      resolved !== undefined &&
+      !(isValueDef(resolved) && sameBindingDef(resolved.value, v))
+    ) {
+      if (isOperatorDef(resolved)) return resolved.operator.signature;
+      return this._typeOfDefinitionInUnit(
+        resolved.value,
+        this._env?.get(v, this._id)
+      );
+    }
+    if (this._env === undefined) return undefined;
+    if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
+    const entry = this._env.get(v, this._id);
+    if (entry === undefined) return undefined;
+    return this._typeOfDefinitionInUnit(v, entry);
+  }
+
+  /**
+   * The type of an occurrence that resolves to the value definition `v`, with
+   * `entry` the requirement of its unit:
+   * - the type of `v`, when `v` has an explicit type (not inferred and not
+   *   `unknown`), or when there is no entry;
+   * - otherwise, the meet of the type of `v` and the entry, with the facts
+   *   of the assumptions of the context merged in, as the type of a
+   *   definition merges them. When this meet is `never`, before or after the
+   *   facts are merged, the type of `v`: a definition is made by an
+   *   assignment, an assumption or a commit, and evaluation reads it, so its
+   *   type wins.
+   */
+  private _typeOfDefinitionInUnit(
+    v: BoxedValueDefinition,
+    entry: BoxedType | undefined
+  ): BoxedType {
+    if (entry === undefined) return v.type;
+    const declared = v.declaredType;
+    if (!v.inferredType && !declared.isUnknown) return v.type;
+    const meet = narrow(declared.type, entry.type);
+    if (meet === 'never') return v.type;
+    const merged = v._typeWithFacts(this.engine.type(meet), false);
+    return merged.type === 'never' ? v.type : merged;
+  }
+
+  /**
+   * For a free name: a symbol bound to the value definition that its name
+   * resolves to in the current context (`freeNameBindingInContext()`), which
+   * an evaluation reads in its place. `undefined` when the name resolves to
+   * no value definition: the free name then stays symbolic.
+   */
+  private _resolvedFreeSymbol(): BoxedSymbol | undefined {
+    const resolved = freeNameBindingInContext(this.engine, this._id);
+    if (resolved === undefined || !isValueDef(resolved)) return undefined;
+    return new BoxedSymbol(this.engine, this._id, { def: resolved });
+  }
+
+  /**
+   * For a free name: `result`, the evaluation of `resolved`
+   * (`_resolvedFreeSymbol()`), or this occurrence when the evaluation gave
+   * `resolved` itself (the definition has no value, or holds it). The
+   * occurrence keeps the environment of its unit, and so the type that the
+   * uses of the unit require; `resolved` has none.
+   */
+  private _orFreeName(resolved: BoxedSymbol, result: Expression): Expression {
+    return result === resolved ? this : result;
   }
 
   /** True when the nearest scope of the current context that binds this
@@ -983,6 +1290,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       )
         return false;
       if (def.value.inferredType || def.value.type.isUnknown) {
+        // With the engine flag `_bindingUnits`, boxing does not narrow,
+        // widen or mark a definition that existed before it: the
+        // requirement goes in the environment of the unit
+        // (`binding-unit.ts`).
+        const unitScope = this._unitWriteScope(def);
+        if (unitScope !== undefined)
+          return this._inferInEnvironment(unitScope, t, inferenceMode);
         const previousType = def.value.type;
         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
         // to apply the type effect of a top-level assignment, whose runtime
@@ -1346,6 +1660,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (isOperatorDef(this._def))
       return this.engine._fn('Operator', [this.engine.string(this._id)]);
 
+    // A free name reads the value of the definition that its name resolves
+    // to in the current context (`binding-unit.ts`).
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.value;
+
     return this._value;
   }
 
@@ -1531,6 +1849,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * 'unknown'
    */
   get type(): BoxedType {
+    if (this.engine._bindingUnits) {
+      const unitType = this._unitType();
+      if (unitType !== undefined) return unitType;
+    }
     const def = this._def;
     // The definition's own type, faithfully — Design E retired the R-D5
     // display projection with the `callback<S>` constructor: an honest arrow
@@ -2032,6 +2354,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
+    // A free name evaluates through the definition that its name resolves to
+    // in the current context, and stays symbolic with none
+    // (`binding-unit.ts`).
+    if (this._isFreeName) {
+      const resolved = this._resolvedFreeSymbol();
+      if (resolved === undefined) return this;
+      return this._orFreeName(resolved, resolved.evaluate(options));
+    }
     const canonical = this._canonicalToEvaluate();
     if (canonical) return canonical.evaluate(options);
 
@@ -2186,6 +2516,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     options?: Partial<EvaluateOptions>,
     numericRead = false
   ): Promise<Expression> {
+    // A free name: see `evaluate()`.
+    if (this._isFreeName) {
+      const resolved = this._resolvedFreeSymbol();
+      if (resolved === undefined) return this;
+      return this._orFreeName(
+        resolved,
+        await resolved._evaluateAsyncValue(options, numericRead)
+      );
+    }
     const canonical = this._canonicalToEvaluate();
     if (canonical) return canonical.evaluateAsync(options);
     const def = this.valueDefinition;
@@ -2464,7 +2803,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * evaluate this symbol directly.
    */
   private _canonicalToEvaluate(): Expression | undefined {
-    if (this._def !== undefined) return undefined;
+    if (this._def !== undefined || this._isFreeName) return undefined;
     const canonical = this.canonical;
     return canonical.isCanonical ? canonical : undefined;
   }
@@ -2556,6 +2895,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   N(): Expression {
+    // A free name: see `evaluate()`.
+    if (this._isFreeName) {
+      const resolved = this._resolvedFreeSymbol();
+      if (resolved === undefined) return this;
+      return this._orFreeName(resolved, resolved.N());
+    }
     const canonical = this._canonicalToEvaluate();
     if (canonical) return canonical.N();
 

@@ -546,7 +546,18 @@ old mechanism, and updates the tests. The flag exists only during the work.
 - **B, the sites:** rule 7 (`sameBinding()`, `rebindToBindings()`, the 53,
   47 and 41 sites, the getters, the setters); the other readings of rule 2
   (`N`, `f`, the free name of a function body); the order-independence
-  test.
+  test. The reviews of phase A found these cases, to fix in phase B:
+  - The getters of a free name (`re`, `sgn`, …) key their cycle guard on
+    `this._def!`, so all free names share one guard. With `x := y`,
+    `y := z` and `z := 2`, `x.re` gives `NaN`, not `2`.
+  - The setters `value` and `type` on a free name throw.
+  - The binder substitution in `library/utils.ts`
+    (`substituteBinderValues()`, `evaluateBigOpTerm()`), and the
+    substitution of a call of a function literal, replace every occurrence
+    that has no definition, so they also replace a free name. With
+    `a := n + 1`, `Apply((n) ↦ Σ_{n=1}^{3} a, 5)` gives `9`, not `3n + 3`.
+    The test is marked `test.failing` in
+    `test/compute-engine/binding-units-core.test.ts`.
 - **C, operations, programs and caches:** rules 8, 9 and 10.
 - **D, commits and state:** rules 11 to 13 (`ce.infer()`, `ce.assume()`,
   trials, the deprecation of checkpoints, the two library loads).

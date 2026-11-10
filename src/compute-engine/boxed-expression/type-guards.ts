@@ -39,6 +39,23 @@ export function isNumber(
   return expr?._kind === 'number';
 }
 
+/**
+ * True when `expr` is a free name: a canonical symbol that has no
+ * definition. With the engine flag `_bindingUnits`, boxing declares no name,
+ * and a name that has no definition when it is boxed becomes a free name
+ * (`binding-unit.ts`). The predicate gives the kind of the occurrence: it
+ * stays true after a later declaration of the name, which the occurrence
+ * then reads.
+ */
+export function isFreeName(
+  expr: Expression | null | undefined
+): expr is Expression & SymbolInterface {
+  return (
+    expr?._kind === 'symbol' &&
+    (expr as { _isFreeName?: boolean })._isFreeName === true
+  );
+}
+
 export function isSymbol(
   expr: Expression | null | undefined,
   name?: string

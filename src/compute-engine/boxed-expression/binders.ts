@@ -595,6 +595,45 @@ export function bindingInContext(
 }
 
 /**
+ * The definition that an occurrence of the free name `name` reads in the
+ * current context, or `undefined` when there is none (`binding-unit.ts`).
+ *
+ * A free name is a canonical symbol with no definition: it was boxed when its
+ * name had no definition, and it was not inside a binder then. The walk
+ * skips the variable of a binder (a `Sum` index), a parameter of a function
+ * literal and the parameter activation of a call frame: such a binding is
+ * not the one that the free name denotes. The skip applies to an occurrence
+ * that stays free and is read while the scope of a binder is current, for
+ * example an occurrence reached through the value of a name: with
+ * `a := n + 1`, the `n` of the value of `a` is read inside `Σ_n a`, and it
+ * does not read the index `n`. Every other binding
+ * is read by name, as `bindingInContext()` reads it for an occurrence with
+ * no definition of its own.
+ */
+export function freeNameBindingInContext(
+  ce: ComputeEngine,
+  name: string,
+  scope: Scope | null = ce.context.lexicalScope
+): BoxedDefinition | undefined {
+  const start = scope;
+  while (scope) {
+    const found = staticBindingIn(scope, name, scope === start);
+    if (
+      found !== undefined &&
+      !(
+        'value' in found &&
+        (isBinderVariable(found.value) ||
+          isFunctionLiteralParameter(found.value) ||
+          isActivation(found.value))
+      )
+    )
+      return found;
+    scope = staticParentOf(scope);
+  }
+  return undefined;
+}
+
+/**
  * True when an occurrence of `name` bound to `own`, about to read `other`, a
  * binding of the same name that is not its own, reads no binding: a type
  * computation reads a parameter of a function literal, or a local of a block

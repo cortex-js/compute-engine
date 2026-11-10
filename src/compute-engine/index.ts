@@ -558,7 +558,13 @@ export class ComputeEngine implements IComputeEngine {
   private _runtimeState = new EngineRuntimeState();
 
   /** @internal Construction-local boxing repair state */
-  readonly _boxingState = new EngineBoxingState<Scope>();
+  readonly _boxingState = new EngineBoxingState<Scope>(() =>
+    this._noteStateEvent({
+      kind: 'inference',
+      valueType: true,
+      widening: true,
+    })
+  );
 
   /** @internal Configuration change generation/tracking lifecycle */
   private _configurationLifecycle = new EngineConfigurationLifecycle();
@@ -1688,6 +1694,11 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _debugBindings = debugBindingsDefault();
+
+  /** See `IComputeEngine._bindingUnits`.
+   * @internal
+   */
+  _bindingUnits = false;
 
   /** Value definitions whose type was first inferred (unknown → concrete)
    * during the current top-level boxing operation — forward-computed

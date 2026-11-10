@@ -2625,6 +2625,13 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    */
   inferredType: boolean;
 
+  /** The type `declared` with the facts of the current context merged in,
+   * as `type` merges them into the declared type. `memoize` is false when
+   * `declared` is not the declared type of this definition (the type that a
+   * binding unit reads for an occurrence, `binding-unit.ts`).
+   * @internal */
+  _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType;
+
   /** True for a block-local binding hoisted by a `Block` for a `let` or a
    * block-introducing assignment before the statement that gives it a value
    * runs. Not a free mathematical symbol: the generic-symbol fold of a list
