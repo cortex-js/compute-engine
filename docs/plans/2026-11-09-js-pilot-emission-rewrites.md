@@ -72,6 +72,7 @@ handlers of the operators decide more.
 | `And`, `Or` (infix `&&`, `\|\|`) | JavaScript does not evaluate the second operand when the first one decides. | The representation makes this explicit: each operand after the first is a region that is evaluated only when the earlier operands do not decide, as a branch of `If` is. An operand written as a plain value in an ordered block would be evaluated always, which changes the count of evaluations of an effectful operand. |
 | `Min`, `Max` (`compileExtremum()`) | For scalar operands, writes `Math.min(a, b)` or `Math.max(a, b)`. The other cases are for collections. | The lowering writes the same call for operands of the representation `number`. |
 | Call of a user function: `tryInlineUserFunctionCall()` (`compile-user-calls.ts`) and the variants by argument shape (`ensureUserFunctionVariantEmitted()`) | Replaces some calls by the body of the function, and writes one function per shape of the arguments. | The new emitter writes one JavaScript function for the resolved helper and one call. Each argument is evaluated once, in order, before the call. It does not inline and has no variants: each parameter has one scalar representation. |
+| A local with one assignment: `compileBlock()` (`compile-blocks.ts`) and the `Declare` handler (`compile-expr-handlers.ts`) | Does not substitute the value at the use. The `Declare` statement is written `let a = <initializer>` at its place in the block, so the initializer is evaluated once, before the statements that follow, and each read of the local is the name `a` (run with `cse: false, constantFold: false`: `Block(Declare(a, real, Max(0, d)), a·v + a)` compiles to `let a = Math.max(0, d); return a * v + a`). A block of one statement with no local is unwrapped and has no `let`. | The lowering (`javascript-structured-lower.ts`) lowers the initializer at the place of the `Declare`, in the region of the block, and each read of the local is that value, with no operation. This is the order of the existing emitter. The structured route refuses a local that a later statement writes, because the value of its initializer is then not the value at each read. |
 
 ### Places that the pilot vocabulary does not reach
 
@@ -85,14 +86,6 @@ handlers of the operators decide more.
 
 Each of these becomes a row of the first table when its operator enters the
 vocabulary (step 5 of the plan for `Sqrt` and `Power`).
-
-## Not read
-
-`compileBlock()` (`compile-blocks.ts`) was not read for what it does to a
-local with one assignment (for example, whether it substitutes the value at
-the use). The fragment route admits one such local today and refuses a nested
-block. This part of the list is written with the lowering of the local, in
-step 2.
 
 ## What step 1 implements from this list
 

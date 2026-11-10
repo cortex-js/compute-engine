@@ -1,7 +1,11 @@
 /** Internal opt-in scalar slice; intentionally absent from target registration. */
 import type { Type } from '../../common/type/types.js';
 import type { Expression } from '../global-types.js';
-import type { CompilationOptions, CompileTarget } from './types.js';
+import type {
+  CompilationOptions,
+  CompilationResult,
+  CompileTarget,
+} from './types.js';
 import {
   isFunction,
   isNumber,
@@ -32,6 +36,9 @@ import {
   type FragmentRule,
   type FragmentFunction,
   type FragmentScope,
+  type FragmentAnnotation,
+  type FragmentContext,
+  type FragmentWalker,
 } from './fragment.js';
 import {
   attachScalarFragment,
@@ -39,6 +46,15 @@ import {
   type ScalarFragmentHelper,
   type ScalarFragmentCapture,
 } from './javascript-fragment-facts.js';
+import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
+import { isPureComputedEffects } from '../../common/type/effects.js';
+import type { EffectFact } from './javascript-structured-ir.js';
+import {
+  recordStructuredPreparation,
+  structuredPreparationOf,
+  type StructuredInput,
+  type StructuredPreparation,
+} from './javascript-structured-lower.js';
 
 // Each operator states its own rule for a real or a complex result. There
 // is no shared default: a rule that reads "a complex operand gives a complex
@@ -125,7 +141,359 @@ function representation(type: {
   return undefined;
 }
 
+//
+// The rules of the structured route
+//
+// The operators below are admitted only by the structured route
+// (`ScalarFragmentJavaScriptTarget` constructed with `'structured'`). The
+// existing emitter of the fragment does not have their rules, so the
+// existing route refuses them as before ("unsupported head").
+//
+
+/** The facts of the operands of `node`, in order. */
+function operandFacts(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+) {
+  return (isFunction(node) ? node.ops : []).map((operand) =>
+    w.value(operand, scope, context)
+  );
+}
+
+/** True when `node` reads no symbol other than `True` and `False`: its
+ *  value is fixed when the program is compiled. */
+function readsNoSymbol(node: Expression): boolean {
+  if (isSymbol(node)) return node.symbol === 'True' || node.symbol === 'False';
+  return isFunction(node) ? node.ops.every(readsNoSymbol) : true;
+}
+
+/**
+ * `Multiply`: real operands only. The JavaScript code of a complex product
+ * is not one call of a runtime helper: the existing emitter binds each
+ * operand to a temporary and writes the real and imaginary parts
+ * (`Multiply` in `javascript-target.ts`). A complex product enters the
+ * structured route with an emitter for it.
+ */
+const multiplyRule = {
+  walk: (node, scope, context, w) => {
+    if (!isFunction(node) || node.nops < 2)
+      return w.refuse(
+        node,
+        'signature',
+        'a product of fewer than two operands is not in the structured route'
+      );
+    if (operandFacts(node, scope, context, w).some((f) => f.type.kind === 'complex'))
+      return w.refuse(
+        node,
+        'signature',
+        'a product with a complex operand is not in the structured route'
+      );
+    return w.signatures(node, scope, context, [
+      { operands: ['real'], rest: 'real', result: 'real' },
+    ]);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
+
+/**
+ * `Less` and `Equal`: two real operands, a boolean result. A comparison
+ * that reads no symbol is refused: its value is fixed at compile time, and
+ * the existing emitter writes it as a literal also with `constantFold:
+ * false`. A comparison of three operands or more is a conjunction of pairs
+ * that the existing emitter writes with temporaries. `Equal` is the exact
+ * comparison `===` of two numbers; a complex operand needs a comparison per
+ * component, which the structured route does not have.
+ */
+function comparisonRule(operator: 'Less' | 'Equal') {
+  return {
+    walk: (node, scope, context, w) => {
+      const nops = isFunction(node) ? node.nops : 0;
+      if (nops !== 2)
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with ${nops} operands is not in the structured route, which admits two`
+        );
+      if (readsNoSymbol(node))
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} reads no symbol: its value is fixed at compile time`
+        );
+      const facts = operandFacts(node, scope, context, w);
+      if (facts.some((f) => f.type.kind === 'complex'))
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with a complex operand is not in the structured route`
+        );
+      if (operator === 'Less' && facts.some((f) => f.type.kind === 'boolean'))
+        return w.refuse(
+          node,
+          'signature',
+          'Less with a boolean operand is not in the structured route'
+        );
+      return w.signatures(node, scope, context, [
+        { operands: ['real', 'real'], result: 'boolean' },
+      ]);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/** `Min` and `Max`: real operands, written `Math.min()` and `Math.max()`. */
+function extremumRule(operator: 'Min' | 'Max') {
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || node.nops < 2)
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} of fewer than two operands is not in the structured route`
+        );
+      const facts = operandFacts(node, scope, context, w);
+      if (facts.some((f) => f.type.kind === 'complex'))
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with a complex operand is not in the structured route`
+        );
+      if (facts.some((f) => f.type.kind === 'boolean'))
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with a boolean operand is not in the structured route`
+        );
+      return w.signatures(node, scope, context, [
+        { operands: ['real'], rest: 'real', result: 'real' },
+      ]);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/** `And` and `Or`: boolean operands, a boolean result. Each operand after
+ *  the first is evaluated only when the earlier ones do not decide the
+ *  result (the lowering puts it in a region of its own). */
+function logicalRule(operator: 'And' | 'Or') {
+  return {
+    walk: (node, scope, context, w) => {
+      // The canonical form keeps `And(C)` and `Or(C)`; the representation
+      // has a region for each operand after the first, and needs one.
+      if (!isFunction(node) || node.nops < 2)
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} of fewer than two operands is not in the structured route`
+        );
+      if (
+        operandFacts(node, scope, context, w).some(
+          (f) => f.type.kind !== 'boolean'
+        )
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with an operand that is not a boolean is not in the structured route`
+        );
+      return w.signatures(node, scope, context, [
+        { operands: ['boolean'], rest: 'boolean', result: 'boolean' },
+      ]);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/** The rules of the structured route. `Sqrt` is not one of them: its
+ *  domain and promotion policy stay with the existing emitter. */
+const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
+  Add: addRule,
+  Negate: negateRule,
+  If: { walk: walkIf },
+  Multiply: multiplyRule,
+  Less: comparisonRule('Less'),
+  Equal: comparisonRule('Equal'),
+  And: logicalRule('And'),
+  Or: logicalRule('Or'),
+  Min: extremumRule('Min'),
+  Max: extremumRule('Max'),
+};
+
+/**
+ * What a route admits. The existing route keeps the definition, the heads
+ * and the messages that it had before the structured route existed.
+ */
+type Admission = {
+  readonly structured: boolean;
+  readonly definition: FragmentDefinition<ScalarRepresentation>;
+  /** The heads that a bound body or a helper body admits as operators. */
+  readonly heads: ReadonlySet<string>;
+  /** The heads of the operation that exists only for tests, with the trace
+   *  id of each (structured route only). */
+  readonly testOperations: ReadonlyMap<string, string>;
+};
+
+const EXISTING_ADMISSION: Admission = {
+  structured: false,
+  definition,
+  heads: new Set(['Add', 'Negate', 'If']),
+  testOperations: new Map(),
+};
+
+function structuredAdmission(
+  testOperations: ReadonlyMap<string, string>
+): Admission {
+  // A test head reads real operands and has a real value. Its effect fact
+  // comes from its declaration, as for any other head.
+  const rules = { ...structuredRules };
+  for (const name of testOperations.keys())
+    rules[name] = {
+      signatures: [{ operands: [], rest: 'real', result: 'real' }],
+    };
+  return {
+    structured: true,
+    definition: { ...definition, rules },
+    heads: new Set(Object.keys(rules)),
+    testOperations,
+  };
+}
+
+/** Whether `node` is a library operator of `admission`, or a head of the
+ *  test operation. */
+function isAdmittedOperator(node: Expression, admission: Admission): boolean {
+  return (
+    isFunction(node) &&
+    (admission.testOperations.has(node.operator) ||
+      isLibraryOperator(node, node.operator))
+  );
+}
+
+/**
+ * The effect fact of the prepared node `node`, from its resolved definition
+ * (`shallowApplicationEffects()`: the effects of the operator, or of the
+ * function that the head names, and the effects of the operands that it
+ * invokes). Unknown effects (`any`, for a function that states no purity
+ * and is declared impure, or a head with no definition) give `unknown`; a
+ * set with an impurity label gives `effectful`. A literal and a read of an
+ * input are pure. The fragment target refuses the `functions` and
+ * `operators` options, so no host override changes these facts.
+ */
+function effectFact(node: Expression): EffectFact {
+  if (!isFunction(node)) return 'pure';
+  const effects = shallowApplicationEffects(node);
+  if (effects === 'any') return 'unknown';
+  return isPureComputedEffects(effects) ? 'pure' : 'effectful';
+}
+
+/** The effect fact of every node that `annotation` types, in every scope
+ *  and in the body of each function. */
+function effectFacts(
+  annotation: FragmentAnnotation<ScalarRepresentation>
+): Map<Expression, EffectFact> {
+  const result = new Map<Expression, EffectFact>();
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const node of scope.facts.keys())
+      if (!result.has(node)) result.set(node, effectFact(node));
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+  return result;
+}
+
+/** Record the facts of the structured route on the prepared `target`. */
+function recordStructured(
+  target: CompileTarget<Expression>,
+  admission: Admission,
+  prepared: {
+    root: Expression;
+    functionRoot?: Expression;
+    annotation: FragmentAnnotation<ScalarRepresentation>;
+    helper?: ResolvedHelper;
+    /** Called on the structured route only. */
+    inputs: () => readonly StructuredInput[];
+  }
+): void {
+  if (!admission.structured) return;
+  if (prepared.helper?.capture)
+    throw new Error(
+      'JS scalar fragment: a helper that reads a captured value is not in the structured route'
+    );
+  const mode = BaseCompiler.resolveCompileMode(target);
+  const preparation: StructuredPreparation = {
+    root: prepared.root,
+    functionRoot: prepared.functionRoot,
+    annotation: prepared.annotation,
+    helper:
+      prepared.helper === undefined
+        ? undefined
+        : { name: prepared.helper.name, body: prepared.helper.body },
+    inputs: prepared.inputs(),
+    effects: effectFacts(prepared.annotation),
+    testOperations: admission.testOperations,
+    numericPolicy: mode === 'complex' ? 'complex' : 'strict',
+  };
+  recordStructuredPreparation(target, preparation);
+}
+
+/**
+ * The route of the fragment target. `existing`: the existing emitter of the
+ * fragment writes the code. `structured`: the program is lowered to the
+ * structured representation (`javascript-structured-lower.ts`); this route
+ * admits more operators and requires `cse: false` and `constantFold:
+ * false`. It has no emitter yet, so its `compile()` throws.
+ */
+export type ScalarFragmentRoute = 'existing' | 'structured';
+
 export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
+  private readonly admission: Admission;
+
+  /**
+   * @param route The route of this target (`ScalarFragmentRoute`).
+   * @param testOperations For tests only, on the structured route: the
+   * heads that lower to the operation of the representation that exists
+   * only for tests, with the trace id of each. Such a head takes real
+   * operands and has a real value; its effect fact comes from its
+   * declaration.
+   */
+  constructor(
+    readonly route: ScalarFragmentRoute = 'existing',
+    testOperations: ReadonlyMap<string, string> = new Map()
+  ) {
+    super();
+    if (route === 'existing' && testOperations.size > 0)
+      throw new Error(
+        'JS scalar fragment: test operations exist only on the structured route'
+      );
+    this.admission =
+      route === 'structured'
+        ? structuredAdmission(testOperations)
+        : EXISTING_ADMISSION;
+  }
+
+  compile(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): CompilationResult<'javascript'> {
+    if (this.route === 'structured')
+      throw new Error(
+        'JS scalar fragment: the structured route has no emitter yet'
+      );
+    return super.compile(expr, options);
+  }
+
+  /**
+   * Prepare `expr` on the structured route and return the facts that the
+   * lowering reads (`lowerStructuredFragment()`). Admission and the
+   * annotation run here, as in `compile()`; nothing is emitted.
+   */
+  prepareStructured(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): StructuredPreparation {
+    if (this.route !== 'structured')
+      throw new Error('JS scalar fragment: not the structured route');
+    return structuredPreparationOf(this.prepareCompilation(expr, options).target);
+  }
+
   protected prepareCompilation(
     expr: Expression,
     options: CompilationOptions<Expression>,
@@ -144,11 +512,21 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         options.mode !== 'complex')
     )
       throw new Error('JS scalar fragment: unsupported compile options');
+    const admission = this.admission;
+    // The structured route has no common-subexpression pass and no constant
+    // folding. An option that asks for one is refused, not ignored.
+    if (admission.structured && options.cse !== false)
+      throw new Error('JS scalar fragment: the structured route requires cse: false');
+    if (admission.structured && options.constantFold !== false)
+      throw new Error(
+        'JS scalar fragment: the structured route requires constantFold: false'
+      );
+    const definition = admission.definition;
     const prepared = super.prepareCompilation(expr, options);
     // The annotation, with the facts of the body of a root function and of
     // the helper definition, is built here, before any emission.
     if (isFunction(prepared.expr, 'Function')) {
-      attachBoundFunction(prepared.expr, prepared.target);
+      attachBoundFunction(prepared.expr, prepared.target, admission);
       return prepared;
     }
     const named: NamedCalls = { calls: new Set() };
@@ -172,14 +550,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         return;
       }
       if (isFunction(node) && !Object.hasOwn(definition.rules, node.operator)) {
-        collectHelper(node, prepared.target, named);
+        collectHelper(node, prepared.target, named, admission);
         for (const operand of node.ops) check(operand);
         return;
       }
       if (
         !isFunction(node) ||
         !Object.hasOwn(definition.rules, node.operator) ||
-        !isLibraryOperator(node, node.operator)
+        !isAdmittedOperator(node, admission)
       )
         throw new Error(
           `JS scalar fragment: unsupported head ${node.operator}`
@@ -196,12 +574,24 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     };
     check(prepared.expr);
     const annotate = () => annotateCalls(prepared.expr, definition, named);
+    const annotation = readsSqrt
+      ? withOutermostCompilerState(prepared.target, annotate)
+      : annotate();
     attachScalarFragment(prepared.target, {
       root: prepared.expr,
       helper: named.helper,
-      annotation: readsSqrt
-        ? withOutermostCompilerState(prepared.target, annotate)
-        : annotate(),
+      annotation,
+    });
+    // The inputs of an expression are its free symbols, in the order of
+    // their first read: the pass binds each one in the root scope there.
+    recordStructured(prepared.target, admission, {
+      root: prepared.expr,
+      annotation,
+      helper: named.helper,
+      inputs: () =>
+        [...annotation.scope.bindings].map(([name, facts]) =>
+          structuredInput(name, facts.type)
+        ),
     });
     return prepared;
   }
@@ -300,7 +690,8 @@ function scalarType(type: Type) {
 
 function attachBoundFunction(
   fn: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  admission: Admission
 ): void {
   if (!isFunction(fn, 'Function')) return;
   if (!isLibraryOperator(fn, 'Function'))
@@ -356,6 +747,12 @@ function attachBoundFunction(
   const names = new Set(inputs.map((input) => input.name));
   const bindings = new Set([...names, local]);
   const named: NamedCalls = { calls: new Set() };
+  // The heads that are not helper calls. The existing route also keeps
+  // `Sqrt` here, so that it reaches the refusal below and not the helper
+  // resolution; the structured route has no `Sqrt`.
+  const operatorHeads: ReadonlySet<string> = admission.structured
+    ? admission.heads
+    : new Set(['Add', 'Negate', 'If', 'Sqrt']);
   const checkValue = (node: Expression): void => {
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
@@ -369,8 +766,8 @@ function attachBoundFunction(
         return;
       throw new Error(`JS scalar fragment: unsupported capture ${node.symbol}`);
     }
-    if (isFunction(node) && !['Add', 'Negate', 'If', 'Sqrt'].includes(node.operator)) {
-      collectHelper(node, target, named);
+    if (isFunction(node) && !operatorHeads.has(node.operator)) {
+      collectHelper(node, target, named, admission);
       const helper = named.helper!;
       if (bindings.has(helper.name) || [...(helper.capture?.symbols ?? [])]
           .some(symbol => isSymbol(symbol) && bindings.has(symbol.symbol)))
@@ -382,8 +779,8 @@ function attachBoundFunction(
     // initializer cannot determine whether a later square root is complex.
     if (
       !isFunction(node) ||
-      !['Add', 'Negate', 'If'].includes(node.operator) ||
-      !isLibraryOperator(node, node.operator) ||
+      !admission.heads.has(node.operator) ||
+      !isAdmittedOperator(node, admission) ||
       (node.operator === 'Negate' && node.nops !== 1) ||
       (node.operator === 'If' && node.nops !== 3)
     )
@@ -407,6 +804,12 @@ function attachBoundFunction(
   checkValue(declaration.op3);
   checkWrite(declaration.op3);
   names.add(local);
+  // The lowering of the structured route reads the local as the value of
+  // its initializer, which is right only when nothing else writes it.
+  if (admission.structured && body.nops > 2)
+    throw new Error(
+      'JS scalar fragment: the structured route admits a local with one assignment only'
+    );
   for (const statement of body.ops.slice(1, -1)) {
     if (
       !isFunction(statement, 'Assign') ||
@@ -423,20 +826,16 @@ function attachBoundFunction(
   }
   checkValue(body.ops[body.nops - 1]);
   const boundDefinition: FragmentDefinition<ScalarRepresentation> = {
-    ...definition,
+    ...admission.definition,
     rules: {
-      Add: addRule,
-      Negate: negateRule,
-      If: { walk: walkIf },
+      ...(admission.structured
+        ? admission.definition.rules
+        : { Add: addRule, Negate: negateRule, If: { walk: walkIf } }),
       Block: { walk: walkBlock },
       Assign: { walk: walkAssign },
     },
   };
-  attachScalarFragment(target, {
-    root: body,
-    functionRoot: fn,
-    helper: named.helper,
-    annotation: (() => {
+  const annotation = (() => {
       const annotation = annotateCalls(body, boundDefinition, named, inputs, body);
       const scope = annotation.scope.inner.get(body);
       const binding = scope?.bindings.get(local);
@@ -457,10 +856,43 @@ function attachBoundFunction(
           );
       }
       return annotation;
-    })(),
+    })();
+  attachScalarFragment(target, {
+    root: body,
+    functionRoot: fn,
+    helper: named.helper,
+    annotation,
+  });
+  // The inputs of a root function are its parameters, in their order.
+  recordStructured(target, admission, {
+    root: body,
+    functionRoot: fn,
+    annotation,
+    helper: named.helper,
+    inputs: () =>
+      inputs.map((input) => structuredInput(input.name, input.type!)),
   });
 }
 
+/** The input `name` of the structured route, with the type `type`. */
+function structuredInput(
+  name: string,
+  type: { readonly kind: string }
+): StructuredInput {
+  const rep = representation(type);
+  if (
+    rep === undefined ||
+    !(['real', 'integer', 'boolean', 'complex'] as const).some(
+      (kind) => kind === type.kind
+    )
+  )
+    throw new Error(`JS scalar fragment invariant: no scalar input ${name}`);
+  return {
+    name,
+    type: type.kind as StructuredInput['type'],
+    representation: rep,
+  };
+}
 
 type ResolvedHelper = ScalarFragmentHelper & {
   readonly binding: object;
@@ -470,8 +902,8 @@ type ResolvedHelper = ScalarFragmentHelper & {
 
 type NamedCalls = { helper?: ResolvedHelper; calls: Set<Expression> };
 
-function collectHelper(node: Expression, target: CompileTarget<Expression>, named: NamedCalls): void {
-  const resolved = resolveHelper(node, target);
+function collectHelper(node: Expression, target: CompileTarget<Expression>, named: NamedCalls, admission: Admission): void {
+  const resolved = resolveHelper(node, target, admission);
   const helper = named.helper;
   if (helper && (helper.name !== resolved.name || helper.binding !== resolved.binding ||
       helper.literal !== resolved.literal || helper.body !== resolved.body))
@@ -559,7 +991,8 @@ function refuseClosedComplex(scope: FragmentScope<ScalarRepresentation>) {
 
 function resolveHelper(
   call: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  admission: Admission
 ): ResolvedHelper {
   if (!isFunction(call))
     throw new Error('JS scalar fragment: expected helper call');
@@ -690,8 +1123,12 @@ function resolveHelper(
     }
     if (
       !isFunction(node) ||
-      !isLibraryOperator(node, node.operator) ||
+      !isAdmittedOperator(node, admission) ||
       !(
+        (admission.structured &&
+          node.operator !== 'Negate' &&
+          node.operator !== 'If' &&
+          admission.heads.has(node.operator)) ||
         node.operator === 'Add' ||
         (node.operator === 'Negate' && node.nops === 1) ||
         (node.operator === 'If' && node.nops === 3) ||

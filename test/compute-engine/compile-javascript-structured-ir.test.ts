@@ -1,0 +1,833 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { ScalarFragmentJavaScriptTarget } from '../../src/compute-engine/compilation/javascript-fragment-target';
+import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
+import {
+  lowerStructuredFragment,
+  type StructuredPreparation,
+} from '../../src/compute-engine/compilation/javascript-structured-lower';
+import {
+  verifyProgram,
+  type EffectFact,
+  type IROperation,
+  type IRProgram,
+  type IRRegion,
+  type IRValue,
+  type ScalarKind,
+} from '../../src/compute-engine/compilation/javascript-structured-ir';
+import type { Expression } from '../../src/compute-engine/global-types';
+import type { MathJsonExpression } from '../../src/math-json/types';
+
+// The structured representation of the internal scalar JavaScript fragment
+// target (step 2 of docs/plans/2026-11-09-js-compiler-status-and-plan.md):
+// the lowering of the prepared root and its annotation, and the verifier.
+
+const typed = (name: string, type: string): MathJsonExpression => [
+  'Typed',
+  name,
+  `'${type}'`,
+];
+
+const OPTIONS = { cse: false, constantFold: false } as const;
+
+/** `heatwall` of the heat showcase of Tycho, as the canonical form writes
+ *  it: `Greater` is `Less` with the operands exchanged. */
+const HEATWALL_BODY: MathJsonExpression = [
+  'And',
+  ['Greater', 'obstacle', 0.5],
+  ['Equal', 'c', 16],
+  ['Or', ['Less', 'r', 13], ['Greater', 'r', 18]],
+];
+
+const HEATCELL: MathJsonExpression = [
+  'Function',
+  [
+    'Block',
+    ['Declare', 'a', "'real'", ['Min', 0.25, ['Max', 0, 'd']]],
+    [
+      'If',
+      ['heatwall', 'c', 'r', 'obstacle'],
+      'v',
+      ['Add', 'v', ['Multiply', 'a', ['Subtract', 's', ['Multiply', 4, 'v']]]],
+    ],
+  ],
+  typed('v', 'real'),
+  typed('s', 'real'),
+  typed('d', 'real'),
+  typed('c', 'integer'),
+  typed('r', 'integer'),
+  typed('obstacle', 'real'),
+];
+
+function heatEngine(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('heatwall', '(integer, integer, real) -> boolean');
+  ce.assign(
+    'heatwall',
+    ce.expr([
+      'Function',
+      HEATWALL_BODY,
+      typed('c', 'integer'),
+      typed('r', 'integer'),
+      typed('obstacle', 'real'),
+    ])
+  );
+  return ce;
+}
+
+function scalarEngine(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
+  ce.declare('z', 'complex');
+  ce.declare('C', 'boolean');
+  ce.declare('c', 'integer');
+  ce.declare('r', 'integer');
+  ce.declare('obstacle', 'real');
+  return ce;
+}
+
+const structured = (testOperations?: ReadonlyMap<string, string>) =>
+  new ScalarFragmentJavaScriptTarget('structured', testOperations);
+
+function lower(expr: Expression, testOperations?: ReadonlyMap<string, string>) {
+  return lowerStructuredFragment(structured(testOperations).prepareStructured(expr, OPTIONS));
+}
+
+type Op = IROperation;
+
+/** The operations of `region`, without its yield. */
+const body = (region: IRRegion): Op[] =>
+  region.operations.filter((op) => op.kind !== 'yield');
+
+/** Every operation of `region` and of the regions nested in it, in order. */
+function allOps(region: IRRegion): Op[] {
+  const result: Op[] = [];
+  for (const op of region.operations) {
+    result.push(op);
+    if (op.kind === 'if') result.push(...allOps(op.then), ...allOps(op.else));
+    if (op.kind === 'and' || op.kind === 'or')
+      for (const r of op.rest) result.push(...allOps(r));
+  }
+  return result;
+}
+
+const definedBy = (region: IRRegion, value: IRValue) =>
+  allOps(region).find((op) => op.result?.id === value.id);
+
+/** The input name that `value` reads, when an `input` operation defines it. */
+const inputName = (program: IRProgram, region: IRRegion, value: IRValue) => {
+  const op = definedBy(region, value);
+  return op?.kind === 'input' ? program.inputs[op.input].name : undefined;
+};
+
+describe('the fixtures lower and verify', () => {
+  test('heatcell: the local, the helper call and the If', () => {
+    const ce = heatEngine();
+    const program = lower(ce.expr(HEATCELL));
+    expect(program.inputs.map((i) => `${i.name}:${i.type}`)).toEqual([
+      'v:real', 's:real', 'd:real', 'c:integer', 'r:integer', 'obstacle:real',
+    ]);
+    const root = body(program.root);
+    // The local `a`: one `min` operation, at the declaration, before the If.
+    const mins = allOps(program.root).filter((op) => op.kind === 'min');
+    expect(mins).toHaveLength(1);
+    const local = mins[0].result!;
+    // The call of the helper: its arguments in order, then the If.
+    const call = root.find((op) => op.kind === 'call')!;
+    expect(call.operands.map((v) => inputName(program, program.root, v))).toEqual([
+      'c', 'r', 'obstacle',
+    ]);
+    const conditional = root[root.length - 1];
+    expect(conditional.kind).toBe('if');
+    if (conditional.kind !== 'if') return;
+    expect(conditional.operands[0].id).toBe(call.result!.id);
+    expect(root.indexOf(mins[0])).toBeLessThan(root.indexOf(call));
+    // The then region reads `v` and nothing else.
+    expect(body(conditional.then).map((op) => op.kind)).toEqual(['input']);
+    // The else region reads the local as the value of its initializer.
+    const product = body(conditional.else).find(
+      (op) => op.kind === 'multiply' && op.operands[0].id === local.id
+    );
+    expect(product).toBeDefined();
+    // The helper: one function, with three parameters.
+    expect(program.functions).toHaveLength(1);
+    const helper = program.functions[0];
+    expect(helper.name).toBe('heatwall');
+    expect(helper.parameters.map((p) => p.type)).toEqual(['integer', 'integer', 'real']);
+    expect(helper.result).toEqual({ type: 'boolean', representation: 'boolean' });
+    expect(program.functions[(call as { function: number }).function]).toBe(helper);
+  });
+
+  test('heatwall: each operand of And and Or after the first is its own region', () => {
+    const ce = heatEngine();
+    const program = lower(ce.expr(HEATCELL));
+    const helperBody = body(program.functions[0].body);
+    const and = helperBody[helperBody.length - 1];
+    expect(and.kind).toBe('and');
+    if (and.kind !== 'and') return;
+    // The first operand, `0.5 < obstacle`, is evaluated before the And.
+    expect(definedBy(program.functions[0].body, and.operands[0])?.kind).toBe('less');
+    expect(helperBody.map((op) => op.kind)).toEqual(['literal', 'less', 'and']);
+    expect(and.rest).toHaveLength(2);
+    expect(body(and.rest[0]).map((op) => op.kind)).toEqual(['literal', 'equal']);
+    const or = body(and.rest[1]).find((op) => op.kind === 'or');
+    expect(or).toBeDefined();
+    if (or?.kind !== 'or') return;
+    expect(or.rest).toHaveLength(1);
+    expect(body(or.rest[0]).map((op) => op.kind)).toEqual(['literal', 'less']);
+    // `18 < r` is only in the region of the Or.
+    expect(body(and.rest[1]).filter((op) => op.kind === 'less')).toHaveLength(1);
+  });
+
+  test('heatwall as an expression root', () => {
+    const ce = scalarEngine();
+    const program = lower(ce.expr(HEATWALL_BODY));
+    expect(program.inputs.map((i) => i.name)).toEqual(['obstacle', 'c', 'r']);
+    const ops = body(program.root);
+    expect(ops.map((op) => op.kind)).toEqual(['literal', 'input', 'less', 'and']);
+    const and = ops[3];
+    if (and.kind !== 'and') throw new Error('expected and');
+    // The read of `c` is in the region of the second operand, not before
+    // the And.
+    expect(allOps(and.rest[0]).some((op) => op.kind === 'input')).toBe(true);
+  });
+
+  test('If(C, x, z) + y: each conversion is where its operand is evaluated', () => {
+    const ce = scalarEngine();
+    const program = lower(ce.expr(['Add', ['If', 'C', 'x', 'z'], 'y']));
+    const ops = body(program.root);
+    const conditional = ops.find((op) => op.kind === 'if');
+    if (conditional?.kind !== 'if') throw new Error('expected if');
+    // The conversion of `x` is in the then region, not in the root region.
+    const thenOps = body(conditional.then);
+    expect(thenOps.map((op) => op.kind)).toEqual(['input', 'convert']);
+    expect(program.inputs[(thenOps[0] as { input: number }).input].name).toBe('x');
+    expect(body(conditional.else).map((op) => op.kind)).toEqual(['input']);
+    // The conversion of `y` is in the root region, and reads `y`.
+    const conversions = ops.filter((op) => op.kind === 'convert');
+    expect(conversions).toHaveLength(1);
+    expect(inputName(program, program.root, conversions[0].operands[0])).toBe('y');
+    const sum = ops[ops.length - 1];
+    expect(sum.kind).toBe('add');
+    expect(sum.result!.representation).toBe('complex');
+    expect(sum.operands.map((v) => v.representation)).toEqual(['complex', 'complex']);
+  });
+
+  test('a local read twice is one value', () => {
+    const ce = new ComputeEngine();
+    const program = lower(
+      ce.expr([
+        'Function',
+        ['Block', ['Declare', 't', "'real'", ['Max', 0, 'd']], ['Add', 't', ['Multiply', 't', 'v']]],
+        typed('d', 'real'),
+        typed('v', 'real'),
+      ])
+    );
+    const ops = allOps(program.root);
+    const max = ops.filter((op) => op.kind === 'max');
+    expect(max).toHaveLength(1);
+    const reads = ops.filter((op) =>
+      op.operands.some((v) => v.id === max[0].result!.id)
+    );
+    expect(reads.map((op) => op.kind).sort()).toEqual(['add', 'multiply']);
+  });
+});
+
+test('the lowering reads no type, value or definition of the engine', () => {
+  const ce = heatEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
+  ce.declare('z', 'complex');
+  ce.declare('C', 'boolean');
+  const preparations: StructuredPreparation[] = [
+    structured().prepareStructured(ce.expr(HEATCELL), OPTIONS),
+    structured().prepareStructured(ce.expr(['Add', ['If', 'C', 'x', 'z'], 'y']), OPTIONS),
+  ];
+  const forbid = (object: object, name: string) =>
+    jest.spyOn(object as never, name as never).mockImplementation((() => {
+      throw new Error(`${name} called during the lowering`);
+    }) as never);
+  const samples = [ce.expr(['Add', 'x', 1]), ce.expr('x'), ce.expr(2)];
+  forbid(core, 'isComplexValued');
+  forbid(core, 'staticTypeOf');
+  forbid(core, 'compile');
+  forbid(ce, 'lookupDefinition');
+  for (const sample of samples)
+    for (const name of ['evaluate', 'N']) forbid(Object.getPrototypeOf(sample), name);
+  try {
+    for (const preparation of preparations)
+      expect(() => lowerStructuredFragment(preparation)).not.toThrow();
+  } finally {
+    jest.restoreAllMocks();
+  }
+  // Control: the spies are the functions that the engine calls.
+  forbid(core, 'isComplexValued');
+  expect(() => core.isComplexValued(ce.expr('x'))).toThrow(/during the lowering/);
+  jest.restoreAllMocks();
+});
+
+describe('effects', () => {
+  function traceEngine() {
+    const ce = scalarEngine();
+    // `console` is an impurity label: the definition states an effect.
+    ce.declare('Trace', {
+      signature: '(real) -> real',
+      effects: ['console'],
+      evaluate: (ops) => ops[0],
+    } as never);
+    // `pure: false` states no effect set: the effects are unknown.
+    ce.declare('Mystery', {
+      signature: '(real) -> real',
+      pure: false,
+      evaluate: (ops) => ops[0],
+    } as never);
+    ce.declare('Trusted', {
+      signature: '(real) -> real',
+      pure: true,
+      evaluate: (ops) => ops[0],
+    } as never);
+    return ce;
+  }
+  const TESTS = new Map([
+    ['Trace', 'trace'],
+    ['Mystery', 'mystery'],
+    ['Trusted', 'trusted'],
+  ]);
+
+  test('two occurrences of one node stay two operations, in order', () => {
+    const ce = traceEngine();
+    const trace = ce.expr(['Trace', 'x']);
+    // A made program: one boxed node at two operand positions.
+    const sum = (ce as unknown as { _fn(h: string, ops: Expression[]): Expression })._fn(
+      'Add',
+      [trace, trace]
+    );
+    expect(sum.ops[0]).toBe(sum.ops[1]);
+    const program = lower(sum, TESTS);
+    const ops = body(program.root);
+    expect(ops.map((op) => op.kind)).toEqual(['input', 'trace', 'input', 'trace', 'add']);
+    const [, first, , second, add] = ops;
+    expect(first.result!.id).not.toBe(second.result!.id);
+    expect(first.effect).toBe('effectful');
+    expect(second.effect).toBe('effectful');
+    // The sum of two evaluated values is pure; both producers stay.
+    expect(add.effect).toBe('pure');
+    expect(add.operands.map((v) => v.id)).toEqual([first.result!.id, second.result!.id]);
+    expect(program.root.effect).toBe('effectful');
+  });
+
+  test('an operation of an untaken branch is in its region, not in the parent', () => {
+    const ce = traceEngine();
+    const program = lower(ce.expr(['If', 'C', ['Trace', 'x'], 'y']), TESTS);
+    const ops = body(program.root);
+    expect(ops.some((op) => op.kind === 'trace')).toBe(false);
+    const conditional = ops.find((op) => op.kind === 'if');
+    if (conditional?.kind !== 'if') throw new Error('expected if');
+    expect(body(conditional.then).map((op) => op.kind)).toEqual(['input', 'trace']);
+    expect(conditional.then.effect).toBe('effectful');
+    expect(conditional.else.effect).toBe('pure');
+    expect(conditional.effect).toBe('effectful');
+    expect(program.root.effect).toBe('effectful');
+  });
+
+  test('two occurrences of a head with unknown effects stay two operations, in order', () => {
+    const ce = traceEngine();
+    const mystery = ce.expr(['Mystery', 'x']);
+    const sum = (ce as unknown as { _fn(h: string, ops: Expression[]): Expression })._fn(
+      'Add',
+      [mystery, mystery]
+    );
+    const ops = body(lower(sum, TESTS).root);
+    expect(ops.map((op) => op.kind)).toEqual(['input', 'trace', 'input', 'trace', 'add']);
+    expect(ops[1].result!.id).not.toBe(ops[3].result!.id);
+    expect([ops[1].effect, ops[3].effect]).toEqual(['unknown', 'unknown']);
+    expect(ops[4].operands.map((v) => v.id)).toEqual([ops[1].result!.id, ops[3].result!.id]);
+  });
+
+  test('a head with unknown effects in an untaken branch is in its region only', () => {
+    const ce = traceEngine();
+    const program = lower(ce.expr(['If', 'C', 'y', ['Mystery', 'x']]), TESTS);
+    const ops = body(program.root);
+    expect(ops.some((op) => op.kind === 'trace')).toBe(false);
+    const conditional = ops.find((op) => op.kind === 'if');
+    if (conditional?.kind !== 'if') throw new Error('expected if');
+    expect(body(conditional.else).map((op) => op.kind)).toEqual(['input', 'trace']);
+    expect(conditional.then.effect).toBe('pure');
+    expect(conditional.else.effect).toBe('unknown');
+    expect(conditional.effect).toBe('unknown');
+  });
+
+  test('the effect fact comes from the declaration', () => {
+    const ce = traceEngine();
+    const effectOf = (head: string): EffectFact => {
+      const program = lower(ce.expr([head, 'x']), TESTS);
+      return body(program.root).find((op) => op.kind === 'trace')!.effect;
+    };
+    expect(effectOf('Trace')).toBe('effectful');
+    expect(effectOf('Mystery')).toBe('unknown');
+    expect(effectOf('Trusted')).toBe('pure');
+  });
+});
+
+//
+// The verifier
+//
+
+/** A small program, made by hand: `If(C, x, 1)`. */
+function madeProgram() {
+  const ce = scalarEngine();
+  const origin = ce.expr('x');
+  const owner = {};
+  let next = 0;
+  const value = (type: ScalarKind): IRValue => ({
+    owner,
+    revision: 1,
+    id: next++,
+    type,
+    representation: type === 'real' || type === 'integer' ? 'number' : type,
+  });
+  const region = (operations: Op[], effect: EffectFact = 'pure'): IRRegion => ({
+    operations,
+    effect,
+  });
+  const yieldOf = (v: IRValue): Op => ({ kind: 'yield', operands: [v], effect: 'pure', origin });
+  const condition = value('boolean');
+  const x = value('real');
+  const one = value('real');
+  const result = value('real');
+  const thenOps: Op[] = [
+    { kind: 'input', input: 1, result: x, operands: [], effect: 'pure', origin },
+    yieldOf(x),
+  ];
+  const elseOps: Op[] = [
+    { kind: 'literal', value: 1, result: one, operands: [], effect: 'pure', origin },
+    yieldOf(one),
+  ];
+  const rootOps: Op[] = [
+    { kind: 'input', input: 0, result: condition, operands: [], effect: 'pure', origin },
+    {
+      kind: 'if',
+      result,
+      operands: [condition],
+      then: region(thenOps),
+      else: region(elseOps),
+      effect: 'pure',
+      origin,
+    },
+    yieldOf(result),
+  ];
+  const program: IRProgram = {
+    owner,
+    revision: 1,
+    inputs: [
+      { name: 'C', type: 'boolean', representation: 'boolean' },
+      { name: 'x', type: 'real', representation: 'number' },
+    ],
+    numericPolicy: 'strict',
+    functions: [],
+    root: region(rootOps),
+  };
+  const prepared: ReadonlySet<Expression> = new Set([origin]);
+  return { program, prepared, rootOps, thenOps, elseOps, value, yieldOf, origin, x, one, result, condition, region };
+}
+
+/**
+ * A made program with one function `f(p: real) -> real` whose body traces
+ * `p` with the effect `effectful`, and whose root yields `f(x)`.
+ */
+function madeFunctionProgram() {
+  const m = madeProgram();
+  const p = m.value('real');
+  const traced = m.value('real');
+  const fnOps: Op[] = [
+    { kind: 'trace', trace: 't', result: traced, operands: [p], effect: 'effectful', origin: m.origin },
+    m.yieldOf(traced),
+  ];
+  const fn = {
+    name: 'f',
+    parameters: [p],
+    result: { type: 'real' as ScalarKind, representation: 'number' as const },
+    body: m.region(fnOps, 'effectful'),
+    origin: m.origin,
+  };
+  const x = m.value('real');
+  const called = m.value('real');
+  const call = {
+    kind: 'call' as const,
+    function: 0,
+    result: called,
+    operands: [x],
+    effect: 'effectful' as EffectFact,
+    origin: m.origin,
+  };
+  const rootOps: Op[] = [
+    { kind: 'input', input: 1, result: x, operands: [], effect: 'pure', origin: m.origin },
+    call,
+    m.yieldOf(called),
+  ];
+  const program: IRProgram = {
+    ...m.program,
+    functions: [fn],
+    root: m.region(rootOps, 'effectful'),
+  };
+  return { ...m, program, fn, fnOps, rootOps, call, p };
+}
+
+describe('the verifier', () => {
+  test('control: the made programs verify', () => {
+    const m = madeProgram();
+    expect(() => verifyProgram(m.program, m.prepared)).not.toThrow();
+    const f = madeFunctionProgram();
+    expect(() => verifyProgram(f.program, f.prepared)).not.toThrow();
+  });
+
+  test('an origin that is not a prepared node', () => {
+    const m = madeProgram();
+    expect(() => verifyProgram(m.program, new Set())).toThrow(
+      /origin of the operation .* is not a prepared node/
+    );
+  });
+
+  test('a function whose body yields a value of another type than its result', () => {
+    // No call reads the function: the root of `madeProgram()` is kept.
+    const m = madeProgram();
+    const p = m.value('real');
+    const flag = m.value('boolean');
+    const program: IRProgram = {
+      ...m.program,
+      functions: [
+        {
+          name: 'g',
+          parameters: [p],
+          result: { type: 'real', representation: 'number' },
+          body: m.region([
+            { kind: 'literal', value: true, result: flag, operands: [], effect: 'pure', origin: m.origin },
+            m.yieldOf(flag),
+          ]),
+          origin: m.origin,
+        },
+      ],
+    };
+    expect(() => verifyProgram(program, m.prepared)).toThrow(
+      /the body of g yields a boolean value, and its result is a real/
+    );
+  });
+
+  test('a function result whose representation is not the one of its type', () => {
+    const f = madeFunctionProgram();
+    const program = {
+      ...f.program,
+      functions: [{ ...f.fn, result: { type: 'real' as ScalarKind, representation: 'complex' as const } }],
+    };
+    expect(() => verifyProgram(program, f.prepared)).toThrow(
+      /the result of f has the type real and the representation complex/
+    );
+  });
+
+  test('an if whose result type is not the type of its regions', () => {
+    const m = madeProgram();
+    // `If(C, x, 1)` is real; declare it integer.
+    const integer = { ...m.result, type: 'integer' as ScalarKind };
+    m.rootOps[1] = { ...(m.rootOps[1] as Extract<Op, { kind: 'if' }>), result: integer };
+    m.rootOps[2] = m.yieldOf(integer);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /the result of an if has the type integer, and its regions the types real and real/
+    );
+  });
+
+  test('an integer result of an arithmetic operation on a real operand', () => {
+    const m = madeProgram();
+    const negated = m.value('integer');
+    m.thenOps.splice(1, 1,
+      { kind: 'negate', result: negated, operands: [m.x], effect: 'pure', origin: m.origin },
+      m.yieldOf(m.x)
+    );
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /the operation negate has an integer result and an operand that is not an integer/
+    );
+  });
+
+  test('a real argument of an integer parameter', () => {
+    const f = madeFunctionProgram();
+    const p = { ...f.p, type: 'integer' as ScalarKind };
+    const fnOps = [{ ...f.fnOps[0], operands: [p] } as Op, f.fnOps[1]];
+    const program = {
+      ...f.program,
+      functions: [{ ...f.fn, parameters: [p], body: f.region(fnOps, 'effectful') }],
+    };
+    expect(() => verifyProgram(program, f.prepared)).toThrow(
+      /the argument 1 of a call of f has the type real, and its parameter the type integer/
+    );
+  });
+
+  test('a trace operation with a boolean operand', () => {
+    const m = madeProgram();
+    m.rootOps.splice(1, 0, {
+      kind: 'trace',
+      trace: 't',
+      result: m.value('real'),
+      operands: [m.condition],
+      effect: 'effectful',
+      origin: m.origin,
+    });
+    const program = { ...m.program, root: m.region(m.rootOps, 'effectful') };
+    expect(() => verifyProgram(program, m.prepared)).toThrow(
+      /an operand of the operation trace has the representation boolean/
+    );
+  });
+
+  test('an if whose effect is weaker than its region', () => {
+    const m = madeProgram();
+    m.thenOps.splice(1, 0, {
+      kind: 'trace', trace: 't', result: m.value('real'), operands: [m.x], effect: 'effectful', origin: m.origin,
+    });
+    const conditional = m.rootOps[1] as Extract<Op, { kind: 'if' }>;
+    m.rootOps[1] = { ...conditional, then: m.region(m.thenOps, 'effectful') };
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /the effect of the operation if \(pure\) omits the effect of its region \(effectful\)/
+    );
+  });
+
+  /** `And(C, <rest>)` at the root, with the rest region `restOps`. */
+  function madeAnd(m: ReturnType<typeof madeProgram>, restOps: Op[], restEffect: EffectFact, andEffect: EffectFact) {
+    const first = m.value('boolean');
+    const result = m.value('boolean');
+    const ops: Op[] = [
+      { kind: 'input', input: 0, result: first, operands: [], effect: 'pure', origin: m.origin },
+      { kind: 'and', result, operands: [first], rest: [m.region(restOps, restEffect)], effect: andEffect, origin: m.origin },
+      m.yieldOf(result),
+    ];
+    return { ops, result };
+  }
+
+  test('an and whose effect is weaker than its region', () => {
+    const m = madeProgram();
+    const second = m.value('boolean');
+    const x = m.value('real');
+    const restOps: Op[] = [
+      { kind: 'input', input: 1, result: x, operands: [], effect: 'pure', origin: m.origin },
+      { kind: 'trace', trace: 't', result: m.value('real'), operands: [x], effect: 'effectful', origin: m.origin },
+      { kind: 'input', input: 0, result: second, operands: [], effect: 'pure', origin: m.origin },
+      m.yieldOf(second),
+    ];
+    const { ops } = madeAnd(m, restOps, 'effectful', 'pure');
+    const program = { ...m.program, root: m.region(ops, 'pure') };
+    expect(() => verifyProgram(program, m.prepared)).toThrow(
+      /the effect of the operation and \(pure\) omits the effect of its region \(effectful\)/
+    );
+  });
+
+  test('a value of the rest region of an or used after the or', () => {
+    const m = madeProgram();
+    const second = m.value('boolean');
+    const restOps: Op[] = [
+      { kind: 'input', input: 0, result: second, operands: [], effect: 'pure', origin: m.origin },
+      m.yieldOf(second),
+    ];
+    const { ops } = madeAnd(m, restOps, 'pure', 'pure');
+    ops[1] = { ...(ops[1] as Extract<Op, { kind: 'and' }>), kind: 'or' };
+    ops[2] = m.yieldOf(second);
+    const program = { ...m.program, root: m.region(ops, 'pure') };
+    expect(() => verifyProgram(program, m.prepared)).toThrow(
+      /the value \d+ is used outside the region of its definition/
+    );
+  });
+
+  test('a call whose effect is weaker than the body of its function', () => {
+    const f = madeFunctionProgram();
+    f.rootOps[1] = { ...f.call, effect: 'pure' };
+    const program = { ...f.program, root: f.region(f.rootOps, 'pure') };
+    expect(() => verifyProgram(program, f.prepared)).toThrow(
+      /the effect of a call of f \(pure\) omits the effect of its body \(effectful\)/
+    );
+  });
+
+  test('a function parameter used in the root region', () => {
+    const f = madeFunctionProgram();
+    f.rootOps[2] = f.yieldOf(f.p);
+    expect(() => verifyProgram(f.program, f.prepared)).toThrow(
+      /the value \d+ is used outside the region of its definition/
+    );
+  });
+
+  test('a value of another program', () => {
+    const m = madeProgram();
+    m.rootOps[2] = m.yieldOf({ ...m.result, owner: {} });
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(/belongs to another program/);
+  });
+
+  test('a use outside the region of its definition', () => {
+    const m = madeProgram();
+    // `x` is defined in the then region; the root yields it.
+    m.rootOps[2] = m.yieldOf(m.x);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /used outside the region of its definition/
+    );
+  });
+
+  test('a use before the definition', () => {
+    const m = madeProgram();
+    const late = m.value('real');
+    m.rootOps.splice(0, 0, {
+      kind: 'negate',
+      result: m.value('real'),
+      operands: [late],
+      effect: 'pure',
+      origin: m.origin,
+    });
+    m.rootOps.splice(2, 0, {
+      kind: 'literal',
+      value: 2,
+      result: late,
+      operands: [],
+      effect: 'pure',
+      origin: m.origin,
+    });
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(/used before its definition/);
+  });
+
+  test('an invalid conversion', () => {
+    const m = madeProgram();
+    m.rootOps.splice(1, 0, {
+      kind: 'convert',
+      conversion: 'real-to-complex',
+      result: m.value('complex'),
+      operands: [m.condition],
+      effect: 'pure',
+      origin: m.origin,
+    });
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(/invalid conversion/);
+  });
+
+  test('If results of different representations', () => {
+    const m = madeProgram();
+    const complex = m.value('complex');
+    m.elseOps.splice(0, 2,
+      { kind: 'literal', value: { re: 1, im: 1 }, result: complex, operands: [], effect: 'pure', origin: m.origin },
+      m.yieldOf(complex)
+    );
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /two results of an if have different representations/
+    );
+  });
+
+  test('a region with no yield', () => {
+    const m = madeProgram();
+    m.thenOps.pop();
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(/a region has no yield/);
+  });
+
+  test('a region with two yields', () => {
+    const m = madeProgram();
+    m.thenOps.push(m.yieldOf(m.x));
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(/a region has 2 yields/);
+  });
+
+  test('a missing effect fact', () => {
+    const m = madeProgram();
+    m.thenOps[0] = { ...m.thenOps[0], effect: undefined as never };
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(/has no effect fact/);
+  });
+
+  test('a region summary that omits an effectful operation', () => {
+    const m = madeProgram();
+    const traced = m.value('real');
+    m.elseOps.splice(1, 0, {
+      kind: 'trace',
+      trace: 't',
+      result: traced,
+      operands: [m.one],
+      effect: 'effectful',
+      origin: m.origin,
+    });
+    // The else region still says `pure`.
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /effect of a region \(pure\) does not agree with its operations \(effectful\)/
+    );
+  });
+});
+
+//
+// Admission
+//
+
+describe('admission of the structured route', () => {
+  const refusals: [string, () => Expression, RegExp][] = [
+    ['Less with no free symbol', () => scalarEngine().expr(['Less', 1, 2]), /Less reads no symbol/],
+    ['Equal with no free symbol', () => scalarEngine().expr(['Equal', 1, 2]), /Equal reads no symbol/],
+    ['Less with three operands', () => scalarEngine().expr(['Less', 'x', 'y', 1]), /Less with 3 operands is not in the structured route/],
+    ['Equal with three operands', () => scalarEngine().expr(['Equal', 'x', 'y', 'x']), /Equal with 3 operands is not in the structured route/],
+    ['Less with a complex operand', () => scalarEngine().expr(['Less', 'z', 'x']), /Less with a complex operand/],
+    ['Equal with a complex operand', () => scalarEngine().expr(['Equal', 'z', 'x']), /Equal with a complex operand/],
+    ['Less with a boolean operand', () => scalarEngine().expr(['Less', 'C', 'x']), /Less with a boolean operand/],
+    ['Max with a complex operand', () => scalarEngine().expr(['Max', 'z', 'x']), /Max with a complex operand/],
+    ['Min with a complex operand', () => scalarEngine().expr(['Min', 'x', 'z']), /Min with a complex operand/],
+    ['Min with a boolean operand', () => scalarEngine().expr(['Min', 'x', 'C']), /Min with a boolean operand/],
+    ['Max with a boolean operand', () => scalarEngine().expr(['Max', 'C', 'x']), /Max with a boolean operand/],
+    // The canonical form refuses `And(C, x)` (an incompatible-type error), so
+    // the witness is a made node.
+    ['And with a real operand', () => made('And'), /And with an operand that is not a boolean/],
+    ['Or with a real operand', () => made('Or'), /Or with an operand that is not a boolean/],
+    ['Multiply with a complex operand', () => scalarEngine().expr(['Multiply', 'x', 'z']), /a product with a complex operand is not in the structured route/],
+    // The canonical form keeps `Min(x)`, `And(C)` and `Or(C)`, and writes
+    // `Multiply(x)` as `x`: the unary product is a made node.
+    ['Min of one operand', () => scalarEngine().expr(['Min', 'x']), /Min of fewer than two operands/],
+    ['And of one operand', () => scalarEngine().expr(['And', 'C']), /And of fewer than two operands/],
+    ['Or of one operand', () => scalarEngine().expr(['Or', 'C']), /Or of fewer than two operands/],
+    ['Multiply of one operand', () => made('Multiply', ['x']), /a product of fewer than two operands/],
+  ];
+  function made(head: string, operands = ['C', 'x']): Expression {
+    const ce = scalarEngine();
+    return (ce as unknown as { _fn(h: string, ops: Expression[]): Expression })._fn(
+      head,
+      operands.map((o) => ce.expr(o))
+    );
+  }
+  test.each(refusals)('%s', (_name, make, reason) => {
+    const expr = make();
+    expect(expr.isValid).toBe(true);
+    expect(() => structured().prepareStructured(expr, OPTIONS)).toThrow(reason);
+  });
+
+  test('cse and constantFold must be false', () => {
+    const expr = scalarEngine().expr(['Add', 'x', 'y']);
+    expect(() => structured().prepareStructured(expr, { constantFold: false })).toThrow(
+      /requires cse: false/
+    );
+    expect(() => structured().prepareStructured(expr, { cse: false })).toThrow(
+      /requires constantFold: false/
+    );
+    expect(() =>
+      structured().prepareStructured(expr, { cse: true, constantFold: false })
+    ).toThrow(/requires cse: false/);
+  });
+
+  test('a local written twice is refused', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.expr([
+      'Function',
+      ['Block', ['Declare', 't', "'real'", 'w'], ['Assign', 't', ['Add', 't', 1]], 't'],
+      typed('w', 'real'),
+    ]);
+    expect(() => structured().prepareStructured(expr, OPTIONS)).toThrow(
+      /admits a local with one assignment only/
+    );
+  });
+
+  test('the structured route has no emitter yet', () => {
+    const expr = scalarEngine().expr(['Add', 'x', 'y']);
+    expect(() => structured().compile(expr, OPTIONS)).toThrow(/has no emitter yet/);
+  });
+
+  test('the existing route still refuses the new operators', () => {
+    const ce = scalarEngine();
+    const target = new ScalarFragmentJavaScriptTarget();
+    for (const head of ['Multiply', 'Min', 'Max', 'Less'])
+      expect(() =>
+        target.compile(ce.expr([head, 'x', 'y']), { fallback: false })
+      ).toThrow(new RegExp(`unsupported head ${head}`));
+    expect(() =>
+      target.compile(heatEngine().expr(HEATCELL), { fallback: false })
+    ).toThrow(/unsupported head Min/);
+  });
+});
