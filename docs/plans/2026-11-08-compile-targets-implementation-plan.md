@@ -1,6 +1,8 @@
 # Implementation plan: the GLSL fragment and the removal of WGSL
 
-**Status:** approved 2026-11-08. ROADMAP entry CE-1166.
+**Status:** approved 2026-11-08. Closed: the decisions of step 7, approved
+2026-11-09, are at the end of step 7. Every step is done; nothing of this
+plan is left to do. The former ROADMAP entry was CE-1166.
 
 This plan turns `docs/plans/2026-11-08-glsl-fragment-spec.md` (the spec) into
 steps that a session can take one at a time. Each step is one session unless
@@ -892,3 +894,85 @@ effects, rewrites that each make a new revision: the design note, section
 8), for which targets, and how `interval-js` joins it: it is a lowering that
 must keep its enclosure, not a reader of the annotation of scalar code. No
 work on a wider representation starts before that decision.
+
+**The measure of step 7** (2026-11-09, at `71b7e56bd`, session
+compute-engine-4f). The counting rules are those of
+`docs/plans/2026-11-05-compiler-next-pass-measure.md`, section 1.1: code
+lines are the lines that `grep -v -E '^\s*(//|/\*|\*|$)'` keeps, on whole
+files read with `git show`. At `1872ac457` the script gives the numbers of
+that document again (89,725 lines in all), so the three columns compare.
+"Start" is `a02a5a522`, the parent of the first commit of step 1.
+
+| Family of `compilation/` | `1872ac457` | Start | `71b7e56bd` | Change since the start |
+| --- | ---: | ---: | ---: | ---: |
+| gpu (`gpu-*`, `glsl-*`, `wgsl-*`) | 19,523 | 20,794 | 15,536 | −5,258 |
+| javascript (`javascript-*`) | 16,465 | 16,766 | 19,125 | +2,359 |
+| python | 4,680 | 4,699 | 4,686 | −13 |
+| interval-js | 4,333 | 4,381 | 4,384 | +3 |
+| other files | 44,724 | 46,309 | 50,039 | +3,730 |
+| all | 89,725 | 92,949 | 93,770 | +821 |
+
+The total mixes three works. This plan: the gpu family −5,258 (the WGSL
+files −2,322, `gpu-preambles.ts` −1,994, the shader statement and shape
+code of step 5), the new typing pass `fragment.ts` +2,563 (the JavaScript
+pilot reads it too), `compile-expression.ts` +79 (`canCompile()`),
+`raw-target-check.ts` +21, and about −130 in the shared `compile-*` files,
+which other sessions also changed in this period. CE-1163: `run-async.ts`,
+`pool-async.ts`, `pool-loop.ts`, +1,270. The JavaScript pilot:
+`javascript-fragment-target.ts`, `javascript-fragment-facts.ts`,
+`javascript-structured-ir.ts`, `javascript-structured-lower.ts`, +2,172.
+Without CE-1163 and the pilot, the compiler is about 2,600 code lines
+smaller than at the start of this plan. This is an estimate: the changes of
+`javascript-target.ts` (+208) and `parallel-lowering.ts` (+26) were not
+attributed to one of the three works.
+
+`CompileTarget` (counted with `@babel/parser`; 94 at `1872ac457`, as that
+document says): 97 members at the start, 93 now. Removed: `kernel`,
+`checkOperandShapes`, `hostInputVars`, `storageRead`,
+`storageBufferBindings`, `storageBuffersRead`. Added: `applyDerivatives`,
+`bindStatementEffects`.
+
+The four places that compile a list of statements (`docs/COMPILATION-MODEL.md`,
+"Compiler internals") are all still there: `compileBlock()` and
+`compileStatementList()` (`compile-blocks.ts`), `compileLoopBody()`
+(`compiler-core.ts`), `compilePythonStatements()` (`python-target.ts`).
+The JavaScript pilot lowers a block in `javascript-structured-lower.ts`, for
+an internal target only.
+
+**What is left, with its cost and its gain:**
+
+1. **The shape queries read the annotation** (design note, section 6, "In
+   step 5"). Measured for `gpuOperandShape()` in "The result of the first
+   "Also in this step" session": 46 call sites change, and the function
+   cannot go, because a reader of the prepare stage and `freeSymbolTypes()`
+   run without an annotation; about 65 lines go only when every reader has
+   facts. The other questions have more shader call sites
+   (`isComplexValued()` 83, `aggregateComponentCount()` 14,
+   `gpuType()` 24) and are shared with the other targets (222 calls of
+   `isComplexValued()` outside the shader files), so they cannot go either.
+   No wrong value is known: the annotation agreed with 97.1% of the
+   measured calls, and the 11 differences are not shown to be a defect.
+   Recommendation: leave the queries where they are.
+2. **The table of declared types keyed by frame** (`gpuDeclaredTypes`,
+   34 code lines in `gpu-declared-types.ts`). It can go only when the shader
+   targets push no shape frame. The GLSL target pushes frames at 4 sites in
+   `gpu-shader-target.ts` and 2 in `glsl-fragment.ts`, and the shared code
+   reads them. So it needs item 1 and a change of the shared code.
+   Recommendation: leave it.
+3. **The half-turn operands** (four `fragmentReplaceOperands()` calls in
+   `gpuPiMultiple()`, `gpuImaginaryPiMultiple()` and the Euler split). They
+   can move only with new internal heads. `fragmentReplaceOperands()` stays
+   in any case for the trig offset, which was tried and not moved, so the
+   move removes no function. Recommendation: leave them.
+4. **A structured representation for GLSL and `interval-js`** (the question
+   of this step). The JavaScript pilot is in progress and its step 4 ends
+   with a decision. Recommendation: no work for GLSL or `interval-js` now;
+   ask the question again with the result of the pilot.
+
+**Decisions of step 7, approved 2026-11-09.** The four recommendations
+above are accepted. The shape queries, the table of declared types and the
+half-turn operands stay as they are; each would remove little or no code,
+and no wrong value is known. No structured representation is built for
+GLSL or `interval-js` now. Step 4 of
+`docs/plans/2026-11-09-js-compiler-status-and-plan.md` asks the question
+again with the result of the JavaScript pilot.

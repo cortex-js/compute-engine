@@ -799,42 +799,6 @@ requires matching genTypes), pinned in
 `test/compute-engine/compile-gpu-shape-gate-holes.test.ts`. Unrolling to SCALAR
 selections avoids it; a design that lifts the vec-width cap meets it.
 
-### CE-1166. The GLSL fragment: a positive list for the shader target, and the removal of WGSL
-
-**Status:** ready, approved 2026-11-08; task, L. Spec `docs/plans/2026-11-08-glsl-fragment-spec.md`; steps, files, checks and the definition of done of each sub-item in `docs/plans/2026-11-08-compile-targets-implementation-plan.md`.
-**Witness:** corpus; Tycho's codegen audit of 2026-11-08: every compiled GLSL record is inside the fragment, and Tycho compiles no row to WGSL.
-
-The `glsl` target compiles only the forms of a positive list, checked before
-emission by `canCompile()`, a typing pass that annotates each node of the tree
-with its fragment type. The WGSL target goes. A session reads the spec, then
-its step in the implementation plan. One sub-item per session.
-
-- **CE-1166.1** Remove the WGSL target: code and tests, then documents
-  (plan, step 1). Done: committed in `ceaff236b` and `d1ab4f05f`; released
-  in 0.185.1.
-- **CE-1166.3** `canCompile()` as a typing pass, called first by `compile()`
-  to `glsl` (plan, step 3). Done: committed in six phases, `1e5d675b7` (A),
-  `c726cde71` (B), `bb6247991` (C), `9c126c5d8` (C2), `ede66c90d` (D),
-  `43679ce5d` (E); released in 0.185.1. Spec decisions 11 to 18 came from
-  this step; decision 19 is CE-1180.
-- **CE-1166.4a** Tycho's audit calls `canCompile()` before each GLSL compile
-  and records a disagreement (plan, step 4). Done: CE-1181 is closed.
-- **CE-1166.4** Remove the shader statement machinery that the predicate
-  makes unreachable, one module per session, after a first session that
-  measures which functions still serve a function body (plan, step 5). The
-  removal sessions are done: committed in `d8f3e604a`, `b9b37fca6`,
-  `d43d68f25`, `7520d089c`, `21612f7d8`, `a9e36bada` and `c9a14db67`
-  (CE-1176); not in a release yet. The documentation part of "Also in this
-  step" is done. Open: the move of the shape queries
-  (`gpuOperandShape()`) to the annotation, measured as three sessions that
-  remove about 65 lines, so step 7 can decide to leave it; and the removal
-  of the table of declared types keyed by frame (`withLocalShapeFrame`),
-  which the plan allows only when no shader target pushes a shape frame,
-  not yet checked.
-- **CE-1166.5** Measure the compiler again and give the user the numbers for
-  the decision on a wider intermediate representation (plan, step 7). After
-  CE-1166.1, .3 and .4.
-
 ### CE-280. Compile-target coverage: heads and shapes that decline on GLSL
 
 **Status:** ready; capability. Ledger: do one sub-item per session. Approved 2026-11-01. Revised 2026-11-08 for the GLSL fragment (`docs/plans/2026-11-08-glsl-fragment-spec.md`): the WGSL target is dropped, and CE-280.1 (`Integrate` on glsl) and CE-280.5 (dictionary and string-key forms of `At`) are removed, since the fragment puts quadrature, dictionaries and strings outside the target by contract. The sub-items that remain are inside the fragment.

@@ -378,7 +378,10 @@ existing emitter for the same operators.
   the annotation and the rule of step 1 stay.
 
 The user decides with this report. No work of step 5 starts before that
-decision.
+decision. The same report also asks again whether a structured
+representation is built for GLSL and `interval-js`: that question was left
+open until the result of this pilot
+(`docs/plans/2026-11-08-compile-targets-implementation-plan.md`, step 7).
 
 ### Step 5 — Recover the existing internal slice coverage
 
