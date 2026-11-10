@@ -1223,7 +1223,13 @@ function findEntry(source: ts.SourceFile, table: string, name: string): ts.Node 
 
 function modeLines(): void {
   const rev = process.env.REV ?? 'HEAD';
-  const pilotFiles = ['javascript-structured-ir.ts', 'javascript-structured-lower.ts', 'javascript-structured-emit.ts'];
+  const pilotFiles = [
+    'structured-ir.ts',
+    'structured-verify.ts',
+    'javascript-structured-policy.ts',
+    'javascript-structured-lower.ts',
+    'javascript-structured-emit.ts',
+  ];
   const pilot: Record<string, number> = {};
   for (const f of pilotFiles) pilot[f] = codeLines(readFileSync(resolve(COMPILATION, f), 'utf8'));
   const commits = ['4c4f1c163', '7939b5fac'];
@@ -1293,7 +1299,9 @@ async function modeDeps(): Promise<void> {
   const d = await coveredFunctions('D', prepared);
   const b = await coveredFunctions('B', prepared);
   const PILOT = new Set([
-    'javascript-structured-ir.ts',
+    'structured-ir.ts',
+    'structured-verify.ts',
+    'javascript-structured-policy.ts',
     'javascript-structured-lower.ts',
     'javascript-structured-emit.ts',
   ]);

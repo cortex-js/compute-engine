@@ -1,7 +1,8 @@
 /**
  * The lowering of a prepared program of the internal scalar JavaScript
  * fragment target to the structured representation
- * (`javascript-structured-ir.ts`).
+ * (`structured-ir.ts`), verified with the policy of JavaScript
+ * (`javascript-structured-policy.ts`).
  *
  * The lowering reads the prepared tree and the facts that the preparation
  * recorded: the annotation of `typeFragment()` (types, representations,
@@ -17,6 +18,15 @@
  * region where the operand is evaluated. A local with one assignment is the
  * value of its initializer, which is evaluated where it is declared; each
  * read of the local is that value.
+ *
+ * A write to a local (`Assign`) makes a new value, and each later read on
+ * its path is that value: no operation writes a named variable. An `If`
+ * statement whose branches write locals has one result per local that a
+ * branch writes and that a later statement reads: the merged value. A
+ * branch that does not write the local yields its value before the `If`.
+ * A local that no later statement reads is not merged; a read of it after
+ * the `If` throws. An `If` statement with no merged value and no effect is
+ * not lowered.
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
@@ -34,7 +44,6 @@ import type {
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
   joinEffects,
-  verifyProgram,
   type EffectFact,
   type IRFunction,
   type IRInput,
@@ -43,7 +52,8 @@ import {
   type IRRegion,
   type IRValue,
   type ScalarKind,
-} from './javascript-structured-ir.js';
+} from './structured-ir.js';
+import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 
 export type StructuredInput = IRInput;
 
@@ -126,7 +136,7 @@ export function lowerStructuredFragment(
   preparation: StructuredPreparation
 ): IRProgram {
   const program = lowerStructuredProgram(preparation);
-  verifyProgram(program, preparedNodesOf(preparation));
+  verifyJavaScriptProgram(program, preparedNodesOf(preparation));
   return program;
 }
 
@@ -195,13 +205,15 @@ class Lowering {
     return this.newValue(scalarKind(facts.type), facts.representation);
   }
 
-  /** End `operations` with the yield of `value` and summarize its effects. */
+  /** End `operations` with the yield of `value` (of each value of an
+   *  array) and summarize its effects. */
   private region(
     operations: IROperation[],
     origin: Expression,
-    value: IRValue
+    value: IRValue | readonly IRValue[]
   ): IRRegion {
-    operations.push({ kind: 'yield', operands: [value], effect: 'pure', origin });
+    const operands = Array.isArray(value) ? value : [value as IRValue];
+    operations.push({ kind: 'yield', operands, effect: 'pure', origin });
     return {
       operations,
       effect: joinEffects(...operations.map((op) => op.effect)),
@@ -327,7 +339,7 @@ class Lowering {
       const result = this.resultOf(facts);
       operations.push({
         kind: 'if',
-        result,
+        results: [result],
         operands: [test],
         then,
         else: otherwise,
@@ -438,9 +450,8 @@ class Lowering {
   }
 
   /**
-   * A block: each `Declare` binds its local to the value of its
-   * initializer, then the last statement is the value of the block. The
-   * admission of the structured route admits no other statement.
+   * A block that has a value: its statements in order (`statement()`),
+   * then its last statement, which is the value of the block.
    */
   private block(
     node: Expression & { ops: readonly Expression[] },
@@ -450,27 +461,190 @@ class Lowering {
     const inner = scope.inner.get(node);
     if (inner === undefined) return fail('no scope for a block');
     if (node.ops.length === 0) return fail('an empty block has no value');
-    for (const statement of node.ops.slice(0, -1)) {
-      if (
-        !isFunction(statement, 'Declare') ||
-        statement.nops !== 3 ||
-        !isSymbol(statement.op1)
-      )
-        return fail(`no lowering for the statement ${statement.toString()}`);
-      const name = statement.op1.symbol;
-      const binding = inner.bindings.get(name);
-      const value = this.value(statement.op3, inner, operations);
+    const last = node.ops[node.ops.length - 1];
+    this.statements(node.ops.slice(0, -1), inner, operations, namesIn(last));
+    return this.value(last, inner, operations);
+  }
+
+  /**
+   * The statements `statements`, in order, in `scope`. `liveOut`: the
+   * names that the code after the statements can read.
+   */
+  private statements(
+    statements: readonly Expression[],
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    liveOut: ReadonlySet<string>
+  ): void {
+    // The names that the code after the statement `i` can read: the names
+    // in the statements after it, and `liveOut`. A name that a later
+    // statement writes before it reads it counts too: the set is larger
+    // than needed, never smaller.
+    const live: ReadonlySet<string>[] = [];
+    let after = new Set(liveOut);
+    for (let i = statements.length - 1; i >= 0; i--) {
+      live[i] = after;
+      after = new Set([...after, ...namesIn(statements[i])]);
+    }
+    statements.forEach((s, i) => this.statement(s, scope, operations, live[i]));
+  }
+
+  /**
+   * A statement: a `Declare` binds its local to the value of its
+   * initializer; an `Assign` gives the local a new value; an `If` statement
+   * merges the values of the locals that its branches write; a `Block` (a
+   * branch of an `If`) is its statements. The admission of the structured
+   * route admits no other statement.
+   */
+  private statement(
+    node: Expression,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    liveOut: ReadonlySet<string>
+  ): void {
+    if (isFunction(node, 'Declare') && node.nops === 3 && isSymbol(node.op1)) {
+      const name = node.op1.symbol;
+      const binding = scope.bindings.get(name);
+      const value = this.value(node.op3, scope, operations);
       if (
         binding === undefined ||
         !('representation' in binding) ||
         binding.representation !== value.representation
       )
         fail(`the local ${name} has no binding of the representation of its value`);
-      let locals = this.bound.get(inner);
-      if (locals === undefined) this.bound.set(inner, (locals = new Map()));
+      let locals = this.bound.get(scope);
+      if (locals === undefined) this.bound.set(scope, (locals = new Map()));
       locals.set(name, value);
+      return;
     }
-    return this.value(node.ops[node.ops.length - 1], inner, operations);
+    if (isFunction(node, 'Assign') && node.nops === 2 && isSymbol(node.op1)) {
+      const name = node.op1.symbol;
+      const value = this.value(node.op2, scope, operations);
+      const binder = bindingScope(scope, name);
+      const locals = binder === undefined ? undefined : this.bound.get(binder);
+      const binding = binder?.bindings.get(name);
+      // The admission and the pass refuse a write to a name that is not a
+      // local; an input of the program has no value in `bound`.
+      if (locals === undefined || !locals.has(name) || binding === undefined)
+        return fail(`the name ${name} is not a declared local`);
+      if (!('representation' in binding) || binding.representation !== value.representation)
+        fail(`a write to the local ${name} changes its representation`);
+      locals.set(name, value);
+      return;
+    }
+    if (isFunction(node, 'If') && (node.nops === 2 || node.nops === 3))
+      return this.ifStatement(node, scope, operations, liveOut);
+    if (isFunction(node, 'Block')) {
+      const inner = scope.inner.get(node);
+      if (inner === undefined) return fail('no scope for a block');
+      return this.statements(node.ops, inner, operations, liveOut);
+    }
+    fail(`no lowering for the statement ${node.toString()}`);
+  }
+
+  /**
+   * An `If` statement: an `if` whose results are the merged values of the
+   * locals that a branch writes and that `liveOut` names, in the order of
+   * their bindings. The `If` itself has no effect: its effect is the one
+   * of its regions. A write to a local is not an effect: it makes a value.
+   */
+  private ifStatement(
+    node: Expression & { ops: readonly Expression[] },
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    liveOut: ReadonlySet<string>
+  ): void {
+    // The operations of the condition, kept apart until the `If` is known
+    // to be lowered.
+    const condition: IROperation[] = [];
+    const test = this.value(node.ops[0], scope, condition);
+    const before = this.snapshot();
+    const branch = (statement: Expression | undefined) => {
+      this.restore(before);
+      const inner: IROperation[] = [];
+      if (statement !== undefined) this.statement(statement, scope, inner, liveOut);
+      return { operations: inner, values: this.snapshot() };
+    };
+    const a = branch(node.ops[1]);
+    const b = branch(node.ops[2]);
+    this.restore(before);
+    // The locals to merge, with their values before the `If` and in each
+    // branch.
+    const merged: {
+      locals: Map<string, IRValue>;
+      name: string;
+      then: IRValue;
+      else: IRValue;
+    }[] = [];
+    for (const [binder, locals] of before)
+      for (const [name, value] of locals) {
+        const then = a.values.get(binder)?.get(name);
+        const otherwise = b.values.get(binder)?.get(name);
+        if (then === value && otherwise === value) continue;
+        const target = this.bound.get(binder)!;
+        // A local that no later statement reads has no value after the
+        // `If`: a read of it throws. A local with no value after a branch
+        // is such a local: a nested `If` of the branch removed it, and its
+        // later statements are the ones of this `If`.
+        if (then === undefined || otherwise === undefined || !liveOut.has(name))
+          target.delete(name);
+        else merged.push({ locals: target, name, then, else: otherwise });
+      }
+    // The merged value has the type of both branches, or is `real` for an
+    // integer and a real value.
+    const results = merged.map((m) => {
+      const types = new Set([m.then.type, m.else.type]);
+      const type =
+        types.size === 1
+          ? m.then.type
+          : types.has('integer') && types.has('real') && types.size === 2
+            ? 'real'
+            : fail(
+                `the local ${m.name} has the type ${m.then.type} in one branch and ${m.else.type} in the other`
+              );
+      return this.newValue(type, m.then.representation as ScalarRepresentation);
+    });
+    merged.forEach((m, i) => m.locals.set(m.name, results[i]));
+    const then = this.region(
+      a.operations,
+      node.ops[1],
+      merged.map((m) => m.then)
+    );
+    const otherwise = this.region(
+      b.operations,
+      node.ops[2] ?? node,
+      merged.map((m) => m.else)
+    );
+    // An `If` with no result and no effect has nothing to give: it is
+    // not lowered, and its condition is lowered only when it has an effect
+    // (with the pure operations that the effect reads).
+    if (results.length === 0 && joinEffects(then.effect, otherwise.effect) === 'pure') {
+      if (joinEffects(...condition.map((op) => op.effect)) !== 'pure')
+        operations.push(...condition);
+      return;
+    }
+    operations.push(...condition);
+    operations.push({
+      kind: 'if',
+      results,
+      operands: [test],
+      then,
+      else: otherwise,
+      effect: joinEffects(then.effect, otherwise.effect),
+      origin: node,
+    });
+  }
+
+  /** The value of each local and parameter, copied. */
+  private snapshot(): Map<FragmentScope<ScalarRepresentation>, Map<string, IRValue>> {
+    return new Map([...this.bound].map(([scope, locals]) => [scope, new Map(locals)]));
+  }
+
+  /** Make the values of `snapshot` the values of the locals again. */
+  private restore(
+    snapshot: ReadonlyMap<FragmentScope<ScalarRepresentation>, ReadonlyMap<string, IRValue>>
+  ): void {
+    for (const [scope, locals] of snapshot) this.bound.set(scope, new Map(locals));
   }
 
   /**
@@ -523,11 +697,30 @@ class Lowering {
   }
 }
 
-/** Every node that has facts in `scope` or in a scope nested in it. */
+/** Every node that has facts in `scope` or in a scope nested in it, and
+ *  every statement that the pass checked there. */
 function collectOrigins(
   scope: FragmentScope<ScalarRepresentation>,
   origins: Set<Expression>
 ): void {
   for (const node of scope.facts.keys()) origins.add(node);
+  for (const node of scope.statements) origins.add(node);
   for (const inner of scope.inner.values()) collectOrigins(inner, origins);
+}
+
+/** The scope that binds `name`, from `scope` outward. */
+function bindingScope(
+  scope: FragmentScope<ScalarRepresentation>,
+  name: string
+): FragmentScope<ScalarRepresentation> | undefined {
+  for (let s: FragmentScope<ScalarRepresentation> | undefined = scope; s; s = s.parent)
+    if (s.bindings.has(name)) return s;
+  return undefined;
+}
+
+/** The names of the symbols of `node`, read or written. */
+function namesIn(node: Expression, names = new Set<string>()): Set<string> {
+  if (isSymbol(node)) names.add(node.symbol);
+  else if (isFunction(node)) for (const operand of node.ops) namesIn(operand, names);
+  return names;
 }

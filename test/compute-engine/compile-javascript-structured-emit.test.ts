@@ -11,13 +11,13 @@ import {
   normalizeRunResult,
 } from '../../src/compute-engine/compilation/javascript-runtime';
 import { emitStructuredProgram } from '../../src/compute-engine/compilation/javascript-structured-emit';
+import { verifyJavaScriptProgram as verifyProgram } from '../../src/compute-engine/compilation/javascript-structured-policy';
 import {
-  verifyProgram,
   type IROperation,
   type IRProgram,
   type IRValue,
   type ScalarKind,
-} from '../../src/compute-engine/compilation/javascript-structured-ir';
+} from '../../src/compute-engine/compilation/structured-ir';
 import type { CompilationResult } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../../src/math-json/types';
@@ -663,7 +663,7 @@ describe('laziness and order, with the test operation', () => {
           ...(eager ? [read, trace] : []),
           {
             kind: 'if',
-            result,
+            results: [result],
             operands: [c],
             then,
             else: otherwise,
@@ -803,7 +803,7 @@ describe('made programs with helpers', () => {
         m.op({ kind: 'less', result: less, operands: [p, one] } as never),
         m.op({
           kind: 'if',
-          result,
+          results: [result],
           operands: [less],
           then: m.region([m.yieldOf(p)]),
           else: m.region([
@@ -935,7 +935,15 @@ describe('parentheses, on made programs', () => {
         type,
         representation: type === 'boolean' ? 'boolean' : 'number',
       };
-      ops.push({ kind, result, operands, effect: 'pure', origin, ...extra } as IROperation);
+      // An `if` has a list of results.
+      ops.push({
+        kind,
+        ...(kind === 'if' ? { results: [result] } : { result }),
+        operands,
+        effect: 'pure',
+        origin,
+        ...extra,
+      } as IROperation);
       return result;
     };
     const region = (f: () => IRValue) => {

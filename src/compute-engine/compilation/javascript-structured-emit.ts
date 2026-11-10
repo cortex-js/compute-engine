@@ -1,6 +1,6 @@
 /**
  * The emitter of the structured representation of the internal scalar
- * JavaScript fragment target (`javascript-structured-ir.ts`): from a
+ * JavaScript fragment target (`structured-ir.ts`): from a
  * verified program to JavaScript statements, a final value, function
  * definitions and the dependencies of that code.
  *
@@ -38,8 +38,11 @@
  *   operator `c ? a : b`, and an `and` or an `or` whose regions after the
  *   first operand are expressions is `&&` or `||`: JavaScript evaluates a
  *   branch or an operand only when it is selected, as the program does.
- *   Otherwise the `if` is an `if` statement, and the `and` or `or` a chain
- *   of `if` statements, with a block for each region.
+ *   Otherwise the `and` or `or` is a chain of `if` statements, with a block
+ *   for each region, and the `if` an `if` statement: one `let` per result,
+ *   assigned at the end of each branch. An `if` of several results, or of
+ *   none (the merged values of locals that branches write), is always an
+ *   `if` statement.
  * - Parentheses come from the precedence of the JavaScript operators. A
  *   negative number literal, `-0` and `-Infinity` have the precedence of a
  *   unary minus. The operand of a unary minus is in parentheses unless it is
@@ -60,13 +63,14 @@
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Integration with existing JavaScript compilation".
  */
-import type {
-  IRFunction,
-  IROperation,
-  IRProgram,
-  IRRegion,
-  IRValue,
-} from './javascript-structured-ir.js';
+import {
+  regionsOf,
+  type IRFunction,
+  type IROperation,
+  type IRProgram,
+  type IRRegion,
+  type IRValue,
+} from './structured-ir.js';
 
 /** The names that the assembly of the result gives to the emitter. */
 export type StructuredEmitNames = {
@@ -161,7 +165,7 @@ export function emitStructuredProgram(
   const emitter = new Emitter(program, names, options);
   const definitions = program.functions.map((fn, i) => emitter.definition(fn, i));
   const statements: string[] = [];
-  const value = emitter.region(program.root, statements, true).text;
+  const value = emitter.region(program.root, statements, true)[0].text;
   return {
     definitions,
     statements,
@@ -171,11 +175,12 @@ export function emitStructuredProgram(
   };
 }
 
-/** The regions that `op` evaluates. */
-function regionsOf(op: IROperation): readonly IRRegion[] {
-  if (op.kind === 'if') return [op.then, op.else];
-  if (op.kind === 'and' || op.kind === 'or') return op.rest;
-  return [];
+/** The one value that `op` defines and that `Emitter.operation()` can
+ *  write as an expression: an `if` of one result, or the result of any
+ *  other operation but a yield. */
+function singleResult(op: IROperation): IRValue | undefined {
+  if (op.kind === 'if') return op.results.length === 1 ? op.results[0] : undefined;
+  return op.result;
 }
 
 /** Where a value is used: the number of reads that the code makes of it,
@@ -239,7 +244,7 @@ class Emitter {
     const name = this.functionNames[index];
     const parameters = fn.parameters.map((p) => this.bind(p));
     const statements: string[] = [];
-    const value = this.region(fn.body, statements, false);
+    const [value] = this.region(fn.body, statements, false);
     return `function ${name}(${parameters.join(', ')}) { ${[
       ...statements,
       `return ${value.text};`,
@@ -247,10 +252,11 @@ class Emitter {
   }
 
   /**
-   * Append the statements of `region` to `out` and return the source of the
-   * value that it yields. `readsInputs` is false in the body of a helper.
+   * Append the statements of `region` to `out` and return the sources of
+   * the values that it yields. `readsInputs` is false in the body of a
+   * helper.
    */
-  region(region: IRRegion, out: string[], readsInputs: boolean): Source {
+  region(region: IRRegion, out: string[], readsInputs: boolean): Source[] {
     const operations = region.operations;
     // `impure[k]`: the number of operations before position `k` that are
     // not `pure`.
@@ -258,28 +264,30 @@ class Emitter {
     for (const op of operations)
       impure.push(impure[impure.length - 1] + (op.effect === 'pure' ? 0 : 1));
     for (const [index, op] of operations.entries()) {
-      if (op.kind === 'yield') return this.source(op.operands[0]);
+      if (op.kind === 'yield') return op.operands.map((v) => this.source(v));
       const code = this.operation(op, out, readsInputs);
       if (code === undefined) continue;
-      if (this.writtenAtUse(op, region, index, impure)) this.define(op.result!, code);
-      else out.push(`const ${this.bind(op.result!)} = ${code.text};`);
+      const result = singleResult(op)!;
+      if (this.writtenAtUse(result, op, region, index, impure)) this.define(result, code);
+      else out.push(`const ${this.bind(result)} = ${code.text};`);
     }
     return fail('a region has no yield');
   }
 
   /**
-   * True when the value of `op`, at the position `index` of `region`, is
-   * written at its use: `op` is pure, its value has one use, in `region`,
-   * and every operation between the two is pure.
+   * True when the value `result` of `op`, at the position `index` of
+   * `region`, is written at its use: `op` is pure, its value has one use,
+   * in `region`, and every operation between the two is pure.
    */
   private writtenAtUse(
+    result: IRValue,
     op: IROperation,
     region: IRRegion,
     index: number,
     impure: readonly number[]
   ): boolean {
-    if (op.effect !== 'pure' || op.result === undefined) return false;
-    const use = this.uses.get(op.result.id);
+    if (op.effect !== 'pure') return false;
+    const use = this.uses.get(result.id);
     if (use === undefined || use.count !== 1 || use.region !== region) return false;
     return impure[use.index] - impure[index + 1] === 0;
   }
@@ -305,7 +313,7 @@ class Emitter {
   /**
    * The expression of the value of `op`, which `region()` writes at its use
    * or binds to a `const`. Undefined when `op` defines the source of its
-   * value itself: a literal, and an `if`, `and` or `or` written as
+   * values itself: a literal, and an `if`, `and` or `or` written as
    * statements in `out`.
    */
   private operation(
@@ -366,19 +374,31 @@ class Emitter {
         return atom(`({ re: ${operand(operands[0], CONDITIONAL)}, im: 0 })`);
       case 'if': {
         const thenStatements: string[] = [];
-        const thenValue = this.region(op.then, thenStatements, readsInputs);
+        const thenValues = this.region(op.then, thenStatements, readsInputs);
         const elseStatements: string[] = [];
-        const elseValue = this.region(op.else, elseStatements, readsInputs);
-        if (thenStatements.length === 0 && elseStatements.length === 0)
+        const elseValues = this.region(op.else, elseStatements, readsInputs);
+        if (
+          op.results.length === 1 &&
+          thenStatements.length === 0 &&
+          elseStatements.length === 0
+        )
           return {
-            text: `${operand(operands[0], OR)} ? ${operand(thenValue, CONDITIONAL)} : ${operand(elseValue, CONDITIONAL)}`,
+            text: `${operand(operands[0], OR)} ? ${operand(thenValues[0], CONDITIONAL)} : ${operand(elseValues[0], CONDITIONAL)}`,
             precedence: CONDITIONAL,
           };
-        const name = this.bind(op.result);
-        const block = (statements: string[], value: Source) =>
-          `{ ${[...statements, `${name} = ${value.text};`].join(' ')} }`;
+        // One `let` per result, assigned at the end of each branch.
+        const names = op.results.map((result) => this.bind(result));
+        const block = (statements: string[], values: readonly Source[]) =>
+          `{ ${[...statements, ...names.map((name, i) => `${name} = ${values[i].text};`)].join(' ')} }`;
+        const test = `if (${operands[0].text}) ${block(thenStatements, thenValues)}`;
+        const otherwise =
+          elseStatements.length === 0 && names.length === 0
+            ? ''
+            : ` else ${block(elseStatements, elseValues)}`;
         out.push(
-          `let ${name}; if (${operands[0].text}) ${block(thenStatements, thenValue)} else ${block(elseStatements, elseValue)}`
+          names.length === 0
+            ? `${test}${otherwise}`
+            : `let ${names.join(', ')}; ${test}${otherwise}`
         );
         return undefined;
       }
@@ -386,7 +406,7 @@ class Emitter {
       case 'or': {
         const regions = op.rest.map((region) => {
           const statements: string[] = [];
-          const value = this.region(region, statements, readsInputs);
+          const [value] = this.region(region, statements, readsInputs);
           return { statements, value };
         });
         if (regions.every((r) => r.statements.length === 0))

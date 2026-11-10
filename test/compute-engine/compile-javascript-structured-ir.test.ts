@@ -5,15 +5,15 @@ import {
   lowerStructuredFragment,
   type StructuredPreparation,
 } from '../../src/compute-engine/compilation/javascript-structured-lower';
+import { verifyJavaScriptProgram as verifyProgram } from '../../src/compute-engine/compilation/javascript-structured-policy';
 import {
-  verifyProgram,
   type EffectFact,
   type IROperation,
   type IRProgram,
   type IRRegion,
   type IRValue,
   type ScalarKind,
-} from '../../src/compute-engine/compilation/javascript-structured-ir';
+} from '../../src/compute-engine/compilation/structured-ir';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
@@ -407,7 +407,7 @@ function madeProgram() {
     { kind: 'input', input: 0, result: condition, operands: [], effect: 'pure', origin },
     {
       kind: 'if',
-      result,
+      results: [result],
       operands: [condition],
       then: region(thenOps),
       else: region(elseOps),
@@ -528,7 +528,7 @@ describe('the verifier', () => {
     const m = madeProgram();
     // `If(C, x, 1)` is real; declare it integer.
     const integer = { ...m.result, type: 'integer' as ScalarKind };
-    m.rootOps[1] = { ...(m.rootOps[1] as Extract<Op, { kind: 'if' }>), result: integer };
+    m.rootOps[1] = { ...(m.rootOps[1] as Extract<Op, { kind: 'if' }>), results: [integer] };
     m.rootOps[2] = m.yieldOf(integer);
     expect(() => verifyProgram(m.program, m.prepared)).toThrow(
       /the result of an if has the type integer, and its regions the types real and real/
@@ -818,16 +818,18 @@ describe('admission of the structured route', () => {
     ).toThrow(/requires cse: false/);
   });
 
-  test('a local written twice is refused', () => {
+  // A write makes a new value: compile-javascript-structured-locals.test.ts.
+  test('a local written twice is two values', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr([
       'Function',
       ['Block', ['Declare', 't', "'real'", 'w'], ['Assign', 't', ['Add', 't', 1]], 't'],
       typed('w', 'real'),
     ]);
-    expect(() => structured().prepareStructured(expr, OPTIONS)).toThrow(
-      /admits a local with one assignment only/
-    );
+    const program = lowerStructuredFragment(structured().prepareStructured(expr, OPTIONS));
+    const [read, one, sum, yields] = program.root.operations;
+    expect([read.kind, one.kind, sum.kind, yields.kind]).toEqual(['input', 'literal', 'add', 'yield']);
+    expect(yields.operands[0].id).toBe(sum.result!.id);
   });
 
   test('the structured route compiles', () => {

@@ -39,6 +39,7 @@ import {
   type FragmentRule,
   type FragmentFunction,
   type FragmentScope,
+  type FragmentFacts,
   type FragmentAnnotation,
   type FragmentContext,
   type FragmentWalker,
@@ -51,7 +52,8 @@ import {
 } from './javascript-fragment-facts.js';
 import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
-import { verifyProgram, type EffectFact } from './javascript-structured-ir.js';
+import type { EffectFact } from './structured-ir.js';
+import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import {
   lowerStructuredProgram,
   preparedNodesOf,
@@ -552,7 +554,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       let time = this.clock();
       const program = lowerStructuredProgram(preparation);
       time = this.endPhase('lowering', time);
-      verifyProgram(program, preparedNodesOf(preparation));
+      verifyJavaScriptProgram(program, preparedNodesOf(preparation));
       time = this.endPhase('verification', time);
       const emission = emitStructuredProgram(program, names, {
         trace: this.hooks.trace,
@@ -694,7 +696,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
  * branches. A condition whose type is not `boolean` would need a guard.
  */
 function checkCondition(node: Expression): void {
-  if (!isFunction(node, 'If') || node.nops !== 3) return;
+  if (!isFunction(node, 'If') || node.nops < 2 || node.nops > 3) return;
   const type = node.op1.type.type;
   if (
     typeof type === 'object' &&
@@ -813,28 +815,46 @@ function attachBoundFunction(
     throw new Error(
       'JS scalar fragment: a bound body requires one straight-line block'
     );
+  // The declared type of each local, by its name.
+  const locals = new Map<string, string>();
+  /** The local that `declaration` declares, with its declared type. */
+  const declareLocal = (declaration: Expression) => {
+    if (
+      !isFunction(declaration, 'Declare') ||
+      !isLibraryOperator(declaration, 'Declare') ||
+      declaration.nops !== 3 ||
+      !isSymbol(declaration.op1)
+    )
+      throw new Error(
+        'JS scalar fragment: one explicit initialized local required'
+      );
+    const local = declaration.op1.symbol;
+    const declared = declaredTypeSource(declaration.op2);
+    if (
+      !declared ||
+      !['real', 'integer', 'complex', 'boolean'].includes(declared) ||
+      inputs.some((input) => input.name === local) ||
+      locals.has(local) ||
+      local === 'True' ||
+      local === 'False'
+    )
+      throw new Error('JS scalar fragment: unsupported local declaration');
+    return { local, declared, value: declaration.op3 };
+  };
   const declaration = body.op1;
-  if (
-    !isFunction(declaration, 'Declare') ||
-    !isLibraryOperator(declaration, 'Declare') ||
-    declaration.nops !== 3 ||
-    !isSymbol(declaration.op1)
-  )
-    throw new Error(
-      'JS scalar fragment: one explicit initialized local required'
-    );
-  const local = declaration.op1.symbol;
-  const declared = declaredTypeSource(declaration.op2);
-  if (
-    !declared ||
-    !['real', 'integer', 'complex', 'boolean'].includes(declared) ||
-    inputs.some((input) => input.name === local) ||
-    local === 'True' ||
-    local === 'False'
-  )
-    throw new Error('JS scalar fragment: unsupported local declaration');
+  const { local, declared, value: initializer } = declareLocal(declaration);
   const names = new Set(inputs.map((input) => input.name));
-  const bindings = new Set([...names, local]);
+  // The structured route admits more than one local: every top-level
+  // declaration of the block.
+  const bindings = new Set([
+    ...names,
+    local,
+    ...(admission.structured
+      ? body.ops.flatMap((s) =>
+          isFunction(s, 'Declare') && isSymbol(s.op1) ? [s.op1.symbol] : []
+        )
+      : []),
+  ]);
   const named: NamedCalls = { calls: new Set() };
   // The heads that are not helper calls. The existing route also keeps
   // `Sqrt` here, so that it reaches the refusal below and not the helper
@@ -883,23 +903,68 @@ function attachBoundFunction(
   // `real`, so the check of the representation of a write does not refuse a
   // real value. The interpreter refuses it, so the type of each value that
   // is written must prove `integer`.
-  const checkWrite = (value: Expression): void => {
-    if (declared === 'integer' && !isSubtype(value.type.type, 'integer'))
+  const checkWrite = (value: Expression, name = local): void => {
+    if (locals.get(name) === 'integer' && !isSubtype(value.type.type, 'integer'))
       throw new Error(
-        `JS scalar fragment: a value written to the integer local ${local} ` +
+        `JS scalar fragment: a value written to the integer local ${name} ` +
           `does not have the type integer`
       );
   };
-  checkValue(declaration.op3);
-  checkWrite(declaration.op3);
+  locals.set(local, declared);
+  checkValue(initializer);
+  checkWrite(initializer);
   names.add(local);
-  // The lowering of the structured route reads the local as the value of
-  // its initializer, which is right only when nothing else writes it.
-  if (admission.structured && body.nops > 2)
+  // The structured route: more declarations, writes to the declared locals
+  // at the top level of the block, and `If` statements whose branches
+  // write them (`checkStructuredStatement()`). Each write makes a new value
+  // in the lowering.
+  /** A statement of the body of the structured route. `top`: a statement
+   *  of the block of the body, not of a branch. */
+  const checkStructuredStatement = (statement: Expression, top: boolean): void => {
+    const head = isFunction(statement) ? statement.operator : statement.toString();
+    if (isFunction(statement, 'Declare') && top) {
+      const declared = declareLocal(statement);
+      locals.set(declared.local, declared.declared);
+      checkValue(declared.value);
+      checkWrite(declared.value, declared.local);
+      names.add(declared.local);
+      return;
+    }
+    if (isFunction(statement, 'Assign') && isLibraryOperator(statement, 'Assign') &&
+        statement.nops === 2 && isSymbol(statement.op1)) {
+      const name = statement.op1.symbol;
+      if (!locals.has(name) || !names.has(name))
+        throw new Error(
+          `JS scalar fragment: only writes to a declared local are supported, ` +
+            `and ${name} is ` +
+            (inputs.some((input) => input.name === name)
+              ? 'a parameter'
+              : 'not a local declared before the write')
+        );
+      checkValue(statement.op2);
+      checkWrite(statement.op2, name);
+      return;
+    }
+    if (isFunction(statement, 'If') && isLibraryOperator(statement, 'If') &&
+        (statement.nops === 2 || statement.nops === 3)) {
+      checkValue(statement.op1);
+      checkCondition(statement);
+      for (const branch of statement.ops.slice(1)) checkStructuredStatement(branch, false);
+      return;
+    }
+    if (isFunction(statement, 'Block') && isLibraryOperator(statement, 'Block') && !top) {
+      for (const inner of statement.ops) checkStructuredStatement(inner, false);
+      return;
+    }
     throw new Error(
-      'JS scalar fragment: the structured route admits a local with one assignment only'
+      `JS scalar fragment: the structured route admits no statement ${head}` +
+        (top ? '' : ' in a branch of an If')
     );
-  for (const statement of body.ops.slice(1, -1)) {
+  };
+  if (admission.structured)
+    for (const statement of body.ops.slice(1, -1))
+      checkStructuredStatement(statement, true);
+  for (const statement of admission.structured ? [] : body.ops.slice(1, -1)) {
     if (
       !isFunction(statement, 'Assign') ||
       !isLibraryOperator(statement, 'Assign') ||
@@ -927,11 +992,33 @@ function attachBoundFunction(
   const annotation = (() => {
       const annotation = annotateCalls(body, boundDefinition, named, inputs, body);
       const scope = annotation.scope.inner.get(body);
-      const binding = scope?.bindings.get(local);
-      if (!scope || !binding || !('representation' in binding))
+      if (!scope)
         throw new Error('JS scalar fragment invariant: missing local binding');
-      for (const statement of body.ops.slice(0, -1)) {
-        if (!isFunction(statement)) continue;
+      // Each write of a local, in the scope where the pass typed it: a
+      // statement of the block, or of a branch of an `If` statement.
+      const checkWrites = (
+        statement: Expression,
+        scope: FragmentScope<ScalarRepresentation>
+      ): void => {
+        if (!isFunction(statement)) return;
+        if (statement.operator === 'If') {
+          for (const branch of statement.ops.slice(1)) checkWrites(branch, scope);
+          return;
+        }
+        if (statement.operator === 'Block') {
+          const inner = scope.inner.get(statement);
+          if (!inner)
+            throw new Error('JS scalar fragment invariant: missing block scope');
+          for (const s of statement.ops) checkWrites(s, inner);
+          return;
+        }
+        if (!isSymbol(statement.op1)) return;
+        const name = statement.op1.symbol;
+        let binding: FragmentFacts<ScalarRepresentation> | undefined;
+        for (let s: FragmentScope<ScalarRepresentation> | undefined = scope; s && !binding; s = s.parent)
+          binding = s.bindings.get(name);
+        if (!binding || !('representation' in binding))
+          throw new Error('JS scalar fragment invariant: missing local binding');
         const value =
           statement.operator === 'Declare' ? statement.op3 : statement.op2;
         const valueFacts = scope.facts.get(value);
@@ -943,7 +1030,8 @@ function attachBoundFunction(
           throw new Error(
             'JS scalar fragment: local writes must preserve representation'
           );
-      }
+      };
+      for (const statement of body.ops.slice(0, -1)) checkWrites(statement, scope);
       return annotation;
     })();
   attachScalarFragment(target, {
