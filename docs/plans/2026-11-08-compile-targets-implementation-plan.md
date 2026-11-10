@@ -976,3 +976,11 @@ and no wrong value is known. No structured representation is built for
 GLSL or `interval-js` now. Step 4 of
 `docs/plans/2026-11-09-js-compiler-status-and-plan.md` asks the question
 again with the result of the JavaScript pilot.
+
+**Decision, approved 2026-11-09, for JavaScript only.** The numbers are in
+`docs/plans/2026-11-09-js-emitter-measurement-gate.md`. A structured
+representation is built for one JavaScript pilot, steps 1 to 4 of
+`docs/plans/2026-11-09-js-compiler-status-and-plan.md`; step 4 ends with a
+new decision. This decision was taken while step 5 of this plan was still in
+progress. It does not cover GLSL or `interval-js`: for those, the sentence
+above still applies.
