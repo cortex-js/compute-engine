@@ -140,10 +140,10 @@ test('named-body handoff rejects changed identity, scopes, policy and hidden arg
   };
   const target = { rootExpression: call, mode: 'strict' } as CompileTarget<Expression>;
   attachScalarFragment(target, { root: call, helper: { name: 'helper', literal, body },
-    annotate: () => ({ root: call, scope, functions: new Map([['helper', {
+    annotation: { root: call, scope, functions: new Map([['helper', {
       body, scope: functionScope, type: { kind: 'function',
         parameters: [{ name: 'u', type: { kind: 'real' } }], result: { kind: 'real' } },
-    }]]) }) });
+    }]]) } });
   const leave = enterScalarFragment(call, target)!;
   const inner = { ...target, var: (name: string) => name, boundVars: new Set(['u']) };
   expect(() => bindScalarFragmentDefinition(target, inner, foreign, body, 'helper'))

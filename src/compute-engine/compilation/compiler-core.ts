@@ -1354,7 +1354,7 @@ function compileExpressionInFrame(
  * head, or `undefined` for an interval target. A function of its own so
  * that `compileExpressionInFrame()` holds no closure over `target`.
  */
-function realOnlyLoweringOf(
+export function realOnlyLoweringOf(
   target: CompileTarget<Expression>
 ): ((h: string) => boolean) | undefined {
   return target.language !== undefined &&

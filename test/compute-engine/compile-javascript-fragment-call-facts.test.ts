@@ -38,7 +38,7 @@ function fixture() {
     if ('representation' in value) facts.set(node, value);
   const target = { rootExpression: call, mode: 'strict', language: 'javascript', userFunctions: {} } as CompileTarget<Expression>;
   attachScalarFragment(target, { root: call, helper: { name: 'helper', literal, body },
-    annotate: () => ({ ...annotation, scope: { ...annotation.scope, facts } }),
+    annotation: { ...annotation, scope: { ...annotation.scope, facts } },
   });
   const leave = enterScalarFragment(call, target)!;
   return { call, target, facts, leave };

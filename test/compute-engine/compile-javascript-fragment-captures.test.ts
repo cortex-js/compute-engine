@@ -98,7 +98,7 @@ test('declared complex capture with a real literal remains outside the slice', (
 });
 
 
-test('changing the capture between preparation and annotation fails closed', () => {
+test('changing the capture between preparation and emission fails closed', () => {
   const { ce, expression } = fixture();
   class ChangedCapture extends ScalarFragmentJavaScriptTarget {
     protected prepareCompilation(expr: Expression, options: CompilationOptions<Expression>, batch?: unknown) {
@@ -128,8 +128,8 @@ test('stored literal access requires the exact captured-symbol operation and res
       symbols: new Set([symbol]), value,
       assertCurrent: () => { if (!valid) throw new Error('changed snapshot'); },
     } },
-    annotate: () => ({ root: call, scope,
-      functions: new Map([['helper', { body, scope: innerScope }]]) }),
+    annotation: { root: call, scope,
+      functions: new Map([['helper', { body, scope: innerScope }]]) },
   });
   const leaveRoot = enterScalarFragment(call, target)!;
   const inner = { ...target, boundVars: new Set(['u']) };

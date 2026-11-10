@@ -78,7 +78,7 @@ test('unsupported input and host policy decline',()=>{
 test('missing or foreign prepared facts fail closed',()=>{
   const {ce}=setup();const root=ce.expr('x');const other=ce.expr('y');
   const target={rootExpression:root} as CompileTarget<Expression>;
-  attachScalarFragment(target,{root,annotate:()=>({root,scope:{bindings:new Map(),facts:new Map([[root,{type:{kind:'real'},representation:'number'}]]),inner:new Map()},functions:new Map()})});
+  attachScalarFragment(target,{root,annotation:{root,scope:{bindings:new Map(),facts:new Map([[root,{type:{kind:'real'},representation:'number'}]]),inner:new Map()},functions:new Map()}});
   const leave=enterScalarFragment(root,target);leave!();
   expect(()=>enterScalarFragment(other,target)).toThrow(/missing prepared-node facts/);
   expect(()=>enterScalarFragment(root,{...target,rootExpression:other})).toThrow(/different prepared policy/);
@@ -90,13 +90,13 @@ test('missing or foreign prepared facts fail closed',()=>{
 function factsFixture(rootFacts:Record<string,unknown>, annotatedRoot?:Expression){
   const {ce}=setup();const root=ce.expr('x');
   const target={rootExpression:root} as CompileTarget<Expression>;
-  attachScalarFragment(target,{root,annotate:()=>({root:annotatedRoot??root,scope:{bindings:new Map(),facts:new Map([[root,{type:{kind:'real'},representation:'number',...rootFacts}]]),inner:new Map()},functions:new Map()})});
+  attachScalarFragment(target,{root,annotation:{root:annotatedRoot??root,scope:{bindings:new Map(),facts:new Map([[root,{type:{kind:'real'},representation:'number',...rootFacts}]]),inner:new Map()},functions:new Map()}});
   return {ce,root,target};
 }
 test('an annotation of another root fails closed',()=>{
   const {ce,root,target}=factsFixture({},undefined);
-  const foreign=factsFixture({},ce.expr('y'));
-  expect(()=>enterScalarFragment(foreign.root,foreign.target)).toThrow(/invalid annotation/);
+  // The annotation is checked when it is attached, before any emission.
+  expect(()=>factsFixture({},ce.expr('y'))).toThrow(/invalid annotation/);
   enterScalarFragment(root,target)!();
 });
 test('an operation query outside an entered node fails closed',()=>{

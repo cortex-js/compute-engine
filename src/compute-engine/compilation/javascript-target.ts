@@ -2,6 +2,8 @@ import {
   bindScalarFragmentFunction,
   scalarResultIsComplex,
   scalarOperandIsComplex,
+  scalarOperandConversion,
+  scalarOperandRepresentation,
   scalarConvertOperand,
 } from './javascript-fragment-facts.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
@@ -4674,6 +4676,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // byte-identical to the previous emission).
     const bindings: Array<[name: string, value: string]> = [];
     const parts = args.map((a, index) => {
+      // On the scalar fragment route, the recorded conversion of the operand
+      // must be the one this sum applies, given the representation in the
+      // operand's own facts: `none` for a complex operand, and
+      // `real-to-complex` for any other, which the sum below writes as a
+      // real part only (its imaginary part is 0). Another kind, or a kind
+      // that does not match the operand's facts, fails closed. On the
+      // ordinary target the conversion is `undefined` and nothing is
+      // checked.
+      const conversion = scalarOperandConversion(index, target);
+      if (
+        conversion !== undefined &&
+        conversion !==
+          (scalarOperandRepresentation(a, target) === 'complex'
+            ? 'none'
+            : 'real-to-complex')
+      )
+        throw new Error(
+          'JS scalar fragment invariant: the conversion of a complex sum operand does not match the operand'
+        );
       // A complex operand whose value is known at compile time — the
       // imaginary unit, or a complex literal — contributes its two components
       // as constants, so the object holding them is never built and never
@@ -8953,12 +8974,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Negate: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Negate`: no argument');
-    if (!(scalarResultIsComplex(target) ?? BaseCompiler.isComplexValued(x))) {
+    const annotated = scalarResultIsComplex(target);
+    if (!(annotated ?? BaseCompiler.isComplexValued(x))) {
       const c = tryGetConstant(x);
       if (c !== undefined) return String(-c);
       return `(-(${compile(x)}))`;
     }
-    return complexUnary(target, '_SYS.cneg', compile(x));
+    // On the scalar fragment route, the operand is read with its recorded
+    // conversion (a real operand of a complex negation becomes `{re, im}`).
+    return complexUnary(
+      target,
+      '_SYS.cneg',
+      annotated === undefined
+        ? compile(x)
+        : scalarConvertOperand(0, compile(x), target)!
+    );
   },
   Multiply: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);

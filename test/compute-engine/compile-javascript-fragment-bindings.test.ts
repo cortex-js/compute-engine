@@ -158,7 +158,7 @@ test('scope handoffs reject foreign bodies, statements, nodes and policies', () 
   root.inner.set(body, block);
   const outer = { rootExpression: fn, mode: 'strict' } as CompileTarget<Expression>;
   attachScalarFragment(outer, { root: body, functionRoot: fn,
-    annotate: () => ({ root: body, scope: root, functions: new Map() }) });
+    annotation: { root: body, scope: root, functions: new Map() } });
   const lambda = { ...outer, var: (name: string) => name, boundVars: new Set(['w', 'e', 'n', 's']) };
   const foreign = ce.expr(['Block', 0]);
   expect(() => bindScalarFragmentFunction(outer, lambda, fn, foreign))

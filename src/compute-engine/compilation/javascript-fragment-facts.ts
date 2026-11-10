@@ -41,7 +41,11 @@ export type ScalarFragmentHelper = {
 };
 type ScalarFragmentArtifact = {
   readonly root: Expression;
-  readonly annotate: () => Annotation;
+  /** Built by `prepareCompilation()`, before any emission. */
+  readonly annotation: Annotation;
+  /** The root `Function` literal whose body is `root`. The target that
+   *  holds it does not emit: `bindScalarFragmentFunction()` gives the
+   *  artifact, without this field, to the target of the function body. */
   readonly functionRoot?: Expression;
   readonly helper?: ScalarFragmentHelper;
   readonly capture?: ScalarFragmentCapture;
@@ -62,8 +66,7 @@ const policyKeys = [
 type Policy = Pick<CompileTarget<Expression>, (typeof policyKeys)[number]>;
 type OwnedArtifact = ScalarFragmentArtifact & {
   readonly policy: Policy;
-  annotation?: Annotation;
-  scope?: Scope;
+  scope: Scope;
   statements?: ReadonlySet<Expression>;
   current?: Expression;
 };
@@ -75,17 +78,28 @@ export function attachScalarFragment(
   target: CompileTarget<Expression>,
   artifact: ScalarFragmentArtifact
 ): void {
+  const annotation = artifact.annotation;
+  if (annotation.root !== artifact.root || annotation.refusal)
+    throw new Error('JS scalar fragment invariant: invalid annotation');
   const policy = Object.fromEntries(
     policyKeys.map((key) => [key, target[key]])
   ) as Policy;
   (target as AnnotatedTarget)[artifactKey] = {
     root: artifact.root,
-    annotate: artifact.annotate,
+    annotation,
+    scope: annotation.scope,
     functionRoot: artifact.functionRoot,
     helper: artifact.helper,
     capture: artifact.capture ?? artifact.helper?.capture,
     policy,
   };
+}
+
+/** The annotation attached to `target`, or `undefined` when it has none. */
+export function scalarFragmentAnnotation(
+  target: CompileTarget<Expression>
+): Annotation | undefined {
+  return (target as AnnotatedTarget)[artifactKey]?.annotation;
 }
 
 function assertPolicy(
@@ -102,7 +116,7 @@ function assertPolicy(
 }
 
 function facts(artifact: OwnedArtifact, node: Expression): Facts {
-  const value = artifact.scope?.facts.get(node);
+  const value = artifact.scope.facts.get(node);
   if (value === undefined || !('representation' in value))
     throw new Error(
       'JS scalar fragment invariant: missing prepared-node facts'
@@ -129,7 +143,7 @@ function storedCaptureScope(
   )
     return undefined;
   capture.assertCurrent();
-  return artifact.annotation?.scope;
+  return artifact.annotation.scope;
 }
 
 function assertMember(artifact: OwnedArtifact, node: Expression): void {
@@ -156,14 +170,21 @@ export function bindScalarFragmentFunction(
   if (artifact === undefined) return;
   assertPolicy(artifact, outer);
   if (
+    artifact.functionRoot === undefined ||
     artifact.functionRoot !== fn ||
-    artifact.root !== body ||
-    artifact.annotation
+    artifact.root !== body
   )
     throw new Error(
       'JS scalar fragment invariant: different prepared function'
     );
-  attachScalarFragment(inner, artifact);
+  // The target of the body holds the facts that `prepareCompilation()`
+  // computed for the body. It holds no `functionRoot`: it emits.
+  attachScalarFragment(inner, {
+    root: artifact.root,
+    annotation: artifact.annotation,
+    helper: artifact.helper,
+    capture: artifact.capture,
+  });
 }
 
 /** Bind only the exact helper body that root annotation already proved. */
@@ -179,7 +200,7 @@ export function bindScalarFragmentDefinition(
   assertPolicy(artifact, outer);
   const helper = artifact.helper;
   const entry =
-    name === undefined ? undefined : artifact.annotation?.functions.get(name);
+    name === undefined ? undefined : artifact.annotation.functions.get(name);
   if (
     !helper ||
     helper.name !== name ||
@@ -196,7 +217,6 @@ export function bindScalarFragmentDefinition(
   ) as Policy;
   (inner as AnnotatedTarget)[artifactKey] = {
     root: body,
-    annotate: artifact.annotate,
     policy,
     annotation: artifact.annotation,
     scope: entry.scope,
@@ -263,31 +283,37 @@ export function assertScalarPreparedNode(
   const artifact = (target as AnnotatedTarget)[artifactKey];
   if (artifact === undefined) return;
   assertPolicy(artifact, target);
-  if (artifact.annotation === undefined) {
-    if (node !== artifact.root)
-      throw new Error('JS scalar fragment invariant: different prepared root');
-  } else assertMember(artifact, node);
+  assertEmitter(artifact);
+  assertMember(artifact, node);
 }
 
-/** Enter only after the compiler has installed its mode and folding policy. */
+/** The target of a root `Function` literal does not emit its body: only the
+ *  target that `bindScalarFragmentFunction()` makes for the body does. */
+function assertEmitter(artifact: OwnedArtifact): void {
+  if (artifact.functionRoot !== undefined)
+    throw new Error(
+      'JS scalar fragment invariant: function body emitted before its binding'
+    );
+}
+
+/**
+ * Enter `node`. The annotation was built in `prepareCompilation()`; this
+ * checks only that the target owns the node with the prepared policy.
+ */
 export function enterScalarFragment(
   node: Expression,
   target: CompileTarget<Expression>
 ): (() => void) | undefined {
   const artifact = (target as AnnotatedTarget)[artifactKey];
   if (artifact === undefined) return undefined;
-  assertPolicy(artifact, target);
   // The authorized target's root expression is part of its policy. A named
   // definition has its own annotated body but retains the registry's root.
-  if (artifact.annotation === undefined) {
-    if (node !== artifact.root)
-      throw new Error('JS scalar fragment invariant: different prepared root');
-    const annotation = artifact.annotate();
-    if (annotation.root !== artifact.root || annotation.refusal)
-      throw new Error('JS scalar fragment invariant: invalid annotation');
-    artifact.annotation = annotation;
-    artifact.scope = annotation.scope;
-  }
+  assertPolicy(artifact, target);
+  assertEmitter(artifact);
+  // The annotation typed the captured value that was stored when it was
+  // built. A change of that binding after the preparation fails here, before
+  // the compiler can choose another route for the changed definition.
+  artifact.capture?.assertCurrent();
   assertMember(artifact, node);
   const previous = artifact.current;
   const previousScope = artifact.scope;
@@ -362,6 +388,42 @@ export function scalarOperandIsComplex(
   if (conversion === undefined)
     throw new Error('JS scalar fragment invariant: missing operand conversion');
   return conversion.representation === 'complex' && conversion.kind === 'none';
+}
+
+/**
+ * The recorded conversion of operand `index`, for an emitter that applies
+ * it in its own code (the complex sum writes a real operand as the real
+ * part of the sum, which is what `real-to-complex` makes of it). Only the
+ * two kinds that the scalar emitter applies are answered; another kind
+ * fails closed, as in `scalarConvertOperand()`. Undefined is reserved for
+ * legacy targets.
+ */
+export function scalarOperandConversion(
+  index: number,
+  target: CompileTarget<Expression>
+): 'none' | 'real-to-complex' | undefined {
+  const op = operation(target);
+  if (op === undefined) return undefined;
+  const conversion = op.facts.conversions?.[index];
+  if (conversion === undefined)
+    throw new Error('JS scalar fragment invariant: missing operand conversion');
+  if (conversion.kind === 'none' || conversion.kind === 'real-to-complex')
+    return conversion.kind;
+  throw new Error('JS scalar fragment invariant: unsupported conversion');
+}
+
+/**
+ * The representation in the facts of `operand` itself, an operand of the
+ * current operation, not the representation that its recorded conversion
+ * gives. Undefined is reserved for legacy targets.
+ */
+export function scalarOperandRepresentation(
+  operand: Expression,
+  target: CompileTarget<Expression>
+): ScalarRepresentation | undefined {
+  const op = operation(target);
+  if (op === undefined) return undefined;
+  return facts(op.artifact, operand).representation;
 }
 
 /** Apply an annotated edge conversion inside the operand's evaluation region. */

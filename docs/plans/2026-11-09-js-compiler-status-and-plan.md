@@ -224,13 +224,7 @@ work only when the step's claim needs it.
    (`bindScalarFragmentFunction()`) and the binding of helper definitions are
    done in `prepareCompilation()`, not on first entry in
    `compileExpression()`.
-4. A narrow internal body-emission interface inside JavaScript compilation.
-   It reuses runtime assembly, input normalization, helper and preamble
-   collection, dependencies, stored-code metadata and the existing runner.
-   It is not a member of `CompileTarget`.
-5. The effect facts are recorded with the representation facts, from the
-   resolved definitions and the purity contract of the target.
-6. Two corrections in the fragment route: the complex cases of `Negate` and
+4. Two corrections in the fragment route: the complex cases of `Negate` and
    `Add` apply the recorded conversion of each operand, and a write to a
    local declared `integer` declines when the type of the value is not a
    subtype of `integer`.
@@ -249,6 +243,34 @@ work only when the step's claim needs it.
 
 This step is useful if the work stops after step 4: the GLSL fragment calls
 the same reader.
+
+**Result of step 1 (2026-11-09).** Done, with these differences from the
+text above:
+
+- `Sqrt` still calls `isComplexValued()`. Its rule runs inside
+  `withOutermostCompilerState()` (`javascript-fragment-target.ts`), which
+  sets the state that the outermost compilation sets and restores it. A
+  program with a `Sqrt` is refused inside another compilation. The rule of
+  `Sqrt` moves in step 5.
+- The facts of the root function and of the helper definitions are computed
+  in `prepareCompilation()`. `bindScalarFragmentFunction()` and
+  `bindScalarFragmentDefinition()` stay at their call sites and give those
+  facts to the inner target, because the inner targets are made after
+  preparation by code of the ordinary route.
+- A function node with a complex fact and no free symbol is refused, except
+  `Sqrt` (`refuseClosedComplex()`). With constant folding on, the emitter
+  writes the folded real literal for such a node while its fact says
+  complex: `Add(x, If(p(True), 1, Sqrt(-2)))`, with `p` the identity on
+  booleans, gave `NaN` at `x = 1` before this refusal.
+- The comparison of the new rule with `isComplexValued()` covers 30 programs
+  in 8 combinations of mode, folding and CSE (1,328 nodes). One difference:
+  in `complex` mode, the existing reader calls a local declared `boolean`
+  complex and the fact does not; both compilers give the right value. No
+  corpus was compared: the repository has no tool that lists the scalar
+  expressions of the Tycho corpus.
+- The complex case of `Add` checks the recorded conversion of each operand
+  against the fact of that operand, and still writes a real operand as a
+  real part only.
 
 ### Step 2 — The representation and its verifier, for one real fixture
 
@@ -270,7 +292,9 @@ function heatcell(v: real, s: real, d: real,
 }
 ```
 
-**Deliver:** value IDs owned by the compilation, ordered regions, literals,
+**Deliver:** the effect facts, recorded with the representation facts
+from the resolved definitions and the purity contract of the target; and
+value IDs owned by the compilation, ordered regions, literals,
 input reads, `Add`, `Negate`, `Multiply`, `Less`, `Equal`, `And`, `Or`,
 `Min`, `Max`, the real-to-complex conversion, `If` with a yield per
 region, one local with one assignment, and a call of one resolved helper.
@@ -291,8 +315,12 @@ no trace. No CSE, reordering, loop or collection in this step.
 
 ### Step 3 — Emit the representation
 
-**Deliver:** an emitter for the representation of step 2 behind the body
-interface of step 1. The internal target class selects the emitter with a
+**Deliver:** a narrow internal body-emission interface inside JavaScript
+compilation, and an emitter for the representation of step 2 behind it. The
+interface reuses runtime assembly, input normalization, helper and preamble
+collection, dependencies, stored-code metadata and the existing runner. It
+is not a member of `CompileTarget`. It is written in this step and not in
+step 1, because the new emitter is its first user and decides its form. The internal target class selects the emitter with a
 constructor argument; there is no compile option and no registered target
 name. Both emitters receive the same annotation object and have separate
 emission state. CSE and constant folding are refused, not ignored. `Sqrt`
