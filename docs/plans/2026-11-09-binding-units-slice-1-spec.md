@@ -1,6 +1,7 @@
 # Slice 1 of binding units: host expressions as units, and `ce.infer()`
 
-Status: DRAFT, revision 3, for approval. No code before approval. The plan
+Status: revision 3, approved 2026-11-10. The implementation may start, with
+step 1 of section 6 first. The plan
 of record is `docs/plans/2026-11-09-binding-units-model.md` (sections 2, 8
 and 9). This spec is slice 1 of its section 8. Decisions 4, 5 and 6 of its
 section 9 are approved and are not reopened here. An approval of this spec

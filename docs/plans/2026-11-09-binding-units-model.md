@@ -3,8 +3,9 @@
 Status: DRAFT. The direction and the prototype of section 7 are approved
 (2026-11-09, decisions 1 and 2 of section 9). The prototype is done
 (`2026-11-09-binding-units-evidence/prototype-report.md`), and section 2 is
-revised with decisions 4 to 6. Next: a one-page spec of slice 1 (section 8)
-for approval. No code in the main tree before that.
+revised with decisions 4 to 6. The spec of slice 1
+(`2026-11-09-binding-units-slice-1-spec.md`) is approved (decision 3), and
+its implementation may start.
 
 This document replaces, as the plan of record, the three drafts of the same
 day: `2026-11-09-function-readings-checked-on-use.md`,
@@ -78,7 +79,8 @@ moves at every change of a definition of that name, in any scope.
   (decision 6).
 - the other decisions that a boxing writes on a scope today, for the same
   names: a variable made for a library name used as a value (`N + 1`), a
-  call head read as a function (`f(x)`), the free name of a function body.
+  call head read as a function (`f(x)`), the free name of a function body
+  (its home scope is the scope that the literal is written in).
 
 **The bound form is a cache.** It is computed from the raw form of the unit
 and the definitions. A unit that the engine stores (a function body) keeps
@@ -100,9 +102,12 @@ environment of a unit can therefore gain a requirement after its boxing; it
 never loses one. An expression that the host holds can report a narrower
 type later, and never a wider one.
 
-A symbol that library code makes from a name alone has an empty environment
-of its own, so its type is `unknown` until a use requires one: a rule that
-needs `x: number` does not apply, and no rule applies wrongly.
+A symbol that library code makes from a name belongs to the operation that
+makes it (`evaluate()`, `simplify()`, `compile()`, …): it reads the
+environments of the operation's input, and the operation writes in an
+environment of its own, never in the host's expression. Outside any
+operation, such a symbol has an empty environment of its own, so its type is
+`unknown` until a use requires one. The rule is rule 8 of the slice 1 spec.
 
 **Code with no occurrence at hand reads no inferred type.** A free name has
 no definition (decision 6), so a read on a definition cannot give its
@@ -115,7 +120,8 @@ argument.
 today are keyed on versions of shared definitions, and an inference write
 advances them for the whole engine. A unit that infers again what an earlier
 unit inferred would clear them at each boxing: with that event kept, the
-loading of the integration rules was about 30% slower. The type of an
+two rule-heavy test files were about 40% slower (prototype report,
+section 5). The type of an
 expression is cached on the expression; a cache shared between expressions
 that depends on an inferred type has the environment in its key.
 
@@ -135,9 +141,10 @@ assignment, a definition, or a commit.
   registry of waiting definitions, no repair at a definition, and no rule for
   "who can see this binding": the lookup from the unit's own scope answers.
 - **`ce.infer(units)`**: the commit. It declares the free names of the units
-  in the current scope, with the meet of the types their environments give,
-  marked as inferred. Independent of the order. Two types that conflict give
-  `unknown`.
+  in their home scope, with the meet of the types their environments give,
+  marked as inferred. Independent of the order. A name whose types conflict
+  is not declared, and each expression keeps the type of its own unit
+  (rule 11 of the slice 1 spec).
 - **A batch**: one unit for a set of definitions and readers (a document).
   Reading and typing run as one loop in dependency order inside it, so a
   reading that depends on a type (`L_1`, `(A, B)`) is decided with every
@@ -190,7 +197,9 @@ Measured bounds, on the suite of about 81,000 tests
 | everything, but not in a symbol made from a name alone | between 0.31% and 0.74% |
 | nothing (an undeclared name is `unknown` everywhere) | 2.6% in the third of the suite that ended, most of it compilation |
 
-The model is the second row.
+The model is the second row, changed by rule 8 of the slice 1 spec: a
+symbol that an operation makes reads the environments of the input. The
+bound of that row was measured without rule 8 and does not apply.
 
 ## 6. Not known
 
@@ -278,8 +287,11 @@ matters for its spec.
    changes of section 5, and the order of section 8. The result of the
    prototype is in `2026-11-09-binding-units-evidence/prototype-report.md`;
    its section 6 lists what section 2 had to change. Section 2 was revised
-   on 2026-11-09 with decisions 4 to 6. Still to decide: the breaking
-   changes of section 5 and the order of section 8.
+   on 2026-11-09 with decisions 4 to 6. approved 2026-11-10, with the spec
+   of slice 1 (`2026-11-09-binding-units-slice-1-spec.md`): breaking
+   changes 1, 2 and 5 of section 5, the changes that the spec adds, and
+   slice 1 as the first slice. The order of the other slices is still to
+   decide.
 4. approved 2026-11-09: `compile()` gets no handling of its own for an input
    of type `unknown`, and no default type. It keeps the decline. A host that
    wants the types that its expressions infer calls `ce.infer(units)` before
@@ -296,6 +308,12 @@ matters for its spec.
    build this (it kept a declaration with the type `unknown`), so its cost
    is not measured: the spec of slice 1 measures the sites that expect a
    definition on a canonical symbol before code.
+7. approved 2026-11-10: `ce.checkpoint()`, `ce.restore()` and
+   `ce.discard()` are deprecated in slice 1 and removed in a later release.
+   A trial runs in an environment that is thrown away, and the rollback
+   frames go with the registry in slice 2. Tycho, the only known host that
+   uses a checkpoint, moves its one use to `ce.withValues()`. Rule 13 of the
+   spec of slice 1 has the details.
 
 Tycho is not blocked by any of this: its workarounds exist and work. Nothing
 is shipped to it ahead of the slices.
