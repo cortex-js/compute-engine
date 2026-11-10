@@ -906,31 +906,16 @@ function compileGPUSumProduct(
   // (the `!args[1]` guard above returns for the reduce form).
   BaseCompiler.assertScalarBigOpBody(kind, args[0]);
 
-  // A multi-index Sum/Product (more than one indexing set) is the nest of
-  // one aggregate per index, the first index outermost: the body of the
-  // outer aggregate is the aggregate over the other indexes, whose bounds
-  // can read the outer index. The value is the sum (or product) of the same
-  // terms, which the interpreter visits with the first index outermost too.
-  //
-  // A trusted lowering (`fragmentReplaceOperands()`). Input:
-  // `Sum(body, L1, L2, …)`. Output: `Sum(Sum(body, L2, …), L1)` (the same for
-  // `Product`). Condition: more than one index set. The value is the
-  // interpreter's, as said above; the body and each bound are evaluated as
-  // many times as in the interpreter.
+  // A multi-index Sum/Product (more than one indexing set) is written as a
+  // nest of one aggregate per index in the prepare stage
+  // (`nestMultiIndexAggregate()`, `gpu-applied-derivative.ts`), so only one
+  // index set reaches the emitter. A tree that did not go through that
+  // stage is refused: compiling the first index set only would give a
+  // wrong value.
   if (args.length > 2)
-    return compileGPUSumProduct(
-      kind,
-      [
-        fragmentReplaceOperands(
-          args,
-          args[0].engine._fn(kind, [args[0], ...args.slice(2)]),
-          { name: `the nest of a multi-index \`${kind}\``, operators: [kind] },
-          target
-        ),
-        args[1],
-      ],
-      _compile,
-      target
+    throw new Error(
+      `Could not compile \`${kind}\`: more than one index set (the ` +
+        `prepare stage writes a nest of one ${kind} per index)`
     );
 
   // A `Range` index set with a step of 1 (`Element(k, Range(a, b))` or

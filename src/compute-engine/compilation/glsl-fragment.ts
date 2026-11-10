@@ -656,6 +656,16 @@ function walkSafeAggregate(
   const ops = isFunction(node) ? node.ops : [];
   if (ops.length === 1)
     return walkCollectionAggregate(node, ops[0], scope, context, w);
+  // The prepare stage writes an aggregate with more than one index set as a
+  // nest of one aggregate per index (`nestMultiIndexAggregate()`), and the
+  // emitter compiles one index set only, so one that is still here is
+  // refused.
+  if (ops.length > 2)
+    return w.refuse(
+      node,
+      'signature',
+      `\`${node.operator}\` with more than one index set is not nested`
+    );
   for (const spec of ops.slice(1)) {
     const bounds = isFunction(spec, 'Limits')
       ? [spec.op2, spec.op3]

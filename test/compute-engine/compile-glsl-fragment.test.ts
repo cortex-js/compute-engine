@@ -955,6 +955,120 @@ describe('review fixes', () => {
   });
 });
 
+// CE-1166 step 5. A `Sum` or a `Product` with more than one index set is
+// written as a nest of one aggregate per index, the first index outermost,
+// in the prepare stage (`nestMultiIndexAggregate()`), so the typing pass
+// types the nest that the emitter writes, and `canCompile()` and
+// `compile()` agree.
+describe('a multi-index Sum or Product', () => {
+  const code = (json: unknown) =>
+    compile(ce.box(json as any), { to: 'glsl', fallback: false }).code ?? '';
+
+  test.each([
+    [
+      'Sum',
+      ['Multiply', 'i', 'j', 'x'],
+      ['Limits', 'i', 1, 3],
+      ['Limits', 'j', 1, 4],
+    ],
+    // An inner bound reads the outer index.
+    [
+      'Sum',
+      ['Multiply', 'i', 'j', 'x'],
+      ['Limits', 'i', 1, 'n'],
+      ['Limits', 'j', 1, 'i'],
+    ],
+    [
+      'Product',
+      ['Add', 'i', 'j', 'x'],
+      ['Limits', 'i', 1, 'n'],
+      ['Limits', 'j', 'i', 3],
+    ],
+    [
+      'Sum',
+      ['Multiply', 'i', 'j', 'k', 'x'],
+      ['Limits', 'i', 1, 'n'],
+      ['Limits', 'j', 1, 'i'],
+      ['Limits', 'k', 'j', 'i'],
+    ],
+  ])('%s over several index sets is in', (...json) => expectIn(json));
+
+  test('an inner bound that reads the outer index is read in the outer loop', () => {
+    const glsl = code([
+      'Sum',
+      ['Multiply', 'i', 'j', 'x'],
+      ['Limits', 'i', 1, 'n'],
+      ['Limits', 'j', 1, 'i'],
+    ]);
+    expect(glsl).toMatch(
+      /for \(int i = 1; [^]*for \(int j = 1; j <= int\(floor\(float\(i\)\)\)/
+    );
+  });
+
+  // The unrolled code is also a JavaScript expression of `x`, so its value
+  // can be compared with the value of the interpreter.
+  test.each([
+    [
+      [
+        'Sum',
+        ['Multiply', 'i', 'j', 'x'],
+        ['Limits', 'i', 1, 3],
+        ['Limits', 'j', 1, 4],
+      ],
+      120,
+    ],
+    [
+      [
+        'Product',
+        ['Add', 'i', 'j', 'x'],
+        ['Limits', 'i', 1, 2],
+        ['Limits', 'j', 1, 2],
+      ],
+      600,
+    ],
+  ])(
+    'the unrolled nest of %j has the value of the interpreter',
+    (json, value) => {
+      const glsl = code(json);
+      expect(glsl).not.toContain('for');
+      expect(new Function('x', `return ${glsl};`)(2)).toBe(value);
+      const interpreted = ce.box(json as any).subs({ x: 2 });
+      expect(interpreted.N().re).toBe(value);
+    }
+  );
+
+  test('a multi-index Sum in the body of a user function is in', () => {
+    ce.assign(
+      'multiIndexSum',
+      ce.box([
+        'Function',
+        [
+          'Sum',
+          ['Multiply', 'i', 'j', 't'],
+          ['Limits', 'i', 1, 3],
+          ['Limits', 'j', 1, 'i'],
+        ],
+        't',
+      ])
+    );
+    expectIn(['multiIndexSum', 'x']);
+    expectIn(['Add', ['multiIndexSum', 'x'], ['multiIndexSum', 'y']]);
+  });
+
+  test('a multi-index Sum that is not nested is out', () => {
+    const sum = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j', 'x'],
+      ['Limits', 'i', 1, 3],
+      ['Limits', 'j', 1, 4],
+    ]);
+    const glsl = glslFragmentDefinition(
+      ce._getCompilationTarget('glsl')!.createTarget()
+    );
+    expect(typeFragment(sum, glsl).refusal?.node).toBe(sum);
+  });
+});
+
 describe('review fixes, second round', () => {
   test('a stored value with a name that an index binds where it is read is out', () => {
     ce.assign('capturedK', ce.parse('k^2'));

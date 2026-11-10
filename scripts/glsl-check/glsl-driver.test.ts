@@ -283,7 +283,7 @@ const LOWERINGS: ReadonlyArray<{
     marker: /_gpu_cossinpi\(/,
   },
   {
-    // `compileGPUSumProduct()`: a multi-index `Sum` is a nest.
+    // `nestMultiIndexAggregate()`: a multi-index `Sum` is a nest.
     name: 'the nest of a multi-index sum',
     expr: [
       'Sum',

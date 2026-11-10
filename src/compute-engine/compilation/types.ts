@@ -1475,8 +1475,12 @@ export interface CompileTarget<Expr = unknown> {
    * and `inlinedUserFunctionCall()` call it on the prepared body. The GLSL
    * target sets it (`gpuApplyDerivatives()`, `gpu-applied-derivative.ts`):
    * a shader has no function values, and the call is replaced by the
-   * closed form of the derivative applied to its arguments. Absent means
-   * the body keeps its applications.
+   * closed form of the derivative applied to its arguments. The same
+   * rewrite writes a `Sum` or a `Product` with more than one index set as a
+   * nest of one aggregate per index. Absent means the body keeps its
+   * applications and its aggregates: a GPU target without this member
+   * cannot compile a `Sum` or a `Product` with more than one index set
+   * (`compileGPUSumProduct()` declines it).
    */
   applyDerivatives?: (expr: Expr, target: CompileTarget<Expr>) => Expr;
 

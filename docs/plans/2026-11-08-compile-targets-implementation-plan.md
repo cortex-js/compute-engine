@@ -809,6 +809,60 @@ bodies share, on a pure root, and outside loops.
   binder), all fixed; round 2, no finding from Codex and three small ones
   from Claude, fixed.
 
+**The result of the move of the nest of a multi-index `Sum`/`Product`**
+(2026-11-09, base `fd7941b76`, session compute-engine-8d).
+`Sum(body, L1, L2, …)` (and `Product`) is written as `Sum(Sum(body, L2, …),
+L1)`, the first index outermost, in stage 1 by `nestMultiIndexAggregate()`,
+which the walk of `gpuApplyDerivatives()` (`gpu-applied-derivative.ts`)
+runs after it rewrites the operands, so the nest has every route of that
+walk. The outer node keeps the scope of the original; the inner node gets a
+child scope that binds its indexes to the same definitions. The emit-time
+nest of `compileGPUSumProduct()` and its `fragmentReplaceOperands()` call
+are removed; a multi-index aggregate that reaches the emitter or the pass
+without the nest declines in both, so `canCompile()` and `compile()`
+agree.
+
+- Source: 106 lines added, 35 removed, most of the added lines comments.
+  The change fixes nothing that was wrong; it removes one trusted lowering,
+  and the pass now types the inner aggregate. Five of the nine calls of
+  `fragmentReplaceOperands()` remain: four for the half-turn operands
+  (`gpuPiMultiple()`, `gpuImaginaryPiMultiple()`, the Euler split) and one
+  for the trig offset (`gpuReduceTrigOffset()`).
+- Tests: 9 new cases in `compile-glsl-fragment.test.ts` (an inner bound
+  that reads the outer index, `Product`, three index sets, two values
+  compared with the interpreter, a user-function body). No expectation
+  changed.
+- Found: the interpreter leaves `Sum(i*j, Limits(i, 1, 3), Element(j,
+  Range(1, i)))` unevaluated (CE-1190); GLSL gives 25, as the old nest did.
+- Measures: the 241 test files that name GLSL pass (11,419 tests); `npm run
+  test:glsl`: 0 disagreements; `check:deps` passes. Tycho's whole-corpus
+  codegen audit against `fd7941b76`: 0 changed code, 0 new declines, 0
+  disagreements (17,421 records). Dual review, one round: no finding from
+  Codex; a name and an inner scope with a missing index (now no scope)
+  from Claude, fixed.
+
+**The trig offset was tried and not moved** (2026-11-09, session
+compute-engine-8d). The radian reduction of `gpuReduceTrigOffset()` can run
+in the walk of `gpuApplyDerivatives()`, but the move fixes no value and
+costs more than it removes:
+
+- The source grows by about 76 lines, and `prepareRoot()` must run the walk
+  again after its last `unrollFixedWidthCollections()`, which writes an
+  aggregate index as a literal and so makes new constant angles (the
+  voronoi row, Tycho row 467: 16 of 31 `sin` calls lost the reduction
+  without the second walk).
+- The exact form of the sine hash (`compile-glsl-exact-trig`) breaks unless
+  the rewrite skips a trig inside `Mod(u, 1)` or `Fract(u)`: a special case
+  that the emitter does not need.
+- Emitted code changes (`sin(x + Γ(40))` loses `_gpu_sin`; `sin(πx +
+  2·10⁶·π)` takes the half-turn helper), and a check order had to change to
+  avoid exponential time on a stored graph of shared nodes.
+
+The reduction stays in the emitter with its `fragmentReplaceOperands()`
+check. Item A of step 5 is finished: the remaining five calls are the trig
+offset and the four half-turn operands, which need internal heads to move
+(a question for step 7).
+
 ## Step 6. Tycho calls the predicate at resolve time
 
 Tycho's work, on the release that has step 3: `compileDeferredGlsl()` and

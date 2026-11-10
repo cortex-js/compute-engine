@@ -19,12 +19,20 @@
 //
 // An application that the rewrite cannot write stays as it is, and the pass
 // refuses it with the reason (`gpuAppliedBody()` returns it).
+//
+// The same walk writes a `Sum` or a `Product` with more than one index set
+// as a nest of one aggregate per index (`nestMultiIndexAggregate()`), so
+// that this rewrite also reaches every route where such an aggregate can
+// get to the emitter, and the pass types the nest that the emitter writes.
 
-import type { Expression } from '../global-types.js';
+import type { BoxedDefinition, Expression, Scope } from '../global-types.js';
 import type { CompileTarget } from './types.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
-import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
+import {
+  declaredBinderNamesOf,
+  scopeForRebuild,
+} from '../boxed-expression/binding-sites.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
@@ -50,8 +58,9 @@ import { gpuOperandShape } from './gpu-shapes.js';
 /**
  * `expr` with each application of a derivative, `Apply(Derivative(f, …),
  * x…)`, replaced by the closed form of the derivative applied to its
- * arguments (`gpuAppliedBody()`). A tree with no such application is
- * returned unchanged.
+ * arguments (`gpuAppliedBody()`), and with each `Sum` or `Product` of more
+ * than one index set written as a nest (`nestMultiIndexAggregate()`). A
+ * tree with no such node is returned unchanged.
  *
  * The rewrite keeps the value and the evaluations of the interpreter:
  *  - `gpuAppliedBody()` requires each argument to be pure. The body can
@@ -86,20 +95,24 @@ export function gpuApplyDerivatives(
   target: CompileTarget<Expression>
 ): Expression {
   const ce = expr.engine;
-  // Whether a subtree holds an `Apply` node, by node.
+  // Whether a subtree holds an `Apply` node or a multi-index aggregate, by
+  // node.
   const holds = new Map<Expression, boolean>();
-  const holdsApply = (node: Expression): boolean => {
+  const holdsRewrite = (node: Expression): boolean => {
     if (!isFunction(node)) return false;
     let known = holds.get(node);
     if (known === undefined) {
-      known = node.operator === 'Apply' || node.ops.some(holdsApply);
+      known =
+        node.operator === 'Apply' ||
+        isMultiIndexAggregate(node) ||
+        node.ops.some(holdsRewrite);
       holds.set(node, known);
     }
     return known;
   };
   const done = new Map<Expression, Expression>();
   const walk = (node: Expression): Expression => {
-    if (!holdsApply(node) || !isFunction(node)) return node;
+    if (!holdsRewrite(node) || !isFunction(node)) return node;
     const known = done.get(node);
     if (known !== undefined) return known;
     const ops = node.ops.map(walk);
@@ -124,10 +137,69 @@ export function gpuApplyDerivatives(
       const body = gpuAppliedBody(result.ops, target.language ?? 'glsl');
       if (typeof body !== 'string') result = walk(body);
     }
+    result = nestMultiIndexAggregate(result);
     done.set(node, result);
     return result;
   };
   return walk(expr);
+}
+
+/** A `Sum` or a `Product` with more than one index set. */
+function isMultiIndexAggregate(node: Expression): boolean {
+  return (
+    (isFunction(node, 'Sum') || isFunction(node, 'Product')) && node.nops > 2
+  );
+}
+
+/**
+ * `Sum(body, L1, L2, …)` written as the nest `Sum(Sum(body, L2, …), L1)`,
+ * the first index outermost, and the inner aggregate nested again when it
+ * has more than one index set (the same for `Product`). Any other node is
+ * returned unchanged.
+ *
+ * The shader code has one loop (or one unrolled series of terms) for each
+ * aggregate node, and the emitter compiles one index set for each. The
+ * interpreter also visits the terms with the first index outermost, and the
+ * bounds of an inner index set can read an outer index. So the nest has the
+ * value of the interpreter, and the body and each bound are evaluated as
+ * many times as in the interpreter.
+ *
+ * The outer node keeps the scope of the original node, which binds every
+ * index (`scopeForRebuild()`). The inner node gets a scope of its own, a
+ * child of that scope, that binds the indexes of its index sets to the same
+ * definitions, as the canonical form of a `Sum` binds its indexes in its
+ * own scope (`canonicalBigop()`). The body and the bounds are not rebuilt:
+ * their symbols keep their definitions.
+ */
+function nestMultiIndexAggregate(node: Expression): Expression {
+  if (!isMultiIndexAggregate(node) || !isFunction(node)) return node;
+  const ce = node.engine;
+  const outer = node.localScope;
+  const [body, first, ...rest] = node.ops;
+  const innerOps = [body, ...rest];
+  let scope: Scope | undefined;
+  if (outer !== undefined) {
+    const bindings = new Map<string, BoxedDefinition>();
+    let complete = true;
+    for (const name of declaredBinderNamesOf(ce, node.operator, innerOps)) {
+      const def = outer.bindings.get(name);
+      if (def === undefined) complete = false;
+      else bindings.set(name, def);
+    }
+    // A canonical aggregate binds each of its indexes in its own scope. If
+    // one is missing, the inner node gets no scope, as `scopeForRebuild()`
+    // gives none for a scope that does not bind every declared index.
+    if (complete)
+      scope = {
+        parent: outer,
+        bindings,
+        binderNames: new Set(bindings.keys()),
+      };
+  }
+  const inner = nestMultiIndexAggregate(
+    ce._fn(node.operator, innerOps, { scope })
+  );
+  return ce._fn(node.operator, [inner, first], { scope: outer });
 }
 
 /**
