@@ -22,10 +22,7 @@ import {
   gpuVecType,
   statementCaptureSinks,
 } from './gpu-emit.js';
-import {
-  gpuHoistKeepsCallerOrder,
-  gpuInSelectionBranch,
-} from './gpu-draw-order.js';
+import { gpuWithCallerCodeBound } from './gpu-caller-binding.js';
 import { gpuComponentCount, gpuNaNFor, gpuOperandShape } from './gpu-shapes.js';
 import { gpuTypeOfValue } from './gpu-declared-types.js';
 
@@ -339,6 +336,14 @@ function gpuWritesOutside(
  * `compileGPUConditionalArm`), when the arms have no one static type, and
  * when running the selection ahead of its statement position could be
  * observed (the gate below).
+ *
+ * The code that the caller supplies in a clause that is evaluated on a
+ * condition (an arm, a condition past the first) is computed into
+ * temporaries at the start of its branch (`gpuWithCallerCodeBound()`). The
+ * selection itself runs at its place in the order of caller code: the
+ * caller code of its statement that comes before it is bound ahead of it,
+ * and when the selection holds caller code, the binding of its statement
+ * computes it into a temporary at its place (`gpuBindCallerCode()`).
  */
 export function compileGPUStatementSelection(
   args: ReadonlyArray<Expression>,
@@ -349,11 +354,10 @@ export function compileGPUStatementSelection(
     return undefined;
   // Hoisted as one statement, the selection runs ahead of the whole
   // expression at its statement position (`hoist.unit`), so a sibling
-  // written BEFORE the selection runs after it. Two things could observe
-  // that order, and the gate refuses both: caller code inside the selection
-  // that could change places with a sibling's (`gpuHoistKeepsCallerOrder`
-  // below) — and a sibling that WRITES a binding, since the selection could read that
-  // binding before the write, directly, through a symbol whose value is
+  // written BEFORE the selection runs after it. A sibling that WRITES a
+  // binding could observe that order, and the gate refuses it: the
+  // selection could read that binding before the write, directly, through
+  // a symbol whose value is
   // inlined, or inside a function it calls. Where a read hides is not
   // examined; the writes are: an assignment anywhere in the unit outside
   // the selection's own clauses, and a call of a function whose signature
@@ -380,10 +384,6 @@ export function compileGPUStatementSelection(
     args.some((a) => gpuWritesOutside(a, new Set()))
   )
     return undefined;
-  // The hoisted selection runs ahead of the rest of the statement, so caller
-  // code in a clause must not move ahead of other caller code
-  // (`gpuHoistKeepsCallerOrder`).
-  if (!gpuHoistKeepsCallerOrder(args, target)) return undefined;
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const arms = args.filter((_, i) => i % 2 === 1);
   // In a complex selection the caller lifts each real scalar arm to a `vec2`
@@ -415,9 +415,10 @@ export function compileGPUStatementSelection(
   // `lazy`: the clause is a lazily-evaluated operand of the selection (an
   // arm, a condition past the first), which the operand compiler hands to
   // `compileGPUConditionalArm`; the guard is skipped once for it. The first
-  // condition is evaluated unconditionally and carries no guard. The
-  // statements of a lazy clause are placed in its branch, so their order
-  // check compares them with that clause only (`gpuInSelectionBranch`).
+  // condition is evaluated unconditionally and carries no guard. The caller
+  // code of a lazy clause is computed into temporaries at the start of its
+  // branch (`gpuWithCallerCodeBound()`), with the statements that the clause
+  // hoists.
   const capture = (
     f: () => string,
     lazy: boolean
@@ -426,7 +427,7 @@ export function compileGPUStatementSelection(
     if (lazy) statementCaptureSinks.add(sink);
     let code: string;
     try {
-      code = lazy ? gpuInSelectionBranch(sink, f) : f();
+      code = f();
     } finally {
       statementCaptureSinks.delete(sink);
     }
@@ -453,7 +454,10 @@ export function compileGPUStatementSelection(
     const val = args[i + 1];
     // `True` marks the default branch.
     if (isSymbol(cond, 'True')) {
-      const arm = capture(() => compile(val, i + 1), true);
+      const arm = capture(
+        () => gpuWithCallerCodeBound(val, target, () => compile(val, i + 1)),
+        true
+      );
       return [...arm.stmts, `${tv} = ${arm.code}`];
     }
     // The condition first, as the ternary form compiles it: the first
@@ -461,8 +465,17 @@ export function compileGPUStatementSelection(
     // bound ahead of the selection and the arm reads the binding, where
     // the arm compiled first would emit the subexpression in full — for a
     // shared operand tower, once per occurrence.
-    const c = capture(() => compile(cond, i), i > 0);
-    const arm = capture(() => compile(val, i + 1), true);
+    const c = capture(
+      () =>
+        i > 0
+          ? gpuWithCallerCodeBound(cond, target, () => compile(cond, i))
+          : compile(cond, i),
+      i > 0
+    );
+    const arm = capture(
+      () => gpuWithCallerCodeBound(val, target, () => compile(val, i + 1)),
+      true
+    );
     const armLines = [...arm.stmts, `${tv} = ${arm.code}`];
     return [
       ...c.stmts,
@@ -731,4 +744,57 @@ export function gpuSelectionArm(
         `selection is complex.`
     );
   return `${gpuVec2()}(${code}, 0.0)`;
+}
+
+/**
+ * Compile an operand that the caller will write MORE THAN ONCE into its
+ * emitted code. A pure operand compiles directly (the same code as
+ * `compile(x)`). An impure one is bound to a hoisted temporary, so that it
+ * is computed once, or the head declines where no statement sink is
+ * available. In the GLSL fragment, such an operand is a block used as a
+ * value or a call of a function whose body is a block. `complex` selects a
+ * `vec2` temporary (a complex operand has no scalar shape, so the
+ * scalar-shape test is skipped there; `canHoist` is the test that applies).
+ *
+ * Code that the caller supplies is not handled here: it is computed into a
+ * temporary ahead of its statement (`gpuBindCallerCode()`), so the operand
+ * compiles to a read of that temporary.
+ */
+export function gpuOperandOnce(
+  head: string,
+  x: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>,
+  complex = false
+): string {
+  // Read through the value of a symbol, as the shader inlines it: a symbol
+  // whose value is impure is pure to the engine.
+  if (!BaseCompiler.foldValueImpure(x)) return compile(x);
+  if (
+    !BaseCompiler.canHoist(target) ||
+    (!complex && gpuOperandShape(x) !== 'scalar')
+  )
+    throw new Error(
+      `Could not compile \`${head}\`: an impure operand cannot be bound to a temporary ` +
+        'at this position, and the code writes it more than once.'
+    );
+  return gpuHoistOnce(target, complex ? gpuVec2() : 'float', compile(x));
+}
+
+/**
+ * Hoist `code`, of the shader type `type`, into a temporary declared ahead of
+ * the statement of `target`, and return the name of the temporary. Code that
+ * is already the name of a variable (a temporary that holds code that the
+ * caller supplies, `gpuBindCallerCode()`) is returned as it is: reading a
+ * variable twice runs no code. `target` must have a statement sink.
+ */
+export function gpuHoistOnce(
+  target: CompileTarget<Expression>,
+  type: string,
+  code: string
+): string {
+  if (/^[A-Za-z_]\w*$/.test(code)) return code;
+  const t = BaseCompiler.tempVar(target);
+  BaseCompiler.hoistStatement(target, `${type} ${t} = ${code};`);
+  return t;
 }

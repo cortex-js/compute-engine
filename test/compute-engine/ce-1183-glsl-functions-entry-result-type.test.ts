@@ -39,7 +39,9 @@ describe('GLSL: the result type of a call of a functions entry', () => {
     ce.declare('x', 'real');
     const r = glsl(ce, ['Add', ['h', 'x'], 1], { h: 'hostH' });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('hostH(x) + 1.0');
+    // The call is computed once, into a temporary of type `float`
+    // (`gpu-caller-binding.ts`).
+    expect(r.code).toBe('float _tv1 = hostH(x);\nreturn _tv1 + 1.0;');
   });
 
   test('an integer result is read as a real', () => {

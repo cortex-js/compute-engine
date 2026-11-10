@@ -40,7 +40,39 @@
   example `Log(v, 10)`, the negation of a matrix, and a list of more than
   256 elements read as a uniform array.
 
+- **On GLSL, code that the caller supplies is computed into a temporary
+  before its statement.** This is a `vars` entry whose source is not a plain
+  read (`nextValue()`, `vec3(u + v)`), a `functions` entry not declared
+  `pure: true`, and an operator's own `compile` handler. Such code can count
+  its calls or draw a number. Each occurrence now runs once, in the order of
+  the interpreter, so the code of an expression that holds it is a list of
+  statements that ends with `return`: with `vars: { W: 'nextValue()' }`,
+  `W + 1` was `nextValue() + 1.0` and is now
+  `float _tv1 = nextValue();` then `return _tv1 + 1.0;`. A piece of such code
+  in a branch is computed at the start of its branch, so an `If` or a
+  `Which` whose branch holds it is written as an `if` statement, not with
+  `?:`. A plain read (`u_t`, `params.x`) is not caller code and stays in
+  place, unless caller code comes after it in the statement: the caller's
+  code could write the variable that it reads, so it is then read first.
+  Expressions with no such code compile as before.
+
 ### Resolved Issues
+
+- **On GLSL, `compile()` no longer declines expressions with caller code that
+  `canCompile()` accepts.** With
+  `vars: { W: 'nextValue()', V: 'vec3(nextValue())' }`, `W + Max(V)`,
+  `(W, Max(V))`, `W + Sum(V^2)`, `W + Sum(W + k, k, 1, n)` and
+  `If(c, Max(V), 0)` declined, because the shader code would have computed
+  `V` or the loop before `W`, or a branch would have held statements. They
+  now compile, with `W` and `V` each computed once, in the order of the
+  interpreter: the `W` of the loop body once per iteration, and the `V` of
+  the branch only when the branch is taken. Forms that wrote an operand with
+  caller code more than once now compile too, with the operand computed once:
+  `Cot(W)` is `float _tv1 = nextValue();` then
+  `return (_gpu_cos(_tv1) / _gpu_sin(_tv1));`, and so are `Remainder(W, 2)`,
+  `Binomial(W, 3)`, `x < W < 3` and `Cot(F(x))` with `functions: { F: 'myF' }`.
+  `W + W` calls `nextValue()` twice, as the interpreter evaluates `W` twice.
+  (CE-1176)
 
 - **On GLSL, the code can no longer call a user function that its preamble
   does not define.** A check of the emitted code built a preamble in the

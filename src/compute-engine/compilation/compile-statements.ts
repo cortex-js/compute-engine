@@ -344,8 +344,14 @@ export function compileStatementBody(
     };
     if (root && expr !== undefined) sink.root = expr;
     sink.unit = expr;
-    const code = core.compile(expr, { ...target, hoist: sink }, prec);
-    return { stmts: sink.stmts, code };
+    const t = { ...target, hoist: sink };
+    const release = target.bindStatementEffects?.(expr, t);
+    try {
+      const code = core.compile(expr, t, prec);
+      return { stmts: sink.stmts, code };
+    } finally {
+      release?.();
+    }
   };
   return withStatementRecompile(target, expr, run);
 }
@@ -533,7 +539,14 @@ export function compileListStatement(
     return poolStatementCode(unit, compileWith(target));
   return withStatementRecompile(target, unit, () => {
     const sink = { stmts: [] as string[], boundVars: target.boundVars, unit };
-    const lines = compileWith({ ...target, hoist: sink });
+    const t = { ...target, hoist: sink };
+    const release = target.bindStatementEffects?.(unit, t);
+    let lines: string[];
+    try {
+      lines = compileWith(t);
+    } finally {
+      release?.();
+    }
     if (sink.stmts.length === 0) return lines;
     return [...sink.stmts.map((s) => s.replace(/;\s*$/, '')), ...lines];
   });

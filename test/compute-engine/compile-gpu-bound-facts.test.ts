@@ -147,9 +147,11 @@ for (const [language, makeTarget] of [
 
     test('caller overrides and mappings block the affected proofs', () => {
       const { code } = fixture(3);
+      // The caller's `Length` is computed once, into a temporary, and the
+      // bound of the loop reads it (`gpu-caller-binding.ts`).
       expect(
         code(sum('k'), { functions: { Length: 'customLength' } })
-      ).toContain('floor(customLength(');
+      ).toMatch(/float (_tv\d+) = customLength\([\s\S]*floor\(\1\)/);
       expect(
         code(sum(['Add', 'k', 1], 0, 152), { functions: { Add: 'customAdd' } })
       ).toContain('_gpu_at153');
@@ -171,7 +173,9 @@ for (const [language, makeTarget] of [
       const loop = code(sum(['Add', 'k', 1], 0, 152), {
         constantFold: false,
       });
-      expect(loop).toMatch(/_gpu_at153\([^,]+, 7\.0\)/);
+      // The handler is caller code: its code is computed into a temporary
+      // at the start of each iteration (`gpu-caller-binding.ts`).
+      expect(loop).toMatch(/float (_tv\d+) = 7\.0;[\s\S]*_gpu_at153\([^,]+, \1\)/);
       expect(loop).not.toContain('(k + 1) - 1');
 
       // Preserve the arithmetic node so literal canonicalization cannot
@@ -184,7 +188,7 @@ for (const [language, makeTarget] of [
         { fallback: false, constantFold: false }
       );
       expect(constant.success).toBe(true);
-      expect(constant.code).toMatch(/_gpu_at153\([^,]+, 7\.0\)/);
+      expect(constant.code).toBe('float _tv1 = 7.0;\nreturn _gpu_at153(A, _tv1);');
       expect(constant.code).not.toContain('(1 + 1) - 1');
 
       // An opaque handler elsewhere in the body can also affect the counter.

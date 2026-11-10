@@ -1032,15 +1032,13 @@ export function compileBlock(
                 assignedValue!,
                 result,
                 assignedName,
-                target,
-                node
+                target
               )
             : target.valueBlock(
                 last,
                 result.slice(0, -1),
                 result[result.length - 1],
-                target,
-                node
+                target
               );
         if (hoisted !== undefined) return hoisted;
       }

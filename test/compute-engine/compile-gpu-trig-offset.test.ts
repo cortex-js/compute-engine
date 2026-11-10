@@ -126,7 +126,11 @@ describe('terms that are not constants, and other routes', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['Gamma', 20]]]);
     expect(
       compile(e, { to: 'glsl', functions: { Gamma: 'myGamma' } }).code
-    ).toBe('_gpu_sin(x + myGamma(20.0))');
+    ).toBe(
+      // The call of the caller's function is computed once, into a
+      // temporary, ahead of the statement (`gpu-caller-binding.ts`).
+      'float _tv1 = myGamma(20.0);\nreturn _gpu_sin(x + _tv1);'
+    );
   });
 
   test('degree mode: the offset is reduced by 360', () => {

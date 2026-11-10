@@ -125,13 +125,14 @@ import {
   gpuStorageOperandSource,
 } from './gpu-at.js';
 import { numericLiteralSource } from './compiler-type-facts.js';
-import { targetFoldValueImpure } from './compile-folding.js';
 import {
-  gpuAssertCallerCodeNotRepeated,
-  gpuAssertHoistKeepsCallerOrder,
-  gpuOperandOnce,
-  gpuReachesCallerCode,
-} from './gpu-draw-order.js';
+  reachesCallerCodeOn,
+  targetFoldValueImpure,
+} from './compile-folding.js';
+import {
+  gpuAssertNoConditionalCallerCode,
+  gpuWithCallerCodeBound,
+} from './gpu-caller-binding.js';
 import { gpuDeclaredTypeOf, gpuTypeOfValue } from './gpu-declared-types.js';
 import { gpuCheckIdentifier } from './gpu-reserved.js';
 import { gpuRoundToInteger, gpuRoundToStep } from './gpu-library.js';
@@ -159,7 +160,9 @@ import {
   gpuAssertSelectableArms,
   gpuCanPlaceStatement,
   gpuConditional,
+  gpuHoistOnce,
   gpuNeedsStatements,
+  gpuOperandOnce,
   gpuSelectionArm,
   gpuSelectionIsComplex,
   gpuShaderLoopJumps,
@@ -288,17 +291,16 @@ export function compileGPUBroadcastUnary(
     );
   const vector = lowering.collection();
   // An impure operand (in the GLSL fragment, a block used as a value or a
-  // call of a function whose body is a block) must be computed once. An element lowering can use its
-  // operand twice (`Cot` is `cos(u) / sin(u)`), and on this route it
-  // receives a pure placeholder, so its own guard does not apply. Such a
-  // lowering declines below. Code that the caller supplied (`gpuReachesCallerCode`: `List(W, x, 1)` with
-  // `vars: { W: 'nextValue()' }`) can count its calls, so it must run once
-  // too, and it declines in the same way. The value of a symbol that reads
-  // an input is not emitted, so it is not read (`targetFoldValueImpure`).
+  // call of a function whose body is a block) must be computed once. An
+  // element lowering can use its operand twice (`Cot` is `cos(u) / sin(u)`),
+  // and on this route it receives a pure placeholder, so its own guard does
+  // not apply. Such a lowering declines below. Code that the caller supplies
+  // is not impure here: it is computed into a temporary ahead of the
+  // statement (`gpuBindCallerCode()`), and the operand reads the temporary.
+  // The value of a symbol that reads an input is not emitted, so it is not
+  // read (`targetFoldValueImpure`).
   const impure =
-    (targetFoldValueImpure(operand, target) ||
-      gpuReachesCallerCode(operand, target)) &&
-    !/^[A-Za-z_]\w*$/.test(vector);
+    targetFoldValueImpure(operand, target) && !/^[A-Za-z_]\w*$/.test(vector);
   // The scalar lowering of `Square` reads the shape of its operand to choose
   // between `_gpu_pow2` and the `vecN` overload `_gpu_pow2_vN`. Here its
   // operand is a placeholder for the vector code, which has no shape, so the
@@ -1076,10 +1078,6 @@ function compileGPUSumProduct(
       const sink = target.hoist?.stmts;
       const declarationsAt = sink?.length ?? 0;
       const terms: string[] = [];
-      // How many terms stay in the expression and how many are computed in
-      // hoisted statements (checked after the loop).
-      let inlineTerms = 0;
-      let hoistedTerms = 0;
       // Statements a term hoists (a nested loop-form Sum with a symbolic bound)
       // are drained into the ENCLOSING sink: the index is substituted as a
       // literal in `var` below, so nothing a term emits refers to the bound name,
@@ -1115,26 +1113,22 @@ function compileGPUSumProduct(
         try {
           // Each term must leave a value after any nested loops are hoisted.
           code = underRealIndex(() =>
-            BaseCompiler.compileValueOperand(args[0], innerTarget)
+            gpuWithCallerCodeBound(args[0], innerTarget, () =>
+              BaseCompiler.compileValueOperand(args[0], innerTarget)
+            )
           );
         } finally {
           clearGPUCounters(innerTarget);
         }
         if (termSink.stmts.length === 0) {
-          inlineTerms += 1;
           terms.push(`(${code})`);
           continue;
         }
-        hoistedTerms += 1;
         // The sink is non-empty only when `canHoist(target)` held above.
         //
         // A term whose value is already a bare name — a block term stores its
         // value in a temporary the hoisted statements declare (`valueBlock`)
         // — is read through that name; binding it again would only copy it.
-        // The term's statements run ahead of the enclosing statement, so
-        // caller code among them must not run ahead of caller code written
-        // before the `Sum`.
-        gpuAssertHoistKeepsCallerOrder(kind, [args[0]], target);
         if (/^[A-Za-z_$][\w$]*$/.test(code)) {
           BaseCompiler.hoistStatement(target, ...termSink.stmts);
           terms.push(`(${code})`);
@@ -1149,22 +1143,6 @@ function compileGPUSumProduct(
         );
         terms.push(`(${tv})`);
       }
-      // The statements of a hoisted term run ahead of the whole expression,
-      // so with some terms hoisted and others inline, the caller code of a
-      // later hoisted term would run before that of an earlier inline term.
-      // When every term hoists, the terms run in order.
-      if (
-        inlineTerms > 0 &&
-        hoistedTerms > 0 &&
-        gpuReachesCallerCode(args[0], target)
-      )
-        throw new Error(
-          `Could not compile \`${kind}\`: some unrolled terms are computed in ` +
-            'statements ahead of the expression and others stay in it, and ' +
-            'code supplied by the caller (a `vars` source, a `functions` or ' +
-            '`operators` entry, or a `compile` handler) in the terms would ' +
-            'then run out of the order of the interpreter.'
-        );
       const result = `(${terms.reduce((a, b) => combine(a, b))})`;
       if (sink !== undefined && invariants.length > 0)
         sink.splice(
@@ -1250,8 +1228,15 @@ function compileGPUSumProduct(
   // never ran; shader arithmetic raises nothing (a division by zero answers an
   // infinity, an out-of-domain call a NaN), so evaluating an invariant whose
   // loop turns out to run zero times computes a value nobody reads.
-  const { bindings: invariants, result: body } =
-    BaseCompiler.hoistLoopInvariants(
+  //
+  // Code that the caller supplies in the body runs once per iteration, so it
+  // is computed into temporaries at the start of the body, in the order of
+  // the interpreter (`gpuBindCallerCode()`); it is never an invariant.
+  const { bindings: invariants, result: body } = gpuWithCallerCodeBound(
+    args[0],
+    bodyTarget,
+    () =>
+      BaseCompiler.hoistLoopInvariants(
       args[0],
       [index],
       target,
@@ -1274,7 +1259,8 @@ function compileGPUSumProduct(
           }
         }),
       (node) => gpuTypeOfValue(node) !== undefined
-    );
+    )
+  );
 
   // Compiled BEFORE the loop statements are pushed, so anything the bounds
   // themselves hoist lands ahead of the loop that consumes them.
@@ -1387,9 +1373,6 @@ function compileGPUSumProduct(
   ];
 
   if (BaseCompiler.canHoist(target)) {
-    // The bounds and the body run in the loop statement, so caller code in
-    // any of them must not move ahead of earlier code with an effect.
-    gpuAssertHoistKeepsCallerOrder(kind, args, target);
     BaseCompiler.hoistStatement(target, loop.join('\n'));
     return acc;
   }
@@ -1806,15 +1789,19 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target,
         values
       );
-    // An arm that needs statements, or that repeats a subexpression a
-    // ternary would expand once per occurrence, takes the statement form;
-    // the clause list is in `Which` shape, so its position 3 is the `If`
-    // node's operand 2.
+    // An arm that needs statements, that repeats a subexpression a ternary
+    // would expand once per occurrence, or that holds code that the caller
+    // supplies (computed into temporaries at the start of its branch,
+    // `gpuWithCallerCodeBound()`), takes the statement form; the clause list
+    // is in `Which` shape, so its position 3 is the `If` node's operand 2.
     if (
       gpuNeedsStatements(args[1]) ||
       gpuNeedsStatements(args[2]) ||
       (gpuCanPlaceStatement(target) &&
-        (gpuArmSharesWork(args[1]) || gpuArmSharesWork(args[2])))
+        (gpuArmSharesWork(args[1]) ||
+          gpuArmSharesWork(args[2]) ||
+          reachesCallerCodeOn(args[1], target) ||
+          reachesCallerCodeOn(args[2], target)))
     ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
@@ -1833,6 +1820,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (statement !== undefined) return statement;
     }
+    gpuAssertNoConditionalCallerCode('If', [args[1], args[2]], target);
     // The condition is evaluated unconditionally, so it may hoist; the two arms
     // are selected and must not (see `compileGPUConditionalArm`). Operand
     // indices preserve their CSE regions, allowing reuse of outer bindings.
@@ -1865,16 +1853,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target,
         values
       );
-    // An arm, or a condition past the first, that needs statements takes the
-    // statement form (`compileGPUStatementSelection`); the ternary chain
-    // below cannot hold them.
+    // An arm, or a condition past the first, that needs statements, or
+    // that holds code that the caller supplies, takes the statement form
+    // (`compileGPUStatementSelection`); the ternary chain below cannot hold
+    // them.
     const canPlace = gpuCanPlaceStatement(target);
     if (
       args.some(
         (a, i) =>
           i > 0 &&
           (gpuNeedsStatements(a) ||
-            (canPlace && gpuArmSharesWork(a)))
+            (canPlace &&
+              (gpuArmSharesWork(a) || reachesCallerCodeOn(a, target))))
       )
     ) {
       const statement = compileGPUStatementSelection(
@@ -1894,6 +1884,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (statement !== undefined) return statement;
     }
+    gpuAssertNoConditionalCallerCode('Which', args.slice(1), target);
     // The fall-through NaN must match the branch values' shape (see
     // `gpuNaNFor`); every branch of a well-typed `Which` shares one shape,
     // so the first determinable value decides.
@@ -2368,9 +2359,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Bind scalars to hoisted temporaries; where
     // there is no statement sink (a conditional arm), or the operand is not
     // a scalar, there is no safe reading — decline.
-    // Read through the value of a symbol, as the shader inlines it. Caller
-    // code would run once per copy (`gpuAssertCallerCodeNotRepeated`).
-    gpuAssertCallerCodeNotRepeated('Remainder', [a, b], target);
+    // Read through the value of a symbol, as the shader inlines it.
     if (BaseCompiler.foldValueImpure(a) || BaseCompiler.foldValueImpure(b)) {
       if (
         !BaseCompiler.canHoist(target) ||
@@ -2381,7 +2370,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           'Could not compile `Remainder`: an impure operand cannot be bound to a ' +
             'temporary at this position, and the code writes it twice.'
         );
-      gpuAssertHoistKeepsCallerOrder('Remainder', [a, b], target);
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
       const decl = (n: string) => `float ${n}`;
@@ -2402,9 +2390,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Reciprocal trigonometric functions (no GPU built-ins)
   Cot: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Cot`: no argument');
-    // The operand is written twice below, so caller code in it would run
-    // twice (`gpuAssertCallerCodeNotRepeated`).
-    gpuAssertCallerCodeNotRepeated('Cot', [x], target);
     if (BaseCompiler.isComplexValued(x)) {
       // The operand is spliced TWICE below, so an IMPURE one is first bound
       // to a hoisted temporary, so that it is computed once (see the real
@@ -2415,10 +2400,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
             'Could not compile `Cot`: an impure complex operand cannot be bound to a ' +
               'temporary at this position, and the code writes it twice.'
           );
-        gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
-        const t = BaseCompiler.tempVar(target);
-        const decl = `${gpuVec2()} ${t}`;
-        BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+        const t = gpuHoistOnce(target, gpuVec2(), compile(x));
         return `_gpu_cdiv(_gpu_ccos(${t}), _gpu_csin(${t}))`;
       }
       // Compile the operand ONCE: two `compile()` calls would do the work of
@@ -2435,12 +2417,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           'Could not compile `Cot`: an impure operand cannot be bound to a temporary ' +
             'at this position, and the code writes it twice.'
         );
-      gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
-      const t = BaseCompiler.tempVar(target);
-      const decl = `float ${t}`;
-      BaseCompiler.hoistStatement(
+      const t = gpuHoistOnce(
         target,
-        `${decl} = ${compile(gpuReduceTrigOffset(x, 1, true, target))};`
+        'float',
+        compile(gpuReduceTrigOffset(x, 1, true, target))
       );
       return `(_gpu_cos(${t}) / _gpu_sin(${t}))`;
     }
@@ -3007,14 +2987,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`ContrastingColor\`: an impure operand cannot be bound to a ` +
           `temporary at this position, and the code writes it more than once.`
-      );
-    // Caller code in a color operand would run once per copy, or ahead of
-    // earlier code when the operand is bound to a temporary below.
-    if (target !== undefined)
-      gpuAssertCallerCodeNotRepeated(
-        'ContrastingColor',
-        args.slice(0, 3),
-        target
       );
     // Every color operand is spliced twice, and `select` evaluates both arms,
     // so an operand written inline runs its `_gpu_srgb_to_oklch` conversion up

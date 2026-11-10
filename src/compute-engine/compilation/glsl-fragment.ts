@@ -60,11 +60,6 @@ import { parseColorString } from '../library/colors.js';
 import { GPU_MAX_INLINE_ELEMENTS } from './gpu-functions.js';
 import { gpuStorageAtBaseShape } from './gpu-at.js';
 import { BaseCompiler } from './base-compiler.js';
-import {
-  gpuImaginaryPiMultiple,
-  gpuOperandShape,
-  gpuResultIsComplexValued,
-} from './gpu-shapes.js';
 import { GPU_COLOR_SPACES, GPU_GAMUT_HELPERS } from './gpu-color.js';
 import { colorSpaceIsUnsettled } from './color-space-fact.js';
 import {
@@ -74,11 +69,7 @@ import {
 } from './compiler-type-facts.js';
 import { gpuNormalizeShaderType } from './gpu-declared-types.js';
 import { tryGetConstant } from './constant-folding.js';
-import {
-  assertSafeBigOpBounds,
-  isShaderVariableRead,
-  reachesCallerCodeOn,
-} from './compile-folding.js';
+import { assertSafeBigOpBounds } from './compile-folding.js';
 import { complexContinuation } from './complex-continuation.js';
 import { gpuShaderLoopJumps } from './gpu-statements.js';
 import { shadowedLibraryLoweringError } from './compile-definitions.js';
@@ -1355,122 +1346,6 @@ export type GlslFragmentOptions = {
 };
 
 /**
- * The operands of `node` that its GLSL code writes more than once, or
- * `undefined`. Each case copies the condition of the emitter, where it
- * calls `gpuOperandOnce()` or `gpuAssertCallerCodeNotRepeated()`
- * (`gpu-draw-order.ts`):
- * - `Argument`, `Beta`, `Cot`, `Remainder`, `ContrastingColor`,
- *   `Variance`: every operand;
- * - `Binomial`, `Choose`: the first operand, with a constant second
- *   operand of 2 or more (`gpuBinomial()`);
- * - `Conjugate`: a complex operand; `Coth`: a complex operand that is not
- *   an imaginary multiple of π (`gpuImaginaryPiMultiple()`);
- * - `Power`: the base, when the exponent is a constant non-integer with a
- *   real branch for a negative base (`realPowerExponent()`,
- *   `negativeBaseFloatPower()`) and the operands are real and not both
- *   constants: `Power(F(x), 2)` writes the base once;
- * - `Round` with no step: an operand that is not a scalar;
- *   `Round`, `Floor`, `Ceil`, `Truncate` with a step
- *   (`gpuRoundToStep()`): the operand, and a step that is not a constant;
- * - `Root`: a complex radicand, and its degree when it is not a constant;
- *   a real radicand under a constant odd degree (or a degree read as a
- *   rational with an odd numerator, `realRootDegreeTerms()`), when the
- *   radicand is not a constant either;
- * - a comparison with more than two operands: each middle operand, which
- *   two comparisons read.
- *
- * These operands are a subset of the operands that the emitter declines.
- * The emitter declines more operands than these: the squared term of a
- * `Sum` (`gpu-reduce.ts`) is not in this list.
- */
-function operandsWrittenTwice(
-  node: Expression
-): ReadonlyArray<Expression> | undefined {
-  if (!isFunction(node)) return undefined;
-  const ops = node.ops;
-  const [a, b] = ops;
-  switch (node.operator) {
-    case 'Argument':
-    case 'Beta':
-    case 'Cot':
-    case 'Remainder':
-    case 'ContrastingColor':
-    case 'Variance':
-      return ops;
-    case 'Binomial':
-    case 'Choose': {
-      const k = b === undefined ? undefined : tryGetConstant(b);
-      return k !== undefined && Number.isInteger(k) && k >= 2 ? [a] : undefined;
-    }
-    case 'Conjugate':
-      return a !== undefined && BaseCompiler.isComplexValued(a)
-        ? [a]
-        : undefined;
-    case 'Coth':
-      return a !== undefined &&
-        BaseCompiler.isComplexValued(a) &&
-        gpuImaginaryPiMultiple(a, 1) === undefined
-        ? [a]
-        : undefined;
-    case 'Power': {
-      if (a === undefined || b === undefined) return undefined;
-      if (BaseCompiler.isComplexValued(a) || BaseCompiler.isComplexValued(b))
-        return undefined;
-      if (tryGetConstant(a) !== undefined && tryGetConstant(b) !== undefined)
-        return undefined;
-      const negativeBase = BaseCompiler.negativeBaseFloatPower(ops);
-      return BaseCompiler.realPowerExponent(ops) !== undefined ||
-        typeof negativeBase === 'object'
-        ? [a]
-        : undefined;
-    }
-    case 'Round':
-    case 'Floor':
-    case 'Ceil':
-    case 'Truncate': {
-      if (a === undefined) return undefined;
-      if (b === undefined)
-        return node.operator === 'Round' &&
-          !BaseCompiler.isIntegerValued(a) &&
-          gpuOperandShape(a) !== 'scalar'
-          ? [a]
-          : undefined;
-      return tryGetConstant(b) === undefined ? [a, b] : [a];
-    }
-    case 'Root': {
-      if (a === undefined) return undefined;
-      if (
-        BaseCompiler.isComplexValued(a) ||
-        (b !== undefined && BaseCompiler.isComplexValued(b))
-      )
-        return b !== undefined && tryGetConstant(b) === undefined
-          ? [a, b]
-          : [a];
-      if (b === undefined) return undefined;
-      const n = tryGetConstant(b);
-      if (n === undefined || n === 2 || tryGetConstant(a) !== undefined)
-        return undefined;
-      if (gpuResultIsComplexValued('Root', [a, b])) return undefined;
-      return (Number.isInteger(n) && n % 2 !== 0) ||
-        BaseCompiler.realRootDegreeTerms(b)?.oddNumerator === true
-        ? [a]
-        : undefined;
-    }
-  }
-  return CHAINED_COMPARISONS.has(node.operator) && node.nops > 2
-    ? ops.slice(1, -1)
-    : undefined;
-}
-const CHAINED_COMPARISONS = new Set([
-  'Less',
-  'LessEqual',
-  'Greater',
-  'GreaterEqual',
-  'Equal',
-  'NotEqual',
-]);
-
-/**
  * The heads whose GLSL code reads an operand as a color and converts it to
  * OKLCh (`gpuColorOperand()`, `gpuColorEntryOperand()` in
  * `gpu-color.ts`).
@@ -1503,28 +1378,6 @@ function colorOperandOfUnsettledSpace(
     return undefined;
   return node.ops.find(
     (x) => !isFunction(x, 'Tuple') && colorSpaceIsUnsettled(x)
-  );
-}
-
-/**
- * The operand of `node` that holds code that the caller supplies
- * (`reachesCallerCodeOn()`: a call of a `functions` entry, or a `compile`
- * handler) when the GLSL code of `node` can write that operand more than
- * once, or `undefined`. The code would then run once per copy, where the
- * interpreter evaluates the operand once. These operands
- * (`operandsWrittenTwice()`) are a subset of the operands that the emitter
- * declines (`gpuOperandOnce()`).
- * The emitter declines more operands than these: the squared term of a
- * `Sum` (`gpu-reduce.ts`) is not in this list.
- * An operand that is the read of one variable (`isShaderVariableRead()`)
- * runs no code.
- */
-function callerCodeOperandWrittenTwice(
-  node: Expression,
-  target: CompileTarget<Expression>
-): Expression | undefined {
-  return operandsWrittenTwice(node)?.find(
-    (x) => !isShaderVariableRead(x, target) && reachesCallerCodeOn(x, target)
   );
 }
 
@@ -1622,17 +1475,6 @@ export function glslFragmentDefinition(
     rule: FragmentRule<GlslRepresentation>
   ): FragmentRule<GlslRepresentation> => ({
     walk: (node, scope, context, w) => {
-      const repeated = callerCodeOperandWrittenTwice(node, target);
-      if (repeated !== undefined)
-        return w.refuse(
-          node,
-          'head',
-          `The operand \`${repeated.toString()}\` of \`${node.operator}\` ` +
-            `contains code that the caller supplies (a \`vars\` entry ` +
-            `that is code, a \`functions\` entry or a \`compile\` handler), ` +
-            `and the GLSL code writes that operand more than once, so the ` +
-            `code would run more than once`
-        );
       // A base of `At` that is a list of one scalar has no value in GLSL
       // (there is no `vec1`; `gpuAtBaseShape()` declines it), unless the
       // list is in a texture (the `storage` option): `At(v, 1)` with

@@ -192,18 +192,22 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `vec2(((0.0 < t) ? (1.0 < t) : (t)), 0.0)`. The two branches mix a
   boolean and a float, which the shader compiler refuses. The interpreter
   gives an `incompatible-type` error at `x = 2` and `-1` at `x = -1`.
-- `glsl`, caller code in the `vars` option (crafted): with
-  `vars: { V: "vec3(a, b, c)", W: <code> }`, `canCompile()` answers
-  `{ ok: true }` and `compile()` then declines for `W + Max(V)`,
-  `(W, Max(V))`, `W + Sum(V^2)` and `W + Sum(W + k, k, 1, n)`, because the shader code would
-  run the statements of `Max(V)` or of the loop ahead of the code of `W`;
-  and for `If(c, Max(V), 0)`, because a branch that is evaluated on a
-  condition cannot hold statements. A user function with a parameter named
-  `discard` (a word that GLSL reserves) and no declared type is also
-  accepted by `canCompile()` and refused by `compile()`. The pass decides
-  before the code that fixes this order exists. No program compiles to
-  wrong code: `compile()` declined each of these before the fragment pass
-  too. Issue `issues/CE-1176.md`.
+- `glsl`, caller code evaluated on a condition with no statement of its
+  own (crafted): with `vars: { W: 'nextValue()' }`, `canCompile()` answers
+  `{ ok: true }` and `compile()` declines for a `Loop` whose guard or later
+  clause holds `W` (`Element(i, Range(1, n), 0 < W)`), for a user function
+  whose body has `And`, `Or` or a chained comparison with `W` after the
+  first operand (`g(x) := x < 1 < W < 2`; the prepare stage writes these as
+  an `If` in the root tree only), and for such a head that the caller maps
+  through `functions`. The code would run on a condition where no
+  temporary can be placed. No program compiles to wrong code.
+- `glsl`, a shared node of caller code in a user-function body (crafted):
+  the body of a user function that the host builds with one node object of
+  caller code at two places
+  (`Add(hx, hx)` with one boxed `hx = h(x0)` and `functions: { h: 'myH' }`),
+  written in place of its call: the binding is keyed by node, so the shader
+  calls `myH` once where the interpreter calls it twice. A body that is
+  parsed or boxed from MathJSON has one node per occurrence.
 - `glsl`, `Max(L)` and `Min(L)` of a list input held as a uniform array of
   more than 4 elements (crafted): with `L: list<real^5>`, `canCompile()`
   answers `{ ok: true }` and `compile()` declines, because the shader code
@@ -2016,39 +2020,68 @@ it, and the other impure nodes are calls of functions whose body is a block,
 which write only their own locals. Pure expressions, which every corpus
 document has at this position, are unaffected.
 
-Code that the caller supplies is held to the interpreter's order: a `vars`
-entry whose value is shader source other than a plain read (`nextValue()`,
-`vec3(u + v)`; a uniform name such as `u_x` or `params.x` is a plain read), a
-head mapped through `functions` or `operators`, and an operator's own `compile`
-handler. Such code can count its calls or draw a number, and the compiler does
-not see inside it. The values of the symbols that an expression reads and the
-bodies of the user functions it calls are looked through, as the shader
-inlines them, except the value of a symbol that reads an input (a plain `vars`
-read, a bound variable): with `vars: { T: 'u_T' }`, `T` emits `u_T` whatever
-value `T` has. The shader targets decline, rather than emit, a form that would
-run caller code more than once, move it ahead of code with an effect written
-before it, or compute it in a branch that is not taken. With
+Code that the caller supplies runs once per occurrence, in the order of the
+interpreter. Such code is a `vars` entry whose value is shader source other
+than a plain read (`nextValue()`, `vec3(u + v)`; a uniform name such as `u_x`
+or `params.x` is a plain read), a head mapped through `functions` (unless the
+entry is declared `pure: true`), and an operator's own `compile` handler. It
+can count its calls or draw a number, and the compiler does not see inside
+it. The values of the symbols that an expression reads and the bodies of the
+user functions it calls are looked through, as the shader inlines them,
+except the value of a symbol that reads an input (a plain `vars` read, a
+bound variable): with `vars: { T: 'u_T' }`, `T` emits `u_T` whatever value
+`T` has.
+
+Before a statement is compiled, each piece of caller code that the statement
+evaluates unconditionally is computed into a temporary of its shader type,
+in the order of the interpreter, and the statement reads the temporary
+(`gpuBindCallerCode()`, `gpu-caller-binding.ts`). So a form that writes an
+operand twice, or that computes part of the statement in a statement ahead
+of it, writes a read of the temporary. With
 `vars: { W: 'nextValue()', V: 'vec3(nextValue())' }`:
 
-- `Max(V)` compiles to a temporary that holds `V` once, but `W + Max(V)`
-  declines (the temporary would call `V` before `W`), and so do `Cot(W)`
-  (`cos` and `sin` would each call `W`), `Cot([W, x, 1])` and `x < W < 3`.
-- A `vars` entry whose code is the read of one variable (`u_t`, `params.x`,
-  `v[0]`) runs no code, so a form may write it twice even when it counts as
-  caller source (`{ a: 'u_t', b: 'u_t' }`: `Cot(a)` is
-  `cos(u_t) / sin(u_t)`). Hoisted caller code cannot move ahead of it
-  (next item).
-- Caller code can also write a variable that a plain read reads. So hoisted
-  caller code declines when the interpreter reads a `vars` key (whatever its
-  source) before it: with `vars: { W: 'state.value' }`, `(W, Max(V))`
-  declines, and `(Max(V), W)` compiles. A canonical `Add` can put the read
-  first: `Max(V) + U` declines.
-- A statement hoisted into the branch of a statement form runs ahead of the
-  rest of its clause only, so it is checked against that clause.
+- `W + Max(V)` is `float _tv1 = nextValue(); vec3 _tv2 = vec3(nextValue());`
+  then `return _tv1 + max(…_tv2.x, _tv2.y, _tv2.z…);`, and `Cot(W)` is
+  `float _tv1 = nextValue();` then `cos(_tv1) / sin(_tv1)`.
+- Each occurrence is one evaluation, as in the interpreter: `W + W` computes
+  `nextValue()` twice. One node object that the caller puts at several places
+  of the tree is copied before the other rewrites of the prepare stage, so
+  that each place gets its own temporary (`gpuSeparateCallerCode()`). A graph
+  whose code would then pass the size limit declines with the size message.
+- A position that is evaluated on a condition, or once per iteration, is
+  computed at the start of its branch or of each iteration: the selection
+  takes its statement form (`If(c, Max(V), 0)` computes `V` inside
+  `if (c) { … }`), and a loop body starts with its own temporaries
+  (`W + Sum(W + k, k, 1, n)` calls `nextValue()` once before the loop and once
+  per iteration). The node that holds such a position is itself computed at
+  its place in the order, so its caller code runs after the caller code
+  written before it. `And(a, b)` and `Or(a, b)` whose later operand holds
+  caller code are written `If(a, b, False)` and `If(a, True, b)`, and a
+  chained comparison whose third or later operand holds caller code,
+  `Less(a, b, c)`, is written `If(Less(a, b), Less(b, c), False)`: the
+  interpreter stops at the first pair that is false.
+- Caller code can write a variable that a plain read reads. So a part of the
+  statement that reads a `vars` key and that the interpreter evaluates
+  before a piece of caller code is read into a temporary first: with
+  `vars: { U: 'state.value' }`, `(U, Max(V))` reads `state.value` before it
+  computes `V`. A read with no caller code after it stays in place.
+- A selection whose branch holds caller code and that cannot take its
+  statement form (its branches have no one shader type, or a part of its
+  statement writes a binding that it could read) declines, and so do the
+  forms listed in the known limitations above (a `Loop` guard, `And` in the
+  body of a user function).
+- The body of a user function written as a shader function binds its own
+  caller code at its start; a body written in place of the call binds it at
+  the place of the call.
+- A piece whose value has no shader type for a temporary (a uniform array)
+  declines.
 
-The check is simple, not precise: a hoisted statement with caller code
-declines when anything else in its statement has an effect, also when that
-code comes after it. Binding caller code in order is not implemented. A form with no caller code compiles as before.
+A statement with no caller code compiles as before. A GLSL target object
+passed to `compile()` as the `target` option has no statement sink, so
+nothing is bound there. That route does not install the `vars` sources or
+the `functions` entries (`Cot(W)` is `cos(W) / sin(W)` with the bare name
+`W`); a `compile` handler that reaches it is written in place, and a form
+that writes its operand twice runs the handler's code twice.
 
 ### `Break` and `Continue` on the shader targets
 

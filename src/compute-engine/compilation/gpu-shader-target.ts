@@ -125,7 +125,10 @@ import {
   gpuAssertExpressionOnly,
   gpuCanPlaceStatement,
 } from './gpu-statements.js';
-import { gpuAssertHoistKeepsCallerOrder } from './gpu-draw-order.js';
+import {
+  gpuBindCallerCode,
+  gpuSeparateCallerCode,
+} from './gpu-caller-binding.js';
 import {
   GLSL_STAGE_BUILTINS,
   GLSL_STAGE_BUILTIN_OUTPUTS,
@@ -504,6 +507,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // than splice a bare block into a sub-expression. Gated to the pure GPU
       // languages by language id.
       bareStatementBlocks: this.languageId === 'glsl',
+      // Code that the caller supplies is computed into temporaries ahead of
+      // each statement, in the order of the interpreter
+      // (`gpu-caller-binding.ts`).
+      bindStatementEffects:
+        this.languageId === 'glsl' ? gpuBindCallerCode : undefined,
       // A multi-statement `Block` used as a VALUE — a `with` clause as the
       // term of a `Sum`, or as an operand of an addition — becomes one
       // compound statement in the enclosing sink: the block's locals are
@@ -521,17 +529,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // unconditionally, ahead of the operand that decides whether it runs.
       lazyOperand: (head, compiled, current) =>
         compileGPUConditionalArm(head, compiled, current),
-      valueBlock: (valueNode, stmts, valueCode, current, block) => {
+      valueBlock: (valueNode, stmts, valueCode, current) => {
         if (
           !BaseCompiler.canHoist(current) ||
           conditionalGPUSinks.has(current.hoist!)
         )
           return undefined;
-        gpuAssertHoistKeepsCallerOrder(
-          'Block',
-          block === undefined ? undefined : [block],
-          current
-        );
         const type = gpuTypeOfValue(valueNode, current);
         if (type === undefined) return undefined;
         const tv = BaseCompiler.tempVar(current);
@@ -1948,6 +1951,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * whose code would be too large (`gpuWrittenSize()`). It writes no code.
    *
    * The rewrites run in this order: `rewriteAngularUnit()`,
+   * `lowerParallelHeads()`, `gpuSeparateCallerCode()`,
    * `unrollFixedWidthCollections()`, `inlinePointCalls()`,
    * `inlinePointValues()`, `BaseCompiler.inlineCollectionValuedCallsAtRoot()`,
    * `inlineSharedUserFunctionCalls()`, `unrollFixedWidthCollections()`.
@@ -2008,6 +2012,39 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             reachableNames
           )
       );
+    // Code that the caller supplies runs once per occurrence, in the order of
+    // the interpreter (`gpu-caller-binding.ts`). Each place of the caller's
+    // tree gets a node of its own, before the rewrites below put one node at
+    // several places to mean one evaluation.
+    // A `functions` entry that the caller declares pure (`pure: true`) has
+    // no effect other than its value (`entryIsPure()`, `function-purity.ts`;
+    // its inference from the source text recognizes JavaScript function
+    // syntax only, so a shader entry is pure only by declaration). The
+    // common-subexpression pass can then compute it once, and a lowering can
+    // write its call more than once or move it ahead of other code: it does
+    // not count as code that the caller supplies (`reachesCallerCodeOn()`).
+    // This target reads no `operators` option, so a `functions` entry is
+    // always the lowering of its name.
+    const pureFunctions = new Set<string>();
+    for (const [name, entry] of Object.entries(options.functions ?? {}))
+      if (entryIsPure(entry)) pureFunctions.add(name);
+    const cseOptions = {
+      isOverriddenOperator: (name: string) =>
+        options.functions !== undefined &&
+        Object.hasOwn(options.functions, name),
+      isPureOverriddenOperator: (name: string) => pureFunctions.has(name),
+      isStringVar: opaqueVar,
+      isVarsKey: (name: string) =>
+        options.vars !== undefined && Object.hasOwn(options.vars, name),
+    };
+    expr = gpuSeparateCallerCode(
+      expr,
+      cseOptions,
+      (name) =>
+        options.vars !== undefined &&
+        Object.hasOwn(options.vars, name) &&
+        !opaqueVar(name)
+    );
     expr = unrollFixedWidthCollections(expr, {
       skipHeads: unrollSkipHeads,
       iterationBudget: options.iterationBudget,
@@ -2150,26 +2187,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       }
     );
 
-    // A `functions` entry that the caller declares pure (`pure: true`) has
-    // no effect other than its value (`entryIsPure()`, `function-purity.ts`;
-    // its inference from the source text recognizes JavaScript function
-    // syntax only, so a shader entry is pure only by declaration). The
-    // common-subexpression pass can then compute it once, and a lowering can
-    // write its call more than once or move it ahead of other code: it does
-    // not count as code that the caller supplies (`reachesCallerCodeOn()`).
-    // This target reads no `operators` option, so a `functions` entry is
-    // always the lowering of its name.
-    const pureFunctions = new Set<string>();
-    for (const [name, entry] of Object.entries(userFunctions ?? {}))
-      if (entryIsPure(entry)) pureFunctions.add(name);
-    const cseOptions = {
-      isOverriddenOperator: (name: string) =>
-        userFunctions !== undefined && Object.hasOwn(userFunctions, name),
-      isPureOverriddenOperator: (name: string) => pureFunctions.has(name),
-      isStringVar: opaqueVar,
-      isVarsKey: (name: string) =>
-        vars !== undefined && Object.hasOwn(vars, name),
-    };
     // The code for a node that several paths reach is written once for each
     // path, unless the common-subexpression pass binds the node. A deep
     // graph that the pass cannot bind gives code that grows exponentially

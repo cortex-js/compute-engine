@@ -143,3 +143,63 @@ decline), `npm run test:glsl` with 0 disagreements, the whole-corpus audit
 with 0 changed records (the corpus has no caller code), and the removed
 lines. The `docs/COMPILATION-MODEL.md` section on caller code and its
 known-limitations entry are rewritten. Size M.
+
+## The result of the implementation
+
+Implemented in the worktree of session compute-engine-8d on HEAD
+`7520d089c99f414c1c0e479871177ddcaa7bf6ed`. The binding is in
+`gpu-caller-binding.ts` (`gpuBindCallerCode()`, `gpuSeparateCallerCode()`).
+
+- The five witnesses compile, with the caller code in the order of the
+  interpreter, and are tests
+  (`test/compute-engine/ce-1176-glsl-caller-code-binding.test.ts`, with
+  `W + W`, a shared node object and a symbol value read twice).
+- Removed: `gpu-draw-order.ts` (379 lines; `gpuOperandOnce()` is kept, in
+  `gpu-statements.ts`, without its caller-code checks),
+  `operandsWrittenTwice()` and `callerCodeOperandWrittenTwice()` of
+  `glsl-fragment.ts` (159 lines), the chained-comparison check of
+  `compile-operators.ts`, `isShaderVariableRead()` of `compile-folding.ts`,
+  and their call sites. `findReferences` at `7520d089c` listed each
+  reference; each is removed or re-imported. Source: 726 lines added (453 in
+  the new module), 790 removed.
+- The GLSL test files (238 files): 11,384 tests pass. The expectations of 10
+  test files changed; each now shows the caller code computed once, into a
+  temporary, where the test expected it written in place or expected a
+  decline.
+- `npm run test:glsl`: 5,482 expressions, 966 accepted by `canCompile()`, 0
+  disagreements. Typecheck and `check:deps` pass.
+- Tycho's whole-corpus codegen audit (`--all`, Tycho `6e106b4ff`, 764
+  documents, 17,421 records), base `7520d089c` against this change: 0
+  records with changed code, 0 new declines, 0 `canCompile()`
+  disagreements.
+
+Where the code differs from the choices above:
+
+- Choice 7 (plain reads not bound): a part of a statement that reads a
+  `vars` key and that the interpreter evaluates before a piece of caller
+  code is read into a temporary first, because caller code can write the
+  variable that it reads; the order check that this replaces refused that
+  case. A read with no caller code after it stays in place.
+- Choice 3: a chained comparison whose third or later operand holds caller
+  code is written as an `If` too (`Less(a, b, c)` is
+  `If(Less(a, b), Less(b, c), False)`): the interpreter stops at the first
+  pair that is false.
+- Choice 2: a node that holds a position evaluated on a condition or
+  repeatedly (`If`, `Which`, a loop-form `Sum`, a block used as a value) is
+  itself computed into a temporary at its place in the order, so that its
+  caller code runs after the caller code written before it.
+- Choice 5: the body of a user function written in place of its call binds
+  its caller code at the call (`tryInlineUserFunctionCall()`).
+- Declines that remain, with `canCompile()` accepting (crafted; known
+  limitations of `docs/COMPILATION-MODEL.md`): a `Loop` guard or later
+  clause with caller code; `And`, `Or` or a chained comparison with caller
+  code after the first operand inside the body of a user function (the
+  rewrite runs on the root tree only) or under a head that the caller maps;
+  a selection with caller code in a branch that cannot take its statement
+  form; a piece of caller code with no shader type for a temporary.
+- Not handled (crafted, a known-limitations line): one node object of caller
+  code at two places of a user-function body that the host built, when the
+  body is written in place of its call, runs once.
+- Dual review: two rounds. Round 1: Claude 4 findings (2 high), Codex 1
+  (high); all fixed. Round 2 on the fix delta: Codex none; Claude 3 (2 low,
+  1 nit): two fixed, the shared node in a host-built body recorded as above.

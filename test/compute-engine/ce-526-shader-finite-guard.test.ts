@@ -117,6 +117,10 @@ describe.each(['glsl'] as const)('on %s', (to) => {
       code(['Sin', ['Add', 'x', ['Gamma', 20]]], to, {
         functions: { Gamma: 'myGamma' },
       }).code
-    ).toBe('_gpu_sin(x + myGamma(20.0))');
+    ).toBe(
+      // The call of the caller's function is computed once, into a
+      // temporary, ahead of the statement (`gpu-caller-binding.ts`).
+      'float _tv1 = myGamma(20.0);\nreturn _gpu_sin(x + _tv1);'
+    );
   });
 });

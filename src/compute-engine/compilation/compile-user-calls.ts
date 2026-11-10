@@ -1456,9 +1456,17 @@ export function tryInlineUserFunctionCall(
   target.symbolDeps?.add(h);
   const inlining = (target.userFunctions!.inlining ??= new Set<string>());
   inlining.add(h);
+  // The body is a new tree, which the binding of code that the caller
+  // supplies did not see when the statement started
+  // (`CompileTarget.bindStatementEffects`): its pieces are bound here, at
+  // the place of the call in the order of the interpreter.
+  let release: (() => void) | undefined;
   try {
+    if (target.hoist !== undefined)
+      release = target.bindStatementEffects?.(inlined, target);
     return core.compile(inlined, target);
   } finally {
+    release?.();
     inlining.delete(h);
   }
 }

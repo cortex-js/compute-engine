@@ -61,15 +61,22 @@ describe('CE-227.1 terms that stay unfolded', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['Gamma', 20]]]);
     expect(
       compile(e, { to: 'glsl', functions: { Gamma: 'myGamma' } }).code
-    ).toBe('_gpu_sin(x + myGamma(20.0))');
+    ).toBe(
+      // The call of the caller's function is computed once, into a
+      // temporary, ahead of the statement (`gpu-caller-binding.ts`).
+      'float _tv1 = myGamma(20.0);\nreturn _gpu_sin(x + _tv1);'
+    );
   });
 
   test('a user function whose body calls a function the caller maps', () => {
     ce.parse('u(t) \\coloneq t + \\Gamma(t) + 10^6').evaluate();
     const e = ce.box(['Sin', ['Add', 'x', ['u', 20]]]);
-    expect(
-      compile(e, { to: 'glsl', functions: { Gamma: 'mygamma' } }).code
-    ).toBe('_gpu_sin(x + _fn_u(20.0))');
+    // The body of `_fn_u` computes the caller's `mygamma` into its own
+    // temporary, and the call of `_fn_u` is computed into a temporary
+    // ahead of the statement (`gpu-caller-binding.ts`).
+    const r = compile(e, { to: 'glsl', functions: { Gamma: 'mygamma' } });
+    expect(r.preamble).toContain('  float _tv1 = mygamma(t);');
+    expect(r.code).toBe('float _tv2 = _fn_u(20.0);\nreturn _gpu_sin(x + _tv2);');
   });
 
   test('a symbol the caller maps to a run-time input', () => {

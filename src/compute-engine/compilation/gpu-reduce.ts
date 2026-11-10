@@ -23,12 +23,7 @@ import {
   gpuIsAtomicEmission,
   gpuVecType,
 } from './gpu-emit.js';
-import {
-  gpuAssertCallerCodeNotRepeated,
-  gpuAssertHoistKeepsCallerOrder,
-  gpuOperandOnce,
-  gpuReachesCallerCode,
-} from './gpu-draw-order.js';
+import { gpuOperandOnce } from './gpu-statements.js';
 import { gpuScalarComponents } from './gpu-extrema.js';
 import { gpuTypeOfValue } from './gpu-declared-types.js';
 
@@ -311,15 +306,10 @@ export function compileGPUCollectionReduce(
     // hoisted `vecN` temporary where there is a statement sink, so the vector
     // is built once; with no sink the pure source is written twice, which is
     // what the operand-once convention does everywhere else in this target.
-    //
-    // Caller code in the base (`vars: { V: 'vec3(nextValue())' }`) must run
-    // once, and its temporary must not run ahead of earlier code with an
-    // effect (`gpuAssertHoistKeepsCallerOrder`); with no sink it declines.
-    const caller = gpuReachesCallerCode(squared, target);
-    if (caller && !BaseCompiler.canHoist(target))
-      gpuAssertCallerCodeNotRepeated('Sum', [squared], target);
+    // Code that the caller supplies in the base
+    // (`vars: { V: 'vec3(nextValue())' }`) is a read of the temporary that
+    // holds it (`gpuBindCallerCode()`).
     if (!gpuIsAtomicEmission(v) && BaseCompiler.canHoist(target)) {
-      if (caller) gpuAssertHoistKeepsCallerOrder('Sum', [squared], target);
       const tv = BaseCompiler.tempVar(target);
       const type = `vec${squaredWidth}`;
       const decl = `${type} ${tv}`;

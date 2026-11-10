@@ -802,30 +802,6 @@ export function targetReadsInput(
 }
 
 /**
- * Is `expr` a symbol whose emitted code on a shader target is a read of one
- * variable: a `vars` entry that is a bare identifier, optionally followed by
- * field accesses and literal indexes (`u_t`, `params.x`, `v[0]`)? Such an
- * entry is caller source for `reachesCallerCodeOn` when another `vars`
- * key has the same source (`{ a: 'u_t', b: 'u_t' }`), but GLSL
- * has no getters, so a second copy of the read reads the same value and
- * runs no code. A form that writes its operand more than once can then
- * accept it. A form that moves the operand ahead of other code must not use
- * this test: the order of reads and writes of the variable can matter.
- */
-export function isShaderVariableRead(
-  expr: Expression,
-  target: CompileTarget<Expression>
-): boolean {
-  if (!isSymbol(expr) || target.varsKeys?.has(expr.symbol) !== true)
-    return false;
-  const code = target.var(expr.symbol);
-  return (
-    typeof code === 'string' &&
-    /^[A-Za-z_]\w*(?:\.\w+|\[\d+\])*$/.test(code.trim())
-  );
-}
-
-/**
  * Is `expr` impure once every assigned symbol value it reaches is looked
  * through? `expr.isPure` stops at a symbol that has a value, so
  * `a := r + r` with `r := Random()` reports pure; the body of a called

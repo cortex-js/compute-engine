@@ -5,7 +5,7 @@ import type { Expression, RoundingTies } from '../global-types.js';
 import { tryGetConstant, formatFloat } from './constant-folding.js';
 import type { CompileTarget } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
-import { gpuOperandOnce } from './gpu-draw-order.js';
+import { gpuOperandOnce } from './gpu-statements.js';
 import { gpuOperandShape } from './gpu-shapes.js';
 import { gpuScalarType, gpuVecType } from './gpu-emit.js';
 

@@ -12,7 +12,6 @@ import {
   gpuTopLevelCall,
 } from './gpu-shapes.js';
 import type { GPUShapeRules } from './gpu-shapes.js';
-import { isSymbol } from '../boxed-expression/type-guards.js';
 import {
   GPU_AGGREGATE_CONSTRUCTOR,
   GPU_AGGREGATE_CONSTRUCTOR_ANYWHERE,
@@ -24,28 +23,17 @@ import {
 } from './gpu-emit.js';
 import { gpuProvablyFinite } from './gpu-finite-proof.js';
 import { gpuCanPlaceStatement } from './gpu-statements.js';
-import {
-  gpuAssertHoistKeepsCallerOrder,
-  gpuReachesCallerCode,
-} from './gpu-draw-order.js';
 
 /**
  * Can the emitted source of `expr` be written more than once with the same
  * value and no added effect? It cannot when `expr` is impure once its
  * assigned symbol values and called user-function bodies are looked through
- * (`expr.isPure` stops at a symbol with a value), or when it reads a symbol
- * whose `vars` entry is caller source or applies a head whose emission the
- * caller supplied, directly or inside one of those values or bodies. The
- * caller's code can count its calls or draw a number, and the compiler does
- * not see inside it.
+ * (`expr.isPure` stops at a symbol with a value). Code that the caller
+ * supplies is a read of the temporary that holds it
+ * (`gpuBindCallerCode()`), so it does not count here.
  */
-function gpuRepeatableSource(
-  expr: Expression,
-  target: CompileTarget<Expression>
-): boolean {
-  return (
-    !BaseCompiler.foldValueImpure(expr) && !gpuReachesCallerCode(expr, target)
-  );
+function gpuRepeatableSource(expr: Expression): boolean {
+  return !BaseCompiler.foldValueImpure(expr);
 }
 
 /**
@@ -267,11 +255,10 @@ export function gpuScalarComponents(
       // time but gives the right value whether an argument is a scalar or a
       // vector. An impure one declines, because each repetition would make
       // a draw of its own. The test looks through assigned symbol values and
-      // user-function bodies (`r := Random()` makes `r + 1` impure there),
-      // and it refuses code that the caller supplied (a `vars` string or a
-      // head overridden through `functions`), whose effects the compiler
-      // cannot see.
-      if (!gpuCanPlaceStatement(target) && gpuRepeatableSource(expr, target))
+      // user-function bodies (`r := Random()` makes `r + 1` impure there).
+      // Code that the caller supplies is a read of the temporary that holds
+      // it (`gpuBindCallerCode()`).
+      if (!gpuCanPlaceStatement(target) && gpuRepeatableSource(expr))
         return ['x', 'y', 'z', 'w']
           .slice(0, size)
           .map((c) => `${code.trim()}.${c}`);
@@ -298,11 +285,6 @@ export function gpuScalarComponents(
   const comps = ['x', 'y', 'z', 'w'].slice(0, width);
   if (/^[A-Za-z_]\w*$/.test(code)) return comps.map((c) => `${code}.${c}`);
   if (!BaseCompiler.canHoist(target)) return undefined;
-  gpuAssertHoistKeepsCallerOrder(
-    isSymbol(expr) ? expr.symbol : expr.operator,
-    [expr],
-    target
-  );
   const tv = BaseCompiler.tempVar(target);
   const type = ctorType ?? `vec${width}`;
   const decl = `${type} ${tv}`;

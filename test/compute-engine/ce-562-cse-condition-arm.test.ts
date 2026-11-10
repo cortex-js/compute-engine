@@ -356,7 +356,11 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
         vars: { a: 'u.x + 1' },
       });
       expect(r.success).toBe(true);
-      expect(count(r.code, '_fn_f(u.x + 1)')).toBe(2);
+      // Each occurrence of `a` reads its source into a temporary of its own
+      // (code that the caller supplies, `gpu-caller-binding.ts`), and `f`
+      // is called once per occurrence.
+      expect(count(r.code, '= u.x + 1;')).toBe(2);
+      expect(count(r.code, '_fn_f(')).toBe(2);
     }
   );
 
@@ -449,7 +453,8 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
         vars: { a: 'x' },
       });
       expect(r.success).toBe(true);
-      expect(count(r.code, '_fn_f(x)')).toBe(2);
+      expect(count(r.code, '= x;')).toBe(2);
+      expect(count(r.code, '_fn_f(')).toBe(2);
     }
   );
 
@@ -462,7 +467,9 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
         vars: { a: 'u_a', x: 'u_a' },
       });
       expect(r.success).toBe(true);
-      expect(count(r.code, '_fn_f(u_a)')).toBe(2);
+      // `x` is read too: with one source, both keys are caller source.
+      expect(count(r.code, '= u_a;')).toBe(3);
+      expect(count(r.code, '_fn_f(')).toBe(2);
     }
   );
 

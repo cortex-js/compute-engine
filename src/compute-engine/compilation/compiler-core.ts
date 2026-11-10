@@ -4699,7 +4699,10 @@ function compileExprHelperCall(
  *
  * The form is taken when a branch or a condition assigns a variable (outside
  * a function literal, whose body is not run here) and no operand contains a
- * `Return`, `Break` or `Continue`. It is also taken for a
+ * `Return`, `Break` or `Continue`; for a selection with an else, only when
+ * a branch or a condition after the first also holds code that the caller
+ * supplies, which each branch then computes into temporaries at its start.
+ * It is also taken for a
  * selection with one clause that is a statement of a `Loop` body and holds a
  * `Break` or a `Continue` (`CompileTarget.shaderLoopJumps`): a ternary cannot
  * hold a jump. Any other selection with a jump, and any selection with a
@@ -4732,8 +4735,19 @@ export function shaderSelectionStatement(
       clauses.push([isSymbol(ops[i], 'True') ? -1 : i, i + 1]);
   } else return undefined;
   // A selection that GLSL keeps as a ternary needs no search of its operands.
+  // A branch, or a condition after the first, that holds code that the
+  // caller supplies takes the statement form: each branch then binds that
+  // code to temporaries at its start (`CompileTarget.bindStatementEffects`,
+  // `gpu-caller-binding.ts`), where a ternary would write it in place.
   const admitsJumps = target.shaderLoopJumps?.has(stmt) === true;
-  const ternary = !elseless;
+  const callerCode =
+    target.bindStatementEffects !== undefined &&
+    clauses.some(
+      ([c, b], k) =>
+        reachesCallerCodeOn(ops[b], target) ||
+        (k > 0 && c >= 0 && reachesCallerCodeOn(ops[c], target))
+    );
+  const ternary = !elseless && !callerCode;
   if (ternary && !admitsJumps) return undefined;
   // The operators in the operands, outside a function literal. An expression
   // is a graph with shared nodes, so each node is visited once: a walk of the

@@ -176,7 +176,11 @@ describe('GLSL: the exact form', () => {
         functions: { Sin: 'mysin' },
       }
     );
-    expect(r.code).toBe('fract(fract(43758.547 * mysin(12.9898 * x)))');
+    // The call of the caller's function is computed once, into a temporary,
+    // ahead of the statement (`gpu-caller-binding.ts`).
+    expect(r.code).toBe(
+      'float _tv1 = mysin(12.9898 * x);\nreturn fract(fract(43758.547 * _tv1));'
+    );
   });
 
   test('an operand that is not amplified compiles as before', () => {

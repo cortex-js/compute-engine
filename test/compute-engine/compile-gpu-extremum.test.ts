@@ -329,16 +329,25 @@ describe('GPU reductions over a vector splat read every component', () => {
     // its one operand as the only component made `Max` a vector, and the
     // two branches of the conditional had different types. Repeating the
     // constructor once per component would run the caller's code three
-    // times (`vec3(nextValue())` can count its calls), and an arm has no
-    // place for a temporary, so the reduction declines on GLSL.
+    // times (`vec3(nextValue())` can count its calls). The selection takes
+    // its statement form, and the branch computes `V` once, at its start.
     const cev = new ComputeEngine();
     cev.declare('V', 'list<real^3>');
     cev.declare('c', 'boolean');
     const expr = cev.box(['If', 'c', ['Max', 'V'], 0]);
     for (const source of ['vec3(u + v)', 'vec3(nextValue())']) {
       const opts = { ...NO_FOLD, vars: { V: source } };
-      expect(() => glsl.compile(expr, opts)).toThrow(
-        /conditionally-evaluated branch/
+      expect(glsl.compile(expr, opts).code).toBe(
+        [
+          'float _tv1;',
+          'if (c) {',
+          `  vec3 _tv2 = ${source};`,
+          '  _tv1 = (_gpu_max(_gpu_max(_tv2.x, _tv2.y), _tv2.z));',
+          '} else {',
+          '  _tv1 = 0.0;',
+          '}',
+          'return _tv1;',
+        ].join('\n')
       );
     }
     // Outside an arm, the constructor is held once in a temporary.
@@ -388,32 +397,28 @@ describe('GPU reductions over a vector splat read every component', () => {
       );
     });
 
-    it('a symbol whose `vars` entry is caller source declines', () => {
-      // The caller's text can count its calls; the compiler cannot see it.
+    it('a symbol whose `vars` entry is caller source is not looked at', () => {
+      // On a route with a statement sink, caller code is a read of the
+      // temporary that holds it (`gpuBindCallerCode()`) before it reaches
+      // this function. A route with no statement sink (a GLSL target object
+      // passed to `compile()` as the `target` option) writes caller code in
+      // place, so the constructor is repeated, as for any pure source.
       const target = {
         language: 'glsl',
         cse: { harvestOptions: { isStringVar: (n: string) => n === 'V' } },
       } as any;
       const v = ces.box('V');
-      expect(gpuScalarComponents(v, 'vec3(nextValue())', target)).toBe(
-        undefined
-      );
-      // The same call when `V` is not caller source.
-      const plain = {
-        language: 'glsl',
-        cse: { harvestOptions: { isStringVar: () => false } },
-      } as any;
-      expect(gpuScalarComponents(v, 'vec3(nextValue())', plain)).toEqual([
+      expect(gpuScalarComponents(v, 'vec3(nextValue())', target)).toEqual([
         'vec3(nextValue()).x',
         'vec3(nextValue()).y',
         'vec3(nextValue()).z',
       ]);
     });
 
-    it('caller source reached through a value or a body declines', () => {
+    it('caller source reached through a value or a body is not looked at', () => {
       // `r := Sin(y)` with `Sin` supplied by the caller, and `f(t) := t + w`
-      // with `w` mapped to caller source: the caller's code is inlined in
-      // the emission, so repeating it would run it once per component.
+      // with `w` mapped to caller source: on a route with no statement sink
+      // the caller's code is written in place, as above.
       const cei = new ComputeEngine();
       cei.declare('y', 'real');
       cei.declare('w', 'real');
@@ -430,8 +435,8 @@ describe('GPU reductions over a vector splat read every component', () => {
       } as any;
       for (const e of [['Add', 'r', 1], ['f', 'y']])
         expect(
-          gpuScalarComponents(cei.box(e as any), 'vec3(s + 1.0)', target)
-        ).toBe(undefined);
+          gpuScalarComponents(cei.box(e as any), 'vec2(s + 1.0)', target)
+        ).toEqual(['vec2(s + 1.0).x', 'vec2(s + 1.0).y']);
       // The same shapes with no caller source are read through swizzles.
       const plain = { language: 'glsl', cse: { harvestOptions: {} } } as any;
       expect(
@@ -469,24 +474,30 @@ describe('GPU reductions over a vector splat read every component', () => {
 describe('GPU code supplied by the caller runs once, in order', () => {
   // `W` and `V` are written by the caller as calls (`nextValue()` can count
   // its calls or draw a number). The interpreter evaluates each operand
-  // once, from the first to the last, so a shader that runs such code twice,
-  // ahead of code written before it, or in a branch that is not taken gives
-  // a different value. These forms decline. `U` is a plain uniform read,
-  // which is not caller code: it compiles as a symbol with no `vars` entry
-  // does.
+  // once, from the first to the last. Before a statement is compiled, each
+  // piece of such code that it evaluates unconditionally is computed into a
+  // temporary of its shader type, in that order, and the statement reads the
+  // temporary (`gpu-caller-binding.ts`). A piece in a branch or a loop body
+  // is computed at the start of that branch or of each iteration. `U` is a
+  // plain uniform read, which is not caller code: it stays in place unless
+  // caller code comes after it in the statement.
   const cev = new ComputeEngine();
   cev.declare('b', 'real | signed_infinity | nan');
   cev.declare('n', 'real | signed_infinity | nan');
   cev.declare('V', 'list<real^3>');
   cev.declare('c', 'boolean');
   cev.declare('x', 'real');
+  cev.declare('W', 'real');
+  cev.declare('U', 'real');
   const opts = {
     ...NO_FOLD,
     vars: { W: 'nextValue()', V: 'vec3(nextValue())', U: 'u_u' },
   };
-  const both = (expr: any, message: RegExp) => {
+  // `canCompile()` accepts the expression and `compile()` writes `code`.
+  const both = (expr: any, code: string[], o: any = opts) => {
     const boxed = cev.box(expr);
-    expect(() => glsl.compile(boxed, opts)).toThrow(message);
+    expect(glsl.canCompile(boxed, o)).toEqual({ ok: true });
+    expect(glsl.compile(boxed, o).code).toBe(code.join('\n'));
   };
   // The fragment refuses the form before any code is written.
   const declinesOutside = (expr: any, o: any = opts) => {
@@ -494,43 +505,91 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     expect(result.success).toBe(false);
     expect(result.diagnostic?.code).toBe('outside-fragment');
   };
-  const MOVED = /ahead of the rest of its statement/;
-  const REPEATED = /more than once/;
+  const MAX_V = (t: string) => `(_gpu_max(_gpu_max(${t}.x, ${t}.y), ${t}.z))`;
 
-  it('a temporary for caller code does not run ahead of earlier caller code', () => {
-    // `vec3 _tv = vec3(nextValue());` would run before the `W` of the sum.
-    both(['Add', 'W', ['Max', 'V']], MOVED);
-    // The same through the `dot(v, v)` form of a sum of squares.
-    both(['Add', 'W', ['Sum', ['Square', 'V']]], MOVED);
-  });
-
-  it('a loop or an unrolled sum does not run ahead of earlier caller code', () => {
-    both(['Add', 'W', ['Sum', ['Add', 'W', 'k'], ['Limits', 'k', 1, 'n']]], MOVED);
+  it('caller code written before a temporary runs before it', () => {
     both(
-      ['Add', 'W', ['Sum', ['Multiply', ['Max', 'V'], 'k'], ['Limits', 'k', 1, 3]]],
-      MOVED
+      ['Add', 'W', ['Max', 'V']],
+      [
+        'float _tv1 = nextValue();',
+        'vec3 _tv2 = vec3(nextValue());',
+        `return _tv1 + ${MAX_V('_tv2')};`,
+      ]
+    );
+    // The same through the `dot(v, v)` form of a sum of squares.
+    both(
+      ['Add', 'W', ['Sum', ['Square', 'V']]],
+      [
+        'float _tv1 = nextValue();',
+        'vec3 _tv2 = vec3(nextValue());',
+        'return _tv1 + dot(_tv2, _tv2);',
+      ]
+    );
+    // A tuple evaluates its operands in order too.
+    both(
+      ['Tuple', 'W', ['Max', 'V']],
+      [
+        'float _tv1 = nextValue();',
+        'vec3 _tv2 = vec3(nextValue());',
+        `return vec2(_tv1, ${MAX_V('_tv2')});`,
+      ]
     );
   });
 
-  it('a block with no caller code runs ahead of caller code', () => {
-    // The block writes only its own local, so running it ahead of `W`
-    // changes nothing; `canCompile()` and `compile()` agree.
-    const expr = cev.box([
-      'Add',
-      'W',
-      ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a'],
-    ]);
-    expect(glsl.canCompile(expr, opts)).toEqual({ ok: true });
-    expect(glsl.compile(expr, opts).code).toBe(
+  it('caller code in a loop body runs once per iteration, after earlier caller code', () => {
+    both(
+      ['Add', 'W', ['Sum', ['Add', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
       [
-        'float _tv1;',
+        '_gpu_passes = 0;',
+        'float _tv1 = nextValue();',
+        'float _tv2 = 0.0;',
+        'for (int k = 1; k <= int(floor(n)); k++) {',
+        '  if (++_gpu_passes > 10000) break;',
+        '  float _tv3 = nextValue();',
+        '  _tv2 += _tv3 + float(k);',
+        '}',
+        'float _tv4 = _tv1 + _tv2;',
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv4;',
+      ]
+    );
+    // Each unrolled term computes its own `V`, in the order of the terms.
+    both(
+      [
+        'Add',
+        'W',
+        ['Sum', ['Multiply', ['Max', 'V'], 'k'], ['Limits', 'k', 1, 3]],
+      ],
+      [
+        'float _tv1 = nextValue();',
+        'vec3 _tv2 = vec3(nextValue());',
+        `float _tv3 = 1.0 * ${MAX_V('_tv2')};`,
+        'vec3 _tv4 = vec3(nextValue());',
+        `float _tv5 = 2.0 * ${MAX_V('_tv4')};`,
+        'vec3 _tv6 = vec3(nextValue());',
+        `float _tv7 = 3.0 * ${MAX_V('_tv6')};`,
+        'float _tv8 = ((_tv3) + (_tv5) + (_tv7));',
+        'return _tv1 + _tv8;',
+      ]
+    );
+  });
+
+  it('a block used as a value runs at its place in the order', () => {
+    both(
+      [
+        'Add',
+        'W',
+        ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a'],
+      ],
+      [
+        'float _tv1 = nextValue();',
+        'float _tv2;',
         '{',
         '  float a;',
         '  a = (x * x);',
-        '  _tv1 = a;',
+        '  _tv2 = a;',
         '}',
-        'return nextValue() + _tv1;',
-      ].join('\n')
+        'return _tv1 + _tv2;',
+      ]
     );
   });
 
@@ -539,54 +598,120 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     declinesOutside([
       'WithRandomSeed',
       1,
-      ['Add', 'W', ['Match', ['Random'], ['MatchCase', 1, 10], ['MatchCase', '_', 30]]],
+      [
+        'Add',
+        'W',
+        ['Match', ['Random'], ['MatchCase', 1, 10], ['MatchCase', '_', 30]],
+      ],
     ]);
   });
 
-  it('caller code is not written more than once', () => {
-    both(['Cot', 'W'], REPEATED);
-    declinesOutside(['Cot', ['Complex', 'W', 1]]);
-    both(['Remainder', 'W', 2], REPEATED);
-    both(['Remainder', 2, 'W'], REPEATED);
-    both(['Binomial', 'W', 3], REPEATED);
-    both(['ContrastingColor', ['Tuple', 'W', 1, 1], ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]], REPEATED);
-    declinesOutside(['Match', 'W', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]]);
+  it('caller code that a lowering writes twice runs once', () => {
+    both(
+      ['Cot', 'W'],
+      ['float _tv1 = nextValue();', 'return (_gpu_cos(_tv1) / _gpu_sin(_tv1));']
+    );
+    // `Complex(W, 1)` is the canonical `W + i`.
+    both(['Cot', ['Complex', 'W', 1]], [
+      'float _tv1 = nextValue();',
+      'return _gpu_cdiv(_gpu_ccos(vec2(_tv1, 1.0)), _gpu_csin(vec2(_tv1, 1.0)));',
+    ]);
+    both(
+      ['Remainder', 'W', 2],
+      [
+        'float _tv1 = nextValue();',
+        'return ((_tv1) - (2.0) * _gpu_round_up((_tv1) / (2.0)));',
+      ]
+    );
+    both(
+      ['Remainder', 2, 'W'],
+      [
+        'float _tv1 = nextValue();',
+        'return ((2.0) - (_tv1) * _gpu_round_up((2.0) / (_tv1)));',
+      ]
+    );
+    both(
+      ['Binomial', 'W', 3],
+      [
+        'float _tv1 = nextValue();',
+        'return (((_tv1) * ((_tv1) - 1.0) * ((_tv1) - 2.0)) / 6.0);',
+      ]
+    );
+    both(
+      [
+        'ContrastingColor',
+        ['Tuple', 'W', 1, 1],
+        ['Rgb', 1, 0, 0],
+        ['Rgb', 0, 0, 1],
+      ],
+      [
+        'float _tv1 = nextValue();',
+        'vec3 _tv2 = _gpu_srgb_to_oklch(vec3(_tv1, 1.0, 1.0));',
+        'return (abs(_gpu_apca(_gpu_srgb_to_oklch(vec3(1.0, 0.0, 0.0)), _tv2)) >= ' +
+          'abs(_gpu_apca(_gpu_srgb_to_oklch(vec3(0.0, 0.0, 1.0)), _tv2)) ? ' +
+          '_gpu_srgb_to_oklch(vec3(1.0, 0.0, 0.0)) : _gpu_srgb_to_oklch(vec3(0.0, 0.0, 1.0)));',
+      ]
+    );
+    declinesOutside([
+      'Match',
+      'W',
+      ['MatchCase', 1, 10],
+      ['MatchCase', 2, 20],
+      ['MatchCase', '_', 30],
+    ]);
     // The middle operand of a chained comparison is in two comparisons.
-    both(['Less', 'x', 'W', 3], /more than once/);
+    both(
+      ['Less', 'x', 'W', 3],
+      ['float _tv1 = nextValue();', 'return (x < _tv1) && (_tv1 < 3.0);']
+    );
   });
 
   it('a head mapped through `functions` is caller code', () => {
-    const boxed = cev.box(['Cot', ['F', 'x']]);
-    const fopts = { ...NO_FOLD, functions: { F: 'myF' } };
-    expect(() => glsl.compile(boxed, fopts)).toThrow(REPEATED);
+    both(
+      ['Cot', ['F', 'x']],
+      ['float _tv1 = myF(x);', 'return (_gpu_cos(_tv1) / _gpu_sin(_tv1));'],
+      { ...NO_FOLD, functions: { F: 'myF' } }
+    );
   });
 
-  it('GLSL computes caller code in a branch with the ternary form', () => {
-    // GLSL's `?:` computes only the branch that is taken, so a branch with
-    // caller code keeps the ternary form.
-    for (const expr of [
-      ['If', 'c', 'W', 0],
-      ['Which', 'c', 'W', 'True', 0],
-      ['If', 'c', 'W'],
-    ]) {
-      const boxed = cev.box(expr);
-      expect(glsl.compile(boxed, opts).code).toContain('?');
-    }
+  it('caller code in a branch runs at the start of that branch', () => {
+    // The selection takes its statement form, so the code runs only when its
+    // branch is taken.
+    const selection = (whenFalse: string) => [
+      'float _tv1;',
+      'if (c) {',
+      '  _tv1 = nextValue();',
+      '} else {',
+      `  _tv1 = ${whenFalse};`,
+      '}',
+      'return _tv1;',
+    ];
+    both(['If', 'c', 'W', 0], selection('0.0'));
+    both(['Which', 'c', 'W', 'True', 0], selection('0.0'));
+    both(['If', 'c', 'W'], selection('_gpu_nan()'));
     // A `Match` is outside the fragment.
-    declinesOutside(['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]);
+    declinesOutside([
+      'Match',
+      'x',
+      ['MatchCase', 1, 'W'],
+      ['MatchCase', '_', 30],
+    ]);
   });
 
-  it('GLSL keeps the ternary form for a branch with caller code after caller code', () => {
-    // GLSL's `?:` computes only the branch that is taken, so a branch with
-    // caller code after a `W` keeps the ternary form.
-    for (const expr of [
-      ['Add', 'W', ['If', 'c', 'W', 0]],
-      ['Add', 'W', ['Which', 'c', 'W', 'True', 0]],
-      ['Add', 'W', ['If', 'c', 'W']],
-    ]) {
-      const boxed = cev.box(expr);
-      expect(glsl.compile(boxed, opts).code).toContain('?');
-    }
+  it('a selection with caller code runs after caller code written before it', () => {
+    const selection = (whenFalse: string) => [
+      'float _tv1 = nextValue();',
+      'float _tv2;',
+      'if (c) {',
+      '  _tv2 = nextValue();',
+      '} else {',
+      `  _tv2 = ${whenFalse};`,
+      '}',
+      'return _tv1 + _tv2;',
+    ];
+    both(['Add', 'W', ['If', 'c', 'W', 0]], selection('0.0'));
+    both(['Add', 'W', ['Which', 'c', 'W', 'True', 0]], selection('0.0'));
+    both(['Add', 'W', ['If', 'c', 'W']], selection('_gpu_nan()'));
     // A `Match` is outside the fragment.
     declinesOutside([
       'Add',
@@ -600,7 +725,11 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     declinesOutside([
       'Match',
       'x',
-      ['MatchCase', 1, ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
+      [
+        'MatchCase',
+        1,
+        ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']],
+      ],
       ['MatchCase', '_', 0],
     ]);
     declinesOutside([
@@ -615,16 +744,36 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     ]);
   });
 
-  it('the statement form of a selection is refused when it would move caller code', () => {
-    // The `if` statement holds the loop, and it would run ahead of the first
-    // `W`; the ternary form cannot hold the loop, so the selection declines.
+  it('a loop in a branch runs after caller code written before the selection', () => {
     both(
       [
         'Add',
         'W',
-        ['If', 'c', ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']], 0],
+        [
+          'If',
+          'c',
+          ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']],
+          0,
+        ],
       ],
-      MOVED
+      [
+        '_gpu_passes = 0;',
+        'float _tv1 = nextValue();',
+        'float _tv2;',
+        'if (c) {',
+        '  float _tv3 = 0.0;',
+        '  for (int k = 1; k <= int(floor(n)); k++) {',
+        '    if (++_gpu_passes > 10000) break;',
+        '    float _tv4 = nextValue();',
+        '    _tv3 += _tv4 * float(k);',
+        '  }',
+        '  _tv2 = _tv3;',
+        '} else {',
+        '  _tv2 = 0.0;',
+        '}',
+        'float _tv5 = _tv1 + _tv2;',
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv5;',
+      ]
     );
     // With a plain read, the statement form is placed as before.
     expect(
@@ -632,7 +781,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
         cev.box([
           'Add',
           'U',
-          ['If', 'c', ['Sum', ['Multiply', 'x', 'k'], ['Limits', 'k', 1, 'n']], 0],
+          [
+            'If',
+            'c',
+            ['Sum', ['Multiply', 'x', 'k'], ['Limits', 'k', 1, 'n']],
+            0,
+          ],
         ]),
         opts
       ).code
@@ -672,7 +826,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       '(x < u_T) && (u_T < 3.0)'
     );
   });
-
   it('a draw does not run ahead of caller code in its own endpoints', () => {
     // `Random` and `WithRandomSeed` are outside the GLSL fragment.
     declinesOutside(['WithRandomSeed', 1, ['Random', ['Interval', 'W', 1]]]);
@@ -681,51 +834,89 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     declinesOutside(['Random', ['Interval', 'U', 1]]);
   });
 
-  it('an element-wise lowering does not repeat a vector with caller code', () => {
-    both(['Cot', ['List', 'W', 'x', 1]], /more than once/);
-    expect(glsl.compile(cev.box(['Cot', ['List', 'U', 'x', 1]]), opts).code).toBe(
-      '(_gpu_cos3(vec3(u_u, x, 1.0)) / _gpu_sin3(vec3(u_u, x, 1.0)))'
+  it('an element-wise lowering reads a vector with caller code once', () => {
+    both(
+      ['Cot', ['List', 'W', 'x', 1]],
+      [
+        'float _tv1 = nextValue();',
+        'return (_gpu_cos3(vec3(_tv1, x, 1.0)) / _gpu_sin3(vec3(_tv1, x, 1.0)));',
+      ]
     );
+    expect(
+      glsl.compile(cev.box(['Cot', ['List', 'U', 'x', 1]]), opts).code
+    ).toBe('(_gpu_cos3(vec3(u_u, x, 1.0)) / _gpu_sin3(vec3(u_u, x, 1.0)))');
   });
 
-  it('a `vars` entry that is a read of one variable can be written twice', () => {
-    // `u_t` is the source of two keys, so it is caller source, but two
-    // copies of a read run no code.
+  it('a `vars` entry that two keys share is read once into a temporary', () => {
+    // `u_t` is the source of two keys, so it is caller source: it is read
+    // into a temporary at its place, as other caller code is.
     const aopts = { ...NO_FOLD, vars: { a: 'u_t', b: 'u_t' } };
-    expect(glsl.compile(cev.box(['Cot', 'a']), aopts).code).toBe(
-      '(_gpu_cos(u_t) / _gpu_sin(u_t))'
+    both(
+      ['Cot', 'a'],
+      ['float _tv1 = u_t;', 'return (_gpu_cos(_tv1) / _gpu_sin(_tv1));'],
+      aopts
     );
-    expect(glsl.compile(cev.box(['Less', 'x', 'a', 3]), aopts).code).toBe(
-      '(x < u_t) && (u_t < 3.0)'
+    both(
+      ['Less', 'x', 'a', 3],
+      ['float _tv1 = u_t;', 'return (x < _tv1) && (_tv1 < 3.0);'],
+      aopts
     );
   });
 
-  it('a temporary for caller code is also looked for in function bodies', () => {
+  it('caller code in a function body runs in the function', () => {
+    // The body of `g` is a shader function, which computes its own `V`. The
+    // canonical `Add` puts `Max(V)` first.
     const ce2 = new ComputeEngine();
     ce2.declare('V', 'list<real^3>');
     ce2.assign('g', ce2.box(['Function', ['Add', 'n', ['Max', 'V']], 'n']));
     const expr = ce2.box(['Add', ['g', 1], ['Max', 'V']]);
     const vopts = { ...NO_FOLD, vars: { V: 'vec3(nextValue())' } };
-    expect(() => glsl.compile(expr, vopts)).toThrow(MOVED);
+    expect(glsl.canCompile(expr, vopts)).toEqual({ ok: true });
+    const result = glsl.compile(expr, vopts);
+    expect(result.preamble).toContain(
+      [
+        'float _fn_g(float n) {',
+        '  vec3 _tv2 = vec3(nextValue());',
+        `  return n + ${MAX_V('_tv2')};`,
+        '}',
+      ].join('\n')
+    );
+    expect(result.code).toBe(
+      [
+        'vec3 _tv1 = vec3(nextValue());',
+        'float _tv3 = _fn_g(1.0);',
+        `return ${MAX_V('_tv1')} + _tv3;`,
+      ].join('\n')
+    );
   });
 
-  it('hoisted caller code does not run ahead of an earlier read of a `vars` input', () => {
+  it('a `vars` input read before caller code is read first', () => {
     // `state.value` is a plain read, but `nextValue` can write the variable
-    // it reads, and the interpreter reads `W` first.
+    // it reads, and the interpreter reads `W` first: it is read into a
+    // temporary before `V` is computed.
     const sopts = {
       ...NO_FOLD,
       vars: { W: 'state.value', V: 'vec3(nextValue())' },
       functions: { F: 'nextValue' },
     };
-    const forBoth = (expr: any, message: RegExp) => {
-      const boxed = cev.box(expr);
-      expect(() => glsl.compile(boxed, sopts)).toThrow(message);
-    };
-    forBoth(['Tuple', 'W', ['Max', 'V']], MOVED);
-    // A read after the hoisted code runs after it in both orders.
-    expect(glsl.compile(cev.box(['Tuple', ['Max', 'V'], 'W']), sopts).code).toBe(
-      'vec3 _tv1 = vec3(nextValue());\n' +
-        'return vec2((_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z)), state.value);'
+    both(
+      ['Tuple', 'W', ['Max', 'V']],
+      [
+        'float _tv1 = state.value;',
+        'vec3 _tv2 = vec3(nextValue());',
+        `return vec2(_tv1, ${MAX_V('_tv2')});`,
+      ],
+      sopts
+    );
+    // A read after the caller code runs after it in both orders, and stays
+    // in place.
+    both(
+      ['Tuple', ['Max', 'V'], 'W'],
+      [
+        'vec3 _tv1 = vec3(nextValue());',
+        `return vec2(${MAX_V('_tv1')}, state.value);`,
+      ],
+      sopts
     );
   });
 
@@ -742,7 +933,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       }).code
     ).toBe('(_gpu_cos3(vec3(u_r, x, 1.0)) / _gpu_sin3(vec3(u_r, x, 1.0)))');
   });
-
   it('a bound draw reads endpoints that are reads of one variable', () => {
     // The draws are bound in order (the loop draws too). `a` and `b` have
     // the same source, so they count as caller source, but they run no code.
@@ -750,9 +940,16 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       cev.box([
         'WithRandomSeed',
         1,
-        ['Tuple', ...first, ['Sum', ['Random'], ['Limits', 'n', 1, ['Floor', 't']]]],
+        [
+          'Tuple',
+          ...first,
+          ['Sum', ['Random'], ['Limits', 'n', 1, ['Floor', 't']]],
+        ],
       ]);
-    const aopts = { ...NO_FOLD, vars: { a: 'u_t', b: 'u_t', W: 'nextValue()' } };
+    const aopts = {
+      ...NO_FOLD,
+      vars: { a: 'u_t', b: 'u_t', W: 'nextValue()' },
+    };
     // `WithRandomSeed` and `Random` are outside the GLSL fragment.
     for (const first of [
       [['Random', ['Interval', 'a', 'b']]],
@@ -763,7 +960,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       expect(result.diagnostic?.code).toBe('outside-fragment');
     }
   });
-
   it('a `Match` pin with caller code runs only when the earlier cases fail', () => {
     // GLSL's `?:` computes only the branch that is taken, so the comparison
     // with the pin of a later case stays in its branch.
@@ -779,7 +975,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     declinesOutside(match, popts);
     declinesOutside(['Add', 'W', match], popts);
   });
-
   it('forms with no caller code compile as before', () => {
     const c = (expr: any) => glsl.compile(cev.box(expr), opts).code;
     // `Match` is outside the GLSL fragment.
@@ -796,7 +991,11 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     // A block of declarations is a value expression, so it compiles as the
     // operand of an addition.
     expect(
-      c(['Add', 'x', ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a']])
+      c([
+        'Add',
+        'x',
+        ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a'],
+      ])
     ).toBe(
       'float _tv1;\n{\n  float a;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn x + _tv1;'
     );
@@ -804,15 +1003,16 @@ describe('GPU code supplied by the caller runs once, in order', () => {
 
   it('caller code with nothing before it is held in a temporary', () => {
     expect(glsl.compile(cev.box(['Tuple', ['Max', 'V'], 'U']), opts).code).toBe(
-      'vec3 _tv1 = vec3(nextValue());\n' +
-        'return vec2((_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z)), u_u);'
+      'vec3 _tv1 = vec3(nextValue());\n' + `return vec2(${MAX_V('_tv1')}, u_u);`
     );
     // The canonical `Add` puts `U` first, and the interpreter reads it
     // before it calls `V`: the caller's code could write the variable that
-    // `u_u` reads, so the temporary is refused.
-    expect(() =>
-      glsl.compile(cev.box(['Add', ['Max', 'V'], 'U']), opts)
-    ).toThrow(MOVED);
+    // `u_u` reads, so `u_u` is read into a temporary first.
+    expect(glsl.compile(cev.box(['Add', ['Max', 'V'], 'U']), opts).code).toBe(
+      'float _tv1 = u_u;\n' +
+        'vec3 _tv2 = vec3(nextValue());\n' +
+        `return _tv1 + ${MAX_V('_tv2')};`
+    );
   });
 
   it('a plain uniform read and a symbol with no `vars` entry compile as before', () => {

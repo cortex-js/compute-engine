@@ -4,8 +4,9 @@
  * common-subexpression pass computes its call once, and a lowering may
  * write the call more than once or compute it ahead of other code, as on
  * the JavaScript target. An entry with no such declaration (a plain name)
- * still counts as code that the caller supplies, so these expressions
- * decline for it.
+ * still counts as code that the caller supplies: each call is computed once,
+ * into a temporary, in the order of the interpreter
+ * (`gpu-caller-binding.ts`).
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
@@ -29,7 +30,13 @@ describe('CE-1188: a pure `functions` entry on GLSL', () => {
         'return (_gpu_cos(_tv1) / _gpu_sin(_tv1));',
       ].join('\n')
     );
-    expect(glsl.canCompile(expr, notDeclared).ok).toBe(false);
+    expect(glsl.canCompile(expr, notDeclared)).toEqual({ ok: true });
+    expect(glsl.compile(expr, notDeclared).code).toBe(
+      [
+        'float _tv1 = myFn(x);',
+        'return (_gpu_cos(_tv1) / _gpu_sin(_tv1));',
+      ].join('\n')
+    );
   });
 
   it('a loop may run ahead of the call', () => {
@@ -51,8 +58,22 @@ describe('CE-1188: a pure `functions` entry on GLSL', () => {
         'return _gpu_passes > 10000 ? _gpu_nan() : _tv2;',
       ].join('\n')
     );
-    expect(() => glsl.compile(expr, notDeclared)).toThrow(
-      /ahead of the rest of its statement/
+    // The canonical form puts the `Sum` first, and the interpreter evaluates
+    // it first. The call of the body runs once per iteration, at the start
+    // of the body, and the call after the loop once.
+    expect(glsl.compile(expr, notDeclared).code).toBe(
+      [
+        '_gpu_passes = 0;',
+        'float _tv1 = 0.0;',
+        'for (int k = 1; k <= int(floor(n)); k++) {',
+        '  if (++_gpu_passes > 10000) break;',
+        '  float _tv2 = myFn(x);',
+        '  _tv1 += float(k) + _tv2;',
+        '}',
+        'float _tv3 = myFn(x);',
+        'float _tv4 = _tv1 + _tv3;',
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv4;',
+      ].join('\n')
     );
   });
 });

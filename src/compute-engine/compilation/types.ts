@@ -952,10 +952,7 @@ export interface CompileTarget<Expr = unknown> {
     valueNode: Expr,
     stmts: ReadonlyArray<string>,
     valueCode: string,
-    target: CompileTarget<Expr>,
-    /** The `Block` node itself, when the caller has it: the shader targets
-     * read it for the order of the random draws it makes. */
-    block?: Expr
+    target: CompileTarget<Expr>
   ) => string | undefined;
 
   /**
@@ -977,6 +974,24 @@ export interface CompileTarget<Expr = unknown> {
     compiled: () => TargetSource,
     target: CompileTarget<Expr>
   ) => TargetSource;
+
+  /**
+   * Called when a statement is about to be compiled with its own statement
+   * sink (`compileStatementBody()`, `compileListStatement()`): `unit` is the
+   * statement and `target` carries the sink. The hook may push statements
+   * into the sink ahead of the statement, and returns a function that the
+   * caller runs when the statement is compiled.
+   *
+   * The GLSL target computes there each piece of code that the caller
+   * supplies (a `vars` source, a `functions` or `operators` entry, a
+   * `compile` handler) into a temporary, in the order of the interpreter, so
+   * that the code runs once per occurrence wherever the emitter writes the
+   * piece (`gpuBindCallerCode()`, `gpu-caller-binding.ts`).
+   */
+  bindStatementEffects?: (
+    unit: Expr | undefined,
+    target: CompileTarget<Expr>
+  ) => () => void;
 
   /**
    * When set, a cap on the trip count of emitted `Sum`/`Product` loops: a

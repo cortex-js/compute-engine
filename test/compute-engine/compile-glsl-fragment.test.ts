@@ -1896,7 +1896,7 @@ describe('phase C2, review fixes', () => {
     return String(result.code);
   }
 
-  test('a `vars` entry that is code is caller code, refused only where the code writes it twice', () => {
+  test('a `vars` entry that is code is caller code, computed once into a temporary', () => {
     const e = new ComputeEngine();
     e.declare('x', 'real');
     expect(inOn(e, ['Add', 'x', 1], { vars: { x: 'u.x + 1.0' } })).toContain(
@@ -1904,25 +1904,27 @@ describe('phase C2, review fixes', () => {
     );
     inOn(e, ['Multiply', 'x', 2], { vars: { x: 'v_uv.x * 2.0' } });
     inOn(e, ['Add', 'x', 1], { vars: { x: '-3' } });
-    // `cot(x)` is `cos(x) / sin(x)`: the code would run twice.
-    outOn(e, ['Cot', 'x'], /writes that operand more than once/, {
-      vars: { x: 'draw()' },
-    });
+    // `cot(x)` is `cos(x) / sin(x)`: the code is computed once, into a
+    // temporary ahead of the statement (`gpu-caller-binding.ts`).
+    expect(inOn(e, ['Cot', 'x'], { vars: { x: 'draw()' } })).toBe(
+      'float _tv1 = draw();\nreturn (_gpu_cos(_tv1) / _gpu_sin(_tv1));'
+    );
   });
 
-  test('an operand that the code writes once is not refused for caller code', () => {
+  test('an operand with caller code that the code writes twice is computed once', () => {
     const e = new ComputeEngine();
     e.declare('x', 'real');
     const functions = { F: 'external_f' };
     inOn(e, ['Round', ['F', 'x']], { functions });
     inOn(e, ['Power', ['F', 'x'], 2], { functions });
     // The real branch of `Power` with a constant non-integer exponent writes
-    // the base twice (`sign(b) * pow(abs(b), e)`).
-    outOn(
-      e,
-      ['Power', ['F', 'x'], ['Rational', 1, 3]],
-      /writes that operand more than once/,
-      { functions }
+    // the base twice (`sign(b) * pow(abs(b), e)`): the call is computed once,
+    // into a temporary.
+    expect(
+      inOn(e, ['Power', ['F', 'x'], ['Rational', 1, 3]], { functions })
+    ).toBe(
+      'float _tv1 = external_f(x);\n' +
+        'return (sign(_tv1) * pow(abs(_tv1), 0.33333334));'
     );
   });
 

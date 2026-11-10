@@ -34,10 +34,7 @@ import { multiClauseState } from '../multi-clause.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { candidateAt, isCallerMapped, type CseHarvestOptions } from './cse.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
-import {
-  isShaderVariableRead,
-  reachesCallerCodeOn,
-} from './compile-folding.js';
+import { reachesCallerCodeOn } from './compile-folding.js';
 import { shadowedLibraryLoweringError } from './compile-definitions.js';
 import {
   ELEMENTWISE_TUPLE_EXEMPT_HEADS,
@@ -528,8 +525,9 @@ export function compileExprOperator(
             // `vars` entry `W: 'nextValue()'`, a head mapped through
             // `functions`) counts as impure here, also when it is a bare
             // symbol: that code can count its calls or draw a number
-            // (`reachesCallerCodeOn`). The shader targets have no `bindExpr`
-            // and decline such a chain in the check below instead.
+            // (`reachesCallerCodeOn`). On GLSL, which has no `bindExpr`,
+            // such code is a read of a temporary computed ahead of the
+            // statement (`gpu-caller-binding.ts`).
             //
             // The interpreter SHORT-CIRCUITS a chain (since 2026-08-15,
             // `evaluateChainOperands` in `library/relational-operator.ts`):
@@ -544,10 +542,10 @@ export function compileExprOperator(
             // unconditional — so an impure operand at index ≥ 2 that must be
             // bound declines there (D6).
             const chainOp = target.chainOp ?? '&&';
-            // Caller code is an effect here on every target but the shaders:
-            // the GPU check below declines a shader chain with caller code. A
-            // target with no `bindExpr` that is not a shader (a target that a
-            // caller builds) binds it by a hoisted temporary, or declines.
+            // Caller code is an effect here on every target but GLSL, where
+            // it is already a read of a temporary. A target with no
+            // `bindExpr` that is not a shader (a target that a caller builds)
+            // binds it by a hoisted temporary, or declines.
             const bindsCallerCode = !(target.language === 'glsl');
             const callerCode = (arg: Expression): boolean =>
               bindsCallerCode && reachesCallerCodeOn(arg, target);
@@ -570,41 +568,12 @@ export function compileExprOperator(
               !isNumber(arg) &&
               !isString(arg) &&
               !(isSymbol(arg) && arg.isConstant);
-            // On the shader targets, code that the caller supplied (a `vars`
+            // On the GLSL target, code that the caller supplies (a `vars`
             // source, a `functions` or `operators` entry, a `compile`
-            // handler) can count its calls or draw a number, and it is not
-            // impure to the engine. As a middle operand it would run once per
-            // comparison. With a draw bound to a hoisted temporary, the draw
-            // would run ahead of caller code written before it. Both decline.
-            if (!target.bindExpr && target.language === 'glsl') {
-              const reaches = (e: Expression): boolean =>
-                reachesCallerCodeOn(e, target);
-              const unit = target.hoist?.unit;
-              // A middle operand whose code is the read of one variable
-              // (`isShaderVariableRead`) runs no code when it is read twice.
-              if (
-                args.some(
-                  (arg, i) =>
-                    i >= 1 &&
-                    i <= args.length - 2 &&
-                    !isShaderVariableRead(arg, target) &&
-                    reaches(arg)
-                ) ||
-                (impureMiddle &&
-                  (args.some(
-                    (arg, i) =>
-                      (i === 0 || i === args.length - 1) && reaches(arg)
-                  ) ||
-                    (unit !== undefined && reaches(unit))))
-              )
-                throw new Error(
-                  `Could not compile \`${h}\`: a chained comparison contains code ` +
-                    'supplied by the caller (a `vars` source, a `functions` or ' +
-                    '`operators` entry, or a `compile` handler), and the shader ' +
-                    'form would run that code more than once or out of the ' +
-                    'order of the interpreter.'
-                );
-            }
+            // handler) is a read of a temporary computed ahead of the
+            // statement, and a chained comparison whose later operands hold
+            // such code is written as a selection first
+            // (`gpu-caller-binding.ts`), so it needs no case here.
             // Per operand: its code, or a temporary name plus the binding
             // that introduces it.
             const outerBindings: Array<[name: string, value: string]> = [];
