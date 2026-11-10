@@ -569,6 +569,61 @@ calls are independent and the code is worker portable; the loop of
 condition (both bounds, 1 and `N^2` with the capture `N = 32`, are proved at
 least 1) and no abort. The other two have no loop.
 
+**Prelude census (2026-11-10).** Each function of the preludes of Tycho's
+showcases `burning-ship`, `multibrot`, `buddhabrot`, `julia-set`,
+`game-of-life`, `apollonian-gasket`, `traffic-jam`, `othello` and
+`heat-spread` (`~/dev/tycho/src/graph-paper/onboarding/`, read 2026-11-10),
+executed with `executeEpsil()` and compiled on the structured route with
+`cse: false, constantFold: false`. Before: 9 of 35 functions compile. After
+the scalar numeric functions (`Exp`, `Ln`, `Sin`, `Cos`, `Tanh`, `Abs`,
+`Arctan2`, `Power` with the exponent 1.5 and a base proved non-negative;
+rows in [the emission rewrites](2026-11-09-js-pilot-emission-rewrites.md)):
+12 of 35. `heatseed`, `roadstep` and `tone` compile now; every other function
+still needs something of groups (b), (c) or (e).
+
+| Showcase | Function | Compiles before | First refusal before | Library heads missing |
+| --- | --- | --- | --- | --- |
+| burning-ship | `B` | no | `Break` in a branch of an `If` | `Break`, `Abs`, `Ln` |
+| multibrot | `M` | no | `Break` in a branch of an `If` | `Break`, `Arctan2`, `Power(s, d/2)`, `Cos`, `Sin`, `Ln` |
+| buddhabrot | `step` | no | a `Loop` over `ParallelDomain(Range(1, n))` | `ParallelLoop`, `Tuple`, `Break`, `Abs`, `AddTo` |
+| buddhabrot | `tone` | no (yes after) | `Power` with the exponent 1.5 | `Power(max(0, v), 1.5)` |
+| buddhabrot | `c` | no | a body with local statements (`Block`) | `Rgb`; `Power(…, 1.5)` through `tone` |
+| julia-set | `J` | no | `Break` in a branch of an `If` | `Break`, `Abs`, `Ln`, `Power(…, 1.6)` |
+| julia-set | `pick`, `seg` | yes | | |
+| julia-set | `channel` | no | a helper body with local statements (`Block`) | |
+| julia-set | `shade` | no | `Rgb` | `Rgb` |
+| game-of-life | `life` | no | `RotateLeft` (a sum of rotated lists) | |
+| apollonian-gasket | `csqrt`, `fourth`, `tangent`, `seen`, `admitted`, `fill` | no | parameters of tuple types | `Tuple` (3), `List` (2), `ListJoin` (2), `Count` (2), `Abs` (4, 2 of them through a helper) |
+| apollonian-gasket | `generations` | no | a parameter of the type `list<tuple<…>>` | `List`, `ListJoin`, `Take`, `Drop` |
+| traffic-jam | `roadseed`, `roadstart`, `roadtrail` | yes | | |
+| traffic-jam | `roadstep` | no (yes after) | `Tanh` | `Tanh` |
+| othello | `ray` | no | `Break` in a branch of an `If` | `Break` |
+| othello | `flips` | no | `NotEqual` | `NotEqual`; `Break` through `ray` |
+| othello | `legal`, `stones` | no | a `Comprehension` with a guard | `NotEqual`, `Break` through helpers (`legal`) |
+| othello | `hasmove`, `choosecell`, `play` | no | a `let` where the route reads a value (head `Dictionary`) | `Break` through helpers; `NotEqual` (`play`) |
+| othello | `score` | no | the call of `stones`, which is refused | |
+| heat-spread | `heatwall`, `heatneighbor`, `heatstep`, `heatpaint` | yes | | |
+| heat-spread | `heatseed` | no (yes after) | `Power` with the base `ExponentialE` (`exp`) | `Exp` |
+
+The missing heads by group, with the number of functions that each blocks
+(directly or through a helper that the function calls):
+
+- (a) scalar numeric functions: `Abs` 7, `Ln` 3, `Power` with an exponent
+  other than 2: 5 (the exponent 1.5 with a non-negative base 2, `Exp` 1,
+  1.6 with a base of unknown sign 1, the variable exponent `d/2` 1),
+  `Arctan2` 1, `Cos` 1, `Sin` 1, `Tanh` 1. Done in this change: all but
+  `Power` with the exponent 1.6 or `d/2` (`J`, `M`; both also need
+  `Break`).
+- (b) control flow: `Break` 10, a `Comprehension` with a guard 3 (`legal`,
+  `stones`, and `score` through `stones`), a parallel loop
+  (`ParallelLoop`, a loop over `ParallelDomain`) 1.
+- (c) data: parameters of tuple types 7 (`apollonian-gasket`), `Tuple` 4,
+  `List` literal 3, `ListJoin` 3, `Count` 2, `Take` 1, `Drop` 1, an update
+  of a list element (`AddTo`) 1, `RotateLeft` and the sum of lists 1.
+- (d) random: none.
+- (e) other: `NotEqual` 3, a `let` where the route reads a value 3, `Rgb` (a
+  colour result) 2, a helper body with local statements 2.
+
 ### Step 7 — Specify profiles and migrate individual consumers
 
 **Deliver:** exact public numeric-kernel semantics, diagnostics, execution

@@ -36,7 +36,8 @@ import type { Expression } from '../../src/compute-engine/global-types';
 
 /** The functions of the prelude of Tycho's heat showcase that the structured
  *  route compiles (`~/dev/tycho/src/graph-paper/onboarding/showcase-heat.js`;
- *  `heatseed` is left out: `exp` is not in the route). */
+ *  `heatseed` is left out; its test is in
+ *  compile-javascript-structured-functions.test.ts). */
 const HEAT = `
 const N = 32
 function heatwall(c: integer, r: integer, obstacle: real) -> boolean {

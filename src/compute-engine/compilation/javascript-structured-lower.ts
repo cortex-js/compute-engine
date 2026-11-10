@@ -80,10 +80,26 @@ import {
   type IRValue,
   type ScalarKind,
   type ValueType,
+  type BinaryFunctionName,
+  type UnaryFunctionName,
 } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
+import { isShadowedSymbol } from '../library-shadowing.js';
 
 export type StructuredInput = IRInput;
+
+/**
+ * The form of a `Power` or `Abs` node that the rule of its head admitted
+ * (`javascript-fragment-target.ts`), recorded during the annotation:
+ *
+ * - `square`, `exp`, `three-halves`: the forms of `powerForm()`.
+ * - `abs`: `Abs` written as the function `abs`.
+ * - `abs-identity`: `Abs` of a real operand that the existing emitter proves
+ *   non-negative, written as the operand itself, as that emitter writes it
+ *   (`identityPassthrough()`): `-0` stays `-0`.
+ */
+export type StructuredForm =
+  'square' | 'exp' | 'three-halves' | 'abs' | 'abs-identity';
 
 /**
  * A binding of the engine that the program reads and does not bind, with
@@ -134,6 +150,10 @@ export type StructuredPreparation = {
   /** For tests only: the heads that lower to the trace operation, with the
    *  trace id of each. */
   readonly testOperations: ReadonlyMap<string, string>;
+  /** The form that the rule of its head chose for each `Power` and `Abs`
+   *  node (`StructuredForm`). The lowering reads it, and no fact of the
+   *  engine; a node of these heads with no form is an error. */
+  readonly forms: ReadonlyMap<Expression, StructuredForm>;
   readonly numericPolicy: 'strict' | 'complex';
   /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
    *  recorded on each `loop`. */
@@ -214,6 +234,51 @@ const OPERATIONS: Readonly<
   // integer element.
   ReplaceAt: 'replace-at',
 };
+
+/** The functions of one or two operands, by the head of the library that
+ *  applies them. `Exp(x)` has no head of its own: the canonical form
+ *  writes it `Power(ExponentialE, x)` (`powerForm()`). */
+const FUNCTIONS: Readonly<
+  Record<
+    string,
+    | { readonly kind: 'unary'; readonly fn: UnaryFunctionName }
+    | { readonly kind: 'binary'; readonly fn: BinaryFunctionName }
+  >
+> = {
+  Ln: { kind: 'unary', fn: 'ln' },
+  Sin: { kind: 'unary', fn: 'sin' },
+  Cos: { kind: 'unary', fn: 'cos' },
+  Tanh: { kind: 'unary', fn: 'tanh' },
+  Abs: { kind: 'unary', fn: 'abs' },
+  Arctan2: { kind: 'binary', fn: 'atan2' },
+};
+
+/**
+ * The form of the `Power` node `node` that the structured route admits, or
+ * `undefined`:
+ *
+ * - `square`: the literal exponent 2, the product of the base with itself.
+ * - `exp`: the base is the constant `ExponentialE` of the library (not a
+ *   symbol of that name that a scope declares), the exponential of the
+ *   exponent. The canonical form writes `Exp(x)` so.
+ * - `three-halves`: the literal exponent `1.5` or `3/2`, the product of the
+ *   base and its square root, the base evaluated once. The rule of `Power`
+ *   admits it only for a base that it proves non-negative.
+ *
+ * The rule of `Power` (`javascript-fragment-target.ts`) and the lowering
+ * read the form from this function, so they agree.
+ */
+export function powerForm(
+  node: Expression
+): 'square' | 'exp' | 'three-halves' | undefined {
+  if (!isFunction(node, 'Power') || node.nops !== 2) return undefined;
+  const [base, exponent] = node.ops;
+  if (isSymbol(base, 'ExponentialE') && !isShadowedSymbol(base)) return 'exp';
+  if (!isNumber(exponent) || exponent.im !== 0) return undefined;
+  if (exponent.re === 2) return 'square';
+  if (exponent.re === 1.5) return 'three-halves';
+  return undefined;
+}
 
 function scalarKind(type: { readonly kind: string }): ScalarKind {
   if (
@@ -545,24 +610,87 @@ class Lowering {
       return result;
     }
 
-    // `Power(x, 2)`: the product of the operand with itself. The operand is
-    // evaluated once. The rule of `Power` admits only the literal exponent
-    // 2, which has no operation.
+    // `Power` in the form that its rule recorded (`StructuredForm`, the
+    // forms of `powerForm()`). `Power(x, 2)`: the product of
+    // the operand with itself; `Power(x, 1.5)`: the product of the operand
+    // and its square root. The operand is evaluated once, and the literal
+    // exponent has no operation. `Power(ExponentialE, x)`: the function
+    // `exp` of the exponent, whose conversion is the first one of the facts
+    // (the rule of `Power` types no base for this form).
     if (operator === 'Power') {
+      const form = this.prep.forms.get(node);
+      if (form === 'exp') {
+        const exponent = this.convert(
+          this.value(node.ops[1], scope, operations),
+          facts.conversions?.[0],
+          node,
+          operations
+        );
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'unary',
+          fn: 'exp',
+          result,
+          operands: [exponent],
+          effect,
+          origin: node,
+        });
+        return result;
+      }
+      if (form !== 'square' && form !== 'three-halves')
+        return fail(`no recorded form for the power ${node.toString()}`);
       const operand = this.convert(
         this.value(node.ops[0], scope, operations),
         facts.conversions?.[0],
         node,
         operations
       );
+      let factor = operand;
+      if (form === 'three-halves') {
+        factor = this.newValue('real', 'number');
+        operations.push({
+          kind: 'sqrt',
+          result: factor,
+          operands: [operand],
+          effect,
+          origin: node,
+        });
+      }
       const result = this.resultOf(facts);
       operations.push({
         kind: 'multiply',
         result,
-        operands: [operand, operand],
+        operands: [operand, factor],
         effect,
         origin: node,
       });
+      return result;
+    }
+
+    const fn = Object.hasOwn(FUNCTIONS, operator)
+      ? FUNCTIONS[operator]
+      : undefined;
+    if (fn !== undefined) {
+      // `Abs` of an operand that the existing emitter proves non-negative
+      // is the operand itself (`abs-identity`).
+      const form = operator === 'Abs' ? this.prep.forms.get(node) : 'abs';
+      if (form !== 'abs' && form !== 'abs-identity')
+        return fail(`no recorded form for ${node.toString()}`);
+      const operands = this.operands(node, facts, scope, operations);
+      if (form === 'abs-identity') return operands[0];
+      const result = this.resultOf(facts);
+      operations.push(
+        fn.kind === 'unary'
+          ? { kind: 'unary', fn: fn.fn, result, operands, effect, origin: node }
+          : {
+              kind: 'binary',
+              fn: fn.fn,
+              result,
+              operands,
+              effect,
+              origin: node,
+            }
+      );
       return result;
     }
 

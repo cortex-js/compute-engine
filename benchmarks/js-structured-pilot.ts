@@ -20,7 +20,8 @@
  * matter (`cse-repeat`, `fold`, `local-reads`); the fixtures of step 5
  * (`sqrt-repeat`, `helper-chain`, `capture`, `local-writes`); the
  * fixtures of step 6 (`loop-sum`, `loop-complex-iteration`, `heatneighbor`,
- * `heatstep`, `heatpaint`); two
+ * `heatstep`, `heatpaint`); the prelude functions that the scalar numeric
+ * functions admit (`heatseed`, `roadstep`, `tone`); two
  * generated trees of about 200 operations; and the corpus programs.
  *
  * The ordinary target is called as `new JavaScriptTarget().compile()`, the
@@ -550,9 +551,105 @@ function step6Fixtures(): Fixture[] {
   ];
 }
 
+/** The prelude functions that compile on the structured route with its
+ *  scalar numeric functions (`Exp`, `Tanh`, `Power` with the exponent
+ *  1.5): the fixtures of the prelude census of
+ *  `docs/plans/2026-11-09-js-compiler-status-and-plan.md` and of
+ *  test/compute-engine/compile-javascript-structured-functions.test.ts. */
+function functionFixtures(): Fixture[] {
+  return [
+    {
+      // The seed field of the heat showcase: a comprehension of `exp`.
+      id: 'heatseed',
+      kind: 'named',
+      json: preludeLiteral(HEATSEED_PRELUDE, 'heatseed'),
+      declare: {},
+      setup: (ce) => void executeEpsil(ce, HEATSEED_PRELUDE),
+      inputs: [[]],
+    },
+    {
+      // One step of the traffic showcase: a loop over 24 drivers with
+      // `tanh`, `Mod` and two `replaceAt` per driver.
+      id: 'roadstep',
+      kind: 'named',
+      json: preludeLiteral(ROADSTEP_PRELUDE, 'roadstep'),
+      declare: {},
+      setup: (ce) => void executeEpsil(ce, ROADSTEP_PRELUDE),
+      inputs: product<unknown>([ROAD_SEED, ROAD_SEED.map((s, i) => (i < 24 ? s + (i % 3) : s))], [0.7, 2], [14, 5]) as Inputs[],
+    },
+    {
+      // One colour channel of the Buddhabrot showcase: `max(0, v)^1.5`.
+      id: 'tone',
+      kind: 'named',
+      json: preludeLiteral(TONE_PRELUDE, 'tone'),
+      declare: {},
+      setup: (ce) => void executeEpsil(ce, TONE_PRELUDE),
+      inputs: product<number>([0.25, 0, -3, 0.5, 1e6], [0.1, 0.9]),
+    },
+  ];
+}
+
+/** `heatseed` of the prelude of Tycho's heat showcase, copied from
+ *  `~/dev/tycho/src/graph-paper/onboarding/showcase-heat.js`. */
+const HEATSEED_PRELUDE = `
+const N = 32
+function heatseed() -> list<real> {
+  [exp(-((((k - 1) % N) - 9)^2 + (floor((k - 1)/N) - 15.5)^2)/32) for k in 1..N^2]
+}
+`;
+
+/** The constants and `roadstep` of the prelude of Tycho's traffic
+ *  showcase, copied from
+ *  `~/dev/tycho/src/graph-paper/onboarding/showcase-traffic.js`. */
+const ROADSTEP_PRELUDE = `
+const L = 240
+const N = 24
+const W = 80
+function roadstep(S: list<real>, a: real, v: real) -> list<real> {
+  let R = [0.0 for k in 1..2*N]
+  let j = 0
+  let gap = 0.0
+  let target = 0.0
+  let speed = 0.0
+  for k in 1..N {
+    j = 1 + Mod(k, N)
+    gap = max(0, Mod(S[j] - S[k], L) - 4)
+    target = v*(tanh((gap - 8)/3) + tanh(8/3))/(1 + tanh(8/3))
+    speed = min(gap/0.1, max(0, S[N+k] + 0.1*a*(target - S[N+k])))
+    R = replaceAt(R, k, Mod(S[k] + 0.1*speed, L))
+    R = replaceAt(R, N+k, speed)
+  }
+  R
+}
+`;
+
+/** `roadseed(1)` of the traffic showcase: 24 positions, then 24 speeds. */
+const ROAD_SEED: readonly number[] = Array.from({ length: 48 }, (_, i) =>
+  i < 24 ? (i * 240) / 24 + (i === 0 ? 1 : 0) : 5
+);
+
+/** `tone` of the prelude of Tycho's Buddhabrot showcase, copied from
+ *  `~/dev/tycho/src/graph-paper/onboarding/template-data.js`. */
+const TONE_PRELUDE = `
+function tone(v: real, lo: real) -> real { min(1, max(lo, max(0, v)^1.5)) }
+`;
+
+/** The MathJSON of the `Function` literal that `executeEpsil()` makes for
+ *  the function `name` of `prelude`. */
+function preludeLiteral(prelude: string, name: string): MathJsonExpression {
+  const ce = new ComputeEngine();
+  executeEpsil(ce, prelude);
+  const definition = ce.lookupDefinition(name) as
+    | { operator?: { _lambdaLiteral?: Expression } }
+    | undefined;
+  const literal = definition?.operator?._lambdaLiteral;
+  if (literal === undefined) throw new Error(`no function literal for ${name}`);
+  return literal.json;
+}
+
 /** The functions of the prelude of Tycho's heat showcase that the
  *  structured route compiles, copied from `~/dev/tycho/src/graph-paper/onboarding/showcase-heat.js`
- *  (`heatseed` is left out: `exp` is not in the structured route). */
+ *  (`heatseed` is in `functionFixtures()`). */
 const HEAT_PRELUDE = `
 const N = 32
 function heatwall(c: integer, r: integer, obstacle: real) -> boolean {
@@ -616,8 +713,7 @@ const HEAT_FIELD: readonly number[] = Array.from(
 /** The fields of the heat test
  *  (test/compute-engine/compile-javascript-structured-heat.test.ts). The
  *  seed field is the value of `heatseed()` of the showcase, computed here in
- *  JavaScript (the structured route declines `heatseed`: `exp` is not in
- *  it); it can differ from the value of the interpreter in the last bits,
+ *  JavaScript; it can differ from the value of the interpreter in the last bits,
  *  which does not matter for an input. */
 const HEAT_SEED: readonly number[] = Array.from({ length: 1024 }, (_, i) =>
   Math.exp(-(((i % 32) - 9) ** 2 + (Math.floor(i / 32) - 15.5) ** 2) / 32)
@@ -727,6 +823,7 @@ function allFixtures(): Fixture[] {
     ...namedFixtures(),
     ...step5Fixtures(),
     ...step6Fixtures(),
+    ...functionFixtures(),
     ...deepFixtures(),
     ...corpusFixtures(),
   ];

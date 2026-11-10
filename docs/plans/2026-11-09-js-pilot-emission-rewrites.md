@@ -76,18 +76,55 @@ handlers of the operators decide more.
 
 | `Sqrt` (`javascript-target.ts`), with `isComplexValued()` and `promotesToComplexLane()` | Writes `_SYS.csqrt(z)` for a complex operand. For a real operand: with a literal operand, writes the root as a literal also with `constantFold: false` (`tryGetConstant()`: `Sqrt(2)` is `1.4142135623730951`, `Sqrt(-2)` the complex literal of `complexSqrtLiteral()`); otherwise `_SYS.csqrt(({ re: x, im: 0 }))` when the operand is negative (`isNegative` and a non-real type) or, in the `complex` mode, not proved non-negative (`assumedRealNonNegative()`), and `Math.sqrt(x)` in the other cases. | The rule of the structured route (`structuredSqrtRule()`, `javascript-fragment-target.ts`) decides real or complex from the fact of the operand, the mode and the sign of the operand (`signOf()`: a literal, a snapshot, the declared type of a name, and `Add`, `Multiply`, `Min`, `Max` and `Sqrt` of non-negative operands), with the rules of `assumedRealNonNegative()` for these operators. It declines when the engine knows a sign that these facts do not give (`Sqrt(-n)` with `n: real<..-1>` in the `complex` mode). The lowering converts a real operand of a complex root (`real-to-complex`), and the emitter writes `Math.sqrt` or `_SYS.csqrt`. A literal operand is not folded: `Math.sqrt(2)` gives the same number as the literal, and `_SYS.csqrt` of `-2` the value of the interpreter (the differential test of step 5). |
 
+The rows below are the scalar numeric functions that the prelude census of
+the [plan](2026-11-09-js-compiler-status-and-plan.md) ("Prelude census
+(2026-11-10)") needs, read from the source at `a289574ce` (2026-11-10). The
+emitted code of each case was checked with `cse: false, constantFold: false`
+in both modes. "Same code": the structured route writes the call that the
+existing emitter writes. "Same value": other code, the same number.
+"Decline": the structured route refuses the program, with a message.
+
+| Place | What the existing emitter does | Proposed decision for the fragment route |
+| --- | --- | --- |
+| `Exp` (`Power(ExponentialE, x)`, the canonical form; the `Power` handler) | A real exponent that is not a number literal: `Math.exp(x)`, in both modes (`isComplexValued()` is false: the type is `real<0<..>`, no promotion for an exponent that is not a number literal). A number literal exponent: the code of that exponent (`(Math.E * Math.E)` for 2, `Math.sqrt(Math.E)` for 0.5). An exponent that reads only constants and assigned symbols, with a value that is not an integer: replaced by its value (`knownExponentPower()`), then as a literal. A complex exponent: `_SYS.cexp(z)`, or `_SYS.cexppi(u)` for `a + iπu` (`eulerPiSplit()`). | Real exponent that reads an input, a parameter or a local: same code (`exp`). Number literal exponent, an exponent that reads no input, parameter or local (wider than `knownExponentPower()`), a real exponent whose node type is not real: decline. Complex exponent that is a name: same code (`_SYS.cexp`); any other complex exponent: decline. `±Infinity`, `NaN`, 0, large: `Math.exp` on both routes. |
+| `Sin`, `Cos` | A real operand: `Math.sin(x)`, `Math.cos(x)`; an operand `π·u` (`piMultiple()`): `_SYS.sinpi(u)`, `_SYS.cospi(u)` (exact at the multiples of π). A complex operand: `_SYS.csin(z)`, `_SYS.ccos(z)` in the `strict` mode, wrapped in `_SYS.cplx()` in the `complex` mode (the node type is `number`). | Real operand that does not read `Pi`: same code. Operand that reads `Pi` (wider than `piMultiple()`): decline. Complex operand that is a name, `strict` mode: same code. Any other complex operand, and every complex operand in the `complex` mode: decline. |
+| `Tanh` | A real operand: `Math.tanh(x)`, also for a closed operand (`Math.tanh(2.6666666666666665)` for `tanh(8/3)`). A complex operand: `_SYS.ctanhipi(u)` for `i·π·u` (`imaginaryPiMultiple()`), else `_SYS.ctanh(z)`, wrapped in `_SYS.cplx()` in the `complex` mode. | Real operand: same code. Complex operand: as `Sin`. |
+| `Abs` | A complex operand: `Math.hypot(re, im)` when the operand is a sum of a real and an imaginary part (`tryGetJSComplexParts()`), else `_SYS.cabs(z)`. A real operand that the engine proves non-negative: the operand itself (`identityPassthrough()`). An operand whose type admits a string or a set: `_SYS.absAny(x)`. Otherwise `Math.abs(x)`; an integer operand gives an integer. | Real operand that the existing predicate (`isNonNegative()`: a literal at least 0, or `isNonNegative` true) proves non-negative: the operand itself (the recorded form `abs-identity`), so `-0` stays `-0`, as on the existing route. Other real operand: `Math.abs(x)`, same code. The type of an integer operand is the integer fact: a loop bound can read it. Complex operand that is a name: same code (`_SYS.cabs`), real result. Any other complex operand: decline. A string or set type does not reach the route (no fact for it). |
+| `Arctan2` | `Math.atan2(y, x)` (a name mapping), for real and integer operands. | Real operands: same code. A complex operand: decline. |
+| `Ln` (`javascript-target.ts`), with `isComplexValued()` and `promotesToComplexLane()` | The `Sqrt` rule (`Sqrt`, `Ln`, `Log` share one branch of `isComplexValued()` and `promotesRadicalToComplex()`): a complex operand `_SYS.cln(z)`; a real operand `_SYS.cln(({ re: x, im: 0 }))` when it is provably negative and the node type is not real, or, in the `complex` mode, not proved non-negative (`assumedRealNonNegative()`); `Math.log(x)` otherwise (`NaN` for a negative `x`, `-Infinity` for 0). A literal operand is not folded (`Math.log(2)`). | `structuredRadicalRule('Ln', …)`, the rule of `Sqrt`: the sign from `signOf()`, the guard that declines when the engine knows a sign that the rule does not find, and, in the `strict` mode, a decline when the operand is negative and the node type is real. Same code for each case it admits. `signOf()` now also has the rules of `assumedRealNonNegative()` for `Divide`, `Abs`, `Power` with an even integer literal exponent, `Min` and `Max` of real-typed operands only, and a function node of a non-real type, so `Sqrt` reads them too. |
+| `Power(b, 1.5)` and `Power(b, 3/2)` (`realRadicalPower()`) | A base that `assumedRealNonNegative()` proves non-negative: `(b * Math.sqrt(b))` for a name or a literal, `_SYS.pow3h(b)` (`b * Math.sqrt(b)`) for another base. Another real base: `Math.pow(b, 1.5)` in the `strict` mode, `_SYS.cpow` in the `complex` mode. | A real base that `signOf()` proves non-negative, and a node type that is real: the product of the base and its square root, the base evaluated once (same value). A real number literal base: decline, because the handler folds two finite literals to `Math.pow(b, e)` before every other rule (`10^1.5` folds to `31.622776601683793`, the product gives `31.622776601683796`); the same decline for the exponent 2 (`1.1^2`). Another base, a complex base: decline. |
+| `knownExponentPower()` (`compile-real-analysis.ts`) | Replaces an exponent that reads only constants and assigned symbols, with a value that is not an integer, by that value, before the `Power` handler and `isComplexValued()`. | Not reached for the forms of the route: the exponents 2 and 1.5 are literals, and an exponential whose exponent reads no input, parameter or local is declined (above). |
+
+A cross-check of the branches of the existing emitter (2026-11-10) found
+four more places where the structured route wrote other code; each is now a
+row of the route:
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| The complex branch of `Add` | The real parts of every operand, then the imaginary parts of the complex operands only, in the order of the operands; a complex literal gives its two parts as constants; a term that is the constant `0` is dropped: `z + 1` is `{ re: z.re + 1, im: z.im }`, `x + i` is `{ re: x, im: 1 }`. A real operand is written as it is, with no parentheses. | The same text: a real operand of a complex `add` is not converted (`structuredAddRule`), and the emitter writes the parts as above, so a `-0` part stays `-0`. A real operand whose text is a sum or a conditional fails the emission (the existing emitter groups it otherwise). `Multiply` with a complex result has two complex operands only (unchanged); `Negate` of a real operand is real, and its parent converts it, as on the existing route. |
+| A node whose type is the value `true` or `false` (`booleanClaim()`, `compileExprBooleanClaim()`) | Writes the literal before any handler, for a pure node of a head that is not control flow. | Every function node of such a type is refused (`refuseBooleanClaim()`): `LessEqual(0, p·q·r)` with `p`, `q`, `r` of the type `real<0..>`. |
+| `closedExactJump()` (`compile-folding.ts`) | Folds a node of `JUMP_FUNCTIONS` with no unknowns (every symbol a constant or a captured binding) with its exact value, also with `constantFold: false`. | A `Less`, `LessEqual`, `Equal`, `Mod` or `Floor` with no unknowns is refused (`closedJumpRefusal()`); the other heads of the route are not in `JUMP_FUNCTIONS` (`Min`, `Max`, `Abs` are not; `Sign` is not in the route). |
+| `Mod` | `((a) % (b))` when both operands are non-negative integers and the divisor is the literal 1, or both are literals or of types in `integer<0..2^53 - 1>`; `((a - Math.floor(a)) % 1)` or `_SYS.fract(a)` for another operand with the divisor 1; `_SYS.floorMod(a, b)` otherwise. | `_SYS.floorMod` for the third case; the first two are refused. The `Mod` nodes of the heat and traffic preludes have an unbounded `integer` dividend and stay in the third case. |
+
+The forms of `Power` that the census also needs and the route declines:
+`ln(…)^1.6` (`julia-set`, the real-root convention of a float exponent with
+an odd recovered denominator: `realPowerExponent()` and
+`negativeBaseFloatPower()` write `Math.pow(Math.abs(v), 1.6)` with the sign
+rule) and `s^(d/2)` (`multibrot`, a variable exponent: `_SYS.pow(s, e)` in
+the `strict` mode). Both functions also need `Break`.
+
 ### Places that the pilot vocabulary does not reach
 
 | Place | Why it is not reached |
 | --- | --- |
 | `jumpShiftRewrite()` (`compile-folding.ts`) | It applies to a rounding function. The vocabulary has none. |
-| `knownExponentPower()` (`compile-real-analysis.ts`) | It applies to `Power`. The vocabulary has no `Power`. |
 | `MatchesType` in `compileRewrittenForm()` | Not in the vocabulary. |
 | The rewrite of a `Multiply` as a division in `compileExprOperator()` | It needs a factor that is a `Power`. |
 | The bigint emitter (`emitBigintLane()`) | The fragment target refuses the `bigint` mode. |
 
 Each of these becomes a row of the first table when its operator enters the
-vocabulary (step 5 of the plan for `Power`; `Sqrt` has its row above).
+vocabulary (`Sqrt`, `Power` and the functions of the census have their rows
+above).
 
 ## What step 1 implements from this list
 

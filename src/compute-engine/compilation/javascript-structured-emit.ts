@@ -30,8 +30,8 @@
  *   operation whose effect is `effectful` or `unknown` is always such a
  *   statement, so the statements keep the order of the effects of the
  *   program.
- * - A value that the code reads twice (an operand of a complex sum, whose
- *   text is written once per component) counts as two uses, so it is
+ * - A value that the code reads twice (a complex operand of a complex sum,
+ *   whose text is written once per component) counts as two uses, so it is
  *   evaluated once, into a `const`.
  * - A region whose statements are all written into its value is one
  *   expression. An `if` whose two regions are expressions is the conditional
@@ -77,7 +77,8 @@
  *   literal at each use, as the existing emitter writes the stored value.
  * - Numbers are JavaScript numbers and complex numbers are `{re, im}`
  *   objects, as in the existing emitter. A complex sum is written per
- *   component, a complex negation calls the runtime helper `_SYS.cneg`, a
+ *   component, with the real operands in the real part only, as the
+ *   existing emitter writes it, a complex negation calls the runtime helper `_SYS.cneg`, a
  *   real square root is `Math.sqrt` and a complex one calls `_SYS.csqrt`,
  *   a complex product is written per component, `mod` calls
  *   `_SYS.floorMod`, `floor` is `Math.floor` and `divide` is `/`, as the
@@ -108,6 +109,12 @@
  *   writes in place (`mutatesInPlace()`), as across an effect: it can read
  *   the array before the write.
  * - `not` is `!x`.
+ * - A function of one or two operands (`unary`, `binary`) is the call that
+ *   the existing emitter writes for the same operand (`FUNCTION_CODE`):
+ *   `Math.exp`, `Math.log`, `Math.sin`, `Math.cos`, `Math.tanh`,
+ *   `Math.abs` and `Math.atan2` of numbers, and the runtime helpers
+ *   `_SYS.cexp`, `_SYS.cln`, `_SYS.csin`, `_SYS.ccos`, `_SYS.ctanh` and
+ *   `_SYS.cabs` of an `{re, im}` object.
  *
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Integration with existing JavaScript compilation".
@@ -122,8 +129,35 @@ import {
   type IRProgram,
   type IRRegion,
   type IRValue,
+  type BinaryFunctionName,
+  type UnaryFunctionName,
 } from './structured-ir.js';
 import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
+
+/**
+ * The JavaScript code of each function of the representation: the function
+ * for operands of the representation `number`, and the runtime helper (a
+ * name of `_SYS`) for an operand of the representation `complex`, or
+ * `undefined` when the policy has no complex operand for it
+ * (`JAVASCRIPT_POLICY.functions`). These are the calls of the handlers of
+ * the existing emitter (`Exp`, `Ln`, `Sin`, `Cos`, `Tanh`, `Abs` and
+ * `Arctan2` in `javascript-target.ts`); the rules of the structured route
+ * refuse the operands for which those handlers write other code.
+ */
+const FUNCTION_CODE: Readonly<
+  Record<
+    UnaryFunctionName | BinaryFunctionName,
+    { readonly real: string; readonly complex?: string }
+  >
+> = {
+  exp: { real: 'Math.exp', complex: 'cexp' },
+  ln: { real: 'Math.log', complex: 'cln' },
+  sin: { real: 'Math.sin', complex: 'csin' },
+  cos: { real: 'Math.cos', complex: 'ccos' },
+  tanh: { real: 'Math.tanh', complex: 'ctanh' },
+  abs: { real: 'Math.abs', complex: 'cabs' },
+  atan2: { real: 'Math.atan2' },
+};
 
 /** The names that the assembly of the result gives to the emitter. */
 export type StructuredEmitNames = {
@@ -258,13 +292,16 @@ function usesOf(program: IRProgram): Map<number, Use> {
   const uses = new Map<number, Use>();
   const visit = (region: IRRegion) => {
     region.operations.forEach((op, index) => {
-      // The text of an operand of a complex sum is written twice, once per
-      // component, and of a complex product four times. The code of a loop
+      // The text of a complex operand of a complex sum is written twice,
+      // once per component (a real operand once: it has no imaginary part),
+      // and of a complex product four times. The code of a loop
       // reads the text of its upper bound twice.
       const complex = op.result?.representation === 'complex';
       const readsOf = (i: number) =>
         op.kind === 'add' && complex
-          ? 2
+          ? op.operands[i].representation === 'complex'
+            ? 2
+            : 1
           : op.kind === 'multiply' && complex
             ? 4
             : (op.kind === 'loop' || op.kind === 'build') && i === 1
@@ -300,6 +337,12 @@ class Emitter {
    *  literal: a source that reads no variable that a loop assigns, other
    *  than its own name. */
   private readonly plain = new Set<number>();
+  /** The value of each complex literal, by the id of its value: a complex
+   *  sum writes its two parts as constants. */
+  private readonly complexLiterals = new Map<
+    number,
+    { readonly re: number; readonly im: number }
+  >();
   readonly inputs = new Set<string>();
   readonly runtime = new Set<string>();
   /** The declared element type of each list value that is an input or a
@@ -430,6 +473,8 @@ class Emitter {
       case 'literal': {
         this.plain.add(op.result.id);
         const value = op.value;
+        if (typeof value === 'object')
+          this.complexLiterals.set(op.result.id, value);
         this.define(
           op.result,
           typeof value === 'boolean'
@@ -460,9 +505,38 @@ class Emitter {
       case 'add': {
         if (op.result.representation !== 'complex')
           return leftAssociative(operands, ADDITIVE, '+');
-        const part = (p: 're' | 'im') =>
-          operands.map((a) => `${operand(a, CALL)}.${p}`).join(' + ');
-        return atom(`({ re: ${part('re')}, im: ${part('im')} })`);
+        // The text of the existing emitter (`Add` in `javascript-target.ts`):
+        // the real parts of every operand, then the imaginary parts of the
+        // complex operands only, each in the order of the operands; a complex
+        // literal gives its two parts as constants, and a term that is the
+        // constant `0` is dropped. So `z + 1` is `{ re: z.re + 1, im: z.im }`
+        // and `x + 2i` is `{ re: x, im: 2 }`: a `-0` part stays `-0`.
+        const re: string[] = [];
+        const im: string[] = [];
+        op.operands.forEach((v, i) => {
+          const literal = this.complexLiterals.get(v.id);
+          if (literal !== undefined) {
+            re.push(String(literal.re));
+            im.push(String(literal.im));
+          } else if (v.representation === 'complex') {
+            re.push(`${operand(operands[i], CALL)}.re`);
+            im.push(`${operand(operands[i], CALL)}.im`);
+          } else {
+            // The existing emitter writes the code of a real operand as it
+            // is, with no parentheses: a sum or a conditional would be read
+            // with another grouping there.
+            if (operands[i].precedence <= ADDITIVE)
+              fail(
+                'a real operand of a complex sum is a sum or a conditional, which the existing emitter writes with another grouping'
+              );
+            re.push(operands[i].text);
+          }
+        });
+        const sum = (terms: readonly string[]) => {
+          const nonZero = terms.filter((t) => t !== '0');
+          return nonZero.length === 0 ? '0' : nonZero.join(' + ');
+        };
+        return atom(`({ re: ${sum(re)}, im: ${sum(im)} })`);
       }
       case 'negate':
         if (op.result.representation !== 'complex')
@@ -497,6 +571,16 @@ class Emitter {
           return call('Math.sqrt', operands);
         this.runtime.add('csqrt');
         return call('_SYS.csqrt', operands);
+      case 'unary':
+      case 'binary': {
+        const code = FUNCTION_CODE[op.fn];
+        if (!op.operands.some((v) => v.representation === 'complex'))
+          return call(code.real, operands);
+        if (code.complex === undefined)
+          return fail(`the function ${op.fn} has a complex operand`);
+        this.runtime.add(code.complex);
+        return call(`_SYS.${code.complex}`, operands);
+      }
       case 'at':
         this.runtime.add('atNumeric');
         return call('_SYS.atNumeric', [

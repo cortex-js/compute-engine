@@ -103,6 +103,8 @@ export type IRInputRead = OperationBase & {
  *  decides which of the two an occurrence is, and a real operand of a
  *  complex `sqrt` is converted first.
  *
+ *  `add` of a complex result has at least one complex operand; a real
+ *  operand of it is not converted, and adds to the real part only.
  *  `multiply` of a complex result has two complex operands. `mod` is the
  *  floored remainder: its result has the sign of the divisor, as the
  *  interpreter gives it (`Mod(-7, 3)` is `2`, `Mod(7, -3)` is `-2`,
@@ -124,6 +126,52 @@ export type IRArithmetic = OperationBase & {
     | 'mod'
     | 'floor'
     | 'divide';
+};
+
+/**
+ * The functions of one operand that the representation names, by an
+ * identifier that names no target. Each is defined on the real and the
+ * complex numbers:
+ *
+ * - `exp`, `sin`, `cos` and `tanh`: a real result for a real operand, a
+ *   complex result for a complex operand.
+ * - `ln`: the natural logarithm. A real result for a real operand (not a
+ *   number for a negative operand, minus infinity for 0), the principal
+ *   complex logarithm for a complex operand. As for `sqrt`, the rule of the
+ *   target decides which of the two an occurrence is, and a real operand of
+ *   a complex `ln` is converted first.
+ * - `abs`: the absolute value, or the modulus of a complex operand. The
+ *   result is real; it is an integer for an integer operand.
+ *
+ * Only `abs` has an integer result, and only for an integer operand.
+ */
+export type UnaryFunctionName = 'exp' | 'ln' | 'sin' | 'cos' | 'tanh' | 'abs';
+
+/**
+ * The functions of two operands that the representation names, by an
+ * identifier that names no target. `atan2(y, x)` is the angle of the point
+ * `(x, y)` from the positive first axis, in `[-π, π]`: two real operands, a
+ * real result.
+ */
+export type BinaryFunctionName = 'atan2';
+
+/**
+ * An application of a function of one operand (`unary`) or two operands
+ * (`binary`) that `fn` names. One operation kind serves every such
+ * function: the core checks the types of the operands and of the result by
+ * the rule of the identifier (`UnaryFunctionName`, `BinaryFunctionName`),
+ * the policy of a target says which identifiers it has and in which
+ * representations, and the emitter of the target writes the code of each
+ * identifier. A function of this kind is `pure`.
+ */
+export type IRUnaryFunction = OperationBase & {
+  readonly kind: 'unary';
+  readonly fn: UnaryFunctionName;
+};
+
+export type IRBinaryFunction = OperationBase & {
+  readonly kind: 'binary';
+  readonly fn: BinaryFunctionName;
 };
 
 /**
@@ -324,6 +372,8 @@ export type IROperation =
   | IRInputRead
   | IRCaptureRead
   | IRArithmetic
+  | IRUnaryFunction
+  | IRBinaryFunction
   | IRListRead
   | IRBuild
   | IRReplaceAt

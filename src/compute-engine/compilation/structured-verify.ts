@@ -22,8 +22,10 @@ import {
   type IRProgram,
   type IRRegion,
   type IRValue,
+  type BinaryFunctionName,
   type Representation,
   type ScalarKind,
+  type UnaryFunctionName,
   type ValueType,
 } from './structured-ir.js';
 
@@ -100,6 +102,13 @@ export type RepresentationPolicy = {
     >
   >;
   readonly operations: Readonly<Record<PolicyOperationKind, OperationRule>>;
+  /** The functions of one or two operands that the target has
+   *  (`IRUnaryFunction`, `IRBinaryFunction`), each with the representations
+   *  of its operands and of its result. A function that is not listed is
+   *  not in the target: an operation that applies it fails the check. */
+  readonly functions: Readonly<
+    Partial<Record<UnaryFunctionName | BinaryFunctionName, OperationRule>>
+  >;
 };
 
 /**
@@ -422,6 +431,8 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'mod',
   'floor',
   'divide',
+  'unary',
+  'binary',
   'and',
   'or',
   'convert',
@@ -566,6 +577,17 @@ function verifySignature(
       resultIn(policy.operations[op.kind].results);
       operandsIn(operandRule(op.kind));
       integerOnlyFromIntegers();
+      // A complex sum has a complex operand; its real operands are read as
+      // their real parts. A real sum has no complex operand.
+      if (
+        op.kind === 'add' &&
+        (op.result.type === 'complex') !==
+          op.operands.some((o) => o.type === 'complex')
+      )
+        fail(
+          `the operation add has a result of the type ${op.result.type} and ` +
+            `${op.result.type === 'complex' ? 'no' : 'a'} complex operand`
+        );
       // A complex product is the product of two complex operands.
       if (
         op.kind === 'multiply' &&
@@ -596,6 +618,43 @@ function verifySignature(
       if (op.result.type === 'integer')
         fail('the operation divide has an integer result');
       return;
+    case 'unary':
+    case 'binary': {
+      arity(op.kind === 'unary' ? 1 : 2);
+      const rule = Object.hasOwn(policy.functions, op.fn)
+        ? policy.functions[op.fn]
+        : undefined;
+      if (rule === undefined)
+        return fail(`the target has no function ${op.fn}`);
+      resultIn(rule.results);
+      operandsIn(
+        rule.operands === 'same' ? [op.result.representation] : rule.operands
+      );
+      if (op.effect !== 'pure') fail(`the function ${op.fn} is not pure`);
+      const types = op.operands.map((operand) => operand.type);
+      if (types.includes('boolean') || op.result.type === 'boolean')
+        fail(`the function ${op.fn} has a boolean operand or result`);
+      // The rule of each identifier (`UnaryFunctionName`,
+      // `BinaryFunctionName`): `abs` has a real result, an integer only for
+      // an integer operand; `atan2` has real operands and a real result;
+      // every other function has a complex result for a complex operand and
+      // a real one for a real or an integer operand.
+      const expected: readonly ValueType[] =
+        op.fn === 'abs'
+          ? types[0] === 'integer'
+            ? ['integer', 'real']
+            : ['real']
+          : op.fn === 'atan2'
+            ? types.includes('complex')
+              ? []
+              : ['real']
+            : [types[0] === 'complex' ? 'complex' : 'real'];
+      if (!expected.includes(op.result.type))
+        fail(
+          `the function ${op.fn} of ${types.join(', ')} has a result of the type ${op.result.type}`
+        );
+      return;
+    }
     case 'negate':
       arity(1);
       resultIn(policy.operations.negate.results);

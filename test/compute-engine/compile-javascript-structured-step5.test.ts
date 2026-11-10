@@ -154,6 +154,19 @@ function close(a: unknown, b: unknown): boolean {
   return near(p.re, q.re) && near(p.im, q.im);
 }
 
+/** `a` and `b` are the same value, exactly: `Object.is` per number and per
+ *  component of a complex value (`NaN` equals `NaN`, `0` differs from
+ *  `-0`). The structured route and the existing emitter are compared so;
+ *  `close()` is for the interpreter only. */
+function exact(a: unknown, b: unknown): boolean {
+  if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null)
+    return (
+      Object.is((a as { re: number }).re, (b as { re: number }).re) &&
+      Object.is((a as { im: number }).im, (b as { im: number }).im)
+    );
+  return Object.is(a, b);
+}
+
 test('control: the comparator of values', () => {
   expect(close(1, 1 + 1e-14)).toBe(true);
   expect(close(1, 1.001)).toBe(false);
@@ -315,7 +328,8 @@ describe('Sqrt', () => {
               close(value, expected) ||
               (mode === 'strict' && Number.isNaN(value) && nonReal(expected));
             expect([inputs, value, expected, agrees]).toEqual([inputs, value, expected, true]);
-            expect([inputs, close(value, run(existing, inputs))]).toEqual([inputs, true]);
+            const other = run(existing, inputs);
+            expect([inputs, value, other, exact(value, other)]).toEqual([inputs, value, other, true]);
           }
         });
     });

@@ -15,6 +15,7 @@ import {
   type ScalarKind,
 } from '../../src/compute-engine/compilation/structured-ir';
 import type { Expression } from '../../src/compute-engine/global-types';
+import { isShadowedSymbol } from '../../src/compute-engine/library-shadowing';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 // The structured representation of the internal scalar JavaScript fragment
@@ -203,14 +204,16 @@ describe('the fixtures lower and verify', () => {
     expect(thenOps.map((op) => op.kind)).toEqual(['input', 'convert']);
     expect(program.inputs[(thenOps[0] as { input: number }).input].name).toBe('x');
     expect(body(conditional.else).map((op) => op.kind)).toEqual(['input']);
-    // The conversion of `y` is in the root region, and reads `y`.
+    // `y` is not converted: a real operand of a complex sum adds to the
+    // real part only, as the existing emitter writes it.
     const conversions = ops.filter((op) => op.kind === 'convert');
-    expect(conversions).toHaveLength(1);
-    expect(inputName(program, program.root, conversions[0].operands[0])).toBe('y');
+    expect(conversions).toHaveLength(0);
     const sum = ops[ops.length - 1];
     expect(sum.kind).toBe('add');
     expect(sum.result!.representation).toBe('complex');
-    expect(sum.operands.map((v) => v.representation)).toEqual(['complex', 'complex']);
+    // The canonical form puts `y` first.
+    expect(sum.operands.map((v) => v.representation)).toEqual(['number', 'complex']);
+    expect(inputName(program, program.root, sum.operands[0])).toBe('y');
   });
 
   test('a local read twice is one value', () => {
@@ -242,6 +245,19 @@ test('the lowering reads no type, value or definition of the engine', () => {
   const preparations: StructuredPreparation[] = [
     structured().prepareStructured(ce.expr(HEATCELL), OPTIONS),
     structured().prepareStructured(ce.expr(['Add', ['If', 'C', 'x', 'z'], 'y']), OPTIONS),
+    // The forms of `Power` and `Abs` that the rules record: the lowering
+    // reads the record, not the symbol `ExponentialE` or a sign fact.
+    structured().prepareStructured(
+      ce.expr([
+        'Add',
+        ['Exp', 'x'],
+        ['Power', 'y', 2],
+        ['Power', ['Max', 0, 'x'], 1.5],
+        ['Abs', 'y'],
+        ['Abs', ['Max', 0, 'y']],
+      ]),
+      OPTIONS
+    ),
   ];
   const forbid = (object: object, name: string) =>
     jest.spyOn(object as never, name as never).mockImplementation((() => {
@@ -254,6 +270,16 @@ test('the lowering reads no type, value or definition of the engine', () => {
   forbid(ce, 'lookupDefinition');
   for (const sample of samples)
     for (const name of ['evaluate', 'N']) forbid(Object.getPrototypeOf(sample), name);
+  // The scope chain and the definition of a symbol, which a test of a
+  // shadowed library name reads (`isShadowedSymbol()`).
+  const forbidGetter = (object: object, name: string) =>
+    (jest.spyOn(object as never, name as never, 'get' as never) as jest.SpyInstance).mockImplementation((() => {
+      throw new Error(`${name} read during the lowering`);
+    }) as never);
+  forbidGetter(ce, 'contextStack');
+  for (const sample of samples)
+    for (const name of ['valueDefinition', 'isNonNegative'])
+      if (name in sample) forbidGetter(Object.getPrototypeOf(sample), name);
   try {
     for (const preparation of preparations)
       expect(() => lowerStructuredFragment(preparation)).not.toThrow();
@@ -263,6 +289,10 @@ test('the lowering reads no type, value or definition of the engine', () => {
   // Control: the spies are the functions that the engine calls.
   forbid(core, 'isComplexValued');
   expect(() => core.isComplexValued(ce.expr('x'))).toThrow(/during the lowering/);
+  const e = ce.expr('ExponentialE');
+  forbidGetter(ce, 'contextStack');
+  forbidGetter(Object.getPrototypeOf(e), 'valueDefinition');
+  expect(() => isShadowedSymbol(e as never)).toThrow(/during the lowering/);
   jest.restoreAllMocks();
 });
 
@@ -770,8 +800,9 @@ describe('the verifier', () => {
 
 describe('admission of the structured route', () => {
   const refusals: [string, () => Expression, RegExp][] = [
-    ['Less with no free symbol', () => scalarEngine().expr(['Less', 1, 2]), /Less reads no symbol/],
-    ['Equal with no free symbol', () => scalarEngine().expr(['Equal', 1, 2]), /Equal reads no symbol/],
+    // The engine types these `true` and `false` (`booleanClaim()`).
+    ['Less with no free symbol', () => scalarEngine().expr(['Less', 1, 2]), /1 < 2 has the type true/],
+    ['Equal with no free symbol', () => scalarEngine().expr(['Equal', 1, 2]), /1 == 2 has the type false/],
     ['Less with three operands', () => scalarEngine().expr(['Less', 'x', 'y', 1]), /Less with 3 operands is not in the structured route/],
     ['Equal with three operands', () => scalarEngine().expr(['Equal', 'x', 'y', 'x']), /Equal with 3 operands is not in the structured route/],
     ['Less with a complex operand', () => scalarEngine().expr(['Less', 'z', 'x']), /Less with a complex operand/],

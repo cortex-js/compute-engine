@@ -712,6 +712,7 @@ const FLOAT_POLICY: RepresentationPolicy = {
     'replace-at': { results: ['float'], operands: ['float'] },
     trace: { results: ['float'], operands: ['float'] },
   },
+  functions: {},
 };
 
 describe('a policy that is not the one of JavaScript', () => {

@@ -186,8 +186,8 @@ const close = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(1e-
 //
 
 const HEAT = engineWith(PRELUDE);
-/** `heatseed()` by the interpreter: the structured route declines it
- *  (`exp` is not in the route). */
+/** `heatseed()` by the interpreter. The structured route compiles it too
+ *  (compile-javascript-structured-functions.test.ts). */
 const SEED: readonly number[] = (() => {
   const v = interpret(HEAT, 'heatseed', []);
   if (!Array.isArray(v)) throw new Error('heatseed is not a list');
@@ -239,10 +239,10 @@ describe('the definitions that executeEpsil() makes', () => {
       }
   });
 
-  test('heatseed declines: exp is not in the structured route', () => {
-    expect(() => structured().compile(literal(HEAT, 'heatseed'), OPTIONS)).toThrow(
-      /Power is in the structured route only with the literal exponent 2/
-    );
+  test('heatseed compiles: exp is in the structured route', () => {
+    const seed = run(structured().compile(literal(HEAT, 'heatseed'), OPTIONS), []) as number[];
+    expect(seed.length).toBe(SEED.length);
+    seed.forEach((v, i) => close(v, SEED[i]));
   });
 });
 

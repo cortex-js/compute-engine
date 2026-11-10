@@ -45,7 +45,10 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'real-to-complex': { from: 'number', to: 'complex', type: 'complex' },
   },
   operations: {
-    'add': { results: ['number', 'complex'], operands: 'same' },
+    // A complex sum reads a real operand as its real part, with no
+    // conversion, as the existing emitter writes it; the verifier checks
+    // that a complex sum has a complex operand and a real sum none.
+    'add': { results: ['number', 'complex'], operands: ['number', 'complex'] },
     'negate': { results: ['number', 'complex'], operands: 'same' },
     // A complex product is written per component, as the existing emitter
     // writes it.
@@ -79,6 +82,19 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'replace-at': { results: ['array'], operands: ['array', 'number'] },
     // The test heads take real operands and have a real value.
     'trace': { results: ['number'], operands: ['number'] },
+  },
+  // The emitter writes each function as the existing emitter writes it for
+  // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):
+  // `Math.exp` of a number, `_SYS.cexp` of an `{re, im}` object, and so
+  // on. `abs` of an `{re, im}` object is the number `_SYS.cabs`.
+  functions: {
+    exp: { results: ['number', 'complex'], operands: 'same' },
+    ln: { results: ['number', 'complex'], operands: 'same' },
+    sin: { results: ['number', 'complex'], operands: 'same' },
+    cos: { results: ['number', 'complex'], operands: 'same' },
+    tanh: { results: ['number', 'complex'], operands: 'same' },
+    abs: { results: ['number'], operands: ['number', 'complex'] },
+    atan2: { results: ['number'], operands: ['number'] },
   },
 };
 
