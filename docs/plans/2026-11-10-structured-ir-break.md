@@ -93,3 +93,28 @@ the function body as its target is a later `Return`.
 - The iteration budget counts the passes that ran.
 - The verifier refuses each malformed form with its own test.
 - The prelude census is run again; the plan records the new count.
+
+## Result (2026-11-10)
+
+Implemented as designed, in `7227993d3128f94b7b1709b53390db4a31d78608`. The
+points where the code differs from this note:
+
+- The verifier cannot tell an `if` that is a value from an `if` that is a
+  statement: the representation has one `if`. The rule "no `exit` in a
+  branch of an `if` that is a value" is enforced at admission only.
+- A range always has at least one element (`Range(1, 0)` has two), so "a
+  range with no pass" does not exist. The tests use one pass and
+  `Range(1, 0)`.
+- An `if` with no result and no effect is not lowered. An `if` that holds an
+  `exit` at any depth is kept (`exitsIn()` in `structured-ir.ts`): both
+  reviewers found that the first version removed it, and the loop then did
+  not stop.
+- Update in place: a use that the loop body places after an `exit`, and the
+  `exit`, are exclusive; every other order with an `exit` stays a blocking
+  use. An operand of an `exit` goes to the result of the loop only, not to
+  the parameter of the next pass.
+
+`B` and `ray` compile under the profile, unreduced. `M` and `J` decline on
+`Power` with an exponent that is not the literal 2 or 1.5. `hasmove` and
+`choosecell` decline on a `let` with a type (`let count: integer = v`), then
+on `NotEqual` through `flips`. `step` declines on its `parallel for`.

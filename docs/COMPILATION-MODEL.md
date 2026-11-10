@@ -1942,7 +1942,7 @@ nothing changes.
 | Functions | `Sqrt`, `Ln`, `Exp`, `Sin`, `Cos`, `Tanh`, `Abs`, `Arctan2`, `Min`, `Max`, `Floor`, `Mod` |
 | Conditions | `If`, `Less`, `LessEqual`, `Equal`, `And`, `Or`, `Not` |
 | Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot) |
-| Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`; calls of user functions with a declared signature |
+| Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature |
 | Lists | `At` and `Length` of a list input or parameter, `Comprehension(body, Element(j, Range(a, b)))`, `ReplaceAt` |
 
 | Declined with `outside-profile` | Example |
@@ -1951,7 +1951,7 @@ nothing changes.
 | A form the existing emitter writes in a special way | `x^3`, `Mod(x, 1)`, `Sin(z)` in the `complex` mode, a closed comparison |
 | A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
 | A name with no numeric type | `x + u` with `u` undeclared (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
-| A statement outside the list | `Break` in a `Loop` (`operator: 'Break'`), a `Loop` over a list |
+| A statement outside the list | `Continue` in a `Loop` (`operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Loop` over a list |
 | An option outside the profile | `functions`, `operators`, `vars`, `imports`, `preamble`, `broadcast`, `mode: 'bigint'` |
 
 The decline follows the `fallback` option, as any other decline: with

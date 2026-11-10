@@ -652,6 +652,16 @@ option is experimental and documented in `CHANGELOG.md`,
 35 functions of Tycho's prelude showcases, 12 compile under the profile (the
 census above lists what blocks the others: `Break` first, then tuples).
 
+**`Break` (2026-11-10).** [Design and result](2026-11-10-structured-ir-break.md),
+commit `7227993d3128f94b7b1709b53390db4a31d78608`: an `exit` operation of the
+representation. 14 of 35 prelude functions compile (`B` and `ray` are new).
+Of the 10 functions that `Break` blocked, the other 8 now stop at: `Power`
+with an exponent other than 2 or 1.5 (`M`, `J`), a `let` with a type
+(`hasmove`, `choosecell`), a parallel loop (`step`), all measured after the
+change; and, by the first refusals of the census table, not measured again,
+`NotEqual` (`flips`), a guarded comprehension (`legal`), a `let` in a value
+position (`play`).
+
 ### Step 8 — Add optimizations only with measured justification
 
 Once stable value/region/effect contracts exist, consider pure-operation CSE

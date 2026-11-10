@@ -6,7 +6,8 @@
   `compile(expr, { to: 'javascript', profile: 'numeric-kernel' })` compiles
   the expression with the structured compiler of the JavaScript target. It
   admits scalar arithmetic, conditionals, calls of user functions with
-  declared signatures, captured numbers, loops over an integer range, and
+  declared signatures, captured numbers, loops over an integer range (with
+  `Break` at the end of a branch of an `If`), and
   lists of numbers made with a comprehension and updated with `ReplaceAt`.
   A program outside the profile declines with the diagnostic code
   `outside-profile`, which names the first node outside it (`operator` or
