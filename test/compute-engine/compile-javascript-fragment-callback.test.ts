@@ -45,18 +45,32 @@ for (const mode of ['strict', 'complex'] as const)
       });
     }
 
-test.each(['offset', 'helper'])('root parameter %s cannot hide helper bindings', name => {
+test('root parameter offset cannot hide the helper capture', () => {
   const ce = setup();
   const expression = ce.expr(['Function', ['Block',
-    ['Declare', 'total', "'real'", 0], ['helper', name]], typed(name)]);
-  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false })).toThrow();
+    ['Declare', 'total', "'real'", 0], ['helper', 'offset']], typed('offset')]);
+  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
+    .toThrow(/helper bindings collide with the root function/);
+});
+
+// A root binding named like the helper is the binding that the call reads,
+// so the call is not a helper call: the fragment refuses its head before the
+// name-collision check.
+test('a root local named helper shadows the helper', () => {
+  const ce = setup();
+  const expression = ce.expr(['Function', ['Block',
+    ['Declare', 'helper', "'real'", 'x'], ['helper', 'x']], typed('x')]);
+  expect(expression.isValid).toBe(true);
+  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
+    .toThrow(/unsupported head helper/);
 });
 
 test('root local cannot hide the helper capture', () => {
   const ce = setup();
   const expression = ce.expr(['Function', ['Block',
     ['Declare', 'offset', "'real'", 'x'], ['helper', 'offset']], typed('x')]);
-  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression)).toThrow();
+  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression))
+    .toThrow(/helper bindings collide with the root function/);
 });
 
 test('direct root capture remains unsupported', () => {
@@ -69,7 +83,8 @@ test('helper argument and assigned result representations remain fixed', () => {
   const ce = setup();
   const expression = ce.expr(['Function', ['Block',
     ['Declare', 'total', "'complex'", 'z'], ['helper', 'total']], typed('z', 'complex')]);
-  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression)).toThrow();
+  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression))
+    .toThrow(/of `helper` has the type `complex`, and the parameter `u` has the type `real`/);
 });
 
 test('complex helper composes with same-shape local writes', () => {

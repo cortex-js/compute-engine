@@ -78,6 +78,29 @@ test('legacy target still uses the existing lane classifier', () => {
   leave();
 });
 
+test('legacy target still reads the existing complex classifier', () => {
+  const { call, leave } = fixture();
+  const legacy = { language: 'javascript', userFunctions: {} } as CompileTarget<Expression>;
+  // Real parameter lanes and no declared coercion make the legacy call ask
+  // whether each argument is complex-valued.
+  jest.spyOn(core, 'userFunctionParamLanes').mockImplementation(() => [false, false]);
+  jest.spyOn(core, 'isComplexValued').mockImplementation(() => { throw new Error('legacy complex query'); });
+  expect(() => emitUserFunctionCall('_fn_registered', call.ops, legacy, [false, false], true))
+    .toThrow('legacy complex query');
+  leave();
+});
+
+test('legacy target still reads the existing static type', () => {
+  const { call, leave } = fixture();
+  const legacy = { language: 'javascript', userFunctions: {} } as CompileTarget<Expression>;
+  // Scalar parameters make the legacy call read the static type of each
+  // argument to find its map rank.
+  jest.spyOn(core, 'staticTypeOf').mockImplementation(() => { throw new Error('legacy shape query'); });
+  expect(() => emitUserFunctionCall('_fn_registered', call.ops, legacy, [false, false], true))
+    .toThrow('legacy shape query');
+  leave();
+});
+
 test.each([
   { name: 'missing', edges: undefined },
   { name: 'short', edges: [{ kind: 'none', representation: 'number' }] },

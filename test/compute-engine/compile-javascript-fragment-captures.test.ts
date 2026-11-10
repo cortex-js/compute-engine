@@ -65,8 +65,12 @@ test('a same-named ambient capture cannot replace the held binding', () => {
   ce.pushScope();
   try {
     ce.declare('offset', 'real'); ce.assign('offset', 99);
-    expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false })).toThrow();
+    expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
+      .toThrow(/unsupported helper capture offset/);
   } finally { ce.popScope(); }
+  // Control: without the inner binding, the same expression compiles.
+  expect(new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false })
+    .run!({ x: 3 })).toBe(5);
 });
 
 test('a second captured binding declines', () => {
@@ -81,7 +85,8 @@ test.each(([['Add', 'x', 1], ['Random']] as MathJsonExpression[]).map(value => (
   const { ce, expression } = fixture();
   ce.assign('offset', ce.expr(value));
   expect(ce.expr('offset').valueDefinition!.value!.operator).toBe((value as string[])[0]);
-  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false })).toThrow();
+  expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
+    .toThrow(/unsupported helper capture offset/);
 });
 
 test('declared complex capture with a real literal remains outside the slice', () => {

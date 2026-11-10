@@ -2,7 +2,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 import { ScalarFragmentJavaScriptTarget } from '../../src/compute-engine/compilation/javascript-fragment-target';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
-import { attachScalarFragment, enterScalarFragment } from '../../src/compute-engine/compilation/javascript-fragment-facts';
+import { attachScalarFragment, enterScalarFragment, scalarResultIsComplex, scalarOperandIsComplex, scalarConvertOperand } from '../../src/compute-engine/compilation/javascript-fragment-facts';
 import type { CompileTarget } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -50,14 +50,19 @@ test('branch conversion stays in the selected branch',()=>{
   expect(result.run!({C:true,x:2,z:{re:3,im:4}})).toBe(2);
 });
 test.each(([
-  ['Random'], ['List',1,2], ['Multiply','x','y'], ['If','C','x'],
-  ['Function',['Add','x',1],'x'], ['Block',['Declare','s',1],['Assign','s',2],'s'],
-] as MathJsonExpression[]).map(json=>({json})))('declines unsupported $json',({json})=>{
-  const {ce,target}=setup();expect(()=>target.compile(ce.expr(json),{fallback:false})).toThrow(/JS scalar fragment/);
+  [['Random'], /unsupported head Random/], [['List',1,2], /unsupported head List/],
+  [['Multiply','x','y'], /unsupported head Multiply/], [['If','C','x'], /unsupported arity/],
+  [['Function',['Add','x',1],'x'], /explicit distinct scalar parameters required/],
+  [['Block',['Declare','s',"'real'",1],['Assign','s',2],'s'], /unsupported head Block/],
+] as [MathJsonExpression, RegExp][]).map(([json,reason])=>({json,reason})))('declines unsupported $json',({json,reason})=>{
+  const {ce,target}=setup();const expr=ce.expr(json);
+  // A valid program, so that the decline comes from the fragment checks.
+  expect(expr.isValid).toBe(true);
+  expect(()=>target.compile(expr,{fallback:false})).toThrow(reason);
 });
 test('legacy seeded lazy Random remains unchanged',()=>{
   const {ce,target}=setup();const expr=ce.expr(['If','C',['Random'],['Add',['Random'],['Random']]]);
-  expect(()=>target.compile(expr,{fallback:false})).toThrow(/JS scalar fragment/);
+  expect(()=>target.compile(expr,{fallback:false})).toThrow(/unsupported head Random/);
   for(const C of [false,true]){
     const result=compile(expr,{fallback:false});
     const sample=(f:()=>unknown)=>withRandomSeedFrame(ce,42,()=>[f(),ce._random()]);
@@ -66,7 +71,7 @@ test('legacy seeded lazy Random remains unchanged',()=>{
 });
 test('unsupported input and host policy decline',()=>{
   const {ce,target}=setup();ce.assign('a',-4);
-  for(const json of ['a','u'] as MathJsonExpression[])expect(()=>target.compile(ce.expr(json),{fallback:false})).toThrow(/JS scalar fragment/);
+  for(const json of ['a','u'] as MathJsonExpression[])expect(()=>target.compile(ce.expr(json),{fallback:false})).toThrow(new RegExp(`unsupported binding ${json}`));
   expect(()=>target.compile(ce.expr('x'),{functions:{Sqrt:'Math.sqrt'}})).toThrow(/unsupported compile options/);
   expect(()=>target.compile(ce.expr('x'),{mode:'bigint'})).toThrow(/unsupported compile options/);
 });
@@ -79,6 +84,41 @@ test('missing or foreign prepared facts fail closed',()=>{
   expect(()=>enterScalarFragment(root,{...target,rootExpression:other})).toThrow(/different prepared policy/);
   expect(()=>enterScalarFragment(root,{...target,mode:'complex'})).toThrow(/different prepared policy/);
   expect(()=>enterScalarFragment(root,{...target,constantFold:false})).toThrow(/different prepared policy/);
+});
+
+/** A target with an attached artifact whose root `x` has the given facts. */
+function factsFixture(rootFacts:Record<string,unknown>, annotatedRoot?:Expression){
+  const {ce}=setup();const root=ce.expr('x');
+  const target={rootExpression:root} as CompileTarget<Expression>;
+  attachScalarFragment(target,{root,annotate:()=>({root:annotatedRoot??root,scope:{bindings:new Map(),facts:new Map([[root,{type:{kind:'real'},representation:'number',...rootFacts}]]),inner:new Map()},functions:new Map()})});
+  return {ce,root,target};
+}
+test('an annotation of another root fails closed',()=>{
+  const {ce,root,target}=factsFixture({},undefined);
+  const foreign=factsFixture({},ce.expr('y'));
+  expect(()=>enterScalarFragment(foreign.root,foreign.target)).toThrow(/invalid annotation/);
+  enterScalarFragment(root,target)!();
+});
+test('an operation query outside an entered node fails closed',()=>{
+  const {target}=factsFixture({});
+  expect(()=>scalarResultIsComplex(target)).toThrow(/no current operation/);
+  expect(()=>scalarOperandIsComplex(0,target)).toThrow(/no current operation/);
+});
+test('an operand query needs the recorded conversion of that operand',()=>{
+  const {root,target}=factsFixture({conversions:[{kind:'none',representation:'number'}]});
+  const leave=enterScalarFragment(root,target)!;
+  expect(scalarOperandIsComplex(0,target)).toBe(false);
+  expect(scalarConvertOperand(0,'a',target)).toBe('a');
+  expect(()=>scalarOperandIsComplex(1,target)).toThrow(/missing operand conversion/);
+  expect(()=>scalarConvertOperand(1,'a',target)).toThrow(/missing operand conversion/);
+  leave();
+});
+test('an operand conversion other than none or real-to-complex fails closed',()=>{
+  const {root,target}=factsFixture({conversions:[{kind:'real-to-complex',representation:'complex'},{kind:'complex-to-real',representation:'number'}]});
+  const leave=enterScalarFragment(root,target)!;
+  expect(scalarConvertOperand(0,'a',target)).toBe('({ re: a, im: 0 })');
+  expect(()=>scalarConvertOperand(1,'a',target)).toThrow(/unsupported conversion/);
+  leave();
 });
 
 for (const constantFold of [false, true]) {

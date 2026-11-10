@@ -74,18 +74,36 @@ for (const mode of ['strict', 'complex'] as const) {
 }
 
 test.each([
-  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Assign', 'x', 2], 't'] },
-  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Assign', 't', ['List', 1]], 't'] },
-  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Sqrt', 't']] },
-  { body: ['Block', ['Declare', 't', "'complex'", 'x'], 't'] },
-  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Block', 't']] },
-  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Add', 't', 'capture']] },
-])('declines unsupported bound program $body', ({ body }) => {
+  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Assign', 'x', 2], 't'],
+    reason: /only writes to the declared local are supported/ },
+  // The canonical form replaces this write with an `Error` (a list assigned
+  // to a real local), so the fragment refuses an `Error` statement.
+  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Assign', 't', ['List', 1]], 't'],
+    reason: /only writes to the declared local are supported/ },
+  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Sqrt', 't']],
+    reason: /unsupported bound head Sqrt/ },
+  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Block', 't']],
+    reason: /unsupported head Block/ },
+  { body: ['Block', ['Declare', 't', "'real'", 'x'], ['Add', 't', 'capture']],
+    reason: /unsupported capture capture/ },
+])('declines unsupported bound program $body', ({ body, reason }) => {
   const ce = new ComputeEngine();
   ce.assign('capture', 42);
   const expression = ce.expr(['Function', body, parameter('x')] as MathJsonExpression);
   expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
-    .toThrow(/JS scalar fragment|different shapes/);
+    .toThrow(reason);
+});
+
+test('a real write to a complex local declines', () => {
+  for (const mode of ['strict', 'complex'] as const) {
+    const ce = new ComputeEngine();
+    const expression = ce.expr(['Function', ['Block',
+      ['Declare', 't', "'complex'", 'z'], ['Assign', 't', 'x'], 't'],
+      parameter('z', 'complex'), parameter('x')]);
+    expect(expression.isValid).toBe(true);
+    expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { mode, fallback: false }))
+      .toThrow(/local writes must preserve representation/);
+  }
 });
 
 test('does not accept an untyped parameter from an ambient declaration', () => {

@@ -69,15 +69,22 @@ test('a single-value block enters its exact annotated scope', () => {
 });
 
 test.each([
-  { signature: '(real) -> complex', parameter: 'real', body: 'u', input: 'real' },
-  { signature: '(complex) -> real', parameter: 'complex', body: 'u', input: 'complex' },
-  { signature: '(complex) -> complex', parameter: 'complex', body: 'u', input: 'real' },
-  { signature: '(real) -> real', parameter: 'real', body: 'u', input: 'complex' },
+  { signature: '(real) -> complex', parameter: 'real', body: 'u', input: 'real',
+    reason: /helper return representation differs from its signature/ },
+  // The canonical form wraps a complex body in `Typed(…, 'real')` for a real
+  // result, so a complex-to-real result convention never reaches the fragment
+  // checks: the helper body check refuses the `Typed` wrapper first.
+  { signature: '(complex) -> real', parameter: 'complex', body: 'u', input: 'complex',
+    reason: /unsupported helper body Typed/ },
+  { signature: '(complex) -> complex', parameter: 'complex', body: 'u', input: 'real',
+    reason: /helper arguments must preserve representation/ },
+  { signature: '(real) -> real', parameter: 'real', body: 'u', input: 'complex',
+    reason: /argument `x` of `helper` has the type `complex`, and the parameter `u` has the type `real`/ },
 ])('declines unmatched call conventions $signature from $input', testCase => {
   const ce = new ComputeEngine(); ce.declare('x', testCase.input);
   install(ce, 'helper', testCase.signature, testCase.body, [typed('u', testCase.parameter)]);
   expect(() => new ScalarFragmentJavaScriptTarget().compile(ce.expr(['helper', 'x']),
-    { fallback: false })).toThrow();
+    { fallback: false })).toThrow(testCase.reason);
 });
 
 test('captures and transitive calls remain outside the helper slice', () => {
@@ -98,7 +105,7 @@ test('different lexical helper binding cannot substitute for the bound definitio
   ce.pushScope();
   install(ce, 'helper', '(real) -> real', ['Add', 'u', 10], [typed('u', 'real')]);
   expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
-    .toThrow(/captured callable|binding|definition/);
+    .toThrow(/captured callable has a different binding from the ambient function/);
   ce.popScope();
 });
 
