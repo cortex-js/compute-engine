@@ -83,8 +83,8 @@ pgrep -f "[j]est-worker"
 
 ## §4 Detecting source changes during a shared-tree run
 
-Use this fingerprint before and after a run when the shared protocol requires
-it:
+To certify a run against the shared tree (shared protocol §4), take this
+fingerprint before and after the run:
 
 ```sh
 find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
@@ -157,19 +157,18 @@ Follow [BUILD.md](../BUILD.md#releasing-to-npm) for releases.
 
 ## §8 Handoff
 
-Before a long run, write `docs/scratch/<date>-<topic>-handoff.md` as required by
-the shared protocol. Record the command, log path, and actual exit status when
-it finishes; keep the handoff current. The file is not a work queue: a defect
+When a handoff file helps (shared protocol §8), it is
+`docs/scratch/<date>-<topic>-handoff.md`. The file is not a work queue: a defect
 found during the work goes to `issues/` with its witness (`AGENTS.md`, "Fix
 every defect"),
 and the file lists no next tasks. Delete it when the work is committed.
 
 ## §9 Context size, agent types and work areas
 
-Delegate only when it helps (shared protocol §9); write a change of a few lines
-yourself. When you delegate, use `implementer` (Opus) for implementation and
-bug fixes, one issue or ROADMAP item per agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
-sweeps and censuses. Do not use `general-purpose` for implementation. Find code with the LSP tool or
+Delegate only when it helps (`~/.claude/CLAUDE.md`, "Subagents, reviews and
+cost"); write a change of a few lines yourself. The repo's agent types are `implementer` (Opus) for implementation
+and bug fixes, and `mechanic` (Sonnet) for recipe-driven edits, read-only
+audits, sweeps and censuses; prefer them to `general-purpose`. Find code with the LSP tool or
 `scripts/where.ts`.
 
 Run at most three Compute Engine sessions at the same time, each in a different
