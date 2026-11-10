@@ -178,7 +178,9 @@ export function verifyProgram(
       );
     const representation = policy.representationOf(value.type);
     if (representation === undefined)
-      fail(`the value ${value.id} has the type ${value.type}, which the target does not hold`);
+      fail(
+        `the value ${value.id} has the type ${value.type}, which the target does not hold`
+      );
     if (representation !== value.representation)
       fail(
         `the value ${value.id} of the type ${value.type} has the representation ${value.representation}`
@@ -189,7 +191,8 @@ export function verifyProgram(
       for (const value of definedValues(op)) define(value, region, index);
       for (const inner of regionsOf(op)) {
         // The parameters of a region are defined at its entry (-1).
-        for (const parameter of inner.parameters ?? []) define(parameter, inner, -1);
+        for (const parameter of inner.parameters ?? [])
+          define(parameter, inner, -1);
         collect(inner);
       }
     });
@@ -224,7 +227,9 @@ export function verifyProgram(
     if (!Number.isFinite(capture.snapshot))
       fail(`the snapshot of the capture ${capture.name} is not finite`);
     if (capture.type === 'integer' && !Number.isInteger(capture.snapshot))
-      fail(`the snapshot of the integer capture ${capture.name} is not an integer`);
+      fail(
+        `the snapshot of the integer capture ${capture.name} is not an integer`
+      );
   }
 
   /** The regions around the current operation, outermost first, with the
@@ -245,13 +250,19 @@ export function verifyProgram(
       );
     const frame = frames.find((f) => f.region === definition.region);
     if (frame === undefined)
-      fail(`the value ${value.id} is used outside the region of its definition`);
+      fail(
+        `the value ${value.id} is used outside the region of its definition`
+      );
     if (definition.index >= frame!.index)
       fail(`the value ${value.id} is used before its definition`);
   };
 
   /** One yield, the last operation, of `count` values. */
-  const verifyRegionShape = (region: IRRegion, count: number, owner?: IROperation) => {
+  const verifyRegionShape = (
+    region: IRRegion,
+    count: number,
+    owner?: IROperation
+  ) => {
     const yields = region.operations.filter((op) => op.kind === 'yield').length;
     if (yields === 0) fail('a region has no yield');
     if (yields > 1) fail(`a region has ${yields} yields`);
@@ -267,7 +278,9 @@ export function verifyProgram(
       fail(
         `the body of a loop yields ${last.operands.length} values, and the loop has ${count} results`
       );
-    fail(`the operation yield has ${last.operands.length} operands, not ${count}`);
+    fail(
+      `the operation yield has ${last.operands.length} operands, not ${count}`
+    );
   };
 
   // `inFunction`: the region is the body of a function or is nested in it.
@@ -311,7 +324,9 @@ export function verifyProgram(
     });
     if (!isEffect(region.effect)) fail('a region has no effect fact');
     // The abort fact, checked as the effect fact is.
-    const aborts = region.operations.some((op) => operationCanAbort(op, program.functions));
+    const aborts = region.operations.some((op) =>
+      operationCanAbort(op, program.functions)
+    );
     if ((region.canAbort === true) !== aborts)
       fail(
         `the abort fact of a region (${region.canAbort === true}) does not agree with its operations (${aborts})`
@@ -349,7 +364,9 @@ const isEffect = (e: unknown): e is EffectFact =>
  *  interpreter applies each to the elements of a list operand; the
  *  representation has no such operation, so none has a list operand or a
  *  list result. */
-const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<IROperation['kind']>([
+const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
+  IROperation['kind']
+>([
   'literal',
   'add',
   'negate',
@@ -378,7 +395,9 @@ function verifySignature(
 ): void {
   const arity = (n: number) => {
     if (op.operands.length !== n)
-      fail(`the operation ${op.kind} has ${op.operands.length} operands, not ${n}`);
+      fail(
+        `the operation ${op.kind} has ${op.operands.length} operands, not ${n}`
+      );
   };
   const atLeast = (n: number) => {
     if (op.operands.length < n)
@@ -394,13 +413,18 @@ function verifySignature(
         );
   };
   const resultIn = (representations: readonly Representation[]) => {
-    if (op.result === undefined || !representations.includes(op.result.representation))
+    if (
+      op.result === undefined ||
+      !representations.includes(op.result.representation)
+    )
       fail(
         `the result of the operation ${op.kind} has the representation ${op.result?.representation}`
       );
   };
   /** The representations that the rule of `kind` admits for an operand. */
-  const operandRule = (kind: PolicyOperationKind): readonly Representation[] => {
+  const operandRule = (
+    kind: PolicyOperationKind
+  ): readonly Representation[] => {
     const operands = policy.operations[kind].operands;
     return operands === 'same' ? [op.result?.representation ?? ''] : operands;
   };
@@ -410,7 +434,9 @@ function verifySignature(
       op.result?.type === 'integer' &&
       op.operands.some((operand) => operand.type !== 'integer')
     )
-      fail(`the operation ${op.kind} has an integer result and an operand that is not an integer`);
+      fail(
+        `the operation ${op.kind} has an integer result and an operand that is not an integer`
+      );
   };
   // A list is an operand only of `at`, `length`, a call, a loop (as a
   // carried value) and a yield, and the result only of an input, a call, an
@@ -463,7 +489,9 @@ function verifySignature(
       arity(0);
       const capture = program.captures[op.capture];
       if (capture === undefined)
-        return fail(`a read of the capture ${op.capture}, which the program does not list`);
+        return fail(
+          `a read of the capture ${op.capture}, which the program does not list`
+        );
       if (op.binding !== capture.binding)
         fail(`a read of the capture ${capture.name} names another binding`);
       if (!Object.is(op.snapshot, capture.snapshot))
@@ -472,7 +500,9 @@ function verifySignature(
         op.result.type !== capture.type ||
         op.result.representation !== capture.representation
       )
-        fail(`a read of the capture ${capture.name} does not match the capture`);
+        fail(
+          `a read of the capture ${capture.name} does not match the capture`
+        );
       // A snapshot is fixed when the program is compiled.
       if (op.effect !== 'pure')
         fail(`a read of the capture ${capture.name} is not pure`);
@@ -498,7 +528,8 @@ function verifySignature(
       if (
         op.kind === 'multiply' &&
         op.result.type === 'complex' &&
-        (op.operands.length !== 2 || op.operands.some((o) => o.type !== 'complex'))
+        (op.operands.length !== 2 ||
+          op.operands.some((o) => o.type !== 'complex'))
       )
         fail('a complex multiply does not have two complex operands');
       return;
@@ -567,7 +598,9 @@ function verifySignature(
             `the two results of an if have different representations (${a.representation}, ${b.representation})`
           );
         if (a.representation !== result.representation)
-          fail('the result of an if has another representation than its regions');
+          fail(
+            'the result of an if has another representation than its regions'
+          );
         // The result has the type of both branches, or is `real` for an
         // integer branch and a real one.
         const types = new Set([a.type, b.type]);
@@ -586,9 +619,13 @@ function verifySignature(
       arity(op.kind === 'at' ? 2 : 1);
       const element = elementOf(op.operands[0].type);
       if (element === undefined)
-        fail(`the operation ${op.kind} reads a value of the type ${op.operands[0].type}, not a list`);
+        fail(
+          `the operation ${op.kind} reads a value of the type ${op.operands[0].type}, not a list`
+        );
       if (op.kind === 'at' && op.operands[1].type !== 'integer')
-        fail(`the index of the operation at has the type ${op.operands[1].type}`);
+        fail(
+          `the index of the operation at has the type ${op.operands[1].type}`
+        );
       const type = op.kind === 'at' ? element : 'integer';
       if (op.result.type !== type)
         fail(
@@ -617,7 +654,10 @@ function verifySignature(
     }
     case 'call': {
       const fn = program.functions[op.function];
-      if (fn === undefined) return fail(`a call of the function ${op.function}, which does not exist`);
+      if (fn === undefined)
+        return fail(
+          `a call of the function ${op.function}, which does not exist`
+        );
       arity(fn.parameters.length);
       op.operands.forEach((operand, i) => {
         const parameter = fn.parameters[i];
@@ -656,7 +696,9 @@ function verifySignature(
       resultIn(policy.operations.trace.results);
       return;
     default:
-      return fail(`an operation of the unknown kind ${(op as { kind: string }).kind}`);
+      return fail(
+        `an operation of the unknown kind ${(op as { kind: string }).kind}`
+      );
   }
 }
 
@@ -681,7 +723,10 @@ function verifyLoop(
     fail(
       `the body of a loop has ${parameters.length} parameters, and the loop has ${count} results: it needs the index and one parameter per result`
     );
-  if (parameters[0].type !== 'integer' || parameters[0].representation !== integer)
+  if (
+    parameters[0].type !== 'integer' ||
+    parameters[0].representation !== integer
+  )
     fail(`the index of a loop has the type ${parameters[0].type}`);
   const next = yieldedValues(op.body);
   op.results.forEach((result, i) => {
@@ -701,7 +746,8 @@ function verifyLoop(
       );
     // An integer is a valid real, as for the two values of an `if`.
     const fits = (v: IRValue) =>
-      v.type === parameter.type || (v.type === 'integer' && parameter.type === 'real');
+      v.type === parameter.type ||
+      (v.type === 'integer' && parameter.type === 'real');
     if (!fits(initial))
       fail(
         `the carried value ${i + 1} of a loop has an initial value of the type ${initial.type} and a parameter of the type ${parameter.type}`

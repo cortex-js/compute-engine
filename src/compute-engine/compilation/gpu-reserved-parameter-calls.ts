@@ -77,9 +77,7 @@ function argumentsHaveDeclaredTypes(
     const arg = args[i];
     if (declared === undefined || arg === undefined) return true;
     const type = arg.type.type;
-    return (
-      (type === 'unknown' && isSymbol(arg)) || isSubtype(type, declared)
-    );
+    return (type === 'unknown' && isSymbol(arg)) || isSubtype(type, declared);
   });
 }
 

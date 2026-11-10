@@ -306,7 +306,9 @@ function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal') {
 function realOperatorFacts(
   operator: string,
   operands: number,
-  type: (facts: readonly FragmentValueFacts<ScalarRepresentation>[]) => 'real' | 'integer'
+  type: (
+    facts: readonly FragmentValueFacts<ScalarRepresentation>[]
+  ) => 'real' | 'integer'
 ) {
   return {
     walk: (node, scope, context, w) => {
@@ -328,8 +330,8 @@ function realOperatorFacts(
       return w.valueFacts(
         node,
         { kind: result },
-        facts.map(
-          (f) => w.convert(f, result === 'integer' ? f.type : { kind: 'real' })!
+        facts.map((f) =>
+          w.convert(f, result === 'integer' ? f.type : { kind: 'real' })!
         )
       );
     },
@@ -360,7 +362,9 @@ const modRule = realOperatorFacts('Mod', 2, integerWhenAll);
 const floorFacts = realOperatorFacts('Floor', 1, () => 'integer');
 const floorRule = {
   walk: (node, scope, context, w) => {
-    const constant = isFunction(node) ? inexactJumpConstant(node.ops) : undefined;
+    const constant = isFunction(node)
+      ? inexactJumpConstant(node.ops)
+      : undefined;
     if (constant !== undefined)
       return w.refuse(
         node,
@@ -426,7 +430,10 @@ function inexactJumpConstant(
     value.isExact &&
     value.im === 0 &&
     Number.isSafeInteger(value.re);
-  const visit = (node: Expression, parent: Expression | undefined): Expression | undefined => {
+  const visit = (
+    node: Expression,
+    parent: Expression | undefined
+  ): Expression | undefined => {
     if (node.unknowns.length === 0) {
       if (isNumber(node))
         return exact(node) || divisionFactor(node, parent) ? undefined : node;
@@ -437,7 +444,8 @@ function inexactJumpConstant(
         return undefined;
       return node;
     }
-    if (!isFunction(node) || SHIFT_JUMP_HEADS.has(node.operator)) return undefined;
+    if (!isFunction(node) || SHIFT_JUMP_HEADS.has(node.operator))
+      return undefined;
     for (const op of node.ops) {
       const found = visit(op, node);
       if (found !== undefined) return found;
@@ -489,9 +497,12 @@ const powerRule = {
         'signature',
         'Power with a boolean operand is not in the structured route'
       );
-    const type = base.type.kind === 'integer' ? { kind: 'integer' as const }
-      : base.type.kind === 'complex' ? { kind: 'complex' as const }
-      : { kind: 'real' as const };
+    const type =
+      base.type.kind === 'integer'
+        ? { kind: 'integer' as const }
+        : base.type.kind === 'complex'
+          ? { kind: 'complex' as const }
+          : { kind: 'real' as const };
     return w.valueFacts(node, type, [
       w.convert(base, base.type)!,
       w.convert(exponent, exponent.type)!,
@@ -639,7 +650,8 @@ function signOf(
   let sign: Sign | { refusal: string } = 'unknown';
   const snapshot = isSymbol(node) ? snapshotOf(node) : undefined;
   if (snapshot !== undefined) sign = fromValue(snapshot);
-  else if (isNumber(node)) sign = node.im === 0 ? fromValue(node.re) : 'unknown';
+  else if (isNumber(node))
+    sign = node.im === 0 ? fromValue(node.re) : 'unknown';
   else if (isSymbol(node)) {
     const type = withoutNaNMember(node.type.type);
     if (type !== undefined && isSubtype(type, NON_NEGATIVE_REAL_TYPE))
@@ -669,8 +681,10 @@ function signOf(
   }
   if (typeof sign === 'object') return sign;
   // The check of the sign facts of the engine (see above).
-  if (node.isNegative === true && sign !== 'negative') return refusal('negative');
-  if (sign === 'negative' && node.isNegative !== true) return refusal('not negative');
+  if (node.isNegative === true && sign !== 'negative')
+    return refusal('negative');
+  if (sign === 'negative' && node.isNegative !== true)
+    return refusal('not negative');
   if (deep && sign !== 'nonnegative') {
     const type = withoutNaNMember(node.type.type);
     if (
@@ -707,7 +721,10 @@ function signOf(
  * (`real-to-complex`). The result of a real square root is `real`, also
  * for an integer operand.
  */
-function structuredSqrtRule(mode: 'strict' | 'complex', snapshotOf: SnapshotOf) {
+function structuredSqrtRule(
+  mode: 'strict' | 'complex',
+  snapshotOf: SnapshotOf
+) {
   return {
     walk: (node, scope, context, w) => {
       if (!isFunction(node) || node.nops !== 1)
@@ -751,7 +768,9 @@ function structuredSqrtRule(mode: 'strict' | 'complex', snapshotOf: SnapshotOf) 
 const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Sqrt: {
     walk: () => {
-      throw new Error('JS scalar fragment invariant: Sqrt without its compile mode');
+      throw new Error(
+        'JS scalar fragment invariant: Sqrt without its compile mode'
+      );
     },
   },
   Add: withListLengthIntegers(addRule),
@@ -771,7 +790,9 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Min: extremumRule('Min'),
   Max: extremumRule('Max'),
   At: { walk: (node, scope, context, w) => atRule(node, scope, context, w) },
-  Length: { walk: (node, scope, context, w) => lengthRule(node, scope, context, w) },
+  Length: {
+    walk: (node, scope, context, w) => lengthRule(node, scope, context, w),
+  },
 };
 
 /**
@@ -846,14 +867,16 @@ function integerFromListLength(
   isIntegerName: (symbol: Expression & { symbol: string }) => boolean
 ): boolean {
   if (isSymbol(node)) return isIntegerName(node);
-  if (!isFunction(node) || !isLibraryOperator(node, node.operator)) return false;
+  if (!isFunction(node) || !isLibraryOperator(node, node.operator))
+    return false;
   if (node.operator === 'Length')
     return (
       node.nops === 1 &&
       isSymbol(node.op1) &&
       isAdmittedList(node.op1.type.type)
     );
-  if (!['Add', 'Negate', 'Multiply', 'Mod'].includes(node.operator)) return false;
+  if (!['Add', 'Negate', 'Multiply', 'Mod'].includes(node.operator))
+    return false;
   let found = false;
   for (const operand of node.ops) {
     if (integerFromListLength(operand, isIntegerName)) found = true;
@@ -874,11 +897,15 @@ function withListLengthIntegers(
   return {
     walk: (node, scope, context, w) => {
       const facts = rule.walk(node, scope, context, w);
-      if (!('representation' in facts) || facts.type.kind !== 'real') return facts;
+      if (!('representation' in facts) || facts.type.kind !== 'real')
+        return facts;
       const operands = operandFacts(node, scope, context, w);
       if (
         !operands.every((f) => f.type.kind === 'integer') ||
-        !integerFromListLength(node, (s) => w.value(s, scope, context).type.kind === 'integer')
+        !integerFromListLength(
+          node,
+          (s) => w.value(s, scope, context).type.kind === 'integer'
+        )
       )
         return facts;
       return w.valueFacts(
@@ -957,7 +984,9 @@ function structuredParameterType(type: Type, name: string | undefined) {
   if (scalar !== undefined) return scalar;
   const list = structuredListType(type);
   if (list !== undefined && 'refusal' in list)
-    throw new Error(`JS scalar fragment: the parameter ${name ?? ''} has ${list.refusal}`);
+    throw new Error(
+      `JS scalar fragment: the parameter ${name ?? ''} has ${list.refusal}`
+    );
   return list;
 }
 
@@ -994,7 +1023,9 @@ const structuredDefinition: Pick<
     return list === undefined || 'refusal' in list ? undefined : list;
   },
   representationOfBinding: (type, binding) =>
-    type.kind === 'list' && binding.role !== 'input' && binding.role !== 'parameter'
+    type.kind === 'list' &&
+    binding.role !== 'input' &&
+    binding.role !== 'parameter'
       ? undefined
       : structuredRepresentation(type),
   representationOfValue: structuredRepresentation,
@@ -1158,11 +1189,23 @@ function withoutListOperands(
 /** The heads that make or read a list in a way that the structured route
  *  does not have, with the message of each refusal. */
 const LIST_HEAD_REFUSALS: ReadonlyMap<string, string> = new Map([
-  ['First', 'First is not in the structured route, which reads a list with At and Length'],
-  ['Last', 'Last is not in the structured route, which reads a list with At and Length'],
+  [
+    'First',
+    'First is not in the structured route, which reads a list with At and Length',
+  ],
+  [
+    'Last',
+    'Last is not in the structured route, which reads a list with At and Length',
+  ],
   ['Rest', 'Rest makes a list, which the structured route does not have'],
-  ['Comprehension', 'Comprehension makes a list, which the structured route does not have'],
-  ['ReplaceAt', 'ReplaceAt makes a list, which the structured route does not have'],
+  [
+    'Comprehension',
+    'Comprehension makes a list, which the structured route does not have',
+  ],
+  [
+    'ReplaceAt',
+    'ReplaceAt makes a list, which the structured route does not have',
+  ],
   ['List', 'a list literal is not in the structured route'],
   ['Tuple', 'a tuple is not in the structured route'],
 ]);
@@ -1176,7 +1219,8 @@ const LIST_HEAD_REFUSALS: ReadonlyMap<string, string> = new Map([
  * route does not have (`Range`, `Element`, a string).
  */
 function structuredListRefusal(node: Expression): string | undefined {
-  if (!isFunction(node) || !isLibraryOperator(node, node.operator)) return undefined;
+  if (!isFunction(node) || !isLibraryOperator(node, node.operator))
+    return undefined;
   const message = LIST_HEAD_REFUSALS.get(node.operator);
   if (message !== undefined) return message;
   if (node.operator !== 'At') return undefined;
@@ -1448,7 +1492,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         capture.assertCurrent();
         target.symbolDeps?.add(capture.name);
       }
-      for (const name of preparation.helpers.keys()) target.symbolDeps?.add(name);
+      for (const name of preparation.helpers.keys())
+        target.symbolDeps?.add(name);
       const program = lowerStructuredProgram(preparation);
       time = this.endPhase('lowering', time);
       verifyJavaScriptProgram(program, preparedNodesOf(preparation));
@@ -1472,7 +1517,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
   ): StructuredPreparation {
     if (this.route !== 'structured')
       throw new Error('JS scalar fragment: not the structured route');
-    return structuredPreparationOf(this.prepareCompilation(expr, options).target);
+    return structuredPreparationOf(
+      this.prepareCompilation(expr, options).target
+    );
   }
 
   protected prepareCompilation(
@@ -1499,7 +1546,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     // The structured route has no common-subexpression pass and no constant
     // folding. An option that asks for one is refused, not ignored.
     if (admission.structured && options.cse !== false)
-      throw new Error('JS scalar fragment: the structured route requires cse: false');
+      throw new Error(
+        'JS scalar fragment: the structured route requires cse: false'
+      );
     if (admission.structured && options.constantFold !== false)
       throw new Error(
         'JS scalar fragment: the structured route requires constantFold: false'
@@ -1544,9 +1593,13 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
           );
-        const list = structured ? structuredListType(node.type.type) : undefined;
+        const list = structured
+          ? structuredListType(node.type.type)
+          : undefined;
         if (list !== undefined && 'refusal' in list)
-          throw new Error(`JS scalar fragment: the input ${node.symbol} has ${list.refusal}`);
+          throw new Error(
+            `JS scalar fragment: the input ${node.symbol} has ${list.refusal}`
+          );
         if (definition.typeOfSymbol(node) === undefined)
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
@@ -1811,14 +1864,18 @@ function attachBoundFunction(
    *  local of the root function. */
   const checkCollisions = (): void => {
     const collides = registry
-      ? [...registry.helpers.keys(), ...[...registry.captures.values()].map((c) => c.name)]
-          .some((name) => bindings.has(name))
+      ? [
+          ...registry.helpers.keys(),
+          ...[...registry.captures.values()].map((c) => c.name),
+        ].some((name) => bindings.has(name))
       : bindings.has(named.helper!.name) ||
         [...(named.helper!.capture?.symbols ?? [])].some(
           (symbol) => isSymbol(symbol) && bindings.has(symbol.symbol)
         );
     if (collides)
-      throw new Error('JS scalar fragment: helper bindings collide with the root function');
+      throw new Error(
+        'JS scalar fragment: helper bindings collide with the root function'
+      );
   };
   const checkValue = (node: Expression): void => {
     refuseListHead(node, admission);
@@ -1885,7 +1942,11 @@ function attachBoundFunction(
     if (length && (declaredType === 'let' || declaredType === 'integer'))
       lengthWritten.add(name);
     else if (!isSubtype(value.type.type, 'integer')) notLength.add(name);
-    if (declaredType === 'integer' && !length && !isSubtype(value.type.type, 'integer'))
+    if (
+      declaredType === 'integer' &&
+      !length &&
+      !isSubtype(value.type.type, 'integer')
+    )
       throw new Error(
         `JS scalar fragment: a value written to the integer local ${name} ` +
           `does not have the type integer`
@@ -1929,7 +1990,9 @@ function attachBoundFunction(
     place: 'top' | 'branch' | 'loop',
     inBlock: boolean
   ): void => {
-    const head = isFunction(statement) ? statement.operator : statement.toString();
+    const head = isFunction(statement)
+      ? statement.operator
+      : statement.toString();
     if (isFunction(statement, 'Declare') && inBlock) {
       const declared = declareLocal(statement);
       locals.set(declared.local, declared.declared);
@@ -1938,8 +2001,12 @@ function attachBoundFunction(
       names.add(declared.local);
       return;
     }
-    if (isFunction(statement, 'Assign') && isLibraryOperator(statement, 'Assign') &&
-        statement.nops === 2 && isSymbol(statement.op1)) {
+    if (
+      isFunction(statement, 'Assign') &&
+      isLibraryOperator(statement, 'Assign') &&
+      statement.nops === 2 &&
+      isSymbol(statement.op1)
+    ) {
       const name = statement.op1.symbol;
       // The interpreter gives the index the next element of the range at
       // the next iteration, whatever the body writes to it.
@@ -1959,18 +2026,25 @@ function attachBoundFunction(
       checkWrite(statement.op2, name);
       return;
     }
-    if (isFunction(statement, 'If') && isLibraryOperator(statement, 'If') &&
-        (statement.nops === 2 || statement.nops === 3)) {
+    if (
+      isFunction(statement, 'If') &&
+      isLibraryOperator(statement, 'If') &&
+      (statement.nops === 2 || statement.nops === 3)
+    ) {
       checkValue(statement.op1);
       checkCondition(statement);
       for (const branch of statement.ops.slice(1))
         nested(() => checkStructuredStatement(branch, 'branch', false));
       return;
     }
-    if (isFunction(statement, 'Block') && isLibraryOperator(statement, 'Block') &&
-        place !== 'top') {
+    if (
+      isFunction(statement, 'Block') &&
+      isLibraryOperator(statement, 'Block') &&
+      place !== 'top'
+    ) {
       nested(() => {
-        for (const inner of statement.ops) checkStructuredStatement(inner, place, true);
+        for (const inner of statement.ops)
+          checkStructuredStatement(inner, place, true);
       });
       return;
     }
@@ -1993,7 +2067,9 @@ function attachBoundFunction(
    * loop with no index set, with a step or a guard, or over another
    * collection is refused.
    */
-  const checkLoop = (loop: Expression & { ops: readonly Expression[] }): void => {
+  const checkLoop = (
+    loop: Expression & { ops: readonly Expression[] }
+  ): void => {
     const spec = loop.ops[1];
     if (loop.ops.length !== 2)
       throw new Error(
@@ -2027,7 +2103,12 @@ function attachBoundFunction(
         );
     }
     const index = spec.op1.symbol;
-    if (names.has(index) || locals.has(index) || index === 'True' || index === 'False')
+    if (
+      names.has(index) ||
+      locals.has(index) ||
+      index === 'True' ||
+      index === 'False'
+    )
       throw new Error(
         `JS scalar fragment: the loop index ${index} has the name of a parameter, a local or another index`
       );
@@ -2072,60 +2153,72 @@ function attachBoundFunction(
       : {}),
   };
   const annotation = (() => {
-      const annotation = annotateCalls(body, boundDefinition, named, inputs, body);
-      const scope = annotation.scope.inner.get(body);
-      if (!scope)
+    const annotation = annotateCalls(
+      body,
+      boundDefinition,
+      named,
+      inputs,
+      body
+    );
+    const scope = annotation.scope.inner.get(body);
+    if (!scope)
+      throw new Error('JS scalar fragment invariant: missing local binding');
+    // Each write of a local, in the scope where the pass typed it: a
+    // statement of the block, of a branch of an `If` statement, or of the
+    // body of a `Loop`, which is typed in the scope of the loop.
+    const checkWrites = (
+      statement: Expression,
+      scope: FragmentScope<ScalarRepresentation>
+    ): void => {
+      if (!isFunction(statement)) return;
+      if (statement.operator === 'If') {
+        for (const branch of statement.ops.slice(1)) checkWrites(branch, scope);
+        return;
+      }
+      if (statement.operator === 'Loop') {
+        const inner = scope.inner.get(statement);
+        if (!inner)
+          throw new Error('JS scalar fragment invariant: missing loop scope');
+        checkWrites(statement.op1, inner);
+        return;
+      }
+      if (statement.operator === 'Block') {
+        const inner = scope.inner.get(statement);
+        if (!inner)
+          throw new Error('JS scalar fragment invariant: missing block scope');
+        for (const s of statement.ops) checkWrites(s, inner);
+        return;
+      }
+      if (!isSymbol(statement.op1)) return;
+      const name = statement.op1.symbol;
+      let binding: FragmentFacts<ScalarRepresentation> | undefined;
+      for (
+        let s: FragmentScope<ScalarRepresentation> | undefined = scope;
+        s && !binding;
+        s = s.parent
+      )
+        binding = s.bindings.get(name);
+      if (!binding || !('representation' in binding))
         throw new Error('JS scalar fragment invariant: missing local binding');
-      // Each write of a local, in the scope where the pass typed it: a
-      // statement of the block, of a branch of an `If` statement, or of the
-      // body of a `Loop`, which is typed in the scope of the loop.
-      const checkWrites = (
-        statement: Expression,
-        scope: FragmentScope<ScalarRepresentation>
-      ): void => {
-        if (!isFunction(statement)) return;
-        if (statement.operator === 'If') {
-          for (const branch of statement.ops.slice(1)) checkWrites(branch, scope);
-          return;
-        }
-        if (statement.operator === 'Loop') {
-          const inner = scope.inner.get(statement);
-          if (!inner)
-            throw new Error('JS scalar fragment invariant: missing loop scope');
-          checkWrites(statement.op1, inner);
-          return;
-        }
-        if (statement.operator === 'Block') {
-          const inner = scope.inner.get(statement);
-          if (!inner)
-            throw new Error('JS scalar fragment invariant: missing block scope');
-          for (const s of statement.ops) checkWrites(s, inner);
-          return;
-        }
-        if (!isSymbol(statement.op1)) return;
-        const name = statement.op1.symbol;
-        let binding: FragmentFacts<ScalarRepresentation> | undefined;
-        for (let s: FragmentScope<ScalarRepresentation> | undefined = scope; s && !binding; s = s.parent)
-          binding = s.bindings.get(name);
-        if (!binding || !('representation' in binding))
-          throw new Error('JS scalar fragment invariant: missing local binding');
-        const value =
-          statement.operator === 'Declare'
-            ? declareValueOperand(statement.ops)
-            : statement.op2;
-        const valueFacts = value === undefined ? undefined : scope.facts.get(value);
-        if (
-          !valueFacts ||
-          !('representation' in valueFacts) ||
-          valueFacts.representation !== binding.representation
-        )
-          throw new Error(
-            'JS scalar fragment: local writes must preserve representation'
-          );
-      };
-      for (const statement of body.ops.slice(0, -1)) checkWrites(statement, scope);
-      return annotation;
-    })();
+      const value =
+        statement.operator === 'Declare'
+          ? declareValueOperand(statement.ops)
+          : statement.op2;
+      const valueFacts =
+        value === undefined ? undefined : scope.facts.get(value);
+      if (
+        !valueFacts ||
+        !('representation' in valueFacts) ||
+        valueFacts.representation !== binding.representation
+      )
+        throw new Error(
+          'JS scalar fragment: local writes must preserve representation'
+        );
+    };
+    for (const statement of body.ops.slice(0, -1))
+      checkWrites(statement, scope);
+    return annotation;
+  })();
   attachScalarFragment(target, {
     root: body,
     functionRoot: fn,
@@ -2185,17 +2278,23 @@ function structuredInput(
   declared?: Type
 ): StructuredInput {
   const rep = structuredRepresentation(type);
-  const kind =
-    type.kind === 'list'
-      ? `list<${type.element?.kind}>`
-      : type.kind;
+  const kind = type.kind === 'list' ? `list<${type.element?.kind}>` : type.kind;
   if (
     rep === undefined ||
-    !(['real', 'integer', 'boolean', 'complex', 'list<real>', 'list<integer>'] as const).some(
-      (k) => k === kind
-    )
+    !(
+      [
+        'real',
+        'integer',
+        'boolean',
+        'complex',
+        'list<real>',
+        'list<integer>',
+      ] as const
+    ).some((k) => k === kind)
   )
-    throw new Error(`JS scalar fragment invariant: no scalar or list input ${name}`);
+    throw new Error(
+      `JS scalar fragment invariant: no scalar or list input ${name}`
+    );
   const label = type.kind === 'list' ? elementLabel(declared) : undefined;
   return {
     name,
@@ -2252,7 +2351,9 @@ function structuredRegistry(
 ): StructuredRegistry | undefined {
   if (!admission.structured) return undefined;
   const mode =
-    BaseCompiler.resolveCompileMode(target) === 'complex' ? 'complex' : 'strict';
+    BaseCompiler.resolveCompileMode(target) === 'complex'
+      ? 'complex'
+      : 'strict';
   return { mode, helpers: new Map(), captures: new Map(), resolving: [] };
 }
 
@@ -2265,7 +2366,9 @@ function structuredRegistry(
  * with the same name is not captured). `assertCurrent()` throws when the
  * binding, its declared type or its value changed after this call.
  */
-function numericSnapshot(node: Expression & { symbol: string }):
+function numericSnapshot(
+  node: Expression & { symbol: string }
+):
   | { binding: object; value: Expression; assertCurrent: () => void }
   | undefined {
   const binding = node.valueDefinition;
@@ -2373,20 +2476,35 @@ function collectStructuredHelper(
     }
   } else {
     if ((node.valueDefinition ?? node.operatorDefinition) !== known.binding)
-      throw new Error(`JS scalar fragment: two definitions of the helper ${name}`);
+      throw new Error(
+        `JS scalar fragment: two definitions of the helper ${name}`
+      );
     // `resolveHelper()` checks this at the first call.
     BaseCompiler.assertCapturedCallableBindings(node, target);
   }
   named.calls.add(node);
 }
 
-function collectHelper(node: Expression, target: CompileTarget<Expression>, named: NamedCalls, admission: Admission): void {
-  if (named.structured) return collectStructuredHelper(node, target, named, admission);
+function collectHelper(
+  node: Expression,
+  target: CompileTarget<Expression>,
+  named: NamedCalls,
+  admission: Admission
+): void {
+  if (named.structured)
+    return collectStructuredHelper(node, target, named, admission);
   const resolved = resolveHelper(node, target, admission);
   const helper = named.helper;
-  if (helper && (helper.name !== resolved.name || helper.binding !== resolved.binding ||
-      helper.literal !== resolved.literal || helper.body !== resolved.body))
-    throw new Error('JS scalar fragment: only one resolved helper is supported');
+  if (
+    helper &&
+    (helper.name !== resolved.name ||
+      helper.binding !== resolved.binding ||
+      helper.literal !== resolved.literal ||
+      helper.body !== resolved.body)
+  )
+    throw new Error(
+      'JS scalar fragment: only one resolved helper is supported'
+    );
   named.helper ??= resolved;
   named.calls.add(node);
 }
@@ -2405,18 +2523,23 @@ function annotateCalls(
   if (named.structured)
     return annotateStructured(root, base, named, named.structured, inputs);
   const { helper, calls } = named;
-  const definition = helper === undefined ? base : {
-    ...base,
-    rules: { ...base.rules, Block: { walk: walkBlock } },
-    storedValue: (node: Expression) => {
-      const capture = helper.capture;
-      if (!capture?.symbols.has(node)) return undefined;
-      capture.assertCurrent();
-      return capture.value;
-    },
-    functionOf: (call: Expression) => calls.has(call) && isFunction(call)
-      ? { ...helper.fragment, arguments: call.ops } : undefined,
-  };
+  const definition =
+    helper === undefined
+      ? base
+      : {
+          ...base,
+          rules: { ...base.rules, Block: { walk: walkBlock } },
+          storedValue: (node: Expression) => {
+            const capture = helper.capture;
+            if (!capture?.symbols.has(node)) return undefined;
+            capture.assertCurrent();
+            return capture.value;
+          },
+          functionOf: (call: Expression) =>
+            calls.has(call) && isFunction(call)
+              ? { ...helper.fragment, arguments: call.ops }
+              : undefined,
+        };
   const annotation = typeFragment(root, definition, { inputs });
   if (annotation.refusal)
     throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
@@ -2424,16 +2547,29 @@ function annotateCalls(
   for (const fn of annotation.functions.values()) refuseClosedComplex(fn.scope);
   if (helper) {
     const entry = annotation.functions.get(helper.name);
-    if (!entry || entry.body !== helper.body || entry.type.kind !== 'function' ||
-        representation(entry.type.result) !== helper.resultRepresentation)
-      throw new Error('JS scalar fragment: helper return representation differs from its signature');
-    const scope: FragmentScope<ScalarRepresentation> | undefined = block === undefined
-      ? annotation.scope : annotation.scope.inner.get(block);
+    if (
+      !entry ||
+      entry.body !== helper.body ||
+      entry.type.kind !== 'function' ||
+      representation(entry.type.result) !== helper.resultRepresentation
+    )
+      throw new Error(
+        'JS scalar fragment: helper return representation differs from its signature'
+      );
+    const scope: FragmentScope<ScalarRepresentation> | undefined =
+      block === undefined
+        ? annotation.scope
+        : annotation.scope.inner.get(block);
     for (const call of calls) {
       const facts = scope?.facts.get(call);
-      if (!facts || !('representation' in facts) ||
-          facts.conversions?.some(conversion => conversion.kind !== 'none'))
-        throw new Error('JS scalar fragment: helper arguments must preserve representation');
+      if (
+        !facts ||
+        !('representation' in facts) ||
+        facts.conversions?.some((conversion) => conversion.kind !== 'none')
+      )
+        throw new Error(
+          'JS scalar fragment: helper arguments must preserve representation'
+        );
     }
   }
   return annotation;
@@ -2477,8 +2613,10 @@ function annotateStructured(
       return capture.stored;
     },
     functionOf: (call: Expression) => {
-      const helper = isFunction(call) && calls.has(call)
-        ? registry.helpers.get(call.operator) : undefined;
+      const helper =
+        isFunction(call) && calls.has(call)
+          ? registry.helpers.get(call.operator)
+          : undefined;
       return helper === undefined || !isFunction(call)
         ? undefined
         : { ...helper.fragment, arguments: call.ops };
@@ -2497,9 +2635,15 @@ function annotateStructured(
   // fact, so a closed node with a complex fact is written complex.
   for (const helper of registry.helpers.values()) {
     const entry = annotation.functions.get(helper.name);
-    if (!entry || entry.body !== helper.body || entry.type.kind !== 'function' ||
-        representation(entry.type.result) !== helper.resultRepresentation)
-      throw new Error('JS scalar fragment: helper return representation differs from its signature');
+    if (
+      !entry ||
+      entry.body !== helper.body ||
+      entry.type.kind !== 'function' ||
+      representation(entry.type.result) !== helper.resultRepresentation
+    )
+      throw new Error(
+        'JS scalar fragment: helper return representation differs from its signature'
+      );
   }
   // The facts of each call, in each scope that typed it.
   const scopes: FragmentScope<ScalarRepresentation>[] = [];
@@ -2514,9 +2658,17 @@ function annotateStructured(
       const facts = scope.facts.get(call);
       return facts === undefined ? [] : [facts];
     });
-    if (all.length === 0 || all.some((facts) => !('representation' in facts) ||
-        facts.conversions?.some((conversion) => conversion.kind !== 'none')))
-      throw new Error('JS scalar fragment: helper arguments must preserve representation');
+    if (
+      all.length === 0 ||
+      all.some(
+        (facts) =>
+          !('representation' in facts) ||
+          facts.conversions?.some((conversion) => conversion.kind !== 'none')
+      )
+    )
+      throw new Error(
+        'JS scalar fragment: helper arguments must preserve representation'
+      );
   }
   return annotation;
 }
@@ -2595,7 +2747,9 @@ function resolveHelper(
       'JS scalar fragment: helper requires one pure scalar signature'
     );
   const parameters: string[] = [];
-  const parameterTypes: NonNullable<ReturnType<typeof structuredParameterType>>[] = [];
+  const parameterTypes: NonNullable<
+    ReturnType<typeof structuredParameterType>
+  >[] = [];
   const parameterSymbols: Expression[] = [];
   const parameterElementLabels: (string | undefined)[] = [];
   // The structured route also admits a list parameter
@@ -2626,7 +2780,8 @@ function resolveHelper(
     const declaredScalar = typeOf(declared, name);
     if (
       !declaredScalar ||
-      structuredRepresentation(declaredScalar) !== structuredRepresentation(scalar) ||
+      structuredRepresentation(declaredScalar) !==
+        structuredRepresentation(scalar) ||
       (declaredScalar.kind === 'list' &&
         scalar.kind === 'list' &&
         declaredScalar.element.kind !== scalar.element.kind)
@@ -2637,7 +2792,9 @@ function resolveHelper(
     parameters.push(name);
     parameterTypes.push(scalar);
     parameterSymbols.push(parameter.op1);
-    parameterElementLabels.push(scalar.kind === 'list' ? elementLabel(type) : undefined);
+    parameterElementLabels.push(
+      scalar.kind === 'list' ? elementLabel(type) : undefined
+    );
   }
   if ((signature.args?.length ?? 0) !== parameters.length)
     throw new Error('JS scalar fragment: helper signature arity differs');

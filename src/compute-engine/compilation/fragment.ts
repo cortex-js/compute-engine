@@ -411,7 +411,9 @@ export type FragmentFunction = {
    *  `undefined` when the parameter has no fragment type. A list type is
    *  bound as it is: the definition decides with
    *  `representationOfBinding()` whether it holds it. */
-  readonly parameterTypes: readonly (FragmentValueType | FragmentListType | undefined)[];
+  readonly parameterTypes: readonly (
+    FragmentValueType | FragmentListType | undefined
+  )[];
   /** For each parameter, `true` when its declared or inferred type is a
    *  collection with no fragment type (`list<number>`, which the engine
    *  infers from the `At` reads of the body). Such a parameter takes a

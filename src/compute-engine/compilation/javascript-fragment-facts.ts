@@ -360,14 +360,21 @@ export function assertScalarFragmentCall(
   )
     throw new Error('JS scalar fragment invariant: different prepared call');
   const conversions = op.facts.conversions;
-  if ((conversions?.length ?? 0) !== args.length ||
-      args.some((arg, i) => {
-        const conversion = conversions?.[i];
-        return !conversion || conversion.kind !== 'none' ||
-          !['number', 'boolean', 'complex'].includes(conversion.representation) ||
-          conversion.representation !== facts(op.artifact, arg).representation;
-      }))
-    throw new Error('JS scalar fragment invariant: invalid scalar call conversions');
+  if (
+    (conversions?.length ?? 0) !== args.length ||
+    args.some((arg, i) => {
+      const conversion = conversions?.[i];
+      return (
+        !conversion ||
+        conversion.kind !== 'none' ||
+        !['number', 'boolean', 'complex'].includes(conversion.representation) ||
+        conversion.representation !== facts(op.artifact, arg).representation
+      );
+    })
+  )
+    throw new Error(
+      'JS scalar fragment invariant: invalid scalar call conversions'
+    );
   return true;
 }
 

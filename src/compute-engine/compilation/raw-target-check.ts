@@ -35,15 +35,12 @@ export function setRawTargetCheck(
   target: CompileTarget<Expression>,
   check: RawTargetCheck
 ): void {
-  (target as { [RAW_TARGET_CHECK]?: RawTargetCheck })[RAW_TARGET_CHECK] =
-    check;
+  (target as { [RAW_TARGET_CHECK]?: RawTargetCheck })[RAW_TARGET_CHECK] = check;
 }
 
 /** The check of the raw route for `target`, or `undefined` when it has none. */
 export function rawTargetCheck(
   target: CompileTarget<Expression>
 ): RawTargetCheck | undefined {
-  return (target as { [RAW_TARGET_CHECK]?: RawTargetCheck })[
-    RAW_TARGET_CHECK
-  ];
+  return (target as { [RAW_TARGET_CHECK]?: RawTargetCheck })[RAW_TARGET_CHECK];
 }

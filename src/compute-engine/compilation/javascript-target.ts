@@ -12464,7 +12464,9 @@ export type JavaScriptBody = {
  * where it would compile the body, and builds the result from its body as
  * from the body of the existing emitter.
  */
-export type JavaScriptBodyEmitter = (names: JavaScriptBodyNames) => JavaScriptBody;
+export type JavaScriptBodyEmitter = (
+  names: JavaScriptBodyNames
+) => JavaScriptBody;
 
 /**
  * Call `emit` with the names of the compilation of `target`, and give the
@@ -12605,23 +12607,25 @@ function compileToTarget(
             if (i < 0) throw new Error(`No parameter ${name} to read`);
             return params[i];
           });
-    const body = emitted?.code ?? BaseCompiler.withWritableLoopIndices(
-      params.filter((p, i) => p !== declared[i]),
-      () =>
-        BaseCompiler.withEnforcedParams(
-          expr as Expression & FunctionInterface,
-          () =>
-            BaseCompiler.compileCseRoot(expr, target, 0, () =>
-              BaseCompiler.compileOp(
-                expr,
-                0,
-                lambdaTarget,
-                0,
-                args[0].canonical
+    const body =
+      emitted?.code ??
+      BaseCompiler.withWritableLoopIndices(
+        params.filter((p, i) => p !== declared[i]),
+        () =>
+          BaseCompiler.withEnforcedParams(
+            expr as Expression & FunctionInterface,
+            () =>
+              BaseCompiler.compileCseRoot(expr, target, 0, () =>
+                BaseCompiler.compileOp(
+                  expr,
+                  0,
+                  lambdaTarget,
+                  0,
+                  args[0].canonical
+                )
               )
-            )
-        )
-    );
+          )
+      );
     // The value kinds whose compile contracts the code reads or makes: the
     // value of a call is then returned raw (`valueKindFields`).
     const kinds = BaseCompiler.kindLoweringReport();

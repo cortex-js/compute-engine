@@ -33,13 +33,7 @@ import {
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
-import {
-  gpuFVec,
-  gpuNaN,
-  gpuType,
-  gpuVec2,
-  gpuVecType,
-} from './gpu-emit.js';
+import { gpuFVec, gpuNaN, gpuType, gpuVec2, gpuVecType } from './gpu-emit.js';
 import {
   GPU_SCALAR_ARITHMETIC,
   GPU_SCALAR_PREDICATES,

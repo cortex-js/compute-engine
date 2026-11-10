@@ -1028,12 +1028,7 @@ export function compileBlock(
       ) {
         const hoisted =
           assignedName !== undefined
-            ? target.valueBlock(
-                assignedValue!,
-                result,
-                assignedName,
-                target
-              )
+            ? target.valueBlock(assignedValue!, result, assignedName, target)
             : target.valueBlock(
                 last,
                 result.slice(0, -1),

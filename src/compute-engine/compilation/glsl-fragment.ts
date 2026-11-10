@@ -2056,9 +2056,7 @@ function glslFunctionOf(
     // registry of user functions, `compile()` writes no definition and
     // checks nothing.
     sizeCheck:
-      definitionBody === undefined
-        ? undefined
-        : { body: definitionBody },
+      definitionBody === undefined ? undefined : { body: definitionBody },
     // Read on the body before its preparation, where a `+=` is an `AddTo`.
     sumAssigned: sumAssignedNames(body),
   };

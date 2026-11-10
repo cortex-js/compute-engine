@@ -175,9 +175,15 @@ function operand(source: Source, min: number): string {
 
 /** The operands of a left-associative operator of precedence `p`: the first
  *  at `p`, the others above it. */
-function leftAssociative(operands: readonly Source[], p: number, symbol: string): Source {
+function leftAssociative(
+  operands: readonly Source[],
+  p: number,
+  symbol: string
+): Source {
   return {
-    text: operands.map((s, i) => operand(s, i === 0 ? p : p + 1)).join(` ${symbol} `),
+    text: operands
+      .map((s, i) => operand(s, i === 0 ? p : p + 1))
+      .join(` ${symbol} `),
     precedence: p,
   };
 }
@@ -189,7 +195,11 @@ function leftAssociative(operands: readonly Source[], p: number, symbol: string)
  */
 function numberSource(n: number): Source {
   if (Number.isNaN(n)) return atom('NaN');
-  const text = Object.is(n, -0) ? '-0' : n === -Infinity ? '-Infinity' : String(n);
+  const text = Object.is(n, -0)
+    ? '-0'
+    : n === -Infinity
+      ? '-Infinity'
+      : String(n);
   return text.startsWith('-') ? { text, precedence: UNARY } : atom(text);
 }
 
@@ -200,7 +210,9 @@ export function emitStructuredProgram(
   options: StructuredEmitOptions = {}
 ): StructuredEmission {
   const emitter = new Emitter(program, names, options);
-  const definitions = program.functions.map((fn, i) => emitter.definition(fn, i));
+  const definitions = program.functions.map((fn, i) =>
+    emitter.definition(fn, i)
+  );
   const statements: string[] = [];
   const value = emitter.region(program.root, statements, true)[0].text;
   return {
@@ -216,7 +228,8 @@ export function emitStructuredProgram(
  *  write as an expression: an `if` of one result, or the result of any
  *  other operation but a yield. */
 function singleResult(op: IROperation): IRValue | undefined {
-  if (op.kind === 'if') return op.results.length === 1 ? op.results[0] : undefined;
+  if (op.kind === 'if')
+    return op.results.length === 1 ? op.results[0] : undefined;
   return op.result;
 }
 
@@ -244,7 +257,8 @@ function usesOf(program: IRProgram): Map<number, Use> {
       for (const [i, value] of op.operands.entries()) {
         const reads = readsOf(i);
         const use = uses.get(value.id);
-        if (use === undefined) uses.set(value.id, { count: reads, region, index });
+        if (use === undefined)
+          uses.set(value.id, { count: reads, region, index });
         else {
           use.count += reads;
           use.region = region;
@@ -326,7 +340,8 @@ class Emitter {
       const code = this.operation(op, out, readsInputs);
       if (code === undefined) continue;
       const result = singleResult(op)!;
-      if (this.writtenAtUse(result, op, region, index, impure)) this.define(result, code);
+      if (this.writtenAtUse(result, op, region, index, impure))
+        this.define(result, code);
       else out.push(`const ${this.bind(result)} = ${code.text};`);
     }
     return fail('a region has no yield');
@@ -346,7 +361,8 @@ class Emitter {
   ): boolean {
     if (op.effect !== 'pure') return false;
     const use = this.uses.get(result.id);
-    if (use === undefined || use.count !== 1 || use.region !== region) return false;
+    if (use === undefined || use.count !== 1 || use.region !== region)
+      return false;
     return impure[use.index] - impure[index + 1] === 0;
   }
 
@@ -359,13 +375,15 @@ class Emitter {
   }
 
   private define(value: IRValue, source: Source): void {
-    if (this.sources.has(value.id)) fail(`the value ${value.id} is defined twice`);
+    if (this.sources.has(value.id))
+      fail(`the value ${value.id} is defined twice`);
     this.sources.set(value.id, source);
   }
 
   private source(value: IRValue): Source {
     const source = this.sources.get(value.id);
-    if (source === undefined) return fail(`the value ${value.id} has no source`);
+    if (source === undefined)
+      return fail(`the value ${value.id} has no source`);
     return source;
   }
 
@@ -462,12 +480,16 @@ class Emitter {
           ...operands,
           atom(
             JSON.stringify(
-              this.elementLabels.get(op.operands[0].id) ?? elementOf(op.operands[0].type)
+              this.elementLabels.get(op.operands[0].id) ??
+                elementOf(op.operands[0].type)
             )
           ),
         ]);
       case 'length':
-        return { text: `${operand(operands[0], CALL)}.length`, precedence: CALL };
+        return {
+          text: `${operand(operands[0], CALL)}.length`,
+          precedence: CALL,
+        };
       case 'min':
         return call('Math.min', operands);
       case 'max':
@@ -549,7 +571,9 @@ class Emitter {
         return { text: trace(op.trace, args), precedence: CALL };
       }
       default:
-        return fail(`no emission for the operation ${(op as { kind: string }).kind}`);
+        return fail(
+          `no emission for the operation ${(op as { kind: string }).kind}`
+        );
     }
   }
 
@@ -557,7 +581,11 @@ class Emitter {
    * The statements of `op`, whose operands have the sources `operands`:
    * the `let` of each carried value, then the `for` statement.
    */
-  private loop(op: IRLoop, operands: readonly Source[], readsInputs: boolean): string[] {
+  private loop(
+    op: IRLoop,
+    operands: readonly Source[],
+    readsInputs: boolean
+  ): string[] {
     const [from, to, ...initial] = operands;
     const [index, ...parameters] = op.body.parameters ?? [];
     if (index === undefined) return fail('a loop has no index');
@@ -576,7 +604,9 @@ class Emitter {
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
     const next = this.region(op.body, body, readsInputs);
     // The carried values whose next value is not the parameter itself.
-    const changed = parameters.flatMap((_, i) => (next[i].text === names[i] ? [] : [i]));
+    const changed = parameters.flatMap((_, i) =>
+      next[i].text === names[i] ? [] : [i]
+    );
     // Each next value is read before any carried variable is assigned:
     // the last one is assigned first, and every other one that could read
     // a carried variable is first bound to a `const`.
@@ -607,7 +637,9 @@ class Emitter {
     const declarations =
       names.length === 0
         ? []
-        : [`let ${names.map((name, i) => `${name} = ${operand(initial[i], CONDITIONAL)}`).join(', ')};`];
+        : [
+            `let ${names.map((name, i) => `${name} = ${operand(initial[i], CONDITIONAL)}`).join(', ')};`,
+          ];
     return [...declarations, `${header} { ${body.join(' ')} }`];
   }
 }

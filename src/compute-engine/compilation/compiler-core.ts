@@ -4678,9 +4678,7 @@ function compileExprHelperCall(
     );
   }
 
-  return `${fn}(${args
-    .map((x) => compileValueOperand(x, target))
-    .join(', ')})`;
+  return `${fn}(${args.map((x) => compileValueOperand(x, target)).join(', ')})`;
 }
 
 /**

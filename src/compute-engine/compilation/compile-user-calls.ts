@@ -1,9 +1,7 @@
 // Calls of user and local functions: emission, parameter types, inlining of
 // collection-valued calls, and operand types in context.
 
-import {
-  assertScalarFragmentCall,
-} from './javascript-fragment-facts.js';
+import { assertScalarFragmentCall } from './javascript-fragment-facts.js';
 import {
   describe as describeOperand,
   describeType,
@@ -204,7 +202,7 @@ export function emitUserFunctionCall(
   held: ReadonlyArray<string> = []
 ): TargetSource {
   if (assertScalarFragmentCall(target, args, held))
-    return `${name}(${args.map(arg => compileValueOperand(arg, target)).join(', ')})`;
+    return `${name}(${args.map((arg) => compileValueOperand(arg, target)).join(', ')})`;
   const coerceToComplex = realLaneArguments(
     name,
     args,

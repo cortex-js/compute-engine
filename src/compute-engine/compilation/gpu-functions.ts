@@ -1191,29 +1191,29 @@ function compileGPUSumProduct(
     bodyTarget,
     () =>
       BaseCompiler.hoistLoopInvariants(
-      args[0],
-      [index],
-      target,
-      () =>
-        underRealIndex(() => {
-          try {
-            if (target.cse?.enabled) {
-              BaseCompiler.openCseSession(
-                args[0],
-                bodyTarget,
-                target.cse.harvestOptions
-              );
-              return BaseCompiler.compileCseRoot(args[0], bodyTarget, 0, () =>
-                BaseCompiler.compileValueOperand(args[0], bodyTarget)
-              );
+        args[0],
+        [index],
+        target,
+        () =>
+          underRealIndex(() => {
+            try {
+              if (target.cse?.enabled) {
+                BaseCompiler.openCseSession(
+                  args[0],
+                  bodyTarget,
+                  target.cse.harvestOptions
+                );
+                return BaseCompiler.compileCseRoot(args[0], bodyTarget, 0, () =>
+                  BaseCompiler.compileValueOperand(args[0], bodyTarget)
+                );
+              }
+              return BaseCompiler.compileValueOperand(args[0], bodyTarget);
+            } finally {
+              clearGPUCounters(bodyTarget);
             }
-            return BaseCompiler.compileValueOperand(args[0], bodyTarget);
-          } finally {
-            clearGPUCounters(bodyTarget);
-          }
-        }),
-      (node) => gpuTypeOfValue(node) !== undefined
-    )
+          }),
+        (node) => gpuTypeOfValue(node) !== undefined
+      )
   );
 
   // Compiled BEFORE the loop statements are pushed, so anything the bounds
@@ -1581,8 +1581,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Positional access. The lowering indexes INTO its aggregate base, so the
   // emission has the shape of an element (a `vec3` base becomes a scalar
   // `v.y`, a `float[7]` base a `_gpu_at7(…)` call). See `compileGPUAt`.
-  At: (args, compile, target) =>
-    compileGPUAt(args, compile, target),
+  At: (args, compile, target) => compileGPUAt(args, compile, target),
   Ceil: (args, compile, target) => {
     if (args.length > 1 && args[1] !== null)
       return gpuRoundToStep('ceil', args[0], args[1], compile, target);

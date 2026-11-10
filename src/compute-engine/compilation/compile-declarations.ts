@@ -347,8 +347,7 @@ export function assertLeafAssignable(
   for (const frame of [enforcedLocals, ...CompilerState._enforcedTargets]) {
     if (frame === undefined || !frame.has(name)) continue;
     const declared = frame.get(name);
-    if (declared !== undefined && leafAlwaysFits(valueType, declared))
-      continue;
+    if (declared !== undefined && leafAlwaysFits(valueType, declared)) continue;
     throw new Error(
       `Could not compile a destructuring assignment: the target '${name}' is ` +
         `declared as a constant or with a declared type (a block-local ` +

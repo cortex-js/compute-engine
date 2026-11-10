@@ -996,13 +996,7 @@ export function setSymbolValue(
       // A value that is not a function: a body that APPLIED `id` while it had
       // no definition is re-derived and reads the product instead (see the
       // same step in `updateDef`). A no-op when nothing waits on `id`.
-      repairProvisionalDependents(
-        ce,
-        id,
-        def.value,
-        undefined,
-        bindingScope
-      );
+      repairProvisionalDependents(ce, id, def.value, undefined, bindingScope);
     }
     return;
   }

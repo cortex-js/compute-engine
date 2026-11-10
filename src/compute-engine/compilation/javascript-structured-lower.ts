@@ -224,9 +224,12 @@ function valueType(type: {
   readonly element?: { readonly kind: string };
 }): ValueType {
   if (type.kind !== 'list') return scalarKind(type);
-  const element = type.element === undefined ? undefined : scalarKind(type.element);
+  const element =
+    type.element === undefined ? undefined : scalarKind(type.element);
   if (element !== 'real' && element !== 'integer')
-    return fail(`the list type of elements ${type.element?.kind} is not in the structured route`);
+    return fail(
+      `the list type of elements ${type.element?.kind} is not in the structured route`
+    );
   return `list<${element}>`;
 }
 
@@ -319,7 +322,9 @@ class Lowering {
   ): IRRegion {
     const operands = Array.isArray(value) ? value : [value as IRValue];
     operations.push({ kind: 'yield', operands, effect: 'pure', origin });
-    const canAbort = operations.some((op) => operationCanAbort(op, this.functions));
+    const canAbort = operations.some((op) =>
+      operationCanAbort(op, this.functions)
+    );
     return {
       operations,
       effect: joinEffects(...operations.map((op) => op.effect)),
@@ -339,7 +344,8 @@ class Lowering {
 
   private effect(node: Expression): EffectFact {
     const effect = this.prep.effects.get(node);
-    if (effect === undefined) return fail(`no effect fact for ${node.toString()}`);
+    if (effect === undefined)
+      return fail(`no effect fact for ${node.toString()}`);
     return effect;
   }
 
@@ -358,11 +364,15 @@ class Lowering {
       return fail(`no conversion fact for an operand of ${node.toString()}`);
     if (conversion.kind === 'none') {
       if (conversion.representation !== value.representation)
-        fail(`an identity conversion of ${node.toString()} changes the representation`);
+        fail(
+          `an identity conversion of ${node.toString()} changes the representation`
+        );
       return value;
     }
     if (conversion.kind !== 'real-to-complex')
-      return fail(`the conversion ${conversion.kind} is not in the structured route`);
+      return fail(
+        `the conversion ${conversion.kind} is not in the structured route`
+      );
     const result = this.newValue('complex', 'complex');
     operations.push({
       kind: 'convert',
@@ -506,7 +516,14 @@ class Lowering {
     if (trace !== undefined) {
       const operands = this.operands(node, facts, scope, operations);
       const result = this.resultOf(facts);
-      operations.push({ kind: 'trace', trace, result, operands, effect, origin: node });
+      operations.push({
+        kind: 'trace',
+        trace,
+        result,
+        operands,
+        effect,
+        origin: node,
+      });
       return result;
     }
 
@@ -538,7 +555,9 @@ class Lowering {
     )
       return this.multiplyByRational(node, facts, scope, operations, effect);
 
-    const kind = Object.hasOwn(OPERATIONS, operator) ? OPERATIONS[operator] : undefined;
+    const kind = Object.hasOwn(OPERATIONS, operator)
+      ? OPERATIONS[operator]
+      : undefined;
     if (kind === undefined) return fail(`no lowering for the head ${operator}`);
     const operands = this.operands(node, facts, scope, operations);
     const result = this.resultOf(facts);
@@ -565,17 +584,33 @@ class Lowering {
     operations: IROperation[],
     effect: EffectFact
   ): IRValue {
-    const index = node.ops.findIndex((op) => exactRationalDivisor(op) !== undefined);
+    const index = node.ops.findIndex(
+      (op) => exactRationalDivisor(op) !== undefined
+    );
     const rational = node.ops[index];
     const { p, q } = exactRationalDivisor(rational)!;
     const factors = node.ops.flatMap((operand, i) =>
       i === index
         ? []
-        : [this.convert(this.value(operand, scope, operations), facts.conversions?.[i], node, operations)]
+        : [
+            this.convert(
+              this.value(operand, scope, operations),
+              facts.conversions?.[i],
+              node,
+              operations
+            ),
+          ]
     );
     const literal = (value: number): IRValue => {
       const result = this.newValue('integer', 'number');
-      operations.push({ kind: 'literal', value, result, operands: [], effect: 'pure', origin: rational });
+      operations.push({
+        kind: 'literal',
+        value,
+        result,
+        operands: [],
+        effect: 'pure',
+        origin: rational,
+      });
       return result;
     };
     const push = (
@@ -591,13 +626,25 @@ class Lowering {
         ? push(
             'multiply',
             factors,
-            this.newValue(factors.every((f) => f.type === 'integer') ? 'integer' : 'real', 'number')
+            this.newValue(
+              factors.every((f) => f.type === 'integer') ? 'integer' : 'real',
+              'number'
+            )
           )
         : factors[0];
-    const quotient = push('divide', [numerator, literal(q)], this.newValue('real', 'number'));
+    const quotient = push(
+      'divide',
+      [numerator, literal(q)],
+      this.newValue('real', 'number')
+    );
     if (p === 1) return quotient;
-    if (p === -1) return push('negate', [quotient], this.newValue('real', 'number'));
-    return push('multiply', [quotient, literal(p)], this.newValue('real', 'number'));
+    if (p === -1)
+      return push('negate', [quotient], this.newValue('real', 'number'));
+    return push(
+      'multiply',
+      [quotient, literal(p)],
+      this.newValue('real', 'number')
+    );
   }
 
   /**
@@ -649,7 +696,8 @@ class Lowering {
     operations: IROperation[]
   ): IRValue {
     const capture = this.prep.captures.find((c) => c.symbols.has(node));
-    if (capture === undefined) return fail(`no binding for the name ${node.symbol}`);
+    if (capture === undefined)
+      return fail(`no binding for the name ${node.symbol}`);
     const facts = this.facts(node, scope);
     const result = this.resultOf(facts);
     let index = this.captureIndex.get(capture.binding);
@@ -736,7 +784,11 @@ class Lowering {
     const initializer = isFunction(node, 'Declare')
       ? declareValueOperand(node.ops)
       : undefined;
-    if (isFunction(node, 'Declare') && initializer !== undefined && isSymbol(node.op1)) {
+    if (
+      isFunction(node, 'Declare') &&
+      initializer !== undefined &&
+      isSymbol(node.op1)
+    ) {
       const name = node.op1.symbol;
       const binding = scope.bindings.get(name);
       const value = this.value(initializer, scope, operations);
@@ -745,7 +797,9 @@ class Lowering {
         !('representation' in binding) ||
         binding.representation !== value.representation
       )
-        fail(`the local ${name} has no binding of the representation of its value`);
+        fail(
+          `the local ${name} has no binding of the representation of its value`
+        );
       let locals = this.bound.get(scope);
       if (locals === undefined) this.bound.set(scope, (locals = new Map()));
       locals.set(name, value);
@@ -767,7 +821,10 @@ class Lowering {
         binding === undefined
       )
         return fail(`the name ${name} is not a declared local`);
-      if (!('representation' in binding) || binding.representation !== value.representation)
+      if (
+        !('representation' in binding) ||
+        binding.representation !== value.representation
+      )
         fail(`a write to the local ${name} changes its representation`);
       locals.set(name, value);
       return;
@@ -804,7 +861,8 @@ class Lowering {
     const branch = (statement: Expression | undefined) => {
       this.restore(before);
       const inner: IROperation[] = [];
-      if (statement !== undefined) this.statement(statement, scope, inner, liveOut);
+      if (statement !== undefined)
+        this.statement(statement, scope, inner, liveOut);
       return { operations: inner, values: this.snapshot() };
     };
     const a = branch(node.ops[1]);
@@ -939,7 +997,10 @@ class Lowering {
 
     // The locals of the scopes around the loop that the body writes.
     const written = assignedNames(body);
-    const candidates: { binder: FragmentScope<ScalarRepresentation>; name: string }[] = [];
+    const candidates: {
+      binder: FragmentScope<ScalarRepresentation>;
+      name: string;
+    }[] = [];
     for (const name of written) {
       const binder = bindingScope(scope, name);
       if (binder !== undefined && this.bound.get(binder)?.has(name))
@@ -949,7 +1010,9 @@ class Lowering {
     const carried = candidates.filter(
       ({ name }) => liveOut.has(name) || exposed.has(name)
     );
-    const initial = carried.map(({ binder, name }) => this.bound.get(binder)!.get(name)!);
+    const initial = carried.map(({ binder, name }) =>
+      this.bound.get(binder)!.get(name)!
+    );
     const carriedNames = new Set(carried.map((c) => c.name));
 
     const before = this.snapshot();
@@ -958,9 +1021,13 @@ class Lowering {
       this.restore(before);
       const indexValue = this.newValue('integer', 'number');
       const parameters = carried.map((c, i) =>
-        this.newValue(types[i], initial[i].representation as ScalarRepresentation)
+        this.newValue(
+          types[i],
+          initial[i].representation as ScalarRepresentation
+        )
       );
-      for (const { binder, name } of candidates) this.bound.get(binder)!.delete(name);
+      for (const { binder, name } of candidates)
+        this.bound.get(binder)!.delete(name);
       carried.forEach(({ binder, name }, i) =>
         this.bound.get(binder)!.set(name, parameters[i])
       );
@@ -970,7 +1037,9 @@ class Lowering {
       const next = carried.map(({ binder, name }) => {
         const value = this.bound.get(binder)?.get(name);
         if (value === undefined)
-          return fail(`the carried local ${name} has no value at the end of the loop body`);
+          return fail(
+            `the carried local ${name} has no value at the end of the loop body`
+          );
         return value;
       });
       // A real next value of an integer parameter: lower the body again
@@ -997,9 +1066,14 @@ class Lowering {
         parameters: [indexValue, ...parameters],
       };
       this.restore(before);
-      const results = parameters.map((p) => this.newValue(p.type, p.representation as ScalarRepresentation));
-      for (const { binder, name } of candidates) this.bound.get(binder)!.delete(name);
-      carried.forEach(({ binder, name }, i) => this.bound.get(binder)!.set(name, results[i]));
+      const results = parameters.map((p) =>
+        this.newValue(p.type, p.representation as ScalarRepresentation)
+      );
+      for (const { binder, name } of candidates)
+        this.bound.get(binder)!.delete(name);
+      carried.forEach(({ binder, name }, i) =>
+        this.bound.get(binder)!.set(name, results[i])
+      );
       operations.push({
         kind: 'loop',
         results,
@@ -1014,17 +1088,26 @@ class Lowering {
   }
 
   /** The value of each local and parameter, copied. */
-  private snapshot(): Map<FragmentScope<ScalarRepresentation>, Map<string, IRValue>> {
-    return new Map([...this.bound].map(([scope, locals]) => [scope, new Map(locals)]));
+  private snapshot(): Map<
+    FragmentScope<ScalarRepresentation>,
+    Map<string, IRValue>
+  > {
+    return new Map(
+      [...this.bound].map(([scope, locals]) => [scope, new Map(locals)])
+    );
   }
 
   /** Make the values of `snapshot` the values of the locals again. A
    *  scope that has no values in `snapshot` has none after. */
   private restore(
-    snapshot: ReadonlyMap<FragmentScope<ScalarRepresentation>, ReadonlyMap<string, IRValue>>
+    snapshot: ReadonlyMap<
+      FragmentScope<ScalarRepresentation>,
+      ReadonlyMap<string, IRValue>
+    >
   ): void {
     this.bound.clear();
-    for (const [scope, locals] of snapshot) this.bound.set(scope, new Map(locals));
+    for (const [scope, locals] of snapshot)
+      this.bound.set(scope, new Map(locals));
   }
 
   /**
@@ -1074,12 +1157,16 @@ class Lowering {
       representation: facts.representation,
     };
     if (value.representation !== result.representation)
-      fail(`the body of ${name} does not have the representation of its result`);
+      fail(
+        `the body of ${name} does not have the representation of its result`
+      );
     const labels = this.prep.helpers.get(name)!.parameterElementLabels;
     this.functions.push({
       name,
       parameters,
-      ...(labels?.some((l) => l !== undefined) ? { parameterElementLabels: labels } : {}),
+      ...(labels?.some((l) => l !== undefined)
+        ? { parameterElementLabels: labels }
+        : {}),
       result,
       body: this.region(operations, entry.body, value),
       origin: node,
@@ -1105,14 +1192,21 @@ function bindingScope(
   scope: FragmentScope<ScalarRepresentation>,
   name: string
 ): FragmentScope<ScalarRepresentation> | undefined {
-  for (let s: FragmentScope<ScalarRepresentation> | undefined = scope; s; s = s.parent)
+  for (
+    let s: FragmentScope<ScalarRepresentation> | undefined = scope;
+    s;
+    s = s.parent
+  )
     if (s.bindings.has(name)) return s;
   return undefined;
 }
 
 /** The names that an `Assign` of `statement` writes, in a nested block,
  *  branch or loop too. */
-function assignedNames(statement: Expression, names = new Set<string>()): Set<string> {
+function assignedNames(
+  statement: Expression,
+  names = new Set<string>()
+): Set<string> {
   if (!isFunction(statement)) return names;
   if (statement.operator === 'Assign' && isSymbol(statement.op1))
     names.add(statement.op1.symbol);
@@ -1135,7 +1229,10 @@ function assignedNames(statement: Expression, names = new Set<string>()): Set<st
  */
 function exposedReads(statement: Expression): Set<string> {
   const exposed = new Set<string>();
-  const reads = (node: Expression | undefined, written: ReadonlySet<string>) => {
+  const reads = (
+    node: Expression | undefined,
+    written: ReadonlySet<string>
+  ) => {
     if (node === undefined) return;
     for (const name of namesIn(node)) if (!written.has(name)) exposed.add(name);
   };
@@ -1149,10 +1246,14 @@ function exposedReads(statement: Expression): Set<string> {
         return node.ops.reduce((w, s) => visit(s, w), written);
       case 'Declare':
         reads(declareValueOperand(node.ops), written);
-        return isSymbol(node.op1) ? new Set([...written, node.op1.symbol]) : written;
+        return isSymbol(node.op1)
+          ? new Set([...written, node.op1.symbol])
+          : written;
       case 'Assign':
         reads(node.op2, written);
-        return isSymbol(node.op1) ? new Set([...written, node.op1.symbol]) : written;
+        return isSymbol(node.op1)
+          ? new Set([...written, node.op1.symbol])
+          : written;
       case 'If': {
         reads(node.op1, written);
         const a = visit(node.op2, new Set(written));
@@ -1177,6 +1278,7 @@ function exposedReads(statement: Expression): Set<string> {
 /** The names of the symbols of `node`, read or written. */
 function namesIn(node: Expression, names = new Set<string>()): Set<string> {
   if (isSymbol(node)) names.add(node.symbol);
-  else if (isFunction(node)) for (const operand of node.ops) namesIn(operand, names);
+  else if (isFunction(node))
+    for (const operand of node.ops) namesIn(operand, names);
   return names;
 }

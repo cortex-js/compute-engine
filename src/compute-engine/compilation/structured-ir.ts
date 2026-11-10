@@ -56,7 +56,9 @@ export type ValueType = ScalarKind | ListType;
 /** The kind of the elements of `type`, or `undefined` when `type` is not a
  *  list type. */
 export function elementOf(type: ValueType): ScalarKind | undefined {
-  return type.startsWith('list<') ? (type.slice(5, -1) as ScalarKind) : undefined;
+  return type.startsWith('list<')
+    ? (type.slice(5, -1) as ScalarKind)
+    : undefined;
 }
 
 /** The name of a representation of a target (`RepresentationPolicy`). */
@@ -84,7 +86,8 @@ type OperationBase = {
 /** A number, a boolean or a complex number. */
 export type IRLiteral = OperationBase & {
   readonly kind: 'literal';
-  readonly value: number | boolean | { readonly re: number; readonly im: number };
+  readonly value:
+    number | boolean | { readonly re: number; readonly im: number };
 };
 
 /** A read of the input `IRProgram.inputs[input]` at this position. */
