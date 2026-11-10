@@ -1,0 +1,260 @@
+diff --git a/src/compute-engine/compilation/compile-statements.ts b/src/compute-engine/compilation/compile-statements.ts
+index 97f6271c4..23b526cb3 100644
+--- a/src/compute-engine/compilation/compile-statements.ts
++++ b/src/compute-engine/compilation/compile-statements.ts
+@@ -344,8 +344,14 @@ export function compileStatementBody(
+     };
+     if (root && expr !== undefined) sink.root = expr;
+     sink.unit = expr;
+-    const code = core.compile(expr, { ...target, hoist: sink }, prec);
+-    return { stmts: sink.stmts, code };
++    const t = { ...target, hoist: sink };
++    const release = (target as any).bindStatementEffects?.(expr, t);
++    try {
++      const code = core.compile(expr, t, prec);
++      return { stmts: sink.stmts, code };
++    } finally {
++      release?.();
++    }
+   };
+   return withStatementRecompile(target, expr, run);
+ }
+@@ -533,7 +539,14 @@ export function compileListStatement(
+     return poolStatementCode(unit, compileWith(target));
+   return withStatementRecompile(target, unit, () => {
+     const sink = { stmts: [] as string[], boundVars: target.boundVars, unit };
+-    const lines = compileWith({ ...target, hoist: sink });
++    const t = { ...target, hoist: sink };
++    const release = (target as any).bindStatementEffects?.(unit, t);
++    let lines: string[];
++    try {
++      lines = compileWith(t);
++    } finally {
++      release?.();
++    }
+     if (sink.stmts.length === 0) return lines;
+     return [...sink.stmts.map((s) => s.replace(/;\s*$/, '')), ...lines];
+   });
+diff --git a/src/compute-engine/compilation/gpu-draw-order.ts b/src/compute-engine/compilation/gpu-draw-order.ts
+index b71f91bfe..a894ab354 100644
+--- a/src/compute-engine/compilation/gpu-draw-order.ts
++++ b/src/compute-engine/compilation/gpu-draw-order.ts
+@@ -176,6 +176,7 @@ export function gpuHoistKeepsCallerOrder(
+   hoisted: ReadonlyArray<Expression> | undefined,
+   target: CompileTarget<Expression>
+ ): boolean {
++  if (process.env.PROTO_NO_ORDER) return true;
+   const unit = gpuCallerOrderUnit(target);
+   if (hoisted === undefined)
+     return unit === undefined || !gpuReachesCallerCode(unit, target);
+diff --git a/src/compute-engine/compilation/gpu-functions.ts b/src/compute-engine/compilation/gpu-functions.ts
+index 6656889d9..f1ce508f4 100644
+--- a/src/compute-engine/compilation/gpu-functions.ts
++++ b/src/compute-engine/compilation/gpu-functions.ts
+@@ -139,6 +139,11 @@ import {
+   gpuOperandOnce,
+   gpuReachesCallerCode,
+ } from './gpu-draw-order.js';
++import {
++  gpuBindCallerCode,
++  gpuWithCallerCodeBound,
++} from './gpu-caller-binding.js';
++import { reachesCallerCodeOn } from './compile-folding.js';
+ import { gpuDeclaredTypeOf, gpuTypeOfValue } from './gpu-declared-types.js';
+ import { gpuCheckIdentifier } from './gpu-reserved.js';
+ import { gpuRoundToInteger, gpuRoundToStep } from './gpu-library.js';
+@@ -1139,7 +1144,9 @@ function compileGPUSumProduct(
+         try {
+           // Each term must leave a value after any nested loops are hoisted.
+           code = underRealIndex(() =>
+-            BaseCompiler.compileValueOperand(args[0], innerTarget)
++            gpuWithCallerCodeBound(args[0], innerTarget, () =>
++              BaseCompiler.compileValueOperand(args[0], innerTarget)
++            )
+           );
+         } finally {
+           clearGPUCounters(innerTarget);
+@@ -1274,6 +1281,7 @@ function compileGPUSumProduct(
+   // never ran; shader arithmetic raises nothing (a division by zero answers an
+   // infinity, an out-of-domain call a NaN), so evaluating an invariant whose
+   // loop turns out to run zero times computes a value nobody reads.
++  const releaseBody = gpuBindCallerCode(args[0], bodyTarget);
+   const { bindings: invariants, result: body } =
+     BaseCompiler.hoistLoopInvariants(
+       args[0],
+@@ -1299,6 +1307,7 @@ function compileGPUSumProduct(
+         }),
+       (node) => gpuTypeOfValue(node) !== undefined
+     );
++  releaseBody();
+ 
+   // Compiled BEFORE the loop statements are pushed, so anything the bounds
+   // themselves hoist lands ahead of the loop that consumes them.
+@@ -1850,7 +1859,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
+       gpuNeedsStatements(args[1]) ||
+       gpuNeedsStatements(args[2]) ||
+       (gpuCanPlaceStatement(target) &&
+-        (gpuArmSharesWork(args[1]) || gpuArmSharesWork(args[2])))
++        (gpuArmSharesWork(args[1]) ||
++          gpuArmSharesWork(args[2]) ||
++          reachesCallerCodeOn(args[1], target) ||
++          reachesCallerCodeOn(args[2], target)))
+     ) {
+       const statement = compileGPUStatementSelection(
+         [args[0], args[1], args[0].engine.True, args[2]],
+diff --git a/src/compute-engine/compilation/gpu-shader-target.ts b/src/compute-engine/compilation/gpu-shader-target.ts
+index 8b798e535..88f7aec51 100644
+--- a/src/compute-engine/compilation/gpu-shader-target.ts
++++ b/src/compute-engine/compilation/gpu-shader-target.ts
+@@ -126,6 +126,7 @@ import {
+   gpuCanPlaceStatement,
+ } from './gpu-statements.js';
+ import { gpuAssertHoistKeepsCallerOrder } from './gpu-draw-order.js';
++import { gpuBindCallerCode } from './gpu-caller-binding.js';
+ import {
+   GLSL_STAGE_BUILTINS,
+   GLSL_STAGE_BUILTIN_OUTPUTS,
+@@ -522,6 +523,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
+       // than splice a bare block into a sub-expression. Gated to the pure GPU
+       // languages by language id.
+       bareStatementBlocks: this.languageId === 'glsl',
++      bindStatementEffects: gpuBindCallerCode,
+       // A multi-statement `Block` used as a VALUE — a `with` clause as the
+       // term of a `Sum`, or as an operand of an addition — becomes one
+       // compound statement in the enclosing sink: the block's locals are
+diff --git a/src/compute-engine/compilation/gpu-statements.ts b/src/compute-engine/compilation/gpu-statements.ts
+index 1922b8902..e87859ede 100644
+--- a/src/compute-engine/compilation/gpu-statements.ts
++++ b/src/compute-engine/compilation/gpu-statements.ts
+@@ -22,6 +22,7 @@ import {
+   gpuVecType,
+   statementCaptureSinks,
+ } from './gpu-emit.js';
++import { gpuWithCallerCodeBound } from './gpu-caller-binding.js';
+ import {
+   gpuHoistKeepsCallerOrder,
+   gpuInSelectionBranch,
+@@ -453,7 +454,7 @@ export function compileGPUStatementSelection(
+     const val = args[i + 1];
+     // `True` marks the default branch.
+     if (isSymbol(cond, 'True')) {
+-      const arm = capture(() => compile(val, i + 1), true);
++      const arm = capture(() => gpuWithCallerCodeBound(val, target, () => compile(val, i + 1)), true);
+       return [...arm.stmts, `${tv} = ${arm.code}`];
+     }
+     // The condition first, as the ternary form compiles it: the first
+@@ -461,8 +462,8 @@ export function compileGPUStatementSelection(
+     // bound ahead of the selection and the arm reads the binding, where
+     // the arm compiled first would emit the subexpression in full — for a
+     // shared operand tower, once per occurrence.
+-    const c = capture(() => compile(cond, i), i > 0);
+-    const arm = capture(() => compile(val, i + 1), true);
++    const c = capture(() => (i > 0 ? gpuWithCallerCodeBound(cond, target, () => compile(cond, i)) : compile(cond, i)), i > 0);
++    const arm = capture(() => gpuWithCallerCodeBound(val, target, () => compile(val, i + 1)), true);
+     const armLines = [...arm.stmts, `${tv} = ${arm.code}`];
+     return [
+       ...c.stmts,
+diff --git a/src/compute-engine/compilation/gpu-caller-binding.ts b/src/compute-engine/compilation/gpu-caller-binding.ts
+new file mode 100644
+index 000000000..25652f03d
+--- /dev/null
++++ b/src/compute-engine/compilation/gpu-caller-binding.ts
+@@ -0,0 +1,98 @@
++// PROTOTYPE (CE-1176 option (a), session compute-engine-a8). Not for delivery.
++//
++// Before a statement is compiled, bind each piece of caller code that the
++// statement evaluates unconditionally to a temporary of its shader type, in
++// the order of the interpreter. Lazy positions (the arms of a conditional,
++// the body of a loop) are not walked: they are bound when their own
++// statement (a branch, a loop body) is compiled.
++
++import type { Expression } from '../global-types.js';
++import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
++import type { CompileTarget } from './types.js';
++import { BaseCompiler } from './base-compiler.js';
++import { _codeAliases } from './compiler-mode.js';
++import { reachesCallerCodeOn } from './compile-folding.js';
++import { gpuTypeOfValue } from './gpu-declared-types.js';
++
++let counter = 0;
++
++/** Run `f` with the alias of `n` from an enclosing statement lifted. */
++function unaliased<T>(n: Expression, f: () => T): T {
++  const prev = _codeAliases.get(n);
++  if (prev === undefined) return f();
++  _codeAliases.delete(n);
++  try {
++    return f();
++  } finally {
++    _codeAliases.set(n, prev);
++  }
++}
++
++const LAZY_AFTER_FIRST = new Set(['If', 'Which', 'And', 'Or', 'Coalesce']);
++const BODY_HEADS = new Set(['Sum', 'Product', 'Loop', 'Function', 'Map']);
++
++export function gpuWithCallerCodeBound<T>(
++  unit: Expression,
++  target: CompileTarget<Expression>,
++  f: () => T
++): T {
++  const release = gpuBindCallerCode(unit, target);
++  try {
++    return f();
++  } finally {
++    release();
++  }
++}
++
++export function gpuBindCallerCode(
++  unit: Expression | undefined,
++  target: CompileTarget<Expression>
++): () => void {
++  // Each node bound here, with the alias an enclosing statement gave it.
++  const bound: [Expression, string | undefined][] = [];
++  const mine = new Set<Expression>();
++  const cleanup = () => {
++    for (const [n, prev] of bound.reverse())
++      if (prev === undefined) _codeAliases.delete(n);
++      else _codeAliases.set(n, prev);
++  };
++  if (unit === undefined || !BaseCompiler.canHoist(target)) return cleanup;
++  if (!reachesCallerCodeOn(unit, target)) return cleanup;
++  const bind = (n: Expression): void => {
++    const type = gpuTypeOfValue(n, target);
++    if (type === undefined) return; // prototype: leave it inline
++    const code = unaliased(n, () => BaseCompiler.compile(n, target));
++    const name = `_cc${++counter}`;
++    BaseCompiler.hoistStatement(target, `${type} ${name} = ${code};`);
++    bound.push([n, _codeAliases.get(n)]);
++    _codeAliases.set(n, name);
++    mine.add(n);
++  };
++  const visit = (n: Expression): void => {
++    if (mine.has(n)) return;
++    if (isSymbol(n)) {
++      if (unaliased(n, () => reachesCallerCodeOn(n, target))) bind(n);
++      return;
++    }
++    if (!isFunction(n)) return;
++    const h = n.operator;
++    if (h === 'Block') return; // its statements bind their own
++    if (LAZY_AFTER_FIRST.has(h)) {
++      if (n.ops[0] !== undefined) visit(n.ops[0]);
++      return;
++    }
++    if (BODY_HEADS.has(h) && n.nops > 1) {
++      // The bounds are evaluated once, before the loop.
++      for (const op of n.ops.slice(1)) visit(op);
++      return;
++    }
++    for (const op of n.ops) visit(op);
++    // The node's own evaluation runs caller code beyond its operands (a
++    // `functions` entry, a user function whose body has caller code).
++    const ops = new Set(n.ops);
++    if (unaliased(n, () => reachesCallerCodeOn(n, target, (m) => ops.has(m))))
++      bind(n);
++  };
++  visit(unit);
++  return cleanup;
++}
