@@ -522,8 +522,7 @@ export function gpuAtElement(
 }
 
 /**
- * Does `gpuAtGather` fold `slots` to a SINGLE swizzle of the base? Stated once
- * so the emission and the reference count below cannot drift apart.
+ * Does `gpuAtGather` fold `slots` to a SINGLE swizzle of the base?
  */
 function gpuAtIsSwizzleGather(
   base: Expression,
@@ -532,24 +531,6 @@ function gpuAtIsSwizzleGather(
 ): boolean {
   const isLiteral = isFunction(base, 'List') || isFunction(base, 'Tuple');
   return !isLiteral && n <= 4 && slots.every((s) => s !== null);
-}
-
-/**
- * How many times the emission `gpuAtGather` will actually CHOOSE references
- * the base source — one for a swizzle however many components it selects, one
- * per in-range slot for a constructor.
- *
- * Counting the non-null slots instead described a constructor that a
- * swizzling gather never emits, and so declined `At(impure, [1, 3])`, whose
- * emission evaluates its base exactly once.
- */
-export function gpuAtBaseRefs(
-  base: Expression,
-  slots: ReadonlyArray<number | null>,
-  n: number
-): number {
-  if (gpuAtIsSwizzleGather(base, slots, n)) return 1;
-  return slots.filter((s) => s !== null).length;
 }
 
 /**

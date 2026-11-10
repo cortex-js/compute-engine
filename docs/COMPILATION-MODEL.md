@@ -362,8 +362,16 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `glsl`, a target object of `GLSLTarget.createTarget()` passed straight to
   `BaseCompiler.compile(expr, target)` (crafted): for `v: list<real^3>` and
   `x: real`, `Arctan2(v, x)` gives the code `atan(v, x)`, which no shader
-  compiler accepts, where `compile()` declines. `BaseCompiler.compile()`
-  runs no fragment pass, and the GLSL lowerings do not check operand
+  compiler accepts, where `compile()` declines. In the same way, a block
+  local that holds a list of points, a matrix, or a value whose type admits
+  a point and a list of points gives a declaration that disagrees with its
+  assignment (`Block(Assign(m, Matrix(…)), x)` gives `float m; m = mat2(…);`),
+  and so does a local whose bindings have different shapes (a scalar and a
+  point, in either order). A gather
+  with a list index (`At(v, [1, 3])`) does not check that its base is pure,
+  so an impure base can be computed more than once, or not at all when every
+  index is out of range. `BaseCompiler.compile()` runs no fragment pass, and
+  the GLSL lowerings and the declarations of block locals do not check
   shapes. `compile()` with the target object as the `target` option runs
   the pass first (`raw-target-check.ts`), so it declines what `compile()`
   with `to: 'glsl'` declines; the pass types the tree of that preparation,

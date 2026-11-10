@@ -5,12 +5,10 @@ import {
   scalarFragmentUnwrappedBlock,
 } from './javascript-fragment-facts.js';
 import type { Expression } from '../global-types.js';
-import type { Type } from '../../common/type/types.js';
 import { recordBlockScalarLocals } from './javascript-value-facts.js';
 import { discardedValueStatement } from './javascript-statements.js';
 import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
@@ -63,12 +61,7 @@ import {
   withCseOperand,
   writesBlocksAsIife,
 } from './compile-conditions.js';
-import {
-  LOCAL_UNSET,
-  isNonScalarShape,
-  localShapeFrameOf,
-} from './compile-shapes.js';
-import { pointOrPointListUnion } from './compile-user-calls.js';
+import { LOCAL_UNSET, localShapeFrameOf } from './compile-shapes.js';
 import {
   localComplexDefault,
   realLaneLocalBinding,
@@ -352,112 +345,48 @@ export function compileBlock(
   // declaration must be the matching array type — a `float` declaration with
   // an array assignment is the same mismatch, one width up.
   const vectorFrame = new Map<string, number>();
-  // A shader local gets ONE declared type, so every binding of it in the
-  // block must agree on a shape. On a GPU target we therefore inspect every
-  // binding, not just the first: "first assignment wins" reached the very
-  // "declared `float`, assigned `vecN`" mismatch this inference exists to
-  // prevent, by intra-block reassignment instead of aliasing.
-  //
-  // Disagreement FAILS CLOSED rather than widening to a union, because
-  // GLSL has no type a scalar and a `vecN` (or a `vec2` and
-  // a `vec3`) both fit: there is no variant type and no implicit
-  // scalar↔vector assignment conversion. "Widening" could only mean
-  // splatting the scalar binding (`p = vec2(cos(t))`), which silently
-  // rewrites the program's meaning — every later scalar use of `p` becomes
-  // vector arithmetic — and for two different vector widths not even that
-  // exists. A diagnostic naming the two shapes beats source no driver
-  // accepts (D6).
+  // On a GPU target the width of a local is the width of its first binding
+  // (a scalar or an aggregate); a later binding does not change it. Off GPU
+  // it is the width of its first aggregate binding. On a GPU target this is
+  // sound because
+  // the GLSL fragment pass runs before any code is written, and it refuses a
+  // block local that is not a scalar, a complex number or a point (a list,
+  // a list of points, an empty list, a matrix), and a local whose bindings
+  // have different types (`walkDeclare()` and `walkAssign()` in
+  // `fragment.ts`). So every binding of a local that reaches this point has
+  // the shape of the first one, and a local has one declared type, as GLSL
+  // requires. A target object passed straight to `BaseCompiler.compile()`
+  // skips the pass; on that route such a block gives code that no shader
+  // compiler accepts (a known limitation in `docs/COMPILATION-MODEL.md`).
   const isGPUTarget = target.language === 'glsl';
   const declaredVarTypes = statementListDeclaredVarTypes(
     args,
     target.declaredVarTypes
   );
-  const shapeName = (n: number) =>
-    n === LOCAL_SCALAR ? 'scalar' : `${n}-component aggregate`;
   const noteVectorWidth = (name: string, value: Expression) => {
     // Only declared locals get a declaration (and hence a type hint).
     const prev = vectorFrame.get(name);
     if (prev === undefined) return;
     // A shader color occupies three channels, even though its language
     // type is atomic and its JavaScript representation is an object.
-    // A written list of points lowers on a shader target as an ARRAY of
-    // vectors, for which no local declaration is synthesized here (the
-    // element count would declare a `vecN` over a `vecK[N]` initializer).
-    // Fail closed rather than emit a declaration that contradicts
-    // its own initializer.
-    // A value whose TYPE is a list of points (a copy of a declared
-    // `P: list<tuple<real, real>^3>`, of another local, or the result of a
-    // call) lowers as the same array of vectors, but its component count is
-    // the length of the list: the declaration would be `vec3 Q` over the
-    // `vec2[3]` value of `P`. It fails closed in the same way.
-    if (
-      isGPUTarget &&
-      (((isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
-        value.nops > 0 &&
-        value.ops.every((op) => isNonScalarShape(op))) ||
-        isListOfTuplesType(compilationType(value)))
-    )
-      throw new Error(
-        `Could not compile \`${name}\`: a local holding a list of points has no static shader ` +
-          `declaration — the value lowers as an array of vectors, and a ` +
-          `local is declared as a vector or an array of scalars. Read the ` +
-          `points where they are written instead.`
-      );
     const count =
       isGPUTarget &&
       (!isSymbol(value) || !localShapeFrameOf(value.symbol)) &&
       isSubtype(compilationType(value), 'color')
         ? 3
         : core.aggregateComponentCount(value);
-    if (!isGPUTarget) {
-      // Off-GPU a local is untyped, so any shape may be rebound: keep the
-      // historical "first aggregate binding wins". A width of `0` is not
-      // recorded (it produces no declaration anywhere), which also keeps it
-      // from reading back as an aggregate count off-GPU.
-      if (prev < 0 && count) vectorFrame.set(name, count);
+    if (isGPUTarget) {
+      // The first binding also records a scalar local as `LOCAL_SCALAR`:
+      // the frame stays pushed while the statements of the block compile,
+      // and `provablyScalarOrFramedScalar()` and `operandTypeInContext()`
+      // read that entry to treat the local as a scalar, also when its stored
+      // type still admits a collection.
+      if (prev === LOCAL_UNSET) vectorFrame.set(name, count || LOCAL_SCALAR);
       return;
     }
-    if (count === 0)
-      throw new Error(
-        `Could not compile the block local \`${name}\`: an empty tuple/list has no GPU lowering — ` +
-          `GLSL has no zero-length array type, so there is ` +
-          `no declaration its assignment could match.`
-      );
-    // Provably non-scalar, but with no single component count (a `Matrix`,
-    // a multi-axis or unsized list): no declaration can be synthesized for
-    // it, and the `float` default would disagree with its `matN` assignment.
-    // A value whose type admits a point and a list of points (`2P` with
-    // `P: list<tuple<number, number>> | tuple<number, number>`) has no
-    // width that its type states, and its emission can be a vector: a
-    // `float` declaration would disagree with it.
-    if (
-      count === undefined &&
-      pointOrPointListUnion(compilationType(value)) !== undefined
-    )
-      throw new Error(
-        `Could not compile the block local \`${name}\`: its value has the ` +
-          `type \`${typeToString(compilationType(value))}\`, which admits ` +
-          `a point and a list of points, so a shader local has no ` +
-          `declared type for it.`
-      );
-    if (count === undefined && isNonScalarShape(value))
-      throw new Error(
-        `Could not compile the block local \`${name}\`: a matrix/tensor-valued local has no GPU ` +
-          `declaration (its shape has no single component count), so a ` +
-          `scalar declaration would disagree with its own assignment.`
-      );
-    const n = count ?? LOCAL_SCALAR;
-    if (prev === LOCAL_UNSET) {
-      vectorFrame.set(name, n);
-      return;
-    }
-    if (n !== prev)
-      throw new Error(
-        `Could not compile the block local \`${name}\`: it is bound to values of disagreeing shapes ` +
-          `(${shapeName(prev)}, then ${shapeName(n)}); a shader local has ` +
-          `one declared type and GLSL cannot convert between ` +
-          `these.`
-      );
+    // Off GPU a local is untyped. A width of `0` is not recorded: it
+    // produces no declaration.
+    if (prev < 0 && count) vectorFrame.set(name, count);
   };
   for (const local of locals) {
     // Under the complex discipline a local that is neither declared real
@@ -545,9 +474,8 @@ export function compileBlock(
         else {
           const n = vectorFrame.get(local);
           // Negative entries are the "not an aggregate" sentinels. A width
-          // of `0` has no valid array type in GLSL; on a GPU
-          // target `noteVectorWidth` has already failed closed on it, and
-          // this guard keeps any other target from emitting `float[0]`.
+          // of `0` has no valid array type in GLSL, so this guard keeps a
+          // `float[0]` declaration from being written.
           if (n !== undefined && n > 0) typeHints[local] = aggregateType(n);
         }
       }
@@ -1152,29 +1080,6 @@ export function compileBlock(
     for (const d of ownedDeclarations) OWNED_LOCAL_DECLARATIONS.delete(d);
     for (const name of shadowSpellings) _freshLocalNames.delete(name);
   }
-}
-
-/**
- * True when `t` is a list of points: a list whose elements are tuples, or a
- * tuple whose elements are all tuples. A shader lowers such a value as an
- * array of vectors (`vec2[3]` in GLSL), for which
- * a block local has no declaration. The component count of such a type is
- * the number of points, so without this test the local would be declared
- * `vec3` (three points) or `vec2` (two points).
- */
-function isListOfTuplesType(t: Type): boolean {
-  const isTuple = (u: Type): boolean => {
-    const r = resolveTypeForCompilation(u);
-    return typeof r !== 'string' && r.kind === 'tuple';
-  };
-  const resolved = resolveTypeForCompilation(t);
-  if (typeof resolved === 'string') return false;
-  if (resolved.kind === 'list') return isTuple(resolved.elements);
-  return (
-    resolved.kind === 'tuple' &&
-    resolved.elements.length > 0 &&
-    resolved.elements.every((e) => isTuple(e.type))
-  );
 }
 
 /**

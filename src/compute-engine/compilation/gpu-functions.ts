@@ -114,7 +114,6 @@ import {
 } from './gpu-emit.js';
 import {
   compileGPUPointListAt,
-  gpuAtBaseRefs,
   gpuAtBaseShape,
   gpuAtElement,
   gpuAtEntryKind,
@@ -579,17 +578,11 @@ function compileGPUAt(
       'both the base and the index are impure, and GLSL does not ' +
         'specify the order in which a call evaluates its arguments'
     );
-  // An emission that DISCARDS the base entirely (an all-out-of-range gather)
-  // or references the base source MORE THAN ONCE (a mixed gather constructor)
-  // needs the base to be pure.
   const literalOps =
     isFunction(base, 'List') || isFunction(base, 'Tuple')
       ? base.ops!
       : undefined;
   const isLiteralBase = literalOps !== undefined;
-  const requirePureBase = (why: string): void => {
-    if (!base.isPure) decline(why);
-  };
   // A LITERAL base folds PER ELEMENT — the selected element is emitted, the
   // siblings are dropped — so the purity question is per element too. Asking
   // it of the whole literal over-declined `At([Random(), 1, 2], 1)`, whose
@@ -719,27 +712,16 @@ function compileGPUAt(
       );
       return `${ctor}(${parts.join(', ')})`;
     }
+    // A gather of a base that is not a literal list needs no purity test
+    // here: the GLSL fragment pass refuses an index that is a list
+    // ("An index or a bound must be an integer or a real"), so such a
+    // gather reaches this point only from a target object passed straight
+    // to `BaseCompiler.compile()`, which skips the pass.
     if (isLiteralBase)
       requireLiteralBaseElements(
         slots.filter((s): s is number => s !== null),
         'gather'
       );
-    else {
-      // Judged on the emission `gpuAtGather` will actually take: a swizzle
-      // references the base once whatever it selects, a constructor once per
-      // in-range slot — and an ALL-out-of-range gather not at all.
-      const refs = gpuAtBaseRefs(base, slots, n);
-      if (refs === 0)
-        requirePureBase(
-          'the gather selects no element of the base, so its emission would ' +
-            'DISCARD the impure base unevaluated'
-        );
-      else if (refs > 1)
-        requirePureBase(
-          'the gather emits a constructor that references the impure base ' +
-            'more than once, which would evaluate it more than once'
-        );
-    }
 
     return gpuAtGather(base, slots, n, compile, target);
   }

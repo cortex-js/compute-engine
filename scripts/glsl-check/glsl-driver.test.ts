@@ -378,6 +378,25 @@ const LOWERINGS: ReadonlyArray<{
     ],
     marker: /_gpu_sinpi\(/,
   },
+  {
+    // `desugarPatternAssign()` in `compileStatementList()`: a tuple
+    // assignment of locals that is the whole body of a loop. Each value is
+    // computed into a temporary before any local is written, so `b` reads the
+    // old value of `a`. The value is `3x + 5y`.
+    name: 'a tuple assignment of locals as a loop body',
+    expr: [
+      'Block',
+      ['Assign', 'a', 'x'],
+      ['Assign', 'b', 'y'],
+      [
+        'Loop',
+        ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', ['Add', 'a', 'b']]],
+        ['Element', 'k', ['Range', 1, 5]],
+      ],
+      'a',
+    ],
+    marker: /_tv\d+ = a \+ b;/,
+  },
 ];
 
 /** A list input of six reals, held as a `float[6]` uniform array. */

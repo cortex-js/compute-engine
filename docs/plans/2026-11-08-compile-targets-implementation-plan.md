@@ -511,6 +511,62 @@ Two timing lines (`interval-js` and `javascript` records, 15 to 392 ms and
 1.3 to 455 ms) are on targets that this change does not touch, measured on a
 shared machine.
 
+**The result of the `compile-blocks.ts` and `gpu-at.ts` session**
+(2026-11-09, base `7520d089c`). Removed: the five GLSL throws of the
+local-shape check in `compileBlock()` (a local that holds a list of points,
+an empty list, a point-or-list union, a matrix, two shapes), with
+`isListOfTuplesType()`, which only the first throw used; and
+`gpuAtBaseRefs()` with the purity checks of a gather of a non-literal base
+in the `At` lowering of `gpu-functions.ts`. `findReferences` confirmed each
+removed function. `compile-blocks.ts` went from 1,309 to 1,214 lines and
+`gpu-at.ts` from 1,025 to 1,006; the source lost 164 lines and gained 32
+(comments).
+
+The fragment pass refuses every removed form first, on every public route:
+`compile()` with `to: 'glsl'`, a target object passed as the `target`
+option (`raw-target-check.ts`), `compileFunction()`, `compileShader()` and
+`compileToSource()`. A probe of the five block forms and of six gathers gave
+the same verdict and the same diagnostic before and after the change on
+these routes. The two "two shapes" forms do not even reach the compiler: the
+boxing of the block writes an `Error` node. The gather is refused for its
+list index ("An index or a bound must be an integer or a real"), so the
+measure's "never entered" holds on these routes. The only route without
+the pass is `BaseCompiler.compile(expr, target)`. There, a local that holds
+a list of points, a point-or-list union or a matrix, a local whose
+bindings have different shapes, and a gather of an impure base now give
+code that is wrong or that no shader compiler accepts, where they threw
+before. The known-limitations entry of that route in
+`docs/COMPILATION-MODEL.md` names them. An empty list still declines on
+that route, in the list lowering.
+
+One difference from the measure: the local-shape check was not only
+throws. On GLSL it also entered a scalar local in the frame as
+`LOCAL_SCALAR`, and `provablyScalarOrFramedScalar()` and
+`operandTypeInContext()` read that entry. That entry stays; the rule now
+writes the same frame entries as before for every block that did not throw.
+
+The test that the row asks for: `glsl-tuple-assign-loop-body.test.ts` (a
+swap and a rotation of locals as the whole body of a loop; each value goes
+to a temporary before any local is written), and the same swap in the
+lowerings of `npm run test:glsl`, which draws it on WebGL 2 and compares
+the value with the interpreter's. The test found an older disagreement: with
+locals declared with a type (`Declare(a, "real", 0)`), `canCompile()`
+accepts the block and `compile()` declines it. It is filed as CE-1189.
+
+Measures: the test files that name GLSL pass (239 files, 238 run and 1
+skipped; 11,381 tests); `npm run test:glsl`: 0 disagreements (966
+expressions accepted by `canCompile()`); the typecheck passes. Dual review,
+two rounds (Codex: no finding; Claude: the `LOCAL_SCALAR` entry above, and
+the wording of the known-limitations entry). Tycho's whole-corpus codegen
+audit through `CE_ALT_PKG` (764 documents, 17,421 records; production
+builds of the base and of the change; load 7.3 at the start of the base
+run, 4.4 at the end of the change run, on 18 cores): 0 changed code, 0 new
+declines, 0 resolved declines, 0 disagreements of `canCompile()` with
+`compile()` (3,661 GLSL records, 46 refused). Three timing lines (one
+slower, `interval-js`, 1.2 to 270 ms; two faster, `interval-js` and
+`javascript`) are on targets that this change does not touch. They were
+measured on a shared machine.
+
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
 in the order of the interpreter, at the start of its statement. A piece in
