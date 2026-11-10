@@ -14,6 +14,8 @@ import type {
   CollectionInterface,
   IndexedCollectionInterface,
   ObjectInterface,
+  BoxedValueDefinition,
+  BoxedDefinition,
 } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
 
@@ -46,14 +48,109 @@ export function isNumber(
  * (`binding-unit.ts`). The predicate gives the kind of the occurrence: it
  * stays true after a later declaration of the name, which the occurrence
  * then reads.
+ *
+ * It is not a type guard: a free name has the same static type as any other
+ * symbol, and a guard would narrow a symbol that is not a free name to
+ * `never`.
  */
-export function isFreeName(
-  expr: Expression | null | undefined
-): expr is Expression & SymbolInterface {
+export function isFreeName(expr: Expression | null | undefined): boolean {
   return (
     expr?._kind === 'symbol' &&
     (expr as { _isFreeName?: boolean })._isFreeName === true
   );
+}
+
+/**
+ * True when `expr` is a call with a free head: a canonical call whose head
+ * had no definition when it was boxed, with the engine flag `_bindingUnits`
+ * (`BoxedFunction._freeHeadScope`, `binding-unit.ts`). Like a free name,
+ * the head is not a raw occurrence and never denotes the variable of a
+ * binder or a parameter: it was not inside a binder when it was boxed.
+ */
+export function isFreeCallHead(expr: Expression | null | undefined): boolean {
+  return (
+    expr?._kind === 'function' &&
+    (expr as { _freeHeadScope?: object })._freeHeadScope !== undefined
+  );
+}
+
+/**
+ * The definition that the free name (`isFreeName()`) or the call with a free
+ * head (`isFreeCallHead()`) `expr` reads: the definition that its name
+ * resolves to in the current context (`freeNameBindingInContext()`,
+ * `binders.ts`), which skips the variable of a binder, a parameter of a
+ * function literal and the parameter activation of a call frame. For a free
+ * name, the resolution also skips the library operator of its name when its
+ * unit reads the name as a variable (`N` in `N + 1`). `undefined` when
+ * `expr` is neither, or when the name resolves to no definition.
+ *
+ * This is the one function that resolves a free name or a free call head:
+ * `BoxedSymbol._resolvedDefinition()` and
+ * `BoxedFunction._resolvedDefinition()` implement it.
+ */
+export function freeBinding(
+  expr: Expression | null | undefined
+): BoxedDefinition | undefined {
+  if (!isFreeName(expr) && !isFreeCallHead(expr)) return undefined;
+  return (
+    expr as unknown as { _resolvedDefinition(): BoxedDefinition | undefined }
+  )._resolvedDefinition();
+}
+
+/**
+ * The value definition that the symbol `expr` reads: its own, or, for a
+ * free name (`isFreeName()`), the value definition that its name resolves
+ * to in the current context (`freeBinding()`). `undefined` when there is
+ * none (no definition, or an operator definition).
+ */
+export function resolvedValueDefinition(
+  expr: Expression | null | undefined
+): BoxedValueDefinition | undefined {
+  if (expr === null || expr === undefined) return undefined;
+  if (!isFreeName(expr)) return expr.valueDefinition;
+  const def = freeBinding(expr);
+  return def !== undefined && 'value' in def ? def.value : undefined;
+}
+
+/**
+ * The binding that the symbol or call `expr` reads: its own value or
+ * operator definition, or, for a free name (`isFreeName()`) or a free call
+ * head (`isFreeCallHead()`), the definition that its name resolves to in
+ * the current context (`freeBinding()`). `undefined` when there is none.
+ */
+export function readBinding(expr: Expression): BoxedDefinition | undefined {
+  if (expr.valueDefinition !== undefined)
+    return { value: expr.valueDefinition };
+  if (expr.operatorDefinition !== undefined)
+    return { operator: expr.operatorDefinition };
+  return freeBinding(expr);
+}
+
+/**
+ * True when the type of the symbol `expr` is inferred, not declared: its
+ * value definition has an inferred type, or it is a free name
+ * (`isFreeName()`) whose name resolves to no definition, or to a definition
+ * whose type is inferred or `unknown`. The type of such a free name holds the
+ * requirements of its unit (rule 4 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), and it is narrowed
+ * by its uses as an inferred definition is.
+ *
+ * With the engine flag `_bindingUnits`, a symbol bound to a definition
+ * declared `unknown` gives the same answer as a free name that resolves to
+ * that definition. Without the flag, only an inferred type counts.
+ */
+export function hasInferredType(expr: Expression | null | undefined): boolean {
+  if (expr === null || expr === undefined) return false;
+  if (!isFreeName(expr)) {
+    const own = expr.valueDefinition;
+    if (own === undefined) return false;
+    if (own.inferredType) return true;
+    return expr.engine._bindingUnits && own.declaredType.isUnknown;
+  }
+  const def = freeBinding(expr);
+  if (def === undefined) return true;
+  if (!('value' in def)) return false;
+  return def.value.inferredType || def.value.declaredType.isUnknown;
 }
 
 export function isSymbol(

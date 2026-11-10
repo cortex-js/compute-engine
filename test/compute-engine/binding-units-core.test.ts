@@ -1,5 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
+import {
+  hasInferredType,
+  isFreeName,
+} from '../../src/compute-engine/boxed-expression/type-guards';
+import { checkConditions } from '../../src/compute-engine/boxed-expression/rules';
 import {
   UnitEnvironment,
   unitEnvironmentOfOperands,
@@ -163,15 +167,13 @@ describe('BINDING UNITS: TYPES', () => {
     expect(x.type.toString()).toBe('number');
   });
 
-  test('an outer declaration made by the boxing of a literal is not narrowed', () => {
+  test('the free name of the body of a literal declares nothing outside', () => {
     const ce = engine();
-    // The free name `y` of the body is declared in the scope that the
-    // literal is written in, with the type of its first use. That scope
-    // existed before the boxing: the later uses write their requirement in
-    // the environment of the unit, not on the declaration.
+    // The free name `y` of the body is not declared in the scope that the
+    // literal is written in: its requirement goes in the environment of the
+    // unit, under that scope (rule 2 of the spec).
     const f = ce.parse('x \\mapsto (x + y) + \\binom{y}{2}');
-    const def = ce.lookupDefinition('y')!;
-    expect('value' in def && def.value.type.toString()).toBe('number');
+    expect(ce.lookupDefinition('y')).toBeUndefined();
     const ys: { type: { toString(): string } }[] = [];
     const walk = (e: typeof f): void => {
       if (e.symbol === 'y') ys.push(e);
@@ -180,6 +182,138 @@ describe('BINDING UNITS: TYPES', () => {
     walk(f);
     expect(ys.length).toBe(2);
     for (const y of ys) expect(y.type.toString()).toBe('complex | infinity');
+    // A call of the literal reads the binding of the scope that the literal
+    // is written in.
+    ce.assign('y', 3);
+    expect(ce.box(['Apply', f, 2]).evaluate().json).toBe(8);
+  });
+});
+
+describe('BINDING UNITS: SITES OF RULE 7', () => {
+  test('the getters of a free name follow a chain of values', () => {
+    const ce = engine();
+    const x = ce.box('x');
+    const y = ce.box('y');
+    const z = ce.box('z');
+    expect(isFreeName(x)).toBe(true);
+    ce.assign('x', y);
+    ce.assign('y', z);
+    ce.assign('z', 2);
+    expect(x.re).toBe(2);
+    expect(x.im).toBe(0);
+    expect(x.sgn).toBe('positive');
+    expect(x.isEven).toBe(true);
+    expect(x.isOdd).toBe(false);
+  });
+
+  test('the getters of a free name with no definition', () => {
+    const ce = engine();
+    const x = ce.parse('x + 1').op1;
+    expect(x.value).toBeUndefined();
+    expect(x.re).toBeNaN();
+    expect(x.sgn).toBeUndefined();
+    expect(x.isEven).toBeUndefined();
+  });
+
+  test('the value setter of a free name declares it in its home scope', () => {
+    const ce = engine();
+    const w = ce.box('w');
+    w.value = 3;
+    expect(ce.lookupDefinition('w')).toBeDefined();
+    expect(ce.box('w').evaluate().json).toBe(3);
+    expect(w.evaluate().json).toBe(3);
+  });
+
+  test('the type setter of a free name declares it in its home scope', () => {
+    const ce = engine();
+    const v = ce.box('v');
+    v.type = 'integer';
+    expect(ce.box('v').type.toString()).toBe('integer');
+    expect(v.type.toString()).toBe('integer');
+  });
+
+  test('two free names of one home scope are the same binding', () => {
+    const ce = engine();
+    const a = ce.parse('x + 1');
+    const b = ce.parse('x + 1');
+    expect(a.isSame(b)).toBe(true);
+    // A free name is not a raw occurrence.
+    expect(a.op1.isSame(ce.box('x', { form: 'raw' }))).toBe(false);
+  });
+
+  test('a free name is the same binding as the definition it resolves to', () => {
+    const ce = engine();
+    const a = ce.parse('x + 1');
+    ce.declare('x', 'real');
+    expect(a.isSame(ce.parse('x + 1'))).toBe(true);
+  });
+
+  test('a free name in the body of a binder built around it is the index', () => {
+    const ce = engine();
+    const body = ce.parse('k^2');
+    const sum = ce.function('Sum', [body, ['Limits', 'k', 1, 3]]);
+    expect(sum.evaluate().json).toBe(14);
+  });
+
+  test('a call head with no definition declares nothing', () => {
+    const ce = engine();
+    const c = ce.parse('f(x) + 1');
+    expect(ce.lookupDefinition('f')).toBeUndefined();
+    expect(c.isCanonical).toBe(true);
+    // A later name of the host is not a function.
+    expect(ce.parse('(f^1)^3').simplify().toString()).toBe('f^3');
+    // The head is resolved when the call is evaluated.
+    ce.assign('f', ce.parse('t \\mapsto 2t'));
+    expect(c.evaluate().toString()).toBe('2x + 1');
+  });
+
+  test('two free calls of one home scope are the same call', () => {
+    const ce = engine();
+    const a = ce.parse('f(x)');
+    const b = ce.parse('f(x)');
+    expect(a.isSame(b)).toBe(true);
+    // A raw call is not a free call.
+    expect(a.isSame(ce.box(['f', 'x'], { form: 'raw' }))).toBe(false);
+  });
+
+  test('free calls of two home scopes are different calls', () => {
+    const ce = engine();
+    // The operand is a number: a free name `x` of each scope would make
+    // the operands different too.
+    const a = ce.parse('f(1)');
+    ce.pushScope();
+    try {
+      const b = ce.parse('f(1)');
+      expect(a.isSame(b)).toBe(false);
+      // Once the name resolves, both calls read the same definition.
+      ce.declare('f', 'function');
+      expect(a.isSame(b)).toBe(true);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('a list of free names is a matrix of numbers', () => {
+    const ce = engine();
+    const det = ce.box([
+      'Determinant',
+      ['List', ['List', 'a', 'b'], ['List', 'c', 'd']],
+    ]);
+    expect(det.op1.type.toString()).toBe('matrix<2x2>');
+    expect(det.evaluate().isSame(ce.parse('ad - bc'))).toBe(true);
+  });
+
+  test('a library operator name read as a variable declares nothing', () => {
+    const ce = engine();
+    const a = ce.parse('N + 1');
+    const n = a.ops!.find((op) => op.symbol === 'N')!;
+    expect(isFreeName(n)).toBe(true);
+    expect(n.type.toString()).toBe('number');
+    expect(a.evaluate().toString()).toBe('N + 1');
+    const lib = ce.lookupDefinition('N');
+    expect(lib !== undefined && 'operator' in lib).toBe(true);
+    ce.assign('N', 2);
+    expect(a.evaluate().json).toBe(3);
   });
 });
 
@@ -220,15 +354,14 @@ describe('BINDING UNITS: EVALUATION', () => {
     expect(await x.evaluateAsync()).toBe(x);
   });
 
-  // Fails today (the result is 9). The read of the free name `n` in the
-  // scope of the `Sum` resolves no definition, as it must
-  // (`freeNameBindingInContext()` skips the index and the parameter). The
-  // capture comes after the read: the big-operator fold substitutes the
-  // index value into the evaluated term (`evaluateBigOpTerm()` and
-  // `substituteBinderValues()`, `library/utils.ts`), and that substitution
-  // replaces every occurrence with no definition, so also a free name.
-  // `ce.box(['Apply', ce.parse('(n) \\mapsto a'), 5])` gives 6 the same way.
-  test.failing('a free name in the value of a name does not read a binder', () => {
+  // The read of the free name `n` in the scope of the `Sum` resolves no
+  // definition (`freeNameBindingInContext()` skips the index and the
+  // parameter). The substitutions that follow the read keep a free name: the
+  // big-operator fold, which substitutes the index value into the evaluated
+  // term (`substituteBinderValues()`, `library/utils.ts`), and the
+  // substitution of the arguments of a call of a function literal
+  // (`parameterSubVisitors()`, `function-utils.ts`).
+  test('a free name in the value of a name does not read a binder', () => {
     const ce = engine();
     ce.assign('a', ce.parse('n + 1'));
     // The `n` of the value of `a` is read while the scope of the `Sum`
@@ -240,12 +373,67 @@ describe('BINDING UNITS: EVALUATION', () => {
     expect(result.isSame(ce.parse('3n + 3'))).toBe(true);
   });
 
+  test('a free name in the value of a name does not read a parameter', () => {
+    const ce = engine();
+    ce.assign('a', ce.parse('n + 1'));
+    const result = ce.box(['Apply', ce.parse('(n) \\mapsto a'), 5]).evaluate();
+    expect(result.toString()).toBe('n + 1');
+  });
+
   test('a free name with no definition stays symbolic', () => {
     const ce = engine();
     const x = ce.parse('x + 1').op1;
     expect(x.evaluate()).toBe(x);
     expect(x.N()).toBe(x);
     expect(x.value).toBeUndefined();
+  });
+
+  // A free call head is resolved as a free name is
+  // (`BoxedFunction._resolvedDefinition()`): the parameter `f` of the
+  // function literal, and the index `f` of the `Sum`, are not the function
+  // that the call `f(1)` in the value of `a` names.
+  test('a free call head in the value of a name does not read a parameter', () => {
+    const ce = engine();
+    ce.assign('a', ce.parse('f(1)'));
+    const result = ce
+      .box(['Apply', ce.parse('(f) \\mapsto a'), ce.parse('t \\mapsto 2t')])
+      .evaluate();
+    expect(result.json).toEqual(['f', 1]);
+  });
+
+  test('a free call head in the value of a name does not read a binder', () => {
+    const ce = engine();
+    ce.assign('a', ce.parse('f(1)'));
+    const result = ce.parse('\\sum_{f=1}^{3} a').evaluate();
+    expect(result.json).toEqual(['Multiply', 3, ['f', 1]]);
+  });
+
+  test('a free call head evaluates through a later assignment', () => {
+    const ce = engine();
+    const call = ce.box(['h', 2]);
+    ce.assign('h', ce.parse('t \\mapsto 3t'));
+    expect(call.evaluate().json).toEqual(6);
+  });
+
+  // The canonical handler of the definition declared after the boxing gives
+  // a literal, not a call: the literal is the value of the call.
+  test('a free call head reads the canonical form of a later definition', () => {
+    const ce = engine();
+    const call = ce.box(['g', 2]);
+    ce.declare('g', {
+      signature: '(number) -> number',
+      canonical: () => ce.One,
+    });
+    expect(call.evaluate().json).toEqual(1);
+  });
+
+  test('a free call head has the result type of a later declaration', () => {
+    const ce = engine();
+    const call = ce.box(['f', 2]);
+    expect(call.type.toString()).toBe('unknown');
+    ce.declare('f', '(number) -> integer');
+    expect(call.type.toString()).toBe('integer');
+    expect(call.type.toString()).toBe(ce.box(['f', 2]).type.toString());
   });
 });
 
@@ -565,5 +753,191 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     expect(env.undoJournal()).toBe(false);
     expect(env.scalarUsesMap(scope, 'a')).toBeUndefined();
     expect(env.counter).toBeGreaterThan(before);
+  });
+});
+
+describe('BINDING UNITS: FREE CALL HEADS AND HOST WRITES', () => {
+  // The value of `f` is a number, which cannot be applied: the call `f(1)`
+  // stays as it is, and is not bound to the parameter `f` of the function
+  // literal, which a lookup of the name that skips the number would find.
+  test('a free call head whose definition cannot be applied stays a call', () => {
+    const ce = engine();
+    ce.assign('a', ce.parse('f(1)'));
+    ce.assign('f', 5);
+    const result = ce
+      .box(['Apply', ce.parse('(f) \\mapsto a'), ce.parse('t \\mapsto 2t')])
+      .evaluate();
+    expect(result.json).toEqual(['f', 1]);
+  });
+
+  // The call boxed again selects the overload by the type of `x` in the
+  // current scope: the memo of the call boxed again is not used in another
+  // scope.
+  test('a free call head is boxed again in another scope', () => {
+    const ce = engine();
+    ce.declare('x', 'integer');
+    const call = ce.box(['f', 'x']);
+    ce.declare('f', '((integer) -> integer) & ((string) -> boolean)');
+    expect(call.type.toString()).toBe('integer');
+    ce.pushScope();
+    try {
+      ce.declare('x', 'string');
+      expect(call.type.toString()).toBe(ce.box(['f', 'x']).type.toString());
+    } finally {
+      ce.popScope();
+    }
+    expect(call.type.toString()).toBe('integer');
+  });
+
+  // An assignment of the free operand `x` gives it a type, and the call
+  // boxed again must follow it. The assignment does not advance the
+  // definition version of the engine: the memo of the call boxed again is
+  // keyed on the type cache of the engine and on the unit environments of
+  // the operands.
+  test('a free call head is boxed again when its operand is assigned', () => {
+    const ce = engine();
+    const call = ce.box(['f', 'x']);
+    ce.declare('f', '((integer) -> integer) & ((string) -> boolean)');
+    expect(call.type.toString()).toBe('integer');
+    ce.assign('x', ce.string('hello'));
+    expect(call.type.toString()).toBe(ce.box(['f', 'x']).type.toString());
+    expect(call.type.toString()).toBe('boolean');
+  });
+
+  // The body of `g` reads `a`, whose value is the call `f(1)` with the free
+  // head `f`. Each call of `g` has a new frame scope, and `f` resolves to
+  // the same definition in each frame, so the second call of `g` does not
+  // box the call `f(1)` again.
+  test('a free call head read in a function body is not boxed again per call', () => {
+    const ce = engine();
+    ce.assign('a', ce.parse('f(1)'));
+    ce.assign('f', ce.parse('t \\mapsto 2t'));
+    ce.assign('g', ce.parse('n \\mapsto a + n'));
+    const spy = jest.spyOn(ce, '_callBoundTo');
+    const reboxes = () =>
+      spy.mock.calls.filter(([name]) => name === 'f').length;
+    try {
+      expect(ce.box(['g', 1]).evaluate().json).toEqual(3);
+      const afterFirst = reboxes();
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(ce.box(['g', 3]).evaluate().json).toEqual(5);
+      expect(reboxes()).toBe(afterFirst);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // The write resolves the name from its home scope: a scope pushed after
+  // the boxing that declares the same name does not receive the write.
+  test('a host write on a free name skips a later scope of the same name', () => {
+    const ce = engine();
+    const w = ce.box('w');
+    ce.pushScope();
+    try {
+      ce.declare('w', 'integer');
+      w.value = 3;
+      expect(ce.box('w').value).toBeUndefined();
+    } finally {
+      ce.popScope();
+    }
+    expect(ce.box('w').value?.json).toEqual(3);
+  });
+
+  // The type of `a` reads the call `f(1)`, whose boxing against `f` reads
+  // the type of `a` again: the nested read of the same call gives no call
+  // boxed again, and the read ends.
+  test('a free call head read again while it is boxed again', () => {
+    const ce = engine();
+    ce.assign('a', ce.parse('f(1)'));
+    ce.assign('f', ce.parse('t \\mapsto a + 1'));
+    expect(() => ce.box('a').type).not.toThrow();
+    expect(() => ce.box('a').evaluate()).not.toThrow();
+  });
+
+  // An assignment of a lazy collection captures the values of the variables
+  // that it reads (`bindReadVariablesOfLazyCollection()`), also of a free
+  // name boxed before its assignment: a later assignment of the name does
+  // not change the stored collection.
+  test('a lazy collection keeps the value of a free name that it captured', () => {
+    const ce = engine();
+    const lazy = ce.box(['Filter', 'xs', ['Function', ['Greater', 'c', 3], 'c']]);
+    ce.assign('xs', ce.box(['Range', 1, 'PositiveInfinity']));
+    ce.box(['Assign', 'big', lazy]).evaluate();
+    ce.assign('xs', ce.box(['Range', 100, 'PositiveInfinity']));
+    expect(ce.box(['First', 'big']).evaluate().json).toEqual(4);
+  });
+});
+
+describe('BINDING UNITS: RULE CONDITIONS AND INFERRED TYPES', () => {
+  // A free name reads the definition that its name resolves to when the
+  // condition is checked, not the definition (none) of the boxing.
+  test('the `constant` condition on a free name later declared constant', () => {
+    const ce = engine();
+    const q = ce.box(['Add', 'q', 1]).ops![0];
+    expect(isFreeName(q)).toBe(true);
+    expect(checkConditions(q, ['constant'])).toBe(false);
+    ce.declare('q', { type: 'real', isConstant: true, value: 2 });
+    expect(checkConditions(q, ['constant'])).toBe(true);
+    expect(checkConditions(q, ['variable'])).toBe(false);
+  });
+
+  test('the `function` condition on a free name later declared a function', () => {
+    const ce = engine();
+    const g = ce.box(['Add', 'g', 1]).ops![0];
+    expect(isFreeName(g)).toBe(true);
+    expect(checkConditions(g, ['function'])).toBe(false);
+    ce.declare('g', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => x,
+    });
+    expect(checkConditions(g, ['function'])).toBe(true);
+  });
+
+  test('`hasInferredType()` of a bound symbol declared `unknown`', () => {
+    for (const flag of [true, false]) {
+      const ce = new ComputeEngine();
+      ce._bindingUnits = flag;
+      ce.declare('u', 'unknown');
+      expect([flag, hasInferredType(ce.box('u'))]).toEqual([flag, flag]);
+    }
+  });
+
+  test('the setters of a wildcard give the same result with each flag', () => {
+    const results = [true, false].map((flag) => {
+      const ce = new ComputeEngine();
+      ce._bindingUnits = flag;
+      const outcome = (fn: () => void): string => {
+        try {
+          fn();
+          return 'ok';
+        } catch {
+          return 'throws';
+        }
+      };
+      const value = outcome(() => {
+        ce.box('_x').value = 3;
+      });
+      const type = outcome(() => {
+        ce.box('_y').type = 'integer';
+      });
+      return { value, type };
+    });
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0].value).toBe('ok');
+  });
+});
+
+describe('BINDING UNITS: A HOST WRITE AFTER THE HOME SCOPE WAS POPPED', () => {
+  test('throws, as it does with the flag off', () => {
+    for (const flag of [false, true]) {
+      const ce = new ComputeEngine();
+      ce._bindingUnits = flag;
+      ce.pushScope();
+      const w = ce.box('w');
+      ce.popScope();
+      expect(() => {
+        (w as unknown as { value: unknown }).value = 3;
+      }).toThrow(/Unknown symbol/);
+    }
   });
 });

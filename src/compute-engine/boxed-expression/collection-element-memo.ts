@@ -7,7 +7,13 @@ import type {
   Scope,
 } from '../global-types';
 
-import { isDictionary, isFunction, isObject, isSymbol } from './type-guards';
+import {
+  isDictionary,
+  isFunction,
+  isObject,
+  isSymbol,
+  isFreeName,
+} from './type-guards';
 import { isValueDef, isOperatorDef } from './definition-guards';
 import { bindingInContext } from './binders';
 import { withAmbientChain } from './ambient-chain';
@@ -871,7 +877,10 @@ function snapshotDepsUnderChain(
         }
       } else if (e.operatorDefinition !== undefined) {
         visitLambdaBody(e, e.symbol, e.operatorDefinition, true);
-      } else if (e.isCanonical === false) {
+      } else if (e.isCanonical === false || isFreeName(e)) {
+        // A free name (`isFreeName()`, `binding-unit.ts`) is canonical with
+        // no definition: like a raw name, its current resolution is a
+        // dependency.
         // Declared callbacks are canonical and tracked through their binding
         // above. An unresolved raw callback name can acquire a declaration
         // later, so its current resolution is a dependency too. Track a

@@ -15,7 +15,14 @@ import type {
   Scope,
   TaggedValueDefinition,
 } from '../global-types.js';
-import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
+import {
+  isFunction,
+  isSymbol,
+  isDictionary,
+  isNumber,
+  isFreeName,
+  isFreeCallHead,
+} from './type-guards.js';
 import {
   functionLiteralParameterNames,
   isFunctionLiteralParameter,
@@ -609,17 +616,36 @@ export function bindingInContext(
  * does not read the index `n`. Every other binding
  * is read by name, as `bindingInContext()` reads it for an occurrence with
  * no definition of its own.
+ *
+ * With `skipLibraryOperator`, the walk also skips an operator definition of
+ * the root scope (the standard library): the unit of the occurrence reads
+ * the name as a variable (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`).
  */
 export function freeNameBindingInContext(
   ce: ComputeEngine,
   name: string,
-  scope: Scope | null = ce.context.lexicalScope
+  scope: Scope | null = ce.context.lexicalScope,
+  skipLibraryOperator = false
 ): BoxedDefinition | undefined {
+  return freeNameBindingAndScope(ce, name, scope, skipLibraryOperator)?.def;
+}
+
+/**
+ * The definition that `freeNameBindingInContext()` finds, and the scope of
+ * the walk that holds it. `undefined` when there is no definition.
+ */
+export function freeNameBindingAndScope(
+  ce: ComputeEngine,
+  name: string,
+  scope: Scope | null = ce.context.lexicalScope,
+  skipLibraryOperator = false
+): { def: BoxedDefinition; scope: Scope } | undefined {
   const start = scope;
   while (scope) {
     const found = staticBindingIn(scope, name, scope === start);
     if (
       found !== undefined &&
+      !(skipLibraryOperator && 'operator' in found && !scope.parent) &&
       !(
         'value' in found &&
         (isBinderVariable(found.value) ||
@@ -627,7 +653,7 @@ export function freeNameBindingInContext(
           isActivation(found.value))
       )
     )
-      return found;
+      return { def: found, scope };
     scope = staticParentOf(scope);
   }
   return undefined;
@@ -1095,7 +1121,10 @@ export function parameterActivationValue(
   // own, and `valueDefinitionInContext` then skips an activation to return the
   // next binding of the name, so a global of the same name (created by any
   // later parse of that name) would hide the parameter. Read the innermost
-  // binding of the name instead.
+  // binding of the name instead. A free name (`isFreeName()`,
+  // `binding-unit.ts`) was boxed outside the call: it never denotes a
+  // parameter.
+  if (isFreeName(sym)) return undefined;
   const def =
     sym.valueDefinition === undefined
       ? binderBindingOf(ce, sym.symbol)
@@ -1120,6 +1149,9 @@ export function calledParameterValue(
   const own = app.valueDefinition;
   if (own === undefined && app.operatorDefinition !== undefined)
     return undefined;
+  // A free call head (`isFreeCallHead()`) was boxed outside the call: it
+  // never denotes a parameter.
+  if (isFreeCallHead(app)) return undefined;
   const def =
     own === undefined
       ? binderBindingOf(ce, app.operator)
@@ -1633,7 +1665,9 @@ export function shadowedKey(shadowed: ReadonlySet<string> | undefined): string {
  *   and `Declare` deliberately keeps its first operand un-canonicalized so the
  *   about-to-be-declared name is not turned into a reference to an outer
  *   definition — `Declare`'s `sym(ops[0].evaluate())` would then read the
- *   symbol's VALUE and the declaration would silently vanish).
+ *   symbol's VALUE and the declaration would silently vanish). A free name
+ *   (a canonical symbol with no definition, `isFreeName()`) is not such an
+ *   occurrence: it is re-pointed like a bound occurrence.
  * - An occurrence already on `scope`'s binding for the name is returned
  *   unchanged, so an already-correct body is preserved by identity.
  * - A qualified name, the canonical form of `["Module", name]` made where a
@@ -1667,7 +1701,11 @@ export function rebindToBindings(
       if (target === undefined) return sym;
       if (options?.accept?.(name) === false) return sym;
       const def = sym.valueDefinition;
-      if (def === undefined) return sym;
+      // A free name (`isFreeName()`, `binding-unit.ts`) has no binding, but
+      // it is not a raw occurrence: it is an occurrence of the name in the
+      // body, boxed before the binder existed, so it is re-pointed at the
+      // binder's variable.
+      if (def === undefined && !isFreeName(sym)) return sym;
       // Inline value-def check (`isValueDef` lives in `utils.ts`, which
       // imports this module).
       const own = scope.bindings.get(name);

@@ -322,6 +322,7 @@ import {
   isSymbol,
   isUnorderedSet,
   sym,
+  hasInferredType,
 } from '../boxed-expression/type-guards.js';
 import {
   isRestriction,
@@ -10969,9 +10970,7 @@ function isScalarSlot(op: Expression): boolean {
   if (isTuple(op) || isTextAtom(op)) return true;
   if (isProvablyScalarNumber(op)) return true;
   return (
-    isSymbol(op) &&
-    op.valueDefinition?.inferredType !== true &&
-    isSubtype(op.type.type, 'boolean')
+    isSymbol(op) && !hasInferredType(op) && isSubtype(op.type.type, 'boolean')
   );
 }
 
@@ -12198,7 +12197,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (
           target !== undefined &&
           isSymbol(target) &&
-          target.valueDefinition?.inferredType &&
+          hasInferredType(target) &&
           target.type.type === 'unknown'
         )
           target._infer(() => 'collection', 'narrow');
@@ -12368,7 +12367,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       engine._fn(
         'PointList',
         flatten(ops).map((op) =>
-          !(isSymbol(op) && op.valueDefinition?.inferredType) &&
+          !(isSymbol(op) && hasInferredType(op)) &&
           isRefusedPointListComponentType(op.type.type)
             ? engine.typeError(POINT_LIST_COMPONENT_TYPE, op.type, op)
             : op
@@ -26489,7 +26488,7 @@ function canonicalOptimumForm(
     t !== 'value' &&
     !(
       isSymbol(d) &&
-      d.valueDefinition?.inferredType === true &&
+      hasInferredType(d) &&
       d.type.matches('collection') &&
       !d.type.matches('indexed_collection') &&
       (d.value === undefined || d.value.type.matches('set<any>'))

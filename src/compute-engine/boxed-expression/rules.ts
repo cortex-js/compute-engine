@@ -42,6 +42,9 @@ import {
   isFunction,
   isTensor,
   operandsForCanonicalRebuild,
+  isFreeName,
+  resolvedValueDefinition,
+  readBinding,
 } from './type-guards.js';
 import { getRuleIndex, candidateRules } from './rule-index.js';
 import { scopeForRebuild } from './binding-sites.js';
@@ -232,9 +235,18 @@ export const CONDITIONS = {
   finite: (x: Expression) => x.isFinite,
   infinite: (x: Expression) => x.isFinite === false,
 
-  constant: (x: Expression) => x.valueDefinition?.isConstant ?? false,
-  variable: (x: Expression) => !(x.valueDefinition?.isConstant ?? true),
-  function: (x: Expression) => x.operatorDefinition !== undefined,
+  // A free name (`isFreeName()`, `binding-unit.ts`) reads the definition
+  // that its name resolves to: it is a constant when that definition is
+  // one, a variable unless it is one, and a function when it is an
+  // operator definition.
+  constant: (x: Expression) =>
+    resolvedValueDefinition(x)?.isConstant ?? false,
+  variable: (x: Expression) =>
+    !(resolvedValueDefinition(x)?.isConstant ?? !isFreeName(x)),
+  function: (x: Expression) => {
+    const binding = readBinding(x);
+    return binding !== undefined && 'operator' in binding;
+  },
 
   relation: (x: Expression) => isRelationalOperator(x.operator),
   equation: (x: Expression) => x.operator === 'Equal',

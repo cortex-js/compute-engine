@@ -24,7 +24,14 @@ import {
   dictionaryValueValuesType,
   signOfType,
 } from '../../common/type/utils.js';
-import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+  isFreeName,
+  hasInferredType,
+} from './type-guards.js';
 import { closedDictionaryType } from './generic-instantiation.js';
 import { asRational } from './numerics.js';
 import { numberLiteralTierType } from './literal-tier.js';
@@ -437,6 +444,14 @@ function structureOfExpression(
         ambient.operator !== operator
       )
         node.lookupByName = false;
+    }
+    // A free name (`isFreeName()`, `binding-unit.ts`) has no definition:
+    // its type comes from the requirements of its unit, so it is inferred,
+    // and it is free when its name resolves to no binding
+    // (`isFreeSymbol()`).
+    if (isFreeName(op)) {
+      if (hasInferredType(op)) node.inferred = true;
+      if (isFreeSymbol(op)) node.free = true;
     }
     const def = op.valueDefinition;
     if (def !== undefined) {

@@ -9,6 +9,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  hasInferredType,
 } from '../boxed-expression/type-guards.js';
 import type { CompileTarget } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
@@ -396,7 +397,7 @@ function gpuFiniteProof(
         e.valueDefinition?.isConstant !== true &&
         target.var(e.symbol) === e.symbol;
       result =
-        (baked !== undefined || e.valueDefinition?.inferredType !== true) &&
+        (baked !== undefined || !hasInferredType(e)) &&
         (!strict || baked !== undefined || gpuFiniteRealCells(e)) &&
         (!mapped || selfMapped) &&
         (value === undefined ||
@@ -722,7 +723,7 @@ function gpuFiniteProof(
       facts?.has(e.symbol) === true ||
       isWritten(e.symbol) ||
       bakedValue(e) !== undefined ||
-      e.valueDefinition?.inferredType === true
+      hasInferredType(e)
     )
       return undefined;
     return declaredRangeBound(e);
@@ -857,7 +858,7 @@ function gpuFiniteProof(
       facts?.has(d.symbol) !== true &&
       !isWritten(d.symbol) &&
       bakedValue(d) === undefined &&
-      d.valueDefinition?.inferredType !== true
+      !hasInferredType(d)
     ) {
       const t = d.type.type;
       if (typeof t === 'object' && t.kind === 'numeric') {
@@ -986,7 +987,7 @@ function gpuFiniteProof(
       facts?.has(t.symbol) === true ||
       isWritten(t.symbol) ||
       bakedValue(t) !== undefined ||
-      t.valueDefinition?.inferredType === true
+      hasInferredType(t)
     )
       return undefined;
     const type = t.type.type;

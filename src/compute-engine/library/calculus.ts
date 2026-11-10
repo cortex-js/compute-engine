@@ -50,6 +50,7 @@ import {
   isString,
   isSymbol,
   sym,
+  readBinding,
 } from '../boxed-expression/type-guards.js';
 import {
   ANONYMOUS_SLOT_NAMES,
@@ -3487,7 +3488,10 @@ function dataSymbolCallError(
  */
 function valueHeldLiteral(e: Expression): Expression | undefined {
   if (!isFunction(e) || e.operatorDefinition !== undefined) return undefined;
-  const def = e.valueDefinition;
+  // A free call head (`isFreeCallHead()`, `binding-unit.ts`) reads the
+  // value definition that its name resolves to now.
+  const read = readBinding(e);
+  const def = read !== undefined && 'value' in read ? read.value : undefined;
   if (def === undefined) return undefined;
   const binding = callableBindingInContext(e.engine, e.operator, {
     value: def,

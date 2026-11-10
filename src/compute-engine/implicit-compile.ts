@@ -4,7 +4,11 @@ import type {
   IComputeEngine,
 } from './global-types.js';
 import { CancellationError } from '../common/interruptible.js';
-import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isSymbol,
+  freeBinding,
+} from './boxed-expression/type-guards.js';
 import {
   boundVariableNames,
   callableBindingInContext,
@@ -147,8 +151,16 @@ function withCapturedCallBindings<T>(
       node.valueDefinition !== undefined &&
       isForwardCallReference(node.valueDefinition);
     if (name !== undefined && (!bound.has(name) || forwardPlaceholder)) {
-      const value = node.valueDefinition;
-      const operator = node.operatorDefinition;
+      // A free name or a free call head (`binding-unit.ts`) has no
+      // definition of its own: it reads the definition that its name
+      // resolves to now (`freeBinding()`).
+      const free = freeBinding(node);
+      const value =
+        node.valueDefinition ??
+        (free !== undefined && 'value' in free ? free.value : undefined);
+      const operator =
+        node.operatorDefinition ??
+        (free !== undefined && 'operator' in free ? free.operator : undefined);
       // The definition that a call reads: the value definition when it holds
       // a function literal, otherwise the operator definition (a node can
       // have both, a value definition with no value beside the operator

@@ -1,8 +1,11 @@
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
+import { unitCounterOfOperands } from '../binding-unit.js';
 import {
   callableBindingInContext,
+  freeNameBindingAndScope,
+  freeNameBindingInContext,
   markCallableHome,
   hasCallableHome,
   sameBindingDef,
@@ -261,6 +264,8 @@ import {
   integerRangeElements,
   kindValueIsNaN,
   isNaNPointValue,
+  isFreeName,
+  hasInferredType,
 } from './type-guards.js';
 import {
   isElementwiseWhich,
@@ -1404,9 +1409,18 @@ export class BoxedFunction
 
   /** The memo of `_reboxedForForwardCallee()`: the definition half the name
    * held and its change counter when the call was boxed again, and the new
-   * call. */
+   * call. For a free call head (`_reboxedForFreeHead()`), the other keys
+   * that `_reboxedForFreeHead()` describes. */
   private _forwardRebox:
-    | { half: { _writeVersion: number }; version: number; call: Expression }
+    | {
+        half: { _writeVersion: number };
+        version: number;
+        call: Expression;
+        scope?: Scope;
+        unitCounter?: number;
+        typeGeneration?: number;
+        definitionVersion?: number;
+      }
     | undefined = undefined;
 
   /** This call boxed again against the definition that its name holds now,
@@ -1424,6 +1438,11 @@ export class BoxedFunction
    * @internal */
   _reboxedForForwardCallee(): Expression | undefined {
     const own = this._def;
+    // A free call head (`_freeHeadScope`, `binding-unit.ts`) is a forward
+    // reference too: the call is boxed again against the definition that
+    // its name resolves to now (`_resolvedDefinition()`).
+    if (!own && this._freeHeadScope !== undefined)
+      return this._reboxedForFreeHead();
     if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
       return undefined;
     const current = callableBindingInContext(this.engine, this._operator, own);
@@ -1771,6 +1790,142 @@ export class BoxedFunction
    * decided once: the structure of a node never changes. */
   private _literalListTree: boolean | undefined;
 
+  /**
+   * With the engine flag `_bindingUnits`: the home scope of the head of a
+   * canonical call whose head had no definition when the call was boxed (a
+   * free call head, `f` in `f(x)`, `binding-unit.ts`). The boxing
+   * declares no function for the head: the call is canonical with no
+   * definition, and its head is resolved when the call is evaluated
+   * (`_canonicalToEvaluate()`). Declared, not initialized, so that a call
+   * carries no own property for it while the flag is off.
+   * @internal
+   */
+  declare _freeHeadScope?: Scope;
+
+  /**
+   * The definition of the head of this call: its own definition, or, for a
+   * free call head (`_freeHeadScope`), the definition that its name
+   * resolves to in the current context (`freeNameBindingInContext()`). The
+   * resolution skips the variable of a binder, a parameter of a function
+   * literal and the parameter activation of a call frame: the head was not
+   * inside a binder when the call was boxed. It does not skip a library
+   * operator: a call head is never read as a variable. `undefined` when
+   * there is no definition. Read it through `freeBinding()` or
+   * `readBinding()` (`type-guards.ts`).
+   * @internal
+   */
+  _resolvedDefinition(): BoxedDefinition | undefined {
+    if (this._def) return this._def;
+    if (this._freeHeadScope === undefined) return undefined;
+    return freeNameBindingInContext(this.engine, this._operator);
+  }
+
+  /**
+   * This call boxed again with its head bound to `def`, the definition that
+   * its free head resolves to (`_resolvedDefinition()`). The head of the
+   * new call is bound to exactly `def` (`ce._callBoundTo()`, which sets
+   * `ce._qualifiedHead`), not by its name in the
+   * current scope: a lookup by name skips a value definition that cannot be
+   * applied (`lookupApplicable()`), and could then read a parameter or the
+   * variable of a binder of the same name. The call is also boxed in a scope
+   * where the name reads `def` (`withBorrowedBinding()`).
+   */
+  private _boxedForFreeHead(def: BoxedDefinition): Expression {
+    const ce = this.engine;
+    return withBorrowedBinding(ce, this._operator, def, () =>
+      ce._callBoundTo(this._operator, this.ops, def)
+    );
+  }
+
+  /** True while `_reboxedForFreeHead()` boxes this call again. A read of the
+   * same call during that boxing (`a := f(1)`, then `f := t ↦ a + 1`, then
+   * the type of `a`) gets `undefined`. Declared, not initialized, so that a
+   * call carries no own property for it while the engine flag
+   * `_bindingUnits` is off. */
+  declare private _freeHeadReboxing?: boolean;
+
+  /**
+   * For a free call head (`_freeHeadScope`): this call boxed again against
+   * the definition that its name resolves to now (`_boxedForFreeHead()`),
+   * so that its type is the type of a call boxed after the declaration of
+   * the name. `undefined` when the name resolves to no definition, when the
+   * definition cannot be applied (`isApplicableDef()`: the call stays as it
+   * is), when the call boxed again is still a call of the same name with no
+   * definition, and while the same call is being boxed again
+   * (`_freeHeadReboxing`).
+   *
+   * The result is kept (`_forwardRebox`) under these keys, and the call is
+   * boxed again when one of them changed:
+   * - the definition half of the callee (`calleeHalf()`) and its change
+   *   counter (`_writeVersion`);
+   * - the scope that holds the definition that the head resolves to, not
+   *   the current lexical scope: each call of a function literal has a new
+   *   frame scope, and a free head of its body resolves to the same
+   *   definition in each frame;
+   * - the sum of the counters of the unit environments of the operands
+   *   (`unitCounterOfOperands()`): the overload that the boxing selects,
+   *   and the canonical handler, read the types of the operands, and a
+   *   narrowing of an operand in its unit moves that sum;
+   * - the key of the type cache of the engine (`ce._typeCacheGeneration()`),
+   *   which every inference and every value write advances, also one that
+   *   does not advance the definition version (a value-type inference, or
+   *   `ce.assign()` of an operand), but not the declaration of the
+   *   parameters of a call frame;
+   * - the definition version of the engine (`ce._definitionVersion`).
+   */
+  private _reboxedForFreeHead(): Expression | undefined {
+    if (this._freeHeadReboxing === true) return undefined;
+    const ce = this.engine;
+    const found = freeNameBindingAndScope(ce, this._operator);
+    const current = found?.def;
+    const half = calleeHalf(current);
+    if (current === undefined || half === undefined) return undefined;
+    if (!isApplicableDef(current)) return undefined;
+    const scope = found!.scope;
+    const unitCounter = unitCounterOfOperands(this._ops);
+    const typeGeneration = ce._typeCacheGeneration();
+    const definitionVersion = ce._definitionVersion;
+    const memo = this._forwardRebox;
+    if (
+      memo !== undefined &&
+      memo.half === half &&
+      memo.version === half._writeVersion &&
+      memo.scope === scope &&
+      memo.unitCounter === unitCounter &&
+      memo.typeGeneration === typeGeneration &&
+      memo.definitionVersion === definitionVersion
+    )
+      return memo.call;
+    this._freeHeadReboxing = true;
+    let fresh: Expression;
+    try {
+      fresh = this._boxedForFreeHead(current);
+    } finally {
+      this._freeHeadReboxing = false;
+    }
+    if (
+      fresh === this ||
+      !fresh.isCanonical ||
+      (fresh instanceof BoxedFunction &&
+        fresh._operator === this._operator &&
+        !fresh._def)
+    )
+      return undefined;
+    // The keys are read again after the boxing: the boxing can itself write
+    // an inference, which moves them. With the keys read before, the next
+    // read would box the call again, with the same result.
+    this._forwardRebox = {
+      half,
+      version: half._writeVersion,
+      call: fresh,
+      scope,
+      unitCounter: unitCounterOfOperands(this._ops),
+      typeGeneration: ce._typeCacheGeneration(),
+      definitionVersion: ce._definitionVersion,
+    };
+    return fresh;
+  }
+
   constructor(
     ce: ComputeEngine,
     operator: string,
@@ -1786,6 +1941,10 @@ export class BoxedFunction
       /** Are the integer-valued elements of the store floats
        * (`_numericStoreFloats`)? */
       numericStoreFloats?: boolean;
+      /** With the engine flag `_bindingUnits`: the home scope of a free
+       * call head (`_freeHeadScope`), used only when `canonical` is true
+       * and the head has no definition. */
+      freeHead?: Scope;
     }
   ) {
     super(ce, options?.metadata);
@@ -1821,6 +1980,13 @@ export class BoxedFunction
     this._isStructural = options?.structural ?? false;
     if (options?.canonical || this._isStructural) {
       this._bind();
+      if (
+        this._def === undefined &&
+        options?.canonical === true &&
+        options.freeHead !== undefined &&
+        ce._bindingUnits
+      )
+        this._freeHeadScope = options.freeHead;
       // An assignment or a declaration is a statement, never a value:
       // `f(Assign(a, 2))` and `Assign(t, Assign(u, v))` are static errors.
       // It is valid only at an operand whose role, in the definition that
@@ -2225,7 +2391,13 @@ export class BoxedFunction
   }
 
   get isCanonical(): boolean {
-    return this._def !== undefined && this._def !== null && !this._isStructural;
+    // A free call head (`_freeHeadScope`) has no definition, and the call
+    // is canonical.
+    return (
+      ((this._def !== undefined && this._def !== null) ||
+        this._freeHeadScope !== undefined) &&
+      !this._isStructural
+    );
   }
 
   /**
@@ -5153,6 +5325,8 @@ export class BoxedFunction
         : undefined
     );
     result._def = this._def;
+    if (this._freeHeadScope !== undefined)
+      result._freeHeadScope = this._freeHeadScope;
     // The node has the binding of this node, so it is a library call when
     // this node is one (`isLibraryCall()`).
     if (isLibraryCall(this)) markLibraryCall(result);
@@ -5955,7 +6129,12 @@ export class BoxedFunction
       if (seen.has(e)) continue;
       seen.add(e);
       if (isSymbol(e)) {
-        const value = e.valueDefinition !== undefined ? e.value : undefined;
+        // A free name (`isFreeName()`) reads the value of the definition
+        // that its name resolves to.
+        const value =
+          e.valueDefinition !== undefined || isFreeName(e)
+            ? e.value
+            : undefined;
         if (value !== undefined && !isTransitivelyPure(value, seen, knownPure))
           return false;
       } else if (isDictionary(e)) stack.push(...e.values);
@@ -6686,6 +6865,16 @@ export class BoxedFunction
     // one would rebuild the identical tree on every single `evaluate()` call
     // (a 4x slowdown of the compilation and factorization paths, which
     // evaluate definition-less nodes in a loop).
+    //
+    // A free call head (`_freeHeadScope`) is resolved in the current
+    // context (`_resolvedDefinition()`): when the name has a definition now,
+    // the call is boxed again against that definition, and the result is
+    // evaluated (`_reboxedForFreeHead()`). The result can be another
+    // expression than a call, when the canonical handler of the definition
+    // gives one (a literal). With no definition, with a definition that
+    // cannot be applied, or when the call boxed again is still a call of the
+    // same name with no definition, the call stays as it is.
+    if (this._freeHeadScope !== undefined) return this._reboxedForFreeHead();
     if (this._def !== null && !this._isStructural) return undefined;
     const canonical = this.canonical;
     return canonical.isCanonical ? canonical : undefined;
@@ -8889,7 +9078,15 @@ export class BoxedFunction
       // enclosing `withTimeLimit` span's deadline.
       checkDeadlineEvery(this.engine._deadlineFrame, 0x3ff);
 
-      if (!this._def) return this;
+      // A free call head (`_freeHeadScope`) that resolves to no definition
+      // evaluates its operands, as a call of a head with no value does.
+      if (!this._def)
+        return this._freeHeadScope !== undefined
+          ? evaluatedUnresolvedCall(
+              this,
+              this.ops.map((x) => x.evaluate(operandOptions(options)))
+            )
+          : this;
       if (!this.isValid) {
         const invalid = this._invalidValue();
         if (invalid === this) {
@@ -10424,7 +10621,12 @@ export class BoxedFunction
       // Cooperative deadline checkpoint — see `_computeValue`.
       checkDeadlineEvery(this.engine._deadlineFrame, 0x3ff);
 
-      if (!this._def) return this;
+      // A free call head (`_freeHeadScope`) that resolves to no definition
+      // evaluates its operands, as a call of a head with no value does.
+      if (!this._def)
+        return this._freeHeadScope !== undefined
+          ? evaluatedUnresolvedCallAsync(this, options)
+          : this;
       if (!this.isValid) {
         const invalid = this._invalidValue();
         if (invalid === this) {
@@ -17564,6 +17766,9 @@ function hasInferredUnknown(expr: Expression): boolean {
   const visit = (x: Expression): boolean => {
     if (isSymbol(x)) {
       if (!unknowns.has(x.symbol)) return false;
+      // A free name (`isFreeName()`) has an inferred type when its name
+      // resolves to no definition or to an inferred one.
+      if (isFreeName(x)) return hasInferredType(x);
       if (x.valueDefinition !== undefined)
         return x.valueDefinition.inferredType === true;
       const binding = x.engine.lookupDefinition(x.symbol);

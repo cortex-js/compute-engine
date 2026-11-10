@@ -152,6 +152,7 @@ import {
   isSymbol,
   isString,
   sym,
+  hasInferredType,
 } from '../boxed-expression/type-guards.js';
 import {
   FLAT_MASK_TYPE,
@@ -6209,7 +6210,7 @@ function canonicalLoopLike(
     ce._withoutFacts(() => {
       if (
         isSymbol(collCanonical) &&
-        collCanonical.valueDefinition?.inferredType &&
+        hasInferredType(collCanonical) &&
         collCanonical.type.type === 'unknown'
       )
         collCanonical._infer(() => 'collection', 'narrow');

@@ -103,6 +103,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  hasInferredType,
 } from './type-guards.js';
 import { isKindValue } from './kind-compare.js';
 import { realExponentValue } from './imaginary-part.js';
@@ -126,6 +127,7 @@ import {
   evaluateInOwnBindingsAsync,
   bindingInContext,
   freeNameBindingInContext,
+  freeNameBindingAndScope,
   sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
@@ -554,7 +556,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const val = this.value;
     if (!val || val === (this as unknown)) return false;
     if (isNumber(val)) return val.is(other, tolerance);
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.Is);
     if (guard === CYCLE_DETECTED) return false;
     try {
@@ -1037,7 +1039,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (!this._isFreeName) return undefined;
       const entry = this._env?.get(this._homeScope!, this._id);
       const resolved = withStaticTypingView(this.engine, () =>
-        freeNameBindingInContext(this.engine, this._id)
+        this._freeNameBinding()
       );
       if (resolved === undefined) return entry ?? BoxedType.unknown;
       if (isOperatorDef(resolved)) return resolved.operator.signature;
@@ -1097,7 +1099,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * no value definition: the free name then stays symbolic.
    */
   private _resolvedFreeSymbol(): BoxedSymbol | undefined {
-    const resolved = freeNameBindingInContext(this.engine, this._id);
+    const resolved = this._freeNameBinding();
     if (resolved === undefined || !isValueDef(resolved)) return undefined;
     return new BoxedSymbol(this.engine, this._id, { def: resolved });
   }
@@ -1111,6 +1113,116 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   private _orFreeName(resolved: BoxedSymbol, result: Expression): Expression {
     return result === resolved ? this : result;
+  }
+
+  /**
+   * With the engine flag `_bindingUnits`: a free name of the same name as
+   * this symbol, with the home scope `home`, that the unit of the boxing in
+   * progress reads as a variable (`UnitEnvironment.setReadsAsVariable()`).
+   * Its resolution skips the library operator of its name.
+   *
+   * This is the reading of a library operator name used as a value (`N` in
+   * `N + 1`). Without the flag, the boxing declares a variable that shadows
+   * the operator in `home` (`devolveUnappliedOperator()`, `validate.ts`).
+   * @internal
+   */
+  _asFreeVariable(home: Scope): BoxedSymbol {
+    const ce = this.engine;
+    const result = new BoxedSymbol(ce, this._id, { homeScope: home });
+    const env = (result._env ??= new UnitEnvironment());
+    ce._boxingState.noteUnitWrite(env);
+    env.setReadsAsVariable(home, this._id);
+    return result;
+  }
+
+  /**
+   * For a free name: the definition that its name resolves to in the current
+   * context (`freeNameBindingInContext()`). The resolution skips a library
+   * operator when the unit of the occurrence reads the name as a variable
+   * (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`).
+   */
+  private _freeNameBinding(): BoxedDefinition | undefined {
+    return freeNameBindingInContext(
+      this.engine,
+      this._id,
+      undefined,
+      this._env?.readsAsVariable(this._homeScope!, this._id) === true
+    );
+  }
+
+  /**
+   * The definition that this occurrence reads: its own definition, or, for a
+   * free name, the definition that its name resolves to in the current
+   * context (`freeNameBindingInContext()`). `undefined` for a free name whose
+   * name resolves to no definition, and for a symbol that is not canonical.
+   * @internal
+   */
+  _resolvedDefinition(): BoxedDefinition | undefined {
+    if (this._def !== undefined) return this._def;
+    if (!this._isFreeName) return undefined;
+    return this._freeNameBinding();
+  }
+
+  /**
+   * The key of the cycle guard of a query that follows the value of this
+   * symbol (`sgn`, `re`, `is()`, …): the definition that holds the value.
+   * Two free names of different names resolve to different definitions, so
+   * they do not share a guard. A symbol that reads no definition has no
+   * value, and the callers return before they need a key: the symbol itself
+   * is the key in that case.
+   */
+  private _cycleKey(): object {
+    return this._resolvedDefinition() ?? this;
+  }
+
+  /**
+   * For a free name: run a host write (`write`, from the `value` and `type`
+   * setters) on a symbol bound to the definition that the name resolves to
+   * from its home scope (`_homeScope`), not from the current context: the
+   * home scope need not be on the current chain of scopes, and a scope
+   * pushed after the boxing that declares the same name must not receive
+   * the write. When the name resolves to no definition, it is declared in
+   * its home scope, with the type `unknown`, inferred, as `ce.assign()` and
+   * `ce.declare()` declare a name, and as the boxing of the name declares it
+   * when the engine flag `_bindingUnits` is off. The write runs in the scope
+   * that holds the definition, so that a write by name (`ce.assign()`,
+   * `ce.forget()`) reaches that definition.
+   *
+   * A home scope that is no longer on the current chain (it was popped)
+   * throws `Unknown symbol`, as the write throws when the flag is off: a
+   * definition declared in a popped scope cannot be read again, so the
+   * write would be lost with no error.
+   */
+  private _hostWrite(write: (target: BoxedSymbol) => void): void {
+    const ce = this.engine;
+    const home = this._homeScope!;
+    let onChain = false;
+    for (
+      let s: Scope | null | undefined = ce.context?.lexicalScope;
+      s;
+      s = s.parent
+    )
+      if (s === home) {
+        onChain = true;
+        break;
+      }
+    if (!onChain) throw new Error(`Unknown symbol "${this._id}"`);
+    let found = freeNameBindingAndScope(
+      ce,
+      this._id,
+      home,
+      this._env?.readsAsVariable(home, this._id) === true
+    );
+    if (found === undefined) {
+      const def = ce._declareSymbolValue(
+        this._id,
+        { type: 'unknown', inferred: true },
+        home
+      );
+      found = { def, scope: home };
+    }
+    const target = new BoxedSymbol(ce, this._id, { def: found.def });
+    ce._inScope(found.scope, () => write(target));
   }
 
   /** True when the nearest scope of the current context that binds this
@@ -1246,6 +1358,21 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // is under a registered scratch scope, so it is made only in that case.
     if (ce._resolveOnlyDepth > 0 && scratchRootOf(ce, outerScope) === undefined)
       return;
+    // With the engine flag `_bindingUnits`, boxing declares no name: the
+    // narrowing is a requirement on the free name, under its home scope (the
+    // scope that the literal is written in), in the environment of the unit
+    // (`binding-unit.ts`). A call of the literal reads the binding of that
+    // scope by name, as it does without the flag.
+    if (
+      ce._bindingUnits &&
+      ce._boxingState.isPersistentScope(outerScope) !== false
+    ) {
+      new BoxedSymbol(ce, name, { homeScope: outerScope })._infer(
+        () => t,
+        'narrow'
+      );
+      return;
+    }
     // The binding is marked: it is not a declaration for an assignment in
     // the body (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
     markFreeSymbolDeclaration(
@@ -1684,6 +1811,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       | _BoxedExpression
       | undefined
   ) {
+    // A free name: a host write that declares the name in its home scope
+    // when it has no definition (`_hostWrite()`). A wildcard (`_x`) is
+    // written the same way: without the engine flag `_bindingUnits`, the
+    // boxing of `_x` declares it, and the write sets its value.
+    if (this._isFreeName) {
+      this._hostWrite((target) => {
+        target.value = value;
+      });
+      return;
+    }
     if (!this._def)
       throw new Error(`Cannot set value of non-canonical ${this._id}`);
 
@@ -1864,6 +2001,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   set type(t: Type | TypeString | BoxedType) {
+    // A free name: see the `value` setter. The type of a wildcard (`_x`)
+    // cannot be changed, as for a wildcard that has a definition.
+    if (this._isFreeName) {
+      if (this._id[0] === '_')
+        throw new Error(
+          `The type of the wildcard "${this._id}" cannot be changed`
+        );
+      this._hostWrite((target) => {
+        target.type = t;
+      });
+      return;
+    }
     if (!this._def)
       throw new Error(`Cannot set type of non-canonical symbol "${this._id}"`);
 
@@ -2062,7 +2211,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value !== undefined) {
       if (isNumber(value)) return value.sgn;
-      const def = this._def!;
+      const def = this._cycleKey();
       const guard = enterCycleQuery(def, CycleQuery.Sgn);
       if (guard === CYCLE_DETECTED) return undefined;
       try {
@@ -2095,7 +2244,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isOdd;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.IsOdd);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -2109,7 +2258,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isEven;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.IsEven);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -2138,7 +2287,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isFinite;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.IsFinite);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -2173,7 +2322,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isInfinity;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.IsInfinity);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -2201,7 +2350,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isNaN;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.IsNaN);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -2293,7 +2442,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return NaN;
     if (isNumber(value)) return value.re;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.Re);
     if (guard === CYCLE_DETECTED) return NaN;
     try {
@@ -2307,7 +2456,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return NaN;
     if (isNumber(value)) return value.im;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.Im);
     if (guard === CYCLE_DETECTED) return NaN;
     try {
@@ -2321,7 +2470,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.bignumRe;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.BignumRe);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -2335,7 +2484,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.bignumIm;
-    const def = this._def!;
+    const def = this._cycleKey();
     const guard = enterCycleQuery(def, CycleQuery.BignumIm);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
@@ -3108,10 +3257,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   // getter). A symbol with no collection value answers the shape of its
   // declared type: a valueless `L: vector<2>` promises an indexed
   // collection of 2 elements. A type that the engine inferred from the uses
-  // of an undeclared name (`inferredType`) is not a promise.
+  // of an undeclared name (`inferredType`) is not a promise, nor is the type
+  // of a free name that comes from the requirements of its unit
+  // (`hasInferredType()`).
   get staticShape(): StaticShape | undefined {
     if (this.isCollection) return super.staticShape;
-    if (this.valueDefinition?.inferredType === true) return undefined;
+    if (hasInferredType(this)) return undefined;
     const t = collectionTypeBesideAbsence(this.type.type);
     return t === undefined ? undefined : staticShapeOfType(t);
   }

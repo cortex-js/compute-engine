@@ -20,6 +20,7 @@ import {
   isDictionary,
   isAbsentSymbol,
   sym,
+  readBinding,
 } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralParameterName,
@@ -5146,10 +5147,12 @@ function isContinuousInVariable(
       return !variables.some((x) => dependsOnVariable(body, x)) && ok();
     return false;
   }
+  // The binding that the symbol reads: its own, or for a free name
+  // (`binding-unit.ts`) the definition that its name resolves to now.
+  const read = readBinding(opSym);
   if (
     !isEngineAuthoredDefinition(opSym) &&
-    opSym.operatorDefinition === undefined &&
-    opSym.valueDefinition?.value === undefined
+    (read === undefined || ('value' in read && read.value.value === undefined))
   )
     return ok();
   return false;

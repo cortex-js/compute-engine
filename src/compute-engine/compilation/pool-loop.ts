@@ -14,6 +14,7 @@ import {
   isDictionary,
   isFunction,
   isSymbol,
+  isFreeCallHead,
 } from '../boxed-expression/type-guards.js';
 import {
   isOperatorDef,
@@ -521,10 +522,13 @@ function analyze(
       // A node that is bound to no definition (`Typed`) is not a call. A
       // call whose head is bound to a value definition (a symbol that holds
       // a function) is a call of a function value, which
-      // `callsEngineLevel()` refuses.
+      // `callsEngineLevel()` refuses. A free call head (`isFreeCallHead()`,
+      // `binding-unit.ts`) has no definition, but it is a call: its head is
+      // resolved when it runs, and it is tested as a call.
       if (
         (e.operatorDefinition !== undefined ||
-          e.valueDefinition !== undefined) &&
+          e.valueDefinition !== undefined ||
+          isFreeCallHead(e)) &&
         !isLibraryOperator(e, h) &&
         !path.some((scope) => scope.bindings.has(h))
       ) {

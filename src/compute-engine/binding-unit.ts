@@ -37,6 +37,10 @@ export class UnitEnvironment {
   private _scalarUsesMap: Map<object, Map<string, boolean>> | undefined =
     undefined;
 
+  /** For each scope, the names of library operators that the unit reads as
+   * variables (`readsAsVariable()`). */
+  private _variableReadings: Map<object, Set<string>> | undefined = undefined;
+
   /** The number of writes that changed an entry. */
   private _counter = 0;
 
@@ -132,6 +136,34 @@ export class UnitEnvironment {
     });
   }
 
+  /**
+   * True when the unit reads `name`, a name of a library operator, as a
+   * variable in the scope `scope` (`N` in `N + 1`). The resolution of a free
+   * name of this unit then skips the library operator
+   * (`freeNameBindingInContext()`). Without the engine flag `_bindingUnits`,
+   * the boxing declares a variable that shadows the library operator
+   * instead (`devolveUnappliedOperator()`, `validate.ts`).
+   */
+  readsAsVariable(scope: object, name: string): boolean {
+    return this._variableReadings?.get(scope)?.has(name) === true;
+  }
+
+  /** Record that the unit reads `name` as a variable in the scope `scope`
+   * (`readsAsVariable()`). */
+  setReadsAsVariable(scope: object, name: string): void {
+    this._variableReadings ??= new Map();
+    let names = this._variableReadings.get(scope);
+    if (names === undefined)
+      this._variableReadings.set(scope, (names = new Set()));
+    if (names.has(name)) return;
+    names.add(name);
+    this._counter += 1;
+    if (this._journal !== undefined) {
+      const added = names;
+      this._journal.push({ undo: () => added.delete(name), type: true });
+    }
+  }
+
   scalarUsesMap(scope: object, name: string): boolean | undefined {
     return this._scalarUsesMap?.get(scope)?.get(name);
   }
@@ -202,4 +234,44 @@ export function unitEnvironmentOfOperands(
       for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
   }
   return undefined;
+}
+
+/**
+ * The sum of the counters (`UnitEnvironment.counter`) of the distinct unit
+ * environments of the symbols in `ops`, at any depth. The walk is the walk of
+ * `unitEnvironmentOfOperands()`, but it does not stop at the first
+ * environment. A counter never decreases, so the sum changes when, and only
+ * when, a write changes an entry of one of these environments. A cache that
+ * depends on the types that the units of the operands require keeps this sum
+ * and computes its value again when the sum moved.
+ */
+export function unitCounterOfOperands(ops: readonly unknown[]): number {
+  type Node = {
+    _kind?: string;
+    _env?: UnitEnvironment;
+    ops?: readonly unknown[];
+    values?: readonly unknown[];
+  };
+  const stack: unknown[] = [...ops];
+  const visited = new Set<object>();
+  const envs = new Set<UnitEnvironment>();
+  let sum = 0;
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (typeof node !== 'object' || node === null) continue;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    const n = node as Node;
+    if (n._kind === undefined) continue;
+    if (n._kind === 'symbol') {
+      if (n._env !== undefined && !envs.has(n._env)) {
+        envs.add(n._env);
+        sum += n._env.counter;
+      }
+      continue;
+    }
+    const children = n._kind === 'dictionary' ? n.values : n.ops;
+    if (children !== undefined) for (const child of children) stack.push(child);
+  }
+  return sum;
 }

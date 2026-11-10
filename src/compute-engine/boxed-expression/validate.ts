@@ -154,6 +154,9 @@ import {
   isNaNPointValue,
   isContinuationOperand,
   containsContinuationOperand,
+  hasInferredType,
+  isFreeName,
+  resolvedValueDefinition,
 } from './type-guards.js';
 import { narrowStringLiteralToCharacter } from './boxed-character.js';
 import { smallCount } from './collection-count.js';
@@ -728,7 +731,7 @@ export function checkCollectionOperand(
   // value: a declared-`unknown` symbol assigned `5` is typed `integer`, or
   // from an earlier use) is admitted. The refusal reads declared types only,
   // as the refusal of the boxing does (`refusedCollectionSourceOperands`).
-  if (isSymbol(x) && x.valueDefinition?.inferredType) return x;
+  if (isSymbol(x) && hasInferredType(x)) return x;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
   if (absentTupleSlotsMatchSource(x, type)) return x;
   // An operand that can be absent as a whole is admitted when its other arms
@@ -986,8 +989,7 @@ export function refusedCollectionSourceOperands(
     // evaluation step reports a non-collection value as `incompatible-type`.
     const t = operand.type.type;
     if (t === 'unknown' || t === 'any' || t === 'value') return operand;
-    if (isSymbol(operand) && operand.valueDefinition?.inferredType)
-      return operand;
+    if (isSymbol(operand) && hasInferredType(operand)) return operand;
     const checked = checkCollectionOperand(ce, operand, kind);
     if (!checked.isValid) refused = true;
     return checked;
@@ -1107,6 +1109,19 @@ function devolveUnappliedOperator(
     let declareScope = ce.context.lexicalScope;
     while (declareScope.noAutoDeclare && declareScope.parent)
       declareScope = declareScope.parent;
+    // With the engine flag `_bindingUnits`, boxing declares no name: the
+    // occurrence becomes a free name that its unit reads as a variable, and
+    // the resolution of the name in that unit skips the library operator
+    // (`BoxedSymbol._asFreeVariable()`, `binding-unit.ts`). A scope that
+    // the boxing created (the body of a function literal) still gets the
+    // declaration below, as a free name does (`createSymbolExpression()`).
+    if (
+      ce._bindingUnits &&
+      ce._boxingState.isPersistentScope(declareScope) !== false
+    )
+      return (
+        op as unknown as { _asFreeVariable(home: Scope): Expression }
+      )._asFreeVariable(declareScope);
     if (declareScope === ce.context.lexicalScope) ce.declare(name, 'unknown');
     else ce._inScope(declareScope, () => ce.declare(name, 'unknown'));
     // Remember the shadow we just created: a later operand of the same
@@ -1413,10 +1428,13 @@ export function devolveAtValuePositions(
     const devolved = canonicalValueOperand(ce, op);
     // Only a repaired operand replaces the operand: a raw operand that was
     // not repaired stays raw, for the operator to canonicalize itself.
+    // With the engine flag `_bindingUnits`, the repaired operand is a free
+    // name that its unit reads as a variable (`BoxedSymbol._asFreeVariable()`).
     if (
       devolved === op ||
       !isSymbol(devolved) ||
-      devolved.valueDefinition?._isDevolvedShadow !== true
+      (devolved.valueDefinition?._isDevolvedShadow !== true &&
+        !isFreeName(devolved))
     )
       return;
     result ??= [...ops];
@@ -1716,10 +1734,7 @@ export function checkNumericArgs(
       // strength of the element type: iterating to validate the elements —
       // what the finite branch above does — is not possible here.
       xs.push(op);
-    } else if (
-      op.valueDefinition?.inferredType &&
-      isSubtype('number', op.type.type)
-    ) {
+    } else if (hasInferredType(op) && isSubtype('number', op.type.type)) {
       // There was an inferred type, and it is a supertype of "number"
       // e.g. "any". We'll narrow it down to "number" when we infer later.
       xs.push(op);
@@ -4896,7 +4911,7 @@ export function validateArguments(
       isValid = false;
       continue;
     }
-    if (op.valueDefinition?.inferredType && op.type.matches(param)) {
+    if (hasInferredType(op) && op.type.matches(param)) {
       result.push(op);
       continue;
     }
@@ -4917,8 +4932,8 @@ export function validateArguments(
     // (issue #448).
     if (
       !paramStillOpen &&
-      op.valueDefinition?.inferredType &&
-      op.valueDefinition.value === undefined
+      hasInferredType(op) &&
+      resolvedValueDefinition(op)?.value === undefined
     ) {
       const extended = ce._withoutFacts(
         () =>
@@ -4957,7 +4972,7 @@ export function validateArguments(
       const target = inferredNarrowTarget(op.type.type, param);
       if (!(
         !paramStillOpen &&
-        op.valueDefinition?.inferredType &&
+        hasInferredType(op) &&
         target !== undefined &&
         !hasValueComponent(param) &&
         // Design E §3: never narrow a symbol's type TO an arrow slot's
@@ -5273,7 +5288,7 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (op.valueDefinition?.inferredType && op.type.matches(param)) {
+    if (hasInferredType(op) && op.type.matches(param)) {
       // There was an inferred type, and it is contravariant with `number`
       // e.g. "any". We'll narrow it down to `number` when we infer later.
       result.push(op);
@@ -5293,7 +5308,7 @@ export function validateArguments(
       const target = inferredNarrowTarget(op.type.type, param);
       if (!(
         !paramStillOpen &&
-        op.valueDefinition?.inferredType &&
+        hasInferredType(op) &&
         target !== undefined &&
         !hasValueComponent(param) &&
         paramArrowArms(param) === undefined &&
@@ -5556,7 +5571,7 @@ export function validateArguments(
         isValid = false;
         continue;
       }
-      if (op.valueDefinition?.inferredType && op.type.matches(varParam)) {
+      if (hasInferredType(op) && op.type.matches(varParam)) {
         // There was an inferred type, and it is contravariant with `number`
         // e.g. "any". We'll narrow it down `number` to  when we infer later.
         result.push(op);
@@ -5574,7 +5589,7 @@ export function validateArguments(
         const target = inferredNarrowTarget(op.type.type, varParam);
         if (!(
           !paramStillOpen &&
-          op.valueDefinition?.inferredType &&
+          hasInferredType(op) &&
           target !== undefined &&
           !hasValueComponent(varParam) &&
           paramArrowArms(varParam) === undefined &&

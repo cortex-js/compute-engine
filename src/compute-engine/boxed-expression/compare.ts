@@ -29,6 +29,9 @@ import {
   isObject,
   isUnorderedSet,
   integerRangeElements,
+  isFreeName,
+  isFreeCallHead,
+  freeBinding,
 } from './type-guards.js';
 import { isLibraryOperator, isShadowedSymbol } from '../library-shadowing.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
@@ -92,8 +95,11 @@ export function sameBinding(
   // `\sum_{k=1}^n`) while `ce.box(json)` binds it.
   const ea = boundA?.get(a.symbol);
   const eb = boundB?.get(b.symbol);
-  const aBound = isBoundHere(ea, a.valueDefinition);
-  const bBound = isBoundHere(eb, b.valueDefinition);
+  // A free name (`isFreeName()`, `binding-unit.ts`) has no definition, but
+  // it is never the variable of a binder: it was not inside a binder when it
+  // was boxed.
+  const aBound = !isFreeName(a) && isBoundHere(ea, a.valueDefinition);
+  const bBound = !isFreeName(b) && isBoundHere(eb, b.valueDefinition);
   // One is its binder's variable and the other is a free reference: different
   // symbols, whatever they are spelled.
   if (aBound !== bBound) return false;
@@ -105,8 +111,20 @@ export function sameBinding(
   // operator definitions too — a symbol naming a local function has no
   // `valueDefinition`, and reading only that would make two distinct local
   // functions of the same name compare equal.
-  const ad = a.baseDefinition;
-  const bd = b.baseDefinition;
+  //
+  // A free name reads the definition that its name resolves to in the
+  // current context (`resolvedBaseDefinition()`). When neither side
+  // resolves, two free names are the same binding when they have the same
+  // home scope; a free name and a raw occurrence are different.
+  const ad = resolvedBaseDefinition(a);
+  const bd = resolvedBaseDefinition(b);
+  if (ad === undefined && bd === undefined && (isFreeName(a) || isFreeName(b)))
+    return (
+      isFreeName(a) &&
+      isFreeName(b) &&
+      (a as { _homeScope?: object })._homeScope ===
+        (b as { _homeScope?: object })._homeScope
+    );
 
   // Same definition object (or both unbound): the common case, and the only
   // way two same-engine occurrences of one symbol compare — check it before
@@ -164,6 +182,22 @@ export function sameBinding(
 }
 
 /**
+ * The definition that the symbol occurrence or the call `expr` reads: its
+ * `baseDefinition`, or, for a free name (`isFreeName()`) or a free call head
+ * (`isFreeCallHead()`), the value or operator definition that its name
+ * resolves to in the current context (`freeBinding()`). `undefined` when
+ * there is none.
+ */
+function resolvedBaseDefinition(
+  expr: Expression
+): BoxedBaseDefinition | undefined {
+  if (!isFreeName(expr) && !isFreeCallHead(expr)) return expr.baseDefinition;
+  const def = freeBinding(expr);
+  if (def === undefined) return undefined;
+  return 'value' in def ? def.value : def.operator;
+}
+
+/**
  * Do two calls with the same name denote the same function?
  *
  * A canonical call denotes the definition that its head is bound to, not
@@ -210,13 +244,34 @@ function sameCallHead(
   boundB: BinderMap | undefined
 ): boolean {
   if (boundA !== undefined || boundB !== undefined) {
-    const aBound = isBoundHere(boundA?.get(a.operator), a.valueDefinition);
-    const bBound = isBoundHere(boundB?.get(b.operator), b.valueDefinition);
+    // A free call head is never bound by a binder (`isFreeCallHead()`).
+    const aBound =
+      !isFreeCallHead(a) &&
+      isBoundHere(boundA?.get(a.operator), a.valueDefinition);
+    const bBound =
+      !isFreeCallHead(b) &&
+      isBoundHere(boundB?.get(b.operator), b.valueDefinition);
     if (aBound !== bBound) return false;
     if (aBound) return true;
   }
-  const ad = a.baseDefinition;
-  const bd = b.baseDefinition;
+  // A free call head (`isFreeCallHead()`, `binding-unit.ts`) reads the
+  // definition that its name resolves to in the current context, as a free
+  // name does (`sameBinding()`). When neither side resolves, two free
+  // heads are the same function only with the same home scope, and a free
+  // head and a raw call are different.
+  const ad = resolvedBaseDefinition(a);
+  const bd = resolvedBaseDefinition(b);
+  if (
+    ad === undefined &&
+    bd === undefined &&
+    (isFreeCallHead(a) || isFreeCallHead(b))
+  )
+    return (
+      isFreeCallHead(a) &&
+      isFreeCallHead(b) &&
+      (a as { _freeHeadScope?: object })._freeHeadScope ===
+        (b as { _freeHeadScope?: object })._freeHeadScope
+    );
   if (sameBindingDef(ad, bd)) return true;
   if (ad === undefined || bd === undefined) return false;
   if (isLibraryOperator(a) && isLibraryOperator(b)) return true;

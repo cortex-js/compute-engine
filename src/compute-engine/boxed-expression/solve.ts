@@ -17,6 +17,7 @@ import {
   isSymbol,
   numericValue,
   sym,
+  hasInferredType,
 } from './type-guards.js';
 import { conditionalValue, restrictionParts } from './conditional-value.js';
 import {
@@ -3434,11 +3435,7 @@ function isComplexUnknown(ce: ComputeEngine, x: string): boolean {
  */
 export function unknownType(ce: ComputeEngine, x: string): Expression['type'] {
   const symbol = ce.symbol(x);
-  if (
-    isSymbol(symbol) &&
-    symbol.valueDefinition?.inferredType === true &&
-    symbol.value !== undefined
-  )
+  if (isSymbol(symbol) && hasInferredType(symbol) && symbol.value !== undefined)
     return ce.type('unknown');
   return symbol.type;
 }
@@ -3465,7 +3462,9 @@ function isRealForRealUnknown(expr: Expression, x: string): boolean {
 function isGenericRealParameter(ce: ComputeEngine, name: string): boolean {
   const symbol = ce.symbol(name);
   if (!isSymbol(symbol) || symbol.value !== undefined) return false;
-  if (symbol.valueDefinition?.inferredType !== true) return false;
+  // A free name (`binding-unit.ts`) has an inferred type
+  // (`hasInferredType()`).
+  if (!hasInferredType(symbol)) return false;
   const type = symbol.type;
   return type.isUnknown || ce.type('real').matches(type);
 }

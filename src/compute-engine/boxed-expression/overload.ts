@@ -38,7 +38,11 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types.js';
-import { isSymbol } from './type-guards.js';
+import {
+  isSymbol,
+  hasInferredType,
+  resolvedValueDefinition,
+} from './type-guards.js';
 import {
   isErrorTypedOperand,
   isErrorTypedWithoutErrorValue,
@@ -579,8 +583,8 @@ function prefilterAdmits(
   // the call (`indexReadTupleExtension()`, in `validateArguments`). The
   // conditions are the ones that validation tests, with no write.
   if (
-    op.valueDefinition?.inferredType &&
-    op.valueDefinition.value === undefined &&
+    hasInferredType(op) &&
+    resolvedValueDefinition(op)?.value === undefined &&
     ce._withoutFacts(() => indexReadTupleExtension(op.type.type, param)) !==
       undefined
   )

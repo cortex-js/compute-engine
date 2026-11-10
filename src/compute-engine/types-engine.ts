@@ -2545,6 +2545,20 @@ export interface IComputeEngine {
   ): Expression | undefined;
 
   /**
+   * The canonical call `name(…ops)` with its head bound to exactly `def`
+   * (`_qualifiedHead`), not to the definition that `name` resolves to in the
+   * current scope. The operands are boxed in the current scope. Unlike
+   * `_libraryCall()`, `def` can be any definition, and the call is not
+   * marked as a library call. A boxed call whose free head is read again
+   * (`BoxedFunction._reboxedForFreeHead()`) uses it.
+   * @internal */
+  _callBoundTo(
+    name: MathJsonSymbol,
+    ops: ReadonlyArray<ExpressionInput>,
+    def: BoxedDefinition
+  ): Expression;
+
+  /**
    * Push a set of parameter names that, while canonicalizing a function body,
    * shadow any same-named constant (`i`, `e`, ...) so they resolve as ordinary
    * local variables. Balanced with `_popShadowedParameters`. Optional `types`

@@ -55,7 +55,13 @@ import {
 } from '../collection-utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
-import { isDictionary, isFunction, isNumber, isSymbol } from './type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isNumber,
+  isSymbol,
+  readBinding,
+} from './type-guards.js';
 import { provisionalRecursionResult } from './declared-parameter-result.js';
 import {
   noteStackDependentAnswer,
@@ -100,12 +106,7 @@ function namesRunningLiteral(
   expr: Expression,
   running: ReadonlySet<Expression>
 ): boolean {
-  const binding: BoxedDefinition | undefined =
-    expr.valueDefinition !== undefined
-      ? { value: expr.valueDefinition }
-      : expr.operatorDefinition !== undefined
-        ? { operator: expr.operatorDefinition }
-        : undefined;
+  const binding: BoxedDefinition | undefined = readBinding(expr);
   const literal = userFunctionLiteral(binding);
   return literal !== undefined && running.has(literal);
 }
@@ -130,12 +131,7 @@ function callsRunningLiteral(
   if (seen.has(expr)) return false;
   seen.add(expr);
   if (namesRunningLiteral(expr, running)) return true;
-  const binding: BoxedDefinition | undefined =
-    expr.valueDefinition !== undefined
-      ? { value: expr.valueDefinition }
-      : expr.operatorDefinition !== undefined
-        ? { operator: expr.operatorDefinition }
-        : undefined;
+  const binding: BoxedDefinition | undefined = readBinding(expr);
   const callee = userFunctionLiteral(binding);
   if (callee !== undefined && callsRunningLiteral(callee, running, seen))
     return true;
@@ -2110,12 +2106,7 @@ function literalBodyResultType(
         derive,
       });
       if (callee !== undefined) {
-        const binding =
-          expr.valueDefinition !== undefined
-            ? { value: expr.valueDefinition }
-            : expr.operatorDefinition !== undefined
-              ? { operator: expr.operatorDefinition }
-              : undefined;
+        const binding = readBinding(expr);
         if (binding !== undefined)
           t =
             callResultType(

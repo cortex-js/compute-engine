@@ -11,7 +11,13 @@ import type {
 import { markForwardCallReference } from './forward-call-reference.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
 import { assignmentLocalsOf } from '../assignment-locals.js';
-import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
+import {
+  isFunction,
+  isSymbol,
+  isString,
+  isNumber,
+  isFreeName,
+} from './type-guards.js';
 import { canonicalMultiply } from './arithmetic-mul-div.js';
 import { inferNumericArgs } from './validate.js';
 import { productMayHaveMatrix } from './matrix-operand.js';
@@ -241,10 +247,13 @@ function canonicalJuxtaposition(
       // (`provisional-application.ts`).
       if (
         isSymbol(lhsCanon) &&
-        couldBecomeFunction(ce.lookupDefinition(lhsCanon.symbol))
+        couldBecomeFunction(ce.lookupDefinition(lhsCanon.symbol), lhsCanon)
       )
         noteProvisionalApplication(lhsCanon.symbol);
-    } else if (isSymbol(lhsCanon) && isDeclaredFunction(ce, lhsCanon.symbol)) {
+    } else if (
+      isSymbol(lhsCanon) &&
+      isDeclaredFunction(ce, lhsCanon.symbol, lhsCanon)
+    ) {
       const applied = applySymbolThroughPostfix(ce, lhsCanon.symbol, rhs);
       if (applied !== undefined) return applied;
     } else if (
@@ -257,14 +266,14 @@ function canonicalJuxtaposition(
       // function (the rule of the bare-argument-list branch below, which
       // states why the application reading is preferred).
       const def = ce.lookupDefinition(lhsCanon.symbol);
-      if (headHasNoTypeInformation(ce, lhsCanon.symbol, def)) {
+      if (headHasNoTypeInformation(ce, lhsCanon.symbol, def, lhsCanon)) {
         const applied = applyThroughPostfix(ce, rhs, (args) => {
           if (args.some((a) => a.has(lhsCanon.symbol))) return undefined;
           return applyUndeclaredHead(ce, lhsCanon, args);
         });
         if (applied !== undefined) return applied;
       }
-      if (couldBecomeFunction(def)) {
+      if (couldBecomeFunction(def, lhsCanon)) {
         // The product reading below rests on the symbol having no function
         // definition YET: record the application so the expression can be
         // re-derived if the symbol later gains one
@@ -305,8 +314,12 @@ function canonicalJuxtaposition(
         // assertion by the user: mark the declaration INFERRED so a later
         // scalar use or `ce.assign(sym, value)` can widen/override it
         // (D11). A genuine function use keeps working — the inferred type
-        // still matches `function`.
-        ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
+        // still matches `function`. With the engine flag `_bindingUnits`,
+        // boxing declares no name: the call boxed below writes the
+        // `function` reading of the head in the environment of the unit
+        // (`makeCanonicalFunctionCore()`).
+        if (!ce._bindingUnits)
+          ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
         return ce.expr([lhsCanon.symbol]);
       }
 
@@ -323,7 +336,7 @@ function canonicalJuxtaposition(
       const def = ce.lookupDefinition(lhsCanon.symbol);
 
       // Explicitly declared as function/operator → function call
-      if (isDeclaredFunction(ce, lhsCanon.symbol)) {
+      if (isDeclaredFunction(ce, lhsCanon.symbol, lhsCanon)) {
         return ce.function(lhsCanon.symbol, args);
       }
 
@@ -332,9 +345,13 @@ function canonicalJuxtaposition(
       if (args.length > 1) {
         // Inferred (see above): a heuristic auto-declaration the user can
         // later widen/override.
-        if (!def)
-          ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
-        else if (!isOperatorDef(def) && def.value?.type?.isUnknown) {
+        // With the engine flag `_bindingUnits`, boxing declares no name:
+        // the call boxed below writes the `function` reading of the head
+        // in the environment of the unit (`makeCanonicalFunctionCore()`).
+        if (!def) {
+          if (!ce._bindingUnits)
+            ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
+        } else if (!isOperatorDef(def) && def.value?.type?.isUnknown) {
           markBodyCopyAsForwardCall(ce, lhsCanon.symbol);
           lhsCanon._infer(() => 'function');
         }
@@ -387,7 +404,7 @@ function canonicalJuxtaposition(
       // re-derived as a product, see `provisional-application.ts`).
       if (
         allArgsNumeric &&
-        headHasNoTypeInformation(ce, lhsCanon.symbol, def) &&
+        headHasNoTypeInformation(ce, lhsCanon.symbol, def, lhsCanon) &&
         !args.some((a) => a.has(lhsCanon.symbol))
       ) {
         return applyUndeclaredHead(ce, lhsCanon, args);
@@ -398,7 +415,7 @@ function canonicalJuxtaposition(
         // definition *yet*: record it so a `Function` literal canonicalized now
         // can be re-derived if the symbol later gains one (see
         // `provisional-application.ts`).
-        if (couldBecomeFunction(def))
+        if (couldBecomeFunction(def, lhsCanon))
           noteProvisionalApplication(lhsCanon.symbol);
         return ce.function(
           'Multiply',
@@ -448,7 +465,7 @@ function canonicalJuxtaposition(
       // application is noted for re-derivation when the head gains a
       // definition or a value (`f(S)` with `S` a list, `f` undeclared).
       if (
-        headHasNoTypeInformation(ce, lhsCanon.symbol, def) &&
+        headHasNoTypeInformation(ce, lhsCanon.symbol, def, lhsCanon) &&
         !args.some((a) => a.has(lhsCanon.symbol))
       )
         return applyUndeclaredHead(ce, lhsCanon, args);
@@ -460,7 +477,10 @@ function canonicalJuxtaposition(
         return applyUndeclaredHead(ce, lhsCanon, args);
       // Inferred (see above): a heuristic auto-declaration the user can
       // later widen/override.
-      if (!def)
+      // With the engine flag `_bindingUnits`, boxing declares no name:
+      // the call boxed below writes the `function` reading of the head
+      // in the environment of the unit (`makeCanonicalFunctionCore()`).
+      if (!def && !ce._bindingUnits)
         ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
       return ce.function(lhsCanon.symbol, args);
     }
@@ -987,8 +1007,22 @@ function isNumericConstant(ce: ComputeEngine, x: Expression): boolean {
 
 /** Is `name` declared as a function — an operator, or a value whose type is
  * a function type? The test the adjacent-pair combiner applies before it
- * reads `f (x)` as a call. */
-function isDeclaredFunction(ce: ComputeEngine, name: string): boolean {
+ * reads `f (x)` as a call.
+ *
+ * `occurrence` is the canonical occurrence of `name` being read, when the
+ * caller has one. A free name (`isFreeName()`, `binding-unit.ts`) has no
+ * definition: its type is read instead (rule 4 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), which holds the
+ * requirements of its own unit. */
+function isDeclaredFunction(
+  ce: ComputeEngine,
+  name: string,
+  occurrence?: Expression
+): boolean {
+  if (isFreeName(occurrence)) {
+    const type = occurrence!.type;
+    return !type.isUnknown && type.matches('function');
+  }
   const def = ce.lookupDefinition(name);
   return (
     def !== undefined &&
@@ -1052,7 +1086,8 @@ function functionSymbolOf(
   if (isParenthesizedFactorName(ce, op)) return undefined;
   const sym =
     isFunction(op, 'Delimiter') && op.nops === 1 ? canonicalOnce(op.op1) : op;
-  if (!isSymbol(sym) || !isDeclaredFunction(ce, sym.symbol)) return undefined;
+  if (!isSymbol(sym) || !isDeclaredFunction(ce, sym.symbol, sym))
+    return undefined;
   return sym.symbol;
 }
 
@@ -1163,7 +1198,8 @@ function combineFunctionApplications(
       // A head with no type information applied through a power or a
       // factorial (`2f(3)^2`): the application, as on the two-operand route.
       const def = ce.lookupDefinition(op.symbol);
-      if (headHasNoTypeInformation(ce, op.symbol, def)) {
+      const occurrence = occurrenceOf(ce, op, def);
+      if (headHasNoTypeInformation(ce, op.symbol, def, occurrence)) {
         const head = op.canonical;
         const applied = isSymbol(head)
           ? applyThroughPostfix(ce, ops[i + 1], (args) => {
@@ -1177,7 +1213,7 @@ function combineFunctionApplications(
           continue;
         }
       }
-      if (couldBecomeFunction(def)) {
+      if (couldBecomeFunction(def, occurrence)) {
         // The postfix pair stays two multiplication operands only because
         // the symbol has no function definition YET — record it, as for a
         // bare argument list below.
@@ -1191,13 +1227,14 @@ function combineFunctionApplications(
     ) {
       const symName = op.symbol;
       const def = ce.lookupDefinition(symName);
+      const occurrence = occurrenceOf(ce, op, def);
       const delim = ops[i + 1] as Expression & {
         op1: Expression;
         ops: ReadonlyArray<Expression>;
       };
 
       // Already declared as function/operator → function call
-      if (isDeclaredFunction(ce, symName)) {
+      if (isDeclaredFunction(ce, symName, occurrence)) {
         let args: ReadonlyArray<Expression> = delim.op1
           ? isFunction(delim.op1, 'Sequence')
             ? delim.op1.ops
@@ -1217,8 +1254,13 @@ function combineFunctionApplications(
         if (args.length > 1) {
           // Inferred: a heuristic auto-declaration the user can later
           // widen/override (D11).
-          if (!def) ce.declare(symName, { type: 'function', inferred: true });
-          else if (!isOperatorDef(def) && def.value?.type?.isUnknown) {
+          // With the engine flag `_bindingUnits`, boxing declares no name:
+          // the call boxed below writes the `function` reading of the head
+          // in the environment of the unit (`makeCanonicalFunctionCore()`).
+          if (!def) {
+            if (!ce._bindingUnits)
+              ce.declare(symName, { type: 'function', inferred: true });
+          } else if (!isOperatorDef(def) && def.value?.type?.isUnknown) {
             markBodyCopyAsForwardCall(ce, symName);
             op.canonical._infer(() => 'function');
           }
@@ -1232,7 +1274,10 @@ function combineFunctionApplications(
       // application here too: `2f(x)` is `2 · f(x)`. Same rule and same
       // exception as the two-operand route (`x y(2y)` keeps `y(2y)` a
       // product).
-      if (headHasNoTypeInformation(ce, symName, def) && delim.op1) {
+      if (
+        headHasNoTypeInformation(ce, symName, def, occurrence) &&
+        delim.op1
+      ) {
         const args = flatten(
           isFunction(delim.op1, 'Sequence') ? delim.op1.ops : [delim.op1]
         );
@@ -1245,7 +1290,7 @@ function combineFunctionApplications(
         // first and only then looks the head up ("Parse the arguments first,
         // in case they reference lhsCanon.symbol") — and a declared function
         // applied to an argument that mentions it is a call there too.
-        if (isDeclaredFunction(ce, symName)) {
+        if (isDeclaredFunction(ce, symName, occurrence)) {
           result.push(ce.function(symName, args));
           i += 2;
           continue;
@@ -1260,7 +1305,8 @@ function combineFunctionApplications(
       // The pair stays two multiplication operands only because `symName` has
       // no function definition *yet* — record it (see the same note in
       // `canonicalInvisibleOperator`).
-      if (couldBecomeFunction(def)) noteProvisionalApplication(symName);
+      if (couldBecomeFunction(def, occurrence))
+        noteProvisionalApplication(symName);
     }
     result.push(ops[i]);
     i++;
@@ -1357,7 +1403,8 @@ function isWideValueType(x: Expression): boolean {
 function headHasNoTypeInformation(
   ce: ComputeEngine,
   name: string,
-  def: ReturnType<ComputeEngine['lookupDefinition']>
+  def: ReturnType<ComputeEngine['lookupDefinition']>,
+  occurrence?: Expression
 ): boolean {
   if (ce._isShadowedParameter(name)) {
     if (
@@ -1394,6 +1441,10 @@ function headHasNoTypeInformation(
   // to the scope.
   const resolved = oracleHeadType(ce, name);
   if (resolved !== undefined) return !oracleTypeIsValue(resolved);
+  // A free name (`isFreeName()`, `binding-unit.ts`): the type of the
+  // occurrence holds the requirements of its unit (`isDeclaredFunction()`).
+  if (def === undefined && isFreeName(occurrence))
+    return occurrence!.type.isUnknown;
   if (def === undefined) return true;
   if (isOperatorDef(def)) return false;
   // A head that HOLDS a value is a value, whatever the value's type: after
@@ -1543,11 +1594,31 @@ export function markBodyCopyAsForwardCall(
  * (non-function) type is settled — `2x(t+1)` with a numeric `x` is a product,
  * and stays one. */
 function couldBecomeFunction(
-  def: ReturnType<ComputeEngine['lookupDefinition']>
+  def: ReturnType<ComputeEngine['lookupDefinition']>,
+  occurrence?: Expression
 ): boolean {
+  // A free name (`isFreeName()`, `binding-unit.ts`): settled when the
+  // requirements of its unit give it a type (`isDeclaredFunction()`).
+  if (def === undefined && isFreeName(occurrence))
+    return occurrence!.type.isUnknown;
   if (def === undefined) return true;
   if (isOperatorDef(def)) return false;
   return def.value.type.isUnknown;
+}
+
+/** With the engine flag `_bindingUnits`: the canonical occurrence of the
+ * symbol `op`, whose type the tests of a call head read for a free name
+ * (`isDeclaredFunction()`). `undefined` without the flag, and when the name
+ * has a definition `def`: the tests then read `def`, and only a free name
+ * reads its occurrence. The caller computes it once per head: the canonical
+ * form of a raw symbol is a new symbol at each read, and its boxing can
+ * write in the scope of the boxing. */
+function occurrenceOf(
+  ce: ComputeEngine,
+  op: Expression,
+  def: ReturnType<ComputeEngine['lookupDefinition']>
+): Expression | undefined {
+  return ce._bindingUnits && def === undefined ? op.canonical : undefined;
 }
 
 /**

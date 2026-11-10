@@ -87,6 +87,7 @@ import {
   isString,
   isDictionary,
   integerRangeElements,
+  hasInferredType,
 } from '../boxed-expression/type-guards.js';
 import { multiClauseState } from '../multi-clause.js';
 import {
@@ -2393,7 +2394,7 @@ function admitsRuntimeCheckedArray(e: Expression): boolean {
   // Only a type the engine INFERRED from the uses. A declared
   // `collection<number>` is a contract that admits a set, and the program
   // then declines, so that the interpreter evaluates it.
-  if (e.valueDefinition?.inferredType !== true) return false;
+  if (!hasInferredType(e)) return false;
   if (couldBeStringOperand(e)) return false;
   // A symbol whose type is inferred `string` matches `collection<any>`, but
   // its value is a JavaScript string, never an array, so `_SYS.arr` would
@@ -2473,7 +2474,7 @@ function iterableCollectionCode(
   // A single value is read as one element when the type has a number arm,
   // or when the type was inferred from the uses. The interpreter refuses a
   // number at a parameter DECLARED `collection` (`incompatible-type`).
-  const inferred = e.valueDefinition?.inferredType === true;
+  const inferred = hasInferredType(e);
   const scalar =
     !reducer || (!inferred && !numberArm)
       ? undefined
@@ -5439,7 +5440,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const tupleBase =
       typeof baseType !== 'string' &&
       baseType.kind === 'tuple' &&
-      !(isSymbol(coll) && coll.valueDefinition?.inferredType === true);
+      !(isSymbol(coll) && hasInferredType(coll));
     if (numericElement && !tupleBase && coll.unknowns.length > 0) {
       // The batch body of `broadcast()` reads a checked shared list with no
       // per-read test of the array (`batchListRead`).
@@ -12288,7 +12289,7 @@ function varsEntryPlan(
     // declaration.
     if (
       declared !== undefined &&
-      sym.valueDefinition?.inferredType !== true &&
+      !hasInferredType(sym) &&
       isTextEntryType(declared)
     )
       continue;

@@ -26,7 +26,7 @@ import type {
 
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import type { Expression } from '../global-types.js';
-import { isDictionary } from './type-guards.js';
+import { isDictionary, hasInferredType } from './type-guards.js';
 
 /**
  * The call-site solver's EMBEDDING (§4.3/§4.5 of
@@ -265,9 +265,11 @@ export function actualOfOperand(op: Expression): SolveActual {
     // A block local declared `any` is not inferable: its type is the
     // declaration (`isDeclaredLocal()`).
     inferable:
-      (!!op.valueDefinition?.inferredType &&
+      (hasInferredType(op) &&
         (op.type.isUnknown ||
-          (type === 'any' && !isDeclaredLocal(op.valueDefinition)))) ||
+          (type === 'any' &&
+            (op.valueDefinition === undefined ||
+              !isDeclaredLocal(op.valueDefinition))))) ||
       forwardsRequirementWhileUnknown(op),
     get liftable(): boolean {
       return (liftable ??= couldBeUnkeyedCollectionOperand(op));

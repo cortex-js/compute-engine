@@ -89,6 +89,7 @@ import {
   isString,
   isSymbol,
   sym,
+  hasInferredType as hasInferredNameType,
 } from './boxed-expression/type-guards.js';
 import { restrictionParts } from './boxed-expression/conditional-value.js';
 import { optionalParameterTarget } from './boxed-expression/function-literal.js';
@@ -1612,7 +1613,7 @@ function isUnresolvedCollectionShape(x: Expression): boolean {
  * and such a type does not say that `q` will hold a collection.
  */
 function hasInferredType(x: Expression): boolean {
-  if (isSymbol(x)) return x.valueDefinition?.inferredType === true;
+  if (isSymbol(x)) return hasInferredNameType(x);
   if (isFunction(x)) return x.operatorDefinition?.inferredSignature === true;
   return false;
 }
@@ -3808,7 +3809,9 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
 
   // A symbol counts only when its number type was explicitly declared, not
   // merely inferred from earlier use.
-  if (isSymbol(expr)) return !expr.valueDefinition?.inferredType;
+  // A free name (`binding-unit.ts`) has a type from the requirements of its
+  // unit, which is inferred (`hasInferredNameType()`).
+  if (isSymbol(expr)) return !hasInferredNameType(expr);
 
   // A function call counts only when its operator has a declared (non-inferred)
   // numeric result. A genuinely scalar-typed call (e.g. `Length([1,2])`)

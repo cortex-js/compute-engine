@@ -22,6 +22,7 @@ import {
   isFunction,
   isAbsentSymbol,
   isDictionary,
+  isFreeName,
 } from '../boxed-expression/type-guards.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
@@ -1320,7 +1321,12 @@ export function freeSymbolOccurrence(
   occurrences: ReadonlyMap<string, Expression>
 ): Expression | undefined {
   const found = occurrences.get(name);
-  return found !== undefined && isSymbol(found) && !found.valueDefinition
+  // A free name (`isFreeName()`, `binding-unit.ts`) has no definition, and
+  // its type holds the requirements of its unit: it is kept.
+  return found !== undefined &&
+    isSymbol(found) &&
+    !found.valueDefinition &&
+    !isFreeName(found)
     ? undefined
     : found;
 }

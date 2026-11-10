@@ -7,7 +7,13 @@ import type { Rational } from '../numerics/types.js';
 import { isZero } from '../numerics/rationals.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
-import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  isFreeName,
+  freeBinding,
+} from './type-guards.js';
 import {
   isFunctionLiteralCapture,
   isFunctionLiteralParameter,
@@ -169,10 +175,22 @@ export const FREE_SYMBOL_ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set([
  * a literal list reads a symbol as a number cell only when the fact is
  * present. `narrowFreeSymbolCells()` infers as numbers only the free
  * symbols of an arithmetic cell, not a free symbol that is an element.
+ *
+ * A free name (`isFreeName()`, `binding-unit.ts`) is a free symbol when
+ * its name resolves to no definition. When it resolves to a value
+ * definition, that definition is tested as an own definition is.
  */
 export function isFreeSymbol(op: Expression): boolean {
   if (!isSymbol(op)) return false;
-  const def = op.valueDefinition;
+  // A free name that resolves to no definition is free; one that resolves
+  // to a value definition is tested on that definition.
+  const binding = isFreeName(op) ? freeBinding(op) : undefined;
+  if (isFreeName(op) && (binding === undefined || !('value' in binding)))
+    return binding === undefined && !op.symbol.startsWith('_');
+  const def =
+    binding !== undefined && 'value' in binding
+      ? binding.value
+      : op.valueDefinition;
   if (def === undefined || def._blockLocal === true) return false;
   if (def.value !== undefined || def.isConstant) return false;
   if (op.symbol.startsWith('_')) return false;

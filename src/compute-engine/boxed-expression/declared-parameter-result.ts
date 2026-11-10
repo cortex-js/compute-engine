@@ -9,7 +9,7 @@ import {
   openDepthScalarArms,
   returnTypeText,
 } from '../../common/type/utils.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isSymbol, isFreeCallHead } from './type-guards.js';
 import {
   functionLiteralParameterNames,
   functionLiteralParameterType,
@@ -422,10 +422,12 @@ function calleeLiteral(expr: Expression): Expression | undefined {
   // A call bound when its head was not yet assigned keeps the value
   // definition declared then (a forward reference), which holds no literal:
   // `hb(x − 1)` in the body of `ha` when `ha` was assigned before `hb`. The
-  // current definition of the head is read instead.
+  // current definition of the head is read instead. A free call head
+  // (`isFreeCallHead()`, `binding-unit.ts`) is such a forward reference with
+  // no definition at all.
   if (
     literal === undefined &&
-    expr.valueDefinition !== undefined &&
+    (expr.valueDefinition !== undefined || isFreeCallHead(expr)) &&
     isFunction(expr)
   ) {
     const current = expr.engine.lookupDefinition(expr.operator);

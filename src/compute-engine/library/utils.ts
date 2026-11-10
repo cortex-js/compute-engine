@@ -13,6 +13,8 @@ import {
   isNumber,
   isSymbol,
   isFunction,
+  isFreeName,
+  isFreeCallHead,
 } from '../boxed-expression/type-guards.js';
 import type { Type } from '../../common/type/types.js';
 import {
@@ -5003,7 +5005,10 @@ export function substituteBinderValues(
       const value = subs[name];
       if (value === undefined) return sym;
       const own = sym.valueDefinition;
-      if (own === undefined) return value;
+      // A free name (`isFreeName()`, `binding-unit.ts`) has no binding, but
+      // it never denotes the variable of a binder: it was not inside the
+      // binder when it was boxed. It is kept.
+      if (own === undefined) return isFreeName(sym) ? sym : value;
       const binding = bindings.get(name);
       return binding !== undefined && sameBindingDef(binding, own)
         ? value
@@ -5027,6 +5032,9 @@ export function substituteBinderValues(
       if (value === undefined || !value.type.matches('function'))
         return undefined;
       if (app.operatorDefinition !== undefined) return undefined;
+      // A free call head (`isFreeCallHead()`) never denotes the variable of
+      // a binder, as a free name does not.
+      if (isFreeCallHead(app)) return undefined;
       const own = app.valueDefinition;
       if (own !== undefined) {
         const binding = bindings.get(name);

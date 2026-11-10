@@ -60,6 +60,9 @@ import {
   isNaNPointValue,
   isExpression,
   sym,
+  isFreeName,
+  isFreeCallHead,
+  freeBinding,
 } from './boxed-expression/type-guards.js';
 import {
   adoptLazyView,
@@ -4684,11 +4687,16 @@ export function snapshotRunVariables(
     return held;
   };
   const current = (s: Expression & { symbol: string }): Expression => {
-    const binding = bindingInContext(
-      ce,
-      s.symbol,
-      s.valueDefinition ?? s.operatorDefinition
-    );
+    // A free name (`isFreeName()`, `binding-unit.ts`) reads the binding
+    // that its name resolves to, which is never a parameter of a call or the
+    // variable of a binder (`freeBinding()`).
+    const binding = isFreeName(s)
+      ? freeBinding(s)
+      : bindingInContext(
+          ce,
+          s.symbol,
+          s.valueDefinition ?? s.operatorDefinition
+        );
     // An occurrence bound to a constant reads the value of its own
     // definition, whatever binding of the same name the scope chain holds
     // (the `isConstant` branch of `BoxedSymbol.evaluate()`). So a result
@@ -5178,7 +5186,8 @@ export function bindReadVariablesOfLazyCollection(
   const subs: ParameterSub[] = [];
   // One substitution per definition that an occurrence carries, and one per
   // name for the occurrences that carry no definition.
-  const added = new Set<BoxedValueDefinition | string>();
+  // A free occurrence is keyed by the definition that it resolves to.
+  const added = new Set<BoxedDefinition | BoxedValueDefinition | string>();
   // The value that the variable `name` bound to `binding` holds now, or
   // `undefined` when `binding` is not a variable with a value.
   const valueOf = (
@@ -5195,12 +5204,17 @@ export function bindReadVariablesOfLazyCollection(
   const add = (
     own: BoxedValueDefinition | undefined,
     name: string,
-    held: Expression
+    held: Expression,
+    free?: BoxedDefinition
   ): void => {
-    const key = own ?? name;
+    const key = free ?? own ?? name;
     if (added.has(key)) return;
     added.add(key);
-    subs.push([own, name, held, false]);
+    subs.push(
+      free === undefined
+        ? [own, name, held, false]
+        : [own, name, held, false, free]
+    );
   };
   // The names that a node of `e` binds, as they shadow the walk. The scope
   // of a `Block` (the body of a function literal) can hold the binding of a
@@ -5247,8 +5261,16 @@ export function bindReadVariablesOfLazyCollection(
       // An occurrence that carries an operator definition and no value
       // definition names a function: it is not a variable.
       if (own === undefined && sym.operatorDefinition !== undefined) return sym;
-      const held = valueOf(sym.symbol, bindingInContext(ce, sym.symbol, own));
-      if (held !== undefined) add(own, sym.symbol, held);
+      // A free name (`isFreeName()`, `binding-unit.ts`) never reads a
+      // parameter or the variable of a binder (`freeBinding()`). Its
+      // substitution records the definition that it resolves to, so that
+      // the free occurrences that read it are replaced.
+      const free = isFreeName(sym) ? freeBinding(sym) : undefined;
+      const held = valueOf(
+        sym.symbol,
+        isFreeName(sym) ? free : bindingInContext(ce, sym.symbol, own)
+      );
+      if (held !== undefined) add(own, sym.symbol, held, free);
       return sym;
     },
     undefined,
@@ -5263,16 +5285,22 @@ export function bindReadVariablesOfLazyCollection(
       // only a head that carries the value definition or no definition.
       if (own === undefined && app.operatorDefinition !== undefined)
         return undefined;
+      // A free call head (`isFreeCallHead()`) never reads a parameter or
+      // the variable of a binder (`freeBinding()`). Its substitution
+      // records the definition that it resolves to, as for a free name.
+      const free = isFreeCallHead(app) ? freeBinding(app) : undefined;
       const held = valueOf(
         name,
-        callableBindingInContext(
-          ce,
-          name,
-          own !== undefined ? { value: own } : undefined
-        )
+        isFreeCallHead(app)
+          ? free
+          : callableBindingInContext(
+              ce,
+              name,
+              own !== undefined ? { value: own } : undefined
+            )
       );
       if (held !== undefined && held.type.matches('function'))
-        add(own, name, held);
+        add(own, name, held, free);
       return undefined;
     },
     undefined,
@@ -6587,12 +6615,22 @@ function captureClosuresUncached(
 
 /** One parameter's post-evaluation substitution: the literal's OWN binding for
  * it, its name, the value to substitute, and whether the ARGUMENT mentions the
- * name (see `bindingKeyedSubs`). */
+ * name (see `bindingKeyedSubs`).
+ *
+ * `freeBinding` is set only by `bindReadVariablesOfLazyCollection()`: the
+ * definition that a free name or a free call head of that name
+ * (`isFreeName()`, `isFreeCallHead()`, `binding-unit.ts`) resolved to when
+ * its value was captured. An occurrence of the name that is free is
+ * replaced only when it resolves to this definition. A substitution of the
+ * parameters of a call leaves it unset, and never replaces a free
+ * occurrence: a free name was boxed outside the literal, and it never
+ * denotes a parameter. */
 type ParameterSub = readonly [
   binding: BoxedValueDefinition | undefined,
   name: string,
   value: Expression,
   ambiguous: boolean,
+  freeBinding?: BoxedDefinition,
 ];
 
 /**
@@ -7074,7 +7112,19 @@ function parameterSubVisitors(subs: ReadonlyArray<ParameterSub>): {
   ): Expression | undefined => {
     const def = (sym as { valueDefinition?: BoxedValueDefinition })
       .valueDefinition;
-    for (const [binding, name, value, ambiguous] of subs) {
+    const free = isFreeName(sym);
+    for (const [binding, name, value, ambiguous, captured] of subs) {
+      // A free name whose value was captured (`freeBinding` of the
+      // substitution): it is replaced when it resolves to the captured
+      // definition.
+      if (
+        free &&
+        captured !== undefined &&
+        sym.symbol === name &&
+        shadowed?.has(name) !== true &&
+        freeBinding(sym) === captured
+      )
+        return value;
       // Bound: it denotes this parameter — either the literal's own binding
       // or this frame's activation of it.
       if (
@@ -7090,9 +7140,12 @@ function parameterSubVisitors(subs: ReadonlyArray<ParameterSub>): {
       // carry no binding at all (`Map`'s held body, a pipe's `_1` topic). An
       // unbound occurrence has nothing else it could denote inside this
       // frame, so the name is the whole answer — the same rule the equality
-      // contract uses for a raw operand.
+      // contract uses for a raw operand. A free name (`isFreeName()`,
+      // `binding-unit.ts`) carries no binding but is not raw: it was boxed
+      // outside the literal, and it never denotes a parameter.
       if (
         def === undefined &&
+        !free &&
         sym.symbol === name &&
         shadowed?.has(name) !== true
       )
@@ -7120,6 +7173,18 @@ function parameterSubVisitors(subs: ReadonlyArray<ParameterSub>): {
     // is not a call of a function value and is kept, and an outer local of
     // the same name, which the inner one shadows, is not used. A bound
     // occurrence takes the first substitution whose binding matches.
+    // A free call head (`isFreeCallHead()`) carries no binding but is not
+    // raw: it never denotes a parameter. It is replaced only by a
+    // substitution that captured the value of the definition that it
+    // resolves to (`freeBinding` of the substitution).
+    if (def === undefined && isFreeCallHead(app)) {
+      const resolved = freeBinding(app);
+      if (resolved === undefined) return undefined;
+      for (const [, param, value, , captured] of subs)
+        if (param === name && captured === resolved)
+          return value.type.matches('function') ? value : undefined;
+      return undefined;
+    }
     const raw = def === undefined && app.operatorDefinition === undefined;
     for (const [binding, param, value, ambiguous] of subs) {
       if (param !== name) continue;
@@ -7794,6 +7859,8 @@ function renameBoundVariables(
         const def = app.valueDefinition;
         if (def === undefined && app.operatorDefinition !== undefined)
           return undefined;
+        // A free call head (`isFreeCallHead()`) is never a parameter.
+        if (isFreeCallHead(app)) return undefined;
         const target = denotes(app.operator, def, inScope);
         if (target === undefined) return undefined;
         return ce.function(target.id, [...ops], {
@@ -9594,6 +9661,10 @@ export function inlineCallParameters(
       break;
     }
     if (live === undefined || !isParameterActivation(live)) return sym;
+    // A free name (`isFreeName()`, `binding-unit.ts`) carries no binding,
+    // but it is not a raw operand: it was boxed outside the function
+    // literal, so it never denotes a parameter.
+    if (isFreeName(sym)) return sym;
     const own = sym.valueDefinition;
     if (own !== undefined && !sameBindingDef(own, live)) return sym;
     return live.storedValue ?? sym;

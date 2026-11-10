@@ -58,6 +58,8 @@ import {
   isDictionary,
   isObject,
   operandsForCanonicalRebuild,
+  isFreeName,
+  readBinding,
 } from './type-guards.js';
 import {
   functionLiteralParameterNames,
@@ -2036,8 +2038,15 @@ function collectReferences(
       // An unbound occurrence (a raw form) has no definition of its own: the
       // binding its name resolves to says whether it is a constant (a bound
       // constant was left out above).
+      // A free name (`isFreeName()`, `binding-unit.ts`) reads the binding
+      // that its name resolves to (`readBinding()`), which skips a library
+      // operator that its unit reads as a variable (`N` in `N + 1`).
       const looked =
-        bound === undefined ? expr.engine.lookupDefinition(s) : undefined;
+        bound !== undefined
+          ? undefined
+          : isFreeName(expr)
+            ? readBinding(expr)
+            : expr.engine.lookupDefinition(s);
       if (looked !== undefined && 'value' in looked && looked.value.isConstant)
         return;
       if (!isLibraryDefinition(expr.engine, s, bound ?? looked))
@@ -2071,8 +2080,13 @@ function collectReferences(
     // parameter whenever an outer binding of the name exists, and report as
     // free a symbol that evaluates to the parameter's value.
     const own = expr.valueDefinition;
-    const def =
-      own === undefined
+    // A free name (`isFreeName()`, `binding-unit.ts`) reads the binding
+    // that its name resolves to (`readBinding()`): never a parameter or the
+    // variable of a binder, and not a library operator that its unit reads
+    // as a variable.
+    const def = isFreeName(expr)
+      ? readBinding(expr)
+      : own === undefined
         ? expr.engine.lookupDefinition(s)
         : bindingInContext(expr.engine, s, own);
 

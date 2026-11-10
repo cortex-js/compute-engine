@@ -3543,6 +3543,15 @@ export class ComputeEngine implements IComputeEngine {
     return call;
   }
 
+  /** See `IComputeEngine._callBoundTo()`. @internal */
+  _callBoundTo(
+    name: MathJsonSymbol,
+    ops: ReadonlyArray<ExpressionInput>,
+    def: BoxedDefinition
+  ): Expression {
+    return boxFunction(this, name, ops, { libraryHead: def });
+  }
+
   /** The `resolveSymbol` handler of the `parse()` call in progress; see the
    * interface. Saved and restored around each parse, so a parse made from
    * inside a handler sees its own. @internal */

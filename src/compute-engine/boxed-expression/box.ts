@@ -165,6 +165,8 @@ import {
   isSymbol,
   isAbsentSymbol,
   adoptsForeignEngineObject,
+  hasInferredType,
+  resolvedValueDefinition,
 } from './type-guards.js';
 import {
   functionLiteralParameterType,
@@ -1372,8 +1374,9 @@ function triviallyAdmittedCall(
       if (op.operatorDefinition !== undefined) return false;
       // A symbol not yet declared holds nothing (it is declared `unknown`
       // on first use); a declared one must hold no value and carry no
-      // static assignment evidence.
-      const def = op.valueDefinition;
+      // static assignment evidence. A free name (`binding-unit.ts`) is
+      // tested on the definition that its name resolves to.
+      const def = resolvedValueDefinition(op);
       if (
         def !== undefined &&
         (def.value !== undefined ||
@@ -3345,16 +3348,33 @@ function makeCanonicalFunctionCore(
     // adopts as its parameter (`_setShadowedParameterDef`). Without it,
     // `(g) ↦ Σ_{x ∈ [1, 2]} g(x)` called a binding of the `Sum` scope, not
     // the parameter, and applied to `a ↦ a + 1` gave `g(1) + g(2)`.
+    let freeHead: Scope | undefined = undefined;
     if (ce._resolveOnlyDepth === 0) {
       let autoScope = ce.context.lexicalScope;
       while (autoScope.noAutoDeclare && autoScope.parent)
         autoScope = autoScope.parent;
-      ce.declare(name, { type: 'function', inferred: true }, autoScope);
-      const declared = autoScope.bindings.get(name);
-      if (declared !== undefined && !ce._isShadowedParameter(name))
-        markForwardCallReference(declared, autoScope);
-      if (declared !== undefined && ce._isShadowedParameter(name))
-        ce._setShadowedParameterDef(name, declared);
+      // With the engine flag `_bindingUnits`, boxing declares no name: the
+      // `function` reading of the head is a requirement on the free name
+      // in the environment of the unit (`binding-unit.ts`), and the head
+      // is resolved when the call is evaluated. A scope that the boxing
+      // created (the body of a function literal), and a parameter of a
+      // literal, still get the declaration below.
+      if (
+        ce._bindingUnits &&
+        !ce._isShadowedParameter(name) &&
+        ce.lookupDefinition(name) === undefined &&
+        ce._boxingState.isPersistentScope(autoScope) !== false
+      ) {
+        ce.symbol(name)._infer(() => 'function');
+        freeHead = autoScope;
+      } else {
+        ce.declare(name, { type: 'function', inferred: true }, autoScope);
+        const declared = autoScope.bindings.get(name);
+        if (declared !== undefined && !ce._isShadowedParameter(name))
+          markForwardCallReference(declared, autoScope);
+        if (declared !== undefined && ce._isShadowedParameter(name))
+          ce._setShadowedParameterDef(name, declared);
+      }
     }
     // An argument of a function with no declared signature is a value: a
     // bare `N` or `D` there is a variable (`devolveAtValuePositions`).
@@ -3369,6 +3389,7 @@ function makeCanonicalFunctionCore(
     return new BoxedFunction(ce, name, boxedOps, {
       metadata,
       canonical: true,
+      freeHead,
     });
   }
 
@@ -4234,9 +4255,7 @@ function isCollectionOnlyType(t: Type): boolean {
 function hasNarrowableArg(args: ReadonlyArray<Expression>): boolean {
   return args.some(
     (arg) =>
-      isSymbol(arg) &&
-      arg.valueDefinition?.inferredType &&
-      arg.type.type === 'unknown'
+      isSymbol(arg) && hasInferredType(arg) && arg.type.type === 'unknown'
   );
 }
 
@@ -4283,7 +4302,7 @@ function narrowArgsFromInferredSignature(
     for (let i = 0; i < n; i++) {
       const arg = args[i];
       if (!isSymbol(arg)) continue;
-      if (!arg.valueDefinition?.inferredType) continue;
+      if (!hasInferredType(arg)) continue;
       if (arg.type.type !== 'unknown') continue;
       const paramType = sigArgs[i].type;
       if (!isCollectionOnlyType(paramType)) continue;
