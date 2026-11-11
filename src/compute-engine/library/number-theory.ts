@@ -1930,6 +1930,53 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       }),
     },
 
+    PartitionsQ: {
+      description:
+        'Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n < 0. The Wolfram Language `PartitionsQ`.',
+      signature: '(integer) -> integer',
+      broadcastable: true,
+      examples: ['PartitionsQ(10)  // 10'],
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
+        // The integrality test comes first, as for `NPartition`: `toBigint`
+        // rounds a non-integer.
+        if (n.isInteger !== true) return undefined;
+        const nn = toBigint(n);
+        if (nn === null) return undefined;
+        if (nn < 0n) return ce.number(0);
+        // Σ q(n) xⁿ = ∏(1 + xᵏ) = E(x²)/E(x), with Euler's pentagonal series
+        // E(x) = ∏(1 − xᵏ) = Σ_{k∈ℤ} (−1)ᵏ x^{k(3k−1)/2} (OEIS A000009).
+        // Multiplying by E(x) gives, with the pentagonal numbers g = k(3k∓1)/2,
+        // q(m) = Σ_{k≥1} (−1)^{k+1} (q(m − g₋) + q(m − g₊))
+        //        + Σ_{k≥1} (−1)ᵏ ([m = 2g₋] + [m = 2g₊]),
+        // for m ≥ 1, with q(0) = 1. O(n√n) steps on integers of about
+        // π√(n/3)/ln 10 digits; the work estimate keeps a call too large to
+        // materialize symbolic.
+        const N = Number(nn);
+        const digits = (Math.PI * Math.sqrt(N / 3)) / Math.LN10 + 1;
+        if (exactRecurrenceTooLarge(N * (2 * Math.sqrt(N) + 2), digits))
+          return undefined;
+        const Q: bigint[] = new Array(N + 1);
+        Q[0] = 1n;
+        let steps = 0;
+        for (let m = 1; m <= N; m++) {
+          let total = 0n;
+          for (let k = 1; ; k++) {
+            valueScaledStep('PartitionsQ', ++steps, ce._deadlineFrame);
+            const pent1 = (k * (3 * k - 1)) / 2;
+            const pent2 = (k * (3 * k + 1)) / 2;
+            if (pent1 > m) break;
+            const sign = k % 2 === 0 ? -1n : 1n;
+            total += sign * Q[m - pent1];
+            if (pent2 <= m) total += sign * Q[m - pent2];
+            if (m === 2 * pent1) total -= sign;
+            if (m === 2 * pent2) total -= sign;
+          }
+          Q[m] = total;
+        }
+        return ce.number(Q[N]);
+      }),
+    },
+
     // `PartitionsP` is the Wolfram Language name of `NPartition`. It has the
     // same meaning and the same single integer operand, so the canonical form
     // is `NPartition`. `ce.function()` validates the operand against the

@@ -6292,6 +6292,21 @@
       ]
     },
     {
+      "name": "PartitionsQ",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n < 0. The Wolfram Language `PartitionsQ`.",
+      "examples": [
+        "PartitionsQ(10)  // 10"
+      ]
+    },
+    {
       "name": "PDF",
       "category": "Statistics",
       "arity": "2",

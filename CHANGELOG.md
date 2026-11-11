@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### New Features
+
+- **`PartitionsQ(n)` is the number of partitions of `n` into distinct parts.**
+  It is the Wolfram Language `PartitionsQ` and, by Euler's theorem, also counts
+  the partitions of `n` into odd parts. Like `NPartition`, it is 0 for a
+  negative integer, threads over lists, gives a float for a float operand and
+  stays unevaluated for a non-integer or for an `n` too large to compute.
+
+  ```js
+  ce.box(['PartitionsQ', 10]).evaluate(); // 10
+  ```
+
 ## 0.187.0 _2026-11-11_
 
 ### Breaking Changes
