@@ -518,9 +518,23 @@ export function closedFormIntegral(
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): Expression | undefined {
+  const engine = args[0].engine;
+  // With the engine flag `_bindingUnits`, a bound that is a name with no
+  // type (`x` in `\int_x^\infty f(y) dy`) is required to be a number here:
+  // the compiled code reads it as one. Without the flag, the first search
+  // below narrows the definition of the name, and that narrowing stays for
+  // the later compilations. With the flag, a requirement is written in the
+  // environment of the compilation in progress, so a compilation that makes
+  // no search (a recorded timeout, an empty pool) must write it too.
+  if (engine._bindingUnits)
+    for (const limit of args.slice(1)) {
+      if (!isFunction(limit, 'Limits')) continue;
+      for (const bound of limit.ops.slice(1))
+        if (isSymbol(bound) && bound.type.type === 'unknown')
+          bound._infer(() => 'number');
+    }
   if (referencesVarsSymbol(args, target)) return undefined;
 
-  const engine = args[0].engine;
   // The attempt evaluates in radian mode (see below), but the value of an
   // assigned symbol and the body of a user function that the integrand
   // reads are stored in the engine's unit, and were not rewritten: in

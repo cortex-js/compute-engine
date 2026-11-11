@@ -184,6 +184,13 @@ export class GLSLTarget extends GPUShaderTarget {
     parameters: Array<[name: string, type: string]>,
     options?: { constantFold?: boolean }
   ): string {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compileFunction(expr, functionName, returnType, parameters, options)
+      );
     // Both branches below put the body in a position that requires a VALUE:
     // the single-line one wraps it in `return`, the multi-line one relies on
     // the block hook having done so. A body whose value statement is a
@@ -245,6 +252,16 @@ export class GLSLTarget extends GPUShaderTarget {
      * (see `CompilationOptions.constantFold`). */
     constantFold?: boolean;
   }): string {
+    // Called directly, this method is an operation on the expressions of
+    // the body (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    const first = options.body?.[0]?.expression;
+    if (first?.engine?._opensOperation(false))
+      return first.engine._withOperation(
+        options.body.map((statement) => statement.expression),
+        () => this.compileShader(options)
+      );
     const {
       type,
       version = '300 es',

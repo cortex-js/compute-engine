@@ -7648,6 +7648,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compile(expr, options)
+      );
     assertNoProfileOption(options);
     // The `storage` hints are shader-only and ignored by this target, but
     // validated on every target (see `javascript-target.ts`).
@@ -7802,6 +7809,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): string {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compileToSource(expr, options)
+      );
     // The single-line statements the emitted-source scan below cannot see: an
     // assignment body emits `s = x` and a root `Declare` emits the empty
     // string. Checked structurally, before the body is compiled (D6).
@@ -7881,6 +7895,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     docstring?: string,
     options?: { cse?: boolean; constantFold?: boolean }
   ): string {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compileFunction(expr, functionName, parameters, docstring, options)
+      );
     // Both branches below put the body in a position that requires a VALUE: the
     // single-line one wraps it in `return`, the multi-line one relies on the
     // block hook having done so. A root that is an assignment or a declaration
@@ -8032,6 +8053,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     docstring?: string,
     options?: { cse?: boolean; constantFold?: boolean }
   ): string {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compileVectorized(expr, functionName, parameters, docstring, options)
+      );
     // `functionName` is bound below as a bare Python name. The checks of
     // `compileFunction()` see only the `_<name>_scalar` spelling, which is a
     // valid identifier even for a keyword, so check the name itself here.
@@ -8065,6 +8093,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     parameters: string[],
     options?: { cse?: boolean; constantFold?: boolean }
   ): string {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compileLambda(expr, parameters, options)
+      );
     // A lambda body is an EXPRESSION position, so the same two single-line
     // statement shapes `compileToSource()` declines have no emission here
     // either — the `\n` check below is blind to both (D6).

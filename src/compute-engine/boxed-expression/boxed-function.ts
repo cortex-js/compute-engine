@@ -5070,7 +5070,9 @@ export class BoxedFunction
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(true))
-      return this.engine._withOperation(this, () => this.evaluate(options));
+      return this.engine._withOperation(this, () =>
+        evaluateInOperation.call(this, options)
+      );
     // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
     // when a checkpoint is taken or restored — the snapshot would capture
     // state the evaluation is still about to move, and a later restore would
@@ -12381,6 +12383,12 @@ export class BoxedFunction
     return () => compute(false);
   }
 }
+
+/** The body of `BoxedFunction.evaluate()`, which runs again in the operation
+ * that it opens (`ce._opensOperation()`). It is called directly, not through
+ * `this.evaluate()`: an override or a spy of the public method is entered
+ * once per evaluation. */
+const evaluateInOperation = BoxedFunction.prototype.evaluate;
 
 /**
  * Does `op` supply the CELLS of an element-wise broadcast (rather than being

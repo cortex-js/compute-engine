@@ -39,7 +39,11 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
 import { getPolynomialCoefficients } from '../boxed-expression/polynomials.js';
 import { realPolynomialRoots } from '../numerics/polynomial-roots.js';
@@ -1288,14 +1292,38 @@ function isFreeCoefficient(c: Expression): boolean {
  * declaration would hide the assumption. A symbol whose inferred type is not
  * numeric (`boolean`, `string`, …) is not a real number either.
  */
-function isUntypedFree(ce: ComputeEngine, name: string): boolean {
+function isUntypedFree(
+  ce: ComputeEngine,
+  name: string,
+  expr: Expression
+): boolean {
   const def = ce.lookupDefinition(name);
+  // With the engine flag `_bindingUnits`, a symbol that was never declared
+  // is a free name, with no definition (rule 7 of
+  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): its type is the
+  // type of its occurrence, which its uses require.
+  if (def === undefined && ce._bindingUnits) {
+    const type = occurrenceOf(expr, name)?.type;
+    if (type === undefined || type.isUnknown) return true;
+    return type.matches('number') && !type.matches('real');
+  }
   if (!isValueDef(def) || def.value.isConstant === true) return false;
   if (def.value.value !== undefined && def.value.value !== null) return false;
   if (!def.value.inferredType) return false;
   const type = def.value.type;
   if (type.isUnknown) return true;
   return type.matches('number') && !type.matches('real');
+}
+
+/** The first occurrence of the symbol `name` in `e`, or `undefined`. */
+function occurrenceOf(e: Expression, name: string): Expression | undefined {
+  if (isSymbol(e, name)) return e;
+  if (!isFunction(e)) return undefined;
+  for (const op of e.ops) {
+    const found = occurrenceOf(op, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /**
@@ -1331,7 +1359,7 @@ function realSign(d: Expression, ce: ComputeEngine): -1 | 1 | undefined {
     if (withConstant(k + margin).isNegative === true) return -1;
     return undefined;
   };
-  const names = d.unknowns.filter((name) => isUntypedFree(ce, name));
+  const names = d.unknowns.filter((name) => isUntypedFree(ce, name, d));
   if (names.length === 0) return read(d);
   ce.pushScope();
   try {

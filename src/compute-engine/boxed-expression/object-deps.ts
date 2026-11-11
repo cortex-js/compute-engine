@@ -115,10 +115,21 @@
  * versions move at a write in the environment and at a change of scope. The
  * type is structural so that this module imports no engine module.
  */
-export type VersionedObject = { readonly _version: number };
+export type VersionedObject = {
+  readonly _version: number;
+  /** True for an object whose version is what a read finds in the current
+   * context, not a counter: the read of an entry of a unit environment
+   * (`UnitReadToken`, `binding-unit.ts`). See {@link stampObjectDepsAtEnd}. */
+  readonly _readAgainAtEnd?: boolean;
+};
 
-/** One recorded read: the object, held weakly, and its version at read time. */
-export type ObjectDep = [WeakRef<VersionedObject>, number];
+/** One recorded read: the object, held weakly, and its version at read time.
+ * For an object read again at the end of the computation
+ * (`VersionedObject._readAgainAtEnd`), in a record that asks for it
+ * ({@link stampObjectDepsAtEnd}), the third item is its version then. */
+export type ObjectDep =
+  | [WeakRef<VersionedObject>, number]
+  | [WeakRef<VersionedObject>, number, number];
 
 /** The dependency set of one cache entry. An entry with no object reads
  * carries `undefined` rather than an empty array, so the overwhelmingly
@@ -220,6 +231,31 @@ export function endObjectDeps(): ObjectDeps | undefined {
 }
 
 /**
+ * For a record whose dependencies are read after its computation (the
+ * record of a derivative, `withDerivativeMemo()` in `library/calculus.ts`):
+ * give each object of `deps` that is read again at the end
+ * (`VersionedObject._readAgainAtEnd`) its version now, as the third item of
+ * its dependency. The record is then valid when the read finds the version
+ * of its first read or this one ({@link objectDepsValid}).
+ *
+ * The read of an entry of a unit environment can find an entry that the
+ * computation itself wrote after its first read (a requirement in the
+ * environment of the operation), and a later read through a symbol of the
+ * result finds that entry after the operation ended. The computation, run
+ * again from the state of the first read, makes the same writes and leaves
+ * this state. A cache whose value must be the one that a new computation
+ * gives from the current state does not call this function: it keeps the
+ * first version only.
+ */
+export function stampObjectDepsAtEnd(deps: ObjectDeps | undefined): void {
+  if (deps === undefined) return;
+  for (const dep of deps) {
+    const obj = dep[0].deref();
+    if (obj?._readAgainAtEnd === true) dep[2] = obj._version;
+  }
+}
+
+/**
  * Report a field read of `obj`, whose version was `version` at the moment of
  * the read, to every collector currently open.
  *
@@ -257,7 +293,11 @@ export function mergeObjectDeps(deps: ObjectDeps | undefined): void {
       for (const c of _collectors) c.push([ref, version]);
       continue;
     }
-    for (const c of _collectors) addDep(c, obj, version);
+    // An entry with two versions (`stampObjectDepsAtEnd()`) was served
+    // because the read finds one of them now: that version is what the
+    // enclosing computation read.
+    const read = obj._readAgainAtEnd === true ? obj._version : version;
+    for (const c of _collectors) addDep(c, obj, read);
   }
 }
 
@@ -289,17 +329,20 @@ export function accumulateObjectDeps(
  * Is a cache entry with these dependencies still valid?
  *
  * Every recorded reference must still deref AND still carry the version that
- * was stamped. A reference that has been collected fails conservatively: the
- * object is gone, so its version cannot be compared, and the safe answer is
+ * was stamped (or its version at the end of the computation, in a record
+ * that keeps it: see {@link stampObjectDepsAtEnd}). A reference that has
+ * been collected fails conservatively: the object is gone, so its version cannot be compared, and the safe answer is
  * "recompute". An entry with no dependencies (`undefined`) is unconstrained by
  * this channel and answers `true` — its own generation guard still applies.
  */
 export function objectDepsValid(deps: ObjectDeps | undefined): boolean {
   if (deps === undefined) return true;
-  for (const [ref, version] of deps) {
-    const obj = ref.deref();
+  for (const dep of deps) {
+    const obj = dep[0].deref();
     if (obj === undefined) return false;
-    if (obj._version !== version) return false;
+    const now = obj._version;
+    // The third item is read only when the first version does not match.
+    if (now !== dep[1] && now !== dep[2]) return false;
   }
   return true;
 }
@@ -313,8 +356,11 @@ export function objectDepCollectorDepth(): number {
 }
 
 /** Add one `(object, version)` read to a single collector, coalescing a
- * repeat read of the same object to the LOWEST version seen. Collectors hold
- * a handful of entries at most, so the linear scan beats a map. */
+ * repeat read of the same object to the LOWEST version seen. For an object
+ * read again at the end (`VersionedObject._readAgainAtEnd`), whose version
+ * is not a counter, the record keeps the version of the first read.
+ * Collectors hold a handful of entries at most, so the linear scan beats a
+ * map. */
 function addDep(
   deps: ObjectDeps,
   obj: VersionedObject,
@@ -322,7 +368,7 @@ function addDep(
 ): void {
   for (const dep of deps) {
     if (dep[0].deref() === obj) {
-      if (version < dep[1]) dep[1] = version;
+      if (version < dep[1] && obj._readAgainAtEnd !== true) dep[1] = version;
       return;
     }
   }

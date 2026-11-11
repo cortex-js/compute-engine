@@ -10,6 +10,7 @@ import {
   isNonRealNumber,
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
+  narrow,
 } from '../../common/type/utils.js';
 import { loweredKindType } from './kind-lowering.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
@@ -146,7 +147,10 @@ export function analyzeReferences(
     // read an input `_`.
     if (writing !== undefined && e.symbol === '_') return;
     free.add(e.symbol);
-    if (occurrences === undefined || indirectDepth !== 0) return;
+    if (occurrences === undefined) return;
+    if (engine._bindingUnits && !assignTargets.has(e))
+      noteTypedOccurrence(occurrences, e);
+    if (indirectDepth !== 0) return;
     const recorded = occurrences.get(e.symbol);
     if (
       recorded === undefined ||
@@ -1321,6 +1325,9 @@ export function freeSymbolOccurrence(
   occurrences: ReadonlyMap<string, Expression>
 ): Expression | undefined {
   const found = occurrences.get(name);
+  const typed = typedOccurrences.get(occurrences)?.get(name);
+  if (typed !== undefined && (typed.length > 1 || typed[0] !== found))
+    return narrowestOccurrence(typed);
   // A free name (`isFreeName()`, `binding-unit.ts`) has no definition, and
   // its type holds the requirements of its unit: it is kept.
   return found !== undefined &&
@@ -1329,6 +1336,95 @@ export function freeSymbolOccurrence(
     !isFreeName(found)
     ? undefined
     : found;
+}
+
+/**
+ * With the engine flag `_bindingUnits`: for the map of occurrences of one
+ * reference analysis, for each free symbol, the occurrences that can read
+ * different types (`noteTypedOccurrence()`).
+ */
+const typedOccurrences = new WeakMap<
+  ReadonlyMap<string, Expression>,
+  Map<string, Expression[]>
+>();
+
+/** The environment of the unit of the symbol `e`, and the key of its entry
+ * there: its value definition, or its home scope for a free name
+ * (`binding-unit.ts`). */
+function unitKeyOf(e: Expression): { env: unknown; key: unknown } {
+  const s = e as {
+    _env?: unknown;
+    _homeScope?: unknown;
+    valueDefinition?: unknown;
+  };
+  return { env: s._env, key: s.valueDefinition ?? s._homeScope };
+}
+
+/**
+ * Record the occurrence `e` of a free symbol of the compiled expression,
+ * with the engine flag `_bindingUnits`. Boxing declares no name, so the
+ * type of an input is in the environments of the units that use it: the
+ * unit of the expression, the unit of an assigned value that the code
+ * folds (`b := c + 1`), the unit of the body of a function that the code
+ * calls. Each occurrence reads its own unit, and the compilation gives the
+ * input the meet of these types (`narrowestOccurrence()`; rule 8 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
+ *
+ * An occurrence with the unit and the key of a recorded one reads the same
+ * entry and is not recorded again. The target of an assignment, which has
+ * no definition and is not a free name, has no type and is not recorded.
+ */
+function noteTypedOccurrence(
+  occurrences: ReadonlyMap<string, Expression>,
+  e: Expression & { symbol: string }
+): void {
+  if (!isFreeName(e) && !e.valueDefinition) return;
+  let byName = typedOccurrences.get(occurrences);
+  if (byName === undefined) typedOccurrences.set(occurrences, (byName = new Map()));
+  const list = byName.get(e.symbol);
+  if (list === undefined) {
+    byName.set(e.symbol, [e]);
+    return;
+  }
+  const { env, key } = unitKeyOf(e);
+  for (const recorded of list) {
+    const r = unitKeyOf(recorded);
+    if (r.env === env && r.key === key) return;
+  }
+  list.push(e);
+}
+
+/**
+ * Of the occurrences `typed` of one input, the first whose type is the meet
+ * of the types of all of them. An occurrence of type `unknown` requires
+ * nothing.
+ *
+ * When the meet is `never` (the units disagree), or when no occurrence has
+ * exactly the meet as its type (`real<0..>` in one unit and `real<..1>` in
+ * another), the result is a symbol of the name with no definition and no
+ * unit, whose type is `unknown`: the input then has no type, and the
+ * compilation declines with `untyped-input`. This is the simple, sound
+ * version: a type report that carries the meet itself would compile the
+ * second case.
+ */
+function narrowestOccurrence(typed: ReadonlyArray<Expression>): Expression {
+  let meet: Type = 'unknown';
+  let anyTyped = false;
+  for (const occurrence of typed) {
+    const t = occurrence.type.type;
+    if (t === 'unknown') continue;
+    anyTyped = true;
+    meet = narrow(meet, t);
+    if (meet === 'never') break;
+  }
+  if (!anyTyped) return typed[0];
+  if (meet !== 'never') {
+    const text = typeToString(meet);
+    const exact = typed.find((o) => typeToString(o.type.type) === text);
+    if (exact !== undefined) return exact;
+  }
+  const first = typed[0] as Expression & { symbol: string };
+  return first.engine.symbol(first.symbol, { canonical: false });
 }
 
 /**

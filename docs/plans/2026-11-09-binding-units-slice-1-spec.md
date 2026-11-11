@@ -667,3 +667,73 @@ old mechanism, and updates the tests. The flag exists only during the work.
   capture of narrowings. Also: the test updates for the breaking changes,
   `CHANGELOG.md`, the documents of section 5, the timing of acceptance
   item 10, and the result paragraph of section 8 of the model.
+
+### Phase E, package A: rules added or made precise (2026-11-10)
+
+Each item is a choice of the session that fixed package A of
+`docs/plans/2026-11-10-binding-units-phase-e-handoff.md`. The user can
+reverse it.
+
+- **Rule 1, a name that is free inside and outside a scope that the boxing
+  made.** In `Limit(Function(Block(1/(x - a)), x), a)`, the `a` of the body
+  and the `a` of the point are one free name, with the home scope of the
+  outer one. The boxing is built again when the body's `a` wrote its
+  requirement on the outer name and the name is also a free name outside
+  the body (`EngineBoxingState.noteOuterFreeName()`),
+  as it is built again without the flag when the body declares the outer
+  name. Before, the body's `a` was a local of the block, `a - a` did not
+  fold, and `1/(a - a)` was taken as a definite value. A name that occurs
+  only in the body keeps the definition of the body's scope, which the
+  check of a captured symbol reads.
+- **Rule 3, the body of a stored function.** The type of a call of a
+  function literal is derived in the scope that the literal is written in
+  (`inLiteralScope()`, `call-result-type.ts`), as its evaluation reads that
+  scope (`docs/SCOPING-MODEL.md`). With `U: real | list<real>` and
+  `h := s ↦ s + U`, the type of `h(1)` in a pushed scope that declares
+  `U: real` is the type with the outer `U`. The compiler types a called
+  function the same way (`literalVariantResultType()`).
+- **Rule 8, `compile()`: the occurrences of an input.** They are the
+  occurrences in the expression, in the assigned values that the code
+  folds, and in the bodies of the functions that the code calls
+  (`noteTypedOccurrence()`, `compile-references.ts`). The input has the meet
+  of their types; `freeSymbolTypes` reports the first occurrence that has
+  exactly that type, else the first that has a type.
+- **Rule 8, a target called directly.** `compile()`, `canCompile()`,
+  `compileToSource()`, `compileFunction()`, `compileShader()`,
+  `compileVectorized()` and `compileLambda()` of a target are operations,
+  as the function `compile()` is.
+- **Rule 8, the bounds of a compiled integral.** The compilation of an
+  `Integrate` requires a number of a bound that is a name with no type
+  (`closedFormIntegral()`). Without the flag, the first closed-form search
+  narrowed the definition of the name, and the later compilations, which
+  make no search after a recorded timeout, read that definition.
+- **Rule 8, `FindFit` and `FindRoot`** (option (c) of decision 4 of the
+  handoff). A fit is one operation (`fitOperation()`, `nonlinear-fit.ts`),
+  also in a statement of an Epsil program and in a direct call of
+  `findFitAsync()`: the `subs()` calls that rebuild the model and the
+  compilation of the result share its environment. Options (a) and (b) of
+  that decision are still open.
+- **Rule 4, the record of a derivative.** A cache of one expression keeps,
+  for each read of an entry of an environment, what its first read found,
+  and is valid when the same read finds it now. The record of a derivative
+  (`withDerivativeMemo()`, `calculus.ts`) reads its dependencies after the
+  attempt, as it does without the flag: it also keeps what each read finds
+  when the attempt ends (`stampObjectDepsAtEnd()`, `object-deps.ts`) and
+  the type of each variable before the attempt, and is valid for either.
+  The attempt writes requirements in the environment of its operation, and
+  a symbol of its result keeps that environment: without this, the
+  derivative was computed again at each `evaluate()`. A first version of
+  this rule applied it to every cache; the review showed that a type cached
+  before a write of its own computation was then served after the write,
+  so it is limited to this record.
+- **Not done: the asynchronous memo of a lazy collection** refuses to store
+  a result when an entry of an environment was read
+  (`test/compute-engine/lazy-collection-regimes.test.ts`, one test). A log
+  of the reads that an `await` does not break was written and removed: both
+  reviewers showed that it took its last versions outside the operation of
+  the evaluation, and that a caller that joins a pending walk did not check
+  them. No entry is always safe.
+- **Not done: a cache filled after the operation wrote an entry** misses in
+  the next operation (`test/compute-engine/comprehension-memo.test.ts`,
+  three tests). A hit needs a rule that an entry written by the operation in
+  progress is derived state, not a dependency.

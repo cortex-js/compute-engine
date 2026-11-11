@@ -96,6 +96,7 @@ import {
   endObjectDeps,
   mergeObjectDeps,
   objectDepsValid,
+  stampObjectDepsAtEnd,
   type ObjectDeps,
 } from '../boxed-expression/object-deps.js';
 import { containsObject } from '../boxed-expression/object-walk.js';
@@ -5512,8 +5513,14 @@ type DerivativeRecord = {
 };
 
 /** A differentiation variable of a `D` node, the definition it is bound to
- * and its type, as a string. */
-type VariableStamp = [node: Expression, def: object | undefined, type: string];
+ * and its type, as a string. With the engine flag `_bindingUnits`, also its
+ * type before the differentiation (`withDerivativeMemo()`). */
+type VariableStamp = [
+  node: Expression,
+  def: object | undefined,
+  type: string,
+  typeBefore?: string,
+];
 
 /** The stamps of the differentiation variables of the `D` node `expr`. */
 function variableStamps(expr: Expression): VariableStamp[] {
@@ -5524,13 +5531,28 @@ function variableStamps(expr: Expression): VariableStamp[] {
     .map((op) => [op, op.valueDefinition, op.type.toString()]);
 }
 
-/** Is each variable still bound to the definition it was bound to, with
- * the same type? */
-function variableStampsValid(stamps: VariableStamp[]): boolean {
-  return stamps.every(
-    ([node, def, type]) =>
-      node.valueDefinition === def && node.type.toString() === type
+/** The stamps `after`, each with the type of the same variable in `before`
+ * when it has the same definition there. */
+function withTypesBefore(
+  after: VariableStamp[],
+  before: VariableStamp[] | undefined
+): VariableStamp[] {
+  if (before === undefined) return after;
+  return after.map((stamp, i) =>
+    before[i]?.[1] === stamp[1]
+      ? [stamp[0], stamp[1], stamp[2], before[i][2]]
+      : stamp
   );
+}
+
+/** Is each variable still bound to the definition it was bound to, with
+ * the same type, or with its type before the differentiation? */
+function variableStampsValid(stamps: VariableStamp[]): boolean {
+  return stamps.every(([node, def, type, typeBefore]) => {
+    if (node.valueDefinition !== def) return false;
+    const now = node.type.toString();
+    return now === type || now === typeBefore;
+  });
 }
 
 /**
@@ -5670,6 +5692,15 @@ function withDerivativeMemo(
   const guard = beginStoreGuard();
   const rewritesBefore = ownBindingRewriteCount();
   const keyUsesBefore = derivativeKeyUseCount();
+  // With the engine flag `_bindingUnits`, the attempt writes the
+  // requirements on the variables in the environment of the operation. A
+  // later check in the same operation reads the types that the attempt left,
+  // and a check in the next operation, whose environment does not have these
+  // writes, reads the types that the attempt started from: the record keeps
+  // both (`variableStampsValid()`).
+  const variablesBefore = ce._bindingUnits
+    ? variableStamps(expression)
+    : undefined;
   beginObjectDeps();
   let objectDeps: ObjectDeps | undefined;
   let result: Expression | undefined;
@@ -5678,6 +5709,11 @@ function withDerivativeMemo(
   } finally {
     objectDeps = endObjectDeps();
   }
+  // The record reads its dependencies after the attempt, as it reads the
+  // types of the variables (`variablesBefore` above): an entry of the
+  // environment of the operation that the attempt wrote is the state that
+  // the attempt leaves.
+  if (ce._bindingUnits) stampObjectDepsAtEnd(objectDeps);
   if (
     (result !== undefined && !result.isValid) ||
     !guard.allowsStore() ||
@@ -5698,7 +5734,7 @@ function withDerivativeMemo(
     worldVersion: ce._worldVersion,
     factsHidden: ce._factsHidden(),
     deps,
-    variables: variableStamps(expression),
+    variables: withTypesBefore(variableStamps(expression), variablesBefore),
     objectDeps,
   };
   DERIVATIVE_RECORDS.set(expression, slots);

@@ -353,8 +353,21 @@ export function createSymbolExpression(
   // (`freeNameHomeScope()`).
   if (engine._bindingUnits) {
     const homeScope = freeNameHomeScope(autoScope);
-    if (engine._boxingState.isPersistentScope(homeScope) !== false)
+    if (engine._boxingState.isPersistentScope(homeScope) !== false) {
+      engine._boxingState.noteRootFreeName(name);
       return new BoxedSymbol(engine, name, { metadata, homeScope });
+    }
+    // In a scope that the boxing made, a name that the construction took as
+    // the free name of an enclosing persistent scope (a free symbol of a
+    // binder body that is also a free name outside the body,
+    // `EngineBoxingState.noteOuterFreeName()`) is that free name, as it
+    // reads the outer declaration without the flag.
+    const home = engine._boxingState.outerFreeNameHome(name);
+    if (home !== undefined) {
+      for (let s: typeof autoScope | null = autoScope; s; s = s.parent)
+        if (s === home)
+          return new BoxedSymbol(engine, name, { metadata, homeScope: home });
+    }
   }
   def = engine._declareSymbolValue(
     name,

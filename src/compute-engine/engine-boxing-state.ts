@@ -193,6 +193,25 @@ export class EngineBoxingState<Scope extends object> {
   private _madeDefinitions: Set<object> | null = null;
 
   /**
+   * The free names of the active root construction that are the outer
+   * binding of a free symbol of a binder body, with their home scope, with
+   * the engine flag `_bindingUnits` only (`noteOuterFreeName()`). Kept
+   * across the build passes of the root, as the outer declaration that it
+   * replaces is, and cleared when the root construction ends.
+   */
+  private _outerFreeNames: Map<string, Scope> | null = null;
+
+  /**
+   * With the engine flag `_bindingUnits`, for the active root construction:
+   * the names whose use in a binder body wrote a requirement on the free
+   * name of a persistent scope, with that scope (`noteOuterFreeName()`),
+   * and the free names that the construction made in a persistent scope
+   * (`noteRootFreeName()`). A name in both is in `_outerFreeNames`.
+   */
+  private _outerRequirements: Map<string, Scope> | null = null;
+  private _freeNamesMade: Set<string> | null = null;
+
+  /**
    * For the active root construction: the scope of a persistent lexical
    * chain (see `_isPersistentScope`) whose bindings hold `def` under `name`,
    * or `undefined`. Captured by `withRootRepair`; `null` while no root
@@ -291,6 +310,9 @@ export class EngineBoxingState<Scope extends object> {
       this._transientAutoDeclares = null;
       this._unitEnvironment = null;
       this._madeDefinitions = null;
+      this._outerFreeNames = null;
+      this._outerRequirements = null;
+      this._freeNamesMade = null;
     }
   }
 
@@ -372,6 +394,60 @@ export class EngineBoxingState<Scope extends object> {
 
     const root = this._frames.find((frame) => frame.scope === undefined);
     if (root) root.repairRequested = true;
+  }
+
+  /**
+   * With the engine flag `_bindingUnits`: the use of a free symbol of a
+   * binder body, which the running construction auto-declared into a scope
+   * of its own making, wrote its requirement on the free name `name` of the
+   * persistent scope `home`, in place of the outer declaration that
+   * `noteDeclarationIn()` sees without the flag.
+   *
+   * When the construction also made a free name `name` outside the body
+   * (`noteRootFreeName()`: the point `a` of
+   * `Limit(Function(Block(1/(x - a)), x), a)`), the construction is rebuilt
+   * as it is for that declaration, and in the rebuild each occurrence of
+   * `name` under `home` is that free name (`outerFreeNameHome()`), so the
+   * occurrences of the body and those outside it are the same binding
+   * (rule 7 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). A
+   * name that occurs only in the body keeps the definition of the body's
+   * scope, whose type the check of a captured symbol reads.
+   */
+  noteOuterFreeName(home: Scope, name: string): void {
+    if (!this._rootActive) return;
+    if (!this._transientAutoDeclares?.has(name)) return;
+    if (this._isPersistentScope?.(home) !== true) return;
+    if (this._outerRequirements?.has(name) !== true)
+      (this._outerRequirements ??= new Map()).set(name, home);
+    this._mergeOuterFreeName(name);
+  }
+
+  /** With the engine flag `_bindingUnits`: the active root construction
+   * made the free name `name` in a persistent scope (see
+   * `noteOuterFreeName()`). */
+  noteRootFreeName(name: string): void {
+    if (!this._rootActive) return;
+    if (this._freeNamesMade?.has(name) === true) return;
+    (this._freeNamesMade ??= new Set()).add(name);
+    this._mergeOuterFreeName(name);
+  }
+
+  /** Record `name` in `_outerFreeNames` and ask for a rebuild of the root
+   * construction, when the name is used in a binder body and is a free
+   * name outside it. */
+  private _mergeOuterFreeName(name: string): void {
+    if (this._outerFreeNames?.has(name) === true) return;
+    const home = this._outerRequirements?.get(name);
+    if (home === undefined || this._freeNamesMade?.has(name) !== true) return;
+    (this._outerFreeNames ??= new Map()).set(name, home);
+    const root = this._frames.find((frame) => frame.scope === undefined);
+    if (root) root.repairRequested = true;
+  }
+
+  /** The home scope recorded by `noteOuterFreeName()` for `name` in the
+   * active root construction, or `undefined`. */
+  outerFreeNameHome(name: string): Scope | undefined {
+    return this._outerFreeNames?.get(name);
   }
 
   /** Number of repair frames currently on the stack. Recorded by an

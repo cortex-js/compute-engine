@@ -101,6 +101,31 @@ export function unusedVariableName(
     for (const name of collectBinderNames(e)) used.add(name);
   }
   const ce = exprs[0]?.engine;
+  // With the engine flag `_bindingUnits`, boxing declares no name, so a
+  // symbol that the integrand reads through an assigned value or the body of
+  // a user function can have no definition. These symbols are collected
+  // from the values and the bodies.
+  if (ce?._bindingUnits) {
+    const pending = [...used];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const name = pending.pop()!;
+      if (visited.has(name)) continue;
+      visited.add(name);
+      const def = ce.lookupDefinition(name);
+      if (def === undefined) continue;
+      const held = isValueDef(def)
+        ? def.value.value
+        : isOperatorDef(def)
+          ? def.operator._lambdaLiteral
+          : undefined;
+      if (held === undefined) continue;
+      for (const inner of held.symbols) {
+        used.add(inner);
+        pending.push(inner);
+      }
+    }
+  }
   for (let k = 0; ; k++) {
     const name = k === 0 ? 'IntegrationVariable' : `IntegrationVariable_${k}`;
     if (!used.has(name) && ce?.lookupDefinition(name) === undefined)

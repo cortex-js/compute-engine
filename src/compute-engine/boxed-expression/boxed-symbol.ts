@@ -1497,6 +1497,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         () => t,
         'narrow'
       );
+      ce._boxingState.noteOuterFreeName(outerScope, name);
       return;
     }
     // The binding is marked: it is not a declaration for an assignment in

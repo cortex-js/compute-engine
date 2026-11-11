@@ -1652,6 +1652,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compile(expr, options)
+      );
     assertNoProfileOption(options);
     // A `vars` entry is not given to the calls of a user function here, as
     // the JavaScript target does (`BaseCompiler.withVarsMappedUserFunctionHeads`).
@@ -1721,6 +1728,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CanCompileResult {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.canCompile(expr, options)
+      );
     try {
       return this.preparedAndTypedForCheck(
         expr,
@@ -2574,6 +2588,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): string {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compileToSource(expr, options)
+      );
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry: in degree mode `sin(x)` is the sine of `x` degrees.
     expr = rewriteAngularUnit(expr);

@@ -6621,6 +6621,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'interval-js', IntervalValue> {
+    // Called directly, this method is an operation (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (expr.engine._opensOperation(false))
+      return expr.engine._withOperation(expr, () =>
+        this.compile(expr, options)
+      );
     assertNoProfileOption(options);
     options = BaseCompiler.withVarsMappedUserFunctionHeads(
       expr.engine,

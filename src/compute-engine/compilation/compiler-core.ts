@@ -7,6 +7,7 @@ import {
   assertScalarPreparedNode,
 } from './javascript-fragment-facts.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
+import { inLiteralScope } from '../boxed-expression/call-result-type.js';
 import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
 import { isFoldableName, isHeldListArithmetic } from './provable-kind.js';
@@ -6428,9 +6429,17 @@ export function literalVariantResultType(
     }
     types.push(t);
   }
-  const variant = literalWithParameterTypes(literal.engine, literal, types);
-  if (variant === undefined) return undefined;
-  let result = variant.ops[0].type.type;
+  // The body reads the scope that the literal is written in
+  // (`inLiteralScope()`), not the scope of the compilation: the scope of a
+  // member of a declared union declares the input again.
+  let result = inLiteralScope(
+    literal.engine,
+    literal,
+    () =>
+      literalWithParameterTypes(literal.engine, literal, types)?.ops[0].type
+        .type
+  );
+  if (result === undefined) return undefined;
   if (result === 'unknown' || result === 'any') return undefined;
   const depth = Math.max(0, ...(ranks as number[]));
   for (let k = 0; k < depth; k++) result = { kind: 'list', elements: result };

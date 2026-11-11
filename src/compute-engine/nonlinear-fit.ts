@@ -42,6 +42,7 @@ import { numberLiteralOf } from './boxed-expression/numerics.js';
 import { differentiate } from './symbolic/derivative.js';
 import { angularChainFactor } from './symbolic/angular-unit.js';
 import { implicitCompileNumericResult } from './implicit-compile.js';
+import { UnitEnvironment } from './binding-unit.js';
 import {
   levenbergMarquardtSteps,
   type LMOptions,
@@ -2674,13 +2675,52 @@ function solveSetup(
     : solve(ce, units, specs, operator);
 }
 
+/**
+ * With the engine flag `_bindingUnits`: the operation environment of a fit
+ * or a root search on `ops`, or `undefined` when the call runs in the
+ * operation in progress (`ce._opensOperation()`), and without the flag.
+ *
+ * A fit makes new names for its parameters, rebuilds the model over them
+ * with `subs()` and compiles the result. The compilation reads the types
+ * that the rebuilt model requires of the new names, so the fit is one
+ * operation (rule 8 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): `subs()` and the
+ * compilation, which are nested in it, write and read in its environment.
+ * The evaluation of a statement of an Epsil program is not such an
+ * operation (rule 10), and neither is a direct call of `findFitAsync()`;
+ * without this environment, the requirements of each `subs()` are thrown
+ * away with its own environment, the compilation declines, and the fit
+ * runs interpreted.
+ */
+function fitOperation(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>
+): UnitEnvironment | undefined {
+  if (!ce._opensOperation(false)) return undefined;
+  return UnitEnvironment.forOperation([...ops], ce.context?.lexicalScope);
+}
+
+/** Run `fn` in the operation environment `operation` (`fitOperation()`),
+ * or as it is when there is none. */
+function inFitOperation<T>(
+  ce: IComputeEngine,
+  operation: UnitEnvironment | undefined,
+  fn: () => T
+): T {
+  return operation === undefined
+    ? fn()
+    : ce._boxingState.withOperation(operation, fn);
+}
+
 /** `FindFit(data, model, params, vars)`. */
 export function findFit(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
-  return withSetupDeadline(ce, 'FindFit', (ctx) =>
-    solveSetup(ce, runStepsSync(findFitSetupSteps(ce, ops, ctx)), 'FindFit')
+  return inFitOperation(ce, fitOperation(ce, ops), () =>
+    withSetupDeadline(ce, 'FindFit', (ctx) =>
+      solveSetup(ce, runStepsSync(findFitSetupSteps(ce, ops, ctx)), 'FindFit')
+    )
   );
 }
 
@@ -2724,7 +2764,7 @@ export async function findFitAsync(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> = {}
 ): Promise<Expression | undefined> {
-  const route = asyncRoute(ce, 'FindFit', options);
+  const route = asyncRoute(ce, 'FindFit', options, ops);
   let data: Expression | undefined;
   let specs: ParamSpec[] | undefined;
   try {
@@ -2770,7 +2810,7 @@ export async function findRootAsync(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> = {}
 ): Promise<Expression | undefined> {
-  const route = asyncRoute(ce, 'FindRoot', options);
+  const route = asyncRoute(ce, 'FindRoot', options, ops);
   try {
     checkAborted(options.signal);
   } catch (e) {
@@ -2809,12 +2849,17 @@ interface AsyncRoute {
 function asyncRoute(
   ce: IComputeEngine,
   operator: FitOperator,
-  options: Partial<EvaluateOptions>
+  options: Partial<EvaluateOptions>,
+  ops: ReadonlyArray<Expression>
 ): AsyncRoute {
   const signal = options.signal;
   const frame = ce._deadlineFrame;
   const ctx: SetupContext = { operator, phase: 'setup' };
   const effects = options._effects;
+  // The operation environment of the call (`fitOperation()`), captured
+  // now. Each synchronous part puts it in place and restores the previous
+  // one, so it is never in place across an `await`.
+  const operation = fitOperation(ce, ops);
   return {
     options,
     signal,
@@ -2823,11 +2868,11 @@ function asyncRoute(
     ctx,
     inContext: (f) =>
       effects === undefined
-        ? f()
+        ? inFitOperation(ce, operation, f)
         : runWithEvaluationEffects(
             ce,
             effects,
-            f,
+            () => inFitOperation(ce, operation, f),
             options._contextStack,
             options._precisionWindow
           ),
@@ -3169,8 +3214,14 @@ export function findRoot(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
-  return withSetupDeadline(ce, 'FindRoot', (ctx) =>
-    solveSetup(ce, runStepsSync(findRootSetupSteps(ce, ops, ctx)), 'FindRoot')
+  return inFitOperation(ce, fitOperation(ce, ops), () =>
+    withSetupDeadline(ce, 'FindRoot', (ctx) =>
+      solveSetup(
+        ce,
+        runStepsSync(findRootSetupSteps(ce, ops, ctx)),
+        'FindRoot'
+      )
+    )
   );
 }
 

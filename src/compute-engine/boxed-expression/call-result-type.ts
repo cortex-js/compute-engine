@@ -1710,8 +1710,63 @@ function readsAnyName(
   return visit(literal, new Set());
 }
 
-/** The body walk shared by `callResultType` and `appliedLiteralResultType`. */
+/**
+ * The body walk shared by `callResultType` and `appliedLiteralResultType`.
+ *
+ * With the engine flag `_bindingUnits`, the type of an occurrence is read
+ * through the definition that its name resolves to in the current context
+ * (rule 3 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The
+ * body of a function literal reads the scope that the literal is written
+ * in, as its evaluation does (`docs/SCOPING-MODEL.md`), so the walk runs in
+ * that scope: with `U: real | list<real>` and `h := s ↦ s + U`, the type
+ * of `h(1)` in a pushed scope that declares `U: real` is that of the outer
+ * `U`.
+ */
 function literalBodyResultType(
+  engine: IComputeEngine,
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[],
+  declared: Type,
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
+  declaredParams?: ReadonlyArray<Type>,
+  partialArgCount?: number
+): Type | undefined {
+  const walk = () =>
+    literalBodyResultTypeInContext(
+      engine,
+      literal,
+      args,
+      declared,
+      derive,
+      declaredParams,
+      partialArgCount
+    );
+  return inLiteralScope(engine, literal, walk);
+}
+
+/**
+ * Run `fn`, which reads the types of the occurrences of the body of the
+ * function literal `literal`, in the scope that the literal is written in,
+ * with the engine flag `_bindingUnits`; without the flag, or when that
+ * scope is the current one, `fn()`. See `literalBodyResultType()`.
+ */
+export function inLiteralScope<T>(
+  engine: IComputeEngine,
+  literal: Expression & FunctionInterface,
+  fn: () => T
+): T {
+  if (!engine._bindingUnits) return fn();
+  const body = literal.ops[0];
+  const written = body?.isScoped ? body.localScope?.parent : undefined;
+  if (!written || written === engine.context?.lexicalScope) return fn();
+  return engine._inScope(written, fn);
+}
+
+/** The body walk of `literalBodyResultType()`, in the current context. */
+function literalBodyResultTypeInContext(
   engine: IComputeEngine,
   literal: Expression & FunctionInterface,
   args: readonly OperandDescriptor[],
