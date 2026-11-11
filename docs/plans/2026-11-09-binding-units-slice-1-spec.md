@@ -733,7 +733,11 @@ reverse it.
   reviewers showed that it took its last versions outside the operation of
   the evaluation, and that a caller that joins a pending walk did not check
   them. No entry is always safe.
-- **Not done: a cache filled after the operation wrote an entry** misses in
-  the next operation (`test/compute-engine/comprehension-memo.test.ts`,
-  three tests). A hit needs a rule that an entry written by the operation in
-  progress is derived state, not a dependency.
+- **Decided by the user, 2026-11-10: a cache filled after the operation
+  wrote an entry misses in the next operation**
+  (`test/compute-engine/comprehension-memo.test.ts`, three tests). The
+  stored expression is evaluated once more, with the same value. The
+  alternative, a rule that an entry written by the operation in progress
+  is derived state and not a dependency, is not adopted: the cache would
+  not record what that write depended on. To revisit with measurements
+  from Tycho's adoption.

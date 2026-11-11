@@ -138,6 +138,16 @@ Open, for the user:
      diagnostic depends on the order of the statements, and the program
      above can read `x` with no value.
 
+Decided by the user, 2026-11-10 (package A):
+
+6. **A cache filled after the operation wrote an entry misses in the next
+   operation.** The three tests of class DEF-MEMO-STORED
+   (`test/compute-engine/comprehension-memo.test.ts`) stay as they are in
+   the code: package D changes their expected counts (the stored chain
+   runs once more in a later operation, with the same value). The rule
+   that would make them hit is not adopted (spec, "Phase E, package A").
+   To revisit with measurements from Tycho's adoption.
+
 ## 5. The packages
 
 The counts are tests that fail with the flag on at `7e92c4b0f`. The test
