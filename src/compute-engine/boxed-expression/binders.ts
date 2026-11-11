@@ -689,14 +689,34 @@ export function isBodyFreeName(def: object): boolean {
  * With `skipLibraryOperator`, the walk also skips an operator definition of
  * the root scope (the standard library): the unit of the occurrence reads
  * the name as a variable (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`).
+ *
+ * With `home`, the home scope of the free name, a read of a free name of a
+ * stored value also skips a local of a `Block` (`isBlockLocalBinding()`) in a
+ * scope that is not `home` or an ancestor of it: the stored value was not
+ * inside that block when it was boxed. The read is one of a stored value
+ * when `outsideBlocks` is true, or when the walk passes the scope that the
+ * evaluation of a stored value pushes (`evaluateInOwnBindings()`). With
+ * `a := x + 1`, the `x` of the value of `a` is read inside
+ * `Block(Declare(x, real, 7), a + 5)`, and it does not read the local `x`. A
+ * free name that is an operand of the block (a host builds the block with
+ * `ce.function()`) is read by the block itself, and reads the local.
  */
 export function freeNameBindingInContext(
   ce: ComputeEngine,
   name: string,
   scope: Scope | null = ce.context.lexicalScope,
-  skipLibraryOperator = false
+  skipLibraryOperator = false,
+  home?: Scope,
+  outsideBlocks = false
 ): BoxedDefinition | undefined {
-  return freeNameBindingAndScope(ce, name, scope, skipLibraryOperator)?.def;
+  return freeNameBindingAndScope(
+    ce,
+    name,
+    scope,
+    skipLibraryOperator,
+    home,
+    outsideBlocks
+  )?.def;
 }
 
 /**
@@ -707,10 +727,14 @@ export function freeNameBindingAndScope(
   ce: ComputeEngine,
   name: string,
   scope: Scope | null = ce.context.lexicalScope,
-  skipLibraryOperator = false
+  skipLibraryOperator = false,
+  home?: Scope,
+  outsideBlocks = false
 ): { def: BoxedDefinition; scope: Scope } | undefined {
   const start = scope;
+  let storedValue = outsideBlocks;
   while (scope) {
+    if (storedValueScopes.has(scope)) storedValue = true;
     const found = staticBindingIn(scope, name, scope === start);
     if (
       found !== undefined &&
@@ -720,12 +744,41 @@ export function freeNameBindingAndScope(
         (isBinderVariable(found.value) ||
           isFunctionLiteralParameter(found.value) ||
           isActivation(found.value))
+      ) &&
+      !(
+        home !== undefined &&
+        storedValue &&
+        isBlockLocalBinding(found) &&
+        !isScopeOrAncestor(scope, home)
       )
     )
       return { def: found, scope };
     scope = staticParentOf(scope);
   }
   return undefined;
+}
+
+/**
+ * True when `found` is a local of a `Block`: a binding that the
+ * canonicalization of the block made for a `Declare` statement or a first
+ * assignment (`_blockLocal`), or that a run of the block made for a `Declare`
+ * statement (`_declaredByStatement`, `createBlockLocals()`,
+ * `function-utils.ts`).
+ */
+export function isBlockLocalBinding(found: BoxedDefinition): boolean {
+  if ((found as { _declaredByStatement?: boolean })._declaredByStatement)
+    return true;
+  return 'value' in found && found.value._blockLocal === true;
+}
+
+/** The scopes that `evaluateInOwnBindings()` pushes for the evaluation of a
+ * stored value (`freeNameBindingAndScope()`). */
+const storedValueScopes = new WeakSet<Scope>();
+
+/** True when `scope` is `home` or an ancestor of `home`. */
+function isScopeOrAncestor(scope: Scope, home: Scope): boolean {
+  for (let s: Scope | null = home; s; s = s.parent) if (s === scope) return true;
+  return false;
 }
 
 /**
@@ -1276,7 +1329,10 @@ export function parameterValueVariesWith(
   rewriteWithBinders(value, (s, shadowed) => {
     if (s.symbol !== name || shadowed?.has(name)) return s;
     const def = s.valueDefinition;
-    if (def === undefined || sameBindingDef(def, outer)) varies = true;
+    // A free name (`isFreeName()`) was boxed outside the call: it is not the
+    // parameter.
+    if ((def === undefined && !isFreeName(s)) || sameBindingDef(def, outer))
+      varies = true;
     return s;
   });
   return varies;
@@ -1909,6 +1965,7 @@ export function evaluateInOwnBindings(
   // during the evaluation reaches the real definition.
   const borrowed = [...env];
   ce.pushScope({ parent: ce.context.lexicalScope, bindings: env });
+  storedValueScopes.add(ce.context.lexicalScope);
   try {
     return evaluated();
   } finally {
@@ -1996,18 +2053,35 @@ function activationBindingOf(
   return undefined;
 }
 
+/**
+ * The bindings that the evaluation of the stored value `value` borrows
+ * (`evaluateInOwnBindings()`), or `undefined` when it needs none. An empty
+ * map when it borrows none, but a free name of `value` must not read the
+ * local of a block that the read by name finds (`storedValueFreeNameRead()`):
+ * the scope pushed for the evaluation then stops that read
+ * (`freeNameBindingAndScope()`).
+ */
 function ownBindingEnvironment(
   ce: ComputeEngine,
   value: Expression
 ): Map<string, BoxedDefinition> | undefined {
   let env: Map<string, BoxedDefinition> | undefined;
+  let hidesLocal = false;
   rewriteWithBinders(value, (sym, shadowed) => {
     const name = sym.symbol;
     // An occurrence bound by a binder INSIDE the value (a stored lambda's own
     // parameter, a `Sum` index) is not free: it is not ours to re-point.
     if (shadowed?.has(name)) return sym;
     if (env?.has(name)) return sym;
-    const own = sym.valueDefinition;
+    // A free name (`isFreeName()`): the definition that it resolves to,
+    // past the local of a block that it was not in when it was boxed
+    // (`storedValueFreeNameRead()`).
+    let own = sym.valueDefinition;
+    if (isFreeName(sym)) {
+      const read = storedValueFreeNameRead(ce, sym);
+      own = read.def;
+      if (read.hidesLocal) hidesLocal = true;
+    }
     if (own === undefined) return sym;
     // Debug invariant (§3 of the binder-mechanism design). This site also pins
     // the withdrawal below: were a borrowed definition ever left behind for the
@@ -2048,7 +2122,33 @@ function ownBindingEnvironment(
     return sym;
   });
 
-  return env;
+  return env ?? (hidesLocal ? new Map() : undefined);
+}
+
+/**
+ * For the free name `sym` (`isFreeName()`) of a stored value: `def`, the
+ * value definition that it reads (`freeNameBindingInContext()` with
+ * `outsideBlocks`), and `hidesLocal`, true when that read skips a local of a
+ * `Block` that a read by name would find.
+ */
+function storedValueFreeNameRead(
+  ce: ComputeEngine,
+  sym: Expression & { symbol: string }
+): { def: BoxedValueDefinition | undefined; hidesLocal: boolean } {
+  const home = (sym as { _homeScope?: Scope })._homeScope;
+  const found = freeNameBindingInContext(
+    ce,
+    sym.symbol,
+    undefined,
+    false,
+    home,
+    true
+  );
+  const byName = freeNameBindingInContext(ce, sym.symbol);
+  return {
+    def: found !== undefined && 'value' in found ? found.value : undefined,
+    hidesLocal: byName !== found,
+  };
 }
 
 /** Await a stored expression while protecting the free bindings it denotes.
@@ -2075,6 +2175,7 @@ export async function evaluateInOwnBindingsAsync(
   inContext(() => {
     _ownBindingRewrites += 1;
     ce.pushScope({ parent: ce.context.lexicalScope, bindings: env });
+    storedValueScopes.add(ce.context.lexicalScope);
   });
   try {
     return await value.evaluateAsync(carried);

@@ -91,9 +91,9 @@ Taken in this session (the user can reverse them):
    removes the checkpoint API (spec, section 10, phase D).
 3. **A free name does not resolve to a `Block` local**, as it does not
    resolve to a binder variable (rule 3). With `a := x + 1`,
-   `Block(Declare(x, real, 7), a + 5)` reads the outer `x`. Not implemented:
-   it is class DEF-FREE-NAME-CAPTURE of package B, which also writes it in
-   rule 3.
+   `Block(Declare(x, real, 7), a + 5)` reads the outer `x`. Implemented by
+   package B, for a free name of a stored value while that value is
+   evaluated, and written in rule 3.
 
 Open, for the user:
 
@@ -281,6 +281,59 @@ of an abort" (a time limit: it passes alone); and
 `placeholder-signature-refinement`, a regression of the first commit that
 the follow-up fixes. The suite was not run again after the follow-up or
 after package A.
+
+## 5b. Package B: result (2026-11-10, session compute-engine-08)
+
+Commits `795a322e79f2364263bcfd294fab780c7522b188`,
+`c976f546435060f6e5ef8399a18058ce6f54762f` and the commit that adds this
+section. The rules that package B added are in the spec, marked "phase E"
+(rules 3, 7, 8, 10 and 13). New tests: `binding-units-host-values`,
+`binding-units-identity` and `test/epsil/binding-units-static-declarations`.
+
+Fixed: DEF-EPSIL-PIN, DEF-EPSIL-PARAM-NAMES, DEF-DESTRUCTURE-LET,
+DEF-WITHVALUES, DEF-BINDER-SUBST-FREE, DEF-CAPTURE-FREE,
+DEF-FREE-NAME-CAPTURE and DEF-BLOCK-LOCAL-CALL, all tests; of
+DEF-FREE-HOME-SCOPE, `explain` (3) and `solve-root-checks` (1): `explain()`
+is now an operation. Packages A and C fixed three of the four
+DEF-FREE-BOUND-SAME tests.
+
+Left, with the flag on:
+
+- **`ce-614-integral-keeps-call-binding` (2), for the user.** An `x` boxed
+  after a host `pushScope()` has that scope as its home (rule 1), so it is
+  not the binding of an `x` boxed before it (rule 7), and `x + 100x` is not
+  merged to `101x`. No value is wrong. Recommended: keep rule 7, class the
+  two tests BC-RULE7, and package D updates them. The other option: two
+  free names that resolve to no definition are the same binding when both
+  home scopes are on the chain of the current scope; it changes the
+  approved test "free calls of two home scopes are different calls" of
+  `binding-units-core`.
+- **`debug-bindings-scope-copies` (2) and `issue-489-curried-function-capture`
+  "the inner parameter is renamed when the value mentions it" (1), not
+  fixed.** The value of a call carries the body-scope definition of a free
+  name of the literal (`markBodyFreeName()`), so with `g(a) := a x`, `g(2)`
+  is not `isSame` to `2x`. Making that name a free name of the scope that
+  the literal is written in (rule 1 as written) fixes the three tests and
+  breaks the captured-type record (`ce-473`, 9 tests) and `ce-107` "the
+  literal reads the value of a later global `f`": the record reads the
+  body-scope definition. The other fix is a rebind of the value when it
+  leaves the call (`makeLambda()`, `function-utils.ts`).
+- **DEF-FIRST-ASSIGN-FREE (1):** decision 5, recommendation above.
+- **`accessor-proven-length-type` "P: unknown (inferred) …" (1):** its
+  `P[i]` lines pass; it fails on `ce.symbol('P').type`, which is BC1.
+
+The flag-on suite at `5f5acea425bb8347bf401aa476b7fc23c0a94991` with the
+third commit of package B, 2026-11-10: 484 tests fail. Outside the classes
+of package D's start condition: DEF-MATRIX-REPAIR 16, UNCLASSIFIED 14,
+NEW 6, DEF-FREE-HOME-SCOPE 4, DEF-MEMO-STORED 3, DEF-RECURSION 2, and one
+each of DEF-STACK, DEF-DECLUNKNOWN-TYPE, DEF-OPTOKEN,
+DEF-FIRST-ASSIGN-FREE, DEF-SYMBOL-LITERAL-INPUT and DEF-FREE-BOUND-SAME.
+Of the six NEW tests, none comes from package B: a run of their five files
+at that commit gives the same four failures with and without the third
+commit (`ce-139-derivative-enclosing-binding`, `compile-admission`,
+`compile-javascript-profile-undeclared`); `epsil/formatter` (1) was NEW at
+`7e92c4b0f` already; the garbage-collection test of `ce-1102` is CE-1165
+and passes alone.
 
 ## 6. Prompts
 

@@ -138,6 +138,7 @@ import {
   freeNameBindingInContext,
   freeNameBindingAndScope,
   isBodyFreeName,
+  isBlockLocalBinding,
   sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
@@ -328,6 +329,16 @@ function inferenceCauseMaps(ce: ComputeEngine): boolean {
   if (name === 'InvisibleOperator') return true;
   const def = ce.lookupDefinition(name);
   return def !== undefined && isOperatorDef(def) && def.operator.broadcastable;
+}
+
+/** A number for each home scope of a free name, for the key of
+ * `noteResolutionRead()`. */
+const HOME_SCOPE_KEYS = new WeakMap<Scope, number>();
+let nextHomeScopeKey = 0;
+function homeScopeKey(home: Scope): number {
+  let key = HOME_SCOPE_KEYS.get(home);
+  if (key === undefined) HOME_SCOPE_KEYS.set(home, (key = nextHomeScopeKey++));
+  return key;
 }
 
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
@@ -1119,18 +1130,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const entry = this._unitEntry(this._homeScope!);
       const ce = this.engine;
       const name = this._id;
-      const asVariable = this._readsAsVariable(this._homeScope!);
+      const home = this._homeScope!;
+      const asVariable = this._readsAsVariable(home);
+      // The type and the value read the same definition
+      // (`_freeNameBinding()`): in the evaluation of a stored value, both
+      // skip the local of a block that is not around the home scope.
       const resolve = () =>
         withStaticTypingView(ce, () =>
-          freeNameBindingInContext(ce, name, undefined, asVariable)
+          freeNameBindingInContext(ce, name, undefined, asVariable, home)
         );
       // A type cached on a compound expression is computed again when the
       // name resolves to another definition (a declaration in a pushed
-      // scope, or the pop of that scope).
+      // scope, or the pop of that scope). The resolution depends on the home
+      // scope, so the home scope is in the key.
       const resolved = noteResolutionRead(
         ce,
         name,
-        asVariable ? 'variable' : 'name',
+        `${asVariable ? 'variable' : 'name'}:${homeScopeKey(home)}`,
         resolve
       );
       if (resolved === undefined) return entry ?? BoxedType.unknown;
@@ -1159,7 +1175,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // its own outside the body: it reads its name, as a free name does
       // (`markBodyFreeName()`). With `f := x ↦ 1 + a x`, the type of `f`
       // follows a later assignment of `a`.
-      (this._ownDefinitionOnChain(v) || isBodyFreeName(v))
+      (this._ownDefinitionOnChain(v) || isBodyFreeName(v)) &&
+      // A local of a block, when the definition of the occurrence is not
+      // one, is the local of a block that the occurrence was not written in
+      // (the type of the body of a function read at a call in the block):
+      // the occurrence reads its own definition, as without the flag.
+      !(v._blockLocal !== true && isBlockLocalBinding(resolved))
     ) {
       if (isOperatorDef(resolved)) return resolved.operator.signature;
       return this._typeOfDefinitionInUnit(resolved.value, this._unitEntry(v));
@@ -1270,14 +1291,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * For a free name: the definition that its name resolves to in the current
    * context (`freeNameBindingInContext()`). The resolution skips a library
    * operator when the unit of the occurrence reads the name as a variable
-   * (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`).
+   * (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`). In the
+   * evaluation of a stored value, it skips the local of a block that is not
+   * around the home scope.
    */
   private _freeNameBinding(): BoxedDefinition | undefined {
     return freeNameBindingInContext(
       this.engine,
       this._id,
       undefined,
-      this._readsAsVariable(this._homeScope!)
+      this._readsAsVariable(this._homeScope!),
+      this._homeScope
     );
   }
 

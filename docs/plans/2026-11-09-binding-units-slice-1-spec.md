@@ -104,6 +104,17 @@ findings of round 2 and was not reviewed again.
      a free name was not inside a binder when it was boxed.
    - It also skips a library operator, for a name that the unit reads as a
      variable (rule 2, `N`).
+   - A free name of a stored value, read in the evaluation of that value,
+     does not resolve to a local of a `Block` whose scope is not its home
+     scope or an ancestor of it: with `a := x + 1`,
+     `Block(Declare(x, real, 7), a + 5)` reads the outer `x`, or keeps `x`
+     symbolic when the outer `x` has no definition. Its type is read the
+     same way. A free name that is an operand of the block itself (a host
+     builds the block with `ce.function()`) reads the local. The type read
+     of an occurrence whose own definition is not a `Block` local skips a
+     `Block` local too: the body of a function called in the block reads
+     the definitions that it was written with. (Added 2026-11-10, in
+     phase E, package B; decision 3 of the handoff.)
    - A free name of the body of a function literal has a definition in
      the scope of the body, which the boxing made, and no declaration in
      its home scope. It is a free name for the resolution: when the scope
@@ -205,7 +216,8 @@ findings of round 2 and was not reviewed again.
 8. **An operation has an environment of its own.** An operation is each
    public method of an expression that runs library code on its receiver:
    `evaluate()`, `N()`, `simplify()`, `expand()`, `factor()`, `subs()`,
-   `replace()`, `match()`, `solve()`, `isEqual()` and `compile()`, and their
+   `replace()`, `match()`, `solve()`, `isEqual()`, `compile()` and
+   `explain()` (added 2026-11-10, in phase E, package B), and their
    async forms. The getters that only read (`sgn`, `isPositive`, …) are not
    operations. An operation opens an operation environment. Its parents are
    the environments of the occurrences of its input, which can be several

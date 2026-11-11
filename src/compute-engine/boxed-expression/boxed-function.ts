@@ -5054,6 +5054,14 @@ export class BoxedFunction
   }
 
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
+    // An operation, as the method it explains (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): a free name
+    // made in a scope that the explained method pushes takes the home scope
+    // of the same name in the receiver.
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(this, () =>
+        this.explain(operation, options)
+      );
     return explainExpression(this, operation, options);
   }
 
