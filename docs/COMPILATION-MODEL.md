@@ -1933,7 +1933,10 @@ verifier, an emitter (`javascript-structured-emit.ts`), and the assembly of
 the existing JavaScript target, which gives the result its `run`,
 `broadcast`, `broadcastAsync` and `runAsync`. For each program it admits,
 the value equals the interpreter's within the caveats of compiled code, and
-the doubles equal those of the existing compiler. Without the option,
+the doubles equal those of the existing compiler with `cse: false` and
+`constantFold: false`. The profile folds no constant: against the default
+options of the existing compiler, which fold `√2 + √3 + 1/3` to one
+literal, a result can differ in the last place. Without the option,
 nothing changes.
 
 | Admitted | Examples |

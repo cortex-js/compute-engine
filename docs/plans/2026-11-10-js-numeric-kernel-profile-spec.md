@@ -12,7 +12,8 @@ The structured route of the JavaScript compiler
 only tests construct it. It compiles scalar arithmetic, conditionals, helper
 calls, captured numbers, loops over an integer range and lists of numbers. For
 each program it admits, the value equals the interpreter's and the doubles
-equal those of the existing compiler. It also answers, per program, whether
+equal those of the existing compiler with `cse: false` and
+`constantFold: false`. It also answers, per program, whether
 the function is pure and whether its code can go to a worker
 (`analyzeExecution()` in `structured-execution.ts`).
 

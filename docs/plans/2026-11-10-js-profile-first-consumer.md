@@ -106,3 +106,67 @@ switch can also be limited to a list of consumers.
   decline) are checked by a test with the switch on, because the survey
   could not confirm from the source that the profile fills them before a
   decline.
+
+## Result of steps 1 and 2 (2026-11-10)
+
+Step 1 is `943f1eb0f4b8f91d4c3fee9f299bb5a1efacb13d`: `ce._jsProfile`
+(`CE_JS_PROFILE`, `CE_JS_PROFILE_CONSUMERS`), a consumer name at each of the
+call sites, the counters (`js-profile-switch.ts`, `CE_JS_PROFILE_STATS`,
+`scripts/js-profile-stats.mjs`). A consumer that passes `vars` (`series`) or
+another target (`interval-proof`) is not tried.
+
+Step 2, the full suite in a clean worktree, before the last review fixes
+(which changed tests, the file name of the counters and the `vars` rule):
+
+| Switch | Tests passed | Snapshots | Failures |
+| --- | --- | --- | --- |
+| off | 82,851 | 4,247 unchanged | 0 |
+| on | 82,851 | 4,247 unchanged | 0 |
+
+| Consumer | Attempts | Admitted | Declined |
+| --- | --- | --- | --- |
+| `limit-probe` | 1,773 | 0 | 1,773 |
+| `fit` | 1,756 | 295 | 1,461 |
+| `integrand` | 875 | 3 | 872 |
+| `stochastic-equal` | 592 | 157 | 435 |
+| `map-exact` | 224 | 58 | 166 |
+| `periodic-roots` | 223 | 18 | 205 |
+| `series` (tried in this run) | 194 | 0 | 194 |
+| `map` | 192 | 4 | 188 |
+| `multiple-integral` | 161 | 1 | 160 |
+| `integrand-complex` | 135 | 0 | 135 |
+| `nd` | 53 | 0 | 53 |
+| `map-predicate` | 45 | 31 | 14 |
+| `solve-enumeration` | 43 | 0 | 43 |
+| `nlimit` | 38 | 0 | 38 |
+| `ndsolve` | 29 | 24 | 5 |
+| `reduce` | 28 | 0 | 28 |
+| `integrand-log` | 23 | 0 | 23 |
+| other | 8 | 0 | 8 |
+| total | 6,392 | 591 | 5,801 |
+
+No attempt failed. The declines by cause, from the five most frequent
+messages of each consumer:
+
+- about 3,400: "explicit distinct scalar parameters required". The engine
+  builds its `Function` literals with parameters that have no declared type.
+- about 1,800: "unsupported binding `x`" (`_ff_p0`, `a`, …). A free name
+  with no numeric type, whose value the consumer passes at run time.
+- 194: the `vars` option.
+- about 50: a capture that is not a number.
+- under 100: an operator outside the profile (`Tan`, `Arcsin`, `Arccos`,
+  `LogGamma`, `Haversine`, `Cot`, `Sinh`, `Conjugate`), a `Power` form.
+
+**A correction to this note.** "For a program it admits, the doubles equal
+those of the existing compiler" holds against the existing compiler with
+`constantFold: false`. `implicitCompile()` passes no such option, so the
+existing compiler folds constants and the profile does not: for
+`x·(√2 + √3 + 1/3)` the existing code multiplies by `3.479597703275306` and
+the profile by `3.4795977032753056`. `NIntegrate` of it over 0 to 1 gives
+`1.7397988516376528` and `1.7397988516376526`. A search over 3,000 constant
+subexpressions found 6 that differ, all orderings of that sum, and no test of
+the suite changed. Both values are within the precision caveat of compiled
+code.
+
+**Found on the way.** `issues/CE-1193.md`: the log-space evaluation of an
+integrand is skipped for a typed parameter.
