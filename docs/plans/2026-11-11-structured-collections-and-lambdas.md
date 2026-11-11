@@ -630,3 +630,159 @@ the inverse functions of a complex value decline) for
   with the interpreter are of the scalar classes of section 9 (the
   precision caveat, `Mod`, `Floor` of a quotient, `Digamma`, `Gamma`), none
   in a head of these slices.
+
+## 11. Result of slices 4 and 5
+
+Implemented on `3177128ed`. Tests:
+`test/compute-engine/compile-javascript-structured-collections3.test.ts`
+(against the existing compiler with `Object.is` at every depth, the inputs
+compared with a deep copy after each call, a second call with the same
+inputs, and against the interpreter; one test per decline; the witnesses
+`generations` and `life`; in-place and execution facts; the iteration
+budget of a loop over a list), the verifier cases of slices 4 and 5 in
+`compile-javascript-structured-ir.test.ts`, and the generators of
+`scripts/js-profile-fuzz.ts` (`genTupleList()`, `genTupleLambda()`, a list
+of tuples `LQ` and a parameter `TL`, a loop over a list name, a local
+`list<tuple<real, real>>` from `[]`, `Range` with a step, the rotations,
+the user functions `fe` and `fc` as function operands; each run checks the
+input arrays after the call and a second call).
+
+**Part (a), user functions as function operands.** Admitted in the
+`strict` mode: a symbol whose binding holds a function literal, as the
+function operand of `Map`, `Filter`, `Count`, `Reduce`, `Scan` and
+`Apply`. The admission replaces it by the literal `(arg_1, …) ↦ f(arg_1,
+…)` (`userFunctionOperand()`), so the region of the head holds one `call`
+of the helper per element, and the helper is lowered once, as
+`(L).map((_x) => _f(_x))` calls `_fn_f`. Declined: the `complex` mode (the
+rule of function literals); a helper that draws or calls the host
+(`refuseLazyFunctionOperands()` reaches the helper body); a parameter
+annotation that the engine type of the element, of the initial value or of
+an argument does not prove (`Reduce(L, fa, ex)` with `ex: nan | real |
+signed_infinity`: the existing compiler declines it); a local function
+(`Map(lg, L)`): the engine types its call `unknown`, and the existing
+compiler reads the list with `_SYS.atWithValueMarker` and `_SYS.bcast`, by
+the shape of each element at run time. The note planned "first a declared
+or inferred helper, then a local function": the local function stays
+declined for that reason.
+
+**Part (b), `Range` with a step.** `Range(a, b, s)` with real or integer
+operands is the `collection` operation `range` of three operands, written
+`_SYS.range(a, b, s)` as the existing emitter writes it (the count and the
+tolerance of `rangeCount()` are the runtime's); a list of integers when the
+three are integers. It is the same operation as the range with a step of
+the `bigint` mode (`_SYS.brange(a, b, s)`, slices 3 to 5 of
+`2026-11-11-structured-bigint-mode.md`): the verifier admits three integer
+operands, and in the double policy also real ones. A literal step `0`
+declines (the existing compiler declines it). A comprehension over a range with a step stays declined (the
+rule of aggregates and of slice 1).
+
+**Part (c), lists of tuples.** The IR type `list<T>` admits a tuple element
+(`ListType.element: ScalarKind | TupleType`); the verifier checks the
+element type at every depth (`fitsType()` is recursive for lists; `list`,
+`build`, `append` and `replace-at` admit a tuple element; `take`, `drop`,
+`reverse`, `join` and the rotations keep the element type; `sort` reads
+numbers). The fragment type is a list of points (`structuredListType()`),
+held as an array of arrays. Admitted: inputs and parameters
+`list<tuple<real, …>>`, and in the `strict` mode `number` elements
+(`list<tuple<number, number, number, integer>>`, real there); a local
+declared with such a type, also from the empty literal (`markEmptyTupleLists()`
+gives `[]` the element type of the local); list literals of tuples of one
+size; a comprehension and a `Map` whose value is a tuple (a new array per
+element); `At`, `First`, `Last` (`_SYS.atPoint(L, i, n)`, the element array
+itself, a new tuple of `NaN` out of range), `Length`, `Count`; `Take`,
+`Drop`, `Rest`, `Reverse`, `Join`, `ListJoin` and the rotations (a new outer
+array that holds the tuples of its operand); `Map`, `Filter` and `Count`
+with a function literal whose parameter takes the tuple; a `Loop` over the
+elements of a list name (`for c in all`): an ascending `loop` from 1 to the
+length of the list, evaluated once, whose body reads the element as `c`.
+`At` of a tuple of a list of tuples is `_SYS.at(_SYS.atPoint(L, i, n), j)`
+where the existing emitter wraps the read in a `NaN` test; the numbers are
+the same.
+
+Ownership: the tuples of a list are shared by every list made from it, as
+the existing `slice`, spread and `filter` share them; no operation of the
+route writes a tuple (`replace-at` of a tuple value declines), and an `at`
+with a tuple result is never unique (`inPlaceUpdates()`, section 5), so an
+update writes only an outer array that the program made. The tests check
+the inputs after each call against a deep copy, and a second call.
+`analyzeExecution()` needs no change: the loop over a list is `pure` and
+shippable when its body is.
+
+Declined in part (c): `Sort` of a list of tuples, `ReplaceAt` with a tuple
+value, `Map` of a tuple to tuples, a list literal of tuples of two sizes, an operator over a list
+of tuples (`Map(Sin, LP)` is not valid after boxing), a loop over a list that is
+not a name, and in the `complex` mode `At` and `ListJoin` of a list of
+tuples (the existing compiler reads them on the complex lane). A function
+of lists whose value is a number and whose engine type admits a list
+declines (`Norm(At(LQ, -1))`, which the engine types `list<number>`: the
+existing compiler reads it with `_SYS.bcast`, so `x · (2 / Norm(…))` is
+`x * (2 / n)` there and `x * 2 / n` on the route, another double; found by
+`--seed 142`). The predicate of `Filter` and `Count` is admitted when its
+fact is a boolean, whatever its engine type (`e[4] < c[4]`, which the engine
+types `boolean | list<…>` for a tuple parameter, is
+`_SYS.bcast((a, b) => a < b, …)` of two numbers in the existing code: the
+same boolean).
+
+**Part (d), nested lists: not implemented.** The fragment annotation
+(`fragment.ts`, shared with GLSL) has no list of lists
+(`FragmentElementType` is a real, an integer or a point), and the IR, the
+verifier and the policy would need a `list<list<T>>` with a length per
+level, `At` with two indexes, the `NaN`→`undefined` wrapper of the existing
+reads of a row (`_SYS.at` with a value marker), and the copy rule of
+`ReplaceAt` on an inner list. That is a change of the shared annotation and
+of every rule that reads a list type, larger than the note says; the
+declines stay (`list<list<integer>>` 58, `list<list<real>>` 26 and the
+literal of lists 20 in the shadow measure). No witness of the census needs
+it (`fourth` destructures, `fill` recurses).
+
+**Part (e), rotations.** `RotateLeft(L, k)` and `RotateRight(L, k)` (and
+with no shift, `1`) of a list of numbers or of tuples are `collection`
+operations `rotate-left` and `rotate-right`, written `_SYS.rotl` and
+`_SYS.rotr`; a rotation is a length source of its operand
+(`lengthKey()`), so the sum of eight rotations of `S` in `life` is one
+element-wise `build`. The existing emitter writes `_SYS.rotv(S, k, 1)`
+there, a view whose elements are those of `rotl`: the same integers.
+
+**Part (f), matrices and point functions: not implemented.** `Determinant`,
+`Inverse`, `Transpose`, `MatrixMultiply` read a matrix, a nested list
+(part (d)). `PointX`, `PointY` and `Distance` of a tuple or of a list of
+tuples were next; they were left out to keep the change reviewable. The
+declines stay (`PointList` 27 in the shadow measure).
+
+**Counts**, before (`3177128ed`) and after, measured 2026-11-11:
+
+- Shadow measure on the 99 test files of `test/compute-engine/compile*`
+  that name the heads of these slices most often (4,409 compilations that
+  the existing compiler compiles): the profile admits 1,380 before and
+  1,471 after, with 0 failures. Gone: `Range` with 3 operands (75), the
+  input `list<tuple<real, real>>` (45), `Map` with a user function `f`
+  (15), a list literal of tuples (12), `RotateLeft` (10). Of the 911
+  compilations that the existing compiler declines, the profile admits 9
+  before and 10 after.
+- The 52 consumer test files (`map-auto-compile*`, `limit-*`, `find-fit*`,
+  `nintegrate*`, `integrate-*`, `solve*`, and seven collection tests): 2,360
+  tests pass with and without `CE_JS_PROFILE=numeric-kernel`; the admitted
+  counts per consumer are unchanged but for `fit`, which makes 640 attempts
+  before and 645 after, all 5 more admitted, with 6 declines in both.
+- The prelude census: 29 of 40 functions compile, against 27 before;
+  `generations` of `apollonian-gasket` and `life` of `game-of-life` now
+  compile, with the values of the existing compiler on the prelude's 224
+  circles and on random boards, inputs unchanged. `tangent` and `admitted`
+  decline by R1 (their tuple parameters have no declared type in the
+  prelude), `seen` too (`acc` has no type), `fourth` destructures, and
+  `fill` is recursive. `fish-swarm` and `turing-patterns` were left out
+  (their preludes time out).
+- `scripts/js-profile-fuzz.ts`: `--seed 141` to `145 --count 10000` (one
+  process per seed), `--seed 146 --count 5000 --random`, `--seed 148 --count
+  5000 --host`: no failure of the profile. One difference of value, of
+  `Norm(At(LQ, -1))` above, fixed and confirmed by a second run of
+  `--seed 142`. One difference of shape that is older than these slices (the
+  `before` tree admits it too): in the `complex` mode, `1.5 /
+  Comprehension(cn, Element(j, Range(3, 2), xi == 0.1))` with `cn: number`
+  assigned `1.5` is a list of numbers on the route and of `{re, im}` on the
+  existing compiler (the element-wise rule reads the element of the type
+  `number` as real). The disagreements with the interpreter are of the
+  scalar classes of section 9 (`Mod`, `Floor`, `Truncate`, `Round`,
+  `Arctan2` of a signed zero, `Gamma`) and one comprehension whose element is
+  an `At` out of range (`[|L[2]| for j in 1..0]` at `L = [3]`: `[NaN, NaN]`
+  on both compilers, `[]` in the interpreter), a caveat of compiled code.

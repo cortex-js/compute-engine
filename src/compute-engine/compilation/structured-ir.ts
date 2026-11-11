@@ -62,15 +62,17 @@ export type IRState = string;
 /** The semantic type of a scalar value. */
 export type ScalarKind = 'real' | 'integer' | 'boolean' | 'complex';
 
-/** A list of elements of one scalar kind. The length is not part of the
- *  type: two lists of the same element type and different lengths have one
- *  type. A list is a value: no operation changes a list. A list type is an
- *  interned object (`listType()`): two list types of one element type are
- *  the same object, so `===` compares them, as it compares two scalar
- *  kinds. Its text (`toString()`) is `list<real>`. */
+/** A list of elements of one type: a scalar kind, or a tuple type (a list
+ *  of points). The length is not part of the type: two lists of the same
+ *  element type and different lengths have one type, and the elements of a
+ *  list of tuples all have the length of the tuple type. A list is a value:
+ *  no operation changes a list. A list type is an interned object
+ *  (`listType()`): two list types of one element type are the same object,
+ *  so `===` compares them, as it compares two scalar kinds. Its text
+ *  (`toString()`) is `list<real>`, `list<tuple<real, real>>`. */
 export type ListType = {
   readonly kind: 'list';
-  readonly element: ScalarKind;
+  readonly element: ScalarKind | TupleType;
   toString(): string;
 };
 
@@ -87,14 +89,15 @@ export type TupleType = {
 /** The semantic type of a value: a scalar, a list or a tuple. */
 export type ValueType = ScalarKind | ListType | TupleType;
 
-const LIST_TYPES = new Map<ScalarKind, ListType>();
+const LIST_TYPES = new Map<ScalarKind | TupleType, ListType>();
 const TUPLE_TYPES = new Map<string, TupleType>();
 
-/** The list type of elements of the kind `element`, interned. */
-export function listType(element: ScalarKind): ListType {
+/** The list type of elements of the type `element` (a scalar kind, or an
+ *  interned tuple type), interned. */
+export function listType(element: ScalarKind | TupleType): ListType {
   let type = LIST_TYPES.get(element);
   if (type === undefined) {
-    const text = `list<${element}>`;
+    const text = `list<${String(element)}>`;
     type = Object.freeze({ kind: 'list', element, toString: () => text });
     LIST_TYPES.set(element, type);
   }
@@ -126,10 +129,17 @@ export function isTupleType(type: ValueType): type is TupleType {
   return typeof type === 'object' && type.kind === 'tuple';
 }
 
-/** The kind of the elements of `type`, or `undefined` when `type` is not a
- *  list type. */
-export function elementOf(type: ValueType): ScalarKind | undefined {
+/** The type of the elements of `type` (a scalar kind, or a tuple type for
+ *  a list of tuples), or `undefined` when `type` is not a list type. */
+export function elementOf(type: ValueType): ScalarKind | TupleType | undefined {
   return isListType(type) ? type.element : undefined;
+}
+
+/** The scalar kind of the elements of `type`, or `undefined` when `type` is
+ *  not a list of scalars. */
+export function scalarElementOf(type: ValueType): ScalarKind | undefined {
+  const element = elementOf(type);
+  return typeof element === 'string' ? element : undefined;
 }
 
 /** The name of a representation of a target (`RepresentationPolicy`). */
@@ -634,17 +644,26 @@ export type IRReplaceAt = OperationBase & {
  *   expression unevaluated, and the result is the absent value of the
  *   target (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
  * - `reverse`: one list, its elements in the other order.
+ * - `rotate-left`, `rotate-right`: a list and an integer shift `k`; the
+ *   list of its elements moved `k` places to the left (to the right), each
+ *   element leaving one end entering at the other, as the interpreter's
+ *   `RotateLeft(L, k)` and `RotateRight(L, k)`: the shift is taken modulo
+ *   the length, a negative shift moves to the other side, and an empty list
+ *   gives the empty list.
  * - `sort`: one list, its elements in ascending order, a `NaN` after every
  *   number.
  * - `join`: two or more lists, their elements in order.
  * - `range`: two integers `a` and `b`, the list of the integers from `a`
  *   to `b`, in steps of 1, or of -1 when `b < a`, as the interpreter's
  *   `Range(a, b)` (`Range(1, 0)` is `[1, 0]`); its first element is `a`
- *   itself (`-0` for `a = -0`). With a third integer operand `s`, the
- *   step: the integers `a`, `a + s`, … that do not pass `b`, none for
- *   `s = 0` or for a step whose sign is not the sign of `b - a`, as the
- *   interpreter's `Range(a, b, s)`. A range of more than 2^32 - 1 elements
- *   has no value: compiled code throws, as the existing emitter does.
+ *   itself (`-0` for `a = -0`). With a third operand `s`, the step: the
+ *   numbers `a + i·s` for `i` from 0 to the count of `rangeCount()`
+ *   (`numerics/range-count.ts`) less 1, none for `s = 0` or for a step
+ *   whose sign is not the sign of `b - a`, as the interpreter's
+ *   `Range(a, b, s)`; the three are reals or integers, and the list is a
+ *   list of integers only when the three are integers. A range of more
+ *   than 2^32 - 1 elements has no value: compiled code throws, as the
+ *   existing emitter does.
  *
  * A list result has the elements of its operands: it is a list of integers
  * only when every list operand is one.
@@ -660,7 +679,9 @@ export type CollectionFunctionName =
   | 'reverse'
   | 'sort'
   | 'join'
-  | 'range';
+  | 'range'
+  | 'rotate-left'
+  | 'rotate-right';
 
 /**
  * An application of a function of lists that `fn` names

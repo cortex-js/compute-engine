@@ -350,6 +350,32 @@ operations, with no function value.
 | `Apply((t) ↦ body, a)` | `(((t) => t + 1))(_.x)`, complex-lifted in the `complex` mode | The body with its parameters bound to the values of the arguments, evaluated before it; in the `complex` mode declined |
 | A body that draws, calls or reads the host, or holds a `Loop` | Called once per element, when the existing code runs `map` | Declined (`refuseLazyFunctionOperands()`): the interpreter's `Map`, `Filter` and `Scan` compute an element when it is read |
 
+### User functions as operands, ranges with a step, rotations, lists of tuples
+
+Read from the handlers of `javascript-target.ts` at `3177128ed`
+(2026-11-11), with `cse: false, constantFold: false`, by probes in both
+modes; the design is slices 4 and 5 of
+[2026-11-11-structured-collections-and-lambdas.md](2026-11-11-structured-collections-and-lambdas.md)
+(section 11) and the tests are
+`test/compute-engine/compile-javascript-structured-collections3.test.ts`.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `Map(f, L)`, `Filter(L, p)`, `Count(L, p)`, `Reduce(L, f, init)`, `Scan(L, f)`, `Apply(f, x)` with a user function `f` | `((_f) => (L).map((_x) => _f(_x)))(_fn_f)`, `(L).reduce(((_f) => (_a, _b) => _f(_a, _b))(_fn_f), init)`: the helper called once per element, in index order | The function literal `(arg_1, …) ↦ f(arg_1, …)` in place of the name: the region holds one `call` of the helper per element, the helper lowered once (`userFunctionOperand()`). A helper that draws, a local function (the engine types its call `unknown`, and the existing code reads its list with `_SYS.atWithValueMarker`), the `complex` mode, a name that a `vars`, `functions` or `operators` entry maps (the existing code calls the entry), and a parameter whose annotation the element type does not prove (`(p: tuple<integer, integer>)` over `list<tuple<real, real>>`, which the existing compiler declines; the same for a `Typed` tuple parameter of a function literal): declined |
+| `Range(a, b, s)` as a value | `_SYS.range(a, b, s)`; a literal step `0` declined | The `collection` operation `range` with its third operand, the step (the one form of a range with a step, which the `bigint` mode writes `_SYS.brange`), the same call; a list of integers when the three are integers, else of reals; a literal step `0` declined |
+| `RotateLeft(L, k)`, `RotateRight(L, k)` | `_SYS.rotl(L, k)`, `_SYS.rotr(L, k)` (new arrays, `slice` and `concat`); inside an element-wise sum `_SYS.rotv(S, k, 1)`, a view whose elements are those of `rotl` | A `collection` operation `rotate-left` (`rotate-right`) written as `_SYS.rotl` (`_SYS.rotr`), also inside an element-wise sum (`life`: the same integers); a length source of its operand (`lengthKey()`) |
+| `At(LP, i)` of a list of tuples | `_SYS.atPoint(LP, i, n)`: the element array itself, a new array of `n` `NaN` out of range | The same call (`at` with a tuple result, never unique for `inPlaceUpdates()`) |
+| `At(At(LP, i), j)` | `((_tv1) => (Number.isNaN((_tv1) ?? Number.NaN) ? Number.NaN : _SYS.at(_tv1, j)))(_SYS.atPoint(LP, i, n))` | `_SYS.at(_SYS.atPoint(LP, i, n), j)`: the same number, `NaN` out of range in both |
+| `First(LP)`, `Last(LP)`, `Length(LP)`, `Count(LP)` | `_SYS.atPoint(LP, 1, n)`, `_SYS.atPoint(LP, -1, n)`, `(LP).length` | The same |
+| `Take`, `Drop`, `Reverse`, `ListJoin`, `Join` of lists of tuples | `(LP).slice(0, 2)`, `(LP).slice().reverse()`, `[...(LP), ...([_.P])]`: a new outer array that holds the arrays of the operands | The same text; the tuples are shared, and no operation writes a tuple; `Sort` of a list of tuples declined |
+| `[(1, 2), (x, 3)]`, `[(j, 2j) for j in 1..n]` | `[[1, 2], [_.x, 3]]`; `result.push([j, 2 * j])` | A `list` of `tuple` values; a `build` whose body yields a `tuple`: new arrays at every depth |
+| `Map(t ↦ (t[2], t[1]), LP)`, `Map(t ↦ t[1] + t[2], LP)` | `((_f) => (LP).map((_x) => _f(_x)))(((t) => [_SYS.at(t, 2), _SYS.at(t, 1)]))` | A `build` whose parameter is the element (`_SYS.atPoint`), the body inline; a tuple result is a new array |
+| `Filter(LP, e ↦ e[1] < x)`, `Count(LT, e ↦ e[4] < x)` | `(LP).filter((_x) => _f(_x))` with `((e) => _SYS.at(e, 1) < _.x)`; `_SYS.predicateResult(((e) => _SYS.bcast((_tv1, _tv2) => (_tv1 < _tv2), (_SYS.atWithValueMarker(e, 4)), (_.x))), "Count", "select")` when the engine types the predicate `boolean \| list<…>` | A `loop` with a `conditional` and an `append` of the element array (the existing `filter` keeps it too). The predicate is tested, so a predicate whose fact is boolean is admitted whatever its engine type: the two comparisons give the same boolean for numbers |
+| `let out: list<tuple<…>> = []`, a later `out = []` | `let out = [];` | The empty literal has the element type of the declared local (`markEmptyTupleLists()`): a `list` of no operand |
+| `Loop(body, Element(c, L))` (`for c in all`) of a list name | `for (const c of all) { … }` | An ascending `loop` from 1 to the length of the list, evaluated once before the loop, whose body reads the element (`_SYS.atPoint` or `_SYS.atNumeric`) as `c`; each pass counts against an `iterationBudget`, as the existing loop does. A loop over another value than a name declined |
+| A tuple of `number` elements in the `strict` mode (`list<tuple<number, number, number, integer>>`) | `_SYS.atNumeric(c, 4, "integer")`, `_SYS.at(t, 1)`: numbers | Real elements (`structuredTupleType()`), as a `number` input is real there |
+
+
 ### The compile mode `bigint`
 
 Read from `emitBigintLane()` (`compile-bigint-emit.ts`) and the helpers of

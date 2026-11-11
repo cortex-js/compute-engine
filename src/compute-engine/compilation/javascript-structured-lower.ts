@@ -444,10 +444,13 @@ export const COLLECTION_HEADS: Readonly<
   Reverse: 'reverse',
   Sort: 'sort',
   Join: 'join',
+  ListJoin: 'join',
   First: 'at',
   Last: 'at',
   Count: 'length',
   Range: 'range',
+  RotateLeft: 'rotate-left',
+  RotateRight: 'rotate-right',
 };
 
 /** The heads that take a function operand on the structured route
@@ -464,6 +467,55 @@ export const FUNCTION_OPERAND_HEADS: Readonly<
   Apply: { fn: 0 },
 };
 
+/** The function literal that the admission made for the function operand
+ *  of each head node whose function is a user function
+ *  (`recordUserFunctionOperand()`), and the operand symbol of the call in
+ *  its body. */
+const USER_FUNCTION_OPERANDS = new WeakMap<Expression, Expression>();
+const USER_FUNCTION_CALLS = new WeakMap<Expression, Expression>();
+
+/**
+ * Record `lambda`, `Function(f(p1, …), p1, …)`, as the function operand of
+ * the head node `node` (`FUNCTION_OPERAND_HEADS`) whose function operand is
+ * the symbol `symbol` of a user function `f`: the admission, the rule and the
+ * lowering read the function as that literal (`functionOperandOf()`), so
+ * each element is one call of the helper `f`, as the existing emitter calls
+ * `_fn_f` once per element (`L.map((_x) => _f(_x))`). The admission makes the
+ * literal, since it reads the engine (`userFunctionOperand()` in
+ * `javascript-fragment-target.ts`).
+ */
+export function recordUserFunctionOperand(
+  node: Expression,
+  symbol: Expression,
+  lambda: Expression,
+  call: Expression
+): void {
+  USER_FUNCTION_OPERANDS.set(node, lambda);
+  USER_FUNCTION_CALLS.set(call, symbol);
+}
+
+/** The function operand of the head node `node` (`FUNCTION_OPERAND_HEADS`):
+ *  the literal that `recordUserFunctionOperand()` recorded for a user
+ *  function, or the operand itself. */
+export function functionOperandOf(
+  node: Expression & { ops: readonly Expression[] }
+): Expression | undefined {
+  const recorded = USER_FUNCTION_OPERANDS.get(node);
+  if (recorded !== undefined) return recorded;
+  const position = Object.hasOwn(FUNCTION_OPERAND_HEADS, node.operator)
+    ? FUNCTION_OPERAND_HEADS[node.operator]
+    : undefined;
+  return position === undefined ? undefined : node.ops[position.fn];
+}
+
+/** The operand symbol of `call` when `call` is the body of a literal that
+ *  `recordUserFunctionOperand()` recorded, else `undefined`. */
+export function userFunctionOperandSymbol(
+  call: Expression
+): Expression | undefined {
+  return USER_FUNCTION_CALLS.get(call);
+}
+
 /**
  * The parameters and the body of the function literal `fn`
  * (`Function(Block(body), p1, …)`, or `Function(body, p1, …)`), with
@@ -471,7 +523,9 @@ export const FUNCTION_OPERAND_HEADS: Readonly<
  * node. A parameter is a symbol, or `Typed(p, T)` with `T` one of
  * `integer`, `real` and `number` (the preparation of the existing compiler
  * types the parameter of a `Map` with the element type of its list):
- * `type` is then `T`.
+ * `type` is then `T`; or with `T` a tuple type (the element type of a list
+ * of tuples): `type` is `tuple`, and `tuple` the spelling of `T`, which the
+ * rule of the head checks.
  */
 export function functionOperandParts(
   fn: Expression,
@@ -480,7 +534,8 @@ export function functionOperandParts(
   | {
       readonly parameters: readonly {
         readonly symbol: Expression & { symbol: string };
-        readonly type?: 'integer' | 'real' | 'number';
+        readonly type?: 'integer' | 'real' | 'number' | 'tuple';
+        readonly tuple?: string;
       }[];
       readonly body: Expression;
     }
@@ -493,7 +548,8 @@ export function functionOperandParts(
     return undefined;
   const parameters: {
     symbol: Expression & { symbol: string };
-    type?: 'integer' | 'real' | 'number';
+    type?: 'integer' | 'real' | 'number' | 'tuple';
+    tuple?: string;
   }[] = [];
   for (const p of fn.ops.slice(1)) {
     if (isSymbol(p)) {
@@ -503,6 +559,11 @@ export function functionOperandParts(
     if (!isFunction(p, 'Typed') || p.nops !== 2 || !isSymbol(p.op1))
       return undefined;
     const type = isString(p.op2) ? p.op2.string : undefined;
+    const spelling = type?.replace(/^'(.*)'$/, '$1');
+    if (spelling !== undefined && /^tuple<.*>$/.test(spelling)) {
+      parameters.push({ symbol: p.op1, type: 'tuple', tuple: spelling });
+      continue;
+    }
     const declared =
       type === "'integer'" || type === 'integer'
         ? 'integer'
@@ -681,11 +742,12 @@ function scalarKind(type: { readonly kind: string }): ScalarKind {
   return fail(`the type ${type.kind} is not a scalar type`);
 }
 
-/** The type of a value: a scalar type, a list of reals or of integers,
- *  whatever its length, or a tuple (a fragment point) of reals. */
+/** The type of a value: a scalar type, a list of reals, of integers or of
+ *  tuples of reals, whatever its length, or a tuple (a fragment point) of
+ *  reals. */
 export function valueType(type: {
   readonly kind: string;
-  readonly element?: { readonly kind: string };
+  readonly element?: { readonly kind: string; readonly size?: number };
   readonly size?: number;
 }): ValueType {
   if (type.kind === 'point') {
@@ -695,6 +757,9 @@ export function valueType(type: {
     return tupleType(new Array<ScalarKind>(size).fill('real'));
   }
   if (type.kind !== 'list') return scalarKind(type);
+  // A list of points is a list of tuples of reals.
+  if (type.element?.kind === 'point')
+    return listType(valueType(type.element) as TupleType);
   const element =
     type.element === undefined ? undefined : scalarKind(type.element);
   if (element !== 'real' && element !== 'integer')
@@ -1992,7 +2057,7 @@ class Lowering {
   }
 
   /** The element of `list` (a list, or a tuple of reals) at `index`, at the
-   *  end of `operations`. */
+   *  end of `operations`: a number, or a tuple of a list of tuples. */
   private element(
     list: IRValue,
     index: IRValue,
@@ -2000,11 +2065,12 @@ class Lowering {
     operations: IROperation[]
   ): IRValue {
     const type = list.type;
+    const element = isTupleType(type)
+      ? type.elements[0]
+      : (elementOf(type) ?? fail(`${nodeText(origin)} reads no list`));
     const result = this.newValue(
-      isTupleType(type)
-        ? type.elements[0]
-        : (elementOf(type) ?? fail(`${nodeText(origin)} reads no list`)),
-      'number'
+      element,
+      isTupleType(element) ? 'array' : 'number'
     );
     operations.push({
       kind: 'at',
@@ -2206,16 +2272,17 @@ class Lowering {
    * in order, then
    *
    * - `Norm`, `Mean`, `Median`, `Variance`, `Dot` of two lists, `Take`,
-   *   `Drop`, `Reverse`, `Sort` and `Join`: the `collection` operation of the
-   *   head; `Rest(L)` is `drop` of the count `1`;
+   *   `Drop`, `Reverse`, `Sort`, `Join`, `RotateLeft` and `RotateRight`: the
+   *   `collection` operation of the head; `Rest(L)` is `drop` of the count
+   *   `1`, and a rotation with no shift rotates by `1`;
    * - `Dot` of two tuples: one `add` of the products of the elements at each
    *   position (`get`), in order, or the one product of a tuple of one
    *   element, as the existing emitter writes `(P[0] * Q[0] + P[1] *
    *   Q[1])`;
    * - `First(L)` and `Last(L)`: `at` of the index `1` and `-1`; `Count(L)`:
    *   `length`;
-   * - `Range(a, b)` (`Range(b)` from 1): a `build` from `a` to `b` whose body
-   *   yields its index, in steps of 1, or of -1 when `b < a`.
+   * - `Range(a, b)` (`Range(b)` from 1) and `Range(a, b, step)`: the
+   *   `collection` operation `range` of the bounds (and the step).
    */
   private collection(
     node: Expression & { ops: readonly Expression[] },
@@ -2249,7 +2316,8 @@ class Lowering {
       case 'Drop':
       case 'Reverse':
       case 'Sort':
-      case 'Join': {
+      case 'Join':
+      case 'ListJoin': {
         const fn = COLLECTION_HEADS[operator];
         if (fn === 'at' || fn === 'length')
           return fail(`no function of lists for ${operator}`);
@@ -2260,6 +2328,19 @@ class Lowering {
           operands[0],
           this.numberLiteral(1, 'integer', node, operations),
         ]);
+      // A rotation with no shift rotates by 1, as the existing emitter
+      // writes `_SYS.rotl(L, 1)`.
+      case 'RotateLeft':
+      case 'RotateRight':
+        return push(
+          COLLECTION_HEADS[operator] as CollectionFunctionName,
+          operands.length === 2
+            ? operands
+            : [
+                operands[0],
+                this.numberLiteral(1, 'integer', node, operations),
+              ]
+        );
       case 'Dot': {
         const [a, b] = operands;
         if (!isTupleType(a.type) || !isTupleType(b.type))
@@ -2329,6 +2410,7 @@ class Lowering {
         return result;
       }
       case 'Range': {
+        // `Range(b)` from 1; `Range(a, b, step)` has three operands.
         const bounds =
           operands.length === 1
             ? [this.numberLiteral(1, 'integer', node, operations), operands[0]]
@@ -2377,7 +2459,7 @@ class Lowering {
   ): IRValue {
     const operator = node.operator;
     const position = FUNCTION_OPERAND_HEADS[operator];
-    const fn = node.ops[position.fn];
+    const fn = functionOperandOf(node) ?? node.ops[position.fn];
     const lambda = functionOperandParts(
       fn,
       position.arity ?? node.ops.length - 1
@@ -4083,6 +4165,12 @@ class Lowering {
    * the result of the loop (an `exit`); a real value there makes the
    * parameter real too, as a real next value does. A body that always
    * exits throws: the admission refuses it.
+   *
+   * A `Loop` over `Element(c, L)` with a list `L` is a `loop` from 1 to the
+   * length of the value of `L`, evaluated once before the loop, whose index
+   * is not a name: the body reads the element at the index (`at`, at the
+   * start of each iteration) as `c`, as `for (const c of L)` of the
+   * existing emitter visits each element in order.
    */
   private loopStatement(
     node: Expression & { ops: readonly Expression[] },
@@ -4092,13 +4180,17 @@ class Lowering {
   ): void {
     const [body, spec] = node.ops;
     const loopScope = scope.inner.get(node);
+    const overList =
+      isFunction(spec, 'Element') &&
+      spec.nops === 2 &&
+      isSymbol(spec.op1) &&
+      !isFunction(spec.op2, 'Range');
     if (
       loopScope === undefined ||
       !isFunction(spec, 'Element') ||
       spec.nops !== 2 ||
       !isSymbol(spec.op1) ||
-      !isFunction(spec.op2, 'Range') ||
-      spec.op2.nops !== 2
+      (!overList && (!isFunction(spec.op2, 'Range') || spec.op2.nops !== 2))
     )
       return fail(`no lowering for the loop ${nodeText(node)}`);
     const index = spec.op1.symbol;
@@ -4108,8 +4200,26 @@ class Lowering {
         fail(`the bound ${nodeText(b)} of a loop is not an integer`);
       return value;
     };
-    const from = bound(spec.op2.op1);
-    const to = bound(spec.op2.op2);
+    // The list of a loop over a list, and its length; the bounds of a loop
+    // over a range.
+    const list = overList ? this.value(spec.op2, scope, operations) : undefined;
+    let from: IRValue;
+    let to: IRValue;
+    if (list !== undefined) {
+      from = this.numberLiteral(1, 'integer', node, operations);
+      to = this.newValue('integer', 'number');
+      operations.push({
+        kind: 'length',
+        result: to,
+        operands: [list],
+        effect: 'pure',
+        origin: node,
+      });
+    } else {
+      const range = spec.op2 as Expression & { op1: Expression; op2: Expression };
+      from = bound(range.op1);
+      to = bound(range.op2);
+    }
 
     // The locals of the scopes around the loop that the body writes.
     const written = assignedNames(body);
@@ -4149,10 +4259,20 @@ class Lowering {
       carried.forEach(({ binder, name }, i) =>
         this.bound.get(binder)!.set(name, parameters[i])
       );
-      this.bound.set(loopScope, new Map([[index, indexValue]]));
+      const inner: IROperation[] = [];
+      this.bound.set(
+        loopScope,
+        new Map([
+          [
+            index,
+            list === undefined
+              ? indexValue
+              : this.element(list, indexValue, node, inner),
+          ],
+        ])
+      );
       this.wrote(loopScope);
       this.changed();
-      const inner: IROperation[] = [];
       const context = { carried, exits: [] as (readonly IRValue[])[] };
       this.loops.push(context);
       let closed: boolean;
@@ -4214,6 +4334,8 @@ class Lowering {
         effect: region.effect,
         ...touchesField(region.touches),
         iterationBudget: this.prep.iterationBudget,
+        // A loop over a list runs no iteration for an empty list.
+        ...(list === undefined ? {} : { ascending: true as const }),
         origin: node,
       });
       return;
@@ -4605,7 +4727,10 @@ function namesIn(
   memo: Map<Expression, ReadonlySet<string>>,
   captured?: (operator: string) => readonly string[]
 ): ReadonlySet<string> {
-  if (isSymbol(node)) return new Set([node.symbol]);
+  // The symbol of a local function as a function operand (`Map(lf, L)`)
+  // reads the names that a call of it reads.
+  if (isSymbol(node))
+    return new Set([node.symbol, ...(captured?.(node.symbol) ?? [])]);
   if (!isFunction(node)) return new Set();
   const known = memo.get(node);
   if (known !== undefined) return known;

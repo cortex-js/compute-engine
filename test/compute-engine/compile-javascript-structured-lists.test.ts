@@ -532,7 +532,7 @@ describe('refusals', () => {
     ['At with a string index', body([L, I], ['At', 'L', "'a'"]), /At with a string index is not in the structured route/],
     ['At with a Range index', body([L, I], ['Add', ['At', 'L', ['Range', 1, 2]], 0]), /At with a Range index \(a slice\) is not in the structured route/],
     ['At of a number', body([L, I], ['At', 'i', 1]), /invalid bound expression/],
-    ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list of reals or integers or a tuple of reals, and its operand has the type `integer`/],
+    ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list of reals, integers or tuples or a tuple of reals, and its operand has the type `integer`/],
     ['a list of lists', body([typed('L', 'list<list<real>>'), I], ['At', ['At', 'L', 'i'], 1]), /the parameter L has the type list<list<real>>, and the structured route admits a list only of the type list<real> or list<integer>/],
     ['a matrix', body([typed('L', 'matrix<real>'), I], 'i'), /the parameter L has the type matrix<real>/],
     // A type that is not a list type keeps the message of a parameter that
@@ -546,7 +546,7 @@ describe('refusals', () => {
     // route since slice 2 (compile-javascript-structured-collections2.test.ts).
     ['Take with a real count', body([L, typed('x', 'real')], ['At', ['Take', 'L', 'x'], 1]), /Take with x of the type `real` is not in the structured route, which reads an integer there/],
     ['Norm with an order', body([L], ['Norm', 'L', 1]), /Norm with 2 operands is not in the structured route/],
-    ['Range with a step', body([L, I], ['At', ['Range', 1, 'i', 2], 1]), /Range with 3 operands is not in the structured route/],
+    ['Range with a literal step 0', body([L, I], ['At', ['Range', 1, 'i', 0], 1]), /Range with the literal step 0 is not in the structured route/],
     // The structured route admits `Comprehension` over one range and
     // `ReplaceAt` (compile-javascript-structured-heat.test.ts; design:
     // docs/plans/2026-11-10-structured-ir-loops-and-lists.md); these forms

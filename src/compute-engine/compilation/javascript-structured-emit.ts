@@ -1169,16 +1169,28 @@ class Emitter {
           this.runtime.add('at');
           return call('_SYS.at', operands);
         }
-        this.runtime.add('atNumeric');
-        return call('_SYS.atNumeric', [
-          ...operands,
-          atom(
-            JSON.stringify(
-              this.elementLabels.get(op.operands[0].id) ??
-                elementOf(op.operands[0].type)
-            )
-          ),
-        ]);
+        // An element of a list of tuples: `_SYS.atPoint(L, i, n)`, a tuple of
+        // `n` `NaN` for an index out of range, as the existing emitter reads
+        // a list of points.
+        {
+          const element = elementOf(op.operands[0].type);
+          if (element !== undefined && isTupleType(element)) {
+            this.runtime.add('atPoint');
+            return call('_SYS.atPoint', [
+              ...operands,
+              atom(String(element.elements.length)),
+            ]);
+          }
+          this.runtime.add('atNumeric');
+          return call('_SYS.atNumeric', [
+            ...operands,
+            atom(
+              JSON.stringify(
+                this.elementLabels.get(op.operands[0].id) ?? element
+              )
+            ),
+          ]);
+        }
       case 'length':
         if (op.result.representation === 'bigint') {
           this.runtime.add('toBigint');
@@ -1436,9 +1448,10 @@ class Emitter {
    * `L.slice().reverse()` and `L.slice().sort(cmp)` with the comparator of
    * the existing emitter, which puts a `NaN` after every number. `join` is
    * `[...L, ...M]`. `range` is the call of the existing emitter,
-   * `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))(a, b)`: the
-   * runtime throws for more than 2^32 - 1 elements, and its first element
-   * is `a` itself. Each operand is read once.
+   * `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))(a, b)`, or
+   * `_SYS.range(a, b, step)` with a step: the runtime throws for more than
+   * 2^32 - 1 elements, and its first element is `a` itself. Each operand is
+   * read once.
    */
   private collection(
     op: Extract<IROperation, { kind: 'collection' }>,
@@ -1494,6 +1507,14 @@ class Emitter {
       }
       case 'reverse':
         return method('slice().reverse()');
+      // The runtime helpers of `RotateLeft` and `RotateRight`, a new array:
+      // the shift is rounded and taken modulo the length.
+      case 'rotate-left':
+        this.runtime.add('rotl');
+        return call('_SYS.rotl', operands);
+      case 'rotate-right':
+        this.runtime.add('rotr');
+        return call('_SYS.rotr', operands);
       case 'sort':
         return method(
           'slice().sort((_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0))'
@@ -1503,9 +1524,10 @@ class Emitter {
           `[${operands.map((o) => `...${operand(o, CALL)}`).join(', ')}]`
         );
       case 'range':
-        if (operands.length !== 2)
-          return fail('a range of numbers with a step');
         this.runtime.add('range');
+        // With a step, the call of the existing emitter for
+        // `Range(a, b, step)`.
+        if (operands.length === 3) return call('_SYS.range', operands);
         return {
           text:
             `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))` +

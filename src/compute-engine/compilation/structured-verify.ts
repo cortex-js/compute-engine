@@ -728,19 +728,27 @@ function verifyStates(
 }
 
 /** Whether a value of the type `type` is a valid value of the type
- *  `wider`: the same type, an integer for a real, a list of integers
- *  for a list of reals (the elements of a list of integers are valid
+ *  `wider`: the same type, an integer for a real, a list whose elements fit
+ *  the elements of `wider` (the elements of a list of integers are valid
  *  reals), or a tuple of the length of `wider` whose element at each
  *  position fits the element of `wider` there. A real is not an integer. */
 function fitsType(type: ValueType, wider: ValueType): boolean {
   if (type === wider || (type === 'integer' && wider === 'real')) return true;
-  if (type === listType('integer') && wider === listType('real')) return true;
+  if (isListType(type) && isListType(wider))
+    return fitsType(type.element, wider.element);
   return (
     isTupleType(type) &&
     isTupleType(wider) &&
     type.elements.length === wider.elements.length &&
     type.elements.every((e, i) => fitsType(e, wider.elements[i]))
   );
+}
+
+/** Whether a value of the type `type` can be an element of a list: a real,
+ *  an integer, or a tuple (a list of points). A boolean, a complex number
+ *  and a list are not elements of a list of the representation. */
+function isElementType(type: ValueType): boolean {
+  return type === 'real' || type === 'integer' || isTupleType(type);
 }
 
 /** Whether `type` is a list or a tuple type: a value of several elements. */
@@ -1139,12 +1147,10 @@ function verifySignature(
           `a build has a result of the type ${op.result.type}, not a list`
         );
       const value = yieldedValues(op.body)[0];
-      // The element is a number; an integer element is a valid element of a
-      // list of reals, a real one is not an element of a list of integers.
-      if (
-        (value.type !== 'real' && value.type !== 'integer') ||
-        !fitsType(value.type, element)
-      )
+      // The element is a number or a tuple; an integer element is a valid
+      // element of a list of reals, a real one is not an element of a list
+      // of integers.
+      if (!isElementType(value.type) || !fitsType(value.type, element))
         fail(
           `the body of a build yields a value of the type ${value.type}, and its result has the type ${op.result.type}`
         );
@@ -1174,7 +1180,7 @@ function verifySignature(
       // The result holds the elements of the list and the new element: an
       // integer fits a list of reals, a real does not fit a list of integers.
       if (
-        (value.type !== 'real' && value.type !== 'integer') ||
+        !isElementType(value.type) ||
         !fitsType(value.type, resultElement) ||
         !fitsType(element, resultElement)
       )
@@ -1258,6 +1264,7 @@ function verifySignature(
       arity(op.kind === 'at' ? 2 : 1);
       const base = op.operands[0].type;
       // A tuple is read by `at` when its elements have one kind.
+      // A list of tuples reads a tuple.
       const element = isTupleType(base)
         ? base.elements.every((e) => e === base.elements[0])
           ? base.elements[0]
@@ -1301,9 +1308,13 @@ function verifySignature(
           `the operation ${op.kind} has a result of the type ${type}, not a ${op.kind}`
         );
       if (op.kind === 'tuple') arity(places.length);
+      // An element of a list is a number or a tuple, an element of a tuple
+      // a number.
       op.operands.forEach((operand, i) => {
         if (
-          (operand.type !== 'real' && operand.type !== 'integer') ||
+          (op.kind === 'list'
+            ? !isElementType(operand.type)
+            : operand.type !== 'real' && operand.type !== 'integer') ||
           !fitsType(operand.type, places[i])
         )
           fail(
@@ -1352,7 +1363,7 @@ function verifySignature(
       // The result holds the elements of the list and the new element, by
       // the rule of `replace-at`.
       if (
-        (value.type !== 'real' && value.type !== 'integer') ||
+        !isElementType(value.type) ||
         !fitsType(value.type, resultElement) ||
         !fitsType(element, resultElement)
       )
@@ -1526,8 +1537,9 @@ function numericElement(
  * The checks of a function of lists (`IRCollection`), by the rule of its
  * identifier (`CollectionFunctionName`): `norm`, `mean`, `median` and
  * `variance` read one list or tuple of numbers and have a real result;
- * `dot` reads two lists of numbers and has a real result; `take` and `drop`
- * read a list of numbers and an integer count, `reverse` and `sort` one
+ * `dot` reads two lists of numbers and has a real result; `take`, `drop`,
+ * `rotate-left` and `rotate-right` read a list of numbers and an integer
+ * count, `range` two integers, or two numbers and a step; `reverse` and `sort` one
  * list of numbers, `join` two or more, and each has a list result whose
  * element holds the elements of its list operands (a list of integers only
  * when every list operand is one). The operation is `pure`, and the policy
@@ -1579,11 +1591,16 @@ function verifyCollection(
       result = 'real';
       break;
     case 'take':
-    case 'drop': {
+    case 'drop':
+    case 'rotate-left':
+    case 'rotate-right': {
       count(operands.length === 2);
       if (isTupleType(operands[0].type))
         fail(`the function of lists ${fn} reads a list, not a tuple`);
-      const element = listOperand(0);
+      // A list of numbers or of tuples: the result has its elements.
+      const tuple = elementOf(operands[0].type);
+      const element =
+        tuple !== undefined && isTupleType(tuple) ? tuple : listOperand(0);
       if (operands[1].type !== 'integer')
         fail(
           `the count of the function of lists ${fn} has the type ${operands[1].type}`
@@ -1597,6 +1614,17 @@ function verifyCollection(
       count(fn === 'join' ? operands.length >= 2 : operands.length === 1);
       if (operands.some((o) => isTupleType(o.type)))
         fail(`the function of lists ${fn} reads lists, not a tuple`);
+      // `reverse` and `join` of lists of one tuple type (a list of points)
+      // have elements of that type; `sort` reads numbers.
+      const tuple = elementOf(operands[0].type);
+      if (fn !== 'sort' && tuple !== undefined && isTupleType(tuple)) {
+        if (operands.some((o) => elementOf(o.type) !== tuple))
+          fail(
+            `the function of lists ${fn} reads lists of other elements than ${tuple}`
+          );
+        result = listType(tuple);
+        break;
+      }
       const elements = operands.map((_, i) => listOperand(i));
       result = listType(
         elements.every((e) => e === 'integer') ? 'integer' : 'real'
@@ -1604,11 +1632,21 @@ function verifyCollection(
       break;
     }
     case 'range':
-      // The bounds, and an optional step.
+      // Two integer bounds, or two bounds and a step, each a real or an
+      // integer: a list of integers when the three are integers.
       count(operands.length === 2 || operands.length === 3);
-      if (operands.some((o) => o.type !== 'integer'))
+      if (
+        operands.length === 2 &&
+        operands.some((o) => o.type !== 'integer')
+      )
         fail('the bounds of the function of lists range are not integers');
-      result = listType('integer');
+      if (operands.some((o) => o.type !== 'integer' && o.type !== 'real'))
+        fail(
+          'the bounds and the step of the function of lists range are not numbers'
+        );
+      result = listType(
+        operands.every((o) => o.type === 'integer') ? 'integer' : 'real'
+      );
       break;
     default:
       return fail(`the function of lists ${String(fn)} is not known`);

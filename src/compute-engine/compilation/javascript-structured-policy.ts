@@ -31,13 +31,20 @@ import {
 /** The representation that holds a value of the type `type`, or
  *  `undefined` for a list or a tuple of booleans or of complex numbers. A
  *  tuple of reals or of integers is an array of numbers, as a list is: the
- *  existing emitter writes both `[a, b]`. */
+ *  existing emitter writes both `[a, b]`; a list of such tuples is an array
+ *  of them. */
 export function representationOfKind(
   type: ValueType
 ): ScalarRepresentation | undefined {
   const element = elementOf(type);
+  // A list of tuples (a list of points) is an array of arrays, as the
+  // existing emitter holds `[[1, 2], [x, 3]]`.
   if (element !== undefined)
-    return element === 'real' || element === 'integer' ? 'array' : undefined;
+    return element === 'real' ||
+      element === 'integer' ||
+      (isTupleType(element) && representationOfKind(element) === 'array')
+      ? 'array'
+      : undefined;
   if (isTupleType(type))
     return type.elements.every((e) => e === 'real' || e === 'integer')
       ? 'array'
@@ -110,14 +117,15 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // `Math.sqrt` of a number, `_SYS.csqrt` of an `{re, im}` object.
     'sqrt': { results: ['number', 'complex'], operands: 'same' },
     // `_SYS.atNumeric(list, index, element type)` and `list.length`, as the
-    // existing emitter writes them for a list input or parameter, and
-    // `_SYS.at(tuple, index)` for a tuple.
-    'at': { results: ['number'], operands: ['array', 'number'] },
+    // existing emitter writes them for a list input or parameter,
+    // `_SYS.at(tuple, index)` for a tuple, and `_SYS.atPoint(list, index,
+    // size)` for a list of tuples, whose element is an array.
+    'at': { results: ['number', 'array'], operands: ['array', 'number'] },
     'length': { results: ['number'], operands: ['array'] },
     // `[a, b, …]`, the array literal of the existing emitter for a list
     // literal and a tuple; `t[i]` for the element of a tuple at a literal
     // position.
-    'list': { results: ['array'], operands: ['number'] },
+    'list': { results: ['array'], operands: ['number', 'array'] },
     'tuple': { results: ['array'], operands: ['number'] },
     'get': { results: ['number'], operands: ['array'] },
     // `(r.push(x), r)` when the emitter writes the element into the array
@@ -161,7 +169,8 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   // its head for an array of numbers (`Norm`, `Mean`, `Dot`, `Take`, …, in
   // `javascript-target.ts`): `_SYS.norm(L)`, `_SYS.mean(L)`,
   // `_SYS.median(L)`, `_SYS.variance(L)`, `_SYS.matmul(L, M)`, `L.slice(…)`,
-  // `L.slice().reverse()`, `L.slice().sort(…)` and `[...L, ...M]`. Each
+  // `L.slice().reverse()`, `L.slice().sort(…)`, `[...L, ...M]`,
+  // `_SYS.range(a, b, step)`, `_SYS.rotl(L, k)` and `_SYS.rotr(L, k)`. Each
   // list result is a new array.
   collections: {
     norm: { results: ['number'], operands: ['array'] },
@@ -175,6 +184,9 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     sort: { results: ['array'], operands: ['array'] },
     join: { results: ['array'], operands: ['array'] },
     range: { results: ['array'], operands: ['number'] },
+    // `_SYS.rotl(L, k)` and `_SYS.rotr(L, k)`, a new array.
+    'rotate-left': { results: ['array'], operands: ['array', 'number'] },
+    'rotate-right': { results: ['array'], operands: ['array', 'number'] },
   },
   // The emitter writes each function as the existing emitter writes it for
   // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):

@@ -1115,12 +1115,76 @@ describe('the verifier: lists and tuples', () => {
       (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: tupleType(['real', 'real']) }] }),
       /reads lists, not a tuple|is used with another type/,
     ],
+    // Slices 4 and 5: a range with a step, the rotations, lists of tuples.
+    [
+      'a range with a real step whose result is a list of integers',
+      fn(['Range', 1, 'n', 0.5], N),
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType('integer') } }),
+      /the function of lists range has a result of the type list<integer>, not list<real>/,
+    ],
+    [
+      'a range of four operands',
+      fn(['Range', 1, 'n', 2], N),
+      (op: IROperation) => ({ ...op, operands: [...op.operands, op.operands[2]] }),
+      /the function of lists range has 4 operands/,
+    ],
+    [
+      'a rotation by a real shift',
+      fn(['RotateLeft', 'L', 'n'], L, N),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: 'real' }] }),
+      /the count of the function of lists rotate-left has the type real|is used with another type/,
+    ],
+    [
+      'a take of a list of booleans',
+      fn(['Take', 'L', 'n'], L, N),
+      (op: IROperation) => ({
+        ...op,
+        operands: [{ ...op.operands[0], type: listType('boolean') }, op.operands[1]],
+        result: { ...op.result!, type: listType('boolean') },
+      }),
+      // The JavaScript policy holds no list of booleans, so the check of the
+      // value can fire first; the rule of `take` refuses it too.
+      /the operand 1 of the function of lists take has the type list<boolean>|is used with another type|has the type list<boolean>, which the target does not hold/,
+    ],
+    [
+      'a take of a list of tuples whose result is a list of reals',
+      fn(['Take', 'LP', 'n'], ['LP', 'list<tuple<real, real>>'], N),
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType('real') } }),
+      /the function of lists take has a result of the type list<real>, not list<tuple<real, real>>/,
+    ],
+    [
+      'a join of lists of tuples of two sizes',
+      fn(['ListJoin', 'LP', 'LP'], ['LP', 'list<tuple<real, real>>']),
+      (op: IROperation) => ({
+        ...op,
+        operands: [op.operands[0], { ...op.operands[1], type: listType(tupleType(['real', 'real', 'real'])) }],
+      }),
+      /reads lists of other elements than tuple<real, real>|is used with another type/,
+    ],
   ] as [string, MathJsonExpression, (op: IROperation) => IROperation, RegExp][])(
     '%s',
     (_name, json, change, message) => {
       expect(changed(json, 'collection', change)).toThrow(message);
     }
   );
+
+  test('a list of tuples with a tuple of another size', () => {
+    expect(
+      changed(fn(['List', 'P', 'P'], P), 'list', (op) => ({
+        ...op,
+        result: { ...op.result!, type: listType(tupleType(['real', 'real', 'real'])) },
+      }) as IROperation)
+    ).toThrow(/the element 1 of the operation list has the type tuple<real, real>, and its result the type list<tuple<real, real, real>>/);
+  });
+
+  test('an element of a list of tuples read as a number', () => {
+    expect(
+      changed(fn(['At', ['At', 'LP', 'n'], 1], ['LP', 'list<tuple<real, real>>'], N), 'at', (op) => ({
+        ...op,
+        result: { ...op.result!, type: 'real', representation: 'number' },
+      }) as IROperation)
+    ).toThrow(/the operation at of a list<tuple<real, real>> has a result of the type real, not tuple<real, real>|is used with another type/);
+  });
 
   test('a target with no functions of lists refuses one', () => {
     const preparation = prepare(fn(['Mean', 'L'], L));

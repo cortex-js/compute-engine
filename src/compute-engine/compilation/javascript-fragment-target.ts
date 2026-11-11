@@ -86,6 +86,7 @@ import {
   nodeText,
   type FragmentConversion,
   type FragmentDeclaredInput,
+  type FragmentElementType,
   type FragmentListType,
   type FragmentValueFacts,
   type FragmentDefinition,
@@ -120,8 +121,11 @@ import {
   COLLECTION_HEADS,
   FOLD_OPERATORS,
   FUNCTION_OPERAND_HEADS,
+  functionOperandOf,
   functionOperandParts,
   literalSeedOf,
+  recordUserFunctionOperand,
+  userFunctionOperandSymbol,
   lowerStructuredProgram,
   MAPPED_OPERATORS,
   valueType as structuredValueType,
@@ -795,11 +799,42 @@ const divideRule = {
  * `Loop` over `Element(k, Range(a, b))`, as a statement: the rule of a
  * counted loop of the pass (`walkCountedLoop()`), and bounds whose facts
  * are integers. The admission of the structured route checks the rest of
- * the form (no step, no guard, the statements of the body).
+ * the form (no step, no guard, the statements of the body). A `Loop` over
+ * `Element(c, L)` with a list `L` (a name) binds `c` to each element of the
+ * list in turn, a number or a tuple, as the existing emitter writes
+ * `for (const c of L)`.
  */
 const loopRule = {
   walk: (node, scope, context, w) => {
     const spec = isFunction(node) && node.nops === 2 ? node.op2 : undefined;
+    // A loop over the elements of a list (`for c in all`).
+    if (
+      isFunction(node) &&
+      isFunction(spec, 'Element') &&
+      spec.nops === 2 &&
+      isSymbol(spec.op1) &&
+      !isFunction(spec.op2, 'Range')
+    ) {
+      const list = w.value(spec.op2, scope, context);
+      const element = listElementType(list);
+      if (element === undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `Loop over \`${nodeText(spec.op2)}\` of the type ` +
+            `\`${fragmentTypeToString(list.type)}\` is not in the structured route, ` +
+            `which visits the elements of a list of reals, of integers or of tuples`
+        );
+      const inner = w.open(node, scope);
+      w.bind(spec.op1, inner, spec.op1.symbol, element, 'index');
+      w.type(node.op1, inner, {
+        place: 'statement',
+        fn: context.fn,
+        loop: { kind: 'loop', scope: inner },
+        parallel: context.parallel,
+      });
+      return { type: { kind: 'statement' } };
+    }
     if (
       !isFunction(spec, 'Element') ||
       spec.nops !== 2 ||
@@ -2832,7 +2867,75 @@ function declaredLocalType(
     case 'list<integer>':
       return { kind: 'list', element: { kind: 'integer' } };
   }
-  return undefined;
+  return tupleListLocalType(declared, mode);
+}
+
+/** The list type of a local declared with a list of tuples
+ *  (`list<tuple<number, number, number, integer>>`, a list of points,
+ *  `structuredListType()`), or `undefined` for another declared type. */
+function tupleListLocalType(
+  declared: string | undefined,
+  mode: 'strict' | 'complex'
+): FragmentListType | undefined {
+  if (declared === undefined || !/^list<tuple<.*>>$/.test(declared))
+    return undefined;
+  let type: Type;
+  try {
+    type = parseType(declared);
+  } catch {
+    return undefined;
+  }
+  const list = structuredListType(type, mode);
+  return list !== undefined &&
+    !('refusal' in list) &&
+    list.element.kind === 'point'
+    ? list
+    : undefined;
+}
+
+/**
+ * The empty list literals that are the value of a local declared with a
+ * list of tuples (`let out: list<tuple<real, real>> = []`, or a later
+ * `out = []`), with the element type of the local. The rule of `List`
+ * gives such a literal the type of the local (`listLiteralRule()`): the
+ * existing emitter writes `[]` for each, and the local holds a list of
+ * tuples.
+ */
+const EMPTY_TUPLE_LISTS = new WeakMap<Expression, FragmentElementType>();
+
+/** Record in `EMPTY_TUPLE_LISTS` the empty list literals that `body`
+ *  writes to a local declared with a list of tuples. A name is declared
+ *  once on the structured route, so the declarations of the body give the
+ *  type of each write. */
+function markEmptyTupleLists(
+  body: Expression,
+  mode: 'strict' | 'complex'
+): void {
+  const declared = new Map<string, FragmentElementType>();
+  const isEmpty = (node: Expression | undefined) =>
+    isFunction(node, 'List') && node.nops === 0;
+  // A node object reached twice is visited once: a tree can share its
+  // subtrees (a doubling graph of depth 40).
+  const seen = new Set<Expression>();
+  const visit = (node: Expression): void => {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    if (node.operator === 'Declare' && isSymbol(node.op1)) {
+      const list = tupleListLocalType(declaredTypeSource(node.op2), mode);
+      if (list !== undefined) {
+        declared.set(node.op1.symbol, list.element);
+        const value = declareValueOperand(node.ops);
+        if (value !== undefined && isEmpty(value))
+          EMPTY_TUPLE_LISTS.set(value, list.element);
+      }
+    }
+    if (node.operator === 'Assign' && isSymbol(node.op1) && isEmpty(node.op2)) {
+      const element = declared.get(node.op1.symbol);
+      if (element !== undefined) EMPTY_TUPLE_LISTS.set(node.op2, element);
+    }
+    for (const op of node.ops) visit(op);
+  };
+  visit(body);
 }
 
 /**
@@ -3019,7 +3122,9 @@ function withRealFromRealOperands(
  * `list<real>`, `vector<real>`, `list<integer>`, a list with a declared
  * length (`list<real^5>`: the length is not part of the type, and the code
  * reads the length of the array, as the existing emitter does) and a list
- * of a subtype of `real` (`list<finite_real>`).
+ * of a subtype of `real` (`list<finite_real>`), and a list of tuples of
+ * the tuple types of `structuredTupleType()` (a list of points, an array of
+ * arrays).
  *
  * A refusal, with its message, for every other list type: a list of lists
  * or a matrix, a list of complex numbers (its elements are `{re, im}`
@@ -3032,12 +3137,23 @@ function withRealFromRealOperands(
  * has no type for.
  */
 function structuredListType(
-  type: Type
+  type: Type,
+  mode?: 'strict' | 'complex'
 ): FragmentListType | { refusal: string } | undefined {
   if (isSubtype(type, 'list<integer>'))
     return { kind: 'list', element: { kind: 'integer' } };
   if (isSubtype(type, 'list<real>'))
     return { kind: 'list', element: { kind: 'real' } };
+  // A list of tuples of reals (a list of points): an array of arrays, as the
+  // existing emitter reads it (`_SYS.atPoint(L, i, n)`).
+  if (
+    typeof type === 'object' &&
+    type.kind === 'list' &&
+    type.dimensions === undefined
+  ) {
+    const point = structuredTupleType(type.elements, mode);
+    if (point !== undefined) return { kind: 'list', element: point };
+  }
   // Another list type (`typeof type === 'object'`, of the kind `list`):
   // a string, a tuple or a set keeps the message of a binding with no type.
   if (typeof type === 'object' && type.kind === 'list')
@@ -3054,20 +3170,33 @@ function structuredListType(
  * The fragment type of a tuple input, a tuple parameter or a tuple result of
  * the declared engine type `type` on the structured route: a point of the
  * size of the tuple, for a tuple of elements with no name, each of a
- * subtype of `real`. The existing emitter reads such a tuple as a
- * JavaScript array of numbers (`_SYS.at(P, k)`, `P[0]`). `undefined` for
- * every other type: a named tuple (a record of the language), a tuple of
- * complex or boolean elements, and a tuple of `number` elements keep the
- * message of a binding that the route has no type for.
+ * subtype of `real`, or, in the `strict` mode (`mode`), of the type
+ * `number` (or a real with `NaN` and infinities, `declaredNumberKind()`),
+ * which is real there ("In `strict`, a value of type `number` must be
+ * real", `docs/COMPILATION-MODEL.md`). The existing emitter reads such a
+ * tuple as a JavaScript array of numbers (`_SYS.at(P, k)`, `P[0]`,
+ * `_SYS.atNumeric(P, k, "number")`). `undefined` for every other type: a
+ * named tuple (a record of the language), a tuple of complex or boolean
+ * elements, and a tuple of `number` elements in the `complex` mode or with
+ * no mode keep the message of a binding that the route has no type for.
  */
 function structuredTupleType(
-  type: Type
+  type: Type,
+  mode?: 'strict' | 'complex'
 ): { kind: 'point'; size: number } | undefined {
   if (typeof type !== 'object' || type.kind !== 'tuple') return undefined;
   const elements = type.elements;
   if (
     elements.length === 0 ||
-    elements.some((e) => e.name !== undefined || !isSubtype(e.type, 'real'))
+    elements.some(
+      (e) =>
+        e.name !== undefined ||
+        !(
+          isSubtype(e.type, 'real') ||
+          (mode === 'strict' &&
+            declaredNumberKind(e.type, 'strict')?.kind === 'real')
+        )
+    )
   )
     return undefined;
   return { kind: 'point', size: elements.length };
@@ -3082,12 +3211,16 @@ function isAdmittedList(type: Type): boolean {
 /** The fragment type of a parameter of the declared engine type `type` on
  *  the structured route: a scalar type, or a list type
  *  (`structuredListType()`). Throws for another collection type. */
-function structuredParameterType(type: Type, name: string | undefined) {
+function structuredParameterType(
+  type: Type,
+  name: string | undefined,
+  mode?: 'strict' | 'complex'
+) {
   const scalar = scalarType(type);
   if (scalar !== undefined) return scalar;
-  const tuple = structuredTupleType(type);
+  const tuple = structuredTupleType(type, mode);
   if (tuple !== undefined) return tuple;
-  const list = structuredListType(type);
+  const list = structuredListType(type, mode);
   if (list !== undefined && 'refusal' in list)
     throw new Error(
       `JS scalar fragment: the parameter ${name ?? ''} has ${list.refusal}`
@@ -3096,9 +3229,9 @@ function structuredParameterType(type: Type, name: string | undefined) {
 }
 
 /** How the structured route holds a value of the type `type`: the
- *  representation of a scalar, and `array` for a list of reals or of
- *  integers and for a tuple of reals (a point), as the existing emitter
- *  holds both. */
+ *  representation of a scalar, and `array` for a list of reals, of integers
+ *  or of tuples of reals (points), and for a tuple of reals, as the existing
+ *  emitter holds each. */
 function structuredRepresentation(type: {
   readonly kind: string;
   readonly element?: { readonly kind: string };
@@ -3106,7 +3239,9 @@ function structuredRepresentation(type: {
   if (type.kind === 'point') return 'array';
   if (type.kind !== 'list') return representation(type);
   const element = type.element?.kind;
-  return element === 'real' || element === 'integer' ? 'array' : undefined;
+  return element === 'real' || element === 'integer' || element === 'point'
+    ? 'array'
+    : undefined;
 }
 
 /** The definition of the structured route: the existing definition, with a
@@ -3191,12 +3326,15 @@ function atRule(
       'At with other than one index is not in the structured route'
     );
   const [base, index] = operandFacts(node, scope, context, w);
-  const element = collectionElement(base);
+  // An element of a list of tuples is a tuple (a point).
+  const point = listElementType(base);
+  const element =
+    point?.kind === 'point' ? point : collectionElement(base);
   if (element === undefined)
     return w.refuse(
       node,
       'signature',
-      `At in the structured route reads a list of reals or integers or a ` +
+      `At in the structured route reads a list of reals, integers or tuples or a ` +
         `tuple of reals, and its first operand has the type ` +
         `\`${fragmentTypeToString(base.type)}\``
     );
@@ -3207,10 +3345,11 @@ function atRule(
       `At with an index of the type \`${fragmentTypeToString(index.type)}\` is ` +
         `not in the structured route, which reads an index of the type integer`
     );
-  return w.valueFacts(node, { kind: element }, [
-    w.convert(base, base.type)!,
-    w.convert(index, index.type)!,
-  ]);
+  return w.valueFacts(
+    node,
+    typeof element === 'string' ? { kind: element } : element,
+    [w.convert(base, base.type)!, w.convert(index, index.type)!]
+  );
 }
 
 /**
@@ -3234,11 +3373,11 @@ function lengthRule(
       'Length with other than one operand is not in the structured route'
     );
   const [base] = operandFacts(node, scope, context, w);
-  if (collectionElement(base) === undefined)
+  if (collectionElement(base) === undefined && listElementType(base) === undefined)
     return w.refuse(
       node,
       'signature',
-      `Length in the structured route reads a list of reals or integers or ` +
+      `Length in the structured route reads a list of reals, integers or tuples or ` +
         `a tuple of reals, and its operand has the type ` +
         `\`${fragmentTypeToString(base.type)}\``
     );
@@ -3388,6 +3527,10 @@ function comprehensionRule(
   }
   const body = w.value(parts.body, inner, { ...context, loop: undefined });
   const kind = body.type.kind;
+  // A comprehension of tuples makes a list of points, as the existing
+  // emitter pushes each array (`result.push([j, 2 * j])`).
+  if (body.type.kind === 'point')
+    return w.valueFacts(node, { kind: 'list', element: body.type });
   if (kind !== 'real' && kind !== 'integer')
     return w.refuse(
       node,
@@ -3751,7 +3894,7 @@ function structuredValueParts(
     !(node.operator === 'Count' && node.nops === 1)
   ) {
     const outer = node.ops.filter((_, i) => i !== position.fn);
-    const fn = node.ops[position.fn];
+    const fn = userFunctionOperand(node, position);
     const lambda =
       fn === undefined
         ? undefined
@@ -3770,6 +3913,59 @@ function structuredValueParts(
     };
   }
   return undefined;
+}
+
+/**
+ * The function operand of the head node `node` with a function operand at
+ * `position` (`FUNCTION_OPERAND_HEADS`) on the structured route. A symbol
+ * that is not a library operator and whose binding holds a function literal
+ * (a user function: a helper of the engine or of a prelude, or a local
+ * function of the body) is read as the literal `Function(f(arg_1, …), arg_1, …)`
+ * of one parameter per argument of the head, made here once per node and
+ * recorded (`recordUserFunctionOperand()`): the existing emitter calls the
+ * compiled function `_fn_f` with the element (`L.map((_x) => _f(_x))`), or
+ * with the accumulator and the element (`_f(_a, _b)`), once per element in
+ * order, and so does a call of the helper in the body of the literal. The
+ * call reaches the helper by the rules of a call (`collectStructuredHelper()`,
+ * which checks that the call and the symbol reach one definition). Every
+ * other operand is returned as it is.
+ */
+function userFunctionOperand(
+  node: Expression & { ops: readonly Expression[] },
+  position: { readonly fn: number; readonly arity?: number }
+): Expression | undefined {
+  const fn = node.ops[position.fn];
+  const known = functionOperandOf(node);
+  if (known !== fn || fn === undefined) return known;
+  if (!isSymbol(fn) || isLibraryOperator(fn, fn.symbol)) return fn;
+  if (userFunctionLiteralOf(fn) === undefined) return fn;
+  const arity = position.arity ?? node.ops.length - 1;
+  const parameters = Array.from({ length: arity }, (_, i) => `arg_${i + 1}`);
+  const lambda = node.engine.expr([
+    'Function',
+    [fn.symbol, ...parameters],
+    ...parameters,
+  ]);
+  const call = functionOperandParts(lambda, arity)?.body;
+  if (call === undefined || !isFunction(call, fn.symbol)) return fn;
+  recordUserFunctionOperand(node, fn, lambda, call);
+  return lambda;
+}
+
+/** The function literal that the binding of the symbol `symbol` holds (the
+ *  value of a value definition, or the literal of an operator definition),
+ *  or `undefined`. */
+function userFunctionLiteralOf(symbol: Expression): Expression | undefined {
+  const read = readBinding(symbol);
+  const held =
+    read === undefined
+      ? undefined
+      : 'value' in read
+        ? read.value.value
+        : 'operator' in read
+          ? (read.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
+          : undefined;
+  return held !== undefined && isFunction(held, 'Function') ? held : undefined;
 }
 
 /** The function nodes of `node`, itself included, whose effect fact is not
@@ -3814,7 +4010,12 @@ function replaceAtRule(
       'ReplaceAt with other than a list, one index and a value is not in the structured route'
     );
   const [list, index, value] = operandFacts(node, scope, context, w);
-  if (list.type.kind !== 'list' || list.representation !== 'array')
+  // A list of numbers: a list of tuples (`ReplaceAt(LP, 1, 0)`) is refused.
+  if (
+    list.type.kind !== 'list' ||
+    list.representation !== 'array' ||
+    (list.type.element.kind !== 'real' && list.type.element.kind !== 'integer')
+  )
     return w.refuse(
       node,
       'signature',
@@ -3881,8 +4082,9 @@ function elementRefusal(
  * its type. The lowering writes the operation `list`, which the emitter
  * writes `[a, b, …]`, the array literal of the existing emitter (which
  * also writes a list of number literals as a hoisted constant, the same
- * values). Refused: an element that is a list, a tuple, a complex number or
- * a boolean.
+ * values). A list literal of tuples of one size is a list of points,
+ * `[[a, b], [c, d]]`. Refused: an element that is a list, a tuple beside a
+ * number or a tuple of another size, a complex number or a boolean.
  */
 function listLiteralRule(
   node: Expression,
@@ -3891,6 +4093,30 @@ function listLiteralRule(
   w: FragmentWalker<ScalarRepresentation>
 ): FragmentFacts<ScalarRepresentation> {
   const facts = operandFacts(node, scope, context, w);
+  // The empty list written to a local declared with a list of tuples.
+  const empty = EMPTY_TUPLE_LISTS.get(node);
+  if (empty !== undefined && facts.length === 0)
+    return w.valueFacts(node, { kind: 'list', element: empty }, []);
+  // A list of tuples of one size (a list of points): `[[1, 2], [x, 3]]`.
+  const first = facts[0]?.type;
+  if (first?.kind === 'point') {
+    if (
+      facts.some(
+        (f) => f.type.kind !== 'point' || f.type.size !== first.size
+      )
+    )
+      return w.refuse(
+        node,
+        'signature',
+        `a list literal of tuples of different sizes or of tuples and numbers ` +
+          `is not in the structured route`
+      );
+    return w.valueFacts(
+      node,
+      { kind: 'list', element: first },
+      facts.map((f) => w.convert(f, f.type)!)
+    );
+  }
   for (const f of facts) {
     const refusal = elementRefusal('List', f);
     if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
@@ -3935,6 +4161,22 @@ function tupleRule(
     { kind: 'point', size: facts.length },
     facts.map((f) => w.convert(f, f.type)!)
   );
+}
+
+/** The type of the elements of a list of the facts `facts` on the
+ *  structured route: a real, an integer, or a point (a list of tuples);
+ *  `undefined` for another value, a tuple included. */
+function listElementType(
+  facts: FragmentValueFacts<ScalarRepresentation>
+): FragmentElementType | undefined {
+  if (facts.representation !== 'array' || facts.type.kind !== 'list')
+    return undefined;
+  const element = facts.type.element;
+  return element.kind === 'real' ||
+    element.kind === 'integer' ||
+    element.kind === 'point'
+    ? element
+    : undefined;
 }
 
 /** The kind of the elements of a list or a tuple of the facts `facts` on
@@ -4010,14 +4252,21 @@ function foldRule(
  *   the existing emitter writes it; from that width on it calls
  *   `_SYS.matmul`, and the tuples are refused.
  * - `Take(L, n)`, `Drop(L, n)` with an integer count, `Rest(L)` (`Drop(L,
- *   1)`), `Reverse(L)` and `Sort(L)` of a list, and `Join(L, M, …)` of two
- *   or more lists: a new list of the elements of the operands (a list of
- *   integers when every list is one). A count beyond the length takes or
+ *   1)`), `Reverse(L)` and `Sort(L)` of a list, and `Join(L, M, …)` and
+ *   `ListJoin(L, M, …)` of two or more lists: a new list of the elements of
+ *   the operands (a list of integers when every list is one). All but `Sort`
+ *   also read a list of tuples of one size (a list of points), and keep its
+ *   tuples as they are (the new array holds the arrays of the elements of
+ *   its operand, which no operation writes). A count beyond the length takes or
  *   drops every element, and a negative count counts from the end, as in
  *   the interpreter. Refused: a tuple (the existing emitter writes an array
  *   where the interpreter keeps a tuple), a count with a real fact (the
  *   existing emitter rounds it, the interpreter does not), `Sort` with an
  *   ordering function.
+ * - `RotateLeft(L, k)` and `RotateRight(L, k)` of a list with an integer
+ *   shift (1 when absent): a new list, `_SYS.rotl(L, k)` and
+ *   `_SYS.rotr(L, k)`. Refused: a tuple, a shift with a real fact (the
+ *   runtime rounds it).
  * - `First(L)` and `Last(L)` of a list or a tuple: the element at 1 or -1
  *   (`at`), `NaN` for an empty list, as `(L[0] ?? NaN)` and `_SYS.at(L,
  *   -1)` of the existing emitter.
@@ -4025,7 +4274,12 @@ function foldRule(
  * - `Range(a, b)` and `Range(b)` (from 1) with integer bounds: the list of
  *   the integers from `a` to `b`, in steps of 1, or of -1 when `b < a`
  *   (`Range(1, 0)` is `[1, 0]`), the values of `_SYS.range(a, b, b >= a ? 1
- *   : -1)`. Refused: a step, a bound with a real fact.
+ *   : -1)`. Refused: a bound with a real fact.
+ * - `Range(a, b, step)` with real or integer bounds and step: the list
+ *   `a, a + step, a + 2·step, …` up to `b`, the values of `_SYS.range(a, b,
+ *   step)`, a list of integers when the three are integers (an empty list
+ *   for a step of the other sign, or a step 0 at run time). Refused: the
+ *   literal step 0, which the existing compiler declines.
  */
 function collectionRule(
   node: Expression,
@@ -4044,6 +4298,19 @@ function collectionRule(
         `with ${node.nops} operands is not in the structured route, which reads ${n}`
       );
   };
+  // A function of lists whose value is a number and whose engine type
+  // admits a list (`Norm(At(LQ, -1))` of a list of tuples `LQ` has the type
+  // `list<number>`): the existing compiler reads such a value as a possible
+  // list, and writes its parent with `_SYS.bcast` (`x · (2 / Norm(…))` is
+  // `x * (2 / n)` there, `x * 2 / n` on the route, another double).
+  if (
+    ['Norm', 'Mean', 'Median', 'Variance', 'Dot'].includes(head) &&
+    !isSubtype(node.type.type, 'number')
+  )
+    return refuse(
+      `of the type ${node.type.toString()} is not in the structured route: the existing ` +
+        `compiler reads a value of a type that admits a list with _SYS.bcast`
+    );
   const facts = operandFacts(node, scope, context, w);
   const conversions = facts.map((f) => w.convert(f, f.type)!);
   const describe = (i: number) =>
@@ -4064,6 +4331,19 @@ function collectionRule(
       refuse(
         `with ${describe(i)} is not in the structured route, which reads an integer there`
       );
+  };
+  /** The element type of the list operand `i`: a real, an integer, or a
+   *  point (a list of tuples, whose elements a slice, a rotation or a join
+   *  keeps as they are: the inner arrays are shared, and no operation
+   *  writes a tuple). */
+  const listElementAt = (i: number): FragmentElementType => {
+    const element = listElementType(facts[i]);
+    if (element === undefined)
+      refuse(
+        `of ${describe(i)} is not in the structured route, which reads a list ` +
+          `of reals, of integers or of tuples`
+      );
+    return element!;
   };
   switch (head) {
     case 'Norm':
@@ -4105,16 +4385,26 @@ function collectionRule(
     case 'Take':
     case 'Drop': {
       arity(2);
-      const element = elementAt(0, false);
+      const element = listElementAt(0);
       integerAt(1);
-      return w.valueFacts(
-        node,
-        { kind: 'list', element: { kind: element } },
-        conversions
-      );
+      return w.valueFacts(node, { kind: 'list', element }, conversions);
+    }
+    case 'RotateLeft':
+    case 'RotateRight': {
+      if (node.nops !== 1 && node.nops !== 2)
+        refuse(
+          `with ${node.nops} operands is not in the structured route, which reads a list and a shift`
+        );
+      const element = listElementAt(0);
+      if (node.nops === 2) integerAt(1);
+      return w.valueFacts(node, { kind: 'list', element }, conversions);
     }
     case 'Rest':
-    case 'Reverse':
+    case 'Reverse': {
+      arity(1);
+      const element = listElementAt(0);
+      return w.valueFacts(node, { kind: 'list', element }, conversions);
+    }
     case 'Sort': {
       arity(1);
       const element = elementAt(0, false);
@@ -4124,11 +4414,35 @@ function collectionRule(
         conversions
       );
     }
-    case 'Join': {
+    case 'Join':
+    case 'ListJoin': {
       if (node.nops < 2)
         refuse(
           `with ${node.nops} operands is not in the structured route, which joins two lists or more`
         );
+      // Lists of tuples of one size join to a list of tuples; a list of
+      // tuples beside a list of numbers (also the empty literal) is refused
+      // with that cause.
+      const tupleAt = facts.findIndex(
+        (f) => listElementType(f)?.kind === 'point'
+      );
+      const first =
+        tupleAt < 0 ? listElementAt(0) : listElementAt(tupleAt);
+      if (first.kind === 'point') {
+        facts.forEach((_, i) => {
+          const element = listElementAt(i);
+          if (element.kind !== 'point' || element.size !== first.size)
+            refuse(
+              `of ${describe(tupleAt)} and ${describe(i)} is not in the structured route, ` +
+                `which joins lists of one element type`
+            );
+        });
+        return w.valueFacts(
+          node,
+          { kind: 'list', element: first },
+          conversions
+        );
+      }
       const elements = facts.map((_, i) => elementAt(i, false));
       return w.valueFacts(
         node,
@@ -4142,24 +4456,62 @@ function collectionRule(
       );
     }
     case 'First':
-    case 'Last':
+    case 'Last': {
       arity(1);
+      // The first or last tuple of a list of tuples, `_SYS.atPoint(L, 1,
+      // n)` and `_SYS.atPoint(L, -1, n)`.
+      const point = listElementType(facts[0]);
+      if (point?.kind === 'point')
+        return w.valueFacts(node, point, conversions);
       return w.valueFacts(node, { kind: elementAt(0, true) }, conversions);
+    }
     case 'Count':
       arity(1);
-      elementAt(0, true);
+      // The length of a list of tuples, too.
+      if (listElementType(facts[0])?.kind !== 'point') elementAt(0, true);
       return w.valueFacts(node, { kind: 'integer' }, conversions);
-    case 'Range':
-      if (node.nops !== 1 && node.nops !== 2)
+    case 'Range': {
+      if (node.nops < 1 || node.nops > 3)
         refuse(
-          `with ${node.nops} operands is not in the structured route, which admits Range(a, b) and Range(b)`
+          `with ${node.nops} operands is not in the structured route, which admits Range(a, b, step), Range(a, b) and Range(b)`
         );
-      facts.forEach((_, i) => integerAt(i));
+      if (node.nops < 3) {
+        facts.forEach((_, i) => integerAt(i));
+        return w.valueFacts(
+          node,
+          { kind: 'list', element: { kind: 'integer' } },
+          conversions
+        );
+      }
+      // With a step, the bounds and the step are reals or integers: the
+      // existing emitter calls `_SYS.range(a, b, step)` for each of them,
+      // and the runtime counts the elements with the tolerance of the
+      // interpreter (`rangeCount()`).
+      facts.forEach((f, i) => {
+        if (f.type.kind !== 'real' && f.type.kind !== 'integer')
+          refuse(
+            `with ${describe(i)} is not in the structured route, which reads a real or an integer there`
+          );
+      });
+      // The existing compiler declines a literal step 0.
+      const step = node.ops[2];
+      if (isNumber(step) && step.re === 0 && step.im === 0)
+        refuse(
+          'with the literal step 0 is not in the structured route: the existing compiler declines it'
+        );
       return w.valueFacts(
         node,
-        { kind: 'list', element: { kind: 'integer' } },
+        {
+          kind: 'list',
+          element: {
+            kind: facts.every((f) => f.type.kind === 'integer')
+              ? 'integer'
+              : 'real',
+          },
+        },
         conversions
       );
+    }
   }
   return refuse('is not a function of lists of the structured route');
 }
@@ -4227,7 +4579,9 @@ function functionOperandRule(
         w.refuse(node, 'signature', `${head} ${message}`);
       const position = FUNCTION_OPERAND_HEADS[head];
       if (position === undefined) return refuse('takes no function operand');
-      const fn = node.ops[position.fn];
+      // A user function is the literal of one call of it
+      // (`userFunctionOperand()`), which the admission recorded.
+      const fn = functionOperandOf(node);
       const arity = position.arity ?? node.nops - 1;
       const lambda =
         fn === undefined ? undefined : functionOperandParts(fn, arity);
@@ -4253,16 +4607,102 @@ function functionOperandRule(
             `not in the structured route: the existing emitter calls the source ` +
             `of the entry`
         );
+      // The function literal of a user function (`userFunctionOperand()`).
+      const user = fn !== node.ops[position.fn];
+      // A user function whose name an option of the host maps (`vars: { f:
+      // … }`, a `functions` or an `operators` entry): the existing emitter
+      // calls the source of the entry for each element, the route the
+      // definition of the engine.
+      const named = node.ops[position.fn];
+      if (
+        user &&
+        isSymbol(named) &&
+        (hosts?.vars.has(named.symbol) === true ||
+          hosts?.heads.has(named.symbol) === true)
+      )
+        refuse(
+          `with the user function ${named.symbol}, which an option of the host maps, ` +
+            `is not in the structured route: the existing emitter calls the source of the entry`
+        );
       if (lambda !== undefined && mode === 'complex')
         refuse(
-          `with a function literal is not in the structured route in the complex mode: ` +
+          `with ${user ? 'the user function ' + nodeText(node.ops[position.fn]) : 'a function literal'} ` +
+            `is not in the structured route in the complex mode: ` +
             `the existing compiler compiles its body with parameters of the type number, on the complex lane in places`
+        );
+      // A parameter annotated with a type that the engine type of the
+      // element (or of the initial value, or of an argument of `Apply`) does
+      // not prove: a parameter of a user function (`fd(v: real)` mapped over
+      // a `list<number>`), or a tuple annotation of a function literal or of
+      // a user function (`(p: tuple<integer, integer>) ↦ …` over a
+      // `list<tuple<real, real>>`). The existing compiler declines it, as it
+      // cannot check the annotation in the compiled callback; the interpreter
+      // refuses each element. A scalar annotation of a function literal is
+      // checked on its fact (`body()`).
+      if (lambda !== undefined) {
+        const literal = user
+          ? userFunctionLiteralOf(node.ops[position.fn])
+          : undefined;
+        const declared = user
+          ? literal === undefined
+            ? undefined
+            : functionOperandParts(literal, arity)?.parameters
+          : lambda.parameters;
+        // The list is the other operand of `Map` (its second) and the first
+        // of `Filter`, `Count`, `Reduce` and `Scan`.
+        const list =
+          head === 'Apply' ? undefined : node.ops[position.fn === 0 ? 1 : 0];
+        const element =
+          list === undefined
+            ? undefined
+            : (indexElementType(list.type.type) ?? undefined);
+        const argumentTypes: (Type | undefined)[] =
+          head === 'Apply'
+            ? node.ops.slice(1).map((op) => op.type.type)
+            : head === 'Reduce' || head === 'Scan'
+              ? [node.nops === 3 ? node.op3.type.type : element, element]
+              : [element];
+        declared?.forEach((p, i) => {
+          if (p.type === undefined || (!user && p.type !== 'tuple')) return;
+          let annotation: Type;
+          try {
+            annotation = p.type === 'tuple' ? parseType(p.tuple!) : p.type;
+          } catch {
+            annotation = 'unknown';
+          }
+          const t = argumentTypes[i];
+          if (t === undefined || !isSubtype(t, annotation))
+            refuse(
+              `with ${user ? 'the user function ' + nodeText(node.ops[position.fn]) : 'a function literal'}, whose parameter ` +
+                `${p.symbol.symbol} is annotated ${typeToString(annotation)}, is not in the structured route ` +
+                `for an argument of the type ${t === undefined ? 'unknown' : typeToString(t)}: ` +
+                `the existing compiler declines it`
+            );
+        });
+      }
+      // A local function of the body (declared `function`, with no value
+      // at compile time): the engine types its calls `unknown`, and the
+      // existing compiler reads the list that `Map` makes of it by the shape
+      // of each element at run time (`_SYS.atWithValueMarker`).
+      if (
+        lambda === undefined &&
+        fn !== undefined &&
+        isSymbol(fn) &&
+        operator === undefined &&
+        fn.valueDefinition !== undefined &&
+        fn.valueDefinition.value === undefined &&
+        fn.valueDefinition.type.type === 'function'
+      )
+        refuse(
+          `with the local function ${nodeText(fn)} is not in the structured route: the engine ` +
+            `types a call of a local function unknown, and the existing compiler reads the ` +
+            `list that it makes by the shape of each element at run time`
         );
       if (lambda === undefined && operator === undefined)
         refuse(
           `with the function ${fn === undefined ? 'none' : nodeText(fn)} is not in the structured route, ` +
             `which admits a function literal of ${arity} parameter${arity === 1 ? '' : 's'} with a body of one value, ` +
-            `or a library operator`
+            `a user function with a function literal as its value, or a library operator`
         );
       /** The facts of an operand that is not the function. */
       const value = (operand: Expression) => w.value(operand, scope, context);
@@ -4284,28 +4724,71 @@ function functionOperandRule(
           );
         return { facts, element: element! };
       };
+      /** The element type of the list `L`: a real, an integer, or a point
+       *  (a list of tuples), which a function literal takes. */
+      const elementTypeOf = (operand: Expression, tuples: boolean) => {
+        const facts = value(operand);
+        const element = listElementType(facts);
+        if (element?.kind === 'point') {
+          if (lambda === undefined)
+            refuse(
+              `of ${nodeText(operand)} of the type \`${fragmentTypeToString(facts.type)}\` with ` +
+                `an operator is not in the structured route, which applies a function literal ` +
+                `or a user function to a tuple`
+            );
+          return { facts, element };
+        }
+        const scalar = elementOf(operand, tuples);
+        return { facts: scalar.facts, element: { kind: scalar.element } };
+      };
       /** Type the body of the lambda with its parameters bound to `types`,
-       *  in the scope of the node. */
-      const body = (types: readonly ('real' | 'integer')[]) => {
+       *  in the scope of the node. `predicate`: the body is the predicate
+       *  of `Filter` or `Count`, whose value is only tested. */
+      const body = (
+        types: readonly ('real' | 'integer' | FragmentElementType)[],
+        predicate = false
+      ) => {
         const inner = w.open(node, scope);
         lambda!.parameters.forEach((p, i) => {
+          const t = types[i];
+          const type = typeof t === 'string' ? { kind: t } : t;
           // A typed parameter takes an element of its type: an integer is a
-          // real, and `number` is real in the `strict` mode.
-          if (p.type === 'integer' && types[i] !== 'integer')
+          // real, and `number` is real in the `strict` mode. A parameter
+          // typed with a tuple type (the element type of a list of tuples)
+          // takes a tuple of its size.
+          const declaredTuple =
+            p.type === 'tuple' && p.tuple !== undefined
+              ? structuredTupleType(parseType(p.tuple), mode)
+              : undefined;
+          if (
+            p.type !== undefined &&
+            (p.type === 'tuple'
+              ? type.kind !== 'point' || declaredTuple?.size !== type.size
+              : type.kind === 'point' ||
+                (p.type === 'integer' && type.kind !== 'integer'))
+          )
             refuse(
-              `whose parameter ${p.symbol.symbol} is declared integer and takes a real is not in the structured route`
+              `whose parameter ${p.symbol.symbol} is declared ${p.tuple ?? p.type} and takes ` +
+                `a ${type.kind === 'point' ? 'tuple' : type.kind} is not in the structured route`
             );
-          w.bind(p.symbol, inner, p.symbol.symbol, { kind: types[i] }, 'index');
+          w.bind(p.symbol, inner, p.symbol.symbol, type, 'index');
         });
         // A body whose engine type admits a value that is not a number or a
         // boolean (`fm(L)` of `fm: (list<real>) -> real` has the type
         // `list<any> | real`): the existing compiler reads the list it
         // makes with `_SYS.atWithValueMarker`, which gives `undefined` out
-        // of range where the route gives `NaN`.
+        // of range where the route gives `NaN`. A predicate is tested, not
+        // read: its fact must be a boolean (`predicate()`), and the existing
+        // compiler tests the boolean that its code of a possible list gives
+        // for the scalar operands of the program (`e[4] < c[4]` of a tuple
+        // `e` that the engine types `unknown` is `_SYS.bcast((a, b) => a <
+        // b, …)` of two numbers there).
         const engineType = lambda!.body.type.type;
         if (
+          !predicate &&
           !isSubtype(engineType, 'number') &&
-          !isSubtype(engineType, 'boolean')
+          !isSubtype(engineType, 'boolean') &&
+          !(head === 'Map' && structuredTupleType(engineType, mode) !== undefined)
         )
           refuse(
             `whose function has a value of the type ${lambda!.body.type.toString()} is not in the ` +
@@ -4349,14 +4832,28 @@ function functionOperandRule(
             refuse(
               'over several lists is not in the structured route, which maps one list or tuple'
             );
-          const { facts, element } = elementOf(node.op2, true);
-          const conversions = [w.convert(facts, facts.type)!];
-          if (lambda !== undefined)
+          if (lambda !== undefined) {
+            // A function literal of a list of numbers or of tuples, whose
+            // parameter takes each element as it is
+            // (`L.map((_x) => _f(_x))`), and whose value is a number or a
+            // tuple (a new array for each element).
+            const { facts, element } = elementTypeOf(node.op2, true);
+            const mapped = body([element]);
+            if (mapped.type.kind === 'point' && facts.type.kind === 'point')
+              refuse(
+                `of a tuple with a function whose value is a tuple is not in the structured route, ` +
+                  `which maps a list to a list of tuples`
+              );
             return w.valueFacts(
               node,
-              list(numeric(body([element]))),
-              conversions
+              mapped.type.kind === 'point'
+                ? { kind: 'list', element: mapped.type }
+                : list(numeric(mapped)),
+              [w.convert(facts, facts.type)!]
             );
+          }
+          const { facts, element } = elementOf(node.op2, true);
+          const conversions = [w.convert(facts, facts.type)!];
           const mapped = Object.hasOwn(MAPPED_OPERATORS, operator!)
             ? MAPPED_OPERATORS[operator!]
             : undefined;
@@ -4390,11 +4887,13 @@ function functionOperandRule(
             refuse(
               'with an operator as its predicate is not in the structured route, which admits a function literal'
             );
-          const { facts, element } = elementOf(node.op1, false);
-          predicate(body([element]));
+          const { facts, element } = elementTypeOf(node.op1, false);
+          predicate(body([element], true));
           return w.valueFacts(
             node,
-            head === 'Filter' ? list(element) : { kind: 'integer' },
+            head === 'Filter'
+              ? { kind: 'list', element }
+              : { kind: 'integer' },
             [w.convert(facts, facts.type)!]
           );
         }
@@ -4414,7 +4913,7 @@ function functionOperandRule(
           if (lambda !== undefined) {
             if (head === 'Reduce' && init === undefined)
               refuse(
-                'with a function literal and no initial value is not in the structured route: ' +
+                'with a function literal or a user function and no initial value is not in the structured route: ' +
                   'the existing compiler refuses it'
               );
             numeric(body(['real', element]));
@@ -4479,7 +4978,8 @@ function isFoldNode(node: Expression): boolean {
  * no such key is known: a read of a name (two reads of one name in one
  * expression read one value), a list literal (its number of elements), an
  * element-wise result (the key of its list operands, which its rule found
- * equal) and `ReplaceAt(L, …)` (the key of `L`).
+ * equal), `ReplaceAt(L, …)`, `RotateLeft(L, k)` and `RotateRight(L, k)` (the
+ * key of `L`).
  */
 function lengthKey(
   node: Expression,
@@ -4491,7 +4991,12 @@ function lengthKey(
   if (!isFunction(node) || !isLibraryOperator(node, node.operator))
     return undefined;
   if (node.operator === 'List') return `literal ${node.nops}`;
-  if (node.operator === 'ReplaceAt' && node.nops === 3)
+  // A rotation has the length of its list.
+  if (
+    (node.operator === 'ReplaceAt' && node.nops === 3) ||
+    ((node.operator === 'RotateLeft' || node.operator === 'RotateRight') &&
+      node.nops >= 1)
+  )
     return lengthKey(node.op1, scope, context, w);
   if (ELEMENTWISE_HEADS.includes(node.operator)) {
     const list = node.ops.find(
@@ -4831,8 +5336,8 @@ function typedRule(
     numberKind !== undefined
       ? ({ kind: 'real' } as const)
       : (scalarType(ascribed) ??
-        structuredTupleType(ascribed) ??
-        structuredListType(ascribed));
+        structuredTupleType(ascribed, mode) ??
+        structuredListType(ascribed, mode));
   const conversion =
     type === undefined || 'refusal' in type
       ? undefined
@@ -5117,8 +5622,55 @@ function refuseWideRead(
  * `{re: NaN, im: NaN}` also where `y = 4`, and `Arcsch` of such a read calls
  * `_SYS.cacsch` of a number. A pass over the admitted program, so that the
  * refusal of a list that the route does not have (a comprehension of complex
- * numbers, `ReplaceAt` with a complex value) keeps its message.
+ * numbers, `ReplaceAt` with a complex value) keeps its message. A read of
+ * a tuple whose element types are `number` (`tuple<number, number>`, the
+ * element of a declared `list<tuple<number, number>>`) is real in the
+ * `strict` mode (`structuredTupleType()`), and is not refused.
  */
+/**
+ * Throw, on the structured route in the `complex` mode, for an element-wise
+ * `Divide` with a list operand whose engine element type is not real
+ * (`1.5 / [cn for j in 3..2]` with `cn: number` assigned `1.5`, of the type
+ * `list<number>`): the existing compiler divides each element with the
+ * complex quotient (`_SYS.cplx(_tv2)`), whose result is `{re, im}`, where the
+ * route divides the real numbers of its facts. A sum, a product and a
+ * negation of such a list keep the numbers on both, and so does a quotient
+ * by a list literal.
+ */
+function refuseComplexListQuotients(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  mode: 'strict' | 'complex' | undefined
+): void {
+  if (mode !== 'complex') return;
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const [node, facts] of scope.facts)
+      if (
+        isFunction(node, 'Divide') &&
+        facts.type.kind === 'list' &&
+        node.ops.some((op) => {
+          // A list literal: the existing emitter divides by its elements
+          // one by one, on the lane of each.
+          if (isFunction(op, 'List')) return false;
+          const element = indexElementType(op.type.type);
+          return (
+            op.type.type !== undefined &&
+            isSubtype(op.type.type, 'list') &&
+            element !== undefined &&
+            !isSubtype(element, 'real')
+          );
+        })
+      )
+        throw new Error(
+          `JS scalar fragment: the quotient ${nodeText(node)} of a list of the type ` +
+            `${node.type.toString()} is not in the structured route in the complex mode: ` +
+            `the existing compiler divides each element on the complex lane`
+        );
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+}
+
 function refuseStrictWideReads(
   annotation: FragmentAnnotation<ScalarRepresentation>,
   mode: 'strict' | 'complex' | undefined
@@ -5129,7 +5681,8 @@ function refuseStrictWideReads(
       if (
         isFunction(node, 'At') &&
         isSubtype(node.type.type, 'number') &&
-        !isSubtype(finitePartOfType(node.type.type), 'real')
+        !isSubtype(finitePartOfType(node.type.type), 'real') &&
+        structuredTupleType(node.op1.type.type, 'strict') === undefined
       )
         throw new Error(
           `JS scalar fragment: ${nodeText(node)} has the type ` +
@@ -5305,7 +5858,13 @@ function refuseUnsettledCollection(
     if (head === 'Apply') return;
     operands = head === 'Map' ? node.ops.slice(1) : [node.op1];
   } else if (Object.hasOwn(COLLECTION_HEADS, head) && head !== 'Range')
-    operands = head === 'Take' || head === 'Drop' ? [node.op1] : node.ops;
+    operands =
+      head === 'Take' ||
+      head === 'Drop' ||
+      head === 'RotateLeft' ||
+      head === 'RotateRight'
+        ? [node.op1]
+        : node.ops;
   else return;
   const refuse = (operand: Expression, cause: string): never => {
     throw new Error(
@@ -5794,7 +6353,7 @@ function refuseLazyFunctionOperands(
       )
         continue;
       const position = FUNCTION_OPERAND_HEADS[node.operator];
-      const fn = node.ops[position.fn];
+      const fn = functionOperandOf(node);
       const lambda =
         fn === undefined
           ? undefined
@@ -6923,6 +7482,7 @@ function recordStructured(
   refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
   chainForms(prepared.annotation, registry.helpers, hosts, registry.forms);
   refuseStrictWideReads(prepared.annotation, registry.mode);
+  refuseComplexListQuotients(prepared.annotation, registry.mode);
   refuseLocalFunctionArithmetic(
     prepared.annotation,
     registry.localFunctionNames,
@@ -7729,13 +8289,20 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           return;
         }
         const list = structured
-          ? structuredListType(node.type.type)
+          ? structuredListType(node.type.type, registry?.mode)
           : undefined;
         if (list !== undefined && 'refusal' in list)
           throw new Error(
             `JS scalar fragment: the input ${node.symbol} has ${list.refusal}`
           );
-        if (definition.typeOfSymbol(node) === undefined)
+        if (
+          definition.typeOfSymbol(node) === undefined &&
+          !(
+            structured &&
+            (list !== undefined ||
+              structuredTupleType(node.type.type, registry?.mode) !== undefined)
+          )
+        )
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
           );
@@ -8066,7 +8633,7 @@ function attachBoundFunction(
         registry === undefined ||
         declared === undefined ||
         undeclared ||
-        structuredParameterType(declared, name) !== undefined
+        structuredParameterType(declared, name, registry.mode) !== undefined
           ? undefined
           : declaredNumberKind(declared, registry.mode);
       const type = undeclared
@@ -8076,7 +8643,7 @@ function attachBoundFunction(
           : numberKind !== undefined
             ? { kind: numberKind.kind }
             : admission.structured
-              ? structuredParameterType(declared, name)
+              ? structuredParameterType(declared, name, registry?.mode)
               : scalarType(declared);
       if (numberKind?.lifted) lifted.add(name);
       const refusal = parameterRefusal(
@@ -8296,12 +8863,16 @@ function attachRootBlock(
         if (numberKind.lifted) lifted.add(node.symbol);
         return;
       }
-      const list = structuredListType(node.type.type);
+      const list = structuredListType(node.type.type, registry.mode);
       if (list !== undefined && 'refusal' in list)
         throw new Error(
           `JS scalar fragment: the input ${node.symbol} has ${list.refusal}`
         );
-      if (admission.definition.typeOfSymbol(node) === undefined)
+      if (
+        admission.definition.typeOfSymbol(node) === undefined &&
+        structuredTupleType(node.type.type, registry.mode) === undefined &&
+        list === undefined
+      )
         throw new Error(
           `JS scalar fragment: unsupported binding ${node.symbol}`
         );
@@ -8565,6 +9136,13 @@ function admitFunctionBody(
       !['real', 'integer', 'complex', 'boolean', 'let']
         .concat(admission.structured ? ['list<real>', 'list<integer>'] : [])
         .concat(
+          admission.structured &&
+            tupleListLocalType(declared, named.structured?.mode ?? 'strict') !==
+              undefined
+            ? [declared]
+            : []
+        )
+        .concat(
           admission.structured && named.structured?.mode === 'strict'
             ? ['number']
             : []
@@ -8681,7 +9259,7 @@ function admitFunctionBody(
         node.operator === 'Typed'
       ) {
         const ascribed =
-          structuredParameterType(node.type.type, helper.name) ??
+          structuredParameterType(node.type.type, helper.name, registry?.mode) ??
           (isSubtype(node.type.type, REAL_WITH_NON_FINITE_TYPE)
             ? ({ kind: 'real' } as const)
             : undefined);
@@ -8740,7 +9318,7 @@ function admitFunctionBody(
         !indexPositions.has(node) &&
         !isSubtype(node.type.type, 'real') &&
         !isSubtype(node.type.type, 'boolean') &&
-        structuredListType(node.type.type) === undefined
+        structuredListType(node.type.type, registry.mode) === undefined
       )
         throw new Error(
           `JS scalar fragment: the local ${node.symbol} has the type ` +
@@ -9136,7 +9714,10 @@ function admitFunctionBody(
    * A `Loop` statement: `Loop(body, Element(k, Range(a, b)))`, with bounds
    * of the type `integer` and an index that names no parameter, local or
    * other index. The interpreter evaluates the bounds once and visits each
-   * integer from `a` to `b`, in steps of -1 when `b` is less than `a`. A
+   * integer from `a` to `b`, in steps of -1 when `b` is less than `a`.
+   * `Loop(body, Element(c, L))` over a value `L` that is not a `Range` (a
+   * list, `for c in all`) visits each element of `L`, evaluated once; the
+   * rule of the pass (`loopRule`) admits a list of numbers or of tuples. A
    * loop with no index set, with a step or a guard, or over another
    * collection is refused.
    */
@@ -9151,20 +9732,31 @@ function admitFunctionBody(
       );
     // `Element` and `Range` are the operators of the library: a user
     // function of one of these names is not an index set.
+    const overList =
+      isFunction(spec, 'Element') &&
+      isLibraryOperator(spec, 'Element') &&
+      spec.nops === 2 &&
+      isSymbol(spec.op1) &&
+      !isFunction(spec.op2, 'Range') &&
+      isSymbol(spec.op2) &&
+      isSubtype(spec.op2.type.type, 'list');
     if (
-      !isFunction(spec, 'Element') ||
-      !isLibraryOperator(spec, 'Element') ||
-      spec.nops !== 2 ||
-      !isSymbol(spec.op1) ||
-      !isFunction(spec.op2, 'Range') ||
-      !isLibraryOperator(spec.op2, 'Range') ||
-      spec.op2.nops !== 2
+      !overList &&
+      (!isFunction(spec, 'Element') ||
+        !isLibraryOperator(spec, 'Element') ||
+        spec.nops !== 2 ||
+        !isSymbol(spec.op1) ||
+        !isFunction(spec.op2, 'Range') ||
+        !isLibraryOperator(spec.op2, 'Range') ||
+        spec.op2.nops !== 2)
     )
       throw new Error(
         `JS scalar fragment: the structured route admits a Loop only over ` +
-          `Element(k, Range(a, b)), with no step and no guard, and not over ${nodeText(spec)}`
+          `Element(k, Range(a, b)), with no step and no guard, or over a list ` +
+          `that a name holds, and not over ${nodeText(spec)}`
       );
-    for (const bound of spec.op2.ops) {
+    if (overList) checkValue(spec.op2);
+    else for (const bound of (spec.op2 as Expression & { ops: readonly Expression[] }).ops) {
       indexPositions.add(bound);
       checkValue(bound);
       // A bound computed from the length of a list with integer arithmetic
@@ -10069,6 +10661,10 @@ function collectStructuredHelper(
       `JS scalar fragment: the helper ${name} calls itself, directly or ` +
         'through another helper: the structured route has no recursion'
     );
+  // The call of a user function that is a function operand
+  // (`userFunctionOperand()`): the binding of the operand symbol is the one
+  // that the call must reach.
+  const operand = userFunctionOperandSymbol(node);
   // A call of a local function (`LocalFunction`): its helper was resolved at
   // its definition. A call of a name that a statement of the body defines as
   // a local function, and that does not reach that definition (a call before
@@ -10076,10 +10672,15 @@ function collectStructuredHelper(
   // refused.
   if (registry.localFunctionNames.has(name)) {
     const local = registry.localFunctions.get(name);
+    const reached = operand ?? node;
     if (
       local === undefined ||
-      !local.bindings.has(
-        (node.valueDefinition ?? node.operatorDefinition) as object
+      !(
+        local.bindings.has(
+          (reached.valueDefinition ?? reached.operatorDefinition) as object
+        ) ||
+        (operand !== undefined &&
+          userFunctionLiteralOf(operand) === local.literal)
       )
     )
       throw new Error(
@@ -10090,6 +10691,14 @@ function collectStructuredHelper(
     registry.localCalls.add(node);
     return;
   }
+  if (
+    operand !== undefined &&
+    userFunctionLiteralOf(operand) !== userFunctionLiteral(node.engine, name)
+  )
+    throw new Error(
+      `JS scalar fragment: the function operand ${nodeText(operand)} does not ` +
+        `reach the definition of the helper ${name}`
+    );
   const known = registry.helpers.get(name);
   if (known === undefined) {
     registry.resolving.push(name);
@@ -10325,9 +10934,16 @@ function annotateStructured(
       if (hasNoDeclaredType(node)) return defaultKind(registry.mode);
       // A name declared `number`: the kind of `number` in the mode.
       const numberKind = declaredNumberKind(node.type.type, registry.mode);
-      return numberKind !== undefined
-        ? { kind: numberKind.kind }
-        : (base.typeOfInput ?? base.typeOfSymbol)(node);
+      if (numberKind !== undefined) return { kind: numberKind.kind };
+      // A tuple or a list of tuples of elements of the type `number`, which
+      // are real in the `strict` mode (`structuredTupleType()`).
+      const tuple = structuredTupleType(node.type.type, registry.mode);
+      const list = structuredListType(node.type.type, registry.mode);
+      return (
+        (base.typeOfInput ?? base.typeOfSymbol)(node) ??
+        tuple ??
+        (list === undefined || 'refusal' in list ? undefined : list)
+      );
     },
     functionOf: (call: Expression) => {
       const helper =
@@ -10360,6 +10976,9 @@ function annotateStructured(
               atNode(node, () => rule.walk(node, scope, context, w)),
           }
         : rule;
+  markEmptyTupleLists(root, registry.mode);
+  for (const helper of registry.helpers.values())
+    markEmptyTupleLists(helper.fragment.body, registry.mode);
   const annotation = typeFragment(root, { ...definition, rules }, { inputs });
   if (annotation.refusal) {
     const { refusal } = annotation;
@@ -10601,7 +11220,8 @@ function resolveHelper(
   const numberResult =
     registry === undefined || signature === undefined || inferred
       ? undefined
-      : structuredParameterType(signature.result, call.operator) === undefined
+      : structuredParameterType(signature.result, call.operator, registry.mode) ===
+          undefined
         ? declaredNumberKind(signature.result, registry.mode)
         : undefined;
   const bodyResult =
@@ -10613,7 +11233,11 @@ function resolveHelper(
       : numberResult !== undefined
         ? ({ kind: 'real' } as const)
         : registry
-          ? structuredParameterType(signature.result, call.operator)
+          ? structuredParameterType(
+              signature.result,
+              call.operator,
+              registry.mode
+            )
           : scalarType(signature.result);
   // In the `complex` mode the existing compiler writes the body of such a
   // helper with each parameter read as a complex value, also an annotated
@@ -10682,7 +11306,7 @@ function resolveHelper(
     type === undefined
       ? undefined
       : registry
-        ? (structuredParameterType(type, name) ??
+        ? (structuredParameterType(type, name, registry.mode) ??
           (() => {
             const kind = declaredNumberKind(type, registry.mode);
             return kind === undefined ? undefined : { kind: kind.kind };
@@ -10933,7 +11557,7 @@ function resolveLocalFunction(
         ? undefined
         : numberKind !== undefined
           ? { kind: numberKind.kind }
-          : structuredParameterType(type, name));
+          : structuredParameterType(type, name, registry.mode));
     const refusal = parameterRefusal(
       parameter,
       name,

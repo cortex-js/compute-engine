@@ -504,7 +504,7 @@ describe('the declines of slices 2 and 3', () => {
     ['Norm with an order', ['Norm', 'L', 1], /Norm with 2 operands is not in the profile/],
     ['Take with a real count', ['Take', 'L', 'x'], /Take with x of the type `real` is not in the profile, which reads an integer there/],
     ['Take of a tuple', ['Take', 'P', 1], /Take of P of the type `point<2>` is not in the profile, which reads a list of reals/],
-    ['Range with a step', ['Range', 1, 'n', 2], /Range with 3 operands is not in the profile/],
+    ['Range with a literal step 0', ['Range', 1, 'n', 0], /Range with the literal step 0 is not in the profile/],
     ['Range with a real bound', ['Range', 1, 'x'], /Range with x of the type `real` is not in the profile/],
     // From five elements on, the existing compiler calls `_SYS.matmul`,
     // whose sum starts at `+0` (the next test).
@@ -517,7 +517,7 @@ describe('the declines of slices 2 and 3', () => {
     [
       'Map of a local function',
       ['Block', ['Declare', 'lg', "'function'", lambda(['Add', 's', 1], 's')], ['Map', 'lg', 'L']],
-      /Map with the function "lg" is not in the profile/,
+      /Map with the local function .*lg.* is not in the profile/,
     ],
     ['Map of Fract (the profile declines Fract of a name)', ['Map', 'Fract', 'L'], /Map of the operator Fract is not in the profile, which maps the operators/],
     ['Map of Arcsec (a complex element)', ['Map', 'Arcsec', 'L'], /Map of the type list<complex \| infinity \| nan> is not in the profile/],
@@ -536,7 +536,7 @@ describe('the declines of slices 2 and 3', () => {
     ['Last of an element-wise product of a name of no declared type in the complex mode', ['Last', ['Multiply', 'L', 'w']], /Last of .* is not in the profile: in the complex mode the existing compiler reads elements of the type/, 'complex'],
     ['Map of a lambda of a boolean value', ['Map', lambda(['Less', 't', 1], 't'), 'L'], /Map whose function has a value of the type `boolean` is not in the profile/],
     ['Filter of a user function', ['Filter', 'L', 'g'], /Filter with the function g is not in the profile/],
-    ['Reduce by a lambda with no initial value', ['Reduce', 'L', lambda(['Add', 'a', 'b'], 'a', 'b')], /Reduce with a function literal and no initial value is not in the profile/],
+    ['Reduce by a lambda with no initial value', ['Reduce', 'L', lambda(['Add', 'a', 'b'], 'a', 'b')], /Reduce with a function literal or a user function and no initial value is not in the profile/],
     ['Reduce by Subtract', ['Reduce', 'L', 'Subtract'], /Reduce by the operator Subtract is not in the profile, which folds with Add, Multiply, Max and Min/],
     ['Reduce of a tuple', ['Reduce', 'P', 'Add'], /Reduce of P of the type `point<2>` is not in the profile/],
     ['Apply in the complex mode', ['Apply', lambda(['Add', 't', 1], 't'), 'x'], /Apply with a function literal is not in the profile in the complex mode/, 'complex'],

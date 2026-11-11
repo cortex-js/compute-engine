@@ -973,7 +973,7 @@ describe('refusals', () => {
     ce.assign('Range', ce.expr(['Function', ['List', 'a', 'b'], typed('a', 'integer'), typed('b', 'integer')]));
     const json = fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', 's', 'k']], 'k', 1, 'n'), 's');
     expect(() => structured().prepareStructured(ce.expr(json), OPTIONS)).toThrow(
-      /admits a Loop only over Element\(k, Range\(a, b\)\), with no step and no guard, and not over Element\(k, Range\(1, n\)\)/
+      /admits a Loop only over Element\(k, Range\(a, b\)\), with no step and no guard, or over a list that a name holds, and not over Element\(k, Range\(1, n\)\)/
     );
   });
 

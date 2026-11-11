@@ -504,7 +504,7 @@ describe('declarations and conflicts', () => {
   });
 
   test.each<[string, MathJsonExpression, RegExp]>([
-    ['a list', ['At', 'L', 1], /At in the profile reads a list of reals or integers or a tuple of reals/],
+    ['a list', ['At', 'L', 1], /At in the profile reads a list of reals, integers or tuples or a tuple of reals/],
     ['a condition', ['If', 'q', 1, 2], /the condition of If does not have the type boolean/],
     ['an operand of And', ['And', 'p', ['Less', 'x', 1]], /And with an operand that is not a boolean/],
   ])('a name with no declared type used as %s declines', (_name, body, reason) => {

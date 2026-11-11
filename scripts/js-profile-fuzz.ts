@@ -234,7 +234,7 @@ const intBetween = (rng: Rng, lo: number, hi: number): number =>
 
 export type Json = number | string | Json[];
 type Complex = { re: number; im: number };
-export type Value = number | boolean | Complex | number[];
+export type Value = number | boolean | Complex | number[] | number[][];
 export type Inputs = Record<string, Value>;
 type Mode = 'strict' | 'complex';
 
@@ -251,6 +251,7 @@ type InputKind =
   | 'list'
   | 'intlist'
   | 'tuple'
+  | 'tuplelist'
   | 'boolean'
   | 'inferred';
 
@@ -270,6 +271,7 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   L: 'list',
   I: 'intlist',
   P: 'tuple',
+  LQ: 'tuplelist',
   B: 'boolean',
   // The names that `HOST_OPTIONS` maps to another entry of the vars object
   // (`--host`).
@@ -286,6 +288,7 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
   ['V', 'list', 'list<real>'],
   ['W', 'intlist', 'list<integer>'],
   ['T', 'tuple', 'tuple<real, real>'],
+  ['TL', 'tuplelist', 'list<tuple<real, real>>'],
   ['c', 'boolean', 'boolean'],
 ];
 
@@ -301,6 +304,7 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   list: 'list<real>',
   intlist: 'list<integer>',
   tuple: 'tuple<real, real>',
+  tuplelist: 'list<tuple<real, real>>',
   boolean: 'boolean',
   inferred: 'real, written by ce.infer()',
 };
@@ -308,7 +312,8 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
 /** The declarations of the engine, as the report prints them. */
 export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
-  'L: list<real>; I: list<integer>; P: tuple<real, real>; B: boolean; ' +
+  'L: list<real>; I: list<integer>; P: tuple<real, real>; ' +
+  'LQ: list<tuple<real, real>>; B: boolean; ' +
   'u: no declared type; xn: number; ' +
   'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
   'Mod(xi, 2); h: real, assigned 2.5; ' +
@@ -714,9 +719,30 @@ const LIST_PARAMETER_HELPER = {
   ] as Json,
 };
 
+/** The helpers that a function operand of `Reduce`, `Scan`, `Filter` and
+ *  `Count` names (a user function as the function operand): a function of
+ *  the accumulator and the element, and a predicate. */
+const FUNCTION_OPERAND_HELPERS = [
+  {
+    name: 'fe',
+    signature: '(real, real) -> real',
+    definition: [
+      'Function',
+      ['Subtract', ['Multiply', 'v', 2], ['Divide', 'e', 3]],
+      ['Typed', 'v', "'real'"],
+      ['Typed', 'e', "'real'"],
+    ] as Json,
+  },
+  {
+    name: 'fc',
+    signature: '(real) -> boolean',
+    definition: ['Function', ['Less', 'v', 0.5], ['Typed', 'v', "'real'"]] as Json,
+  },
+];
+
 /** Assigns the helpers of `HELPERS`, `RANDOM_HELPERS`,
- *  `COLLECTION_HELPERS`, `SLICE_HELPERS` and `LIST_PARAMETER_HELPER` in the current scope of
- *  `ce`. */
+ *  `COLLECTION_HELPERS`, `SLICE_HELPERS`, `LIST_PARAMETER_HELPER` and
+ *  `FUNCTION_OPERAND_HELPERS` in the current scope of `ce`. */
 function defineHelpers(ce: ComputeEngine): void {
   for (const helper of [
     ...HELPERS,
@@ -724,6 +750,7 @@ function defineHelpers(ce: ComputeEngine): void {
     ...COLLECTION_HELPERS,
     ...SLICE_HELPERS,
     LIST_PARAMETER_HELPER,
+    ...FUNCTION_OPERAND_HELPERS,
   ]) {
     if (helper.signature !== undefined)
       ce.declare(helper.name, helper.signature);
@@ -807,6 +834,13 @@ const TUPLES_IN: number[][] = [
   [1 / 3, 0.1],
 ];
 const TUPLES_EDGE: number[][] = [[NaN, 1]];
+const TUPLE_LISTS_IN: number[][][] = [
+  [],
+  [[1, 2]],
+  [[0.1, -3], [2.5, 1 / 3], [-0, 7]],
+  [[1e300, 5e-324], [-1, 0.5]],
+];
+const TUPLE_LISTS_EDGE: number[][][] = [[[NaN, 1], [2, Infinity]]];
 
 /** The values of an input of the kind `kind` in the mode `mode`: those in
  *  its type first, then those outside it. */
@@ -836,6 +870,8 @@ function gridOf(kind: InputKind, mode: Mode): Value[] {
       return INTLISTS_IN;
     case 'tuple':
       return [...TUPLES_IN, ...TUPLES_EDGE];
+    case 'tuplelist':
+      return [...TUPLE_LISTS_IN, ...TUPLE_LISTS_EDGE];
     case 'boolean':
       return [true, false];
   }
@@ -877,6 +913,16 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
       return (
         Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x))
       );
+    case 'tuplelist':
+      return (
+        Array.isArray(v) &&
+        v.every(
+          (t) =>
+            Array.isArray(t) &&
+            t.length === 2 &&
+            t.every((x) => Number.isFinite(x))
+        )
+      );
     case 'boolean':
       return typeof v === 'boolean';
   }
@@ -892,7 +938,10 @@ const ordinaryNumber = (v: number): boolean =>
 function ordinary(v: Value): boolean {
   if (typeof v === 'boolean') return true;
   if (typeof v === 'number') return ordinaryNumber(v);
-  if (Array.isArray(v)) return v.every(ordinaryNumber);
+  if (Array.isArray(v))
+    return v.every((x) =>
+      Array.isArray(x) ? x.every(ordinaryNumber) : ordinaryNumber(x)
+    );
   return ordinaryNumber(v.re) && ordinaryNumber(v.im);
 }
 
@@ -915,6 +964,8 @@ interface GenContext {
   readonly lists: readonly string[];
   /** The names of tuples of two reals. */
   readonly tuples?: readonly string[];
+  /** The names of lists of tuples of two reals. */
+  readonly tupleLists?: readonly string[];
   /** Whether to generate draws (`--random`). */
   readonly random?: boolean;
   /** Whether to generate reads and calls of the host (`--host`). */
@@ -1237,6 +1288,14 @@ function genReal(ctx: GenContext, depth: number): Json {
 function genCollectionReal(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
   if (rng() < 0.45) return genFunctionOfListsReal(ctx, depth);
+  if ((ctx.tupleLists?.length ?? 0) > 0 && rng() < 0.2) {
+    const d = Math.min(depth + 1, ctx.maxDepth);
+    const r = rng();
+    if (r < 0.3) return [pick(rng, ['Length', 'Count']), genTupleList(ctx, d)];
+    if (r < 0.6)
+      return ['Count', genTupleList(ctx, d), genTupleLambda(ctx, depth, true)];
+    return ['At', genTuple(ctx, depth), pick(rng, [1, 2, -1])];
+  }
   const r = rng();
   const collection = (): Json =>
     rng() < 0.75 ? genList(ctx, depth) : genTuple(ctx, depth);
@@ -1356,6 +1415,7 @@ function genFoldFunction(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
   if (rng() < 0.5)
     return pick(rng, ['Add', 'Add', 'Multiply', 'Max', 'Min', 'Subtract']);
+  if (rng() < 0.15) return FUNCTION_OPERAND_HELPERS[0].name;
   return genLambda(ctx, depth, [`a${depth}`, `e${depth}`]);
 }
 
@@ -1403,7 +1463,13 @@ function genFunctionOfListsReal(ctx: GenContext, depth: number): Json {
     return op;
   }
   if (r < 0.62)
-    return ['Count', list(), genLambda(ctx, depth, [`e${depth}`], true)];
+    return [
+      'Count',
+      list(),
+      rng() < 0.15
+        ? FUNCTION_OPERAND_HELPERS[1].name
+        : genLambda(ctx, depth, [`e${depth}`], true),
+    ];
   if (r < 0.88) return ['At', genFunctionOfListsList(ctx, depth), genIndex(ctx)];
   const n = intBetween(rng, 1, 2);
   return [
@@ -1438,6 +1504,35 @@ function genFunctionOfListsList(ctx: GenContext, depth: number): Json {
     ];
   if (r < 0.25) return [pick(rng, ['Rest', 'Reverse', 'Sort']), list()];
   if (r < 0.32) return ['Join', list(), list()];
+  if (r < 0.36) {
+    // A rotation by a count of `COUNTS`, an integer input or one.
+    const op: Json[] = [pick(rng, ['RotateLeft', 'RotateRight']), list()];
+    if (rng() < 0.8)
+      op.push(
+        ctx.integers.length > 0 && rng() < 0.3
+          ? pick(rng, ctx.integers)
+          : pick(rng, COUNTS)
+      );
+    return op;
+  }
+  if (r < 0.38) {
+    // A `Range` with a step: literal or real bounds and a literal step of
+    // either sign (a step 0 declines), or an integer input.
+    const step: Json =
+      ctx.integers.length > 0 && rng() < 0.2
+        ? ['Add', ['Min', ['Abs', pick(rng, ctx.integers)], 3], 1]
+        : pick(rng, [2, -1, 0.5, -0.25, 0.1, 3, 0]);
+    return [
+      'Range',
+      pick<Json>(rng, [1, 0, -2, 3]),
+      rng() < 0.6 || ctx.reals.length === 0
+        ? intBetween(rng, -3, 5)
+        : ['Min', ['Max', pick(rng, ctx.reals), -4], 4],
+      step,
+    ];
+  }
+  if (r < 0.4 && (ctx.tupleLists?.length ?? 0) > 0)
+    return ['Map', genTupleLambda(ctx, depth), genTupleList(ctx, d)];
   if (r < 0.4)
     return rng() < 0.3
       ? ['Range', intBetween(rng, -1, 4)]
@@ -1451,10 +1546,71 @@ function genFunctionOfListsList(ctx: GenContext, depth: number): Json {
   if (r < 0.7)
     return ['Map', genMapFunction(ctx, depth), rng() < 0.85 ? list() : genTuple(ctx, d)];
   if (r < 0.85)
-    return ['Filter', list(), genLambda(ctx, depth, [`e${depth}`], true)];
+    return [
+      'Filter',
+      list(),
+      rng() < 0.15
+        ? FUNCTION_OPERAND_HELPERS[1].name
+        : genLambda(ctx, depth, [`e${depth}`], true),
+    ];
   const op: Json[] = ['Scan', list(), genFoldFunction(ctx, depth)];
   if (rng() < 0.5) op.push(genReal(ctx, d));
   return op;
+}
+
+/** A function literal of one parameter that is a tuple of two reals: its
+ *  body reads the elements of the tuple (`At(t, 1)`, `At(t, 2)`); a real,
+ *  or a condition with `predicate`. */
+function genTupleLambda(ctx: GenContext, depth: number, predicate = false): Json {
+  const name = `t${depth}`;
+  const inner: GenContext = {
+    ...ctx,
+    symbols: [
+      ...ctx.symbols,
+      [['At', name, 1], 25],
+      [['At', name, 2], 25],
+    ],
+  };
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  return ['Function', predicate ? genCondition(inner, d) : genReal(inner, d), name];
+}
+
+/**
+ * A list of tuples of two reals: a name, a list literal of tuples, a
+ * comprehension of tuples, `Map` of a list of reals to tuples, `Take`,
+ * `Drop`, `Reverse`, a rotation, `ListJoin` and `Filter` of a list of
+ * tuples.
+ */
+function genTupleList(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const names = ctx.tupleLists ?? [];
+  if (depth >= ctx.maxDepth || rng() < 0.35) {
+    if (names.length > 0 && rng() < 0.8) return pick(rng, names);
+    return ['List', ...Array.from({ length: intBetween(rng, 0, 3) }, () => ['Tuple', genReal(ctx, d), genReal(ctx, d)] as Json)];
+  }
+  const list = () => genTupleList(ctx, d);
+  const r = rng();
+  if (r < 0.15) {
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['j', 30]] };
+    return [
+      'Comprehension',
+      ['Tuple', genReal(inner, d), genReal(inner, d)],
+      ['Element', 'j', ['Range', pick(rng, [1, 1, 0]), intBetween(rng, 0, 4)]],
+    ];
+  }
+  if (r < 0.3) {
+    const e = `e${depth}`;
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, [e, 30]] };
+    return ['Map', ['Function', ['Tuple', genReal(inner, d), e], e], genList(ctx, d)];
+  }
+  if (r < 0.45)
+    return [pick(rng, ['Take', 'Drop']), list(), ctx.integers.length > 0 && rng() < 0.3 ? pick(rng, ctx.integers) : pick(rng, COUNTS)];
+  if (r < 0.55) return ['Reverse', list()];
+  if (r < 0.65) return [pick(rng, ['RotateLeft', 'RotateRight']), list(), pick(rng, COUNTS)];
+  if (r < 0.8) return ['ListJoin', list(), rng() < 0.5 ? list() : ['List', genTuple(ctx, d)]];
+  if (r < 0.9) return ['Filter', list(), genTupleLambda(ctx, depth, true)];
+  return ['Map', ['Function', ['Tuple', ['At', `t${depth}`, 2], ['At', `t${depth}`, 1]], `t${depth}`], list()];
 }
 
 /** A tuple of two reals: a tuple name, a tuple literal, or a call of the
@@ -1464,6 +1620,10 @@ function genTuple(ctx: GenContext, depth: number): Json {
   const d = Math.min(depth + 1, ctx.maxDepth);
   const tuples = ctx.tuples ?? [];
   const r = rng();
+  if ((ctx.tupleLists?.length ?? 0) > 0 && r < 0.12)
+    return rng() < 0.7
+      ? ['At', genTupleList(ctx, d), genIndex(ctx)]
+      : [pick(rng, ['First', 'Last']), genTupleList(ctx, d)];
   if (tuples.length > 0 && r < 0.5) return pick(rng, tuples);
   if (r < 0.85) return ['Tuple', genReal(ctx, d), genReal(ctx, d)];
   return [COLLECTION_HELPERS[2].name, genReal(ctx, d), genReal(ctx, d)];
@@ -1670,6 +1830,7 @@ const EXPRESSION_CONTEXT: ContextBase = {
   booleans: ['B'],
   lists: ['L', 'I'],
   tuples: ['P'],
+  tupleLists: ['LQ'],
 };
 
 /** The statements of a block: one or two real locals, maybe a list local
@@ -1786,6 +1947,21 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
       ];
       if (rng() < 0.5) branch.push(['Assign', target(), genReal(c(2), 0)]);
       statements.push(branch);
+    } else if (
+      r < 0.8 &&
+      base.lists.length + listLocals.length + (base.tupleLists?.length ?? 0) > 0
+    ) {
+      // A loop over the elements of a list name: a list of reals or of
+      // integers, or a list of tuples, whose element the body reads.
+      const over = pick(rng, [...base.lists, ...listLocals, ...(base.tupleLists ?? [])]);
+      const element: [Json, number][] = (base.tupleLists ?? []).includes(over)
+        ? [[['At', 'cv', 1], 20], [['At', 'cv', 2], 20]]
+        : [['cv', 20]];
+      statements.push([
+        'Loop',
+        ['Assign', target(), genReal(c(2, [...locals, ...element]), 0)],
+        ['Element', 'cv', over],
+      ]);
     } else {
       const inLoop: [Json, number][] = [...locals, ['r', 20]];
       const body: Json[] = [
@@ -1806,7 +1982,32 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
       ]);
     }
   }
-  if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
+  // A local declared a list of tuples, from the empty list, that a loop
+  // over a list appends to (`out = [...out, (…)]`).
+  let tupleLocal = false;
+  if (rng() < 0.08 && base.lists.length + (base.tupleLists?.length ?? 0) > 0) {
+    const over = pick(rng, [...base.lists, ...(base.tupleLists ?? [])]);
+    const element: [Json, number][] = (base.tupleLists ?? []).includes(over)
+      ? [[['At', 'cv', 1], 20], [['At', 'cv', 2], 20]]
+      : [['cv', 20]];
+    const c = ctx([...locals, ...element], 2);
+    const append: Json = [
+      'Assign',
+      'Q',
+      ['ListJoin', 'Q', ['List', ['Tuple', genReal(c, 0), genReal(c, 0)]]],
+    ];
+    statements.push(
+      ['Declare', 'Q', "'list<tuple<real, real>>'", ['List']],
+      [
+        'Loop',
+        rng() < 0.5 ? append : ['If', genCondition(c, 0), append],
+        ['Element', 'cv', over],
+      ]
+    );
+    tupleLocal = true;
+  }
+  if (tupleLocal && rng() < 0.6) statements.push('Q');
+  else if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
   else if (rng() < 0.12)
     statements.push(
       rng() < 0.75
@@ -1898,6 +2099,7 @@ function genFunction(
       kind !== 'list' &&
       kind !== 'intlist' &&
       kind !== 'tuple' &&
+      kind !== 'tuplelist' &&
       kind !== 'boolean'
     )
       symbols.push([name, 20]);
@@ -1913,6 +2115,7 @@ function genFunction(
         booleans: names.includes('c') ? ['c'] : [],
         lists: names.filter((n) => n === 'V' || n === 'W'),
         tuples: names.includes('T') ? ['T'] : [],
+        tupleLists: names.includes('TL') ? ['TL'] : [],
         random,
         host,
       })
@@ -1961,7 +2164,9 @@ export function generateProgram(
           ? genList(ctx, 0)
           : value < 0.08
             ? genTuple(ctx, 0)
-            : genReal(ctx, 0);
+            : value < 0.1
+              ? genTupleList(ctx, 0)
+              : genReal(ctx, 0);
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
     }
     if (nodeCount(json) <= options.size)
@@ -2106,7 +2311,9 @@ function compileWith(
         message: result.diagnostic?.message ?? 'no run function',
       };
     const raw = rawRunner(run, parameters);
-    const copy = (v: Value): unknown => (Array.isArray(v) ? [...v] : v);
+    // A deep copy: a list of tuples holds arrays.
+    const copy = (v: Value): unknown =>
+      Array.isArray(v) ? structuredClone(v) : v;
     // The entries that `HOST_OPTIONS` reads in place of `vu` and `vz`.
     // A new vars object per call, which `hm` changes (`HOST_VARS`).
     const argumentsOf = (inputs: Inputs): unknown[] => {
@@ -2133,15 +2340,37 @@ function compileWith(
         let value: unknown;
         let draws: number;
         let calls: string;
+        // The arguments of the call, kept to see whether the call writes an
+        // array of its inputs (a list or a tuple of a list of tuples).
+        let args: unknown[] = [];
         try {
           ({
             value: { value, draws },
             host: calls,
           } = hostCalls(() =>
-            withStubbedRandom(() => run(...argumentsOf(inputs)))
+            withStubbedRandom(() => run(...(args = argumentsOf(inputs))))
           ));
         } catch (error) {
           return { kind: 'throw', message: String(error) };
+        }
+        const written = Object.entries(inputs).filter(([name, v]) => {
+          if (!Array.isArray(v)) return false;
+          const passed =
+            parameters === undefined
+              ? (args[0] as Record<string, unknown>)[name]
+              : args[parameters.indexOf(name)];
+          return !sameValue(passed, v);
+        });
+        if (written.length > 0)
+          calls += ` wrote the input ${written.map(([n]) => n).join(', ')}`;
+        // A second call with the inputs of the first: the same value.
+        if (draws === 0 && calls === '' && host === false) {
+          try {
+            const again = run(...(args as unknown[]));
+            if (!sameValue(again, value)) calls += ' second call differs';
+          } catch {
+            calls += ' second call throws';
+          }
         }
         let shape: string | undefined;
         try {
@@ -2270,7 +2499,11 @@ function boxValue(ce: ComputeEngine, v: Value, name?: string): Expression {
   if (Array.isArray(v))
     return ce.function(
       name === 'P' || name === 'T' ? 'Tuple' : 'List',
-      v.map((x) => ce.number(x))
+      v.map((x) =>
+        Array.isArray(x)
+          ? ce.function('Tuple', x.map((e) => ce.number(e)))
+          : ce.number(x)
+      )
     );
   return ce.expr(['Complex', v.re, v.im]);
 }
@@ -2283,7 +2516,7 @@ function interpret(
   program: Program,
   expr: Expression,
   point: Inputs
-): Complex | Complex[] | string {
+): Expected {
   let value: Expression;
   if (program.parameters !== undefined)
     value = ce
@@ -2306,17 +2539,24 @@ function interpret(
       ? ce.function('List', [...value.each()])
       : value
   ).N();
-  if (
-    (isFunction(n, 'List') || isFunction(n, 'Tuple')) &&
-    n.ops.every((op) => isNumber(op))
-  )
-    return n.ops.map((op) => ({
-      re: (op as Expression & { re: number }).re,
-      im: (op as Expression & { im: number }).im,
-    }));
+  // A list or a tuple of numbers, or a list of such tuples, at every depth.
+  const numbers = (e: Expression): Expected | undefined => {
+    if (isNumber(e)) return { re: e.re, im: e.im };
+    if (!isFunction(e, 'List') && !isFunction(e, 'Tuple')) return undefined;
+    const ops = e.ops.map(numbers);
+    return ops.every((op) => op !== undefined) ? (ops as Expected[]) : undefined;
+  };
+  if (isFunction(n, 'List') || isFunction(n, 'Tuple')) {
+    const list = numbers(n);
+    if (list !== undefined) return list;
+  }
   if (!isNumber(n)) return JSON.stringify(value.json).slice(0, 200);
   return { re: n.re, im: n.im };
 }
+
+/** The value of the interpreter: a number, a list of values (at every
+ *  depth), or the MathJSON of a value that is not a number, as text. */
+type Expected = Complex | Expected[] | string;
 
 function asComplex(v: unknown): Complex | undefined {
   if (typeof v === 'number') return { re: v, im: 0 };
@@ -2342,7 +2582,7 @@ const TOLERANCE = 1e-7;
  */
 function compareWithInterpreter(
   value: unknown,
-  expected: Complex | Complex[] | string,
+  expected: Expected,
   mode: Mode
 ): 'agree' | 'no-number' | 'disagree' {
   // A list or a tuple: the same length, and each element by the rule of a

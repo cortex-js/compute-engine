@@ -108,6 +108,38 @@ test('the generator writes the functions of lists and the function operands', ()
     expect([head, heads.has(head)]).toEqual([head, true]);
 });
 
+test('the generator writes the forms of slices 4 and 5', () => {
+  // User functions as function operands, ranges with a step, rotations,
+  // lists of tuples, a local list of tuples and a loop over a list.
+  const forms = new Set<string>();
+  const visit = (json: unknown): void => {
+    if (!Array.isArray(json)) return;
+    const [head, ...ops] = json;
+    if (typeof head === 'string') {
+      forms.add(head);
+      if (head === 'Range' && ops.length === 3) forms.add('Range with a step');
+      if ((head === 'Reduce' || head === 'Scan') && ops[1] === 'fe') forms.add('a user function of a fold');
+      if ((head === 'Filter' || head === 'Count') && ops[1] === 'fc') forms.add('a user predicate');
+      if (head === 'Map' && (ops[0] === 'fd' || ops[0] === 'fi')) forms.add('Map of a user function');
+      if (head === 'Loop' && Array.isArray(ops[1]) && ops[1][0] === 'Element' && typeof ops[1][2] === 'string')
+        forms.add('a loop over a list');
+      if (head === 'Declare' && ops[1] === "'list<tuple<real, real>>'") forms.add('a local list of tuples');
+      if (head === 'Map' && Array.isArray(ops[0]) && Array.isArray(ops[0][1]) && ops[0][1][0] === 'Tuple')
+        forms.add('Map to tuples');
+    } else if (head === 'LQ' || head === 'TL') forms.add('a list of tuples');
+    json.forEach(visit);
+    if (json.includes('LQ') || json.includes('TL')) forms.add('a list of tuples');
+  };
+  for (let i = 0; i < 3000; i++)
+    visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: DEFAULT_OPTIONS.size }).json);
+  for (const form of [
+    'Range with a step', 'RotateLeft', 'RotateRight', 'ListJoin', 'a list of tuples',
+    'a user function of a fold', 'a user predicate', 'Map of a user function',
+    'a loop over a list', 'a local list of tuples', 'Map to tuples',
+  ])
+    expect([form, forms.has(form)]).toEqual([form, true]);
+});
+
 test('no difference between the two compilers and no failure of the profile, but the known ones', () => {
   const unexplained = result.findings.filter(
     (f) =>
