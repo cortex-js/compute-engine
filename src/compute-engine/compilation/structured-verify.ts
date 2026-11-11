@@ -29,7 +29,6 @@ import {
   type IRValue,
   type BinaryFunctionName,
   type Representation,
-  type ScalarKind,
   type UnaryFunctionName,
   type ValueType,
 } from './structured-ir.js';
@@ -110,7 +109,7 @@ export type RepresentationPolicy = {
       {
         readonly from: Representation;
         readonly to: Representation;
-        readonly type: ScalarKind;
+        readonly type: ValueType;
       }
     >
   >;
@@ -647,7 +646,6 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'binary',
   'and',
   'or',
-  'convert',
   'trace',
   'capture',
   'draw',
@@ -708,8 +706,9 @@ function verifySignature(
       );
   };
   // A list is an operand only of `at`, `length`, `replace-at`, a call, a
-  // loop (as a carried value) and a yield, and the result only of an input,
-  // a call, an `if`, a loop, a `build` and a `replace-at`.
+  // loop (as a carried value), a yield and a conversion of the
+  // representation of a list, and the result only of an input, a call, an
+  // `if`, a loop, a `build`, a `replace-at` and such a conversion.
   if (
     ELEMENTWISE_KINDS.has(op.kind) &&
     (op.operands.some((operand) => elementOf(operand.type) !== undefined) ||
@@ -998,7 +997,11 @@ function verifySignature(
         conversion === undefined ||
         operand.representation !== conversion.from ||
         op.result.type !== conversion.type ||
-        op.result.representation !== conversion.to
+        op.result.representation !== conversion.to ||
+        // A conversion that keeps the representation gives a value the
+        // wider type of a local (an integer as a real).
+        (conversion.from === conversion.to &&
+          !fitsType(operand.type, op.result.type))
       )
         fail(
           `an invalid conversion ${String(op.conversion)} from ${operand.type} to ${op.result.type}`

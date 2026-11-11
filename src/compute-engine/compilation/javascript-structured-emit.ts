@@ -701,13 +701,8 @@ class Emitter {
         );
       }
       case 'add': {
-        if (op.result.representation !== 'complex') {
-          const sum = leftAssociative(operands, ADDITIVE, '+');
-          // The arithmetic of a draw from a literal domain: the `Random`
-          // handler of the existing emitter writes it in parentheses, so a
-          // parent reads it as one operand (`z + Random(Interval(0, 2))`).
-          return op.origin.operator === 'Random' ? atom(`(${sum.text})`) : sum;
-        }
+        if (op.result.representation !== 'complex')
+          return leftAssociative(operands, ADDITIVE, '+');
         // The text of the existing emitter (`Add` in `javascript-target.ts`):
         // the real parts of every operand, then the imaginary parts of the
         // complex operands only, each in the order of the operands; a complex
@@ -725,14 +720,14 @@ class Emitter {
             re.push(`${operand(operands[i], CALL)}.re`);
             im.push(`${operand(operands[i], CALL)}.im`);
           } else {
-            // The existing emitter writes the code of a real operand as it
-            // is, with no parentheses: a sum or a conditional would be read
-            // with another grouping there.
-            if (operands[i].precedence <= ADDITIVE)
-              fail(
-                'a real operand of a complex sum is a sum or a conditional, which the existing emitter writes with another grouping'
-              );
-            re.push(operands[i].text);
+            // The existing emitter writes the code of a real operand as one
+            // term: a conditional and a sum (`Sum`, the identity of
+            // `Conjugate` or `Abs` of a sum, the arithmetic of a draw from a
+            // literal domain, `z + Random(Interval(0, 2))`) in parentheses,
+            // or as an immediately called function, and a local as its name.
+            // The route writes a real operand of additive precedence (a sum
+            // or a conditional) in parentheses, which gives the same double.
+            re.push(operand(operands[i], ADDITIVE + 1));
           }
         });
         const sum = (terms: readonly string[]) => {
@@ -919,6 +914,15 @@ class Emitter {
       case 'max':
         return call('Math.max', operands);
       case 'convert':
+        // An identity conversion of a write to a local of a wider type is
+        // the text of its operand: a literal or a name is written at each
+        // use, as the operand would be.
+        if (op.conversion !== 'real-to-complex') {
+          if (!this.plain.has(op.operands[0].id)) return operands[0];
+          this.define(op.result, operands[0]);
+          this.plain.add(op.result.id);
+          return undefined;
+        }
         return atom(`({ re: ${operand(operands[0], CONDITIONAL)}, im: 0 })`);
       case 'if': {
         const thenStatements: string[] = [];

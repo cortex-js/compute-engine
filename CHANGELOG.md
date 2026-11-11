@@ -140,7 +140,14 @@
   or `signed_infinity` is real. A user function declared with the result
   `number` returns the type of its body, and a name declared `number` with
   a number value is captured. `defaultedSymbols` does not list these names:
-  their type is declared. The options `cse` and
+  their type is declared. A local declared with a type keeps that type: an
+  integer value of a `real` local and a list of integers of a `list<real>`
+  local are admitted, and a value of another kind declines with
+  `outside-profile` (`let t: real = 1 + 2i`, `let t: real = sqrt(x)` in the
+  `strict` mode, a number of a list local). A product with a quotient
+  factor whose numerator is a product with an exact rational
+  (`q·((0.1/3)/w)`) gives the doubles of the ordinary compiler; it gave a
+  value that differed in the last place before. The options `cse` and
   `constantFold` are ignored under the profile; `functions`, `operators`,
   `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
   with `outside-profile` (an empty object of `functions`, `operators` or

@@ -19,7 +19,8 @@ import {
 // A minimal program of a known class is listed in `KNOWN` with its reason
 // and its reference; a finding that matches no entry fails the test, and
 // an entry that matches no finding fails it too, so that the list is
-// cleared when a fix lands.
+// cleared when a fix lands. An `optional` entry is a class that only the
+// scale runs of the tester reach: it may match no finding here.
 
 type Known = {
   readonly name: string;
@@ -27,34 +28,25 @@ type Known = {
   readonly reference: string;
   readonly classes: readonly Finding['class'][];
   readonly matches: (finding: Finding) => boolean;
+  /** The seeds of this test need not reach the entry. */
+  readonly optional?: boolean;
 };
 
 const KNOWN: readonly Known[] = [
   {
-    name: 'a complex sum with a real operand that is a sum or a conditional',
+    name: 'an element of a comprehension whose element type is not real, read in the strict mode',
     reason:
-      'the emitter of the profile fails ("a real operand of a complex sum ' +
-      'is a sum or a conditional, which the existing emitter writes with ' +
-      'another grouping"), a `compile-error` and not a decline',
-    reference:
-      'docs/plans/2026-11-09-js-pilot-emission-rewrites.md, the row "The complex branch of `Add`"',
-    classes: ['profile-failure'],
+      'the existing compiler reads the element as a complex value ' +
+      '(`_SYS.cneg(_SYS.atNumeric(…, "complex | signed_infinity"))` is ' +
+      '`{re: NaN, im: NaN}` for `-At(Comprehension(Ln(x), …), 1)` at ' +
+      '`x = 3`); the profile gives the value of the interpreter',
+    reference: 'CE-1203',
+    classes: ['difference'],
+    // The seeds of this test do not reach it; the scale runs of the tester
+    // do (about one program in 50,000).
+    optional: true,
     matches: (f) =>
-      (f.message ?? '').includes(
-        'a real operand of a complex sum is a sum or a conditional'
-      ),
-  },
-  {
-    name: 'a local declared real keeps the kind of a complex initializer',
-    reason:
-      'the profile does not apply the declared type of a `Declare`: the ' +
-      'local is complex where the existing compiler writes ' +
-      '`_SYS.crealElements(v)` (NaN) in the `complex` mode',
-    reference:
-      'the class D1 of the random differential tester, fixed by the change ' +
-      'to the rules of locals; remove this entry with that change',
-    classes: ['difference', 'shape'],
-    matches: (f) => f.shape.includes("Declare(_, 'real', "),
+      f.mode === 'strict' && f.shape.includes('At(Comprehension('),
   },
 ];
 
@@ -100,6 +92,7 @@ test('no difference between the two compilers and no failure of the profile, but
 test('each entry of the allow-list is still needed', () => {
   const unused = KNOWN.filter(
     (k) =>
+      k.optional !== true &&
       !result.findings.some(
         (f) => checked(f) && k.classes.includes(f.class) && k.matches(f)
       )

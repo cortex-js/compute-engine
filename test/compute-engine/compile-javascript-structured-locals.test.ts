@@ -366,7 +366,8 @@ describe('single-definition values', () => {
 
   // No program reaches two branch values of one representation and of
   // types other than integer and real: the facts of the literal `1` are
-  // changed to a boolean held as a number.
+  // changed to a boolean held as a number. The write of that value to the
+  // real local throws before the merge.
   test('a merge of a boolean and a real value throws', () => {
     const preparation = structured().prepareStructured(
       engine().expr(fn(declare('t', 'real', 'w'), ['If', 'C', ['Assign', 't', 1]], 't')),
@@ -376,7 +377,7 @@ describe('single-definition values', () => {
     const one = [...block.facts.keys()].find((node) => node.isNumberLiteral && node.re === 1)!;
     block.facts.set(one, { type: { kind: 'boolean' }, representation: 'number' });
     expect(() => lowerStructuredFragment(preparation)).toThrow(
-      /the local t has the type boolean in one branch and real in the other/
+      /a value of the type boolean is written to the local t of the type real/
     );
   });
 
@@ -451,7 +452,7 @@ describe('refusals', () => {
     [
       'a complex value written to a real local',
       fn(declare('t', 'real', 'w'), ['If', 'C', ['Assign', 't', 'u']], 't'),
-      /`Assign` writes a value of the type `complex` to the local `t` of the type `real`/,
+      /the local t is declared real, and the value u written to it has the type complex, which is not real/,
     ],
     [
       'a real value written to an integer local, in a branch',

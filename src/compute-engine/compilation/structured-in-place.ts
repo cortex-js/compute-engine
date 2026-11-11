@@ -276,6 +276,14 @@ function analyzeInPlace(program: IRProgram): {
           return true;
         case 'call':
           return yieldsUnique[op.function] === true;
+        // A conversion of a list that keeps its representation (a list of
+        // integers written to a local of a list of reals) is the array of
+        // its operand.
+        case 'convert':
+          return (
+            op.result.representation === op.operands[0].representation &&
+            consumable(op.operands[0], op, definition.position)
+          );
         case 'if': {
           const i = op.results.indexOf(value);
           // A closed branch yields nothing to the result.

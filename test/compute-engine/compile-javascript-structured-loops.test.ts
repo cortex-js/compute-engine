@@ -689,7 +689,9 @@ describe('the loop in the representation', () => {
 
   test('a carried value whose next value is real has a real parameter', () => {
     const [op] = loopsOf(lower(fixture('a carried value that becomes real')).root);
-    expect(op.operands[2].type).toBe('integer');
+    // The local is declared `real`: its integer initial value is converted
+    // to a real where it is declared.
+    expect(op.operands[2].type).toBe('real');
     expect(op.body.parameters![1].type).toBe('real');
     // A local declared `integer` whose values are integers.
     const [integer] = loopsOf(lower(fixture('an integer local')).root);

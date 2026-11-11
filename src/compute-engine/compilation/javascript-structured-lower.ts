@@ -105,6 +105,7 @@ import {
   exitsIn,
   joinEffects,
   operationCanAbort,
+  regionsOf,
   touchesField,
   type EffectFact,
   type IRCapture,
@@ -2215,7 +2216,10 @@ class Lowering {
    * `x * (z/y) * (w/z)` is `((x * w) / z * z) / y` in the canonical order of
    * the factors. A factor after the first that is a real quotient
    * multiplies the product by its numerator (a numerator that is a quotient
-   * in turn is read the same way, `a / b / c`) and divides it by its
+   * in turn is read the same way, `a / b / c`, and a numerator
+   * `Multiply(1/d, a, …)` that `multiplyByRational()` writes `a / d` as the
+   * product of its other factors, then a division by `d`: `q * (0.1/3)/w`
+   * is `q * 0.1 / 3 / w`) and divides it by its
    * denominator; a denominator is in parentheses, and so is a numerator
    * that is a product. The first factor and every other factor are one
    * operand. The multiplications between two divisions are one `multiply`
@@ -2255,8 +2259,49 @@ class Lowering {
           operations
         );
       const inner = quotientOf(q.ops[0]);
+      const numerator = q.ops[0];
       if (inner !== undefined) quotient(inner);
-      else steps.push({ kind: 'multiply', value: part(0) });
+      else if (
+        isFunction(numerator, 'Multiply') &&
+        this.facts(numerator, scope).representation === 'number' &&
+        unitRationalFactor(numerator) !== undefined
+      ) {
+        // A numerator `Multiply(1/d, a, …)` (`multiplyByRational()`) is
+        // `a / d`, or `(a * …) / d`, with no parentheses around it on the
+        // existing emitter: the product multiplies by the other factors as
+        // one operand, then divides by `d`.
+        const index = unitRationalFactor(numerator)!;
+        const others = numerator.ops.flatMap((_, i) =>
+          i === index ? [] : [i]
+        );
+        // One other factor that is a quotient is written `a / b / d`, a
+        // part of the chain; more than one, `(a * …) / d`.
+        const single =
+          others.length === 1 ? quotientOf(numerator.ops[others[0]]) : undefined;
+        if (single !== undefined) quotient(single);
+        else
+          steps.push({
+            kind: 'multiply',
+            value: this.realProduct(
+              numerator,
+              others,
+              this.facts(numerator, scope),
+              scope,
+              operations,
+              this.effect(numerator)
+            ),
+          });
+        const divisor = this.newValue('integer', 'number');
+        operations.push({
+          kind: 'literal',
+          value: exactRationalDivisor(numerator.ops[index])!.q,
+          result: divisor,
+          operands: [],
+          effect: 'pure',
+          origin: numerator.ops[index],
+        });
+        steps.push({ kind: 'divide', value: divisor });
+      } else steps.push({ kind: 'multiply', value: part(0) });
       steps.push({ kind: 'divide', value: part(1) });
     };
     const first = factor(indexes[0]);
@@ -2459,15 +2504,15 @@ class Lowering {
     ) {
       const name = node.op1.symbol;
       const binding = scope.bindings.get(name);
-      const value = this.value(initializer, scope, operations);
-      if (
-        binding === undefined ||
-        !('representation' in binding) ||
-        binding.representation !== value.representation
-      )
-        fail(
-          `the local ${name} has no binding of the representation of its value`
-        );
+      if (binding === undefined || !('representation' in binding))
+        return fail(`the local ${name} has no binding`);
+      const value = this.toLocal(
+        this.value(initializer, scope, operations),
+        binding,
+        name,
+        node,
+        operations
+      );
       let locals = this.bound.get(scope);
       if (locals === undefined) this.bound.set(scope, (locals = new Map()));
       locals.set(name, value);
@@ -2477,7 +2522,7 @@ class Lowering {
     }
     if (isFunction(node, 'Assign') && node.nops === 2 && isSymbol(node.op1)) {
       const name = node.op1.symbol;
-      const value = this.value(node.op2, scope, operations);
+      const written = this.value(node.op2, scope, operations);
       const binder = bindingScope(scope, name);
       const locals = binder === undefined ? undefined : this.bound.get(binder);
       const binding = binder?.bindings.get(name);
@@ -2491,12 +2536,12 @@ class Lowering {
         binding === undefined
       )
         return fail(`the name ${name} is not a declared local`);
-      if (
-        !('representation' in binding) ||
-        binding.representation !== value.representation
-      )
-        fail(`a write to the local ${name} changes its representation`);
-      locals.set(name, value);
+      if (!('representation' in binding))
+        return fail(`the local ${name} has no representation`);
+      locals.set(
+        name,
+        this.toLocal(written, binding, name, node, operations)
+      );
       this.wrote(binder!);
       this.changed();
       return false;
@@ -2525,6 +2570,68 @@ class Lowering {
       return true;
     }
     return fail(`no lowering for the statement ${nodeText(node)}`);
+  }
+
+  /** Whether the body of each function of the program can throw
+   *  (`canThrow()`), by index. */
+  private readonly throwingBodies = new Map<number, boolean>();
+
+  /** `canThrow()` of `op` in this program: a call throws when the body of
+   *  its function can throw. Recursion is refused, so the walk ends. */
+  private readonly canThrow = (op: IROperation): boolean =>
+    canThrow(op, (i) => {
+      let known = this.throwingBodies.get(i);
+      if (known === undefined) {
+        const fn = this.functions[i];
+        if (fn === undefined) return fail(`no function ${i} for a call`);
+        known = fn.body.operations.some(this.canThrow);
+        this.throwingBodies.set(i, known);
+      }
+      return known;
+    });
+
+  /**
+   * The value `value` written to the local `name` (a `Declare` or an
+   * `Assign`, `node`), as a value of the type of the local (`binding`):
+   * the pass gives a local its declared type and admits a write only when a
+   * conversion reads the value as that type. An integer written to a real
+   * local and a list of integers written to a list of reals are the same
+   * JavaScript value, as in the existing emitter (`let t = 1`): an identity
+   * conversion (`integer-to-real`, `integer-list-to-real-list`) gives the
+   * value the type of the local, with no code. The admission and the pass
+   * refuse every other write of a value of another type
+   * (`checkLocalWrites()`, `structuredLocalType()`).
+   */
+  private toLocal(
+    value: IRValue,
+    binding: FragmentValueFacts<ScalarRepresentation>,
+    name: string,
+    node: Expression,
+    operations: IROperation[]
+  ): IRValue {
+    const type = valueType(binding.type);
+    if (value.type === type && value.representation === binding.representation)
+      return value;
+    const conversion =
+      value.type === 'integer' && type === 'real'
+        ? 'integer-to-real'
+        : value.type === 'list<integer>' && type === 'list<real>'
+          ? 'integer-list-to-real-list'
+          : undefined;
+    if (conversion === undefined)
+      return fail(
+        `a value of the type ${value.type} is written to the local ${name} of the type ${type}`
+      );
+    const result = this.newValue(type, binding.representation);
+    operations.push({
+      kind: 'convert',
+      conversion,
+      result,
+      operands: [value],
+      effect: 'pure',
+      origin: node,
+    });
+    return result;
   }
 
   /**
@@ -2649,14 +2756,21 @@ class Lowering {
     // (with the pure operations that the effect reads). A branch that can
     // abort (a loop with an iteration budget) keeps the `If`, and so does a
     // branch that holds an `exit`, at any depth: the exit decides which
-    // operations run after the `If`.
+    // operations run after the `If`. An operation whose code can throw
+    // (`canThrow()`), in a branch or in the condition, keeps the `If` too:
+    // such an operation is `pure` and touches no state, so the effect
+    // facts would let the `If` go, but the existing emitter evaluates the
+    // statement and throws there.
     if (
       exitsIn(then).length === 0 &&
       exitsIn(otherwise).length === 0 &&
       results.length === 0 &&
       joinEffects(then.effect, otherwise.effect) === 'pure' &&
       then.canAbort !== true &&
-      otherwise.canAbort !== true
+      otherwise.canAbort !== true &&
+      !condition.some(this.canThrow) &&
+      !then.operations.some(this.canThrow) &&
+      !otherwise.operations.some(this.canThrow)
     ) {
       if (condition.some((op) => op.effect !== 'pure'))
         for (const op of condition) operations.push(op);
@@ -2948,6 +3062,44 @@ class Lowering {
     this.functionIndex.set(name, this.functions.length - 1);
     return this.functions.length - 1;
   }
+}
+
+/** Whether the code of `op`, or of an operation of a region that it
+ *  evaluates, or of the body of a function that it calls, can throw on
+ *  JavaScript: `mod` (`_SYS.floorMod` throws for an operand beyond the safe
+ *  integer range) and `replace-at` (`_SYS.replaceAt` throws for an index
+ *  out of range). A throw is not an effect, so the lowering keeps such an
+ *  operation where the existing emitter evaluates it (`ifStatement()`).
+ *  `bodyThrows` answers for the function of index `i` of the program (a
+ *  called function is lowered before its call). */
+function canThrow(
+  op: IROperation,
+  bodyThrows: (i: number) => boolean
+): boolean {
+  return (
+    op.kind === 'mod' ||
+    op.kind === 'replace-at' ||
+    (op.kind === 'call' && bodyThrows(op.function)) ||
+    regionsOf(op).some((region) =>
+      region.operations.some((inner) => canThrow(inner, bodyThrows))
+    )
+  );
+}
+
+/** The index of the exact rational factor `1/d` of the product `node`
+ *  that `multiplyByRational()` divides by (its first factor that
+ *  `exactRationalDivisor()` accepts), when its numerator is 1; otherwise
+ *  `undefined`. The existing emitter writes such a product `a / d`, with no
+ *  multiplication by the numerator. */
+function unitRationalFactor(
+  node: Expression & { ops: readonly Expression[] }
+): number | undefined {
+  const index = node.ops.findIndex(
+    (op) => exactRationalDivisor(op) !== undefined
+  );
+  if (index < 0 || exactRationalDivisor(node.ops[index])!.p !== 1)
+    return undefined;
+  return index;
 }
 
 /** The type that holds a value of the type `a` and a value of the type

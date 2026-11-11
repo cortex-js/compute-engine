@@ -9,7 +9,8 @@
  * of numbers (`array`), as the existing emitter holds a list input and the
  * list that a comprehension makes. The
  * target holds no list of booleans or of complex numbers: no program of the
- * structured route needs one yet. The one conversion is `real-to-complex`.
+ * structured route needs one yet. The conversions are `real-to-complex` and
+ * the identity conversions of a write to a local of a wider type.
  */
 import type { Expression } from '../global-types.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
@@ -43,6 +44,15 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   representationOf: representationOfKind,
   conversions: {
     'real-to-complex': { from: 'number', to: 'complex', type: 'complex' },
+    // A value written to a local of a wider type (an integer to a real
+    // local, a list of integers to a local of a list of reals): the same
+    // JavaScript value, with no code, as the existing emitter writes it.
+    'integer-to-real': { from: 'number', to: 'number', type: 'real' },
+    'integer-list-to-real-list': {
+      from: 'array',
+      to: 'array',
+      type: 'list<real>',
+    },
   },
   operations: {
     // A complex sum reads a real operand as its real part, with no

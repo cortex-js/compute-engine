@@ -2009,7 +2009,8 @@ nothing changes.
 | --- | --- |
 | A head outside the list | `Sech(x)`, `LogGamma(x)`, `Integrate(sin(x), x)`, `RandomChoice(L, 2)` (`operator: 'RandomChoice'`), `RandomSample`, `RandomShuffle` |
 | A draw outside the form | a draw in the body of a `Comprehension` (the interpreter's comprehension draws when an element is read), `Random` of a domain with a symbol or of a list (`Random(Range(1, n))`), a `WithRandomSeed` with a boolean seed, a seed that is a string expression or a list body, a statement that is only a draw, a binding whose value draws (`r := Random()`), a function value that draws (`Map`); two or more draws when one is in a complex value (`Random() + Sqrt(Random(Range(-2, 8, 2)))` in the `complex` mode: the existing emitter evaluates the complex operand first); a `WithRandomSeed` with a real body whose type the existing compiler reads as complex in the `strict` mode (`WithRandomSeed(3, ln(x))`), or whose type is neither real nor wide in the `complex` mode (`integer \| missing`, `infinity \| nan \| real`) |
-| A form the existing emitter writes in a special way | `x^0.5`, `x^(8/5)`, `Mod(x, 1)`, `Sinh(i·π·x)`, `e^(x + i·π·y)`, `\|x + i\|`, a closed comparison, a power or a root of two literals that it folds to `NaN` where the interpreter has a finite value (`Root(-2, -4)`), the literal `-(0^-1)` (an undirected infinity that it writes `Infinity`), and in the `complex` mode a real call or square that it wraps as a complex value (`x·sin(a/y)`, `ln(a^2)^2` with `a`, `y` real) |
+| A form the existing emitter writes in a special way | `x^0.5`, `x^(8/5)`, `Mod(x, 1)`, `Sinh(i·π·x)`, `e^(x + i·π·y)`, `\|x + i\|`, a closed comparison, a power or a root of two literals that it folds to `NaN` where the interpreter has a finite value (`Root(-2, -4)`), the literal `-(0^-1)` (an undirected infinity that it writes `Infinity`), an ordering with a closed operand whose value is the undirected infinity (`x ≤ 1/0`, `x ≤ cot(π)`, which it writes `false`), a `Haversine` where it writes the haversine in its parent with no parentheses (`2 / hav(x)`, `h · (hav(1)/x)`, a product of haversines, a local whose value is a haversine), and in the `complex` mode a real call or square that it wraps as a complex value (`x·sin(a/y)`, `ln(a^2)^2` with `a`, `y` real), an `At` of a list whose element type is not real, a read of a scalar `let` local whose type is not real (`let t = 1/b; t`), except as a bound or an index, and a real value of a local declared `complex` (`Declare(t, 'complex', x)`, which it holds as a number and reads as `{re: 4, im: 0}` after a write and `NaN` with none) |
+| A value of a local of another kind than its declared type | `let t: real = 1 + 2i`, `let t: real = sqrt(x)` in the `strict` mode (`x: real`), `Declare(R, "list<real>", 3)`; an integer value of a `real` local and a list of integers of a `list<real>` local are admitted |
 | A complex form with no compilation of the engine that needs it | `z^x`, `x^z`, `z^w` (an exponent that is not a number literal), `Real(z)`, `Argument(z)`, `Equal(z, w)` |
 | A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
 | A sum, a product or a `Which` outside the form | `Sum(L)` of a list, a bound `+∞`, a bound that does not floor to a safe integer, a complex body, `Which` with the value `Nothing` |
@@ -2050,7 +2051,7 @@ has the default kind, the result has the kind of the body, an argument of
 another kind declines (a list, a boolean, a real argument in the `complex`
 mode), and `defaultedSymbols` lists the name of the function. A function
 declared `function`, or with an optional or a variadic parameter, a type
-parameter or an effect other than `random`, declines. Three limits:
+parameter or an effect other than `random`, declines. Four limits:
 
 - A body that uses the name as a list, as a condition or as an integer (a
   loop bound, an index) declines: declare the name.
@@ -2063,6 +2064,12 @@ parameter or an effect other than `random`, declines. Three limits:
   not declared, `Floor(n)` is `Math.floor(_.n)`, the interpreter's value for
   every real `n`. The existing compiler reads the assumption and writes
   `_.n`.
+- In the `complex` mode, the existing compiler reads such a name by the
+  type that the engine inferred from its uses, also from a use that the
+  canonical form drops: `(0·3·Mod(1, u) + x)/u` is `x/u`, which the
+  existing compiler writes `_.x / _.u` (the type of `u` is real, from
+  `Mod`) and the profile as the complex quotient of `_SYS.cplx(_.u)`. The
+  value is the same; its shape is `{re, im}` on the profile.
 
 The decline follows the `fallback` option, as any other decline: with
 `fallback: true` (the default of `compile()`), `success: false` and the

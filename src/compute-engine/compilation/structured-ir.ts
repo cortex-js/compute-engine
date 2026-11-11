@@ -405,9 +405,10 @@ export type IRCaptureRead = OperationBase & {
   readonly snapshot: number;
 };
 
-/** A conversion that changes the representation. An identity conversion
- *  has no operation. The policy of the target names the conversions that
- *  it has (`RepresentationPolicy.conversions`). */
+/** A conversion that changes the representation, or the type of a value
+ *  that a local of a wider type holds (an integer as a real). An identity
+ *  conversion of an operand has no operation. The policy of the target
+ *  names the conversions that it has (`RepresentationPolicy.conversions`). */
 export type IRConvert = OperationBase & {
   readonly kind: 'convert';
   readonly conversion: string;

@@ -350,6 +350,68 @@ const multiplyRule = {
 } satisfies FragmentRule<ScalarRepresentation>;
 
 /**
+ * Whether `operand`, an operand of an ordering comparison, is a closed
+ * operand whose exact value is the undirected infinity: `ComplexInfinity`,
+ * `-5·ComplexInfinity`, `Cot(Pi)`. The existing compiler writes `false` for
+ * an ordering with such an operand, also with `constantFold: false`
+ * (`constantPoleOrdering()` in `compile-real-analysis.ts`), where the code
+ * of the operand is a double with an order (`Infinity`, or
+ * `_SYS.cot(3.141592653589793)`, a finite number). The test is the one of
+ * `isConstantPole()` there, and shares its memo: the operand is evaluated
+ * only when it is pure and every symbol in it is a constant or a name with
+ * an assigned value that the program does not bind (`bound`: a parameter,
+ * a local, an index), so a sum over an index (`Sum(Sin(j), Limits(j, 1,
+ * N))`) is not evaluated. The test admits every operand that
+ * `isConstantPole()` admits (it does not exclude an input, nor an operand
+ * that `foldValueBlocked()` excludes), so a pole that the existing compiler
+ * writes `false` is refused, and some others are refused too.
+ */
+function isClosedPole(
+  operand: Expression,
+  bound: (name: string) => boolean
+): boolean {
+  if (isNumber(operand))
+    return operand.isInfinity === true && operand.isComplex;
+  if (!isFunction(operand) && !isSymbol(operand)) return false;
+  const closed = (node: Expression): boolean => {
+    if (isNumber(node)) return true;
+    if (isSymbol(node))
+      return (
+        !bound(node.symbol) &&
+        (node.isConstant ||
+          node.engine._getSymbolValue(node.symbol) !== undefined)
+      );
+    if (isFunction(node)) return node.ops.every(closed);
+    return false;
+  };
+  if (!closed(operand) || !operand.isPure) return false;
+  const memo = CompilerState._constantPoleMemo;
+  let pole = memo.get(operand);
+  if (pole === undefined) {
+    const value = operand.evaluate();
+    pole = isNumber(value) && value.isInfinity === true && value.isComplex;
+    memo.set(operand, pole);
+  }
+  return pole;
+}
+
+/** Whether a scope below the root scope of `scope` binds `name` (a
+ *  parameter, a local, an index): the names that `isNameBoundByCompilation()`
+ *  sees in the existing compiler, except the inputs. */
+function boundBelowRoot(
+  scope: FragmentScope<ScalarRepresentation>,
+  name: string
+): boolean {
+  for (
+    let s: FragmentScope<ScalarRepresentation> | undefined = scope;
+    s?.parent !== undefined;
+    s = s.parent
+  )
+    if (s.bindings.has(name)) return true;
+  return false;
+}
+
+/**
  * `Less`, `LessEqual`, `Equal` and `NotEqual`: two real operands, a boolean
  * result. The
  * canonical form writes `GreaterEqual(a, b)` as `LessEqual(b, a)`. A
@@ -376,6 +438,21 @@ function comparisonRule(
         );
       const closed = closedJumpRefusal(operator, node);
       if (closed !== undefined) return w.refuse(node, 'signature', closed);
+      const pole =
+        operator === 'Less' || operator === 'LessEqual'
+          ? (node as Expression & { ops: readonly Expression[] }).ops.find(
+              (operand) =>
+                isClosedPole(operand, (name) => boundBelowRoot(scope, name))
+            )
+          : undefined;
+      if (pole !== undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} has the operand ${nodeText(pole)}, whose value is ` +
+            `the undirected infinity: the existing compiler writes \`false\` ` +
+            `for an ordering with it (constantPoleOrdering())`
+        );
       const facts = operandFacts(node, scope, context, w);
       if (facts.some((f) => f.type.kind === 'complex'))
         return w.refuse(
@@ -1114,14 +1191,18 @@ function readsAsPiMultiple(x: Expression): boolean {
  * code of the same operand `u`. The other operands that `piMultiple()`
  * reads (`readsAsPiMultiple()`) are refused: a product of more factors, a
  * quotient, a negation (for which `piMultiple()` builds a new node), and
- * the symbol `Pi`.
+ * the symbol `Pi`. In the `complex` mode a node whose type is not real
+ * (`Sin(π/x)` has the type `number`) is refused: the compiler wraps the
+ * call in `_SYS.cplx()` there (`liftWideResult()`), as for the real call of
+ * `structuredFunctionRule()`.
  */
 function piMultipleFacts(
   head: 'Sin' | 'Cos' | 'Tan',
   node: Expression,
   facts: FragmentValueFacts<ScalarRepresentation>,
   forms: Map<Expression, StructuredForm>,
-  w: FragmentWalker<ScalarRepresentation>
+  w: FragmentWalker<ScalarRepresentation>,
+  mode: 'strict' | 'complex'
 ) {
   const u = isFunction(node) ? piMultipleFactor(node.op1) : undefined;
   if (u === undefined || facts.type.kind === 'complex')
@@ -1131,6 +1212,17 @@ function piMultipleFacts(
       `${head} of an operand that reads Pi is in the structured route only ` +
         `as Multiply(Pi, u): the existing emitter writes another multiple of ` +
         `Pi with _SYS.sinpi, _SYS.cospi or _SYS.tanpi of a new expression`
+    );
+  if (
+    mode === 'complex' &&
+    !isSubtype(finitePartOfType(node.type.type), 'real')
+  )
+    return w.refuse(
+      node,
+      'signature',
+      `${nodeText(node)} has the type ${node.type.toString()}, which is ` +
+        `not real, in the complex mode: the existing compiler wraps the ` +
+        `real call in _SYS.cplx`
     );
   forms.set(node, 'pi-multiple');
   return w.valueFacts(node, { kind: 'real' }, [
@@ -1350,7 +1442,7 @@ function structuredScalarFunctionRule(
         ]);
       }
       if (head === 'Tan' && readsAsPiMultiple(node.op1))
-        return piMultipleFacts(head, node, facts, forms, w);
+        return piMultipleFacts(head, node, facts, forms, w, mode);
       let result: 'real' | 'complex' = 'real';
       if (lane !== 'operand') {
         const type = finitePartOfType(node.type.type);
@@ -1452,7 +1544,7 @@ function structuredFunctionRule(
           `${head} with a boolean operand is not in the structured route`
         );
       if ((head === 'Sin' || head === 'Cos') && readsAsPiMultiple(node.op1))
-        return piMultipleFacts(head, node, facts[0], forms, w);
+        return piMultipleFacts(head, node, facts[0], forms, w, mode);
       if (facts.some((f) => f.type.kind === 'complex')) {
         const refusal =
           head === 'Arctan2'
@@ -2405,16 +2497,26 @@ const LIST_OPERAND_HEADS = [
 
 /**
  * The type of a local on the structured route (`FragmentDefinition.localType`):
- * `integer` for a local declared `integer` with an integer value, and for a
- * local declared with no type (`Declare(c, {value: Mod(k, 3)})`, a `let`)
- * whose value is an integer and whose type, as the engine infers it from
- * every value written to it, is `integer`. Every other local has the rule of
- * the pass, which widens an integer to a real: a local declared `real`, and
- * a `let` local written later with a real value (`let c = 1` then
- * `c := c + x` with `x: real`), which the interpreter accepts and for which
- * the engine infers `real`. A write of a real value to an integer local is
- * refused by the rule of `Assign`. With an integer local, a loop bound
- * (`Range(1, m)`) and an integer parameter of a helper can read the local.
+ *
+ * - a local declared with a type (`Declare(t, 'real', v)`, a `let` with a
+ *   type) has the declared type, whatever the kind of its value
+ *   (`declaredLocalType()`). The pass converts each value written to it to
+ *   that type where a conversion has the value of the existing compiler (an
+ *   integer to a real, a list of integers to a list of reals), and refuses
+ *   the others: a complex value of a `real`
+ *   local (the existing compiler writes `_SYS.crealElements(v)`, `NaN` for
+ *   a value that is not real, in the `complex` mode, and declines in the
+ *   `strict` mode), a number of a list local, a list of a scalar local.
+ *   A write of a real value to an integer local is refused too.
+ * - a local declared with no type (`Declare(c, {value: Mod(k, 3)})`, a
+ *   `let`) is an integer when its value is an integer and its type, as the
+ *   engine infers it from every value written to it, is `integer`. Every
+ *   other such local has the rule of the pass, which widens an integer to a
+ *   real: a `let` local written later with a real value (`let c = 1` then
+ *   `c := c + x` with `x: real`), which the interpreter accepts and for
+ *   which the engine infers `real`. With an integer local, a loop bound
+ *   (`Range(1, m)`) and an integer parameter of a helper can read the
+ *   local.
  *
  * A `let` local that `isLengthLocal` accepts is an integer too: each value
  * written to it is an integer computed from the length of a list
@@ -2430,11 +2532,13 @@ function structuredLocalType(
     declared: string | undefined;
     inferred: Type | undefined;
   },
-  isLengthLocal: (name: string) => boolean = () => false
-): { kind: 'integer' } | FragmentListType | undefined {
+  isLengthLocal: (name: string) => boolean = () => false,
+  mode: 'strict' | 'complex' = 'strict'
+): DeclaredLocalType | undefined {
+  const declared = declaredLocalType(local.declared, mode);
+  if (declared !== undefined) return declared;
   if (local.value.kind === 'list') return structuredListLocalType(local);
   if (local.value.kind !== 'integer') return undefined;
-  if (local.declared === 'integer') return { kind: 'integer' };
   if (local.declared === undefined && isLengthLocal(local.name))
     return { kind: 'integer' };
   if (
@@ -2447,11 +2551,44 @@ function structuredLocalType(
   return undefined;
 }
 
+type DeclaredLocalType =
+  | { kind: 'integer' | 'real' | 'complex' | 'boolean' }
+  | FragmentListType;
+
+/** The type of a local declared with the type `declared` (its spelling, as
+ *  `declaredTypeSource()` reads it), for the declared types that the
+ *  admission of the structured route admits (`admitFunctionBody()`), or
+ *  `undefined` (no declared type). In the `complex` mode, a local declared
+ *  `complex` is complex: a real value of it (its initializer or a later
+ *  write) is refused by the check of the writes (`checkLocalWrites()`),
+ *  because the existing compiler holds that value as a number and reads it
+ *  in another shape (`let t = _.x`, then `_SYS.cplx(t)` after a write,
+ *  `{re: 4, im: 0}`, and `(t).re` with no write, `NaN`). In the `strict`
+ *  mode it keeps the type of its value: the existing compiler declines a
+ *  real value of a type `real` there, and writes a real value of the type
+ *  `number` as a number (`let t = 2 * _.xn`). */
+function declaredLocalType(
+  declared: string | undefined,
+  mode: 'strict' | 'complex'
+): DeclaredLocalType | undefined {
+  switch (declared) {
+    case 'complex':
+      return mode === 'complex' ? { kind: declared } : undefined;
+    case 'integer':
+    case 'real':
+    case 'boolean':
+      return { kind: declared };
+    case 'list<real>':
+      return { kind: 'list', element: { kind: 'real' } };
+    case 'list<integer>':
+      return { kind: 'list', element: { kind: 'integer' } };
+  }
+  return undefined;
+}
+
 /**
- * The type of a local whose value is a list, on the structured route, by
- * the rule of a scalar local (`structuredLocalType()`): a local declared
- * `list<real>` or `list<integer>` has that type (a list of reals written to
- * a `list<integer>` local is then refused); a `let` local is a list of
+ * The type of a `let` local whose value is a list, on the structured route,
+ * by the rule of a scalar local (`structuredLocalType()`): a list of
  * integers when its value is one and the engine infers a subtype of
  * `list<integer>` from every value written to it, and otherwise a list of
  * reals (`let L = [0 for j in 1..n]` and later `L = replaceAt(L, k, x)`
@@ -2462,10 +2599,6 @@ function structuredListLocalType(local: {
   declared: string | undefined;
   inferred: Type | undefined;
 }): FragmentListType | undefined {
-  if (local.declared === 'list<real>')
-    return { kind: 'list', element: { kind: 'real' } };
-  if (local.declared === 'list<integer>')
-    return { kind: 'list', element: { kind: 'integer' } };
   const value = local.value as FragmentListType;
   if (local.declared !== undefined || value.element.kind !== 'integer')
     return undefined;
@@ -3436,6 +3569,18 @@ function seededRule(mode: 'strict' | 'complex') {
           'WithRandomSeed with a list body is not in the structured route, whose seeded region yields one scalar'
         );
       const type = node.type.type;
+      // A body of a type that admits a collection (a name with no declared
+      // type gives the type `value`): the existing compiler reads the node
+      // element-wise, in `_SYS.bcast()`, with a rational factor of a
+      // product as its double, where the route writes the product of the
+      // existing infix code (`multiplyByRational()`).
+      if (!isSubtype(type, 'number | boolean | missing'))
+        return w.refuse(
+          node,
+          'signature',
+          `WithRandomSeed of the type ${typeToString(type)} is not in the structured route: ` +
+            `the existing compiler reads a value that is not a number element-wise`
+        );
       if (body.type.kind !== 'complex' && mode === 'strict') {
         if (isNonRealNumber(finitePartOfType(type)))
           return w.refuse(
@@ -3676,6 +3821,19 @@ function refuseBooleanClaim(node: Expression, admission: Admission): void {
  * emitters write `_.x`, which the handler binds; every other operand is
  * refused, which is wider than the rule of the handler. The emitter checks
  * the same case (`Source.bare` in `javascript-structured-emit.ts`).
+ *
+ * The lowering also writes a haversine where the tree does not have it as
+ * a direct operand, and these are refused too:
+ *
+ * - the numerator of a quotient factor after the first of a `Multiply`,
+ *   which the lowering reads as a factor of the product
+ *   (`realProduct()`): the existing emitter writes `h * (1 - Math.cos(t))
+ *   / 2 / x` for `Multiply(h, Divide(Haversine(t), x))`. A numerator that
+ *   is a quotient or a product with a haversine is refused in the same
+ *   way;
+ * - the term of a `Product`, a factor of the product of the terms, and
+ *   the term of a `Sum` (a sum of one term is the term);
+ * - the value of a local (`refuseHaversineLocal()`).
  */
 function refuseHaversineGrouping(
   node: Expression,
@@ -3683,21 +3841,113 @@ function refuseHaversineGrouping(
   input: (operand: Expression) => boolean
 ): void {
   if (!admission.structured || !isFunction(node)) return;
+  /** A haversine that the existing emitter writes with no parentheses. */
+  const bare = (op: Expression): boolean =>
+    isFunction(op, 'Haversine') && op.nops === 1 && !input(op.op1);
+  /** A haversine that the lowering writes as a factor of the product. */
+  const numerator = (op: Expression): Expression | undefined => {
+    if (bare(op)) return op;
+    if (isFunction(op, 'Divide') && op.nops === 2) return numerator(op.op1);
+    if (isFunction(op, 'Multiply')) return op.ops.find(bare);
+    return undefined;
+  };
   const grouped =
     node.operator === 'Multiply'
-      ? node.ops.slice(1)
+      ? node.ops.slice(1).filter(bare)
       : node.operator === 'Divide'
-        ? node.ops.slice(1)
+        ? node.ops.slice(1).filter(bare)
         : node.operator === 'Negate'
-          ? node.ops
+          ? node.ops.filter(bare)
           : [];
-  for (const op of grouped)
-    if (isFunction(op, 'Haversine') && op.nops === 1 && !input(op.op1))
-      throw new Error(
-        `JS scalar fragment: Haversine of ${nodeText(op.op1)} as an operand ` +
-          `of ${node.operator} is not in the structured route: the existing ` +
-          `emitter writes it in ${node.operator} with no parentheses`
+  // The terms of a product are the factors of one product (`aggregate()`
+  // in `javascript-structured-lower.ts`); a sum of one term is the term,
+  // written in the parent of the sum. An index of the aggregate is not an
+  // input, also where `input` does not know it yet.
+  if (
+    (node.operator === 'Product' || node.operator === 'Sum') &&
+    isFunction(node.op1, 'Haversine')
+  ) {
+    const term = node.op1;
+    const indexes = node.ops
+      .slice(1)
+      .flatMap((l) =>
+        isFunction(l, 'Limits') && isSymbol(l.op1) ? [l.op1.symbol] : []
       );
+    if (
+      bare(term) ||
+      (isSymbol(term.op1) && indexes.includes(term.op1.symbol))
+    )
+      grouped.push(term);
+  }
+  const first = grouped[0];
+  if (first !== undefined)
+    throw new Error(
+      `JS scalar fragment: Haversine of ` +
+        `${isFunction(first) ? nodeText(first.op1) : ''} as an operand ` +
+        `of ${node.operator} is not in the structured route: the existing ` +
+        `emitter writes it in ${node.operator} with no parentheses`
+    );
+  if (node.operator !== 'Multiply') return;
+  for (const op of node.ops.slice(1)) {
+    const haversine =
+      isFunction(op, 'Divide') && op.nops === 2
+        ? numerator(op.op1)
+        : undefined;
+    if (haversine !== undefined)
+      throw new Error(
+        `JS scalar fragment: ${nodeText(haversine)} in the numerator of the ` +
+          `factor ${nodeText(op)} of a product is not in the structured ` +
+          `route: the existing emitter writes it in the product with no ` +
+          `parentheses`
+      );
+  }
+}
+
+/**
+ * Throw, on the structured route, for a `Haversine` that is the value
+ * written to the local `name`: the lowering writes the value of a local
+ * where the local is read, where a parent can need parentheses around it
+ * (`refuseHaversineGrouping()`), and the existing emitter writes a read of
+ * the variable. Refused whatever its operand: wider than the cases where
+ * the code differs.
+ */
+function refuseHaversineLocal(
+  value: Expression,
+  name: string,
+  admission: Admission
+): void {
+  if (admission.structured && isFunction(value, 'Haversine'))
+    throw new Error(
+      `JS scalar fragment: the value ${nodeText(value)} of the local ` +
+        `${name} is not in the structured route: the existing emitter ` +
+        `writes a haversine with no parentheses where its parent needs them`
+    );
+}
+
+/**
+ * Throw, on the structured route in the `complex` mode, for an `At` node
+ * whose type is not real (the element of a list that a `Comprehension` of
+ * values of the type `number` makes): the existing compiler wraps the read
+ * in `_SYS.cplx()` there (`liftWideResult()` in `compile-inner.ts`), and
+ * the route reads a number. The refusal is wider than that rule, which
+ * also asks whether the node is complex-valued (`isComplexValued()`).
+ */
+function refuseWideRead(
+  node: Expression,
+  admission: Admission,
+  mode: 'strict' | 'complex' | undefined
+): void {
+  if (
+    admission.structured &&
+    mode === 'complex' &&
+    isFunction(node, 'At') &&
+    !isSubtype(finitePartOfType(node.type.type), 'real')
+  )
+    throw new Error(
+      `JS scalar fragment: ${nodeText(node)} has the type ` +
+        `${node.type.toString()}, which is not real, in the complex mode: the ` +
+        `existing compiler wraps the read in _SYS.cplx`
+    );
 }
 
 /** Throw the refusal of `node` (`structuredListRefusal()`) on the
@@ -4661,6 +4911,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           !indexes.has(op.symbol) &&
           op.valueDefinition?.value === undefined
       );
+      refuseWideRead(node, admission, registry?.mode);
       if (!node.isValid || node.type.type === 'error')
         throw new Error('JS scalar fragment: invalid expression');
       if (isNumber(node)) return;
@@ -5385,7 +5636,11 @@ function checkLocalWrites(
       valueFacts.representation !== binding.representation
     )
       throw new Error(
-        'JS scalar fragment: local writes must preserve representation'
+        `JS scalar fragment: local writes must preserve representation: ` +
+          `the local ${name} is held as ${binding.representation}` +
+          (valueFacts !== undefined && 'representation' in valueFacts
+            ? `, and the value written to it as ${valueFacts.representation}`
+            : '')
       );
   };
   for (const statement of body.ops.slice(0, -1)) checkWrites(statement, scope);
@@ -5552,6 +5807,9 @@ function admitFunctionBody(
         'JS scalar fragment: helper bindings collide with the root function'
       );
   };
+  /** The bounds of the loops, sums, products and comprehensions, and the
+   *  indexes of `At` and `ReplaceAt`, of the body. */
+  const indexPositions = new Set<Expression>();
   /** `bodyValue`: `node` is the value of the body, where the structured
    *  route admits `Typed(value, T)` (`typedRule()`). */
   const checkValue = (node: Expression, bodyValue = false): void =>
@@ -5561,6 +5819,7 @@ function admitFunctionBody(
     refuseBooleanClaim(node, admission);
     refuseUndirectedInfinity(node, admission);
     refuseHaversineGrouping(node, admission, () => false);
+    refuseWideRead(node, admission, registry?.mode);
     if (!node.isValid || node.type.type === 'error')
       throw new Error(
         `JS scalar fragment: invalid ${isRoot ? 'bound expression' : 'helper body'}`
@@ -5594,8 +5853,10 @@ function admitFunctionBody(
         const added: string[] = [];
         try {
           for (const { index, bounds } of nested.indexes ?? []) {
-            for (const bound of bounds)
+            for (const bound of bounds) {
+              indexPositions.add(bound);
               checkAggregateBound(node, bound, registry, checkValue);
+            }
             if (names.has(index) || locals.has(index))
               throw new Error(
                 `JS scalar fragment: the ${indexLabel(node)} index ${index} has the name of a parameter, a local or another index`
@@ -5616,6 +5877,27 @@ function admitFunctionBody(
           'route: the interpreter gives a Loop the value Nothing'
       );
     if (isSymbol(node)) {
+      // In the `complex` mode, the existing compiler reads a local whose
+      // type is not real as a complex value (`_SYS.cplx(t)`): the type of
+      // a `let` local is the type that the engine infers from its values
+      // (`let t = 1/b` has the type `infinity | nan | real`, `let n =
+      // Length(L)` the type `integer | signed_infinity`), where the route
+      // reads its real fact. A read that is a bound of a loop or an index
+      // (`indexPositions`) is not lifted, and neither is a list local.
+      if (
+        admission.structured &&
+        registry?.mode === 'complex' &&
+        locals.get(node.symbol) === 'let' &&
+        names.has(node.symbol) &&
+        !indexPositions.has(node) &&
+        isSubtype(node.type.type, 'number') &&
+        !isSubtype(node.type.type, 'real')
+      )
+        throw new Error(
+          `JS scalar fragment: the local ${node.symbol} has the type ` +
+            `${node.type.toString()}, which is not real, in the complex ` +
+            `mode: the existing compiler reads it as a complex value`
+        );
       if (
         names.has(node.symbol) ||
         node.symbol === 'True' ||
@@ -5660,6 +5942,11 @@ function admitFunctionBody(
       );
     if (admission.structured) refuseSelection(node);
     checkCondition(node, conditionContext);
+    if (
+      (node.operator === 'At' || node.operator === 'ReplaceAt') &&
+      node.nops >= 2
+    )
+      indexPositions.add(node.ops[1]);
     for (const operand of admittedOperands(node)) checkValue(operand);
   };
   // The representation of a local declared `integer` is `number`, as for a
@@ -5699,6 +5986,7 @@ function admitFunctionBody(
         !notLength.has(symbol.symbol)
     );
   const checkWrite = (value: Expression, name = local): void => {
+    refuseHaversineLocal(value, name, admission);
     const length = fromLength(value);
     const declaredType = locals.get(name);
     if (length && (declaredType === 'let' || declaredType === 'integer'))
@@ -5712,6 +6000,24 @@ function admitFunctionBody(
       throw new Error(
         `JS scalar fragment: a value written to the integer local ${name} ` +
           `does not have the type integer`
+      );
+    // In the `strict` mode, the existing compiler declines a write of a
+    // value whose type is complex and not real to a local declared `real`
+    // or `integer` (`assignedTypesConflict()` in `compile-admission.ts`):
+    // the local would hold values of two shapes. The pass of the route
+    // reads such a value on the real lane (`Sqrt(x)` is `Math.sqrt(x)`), so
+    // the admission refuses it here.
+    if (
+      admission.structured &&
+      registry?.mode === 'strict' &&
+      (declaredType === 'real' || declaredType === 'integer') &&
+      isSubtype(value.type.type, 'complex') &&
+      !isSubtype(value.type.type, 'real')
+    )
+      throw new Error(
+        `JS scalar fragment: the local ${name} is declared ${declaredType}, ` +
+          `and the value ${nodeText(value)} written to it has the type ` +
+          `${value.type.toString()}, which is not real`
       );
   };
   if (first !== undefined) {
@@ -5906,6 +6212,7 @@ function admitFunctionBody(
           `Element(k, Range(a, b)), with no step and no guard, and not over ${nodeText(spec)}`
       );
     for (const bound of spec.op2.ops) {
+      indexPositions.add(bound);
       checkValue(bound);
       // A bound computed from the length of a list with integer arithmetic
       // (`integerFromListLength()`), which the engine does not type
@@ -6527,7 +6834,8 @@ function annotateStructured(
         local,
         () =>
           local.declaration !== undefined &&
-          lengthDeclarations.has(local.declaration)
+          lengthDeclarations.has(local.declaration),
+        registry.mode
       ),
     storedValue: (node: Expression) => {
       const capture = captureOf(node);

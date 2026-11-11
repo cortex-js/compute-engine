@@ -691,7 +691,8 @@ type Head =
   | 'BigOp'
   | 'Call'
   | 'ImaginaryTimes'
-  | 'Comprehension';
+  | 'Comprehension'
+  | 'QuotientFactor';
 
 const HEADS: readonly (readonly [Head, number])[] = [
   ['Add', 16],
@@ -712,6 +713,16 @@ const HEADS: readonly (readonly [Head, number])[] = [
   ['Call', 5],
   ['ImaginaryTimes', 1],
   ['Comprehension', 1],
+  ['QuotientFactor', 3],
+];
+
+/** The exact rationals of a quotient factor (`QuotientFactor`). */
+const RATIONALS: readonly Json[] = [
+  ['Rational', 1, 3],
+  ['Rational', 1, 7],
+  ['Rational', 2, 3],
+  ['Rational', -1, 3],
+  ['Rational', 1, 2],
 ];
 
 function genReal(ctx: GenContext, depth: number): Json {
@@ -806,7 +817,32 @@ function genReal(ctx: GenContext, depth: number): Json {
       return ['Multiply', 'ImaginaryUnit', sub()];
     case 'Comprehension':
       return ['At', genComprehension(ctx, d), genIndex(ctx)];
+    case 'QuotientFactor':
+      return genQuotientFactor(ctx, d);
   }
+}
+
+/** A product with a quotient factor whose numerator is a product with an
+ *  exact rational, a literal or a quotient in turn: the forms that the
+ *  existing emitter writes as one chain of `*` and `/`
+ *  (`Multiply(q, Divide(Multiply(1/3, 0.1), w))` is `q * 0.1 / 3 / 3`). */
+function genQuotientFactor(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const sub = () => genReal(ctx, Math.min(depth + 1, ctx.maxDepth));
+  const factor = (): Json =>
+    rng() < 0.5 ? choose(rng, LITERALS) : choose(rng, ctx.symbols);
+  const product = (): Json => {
+    const ops: Json[] = [pick(rng, RATIONALS), factor()];
+    if (rng() < 0.3) ops.push(factor());
+    return ['Multiply', ...ops];
+  };
+  let numerator: Json = rng() < 0.7 ? product() : factor();
+  if (rng() < 0.3) numerator = ['Divide', numerator, factor()];
+  const quotient: Json = ['Divide', numerator, rng() < 0.6 ? factor() : sub()];
+  const ops: Json[] = [sub(), quotient];
+  if (rng() < 0.3) ops.push(rng() < 0.5 ? sub() : pick(rng, RATIONALS));
+  if (rng() < 0.3) ops.reverse();
+  return ['Multiply', ...ops];
 }
 
 /** A `Comprehension` of a real body over `Range(1, n)`, `n` from 1 to 4. */
@@ -876,8 +912,31 @@ function genCondition(ctx: GenContext, depth: number): Json {
     if (r < 0.8) return ['Or', genCondition(ctx, d), genCondition(ctx, d)];
     return ['Not', genCondition(ctx, d)];
   }
+  // A comparison with a closed operand: a pole, an infinity, a capture.
+  if (rng() < 0.08) {
+    const closed = pick(rng, CLOSED_OPERANDS);
+    const other = genReal(ctx, d);
+    return [
+      pick(rng, COMPARISONS),
+      ...(rng() < 0.5 ? [closed, other] : [other, closed]),
+    ];
+  }
   return [pick(rng, COMPARISONS), genReal(ctx, d), genReal(ctx, d)];
 }
+
+/** Operands of a comparison that read no input (`genCondition()`). */
+const CLOSED_OPERANDS: readonly Json[] = [
+  ['Divide', 1, 0],
+  ['Multiply', -5, ['Divide', 1, 0]],
+  ['Cot', 'Pi'],
+  ['Tan', ['Divide', 'Pi', 2]],
+  ['Power', 0, -1],
+  'PositiveInfinity',
+  'NegativeInfinity',
+  ['Log', 0],
+  ['Multiply', 'w', 'g'],
+  ['Sqrt', -2],
+];
 
 /** A program: an expression of the free inputs, a `Block` of them, or a
  *  `Function` literal. */
@@ -932,20 +991,26 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
   });
   const locals: [Json, number][] = [['t', 25]];
   const listLocals: string[] = [];
-  const statements: Json[] = [
-    ['Declare', 't', "'real'", genReal(ctx([], 1), 0)],
-  ];
+  const statements: Json[] = [declareLocal(rng, 't', ctx([], 1))];
   if (rng() < 0.4) {
-    statements.push(['Declare', 's', "'real'", genReal(ctx(locals, 1), 0)]);
+    statements.push(declareLocal(rng, 's', ctx(locals, 1)));
     locals.push(['s', 15]);
   }
   if (rng() < 0.2) {
-    statements.push([
-      'Declare',
-      'R',
-      "'list<real>'",
-      genComprehension(ctx(locals, 2), 0),
-    ]);
+    // A list local: a comprehension of reals or of integers, or another
+    // kind of value, which the profile refuses.
+    const r = rng();
+    const value: Json =
+      r < 0.75
+        ? genComprehension(ctx(locals, 2), 0)
+        : r < 0.9
+          ? [
+              'Comprehension',
+              pick(rng, [2, 'j', ['Mod', 'j', 2]] as Json[]),
+              ['Element', 'j', ['Range', 1, intBetween(rng, 1, 3)]],
+            ]
+          : genReal(ctx(locals, 2), 0);
+    statements.push(['Declare', 'R', "'list<real>'", value]);
     listLocals.push('R');
   }
   const target = () => (locals.length > 1 && rng() < 0.3 ? 's' : 't');
@@ -992,6 +1057,49 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
   if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
   else statements.push(genReal(ctx(locals, 1, listLocals), 0));
   return statements;
+}
+
+/**
+ * The declaration of the scalar local `name`: mostly `real` with a real
+ * value; sometimes an integer value (a literal, `Mod`, a captured integer),
+ * a complex value, a boolean or a list value of a `real` local, an
+ * `integer` local, or a `let` (`Declare(t, {value: …})`, the form that
+ * `parseEpsil()` gives).
+ */
+function declareLocal(rng: Rng, name: string, ctx: GenContext): Json {
+  const r = rng();
+  if (r < 0.7) return ['Declare', name, "'real'", genReal(ctx, 0)];
+  const integer = (): Json =>
+    pick(rng, [
+      1,
+      0,
+      -3,
+      'm',
+      ['Mod', choose(rng, ctx.symbols), 3],
+      ...ctx.integers,
+    ] as Json[]);
+  if (r < 0.8) return ['Declare', name, "'real'", integer()];
+  if (r < 0.85)
+    return [
+      'Declare',
+      name,
+      "'real'",
+      pick(rng, [
+        ['Complex', 1, 2],
+        ['Multiply', 'ImaginaryUnit', genReal(ctx, 1)],
+        ['Sqrt', genReal(ctx, 1)],
+        ['Arccos', genReal(ctx, 1)],
+      ] as Json[]),
+    ];
+  if (r < 0.88) return ['Declare', name, "'real'", genCondition(ctx, 1)];
+  if (r < 0.9)
+    return ['Declare', name, "'real'", genComprehension(ctx, 1)];
+  if (r < 0.95) return ['Declare', name, "'integer'", integer()];
+  return [
+    'Declare',
+    name,
+    ['Dictionary', ['KeyValuePair', "'value'", genReal(ctx, 0)]],
+  ];
 }
 
 function genFunction(rng: Rng, maxDepth: number, random: boolean): Json[] {
