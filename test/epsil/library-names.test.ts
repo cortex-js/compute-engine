@@ -443,6 +443,15 @@ describe('the resolution pass', () => {
     });
   });
 
+  test('the variable of a polynomial root is bound', () => {
+    // `pi` is the variable of the polynomial, not the constant.
+    const root = resolved('polynomialRoot(pi^3 - 2, pi, 1)') as {
+      fn: unknown[];
+    };
+    expect(root.fn[0]).toBe('PolynomialRoot');
+    expect(JSON.stringify(root.fn)).not.toContain('Pi');
+  });
+
   test('an iterator clause binds its variable from its own clause onward', () => {
     // The first clause's collection is read in the enclosing scope, where
     // `pi` is the constant; the second clause then binds `pi`.
@@ -522,6 +531,7 @@ describe('the resolution pass', () => {
       'NotForAll',
       'ParallelComprehension',
       'ParallelLoop',
+      'PolynomialRoot',
       'Product',
       'Series',
       'Sum',
