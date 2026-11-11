@@ -420,7 +420,8 @@ describe('BINDING UNITS: THE INPUT OF AN OPERATION', () => {
       expr.replace([rule]);
       expr.match(pattern);
       const inputs = spy.mock.calls.map(([input]) => input);
-      expect(inputs[0]).toEqual([expr, value]);
+      expect(inputs[0][0]).toBe(expr);
+      expect((inputs[0][1] as () => unknown[])()).toEqual([value]);
       expect(inputs).toContainEqual([expr, rule.match, value]);
       expect(inputs).toContainEqual([expr, pattern]);
     } finally {
@@ -448,7 +449,9 @@ describe('BINDING UNITS: THE INPUT OF AN OPERATION', () => {
     const spy = jest.spyOn(ce, '_withOperation');
     try {
       expect(expr.subs(sub as never).evaluate().json).toBe(5);
-      expect(spy.mock.calls[0][0]).toEqual([expr, target.C]);
+      const input = spy.mock.calls[0][0] as unknown[];
+      expect(input[0]).toBe(expr);
+      expect((input[1] as () => unknown[])()).toEqual([target.C]);
     } finally {
       spy.mockRestore();
     }

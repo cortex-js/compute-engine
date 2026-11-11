@@ -266,6 +266,12 @@ export class UnitEnvironment {
     const visited = new Set<object>();
     while (stack.length > 0) {
       const node = stack.pop();
+      // A part of the input that is computed here, at the first read
+      // (`substitutionInput()`).
+      if (typeof node === 'function') {
+        for (const item of (node as () => unknown[])()) stack.push(item);
+        continue;
+      }
       if (typeof node !== 'object' || node === null) continue;
       if (visited.has(node)) continue;
       visited.add(node);
@@ -692,14 +698,27 @@ export function operationInput(receiver: object, argument: unknown): unknown[] {
 }
 
 /**
- * The input of `receiver.subs(sub)` (rule 8): `receiver`, and the boxed
- * expressions of the values of `sub` for the names that `receiver` reads,
- * its symbols and its operators. Only these keys of `sub` are read, each
- * as `subs()` reads it (an own property): a host can give a substitution
- * whose values are computed when they are read, and a value that the
- * expression does not name is not computed.
+ * The input of `receiver.subs(sub)` (rule 8): `receiver`, and a function
+ * that gives the boxed expressions of the values of `sub` for the names
+ * that `receiver` reads, its symbols and its operators. Only these keys of
+ * `sub` are read, each as `subs()` reads it (an own property): a host can
+ * give a substitution whose values are computed when they are read, and a
+ * value that the expression does not name is not computed.
+ *
+ * The function is called when the environment of the operation first
+ * reads its input (`UnitEnvironment.parents()`), so a substitution that
+ * reads no type of a free name does not walk the expression a second time.
  */
 export function substitutionInput(
+  receiver: object,
+  sub: Readonly<Record<string, unknown>>
+): unknown[] {
+  return [receiver, () => substitutionValues(receiver, sub)];
+}
+
+/** The boxed expressions of the values of `sub` for the names that
+ * `receiver` reads (`substitutionInput()`). */
+function substitutionValues(
   receiver: object,
   sub: Readonly<Record<string, unknown>>
 ): unknown[] {
@@ -725,7 +744,7 @@ export function substitutionInput(
     for (const children of [n.ops, n.values])
       if (children) for (const child of children) stack.push(child);
   }
-  const input: unknown[] = [receiver];
+  const input: unknown[] = [];
   for (const name of names) {
     if (!Object.hasOwn(sub, name)) continue;
     // The value when it is boxed, or the boxed expressions of a value
