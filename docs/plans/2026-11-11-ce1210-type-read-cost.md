@@ -1,6 +1,8 @@
 # CE-1210: the cost of a type read with binding units
 
-Status: DRAFT for the user's approval. No code is written.
+Status: step 0 APPROVED by the user on 2026-11-11; the rest is a draft.
+The user is open to reversing a decision of the model when the measure
+shows that it causes the cost (section 9). No code is written.
 
 Issue: `issues/CE-1210.md`. Model: `docs/plans/2026-11-09-binding-units-slice-1-spec.md`
 (rules 3, 4, 8 and 13).
@@ -148,7 +150,8 @@ Each step is one commit with the full suite green.
    six cases of section 1: the number of type reads, of cache hits, and of
    writes of each row of the table; the number of reads and hits that follow
    the previous one with no write between them. Check the claim about the
-   marks. Result: a table in this file, and a decision to continue, to split
+   marks. Also the counts of section 9, which say how often each rule of the
+   model changes an answer. Result: a table in this file, and a decision to continue, to split
    the counter (for example one for the environments and one for the scopes,
    if scope pushes dominate), or to stop. The counters are removed.
 1. **The choke points** of 4.1 and the counter, with no reader. No behavior
@@ -198,3 +201,24 @@ Each step is one commit with the full suite green.
 - **D4. The order with the flag removal.** This work starts after the
   removal of `_bindingUnits` is committed, so that it is written once.
   Recommended.
+
+## 9. Rules of the model that cause the cost
+
+The counter of section 4 keeps every rule and pays for them with a memo.
+The other way is to change a rule. Each rule below is a decision of the
+slice 1 spec; step 0 counts how often it changes an answer, in the full
+suite and in Tycho's audit, so that the choice is made on figures.
+
+| Rule | What it costs | What reversing it would mean | Count of step 0 |
+|---|---|---|---|
+| R-a. A free name resolves in the current scope at each read (rules 3 and 4): a held expression reads a declaration made later, also in a pushed scope. | The scope walk at each read, and one recorded read for each name in each cache (costs 1 and 3). | A free name resolves from its home scope; a declaration moves `typeVersion`, as today, so a later declaration in the home chain is still read. A declaration in a pushed scope is read only after `ce.rebind(expr)`, which Tycho already calls at each of its compile sites. | Reads whose resolution from the current scope differs from the resolution from the home scope. |
+| R-b. A symbol that has a definition reads a declaration that hides it in a pushed scope (`_contextBinding()` at each type read). | The scope walk at each read of every bound symbol (cost 2). Before binding units a bound symbol read its definition. | A bound symbol reads its definition; `ce.rebind(expr)` binds it to the hiding declaration. | Reads where `_contextBinding()` gives another definition than the symbol's own. |
+| R-c. A read looks in the environment of the trial, then of the operation, then of the unit, each through its parents (rules 8 and 13). | Three lookups at each read, and the walk of the input of an operation. | No alternative proposed: the order independence of an operation depends on it. The lookup can be made cheap (an environment with no entry is skipped). | Reads that find an entry in the operation or the trial, against reads that find it in the unit or nowhere. |
+| R-d. A cache records three reads for each free name (entry, variable record, resolution). | The walk at each hit is three times longer (cost 3). | One recorded read with a combined version (option 2 of the issue). With R-a reversed, the resolution read disappears. | Recorded reads for each cache entry, by kind. |
+
+Reversing R-a and R-b removes the resolution from the read path and from
+the caches, with no counter and no memo: a type read then depends on the
+environments (R-c) and on `ce._typeCacheGeneration()` only. It changes
+documented behavior of 0.187.0 (a held expression and a declaration in a
+pushed scope), so it needs the counts, the list of tests that change, and
+the user's decision.
