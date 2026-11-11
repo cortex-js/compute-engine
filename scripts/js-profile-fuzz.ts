@@ -75,6 +75,23 @@
  *   --shrink <n>         The largest number of compilations of one shrink
  *                        (default 300).
  *   --modes <m[,m]>      `strict`, `complex` or both (default both).
+ *   --random             Also generate draws: `Random()`, `Random` of a
+ *                        literal `Interval` or `Range`, `WithRandomSeed`
+ *                        with a literal or an input seed, and calls of the
+ *                        helpers of `RANDOM_HELPERS`, whose body draws.
+ *                        Each call of a compiled function runs with
+ *                        `Math.random` replaced by the same deterministic
+ *                        sequence, started again before the call, so the
+ *                        two compilers give the same doubles when they draw
+ *                        the same number of times in the same order; the
+ *                        number of draws outside a seeded region is part
+ *                        of the outcome. A program that draws outside a
+ *                        `WithRandomSeed`, or an expression that draws
+ *                        (interpreted after `subs()`), is not compared
+ *                        with the interpreter (counted as skipped,
+ *                        `interpretsDraws()`). Without the
+ *                        option, the programs are those of the same seed
+ *                        before the option was added.
  *   --json <file>        Also write the whole result as JSON.
  *   --quiet              Print the counts only, not the programs.
  *
@@ -96,7 +113,8 @@
  * fixed), a helper that calls another, `Loop` bounds that are not
  * literals or `m`, `Continue`, a `Break` outside the last statement of a
  * branch, more than two real locals, nested `Function` literals, a
- * boolean result, `Random()` (outside the profile).
+ * boolean result, `RandomChoice`, `RandomSample`, `RandomShuffle`
+ * (outside the profile).
  */
 
 import { writeFileSync } from 'node:fs';
@@ -335,9 +353,37 @@ const HELPERS: readonly {
   },
 ];
 
-/** Assigns the helpers of `HELPERS` in the current scope of `ce`. */
+/** The helpers whose body draws, called by a program of `--random`. */
+const RANDOM_HELPERS: typeof HELPERS = [
+  {
+    name: 'fr',
+    definition: [
+      'Function',
+      ['Add', 'v', ['Multiply', 0.5, ['Random']]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fv',
+    definition: [
+      'Function',
+      [
+        'Block',
+        ['Declare', 't', "'real'", ['Random', ['Interval', -1, 1]]],
+        ['If', ['Less', 'v', 't'], ['Assign', 't', ['Add', 't', ['Random']]]],
+        ['Multiply', 't', 'v'],
+      ],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+];
+
+/** Assigns the helpers of `HELPERS` and `RANDOM_HELPERS` in the current
+ *  scope of `ce`. */
 function defineHelpers(ce: ComputeEngine): void {
-  for (const helper of HELPERS) {
+  for (const helper of [...HELPERS, ...RANDOM_HELPERS]) {
     if (helper.signature !== undefined)
       ce.declare(helper.name, helper.signature);
     ce.assign(helper.name, ce.expr(helper.definition as MathJsonExpression));
@@ -506,6 +552,8 @@ interface GenContext {
   readonly booleans: readonly string[];
   /** The list names. */
   readonly lists: readonly string[];
+  /** Whether to generate draws (`--random`). */
+  readonly random?: boolean;
 }
 
 const LITERALS: readonly (readonly [Json, number])[] = [
@@ -544,8 +592,21 @@ function genIndex(ctx: GenContext): Json {
     : pick(rng, [1, 2, 3, -1]);
 }
 
+/** A draw: `Random()`, or `Random` of a literal `Interval` or `Range`. */
+function genDraw(ctx: GenContext): Json {
+  return pick<Json>(ctx.rng, [
+    ['Random'],
+    ['Random'],
+    ['Random', ['Interval', -1, 2]],
+    ['Random', ['Interval', 0.5, ['Rational', 7, 3]]],
+    ['Random', ['Range', 1, 6]],
+    ['Random', ['Range', -2, 8, 2]],
+  ]);
+}
+
 function genLeaf(ctx: GenContext): Json {
   const { rng } = ctx;
+  if (ctx.random && rng() < 0.12) return genDraw(ctx);
   if (rng() < 0.55) {
     if (ctx.lists.length > 0 && rng() < 0.08) {
       const list = pick(rng, ctx.lists);
@@ -659,6 +720,12 @@ function genReal(ctx: GenContext, depth: number): Json {
   if (depth >= ctx.maxDepth || rng() < leaf) return genLeaf(ctx);
   const d = depth + 1;
   const sub = () => genReal(ctx, d);
+  if (ctx.random && rng() < 0.06)
+    return [
+      'WithRandomSeed',
+      pick<Json>(rng, [3, 42, "'seed'", 'k', 'x', ['Add', 'k', 1]]),
+      sub(),
+    ];
   switch (choose(rng, HEADS)) {
     case 'Add':
       return ['Add', ...Array.from({ length: intBetween(rng, 2, 3) }, sub)];
@@ -718,7 +785,10 @@ function genReal(ctx: GenContext, depth: number): Json {
     case 'BigOp':
       return genBigOp(ctx, d);
     case 'Call': {
-      const helper = pick(rng, HELPERS);
+      const helper =
+        ctx.random && rng() < 0.4
+          ? pick(rng, RANDOM_HELPERS)
+          : pick(rng, HELPERS);
       return [
         helper.name,
         ...helper.arguments.map((kind): Json =>
@@ -924,7 +994,7 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
   return statements;
 }
 
-function genFunction(rng: Rng, maxDepth: number): Json[] {
+function genFunction(rng: Rng, maxDepth: number, random: boolean): Json[] {
   const parameters = PARAMETERS.filter(([name]) => name === 'a' || rng() < 0.4);
   const names = parameters.map(([name]) => name);
   const symbols: [Json, number][] = [
@@ -946,6 +1016,7 @@ function genFunction(rng: Rng, maxDepth: number): Json[] {
         reals: ['a'],
         booleans: names.includes('c') ? ['c'] : [],
         lists: names.includes('V') ? ['V'] : [],
+        random,
       }),
     ],
     ...parameters.map(([name, , type]): Json => ['Typed', name, `'${type}'`]),
@@ -964,27 +1035,26 @@ export function nodeCount(json: Json): number {
 export function generateProgram(
   seed: number,
   index: number,
-  options: { depth: number; size: number }
+  options: { depth: number; size: number; random?: boolean }
 ): Program {
   const rng = makeRng(mixSeed(seed, index, 1));
+  const random = options.random === true;
+  const context: ContextBase = { ...EXPRESSION_CONTEXT, random };
   for (;;) {
     let json: Json;
     let parameters: string[] | undefined;
     const r = rng();
     if (r < 0.2) {
-      const fn = genFunction(rng, options.depth);
+      const fn = genFunction(rng, options.depth, random);
       json = fn;
       parameters = fn.slice(2).map((p) => (p as Json[])[1] as string);
     } else if (r < 0.3) {
       json = [
         'Block',
-        ...genStatements(rng, options.depth, EXPRESSION_CONTEXT),
+        ...genStatements(rng, options.depth, context),
       ];
     } else {
-      json = genReal(
-        { rng, maxDepth: options.depth, ...EXPRESSION_CONTEXT },
-        0
-      );
+      json = genReal({ rng, maxDepth: options.depth, ...context }, 0);
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
     }
     if (nodeCount(json) <= options.size)
@@ -1004,6 +1074,9 @@ type Outcome =
        *  `run()` turns `{re, im: 0}` into a number (`valueShape()`), or
        *  `undefined` when the raw value is not available. */
       readonly raw: string | undefined;
+      /** The number of calls of `Math.random` (draws outside a seeded
+       *  region) during the run (`withStubbedRandom()`). */
+      readonly draws: number;
     }
   | { readonly kind: 'throw'; readonly message: string };
 
@@ -1060,6 +1133,31 @@ function rawRunner(
   }
 }
 
+/** The seed of the sequence that replaces `Math.random` in each run. */
+const DRAW_SEED = 0x5eed;
+
+/**
+ * Run `f` with `Math.random` replaced by the sequence of `makeRng(DRAW_SEED)`,
+ * started at its first number, and count its calls. A draw outside a
+ * seeded region of the compiled code calls `Math.random`
+ * (`drawNextRandomNumber()`); a draw in a `WithRandomSeed` reads the
+ * generator of its seed, and its value shows its order and its number.
+ */
+function withStubbedRandom<T>(f: () => T): { value: T; draws: number } {
+  const random = Math.random;
+  const next = makeRng(DRAW_SEED);
+  let draws = 0;
+  Math.random = () => {
+    draws += 1;
+    return next();
+  };
+  try {
+    return { value: f(), draws };
+  } finally {
+    Math.random = random;
+  }
+}
+
 function compileWith(
   expr: Expression,
   mode: Mode,
@@ -1098,8 +1196,11 @@ function compileWith(
       code: result.code,
       run: (inputs) => {
         let value: unknown;
+        let draws: number;
         try {
-          value = run(...argumentsOf(inputs));
+          ({ value, draws } = withStubbedRandom(() =>
+            run(...argumentsOf(inputs))
+          ));
         } catch (error) {
           return { kind: 'throw', message: String(error) };
         }
@@ -1108,11 +1209,13 @@ function compileWith(
           shape =
             raw === undefined
               ? undefined
-              : valueShape(raw(argumentsOf(inputs)));
+              : valueShape(
+                  withStubbedRandom(() => raw(argumentsOf(inputs))).value
+                );
         } catch {
           shape = undefined;
         }
-        return { kind: 'value', value, raw: shape };
+        return { kind: 'value', value, raw: shape, draws };
       },
     };
   } catch (error) {
@@ -1148,7 +1251,7 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 function sameOutcome(a: Outcome, b: Outcome): boolean {
   if (a.kind === 'throw' || b.kind === 'throw') return a.kind === b.kind;
-  return sameValue(a.value, b.value);
+  return a.draws === b.draws && sameValue(a.value, b.value);
 }
 
 /** Whether two outcomes differ in the shape that the emitted code makes (a
@@ -1356,6 +1459,8 @@ export interface FuzzOptions {
   readonly interp: number;
   readonly shrink: number;
   readonly modes: readonly Mode[];
+  /** Generate draws (`--random`). */
+  readonly random?: boolean;
 }
 
 export const DEFAULT_OPTIONS: FuzzOptions = {
@@ -1525,6 +1630,9 @@ function differencePredicate(
         existingValue: b.kind === 'value' ? b.value : `throws ${b.message}`,
         profileShape: a.kind === 'value' ? a.raw : undefined,
         existingShape: b.kind === 'value' ? b.raw : undefined,
+        ...(a.kind === 'value' && b.kind === 'value' && a.draws !== b.draws
+          ? { message: `draws: profile ${a.draws}, existing ${b.draws}` }
+          : {}),
       };
     }
     return undefined;
@@ -1555,6 +1663,9 @@ function profileFailurePredicate(mode: Mode, code: string): Predicate {
 
 function interpreterPredicate(mode: Mode, point: Inputs): Predicate {
   return (ce, program) => {
+    // A shrink can take a draw out of its `WithRandomSeed`: such a program
+    // is not compared with the interpreter (`interpretsDraws()`).
+    if (!interpretsDraws(program)) return undefined;
     const expr = boxProgram(ce, program);
     if (expr === undefined) return undefined;
     const inputs = inputsOf(program, expr);
@@ -1732,6 +1843,40 @@ export async function runFuzz(
  * expression: 50,000 programs in one job exhausted a heap of 4 GB.
  */
 const ENGINE_PROGRAMS = 200;
+
+/** Whether `json` draws outside a `WithRandomSeed`: a `Random`, or a call
+ *  of a helper of `RANDOM_HELPERS`. The interpreter and compiled code draw
+ *  such numbers from `Math.random` in their own order of evaluation. */
+function drawsOutsideSeed(json: Json): boolean {
+  if (!Array.isArray(json)) return false;
+  const head = json[0];
+  if (head === 'WithRandomSeed') return drawsOutsideSeed(json[1]);
+  if (head === 'Random' || RANDOM_HELPERS.some((h) => h.name === head))
+    return true;
+  return json.slice(1).some(drawsOutsideSeed);
+}
+
+/** Whether `json` draws: a `Random`, or a call of a helper of
+ *  `RANDOM_HELPERS`, also in a `WithRandomSeed`. */
+function drawsIn(json: Json): boolean {
+  if (!Array.isArray(json)) return false;
+  const head = json[0];
+  if (head === 'Random' || RANDOM_HELPERS.some((h) => h.name === head))
+    return true;
+  return json.slice(1).some(drawsIn);
+}
+
+/**
+ * Whether the interpreter gives the value of `program` with the draws of
+ * compiled code: no draw outside a `WithRandomSeed`, and, for a program
+ * that is not a `Function` literal, no draw at all. Such a program is
+ * interpreted after `subs()` (`interpret()`), which makes the canonical
+ * form again and can order the operands, and so the draws, otherwise.
+ */
+function interpretsDraws(program: Program): boolean {
+  if (drawsOutsideSeed(program.json)) return false;
+  return program.parameters !== undefined || !drawsIn(program.json);
+}
 
 async function runFuzzQuietly(
   options: FuzzOptions,
@@ -1961,7 +2106,13 @@ async function runFuzzQuietly(
               });
             }
           }
-          if (options.interp > 0 && profileAdmits === mode) {
+          if (
+            options.interp > 0 &&
+            profileAdmits === mode &&
+            !interpretsDraws(program)
+          )
+            interpreterPoints.skipped += 1;
+          else if (options.interp > 0 && profileAdmits === mode) {
             const ordinaryPoints = gridPoints(
               inputs,
               mode,
@@ -2168,6 +2319,7 @@ async function main(): Promise<void> {
       modes: { type: 'string' },
       json: { type: 'string' },
       quiet: { type: 'boolean', default: false },
+      random: { type: 'boolean', default: false },
     },
   });
   const int = (s: string | undefined, d: number) =>
@@ -2184,6 +2336,7 @@ async function main(): Promise<void> {
       values.modes === undefined
         ? DEFAULT_OPTIONS.modes
         : (values.modes.split(',') as Mode[]),
+    random: values.random!,
   };
   const result = await runFuzz(options, (line) =>
     process.stderr.write(line + '\n')

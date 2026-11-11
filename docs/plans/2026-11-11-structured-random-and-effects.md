@@ -257,3 +257,147 @@ of calls. The interpreter's value is compared within the caveats.
   optimization for step 8), or the route reproduces the memo.
 - A seeded region is not portable (one rule with `isShippableCode()`), or
   portable in the analysis and refused by the JavaScript assembly.
+
+## Result
+
+Implemented on `6ac31a524af52fecc8744852886ebaba2fac18c8`, then moved onto
+`1c448807b4e9fc40fbb33c2b72babd151cb505a7`, slices 1 to 3,
+with the recommended option of each open choice: the state on the
+operation, a `seeded` that discharges `random`, literal domains as `draw`
+and pure arithmetic, the closure of `_SYS.withRandomSeed`, a constant
+region that runs at each call, and a seeded region that is not portable.
+Tests: `test/compute-engine/compile-javascript-structured-random.test.ts`
+(each program on both routes in an interpreted frame, with the position of
+the frame after the call, with `Math.random` replaced by a counter, and
+inside `WithRandomSeed`).
+
+**Slice 1.** Admitted: `Random()`, `Random(Interval(a, b))` with number
+literal endpoints and `b > a`, `Random(Range(…))` of number literals whose
+first element and step are safe integers (an integer result), anywhere the
+route admits a real value (branches, `And`/`Or`, `Which`, written-out terms
+and loops of a `Sum`, loop bodies, locals, helper bodies). The core has
+`IRState` (a label, `random` for the stream), `touches` on operations and
+regions, the operations `draw` and `seeded`, and the verifier rules of
+section 3. A draw is a `const` at its position on the emitter.
+
+**Slice 2.** Admitted: helpers whose signature states `random` or no effect,
+whose body draws (inferred `(t: unknown) random -> number` too), and a
+helper declared `random` whose body does not draw (the call is `effectful`,
+the value unchanged).
+
+**Slice 3.** Admitted: `WithRandomSeed(seed, body)` with a scalar body and a
+seed that is a number or string literal (no operation, cannot abort), a
+real value, or a complex value in the `complex` mode (it can abort). A
+program whose draws are all in seeded regions reports `pure: true`,
+`shippable: false`.
+
+**Where it differs from the note.**
+
+- The order of the effect facts is `pure < effectful < unknown` (it was
+  `pure < unknown < effectful`): with the named states kept apart in
+  `touches`, a summary of the effect `unknown` still names its states, and
+  `dischargedEffect()` never discharges it.
+- A test operation names the labels of its declaration (`console`), so
+  every `effectful` operation names a state. The hand-made programs of the
+  emit, step 5, IR and execution tests carry `touches: ['console']`.
+- The admission refuses a node whose own effects name another label than
+  `random`, or are unknown, except a test head and a helper call, whose
+  states come from its body (`stateFacts()`).
+- `closedJumpRefusal()` and `inexactJumpConstant()` no longer refuse a
+  node that is not pure: the fold evaluates only a pure node, so the
+  existing compiler writes the code of `Less(Random(), 1/2)` and
+  `Floor(6·Random())`.
+- A literal `Interval` needs number literal endpoints (the existing reader
+  `interval()` also takes a constant such as `Pi` through `N()`); a `Range`
+  with a step that is not an integer declines.
+- A draw in a comprehension declines unless it is inside a `seeded` region
+  in the body of the comprehension: `[WithRandomSeed(k, Random()) for k in
+  1..3]` is admitted, since each element has the same value whenever it is
+  read. A comprehension that draws inside a seeded region still declines.
+- In the analysis, a draw in the body of a seeded region that has another
+  effect is not a blocker; the other effect is.
+- `draw` and `seeded` are optional in a `RepresentationPolicy`: a target
+  without them refuses them in the verifier.
+- An `If` statement whose branch is only a draw (`If(c, Random())` as a
+  statement) declines, as an expression statement that draws does (the
+  profile admits no statement `Random` in a branch of an `If`); §3 said it
+  was kept.
+- A draw in a domain of a `Comprehension` (`Element(j, Range(1, 2 +
+  Random(Range(1, 3))))`) declines, as a draw in its body does: the
+  interpreter evaluates the domain when the list is read. Seeded probes of
+  the other constructs that the route admits with a draw inside (the bounds
+  and the body of a `Loop`, the body of a `Sum`, `ReplaceAt`, `At` of a
+  comprehension, a helper argument that the body does not read or reads
+  twice, an initializer that is not read, the branch of an `If` or a
+  `Which` that is not taken, `Or`, `Max`) give the draws of the compilers.
+- With the memo of shared subexpressions (`Lowering.value()`), a node
+  object that draws, reached twice, draws twice: the memo records a value
+  only when each operation of its lowering is `pure` and cannot abort, and
+  a `draw` is `effectful`, as is a call of a helper whose body draws. A
+  `seeded` region with a literal seed is `pure` and cannot abort, so the
+  memo shares it (the same seed gives the same value); one with an input
+  seed can abort and is lowered at each use. The body of a `seeded` region
+  is a region of the memo (`inRegion()`); it binds no name.
+- Two or more draws of which one is in a complex value decline
+  (`refuseHoistedDraws()`): the existing emitter binds a complex operand to
+  a `const` ahead of the code that it writes inline for the other operands,
+  so `Random() + Sqrt(Random(Range(-2, 8, 2)))` in the `complex` mode draws
+  for the square root first. Found by the random differential tester with
+  `--random`.
+- A `WithRandomSeed` takes the lane that the existing compiler gives it by
+  its type. In the `complex` mode a real body of a wide type (`number`) is
+  converted to complex in the region, the value that `_SYS.cplx()` makes
+  around the call there; in the `strict` mode a real body of a type of
+  numbers that are not real declines, since the existing code reads the
+  parts of the number (`NaN`, a known-limitations line in
+  `docs/COMPILATION-MODEL.md`); another type that is not real declines in
+  the `complex` mode.
+
+**Disagreements between the interpreter and the existing compiler** (none
+in the doubles of an admitted program):
+
+- `WithRandomSeed(z, Random())` with `z` declared `complex`, in the
+  `strict` mode, `z = 3`: the interpreter keeps the expression unevaluated,
+  the existing code gives `0.4706436893981194` (within the caveats: an
+  unevaluated form). The profile declines a complex seed in the `strict`
+  mode.
+- `Sqrt(Random() - 0.5)` in the `strict` mode, seed 7: the interpreter
+  gives `0.6443…i`, both compilers `NaN` (within the caveats).
+
+**The shadow measure**, over the 137 test files that name `Random` and
+compile (138 after, with the new test file), `CE_JS_PROFILE_SHADOW=1`:
+
+| Decline | Before | After |
+| --- | --- | --- |
+| `unsupported head Random` | 575 | 0 |
+| `unsupported head WithRandomSeed` | 65 | 0 |
+| `the helper … is not pure: its signature has effects` | 34 | 16 (`scope` 11, `any` 5) |
+| `Less with n operands` (the next decline of programs that pass `Random`) | 11 | 126 |
+| `unsupported head RandomChoice` / `RandomShuffle` / `RandomSample` | 17 / 7 / 6 | 38 / 10 / 9 |
+| `Random(<domain>)`, a run-time domain | — | 4 |
+| `Sqrt` of `Random()`, which the engine proves non-negative | — | 3 |
+| `Power` with the exponent `Random()` and no unknown | — | 1 |
+
+Admitted by the profile, of the compilations that the existing compiler
+compiled: 1,146 of 4,817 before, 1,396 of 4,877 after (the new test file
+adds 60 compilations). No new failure. The same files run with and without
+`CE_JS_PROFILE=numeric-kernel`: 9,108 passed, 12 skipped, 1 todo, in both.
+Slice 4 (run-time domains) has 4 declines in this measure. The measure
+was made on `6ac31a524`, before the two refusals above.
+
+**The random differential tester** (`scripts/js-profile-fuzz.ts --random`):
+draws in leaves, `WithRandomSeed` with a literal or an input seed, and two
+helpers whose body draws; each call of a compiled function runs with
+`Math.random` replaced by the same deterministic sequence, started again
+before the call, and the number of draws is part of the outcome. With
+`--seed 41,42,43 --count 5000` (15,000 programs, 19,985 compiled by both
+in a mode), before the two refusals above, the classes with draws were the
+order of draws next to a complex value (11 shapes), the lane of a seeded
+region (5 shapes of values, 10 of the shape that the code makes), and 109
+failures of the emitter where a draw from a literal domain is a real
+operand of a complex sum. The emitter now writes that draw in parentheses,
+as the `Random` handler of the existing emitter does. After the changes:
+no program draws a different number of times, no failure of the profile
+has a draw, and the two differences with a draw are of classes that the run
+without `--random` also has (a `real` local that holds a complex value,
+`Mod` of a value beyond the safe integers).

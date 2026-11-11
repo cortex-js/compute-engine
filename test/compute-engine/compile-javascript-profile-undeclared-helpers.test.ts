@@ -371,11 +371,19 @@ describe('the other signatures keep their decline, each with its message', () =>
     expect('message' in got && got.message).toMatch(/the helper g has no signature of ground types/);
   });
 
-  test('a helper with effects', () => {
+  test('a helper with effects other than random', () => {
     const ce = new ComputeEngine();
-    ce.assign('g', ce.expr(['Function', ['Add', 't', ['Random']], 't'] as MathJsonExpression));
+    // `console` is an impurity label: the definition states an effect.
+    ce.declare('Say', {
+      signature: '(real) -> real',
+      effects: ['console'],
+      evaluate: (ops: readonly Expression[]) => ops[0],
+    } as never);
+    ce.assign('g', ce.expr(['Function', ['Add', 't', ['Say', 't']], 't'] as MathJsonExpression));
     const got = profile(ce.expr(root));
-    expect('message' in got && got.message).toMatch(/the helper g is not pure: its signature has effects/);
+    expect('message' in got && got.message).toMatch(
+      /the helper g is not pure: its signature has effects other than random \(console\)/
+    );
   });
 
   test('a helper with an optional parameter', () => {

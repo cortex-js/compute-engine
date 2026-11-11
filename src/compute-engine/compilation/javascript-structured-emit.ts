@@ -125,6 +125,23 @@
  *   writes in place (`mutatesInPlace()`), as across an effect: it can read
  *   the array before the write.
  * - `not` is `!x`.
+ * - A `draw` is `_SYS.drawNextRandomNumber()`, as the existing emitter
+ *   writes `Random()`. It is `effectful`, so it is a `const` at its
+ *   position, and the order of the draws is the order of the operations,
+ *   the order of the prepared tree. A pure value is never moved across a
+ *   draw (the rule of the value written at its use); it touches no state,
+ *   and no other code reads the random stream, so moving it would not change
+ *   what it reads: the rule only keeps the order of the code that of the
+ *   program. A branch, an operand of `and` or `or` and a term that draws
+ *   have a `const` statement, so their region is not an expression: the
+ *   `if` is a statement, the `and` a chain of `if` statements, and a draw
+ *   runs only when its region runs.
+ * - A `seeded` is `_SYS.withRandomSeed(seed, () => { …; return value; })`,
+ *   the closure of the existing emitter: the helper installs a frame of the
+ *   random stream, runs the body once, and installs the frame of the caller
+ *   again, also when the body throws. It is a `const` at its position, also
+ *   when it is pure; the seed is evaluated before the frame is installed. A
+ *   literal seed is a number literal or a string literal.
  * - A function of one or two operands (`unary`, `binary`) is the call that
  *   the existing emitter writes for the same operand (`FUNCTION_CODE`):
  *   `Math.exp`, `Math.log`, `Math.sin`, `Math.cos`, `Math.tanh`,
@@ -684,8 +701,13 @@ class Emitter {
         );
       }
       case 'add': {
-        if (op.result.representation !== 'complex')
-          return leftAssociative(operands, ADDITIVE, '+');
+        if (op.result.representation !== 'complex') {
+          const sum = leftAssociative(operands, ADDITIVE, '+');
+          // The arithmetic of a draw from a literal domain: the `Random`
+          // handler of the existing emitter writes it in parentheses, so a
+          // parent reads it as one operand (`z + Random(Interval(0, 2))`).
+          return op.origin.operator === 'Random' ? atom(`(${sum.text})`) : sum;
+        }
         // The text of the existing emitter (`Add` in `javascript-target.ts`):
         // the real parts of every operand, then the imaginary parts of the
         // complex operands only, each in the order of the operands; a complex
@@ -969,6 +991,27 @@ class Emitter {
         const fn = this.functionNames[op.function];
         if (fn === undefined) return fail(`no function ${op.function}`);
         return call(fn, operands);
+      }
+      case 'draw':
+        // Effectful: `region()` binds it to a `const` at its position.
+        return { text: '_SYS.drawNextRandomNumber()', precedence: CALL };
+      case 'seeded': {
+        // `_SYS.withRandomSeed(seed, () => { …; return value; })`, bound to a
+        // `const` at its position, also when it is pure: the body runs once,
+        // in the closure, and only its value leaves it.
+        const seed =
+          op.operands.length > 0
+            ? operand(operands[0], CONDITIONAL)
+            : typeof op.seed === 'string'
+              ? JSON.stringify(op.seed)
+              : numberSource(op.seed ?? NaN).text;
+        const body: string[] = [];
+        const [value] = this.openRegion(op.body, body, readsInputs);
+        const name = this.bind(op.result);
+        out.push(
+          `const ${name} = _SYS.withRandomSeed(${seed}, () => { ${[...body, `return ${value.text};`].join(' ')} });`
+        );
+        return undefined;
       }
       case 'trace': {
         const trace = this.options.trace;

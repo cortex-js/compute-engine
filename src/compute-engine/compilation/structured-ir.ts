@@ -42,10 +42,22 @@ import type { Expression } from '../global-types.js';
 /**
  * What the evaluation of an operation can do besides giving its value.
  * `pure`: nothing. `effectful`: an effect that the definition states (an
- * impurity label). `unknown`: the definition does not state its effects.
+ * impurity label); the operation names the states that it touches
+ * (`IRState`). `unknown`: the definition does not state its effects.
  * `unknown` never permits a reordering or a merge.
  */
 export type EffectFact = 'pure' | 'effectful' | 'unknown';
+
+/**
+ * A state outside the program that an `effectful` operation reads or
+ * changes, by the name of the impurity label of its definition. `random` is
+ * the random stream of the runtime, which a `draw` reads and advances: one
+ * state, not one per generator, because which generator a draw uses (the
+ * frame of a `seeded` region, the frame of a caller, or the live source) is
+ * decided when the code runs. A test operation names the labels that its
+ * declaration states (`console`).
+ */
+export type IRState = string;
 
 /** The semantic type of a scalar value. */
 export type ScalarKind = 'real' | 'integer' | 'boolean' | 'complex';
@@ -84,6 +96,14 @@ type OperationBase = {
   /** The values that the operation reads, evaluated before it. */
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
+  /** The states that the evaluation touches (`IRState`), sorted, with no
+   *  duplicate; absent when there is none. An `effectful` operation with no
+   *  region and no call names at least one; a `pure` operation, and an
+   *  `unknown` one with no region and no call, name none. An operation that
+   *  evaluates a region or calls a function names the states of that region
+   *  or of the body of that function too, so a summary keeps the named
+   *  states apart from `unknown`. */
+  readonly touches?: readonly IRState[];
   /** The prepared node that the operation comes from. */
   readonly origin: Expression;
 };
@@ -489,6 +509,43 @@ export type IRTrace = OperationBase & {
   readonly trace: string;
 };
 
+/**
+ * The next number of the random stream of the runtime: no operand, a real
+ * result in `[0, 1)`. It is `effectful` and touches exactly the state
+ * `random`: it reads the stream and advances it. Which generator gives the
+ * number is decided when the code runs: the frame of the innermost
+ * `seeded` region, else the frame of the code that called the compiled
+ * function (an interpreted `WithRandomSeed`), else the live source of the
+ * engine. A random number of a literal domain is pure arithmetic around one
+ * `draw`.
+ */
+export type IRDraw = OperationBase & {
+  readonly kind: 'draw';
+};
+
+/**
+ * A region evaluated once with a new frame of the random stream, seeded by
+ * the seed: the structured form of `WithRandomSeed(seed, body)`. The seed is
+ * the one operand (a real, or a complex in the `complex` mode), or, with no
+ * operand, the literal `seed` (a finite number or a string). The body is an
+ * open region with no parameter that yields one scalar value, the result.
+ * The frame of the caller is in place again after the body, also when the
+ * body throws.
+ *
+ * The effect of a `seeded` operation is the effect of its body without the
+ * state `random` (the region discharges it): `pure` when the body touches no
+ * other state and has no operation of `unknown` effect. An `unknown` body is
+ * never discharged. A draw in the seed is an operation of the region that
+ * holds the `seeded`, with its own effect. A seed that is not a literal can
+ * be invalid, which throws: such a `seeded` can abort
+ * (`operationCanAbort()`).
+ */
+export type IRSeeded = OperationBase & {
+  readonly kind: 'seeded';
+  readonly seed?: number | string;
+  readonly body: IRRegion;
+};
+
 /** The last operation of an open region: its operands are the values of
  *  the region. A region of an `if` yields one value per result of the `if`,
  *  and the body of a `loop` one value per result of the `loop`; every other
@@ -499,6 +556,7 @@ export type IRYield = {
   readonly result?: undefined;
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
+  readonly touches?: undefined;
   readonly origin: Expression;
 };
 
@@ -510,15 +568,17 @@ export type IRYield = {
  * `exit` defines no value and has no effect (`pure`).
  *
  * Between the `exit` and the body of its loop there are only branches of
- * `if` operations: no region of a `build`, of an `and` or an `or`, and no
- * body of a function. The `exit` passes values to the results of the loop
- * as the yield of the body does, so each value keeps one definition.
+ * `if` operations: no region of a `build`, of an `and`, an `or` or a
+ * `seeded`, and no body of a function. The `exit` passes values to the
+ * results of the loop as the yield of the body does, so each value keeps
+ * one definition.
  */
 export type IRExit = {
   readonly kind: 'exit';
   readonly result?: undefined;
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
+  readonly touches?: undefined;
   readonly origin: Expression;
 };
 
@@ -538,6 +598,8 @@ export type IROperation =
   | IRShortCircuit
   | IRCall
   | IRTrace
+  | IRDraw
+  | IRSeeded
   | IRYield
   | IRExit;
 
@@ -556,6 +618,9 @@ export type IRRegion = {
   readonly canAbort?: true;
   /** The join of the effects of the operations (`joinEffects()`). */
   readonly effect: EffectFact;
+  /** The union of the states that the operations touch (`unionStates()`);
+   *  absent when there is none. */
+  readonly touches?: readonly IRState[];
 };
 
 export type IRInput = {
@@ -625,8 +690,8 @@ export type IRProgram = {
 
 const EFFECT_RANK: Readonly<Record<EffectFact, number>> = {
   pure: 0,
-  unknown: 1,
-  effectful: 2,
+  effectful: 1,
+  unknown: 2,
 };
 
 /** Whether the effect `a` is weaker than the effect `b` (`joinEffects()`
@@ -637,16 +702,54 @@ export function weakerEffect(a: EffectFact, b: EffectFact): boolean {
 
 /**
  * The effect of evaluating operations of the effects `effects`: the most
- * restrictive one. `effectful` includes `unknown` on purpose: both forbid
- * every transformation (a merge, a duplication, a removal or a reordering),
- * so a summary needs only the strongest one. A pass that must tell a region
- * with an unknown effect from a region with a stated effect must first change
- * the summary to keep both.
+ * restrictive one. `unknown` includes `effectful`: an operation whose
+ * effects are not stated can have any effect. Both forbid every
+ * transformation (a merge, a duplication, a removal or a reordering). A
+ * summary keeps the states that its `effectful` operations name apart
+ * (`unionStates()`), so a region of the effect `unknown` still names them,
+ * and a pass that removes a state (`seeded`, `dischargedEffect()`) can tell
+ * a region whose only effects are named from a region with an `unknown`
+ * operation.
  */
 export function joinEffects(...effects: readonly EffectFact[]): EffectFact {
   let result: EffectFact = 'pure';
   for (const e of effects) if (EFFECT_RANK[e] > EFFECT_RANK[result]) result = e;
   return result;
+}
+
+/** The union of the states `states`, sorted, with no duplicate, or
+ *  `undefined` when it is empty (`OperationBase.touches`). */
+export function unionStates(
+  ...states: readonly (readonly IRState[] | undefined)[]
+): readonly IRState[] | undefined {
+  const all = new Set<IRState>();
+  for (const list of states) for (const s of list ?? []) all.add(s);
+  return all.size === 0 ? undefined : [...all].sort();
+}
+
+/** `{ touches }` when `states` is not empty, else `{}`: the field of an
+ *  operation or a region that touches `states` (`unionStates()`). */
+export function touchesField(
+  ...states: readonly (readonly IRState[] | undefined)[]
+): { readonly touches?: readonly IRState[] } {
+  const touches = unionStates(...states);
+  return touches === undefined ? {} : { touches };
+}
+
+/**
+ * The effect and the states of a `seeded` operation whose body has the
+ * effect `effect` and the states `touches` (`IRSeeded`): the state `random`
+ * is removed; an `effectful` body with no other state gives `pure`; an
+ * `unknown` body stays `unknown`, since an operation whose effects are not
+ * stated can touch any state.
+ */
+export function dischargedEffect(
+  effect: EffectFact,
+  touches: readonly IRState[] | undefined
+): { readonly effect: EffectFact; readonly touches?: readonly IRState[] } {
+  const rest = touchesField((touches ?? []).filter((s) => s !== 'random'));
+  if (effect === 'unknown') return { effect, ...rest };
+  return { effect: rest.touches === undefined ? 'pure' : effect, ...rest };
 }
 
 /** The values that `op` defines: the results of an `if` or a `loop`, the
@@ -657,14 +760,15 @@ export function definedValues(op: IROperation): readonly IRValue[] {
 }
 
 /** Whether the evaluation of `op` can abort: a `loop` with an iteration
- *  budget, an operation whose region can abort, or a call of a function
- *  whose body can abort (`IRLoop`). `functions`: the functions of the
- *  program. */
+ *  budget, a `seeded` whose seed is not a literal (an invalid seed throws),
+ *  an operation whose region can abort, or a call of a function whose body
+ *  can abort (`IRLoop`). `functions`: the functions of the program. */
 export function operationCanAbort(
   op: IROperation,
   functions: readonly IRFunction[]
 ): boolean {
   if (op.kind === 'loop' && op.iterationBudget !== undefined) return true;
+  if (op.kind === 'seeded' && op.operands.length > 0) return true;
   if (op.kind === 'call' && functions[op.function]?.body.canAbort === true)
     return true;
   return regionsOf(op).some((region) => region.canAbort === true);
@@ -673,7 +777,8 @@ export function operationCanAbort(
 /** The regions that `op` evaluates. */
 export function regionsOf(op: IROperation): readonly IRRegion[] {
   if (op.kind === 'if') return [op.then, op.else];
-  if (op.kind === 'loop' || op.kind === 'build') return [op.body];
+  if (op.kind === 'loop' || op.kind === 'build' || op.kind === 'seeded')
+    return [op.body];
   if (op.kind === 'and' || op.kind === 'or') return op.rest;
   return [];
 }

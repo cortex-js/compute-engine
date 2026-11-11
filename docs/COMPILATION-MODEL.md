@@ -129,6 +129,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
+- `javascript`: a list whose length is random, then another draw:
+  `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
+  applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives
+  `987.4569781146947`: its comprehension is a lazy view, so it draws for `r`
+  before it draws for the range. The `numeric-kernel` profile declines a
+  draw in the range of a comprehension.
 - `javascript`, profile `numeric-kernel`: a sum that is not in canonical
   form and has a sum as an operand (`Add(Add(x, 1), Add(x, 1))`, nested four
   times) can differ in the last place from the existing compiler with
@@ -137,6 +143,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (`_.x + 1 + _.x + 1`), the profile adds each nested sum first. A canonical
   sum has no sum as an operand
   (`docs/plans/2026-11-11-structured-shared-subexpressions.md`).
+- `javascript`, `x: real`, `strict` mode: `WithRandomSeed(3, ln(x)) + x` at
+  `x = 3` gives `{ re: NaN, im: undefined }`. The node has the type
+  `complex | signed_infinity`, so the parent
+  reads the parts of a complex value, and the handler writes the real body
+  `Math.log(x)`. The interpreter gives `4.0986…`. The profile
+  `numeric-kernel` declines it.
 - `javascript`, `complex` mode, `t` with no declared type: `-1/(t·ln t)`,
   `1/(t·ln(t)^2)` and `sin(ln t)/t` at `t = ±Infinity` give `NaN`. The
   interpreter gives `0`.
@@ -1991,10 +2003,12 @@ nothing changes.
 | Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot), names with no declared type and names declared `number` (below) |
 | Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature or with no declared signature (below), whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines. A `Block` with statements as the root of the compiled expression has the body of the same form, and its free symbols are the inputs (`{ a ⩴ x^2; a + 1 }`) |
 | Lists | `At` and `Length` of a list input or parameter, `Comprehension(body, Element(j, Range(a, b)))`, `ReplaceAt` |
+| Random draws | `Random()`, `Random(Interval(a, b))` with number literals `a < b`, `Random(Range(…))` of number literals with an integer first element and step; `WithRandomSeed(seed, body)` with a scalar body and a real seed, a complex seed in the `complex` mode, or a number or string literal; calls of functions whose body draws, or whose signature states `random`. The same draws as the existing compiler, in the same order, the same number of times, on the same paths: a compiled function called inside an interpreted `WithRandomSeed` draws from that frame |
 
 | Declined with `outside-profile` | Example |
 | --- | --- |
-| A head outside the list | `Sech(x)`, `LogGamma(x)`, `Integrate(sin(x), x)`, `Random()` (`operator: 'Random'`) |
+| A head outside the list | `Sech(x)`, `LogGamma(x)`, `Integrate(sin(x), x)`, `RandomChoice(L, 2)` (`operator: 'RandomChoice'`), `RandomSample`, `RandomShuffle` |
+| A draw outside the form | a draw in the body of a `Comprehension` (the interpreter's comprehension draws when an element is read), `Random` of a domain with a symbol or of a list (`Random(Range(1, n))`), a `WithRandomSeed` with a boolean seed, a seed that is a string expression or a list body, a statement that is only a draw, a binding whose value draws (`r := Random()`), a function value that draws (`Map`); two or more draws when one is in a complex value (`Random() + Sqrt(Random(Range(-2, 8, 2)))` in the `complex` mode: the existing emitter evaluates the complex operand first); a `WithRandomSeed` with a real body whose type the existing compiler reads as complex in the `strict` mode (`WithRandomSeed(3, ln(x))`), or whose type is neither real nor wide in the `complex` mode (`integer \| missing`, `infinity \| nan \| real`) |
 | A form the existing emitter writes in a special way | `x^0.5`, `x^(8/5)`, `Mod(x, 1)`, `Sinh(i·π·x)`, `e^(x + i·π·y)`, `\|x + i\|`, a closed comparison, a power or a root of two literals that it folds to `NaN` where the interpreter has a finite value (`Root(-2, -4)`), the literal `-(0^-1)` (an undirected infinity that it writes `Infinity`), and in the `complex` mode a real call or square that it wraps as a complex value (`x·sin(a/y)`, `ln(a^2)^2` with `a`, `y` real) |
 | A complex form with no compilation of the engine that needs it | `z^x`, `x^z`, `z^w` (an exponent that is not a number literal), `Real(z)`, `Argument(z)`, `Equal(z, w)` |
 | A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
@@ -2036,7 +2050,7 @@ has the default kind, the result has the kind of the body, an argument of
 another kind declines (a list, a boolean, a real argument in the `complex`
 mode), and `defaultedSymbols` lists the name of the function. A function
 declared `function`, or with an optional or a variadic parameter, a type
-parameter or an effect, declines. Three limits:
+parameter or an effect other than `random`, declines. Three limits:
 
 - A body that uses the name as a list, as a condition or as an integer (a
   loop bound, an index) declines: declare the name.
@@ -2082,10 +2096,15 @@ is an error, thrown whatever `fallback` says.
 the structured program (`analyzeExecution()` in `structured-execution.ts`):
 `pure` when no operation of the program or of a function it calls has an
 effect or an effect that its definition does not state, and no array that
-the host passed is written; `shippable` when, in addition, every function
-the code calls is in the program and every captured value is a number, and
-the checks of the existing assembly (no draw from the random stream in the
-code) agree. A `Function` literal has `shippable` too under the profile. The
+the host passed is written. A draw from the random stream outside every
+`WithRandomSeed` region is such an effect: two calls give different values,
+and a call inside an interpreted `WithRandomSeed` advances its frame. A
+`WithRandomSeed` region whose body only draws has no effect, so a program
+whose draws are all in such regions is `pure`. `shippable` when, in
+addition, every function the code calls is in the program, every captured
+value is a number, the code neither draws nor seeds the random stream, also
+in a region, and the checks of the existing assembly (no random helper in
+the code) agree. A `Function` literal has `shippable` too under the profile. The
 kernel pool reads the same value: a result that is not shippable never goes
 to a worker.
 
@@ -2099,11 +2118,18 @@ const ce = new ComputeEngine();
 ce.declare('x', 'real');
 canCompile(ce.box(['Add', 'x', ['Sin', 'x']]), { profile: 'numeric-kernel' });
 // ➔ { ok: true, pure: true, shippable: true }
-canCompile(ce.box(['Add', 'x', ['Random']]), { profile: 'numeric-kernel' })
+canCompile(ce.box(['Add', 'x', ['Random']]), { profile: 'numeric-kernel' });
+// ➔ { ok: true, pure: false, shippable: false }
+canCompile(ce.box(['WithRandomSeed', 42, ['Add', 'x', ['Random']]]), {
+  profile: 'numeric-kernel',
+});
+// ➔ { ok: true, pure: true, shippable: false }
+ce.declare('L', 'list<real>');
+canCompile(ce.box(['RandomChoice', 'L', 2]), { profile: 'numeric-kernel' })
   .diagnostic;
 // ➔ { code: 'outside-profile', kind: 'capability',
-//     message: "Could not compile with the profile 'numeric-kernel': unsupported head Random",
-//     operator: 'Random', value: 'Random()' }
+//     message: "Could not compile with the profile 'numeric-kernel': unsupported head RandomChoice",
+//     operator: 'RandomChoice', value: 'RandomChoice(L, 2)' }
 ```
 
 The decisions are in `docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md`;

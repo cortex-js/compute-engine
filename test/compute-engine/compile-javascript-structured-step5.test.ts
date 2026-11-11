@@ -704,7 +704,11 @@ describe('the verifier', () => {
       type,
       representation: type === 'boolean' ? 'boolean' : 'number',
     });
-    const region = (operations: IROperation[], effect: 'pure' | 'effectful' = 'pure'): IRRegion => ({ operations, effect });
+    const region = (operations: IROperation[], effect: 'pure' | 'effectful' = 'pure'): IRRegion => ({
+      operations,
+      effect,
+      ...(effect === 'effectful' ? { touches: ['console'] } : {}),
+    });
     const yieldOf = (v: IRValue) => ({ kind: 'yield', operands: [v], effect: 'pure', origin }) as IROperation;
     return { owner, origin, value, region, yieldOf };
   }
@@ -838,14 +842,15 @@ describe('the verifier', () => {
               kind: 'if',
               results: [result],
               operands: [less],
-              then: m.region([{ kind: 'trace', trace: 'trace', result: traced, operands: [p], effect: 'effectful', origin: o } as IROperation, m.yieldOf(traced)], 'effectful'),
+              then: m.region([{ kind: 'trace', trace: 'trace', result: traced, operands: [p], effect: 'effectful', touches: ['console'], origin: o } as IROperation, m.yieldOf(traced)], 'effectful'),
               else: m.region([
                 lit(minusOne, -1),
                 { kind: 'add', result: next, operands: [p, minusOne], effect: 'pure', origin: o } as IROperation,
-                { kind: 'call', function: 1, result: called, operands: [next], effect: 'effectful', origin: o } as IROperation,
+                { kind: 'call', function: 1, result: called, operands: [next], effect: 'effectful', touches: ['console'], origin: o } as IROperation,
                 m.yieldOf(called),
               ], 'effectful'),
               effect: 'effectful',
+              touches: ['console'],
               origin: o,
             } as IROperation,
             m.yieldOf(result),
@@ -859,7 +864,7 @@ describe('the verifier', () => {
         parameters: [q],
         result: { type: 'real' as const, representation: 'number' },
         body: m.region(
-          [{ kind: 'call', function: 0, result: back, operands: [q], effect: callEffect, origin: o } as IROperation, m.yieldOf(back)],
+          [{ kind: 'call', function: 0, result: back, operands: [q], effect: callEffect, ...(callEffect === 'effectful' ? { touches: ['console'] } : {}), origin: o } as IROperation, m.yieldOf(back)],
           callEffect
         ),
         origin: o,
@@ -875,7 +880,7 @@ describe('the verifier', () => {
           root: m.region(
             [
               { kind: 'input', input: 0, result: x, operands: [], effect: 'pure', origin: o } as IROperation,
-              { kind: 'call', function: 0, result: r, operands: [x], effect: 'effectful', origin: o } as IROperation,
+              { kind: 'call', function: 0, result: r, operands: [x], effect: 'effectful', touches: ['console'], origin: o } as IROperation,
               m.yieldOf(r),
             ],
             'effectful'

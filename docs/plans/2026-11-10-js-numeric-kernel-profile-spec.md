@@ -127,8 +127,8 @@ so the helper is one function with one parameter type, as in the existing
 compiler for a real argument. `defaultedSymbols` lists the name of such a
 helper after the names of the inputs: a host declares its signature. A
 helper declared `function`, or whose signature has an optional or a
-variadic parameter, a type parameter or effects, keeps its decline, each
-with its own message. The body of every helper is now rewritten for the
+variadic parameter, a type parameter or effects other than `random`, keeps
+its decline, each with its own message. The body of every helper is now rewritten for the
 angular unit of the engine, as the root is; before, it was compiled in
 radians whatever the unit.
 
@@ -159,7 +159,12 @@ unknown effect, and no array that the host passed in is written (a list
 argument is only read; an update in place writes only into a list that the
 call built itself). A captured value is a number copied at compile time, so
 no call can change it. It is the meaning of `pure` in a function declaration
-and of `isPure` on an expression. It does not say that the host may change an
+and of `isPure` on an expression. A draw from the random stream outside every
+`WithRandomSeed` region is an effect: two calls give different values, and a
+call inside an interpreted `WithRandomSeed` advances its frame. A
+`WithRandomSeed` region discharges the draws of its body, as `isPure` does, so
+a program whose draws are all in such regions is pure
+(`docs/plans/2026-11-11-structured-random-and-effects.md`). It does not say that the host may change an
 input array while a call reads it, that the calls will run in parallel, or
 anything about a function passed at run time. An iteration budget does not
 change the answer: when the budget is exceeded the call throws, and the pass
@@ -169,14 +174,17 @@ counter belongs to the runtime of each thread.
 (`compilation/types.ts`): whether the compiled code can be sent to a worker
 of the pool. Under the profile it is true when every function the code calls
 is compiled into the same program, every captured value is a number written
-into the code, and no operation has an effect or an unknown effect (an
+into the code, no operation has an effect or an unknown effect (an
 unknown operation can be a host closure, which a worker does not have; for a
 known effect the facts do not yet say whether a worker has it, so the answer
-is false). It does not say that the arguments can be transferred cheaply.
+is false), and the code neither draws from nor seeds the random stream, also
+inside a `WithRandomSeed` region, as `isShippableCode()` refuses code that
+names the random helpers. It does not say that the arguments can be
+transferred cheaply.
 
-Today every program that is shippable under the profile is also pure,
-because both exclude effects. The two differ for a later program that calls
-a pure function of the host: pure, and not shippable.
+A program that draws only inside `WithRandomSeed` regions is pure and not
+shippable. A later program that calls a pure function of the host will be
+the same.
 
 The loop candidates of `analyzeExecution()` are not in the public result.
 They stay internal until an execution route uses them.
@@ -191,7 +199,8 @@ heatstep(H: list<real>, diffusivity: real, boundary: real, obstacle: real) -> li
 | --- | --- | --- |
 | `compile(heatstep, { to: 'javascript' })` | existing compiler | the same, unchanged |
 | `compile(heatstep, { to: 'javascript', profile: 'numeric-kernel' })` | the option is unknown | structured route; `result.pure` and `result.shippable` are `true` |
-| `compile(f, { …profile… })` where `f` calls `Random()` | — | declines with `outside-profile`, naming `Random` |
+| `compile(f, { …profile… })` where `f` calls `Random()` | — | compiles; `result.pure` and `result.shippable` are `false` |
+| `compile(f, { …profile… })` where `f` calls `RandomChoice(L, 2)` | — | declines with `outside-profile`, naming `RandomChoice` |
 | `canCompile(heatstep, { to: 'javascript', profile: 'numeric-kernel' })` | `ok: false` | `ok: true`, with `pure: true` and `shippable: true` |
 
 ## What is not in this part

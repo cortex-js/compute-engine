@@ -111,8 +111,14 @@
   operand: products, quotients, powers with a number literal exponent and
   the elementary functions, `e^(i·x)`, `1/(t·ln t)`), conditionals, calls of user functions with
   declared signatures, captured numbers, loops over an integer range (with
-  `Break` at the end of a branch of an `If`), and
-  lists of numbers made with a comprehension and updated with `ReplaceAt`.
+  `Break` at the end of a branch of an `If`),
+  lists of numbers made with a comprehension and updated with `ReplaceAt`,
+  and random draws: `Random()`, `Random` of a literal `Interval` or
+  `Range`, `WithRandomSeed`, and calls of user functions whose body draws.
+  The code draws the numbers of the ordinary compiler, in the same order
+  and the same number of times; a draw in a comprehension declines, as do
+  `RandomChoice`, `RandomSample`, `RandomShuffle` and `Random` of a domain
+  known only at run time.
   A block of statements can be the compiled expression itself, with its free
   symbols as the inputs, and a power or a root of two number literals is
   written as the value that the ordinary compiler folds it to.
@@ -148,7 +154,9 @@
   the new field `pure` (two calls give the same results in any order or at
   the same time, and a call changes nothing that the host can observe), and
   `shippable` (the code can run on a worker of the pool), also for a
-  `Function` literal. `canCompile()` answers for the profile, with the same
+  `Function` literal. A draw makes a program not pure, unless it is inside a
+  `WithRandomSeed`; a program that draws or seeds the random stream is not
+  shippable. `canCompile()` answers for the profile, with the same
   diagnostic as `compile()`, and its positive answer carries `pure` and
   `shippable`:
 

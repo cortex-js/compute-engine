@@ -70,6 +70,15 @@
  * representation (`aggregate()`): a literal, the terms with no loop, or a
  * `loop` whose one carried value is the accumulator, in a guard of `if`
  * operations when a bound is not constant.
+ *
+ * `Random()` and `Random` of a literal domain are a `draw` and the
+ * arithmetic of the existing emitter around it (`draw()`); `WithRandomSeed`
+ * is a `seeded` region (`seeded()`). Each draw is an operation where its
+ * node is lowered, so the draws keep the order and the count of the
+ * prepared tree, and a draw in a branch, in an operand of `And` or `Or`, in
+ * a term of a `Sum` or in a loop body runs only when that region runs. An
+ * operation that evaluates a region, and a call, name the states of their
+ * regions and of the body of the function (`IROperation.touches`).
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
@@ -78,8 +87,11 @@ import { exactRationalDivisor } from './compiler-type-facts.js';
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { interval } from '../numerics/interval.js';
+import { rangeCount } from '../numerics/range-count.js';
 import type {
   FragmentAnnotation,
   FragmentConversion,
@@ -89,9 +101,11 @@ import type {
 import { nodeText } from './fragment.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
+  dischargedEffect,
   exitsIn,
   joinEffects,
   operationCanAbort,
+  touchesField,
   type EffectFact,
   type IRCapture,
   type IRFunction,
@@ -99,6 +113,7 @@ import {
   type IROperation,
   type IRProgram,
   type IRRegion,
+  type IRState,
   type IRValue,
   type ScalarKind,
   type ValueType,
@@ -234,6 +249,10 @@ export type StructuredPreparation = {
   readonly defaulted?: readonly string[];
   /** The effect fact of each prepared node that the annotation types. */
   readonly effects: ReadonlyMap<Expression, EffectFact>;
+  /** The states that each prepared node of the effect `effectful` touches
+   *  itself (`IRState`): the impurity labels of its definition, `random` for
+   *  `Random`. A node that is absent touches none. */
+  readonly states?: ReadonlyMap<Expression, readonly IRState[]>;
   /** For tests only: the heads that lower to the trace operation, with the
    *  trace id of each. */
   readonly testOperations: ReadonlyMap<string, string>;
@@ -692,10 +711,15 @@ class Lowering {
     // A loop, not a spread: a region can hold more operations than a call
     // takes arguments.
     let effect: EffectFact = 'pure';
-    for (const op of operations) effect = joinEffects(effect, op.effect);
+    const states = new Set<IRState>();
+    for (const op of operations) {
+      effect = joinEffects(effect, op.effect);
+      for (const s of op.touches ?? []) states.add(s);
+    }
     return {
       operations,
       effect,
+      ...touchesField([...states]),
       ...(canAbort ? { canAbort: true as const } : {}),
     };
   }
@@ -794,6 +818,11 @@ class Lowering {
     if (effect === undefined)
       return fail(`no effect fact for ${nodeText(node)}`);
     return effect;
+  }
+
+  /** The states that `node` touches itself (`StructuredPreparation.states`). */
+  private states(node: Expression): readonly IRState[] | undefined {
+    return this.prep.states?.get(node);
   }
 
   /**
@@ -971,6 +1000,7 @@ class Lowering {
         then,
         else: otherwise,
         effect: joinEffects(effect, then.effect, otherwise.effect),
+        ...touchesField(this.states(node), then.touches, otherwise.touches),
         origin: node,
       });
       return result;
@@ -1003,10 +1033,16 @@ class Lowering {
         operands: [first],
         rest,
         effect: joinEffects(effect, ...rest.map((r) => r.effect)),
+        ...touchesField(this.states(node), ...rest.map((r) => r.touches)),
         origin: node,
       });
       return result;
     }
+
+    if (operator === 'Random') return this.draw(node, facts, operations);
+
+    if (operator === 'WithRandomSeed')
+      return this.seeded(node, facts, scope, operations);
 
     const entry = this.prep.annotation.functions.get(operator);
     if (entry !== undefined && this.prep.helpers.has(operator)) {
@@ -1019,6 +1055,7 @@ class Lowering {
         result,
         operands: args,
         effect: joinEffects(effect, this.functions[index].body.effect),
+        ...touchesField(this.states(node), this.functions[index].body.touches),
         origin: node,
       });
       return result;
@@ -1034,6 +1071,7 @@ class Lowering {
         result,
         operands,
         effect,
+        ...touchesField(this.states(node)),
         origin: node,
       });
       return result;
@@ -1424,6 +1462,132 @@ class Lowering {
       operands: [from, to],
       body: region,
       effect: joinEffects(effect, region.effect),
+      ...touchesField(this.states(node), region.touches),
+      origin: node,
+    });
+    return result;
+  }
+
+  /**
+   * `Random()`, `Random(Interval(a, b))` or `Random(Range(…))`, which the
+   * rule of `Random` admitted (`randomRule` in
+   * `javascript-fragment-target.ts`), as the existing emitter writes it
+   * (`Random` in `javascript-target.ts`): one `draw`, and for a literal
+   * domain pure arithmetic around it, with the parameters that the rule read
+   * (`randomDomainOf()`): `a + u·w` with the double `w = b - a` for an
+   * `Interval`, `first + step·floor(u·n)` for a `Range`. The domain has no
+   * operation of its own: its literals have the origin of the node.
+   */
+  private draw(
+    node: Expression,
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const domain = randomDomainOf(node);
+    if (domain === undefined)
+      return fail(`no drawable domain in ${nodeText(node)}`);
+    const u = this.newValue('real', 'number');
+    operations.push({
+      kind: 'draw',
+      result: u,
+      operands: [],
+      effect: 'effectful',
+      touches: ['random'],
+      origin: node,
+    });
+    if (domain.kind === 'unit') return u;
+    const literal = (value: number, type: 'real' | 'integer') =>
+      this.numberLiteral(value, type, node, operations);
+    const push = (
+      kind: 'add' | 'multiply' | 'floor',
+      operands: IRValue[],
+      result: IRValue
+    ): IRValue => {
+      operations.push({ kind, result, operands, effect: 'pure', origin: node });
+      return result;
+    };
+    if (domain.kind === 'interval') {
+      const scaled = push(
+        'multiply',
+        [u, literal(domain.width, 'real')],
+        this.newValue('real', 'number')
+      );
+      return push(
+        'add',
+        [literal(domain.start, 'real'), scaled],
+        this.resultOf(facts)
+      );
+    }
+    const first = literal(domain.first, 'integer');
+    const step = literal(domain.step, 'integer');
+    const index = push(
+      'floor',
+      [
+        push(
+          'multiply',
+          [u, literal(domain.n, 'integer')],
+          this.newValue('real', 'number')
+        ),
+      ],
+      this.newValue('integer', 'number')
+    );
+    return push(
+      'add',
+      [
+        first,
+        push('multiply', [step, index], this.newValue('integer', 'number')),
+      ],
+      this.resultOf(facts)
+    );
+  }
+
+  /**
+   * `WithRandomSeed(seed, body)`, which the rule of `WithRandomSeed`
+   * admitted (`seededRule()` in `javascript-fragment-target.ts`): the seed,
+   * evaluated here (a literal number or string seed has no operation), then
+   * a `seeded` whose body region is the value of `body`. Its effect and its
+   * states are those of the body without `random` (`dischargedEffect()`).
+   */
+  private seeded(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const [seedNode, bodyNode] = node.ops;
+    const literalSeed = literalSeedOf(seedNode);
+    const seed =
+      literalSeed === undefined
+        ? this.convert(
+            this.value(seedNode, scope, operations),
+            facts.conversions?.[0],
+            node,
+            operations
+          )
+        : undefined;
+    // The body is a region of its own: a value that its lowering remembers
+    // is not visible after the region (`inRegion()`). It binds no name.
+    const inner: IROperation[] = [];
+    const value = this.inRegion(inner, () =>
+      this.convert(
+        this.value(bodyNode, scope, inner),
+        facts.conversions?.[literalSeed === undefined ? 1 : 0],
+        node,
+        inner
+      )
+    );
+    const body = this.region(inner, bodyNode, value);
+    const result = this.newValue(
+      value.type,
+      value.representation as ScalarRepresentation
+    );
+    operations.push({
+      kind: 'seeded',
+      result,
+      operands: seed === undefined ? [] : [seed],
+      ...(literalSeed !== undefined ? { seed: literalSeed } : {}),
+      body,
+      ...dischargedEffect(body.effect, body.touches),
       origin: node,
     });
     return result;
@@ -1595,6 +1759,7 @@ class Lowering {
       then: thenRegion,
       else: elseRegion,
       effect: joinEffects(effect, thenRegion.effect, elseRegion.effect),
+      ...touchesField(thenRegion.touches, elseRegion.touches),
       origin,
     });
     return result;
@@ -1859,6 +2024,7 @@ class Lowering {
           operands: [from, to, initial],
           body: region,
           effect: region.effect,
+          ...touchesField(region.touches),
           origin: node,
         });
         return result;
@@ -2410,6 +2576,7 @@ class Lowering {
         then,
         else: otherwise,
         effect: joinEffects(then.effect, otherwise.effect),
+        ...touchesField(then.touches, otherwise.touches),
         origin: node,
       });
       return true;
@@ -2505,6 +2672,7 @@ class Lowering {
       then,
       else: otherwise,
       effect: joinEffects(then.effect, otherwise.effect),
+      ...touchesField(then.touches, otherwise.touches),
       origin: node,
     });
     return false;
@@ -2661,6 +2829,7 @@ class Lowering {
         operands: [from, to, ...initial],
         body: region,
         effect: region.effect,
+        ...touchesField(region.touches),
         iterationBudget: this.prep.iterationBudget,
         origin: node,
       });
@@ -2893,6 +3062,111 @@ function exposedReads(
   };
   visit(statement, new Set());
   return exposed;
+}
+
+/**
+ * The domain of the node `Random(…)` that the structured route admits, or
+ * `undefined`. The parameters are those that the handler `Random` of the
+ * existing emitter reads (`javascript-target.ts`), so the code computes the
+ * same doubles:
+ *
+ * - `unit`: no operand, one draw `u` in `[0, 1)`.
+ * - `interval`: `Interval(a, b)` whose endpoints are real number literals
+ *   (an `Open` or `Closed` marker is ignored, as there), finite, with
+ *   `b > a`: `a + u·w`, with the double `w = b - a` computed here, as the
+ *   existing emitter writes `${start} + u * ${end - start}` (`interval()`).
+ * - `range`: `Range(…)` of one to three real number literals, normalized
+ *   as `literalRangeParams()` of the existing emitter does (one operand `n`
+ *   is `Range(1, n)`; two operands have the step 1 or -1): `first +
+ *   step·floor(u·n)` with `n` the number of elements (`rangeCount()`).
+ *   `first` and `step` are safe integers, `n` a positive safe integer, so
+ *   the result is an integer; another `Range` is not admitted.
+ *
+ * Every other operand (a domain with a symbol, a list, an empty or
+ * unbounded domain, which the existing compiler refuses at compile time) is
+ * not admitted. The rule of `Random` (`javascript-fragment-target.ts`) and
+ * the lowering read the domain from this function, so they agree.
+ */
+export function randomDomainOf(node: Expression):
+  | { readonly kind: 'unit' }
+  | {
+      readonly kind: 'interval';
+      readonly start: number;
+      readonly width: number;
+    }
+  | {
+      readonly kind: 'range';
+      readonly first: number;
+      readonly step: number;
+      readonly n: number;
+    }
+  | undefined {
+  if (!isFunction(node, 'Random')) return undefined;
+  if (node.nops === 0) return { kind: 'unit' };
+  if (node.nops !== 1) return undefined;
+  const domain = node.op1;
+  const literal = (x: Expression): number | undefined =>
+    isNumber(x) && x.im === 0 && Number.isFinite(x.re) ? x.re : undefined;
+  if (isFunction(domain, 'Interval')) {
+    if (domain.nops !== 2) return undefined;
+    const endpoint = (x: Expression) =>
+      isFunction(x, 'Open') || isFunction(x, 'Closed') ? x.op1 : x;
+    if (
+      literal(endpoint(domain.op1)) === undefined ||
+      literal(endpoint(domain.op2)) === undefined
+    )
+      return undefined;
+    const bounds = interval(domain);
+    if (
+      bounds === undefined ||
+      !Number.isFinite(bounds.start) ||
+      !Number.isFinite(bounds.end) ||
+      !(bounds.end > bounds.start)
+    )
+      return undefined;
+    return {
+      kind: 'interval',
+      start: bounds.start,
+      width: bounds.end - bounds.start,
+    };
+  }
+  if (isFunction(domain, 'Range')) {
+    const ops = domain.ops;
+    if (ops.length === 0 || ops.length > 3) return undefined;
+    const values = ops.map(literal);
+    if (values.some((v) => v === undefined)) return undefined;
+    const [first, upper, step] =
+      values.length === 1
+        ? [1, values[0]!, 1]
+        : [
+            values[0]!,
+            values[1]!,
+            values.length > 2 ? values[2]! : values[1]! >= values[0]! ? 1 : -1,
+          ];
+    const n = rangeCount(first, upper, step);
+    if (
+      !Number.isSafeInteger(first) ||
+      !Number.isSafeInteger(step) ||
+      !Number.isSafeInteger(n) ||
+      n <= 0 ||
+      !Number.isSafeInteger(first + step * (n - 1))
+    )
+      return undefined;
+    return { kind: 'range', first, step, n };
+  }
+  return undefined;
+}
+
+/**
+ * The literal seed of the seed operand `seed` of `WithRandomSeed`: a
+ * string, or a finite real number literal (its double), or `undefined` for
+ * a seed that is evaluated (`IRSeeded`).
+ */
+export function literalSeedOf(seed: Expression): number | string | undefined {
+  if (isString(seed)) return seed.string;
+  if (isNumber(seed) && seed.im === 0 && Number.isFinite(seed.re))
+    return seed.re;
+  return undefined;
 }
 
 /** The names of the symbols of `node`, read or written. `memo` holds the

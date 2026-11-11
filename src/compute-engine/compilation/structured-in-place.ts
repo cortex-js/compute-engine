@@ -186,7 +186,9 @@ function order(
  *    the array and read it after the call.
  * 2. C runs in the same iteration as the definition of X: no body of a
  *    `loop` or of a `build` is between the region of the definition and C.
- *    Otherwise C would run once per iteration on the one array of X.
+ *    Otherwise C would run once per iteration on the one array of X. The
+ *    body of a `seeded` region runs once, where the region is, and is not
+ *    such a body; a `draw` reads no list.
  * 3. C uses X once, and every other use of X either is in the other branch
  *    of an `if` that holds C (it does not run when C runs), or runs before
  *    C and is an `at` or a `length`, whose result is a number and holds no

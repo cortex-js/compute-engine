@@ -11,6 +11,7 @@ import {
 import { verifyJavaScriptProgram } from '../../src/compute-engine/compilation/javascript-structured-policy';
 import {
   joinEffects,
+  touchesField,
   type IRFunction,
   type IROperation,
   type IRProgram,
@@ -127,26 +128,51 @@ function withEffect(program: IRProgram, name: string, kind: IROperation['kind'])
   const functions: IRFunction[] = [];
   const region = (r: IRRegion, mark: boolean): IRRegion => {
     const operations = r.operations.map((op) => operation(op, mark));
-    return { ...r, operations, effect: joinEffects(...operations.map((op) => op.effect)) };
+    return {
+      ...r,
+      operations,
+      effect: joinEffects(...operations.map((op) => op.effect)),
+      ...touchesField(...operations.map((op) => op.touches)),
+    };
   };
   const operation = (op: IROperation, mark: boolean): IROperation => {
     if (mark && !marked && op.kind === kind) {
       marked = true;
-      return { ...op, effect: 'effectful' } as IROperation;
+      return { ...op, effect: 'effectful', touches: ['console'] } as IROperation;
     }
     if (op.kind === 'call')
-      return { ...op, effect: joinEffects(op.effect, functions[op.function].body.effect) };
+      return {
+        ...op,
+        effect: joinEffects(op.effect, functions[op.function].body.effect),
+        ...touchesField(op.touches, functions[op.function].body.touches),
+      };
     if (op.kind === 'if') {
       const [then, otherwise] = [region(op.then, mark), region(op.else, mark)];
-      return { ...op, then, else: otherwise, effect: joinEffects(op.effect, then.effect, otherwise.effect) };
+      return {
+        ...op,
+        then,
+        else: otherwise,
+        effect: joinEffects(op.effect, then.effect, otherwise.effect),
+        ...touchesField(op.touches, then.touches, otherwise.touches),
+      };
     }
     if (op.kind === 'loop' || op.kind === 'build') {
       const body = region(op.body, mark);
-      return { ...op, body, effect: joinEffects(op.effect, body.effect) } as IROperation;
+      return {
+        ...op,
+        body,
+        effect: joinEffects(op.effect, body.effect),
+        ...touchesField(op.touches, body.touches),
+      } as IROperation;
     }
     if (op.kind === 'and' || op.kind === 'or') {
       const rest = op.rest.map((r) => region(r, mark));
-      return { ...op, rest, effect: joinEffects(op.effect, ...rest.map((r) => r.effect)) };
+      return {
+        ...op,
+        rest,
+        effect: joinEffects(op.effect, ...rest.map((r) => r.effect)),
+        ...touchesField(op.touches, ...rest.map((r) => r.touches)),
+      };
     }
     return op;
   };

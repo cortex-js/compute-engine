@@ -17,14 +17,20 @@
  *   `effectful` or `unknown`, and no array that the host or a caller can
  *   hold is written in place. Captures are snapshots, fixed when the program
  *   is compiled, so no call can change what another call reads. The
- *   iteration budget is a caveat, not a failure (`ExecutionCaveat`).
+ *   iteration budget is a caveat, not a failure (`ExecutionCaveat`). A
+ *   `seeded` region whose body touches no state but the random stream is
+ *   `pure` (`IRSeeded`): each call draws the same numbers from a new frame,
+ *   so a program whose draws are all in such regions has independent calls.
  * - `workerPortable`: the code and what it reads can be sent to another
  *   worker, which rebuilds the function from its stored form with the
  *   runtime of the same version (`createJavaScriptRuntime().load()`). It
  *   holds when every function called is a function of the program, every
- *   capture is a snapshot of a number, and no operation is `unknown` (such
+ *   capture is a snapshot of a number, no operation is `unknown` (such
  *   an operation can be a closure of the host, which a worker does not
- *   have) or `effectful` (see `workerPortable` in `analyzeExecution()`).
+ *   have) or `effectful` (see `workerPortable` in `analyzeExecution()`),
+ *   and no operation is a `draw` or a `seeded` region, also when the region
+ *   is `pure`: the random stream is not portable, as `isShippableCode()`
+ *   (`kernel-pool.ts`) says of code that names its helpers.
  * - `parallelLoops`: for each `loop`, a candidate judgment: the iterations
  *   could run in any order, or at the same time, and give the same results.
  *   It is not a proof that running them at the same time is faster, and the
@@ -145,6 +151,17 @@ export type ExecutionAnalysis = {
   readonly parallelLoops: readonly LoopJudgment[];
 };
 
+/** The reason of a draw outside every `seeded` region, for
+ *  `independentCalls`. */
+const DRAW_REASON =
+  'draws from the random stream of the engine: two calls give different values, and a call inside a seeded frame of its caller moves the counter of that frame';
+
+/** The reason of a draw, or of an operation that touches only the random
+ *  stream (a call of a function whose signature states `random`), for
+ *  `workerPortable`. */
+const WORKER_DRAW_REASON =
+  'draws from the random stream of the engine, which the runtime of a worker does not share';
+
 /** The text of the caveat of the iteration budget. */
 const BUDGET_CAVEAT =
   'The iteration budget counts the passes of every loop of one call in a counter of the runtime, which each call sets to 0 when it starts. ' +
@@ -175,19 +192,26 @@ type Visit = (
  * the rule. A loop with an iteration budget adds the caveat
  * `iteration-budget`.
  *
+ * A `draw` outside every `seeded` region is a blocker with the reason that
+ * names the random stream: two calls give different values, and a call made
+ * inside a seeded frame of its caller advances that frame. A `seeded` region
+ * whose body touches no other state is `pure` and is no blocker.
+ *
  * `workerPortable`: false for an `unknown` operation, an `effectful`
- * operation, a call of a function that is not in the program, or a capture
- * whose snapshot is not a number. The effect facts of the representation are
- * `pure`, `effectful` and `unknown`: an `effectful` operation does not record
- * which effect it has (the impurity label of its definition), so the
- * analysis cannot decide whether the runtime of a worker provides that effect
- * (a random draw of the runtime, a write to the console of the host). It
- * answers false, with that reason.
+ * operation, a `draw` or a `seeded` region anywhere (also a pure one), a
+ * call of a function that is not in the program, or a capture whose
+ * snapshot is not a number. The random stream is not portable (the choice
+ * of `isShippableCode()`, which refuses code that names its helpers). For
+ * another `effectful` operation (a write to the console of the host) the
+ * analysis does not decide whether the runtime of a worker provides the
+ * effect, and answers false.
  *
  * `parallelLoops`: one judgment per `loop` of the root and of the functions
  * that the root calls, in the order of the program. A wrong candidate is a
  * defect and a missed one is not, so a case that the rule cannot decide is
- * not a candidate. A loop is a candidate when its body is pure and every
+ * not a candidate. A body that draws outside a `seeded` region is not pure,
+ * and the reason names the random stream: the values of a pass depend on
+ * the passes before it. A loop is a candidate when its body is pure and every
  * carried value is a list whose every use in the body is in this list: the
  * list operand of a `replace-at` whose index is the loop index (the index
  * parameter itself; a local bound to it is the same value; not an expression
@@ -242,17 +266,24 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
   const independent: ExecutionBlocker[] = effects.map((b) => ({
     ...b.blocker,
     reason:
-      b.effect === 'unknown'
-        ? 'an operation whose definition does not state its effects'
-        : 'an operation whose definition states an effect',
+      b.draws
+        ? DRAW_REASON
+        : b.effect === 'unknown'
+          ? 'an operation whose definition does not state its effects'
+          : 'an operation whose definition states an effect',
   }));
-  const portable: ExecutionBlocker[] = effects.map((b) => ({
-    ...b.blocker,
-    reason:
-      b.effect === 'unknown'
-        ? 'an operation whose definition does not state its effects: it can call a closure of the host, which a worker does not have'
-        : 'an operation with an effect that the effect facts do not name: a worker may not provide it',
-  }));
+  // A draw and a seeded region are blockers of their own below, wherever
+  // they are.
+  const portable: ExecutionBlocker[] = effects
+    .filter((b) => b.blocker.kind !== 'draw')
+    .map((b) => ({
+      ...b.blocker,
+      reason: b.draws
+        ? WORKER_DRAW_REASON
+        : b.effect === 'unknown'
+          ? 'an operation whose definition does not state its effects: it can call a closure of the host, which a worker does not have'
+          : 'an operation with an effect that the effect facts do not name: a worker may not provide it',
+    }));
 
   const inPlace = inPlaceUpdates(program);
   const initials = consumableLoopInitials(program);
@@ -285,6 +316,16 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
     if (op.kind === 'capture' && typeof op.snapshot !== 'number')
       portable.push(
         blocker(op, fn, 'a capture that is not a snapshot of a number')
+      );
+    if (op.kind === 'draw' || op.kind === 'seeded')
+      portable.push(
+        blocker(
+          op,
+          fn,
+          op.kind === 'draw'
+            ? WORKER_DRAW_REASON
+            : 'a seeded region of the random stream of the engine, whose frames the runtime of a worker does not have: the stream is not portable'
+        )
       );
   });
 
@@ -325,41 +366,79 @@ function blocker(
  * functions that it calls: in each region, the deepest operation that has
  * the effect. An operation with regions, or a call, that is not `pure` is
  * reported only when nothing that it evaluates is (its effect then is its
- * own). Each function is visited once.
+ * own). In the body of a `seeded` region a draw is discharged and is not
+ * reported (`onlyRandom()`). Each function is visited once, or once in and
+ * once out of a seeded region, and each operation is reported once.
  */
 function effectBlockers(
   program: IRProgram
-): { blocker: ExecutionBlocker; effect: 'effectful' | 'unknown' }[] {
+): {
+  blocker: ExecutionBlocker;
+  effect: 'effectful' | 'unknown';
+  /** The operation touches the random stream only (`onlyRandom()`). */
+  draws: boolean;
+}[] {
   const found: {
     blocker: ExecutionBlocker;
     effect: 'effectful' | 'unknown';
+    draws: boolean;
   }[] = [];
-  const visitedFunctions = new Map<number, boolean>();
-  /** Whether `region` holds an operation that is not pure; reports each. */
-  const scan = (region: IRRegion, fn: string | undefined): boolean => {
+  const visitedFunctions = new Map<string, boolean>();
+  /** Whether `region` holds an operation that is not pure; reports each.
+   *  `seeded`: the region is in the body of a `seeded` region, where a draw
+   *  is discharged: it is not reported, nor the operations that it makes
+   *  impure. */
+  const scan = (
+    region: IRRegion,
+    fn: string | undefined,
+    seeded: boolean
+  ): boolean => {
     let any = false;
     for (const op of region.operations) {
       if (op.effect === 'pure') continue;
+      if (seeded && onlyRandom(op)) continue;
       any = true;
       let inside = false;
-      for (const inner of regionsOf(op)) if (scan(inner, fn)) inside = true;
+      for (const inner of regionsOf(op))
+        if (scan(inner, fn, seeded || op.kind === 'seeded')) inside = true;
       if (op.kind === 'call') {
         const callee = program.functions[op.function];
+        const key = `${op.function}:${seeded}`;
         if (callee !== undefined) {
-          if (!visitedFunctions.has(op.function)) {
-            visitedFunctions.set(op.function, false);
-            visitedFunctions.set(op.function, scan(callee.body, callee.name));
+          if (!visitedFunctions.has(key)) {
+            visitedFunctions.set(key, false);
+            visitedFunctions.set(key, scan(callee.body, callee.name, seeded));
           }
-          if (visitedFunctions.get(op.function) === true) inside = true;
+          if (visitedFunctions.get(key) === true) inside = true;
         }
       }
-      if (!inside)
-        found.push({ blocker: blocker(op, fn, ''), effect: op.effect });
+      // A function scanned in and out of a seeded region reports an
+      // operation once.
+      if (!inside && !reported.has(op)) {
+        reported.add(op);
+        found.push({
+          blocker: blocker(op, fn, ''),
+          effect: op.effect,
+          draws: onlyRandom(op),
+        });
+      }
     }
     return any;
   };
-  scan(program.root, undefined);
+  const reported = new Set<IROperation>();
+  scan(program.root, undefined, false);
   return found;
+}
+
+/** Whether the only effect of `op` is on the random stream: it is
+ *  `effectful` and touches `random` only. In a `seeded` region such an
+ *  operation is discharged (`IRSeeded`). */
+function onlyRandom(op: IROperation): boolean {
+  return (
+    op.effect === 'effectful' &&
+    op.touches?.length === 1 &&
+    op.touches[0] === 'random'
+  );
 }
 
 /**
@@ -482,9 +561,11 @@ function judgeLoop(
     const first = firstImpure(program, loop.body);
     return fail(
       first ?? loop,
-      first?.effect === 'unknown'
-        ? 'the body has an operation whose definition does not state its effects'
-        : 'the body has an operation whose definition states an effect'
+      first !== undefined && onlyRandom(first)
+        ? 'the body draws from the random stream of the engine: the values of a pass depend on the passes before it'
+        : first?.effect === 'unknown'
+          ? 'the body has an operation whose definition does not state its effects'
+          : 'the body has an operation whose definition states an effect'
     );
   }
 
@@ -534,7 +615,9 @@ function judgeLoop(
                 ? 'the body of an inner loop'
                 : outside.kind === 'build'
                   ? 'the body of a comprehension'
-                  : `an operand of ${outside.kind}`
+                  : outside.kind === 'seeded'
+                    ? 'the body of a seeded region'
+                    : `an operand of ${outside.kind}`
             }`
           );
           return;
@@ -652,18 +735,23 @@ function judgeLoop(
  *  is not. */
 function firstImpure(
   program: IRProgram,
-  region: IRRegion
+  region: IRRegion,
+  seeded = false
 ): IROperation | undefined {
   for (const op of region.operations) {
     if (op.effect === 'pure') continue;
+    // A draw in a seeded region is discharged (`effectBlockers()`).
+    if (seeded && onlyRandom(op)) continue;
     for (const inner of regionsOf(op)) {
-      const found = firstImpure(program, inner);
+      const found = firstImpure(program, inner, seeded || op.kind === 'seeded');
       if (found !== undefined) return found;
     }
     if (op.kind === 'call') {
       const callee = program.functions[op.function];
       const found =
-        callee === undefined ? undefined : firstImpure(program, callee.body);
+        callee === undefined
+          ? undefined
+          : firstImpure(program, callee.body, seeded);
       if (found !== undefined) return found;
     }
     return op;

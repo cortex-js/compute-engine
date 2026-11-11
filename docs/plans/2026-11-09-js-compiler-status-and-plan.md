@@ -881,6 +881,11 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `4422cd7bf64eca17935bd7655e6a5f0a972a3199` | A call of a user function with no declared signature, by the rule of the root; the body of a helper is rewritten for `ce.angularUnit` (it was compiled in radians) |
 | `07a20e284a8282d60f158840c7cb69f3262d571f` | The shadow measure (`CE_JS_PROFILE_SHADOW=1`, [description](2026-11-10-js-profile-first-consumer.md)) |
 | `29ee7c0f7aa216b3c5bf05b125393ef6b4a5828c` | Complex arithmetic ([design and result](2026-11-10-structured-complex-arithmetic.md)) |
+| `6ac31a524af52fecc8744852886ebaba2fac18c8` | `Which`, `If(c, v)` as a value, `Sum` and `Product` over `Limits` clauses |
+| `6ebc2b1574cd75487533e999288fe7339ea71228` | `Power` and `Root` of two number literals; a `Block` at the root; a real product with a quotient factor evaluated as the existing code does (the doubles differed in the last place before); refusals for nodes that the existing compiler puts on the complex lane |
+| `a50de59f9910c56ab46f95d85f71d1c5edc60ddb` | The random differential tester `scripts/js-profile-fuzz.ts` ([description](2026-11-10-js-profile-first-consumer.md)) |
+| `1c448807b4e9fc40fbb33c2b72babd151cb505a7` | A subexpression reached several times is lowered once ([design and result](2026-11-11-structured-shared-subexpressions.md)); CE-1198 fixed |
+| `eac9ab939ef63e0914ba506454feb3d821c293ed` | Names declared `number` ([options and bindings](2026-11-11-structured-options-and-bindings.md), slice 1) |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -897,6 +902,8 @@ clean worktree):
 | `04c9bd783279d05a2d60eb13a1f281a06731ebf8` (start) | 4,621 of 6,203 (74%) | 82,947 passed, 1 timeout (CE-1197) |
 | `5f5acea425bb8347bf401aa476b7fc23c0a94991` | 5,335 of 6,199 (86%) | 83,326 passed, 1 timeout (CE-1197) |
 | `4422cd7bf64eca17935bd7655e6a5f0a972a3199` | 5,375 of 6,192 (87%) | 83,353 passed, 0 failed |
+| `6ac31a524af52fecc8744852886ebaba2fac18c8` | 5,614 of 6,204 (90%) | 83,671 passed, 1 failed (CE-1186, a known flaky test) |
+| `eac9ab939ef63e0914ba506454feb3d821c293ed` | 8,711 of 9,234 (94%) | 85,729 passed, 0 failed |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -904,6 +911,20 @@ census was not run again: none of these changes is in the list of what blocks
 the 15 prelude functions.
 
 ### The gap to retirement: every JavaScript compilation of the suite
+
+The shadow measure over the full suite, at three commits (compilations that
+the existing compiler compiles, and those of them that the profile admits):
+
+| Commit | All | Public `compile()` calls |
+| --- | --- | --- |
+| `07a20e284a8282d60f158840c7cb69f3262d571f` | 8,465 of 22,739 (37%) | 3,070 of 16,539 (19%) |
+| `6ebc2b1574cd75487533e999288fe7339ea71228` | 15,704 of 27,945 (56%) | 7,009 of 18,724 (37%) |
+| `eac9ab939ef63e0914ba506454feb3d821c293ed` | 17,057 of 29,322 (58%) | 8,338 of 20,094 (41%) |
+
+The number of compilations grows because each change adds tests. The table
+of causes below is the first measure; the design notes of 2026-11-11
+(collections and lambdas, the `bigint` mode, options and bindings, `Random`
+and effects) hold the witnesses of each cause.
 
 The shadow measure at `07a20e284a8282d60f158840c7cb69f3262d571f` (before the
 complex arithmetic), full suite: of 22,739 JavaScript compilations that the

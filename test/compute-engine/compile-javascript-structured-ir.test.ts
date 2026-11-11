@@ -14,6 +14,7 @@ import {
   type RepresentationPolicy,
 } from '../../src/compute-engine/compilation/structured-verify';
 import {
+  touchesField,
   type EffectFact,
   type IROperation,
   type IRProgram,
@@ -426,6 +427,7 @@ function madeProgram() {
   const region = (operations: Op[], effect: EffectFact = 'pure'): IRRegion => ({
     operations,
     effect,
+    ...touchesField(...operations.map((op) => op.touches)),
   });
   const yieldOf = (v: IRValue): Op => ({ kind: 'yield', operands: [v], effect: 'pure', origin });
   const condition = value('boolean');
@@ -478,7 +480,7 @@ function madeFunctionProgram() {
   const p = m.value('real');
   const traced = m.value('real');
   const fnOps: Op[] = [
-    { kind: 'trace', trace: 't', result: traced, operands: [p], effect: 'effectful', origin: m.origin },
+    { kind: 'trace', trace: 't', result: traced, operands: [p], effect: 'effectful', touches: ['console'], origin: m.origin },
     m.yieldOf(traced),
   ];
   const fn = {
@@ -496,6 +498,7 @@ function madeFunctionProgram() {
     result: called,
     operands: [x],
     effect: 'effectful' as EffectFact,
+    touches: ['console'],
     origin: m.origin,
   };
   const rootOps: Op[] = [
@@ -606,6 +609,7 @@ describe('the verifier', () => {
       result: m.value('real'),
       operands: [m.condition],
       effect: 'effectful',
+      touches: ['console'],
       origin: m.origin,
     });
     const program = { ...m.program, root: m.region(m.rootOps, 'effectful') };
@@ -617,7 +621,7 @@ describe('the verifier', () => {
   test('an if whose effect is weaker than its region', () => {
     const m = madeProgram();
     m.thenOps.splice(1, 0, {
-      kind: 'trace', trace: 't', result: m.value('real'), operands: [m.x], effect: 'effectful', origin: m.origin,
+      kind: 'trace', trace: 't', result: m.value('real'), operands: [m.x], effect: 'effectful', touches: ['console'], origin: m.origin,
     });
     const conditional = m.rootOps[1] as Extract<Op, { kind: 'if' }>;
     m.rootOps[1] = { ...conditional, then: m.region(m.thenOps, 'effectful') };
@@ -644,7 +648,7 @@ describe('the verifier', () => {
     const x = m.value('real');
     const restOps: Op[] = [
       { kind: 'input', input: 1, result: x, operands: [], effect: 'pure', origin: m.origin },
-      { kind: 'trace', trace: 't', result: m.value('real'), operands: [x], effect: 'effectful', origin: m.origin },
+      { kind: 'trace', trace: 't', result: m.value('real'), operands: [x], effect: 'effectful', touches: ['console'], origin: m.origin },
       { kind: 'input', input: 0, result: second, operands: [], effect: 'pure', origin: m.origin },
       m.yieldOf(second),
     ];
@@ -887,6 +891,7 @@ describe('the verifier', () => {
       result: traced,
       operands: [m.one],
       effect: 'effectful',
+      touches: ['console'],
       origin: m.origin,
     });
     // The else region still says `pure`.

@@ -372,6 +372,8 @@ const EXPRESSIONS: [string, MathJsonExpression][] = [
   ['(x, y)', ['Tuple', 'x', 'y']],
   ['Random()', ['Random']],
   ['x + Random()', ['Add', 'x', ['Random']]],
+  ['RandomChoice(L, 2)', ['RandomChoice', 'L', 2]],
+  ['x + Random(Range(1, k))', ['Add', 'x', ['Random', ['Range', 1, 'k']]]],
   ['Integrate(Sin(x), x)', ['Integrate', ['Sin', 'x'], 'x']],
   ['Sum(j, j = 1..5)', ['Sum', 'j', ['Limits', 'j', 1, 5]]],
   ['Gamma(x)', ['Gamma', 'x']],
@@ -435,6 +437,10 @@ const EXPRESSIONS: [string, MathJsonExpression][] = [
   [
     'a ↦ a + Random()',
     fn([['Add', 'a', ['Random']]], ['a', 'real']),
+  ],
+  [
+    'A ↦ RandomChoice(A, 2)[1]',
+    fn([['At', ['RandomChoice', 'A', 2], 1]], ['A', 'list<real>']),
   ],
   [
     'a ↦ (a, a)',
@@ -583,7 +589,10 @@ describe('canCompile() and compile() agree', () => {
     // A name declared with a type that the profile has no kind for.
     ce.declare('u', 'any');
     const cases: [MathJsonExpression, Partial<CompileDiagnostic>][] = [
-      [['Add', 'x', ['Random']], { operator: 'Random', value: 'Random()' }],
+      [
+        ['RandomChoice', 'L', 2],
+        { operator: 'RandomChoice', value: 'RandomChoice(L, 2)' },
+      ],
       [
         ['Integrate', ['Sin', 'x'], 'x'],
         { operator: 'Integrate' },
@@ -690,17 +699,20 @@ describe('the example of the spec', () => {
     });
   });
 
-  test('a function that calls Random() declines with outside-profile, naming Random', () => {
+  test('a function that calls Random() compiles, not pure and not shippable', () => {
     const other = engineWith(OTHER_PRELUDE);
     const jitter = literal(other, 'jitter');
     const got = outcome(jitter);
-    expect('diagnostic' in got && got.diagnostic).toMatchObject({
-      code: 'outside-profile',
-      operator: 'Random',
+    expect('result' in got && got.result).toMatchObject({
+      success: true,
+      profile: 'numeric-kernel',
+      pure: false,
+      shippable: false,
     });
     expect(canCompile(jitter, PROFILE as never)).toEqual({
-      ok: false,
-      diagnostic: 'diagnostic' in got ? got.diagnostic : undefined,
+      ok: true,
+      pure: false,
+      shippable: false,
     });
   });
 
@@ -753,7 +765,7 @@ describe('the fields of the result', () => {
     const ce = engine();
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const result = compile(ce.expr(['Add', 'x', ['Random']]), PROFILE);
+      const result = compile(ce.expr(['RandomChoice', 'L', 2]), PROFILE);
       expect(result.success).toBe(false);
       expect(result.profile).toBeUndefined();
       expect(result.pure).toBeUndefined();
@@ -912,7 +924,7 @@ describe('the options', () => {
   });
 
   test('fallback: a decline gives the interpreter, or throws', () => {
-    const declined = ce.expr(['Add', 'x', ['Random']]);
+    const declined = ce.expr(['RandomChoice', 'L', 2]);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       for (const fallback of [undefined, true]) {
@@ -920,7 +932,7 @@ describe('the options', () => {
         expect(result.success).toBe(false);
         expect(result.diagnostic).toMatchObject({
           code: 'outside-profile',
-          operator: 'Random',
+          operator: 'RandomChoice',
         });
         expect(typeof result.run).toBe('function');
       }

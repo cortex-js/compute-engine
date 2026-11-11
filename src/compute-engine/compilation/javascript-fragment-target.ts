@@ -97,14 +97,20 @@ import {
   type ScalarFragmentCapture,
 } from './javascript-fragment-facts.js';
 import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
-import { isPureComputedEffects } from '../../common/type/effects.js';
-import type { EffectFact } from './structured-ir.js';
+import {
+  isCoFiniteEffects,
+  isImpurityLabel,
+  isPureComputedEffects,
+} from '../../common/type/effects.js';
+import type { EffectFact, IRState } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import {
+  literalSeedOf,
   lowerStructuredProgram,
   piMultipleFactor,
   powerForm,
   preparedNodesOf,
+  randomDomainOf,
   recordStructuredPreparation,
   STRUCTURED_OPERATION_LIMIT,
   StructuredLimitError,
@@ -265,13 +271,15 @@ function operandFacts(
  * the captures `N = 1/3` and `M = 3333333333333333/10^16`, `Less(M, N)` is
  * `true`, and the comparison of their doubles is `false`. The refusal is
  * wider than that rule, which keeps the code of a node with a float literal
- * or of integer literals only.
+ * or of integer literals only. A node that is not pure (`Less(Random(),
+ * 1/2)`) is not refused: the fold evaluates only a pure node
+ * (`constantFoldValue()`), so the existing compiler writes its code.
  */
 function closedJumpRefusal(
   operator: string,
   node: Expression
 ): string | undefined {
-  return node.unknowns.length === 0
+  return node.unknowns.length === 0 && node.isPure
     ? `${operator} reads no input, parameter or local: the existing compiler ` +
         `folds it with the exact value of its operands (closedExactJump())`
     : undefined;
@@ -601,7 +609,13 @@ function inexactJumpConstant(
     node: Expression,
     parent: Expression | undefined
   ): Expression | undefined => {
-    if (!hasUnknownsWithMemo(node, unknowns)) {
+    // A closed node that is not pure (`6·Random()`) is not a constant: the
+    // existing compiler folds only a pure node and writes the code of this
+    // one, whose operands are judged in turn.
+    if (
+      !hasUnknownsWithMemo(node, unknowns) &&
+      (!isFunction(node) || node.isPure)
+    ) {
       if (isNumber(node))
         return exact(node) || divisionFactor(node, parent) ? undefined : node;
       // `True` and `False` are not numbers: the rule of `Floor` refuses a
@@ -2246,6 +2260,17 @@ function structuredRootRule(
  */
 function admittedOperands(node: Expression): readonly Expression[] {
   if (!isFunction(node)) return [];
+  // The domain of `Random` is not a value (`randomRule`), and a literal
+  // seed of `WithRandomSeed` is no read (`literalSeedOf()`).
+  if (node.operator === 'Random' && isLibraryOperator(node, 'Random'))
+    return [];
+  if (
+    node.operator === 'WithRandomSeed' &&
+    isLibraryOperator(node, 'WithRandomSeed') &&
+    node.nops === 2 &&
+    literalSeedOf(node.op1) !== undefined
+  )
+    return [node.op2];
   return powerForm(node) === 'exp' ? [node.op2] : node.ops;
 }
 
@@ -2269,6 +2294,7 @@ function modeRules(
     Abs: structuredFunctionRule('Abs', mode, forms),
     Arctan2: structuredFunctionRule('Arctan2', mode, forms),
     Log: structuredLogRule(mode, snapshotOf, forms),
+    WithRandomSeed: seededRule(mode),
     ...Object.fromEntries(
       Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [
         head,
@@ -2355,6 +2381,10 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
     walk: (node, scope, context, w) => notRule.walk(node, scope, context, w),
   },
   Typed: withoutMode('Typed'),
+  Random: {
+    walk: (node, scope, context, w) => randomRule.walk(node, scope, context, w),
+  },
+  WithRandomSeed: withoutMode('WithRandomSeed'),
 };
 
 /** The heads whose rule reads a list operand itself; every other rule of
@@ -3312,6 +3342,131 @@ const notRule = {
 } satisfies FragmentRule<ScalarRepresentation>;
 
 /**
+ * `Random()`, `Random(Interval(a, b))` and `Random(Range(…))` with literal
+ * parameters (`randomDomainOf()`): a real result, an integer one for a
+ * `Range`. The domain is not a value: it has no facts and no operation. The
+ * lowering writes one draw and the arithmetic of the existing emitter
+ * around it (`draw()` in `javascript-structured-lower.ts`). Refused: a
+ * domain with a symbol or a list, which the existing emitter draws from at
+ * run time (`_SYS.domainInterval`, `_SYS.domainRange`, `_SYS.domainList`),
+ * and an empty or unbounded domain, which it refuses at compile time.
+ */
+const randomRule = {
+  walk: (node, _scope, _context, w) => {
+    const domain = randomDomainOf(node);
+    if (domain === undefined)
+      return w.refuse(
+        node,
+        'signature',
+        `${nodeText(node)} is not in the structured route, which admits Random() and Random with a literal Interval or Range: ` +
+          `another domain is drawn from at run time (a domain of the runtime, _SYS.domain*)`
+      );
+    return w.valueFacts(node, {
+      kind: domain.kind === 'range' ? 'integer' : 'real',
+    });
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
+
+/**
+ * `WithRandomSeed(seed, body)` in the compile mode `mode`: the body
+ * evaluated once with a new frame of the random stream, the structured
+ * form `seeded` (`IRSeeded`). The seed is a string or a finite real number
+ * literal (no facts, no operation: `literalSeedOf()`), or a value with a
+ * real or an integer fact, or a complex one in the `complex` mode, which
+ * the runtime helper reads as its real part when its imaginary part is 0.
+ * The body is a scalar: its facts are the facts of the node, but for the
+ * lane of the node. The existing compiler reads the node on the lane of
+ * its type (`isComplexValued()`), and its handler writes the body on the
+ * lane of the body. For a real body:
+ *
+ * - In the `strict` mode a type that, without its infinities and `NaN`, is
+ *   one of numbers that are not real is the complex lane: the parent reads
+ *   the parts of the number that the call gives, `NaN` where the
+ *   interpreter has a finite value (`WithRandomSeed(3, ln(x)) + x`, of the
+ *   type `complex | signed_infinity`), which the route does not copy:
+ *   refused. Every other type is the real lane.
+ * - In the `complex` mode a real type (`signed_infinity` too) is the real
+ *   lane. A wide type (`number`, a type of numbers that are not real, a
+ *   type that holds every complex number: `wideNumericType()`) is the
+ *   complex lane, where the handler writes `_SYS.cplx()` around the call
+ *   (`WithRandomSeed(42, x^1.6)` has the type `number`): the route converts
+ *   the value of the body to complex in the region, the same
+ *   `{re, im: 0}`. Another type (`integer | missing`) is refused, as is a
+ *   seed that is not real, which the reader of the existing compiler can
+ *   also read.
+ *
+ * Refused also: a seed of another fact (a boolean, a list, a complex one in
+ * the `strict` mode), a string seed that is not a literal (the
+ * representation has no string values), a body that is a list.
+ */
+function seededRule(mode: 'strict' | 'complex') {
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || node.nops !== 2)
+        return w.refuse(
+          node,
+          'signature',
+          'WithRandomSeed with other than a seed and a body is not in the structured route'
+        );
+      const literal = literalSeedOf(node.op1) !== undefined;
+      const conversions: FragmentConversion<ScalarRepresentation>[] = [];
+      let seedKind: string | undefined;
+      if (!literal) {
+        const seed = w.value(node.op1, scope, context);
+        const kind = seed.type.kind;
+        seedKind = kind;
+        if (
+          kind !== 'real' &&
+          kind !== 'integer' &&
+          !(kind === 'complex' && mode === 'complex')
+        )
+          return w.refuse(
+            node,
+            'signature',
+            `WithRandomSeed with the seed ${nodeText(node.op1)} of the type ${kind} is not in the structured route, ` +
+              `which admits a real seed, a complex one in the complex mode, and a literal number or string`
+          );
+        conversions.push(w.convert(seed, seed.type)!);
+      }
+      const body = w.value(node.op2, scope, context);
+      if (body.type.kind === 'list')
+        return w.refuse(
+          node,
+          'signature',
+          'WithRandomSeed with a list body is not in the structured route, whose seeded region yields one scalar'
+        );
+      const type = node.type.type;
+      if (body.type.kind !== 'complex' && mode === 'strict') {
+        if (isNonRealNumber(finitePartOfType(type)))
+          return w.refuse(
+            node,
+            'signature',
+            `WithRandomSeed of the type ${node.type.toString()} with a real body is not in the structured route: ` +
+              `the existing compiler reads the parts of a complex value from the number that the body gives`
+          );
+      } else if (
+        body.type.kind !== 'complex' &&
+        body.type.kind !== 'boolean' &&
+        !isSubtype(type, 'real')
+      ) {
+        const wide = isNonRealNumber(type) || isSubtype('complex', type);
+        if (!wide || seedKind === 'complex')
+          return w.refuse(
+            node,
+            'signature',
+            `WithRandomSeed of the type ${node.type.toString()} with a real body is not in the structured route ` +
+              `in the complex mode: the structured route does not read the lane that the existing compiler gives it`
+          );
+        conversions.push(w.convert(body, { kind: 'complex' })!);
+        return w.valueFacts(node, { kind: 'complex' }, conversions);
+      }
+      conversions.push(w.convert(body, body.type)!);
+      return w.valueFacts(node, body.type, conversions);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/**
  * `Typed(value, T)` on the structured route, which the admission admits
  * only around the value of a function body (`executeEpsil()` writes the
  * body of a function `f(…) -> T` as `Block(Typed(value, T))`): the fact of
@@ -3647,6 +3802,195 @@ function effectFacts(
   return result;
 }
 
+/**
+ * The states that each node of `annotation` whose effect fact is not `pure`
+ * touches itself (`StructuredPreparation.states`): the impurity labels of
+ * its effects (`shallowApplicationEffects()`). On the structured route a
+ * node whose effects name a label other than `random`, or are unknown
+ * (`any`, or a set that is not finite), is refused, so every effect that
+ * the program has is a draw from the random stream. A head of the test
+ * operation (`testOperations`) keeps the effects of its declaration, and a
+ * call of a helper (`helpers`) the effects of its body, whose nodes have
+ * this rule, and the `random` that its signature can state
+ * (`resolveHelper()`).
+ */
+function stateFacts(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  testOperations: ReadonlyMap<string, string>,
+  helpers: ReadonlyMap<string, ResolvedHelper>
+): Map<Expression, IRState[]> {
+  const result = new Map<Expression, IRState[]>();
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const node of scope.facts.keys()) {
+      if (result.has(node) || !isFunction(node)) continue;
+      const effects = shallowApplicationEffects(node);
+      if (isPureComputedEffects(effects)) continue;
+      const test =
+        testOperations.has(node.operator) || helpers.has(node.operator);
+      if (effects === 'any' || isCoFiniteEffects(effects)) {
+        if (test) continue;
+        throw new Error(
+          `JS scalar fragment: ${nodeText(node)} has effects that its definition does not state, which the structured route does not have`
+        );
+      }
+      const labels = (effects ?? []).filter(isImpurityLabel);
+      const other = labels.filter((label) => label !== 'random');
+      if (other.length > 0 && !test)
+        throw new Error(
+          `JS scalar fragment: ${nodeText(node)} has the effect ${other.join(', ')}, which the structured route does not have: it has draws from the random stream only`
+        );
+      result.set(node, [...labels].sort());
+    }
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+  return result;
+}
+
+/**
+ * Throw for a draw in an operand of a `Comprehension` of `annotation` (its
+ * body, or a domain and its bounds), outside a `WithRandomSeed` there: the
+ * interpreter's comprehension is a lazy view that evaluates its body and
+ * its domain when the list is read (`docs/RANDOMNESS-MODEL.md` §6), and
+ * the structured route makes the list at once (`build`), so the count and
+ * the order of the draws would differ: `Comprehension(j, Element(j,
+ * Range(1, 2 + Random(Range(1, 3)))))` followed by `r := Random()` draws
+ * `r` first in the interpreter. A draw is a `Random` node, or a call of a
+ * helper whose body draws or whose signature states `random` (`helpers`).
+ * The other constructs that the route admits evaluate their operands when
+ * the existing code does (the bounds and the body of a `Loop`, `ReplaceAt`,
+ * `At`, the arguments of a helper, which are evaluated once before the
+ * call, an initializer that is not read, the branches of `If`).
+ */
+function refuseLazyDraws(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  helpers: ReadonlyMap<string, ResolvedHelper>
+): void {
+  const { draws } = drawReaders(helpers);
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const node of scope.facts.keys())
+      if (isFunction(node, 'Comprehension') && node.ops.some(draws))
+        throw new Error(
+          `JS scalar fragment: the comprehension ${nodeText(node)} draws from the random stream: ` +
+            `the interpreter's comprehension is a lazy view that draws when an element is read, ` +
+            `and the structured route makes the list at once`
+        );
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+}
+
+/**
+ * Throw for a program of `annotation` that draws two or more times (a
+ * count of the tree: a node object reached twice draws twice) when one of
+ * the draws is a node on the complex lane (its facts are complex) or is in
+ * one. The existing emitter binds the value of a complex operand to a local
+ * ahead of the code that it writes inline for the other operands of the
+ * expression: `Random() + Sqrt(Random(Range(-2, 8, 2)))` in the `complex`
+ * mode draws for the square root first, and the structured route draws in
+ * the order of the operands. A body of a helper is checked on its own, and
+ * a call of a helper whose body draws is a draw of its caller. A draw in a
+ * `WithRandomSeed` counts with the others. This is the simple, sound form
+ * of the rule: a program whose second draw is in another statement, which
+ * the existing emitter does not reorder, is refused too.
+ */
+function refuseHoistedDraws(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  helpers: ReadonlyMap<string, ResolvedHelper>
+): void {
+  const { isDraw } = drawReaders(helpers);
+  const complex = new Set<Expression>();
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const [node, facts] of scope.facts)
+      if ('representation' in facts && facts.representation === 'complex')
+        complex.add(node);
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+  /** For each node object: its draws (at most 2) and whether one of them is
+   *  on the complex lane. A memo by node keeps the walk linear. */
+  const memo = new Map<Expression, { count: number; complex: boolean }>();
+  const summary = (node: Expression): { count: number; complex: boolean } => {
+    const known = memo.get(node);
+    if (known !== undefined) return known;
+    let count = 0;
+    let lane = false;
+    if (isFunction(node)) {
+      if (isDraw(node)) count = 1;
+      for (const op of node.ops) {
+        const s = summary(op);
+        count = Math.min(2, count + s.count);
+        lane ||= s.complex;
+      }
+      if (count > 0 && complex.has(node)) lane = true;
+    }
+    const result = { count, complex: lane };
+    memo.set(node, result);
+    return result;
+  };
+  const check = (body: Expression) => {
+    const s = summary(body);
+    if (s.count >= 2 && s.complex)
+      throw new Error(
+        `JS scalar fragment: ${nodeText(body)} draws more than once, and a draw is in a complex value: ` +
+          `the existing emitter evaluates a complex operand before the operands that it writes inline, ` +
+          `so the order of the draws would differ`
+      );
+  };
+  check(annotation.root);
+  for (const helper of helpers.values()) check(helper.body);
+}
+
+/**
+ * The readers of draws for the helpers `helpers`: `isDraw(node)`, for a
+ * `Random` node or a call of a helper whose body draws or whose signature
+ * states `random`, and `draws(node)`, for a node that has such a node
+ * outside the body of a `WithRandomSeed`.
+ */
+function drawReaders(helpers: ReadonlyMap<string, ResolvedHelper>): {
+  isDraw: (node: Expression) => boolean;
+  draws: (node: Expression) => boolean;
+} {
+  const memo = new Map<string, boolean>();
+  /** The answer of `draws()` for each node object: a shared node is
+   *  visited once, so the walk is linear in the number of nodes. */
+  const drawsMemo = new Map<Expression, boolean>();
+  const helperDraws = (name: string): boolean => {
+    const known = memo.get(name);
+    if (known !== undefined) return known;
+    memo.set(name, false);
+    const helper = helpers.get(name)!;
+    const signature = isFunction(helper.literal)
+      ? userFunctionSignature(helper.literal.engine, name)
+      : undefined;
+    const declared =
+      Array.isArray(signature?.effects) && signature.effects.includes('random');
+    const result = declared || draws(helper.body);
+    memo.set(name, result);
+    return result;
+  };
+  const isDraw = (node: Expression): boolean =>
+    isFunction(node) &&
+    (node.operator === 'Random' ||
+      (helpers.has(node.operator) && helperDraws(node.operator)));
+  const draws = (node: Expression): boolean => {
+    if (!isFunction(node)) return false;
+    const known = drawsMemo.get(node);
+    if (known !== undefined) return known;
+    const result =
+      isDraw(node) ||
+      (node.operator === 'WithRandomSeed' && node.nops === 2
+        ? draws(node.op1)
+        : node.ops.some(draws));
+    drawsMemo.set(node, result);
+    return result;
+  };
+  return { isDraw, draws };
+}
+
 /** The node that a refusal of the admission or of the annotation is about,
  *  with the head or the name that the diagnostic reports. */
 type RefusedNode = {
@@ -3857,6 +4201,13 @@ function recordStructured(
 ): void {
   const registry = prepared.named.structured;
   if (!admission.structured || registry === undefined) return;
+  const states = stateFacts(
+    prepared.annotation,
+    admission.testOperations,
+    registry.helpers
+  );
+  refuseLazyDraws(prepared.annotation, registry.helpers);
+  refuseHoistedDraws(prepared.annotation, registry.helpers);
   const inputs = prepared.inputs();
   const preparation: StructuredPreparation = {
     root: prepared.root,
@@ -3885,6 +4236,7 @@ function recordStructured(
         .map((helper) => helper.name),
     ],
     effects: effectFacts(prepared.annotation),
+    states,
     testOperations: admission.testOperations,
     forms: registry.forms,
     numericPolicy: registry.mode,
@@ -6445,9 +6797,23 @@ function resolveHelper(
     throw new Error(
       `JS scalar fragment: the helper ${call.operator} has a type parameter`
     );
-  if (signature.effects?.length)
+  // The structured route admits a helper whose signature states `random`:
+  // its calls draw from the random stream (`IRCall`), in the order of the
+  // program.
+  const effects = signature.effects;
+  if (
+    effects?.length &&
+    !(
+      registry !== undefined &&
+      Array.isArray(effects) &&
+      effects.every((label) => label === 'random')
+    )
+  )
     throw new Error(
-      `JS scalar fragment: the helper ${call.operator} is not pure: its signature has effects`
+      `JS scalar fragment: the helper ${call.operator} is not pure: its signature has effects` +
+        (registry !== undefined
+          ? ` other than random (${Array.isArray(effects) ? effects.filter((l) => l !== 'random').join(', ') : 'any'})`
+          : '')
     );
   if (!inferred && !bodyResult && !result)
     throw new Error(

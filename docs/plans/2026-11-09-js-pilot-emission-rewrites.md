@@ -254,6 +254,22 @@ type of the node (`ScalarFunctionLane` in `javascript-fragment-target.ts`).
 | `Log` | One operand (base 10), or the literal base 10 or 2 (`fixedLogBase()`): `Math.log10(x)` or `Math.log2(x)`; on the complex lane `_SYS.clog10` or `_SYS.clog2` of the operand, converted when it is real. Another base: `(Math.log(x) / Math.log(b))`, on the complex lane a complex quotient of `_SYS.cln`. The lane is the rule of `Sqrt` and `Ln` for every operand (`isComplexValued()`, `promotesToComplexLane()`). | The rule of `Ln` (`radicalLane()`) for the first operand with a fixed base, for both operands with another base. Fixed base: the same calls (`log10`, `log2`). Another base, both operands real: the quotient of two `ln`, the same doubles; complex: declined. A complex operand: declined. |
 | `LogGamma` | No lowering on the JavaScript target: the existing compiler declines (`no lowering for it`). | Declined (`unsupported head`), as before. |
 
+### Random draws and seeded regions
+
+Read from the handlers `Random` and `WithRandomSeed` of
+`javascript-target.ts` at `6ac31a524` (2026-11-11), with
+`cse: false, constantFold: false`; the design is
+[2026-11-11-structured-random-and-effects.md](2026-11-11-structured-random-and-effects.md)
+and the tests are
+`test/compute-engine/compile-javascript-structured-random.test.ts`.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `Random` | No domain: `_SYS.drawNextRandomNumber()`, which reads the frame of the engine when the code runs. A literal `Interval(a, b)` (`interval()`, an `Open` or `Closed` marker ignored): `(a + u * w)` with the double `w = b - a` written as a literal; an unbounded or empty interval throws at compile time (`assertDrawableInterval()`). A literal `Range` (`literalRangeParams()`): `(first + step * Math.floor(u * n))`; an empty range throws (`assertDrawableRange()`). Another domain: `_SYS.randomPick()` of a run-time descriptor (`_SYS.domainRange`, `_SYS.domainList`, `_SYS.domainInterval`). | No domain: one `draw` (`effectful`, the state `random`), a `const` at its position. A literal `Interval` with number literal endpoints and a literal `Range` whose first element and step are safe integers (`randomDomainOf()`): the same arithmetic around one `draw`, the same doubles. Another domain, a `Range` with a step that is not an integer: declined (`outside-profile`, "drawn from at run time"). |
+| `WithRandomSeed` | `_SYS.withRandomSeed(seed, () => body)`, which installs a frame and restores the frame of the caller in a `finally`; a seed and a body that read no value of a call are a preamble memo, computed once per compiled artifact (`hoistSeededDraw()`). | A `seeded` region: `_SYS.withRandomSeed(seed, () => { …; return v; })` at its position, with the same seed (a number or string literal, a real input, a complex input in the `complex` mode). The region runs at each call: the memo gives the same value. Its effect is that of its body without `random`. A boolean seed, a complex seed in the `strict` mode, a seed that is a string expression, a list body: declined. The lane is that of the type of the node (`isComplexValued()`), and the handler writes the body on its own lane: in the `complex` mode a real body of a wide type (`number`) is converted to complex in the region, as `_SYS.cplx()` does around the call; a real body of another type that is not real (`integer \| missing`), and in the `strict` mode a real body of a type of numbers that are not real (`ln(x)`, whose parent reads the parts of a number), are declined. |
+| A complex operand next to inline code | A complex value is bound to a `const` ahead of the expression, and a real operand is written inline in the `re` part (`{ re: <real> + _tv1.re, im: _tv1.im }`), so the complex operand is evaluated first. | Declined when the program draws two or more times and a draw is in a complex value (`refuseHoistedDraws()`); one draw, or draws only in real values, are admitted. |
+| A closed jump node that draws (`Less(Random(), 1/2)`, `Floor(6·Random())`) | `closedExactJump()` answers true, but the fold evaluates only a pure node (`constantFoldValue()`), so the code is the structural code. | The structural code: `closedJumpRefusal()` and `inexactJumpConstant()` do not refuse a node that is not pure. |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a

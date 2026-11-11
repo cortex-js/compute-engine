@@ -92,6 +92,17 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'replace-at': { results: ['array'], operands: ['array', 'number'] },
     // The test heads take real operands and have a real value.
     'trace': { results: ['number'], operands: ['number'] },
+    // `_SYS.drawNextRandomNumber()`, a number, as the existing emitter
+    // writes `Random()`.
+    'draw': { results: ['number'], operands: [] },
+    // `_SYS.withRandomSeed(seed, () => { …; return value; })`, the closure
+    // of the existing emitter: a real seed is a number, a complex one an
+    // `{re, im}` object, which the helper reads as its real part when its
+    // imaginary part is 0. The result is the scalar value of the body.
+    'seeded': {
+      results: ['number', 'boolean', 'complex'],
+      operands: ['number', 'complex'],
+    },
   },
   // The emitter writes each function as the existing emitter writes it for
   // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):

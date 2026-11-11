@@ -503,7 +503,7 @@ describe('laziness and order, with the test operation', () => {
     const value = (): IRValue => ({ owner, revision: 1, id: id++, type: 'real', representation: 'number' });
     const [x1, t1, v, x2, t2, sum] = [value(), value(), value(), value(), value(), value()];
     const read = (input: number, result: IRValue): IROperation => ({ kind: 'input', input, result, operands: [], effect: 'pure', origin });
-    const trace = (result: IRValue, x: IRValue): IROperation => ({ kind: 'trace', trace: 'trace', result, operands: [x], effect: 'effectful', origin });
+    const trace = (result: IRValue, x: IRValue): IROperation => ({ kind: 'trace', trace: 'trace', result, operands: [x], effect: 'effectful', touches: ['console'], origin });
     const program: IRProgram = {
       owner,
       revision: 1,
@@ -525,6 +525,7 @@ describe('laziness and order, with the test operation', () => {
           { kind: 'yield', operands: [sum], effect: 'pure', origin },
         ],
         effect: 'effectful',
+        touches: ['console'],
       },
     };
     verifyProgram(program, new Set([origin]));
@@ -568,11 +569,12 @@ describe('laziness and order, with the test operation', () => {
       root: {
         operations: [
           { kind: 'input', input: 0, result: x, operands: [], effect: 'pure', origin },
-          { kind: 'trace', trace: 'trace', result: t, operands: [x], effect: 'effectful', origin },
+          { kind: 'trace', trace: 'trace', result: t, operands: [x], effect: 'effectful', touches: ['console'], origin },
           { kind: 'negate', result: negated, operands: [t], effect: 'pure', origin },
           { kind: 'yield', operands: [negated], effect: 'pure', origin },
         ],
         effect: 'effectful',
+        touches: ['console'],
       },
     };
     verifyProgram(program, new Set([origin]));
@@ -637,6 +639,7 @@ describe('laziness and order, with the test operation', () => {
     const region = (operations: IROperation[]) => ({
       operations,
       effect: operations.some((op) => op.effect === 'effectful') ? ('effectful' as const) : ('pure' as const),
+      ...(operations.some((op) => op.effect === 'effectful') ? { touches: ['console'] } : {}),
     });
     const program = (eager: boolean): IRProgram => {
       const c = value('boolean');
@@ -645,7 +648,7 @@ describe('laziness and order, with the test operation', () => {
       const one = value('real');
       const result = value('real');
       const read: IROperation = { kind: 'input', input: 1, result: x, operands: [], effect: 'pure', origin };
-      const trace: IROperation = { kind: 'trace', trace: 'trace', result: t, operands: [x], effect: 'effectful', origin };
+      const trace: IROperation = { kind: 'trace', trace: 'trace', result: t, operands: [x], effect: 'effectful', touches: ['console'], origin };
       const then = region([...(eager ? [] : [read, trace]), yieldOf(t)]);
       const otherwise = region([
         { kind: 'literal', value: 1, result: one, operands: [], effect: 'pure', origin },
@@ -671,6 +674,7 @@ describe('laziness and order, with the test operation', () => {
             then,
             else: otherwise,
             effect: 'effectful',
+            touches: ['console'],
             origin,
           },
           yieldOf(result),

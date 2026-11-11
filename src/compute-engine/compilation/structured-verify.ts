@@ -10,14 +10,17 @@
 import type { Expression } from '../global-types.js';
 import {
   definedValues,
+  dischargedEffect,
   elementOf,
   isClosedRegion,
   joinEffects,
   operationCanAbort,
   regionsOf,
+  unionStates,
   weakerEffect,
   yieldedValues,
   type EffectFact,
+  type IRState,
   type IRExit,
   type IRLoop,
   type IROperation,
@@ -54,7 +57,14 @@ export type PolicyOperationKind =
   | 'not'
   | 'build'
   | 'replace-at'
-  | 'trace';
+  | 'trace'
+  | 'draw'
+  | 'seeded';
+
+/** The operations of `PolicyOperationKind` that a target can lack: a target
+ *  with no random stream (GLSL) has no `draw` and no `seeded`, and the
+ *  verifier refuses them there. */
+type OptionalPolicyOperationKind = 'draw' | 'seeded';
 
 /** The representations of the operands and of the result of an operation
  *  on a target. */
@@ -104,7 +114,13 @@ export type RepresentationPolicy = {
       }
     >
   >;
-  readonly operations: Readonly<Record<PolicyOperationKind, OperationRule>>;
+  readonly operations: Readonly<
+    Record<
+      Exclude<PolicyOperationKind, OptionalPolicyOperationKind>,
+      OperationRule
+    > &
+      Partial<Record<OptionalPolicyOperationKind, OperationRule>>
+  >;
   /** The functions of one or two operands that the target has
    *  (`IRUnaryFunction`, `IRBinaryFunction`), each with the representations
    *  of its operands and of its result. A function that is not listed is
@@ -176,6 +192,20 @@ export type RepresentationPolicy = {
  * real, a list of integers for a list of reals), as a value that the body
  * yields. An `if` with one closed branch has the results of its open
  * branch; an `if` with two closed branches has no result.
+ *
+ * For the states that an operation touches (`OperationBase.touches`,
+ * `verifyStates()`): a `pure` operation names none and an `effectful` one at
+ * least one; an operation with no region and no call names only its own,
+ * so an `unknown` one names none; an operation that evaluates a region or
+ * calls a function names every state of that region or of the body of that
+ * function; the states of a region are the union of the states of its
+ * operations. A `draw` has no operand, a real result, the effect
+ * `effectful` and exactly the state `random`. A `seeded` has one real seed
+ * (or complex in the `complex` mode) or a literal seed (a finite number or a
+ * string), a body with no parameter that yields one value of its result,
+ * and the effect and the states of its body without `random`
+ * (`dischargedEffect()`): it discharges `random` only, and never an `unknown`
+ * body. A target whose policy has no `draw` or no `seeded` refuses it.
  *
  * A call cycle (a function that calls itself, directly or through other
  * functions) is accepted. The summary of the effects is correct for it:
@@ -399,6 +429,7 @@ export function verifyProgram(
         'a region that is not the body of a loop or of a build has parameters'
       );
     const effects: EffectFact[] = [];
+    const states: (readonly IRState[] | undefined)[] = [];
     region.operations.forEach((op, index) => {
       const frames = [...outer, { region, index }];
       if (inFunction && op.kind === 'input')
@@ -426,13 +457,16 @@ export function verifyProgram(
           op,
           innerExits
         );
-        if (weakerEffect(op.effect, inner.effect))
+        // A `seeded` discharges `random`: `verifyStates()` checks its effect.
+        if (op.kind !== 'seeded' && weakerEffect(op.effect, inner.effect))
           fail(
             `the effect of the operation ${op.kind} (${op.effect}) omits the effect of its region (${inner.effect})`
           );
       }
       verifySignature(op, program, policy, fail);
+      verifyStates(op, program, fail);
       effects.push(op.effect);
+      states.push(op.touches);
     });
     if (!isEffect(region.effect)) fail('a region has no effect fact');
     // The abort fact, checked as the effect fact is.
@@ -450,6 +484,16 @@ export function verifyProgram(
     if (region.effect !== joined)
       fail(
         `the effect of a region (${region.effect}) does not agree with its operations (${joined})`
+      );
+    // The states of a region are the union of the states of its operations.
+    // A loop, not a spread: a region can hold more operations than a call
+    // takes arguments.
+    const all = new Set<IRState>();
+    for (const list of states) for (const s of list ?? []) all.add(s);
+    const touched = unionStates([...all]);
+    if (!sameStates(region.touches, touched))
+      fail(
+        `the states of a region (${statesText(region.touches)}) do not agree with its operations (${statesText(touched)})`
       );
   };
 
@@ -476,6 +520,85 @@ export function verifyProgram(
 
 const isEffect = (e: unknown): e is EffectFact =>
   e === 'pure' || e === 'effectful' || e === 'unknown';
+
+const statesText = (states: readonly IRState[] | undefined): string =>
+  states === undefined ? 'none' : states.join(', ');
+
+const sameStates = (
+  a: readonly IRState[] | undefined,
+  b: readonly IRState[] | undefined
+): boolean => statesText(a) === statesText(b);
+
+/**
+ * The checks of the states that `op` touches (`OperationBase.touches`): a
+ * list of states, sorted, with no duplicate, and not empty. A `pure`
+ * operation names none. An `effectful` operation names at least one. An
+ * operation with no region and no call names only its own states, so an
+ * `unknown` one names none. An operation that evaluates a region names the
+ * states of each region, and a call the states of the body of its function.
+ * A `draw` names exactly `random`. A `seeded` has the effect and the states
+ * of its body without `random` (`dischargedEffect()`): an `unknown` body is
+ * never discharged.
+ */
+function verifyStates(
+  op: IROperation,
+  program: IRProgram,
+  fail: (message: string) => never
+): void {
+  const touches = op.touches;
+  if (touches !== undefined) {
+    if (
+      !Array.isArray(touches) ||
+      touches.length === 0 ||
+      touches.some((s) => typeof s !== 'string' || s === '')
+    )
+      fail(`the operation ${op.kind} has a malformed list of states`);
+    if (!sameStates(touches, unionStates(touches)))
+      fail(
+        `the states of the operation ${op.kind} are not sorted or have a duplicate`
+      );
+  }
+  if (op.effect === 'pure' && touches !== undefined)
+    fail(
+      `the pure operation ${op.kind} touches the states ${statesText(touches)}`
+    );
+  if (op.effect === 'effectful' && touches === undefined)
+    fail(`the effectful operation ${op.kind} names no state that it touches`);
+  if (op.kind === 'draw') {
+    if (op.effect !== 'effectful' || statesText(touches) !== 'random')
+      fail(
+        `a draw has the effect ${op.effect} and the states ${statesText(touches)}, not effectful and random`
+      );
+    return;
+  }
+  if (op.kind === 'seeded') {
+    const expected = dischargedEffect(op.body.effect, op.body.touches);
+    if (op.effect !== expected.effect || !sameStates(touches, expected.touches))
+      fail(
+        `a seeded has the effect ${op.effect} and the states ${statesText(touches)}, and its body discharged gives ${expected.effect} and ${statesText(expected.touches)}`
+      );
+    return;
+  }
+  const inner = [
+    ...regionsOf(op).map((r) => r.touches),
+    ...(op.kind === 'call'
+      ? [program.functions[op.function]?.body.touches]
+      : []),
+  ];
+  if (regionsOf(op).length === 0 && op.kind !== 'call') {
+    if (op.effect === 'unknown' && touches !== undefined)
+      fail(
+        `the operation ${op.kind} of unknown effect names the states ${statesText(touches)}`
+      );
+    return;
+  }
+  for (const states of inner)
+    for (const s of states ?? [])
+      if (!(touches ?? []).includes(s))
+        fail(
+          `the states of the operation ${op.kind} (${statesText(touches)}) omit the state ${s} of its ${op.kind === 'call' ? 'function' : 'region'}`
+        );
+}
 
 /** Whether a value of the type `type` is a valid value of the type
  *  `wider`: the same type, an integer for a real, or a list of integers
@@ -527,6 +650,8 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'convert',
   'trace',
   'capture',
+  'draw',
+  'seeded',
 ]);
 
 function verifySignature(
@@ -567,7 +692,9 @@ function verifySignature(
   const operandRule = (
     kind: PolicyOperationKind
   ): readonly Representation[] => {
-    const operands = policy.operations[kind].operands;
+    const rule =
+      policy.operations[kind] ?? fail(`the target has no operation ${kind}`);
+    const operands = rule.operands;
     return operands === 'same' ? [op.result?.representation ?? ''] : operands;
   };
   // An arithmetic result is an integer only when every operand is one.
@@ -993,6 +1120,59 @@ function verifySignature(
       operandsIn(operandRule('trace'));
       resultIn(policy.operations.trace.results);
       return;
+    case 'draw': {
+      // The states and the effect are checked by `verifyStates()`.
+      arity(0);
+      const rule =
+        policy.operations.draw ?? fail('the target has no draw operation');
+      resultIn(rule.results);
+      if (op.result.type !== 'real')
+        fail(`a draw has a result of the type ${op.result.type}`);
+      return;
+    }
+    case 'seeded': {
+      // The effect, the states and the abort fact are checked with the
+      // region and by `verifyStates()`.
+      const rule =
+        policy.operations.seeded ?? fail('the target has no seeded operation');
+      if (op.body.parameters !== undefined)
+        fail('the body of a seeded has parameters');
+      const seed = op.seed;
+      if (op.operands.length === 0) {
+        if (!(
+          typeof seed === 'string' ||
+          (typeof seed === 'number' && Number.isFinite(seed))
+        ))
+          fail(
+            `a seeded with no seed operand has the literal seed ${String(seed)}, not a finite number or a string`
+          );
+      } else {
+        arity(1);
+        if (seed !== undefined)
+          fail('a seeded has a seed operand and a literal seed');
+        operandsIn(operandRule('seeded'));
+        const type = op.operands[0].type;
+        if (
+          type !== 'real' &&
+          type !== 'integer' &&
+          !(type === 'complex' && program.numericPolicy === 'complex')
+        )
+          fail(
+            `the seed of a seeded has the type ${type} in the ${program.numericPolicy} mode`
+          );
+      }
+      resultIn(rule.results);
+      const value = yieldedValues(op.body)[0];
+      if (
+        value === undefined ||
+        !fitsType(value.type, op.result.type) ||
+        value.representation !== op.result.representation
+      )
+        fail(
+          `the body of a seeded yields a ${value?.type} value, and the seeded has a result of the type ${op.result.type}`
+        );
+      return;
+    }
     default:
       return fail(
         `an operation of the unknown kind ${(op as { kind: string }).kind}`
