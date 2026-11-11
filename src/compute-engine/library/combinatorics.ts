@@ -1085,6 +1085,41 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    IntegerPartitions: {
+      description:
+        'Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. The second operand limits the number of parts: `IntegerPartitions(n, k)` keeps those of at most k parts, a list `[k]` exactly k parts, and `[kmin, kmax]` or `[kmin, kmax, step]` a range of numbers of parts (kmax may be `Infinity`, and `All` is no limit). `IntegerPartitions(n, kspec, [s1, s2, ...])` draws the parts from the given positive integers, and a fourth operand m keeps the first m partitions. There is no partition of a negative n, and the only one of 0 is the empty list.',
+      keywords: ['partition', 'partitions of an integer'],
+      examples: [
+        'IntegerPartitions(4)  // [[4],[3,1],[2,2],[2,1,1],[1,1,1,1]]',
+        'IntegerPartitions(8, [3])  // exactly three parts',
+        'Count(IntegerPartitions(100, 100, [1, 5, 10, 25, 50]))  // 292',
+      ],
+      signature:
+        '(integer, any?, list<integer>?, integer?) -> list<list<integer>>',
+      // A lazy indexed collection, like `Combinations`: it has `p(n)`
+      // elements, so it is never materialized up front. The count is
+      // `NPartition(n)` when the partitions are not restricted, and a
+      // knapsack recurrence (bounded work) when they are; past the bound the
+      // count is unknown. Elements stream from `iterator`, and `at(i)` reads
+      // the position from a table of counts (when the table is small enough)
+      // instead of walking `i` partitions.
+      collection: {
+        isEnumerable: (expr) =>
+          partitionSpec(expr) === undefined ? undefined : true,
+        isLazy: () => true,
+        count: (expr) => integerPartitionsCount(expr),
+        isEmpty: (expr) => {
+          const c = integerPartitionsCount(expr);
+          return c === undefined ? undefined : c === 0;
+        },
+        isFinite: (expr) =>
+          partitionSpec(expr) === undefined ? undefined : true,
+        iterator: integerPartitionsIterator,
+        at: (expr, index) => integerPartitionsAt(expr, index),
+        atBigint: (expr, index) => integerPartitionsAt(expr, index),
+      },
+    },
+
     Multinomial: {
       description: 'Compute the multinomial coefficient for multiple integers.',
       wikidata: 'Q20820114',
@@ -1516,6 +1551,462 @@ function* combinationsIterator(
     idx[i] += 1;
     for (let j = i + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
   }
+}
+
+// ---------------------------------------------------------------------------
+// IntegerPartitions
+
+/**
+ * The reading of the operands of `IntegerPartitions(n, kspec, parts, m)`.
+ *
+ * `kmin`, `kmax` and `step` give the admitted numbers of parts: `kmin`,
+ * `kmin + step`, … up to `kmax` (`Infinity` is unbounded). `parts` lists the
+ * allowed sizes in descending order, or is `null` for every positive integer.
+ * `limit` is the number of partitions to keep (`undefined` keeps them all).
+ */
+interface PartitionSpec {
+  n: number;
+  kmin: number;
+  kmax: number;
+  step: number;
+  parts: number[] | null;
+  limit: number | undefined;
+}
+
+// The largest number of table cells (a bigint addition each) that a count, or
+// the table of an indexed read, may fill. About 0.25 s at the limit.
+const MAX_PARTITION_WORK = 5_000_000;
+
+// The furthest position that `at` reaches by a walk, when no table is built.
+const MAX_PARTITION_WALK = 100_000;
+
+// Up to this position `at` walks even when a table could be built.
+const EARLY_PARTITION_POSITION = 64n;
+
+function isPositiveInfinityOperand(x: Expression): boolean {
+  return x.isInfinity === true && x.isPositive === true;
+}
+
+/** A non-negative integer, or `Infinity` for an unbounded operand. */
+function partitionBound(x: Expression): number | null {
+  if (isPositiveInfinityOperand(x)) return Infinity;
+  const k = toIntegerOperand(x);
+  return k === null || k < 0 ? null : k;
+}
+
+/**
+ * Read the operands of an `IntegerPartitions`. `undefined` when an operand is
+ * not one of the supported forms (`n` or a bound that is not an integer, a
+ * part that is not a positive integer): the collection is then not known, and
+ * its count stays unknown.
+ */
+function partitionSpec(expr: Expression): PartitionSpec | undefined {
+  if (!isFunction(expr)) return undefined;
+  const [nExpr, kExpr, partsExpr, limitExpr] = expr.ops;
+  const n = toIntegerOperand(nExpr);
+  if (n === null || !Number.isSafeInteger(n)) return undefined;
+
+  let kmin = 0;
+  let kmax = Infinity;
+  let step = 1;
+  if (kExpr && !isSymbol(kExpr, 'All')) {
+    if (isFunction(kExpr, 'List')) {
+      // `{k}`, `{kmin, kmax}` and `{kmin, kmax, step}`
+      const ks = kExpr.ops.map(partitionBound);
+      if (ks.length < 1 || ks.length > 3 || ks.includes(null as any))
+        return undefined;
+      kmin = ks[0]!;
+      kmax = ks.length === 1 ? kmin : ks[1]!;
+      if (ks.length === 3) step = ks[2]!;
+      if (kmin === Infinity || step === 0 || step === Infinity)
+        return undefined;
+    } else {
+      const k = partitionBound(kExpr);
+      if (k === null) return undefined;
+      kmax = k; // at most k parts
+    }
+  }
+
+  let parts: number[] | null = null;
+  if (partsExpr) {
+    if (!isFunction(partsExpr, 'List')) return undefined;
+    const sizes = partsExpr.ops.map(toIntegerOperand);
+    if (sizes.some((s) => s === null || s < 1)) return undefined;
+    parts = [...new Set(sizes as number[])].sort((a, b) => b - a);
+  }
+
+  let limit: number | undefined;
+  if (limitExpr) {
+    const m = toIntegerOperand(limitExpr);
+    if (m === null || m < 0) return undefined;
+    limit = m;
+  }
+  return { n, kmin, kmax, step, parts, limit };
+}
+
+/** Is `j` one of the admitted numbers of parts? */
+function admitsPartCount(spec: PartitionSpec, j: number): boolean {
+  return j >= spec.kmin && j <= spec.kmax && (j - spec.kmin) % spec.step === 0;
+}
+
+/**
+ * Does some admitted number of parts lie in `[lo, hi]`? A cheap bound that
+ * the walk uses to skip branches that cannot reach an admitted count.
+ */
+function admitsPartCountBetween(
+  spec: PartitionSpec,
+  lo: number,
+  hi: number
+): boolean {
+  if (lo < spec.kmin) lo = spec.kmin;
+  if (hi > spec.kmax) hi = spec.kmax;
+  if (lo > hi) return false;
+  const first = spec.kmin + Math.ceil((lo - spec.kmin) / spec.step) * spec.step;
+  return first <= hi;
+}
+
+/** The largest allowed part size that is at most `x`, or 0. */
+function largestPartAtMost(spec: PartitionSpec, x: number): number {
+  if (x < 1) return 0;
+  if (spec.parts === null) return x;
+  // `parts` is in descending order
+  let lo = 0;
+  let hi = spec.parts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (spec.parts[mid] <= x) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo < spec.parts.length ? spec.parts[lo] : 0;
+}
+
+function smallestPart(spec: PartitionSpec): number {
+  if (spec.parts === null) return 1;
+  return spec.parts.length === 0 ? 0 : spec.parts[spec.parts.length - 1];
+}
+
+/**
+ * The number of partitions of `n` into parts of the listed sizes, by the
+ * knapsack recurrence over the sizes (`sizes` is `1..b` for parts of at most
+ * `b`, which is the number of partitions into at most `b` parts, by
+ * conjugation). `undefined` when the work is over `MAX_PARTITION_WORK`.
+ */
+function partitionsFromSizes(
+  n: number,
+  sizes: Iterable<number>,
+  count: number,
+  deadline: Expression['engine']['_deadlineFrame']
+): bigint | undefined {
+  if (n * count > MAX_PARTITION_WORK) return undefined;
+  const ways: bigint[] = new Array(n + 1).fill(0n);
+  ways[0] = 1n;
+  let steps = 0;
+  for (const s of sizes)
+    for (let m = s; m <= n; m++) {
+      if ((++steps & 0xffff) === 0) checkDeadline(deadline);
+      ways[m] += ways[m - s];
+    }
+  return ways[n];
+}
+
+/**
+ * The number of partitions of the operands of `spec`, with no walk, or
+ * `undefined` when it is not known: the spec is not supported, or the work is
+ * over `MAX_PARTITION_WORK` (a count read must stay cheap). The limit `m` of
+ * the fourth operand is not applied.
+ *
+ * - The unrestricted count is `NPartition(n)`.
+ * - At most `b` parts (`kmin <= 1`, no `step`) is, by conjugation, parts of at
+ *   most `b`, and a range of counts is a difference of two of those.
+ * - Parts from a given list with any number of parts is one knapsack.
+ * - Otherwise a knapsack with the number of parts as a second dimension.
+ */
+function partitionCountBig(
+  expr: Expression,
+  spec: PartitionSpec
+): bigint | undefined {
+  const { n, kmin, step, parts } = spec;
+  if (n < 0) return 0n;
+  if (n === 0) return admitsPartCount(spec, 0) ? 1n : 0n;
+  const ce = expr.engine;
+  const deadline = ce._deadlineFrame;
+  const smallest = smallestPart(spec);
+  if (smallest === 0) return 0n; // no allowed part
+  const kmax = Math.min(spec.kmax, Math.floor(n / smallest));
+  if (kmin > kmax) return 0n;
+  const anyNumber =
+    step === 1 && kmin <= 1 && kmax === Math.floor(n / smallest);
+
+  if (parts === null && anyNumber) {
+    const p = ce._fn('NPartition', [ce.number(n)]).evaluate();
+    return isNumber(p) ? (toBigint(p) ?? undefined) : undefined;
+  }
+  if (parts === null && step === 1) {
+    const atMost = (b: number) =>
+      b < 1
+        ? 0n
+        : partitionsFromSizes(
+            n,
+            Array.from({ length: Math.min(b, n) }, (_, i) => i + 1),
+            Math.min(b, n),
+            deadline
+          );
+    const upper = atMost(kmax);
+    const lower = atMost(kmin - 1);
+    if (upper === undefined || lower === undefined) return undefined;
+    return upper - lower;
+  }
+  if (anyNumber) return partitionsFromSizes(n, parts!, parts!.length, deadline);
+
+  // The number of parts as a second dimension: `ways[j][m]` is the number of
+  // partitions of `m` into exactly `j` of the sizes met so far.
+  const sizes = parts ?? Array.from({ length: n }, (_, i) => n - i);
+  if (sizes.length * kmax * n > MAX_PARTITION_WORK) return undefined;
+  const ways: bigint[][] = Array.from({ length: kmax + 1 }, () =>
+    new Array(n + 1).fill(0n)
+  );
+  ways[0][0] = 1n;
+  let steps = 0;
+  for (const s of sizes)
+    for (let j = 1; j <= kmax; j++)
+      for (let m = s; m <= n; m++) {
+        if ((++steps & 0xffff) === 0) checkDeadline(deadline);
+        ways[j][m] += ways[j - 1][m - s];
+      }
+  let total = 0n;
+  for (let j = kmin; j <= kmax; j += step) total += ways[j][n];
+  return total;
+}
+
+/** The count of an `IntegerPartitions`, after the limit of the fourth operand. */
+function integerPartitionsCount(expr: Expression): number | bigint | undefined {
+  const spec = partitionSpec(expr);
+  if (spec === undefined) return undefined;
+  const total = partitionCountBig(expr, spec);
+  if (total === undefined) return undefined;
+  if (spec.limit !== undefined && total > BigInt(spec.limit)) return spec.limit;
+  return normalizeCount(total);
+}
+
+/**
+ * Stream the partitions in reverse lexicographic order, each with its parts in
+ * non-increasing order: a depth-first walk that tries the largest part first.
+ * It is a loop over `chosen`, not a recursion, so a partition of many parts
+ * does not exceed the call stack (`First(IntegerPartitions(100000, 1))` is one
+ * step, `IntegerPartitions(5000)` has partitions of 5000 parts).
+ *
+ * A branch is skipped when its remaining sum cannot be reached with an
+ * admitted number of parts (`canFinish`). Over a list of sizes the bounds on
+ * the number of parts do not decide whether the sum can be formed, so the
+ * walk may enter a branch that has no partition, and then backs out of it.
+ */
+function* integerPartitionsIterator(
+  expr: Expression
+): Generator<Expression, undefined, any> {
+  const spec = partitionSpec(expr);
+  if (spec === undefined || spec.n < 0) return;
+  const ce = expr.engine;
+  const deadline = ce._deadlineFrame;
+  const { n } = spec;
+  let remainingLimit = spec.limit ?? Infinity;
+  if (remainingLimit === 0) return;
+  const emit = (parts: number[]) =>
+    ce._fn(
+      'List',
+      parts.map((p) => ce.number(p))
+    );
+  if (n === 0) {
+    if (admitsPartCount(spec, 0)) yield emit([]);
+    return;
+  }
+  const smallest = smallestPart(spec);
+  if (smallest === 0) return;
+
+  // Can `r` be written with `more` further parts, each at most `cap`, after
+  // `used` parts? At least `r / cap` parts are needed and at most
+  // `r / smallest` fit.
+  const canFinish = (r: number, cap: number, used: number): boolean => {
+    if (r === 0) return admitsPartCount(spec, used);
+    const largest = largestPartAtMost(spec, Math.min(cap, r));
+    if (largest === 0) return false;
+    return admitsPartCountBetween(
+      spec,
+      used + Math.ceil(r / largest),
+      used + Math.floor(r / smallest)
+    );
+  };
+
+  const chosen: number[] = [];
+  const upper: number[] = [n]; // the largest part still to try at each depth
+  let depth = 0;
+  let r = n;
+  let steps = 0;
+  while (true) {
+    if ((++steps & 0xfff) === 0) checkDeadline(deadline);
+    let v = largestPartAtMost(spec, Math.min(upper[depth], r));
+    while (v > 0 && !canFinish(r - v, v, depth + 1))
+      v = largestPartAtMost(spec, v - 1);
+    if (v === 0) {
+      if (depth === 0) return;
+      depth -= 1;
+      r += chosen[depth];
+      continue;
+    }
+    upper[depth] = v - 1;
+    chosen[depth] = v;
+    if (r === v) {
+      yield emit(chosen.slice(0, depth + 1));
+      if (--remainingLimit === 0) return;
+      continue;
+    }
+    r -= v;
+    depth += 1;
+    upper[depth] = v;
+  }
+}
+
+/**
+ * The table of `IntegerPartitions` for the indexed reads: `cells[(i * C + c) *
+ * (n + 1) + r]` is the number of ways to write `r` with sizes `sizes[i..]`
+ * (the ones that are at most the last size taken) after `c` parts, so that the
+ * final number of parts is admitted. `C` is 1 when every number of parts is
+ * admitted, and `kmax + 1` otherwise.
+ */
+interface PartitionTable {
+  spec: PartitionSpec;
+  sizes: number[];
+  tracked: boolean;
+  width: number;
+  cells: bigint[];
+  total: bigint;
+}
+
+const partitionTables = new WeakMap<Expression, PartitionTable | null>();
+
+function partitionTable(expr: Expression): PartitionTable | undefined {
+  const cached = partitionTables.get(expr);
+  if (cached !== undefined) return cached ?? undefined;
+  const table = buildPartitionTable(expr);
+  partitionTables.set(expr, table ?? null);
+  return table;
+}
+
+function buildPartitionTable(expr: Expression): PartitionTable | undefined {
+  const spec = partitionSpec(expr);
+  if (spec === undefined || spec.n < 1) return undefined;
+  const { n, kmin, kmax, step } = spec;
+  const sizes = spec.parts ?? Array.from({ length: n }, (_, i) => n - i);
+  const smallest = smallestPart(spec);
+  if (smallest === 0) return undefined;
+  const tracked = !(
+    step === 1 &&
+    kmin <= 1 &&
+    kmax >= Math.floor(n / smallest)
+  );
+  const cmax = tracked ? Math.min(kmax, Math.floor(n / smallest)) : 0;
+  const C = cmax + 1;
+  if ((sizes.length + 1) * C * (n + 1) > MAX_PARTITION_WORK) return undefined;
+  const deadline = expr.engine._deadlineFrame;
+  const cells: bigint[] = new Array((sizes.length + 1) * C * (n + 1)).fill(0n);
+  const at = (i: number, c: number, r: number) => (i * C + c) * (n + 1) + r;
+  let steps = 0;
+  for (let i = sizes.length; i >= 0; i--)
+    for (let c = cmax; c >= 0; c--) {
+      cells[at(i, c, 0)] = !tracked || admitsPartCount(spec, c) ? 1n : 0n;
+      if (i === sizes.length) continue;
+      const s = sizes[i];
+      for (let r = 1; r <= n; r++) {
+        if ((++steps & 0xffff) === 0) checkDeadline(deadline);
+        let v = cells[at(i + 1, c, r)];
+        // Taking `s` adds a part, which the tracked table counts in `c`.
+        if (s <= r) {
+          if (!tracked) v += cells[at(i, 0, r - s)];
+          else if (c < cmax) v += cells[at(i, c + 1, r - s)];
+        }
+        cells[at(i, c, r)] = v;
+      }
+    }
+  return { spec, sizes, tracked, width: C, cells, total: cells[at(0, 0, n)] };
+}
+
+/**
+ * The partition at the 1-based `index` (negative counts from the end) of the
+ * walk of `integerPartitionsIterator`, with no walk, from the table: at each
+ * part the number of partitions that start with each candidate size is read
+ * and skipped until the position falls inside one. `undefined` when the table
+ * is too large (the read then walks) or the position is outside.
+ */
+function integerPartitionsAt(
+  expr: Expression,
+  index: number | string | bigint
+): Expression | undefined {
+  if (typeof index === 'string') return undefined;
+  if (typeof index === 'number' && !Number.isSafeInteger(index))
+    return undefined;
+  const spec = partitionSpec(expr);
+  if (spec === undefined || spec.n < 0) return undefined;
+  const ce = expr.engine;
+  const emit = (parts: number[]) =>
+    ce._fn(
+      'List',
+      parts.map((p) => ce.number(p))
+    );
+  let position = BigInt(index);
+  if (position === 0n) return undefined;
+  if (position < 0n) {
+    const c = integerPartitionsCount(expr);
+    if (c === undefined || !isFiniteCount(c)) return undefined;
+    position += BigInt(c) + 1n;
+  }
+  if (position < 1n) return undefined;
+  // An early position is a short walk, cheaper than building the table.
+  const table =
+    spec.n > 0 && position > EARLY_PARTITION_POSITION
+      ? partitionTable(expr)
+      : undefined;
+  if (table === undefined) {
+    // No table (an early position, n is 0, or the table is too large): walk,
+    // up to a bound.
+    if (position > MAX_PARTITION_WALK) return undefined;
+    let i = 1n;
+    for (const p of integerPartitionsIterator(expr)) {
+      if (i === position) return p;
+      i += 1n;
+    }
+    return undefined;
+  }
+  if (position > table.total) return undefined;
+  if (spec.limit !== undefined && position > BigInt(spec.limit))
+    return undefined;
+
+  const { sizes, width: C, cells, tracked } = table;
+  const n = spec.n;
+  const cell = (i: number, c: number, r: number) =>
+    c >= C ? 0n : cells[(i * C + c) * (n + 1) + r];
+  let rank = position - 1n;
+  const parts: number[] = [];
+  let r = n;
+  let i = 0;
+  let c = 0;
+  while (r > 0) {
+    let found = false;
+    for (let j = i; j < sizes.length; j++) {
+      const s = sizes[j];
+      if (s > r) continue;
+      const ways = cell(j, tracked ? c + 1 : 0, r - s);
+      if (rank < ways) {
+        parts.push(s);
+        r -= s;
+        i = j;
+        c += 1;
+        found = true;
+        break;
+      }
+      rank -= ways;
+    }
+    if (!found) return undefined;
+  }
+  return emit(parts);
 }
 
 /**

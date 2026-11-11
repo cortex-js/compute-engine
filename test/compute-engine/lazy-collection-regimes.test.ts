@@ -102,9 +102,10 @@ describe('lazy collection regimes', () => {
   });
 
   test('Change 1 set — memoized lazy views', () => {
-    // The plan names sixteen; re-derivation adds two the regex missed:
-    // `Permutations` and `Combinations` (`library/combinatorics.ts`, both
-    // genuine lazy views that the memo now covers). `Tuple` was here until
+    // The plan names sixteen; re-derivation adds three the regex missed:
+    // `Permutations`, `Combinations` and `IntegerPartitions`
+    // (`library/combinatorics.ts`, all genuine lazy views that the memo now
+    // covers). `Tuple` was here until
     // it got an `evaluate` handler; it is now in the conditional-handler
     // set.
     expect(namesIn('change-1')).toEqual([
@@ -112,6 +113,7 @@ describe('lazy collection regimes', () => {
       'Combinations',
       'Cycle',
       'Drop',
+      'IntegerPartitions',
       'Iterate',
       'Join',
       'Linspace',
@@ -170,7 +172,7 @@ describe('lazy collection regimes', () => {
 
   test('every collection operator lands in exactly one regime', () => {
     const regimes = collectionRegimes();
-    expect(regimes.size).toBe(48);
+    expect(regimes.size).toBe(49);
     for (const [name, regime] of regimes)
       expect([name, regime]).toEqual([
         name,
@@ -188,6 +190,7 @@ describe('lazy collection regimes', () => {
     Combinations: ['Combinations', ['List', 1, 2, 3], 2],
     Cycle: ['Cycle', ['List', 1, 2, 3]],
     Drop: ['Drop', ['List', 1, 2, 3], 1],
+    IntegerPartitions: ['IntegerPartitions', 5, 2],
     Iterate: ['Iterate', ['Function', ['Multiply', '_', 2]], 1],
     Join: ['Join', ['Range', 1, 2], ['List', 3, 4]],
     Linspace: ['Linspace', 1, 10, 5],

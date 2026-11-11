@@ -2,6 +2,19 @@
 
 ### New Features
 
+- **`IntegerPartitions(n, kspec, parts, m)` lists the partitions of an
+  integer**, as Mathematica's `IntegerPartitions` does: each partition is a
+  list of positive parts in non-increasing order, and the partitions are in
+  reverse lexicographic order. `kspec` is a number of parts at most (`k`),
+  exactly (`[k]`), or in a range (`[kmin, kmax]`, `[kmin, kmax, step]`, with
+  `Infinity` or `All` for no limit); `parts` limits the sizes to a list of
+  positive integers; `m` keeps the first `m`. It is a lazy collection like
+  `Combinations`: `Count(IntegerPartitions(n))` is `NPartition(n)` with no
+  walk, and `At` reads a position from a table of counts. A count that
+  needs more than a bounded amount of work is unknown. Parts that are not
+  positive integers, and the `[m]` and `[m1, m2]` forms of `m`, are not
+  supported.
+
 - **Experimental: the `numeric-kernel` profile of the JavaScript target.**
   `compile(expr, { to: 'javascript', profile: 'numeric-kernel' })` compiles
   the expression with the structured compiler of the JavaScript target. It

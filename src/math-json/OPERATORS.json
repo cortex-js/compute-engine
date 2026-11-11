@@ -3933,6 +3933,23 @@
       ]
     },
     {
+      "name": "IntegerPartitions",
+      "category": "Combinatorics",
+      "arity": "optional",
+      "signature": "(integer, any?, list<integer>?, integer?) -> list<list<integer>>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. The second operand limits the number of parts: `IntegerPartitions(n, k)` keeps those of at most k parts, a list `[k]` exactly k parts, and `[kmin, kmax]` or `[kmin, kmax, step]` a range of numbers of parts (kmax may be `Infinity`, and `All` is no limit). `IntegerPartitions(n, kspec, [s1, s2, ...])` draws the parts from the given positive integers, and a fourth operand m keeps the first m partitions. There is no partition of a negative n, and the only one of 0 is the empty list.",
+      "examples": [
+        "IntegerPartitions(4)  // [[4],[3,1],[2,2],[2,1,1],[1,1,1,1]]",
+        "IntegerPartitions(8, [3])  // exactly three parts",
+        "Count(IntegerPartitions(100, 100, [1, 5, 10, 25, 50]))  // 292"
+      ]
+    },
+    {
       "name": "IntegerSqrt",
       "category": "Number Theory",
       "arity": "1",

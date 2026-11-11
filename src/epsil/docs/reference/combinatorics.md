@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Combinatorics
 
-The 11 definitions of the combinatorics library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 12 definitions of the combinatorics library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -56,6 +56,27 @@ Return all k-element combinations of a collection.
 MathJSON `Fibonacci` · `(integer) -> integer`
 
 Compute the nth Fibonacci number.
+
+### integerPartitions
+
+MathJSON `IntegerPartitions` · `(integer, any?, list<integer>?, integer?) -> list<list<integer>>`
+
+Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. The second operand limits the number of parts: `IntegerPartitions(n, k)` keeps those of at most k parts, a list `[k]` exactly k parts, and `[kmin, kmax]` or `[kmin, kmax, step]` a range of numbers of parts (kmax may be `Infinity`, and `All` is no limit). `IntegerPartitions(n, kspec, [s1, s2, ...])` draws the parts from the given positive integers, and a fourth operand m keeps the first m partitions. There is no partition of a negative n, and the only one of 0 is the empty list.
+
+```epsil
+integerPartitions(4)
+// ➔ [[4],[3,1],[2,2],[2,1,1],[1,1,1,1]]
+```
+
+```epsil
+integerPartitions(8, [3])
+// ➔ [[6,1,1],[5,2,1],[4,3,1],[4,2,2],[3,3,2]]
+```
+
+```epsil
+count(integerPartitions(100, 100, [1, 5, 10, 25, 50]))
+// ➔ 292
+```
 
 ### multinomial
 
