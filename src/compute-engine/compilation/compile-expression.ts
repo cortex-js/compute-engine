@@ -1,5 +1,6 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { entrySource } from './function-purity.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
 import type { Expression, JSSource } from '../global-types.js';
 import type {
   CompileMode,
@@ -11,9 +12,16 @@ import type {
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
 import { withDirectLoopPassReset } from './compile-loops.js';
-import { throwIfCallerCancellation } from '../../common/interruptible.js';
+import {
+  CancellationError,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
-import { compileDiagnosticOf, isKindDeclineError } from './diagnostics.js';
+import {
+  compileDiagnosticOf,
+  isCompileDeclineError,
+  isKindDeclineError,
+} from './diagnostics.js';
 import { rawTargetCheck } from './raw-target-check.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { rewritePartialApplications } from './partial-application.js';
@@ -26,6 +34,10 @@ import { withVarsValuesHidden } from './vars-inputs.js';
 import { fragmentErrorDiagnostic } from './fragment.js';
 import type { CanCompileResult } from './fragment.js';
 import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
+import {
+  jsProfileShadowConsumer,
+  recordJsProfileShadow,
+} from '../js-profile-switch.js';
 
 export type { CanCompileResult } from './fragment.js';
 
@@ -117,8 +129,195 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
  * non-real operand (`Erf(2i)`) is the compile-time decline. The shader
  * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
  * exempt: they consume a complex value by design.)
+ *
+ * With the internal shadow measure `ce._jsProfileShadow` on, a compilation
+ * is also measured with the profile (`compileWithShadow()`).
  */
 export function compile<
+  T extends string = 'javascript',
+  R = DefaultRunnerResult<T>,
+>(
+  expr: Expression,
+  options?: CompileExpressionOptions<T>
+): CompilationResult<T, R> {
+  const ce = expr.engine;
+  if (ce._jsProfileShadow && shadowDepth === 0 && !ce._opensOperation(false)) {
+    const consumer = shadowConsumerOf(options);
+    if (consumer !== undefined)
+      return compileWithShadow(expr, options, consumer);
+  }
+  return compileExpression(expr, options);
+}
+
+/**
+ * The number of compilations with the profile of the shadow measure in
+ * progress: a compilation that one of them starts is not measured.
+ */
+let shadowDepth = 0;
+
+/**
+ * The consumer under which the shadow measure counts a compilation with
+ * `options` (`jsProfileShadowConsumer()`), or `undefined` when it is not
+ * measured: a target other than `javascript`, a direct target, a profile
+ * asked for, or a compilation of `implicitCompile()` that follows an
+ * attempt of its switch.
+ */
+function shadowConsumerOf(
+  options: CompileExpressionOptions | undefined
+): string | undefined {
+  if (
+    options !== undefined &&
+    (options.profile !== undefined ||
+      options.target !== undefined ||
+      (options.to ?? 'javascript') !== 'javascript')
+  )
+    return undefined;
+  return jsProfileShadowConsumer(options);
+}
+
+/**
+ * The compilation of `expr` with `options`, and then, for the shadow
+ * measure, a compilation of `expr` with the same options and the profile
+ * `numeric-kernel`, whose outcome is counted under `consumer`
+ * (`recordJsProfileShadow()`) and whose result is discarded. The result,
+ * or the error, is that of the first compilation. A cancellation of the
+ * first compilation is thrown with no second one.
+ *
+ * The second compilation writes nothing that the caller reads: it has
+ * `fallback: false` (no warning, no interpreter fallback), fresh sets in
+ * place of `symbolDeps` and `varsObjectRefs`, and every error it throws,
+ * a cancellation included, is caught and counted `failed`. A compilation
+ * that it starts is not measured (`shadowDepth`).
+ */
+function compileWithShadow<T extends string, R>(
+  expr: Expression,
+  options: CompileExpressionOptions<T> | undefined,
+  consumer: string
+): CompilationResult<T, R> {
+  let result: CompilationResult<T, R>;
+  try {
+    result = compileExpression<T, R>(expr, options);
+  } catch (e) {
+    // No second compilation after a cancellation, or after an `EvalError`:
+    // a Content Security Policy that blocks dynamic code would report a
+    // second violation.
+    if (!isCancellationError(e) && !(e instanceof EvalError))
+      measureProfile(expr, options, consumer, false);
+    throw e;
+  }
+  measureProfile(expr, options, consumer, result.success === true);
+  return result;
+}
+
+/** Compile `expr` with `options` and the profile, and count the outcome
+ * (`compileWithShadow()`). */
+function measureProfile(
+  expr: Expression,
+  options: CompileExpressionOptions | undefined,
+  consumer: string,
+  baselineSucceeded: boolean
+): void {
+  const ce = expr.engine;
+  // The profile walks the expression as a tree, in a time that grows with
+  // the number of paths (`issues/CE-1198.md`): an expression with more
+  // paths than the cap is counted, not compiled, so the measure cannot hang.
+  let tooManyPaths: boolean;
+  try {
+    tooManyPaths = pathCountAbove(expr, SHADOW_MAX_PATHS);
+  } catch {
+    // A stack overflow on a very deep expression: not compiled either.
+    tooManyPaths = true;
+  }
+  if (tooManyPaths) {
+    recordJsProfileShadow(
+      ce,
+      consumer,
+      baselineSucceeded,
+      'failed',
+      `skipped: the expression has more than ${SHADOW_MAX_PATHS} paths (shared subexpressions)`
+    );
+    return;
+  }
+  shadowDepth += 1;
+  try {
+    const result = compileExpression(expr, {
+      ...options,
+      ...(options?.symbolDeps === undefined ? {} : { symbolDeps: new Set() }),
+      ...(options?.varsObjectRefs === undefined
+        ? {}
+        : { varsObjectRefs: new Set() }),
+      profile: 'numeric-kernel',
+      fallback: false,
+    });
+    if (result.success === true)
+      recordJsProfileShadow(ce, consumer, baselineSucceeded, 'admitted');
+    else {
+      const diagnostic = result.diagnostic;
+      recordJsProfileShadow(
+        ce,
+        consumer,
+        baselineSucceeded,
+        diagnostic?.code === 'outside-profile' ? 'declined' : 'failed',
+        diagnostic === undefined
+          ? result.error
+          : profileMessage(diagnostic.code, diagnostic.message)
+      );
+    }
+  } catch (e) {
+    const diagnostic = compileDiagnosticOf(e);
+    recordJsProfileShadow(
+      ce,
+      consumer,
+      baselineSucceeded,
+      isCompileDeclineError(e) && diagnostic.code === 'outside-profile'
+        ? 'declined'
+        : 'failed',
+      profileMessage(diagnostic.code, diagnostic.message)
+    );
+  } finally {
+    shadowDepth -= 1;
+  }
+}
+
+/** The most paths from the root of an expression that the shadow measure
+ * compiles with the profile (`measureProfile()`). */
+const SHADOW_MAX_PATHS = 100_000;
+
+/** Whether `expr`, as a tree, has more than `cap` paths from its root to a
+ * node: a walk of each distinct node once, which counts a node reached on
+ * several paths once per path. */
+function pathCountAbove(expr: Expression, cap: number): boolean {
+  const memo = new Map<Expression, number>();
+  const count = (node: Expression): number => {
+    const known = memo.get(node);
+    if (known !== undefined) return known;
+    let n = 1;
+    for (const op of isFunction(node) ? node.ops : []) {
+      n += count(op);
+      if (n > cap) break;
+    }
+    memo.set(node, n);
+    return n;
+  };
+  return count(expr) > cap;
+}
+
+/** The message of an outcome of the profile, with its code unless the code
+ * is `outside-profile`. */
+function profileMessage(code: string, message: string): string {
+  return code === 'outside-profile' ? message : `${code}: ${message}`;
+}
+
+/** Whether `e` is a cancellation (a deadline, an abort, a limit). */
+function isCancellationError(e: unknown): boolean {
+  return (
+    e instanceof CancellationError ||
+    (e as { name?: unknown } | undefined)?.name === 'CancellationError'
+  );
+}
+
+/** The compilation of `compile()`, with no shadow measure. */
+function compileExpression<
   T extends string = 'javascript',
   R = DefaultRunnerResult<T>,
 >(

@@ -1692,6 +1692,14 @@ export interface IComputeEngine {
    * @internal */
   _jsProfile: JsProfileSwitch | undefined;
 
+  /** When true, each compilation for the `javascript` target that asks for
+   * no profile also compiles the expression with the `numeric-kernel`
+   * profile, discards that result and counts its outcome (the shadow
+   * measure, `js-profile-switch.ts`). Off by default; the initial value
+   * comes from the `CE_JS_PROFILE_SHADOW` environment variable.
+   * @internal */
+  _jsProfileShadow: boolean;
+
   /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
    * that starts now opens an environment of its own (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the engine flag

@@ -10,6 +10,14 @@
 // after each attempt (`src/compute-engine/js-profile-switch.ts`). The table
 // has one row per consumer: attempts, admitted, declined, failed, then the
 // five most frequent messages of a decline or a failure of that consumer.
+//
+// The counters of the shadow measure (`CE_JS_PROFILE_SHADOW=1`), under
+// `shadow` in each file, are printed after it: per consumer, the
+// compilations, those that the existing compiler compiled (baseline), how
+// many of these the profile admitted, declined or failed on, and how many of
+// the compilations the existing compiler declined and the profile admitted;
+// then the declines and failures of all its consumers, grouped by the
+// normalized message, with one example of each.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,8 +30,41 @@ if (dir === undefined) {
 
 const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
 const totals = new Map();
+const shadow = new Map();
+const shadowMessages = new Map();
 for (const file of files) {
   const data = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+  for (const [name, s] of Object.entries(data.shadow ?? {})) {
+    let t = shadow.get(name);
+    if (t === undefined)
+      shadow.set(
+        name,
+        (t = {
+          attempts: 0,
+          admitted: 0,
+          declined: 0,
+          failed: 0,
+          otherMessages: 0,
+          baselineDeclined: 0,
+          baselineDeclinedAdmitted: 0,
+        })
+      );
+    for (const k of Object.keys(t)) t[k] += s[k] ?? 0;
+    for (const [kind, map] of [
+      ['declined', s.declinedMessages],
+      ['failed', s.failedMessages],
+    ])
+      for (const [message, n] of Object.entries(map ?? {})) {
+        const key = `${kind}: ${message}`;
+        const m = shadowMessages.get(key);
+        if (m === undefined)
+          shadowMessages.set(key, {
+            count: n,
+            example: s.examples?.[message] ?? message,
+          });
+        else m.count += n;
+      }
+  }
   for (const [name, s] of Object.entries(data.consumers ?? {})) {
     let t = totals.get(name);
     if (t === undefined)
@@ -85,5 +126,60 @@ for (const [name, t] of rows) {
   if (t.otherMessages > 0)
     console.log(
       `  ${String(t.otherMessages).padStart(6)}  (messages not kept)`
+    );
+}
+
+if (shadow.size > 0) {
+  const shadowRows = [...shadow.entries()].sort(
+    (a, b) =>
+      b[1].attempts +
+      b[1].baselineDeclined -
+      a[1].attempts -
+      a[1].baselineDeclined
+  );
+  const sum = {
+    attempts: 0,
+    admitted: 0,
+    declined: 0,
+    failed: 0,
+    otherMessages: 0,
+    baselineDeclined: 0,
+    baselineDeclinedAdmitted: 0,
+  };
+  const w = Math.max(8, ...shadowRows.map(([name]) => name.length));
+  const pct = (n, d) => (d === 0 ? '' : `${((100 * n) / d).toFixed(1)}%`);
+  const row = (name, t) =>
+    `${name.padEnd(w)} ${num(t.attempts + t.baselineDeclined)} ${num(t.attempts)} ${num(t.admitted)} ${pct(t.admitted, t.attempts).padStart(7)} ${num(t.declined)} ${num(t.failed)} ${num(t.baselineDeclined)} ${num(t.baselineDeclinedAdmitted)}`;
+  console.log('\nShadow measure (CE_JS_PROFILE_SHADOW)\n');
+  console.log(
+    `${'consumer'.padEnd(w)} ${num('compiled')} ${num('baseline')} ${num('admitted')} ${'%'.padStart(7)} ${num('declined')} ${num('failed')} ${num('base-decl')} ${num('b-d-adm')}`
+  );
+  for (const [name, t] of shadowRows) {
+    for (const k of Object.keys(sum)) sum[k] += t[k];
+    console.log(row(name, t));
+  }
+  console.log(row('total', sum));
+  console.log(
+    `\n'baseline': compilations that the existing compiler compiled; 'admitted', 'declined', 'failed': the profile on these. 'base-decl': compilations that the existing compiler declined; 'b-d-adm': of those, admitted by the profile.`
+  );
+  const top = [...shadowMessages.entries()].sort(
+    (a, b) => b[1].count - a[1].count
+  );
+  const oneLine = (m) => {
+    const line = m.replace(/\s+/g, ' ');
+    return line.length > 220 ? line.slice(0, 217) + '...' : line;
+  };
+  console.log(
+    `\nShadow measure: ${top.length} distinct normalized message(s) of a decline or a failure, most frequent first`
+  );
+  for (const [key, { count, example }] of top.slice(0, 60)) {
+    console.log(`  ${String(count).padStart(6)}  ${oneLine(key)}`);
+    const kind = key.slice(0, key.indexOf(': ') + 2);
+    if (`${kind}${example}` !== key)
+      console.log(`          e.g. ${oneLine(example)}`);
+  }
+  if (sum.otherMessages > 0)
+    console.log(
+      `  ${String(sum.otherMessages).padStart(6)}  (messages not kept)`
     );
 }

@@ -207,3 +207,85 @@ No attempt failed, and no test changed: the constant folding that the
 profile does not do changed no exact comparison of the suite. The declines
 of `limit-probe`, the largest group: `Erf` 142, a `Power` form outside the
 profile 124, `Gamma` 33, `Root` 24.
+
+## Shadow measure
+
+The measure for the decision to replace the existing JavaScript compiler by
+the structured one: how many of the JavaScript compilations of the engine
+and of its hosts the profile admits, and why it declines the others. It
+changes no result.
+
+**What it does.** With the internal setting `ce._jsProfileShadow` on
+(`CE_JS_PROFILE_SHADOW=1` at the construction of the engine; off by
+default), each `compile()` for the target `javascript` that asks for no
+profile and has no direct `target` runs as before, and then compiles the
+same expression again with the same options and `profile:
+'numeric-kernel'`. That second result is discarded; its outcome is counted
+in `js-profile-switch.ts`, apart from the counters of the switch
+(`_jsProfileShadowStats()`, and `shadow` in the file of
+`CE_JS_PROFILE_STATS`). The consumer is `implicit:<name>` for a compilation
+of `implicitCompile()` and `public` for any other. A compilation of
+`implicitCompile()` that follows an attempt of the switch is not measured.
+The classes: admitted, declined (`outside-profile`), failed (any other
+error, with its code), and, apart, the compilations that the existing
+compiler declined or threw on (`baselineDeclined`), with the number of
+those that the profile admitted. An expression with more than 100,000
+paths from its root is not compiled with the profile, and is counted
+failed with the message `skipped: …`: the profile walks such a DAG as a
+tree (`issues/CE-1198.md`). The hook is `compile()` in
+`compilation/compile-expression.ts`, which every compilation of the engine
+reaches (`ce._compile()`, the public `compile()`), after the operation
+environment of binding units is open, so both compilations see the same
+environment.
+
+**Isolation.** The second compilation runs after the first one has
+returned, inside the same scopes (the scope of `withCapturedCallBindings()`
+for an implicit compilation). It has `fallback: false`, so it writes no
+"Compilation fallback" warning and builds no interpreter fallback; it gets
+fresh sets for `symbolDeps` and `varsObjectRefs` when the caller passed
+them; every error it throws, a cancellation included, is caught and
+counted; a compilation that it starts is not measured. Its result is not
+returned, so no cache of a consumer (the `Map` auto-compilation cache)
+holds it. Of the state of the compiler read for this change, the lanes of
+user functions (`_userFunctionLanes`) are keyed by the registry of one
+compilation, the refused nodes of the profile by its error, and the
+counters of the CSE pass and of the broadcast cell loops are not reached
+(the profile has no CSE, and the cell loops are made at run time); every
+`pushScope()` of the compiler has its `popScope()` in a `finally`. The
+memos of the compiler were not all read. What is not isolated: its time (a
+deadline of the caller runs during it), and the memos keyed by an
+expression node that hold a fact of the node (the type and value memos of
+boxed expressions), which the second compilation can fill first for a
+later caller.
+`test/compute-engine/js-profile-shadow.test.ts` compares the code, the
+values, the `symbolDeps`, the declarations of the scopes and the counters
+of the `Map` cache with the setting on and off.
+
+**How to run it.**
+
+```sh
+CE_JS_PROFILE_SHADOW=1 CE_JS_PROFILE_STATS=<dir> timeout -k 30 900 npx jest -w 4 -- <test files>
+node scripts/js-profile-stats.mjs <dir>
+```
+
+The script prints the table of the switch, then the shadow table per
+consumer (compilations; compiled by the existing compiler; of those,
+admitted with the percentage, declined, failed; declined by the existing
+compiler; of those, admitted) and the declines and failures grouped by the
+message with the names of user symbols and the numbers replaced, most
+frequent first, at most 60, each with one example.
+
+**First reading (2026-11-10).** The first 150 test files by name whose name
+starts with `compile` (of 318), at
+`4422cd7bf64eca17935bd7655e6a5f0a972a3199` with this change: the same
+tallies with the setting on and off (5,669 passed, 18 skipped, 105
+snapshots). 4,521 compilations were measured; the existing compiler
+compiled 3,667, and the profile admitted 286 of them (7.8%), declined
+3,373 and skipped 8 (CE-1198); of the 854 that the existing compiler
+declined, the profile admitted 3. Most of these files test the existing
+compiler's own features, so the share is not that of the engine's
+consumers. The most frequent declines: `mode: 'bigint'` 465, `Block` 263,
+a free name with no numeric type 179, `Sum` 169, an input whose list type
+is not `list<real>` or `list<integer>` (tensor, `list<number>`, matrix, …)
+317 over seven messages, `Integrate` 107, parameters with no declared type
+105.

@@ -15,6 +15,15 @@
  * `<directory>/<pid>-<time>.json` after each attempt
  * (`statsAccumulator()`); `scripts/js-profile-stats.mjs` sums these files.
  *
+ * The shadow measure (`ce._jsProfileShadow`, `CE_JS_PROFILE_SHADOW=1`) is a
+ * second internal setting, also off by default: each compilation for the
+ * `javascript` target that asks for no profile also compiles the expression
+ * with the profile, discards that result, and counts its outcome
+ * (`recordJsProfileShadow()`), per consumer: `implicit:<name>` for a
+ * compilation of `implicitCompile()`, `public` for any other. Its counters
+ * are separate from those of the switch (`_jsProfileShadowStats()`), and
+ * the file of `CE_JS_PROFILE_STATS` holds them under `shadow`.
+ *
  * A browser has no `process` object: the switch is then off and nothing is
  * written. This module imports nothing, so that the engine can import it with
  * no dependency cycle.
@@ -43,7 +52,24 @@ export type JsProfileConsumerStats = {
 
 export type JsProfileOutcome = 'admitted' | 'declined' | 'failed';
 
+/** The counters of one consumer of the shadow measure. `attempts`,
+ * `admitted`, `declined` and `failed` count the compilations that the
+ * existing compiler compiled; `baselineDeclined` counts those that it
+ * declined (a result with `success: false`, or an error), and
+ * `baselineDeclinedAdmitted` those of them that the profile admitted. The
+ * keys of the message tables are normalized (`normalizedMessage()`), and
+ * `examples` holds the first message of each key as it was. */
+export type JsProfileShadowStats = JsProfileConsumerStats & {
+  baselineDeclined: number;
+  baselineDeclinedAdmitted: number;
+  examples: Record<string, string>;
+};
+
 const MAX_MESSAGES = 50;
+
+/** The cap of `MAX_MESSAGES` for a consumer of the shadow measure, whose
+ * purpose is the whole distribution of the messages. */
+const MAX_SHADOW_MESSAGES = 1000;
 
 type ProcessLike = {
   env?: Record<string, string | undefined>;
@@ -73,6 +99,83 @@ export function jsProfileSwitchDefault(): JsProfileSwitch | undefined {
     : { profile: 'numeric-kernel', consumers: new Set(names) };
 }
 
+/** The initial value of the shadow measure of an engine, from the
+ * environment: on when `CE_JS_PROFILE_SHADOW` is `1`. */
+export function jsProfileShadowDefault(): boolean {
+  return currentProcess()?.env?.CE_JS_PROFILE_SHADOW === '1';
+}
+
+/** The options objects that `implicitCompile()` passes to `ce._compile()`,
+ * with the name of the consumer, or `null` for a compilation that the shadow
+ * measure leaves out (one that follows an attempt of the switch). */
+const implicitOptions = new WeakMap<object, string | null>();
+
+/** Mark `options`, which `implicitCompile()` passes to `ce._compile()`, as
+ * a compilation of `consumer` (`null`: not measured). */
+export function markImplicitCompileOptions(
+  options: object,
+  consumer: string | null
+): void {
+  implicitOptions.set(options, consumer);
+}
+
+/** The consumer of the shadow measure for a compilation with `options`:
+ * `implicit:<name>` for options marked by `implicitCompile()`, `public`
+ * otherwise, `undefined` for a compilation that is not measured. */
+export function jsProfileShadowConsumer(
+  options: object | undefined
+): string | undefined {
+  const consumer =
+    options === undefined ? undefined : implicitOptions.get(options);
+  if (consumer === null) return undefined;
+  return consumer === undefined ? 'public' : `implicit:${consumer}`;
+}
+
+/** The words that a message of the profile quotes and that are not user
+ * names: option names and type names (`normalizedMessage()`). */
+const QUOTED_WORDS = new Set([
+  'functions',
+  'operators',
+  'vars',
+  'imports',
+  'preamble',
+  'broadcast',
+  'function',
+  'integer',
+  'real',
+  'complex',
+  'number',
+  'boolean',
+  'string',
+  'list',
+  'tuple',
+  'any',
+  'unknown',
+]);
+
+/** `message` with the names of user symbols and the numbers replaced, so
+ * that the declines of one cause have one key. A name is replaced where the
+ * messages of the profile put one: after `binding`, in `the input|parameter|
+ * helper <name> has|is`, in `and <name> is a parameter`, and in quotes
+ * when it starts with a lowercase letter or `_` and is not an option or
+ * type name (`QUOTED_WORDS`). A number becomes `<n>`. */
+function normalizedMessage(message: string): string {
+  return message
+    .replace(/\bbinding [A-Za-z_]\w*/g, 'binding <name>')
+    .replace(
+      /\bthe (input|parameter|helper) [A-Za-z_]\w* (has|is)\b/g,
+      'the $1 <name> $2'
+    )
+    .replace(
+      /\band [A-Za-z_]\w* is a parameter\b/g,
+      'and <name> is a parameter'
+    )
+    .replace(/`([a-z_]\w*)`/g, (quoted, name: string) =>
+      QUOTED_WORDS.has(name) ? quoted : '`<name>`'
+    )
+    .replace(/\b\d+(\.\d+)?(e[-+]?\d+)?\b/g, '<n>');
+}
+
 function emptyStats(): JsProfileConsumerStats {
   return {
     attempts: 0,
@@ -87,6 +190,41 @@ function emptyStats(): JsProfileConsumerStats {
   };
 }
 
+function emptyShadowStats(): JsProfileShadowStats {
+  return {
+    ...emptyStats(),
+    baselineDeclined: 0,
+    baselineDeclinedAdmitted: 0,
+    examples: Object.create(null) as Record<string, string>,
+  };
+}
+
+/** Count one attempt in `stats`. The message `key` is kept when the table
+ * holds fewer than `limit` distinct messages. Returns whether `key` was
+ * added to the table. */
+function count(
+  stats: JsProfileConsumerStats,
+  outcome: JsProfileOutcome,
+  key: string,
+  limit: number
+): boolean {
+  stats.attempts += 1;
+  stats[outcome] += 1;
+  if (outcome === 'admitted') return false;
+  const messages =
+    outcome === 'declined' ? stats.declinedMessages : stats.failedMessages;
+  if (key in messages) messages[key] += 1;
+  else if (
+    Object.keys(stats.declinedMessages).length +
+      Object.keys(stats.failedMessages).length <
+    limit
+  ) {
+    messages[key] = 1;
+    return true;
+  } else stats.otherMessages += 1;
+  return false;
+}
+
 function add(
   table: Map<string, JsProfileConsumerStats>,
   consumer: string,
@@ -95,39 +233,56 @@ function add(
 ): void {
   let stats = table.get(consumer);
   if (stats === undefined) table.set(consumer, (stats = emptyStats()));
-  stats.attempts += 1;
-  stats[outcome] += 1;
-  if (outcome === 'admitted') return;
-  const messages =
-    outcome === 'declined' ? stats.declinedMessages : stats.failedMessages;
-  const key = message ?? '(no message)';
-  if (key in messages) messages[key] += 1;
-  else if (
-    Object.keys(stats.declinedMessages).length +
-      Object.keys(stats.failedMessages).length <
-    MAX_MESSAGES
-  )
-    messages[key] = 1;
-  else stats.otherMessages += 1;
+  count(stats, outcome, message ?? '(no message)', MAX_MESSAGES);
 }
 
-function snapshot(
-  table: Map<string, JsProfileConsumerStats>
-): Record<string, JsProfileConsumerStats> {
-  const result: Record<string, JsProfileConsumerStats> = {};
+/** Count one compilation of the shadow measure (`recordJsProfileShadow()`). */
+function addShadow(
+  table: Map<string, JsProfileShadowStats>,
+  consumer: string,
+  baselineSucceeded: boolean,
+  outcome: JsProfileOutcome,
+  message: string | undefined
+): void {
+  let stats = table.get(consumer);
+  if (stats === undefined) table.set(consumer, (stats = emptyShadowStats()));
+  if (!baselineSucceeded) {
+    stats.baselineDeclined += 1;
+    if (outcome === 'admitted') stats.baselineDeclinedAdmitted += 1;
+    return;
+  }
+  const raw = message ?? '(no message)';
+  const key = normalizedMessage(raw);
+  if (count(stats, outcome, key, MAX_SHADOW_MESSAGES))
+    stats.examples[key] = raw;
+}
+
+function snapshot<S extends JsProfileConsumerStats>(
+  table: Map<string, S>
+): Record<string, S> {
+  const result: Record<string, S> = {};
   for (const [consumer, s] of table)
     result[consumer] = {
       ...s,
       declinedMessages: { ...s.declinedMessages },
       failedMessages: { ...s.failedMessages },
+      ...('examples' in s
+        ? { examples: { ...(s.examples as Record<string, string>) } }
+        : {}),
     };
   return result;
 }
 
 const engineStats = new WeakMap<object, Map<string, JsProfileConsumerStats>>();
 
+const engineShadowStats = new WeakMap<
+  object,
+  Map<string, JsProfileShadowStats>
+>();
+
 type StatsFile = {
   table: Map<string, JsProfileConsumerStats>;
+  shadow: Map<string, JsProfileShadowStats>;
   path: string;
   write: (path: string, text: string) => void;
 };
@@ -165,6 +320,7 @@ function statsAccumulator(): StatsFile | null {
   const suffix = String(proc.hrtime?.bigint?.() ?? Date.now());
   statsFile = {
     table: new Map(),
+    shadow: new Map(),
     path: `${dir}/${proc.pid}-${suffix}.json`,
     write: (path, text) => fs.writeFileSync(path, text),
   };
@@ -184,12 +340,36 @@ export function recordJsProfileAttempt(
   const file = statsAccumulator();
   if (file === null) return;
   add(file.table, consumer, outcome, message);
+  writeStats(file);
+}
+
+/** Count one compilation of the shadow measure by `consumer` on the engine
+ * `ce`: `baselineSucceeded` tells whether the existing compiler gave code,
+ * `outcome` and `message` give the outcome of the profile. */
+export function recordJsProfileShadow(
+  ce: object,
+  consumer: string,
+  baselineSucceeded: boolean,
+  outcome: JsProfileOutcome,
+  message?: string
+): void {
+  let table = engineShadowStats.get(ce);
+  if (table === undefined) engineShadowStats.set(ce, (table = new Map()));
+  addShadow(table, consumer, baselineSucceeded, outcome, message);
+  const file = statsAccumulator();
+  if (file === null) return;
+  addShadow(file.shadow, consumer, baselineSucceeded, outcome, message);
+  writeStats(file);
+}
+
+function writeStats(file: StatsFile): void {
   try {
     file.write(
       file.path,
       JSON.stringify({
         pid: currentProcess()?.pid,
         consumers: snapshot(file.table),
+        ...(file.shadow.size > 0 ? { shadow: snapshot(file.shadow) } : {}),
       })
     );
   } catch {
@@ -204,5 +384,15 @@ export function _jsProfileStats(
   ce: object
 ): Record<string, JsProfileConsumerStats> {
   const table = engineStats.get(ce);
+  return table === undefined ? {} : snapshot(table);
+}
+
+/** A snapshot of the counters of the shadow measure of the engine `ce`, per
+ * consumer. A consumer with no compilation measured has no entry.
+ * @internal */
+export function _jsProfileShadowStats(
+  ce: object
+): Record<string, JsProfileShadowStats> {
+  const table = engineShadowStats.get(ce);
   return table === undefined ? {} : snapshot(table);
 }

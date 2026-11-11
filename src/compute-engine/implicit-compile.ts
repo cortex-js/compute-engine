@@ -19,6 +19,7 @@ import {
   isCompileDeclineError,
 } from './compilation/diagnostics.js';
 import {
+  markImplicitCompileOptions,
   recordJsProfileAttempt,
   type JsProfileSwitch,
 } from './js-profile-switch.js';
@@ -52,6 +53,10 @@ import {
  * tried with the `numeric-kernel` profile first, and the existing compiler
  * runs when the profile does not give code (`tryProfile()`).
  *
+ * With the shadow measure `ce._jsProfileShadow` on, the compilation of the
+ * existing compiler is counted under `implicit:<consumer>`
+ * (`js-profile-switch.ts`), unless the switch tried the profile first.
+ *
  * The compile mode is the target's default, `'strict'`, unless `options`
  * names one: an operation whose value is complex (`Sqrt(x)` at `x = -4`)
  * gives `NaN`. Each caller either reads only real values and treats a `NaN`
@@ -76,15 +81,19 @@ export function implicitCompile(
     // `entryChecks: false`: an implicit caller owns its argument contract and
     // validates the runner's result itself (see `CompilationOptions.entryChecks`).
     return withCapturedCallBindings(ce, expr, () => {
-      if (profile !== undefined) {
-        const result = tryProfile(ce, expr, profile, consumer, options);
+      const tried =
+        profile !== undefined && profileApplies(profile, consumer, options);
+      if (tried) {
+        const result = tryProfile(ce, expr, consumer, options);
         if (result !== undefined) return result;
       }
-      return ce._compile(expr, {
+      const existingOptions = {
         ...options,
         fallback: false,
         entryChecks: false,
-      });
+      };
+      markImplicitCompileOptions(existingOptions, tried ? null : consumer);
+      return ce._compile(expr, existingOptions);
     });
   } catch (e) {
     if (e instanceof EvalError) {
@@ -97,10 +106,8 @@ export function implicitCompile(
 }
 
 /**
- * The compilation of `expr` with the `numeric-kernel` profile, for
- * `implicitCompile()` with the switch `profile` on, or `undefined` when the
- * profile is not tried or does not give code; the existing compiler then
- * runs, with the options of the caller.
+ * Whether `implicitCompile()` with the switch `profile` on tries the
+ * profile for `consumer` with `options` (`tryProfile()`).
  *
  * The profile is tried when `consumer` is in the list of the switch (or the
  * list is absent), the options do not select another target (`to` other
@@ -110,6 +117,28 @@ export function implicitCompile(
  * `vars`, so such a consumer (`series`) is left out and not counted. The
  * other options are passed: the profile declines those it does not have,
  * and that decline is counted.
+ */
+function profileApplies(
+  profile: JsProfileSwitch,
+  consumer: string,
+  options: Record<string, unknown> | undefined
+): boolean {
+  if (profile.consumers !== undefined && !profile.consumers.has(consumer))
+    return false;
+  return !(
+    options !== undefined &&
+    ((options.to !== undefined && options.to !== 'javascript') ||
+      options.target !== undefined ||
+      options.profile !== undefined ||
+      isGivenVars(options.vars))
+  );
+}
+
+/**
+ * The compilation of `expr` with the `numeric-kernel` profile, for
+ * `implicitCompile()` with the switch on, when `profileApplies()`, or
+ * `undefined` when the profile does not give code; the existing compiler
+ * then runs, with the options of the caller.
  *
  * The sets that the compiler fills (`symbolDeps`, `varsObjectRefs`) are
  * replaced by fresh sets for the attempt, and their contents are added to
@@ -124,20 +153,9 @@ export function implicitCompile(
 function tryProfile(
   ce: IComputeEngine,
   expr: Expression,
-  profile: JsProfileSwitch,
   consumer: string,
   options: Record<string, unknown> | undefined
 ): ReturnType<IComputeEngine['_compile']> | undefined {
-  if (profile.consumers !== undefined && !profile.consumers.has(consumer))
-    return undefined;
-  if (
-    options !== undefined &&
-    ((options.to !== undefined && options.to !== 'javascript') ||
-      options.target !== undefined ||
-      options.profile !== undefined ||
-      isGivenVars(options.vars))
-  )
-    return undefined;
   const symbolDeps = options?.symbolDeps as Set<string> | undefined;
   const varsObjectRefs = options?.varsObjectRefs as Set<string> | undefined;
   const attemptDeps = symbolDeps === undefined ? undefined : new Set<string>();

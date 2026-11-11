@@ -129,6 +129,7 @@ import {
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 import {
   jsProfileSwitchDefault,
+  jsProfileShadowDefault,
   type JsProfileSwitch,
 } from './js-profile-switch.js';
 import {
@@ -1715,6 +1716,11 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _jsProfile: JsProfileSwitch | undefined = jsProfileSwitchDefault();
+
+  /** See `IComputeEngine._jsProfileShadow`.
+   * @internal
+   */
+  _jsProfileShadow: boolean = jsProfileShadowDefault();
 
   /** When true, a scope being discarded tombstones its value definitions and
    * the symbol resolution sites report a use of a dead binding with both
