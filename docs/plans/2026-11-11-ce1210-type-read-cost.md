@@ -285,3 +285,25 @@ dependence decided (a shadow of a library name in the same scope must keep
 working: a symbol then resolves by name from its home scope, cached on
 `typeVersion`, not from the definition it had at boxing), and six to ten
 edits in Tycho.
+
+**Tycho's run of the counting build** (codegen audit, 115 documents, Tycho
+`c321f7e51`): 666,697 reads find a declaration that the host made directly,
+in 211 (kind, name, host frame) keys. The largest: the substitution of the
+stored body of a document function under parameter shadows
+(`DocumentCEManager._expandExpr`, 298,000 reads); every product compile,
+whose seam declares the scalar inputs and the hidden values around an
+expression boxed outside (176,000); `ce.function()` on operands boxed
+outside (`_buildFunction`, 144,000); Tycho's `At` override (33,000). The
+names are mostly `x`, `y` and `t`. Tycho's document manager pops and pushes
+the document scope at each evaluation and declares the axes again, so rows
+and stored bodies outlive the scope they were boxed in: under reversal B
+they would read the definitions of a popped scope, and each would have to be
+boxed again or rebound after each swap. The source audit had not found
+these sites.
+
+**Recommendation after step 0.** Keep rules R-a and R-b and build the
+counter (steps 1 to 3 of section 5). Reversal B changes answers on Tycho's
+hot paths and in 294 CE test files, and it does not fit a host that swaps
+its scope. Two small changes go first, with any design: skip the lookup of
+an environment that has no entry (5.5 million empty lookups in the
+`othello` call), and CE-1200.
