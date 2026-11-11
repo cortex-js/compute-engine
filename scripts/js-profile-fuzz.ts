@@ -133,6 +133,14 @@
  *                        interpreter (`interpretsDraws()`). Without the
  *                        option, the programs are those of the same seed
  *                        before the option was added.
+ *   --calculus           Also generate the calculus heads of an expression
+ *                        (`genCalculus()`): `Integrate` of an elementary
+ *                        integrand in `t` with bounds that are literals or
+ *                        leaves, `D` of one in a name, and `Apply` of the
+ *                        `Derivative` of a literal. The profile admits such
+ *                        a node as its closed form only. Without the option,
+ *                        the programs are those of the same seed before the
+ *                        option was added.
  *   --deg                Each engine has the angular unit `deg`: the
  *                        same programs, compiled and interpreted in
  *                        degrees.
@@ -970,6 +978,8 @@ interface GenContext {
   readonly random?: boolean;
   /** Whether to generate reads and calls of the host (`--host`). */
   readonly host?: boolean;
+  /** Whether to generate calculus heads in an expression (`--calculus`). */
+  readonly calculus?: boolean;
   /** The local functions of the block around the expression, each with
    *  one real parameter, that a call can reach. */
   readonly localFunctions?: readonly string[];
@@ -1187,6 +1197,7 @@ function genReal(ctx: GenContext, depth: number): Json {
       pick<Json>(rng, [3, 42, "'seed'", 'k', 'x', ['Add', 'k', 1]]),
       sub(),
     ];
+  if (ctx.calculus && rng() < 0.08) return genCalculus(ctx, d);
   switch (choose(rng, HEADS)) {
     case 'Add':
       return ['Add', ...Array.from({ length: intBetween(rng, 2, 3) }, sub)];
@@ -1278,6 +1289,45 @@ function genReal(ctx: GenContext, depth: number): Json {
     case 'Collection':
       return genCollectionReal(ctx, d);
   }
+}
+
+/** The elementary integrands of `genCalculus()`, as functions of their
+ *  variable: each has a closed form that the engine finds. */
+const INTEGRANDS: readonly ((v: Json) => Json)[] = [
+  (v) => ['Power', v, 2],
+  (v) => ['Sin', v],
+  (v) => ['Exp', v],
+  (v) => ['Multiply', v, ['Cos', v]],
+  (v) => ['Divide', 1, ['Add', 1, ['Power', v, 2]]],
+  (v) => ['Exp', ['Negate', ['Power', v, 2]]],
+  (v) => ['Add', ['Power', v, 3], ['Multiply', 2, v]],
+];
+
+/**
+ * A calculus node (`--calculus`): `Integrate` of an elementary integrand in
+ * `t`, times a leaf at times, with bounds that are literals or leaves; `D`
+ * of an elementary function of a name of the program in that name; or
+ * `Apply` of the derivative, of order 1 or 2, of a literal in `t`.
+ */
+function genCalculus(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const integrand = (): Json =>
+    rng() < 0.3
+      ? ['Multiply', genLeaf(ctx), pick(rng, INTEGRANDS)('t')]
+      : pick(rng, INTEGRANDS)('t');
+  const bound = (): Json =>
+    rng() < 0.4 ? pick<Json>(rng, [0, 1, -1, 2]) : genLeaf(ctx);
+  const r = rng();
+  if (r < 0.5)
+    return ['Integrate', integrand(), ['Limits', 't', bound(), bound()]];
+  if (r < 0.75)
+    return [
+      'Apply',
+      ['Derivative', ['Function', integrand(), 't'], pick(rng, [1, 1, 2])],
+      genReal(ctx, depth),
+    ];
+  const name = choose(rng, ctx.symbols);
+  return ['D', pick(rng, INTEGRANDS)(name), name];
 }
 
 /**
@@ -2136,7 +2186,13 @@ export function nodeCount(json: Json): number {
 export function generateProgram(
   seed: number,
   index: number,
-  options: { depth: number; size: number; random?: boolean; host?: boolean }
+  options: {
+    depth: number;
+    size: number;
+    random?: boolean;
+    host?: boolean;
+    calculus?: boolean;
+  }
 ): Program {
   const rng = makeRng(mixSeed(seed, index, 1));
   const random = options.random === true;
@@ -2157,7 +2213,12 @@ export function generateProgram(
           ? ['Block', ['Block', ...statements]]
           : ['Block', ...statements];
     } else {
-      const ctx = { rng, maxDepth: options.depth, ...context };
+      const ctx = {
+        rng,
+        maxDepth: options.depth,
+        ...context,
+        calculus: options.calculus === true,
+      };
       const value = rng();
       json =
         value < 0.06
@@ -2674,6 +2735,8 @@ export interface FuzzOptions {
   readonly random?: boolean;
   /** Generate reads and calls of the host (`--host`). */
   readonly host?: boolean;
+  /** Generate calculus heads in an expression (`--calculus`). */
+  readonly calculus?: boolean;
   /** The angular unit of each engine (`--deg`); `rad` when absent. */
   readonly angularUnit?: 'rad' | 'deg';
 }
@@ -3456,7 +3519,8 @@ export function printResult(result: FuzzResult, quiet: boolean): string {
       `depth ${o.depth}, size ${o.size}, points ${o.points}, modes ${o.modes.join(',')}, ` +
       `angular unit ${o.angularUnit ?? 'rad'}` +
       (o.random ? ', draws' : '') +
-      (o.host ? ', host' : '')
+      (o.host ? ', host' : '') +
+      (o.calculus ? ', calculus' : '')
   );
   lines.push(`declarations: ${DECLARATIONS}`);
   lines.push('');
@@ -3544,6 +3608,7 @@ async function main(): Promise<void> {
       quiet: { type: 'boolean', default: false },
       random: { type: 'boolean', default: false },
       host: { type: 'boolean', default: false },
+      calculus: { type: 'boolean', default: false },
       deg: { type: 'boolean', default: false },
       bigint: { type: 'boolean', default: false },
     },
@@ -3594,6 +3659,7 @@ async function main(): Promise<void> {
         : (values.modes.split(',') as Mode[]),
     random: values.random!,
     host: values.host!,
+    calculus: values.calculus!,
     angularUnit: values.deg! ? 'deg' : 'rad',
   };
   const result = await runFuzz(options, (line) =>

@@ -9,6 +9,30 @@
   that set either one declares its names, or calls `ce.infer()` on the
   expressions that use them.
 
+### New Features
+
+- **The `numeric-kernel` profile of `compile()` admits integrals and
+  derivatives that have a closed form.** An `Integrate`, `D`, `ND` or
+  `Derivative` node, and an applied derivative (`f'(x)`), declined with
+  `outside-profile` ("unsupported head Integrate"). In the `strict` mode
+  the profile now compiles such a node when the engine finds its closed
+  form at compile time, as the compiler without the profile does: the code
+  is the code of the closed form, with the same values.
+
+  ```js
+  ce.declare('a', 'real');
+  ce.declare('x', 'real');
+  const f = compile(ce.parse('\\int_0^a e^{-t^2} dt'), { profile: 'numeric-kernel' });
+  f.run({ a: 1 }); // ➔ 0.746824132812427
+  const g = compile(ce.parse('\\frac{d}{dx} \\sin(x^2)'), { profile: 'numeric-kernel' });
+  g.run({ x: 1 }); // ➔ 1.0806046117362795
+  ```
+
+  An integral or a derivative with no closed form (`∫₀ᵃ √(1 + t⁴) dt`,
+  which the compiler without the profile integrates numerically), an
+  integrand that draws, the `complex` mode, `NIntegrate` and `Limit`
+  still decline with `outside-profile`.
+
 ### Resolved Issues
 
 - **`ce.infer()` gives a type to a symbol declared with the type
@@ -31,6 +55,14 @@
   its type came from.** Since 0.187.0, the error of `let b = p && q` followed
   by `let y = p + 1` had no note. It has the note "`p` was inferred to have
   type `boolean` from its use in `p && q`" again.
+- **A compiled derivative used as an operand gives the right value.** The
+  closed form of `D`, `ND` or `Derivative` was written with no parentheses,
+  so `\frac{1}{\frac{d}{dx}(x^3+x)}` compiled to
+  `0.3333333333333333 * (_.x * _.x) + 1` and gave `2.333…` at `x = 2`. It
+  now compiles to `1 / (3 * (_.x * _.x) + 1)` and gives `1/13`, the value of
+  `evaluate()`. The same holds for a negation, a product, a difference and a
+  power of a derivative, on every target. The code of a compiled derivative
+  has one more pair of parentheses (`(2 * _.x)` for `D(x^2, x)`). (CE-1216)
 
 ## 0.187.1 _2026-11-11_
 

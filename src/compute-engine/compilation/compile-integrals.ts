@@ -136,10 +136,13 @@ export function setAntiderivativeAttemptBudgetForTesting(steps?: number): void {
 
 /**
  * Start a fresh compilation's shared budgets — today just the
- * antiderivative pool. Called from ONE place: the depth-0 boundary of
- * `BaseCompiler.compile`, which every compilation route crosses (see
- * {@link ANTIDERIVATIVE_COMPILATION_STEPS} for why no shallower entry
- * covers them all).
+ * antiderivative pool. Called from two places: the depth-0 boundary of
+ * `BaseCompiler.compile` (`resetOutermostCompilation()` in
+ * `compiler-core.ts`), which every route of the existing emitter crosses
+ * (see {@link ANTIDERIVATIVE_COMPILATION_STEPS} for why no shallower entry
+ * covers them all), and the preparation of the structured route at depth 0
+ * (`prepareFragment()` in `javascript-fragment-target.ts`), which does not
+ * cross it and searches for closed forms at its admission.
  */
 export function resetSharedCompilationBudgets(): void {
   CompilerState.antiderivativeStepsLeft = ANTIDERIVATIVE_COMPILATION_STEPS;

@@ -431,6 +431,25 @@ literal at the root), read at `4c0828dff` (2026-11-11) with `L` declared
 | `Map`, `Reduce`, `Fold` | `L.map((_tv1) => …)`, `L.reduce(…)` of an arrow of the callback | Declined: the profile holds no function value in the mode |
 | `Function(At(xs, i) + Length(xs), xs: list<integer>, i: integer)` | `(xs, i) => (() => { const _tv1 = typeof i === 'number' ? _SYS.toBigint(i) : i; try { return (_SYS.bat(xs, _tv1) + _SYS.toBigint(xs.length)); } catch (…) { … } })()`: each call lifts its integer parameters and has the catch | The body of the literal with its parameters as the inputs, in the same wrapper: `(xs, i) => { return (() => { const _tv1 = …; try { return _SYS.bat(xs, _tv1) + _SYS.toBigint(xs.length); } catch (…) { … } })(); }` |
 
+### Integrals and derivatives with a closed form
+
+Slice 1 of `docs/plans/2026-11-11-structured-numeric-calculus.md`, read at
+`114403d0b` (2026-11-11) with `x`, `a` declared `real`, `cse: false,
+constantFold: false`; the tests are
+`test/compute-engine/compile-javascript-structured-calculus.test.ts`.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `x · ∫₀¹ t² dt`, `∫₀ᵃ e^{-t²} dt` | `compileIntegrate()`: the closed form of `closedFormIntegral()` in parentheses, `_.x * (0.3333333333333333)`, `(0.5 * _SYS.erf(_.a) * Math.sqrt(Math.PI))` | The node is the closed form (`closedFormReplacement()`), lowered as one value: `_.x * 0.3333333333333333`, `0.5 * _SYS.erf(_.a) * Math.sqrt(3.141592653589793)` |
+| `∫₀ᵃ √(1 + t⁴) dt` | No closed form: `_SYS.integrate((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, _.a)` | Declined (quadrature is slice 2) |
+| `∫₀¹ (t + Random()) dt` | `closedFormIntegral()` evaluates the integral at compile time, with its draw: `(1.0442009924764881)` | Declined: the integral is not pure |
+| `D(x³ + x, x)`, `1 / D(x³ + x, x)` | `compileDerivative()`: the closed form in parentheses (since CE-1216; it had none before, `1 / 3 * (_.x * _.x) + 1`): `(3 * (_.x * _.x) + 1)`, `1 / (3 * (_.x * _.x) + 1)` | The closed form (`derivativeClosedForm()`), lowered as one value, as for `Integrate` |
+| `ND(t ↦ t³, 1.5)`, `ND(t ↦ t³, x)` | `6.750000000000016`; `_SYS.nd(((t) => _SYS.pow3(t)), 1, 'scalar')(_.x)` | The number; declined (the stencil is slice 4) |
+| `g'(x)` with `g(t) := t³ + sin t` | `(((x) => 3 * (x * x) + Math.cos(x)))(_.x)`: the call of the literal of `derivativeClosedForm('Derivative', …)` | `Apply` of that literal to the arguments, written inline as an `Apply` of a literal: `3 * (_tv1 * _tv1) + Math.cos(_tv1)` with `_tv1 = _.x` |
+| `f⁗(x)` of a large literal | Taylor jets (`jetDerivativeTarget()`) | Declined |
+| `Derivative(Sin)` | `((x) => Math.cos(x))` | Declined: a function value |
+| Any calculus node, `complex` mode | `_SYS.cplx((_SYS.pow3(_.a) / 3))` | Declined |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a

@@ -374,7 +374,12 @@ const EXPRESSIONS: [string, MathJsonExpression][] = [
   ['x + Random()', ['Add', 'x', ['Random']]],
   ['RandomChoice(L, 2)', ['RandomChoice', 'L', 2]],
   ['x + Random(Range(1, k))', ['Add', 'x', ['Random', ['Range', 1, 'k']]]],
-  ['Integrate(Sin(x), x)', ['Integrate', ['Sin', 'x'], 'x']],
+  // An integral with no closed form (one with a closed form is admitted,
+  // `compile-javascript-structured-calculus.test.ts`).
+  [
+    'Integrate(Sqrt(1 + x^4), x)',
+    ['Integrate', ['Sqrt', ['Add', 1, ['Power', 'x', 4]]], 'x'],
+  ],
   ['Sum(j, j = 1..5)', ['Sum', 'j', ['Limits', 'j', 1, 5]]],
   ['Gamma(x)', ['Gamma', 'x']],
   ['Factorial(k)', ['Factorial', 'k']],
@@ -598,7 +603,7 @@ describe('canCompile() and compile() agree', () => {
         { operator: 'RandomChoice', value: 'RandomChoice(L, 2)' },
       ],
       [
-        ['Integrate', ['Sin', 'x'], 'x'],
+        ['Integrate', ['Sqrt', ['Add', 1, ['Power', 'x', 4]]], 'x'],
         { operator: 'Integrate' },
       ],
       [['Add', 'x', 'u'], { binding: 'u', value: 'u' }],

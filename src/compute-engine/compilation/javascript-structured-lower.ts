@@ -285,6 +285,13 @@ export type StructuredPreparation = {
    *  fact of the engine; a node of the first four heads with no form is an
    *  error. */
   readonly forms: ReadonlyMap<Expression, StructuredForm>;
+  /** The expression that replaces each `Integrate`, `D`, `ND` and
+   *  `Derivative` node, and each `Apply` of a `Derivative`, of the program:
+   *  its closed form, as the existing compiler writes it
+   *  (`closedFormReplacement()` in `javascript-fragment-target.ts`). The
+   *  annotation typed it in the place of the node, and the node is lowered
+   *  as it. */
+  readonly closedForms?: ReadonlyMap<Expression, Expression>;
   readonly numericPolicy: 'strict' | 'complex';
   /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
    *  recorded on each `loop`. */
@@ -1097,7 +1104,12 @@ class Lowering {
   /** The names of the symbols of `node`, read or written (`namesIn()`),
    *  once per node object. */
   private namesOf(node: Expression): ReadonlySet<string> {
-    return namesIn(node, this.names, this.capturedNames);
+    return namesIn(
+      node,
+      this.names,
+      this.capturedNames,
+      this.prep.closedForms
+    );
   }
 
   private facts(
@@ -1229,6 +1241,9 @@ class Lowering {
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[]
   ): IRValue {
+    const closedForm = this.prep.closedForms?.get(node);
+    if (closedForm !== undefined)
+      return this.value(closedForm, scope, operations);
     if (isFunction(node, 'Block')) return this.block(node, scope, operations);
     const facts = this.facts(node, scope);
     if (isNumber(node) || isSymbol(node, 'True') || isSymbol(node, 'False')) {
@@ -4231,7 +4246,12 @@ class Lowering {
       if (binder !== undefined && this.bound.get(binder)?.has(name))
         candidates.push({ binder, name });
     }
-    const exposed = exposedReads(body, this.names, this.capturedNames);
+    const exposed = exposedReads(
+      body,
+      this.names,
+      this.capturedNames,
+      this.prep.closedForms
+    );
     const carried = candidates.filter(
       ({ name }) => liveOut.has(name) || exposed.has(name)
     );
@@ -4561,7 +4581,8 @@ function assignedNames(
 function exposedReads(
   statement: Expression,
   memo: Map<Expression, ReadonlySet<string>>,
-  captured?: (operator: string) => readonly string[]
+  captured?: (operator: string) => readonly string[],
+  replaced?: ReadonlyMap<Expression, Expression>
 ): Set<string> {
   const exposed = new Set<string>();
   const reads = (
@@ -4569,7 +4590,7 @@ function exposedReads(
     written: ReadonlySet<string>
   ) => {
     if (node === undefined) return;
-    for (const name of namesIn(node, memo, captured))
+    for (const name of namesIn(node, memo, captured, replaced))
       if (!written.has(name)) exposed.add(name);
   };
   const visit = (node: Expression, written: Set<string>): Set<string> => {
@@ -4724,8 +4745,12 @@ export function literalSeedOf(seed: Expression): number | string | undefined {
 function namesIn(
   node: Expression,
   memo: Map<Expression, ReadonlySet<string>>,
-  captured?: (operator: string) => readonly string[]
+  captured?: (operator: string) => readonly string[],
+  replaced?: ReadonlyMap<Expression, Expression>
 ): ReadonlySet<string> {
+  const closedForm = replaced?.get(node);
+  if (closedForm !== undefined)
+    return namesIn(closedForm, memo, captured, replaced);
   // The symbol of a local function as a function operand (`Map(lf, L)`)
   // reads the names that a call of it reads.
   if (isSymbol(node))
@@ -4735,7 +4760,8 @@ function namesIn(
   if (known !== undefined) return known;
   const names = new Set<string>(captured?.(node.operator) ?? []);
   for (const operand of node.ops)
-    for (const name of namesIn(operand, memo, captured)) names.add(name);
+    for (const name of namesIn(operand, memo, captured, replaced))
+      names.add(name);
   memo.set(node, names);
   return names;
 }

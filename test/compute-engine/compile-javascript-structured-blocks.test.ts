@@ -535,10 +535,16 @@ describe('a helper declared function', () => {
     expect(result.code).toBe('_tv1(_.x) + 1');
   });
 
-  test('a body with Integrate declines', () => {
+  test('a body with an Integrate with no closed form declines', () => {
+    // An integral with a closed form is admitted
+    // (`compile-javascript-structured-calculus.test.ts`).
     const ce = engine();
-    helper(ce, 'f', fn(['Integrate', ['Multiply', 't', 'u'], ['Limits', 'u', 0, 1]], 't'));
-    declines(['f', 'x'], /unsupported helper body Integrate/, ce, ['strict']);
+    helper(
+      ce,
+      'f',
+      fn(['Integrate', ['Sqrt', ['Add', 't', ['Power', 'u', 4]]], ['Limits', 'u', 0, 1]], 't')
+    );
+    declines(['f', 'x'], /has no closed form/, ce, ['strict']);
   });
 
   test('in the complex mode, a helper declared function declines', () => {

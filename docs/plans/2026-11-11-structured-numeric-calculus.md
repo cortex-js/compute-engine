@@ -288,3 +288,149 @@ Recommended first; the alternative after the semicolon.
 8. Host calls in the body in slice 5; never.
 9. Decline jets; a jet lowering on the route.
 10. No symbolic `Limit`; the default fold (the open folding decision).
+
+## 9. Result of slice 1
+
+Implemented on `114403d0b44156730f1f943b12362d0c74f90fc8` (first written on
+`d89290f1b`). No new operation of the representation: the admission
+replaces each calculus node by an expression, and the annotation and the
+lowering read that expression in the place of the node.
+
+**Where.** `closedFormReplacement()` (`javascript-fragment-target.ts`) is
+called by the checker of the root expression and by the checker of a
+function body (`admitFunctionBody()`, so the body of a root `Function`, of
+a helper and of a local function), at the node, before its operands. The
+replacement is kept in `StructuredRegistry.closedForms`; the rule of
+`Integrate`, `D`, `ND`, `Derivative` and `Apply` types it in the place of the
+node (`closedFormRule()`, the GLSL fragment's `walkDerivative()` does the
+same), and `Lowering.lower()` lowers it (`StructuredPreparation.closedForms`).
+The parent sees the node itself, with its type `number`, as the parent
+handler of the existing compiler does: a substitution in the tree changed
+the code (`x · ∫₀¹ t² dt` is `_.x * (0.3333333333333333)` on the existing
+compiler, `_.x / 3` for the substituted `x · 1/3`).
+
+**What is admitted** (strict mode): `Integrate` with a closed form of
+`closedFormIntegral()` (constant, input and expression bounds, integrands
+that read inputs, a constant with a value or a user function, nested
+integrals, an integral in a `Sum`, an `If`, a list, a helper body, an
+indefinite integral); `D` of one or several variables, `ND` at a number,
+with the closed form of `derivativeClosedForm()`; `Apply(Derivative(f,
+n…), x…)` of a library function, a user function or a literal, as `Apply`
+of the literal of `derivativeClosedForm('Derivative', …)` (lowered inline,
+the same operations as the existing call of the literal). The tests
+(`compile-javascript-structured-calculus.test.ts`) compare the doubles
+with the existing compiler at three points per program, the interpreter
+(`evaluate().N()`), the text of two programs modulo parentheses, and a
+degree angular unit.
+
+**What stays declined, and why**: no closed form (quadrature, the stencil:
+slices 2 and 4); an integrand that is not pure (the existing compiler
+evaluates it at compile time with its draw); a derivative that is a
+function; a jet derivative (choice 9); a variable that can hold a list (the
+existing check of `compileExprCustomHandler()`, applied in the same way); a
+variable of `D` that holds a value (the existing compiler with
+`constantFold: false` reads it as an input: `3 * (_.x * _.x)` for `D(x³,
+x)` with `x := 4`, where the interpreter gives 48); a complex number in
+the node or in its closed form (the existing compiler can read the node on
+the complex lane around a real closed form: `(∫ᵢ⁰ t dt)²` gives `{re: NaN,
+im: NaN}` there, the interpreter 0.25; found by the random tester); a
+closed form `0` as an operand (the existing compiler writes the term `(0)`,
+which a complex sum keeps, and the route drops a literal `0`: `-0` against
+`0`; found by the random tester); the `complex` mode;
+`Limit`, `NIntegrate`. The `bigint` mode: the lane analysis declines a
+calculus node on both compilers.
+
+The closed form of `D` or `ND` as an operand was declined at first: the
+existing compiler wrote it without parentheses, a wrong value
+(`1 / D(x³ + x, x)` was `1 / 3 * (_.x * _.x) + 1`). The fix of that
+defect (CE-1216, `compileDerivative()` writes the closed form in
+parentheses, as `compileIntegrate()` does) removed the refusal: the tests
+compare the quotient, the negation, the product, the difference and the
+power of `D(x³ + x, x)` with both compilers and the interpreter. The
+review of the slice added: the dependencies are the names whose stored
+definitions the closed form can hold (a value, a user function, at any
+depth), not every name of the node; a local function whose body holds an
+integral captures no variable of the integral (the capture walk and the
+name walks of the lowering read the replacement); a name that the node
+binds is not read for a complex type (`∫ₐᵇ |s| ds`, the derivative of
+`r(t) := |t|`, whose engine types are not real, are admitted with the
+doubles of the existing compiler); `First([])` declines (the existing
+emitter reads `undefined`, the route read `NaN`).
+
+**Where the implementation differs from the note.**
+
+- Closed forms are found once per node object (choice 3 recommended once
+  per occurrence). The admission visits a node once; per occurrence only
+  changes how much of the shared step pool is spent. In its place, a
+  program whose searches spend more than 10,000 steps declines
+  (`CLOSED_FORM_SEARCH_STEPS`): the existing compiler searches again at
+  each occurrence and at each term of an unrolled `Sum`, and the pool of
+  600,000 steps then holds 30 such repetitions. A search of an elementary
+  integral spends 1 to 50 steps (measured on ten integrands).
+- `compileDerivative()` was not changed to call `derivativeClosedForm()`:
+  it is outside the files of the slice. The two differ only in the scope of
+  the angular-unit rewrite of the result; the tests in degrees give the
+  same doubles.
+- The names of the node and of the user functions that it calls are added
+  to `symbolDeps`; the existing compiler adds none (CE-1218).
+
+**The two points the note could not determine.**
+
+1. The pool: the structured route does not reach `compileCseRoot()` (the
+   body emitter replaces it), so nothing reset the pool. `prepareFragment()`
+   now calls `BaseCompiler.resetSharedCompilationBudgets()` at depth 0,
+   after the preparation and before the admission, as
+   `resetOutermostCompilation()` does on the existing route. Tested: with
+   the pool drained before the call, the profile still finds the closed
+   form; with the per-attempt budget shortened to 5 steps
+   (`setAntiderivativeAttemptBudgetForTesting()`), `∫₀ᵃ t eᵗ cos t dt` (9
+   steps) gets quadrature on the existing compiler and declines on the
+   profile, and with the full budget both write the closed form with the
+   same doubles. `canCompile()` runs a whole compilation, so it runs the
+   search; one compilation runs it once per node. The memos of the
+   compilation (`resetCompilationMemos()`, among them
+   `_angularDefinitionMemo`, which the search reads keyed by a name, and
+   `_variantResultTypeMemo`) are emptied at the same place and again when
+   the compilation ends, also after a decline, as the existing compiler does
+   at depth 0; a compilation of the route inside another compilation of
+   either route empties none (`withStructuredCompilation()`). Without that,
+   `∫₀ˣ k dt` in degrees with `k := 3` left the answer "`k` has no angular
+   definition" for a later engine with `k := Sin(30)`, whose closed form
+   then read `sin 30` in radians (-1.976 at x = 2, for 1).
+2. The wall-clock guard of 30 s: nothing done; a known-limitations line in
+   `docs/COMPILATION-MODEL.md` (and one for the pool repetition).
+
+**Measures** (on `114403d0b`, the 118 test files that name `compile` and a
+calculus head, `-w 4`):
+
+- Witness replay (a Jest setup that compiles each JavaScript compilation
+  with a calculus head again with the profile, and compares the values of
+  the admitted ones with the existing compiler at four points): of 219
+  distinct programs, 1 admitted before, 85 after; 0 value differences for
+  inputs of their declared types (one program, `D(g², g)` with `g:
+  list<real>`, differs for a number passed to the list input, outside its
+  type). The 134 that stay declined: no closed form of an integral 70, `Limit`
+  15, no closed form of a derivative 12, jets 8, more than 10,000 search
+  steps 5, a complex `Apply` 4, `NIntegrate` 3, `EvaluateAt` 3, other
+  forms 14.
+- Shadow measure: the profile admits 6,044 of 7,381 compilations (5,901
+  before); public compilations 893 of 2,105 (756 before), engine
+  integrands 468 of 543 (462). Two tests fail with the measure on, both
+  because the measure compiles twice: the one that asserts the default
+  route never calls the profile, and `compile-integrate-timeout-record`,
+  which counts one search per compilation.
+- Consumers with the switch: 1,897 tests pass with and without it, before
+  and after; the engine's compilations admitted: 5,327 of 5,432 before and
+  after (the consumers compile integrands, not `Integrate` nodes).
+- The random tester gains `--calculus` (`genCalculus()`: `Integrate` of an
+  elementary integrand with literal or leaf bounds, `D` of an elementary
+  function of a name, `Apply` of the derivative of a literal; without the
+  option the programs of a seed are those of before). Seeds 161 and 162,
+  10,000 programs each, with and without the option: no profile failure, no
+  difference of value or shape from the existing compiler in the calculus
+  runs; the run of seed 162 without the option shows one difference,
+  `First([])` (`NaN` against `undefined`), which `114403d0b` has already.
+  The first run of seed 161 with the option found the two refusals of the
+  complex number and of the closed form `0` above; the witness replay and
+  the shadow measure ran before these two refusals were added, which only
+  decline more.

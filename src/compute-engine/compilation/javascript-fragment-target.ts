@@ -69,6 +69,11 @@ import {
 import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
 import { rangeSpecializedParameterTypes } from './compile-user-specialization.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { derivativeClosedForm } from './derivative-closed-form.js';
+import { jetDerivativeTarget } from './jet-derivative.js';
+import { storedDefinitions } from './compile-integrals.js';
+import { isUserDefinedFunction } from './compile-statements.js';
+import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
 import { isLibraryOperator, systemScopeBinding } from './builtin-callback.js';
 import { isOpaqueVarsSource, varsObjectSpelling } from './cse.js';
 import { entryIsPure, inferSourcePurity } from './function-purity.js';
@@ -4456,6 +4461,20 @@ function collectionRule(
     case 'First':
     case 'Last': {
       arity(1);
+      // `First` of a list whose element type does not decide the value of
+      // a read past the end (`never`, the type of the elements of `[]`):
+      // the existing emitter writes `_SYS.nth(L, 0)`, `undefined` for an
+      // empty list, where the route reads `NaN` (`compileNthElement()` in
+      // `javascript-target.ts`).
+      if (
+        head === 'First' &&
+        indexElementType(node.ops[0].type.type) === 'never'
+      )
+        refuse(
+          `of ${nodeText(node.ops[0])}, whose elements have the type never, ` +
+            `is not in the structured route: the existing emitter reads ` +
+            `undefined for an empty list`
+        );
       // The first or last tuple of a list of tuples, `_SYS.atPoint(L, 1,
       // n)` and `_SYS.atPoint(L, -1, n)`.
       const point = listElementType(facts[0]);
@@ -4820,9 +4839,16 @@ function functionOperandRule(
       // signed_infinity>`): the existing compiler reads it on the complex
       // lane where it is read (`At(Map(Ln, [x]), 1) + 2` is `{ re: …, im:
       // … }`), where the route reads the real number of its kernel.
+      // The application of the closed form of a derivative
+      // (`closedFormReplacement()`) is read in the lane of its body with the
+      // parameters of the arguments (`withDerivativeArgument()`), not of
+      // its engine type, whose parameters have no type.
       const engineType = node.type.type;
       const element = indexElementType(engineType) ?? engineType;
-      if (isNonRealNumber(finitePartOfType(element)))
+      if (
+        isNonRealNumber(finitePartOfType(element)) &&
+        !DERIVATIVE_APPLICATIONS.has(node)
+      )
         refuse(
           `of the type ${node.type.toString()} is not in the structured route: the existing ` +
             `compiler reads a value of numbers that are not real on the complex lane`
@@ -7540,6 +7566,9 @@ function recordStructured(
     states,
     testOperations: admission.testOperations,
     forms: registry.forms,
+    ...(registry.closedForms.size === 0
+      ? {}
+      : { closedForms: registry.closedForms }),
     numericPolicy: registry.mode,
     iterationBudget: target.iterationBudget,
     ...(hosts === undefined || hosts.bindings.size === 0
@@ -7829,13 +7858,18 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     options: CompilationOptions<Expression>
   ): CompilationResult<'javascript'> {
     const onPhase = this.hooks.onPhase;
-    if (this.route !== 'structured' || !onPhase)
-      return super.compile(expr, options);
-    this.phaseSum = 0;
-    const start = globalThis.performance.now();
-    const result = super.compile(expr, options);
-    onPhase('assembly', globalThis.performance.now() - start - this.phaseSum);
-    return result;
+    if (this.route !== 'structured') return super.compile(expr, options);
+    return withStructuredCompilation(() => {
+      if (!onPhase) return super.compile(expr, options);
+      this.phaseSum = 0;
+      const start = globalThis.performance.now();
+      const result = super.compile(expr, options);
+      onPhase(
+        'assembly',
+        globalThis.performance.now() - start - this.phaseSum
+      );
+      return result;
+    });
   }
 
   /**
@@ -8001,8 +8035,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
   ): StructuredPreparation {
     if (this.route !== 'structured')
       throw new Error('JS scalar fragment: not the structured route');
-    return structuredPreparationOf(
-      this.prepareCompilation(expr, options).target
+    return withStructuredCompilation(() =>
+      structuredPreparationOf(this.prepareCompilation(expr, options).target)
     );
   }
 
@@ -8128,6 +8162,19 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     if (admission.structured) refuseSumOfNestedSums(expr);
     const definition = admission.definition;
     const prepared = super.prepareCompilation(expr, options);
+    // The admission searches for the closed forms of the integrals
+    // (`closedFormReplacement()`) with the full pool of steps of a
+    // compilation, as the existing compiler does: its outermost compilation
+    // resets the pool after the preparation (`resetOutermostCompilation()`
+    // in `compiler-core.ts`), which the structured route does not run.
+    // The memos of the compilation are emptied there too
+    // (`resetCompilationState()`): an answer of `nameHasAngularDefinition()`
+    // made with the definitions of another compilation would be read by the
+    // search for a closed form.
+    if (structured && isOutermostStructuredCompilation()) {
+      resetCompilationState();
+      BaseCompiler.resetSharedCompilationBudgets();
+    }
     const annotationStart = structured
       ? this.endPhase('preparation', start)
       : 0;
@@ -8209,6 +8256,17 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     const checkNode = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
+      // A calculus node is the expression that replaces it
+      // (`closedFormReplacement()`).
+      if (registry !== undefined && isCalculusNode(node))
+        return check(
+          closedFormReplacement(
+            node,
+            registry,
+            prepared.target,
+            node !== prepared.expr
+          )
+        );
       refuseListHead(node, admission);
       refuseBooleanClaim(node, admission);
       refuseUndirectedInfinity(node, admission);
@@ -8482,6 +8540,426 @@ function refuseSelection(node: Expression): void {
       ? selectionRefusal(node)
       : undefined;
   if (message !== undefined) throw new Error(`JS scalar fragment: ${message}`);
+}
+
+/**
+ * The number of compilations of the structured route in progress
+ * (`withStructuredCompilation()`). The route does not enter
+ * `compileExpressionInFrame()`, so `CompilerState._compileDepth` does not
+ * count it: a compilation of the route started while another one runs must
+ * not empty the memos of the outer one.
+ */
+let structuredCompilations = 0;
+
+/** Whether the compilation of the structured route in progress is the
+ *  outermost one: no compilation of the existing compiler runs around it,
+ *  and no other compilation of the route. */
+function isOutermostStructuredCompilation(): boolean {
+  return CompilerState._compileDepth === 0 && structuredCompilations <= 1;
+}
+
+/**
+ * Run a compilation of the structured route (`compileOnRoute()`,
+ * `prepareStructured()`). When it is the outermost compilation, the memos
+ * are emptied when it ends, also after a decline or an error, as the
+ * existing compiler empties them (`compileExpressionInFrame()` in
+ * `compiler-core.ts`); `prepareFragment()` empties them when it starts.
+ */
+function withStructuredCompilation<T>(run: () => T): T {
+  structuredCompilations += 1;
+  try {
+    return run();
+  } finally {
+    const outermost = isOutermostStructuredCompilation();
+    structuredCompilations -= 1;
+    if (outermost) resetCompilationState();
+  }
+}
+
+/**
+ * Empty the module-wide memos of a compilation, as the existing compiler
+ * does when its outermost compilation starts and ends
+ * (`resetOutermostCompilation()` and `compileExpressionInFrame()` in
+ * `compiler-core.ts`): those of `resetCompilationMemos()` (among them
+ * `_angularDefinitionMemo`, which `closedFormIntegral()` reads, keyed by a
+ * name only), and `_variantResultTypeMemo`. The memos depend on the
+ * definitions of the engine, which can change between two compilations.
+ */
+function resetCompilationState(): void {
+  BaseCompiler.resetCompilationMemos();
+  CompilerState._variantResultTypeMemo = new WeakMap();
+}
+
+/** The heads of the nodes that the existing compiler replaces by a closed
+ *  form before it writes code (`closedFormReplacement()`). */
+const CALCULUS_HEADS = ['Integrate', 'D', 'ND', 'Derivative'];
+
+/**
+ * The most steps of the shared pool of the compilation
+ * (`ANTIDERIVATIVE_COMPILATION_STEPS`) that the searches for the closed
+ * forms of the integrals of a program spend on the structured route. The
+ * route searches once for each node, and the existing compiler searches
+ * again at each place where it writes the node: each occurrence, each term
+ * of an unrolled `Sum` or `Product`. When its searches spend the pool, a
+ * later search gets fewer steps, or none, and can end with no closed form
+ * where the route found one. The cap lowers the chance of that, and does
+ * not exclude it: the existing compiler can repeat a search more than 30
+ * times (an unrolled `Sum` of up to 100 terms, `UNROLL_LIMIT` in
+ * `javascript-target.ts`), and 30 searches of this many steps fill the pool
+ * minus one attempt. A search of an elementary integral spends fewer than
+ * 50 steps. The case is a known limitation (`docs/COMPILATION-MODEL.md`,
+ * "Known limitations").
+ */
+const CLOSED_FORM_SEARCH_STEPS = 10_000;
+
+/** The replacements of the applications of a derivative
+ *  (`closedFormReplacement()`): `Apply` of the function literal of the
+ *  closed form to the arguments. */
+const DERIVATIVE_APPLICATIONS = new WeakSet<Expression>();
+
+/** Whether `node` is a node of a head of `CALCULUS_HEADS`, or the
+ *  application of a `Derivative`, of the library. */
+function isCalculusNode(node: Expression): boolean {
+  if (!isFunction(node)) return false;
+  if (CALCULUS_HEADS.includes(node.operator))
+    return isLibraryOperator(node, node.operator);
+  return (
+    node.operator === 'Apply' &&
+    isLibraryOperator(node, 'Apply') &&
+    isFunction(node.ops[0], 'Derivative') &&
+    isLibraryOperator(node.ops[0], 'Derivative')
+  );
+}
+
+/**
+ * The expression that the structured route lowers in place of `node`, a
+ * calculus node (`isCalculusNode()`), or a refusal. It is the expression
+ * from which the existing compiler writes the code of the node, found by
+ * the same function, at the admission of the node:
+ *
+ * - `Integrate`: the closed form of `closedFormIntegral()`
+ *   (`compileIntegrate()` in `javascript-target.ts`), which the existing
+ *   compiler writes in parentheses. With no closed form, it integrates
+ *   numerically (`_SYS.integrate`), which the route does not have.
+ * - `D`, `ND`, `Derivative`: the closed form of `derivativeClosedForm()`
+ *   (`compileDerivative()` in `library/calculus.ts`), which the existing
+ *   compiler writes in parentheses too.
+ * - `Apply(Derivative(f, n…), x…)`: the application of the function
+ *   literal of `derivativeClosedForm()` to the arguments, which the
+ *   existing compiler writes as the call of the literal (the rule of
+ *   `Apply` in `javascript-target.ts`). A derivative that it writes with
+ *   Taylor jets (`jetDerivativeTarget()`) is refused.
+ *
+ * The replacement of a node is found once, and kept in
+ * `registry.closedForms`. Each name of the node, and each user function
+ * that it calls, at any depth, is a dependency of the compiled code
+ * (`CompileTarget.symbolDeps`): a closed form can hold the value of a
+ * name or the body of a function. The `complex` mode is refused: the
+ * existing compiler reads the node there in the lane of its type.
+ */
+function closedFormReplacement(
+  node: Expression,
+  registry: StructuredRegistry,
+  target: CompileTarget<Expression>,
+  operand: boolean
+): Expression {
+  if (!isFunction(node))
+    throw new Error('JS scalar fragment invariant: expected a calculus node');
+  const head =
+    node.operator === 'Apply' ? `Apply of ${node.op1.operator}` : node.operator;
+  if (registry.mode === 'complex')
+    throw new Error(
+      `JS scalar fragment: ${head} in the complex mode is not in the ` +
+        `structured route: the existing compiler reads its closed form in ` +
+        `the lane of the type of the node`
+    );
+  let replacement = registry.closedForms.get(node);
+  if (replacement === undefined) {
+    replacement = findClosedForm(node, registry, target);
+    registry.closedForms.set(node, replacement);
+    for (const name of calculusDependencies(node))
+      target.symbolDeps?.add(name);
+  }
+  // A complex number in the node or in its replacement: the existing
+  // compiler can read the node on the complex lane around a real closed
+  // form (`(∫ᵢ⁰ t dt)²` gives `{re: NaN, im: NaN}` there).
+  const complex = complexPartOf(node) ?? complexPartOf(replacement);
+  if (complex !== undefined)
+    throw new Error(
+      `JS scalar fragment: ${nodeText(node)} reads the complex value ` +
+        `${nodeText(complex)}: the existing compiler can read the node on ` +
+        `the complex lane`
+    );
+  // A closed form `0` as an operand: the existing compiler writes `(0)`, a
+  // term that a complex sum keeps, where the route drops a literal `0`
+  // (`0` and `-0` differ there).
+  if (
+    operand &&
+    isNumber(replacement) &&
+    replacement.re === 0 &&
+    replacement.im === 0
+  )
+    throw new Error(
+      `JS scalar fragment: ${nodeText(node)} is an operand, and its closed ` +
+        `form is 0: the existing compiler writes it as a term \`(0)\``
+    );
+  return replacement;
+}
+
+/**
+ * A number of `expr` that is not real, or a free symbol whose declared type
+ * is one of numbers that are not real, or `undefined`. A name that `expr`
+ * binds (the variable of a `Limits` clause, a parameter of a function
+ * literal) is not read: the engine can give it a type that is not real
+ * (`complex | infinity` in `Abs(s)`), and the existing compiler reads it as
+ * a real scalar. A free symbol with no declared type has the default kind
+ * of the mode, real in the `strict` mode (`hasNoDeclaredType()`).
+ */
+function complexPartOf(
+  expr: Expression,
+  bound: ReadonlySet<string> = new Set()
+): Expression | undefined {
+  if (isNumber(expr)) return expr.im !== 0 ? expr : undefined;
+  if (isSymbol(expr))
+    return expr.symbol === 'ImaginaryUnit' ||
+      (!bound.has(expr.symbol) &&
+        !hasNoDeclaredType(expr) &&
+        isNonRealNumber(finitePartOfType(expr.type.type)))
+      ? expr
+      : undefined;
+  if (!isFunction(expr)) return undefined;
+  let inner = bound;
+  const binds = (names: readonly string[]) => {
+    if (names.length > 0) inner = new Set([...inner, ...names]);
+  };
+  if (expr.operator === 'Function')
+    binds(
+      expr.ops
+        .slice(1)
+        .map((p) => functionLiteralParameterName(p))
+        .filter((n) => n !== '')
+    );
+  if (expr.operator === 'Integrate')
+    binds(
+      expr.ops
+        .slice(1)
+        .flatMap((l) =>
+          isFunction(l, 'Limits') && isSymbol(l.op1) ? [l.op1.symbol] : []
+        )
+    );
+  for (const op of expr.ops) {
+    const found = complexPartOf(op, inner);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** The replacement of the calculus node `node` (`closedFormReplacement()`),
+ *  or a refusal. */
+function findClosedForm(
+  node: Expression & { ops: readonly Expression[] },
+  registry: StructuredRegistry,
+  target: CompileTarget<Expression>
+): Expression {
+  const text = nodeText(node);
+  // A variable whose binding around the node can hold a list: the existing
+  // compiler declines an `Integrate`, and a `D` whose closed form reads
+  // the variable from a binding other than the global of its name
+  // (`compileExprCustomHandler()` in `compiler-core.ts`), and the closed
+  // form read as a number gives `NaN` for a list.
+  const risky =
+    node.operator === 'Integrate' || node.operator === 'D'
+      ? nonScalarEnclosingBindings(node)
+      : [];
+  if (node.operator === 'Integrate' && risky.length > 0)
+    throw new Error(
+      `JS scalar fragment: the variable ${risky[0].name} of the integral ` +
+        `${text} can hold a list: the existing compiler declines it`
+    );
+  if (node.operator === 'Integrate') {
+    // The engine evaluates the integral to find its closed form: a draw in
+    // the integrand would be made once, at compile time.
+    if (!isTransitivelyPure(node))
+      throw new Error(
+        `JS scalar fragment: the integral ${text} is not pure: its closed ` +
+          `form is found by an evaluation at compile time`
+      );
+    const before = CompilerState.antiderivativeStepsLeft;
+    const closed = BaseCompiler.closedFormIntegral(node.ops, target);
+    registry.closedFormSearch.spent +=
+      before - CompilerState.antiderivativeStepsLeft;
+    if (registry.closedFormSearch.spent > CLOSED_FORM_SEARCH_STEPS)
+      throw new Error(
+        `JS scalar fragment: the searches for the closed forms of the ` +
+          `integrals of the program spend more than ` +
+          `${CLOSED_FORM_SEARCH_STEPS} steps: the existing compiler searches ` +
+          `again where it writes an integral, and its searches can spend the ` +
+          `shared pool of the compilation`
+      );
+    if (closed === undefined) {
+      const indefinite =
+        node.ops.length < 2 ||
+        node.ops
+          .slice(1)
+          .some(
+          (limit) =>
+            !isFunction(limit, 'Limits') ||
+            limit.ops.slice(1).some((bound) => isSymbol(bound, 'Nothing'))
+        );
+      throw new Error(
+        indefinite
+          ? `JS scalar fragment: the indefinite integral ${text} has no ` +
+              `closed form that the engine finds at compile time, and no value ` +
+              `at a point`
+          : `JS scalar fragment: the integral ${text} has no closed form that ` +
+              `the engine finds at compile time: the existing compiler ` +
+              `integrates it numerically (\`_SYS.integrate\`), which the ` +
+              `structured route does not have`
+      );
+    }
+    return closed;
+  }
+  if (node.operator === 'Apply') {
+    const callee = node.ops[0] as Expression & { ops: readonly Expression[] };
+    if (
+      jetDerivativeTarget(
+        node.ops,
+        (id) => BaseCompiler.userFunctionLiteral(node.engine, id),
+        false
+      ) !== undefined
+    )
+      throw new Error(
+        `JS scalar fragment: the derivative ${text} is computed with Taylor ` +
+          `jets by the existing compiler (\`jetDerivativeTarget()\`), which ` +
+          `the structured route does not have`
+      );
+    const multivariate = callee.ops.length > 2 || node.ops.length > 2;
+    const literal =
+      multivariate && BaseCompiler.appliedDerivativeTooLarge(node.ops)
+        ? undefined
+        : derivativeClosedForm('Derivative', callee.ops);
+    if (!isFunction(literal, 'Function'))
+      throw new Error(
+        `JS scalar fragment: ${text}: ` +
+          `${BaseCompiler.appliedDerivativeDeclineReason(node.ops)} that the ` +
+          `engine finds at compile time: the existing compiler writes the ` +
+          `numerical derivative \`_SYS.nd\` or declines, and the structured ` +
+          `route has no numerical derivative`
+      );
+    const application = node.engine._fn('Apply', [
+      literal,
+      ...node.ops.slice(1),
+    ]);
+    DERIVATIVE_APPLICATIONS.add(application);
+    return application;
+  }
+  // A variable of `D` that holds a value: the existing compiler reads it as
+  // an input in the closed form (`3 * (_.x * _.x)` for `D(x³, x)` with `x
+  // := 4`), where the interpreter reads its value (`48`).
+  const valued =
+    node.operator === 'D'
+      ? node.ops
+          .slice(1)
+          .find(
+            (v) =>
+              isSymbol(v) && node.engine._getSymbolValue(v.symbol) !== undefined
+          )
+      : undefined;
+  if (valued !== undefined)
+    throw new Error(
+      `JS scalar fragment: the variable ${nodeText(valued)} of the ` +
+        `derivative ${text} holds a value: the existing compiler reads it as ` +
+        `an input in the closed form`
+    );
+  const closed = derivativeClosedForm(
+    node.operator as 'D' | 'ND' | 'Derivative',
+    node.ops
+  );
+  for (const { name, binding } of risky)
+    if (
+      closed === undefined ||
+      (node.engine.lookupDefinition(name) !== binding &&
+        closed.symbols.includes(name))
+    )
+      throw new Error(
+        `JS scalar fragment: the variable ${name} of the derivative ${text} ` +
+          `can hold a list: the existing compiler declines it`
+      );
+  if (closed === undefined)
+    throw new Error(
+      `JS scalar fragment: the derivative ${text} has no closed form that ` +
+        `the engine finds at compile time: the existing compiler writes the ` +
+        `numerical derivative \`_SYS.nd\` or declines, and the structured ` +
+        `route has no numerical derivative`
+    );
+  if (isFunction(closed, 'Function'))
+    throw new Error(
+      `JS scalar fragment: the derivative ${text} is the function ` +
+        `${nodeText(closed)}, which the structured route does not have as a ` +
+        `value`
+    );
+  return closed;
+}
+
+/** The rule of a head of `CALCULUS_HEADS` or of `Apply` on the structured
+ *  route: a node that the admission replaced (`closedFormReplacement()`)
+ *  has the facts of its replacement, typed in its place; another node has
+ *  the rule `rule` of its head, or is refused. */
+function closedFormRule(
+  registry: StructuredRegistry,
+  rule: FragmentRule<ScalarRepresentation> | undefined
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const replacement = registry.closedForms.get(node);
+      if (replacement !== undefined) return w.type(replacement, scope, context);
+      if (rule === undefined)
+        return w.refuse(
+          node,
+          'head',
+          `${nodeText(node)} is not in the structured route`
+        );
+      return 'walk' in rule
+        ? rule.walk(node, scope, context, w)
+        : w.signatures(node, scope, context, rule.signatures);
+    },
+  };
+}
+
+/**
+ * The names whose definitions the closed form of the calculus node `node`
+ * can hold (`closedFormReplacement()`): each symbol of the node that has a
+ * value and is not a constant of the engine, each user function that the
+ * node calls or names (`Derivative(g)`), and the names of their stored
+ * definitions (`storedDefinitions()`), at any depth, as the bigint lowering
+ * records a folded name (`recordFolded()` in
+ * `javascript-structured-bigint.ts`). An input, a variable of the node and
+ * a parameter of a function body have no stored definition, and are not
+ * recorded.
+ */
+function calculusDependencies(node: Expression): Set<string> {
+  const engine = node.engine;
+  const names = new Set<string>();
+  const visited = new Set<string>();
+  const reach = (name: string): void => {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const definitions = storedDefinitions(engine, name);
+    if (definitions.length === 0) return;
+    names.add(name);
+    for (const definition of definitions) visit(definition);
+  };
+  const visit = (e: Expression): void => {
+    if (isSymbol(e)) {
+      if (!e.isConstant) reach(e.symbol);
+      return;
+    }
+    if (!isFunction(e)) return;
+    if (isUserDefinedFunction(engine, e.operator)) reach(e.operator);
+    for (const op of e.ops) visit(op);
+  };
+  visit(node);
+  return names;
 }
 
 /**
@@ -9220,6 +9698,13 @@ function admitFunctionBody(
   const checkValue = (node: Expression, bodyValue = false): void =>
     atNode(node, () => checkValueNode(node, bodyValue));
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
+    // A calculus node is the expression that replaces it
+    // (`closedFormReplacement()`).
+    if (registry !== undefined && isCalculusNode(node))
+      return checkValue(
+        closedFormReplacement(node, registry, target, !bodyValue),
+        bodyValue
+      );
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     refuseUndirectedInfinity(node, admission);
@@ -9979,6 +10464,11 @@ function admitFunctionBody(
       captureArguments.push(symbol);
     };
     const visit = (node: Expression): void => {
+      // A calculus node reads the names of the expression that replaces it
+      // (`closedFormReplacement()`): the variable of an integral is not a
+      // capture.
+      if (isCalculusNode(node))
+        return visit(closedFormReplacement(node, registry, target, false));
       if (isSymbol(node)) {
         if (bound.has(node.symbol)) return;
         if (registry.localFunctions.has(node.symbol))
@@ -10366,6 +10856,11 @@ type StructuredRegistry = {
   /** The calls of the local functions: their effect is the effect of the
    *  body, which the lowering joins (`effectFacts()`). */
   readonly localCalls: Set<Expression>;
+  /** The expression that replaces each calculus node of the program
+   *  (`closedFormReplacement()`), and the steps of the shared pool that the
+   *  searches of integrals spent. */
+  readonly closedForms: Map<Expression, Expression>;
+  readonly closedFormSearch: { spent: number };
 };
 
 /**
@@ -10431,6 +10926,8 @@ function structuredRegistry(
     localFunctions: new Map(),
     localFunctionNames: new Set(),
     localCalls: new Set(),
+    closedForms: new Map(),
+    closedFormSearch: { spent: 0 },
   };
 }
 
@@ -10985,6 +11482,10 @@ function annotateStructured(
               atNode(node, () => rule.walk(node, scope, context, w)),
           }
         : rule;
+  // A calculus node has the facts of the expression that replaces it
+  // (`closedFormReplacement()`), typed in its place.
+  for (const head of [...CALCULUS_HEADS, 'Apply'])
+    rules[head] = closedFormRule(registry, rules[head]);
   markEmptyTupleLists(root, registry.mode);
   for (const helper of registry.helpers.values())
     markEmptyTupleLists(helper.fragment.body, registry.mode);
