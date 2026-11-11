@@ -644,7 +644,10 @@ code, as `freeSymbols` lists it. An input whose static type is `unknown` or
 and the name of the input in `unsupported`: with `m` undeclared,
 `If(m < 3, m, 0)` declines, and `unsupported` is `["m"]`. A declared union of
 shapes (`real | list<real>`) is a type, and compiles (R4). "An input with no
-type declines", under "Fail closed", gives the details.
+type declines", under "Fail closed", gives the details. One exception: the
+experimental `numeric-kernel` profile of the JavaScript target takes an input
+with no declared type as a scalar number ("The `numeric-kernel` profile of
+the JavaScript target", below).
 
 **R2. The static type of an argument selects the code of a call.** A
 function is compiled once for each argument shape that the program gives
@@ -1944,7 +1947,7 @@ nothing changes.
 | Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` with the exponent 2, 1.5 (a base proved non-negative), the base `e`, a real exponent that is not a literal (`s^(d/2)`, a real result), or a float literal exponent with an odd recovered denominator and a base not proved non-negative (`u^1.6`) |
 | Functions | `Sqrt`, `Ln`, `Exp`, `Sin`, `Cos`, `Tanh`, `Abs`, `Arctan2`, `Min`, `Max`, `Floor`, `Mod` |
 | Conditions | `If`, `Less`, `LessEqual`, `Equal`, `NotEqual` (real and integer operands), `And`, `Or`, `Not` |
-| Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot) |
+| Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot), names with no declared type (below) |
 | Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature, whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines |
 | Lists | `At` and `Length` of a list input or parameter, `Comprehension(body, Element(j, Range(a, b)))`, `ReplaceAt` |
 
@@ -1953,9 +1956,34 @@ nothing changes.
 | A head outside the list | `Sinh(x)`, `Integrate(sin(x), x)`, `Random()` (`operator: 'Random'`) |
 | A form the existing emitter writes in a special way | `x^3`, `Mod(x, 1)`, `Sin(z)` in the `complex` mode, a closed comparison |
 | A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
-| A name with no numeric type | `x + u` with `u` undeclared (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
+| A name declared with a type that is not numeric | `x + u` with `u` declared `number` or `any` (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
 | A statement outside the list | `Continue` in a `Loop` (`operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Loop` over a list |
 | An option outside the profile | `functions`, `operators`, `vars`, `imports`, `preamble`, `broadcast`, `mode: 'bigint'` |
+
+**A name with no declared type.** Under the profile, a parameter of a
+`Function` literal or a free symbol with no declared type is a real number
+in the `strict` mode and a complex number in the `complex` mode (the
+compiled code then accepts a number or a complex value for it). The type
+that the engine inferred for the name is not read, so the kind of the name
+does not depend on what was boxed before. The host supplies a scalar number
+for such a name; a value of another shape is outside its type. The result,
+and the positive answer of `canCompile()`, list these names in
+`defaultedSymbols`: with `u` undeclared, `x + u` compiles and `u` is an
+input. A symbol with a value and no declared type (`ce.assign('a', 3)`) is
+captured as a number copied at compile time, with the kind of its value. A
+name declared with a type that the profile has no kind for (`number`,
+`any`) declines. Three limits:
+
+- A body that uses the name as a list, as a condition or as an integer (a
+  loop bound, an index) declines: declare the name.
+- Some rules read the type of a node, which the engine computes from the
+  type it inferred for the name. An earlier use can then make a program
+  decline (`Exp(Sqrt(x))` after `Mod(x, 2)` was boxed); it never changes
+  the code of a program that compiles.
+- An assumption does not change the kind: with `n` assumed an integer and
+  not declared, `Floor(n)` is `Math.floor(_.n)`, the interpreter's value for
+  every real `n`. The existing compiler reads the assumption and writes
+  `_.n`.
 
 The decline follows the `fallback` option, as any other decline: with
 `fallback: true` (the default of `compile()`), `success: false` and the

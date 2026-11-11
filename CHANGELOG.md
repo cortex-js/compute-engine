@@ -12,7 +12,11 @@
   A program outside the profile declines with the diagnostic code
   `outside-profile`, which names the first node outside it (`operator` or
   `binding`); `fallback` applies as for any other decline, and the ordinary
-  compiler is never used for a part of the program. The options `cse` and
+  compiler is never used for a part of the program. A parameter or a free
+  symbol with no declared type is a real number in the `strict` mode and a
+  complex number in the `complex` mode, whatever type the engine inferred
+  for it; the result and the positive answer of `canCompile()` list such
+  names in the new field `defaultedSymbols`. The options `cse` and
   `constantFold` are ignored under the profile; `functions`, `operators`,
   `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
   with `outside-profile` (an empty object of `functions`, `operators` or

@@ -83,6 +83,25 @@ alone caused about 5,200 of 5,801 declines.
   profile cannot give exactly the values of the existing compiler, the
   program declines.
 
+**Result (2026-11-10), `6b3e1e341858468e2b04ce64e3e3ffbaafb6705d`.** Both
+modes are implemented; the predicate is `hasNoDeclaredType()`, built on
+`hasInferredType()` (`boxed-expression/type-guards.ts`) as the session of
+the binding units asked, and it holds with the flag `_bindingUnits` off and
+on. The field is `defaultedSymbols`. Three points differ from the text
+above, each found by the review:
+
+- "The inferred type is not read" holds for the kind of the name. Some rules
+  (`Power`) read the type of a node, which the engine computes from the
+  inferred type: an earlier use can make a program decline
+  (`Exp(Sqrt(x))` after `Mod(x, 2)`), and never changes the code of one
+  that compiles.
+- An assumption (`n` assumed an integer) does not change the kind. The
+  profile gives the interpreter's value for every real `n`; the existing
+  compiler drops `Floor(n)`. The two differ only for a value outside the
+  assumption.
+- A name declared `unknown` declines only until a use narrows it; it then
+  takes the default (with `_bindingUnits` on, it always does).
+
 In the `strict` mode the existing compiler already computes with an untyped
 name as a real number: for 37 of 43 bodies its code for an untyped parameter
 is the code for `x: real`, and the 6 others use operators outside the

@@ -170,3 +170,40 @@ code.
 
 **Found on the way.** `issues/CE-1193.md`: the log-space evaluation of an
 integrand is skipped for a typed parameter.
+
+## After the rule for names with no declared type (2026-11-10)
+
+`6b3e1e341858468e2b04ce64e3e3ffbaafb6705d`
+([the rule](2026-11-10-js-numeric-kernel-profile-spec.md)). The full suite
+in a clean worktree, before two tests were added to the new test file:
+
+| Switch | Tests passed | Snapshots | Failures |
+| --- | --- | --- | --- |
+| off | 82,946 | 4,247 unchanged | 0 |
+| on | 82,946 | 4,247 unchanged | 0 |
+
+| Consumer | Attempts | Admitted | Declined |
+| --- | --- | --- | --- |
+| `limit-probe` | 1,773 | 1,391 | 382 |
+| `fit` | 1,765 | 1,617 | 148 |
+| `integrand` | 875 | 388 | 487 |
+| `stochastic-equal` | 592 | 474 | 118 |
+| `map-exact` | 224 | 163 | 61 |
+| `periodic-roots` | 223 | 177 | 46 |
+| `map` | 192 | 104 | 88 |
+| `multiple-integral` | 161 | 143 | 18 |
+| `integrand-complex` | 135 | 10 | 125 |
+| `nd` | 54 | 28 | 26 |
+| `map-predicate` | 45 | 41 | 4 |
+| `solve-enumeration` | 43 | 27 | 16 |
+| `nlimit` | 39 | 24 | 15 |
+| `ndsolve` | 30 | 26 | 4 |
+| `reduce` | 29 | 8 | 21 |
+| `integrand-log` | 23 | 3 | 20 |
+| other | 8 | 3 | 5 |
+| total | 6,211 | 4,627 (74%) | 1,584 |
+
+No attempt failed, and no test changed: the constant folding that the
+profile does not do changed no exact comparison of the suite. The declines
+of `limit-probe`, the largest group: `Erf` 142, a `Power` form outside the
+profile 124, `Gamma` 33, `Root` 24.
