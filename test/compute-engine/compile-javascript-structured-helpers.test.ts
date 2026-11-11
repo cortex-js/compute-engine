@@ -531,11 +531,14 @@ function b(n: integer) -> integer {
 function f(n: integer) -> integer { a(n) }
 `,
       'f',
-      /helper requires one pure scalar signature/
+      /the helper a is not pure: its signature has effects/
     );
   });
 
-  test('a helper with no declared signature', () => {
+  // A helper with no declared signature is admitted: its untyped parameter
+  // is a real number in the strict mode, as an untyped parameter of the
+  // root (compile-javascript-profile-undeclared-helpers.test.ts).
+  test('a helper with no declared signature is admitted', () => {
     const ce = new ComputeEngine();
     ce.assign(
       'h',
@@ -546,8 +549,10 @@ function f(n: integer) -> integer { a(n) }
       ] as MathJsonExpression)
     );
     const root = ce.expr(['Function', ['Block', ['h', 'x']], ['Typed', 'x', "'real'"]] as MathJsonExpression);
-    expect(() => structured().compile(root, OPTIONS)).toThrow(/helper requires/);
-    expect(profileOutcome(root)).toMatch(/Could not compile with the profile 'numeric-kernel'/);
+    const result = structured().compile(root, OPTIONS);
+    const existing = compile(root, { ...OPTIONS, fallback: false });
+    for (const x of [-1.5, 0, 2.25]) expect(Object.is(run(result, [x]), run(existing, [x]))).toBe(true);
+    expect(typeof profileOutcome(root)).toBe('object');
   });
 
   test('a statement outside the admitted list: Continue', () => {

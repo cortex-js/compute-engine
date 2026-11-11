@@ -115,6 +115,23 @@ is the code for `x: real`, and the 6 others use operators outside the
 profile (`Arcsin`, `Arccos`, `Arcosh`, `Artanh`, `Arcsec`, a parameter as a
 condition).
 
+**Helpers with no declared signature (2026-11-10).** A call of a user
+function whose signature the engine inferred (`f(x) := …`,
+`ce.assign('f', Function(…))`), or derived from a literal with an
+annotation on some parameters only (`_derivedSignature`), follows the same
+rule: each parameter with no annotation has the default kind of the mode,
+by the code of the root (`defaultedParameterKind()`), and the result is the
+fact of the body. An argument of another kind declines (a list, a boolean,
+a complex value in the `strict` mode, a real value in the `complex` mode),
+so the helper is one function with one parameter type, as in the existing
+compiler for a real argument. `defaultedSymbols` lists the name of such a
+helper after the names of the inputs: a host declares its signature. A
+helper declared `function`, or whose signature has an optional or a
+variadic parameter, a type parameter or effects, keeps its decline, each
+with its own message. The body of every helper is now rewritten for the
+angular unit of the engine, as the root is; before, it was compiled in
+radians whatever the unit.
+
 ## The two facts, defined
 
 **`pure`.** Two calls of the compiled function, with any arguments, give the

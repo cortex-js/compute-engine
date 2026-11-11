@@ -3858,7 +3858,9 @@ export type CompilationResult<
    * inferred for such a name is not read. Parameters in their order, free
    * symbols in the order of their first read. A host reads it to find a
    * name that it did not mean to leave undeclared (`x + u` with a typo `u`
-   * compiles, and `u` is an input). Absent when every name has a declared
+   * compiles, and `u` is an input). Then the name of each user function
+   * that the code calls and that has a parameter with no declared type,
+   * which took the default type too. Absent when every name has a declared
    * type. A symbol with a value and no declared type is not listed: the code
    * holds a copy of its value.
    */

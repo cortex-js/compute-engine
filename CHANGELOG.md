@@ -16,7 +16,11 @@
   symbol with no declared type is a real number in the `strict` mode and a
   complex number in the `complex` mode, whatever type the engine inferred
   for it; the result and the positive answer of `canCompile()` list such
-  names in the new field `defaultedSymbols`. The options `cse` and
+  names in the new field `defaultedSymbols`. The same rule applies to a
+  call of a user function with no declared signature (`f(x) := x^2 + 1`):
+  each parameter with no annotation has the default type, the result is
+  the type of the body, an argument of another type declines, and
+  `defaultedSymbols` lists the name of the function. The options `cse` and
   `constantFold` are ignored under the profile; `functions`, `operators`,
   `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
   with `outside-profile` (an empty object of `functions`, `operators` or

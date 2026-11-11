@@ -49,6 +49,8 @@ import {
   userFunctionLiteral,
   userFunctionSignature,
 } from './compile-assignment-checks.js';
+import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
+import { rewriteAngularUnit } from './angular-unit.js';
 import { isLibraryOperator } from './builtin-callback.js';
 import {
   typeFragment,
@@ -3118,9 +3120,16 @@ function recordStructured(
     ),
     captures: [...registry.captures.values()],
     inputs,
-    defaulted: inputs
-      .filter((input) => prepared.defaulted.has(input.name))
-      .map((input) => input.name),
+    // A helper is listed by its name when a parameter took the default
+    // kind: the host declares its signature.
+    defaulted: [
+      ...inputs
+        .filter((input) => prepared.defaulted.has(input.name))
+        .map((input) => input.name),
+      ...[...registry.helpers.values()]
+        .filter((helper) => helper.defaulted.some((d) => d))
+        .map((helper) => helper.name),
+    ],
     effects: effectFacts(prepared.annotation),
     testOperations: admission.testOperations,
     forms: registry.forms,
@@ -3643,20 +3652,41 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
  * branch only and no test; the annotation has facts for the test and both
  * branches. A condition whose type is not `boolean` would need a guard.
  */
-function checkCondition(node: Expression): void {
+function checkCondition(
+  node: Expression,
+  helper?: {
+    readonly name: string;
+    readonly defaulted?: ReadonlySet<string>;
+    readonly mode?: 'strict' | 'complex';
+  }
+): void {
   if (!isFunction(node, 'If') || node.nops < 2 || node.nops > 3) return;
   const type = node.op1.type.type;
+  // In the body of a helper, the refusal names the helper, as a refusal of
+  // the pass does, and a parameter that took the default kind of the mode.
+  const condition = node.op1;
+  const defaulted =
+    helper?.mode !== undefined &&
+    isSymbol(condition) &&
+    helper.defaulted?.has(condition.symbol) === true
+      ? `: the parameter ${condition.symbol} has no declared type, and it is ` +
+        `${defaultKind(helper.mode).kind} in the \`${helper.mode}\` mode`
+      : '';
+  const suffix =
+    helper === undefined
+      ? ''
+      : ` (in the body of the user function \`${helper.name}\`)`;
   if (
     typeof type === 'object' &&
     type.kind === 'value' &&
     typeof type.value === 'boolean'
   )
     throw new Error(
-      `JS scalar fragment: the condition of If has the constant type ${type.value}`
+      `JS scalar fragment: the condition of If has the constant type ${type.value}${suffix}`
     );
   if (!isSubtype(type, 'boolean'))
     throw new Error(
-      'JS scalar fragment: the condition of If does not have the type boolean'
+      `JS scalar fragment: the condition of If does not have the type boolean${defaulted}${suffix}`
     );
 }
 
@@ -3750,14 +3780,12 @@ function attachBoundFunction(
       const declared = functionLiteralParameterType(parameter);
       // On the structured route a parameter with no declared type has the
       // default kind of the mode; its inferred type is not read.
-      const undeclared =
-        registry !== undefined &&
-        declared === undefined &&
-        hasNoDeclaredType(parameter);
+      const defaultType = defaultedParameterKind(parameter, registry);
+      const undeclared = defaultType !== undefined;
       // The structured route also admits a list parameter
       // (`structuredListType()`).
       const type = undeclared
-        ? defaultKind(registry.mode)
+        ? defaultType
         : declared === undefined
           ? undefined
           : admission.structured
@@ -3928,9 +3956,20 @@ function admitFunctionBody(
   named: NamedCalls,
   helper?: {
     readonly name: string;
-    readonly result: NonNullable<ReturnType<typeof structuredParameterType>>;
+    /** `undefined` when the signature of the helper is inferred. */
+    readonly result: ReturnType<typeof structuredParameterType>;
+    /** The parameters that took the default kind of the mode. */
+    readonly defaulted?: ReadonlySet<string>;
   }
 ): void {
+  const conditionContext =
+    helper === undefined
+      ? undefined
+      : {
+          name: helper.name,
+          defaulted: helper.defaulted,
+          mode: named.structured?.mode,
+        };
   const registry = named.structured;
   const isRoot = helper === undefined;
   // The structured route also admits a block of one value, the form of the
@@ -4065,7 +4104,11 @@ function admitFunctionBody(
       const nested = structuredValueParts(node, bodyValue);
       // The value of the body of a helper `f(…) -> T` is `Typed(value, T)`:
       // `T` must be the declared result of the helper.
-      if (nested !== undefined && helper && node.operator === 'Typed') {
+      if (
+        nested !== undefined &&
+        helper?.result !== undefined &&
+        node.operator === 'Typed'
+      ) {
         const ascribed = structuredParameterType(node.type.type, helper.name);
         if (
           ascribed === undefined ||
@@ -4137,7 +4180,7 @@ function admitFunctionBody(
       throw new Error(
         `JS scalar fragment: unsupported ${isRoot ? 'bound head' : 'helper body'} ${node.operator}`
       );
-    checkCondition(node);
+    checkCondition(node, conditionContext);
     for (const operand of admittedOperands(node)) checkValue(operand);
   };
   // The representation of a local declared `integer` is `number`, as for a
@@ -4164,7 +4207,7 @@ function admitFunctionBody(
       (symbol) => isLengthLocal(symbol.symbol),
       (call) =>
         isFunction(call) &&
-        registry?.helpers.has(call.operator) === true &&
+        registry?.helpers.get(call.operator)?.declaredResult === true &&
         isSubtype(
           userFunctionSignature(call.engine, call.operator)?.result ??
             'unknown',
@@ -4305,7 +4348,7 @@ function admitFunctionBody(
       (statement.nops === 2 || statement.nops === 3)
     ) {
       checkValue(statement.op1);
-      checkCondition(statement);
+      checkCondition(statement, conditionContext);
       for (const branch of statement.ops.slice(1))
         nested(() => checkStructuredStatement(branch, 'branch', false));
       return;
@@ -4516,7 +4559,16 @@ function structuredInput(
 
 type ResolvedHelper = ScalarFragmentHelper & {
   readonly binding: object;
-  readonly resultRepresentation: ScalarRepresentation;
+  /** `undefined` for a helper with an inferred signature on the structured
+   *  route: its result is the fact of its body. */
+  readonly resultRepresentation: ScalarRepresentation | undefined;
+  /** Whether the result type of the helper is read from its signature:
+   *  a declared signature, or one derived from a literal whose parameters
+   *  all have an annotation. */
+  readonly declaredResult: boolean;
+  /** For each parameter of the helper, whether it has no declared type and
+   *  took the default kind of the mode (`defaultedParameterKind()`). */
+  readonly defaulted: readonly boolean[];
   readonly fragment: Omit<FragmentFunction, 'arguments'>;
   /** The label of each list parameter (`elementLabel()`). */
   readonly parameterElementLabels?: readonly (string | undefined)[];
@@ -4613,6 +4665,26 @@ function defaultKind(mode: 'strict' | 'complex') {
   return mode === 'complex'
     ? ({ kind: 'complex' } as const)
     : ({ kind: 'real' } as const);
+}
+
+/** The kind of the parameter `parameter` of a `Function` literal on the
+ *  structured route (`registry`) when it has no declared type: no
+ *  annotation, and `hasNoDeclaredType()`. It is the default kind of the
+ *  mode (`defaultKind()`). `undefined` for a parameter with a declared
+ *  type, and on the existing route. The parameters of the root function
+ *  (`attachBoundFunction()`) and of a helper with an inferred signature
+ *  (`resolveHelper()`) take this kind. */
+function defaultedParameterKind(
+  parameter: Expression,
+  registry: StructuredRegistry | undefined
+) {
+  if (
+    registry === undefined ||
+    functionLiteralParameterType(parameter) !== undefined ||
+    !hasNoDeclaredType(parameter)
+  )
+    return undefined;
+  return defaultKind(registry.mode);
 }
 
 /**
@@ -4938,11 +5010,22 @@ function annotateStructured(
       !entry ||
       entry.body !== helper.body ||
       entry.type.kind !== 'function' ||
-      structuredRepresentation(entry.type.result) !==
-        helper.resultRepresentation
+      (helper.resultRepresentation !== undefined &&
+        structuredRepresentation(entry.type.result) !==
+          helper.resultRepresentation)
     )
       throw new Error(
         'JS scalar fragment: helper return representation differs from its signature'
+      );
+    // A helper with an inferred signature returns the fact of its body,
+    // which must be a value that the route holds.
+    if (
+      helper.resultRepresentation === undefined &&
+      structuredRepresentation(entry.type.result) === undefined
+    )
+      throw new Error(
+        `JS scalar fragment: the body of the helper ${helper.name} has the ` +
+          `type ${fragmentTypeToString(entry.type.result)}, which the structured route does not hold`
       );
     checkLocalWrites(helper.body, entry.scope);
   }
@@ -4967,11 +5050,47 @@ function annotateStructured(
           facts.conversions?.some((conversion) => conversion.kind !== 'none')
       )
     )
-      throw new Error(
-        'JS scalar fragment: helper arguments must preserve representation'
-      );
+      throw argumentRefusal(call, registry, scopes);
   }
   return annotation;
+}
+
+/**
+ * The refusal of the call `call` of a helper whose arguments do not keep
+ * their representation (`annotateStructured()`), recorded at the call. An
+ * argument converted to a parameter that took the default kind of the mode
+ * is named, with its type: in the `complex` mode such a parameter is
+ * complex, and a real argument would need a conversion.
+ */
+function argumentRefusal(
+  call: Expression,
+  registry: StructuredRegistry,
+  scopes: readonly FragmentScope<ScalarRepresentation>[]
+): Error {
+  const helper = isFunction(call)
+    ? registry.helpers.get(call.operator)
+    : undefined;
+  let message = 'helper arguments must preserve representation';
+  if (helper !== undefined && isFunction(call))
+    for (const scope of scopes) {
+      const facts = scope.facts.get(call);
+      if (facts === undefined || !('representation' in facts)) continue;
+      const i = (facts.conversions ?? []).findIndex(
+        (conversion, j) => conversion.kind !== 'none' && helper.defaulted[j]
+      );
+      const argument = i < 0 ? undefined : scope.facts.get(call.ops[i]);
+      if (argument === undefined || !('type' in argument)) continue;
+      const kind = defaultKind(registry.mode).kind;
+      message =
+        `The argument \`${call.ops[i].toString()}\` of \`${helper.name}\` has ` +
+        `the type \`${fragmentTypeToString(argument.type)}\`, and the parameter ` +
+        `\`${helper.fragment.parameters[i]}\` has no declared type: it is ` +
+        `${kind} in the \`${registry.mode}\` mode`;
+      break;
+    }
+  const e = new Error(`JS scalar fragment: ${message}`);
+  noteRefusedNode(e, { node: call });
+  return e;
 }
 
 /**
@@ -5036,23 +5155,54 @@ function resolveHelper(
   if (literal !== held)
     throw new Error('JS scalar fragment: helper definition identity differs');
   const signature = userFunctionSignature(call.engine, call.operator);
+  // On the structured route, a signature that the engine inferred from the
+  // definition (`f(x) := …`, `ce.assign('f', …)`) declares no type, and a
+  // signature derived from a literal with an annotated parameter
+  // (`_derivedSignature`) declares only the annotated parameters: when a
+  // parameter has no annotation, it takes the default kind of the mode, as
+  // a parameter of the root does (`defaultedParameterKind()`), and the
+  // result is the fact of the body, since the engine typed the body with
+  // that parameter `unknown`.
+  const inferred =
+    registry !== undefined &&
+    signature !== undefined &&
+    (userFunctionSignatureIsInferred(call.engine, call.operator) ||
+      (call.operatorDefinition?._derivedSignature === true &&
+        literal.ops
+          .slice(1)
+          .some((p) => functionLiteralParameterType(p) === undefined)));
   // The structured route also admits a list result (`structuredListType()`).
   const result =
-    signature === undefined
+    signature === undefined || inferred
       ? undefined
       : registry
         ? structuredParameterType(signature.result, call.operator)
         : scalarType(signature.result);
-  if (
-    !signature ||
-    !result ||
-    signature.optArgs?.length ||
-    signature.variadicArg ||
-    signature.typeParams?.length ||
-    signature.effects?.length
-  )
+  if (!signature)
     throw new Error(
-      'JS scalar fragment: helper requires one pure scalar signature'
+      `JS scalar fragment: the helper ${call.operator} has no signature of ground ` +
+        'types (its type is `function`, or it has a type parameter with no bound)'
+    );
+  if (signature.optArgs?.length)
+    throw new Error(
+      `JS scalar fragment: the helper ${call.operator} has an optional parameter`
+    );
+  if (signature.variadicArg)
+    throw new Error(
+      `JS scalar fragment: the helper ${call.operator} has a variadic parameter`
+    );
+  if (signature.typeParams?.length)
+    throw new Error(
+      `JS scalar fragment: the helper ${call.operator} has a type parameter`
+    );
+  if (signature.effects?.length)
+    throw new Error(
+      `JS scalar fragment: the helper ${call.operator} is not pure: its signature has effects`
+    );
+  if (!inferred && !result)
+    throw new Error(
+      `JS scalar fragment: the declared result type of the helper ${call.operator} ` +
+        `is not ${registry ? 'a number, a boolean or a list of numbers' : 'a number or a boolean'}`
     );
   const parameters: string[] = [];
   const parameterTypes: NonNullable<
@@ -5068,13 +5218,18 @@ function resolveHelper(
       : registry
         ? structuredParameterType(type, name)
         : scalarType(type);
+  /** For each parameter, whether it took the default kind of the mode. */
+  const defaulted: boolean[] = [];
   for (const parameter of literal.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     const type = functionLiteralParameterType(parameter);
-    const scalar = typeOf(type, name);
+    const defaultType = inferred
+      ? defaultedParameterKind(parameter, registry)
+      : undefined;
+    const scalar = defaultType ?? typeOf(type, name);
     if (
-      !isFunction(parameter, 'Typed') ||
-      parameter.nops !== 2 ||
+      (defaultType === undefined &&
+        (!isFunction(parameter, 'Typed') || parameter.nops !== 2)) ||
       !name ||
       !scalar ||
       parameters.includes(name) ||
@@ -5085,7 +5240,8 @@ function resolveHelper(
         'JS scalar fragment: helper requires explicit scalar parameters'
       );
     const declared = signature.args?.[parameters.length]?.type;
-    const declaredScalar = typeOf(declared, name);
+    const declaredScalar = defaultType ?? typeOf(declared, name);
+    defaulted.push(defaultType !== undefined);
     if (
       !declaredScalar ||
       structuredRepresentation(declaredScalar) !==
@@ -5099,14 +5255,20 @@ function resolveHelper(
       );
     parameters.push(name);
     parameterTypes.push(scalar);
-    parameterSymbols.push(parameter.op1);
+    parameterSymbols.push(isFunction(parameter) ? parameter.op1 : parameter);
     parameterElementLabels.push(
       scalar.kind === 'list' ? elementLabel(type) : undefined
     );
   }
   if ((signature.args?.length ?? 0) !== parameters.length)
     throw new Error('JS scalar fragment: helper signature arity differs');
-  const body = literal.op1.canonical;
+  // The compiled code is in radians: on the structured route the body of
+  // the helper is rewritten for the angular unit of the engine, as the
+  // compiled root is (`compileExpression()`) and as the existing compiler
+  // rewrites each function body that it writes.
+  const body = registry
+    ? rewriteAngularUnit(literal.op1.canonical)
+    : literal.op1.canonical;
   let capture: ScalarFragmentCapture | undefined;
   const captureSymbols = new Set<Expression>();
   /** The check of the body on the existing route. */
@@ -5170,6 +5332,7 @@ function resolveHelper(
     admitFunctionBody(body, parameters, target, admission, named, {
       name: call.operator,
       result,
+      defaulted: new Set(parameters.filter((_, i) => defaulted[i])),
     });
   else check(body, true);
   return {
@@ -5178,9 +5341,16 @@ function resolveHelper(
     body,
     binding,
     capture,
-    resultRepresentation: (registry
-      ? structuredRepresentation(result)
-      : representation(result))!,
+    // With an inferred signature, the representation of the fact of the
+    // body (`annotateStructured()`).
+    resultRepresentation:
+      result === undefined
+        ? undefined
+        : (registry
+            ? structuredRepresentation(result)
+            : representation(result))!,
+    declaredResult: result !== undefined,
+    defaulted,
     parameterElementLabels,
     fragment: {
       key: call.operator,

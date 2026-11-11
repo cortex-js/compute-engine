@@ -1950,7 +1950,7 @@ nothing changes.
 | Functions | `Sqrt`, `Ln`, `Log` (base 10, 2 or a real base of a real logarithm), `Exp`, `Sin`, `Cos`, `Tan` (also of `π·u`), `Cot`, `Sec`, `Csc`, `Tanh`, `Sinh`, `Cosh`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh` (complex where the type of the node is complex: `Arcsin(x)` with `x: real`), `Arctan2`, `Abs`, `Sign`, `Gamma` (one operand), `Erf`, `Erfc`, `Digamma`, `Haversine`, `Conjugate` (a real operand), `Min`, `Max`, `Floor`, `Ceil`, `Round` (ties away from zero), `Mod` |
 | Conditions | `If`, `Less`, `LessEqual`, `Equal`, `NotEqual` (real and integer operands), `And`, `Or`, `Not` |
 | Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot), names with no declared type (below) |
-| Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature, whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines |
+| Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature or with no declared signature (below), whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines |
 | Lists | `At` and `Length` of a list input or parameter, `Comprehension(body, Element(j, Range(a, b)))`, `ReplaceAt` |
 
 | Declined with `outside-profile` | Example |
@@ -1974,7 +1974,14 @@ and the positive answer of `canCompile()`, list these names in
 input. A symbol with a value and no declared type (`ce.assign('a', 3)`) is
 captured as a number copied at compile time, with the kind of its value. A
 name declared with a type that the profile has no kind for (`number`,
-`any`) declines. Three limits:
+`any`) declines. The same rule applies to a call of a user function whose
+signature the engine inferred (`f(x) := x^2 + 1`, or a literal with an
+annotation on some parameters only): each parameter with no annotation
+has the default kind, the result has the kind of the body, an argument of
+another kind declines (a list, a boolean, a real argument in the `complex`
+mode), and `defaultedSymbols` lists the name of the function. A function
+declared `function`, or with an optional or a variadic parameter, a type
+parameter or an effect, declines. Three limits:
 
 - A body that uses the name as a list, as a condition or as an integer (a
   loop bound, an index) declines: declare the name.

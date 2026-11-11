@@ -542,7 +542,7 @@ describe('effects, functions and captures', () => {
 function g1(x: real) -> real { g2(x) + g2(x + 1) }
 function f(x: real) -> real { g1(x) * 2 }`;
     for (const head of ['Trace', 'Mystery'])
-      expect(() => analyze(source(`${head}(x)`), 'f')).toThrow(/helper requires one pure scalar signature/);
+      expect(() => analyze(source(`${head}(x)`), 'f')).toThrow(/the helper g1 is not pure: its signature has effects/);
 
     const ce = engineWith(source('x + 0.5'));
     const preparation = structured().prepareStructured(literal(ce, 'f'), OPTIONS);
