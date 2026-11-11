@@ -1,6 +1,9 @@
 # CE-1210: the cost of a type read with binding units
 
-Status: step 0 APPROVED by the user on 2026-11-11; the rest is a draft.
+Status: step 0 is DONE (section 10). Sections 4 to 8 (the counter) are
+WITHDRAWN on 2026-11-11: the user chose the rule of
+`docs/plans/2026-11-11-bound-once-spec.md`. This file stays as the record of
+the measurements.
 The user is open to reversing a decision of the model when the measure
 shows that it causes the cost (section 9). No code is written.
 
@@ -256,8 +259,9 @@ and R-b of section 9 pay for), full suite:
 most four engine frames before the first frame outside the engine.
 
 - 126 test files have a read that finds a host declaration. Two kinds:
-  a declaration that shadows a library name in the same scope (`Pi` in
-  `shadowed-constants`, `module-qualified-name`, `solve-domain`), and a
+  a declaration that shadows a library name (`Pi` in `shadowed-constants`,
+  `module-qualified-name`, `solve-domain`; such a declaration is only
+  possible in a nested scope, so it is the second kind too), and a
   declaration in a pushed scope read by an expression boxed before it (`s`
   in `tycho-325-integrate-list-limit-broadcast`, `T` in
   `compile-gpu-shared-calls`, `t` in the compile fallback tests).
