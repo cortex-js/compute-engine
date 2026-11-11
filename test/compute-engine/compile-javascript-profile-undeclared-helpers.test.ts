@@ -414,7 +414,7 @@ describe('the other signatures keep their decline, each with its message', () =>
       ce.expr(['Function', ['Block', ['g', 'x', "'a'"]], typed('x', 'real')] as MathJsonExpression)
     );
     expect('message' in got && got.message).toMatch(
-      /the parameter s of the helper g has no type annotation, and the helper has a declared signature/
+      /the parameter s of the helper g has no type annotation, and the type string of its signature is not in the/
     );
   });
 

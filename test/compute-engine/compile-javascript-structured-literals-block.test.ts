@@ -839,7 +839,7 @@ describe('the causes of a refused parameter', () => {
         ce.assign('g', ce.expr(['Function', ['Multiply', 't', 2], 't', 's']));
         return ce.expr(['Add', ['g', 'x', "'a'"], 1]);
       },
-      /the parameter s of the helper g has no type annotation, and the helper has a declared signature/,
+      /the parameter s of the helper g has no type annotation, and the type string of its signature is not in the/,
     ],
   ];
   test.each(REFUSALS)('%s', (_name, make, message) => {

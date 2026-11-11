@@ -723,3 +723,87 @@ caveat of a discontinuous operator and large arguments of `Gamma`,
 one program (`buddhabrot c`, a block of declarations whose value is an
 `Rgb`) now declines for the type of the block operand instead of
 `unsupported head Block`.
+
+## Result of the `number` inputs and the signature types (2026-11-11)
+
+On `fdbbf5091`, the work items 2 and 11 of the decline census of
+2026-11-11 (`2026-11-11-js-profile-decline-census.md`), and the ruling of
+the user of the same day: under the profile, a name declared `unknown` or
+with no declared type may be read as a number. The table of each operator,
+with the existing code for `real` and for `number`, is in
+[the emission rewrites](2026-11-09-js-pilot-emission-rewrites.md), "Values
+of the type `number` in the `strict` mode"; the tests are
+`test/compute-engine/compile-javascript-structured-number-inputs.test.ts`.
+
+- **Scalars declared `number`** were admitted in the `strict` mode by slice
+  1; nothing changed for them.
+- **Lists**: in the `strict` mode (the default), an input, a parameter or a
+  local of the type `list<number>`, `vector<n>` or `vector` is a list of
+  reals (`structuredListType()`), read with the label `"number"`. A node
+  whose engine type is `number` only because it reads such values is real
+  for the folds and for `At` (`isWideRealInStrict()`); a node that makes a
+  type that is not real from real operands (a radical or an inverse
+  function of a `real` operand, `I/2.5` with `I: list<real>`) or that has a
+  complex type keeps the decline, because the existing compiler reads it on
+  the complex lane through `isComplexValued()`. The `complex` mode is
+  unchanged.
+- **Signature types**: a parameter with no annotation whose signature type
+  is `unknown` has the default kind of the mode, as for an inferred
+  signature (the existing compiler writes the same function, and compiles a
+  copy per argument type for a list argument, which declines). A list or a
+  tuple of the signature was already read; `broadcastable<…>`,
+  `collection`, `string` decline with the name of the type.
+- **The ruling**: element-wise arithmetic of a list with a scalar name of no
+  declared type or declared `unknown` (`L·u`) is admitted in the `strict`
+  mode: the existing compiler writes the same `_SYS.bcast` closure as for a
+  `real` name, in the same operand order. No probe produced the
+  `_SYS.mulChecked` form that the refusal named. The `complex` mode keeps the
+  decline. `any`, unions of shapes and `collection<…>` keep their declines.
+- **A defect fixed on the way**: a call of a user function whose parameter
+  is declared a list with a stated width (`list<real^3>`, `vector<3>`) with
+  an argument whose type does not state it (`list<real>`) gave another value
+  (the existing compiler unrolls by the width: `NaN` for a list of 1
+  element); it declines now (`refuseListWidthArgument()`), for a helper and
+  for a local function. An argument whose list type states the same width
+  (`kw(V3)` with `V3: vector<3>` and `kw: (list<real^3>) -> real`) is
+  admitted, with the doubles of the existing compiler.
+- `Block(s := u; L·s)` with `u` undeclared, which the existing compiler
+  declines (an input with no type), is admitted on the profile, and its
+  value equals the interpreter's in both modes (`u` = 3, `NaN`, `-1`, `∞`;
+  `L` empty, `[0]`, `[-0, 1]`).
+
+**Replay of the census witnesses** (the 141 test files that hold the
+witnesses of rows 2 and 11, the census logger, base `fdbbf5091`, after
+part A, after all): declines by class, row 2 lists 405 → 10 → 11, row 2
+scalars and folds 69 → 19 → 19, row 11 102 → 133 → 11 (the programs that
+part A unblocked reached the helper refusal next); declines in all, outside
+`js-profile-fuzz.test.ts` (whose programs the generator change alters),
+4,287 → 4,064 → 4,048; admitted 2,279 → 2,506 → 2,470 (with the fuzz
+file). The ruling class ("Divide of a list and the operand …, which reads
+the name … with no declared type") 1 → 3 → 0 compilations.
+
+**Shadow measure** (`CE_JS_PROFILE_SHADOW=1`, the same 141 files): admitted
+2,286 of 6,902 (33.1%) → 2,477 of 6,883 (36.0%); "the input … has the type
+list<number>" 360 → 71 (the route gives this message now only outside the
+`strict` mode).
+
+**The engine's consumers** (`CE_JS_PROFILE=numeric-kernel`, 42 files of
+integrals, limits and solvers): 579 of 633 admitted before and after; the
+tallies with and without the switch are equal (1,313 passed, 1 skipped).
+
+**Random tester**: the generator adds the inputs `LN: list<number>` and
+`VN: vector<3>` and the parameter `NV: list<number>`. Seeds 181 and 182
+(10,000 each), 183 (5,000, `--random`) and 184 (5,000, `--host`): no
+failure of the profile, no difference of emitted shape, and one difference
+from the existing compiler, `First([])` in 2 programs of seed 181 (`NaN` on
+the profile, `undefined` on the existing compiler, the type `missing`),
+which is older than this change (on `f56cd5f29`, where the profile
+declines `First` of an empty list literal, seed 181 shows no difference).
+Seed 161 (5,000, `--calculus`) on `f56cd5f29`: no failure, no difference,
+no disagreement with the interpreter; `Integrate(x·t, Limits(t, 0, 1))`
+and `D(x³, x)` with `x: number` give the code and the doubles of `x: real`.
+The profile disagrees with the
+interpreter in 17, 15, 3 and 1 programs; in each of them it gives the
+doubles of the existing compiler. Most are a discontinuous operator (`Mod`,
+`Fract`, `Ceil`) at a point where the precision of a double changes the
+result.

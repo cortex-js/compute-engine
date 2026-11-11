@@ -2870,6 +2870,12 @@ function declaredLocalType(
       return { kind: 'list', element: { kind: 'real' } };
     case 'list<integer>':
       return { kind: 'list', element: { kind: 'integer' } };
+    // A list of `number` elements, real in the `strict` mode
+    // (`structuredListType()`).
+    case 'list<number>':
+      return mode === 'strict'
+        ? { kind: 'list', element: { kind: 'real' } }
+        : undefined;
   }
   return tupleListLocalType(declared, mode);
 }
@@ -3133,8 +3139,9 @@ function withRealFromRealOperands(
  * A refusal, with its message, for every other list type: a list of lists
  * or a matrix, a list of complex numbers (its elements are `{re, im}`
  * objects, and the structured route has no list of them), a list of
- * booleans (the existing emitter reads it with `_SYS.at`) and `vector` (a
- * list of `number`, whose elements can be complex). The result is
+ * booleans (the existing emitter reads it with `_SYS.at`) and, in the
+ * `complex` mode or with no mode, a list of `number` (`vector`), whose
+ * elements can be complex there. The result is
  * `undefined` for a type that is not a list type: a tuple (the existing
  * emitter reads it with `_SYS.at`), `indexed_collection<real>` (a supertype
  * of a tuple) and a string keep the message of a binding that the route
@@ -3147,6 +3154,19 @@ function structuredListType(
   if (isSubtype(type, 'list<integer>'))
     return { kind: 'list', element: { kind: 'integer' } };
   if (isSubtype(type, 'list<real>'))
+    return { kind: 'list', element: { kind: 'real' } };
+  // In the `strict` mode, a flat list of `number` elements (`list<number>`,
+  // `vector<n>`, `vector`, or of a union that `declaredNumberKind()` maps):
+  // a list of reals, as the existing compiler reads it there
+  // (`_SYS.atNumeric(L, i, "number")`, `(L).reduce((_a, _b) => _a + _b, 0)`;
+  // "In `strict`, a value of type `number` must be real").
+  if (
+    mode === 'strict' &&
+    typeof type === 'object' &&
+    type.kind === 'list' &&
+    (type.dimensions === undefined || type.dimensions?.length === 1) &&
+    declaredNumberKind(type.elements, 'strict')?.kind === 'real'
+  )
     return { kind: 'list', element: { kind: 'real' } };
   // A list of tuples of reals (a list of points): an array of arrays, as the
   // existing emitter reads it (`_SYS.atPoint(L, i, n)`).
@@ -3208,7 +3228,9 @@ function structuredTupleType(
 
 /** Whether `type` is a list type of the structured route. */
 function isAdmittedList(type: Type): boolean {
-  const list = structuredListType(type);
+  // A list of `number` elements is admitted in the `strict` mode only, and
+  // its length is an integer there.
+  const list = structuredListType(type, 'strict');
   return list !== undefined && !('refusal' in list);
 }
 
@@ -5099,9 +5121,19 @@ function elementwiseRule(
         // A name with no declared type can hold a list for the existing
         // compiler, which then multiplies the operands by their shape at
         // run time (`_SYS.mulChecked`), in another order.
+        // In the `strict` mode a name with no declared type, or declared
+        // `unknown`, is a real scalar input of the profile, and the existing
+        // compiler writes the same `_SYS.bcast` closure as for a real name;
+        // in the `complex` mode its fact is complex.
         const undeclared = undeclaredNames(node.ops[i]).find((name) => {
           const role = w.binding(scope, name.symbol)?.role;
-          return role !== 'local' && role !== 'index';
+          if (role === 'local' || role === 'index') return false;
+          const fact = scope.facts.get(name);
+          return !(
+            fact !== undefined &&
+            'type' in fact &&
+            (fact.type.kind === 'real' || fact.type.kind === 'integer')
+          );
         });
         if (undeclared !== undefined)
           return w.refuse(
@@ -5650,7 +5682,10 @@ function refuseWideRead(
  * numbers, `ReplaceAt` with a complex value) keeps its message. A read of
  * a tuple whose element types are `number` (`tuple<number, number>`, the
  * element of a declared `list<tuple<number, number>>`) is real in the
- * `strict` mode (`structuredTupleType()`), and is not refused.
+ * `strict` mode (`structuredTupleType()`), and is not refused; nor is a
+ * read of the type `number` whose type is wide only because it reads
+ * values of the type `number` (`isWideRealInStrict()`: `At(L, i)` with
+ * `L: list<number>`, which the existing compiler reads as a number).
  */
 /**
  * Throw, on the structured route in the `complex` mode, for an element-wise
@@ -5696,6 +5731,66 @@ function refuseComplexListQuotients(
   for (const fn of annotation.functions.values()) visit(fn.scope);
 }
 
+/**
+ * Whether the node `node` of the engine type `number` (or a union of it with
+ * `NaN` and infinities) is real in the `strict` mode as the existing compiler
+ * reads it: its type is wide only because it reads names, elements or
+ * values of the type `number`, which are real there ("In `strict`, a value
+ * of type `number` must be real"), as in `L + 1` or `At(L, i)` with
+ * `L: list<number>`, whose fold the existing compiler writes with `+`
+ * (`(L).reduce((_a, _b) => _a + _b, 0)`) and whose element it reads as a
+ * number (`_SYS.atNumeric(L, i, "number")`).
+ *
+ * `false` when a node of the subtree has a type of numbers that are not
+ * real (`Sqrt(x)` with `x: real` has the type `complex`), or makes a
+ * type that is not real from operands that are real or lists of reals
+ * (`Arcsin(p)` with `p: real<0..>`, `I / 2.5` with `I: list<real>`): the
+ * existing compiler can read such a node on the complex lane
+ * (`isComplexValued()`: `Sum(L + Arcsin(p))` is
+ * `_SYS.cplx((…).reduce(_SYS.sadd, 0))`), and the structured route does not
+ * copy that analysis. A simple rule that declines more than it needs to.
+ */
+function isWideRealInStrict(node: Expression): boolean {
+  const seen = new Set<Expression>();
+  const isRealValued = (e: Expression): boolean => {
+    const t = e.type.type;
+    if (isSubtype(t, 'boolean')) return true;
+    if (isSubtype(finitePartOfType(t), 'real')) return true;
+    const element = indexElementType(t);
+    return (
+      isSubtype(t, 'collection<any>') &&
+      element !== undefined &&
+      isSubtype(finitePartOfType(element), 'real')
+    );
+  };
+  const visit = (e: Expression): boolean => {
+    if (seen.has(e)) return true;
+    seen.add(e);
+    const t = e.type.type;
+    const element = isSubtype(t, 'collection<any>')
+      ? indexElementType(t)
+      : undefined;
+    if (
+      isNonRealNumber(finitePartOfType(t)) ||
+      (element !== undefined && isNonRealNumber(finitePartOfType(element)))
+    )
+      return false;
+    if (!isFunction(e)) return true;
+    const numeric =
+      isSubtype(t, 'number') ||
+      (element !== undefined && isSubtype(element, 'number'));
+    if (
+      numeric &&
+      !isRealValued(e) &&
+      e.nops > 0 &&
+      e.ops.every(isRealValued)
+    )
+      return false;
+    return e.ops.every(visit);
+  };
+  return visit(node);
+}
+
 function refuseStrictWideReads(
   annotation: FragmentAnnotation<ScalarRepresentation>,
   mode: 'strict' | 'complex' | undefined
@@ -5707,7 +5802,8 @@ function refuseStrictWideReads(
         isFunction(node, 'At') &&
         isSubtype(node.type.type, 'number') &&
         !isSubtype(finitePartOfType(node.type.type), 'real') &&
-        structuredTupleType(node.op1.type.type, 'strict') === undefined
+        structuredTupleType(node.op1.type.type, 'strict') === undefined &&
+        !isWideRealInStrict(node)
       )
         throw new Error(
           `JS scalar fragment: ${nodeText(node)} has the type ` +
@@ -5801,6 +5897,9 @@ function refuseLocalFunctionArithmetic(
  *   `Sum` or a `Product` of such an operand is also refused when its type
  *   has `NaN` or an infinity (`Sum(L + ex)` with `ex` of the type
  *   `nan | real | signed_infinity`) or when the operand reads a local.
+ *   In the `strict` mode an operand whose type is wide only because it
+ *   reads values of the type `number` (`isWideRealInStrict()`: `Sum(L + 1)`
+ *   with `L: list<number>`) is folded with `+` on both, and is admitted.
  */
 function refuseUnsettledFold(
   node: Expression,
@@ -5845,7 +5944,10 @@ function refuseUnsettledFold(
         'in the complex mode the existing compiler reads a local list with _SYS.cplx'
       );
   }
-  if (!isSubtype(finitePartOfType(node.type.type), 'real'))
+  if (
+    !isSubtype(finitePartOfType(node.type.type), 'real') &&
+    !(mode === 'strict' && isWideRealInStrict(operand))
+  )
     refuse(
       `its type ${node.type.toString()} is not real, and the existing compiler ` +
         `wraps the fold in _SYS.cplx`
@@ -9627,7 +9729,7 @@ function admitFunctionBody(
         )
         .concat(
           admission.structured && named.structured?.mode === 'strict'
-            ? ['number']
+            ? ['number', 'list<number>']
             : []
         )
         .includes(declared) ||
@@ -10741,11 +10843,13 @@ function namesIn(node: Expression, names = new Set<string>()): Set<string> {
  * The spelling of the element type of the declared list type `type`, as the
  * existing emitter writes it as the third argument of `_SYS.atNumeric`
  * (`typeToString()` of `indexElementType()`): `finite_real` for
- * `list<finite_real>`, `real` for `vector<real>`. `undefined` for a type
- * that is not a list of the structured route.
+ * `list<finite_real>`, `real` for `vector<real>`, `number` for
+ * `list<number>` (a list of the `strict` mode). `undefined` for a type that
+ * is not a list of the structured route.
  */
 function elementLabel(type: Type | undefined): string | undefined {
-  const list = type === undefined ? undefined : structuredListType(type);
+  const list =
+    type === undefined ? undefined : structuredListType(type, 'strict');
   if (list === undefined || 'refusal' in list) return undefined;
   const element = indexElementType(type!);
   return element === undefined ? undefined : typeToString(element);
@@ -11193,6 +11297,7 @@ function collectStructuredHelper(
         `JS scalar fragment: the call ${nodeText(node)} does not reach a ` +
           `local function ${name} defined before it in the body`
       );
+    refuseListWidthArgument(node, local.literal);
     named.calls.add(node);
     registry.localCalls.add(node);
     return;
@@ -11222,7 +11327,58 @@ function collectStructuredHelper(
     BaseCompiler.assertCapturedCallableBindings(node, target);
   }
   if (registry.mode === 'complex') refuseRangeSpecialization(node);
+  refuseListWidthArgument(node);
   named.calls.add(node);
+}
+
+/**
+ * Refuse the call `call` of a helper whose parameter is declared a list
+ * with a stated width (`list<real^3>`, `vector<3>`), when the type of the
+ * argument does not state that width (`list<real>`): the existing compiler
+ * reads such a parameter by its width (`Sum(t)` is
+ * `(0 + t[0] + t[1] + t[2])`, `NaN` for a list of 1 element), and the
+ * structured route by the length of the array. An argument whose list type
+ * states the same width is admitted; its elements are left to the rules of
+ * the arguments. `local` is the literal of a local function (a call of a
+ * local function has no signature).
+ */
+function refuseListWidthArgument(call: Expression, local?: Expression): void {
+  if (!isFunction(call)) return;
+  const literal = local ?? userFunctionLiteral(call.engine, call.operator);
+  const signature =
+    local === undefined
+      ? userFunctionSignature(call.engine, call.operator)
+      : undefined;
+  call.ops.forEach((argument, i) => {
+    const argumentType = argument.type.type;
+    const parameter = isFunction(literal) ? literal.ops[i + 1] : undefined;
+    const declared =
+      (parameter === undefined
+        ? undefined
+        : functionLiteralParameterType(parameter)) ??
+      signature?.args?.[i]?.type;
+    if (
+      declared === undefined ||
+      typeof declared !== 'object' ||
+      declared.kind !== 'list' ||
+      declared.dimensions?.length !== 1 ||
+      declared.dimensions[0] < 0 ||
+      isSubtype(argumentType, declared) ||
+      (typeof argumentType === 'object' &&
+        argumentType.kind === 'list' &&
+        argumentType.dimensions?.length === 1 &&
+        argumentType.dimensions[0] === declared.dimensions[0])
+    )
+      return;
+    const e = new Error(
+      `JS scalar fragment: the argument ${nodeText(argument)} of the type ` +
+        `${typeToString(argument.type.type)} of the helper ${call.operator} is ` +
+        `not in the structured route: the parameter has the type ` +
+        `${typeToString(declared)}, whose width the existing compiler reads`
+    );
+    noteRefusedNode(e, { node: call });
+    throw e;
+  });
 }
 
 /**
@@ -11833,9 +11989,22 @@ function resolveHelper(
   for (const parameter of literal.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     const type = functionLiteralParameterType(parameter);
+    // A parameter with no annotation whose type in the declared signature is
+    // `unknown` (`f: (unknown) -> number`, `f := t ↦ t² + 1`) has the
+    // default kind of the mode, as a parameter of a helper with an inferred
+    // signature: the existing compiler writes the helper as it writes it
+    // for that signature (`const _fn_f = (t) => t * t + 1;`).
+    const unknownInSignature =
+      registry !== undefined &&
+      !inferred &&
+      !functionTyped &&
+      !isFunction(parameter) &&
+      signature?.args?.[parameters.length]?.type === 'unknown';
     const defaultType = inferred
       ? defaultedParameterKind(parameter, registry)
-      : undefined;
+      : unknownInSignature
+        ? defaultKind(registry.mode)
+        : undefined;
     // On the structured route a parameter with no annotation of a helper
     // with a declared signature has the type of the signature, when that
     // type is a base kind (`real`, `integer`, `number`, `complex`,
@@ -11877,6 +12046,19 @@ function resolveHelper(
       signatureScalar !== undefined && signatureScalar.kind !== 'list';
     const scalar =
       defaultType ?? (fromSignature ? signatureScalar : typeOf(type, name));
+    // The type of the signature is not one of the route (`collection`,
+    // `broadcastable<real>`, a string): the message names it.
+    if (
+      scalar === undefined &&
+      signatureType !== undefined &&
+      signatureScalar === undefined
+    )
+      throw new Error(
+        `JS scalar fragment: the parameter ${name} of the helper ${call.operator} has no ` +
+          `type annotation, and the type ${typeToString(signatureType)} of its signature ` +
+          `is not in the structured route: a parameter is a number, a boolean, a list ` +
+          `of reals or of integers, or a tuple of reals`
+      );
     const refusal = parameterRefusal(
       parameter,
       name,

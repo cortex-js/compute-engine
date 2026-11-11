@@ -33,6 +33,36 @@
   integrand that draws, the `complex` mode, `NIntegrate` and `Limit`
   still decline with `outside-profile`.
 
+- **The `numeric-kernel` profile compiles lists of the type `list<number>`
+  in the `strict` mode.** An input or a parameter of the type
+  `list<number>`, `vector<n>` or `vector` declined (`outside-profile`: "the
+  input L has the type list<number>"). In the `strict` mode, the default, it
+  is now a list of real numbers, as without the profile: `At`, `Length`,
+  the folds, element-wise arithmetic and the functions of lists read it,
+  with the values of the compilation without the profile. In the `complex`
+  mode it still declines.
+
+  ```js
+  ce.declare('L', 'list<number>');
+  const f = compile(ce.box(['Sum', ['Add', 'L', 1]]), { profile: 'numeric-kernel' });
+  f.run({ L: [1, 2, 3] }); // ➔ 9
+  ```
+
+- **The `numeric-kernel` profile compiles a call of a user function declared
+  with a parameter of the type `unknown`.** With
+  `ce.declare('g', '(unknown) -> number')` and a function literal with no
+  annotation as its value, a call `g(x)` declined ("the parameter t of the
+  helper g has no type annotation"). Such a parameter now has the default
+  kind of the mode, as for a function whose signature the engine inferred:
+  a real number in the `strict` mode.
+
+  ```js
+  ce.declare('g', '(unknown) -> number');
+  ce.assign('g', ce.box(['Function', ['Add', ['Multiply', 't', 't'], 1], 't']));
+  ce.declare('x', 'real');
+  compile(ce.box(['g', 'x']), { profile: 'numeric-kernel' }).run({ x: 3 }); // ➔ 10
+  ```
+
 ### Resolved Issues
 
 - **`ce.infer()` gives a type to a symbol declared with the type

@@ -378,11 +378,6 @@ describe('declines that stay', () => {
       /Power of the operand .* which admits a list and a number/,
     ],
     [
-      'Sum of a tuple literal, whose type is not real',
-      fn(['Sum', ['Tuple', 'x', 1, 2]], X),
-      /Sum of \(x, 1, 2\) is not in the profile: its type number is not real/,
-    ],
-    [
       'a product with a call whose type admits a list and a number',
       fn(['Multiply', 10, ['Divide', 2, ['fm', 'L']]], L),
       /Multiply of the operand 2 \/ fm\(L\) of the type .*, which admits a list and a number/,
@@ -413,6 +408,22 @@ describe('declines that stay', () => {
       expect(() =>
         compile(ce.expr(json), { profile: 'numeric-kernel', fallback: false, mode } as never)
       ).toThrow(message);
+  });
+
+  // The type of the sum is `number`. In the `strict` mode the existing
+  // compiler adds the elements with `+` (`0 + _tv1[0] + _tv1[1] + _tv1[2]`),
+  // and so does the profile (`isWideRealInStrict()`); in the `complex` mode
+  // it wraps the fold in `_SYS.cplx`.
+  test('Sum of a tuple literal, whose type is number: the strict mode only', () => {
+    const json = fn(['Sum', ['Tuple', 'x', 1, 2]], X);
+    expect(() =>
+      compile(ce.expr(json), { profile: 'numeric-kernel', fallback: false, mode: 'complex' } as never)
+    ).toThrow(/Sum of \(x, 1, 2\) is not in the profile: its type number is not real/);
+    const expr = ce.expr(json);
+    const result = compile(expr, { profile: 'numeric-kernel', fallback: false, mode: 'strict' } as never) as CompilationResult<'javascript'>;
+    const existing = compile(expr, { ...EXISTING, mode: 'strict' }) as CompilationResult<'javascript'>;
+    for (const x of [-2.5, -0, 0, 3, NaN, Infinity])
+      expect([x, same(run(result, [x]), run(existing, [x]))]).toEqual([x, true]);
   });
 });
 

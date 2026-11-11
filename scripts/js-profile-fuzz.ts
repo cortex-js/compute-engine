@@ -44,7 +44,9 @@
  * the body or not), and a helper declared `function` (`fq`). Collections
  * (`genCollectionReal()`, `genList()`, `genTuple()`): list literals of
  * numbers and of expressions, tuples, the inputs `I: list<integer>` and
- * `P: tuple<real, real>` and the parameters `W` and `T` of these types,
+ * `P: tuple<real, real>` and the parameters `W` and `T` of these types, the
+ * inputs `LN: list<number>` and `VN: vector<3>` and the parameter
+ * `NV: list<number>` (lists of reals in the `strict` mode),
  * `Sum`, `Product`, `Max` and `Min` of a list or a tuple, `At` and `Length`
  * of one, element-wise arithmetic of a list and reals (two lists only as
  * one expression twice), comprehensions with and without a guard, calls of
@@ -258,6 +260,8 @@ type InputKind =
   | 'realnan'
   | 'list'
   | 'intlist'
+  | 'numlist'
+  | 'numvec'
   | 'tuple'
   | 'tuplelist'
   | 'boolean'
@@ -278,6 +282,9 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   xi: 'inferred',
   L: 'list',
   I: 'intlist',
+  // Lists of `number` elements, real in the `strict` mode.
+  LN: 'numlist',
+  VN: 'numvec',
   P: 'tuple',
   LQ: 'tuplelist',
   B: 'boolean',
@@ -295,6 +302,7 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
   ['nb', 'number', 'number'],
   ['V', 'list', 'list<real>'],
   ['W', 'intlist', 'list<integer>'],
+  ['NV', 'numlist', 'list<number>'],
   ['T', 'tuple', 'tuple<real, real>'],
   ['TL', 'tuplelist', 'list<tuple<real, real>>'],
   ['c', 'boolean', 'boolean'],
@@ -311,6 +319,8 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   realnan: 'nan | real | signed_infinity',
   list: 'list<real>',
   intlist: 'list<integer>',
+  numlist: 'list<number>',
+  numvec: 'vector<3>',
   tuple: 'tuple<real, real>',
   tuplelist: 'list<tuple<real, real>>',
   boolean: 'boolean',
@@ -320,7 +330,8 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
 /** The declarations of the engine, as the report prints them. */
 export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
-  'L: list<real>; I: list<integer>; P: tuple<real, real>; ' +
+  'L: list<real>; I: list<integer>; LN: list<number>; VN: vector<3>; ' +
+  'P: tuple<real, real>; ' +
   'LQ: list<tuple<real, real>>; B: boolean; ' +
   'u: no declared type; xn: number; ' +
   'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
@@ -834,6 +845,12 @@ const LISTS_IN: number[][] = [
   [2.5, -2.5, 0.4641588833612779, 1e-160],
 ];
 const LISTS_EDGE: number[][] = [[NaN, Infinity]];
+const VECTORS_IN: number[][] = [
+  [0.1, 1 / 3, 7],
+  [-0, 1e300, -1],
+  [2.5, -2.5, 1e-160],
+];
+const VECTORS_EDGE: number[][] = [[NaN, Infinity, -0]];
 const INTLISTS_IN: number[][] = [[], [3], [1, -2, 7], [0, 2 ** 53, -4]];
 const TUPLES_IN: number[][] = [
   [1, 2],
@@ -876,6 +893,10 @@ function gridOf(kind: InputKind, mode: Mode): Value[] {
       return [...LISTS_IN, ...LISTS_EDGE];
     case 'intlist':
       return INTLISTS_IN;
+    case 'numlist':
+      return [...LISTS_IN, ...LISTS_EDGE];
+    case 'numvec':
+      return [...VECTORS_IN, ...VECTORS_EDGE];
     case 'tuple':
       return [...TUPLES_IN, ...TUPLES_EDGE];
     case 'tuplelist':
@@ -917,6 +938,14 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
       return Array.isArray(v) && v.every((x) => Number.isFinite(x));
     case 'intlist':
       return Array.isArray(v) && v.every((x) => Number.isInteger(x));
+    // A `number` element is real in the `strict` mode; the `complex` mode
+    // declines such a list.
+    case 'numlist':
+      return Array.isArray(v) && v.every((x) => Number.isFinite(x));
+    case 'numvec':
+      return (
+        Array.isArray(v) && v.length === 3 && v.every((x) => Number.isFinite(x))
+      );
     case 'tuple':
       return (
         Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x))
@@ -1878,7 +1907,7 @@ const EXPRESSION_CONTEXT: ContextBase = {
   integers: ['k'],
   reals: ['x', 'y'],
   booleans: ['B'],
-  lists: ['L', 'I'],
+  lists: ['L', 'I', 'LN', 'VN'],
   tuples: ['P'],
   tupleLists: ['LQ'],
 };
@@ -2148,6 +2177,7 @@ function genFunction(
     if (
       kind !== 'list' &&
       kind !== 'intlist' &&
+      kind !== 'numlist' &&
       kind !== 'tuple' &&
       kind !== 'tuplelist' &&
       kind !== 'boolean'
@@ -2163,7 +2193,7 @@ function genFunction(
         integers: names.includes('n') ? ['n'] : [],
         reals: ['a'],
         booleans: names.includes('c') ? ['c'] : [],
-        lists: names.filter((n) => n === 'V' || n === 'W'),
+        lists: names.filter((n) => n === 'V' || n === 'W' || n === 'NV'),
         tuples: names.includes('T') ? ['T'] : [],
         tupleLists: names.includes('TL') ? ['TL'] : [],
         random,

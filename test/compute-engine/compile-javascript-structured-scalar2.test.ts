@@ -515,7 +515,7 @@ describe('a helper with a declared signature and a parameter with no annotation'
     expectDecline(
       ['Add', ['g', 'x', "'a'"], 1],
       'strict',
-      /the parameter s of the helper g has no type annotation, and the helper has a declared signature/,
+      /the parameter s of the helper g has no type annotation, and the type string of its signature is not in the/,
       ce
     );
   });

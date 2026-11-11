@@ -540,7 +540,8 @@ describe('refusals', () => {
     ['a named tuple parameter', body([typed('T', 'tuple<x: real, y: real>'), I], ['At', 'T', 'i']), /the parameter T of the function has the type tuple<x: real, y: real>, which is not in the structured route: a parameter is a number, a boolean, a list of reals or of integers, or a tuple of reals/],
     ['a list of complex numbers', body([typed('L', 'list<complex>'), I], ['At', 'L', 'i']), /the parameter L has the type list<complex>/],
     ['a list of booleans', body([typed('L', 'list<boolean>'), I], 'i'), /the parameter L has the type list<boolean>/],
-    ['vector, a list of numbers', body([typed('L', 'vector'), I], 'i'), /the parameter L has the type vector/],
+    // `vector`, a list of numbers, is a list of reals in the `strict` mode
+    // (compile-javascript-structured-number-inputs.test.ts).
     ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], 'i'), /the parameter L of the function has the type indexed_collection<real>, which is not in the structured route/],
     // `First`, `Last`, `Rest` and the other functions of lists are in the
     // route since slice 2 (compile-javascript-structured-collections2.test.ts).

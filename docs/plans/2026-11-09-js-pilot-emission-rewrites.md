@@ -450,6 +450,55 @@ constantFold: false`; the tests are
 | `Derivative(Sin)` | `((x) => Math.cos(x))` | Declined: a function value |
 | Any calculus node, `complex` mode | `_SYS.cplx((_SYS.pow3(_.a) / 3))` | Declined |
 
+### Values of the type `number` in the `strict` mode
+
+Read at `fdbbf5091` (2026-11-11) by probes, each program compiled with its
+names declared `real` and declared `number` (`list<real>` and
+`list<number>`), `cse: false, constantFold: false`, in the default mode
+(which is `strict`). The tests are
+`test/compute-engine/compile-javascript-structured-number-inputs.test.ts`.
+"Same" means the same text for both declarations; every admitted row was
+compared with `Object.is` at every depth over inputs with `NaN`, `±0`,
+`±Infinity` and negatives under roots and logarithms.
+
+| Operator class | Existing code, `real` | Existing code, `number` | Equal doubles | Decision |
+| --- | --- | --- | --- | --- |
+| `+ − × ÷`, `x·(2/y)`, `x·(2/‖L‖)` | `_.x * 2 / _.y` | same | yes | admitted (scalars since `eac9ab939`) |
+| `<`, `=`, `If`, `Which` | `((_.x < 1) ? (Math.sqrt(_.x)) : (_.y))` | same | yes | admitted |
+| `Sqrt`, `Root(·, 3)`, `Power(x, y)`, `Ln`, `Log`, `Log(·, 2)` of a possibly negative operand | `Math.sqrt(_.x)` (`NaN` below 0), `_SYS.pow(_.x, _.y)` | same | yes | admitted |
+| `Arcsin`, `Arccos`, `Arcosh`, `Artanh`, `Arcsec` | `_SYS.casin(({ re: _.x, im: 0 }))` (complex) | `Math.asin(_.x)` (`NaN` outside the domain) | yes, each declaration with its own code | admitted; the route follows the engine type of the operand, also for `At(L, 1)` and `Sum(L)` |
+| `Abs`, `Sign`, `Floor`, `Round`, `Mod`, `Gamma`, `Erf`, `Exp`, `Sin`, `Min`/`Max` of scalars | `Math.abs(_.x)`, `_SYS.floorMod(_.x, 3)` | same | yes | admitted |
+| `Sum`, `Product` over `Limits` | `let _tv1 = (1 * _.x); _tv1 += (2 * _.x); …` | adds `if (_tv1 !== _tv1) return NaN;` after each term | yes (a `NaN` stays `NaN`) | admitted |
+| A list input or parameter `list<number>`, `vector<n>`, `vector` | `_.L` | same | yes | a list of reals |
+| `At(L, i)`, `First`, `Last` | `_SYS.atNumeric(_.L, i, "real")` | `_SYS.atNumeric(_.L, i, "number")`: the label is the text of the error for a nested array | yes | admitted, with the label `"number"` |
+| Element-wise `L + 1`, `L·x`, `−L`, `L + L`, `2L/x` | `_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.L, 1)` | same | yes | admitted (a `build`) |
+| Element-wise `Sqrt(L)`, `Sin(L)`, `L^2` | `_SYS.bcast((_tv1) => Math.sqrt(_tv1), _.L)` | same | – | declined for both (no element-wise function in the route) |
+| `Sum`, `Product`, `Max`, `Min` of a name | `(_.L).reduce((_a, _b) => _a + _b, 0)` | same | yes | admitted |
+| A fold of an element-wise expression of the type `number` (`Sum(L + 1)`, `Max(2L)`, `Sum(L/2.5)`) | raw fold of the `bcast` | same | yes | admitted when the operand reads values of the type `number` only (`isWideRealInStrict()`) |
+| A fold whose operand has a radical or an inverse function of a real operand, or a complex value (`Sum(L·√x)` with `x: real`, `Sum(L + arcsin(p))` with `p: real<0..>`, `Sum(i·L)`) | `_SYS.cplx((…).reduce(_SYS.sadd, 0))` | the same with `x: real`; raw with `x: number` | – | declined (`isComplexValued()` decides it; the route does not copy that analysis) |
+| `Norm`, `Mean`, `Dot` of lists with no stated width | `_SYS.norm(_.L)`, `_SYS.matmul(_.L, _.M)` | same | yes | admitted |
+| `Dot` of `vector<3>` | the sum of the products | same | – | declined, as for `list<real^3>` |
+| `Map`, `Filter`, `Count`, `Reduce`, `Scan` with a function literal | `((_f) => (_.L).map((_x) => _f(_x)))(((t = NaN) => _SYS.casin(…)))` | `… Math.asin(t)` | yes | admitted |
+| `Comprehension` over `Range` with `At(L, j)` | `result.push(2 * _SYS.atNumeric(_.L, j, "number"))` | same but the label | yes | admitted |
+| `At` of a comprehension of `√(At(L, j))` | `_SYS.atNumeric(…, 2, "complex")`, complex | `x * _SYS.atNumeric(…, 2, "number")`, real | yes for `number` | admitted for `number`; declined for `real` (type `complex`) |
+| `Sort`, `Take`, `Reverse`, `ReplaceAt`, `Length` | `(_.L).slice().sort(…)` | same | yes | admitted |
+| Element-wise arithmetic with a scalar name of no declared type or declared `unknown` (`L·u`, `x·L·u`, `L + u·x`, `u·(L + 1)`) | `_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _.L, _.x)` with `x: real` | `_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _.L, _.u)`: the same closure and operand order (no `_SYS.mulChecked` in any probe) | yes | admitted in the `strict` mode (ruling of 2026-11-11: such a name is a number under the profile); declined in the `complex` mode, where its fact is complex |
+| A local declared `number`, `list<number>` | `let s = …` | same | yes | admitted |
+| A user function with a parameter `list<number>` or `vector<n>` | `_fn_f(_.L)` | same | yes | admitted; an argument whose type does not state the width of a `vector<n>` or `list<real^n>` parameter declines (the existing compiler unrolls the body by the width: `(0 + t[0] + t[1] + t[2])`) |
+| A complex value given to a `number` input | scalar: the entry check throws "compiled as a real number"; list: no check (`"1[object Object]3"`) | | – | outside the type in `strict`: unspecified |
+| The `complex` mode | `_SYS.cplx(…)` reads | | – | unchanged: a `list<number>` input declines |
+
+A user function with a declared signature whose literal has no annotation
+(`f: (unknown) -> number`, `f := t ↦ t² + 1`): the existing compiler
+writes `const _fn_f = (t) => t * t + 1;` as for an inferred signature, and
+compiles a copy per argument type (`_fn_f_list_real_(_.L)`, after the
+engine narrows the signature to `(collection) -> number` for `Sum(t)`). The
+route gives such a parameter the default kind of the mode and declines a
+list argument, as for an inferred signature. A list or tuple signature type
+(`list<real>`, `vector<2>`, `tuple<number, number>`) was already read from
+the signature. `broadcastable<…>`, `collection` and `string` decline with
+the name of the type.
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a
