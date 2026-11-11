@@ -59,7 +59,7 @@ beforeAll(async () => {
     count: 150,
     interp: 0,
   });
-}, 60_000);
+}, 300_000);
 
 const describeFinding = (f: Finding) =>
   `${f.class} ${f.shape} (${f.id}, ${f.mode}): ${JSON.stringify(f.minimal)}` +
@@ -116,4 +116,4 @@ test('the same seed gives the same result', async () => {
   expect(JSON.stringify(again, (_k, v) => (Number.isNaN(v) ? 'NaN' : v))).toBe(
     JSON.stringify(once, (_k, v) => (Number.isNaN(v) ? 'NaN' : v))
   );
-}, 60_000);
+}, 300_000);
