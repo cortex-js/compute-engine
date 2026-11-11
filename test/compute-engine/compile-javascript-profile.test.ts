@@ -779,20 +779,20 @@ describe('the options', () => {
   const ce = engine();
   const expr = ce.expr(['Add', 'x', 'y']);
 
+  // The other options are admitted
+  // (`compile-javascript-structured-options.test.ts`).
   test.each([
-    ['functions', { functions: { Foo: 'Math.sin' } }],
-    ['operators', { operators: { Add: ['+', 11] } }],
-    ['vars', { vars: { x: '1' } }],
-    ['preamble', { preamble: 'const q = 1;' }],
-    ['imports', { imports: [Math.sin] }],
-    ['broadcast', { broadcast: true }],
-    ["mode: 'bigint'", { mode: 'bigint' }],
+    ["the option `mode: 'bigint'`", { mode: 'bigint' }],
+    [
+      'the function form of the option `operators`',
+      { operators: () => undefined },
+    ],
   ])('%s declines with outside-profile and names the option', (option, options) => {
     const got = outcome(expr, options);
     expect('diagnostic' in got && got.diagnostic).toEqual({
       code: 'outside-profile',
       kind: 'capability',
-      message: `Could not compile with the profile 'numeric-kernel': the option \`${option}\` is not in the profile.`,
+      message: `Could not compile with the profile 'numeric-kernel': ${option} is not in the profile.`,
     });
     expect(canCompile(expr, { ...PROFILE, ...options } as never)).toEqual({
       ok: false,
@@ -864,12 +864,17 @@ describe('the options', () => {
     }
   );
 
-  test('a vars entry that names a user function: the decline names vars', () => {
+  test('a vars entry that names a user function is a call of the host', () => {
+    // `JavaScriptTarget.compile()` makes it a `functions` entry: the code
+    // calls the function of the host, as the existing compiler does.
     const got = outcome(ce.expr(['twice', 'x']), {
       vars: { twice: 'hostTwice' },
     });
-    expect('diagnostic' in got && got.diagnostic.message).toBe(
-      "Could not compile with the profile 'numeric-kernel': the option `vars` is not in the profile."
+    expect('result' in got && got.result.code).toBe(
+      '(() => { const _tv1 = hostTwice(_.x); return _tv1; })()'
+    );
+    expect('result' in got && [got.result.pure, got.result.shippable]).toEqual(
+      [false, false]
     );
   });
 

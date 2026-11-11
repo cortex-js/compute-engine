@@ -389,14 +389,14 @@ describe('switch on: a consumer whose program has untyped parameters', () => {
   });
 });
 
-describe('switch on: consumers whose programs the profile does not take', () => {
-  test('series passes `vars`: the profile is not tried, and the result is the same', () => {
+describe('switch on: the series walk', () => {
+  test('series passes `vars` (`_["k"]`): the profile reads the index as an input, and the result is the same', () => {
     const r = results(
       (ce) => ce.parse('\\sum_{k=1}^\\infty \\frac{1}{k^3+k+1}').N(),
       false
     );
     expect(r.on).toBe(r.off);
-    expect(r.stats.series).toBeUndefined();
+    expect(r.stats.series?.admitted).toBeGreaterThan(0);
   });
 });
 

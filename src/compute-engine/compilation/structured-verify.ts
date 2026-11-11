@@ -58,12 +58,14 @@ export type PolicyOperationKind =
   | 'replace-at'
   | 'trace'
   | 'draw'
-  | 'seeded';
+  | 'seeded'
+  | 'host';
 
 /** The operations of `PolicyOperationKind` that a target can lack: a target
- *  with no random stream (GLSL) has no `draw` and no `seeded`, and the
- *  verifier refuses them there. */
-type OptionalPolicyOperationKind = 'draw' | 'seeded';
+ *  with no random stream (GLSL) has no `draw` and no `seeded`, and a target
+ *  that calls no code of the host has no `host`; the verifier refuses them
+ *  there. */
+type OptionalPolicyOperationKind = 'draw' | 'seeded' | 'host';
 
 /** The representations of the operands and of the result of an operation
  *  on a target. */
@@ -206,6 +208,13 @@ export type RepresentationPolicy = {
  * (`dischargedEffect()`): it discharges `random` only, and never an `unknown`
  * body. A target whose policy has no `draw` or no `seeded` refuses it.
  *
+ * For a host operation (`IRHostCall`): it names a binding of
+ * `IRProgram.hosts`; a read has no operand; the operands and the result have
+ * the representations of the rule `host` of the policy (a target with no
+ * such rule refuses it); the result has the type of the binding; the effect
+ * is `pure` for a call of a binding declared pure and `unknown` otherwise,
+ * and the operation names no state.
+ *
  * A call cycle (a function that calls itself, directly or through other
  * functions) is accepted. The summary of the effects is correct for it:
  * the check of each call (its effect includes the effect of the body of
@@ -296,6 +305,20 @@ export function verifyProgram(
       fail(
         `the snapshot of the integer capture ${capture.name} is not an integer`
       );
+  }
+
+  // The bindings of the host: a scalar result, and a read is never pure.
+  for (const binding of program.hosts ?? []) {
+    if (binding.form !== 'call' && binding.form !== 'read')
+      fail(`the host binding ${binding.name} has the form ${binding.form}`);
+    if (elementOf(binding.result) !== undefined)
+      fail(`the host binding ${binding.name} has a list result`);
+    if (policy.representationOf(binding.result) === undefined)
+      fail(
+        `the host binding ${binding.name} has the type ${binding.result}, which the target does not hold`
+      );
+    if (binding.form === 'read' && binding.pure)
+      fail(`the host binding ${binding.name} is a read, and is declared pure`);
   }
 
   /** The regions around the current operation, outermost first, with the
@@ -650,6 +673,7 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'capture',
   'draw',
   'seeded',
+  'host',
 ]);
 
 function verifySignature(
@@ -1173,6 +1197,29 @@ function verifySignature(
       )
         fail(
           `the body of a seeded yields a ${value?.type} value, and the seeded has a result of the type ${op.result.type}`
+        );
+      return;
+    }
+    case 'host': {
+      // A host binding of the program; a read has no operand. The effect is
+      // the one that the binding states (`IRHostCall`); `verifyStates()`
+      // checks that it names no state.
+      const rule =
+        policy.operations.host ?? fail('the target has no host operation');
+      const binding = program.hosts?.[op.host];
+      if (binding === undefined)
+        return fail(`a host operation of the binding ${op.host}, which does not exist`);
+      if (binding.form === 'read') arity(0);
+      operandsIn(operandRule('host'));
+      resultIn(rule.results);
+      if (op.result.type !== binding.result)
+        fail(
+          `a host operation of ${binding.name} has a result of the type ${op.result.type}, and its binding the type ${binding.result}`
+        );
+      const effect = binding.pure && binding.form === 'call' ? 'pure' : 'unknown';
+      if (op.effect !== effect)
+        fail(
+          `a host operation of ${binding.name} has the effect ${op.effect}, not ${effect}`
         );
       return;
     }

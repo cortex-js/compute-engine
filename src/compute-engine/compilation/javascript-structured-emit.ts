@@ -136,6 +136,12 @@
  *   have a `const` statement, so their region is not an expression: the
  *   `if` is a statement, the `and` a chain of `if` statements, and a draw
  *   runs only when its region runs.
+ * - A host operation (`IRHostCall`) is the source that the assembly gives
+ *   for its binding (`StructuredEmitOptions.host`): the call `f(a, b)` of a
+ *   `functions` or `operators` entry, or the text of a `vars` source. It is
+ *   a `const` at its position, also when it is `pure`, and no value is moved
+ *   across it, so the host sees its calls and reads in the order and the
+ *   number of the program.
  * - A `seeded` is `_SYS.withRandomSeed(seed, () => { …; return value; })`,
  *   the closure of the existing emitter: the helper installs a frame of the
  *   random stream, runs the body once, and installs the frame of the caller
@@ -166,10 +172,12 @@
 import {
   elementOf,
   isClosedRegion,
+  reachesHost,
   regionsOf,
   yieldedValues,
   type IRExit,
   type IRFunction,
+  type IRHostBinding,
   type IRLoop,
   type IROperation,
   type IRProgram,
@@ -274,6 +282,18 @@ export type StructuredEmitOptions = {
    * program with such an operation throws.
    */
   readonly trace?: (id: string, operands: readonly string[]) => string;
+  /**
+   * The source of a host operation (`IRHostCall`) of the binding `binding`,
+   * from the sources of its operands: the code that the existing emitter
+   * writes for the `functions`, `operators` or `vars` entry of its name. The
+   * source is a call, a member access or a name, or is in parentheses, so a
+   * parent reads it as one operand. Without it, a program with a host
+   * operation throws.
+   */
+  readonly host?: (
+    binding: IRHostBinding,
+    operands: readonly string[]
+  ) => string;
 };
 
 /** The code of a program. */
@@ -526,13 +546,18 @@ class Emitter {
   ): Source[] | undefined {
     const operations = region.operations;
     // `impure[k]`: the number of operations before position `k` that are
-    // not `pure`, or that write an array in place (`mutatesInPlace()`): a
-    // value is not moved across them.
+    // not `pure`, that write an array in place (`mutatesInPlace()`), or that
+    // run code of the host (`reachesHost()`): a value is not moved across
+    // them.
     const impure = [0];
     for (const op of operations)
       impure.push(
         impure[impure.length - 1] +
-          (op.effect === 'pure' && !mutatesInPlace(op, this.inPlace) ? 0 : 1)
+          (op.effect === 'pure' &&
+          !mutatesInPlace(op, this.inPlace) &&
+          !reachesHost(op, this.program.functions)
+            ? 0
+            : 1)
       );
     for (const [index, op] of operations.entries()) {
       if (op.kind === 'yield') return op.operands.map((v) => this.source(v));
@@ -606,8 +631,10 @@ class Emitter {
 
   /**
    * True when the value `result` of `op`, at the position `index` of
-   * `region`, is written at its use: `op` is pure, its value has one use,
-   * in `region`, and every operation between the two is pure.
+   * `region`, is written at its use: `op` is pure and runs no code of the
+   * host (`reachesHost()`: the host can count its calls and their order), its
+   * value has one use, in `region`, and every operation between the two is
+   * pure.
    */
   private writtenAtUse(
     result: IRValue,
@@ -616,7 +643,8 @@ class Emitter {
     index: number,
     impure: readonly number[]
   ): boolean {
-    if (op.effect !== 'pure') return false;
+    if (op.effect !== 'pure' || reachesHost(op, this.program.functions))
+      return false;
     const use = this.uses.get(result.id);
     if (use === undefined || use.count !== 1 || use.region !== region)
       return false;
@@ -708,15 +736,23 @@ class Emitter {
         // complex operands only, each in the order of the operands; a complex
         // literal gives its two parts as constants, and a term that is the
         // constant `0` is dropped. So `z + 1` is `{ re: z.re + 1, im: z.im }`
-        // and `x + 2i` is `{ re: x, im: 2 }`: a `-0` part stays `-0`.
+        // and `x + 2i` is `{ re: x, im: 2 }`: a `-0` part stays `-0`. A value
+        // that a local holds (`IRProgram.localValues`) is the name of the
+        // local there, never a constant: its parts are read, and no term of
+        // it is dropped: `(0.5 - i)·a + t` with `t = 0` is
+        // `{ re: p.re + 0, im: p.im }`, `+0` where the part `p.re` is `-0`.
         const re: string[] = [];
         const im: string[] = [];
+        const kept = new Set<number>();
         op.operands.forEach((v, i) => {
-          const literal = this.complexLiterals.get(v.id);
+          const local = this.program.localValues?.has(v.id) === true;
+          const literal = local ? undefined : this.complexLiterals.get(v.id);
+          if (local) kept.add(re.length);
           if (literal !== undefined) {
             re.push(String(literal.re));
             im.push(String(literal.im));
           } else if (v.representation === 'complex') {
+            if (local) kept.add(-1 - im.length);
             re.push(`${operand(operands[i], CALL)}.re`);
             im.push(`${operand(operands[i], CALL)}.im`);
           } else {
@@ -730,11 +766,15 @@ class Emitter {
             re.push(operand(operands[i], ADDITIVE + 1));
           }
         });
-        const sum = (terms: readonly string[]) => {
-          const nonZero = terms.filter((t) => t !== '0');
+        // `kept`: the index `k` of each real part, and `-1 - k` of each
+        // imaginary part, of a value that a local holds.
+        const sum = (terms: readonly string[], key: (k: number) => number) => {
+          const nonZero = terms.filter((t, k) => t !== '0' || kept.has(key(k)));
           return nonZero.length === 0 ? '0' : nonZero.join(' + ');
         };
-        return atom(`({ re: ${sum(re)}, im: ${sum(im)} })`);
+        return atom(
+          `({ re: ${sum(re, (k) => k)}, im: ${sum(im, (k) => -1 - k)} })`
+        );
       }
       case 'negate':
         if (op.result.representation !== 'complex')
@@ -1024,6 +1064,17 @@ class Emitter {
         // The source of the test operation is a call.
         const args = operands.map((a) => operand(a, CONDITIONAL));
         return { text: trace(op.trace, args), precedence: CALL };
+      }
+      case 'host': {
+        // Bound to a `const` at its position (`writtenAtUse()`), so the host
+        // operations run in the order of the program.
+        const host = this.options.host;
+        if (host === undefined)
+          return fail('a host operation, and no host source');
+        const binding = this.program.hosts?.[op.host];
+        if (binding === undefined) return fail(`no host binding ${op.host}`);
+        const args = operands.map((a) => operand(a, CONDITIONAL));
+        return { text: host(binding, args), precedence: CALL };
       }
       default:
         return fail(

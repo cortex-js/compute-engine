@@ -1296,14 +1296,52 @@ const INTENDED_DECLINES: [string, () => Expression, Record<string, unknown>, Reg
   ['cse not false', () => engine().expr(['Add', 'x', 'y']), { cse: undefined }, /requires cse: false/],
   ['cse true', () => engine().expr(['Add', 'x', 'y']), { cse: true }, /requires cse: false/],
   ['constantFold not false', () => engine().expr(['Add', 'x', 'y']), { constantFold: undefined }, /requires constantFold: false/],
-  ['broadcast', () => engine().expr(['Add', 'x', 'y']), { broadcast: true }, /unsupported compile options/],
-  ['functions', () => engine().expr(['Add', 'x', 'y']), { functions: { Foo: 'Math.sin' } }, /unsupported compile options/],
-  ['operators', () => engine().expr(['Add', 'x', 'y']), { operators: { Add: ['+', 11] } }, /unsupported compile options/],
-  ['vars', () => engine().expr(['Add', 'x', 'y']), { vars: { x: 1 } }, /unsupported compile options/],
-  ['preamble', () => engine().expr(['Add', 'x', 'y']), { preamble: 'const k = 1;' }, /unsupported compile options/],
-  ['imports', () => engine().expr(['Add', 'x', 'y']), { imports: [Math.sin] }, /unsupported compile options/],
+  ['the function form of operators', () => engine().expr(['Add', 'x', 'y']), { operators: () => undefined }, /unsupported compile options/],
+  ['the bigint mode', () => engine().expr(['Add', 'x', 'y']), { mode: 'bigint' }, /unsupported compile options/],
+  ['a functions entry of a library operator', () => engine().expr(['Add', 'x', 'y']), { functions: { Sin: 'Math.sin' } }, /the option `functions` maps Sin, an operator or a constant of the library/],
+  ['an operators entry of a library operator', () => engine().expr(['Add', 'x', 'y']), { operators: { Add: ['+', 11] } }, /the option `operators` maps Add, an operator or a constant of the library/],
+  ['a vars source that is not one operand', () => engine().expr(['Add', 'x', 'y']), { vars: { y: 'Math.PI/4' } }, /the option `vars` maps y to the source "Math\.PI\/4", which is not one operand/],
   ['the bigint mode', () => engine().expr(['Add', 'x', 'y']), { mode: 'bigint' }, /unsupported compile options/],
 ];
+
+describe('a local in a complex sum', () => {
+  // The existing emitter writes a local as its name, and keeps the term: a
+  // local `t = 0` makes a real part of `-0` the `+0` of `-0 + 0`. Only a
+  // term that is the constant `0` is dropped.
+  test.each<[string, MathJsonExpression, MathJsonExpression]>([
+    ['an integer local 0', "'integer'", 0],
+    ['a real local 0', "'real'", 0],
+    ['a complex local 2i', "'complex'", ['Complex', 0, 2]],
+  ].flatMap(([name, type, value]) => [
+    [`${name}, first`, type, value],
+    [`${name}, last`, type, value],
+  ]) as never)('%s', (name, type, value) => {
+    const ce = engine();
+    const sum: MathJsonExpression = name.endsWith('first')
+      ? ['Add', 't', ['Multiply', ['Complex', 0.5, -1], 'a']]
+      : ['Add', 'a', 't', 'ImaginaryUnit'];
+    const fn = ce.expr([
+      'Function',
+      ['Block', ['Declare', 't', type, value], sum],
+      ['Typed', 'a', "'real'"],
+    ]);
+    for (const mode of ['strict', 'complex'] as const) {
+      const profiled = compile(fn, { profile: 'numeric-kernel', fallback: false, mode });
+      const existing = compile(fn, { ...OPTIONS, fallback: false, mode });
+      for (const a of [-0, 0, 1.5]) {
+        const p = profiled.run!(a as never) as unknown;
+        const e = existing.run!(a as never) as unknown;
+        const parts = (v: unknown) =>
+          typeof v === 'object' && v !== null
+            ? [(v as { re: number }).re, (v as { im: number }).im]
+            : [v, 0];
+        const [pr, pi] = parts(p);
+        const [er, ei] = parts(e);
+        expect([Object.is(pr, er), Object.is(pi, ei)]).toEqual([true, true]);
+      }
+    }
+  });
+});
 
 describe('declines', () => {
   test.each(INTENDED_DECLINES)('%s', (_name, make, options, reason) => {

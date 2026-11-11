@@ -148,10 +148,28 @@
   factor whose numerator is a product with an exact rational
   (`q·((0.1/3)/w)`) gives the doubles of the ordinary compiler; it gave a
   value that differed in the last place before. The options `cse` and
-  `constantFold` are ignored under the profile; `functions`, `operators`,
-  `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
-  with `outside-profile` (an empty object of `functions`, `operators` or
-  `vars` is an absent option). A program of more than 100,000 operations
+  `constantFold` are ignored under the profile. The options `vars`,
+  `functions`, `operators`, `imports` and `preamble` give the code of the
+  ordinary compiler, and the host functions run the same number of times, in
+  the same order. A `vars` entry that reads the vars object under another
+  name (`u: '_.w'`) is an input. Another source (`t: 'next()'`) is read once
+  at each occurrence of the name, and makes the result not `pure` and not
+  `shippable`. A call of a `functions` or `operators` entry is a call of the
+  host: it is `pure` when the entry is declared pure, and never `shippable`.
+  A `preamble` that is not blank makes the result not `pure`, because it
+  runs on every call. `broadcast` is ignored: the result has no `batch`.
+  These forms decline with `outside-profile`, each with its own message:
+  - the function form of `operators`;
+  - an infix `operators` entry;
+  - an entry for an operator or a constant of the library;
+  - a `vars` source that is not one operand;
+  - a `functions` source that is not a name, a dotted path of names or a
+    pure arithmetic function expression (`_.getTransform()`);
+  - a source with a line terminator or a comment;
+  - a read or a call of the host in the `complex` mode;
+  - a `Sum` or a `Product` that calls a function declared pure.
+
+  `mode: 'bigint'` declines too. A program of more than 100,000 operations
   declines with `outside-profile` too, also one with no repeated
   subexpression (a sum of 30,000 terms `sin(x + c)`). With another target,
   or in the `compile()` method of a target object, the option is an error.

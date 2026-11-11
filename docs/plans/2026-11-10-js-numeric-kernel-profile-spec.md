@@ -149,6 +149,28 @@ name declared `number` with a finite real literal value is a capture with the
 kind of its value. These names have a declared type, so `defaultedSymbols`
 does not list them.
 
+**The options of the host (2026-11-11, slices 3 to 5 of
+[the options and bindings note](2026-11-11-structured-options-and-bindings.md)).**
+`vars`, `functions`, `operators`, `imports` and `preamble` no longer decline:
+a `vars` entry that reads an entry of the vars object is an input under
+another name; another `vars` source that is one operand is a read of the
+host, an operation of `unknown` effect; a `functions` entry, or an `operators`
+entry whose operator is a name, makes a call of the head the operation
+`host`, `pure` when `entryIsPure()` says so and `unknown` otherwise; `imports`
+and `preamble` go to the existing assembly. `broadcast` is ignored (no
+`batch`, the values of `broadcast: false`). A read or a call of the host is
+not `shippable`, also a pure call, and is in the `strict` mode only. A
+`preamble` that is not blank runs on every call, so the result is not
+`pure`; an import is a definition and changes neither fact. A callee
+source that is not a name, a dotted path of names or a function expression
+with a pure arithmetic body declines (the existing emitter evaluates it
+before the arguments), and so does a source with a line terminator or a
+comment. The
+function form of `operators`, an infix `operators` entry, an entry for an
+operator or a constant of the library, and `mode: 'bigint'` decline with
+`outside-profile`. The rules are in `docs/COMPILATION-MODEL.md`, "The options
+of the host"; the result is in the note, "Result of slices 3 to 5".
+
 ## The two facts, defined
 
 **`pure`.** Two calls of the compiled function, with any arguments, give the

@@ -199,7 +199,9 @@ type Visit = (
  *
  * `workerPortable`: false for an `unknown` operation, an `effectful`
  * operation, a `draw` or a `seeded` region anywhere (also a pure one), a
- * call of a function that is not in the program, or a capture whose
+ * call of a function that is not in the program, a host operation
+ * (`IRHostCall`, also a pure one: the code of the host is not in the code of
+ * the program), or a capture whose
  * snapshot is not a number. The random stream is not portable (the choice
  * of `isShippableCode()`, which refuses code that names its helpers). For
  * another `effectful` operation (a write to the console of the host) the
@@ -316,6 +318,17 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
     if (op.kind === 'capture' && typeof op.snapshot !== 'number')
       portable.push(
         blocker(op, fn, 'a capture that is not a snapshot of a number')
+      );
+    // A host operation of `unknown` effect is a blocker of `effectBlockers()`
+    // already; a pure one calls code that the code of the program does not
+    // hold either.
+    if (op.kind === 'host' && op.effect === 'pure')
+      portable.push(
+        blocker(
+          op,
+          fn,
+          'a call of a function of the host, which the runtime of a worker does not have'
+        )
       );
     if (op.kind === 'draw' || op.kind === 'seeded')
       portable.push(

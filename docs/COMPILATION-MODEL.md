@@ -2016,7 +2016,8 @@ nothing changes.
 | A sum, a product or a `Which` outside the form | `Sum(L)` of a list, a bound `+∞`, a bound that does not floor to a safe integer, a complex body, `Which` with the value `Nothing` |
 | A name declared with a type that is not numeric | `x + u` with `u` declared `any` (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
 | A statement outside the list | `Continue` in a `Loop` (`operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Loop` over a list, a write in a root `Block` to a name that no `Declare` declares, a local function, a `Block` with statements as an operand (`{ a ⩴ x; a } + 1`), an empty `Block` |
-| An option outside the profile | `functions`, `operators`, `vars`, `imports`, `preamble`, `broadcast`, `mode: 'bigint'` |
+| An option outside the profile | the function form of `operators`, `mode: 'bigint'` |
+| An entry of an option of the host outside the form (below) | a `functions` or `operators` entry for an operator of the library (`functions: { Sin: … }`), an `operators` entry that is an infix operator (`['+', 11]`), a `vars` source that is not one operand (`'Math.PI / 4'`), a `vars` entry for a constant of the library (`Pi`) or for a name with a value and no declared type, a mapped name that the body of the root `Function` or of a user function reads, a read or a call of the host in the `complex` mode, a function of the host whose result type is not real, integer or `number` |
 | A program of more than 100,000 operations | a subexpression in both branches of an `If`, nested 14 times: the profile writes it once per branch (no `operator`) |
 
 **A name with no declared type.** Under the profile, a parameter of a
@@ -2071,6 +2072,94 @@ parameter or an effect other than `random`, declines. Four limits:
   `Mod`) and the profile as the complex quotient of `_SYS.cplx(_.u)`. The
   value is the same; its shape is `{re, im}` on the profile.
 
+**The options of the host.** Under the profile, `vars`, `functions`,
+`operators`, `imports`, `preamble` and `broadcast` give the code of the
+existing compiler with `cse: false` and `constantFold: false`, and the host
+calls and reads in the same number and order:
+
+- A `vars` entry whose source reads an entry of the vars object (`_.w`,
+  `_["w"]`) makes the name an input that the code reads at that source. The
+  name has its declared type, also when it has a value (the compilation
+  hides the value, as on the existing compiler), or the default kind, and
+  `defaultedSymbols` then lists it. `varsObjectRefs` records the source
+  only when it is the spelling of the name itself (`u: '_.u'`), as on the
+  existing compiler, and only such an input gets the entry check of its
+  type.
+- A `vars` entry with another source that is one operand (a name, a
+  number, a call, a member access or an expression in parentheses:
+  `next()`, `state.t`) is a read of the host: an operation whose effect is
+  `unknown`. Each occurrence of the name reads the source once, in the order
+  of the program, and is bound to a `const`; the result is not `pure` and not
+  `shippable`. The name has its declared real, integer or `number` type, or
+  the default kind. `Power(u, -2)` of a mapped name is `Math.pow(u, -2)`,
+  as the existing emitter writes it for such a name.
+- A `functions` entry (a string, a function value, or `{ source, pure }`)
+  for a head that is not an operator of the library, and an `operators`
+  entry `[name, precedence]` whose operator is a name, make each call of the
+  head a call of the host: one operation whose effect is `pure` when the
+  entry declares it pure (`entryIsPure()`, as for the existing compiler) and
+  `unknown` otherwise. Its operands are evaluated first, in order; each call
+  is evaluated once, also a pure one that occurs twice, and is bound to a
+  `const`. A pure call keeps the result `pure`, and a result with a call of
+  the host is never `shippable`: a worker does not have the function. The
+  signature of the head gives the types: its result must be real, integer
+  or `number`. A function value goes in the preamble, as on the existing
+  route. The existing emitter evaluates the source of the callee before
+  the arguments, and the profile after them, so the source must be a name,
+  a dotted path of names (`Math.hypot`, `_.f`) or a function expression in
+  parentheses with a pure arithmetic body (`((t) => t * t + 1)`,
+  `inferSourcePurity()`); another source (`_.getTransform()`) declines.
+- `imports` and `preamble` go to the assembly of the existing route: an
+  import that is not a function throws ``Unsupported import `x` ``, and a
+  preamble makes the result not `shippable`. A preamble that is not blank
+  runs on every call, and the profile does not read it: the result is not
+  `pure`. An import is a function definition, which runs only when the code
+  calls it (through `functions`), so it changes neither fact.
+- A source of `vars` or `functions` with a line terminator or a comment
+  (`'\n next()'`, `'_.w // width'`) declines: the existing emitter writes
+  the source as it is, where `return` followed by a line terminator returns
+  `undefined` without evaluating the source.
+- `broadcast` is ignored: the result has no `batch`, and the values are
+  those of `broadcast: false`, which equal those of the batch body of the
+  existing compiler.
+
+Reads and calls of the host are in the `strict` mode only: in the `complex`
+mode the existing compiler evaluates a host read once per part of a complex
+value (`_SYS.cplx(next())`). A read or a call of the host counts as a draw
+in the rule of two draws (above): two or more draws, reads or calls of the
+host decline when one of them is in a complex value (`next() + i·f(x)`),
+because the existing emitter evaluates the complex operand first. In the
+body of a `Comprehension` or of a `Sum`, the host is called once per
+element, as on the existing compiler. A `Sum` or a `Product` that calls a
+function declared pure declines: the existing emitter skips such a call in
+the terms after a sum of `NaN`. An `If` statement whose branch calls the
+host is kept, also when its result is not read, because the existing
+compiler evaluates the call there. A read or a call of the host that is not
+declared pure can change the vars object: no value computed before it is
+reused after it (`h(√x, g(x), √x)` with one node object for `√x`
+computes the square root twice, as the existing compiler does). In a
+program with such a read or call, a read of an input counts as a draw in
+the rule of two draws: `x + g(1)·Arcosh(x)` declines, because the existing
+emitter reads `_.x` for the real operand after the complex operand that
+calls `g`.
+
+```js
+const ce = new ComputeEngine();
+ce.declare('x', 'real');
+ce.declare('f', '(real, real) -> real');
+compile(ce.box(['Add', 'x', 'u']), {
+  profile: 'numeric-kernel',
+  vars: { u: '_.w' },
+}).code;
+// ➔ "_.w + _.x"
+compile(ce.box(['Add', ['f', 'x', 1], 1]), {
+  profile: 'numeric-kernel',
+  functions: { f: { source: 'Math.hypot', pure: true } },
+});
+// ➔ code "(() => { const _tv1 = Math.hypot(_.x, 1); return _tv1 + 1; })()",
+//   pure: true, shippable: false
+```
+
 The decline follows the `fallback` option, as any other decline: with
 `fallback: true` (the default of `compile()`), `success: false` and the
 interpreter; with `fallback: false`, a `CompileDeclineError`. The diagnostic
@@ -2107,8 +2196,13 @@ the host passed is written. A draw from the random stream outside every
 `WithRandomSeed` region is such an effect: two calls give different values,
 and a call inside an interpreted `WithRandomSeed` advances its frame. A
 `WithRandomSeed` region whose body only draws has no effect, so a program
-whose draws are all in such regions is `pure`. `shippable` when, in
-addition, every function the code calls is in the program, every captured
+whose draws are all in such regions is `pure`. A read of the host (a
+`vars` source that is not an entry of the vars object) and a call of a
+function of the host that is not declared pure are effects too; a call
+declared pure is not. A `preamble` option that is not blank makes the
+result not `pure`. `shippable` when, in
+addition, every function the code calls is in the program (a call of the
+host, also a pure one, is not), every captured
 value is a number, the code neither draws nor seeds the random stream, also
 in a region, and the checks of the existing assembly (no random helper in
 the code) agree. A `Function` literal has `shippable` too under the profile. The

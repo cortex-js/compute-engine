@@ -382,3 +382,221 @@ that declines such an `At` covers both.
 The next refusal of the helper witnesses is the annotation rule: a helper
 with a declared signature whose literal has no annotation
 (`f: (unknown) -> number`, `f := t ↦ t² + 1`).
+
+## Result of slices 3 to 5
+
+On `50e3e41a43ba6c1febb9b5f291a78d2e6bc28feb`, the options `vars`,
+`functions`, `operators`, `imports`, `preamble` and `broadcast`. The rules
+are in `docs/COMPILATION-MODEL.md`, "The options of the host"; the code is
+the section "The options of the host" of `javascript-fragment-target.ts`
+(`structuredHosts()`, `varsEntryOf()`, `admitHostRead()`, `hostHeadOf()`),
+the operation `host` of `structured-ir.ts` (`IRHostCall`, with the bindings
+`IRProgram.hosts`), its checks in `structured-verify.ts`, its lowering in
+`javascript-structured-lower.ts` and its text in
+`javascript-structured-emit.ts`.
+
+- **`vars`, an input read.** A source `_.<id>`, `_["<id>"]` or `_['<id>']`
+  is an input that the code reads at the source (`_.w + _.x` for `x + u`
+  with `u: '_.w'`). The name has its declared type, also when it has a
+  value, or the default kind (`defaultedSymbols`). `varsObjectRefs` and the
+  entry check follow `isOpaqueVarsSource()`: only the spelling of the name
+  itself (`u: '_.u'`) is recorded and checked, as on the existing route.
+- **`vars`, a host read.** Another source that is one operand (a name, a
+  number, a call, a member access, an expression in parentheses, with a
+  trailing `++` or `--`) is the operation `host` with no operand and the
+  effect `unknown`: one read per occurrence, in the order of the program.
+- **`functions` and `operators`.** A string, a function value (in the
+  preamble), `{ source, pure }`, and an `operators` entry `[name, prec]`
+  whose operator is an identifier are the operation `host` with the operands
+  of the node: `pure` when `entryIsPure()` says so, `unknown` otherwise. The
+  verifier checks the binding, the arity of a read, the types of the
+  operands and of the result against the binding, and that the effect is
+  `pure` exactly for a pure call. `analyzeExecution()`: an `unknown` host
+  operation is not pure and not shippable (`effectBlockers`); a pure one is
+  pure and not shippable (a `workerPortable` blocker: a worker does not have
+  the function).
+- **`imports` and `preamble`** go to the existing assembly; an import that
+  is not a function throws ``Unsupported import `x` `` as on the existing
+  route. **`broadcast`** is ignored: no `batch`. With `broadcast: true` the
+  existing compiler makes no batch for a program that it delegates either,
+  and its batch body gives the values of the scalar body for the list
+  programs tested.
+
+Where the code differs from this note:
+
+1. **A host operation is bound to a `const` at its position**, not written
+   at its use: `(() => { const _tv1 = next(); return 2 * _tv1 + _.x; })()`
+   for `x + 2t`. The emitter writes a value at its use only when no impure
+   operation lies between; the number and the order of the calls are those
+   of the existing code (`next() + next() + _.x` reads twice in the order of
+   the operands; tested, and compared by the fuzz tester).
+2. **The complex mode declines a host read and a host call.** The existing
+   emitter reads a wide read once per part of a complex value
+   (`_SYS.cplx(next())` twice), and binds a complex operand ahead of the
+   others. A host operation counts as a draw in `refuseHoistedDraws()`: two
+   or more draws, reads or calls when one is in a complex value decline.
+3. **An entry for an operator or a constant of the library declines**
+   (`functions: { Sin: … }`, `operators: { Add: … }`, `vars: { Pi: … }`).
+   The existing compiler applies its own rewrites of library operators
+   first (`Subtract` becomes `add(x, -y)`, an `Add` entry in `functions` is
+   not used), so the code of such an entry is not the call of the entry.
+   A `vars` key with the name of a library binding declines only when the
+   node reads that binding (`systemScopeBinding()`): a sum index `i` that
+   the series walk maps is admitted.
+4. **An infix `operators` entry and the function form decline.** The note
+   wrote "other text is infix at its precedence"; none of the 38 logged
+   `operators` compilations needs it (17 use the function form, 19 an entry
+   for a library operator).
+5. **A pure host call is not shippable.** Conservative: the existing route
+   reports `shippable: true` for a call of a function value that it puts in
+   the preamble.
+6. **A `vars` name that the body of the root `Function` or of a helper
+   reads declines**, and so does a root symbol that an `operators` entry
+   maps. The existing compiler splices the source in the body; no logged
+   compilation needs it (3).
+7. **A `vars` entry for a name with a value and no declared type, or for a
+   constant, declines** (9 logged): the existing compiler types the name by
+   its hidden value. Declare its type.
+8. **A function of the host needs a result type that is real, integer or
+   `number`** (12 logged decline with an `unknown`, list or tensor result).
+9. **`Power(u, -2)` of a name that `vars` maps** is `Math.pow(u, -2)`, as
+   the existing emitter writes it (`varsKeys` in `javascript-target.ts`);
+   `1 / u / u` differs in the last place (`u = 0.4641588833612779`). The
+   fuzz tester found it. A probe grid of 79 forms (each `Power` form of the
+   rule, the functions of the profile, `Root`, `Log`, `Mod`, `Min`, `Max`,
+   quotients, comparisons, `Sum`, complex forms) for a name declared
+   `real`, `real<0..>` and `integer`, mapped to `_.w`, `_["w"]` and a host
+   read, in both modes (98,856 points), finds no other difference. The
+   existing emitter reads `varsKeys` only for the exponents 2 and -2, and
+   `_SYS.pow2(b)` computes `b * b`. `Floor`, `Ceil` and `Round` of a name
+   declared `integer` whose host read returns a non-integer differ: the
+   existing compiler drops the rounding of an integer. That value is outside
+   the type of the name.
+10. **An `If` statement whose branch calls the host is kept**
+    (`canThrow()` holds `host`), also for a function declared pure: the
+    existing compiler evaluates `t = g(x)` in the branch when `t` is not
+    read, so the host counts the call, and a throw of the function
+    surfaces. Without it, the effect facts let such an `If` go.
+11. **A `Sum` or a `Product` that calls a function of the host declared
+    pure declines** (`refusePureHostInAggregates()`). The existing emitter
+    skips the terms after an accumulator of `NaN` when they have no effect
+    (`isEmissionSkippable()`), and so calls such a function fewer times. A
+    call that is not pure has an effect: every term runs on both routes,
+    tested at `x = NaN`. The fuzz tester found it on the new base.
+
+A host operation is never shared by the lowering memo (`reachesHost()`):
+a node object reached twice is two reads or two calls, also for a pure
+function, as on the existing compiler with `cse: false`
+(`_.x + g(_.x) + g(_.x)`); tested for a read and for a call.
+
+Review round 2:
+
+12. **An operation with the effect `unknown` invalidates the memo**
+    (`afterUnknown()`): a host read, a host call not declared pure, and a
+    call of a helper that reaches one, give a new epoch and count as a
+    write outside every open `inScope()`. `h(√x, g(x), √x)` with one node
+    object for `√x`, where `g` sets `_.x` from 4 to 9, gave `√4` twice
+    (`h(2, 5, 2)`); it now computes `√9`, as the existing compiler. A call
+    declared pure does not change the vars object: no invalidation. An
+    input that is not shared is read at each occurrence, and the emitter
+    does not move a read across an impure operation: `x + g(x) + x`,
+    `x · g(x) · x`, a comparison, an `If` condition and a `Sum`, in its
+    unrolled and its loop forms, give the values of the existing compiler
+    with a `g` that changes `_.x` (probe and test).
+13. **A callee source must be a name, a dotted path of names, or one
+    operand that `inferSourcePurity()` reads as a function expression with
+    a pure arithmetic body.** The existing emitter evaluates the callee
+    first (`_.getTransform()(_.next())`), the profile after the arguments.
+    It declines always, also with pure arguments: such a callee can change
+    an input that an argument reads. The logged sources of the 99 files are
+    names, dotted paths (`_.f`, `_SYS.mylist`, `Math.random`), function
+    values (a name in the preamble) and function expressions in
+    parentheses (`((t)=>t*t+1)`, 19); none has a call, an index or a
+    `new` in its callee. A function expression whose body is not pure
+    arithmetic (`((t) => { count++; return t; })`, 1 logged, and the
+    list-valued ones that decline for their result type) declines.
+14. **A `preamble` that is not blank makes the result not `pure`**: the
+    runner executes it on every call (a preamble that increments a global
+    counter counts 2 for two calls, on both routes). An import is a function definition that runs only when the code
+    calls it, so it changes neither `pure` nor `shippable`.
+15. **A source with a line terminator or a comment declines**
+    (`sourceLayoutRefusal()`), for `vars` and `functions`: `return`
+    followed by a line terminator returns `undefined` on the existing
+    route. An `operators` entry is a name, which has neither. No logged
+    source has one.
+16. **The memo of `regionReachesHost()` caches no answer that read a
+    region in progress**, unless the answer is `true` (a hand-built cycle
+    `A = [call B, host]`, `B = [call A]` in the test). The two memos of
+    `javascript-fragment-target.ts` walk the helpers, which have no cycle
+    (`collectStructuredHelper()` refuses recursion first): their
+    provisional `false` is removed and the comment says so.
+17. **A local in a complex sum** (older than this change):
+    `Function(Block(Declare(t, 'integer', 0), t + (0.5 - i)·a), a: real)` at
+    `a = -0` was `-0` on the profile, `0` on the existing compiler, which
+    writes the local as its name and keeps the term. The lowering records
+    the values that a local holds (`IRProgram.localValues`); the complex
+    `add` drops a `0` term, and writes the parts of a complex literal as
+    constants, only for a value that no local holds. A probe grid over 38
+    forms (`0`, `1`, `-1` factors, the bases and exponents of `Power`,
+    `Root`, `Mod`, `Log`, `Arctan2`, `Max`, comparisons, `Sum` bounds and
+    bodies, the rational factor of a product, an `Interval` bound of a
+    draw, complex sums and products), with a local declared `integer` or
+    `real` holding 0, 1, -1, 2 or 0.5 and a capture holding the same, in
+    both modes (911 admitted programs, 9,110 points), found only this
+    class, in the two forms `t + (0.5 - i)·a` and `a + t + i`; after the
+    fix, none. A local declared `complex` holding `2i`, `1 - i`, `i` or
+    `-0.5i` in a sum or a product gives the existing values too (128
+    points). A capture is written as its number on both routes.
+18. **A read of an input around a call that changes the vars object, with
+    a complex operand.** The fuzz tester (`hm`, which sets `x` of the vars
+    object) found `x + hm(1)·Arcosh(x)`: the existing emitter evaluates the
+    complex operand first and reads `_.x` after `hm`, the profile reads it
+    before. When a host operation of the program is not pure, a read of a
+    name of the root scope counts as a draw in `refuseHoistedDraws()`, so
+    such a program declines; a program with no complex operand keeps the
+    order of the operands on both routes (item 12).
+
+Fuzz tester, round 2: seeds 61 to 63 with `--host` (15,000 programs, `hm`
+added) and seeds 11 to 13 without it (30,000 programs, with the locals
+`k0` of item 17): no failure of the profile. Without `--host`, one value
+difference of the class CE-1203 (`-At(Comprehension(Ln(x)), 1)`) and the
+documented shape difference `(0·3·Mod(1, u) + x)/u`. With `--host`, the
+class of item 18 (1 program) before its fix, and after it no difference
+of value, shape or host calls.
+
+**Shadow measure** (on `1652626570dcdbb481e5ec15f5ccd890ce1b4113`, before
+the move to `50e3e41a43ba6c1febb9b5f291a78d2e6bc28feb`), the 99 test files
+that reached the option messages, before (the commit) and after (the
+change):
+
+| Consumer | Baseline | Admitted before | Admitted after |
+| --- | --- | --- | --- |
+| public | 3,898 | 656 | 731 |
+| implicit:series | 175 / 173 | 0 | 169 |
+| total | 4,430 / 4,428 | 990 | 1,234 |
+
+The messages "the option `vars` / `functions` / `operators` / `broadcast` /
+`preamble` is not in the profile" (292 / 118 / 34 / 22 / 1) are gone. Per
+option, the compilations that the existing compiler compiles and the
+profile admits (an option-logging Jest setup on the same files): `vars`
+0 → 32 of 116 public and 0 → 169 of 173 of the series walk, `functions`
+0 → 40 of 118, `operators` 0 → 1 of 38, `broadcast` 0 → 2 of 23,
+`preamble` 0 → 1 of 3, `imports` 0 → 1 of 1. The series walk keeps 4
+declines: `Floor` of `1e30` (2), `Factorial`, `Sinc`. The programs that pass
+the option now reach other refusals: a chained `Less` (+16), `Integrate`
+(+15), a tuple (+11), a `list<number>` input (+13).
+
+**Fuzz tester.** `--host` adds `vu` (`_["vu_"]`, declared `real`), `vz`
+(`_.vz_`, no declared type), `vr` (a read of `__fuzzRead()`), `hp`
+(declared pure), `hq` (not pure) and `ho` (an `operators` entry); the
+outcome includes the reads and calls of the host in order. Seeds 61 to 63,
+15,000 programs: the first run found the `Power(u, -2)` class (14
+programs), and the run on `50e3e41a4` the class of item 11 (1 program).
+After both fixes: no failure of the profile, no difference of shape, and
+no difference of value or of host calls in a program that reads or calls
+the host. One class remains, with no host name, and it gives the same code
+on `50e3e41a4` without this change:
+`Function(Block(Declare(t, 'integer', 0), t + (0.5 - i)·a), a: real)` at
+`a = -0` is `-0` on the profile and `0` on the existing compiler, which
+adds `t`. Without `--host`, seeds 11 and 12 (20,000 programs): no
+difference and no failure.

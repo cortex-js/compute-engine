@@ -229,13 +229,13 @@ describe('the counters', () => {
 
   test('the messages are normalized, with one example each', () => {
     const ce = engine(true);
-    compile(ce.parse('x^2 + 1'), { vars: { x: 'u' } });
-    compile(ce.parse('y^2 + 1'), { vars: { y: 'v' } });
+    compile(ce.parse('x^2 + 1'), { operators: () => undefined });
+    compile(ce.parse('y^2 + 1'), { operators: () => undefined });
     const stats = _jsProfileShadowStats(ce).public;
     expect(stats.declined).toBe(2);
     const keys = Object.keys(stats.declinedMessages);
     expect(keys).toEqual([
-      "Could not compile with the profile 'numeric-kernel': the option `vars` is not in the profile.",
+      "Could not compile with the profile 'numeric-kernel': the function form of the option `operators` is not in the profile.",
     ]);
     expect(stats.examples[keys[0]]).toBe(keys[0]);
   });

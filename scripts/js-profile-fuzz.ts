@@ -30,7 +30,8 @@
  * `nan | real | signed_infinity` (`ex`), boolean inputs and parameters, calls of user
  * functions with declared and inferred signatures (`HELPERS`), a `Block`
  * at the root and `Function` literals with typed parameters, with a body
- * of locals (a list local made by a `Comprehension`), writes, `If`
+ * of locals (a list local made by a `Comprehension`, a local `k0` that
+ * holds 0, 1 or -1 in a complex sum or product), writes, `If`
  * statements and a `Loop` over a range with a `Break`.
  *
  * A difference is reported only for inputs in the type of each input; a
@@ -90,6 +91,23 @@
  *                        (interpreted after `subs()`), is not compared
  *                        with the interpreter (counted as skipped,
  *                        `interpretsDraws()`). Without the
+ *                        option, the programs are those of the same seed
+ *                        before the option was added.
+ *   --host               Also generate the options of the host
+ *                        (`HOST_OPTIONS`): reads of names that a `vars`
+ *                        entry maps to another entry of the vars object
+ *                        (`vu`, `_["vu_"]`, declared `real`; `vz`,
+ *                        `_.vz_`, with no declared type), reads of the host
+ *                        (`vr`, `__fuzzRead()`, which counts its reads),
+ *                        calls of a `functions` entry declared pure (`hp`)
+ *                        and of one that is not (`hq`), of one that sets
+ *                        `x` of the vars object (`hm`), and of an
+ *                        `operators` entry (`ho`); each function of the host
+ *                        counts its calls. Both compilers compile with these
+ *                        options, and the calls and reads of the host, in
+ *                        order, are part of the outcome. A program that
+ *                        reads or calls the host is not compared with the
+ *                        interpreter (`interpretsDraws()`). Without the
  *                        option, the programs are those of the same seed
  *                        before the option was added.
  *   --json <file>        Also write the whole result as JSON.
@@ -204,6 +222,10 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   ex: 'realnan',
   L: 'list',
   B: 'boolean',
+  // The names that `HOST_OPTIONS` maps to another entry of the vars object
+  // (`--host`).
+  vu: 'real',
+  vz: 'undeclared',
 };
 
 /** The parameters of a `Function` program: name, kind, type string. */
@@ -251,7 +273,80 @@ export function makeEngine(): ComputeEngine {
   ce.assign('cn', 1.5);
   ce.assign('w', 3);
   ce.assign('g', 0.75);
+  // The names and the functions of the host of `--host` (`HOST_OPTIONS`).
+  ce.declare('vr', 'real');
+  ce.declare('hp', '(real) -> real');
+  ce.declare('hq', '(real, real) -> real');
+  ce.declare('ho', '(real) -> real');
+  ce.declare('hm', '(real) -> real');
   return ce;
+}
+
+/**
+ * The options of the host of `--host`: `vu` and `vz` read other entries of
+ * the vars object (`vu_`, `vz_`, which the runner sets to the values of
+ * `vu` and `vz`), `vr` reads the host, `hp` is a function of the host
+ * declared pure, `hq` one that is not, `hm` one that sets `x` of the vars
+ * object of the call (`HOST_VARS`), and `ho` an `operators` entry. Each
+ * read and call is logged in `HOST_LOG` (`hostCalls()`).
+ */
+const HOST_OPTIONS = {
+  vars: { vu: '_["vu_"]', vz: '_.vz_', vr: '__fuzzRead()' },
+  functions: {
+    hp: { source: '__fuzzPure', pure: true },
+    hq: '__fuzzImpure',
+    hm: '__fuzzMutate',
+  },
+  operators: { ho: ['__fuzzOp', 20] as [string, number] },
+};
+
+/** The reads and calls of the host during a run (`--host`). */
+const HOST_LOG: string[] = [];
+const hostGlobals = globalThis as unknown as Record<string, unknown>;
+hostGlobals.__fuzzRead = () => {
+  HOST_LOG.push('read');
+  return [0.5, -1.25, 3, 0.1][HOST_LOG.length % 4];
+};
+hostGlobals.__fuzzPure = (t: number) => {
+  HOST_LOG.push(`hp(${t})`);
+  return t * t - 0.5;
+};
+hostGlobals.__fuzzImpure = (a: number, b: number) => {
+  HOST_LOG.push(`hq(${a},${b})`);
+  return a - 2 * b + 0.001 * HOST_LOG.length;
+};
+hostGlobals.__fuzzOp = (t: number) => {
+  HOST_LOG.push(`ho(${t})`);
+  return Math.sin(t) + 0.01 * HOST_LOG.length;
+};
+/** The vars object of the current call of an expression (`--host`), which
+ *  `hm` changes. */
+let HOST_VARS: Record<string, unknown> | undefined;
+hostGlobals.__fuzzMutate = (t: number) => {
+  HOST_LOG.push(`hm(${t})`);
+  if (HOST_VARS !== undefined) HOST_VARS.x = 0.25 + HOST_LOG.length;
+  return t / 2 + 1;
+};
+
+/** Run `f` with an empty `HOST_LOG`, and give its value and the log. */
+function hostCalls<T>(f: () => T): { value: T; host: string } {
+  HOST_LOG.length = 0;
+  const value = f();
+  return { value, host: HOST_LOG.join(' ') };
+}
+
+/** Whether `json` reads or calls the host (`HOST_OPTIONS`). */
+function usesHost(json: Json): boolean {
+  if (typeof json === 'string')
+    return json === 'vr' || json === 'vu' || json === 'vz';
+  if (!Array.isArray(json)) return false;
+  return (
+    json[0] === 'hp' ||
+    json[0] === 'hq' ||
+    json[0] === 'ho' ||
+    json[0] === 'hm' ||
+    json.slice(1).some(usesHost)
+  );
 }
 
 /**
@@ -554,6 +649,8 @@ interface GenContext {
   readonly lists: readonly string[];
   /** Whether to generate draws (`--random`). */
   readonly random?: boolean;
+  /** Whether to generate reads and calls of the host (`--host`). */
+  readonly host?: boolean;
 }
 
 const LITERALS: readonly (readonly [Json, number])[] = [
@@ -607,6 +704,7 @@ function genDraw(ctx: GenContext): Json {
 function genLeaf(ctx: GenContext): Json {
   const { rng } = ctx;
   if (ctx.random && rng() < 0.12) return genDraw(ctx);
+  if (ctx.host && rng() < 0.12) return pick(rng, ['vr', 'vr', 'vu', 'vz']);
   if (rng() < 0.55) {
     if (ctx.lists.length > 0 && rng() < 0.08) {
       const list = pick(rng, ctx.lists);
@@ -731,6 +829,13 @@ function genReal(ctx: GenContext, depth: number): Json {
   if (depth >= ctx.maxDepth || rng() < leaf) return genLeaf(ctx);
   const d = depth + 1;
   const sub = () => genReal(ctx, d);
+  if (ctx.host && rng() < 0.08)
+    return pick<() => Json>(rng, [
+      () => ['hp', sub()],
+      () => ['hq', sub(), sub()],
+      () => ['ho', sub()],
+      () => ['hm', sub()],
+    ])();
   if (ctx.random && rng() < 0.06)
     return [
       'WithRandomSeed',
@@ -945,6 +1050,8 @@ export interface Program {
   readonly json: Json;
   /** For a `Function` literal, the names of its parameters in order. */
   readonly parameters?: readonly string[];
+  /** Compiled with the options of the host (`--host`, `HOST_OPTIONS`). */
+  readonly host?: boolean;
 }
 
 const EXPRESSION_SYMBOLS: readonly (readonly [Json, number])[] = [
@@ -1056,6 +1163,20 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
   }
   if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
   else statements.push(genReal(ctx(locals, 1, listLocals), 0));
+  // A local that holds 0, 1 or -1 in a complex sum or product: the existing
+  // emitter writes the local as its name, never as a constant term.
+  if (rng() < 0.12) {
+    const value = statements.pop()!;
+    const complex: Json = pick<Json>(rng, [
+      ['Multiply', ['Complex', 0.5, -1], value],
+      ['Add', value, 'ImaginaryUnit'],
+      ['Multiply', 'ImaginaryUnit', value],
+    ]);
+    statements.push(
+      ['Declare', 'k0', pick(rng, ["'integer'", "'real'"]), pick(rng, [0, 1, -1])],
+      [pick(rng, ['Add', 'Add', 'Multiply']), 'k0', complex]
+    );
+  }
   return statements;
 }
 
@@ -1102,7 +1223,12 @@ function declareLocal(rng: Rng, name: string, ctx: GenContext): Json {
   ];
 }
 
-function genFunction(rng: Rng, maxDepth: number, random: boolean): Json[] {
+function genFunction(
+  rng: Rng,
+  maxDepth: number,
+  random: boolean,
+  host: boolean
+): Json[] {
   const parameters = PARAMETERS.filter(([name]) => name === 'a' || rng() < 0.4);
   const names = parameters.map(([name]) => name);
   const symbols: [Json, number][] = [
@@ -1125,6 +1251,7 @@ function genFunction(rng: Rng, maxDepth: number, random: boolean): Json[] {
         booleans: names.includes('c') ? ['c'] : [],
         lists: names.includes('V') ? ['V'] : [],
         random,
+        host,
       }),
     ],
     ...parameters.map(([name, , type]): Json => ['Typed', name, `'${type}'`]),
@@ -1143,17 +1270,18 @@ export function nodeCount(json: Json): number {
 export function generateProgram(
   seed: number,
   index: number,
-  options: { depth: number; size: number; random?: boolean }
+  options: { depth: number; size: number; random?: boolean; host?: boolean }
 ): Program {
   const rng = makeRng(mixSeed(seed, index, 1));
   const random = options.random === true;
-  const context: ContextBase = { ...EXPRESSION_CONTEXT, random };
+  const host = options.host === true;
+  const context: ContextBase = { ...EXPRESSION_CONTEXT, random, host };
   for (;;) {
     let json: Json;
     let parameters: string[] | undefined;
     const r = rng();
     if (r < 0.2) {
-      const fn = genFunction(rng, options.depth, random);
+      const fn = genFunction(rng, options.depth, random, host);
       json = fn;
       parameters = fn.slice(2).map((p) => (p as Json[])[1] as string);
     } else if (r < 0.3) {
@@ -1166,7 +1294,12 @@ export function generateProgram(
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
     }
     if (nodeCount(json) <= options.size)
-      return { id: `${seed}:${index}`, json, parameters };
+      return {
+        id: `${seed}:${index}`,
+        json,
+        parameters,
+        ...(host ? { host: true } : {}),
+      };
   }
 }
 
@@ -1185,6 +1318,8 @@ type Outcome =
       /** The number of calls of `Math.random` (draws outside a seeded
        *  region) during the run (`withStubbedRandom()`). */
       readonly draws: number;
+      /** The reads and calls of the host, in order (`hostCalls()`). */
+      readonly host: string;
     }
   | { readonly kind: 'throw'; readonly message: string };
 
@@ -1270,12 +1405,20 @@ function compileWith(
   expr: Expression,
   mode: Mode,
   profile: boolean,
-  parameters: readonly string[] | undefined
+  parameters: readonly string[] | undefined,
+  host = false
 ): Compiled {
   try {
+    const hostOptions = host ? HOST_OPTIONS : {};
     const result = profile
-      ? compile(expr, { profile: 'numeric-kernel', fallback: false, mode })
+      ? compile(expr, {
+          ...hostOptions,
+          profile: 'numeric-kernel',
+          fallback: false,
+          mode,
+        })
       : compile(expr, {
+          ...hostOptions,
           cse: false,
           constantFold: false,
           fallback: false,
@@ -1291,23 +1434,38 @@ function compileWith(
       };
     const raw = rawRunner(run, parameters);
     const copy = (v: Value): unknown => (Array.isArray(v) ? [...v] : v);
-    const argumentsOf = (inputs: Inputs): unknown[] =>
-      parameters === undefined
-        ? [
-            Object.fromEntries(
-              Object.entries(inputs).map(([k, v]) => [k, copy(v)])
-            ),
-          ]
-        : parameters.map((name) => copy(inputs[name]));
+    // The entries that `HOST_OPTIONS` reads in place of `vu` and `vz`.
+    // A new vars object per call, which `hm` changes (`HOST_VARS`).
+    const argumentsOf = (inputs: Inputs): unknown[] => {
+      if (parameters !== undefined) {
+        HOST_VARS = undefined;
+        return parameters.map((name) => copy(inputs[name]));
+      }
+      const vars: Record<string, unknown> = Object.fromEntries([
+        ...Object.entries(inputs).map(([k, v]) => [k, copy(v)]),
+        ...(host
+          ? [
+              ['vu_', inputs.vu],
+              ['vz_', inputs.vz],
+            ]
+          : []),
+      ]);
+      HOST_VARS = vars;
+      return [vars];
+    };
     return {
       ok: true,
       code: result.code,
       run: (inputs) => {
         let value: unknown;
         let draws: number;
+        let calls: string;
         try {
-          ({ value, draws } = withStubbedRandom(() =>
-            run(...argumentsOf(inputs))
+          ({
+            value: { value, draws },
+            host: calls,
+          } = hostCalls(() =>
+            withStubbedRandom(() => run(...argumentsOf(inputs)))
           ));
         } catch (error) {
           return { kind: 'throw', message: String(error) };
@@ -1323,7 +1481,7 @@ function compileWith(
         } catch {
           shape = undefined;
         }
-        return { kind: 'value', value, raw: shape, draws };
+        return { kind: 'value', value, raw: shape, draws, host: calls };
       },
     };
   } catch (error) {
@@ -1359,7 +1517,9 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 function sameOutcome(a: Outcome, b: Outcome): boolean {
   if (a.kind === 'throw' || b.kind === 'throw') return a.kind === b.kind;
-  return a.draws === b.draws && sameValue(a.value, b.value);
+  return (
+    a.draws === b.draws && a.host === b.host && sameValue(a.value, b.value)
+  );
 }
 
 /** Whether two outcomes differ in the shape that the emitted code makes (a
@@ -1569,6 +1729,8 @@ export interface FuzzOptions {
   readonly modes: readonly Mode[];
   /** Generate draws (`--random`). */
   readonly random?: boolean;
+  /** Generate reads and calls of the host (`--host`). */
+  readonly host?: boolean;
 }
 
 export const DEFAULT_OPTIONS: FuzzOptions = {
@@ -1712,9 +1874,9 @@ function differencePredicate(
     const expr = boxProgram(ce, program);
     if (expr === undefined) return undefined;
     const inputs = inputsOf(program, expr);
-    const p = compileWith(expr, mode, true, program.parameters);
+    const p = compileWith(expr, mode, true, program.parameters, program.host);
     if (!p.ok) return undefined;
-    const e = compileWith(expr, mode, false, program.parameters);
+    const e = compileWith(expr, mode, false, program.parameters, program.host);
     if (!e.ok) return undefined;
     const tried = [
       point,
@@ -1740,7 +1902,9 @@ function differencePredicate(
         existingShape: b.kind === 'value' ? b.raw : undefined,
         ...(a.kind === 'value' && b.kind === 'value' && a.draws !== b.draws
           ? { message: `draws: profile ${a.draws}, existing ${b.draws}` }
-          : {}),
+          : a.kind === 'value' && b.kind === 'value' && a.host !== b.host
+            ? { message: `host: profile [${a.host}], existing [${b.host}]` }
+            : {}),
       };
     }
     return undefined;
@@ -1751,9 +1915,9 @@ function existingDeclinesPredicate(mode: Mode): Predicate {
   return (ce, program) => {
     const expr = boxProgram(ce, program);
     if (expr === undefined) return undefined;
-    const p = compileWith(expr, mode, true, program.parameters);
+    const p = compileWith(expr, mode, true, program.parameters, program.host);
     if (!p.ok) return undefined;
-    const e = compileWith(expr, mode, false, program.parameters);
+    const e = compileWith(expr, mode, false, program.parameters, program.host);
     if (e.ok) return undefined;
     return { expr, profileCode: p.code, message: e.message };
   };
@@ -1763,7 +1927,7 @@ function profileFailurePredicate(mode: Mode, code: string): Predicate {
   return (ce, program) => {
     const expr = boxProgram(ce, program);
     if (expr === undefined) return undefined;
-    const p = compileWith(expr, mode, true, program.parameters);
+    const p = compileWith(expr, mode, true, program.parameters, program.host);
     if (p.ok || p.decline || p.code !== code) return undefined;
     return { expr, message: `${p.code}: ${p.message}` };
   };
@@ -1778,7 +1942,7 @@ function interpreterPredicate(mode: Mode, point: Inputs): Predicate {
     if (expr === undefined) return undefined;
     const inputs = inputsOf(program, expr);
     if (!pointInType(inputs, point, mode)) return undefined;
-    const p = compileWith(expr, mode, true, program.parameters);
+    const p = compileWith(expr, mode, true, program.parameters, program.host);
     if (!p.ok) return undefined;
     const a = p.run(point);
     if (a.kind !== 'value') return undefined;
@@ -1979,9 +2143,12 @@ function drawsIn(json: Json): boolean {
  * compiled code: no draw outside a `WithRandomSeed`, and, for a program
  * that is not a `Function` literal, no draw at all. Such a program is
  * interpreted after `subs()` (`interpret()`), which makes the canonical
- * form again and can order the operands, and so the draws, otherwise.
+ * form again and can order the operands, and so the draws, otherwise. A
+ * program that reads or calls the host (`--host`) is not interpreted: the
+ * interpreter has no function of the host.
  */
 function interpretsDraws(program: Program): boolean {
+  if (program.host === true && usesHost(program.json)) return false;
   if (drawsOutsideSeed(program.json)) return false;
   return program.parameters !== undefined || !drawsIn(program.json);
 }
@@ -2085,8 +2252,8 @@ async function runFuzzQuietly(
         const inputs = inputsOf(program, expr);
         let profileAdmits: Mode | undefined;
         for (const mode of options.modes) {
-          const p = compileWith(expr, mode, true, program.parameters);
-          const e = compileWith(expr, mode, false, program.parameters);
+          const p = compileWith(expr, mode, true, program.parameters, program.host);
+          const e = compileWith(expr, mode, false, program.parameters, program.host);
           if (!p.ok && !p.decline) {
             classes['profile failure'] += 1;
             const code = p.code;
@@ -2428,6 +2595,7 @@ async function main(): Promise<void> {
       json: { type: 'string' },
       quiet: { type: 'boolean', default: false },
       random: { type: 'boolean', default: false },
+      host: { type: 'boolean', default: false },
     },
   });
   const int = (s: string | undefined, d: number) =>
@@ -2445,6 +2613,7 @@ async function main(): Promise<void> {
         ? DEFAULT_OPTIONS.modes
         : (values.modes.split(',') as Mode[]),
     random: values.random!,
+    host: values.host!,
   };
   const result = await runFuzz(options, (line) =>
     process.stderr.write(line + '\n')

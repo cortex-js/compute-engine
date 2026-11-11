@@ -65,7 +65,9 @@ import {
 import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
 import { rangeSpecializedParameterTypes } from './compile-user-specialization.js';
 import { rewriteAngularUnit } from './angular-unit.js';
-import { isLibraryOperator } from './builtin-callback.js';
+import { isLibraryOperator, systemScopeBinding } from './builtin-callback.js';
+import { isOpaqueVarsSource, varsObjectSpelling } from './cse.js';
+import { entryIsPure, inferSourcePurity } from './function-purity.js';
 import {
   typeFragment,
   walkIf,
@@ -102,7 +104,7 @@ import {
   isImpurityLabel,
   isPureComputedEffects,
 } from '../../common/type/effects.js';
-import type { EffectFact, IRState } from './structured-ir.js';
+import type { EffectFact, IRHostBinding, IRState } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import {
   literalSeedOf,
@@ -1701,7 +1703,8 @@ function structuredFunctionRule(
 function structuredPowerRule(
   mode: 'strict' | 'complex',
   snapshotOf: SnapshotOf,
-  forms: Map<Expression, StructuredForm>
+  forms: Map<Expression, StructuredForm>,
+  varsKeys?: ReadonlyMap<string, unknown>
 ) {
   return {
     walk: (node, scope, context, w) => {
@@ -1856,7 +1859,8 @@ function structuredPowerRule(
         form,
         base.type.kind,
         mode,
-        snapshotOf
+        snapshotOf,
+        varsKeys
       );
       if (typeof chosen === 'object')
         return w.refuse(node, 'signature', chosen.refusal);
@@ -2102,7 +2106,8 @@ function foldedLiteralRoot(
  *   base and an exponent of at least 2, refused (`realRadicalPower()`
  *   reads through it); `_SYS.pow3(b)` to `_SYS.pow5(b)` for 3 to 5, the
  *   form `product-power`; `(1 / b / b)` for `-2` and a base that is a name
- *   or a literal, the form `reciprocal-square`; `Math.pow(b, e)` for every
+ *   or a literal that the option `vars` does not map, the form
+ *   `reciprocal-square`; `Math.pow(b, e)` for every
  *   other safe integer, the form `real-pow`.
  * - Another exponent: the product of the base and its square root for `1.5`
  *   and a base that `signOf()` proves non-negative (`three-halves`), and
@@ -2119,7 +2124,8 @@ function constantPowerForm(
   form: 'float' | 'integer' | 'rational' | 'three-halves',
   baseKind: string,
   mode: 'strict' | 'complex',
-  snapshotOf: SnapshotOf
+  snapshotOf: SnapshotOf,
+  varsKeys?: ReadonlyMap<string, unknown>
 ): Extract<StructuredForm, string> | { refusal: string } {
   const refuse = (refusal: string) => ({ refusal });
   if (!isFunction(node) || !isNumber(node.op2))
@@ -2197,7 +2203,13 @@ function constantPowerForm(
           `root (realRadicalPower())`
       );
     if (value >= 3 && value <= 5) return 'product-power';
-    if (value === -2 && (isSymbol(base) || isNumber(base)))
+    // The existing emitter writes `Math.pow` for a name that the option
+    // `vars` maps (`varsKeys`).
+    if (
+      value === -2 &&
+      (isSymbol(base) || isNumber(base)) &&
+      !(isSymbol(base) && varsKeys?.has(base.symbol))
+    )
       return 'reciprocal-square';
     return 'real-pow';
   }
@@ -2373,12 +2385,13 @@ function admittedOperands(node: Expression): readonly Expression[] {
 function modeRules(
   mode: 'strict' | 'complex',
   snapshotOf: SnapshotOf,
-  forms: Map<Expression, StructuredForm>
+  forms: Map<Expression, StructuredForm>,
+  varsKeys?: ReadonlyMap<string, unknown>
 ): Record<string, FragmentRule<ScalarRepresentation>> {
   return {
     Sqrt: structuredRadicalRule('Sqrt', mode, snapshotOf),
     Ln: structuredRadicalRule('Ln', mode, snapshotOf),
-    Power: structuredPowerRule(mode, snapshotOf, forms),
+    Power: structuredPowerRule(mode, snapshotOf, forms, varsKeys),
     Root: structuredRootRule(mode, forms),
     Sin: structuredFunctionRule('Sin', mode, forms),
     Cos: structuredFunctionRule('Cos', mode, forms),
@@ -4062,17 +4075,20 @@ function effectFacts(
  * operation (`testOperations`) keeps the effects of its declaration, and a
  * call of a helper (`helpers`) the effects of its body, whose nodes have
  * this rule, and the `random` that its signature can state
- * (`resolveHelper()`).
+ * (`resolveHelper()`). A call of a function of the host (`hosts`) has the
+ * effect of its binding (`IRHostCall`), which names no state.
  */
 function stateFacts(
   annotation: FragmentAnnotation<ScalarRepresentation>,
   testOperations: ReadonlyMap<string, string>,
-  helpers: ReadonlyMap<string, ResolvedHelper>
+  helpers: ReadonlyMap<string, ResolvedHelper>,
+  hosts?: StructuredHosts
 ): Map<Expression, IRState[]> {
   const result = new Map<Expression, IRState[]>();
   const visit = (scope: FragmentScope<ScalarRepresentation>) => {
     for (const node of scope.facts.keys()) {
       if (result.has(node) || !isFunction(node)) continue;
+      if (hosts?.bindings.has(`call:${node.operator}`)) continue;
       const effects = shallowApplicationEffects(node);
       if (isPureComputedEffects(effects)) continue;
       const test =
@@ -4145,12 +4161,57 @@ function refuseLazyDraws(
  * `WithRandomSeed` counts with the others. This is the simple, sound form
  * of the rule: a program whose second draw is in another statement, which
  * the existing emitter does not reorder, is refused too.
+ *
+ * A host operation (a call or a read of the host, `hosts`), and a call of a
+ * helper whose body has one, counts as a draw: the host can count its calls
+ * and their order. When one of them is not pure, it can change the vars
+ * object, and a read of a name of the root scope counts as a draw too.
  */
 function refuseHoistedDraws(
   annotation: FragmentAnnotation<ScalarRepresentation>,
-  helpers: ReadonlyMap<string, ResolvedHelper>
+  helpers: ReadonlyMap<string, ResolvedHelper>,
+  hosts?: StructuredHosts
 ): void {
-  const { isDraw } = drawReaders(helpers);
+  const readers = drawReaders(helpers);
+  const isHost = (node: Expression): boolean =>
+    hosts !== undefined &&
+    ((isFunction(node) && hosts.bindings.has(`call:${node.operator}`)) ||
+      (isSymbol(node) && hosts.bindings.has(`read:${node.symbol}`)));
+  // A host operation that is not pure can change the vars object: then a
+  // read of a name of the root scope (an input, conservatively also a
+  // local of a root `Block`) counts as a draw too, since the existing
+  // emitter can move it after the complex operand that holds the call
+  // (`x + hm(1)·Arcosh(x)` reads `_.x` after `hm`).
+  const mutates =
+    hosts !== undefined &&
+    [...hosts.bindings.values()].some((binding) => !binding.pure);
+  const readsRoot = (node: Expression): boolean =>
+    mutates &&
+    isSymbol(node) &&
+    annotation.scope.bindings.has(node.symbol);
+  /** Whether each node object, or the body of a helper that it calls, has a
+   *  host operation. The calls of the helpers have no cycle
+   *  (`collectStructuredHelper()` refuses recursion before this pass), so
+   *  each answer is final when it is remembered. */
+  const hostMemo = new Map<Expression, boolean>();
+  const hasHost = (node: Expression): boolean => {
+    const known = hostMemo.get(node);
+    if (known !== undefined) return known;
+    const result =
+      isHost(node) ||
+      (isFunction(node) &&
+        ((helpers.has(node.operator) &&
+          hasHost(helpers.get(node.operator)!.body)) ||
+          node.ops.some(hasHost)));
+    hostMemo.set(node, result);
+    return result;
+  };
+  const isDraw = (node: Expression): boolean =>
+    readers.isDraw(node) ||
+    isHost(node) ||
+    (isFunction(node) &&
+      helpers.has(node.operator) &&
+      hasHost(helpers.get(node.operator)!.body));
   const complex = new Set<Expression>();
   const visit = (scope: FragmentScope<ScalarRepresentation>) => {
     for (const [node, facts] of scope.facts)
@@ -4168,6 +4229,7 @@ function refuseHoistedDraws(
     if (known !== undefined) return known;
     let count = 0;
     let lane = false;
+    if (isSymbol(node) && (isDraw(node) || readsRoot(node))) count = 1;
     if (isFunction(node)) {
       if (isDraw(node)) count = 1;
       for (const op of node.ops) {
@@ -4189,6 +4251,64 @@ function refuseHoistedDraws(
           `the existing emitter evaluates a complex operand before the operands that it writes inline, ` +
           `so the order of the draws would differ`
       );
+  };
+  check(annotation.root);
+  for (const helper of helpers.values()) check(helper.body);
+}
+
+/**
+ * Throw for a `Sum` or a `Product` of `annotation` whose operands (the body
+ * and the bounds) call a function of the host declared pure, directly or in
+ * the body of a helper that they call. The existing emitter skips the terms
+ * after an accumulator of `NaN` when they have no effect
+ * (`isEmissionSkippable()`), and a pure call has none: it calls the
+ * function fewer times than the structured route, which evaluates every
+ * term. A call that is not pure has an effect, and every term runs on both
+ * routes. The simple, sound form of the rule: an aggregate with such a call
+ * is refused also when no term can be `NaN`.
+ */
+function refusePureHostInAggregates(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  helpers: ReadonlyMap<string, ResolvedHelper>,
+  hosts: StructuredHosts | undefined
+): void {
+  if (hosts === undefined) return;
+  const pure = new Set<string>();
+  for (const binding of hosts.bindings.values())
+    if (binding.form === 'call' && binding.pure) pure.add(binding.name);
+  if (pure.size === 0) return;
+  /** Whether each node object, or the body of a helper that it calls, has a
+   *  call of a pure function of the host. A memo keeps the walk linear. The
+   *  calls of the helpers have no cycle (`collectStructuredHelper()` refuses
+   *  recursion before this pass), so each answer is final when it is
+   *  remembered. */
+  const memo = new Map<Expression, boolean>();
+  const hasPure = (node: Expression): boolean => {
+    const known = memo.get(node);
+    if (known !== undefined) return known;
+    const result =
+      isFunction(node) &&
+      (pure.has(node.operator) ||
+        (helpers.has(node.operator) &&
+          hasPure(helpers.get(node.operator)!.body)) ||
+        node.ops.some(hasPure));
+    memo.set(node, result);
+    return result;
+  };
+  const seen = new Set<Expression>();
+  const check = (node: Expression) => {
+    if (seen.has(node) || !isFunction(node)) return;
+    seen.add(node);
+    if (
+      (node.operator === 'Sum' || node.operator === 'Product') &&
+      node.ops.some(hasPure)
+    )
+      throw new Error(
+        `JS scalar fragment: ${node.operator} calls a function of the host that the options declare pure ` +
+          `(${nodeText(node)}): the existing emitter skips such a call after a term of NaN, ` +
+          `and so calls the function fewer times`
+      );
+    for (const op of node.ops) check(op);
   };
   check(annotation.root);
   for (const helper of helpers.values()) check(helper.body);
@@ -4390,35 +4510,507 @@ function profileDecline(e: unknown): unknown {
  * The options that the `numeric-kernel` profile does not have, by name, in
  * `options`: the decline `'outside-profile'` that names the first one, or
  * `undefined`. `cse` and `constantFold` are not in this list: the profile
- * ignores them. An empty object of `functions`, `operators` or `vars` is
- * an absent option (`isGivenOption()`).
+ * ignores them. `vars`, `functions`, the record form of `operators`,
+ * `imports` and `preamble` are admitted (`structuredHosts()`), and
+ * `broadcast` is ignored: the route makes no batch body, so `broadcast()`
+ * runs the ordinary body for each cell, as with `broadcast: false`.
  */
 function profileOptionDecline(
   options: CompilationOptions<Expression>
 ): CompileDeclineError | undefined {
-  const option = isGivenOption(options.functions)
-    ? 'functions'
-    : isGivenOption(options.operators)
-      ? 'operators'
-      : isGivenOption(options.vars)
-        ? 'vars'
-        : options.imports?.length
-          ? 'imports'
-          : options.preamble
-            ? 'preamble'
-            : options.broadcast
-              ? 'broadcast'
-              : options.mode === 'bigint'
-                ? "mode: 'bigint'"
-                : undefined;
+  const option =
+    typeof options.operators === 'function'
+      ? 'the function form of the option `operators`'
+      : options.mode === 'bigint'
+        ? "the option `mode: 'bigint'`"
+        : undefined;
   if (option === undefined) return undefined;
   return new CompileDeclineError({
     code: 'outside-profile',
     kind: 'capability',
     message:
-      `Could not compile with the profile 'numeric-kernel': the option ` +
-      `\`${option}\` is not in the profile.`,
+      `Could not compile with the profile 'numeric-kernel': ${option} ` +
+      `is not in the profile.`,
   });
+}
+
+//
+// The options of the host on the structured route: `vars`, `functions` and
+// `operators`
+//
+
+/**
+ * A `vars` entry on the structured route (`structuredHosts()`):
+ *
+ * - `input`: a read of an entry of the vars object, `_.<id>` or
+ *   `_["<id>"]` (the form of the series walk of the engine,
+ *   `compiledSeriesTerm()`): the mapped name is an input, typed as an input
+ *   (its declared type, or the default kind of the mode), whose reads the
+ *   emitter writes as the source. `recorded`: the source is the spelling of
+ *   the name itself (`_.u` for `u`), which the existing compiler records as
+ *   a read of the vars object (`CompileTarget.varsObjectRefs`) and checks at
+ *   the entry; another source is not recorded, as on the existing route
+ *   (`isOpaqueVarsSource()`).
+ * - `read`: another source that is one operand (`isOperandSource()`): a read
+ *   of the host at each occurrence (`IRHostCall` with no operand), whose
+ *   effect is `unknown`.
+ * - `refusal`: another source, with the reason.
+ */
+type VarsEntry =
+  | {
+      readonly form: 'input';
+      readonly source: string;
+      readonly recorded: boolean;
+    }
+  | { readonly form: 'read'; readonly source: string }
+  | { readonly refusal: string };
+
+/** A head that a `functions` or `operators` entry maps
+ *  (`structuredHosts()`): the code that the existing emitter writes in
+ *  place of the head (`text`, called with the operands), and whether the
+ *  host declared it pure (`entryIsPure()`; an `operators` entry is never
+ *  pure). Or a refusal, with the reason. */
+type HostHead =
+  | { readonly text: string; readonly pure: boolean }
+  | { readonly refusal: string };
+
+/**
+ * The options of the host of a compilation on the structured route, and the
+ * host bindings that the admission finds (`IRHostBinding`).
+ */
+type StructuredHosts = {
+  /** The `vars` entries, by the name that they map. */
+  readonly vars: ReadonlyMap<string, VarsEntry>;
+  /** The heads of the `functions` and `operators` entries. An `operators`
+   *  entry outranks a `functions` entry of the same head, as at the
+   *  emission of the existing compiler. */
+  readonly heads: ReadonlyMap<string, HostHead>;
+  /** The bindings that the program reads or calls, by `<form>:<name>`, in
+   *  the order of their first node. */
+  readonly bindings: Map<string, IRHostBinding>;
+  /** The names of the host reads with no declared type, which took the
+   *  default kind of the mode (`CompilationResult.defaultedSymbols`). */
+  readonly defaulted: Set<string>;
+};
+
+/** A name or a dotted path of names (`f`, `_.f`, `Math.hypot`): a source
+ *  whose evaluation has no effect. */
+const PLAIN_REFERENCE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+
+/**
+ * The refusal of a source of the option `option` that holds a line
+ * terminator or a comment, or `undefined`. The existing emitter writes the
+ * source as it is, where a line terminator after `return` ends the
+ * statement (`return\n next()` returns `undefined` and reads nothing) and a
+ * `//` comment hides the code after it on its line; the profile reads the
+ * source as one operand.
+ */
+function sourceLayoutRefusal(
+  option: string,
+  name: string,
+  source: string
+): string | undefined {
+  const terminator = [...source].some((c) => {
+    const code = c.charCodeAt(0);
+    return code === 0x0a || code === 0x0d || code === 0x2028 || code === 0x2029;
+  });
+  if (!terminator && !source.includes('//') && !source.includes('/*'))
+    return undefined;
+  return (
+    `the option \`${option}\` maps ${name} to a source with a ` +
+    `${terminator ? 'line terminator' : 'comment'}: the existing emitter ` +
+    `writes the source as it is, where a line terminator after \`return\` ` +
+    `or a comment changes what the code evaluates`
+  );
+}
+
+/** A `vars` source that reads an entry of the vars object: `_.<id>`, or
+ *  `_["<id>"]` with a string literal. */
+const VARS_INPUT_SOURCE =
+  /^_(?:\.([A-Za-z_$][\w$]*)|\[\s*("(?:[^"\\]|\\.)*"|'[^'\\]*')\s*\])$/;
+
+/** The words of JavaScript that cannot start an operand of
+ *  `isOperandSource()`: an operator (`typeof x`, `new F()`) or a statement. */
+const SOURCE_KEYWORDS = new Set([
+  'async',
+  'await',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'export',
+  'extends',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'import',
+  'in',
+  'instanceof',
+  'let',
+  'new',
+  'return',
+  'super',
+  'switch',
+  'throw',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
+]);
+
+/**
+ * Whether the JavaScript source `source` is one operand: a name, a number
+ * literal or an expression in parentheses, followed by member accesses
+ * (`.name`, `[…]`), calls (`(…)`) and at most one `++` or `--` (`next()`,
+ * `_.state.a`, `globalThis.__c`, `(2 * _.h)`, `_.x++`). The existing emitter
+ * writes a `vars` source and the source of a `functions` entry as they are,
+ * in the place of the symbol or of the head, and the value of such a source
+ * is the same there and alone: no operator of the code around it binds to a
+ * part of it. `Math.PI/4` is not one: in `6 * Math.PI/4` the product is
+ * computed first. A group is read with its string literals; a template
+ * literal is not read.
+ */
+function isOperandSource(source: string): boolean {
+  const text = source.trim();
+  /** The index after the group that opens at `start`, or -1. */
+  const group = (start: number): number => {
+    const closing: string[] = [];
+    for (let k = start; k < text.length; k++) {
+      const c = text[k];
+      if (c === '`') return -1;
+      if (c === '"' || c === "'") {
+        k++;
+        while (k < text.length && text[k] !== c) k += text[k] === '\\' ? 2 : 1;
+        if (k >= text.length) return -1;
+        continue;
+      }
+      if (c === '(') closing.push(')');
+      else if (c === '[') closing.push(']');
+      else if (c === '{') closing.push('}');
+      else if (c === ')' || c === ']' || c === '}') {
+        if (closing.pop() !== c) return -1;
+        if (closing.length === 0) return k + 1;
+      }
+    }
+    return -1;
+  };
+  const name = /^[A-Za-z_$][\w$]*/.exec(text);
+  let i: number;
+  if (name !== null) {
+    if (SOURCE_KEYWORDS.has(name[0])) return false;
+    i = name[0].length;
+  } else if (text.startsWith('(')) {
+    i = group(0);
+    if (i < 0) return false;
+  } else return /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text);
+  while (i < text.length) {
+    if (text[i] === '.') {
+      const member = /^[A-Za-z_$][\w$]*/.exec(text.slice(i + 1));
+      if (member === null) return false;
+      i += 1 + member[0].length;
+    } else if (text[i] === '(' || text[i] === '[') {
+      i = group(i);
+      if (i < 0) return false;
+    } else return text.slice(i) === '++' || text.slice(i) === '--';
+  }
+  return true;
+}
+
+/** Whether the system scope of the engine binds `name`: an operator or a
+ *  constant of the library (`systemScopeBinding()`), or an operator of a
+ *  custom library. */
+function isLibraryName(engine: Expression['engine'], name: string): boolean {
+  const ce = engine as unknown as Parameters<typeof systemScopeBinding>[0];
+  return (
+    ce._customLibraryOperators.has(name) ||
+    systemScopeBinding(ce, name) !== undefined
+  );
+}
+
+/**
+ * The options of the host of a compilation of `expr` on the structured
+ * route (`StructuredHosts`): the `vars` entries, and the heads of the
+ * `functions` and `operators` entries, with the code that the existing
+ * emitter writes for each, read from the prepared `target`
+ * (`CompileTarget.functions`, `CompileTarget.operators`). `options` are the
+ * options of the prepared compilation: `JavaScriptTarget.compile()` has made
+ * a `functions` entry of each `vars` entry that names a user function.
+ *
+ * Throws the refusal of the structured route for an entry of `functions` or
+ * of `operators` whose name is an operator or a constant of the library
+ * (`Sin`, `Add`, `Pi`): the existing compiler applies the rewrites of the
+ * library operator (a peephole, the lowering of `Subtract` as `Add` of a
+ * negation) before or instead of the entry, and also writes the operator
+ * for a node that the program does not hold (a quotient), so the route
+ * could not give its code. An `operators` entry whose operator is not a
+ * name (`'|'`, `'+'`) is written infix at its precedence, which JavaScript
+ * may read with another grouping: such a head is refused where it is
+ * called.
+ */
+function structuredHosts(
+  expr: Expression,
+  options: CompilationOptions<Expression>,
+  target: CompileTarget<Expression>
+): StructuredHosts {
+  const engine = expr.engine;
+  const vars = new Map<string, VarsEntry>();
+  for (const [name, source] of Object.entries(options.vars ?? {})) {
+    if (typeof source !== 'string') continue;
+    const layout = sourceLayoutRefusal('vars', name, source);
+    if (layout !== undefined) {
+      vars.set(name, { refusal: layout });
+      continue;
+    }
+    // A read of an entry of the vars object: the name is an input whose
+    // reads are the source.
+    if (VARS_INPUT_SOURCE.test(source.trim())) {
+      vars.set(name, {
+        form: 'input',
+        source: source.trim(),
+        recorded: !isOpaqueVarsSource(source, varsObjectSpelling(name)),
+      });
+      continue;
+    }
+    vars.set(
+      name,
+      isOperandSource(source)
+        ? { form: 'read', source: source.trim() }
+        : {
+            refusal:
+              `the option \`vars\` maps ${name} to the source ${JSON.stringify(source)}, ` +
+              `which is not one operand (a name, a call, a member access or an ` +
+              `expression in parentheses): the existing emitter writes it in ` +
+              `place of the symbol, where an operator around it can bind to a part of it`,
+          }
+    );
+  }
+  const heads = new Map<string, HostHead>();
+  const refuseLibrary = (option: string, name: string) => {
+    if (isLibraryName(engine, name))
+      throw new Error(
+        `JS scalar fragment: the option \`${option}\` maps ${name}, an ` +
+          `operator or a constant of the library: the existing compiler ` +
+          `applies the rewrites of the library operator before or instead of the entry`
+      );
+  };
+  for (const [name, entry] of Object.entries(options.functions ?? {})) {
+    refuseLibrary('functions', name);
+    // The code that the existing emitter writes in place of the head: the
+    // name of a function given as a function (its definition is in the
+    // preamble), or the source of a string.
+    const text = target.functions?.(name);
+    if (typeof text !== 'string') continue;
+    const layout = sourceLayoutRefusal('functions', name, text);
+    // The existing emitter evaluates the source of the callee before the
+    // arguments, and the route after them: a source whose evaluation can
+    // have an effect (a call, an index, `new`, an operator) is refused. A
+    // name, a dotted path of names and a function expression with a pure
+    // arithmetic body (`inferSourcePurity()`) have none; the source is also
+    // one operand, or the arguments that the existing emitter writes after
+    // it bind to a part of it (`t => t` followed by `(x)`).
+    heads.set(
+      name,
+      layout !== undefined
+        ? { refusal: layout }
+        : !isOperandSource(text)
+          ? {
+              refusal:
+                `the source ${JSON.stringify(text)} of the \`functions\` entry ${name} ` +
+                `is not one operand (a name, a call, a member access or an ` +
+                `expression in parentheses): the existing emitter writes the call ` +
+                `as the source followed by the arguments`,
+            }
+          : PLAIN_REFERENCE.test(text) || inferSourcePurity(text)
+            ? { text, pure: entryIsPure(entry) }
+            : {
+                refusal:
+                  `the source ${JSON.stringify(text)} of the \`functions\` entry ${name} ` +
+                  `is not a name, a dotted path of names or a function expression ` +
+                  `with a pure arithmetic body: the existing emitter evaluates it ` +
+                  `before the arguments of the call, and the profile after them`,
+              }
+    );
+  }
+  const operators = options.operators;
+  if (operators !== undefined && typeof operators !== 'function')
+    for (const name of Object.keys(operators)) {
+      refuseLibrary('operators', name);
+      const op = target.operators?.(name)?.[0];
+      if (typeof op !== 'string') continue;
+      heads.set(
+        name,
+        PLAIN_REFERENCE.test(op)
+          ? { text: op, pure: false }
+          : {
+              refusal:
+                `the \`operators\` entry of ${name} is the infix operator ` +
+                `${JSON.stringify(op)}, which the existing emitter writes at its ` +
+                `declared precedence: the profile admits an operator that is a ` +
+                `name, which the existing emitter writes as a call`,
+            }
+      );
+    }
+  return { vars, heads, bindings: new Map(), defaulted: new Set() };
+}
+
+/**
+ * The `vars` entry of the free symbol `node` on the structured route, or
+ * `undefined` when no entry maps it. Throws the refusal of an entry that the
+ * route does not admit (`VarsEntry`), and of an entry that maps a constant of
+ * the library (`Pi`: the existing emitter writes the source in place of the
+ * constant, which the rules of the route read as the constant) or a name
+ * that holds a value and has no declared type (the engine keeps the value,
+ * `withVarsValuesHidden()`, and the existing compiler types the name by it:
+ * declare its type). A `read` entry is refused in the `complex` mode: the
+ * existing emitter converts a wide read to a complex value where it is read,
+ * once per part (`_SYS.cplx(next())`), and binds a complex operand ahead of
+ * the code that it writes inline for the other operands.
+ */
+function varsEntryOf(
+  node: Expression & { symbol: string },
+  registry: StructuredRegistry | undefined
+): Exclude<VarsEntry, { readonly refusal: string }> | undefined {
+  const entry = registry?.hosts?.vars.get(node.symbol);
+  if (entry === undefined) return undefined;
+  if ('refusal' in entry)
+    throw new Error(`JS scalar fragment: ${entry.refusal}`);
+  // The symbol reads the binding of the library (`Pi`), not a binding of
+  // the program of the same name (the index `i` of a sum).
+  const library = systemScopeBinding(
+    node.engine as unknown as Parameters<typeof systemScopeBinding>[0],
+    node.symbol
+  );
+  if (
+    library !== undefined &&
+    ('value' in library
+      ? node.valueDefinition === library.value
+      : node.operatorDefinition === library.operator)
+  )
+    throw new Error(
+      `JS scalar fragment: the option \`vars\` maps ${node.symbol}, a constant ` +
+        `or an operator of the library, which the rules of the structured route read as the library defines it`
+    );
+  if (node.valueDefinition?.value !== undefined)
+    throw new Error(
+      `JS scalar fragment: the option \`vars\` maps ${node.symbol}, which ` +
+        `holds a value that the compilation does not hide (a constant, or a ` +
+        `name with no declared type): the existing compiler types the name by ` +
+        `its value; declare its type`
+    );
+  if (entry.form === 'read' && registry!.mode === 'complex')
+    throw new Error(
+      `JS scalar fragment: the option \`vars\` maps ${node.symbol} to a source ` +
+        `that is not a read of the vars object, and the structured route admits ` +
+        `such a read of the host in the \`strict\` mode only: the existing ` +
+        `emitter converts it to a complex value once per part`
+    );
+  return entry;
+}
+
+/**
+ * Admit the read `node` of the free symbol that a `read` entry of `vars`
+ * maps (`varsEntryOf()`): the kind of its value is its declared type (an
+ * integer or a real, or `number` and a union of a real type with `nan` or
+ * `signed_infinity`, which are real in the `strict` mode), or the default
+ * kind of the mode when it has no declared type, as for an input. Records
+ * the binding of the host (`StructuredHosts.bindings`); its result type is
+ * read from the annotation (`recordStructured()`).
+ */
+function admitHostRead(
+  node: Expression & { symbol: string },
+  registry: StructuredRegistry
+): void {
+  const hosts = registry.hosts!;
+  const key = `read:${node.symbol}`;
+  if (hasNoDeclaredType(node)) hosts.defaulted.add(node.symbol);
+  else {
+    const type = node.type.type;
+    if (
+      !isSubtype(type, 'real') &&
+      declaredNumberKind(type, registry.mode)?.kind !== 'real'
+    )
+      throw new Error(
+        `JS scalar fragment: the option \`vars\` maps ${node.symbol}, which has ` +
+          `the type ${typeToString(type)}: the structured route reads a value of ` +
+          `the host as a real number or an integer`
+      );
+  }
+  if (!hosts.bindings.has(key))
+    hosts.bindings.set(key, {
+      name: node.symbol,
+      form: 'read',
+      result: isSubtype(node.type.type, 'integer') ? 'integer' : 'real',
+      pure: false,
+    });
+}
+
+/**
+ * The head of a `functions` or `operators` entry that `node` calls, on the
+ * structured route, or `undefined` when `node` is not such a call. Throws
+ * the refusal of the head (`HostHead`), in the `complex` mode (the existing
+ * emitter binds a complex operand ahead of the code that it writes inline
+ * for the other operands), and for a result type that is not a real number
+ * or an integer: the existing compiler reads the result type of the head
+ * from its signature, declared or derived from its function literal
+ * (`(real) -> real`, `(t) -> number`), and a head with no signature
+ * (`unknown`) is a value of any shape there (`_SYS.bcast`). `number` and a
+ * union of a real type with `nan` or `signed_infinity` are real, as the
+ * existing compiler reads them in the `strict` mode. Records the binding of
+ * the host (`StructuredHosts.bindings`).
+ */
+function hostHeadOf(
+  node: Expression,
+  registry: StructuredRegistry | undefined
+): { readonly text: string; readonly pure: boolean } | undefined {
+  if (!isFunction(node)) return undefined;
+  const head = registry?.hosts?.heads.get(node.operator);
+  if (head === undefined) return undefined;
+  if ('refusal' in head) throw new Error(`JS scalar fragment: ${head.refusal}`);
+  if (registry!.mode === 'complex')
+    throw new Error(
+      `JS scalar fragment: the call ${nodeText(node)} of a function of the ` +
+        `host is in the structured route in the \`strict\` mode only`
+    );
+  const type = node.type.type;
+  const result = isSubtype(type, 'integer')
+    ? 'integer'
+    : isSubtype(type, 'real') ||
+        declaredNumberKind(type, 'strict')?.kind === 'real'
+      ? 'real'
+      : undefined;
+  if (result === undefined)
+    throw new Error(
+      `JS scalar fragment: the function ${node.operator} of the host has the ` +
+        `result type ${typeToString(type)}: the structured route calls a ` +
+        `function of the host whose signature has a real or an integer ` +
+        `result; declare its signature`
+    );
+  const key = `call:${node.operator}`;
+  const known = registry!.hosts!.bindings.get(key);
+  if (known === undefined)
+    registry!.hosts!.bindings.set(key, {
+      name: node.operator,
+      form: 'call',
+      result,
+      pure: head.pure,
+    });
+  else if (known.result !== result)
+    throw new Error(
+      `JS scalar fragment: two calls of the function ${node.operator} of the ` +
+        `host have the result types ${known.result} and ${result}`
+    );
+  return head;
 }
 
 /**
@@ -4451,14 +5043,24 @@ function recordStructured(
 ): void {
   const registry = prepared.named.structured;
   if (!admission.structured || registry === undefined) return;
+  const hosts = registry.hosts;
   const states = stateFacts(
     prepared.annotation,
     admission.testOperations,
-    registry.helpers
+    registry.helpers,
+    hosts
   );
   refuseLazyDraws(prepared.annotation, registry.helpers);
-  refuseHoistedDraws(prepared.annotation, registry.helpers);
-  const inputs = prepared.inputs();
+  refuseHoistedDraws(prepared.annotation, registry.helpers, hosts);
+  refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
+  /** The names of the free symbols that are reads of the host: not
+   *  inputs. */
+  const reads = new Set(
+    [...(hosts?.bindings.values() ?? [])]
+      .filter((binding) => binding.form === 'read')
+      .map((binding) => binding.name)
+  );
+  const inputs = prepared.inputs().filter((input) => !reads.has(input.name));
   const preparation: StructuredPreparation = {
     root: prepared.root,
     functionRoot: prepared.functionRoot,
@@ -4481,6 +5083,7 @@ function recordStructured(
       ...inputs
         .filter((input) => prepared.defaulted.has(input.name))
         .map((input) => input.name),
+      ...[...reads].filter((name) => hosts!.defaulted.has(name)),
       ...[...registry.helpers.values()]
         .filter((helper) => helper.defaulted.some((d) => d))
         .map((helper) => helper.name),
@@ -4491,8 +5094,89 @@ function recordStructured(
     forms: registry.forms,
     numericPolicy: registry.mode,
     iterationBudget: target.iterationBudget,
+    ...(hosts === undefined || hosts.bindings.size === 0
+      ? {}
+      : { hosts: hostBindings(hosts, prepared.annotation) }),
   };
   recordStructuredPreparation(target, preparation);
+  STRUCTURED_SOURCES.set(target, {
+    hosts: new Map(
+      [...(hosts?.bindings.values() ?? [])].map((binding) => {
+        const head = hosts!.heads.get(binding.name);
+        const entry = hosts!.vars.get(binding.name);
+        const text =
+          binding.form === 'call'
+            ? head !== undefined && 'text' in head
+              ? head.text
+              : undefined
+            : entry !== undefined && 'source' in entry
+              ? entry.source
+              : undefined;
+        if (text === undefined)
+          throw new Error(
+            `JS scalar fragment invariant: no source for the host binding ${binding.name}`
+          );
+        return [`${binding.form}:${binding.name}`, text];
+      })
+    ),
+    // The parameters of a root `Function` are its inputs: a `vars` entry
+    // does not map them (the existing compiler reads a parameter first).
+    inputs: new Map(
+      prepared.functionRoot !== undefined
+        ? []
+        : inputs.flatMap((input) => {
+            const entry = hosts?.vars.get(input.name);
+            return entry !== undefined &&
+              'form' in entry &&
+              entry.form === 'input'
+              ? [[input.name, entry] as const]
+              : [];
+          })
+    ),
+  });
+}
+
+/**
+ * The code that the JavaScript emitter writes for the options of the host
+ * of a compilation on the structured route, recorded with its preparation
+ * (`recordStructured()`): the source of each host binding, by
+ * `<form>:<name>` (`StructuredEmitOptions.host`), and each input whose
+ * reads are the source of a `vars` entry, with whether the existing compiler
+ * records it as a read of the vars object. The lowering does not read them.
+ */
+const STRUCTURED_SOURCES = new WeakMap<
+  CompileTarget<Expression>,
+  {
+    readonly hosts: ReadonlyMap<string, string>;
+    readonly inputs: ReadonlyMap<
+      string,
+      { readonly source: string; readonly recorded: boolean }
+    >;
+  }
+>();
+
+/**
+ * The host bindings of `hosts`, in the order of their first node, as the
+ * program has them (`IRProgram.hosts`). The result type of a read is the
+ * type that the annotation gives to its name in the root scope, which must
+ * be a real or an integer.
+ */
+function hostBindings(
+  hosts: StructuredHosts,
+  annotation: FragmentAnnotation<ScalarRepresentation>
+): IRHostBinding[] {
+  return [...hosts.bindings.values()].map((binding) => {
+    if (binding.form === 'call') return binding;
+    const facts = annotation.scope.bindings.get(binding.name);
+    const kind = facts !== undefined && 'type' in facts ? facts.type.kind : '';
+    if (kind !== 'real' && kind !== 'integer')
+      throw new Error(
+        `JS scalar fragment: the option \`vars\` maps ${binding.name}, which ` +
+          `the program reads as a value of the type ${kind}: the structured ` +
+          `route reads a value of the host as a real number or an integer`
+      );
+    return { ...binding, result: kind };
+  });
 }
 
 /**
@@ -4667,7 +5351,13 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         result.code,
       ].join('\n');
       result.profile = 'numeric-kernel';
-      result.pure = analysis.independentCalls.holds;
+      // The caller's `preamble` runs on every call, and the profile does not
+      // read its text: a preamble that is not blank makes the result not
+      // pure. An import is a function definition, which runs only when the
+      // code calls it (through `functions`, a call of the host).
+      result.pure =
+        analysis.independentCalls.holds &&
+        (options.preamble === undefined || options.preamble.trim() === '');
       // On a result called with a vars object, the existing assembly has
       // already combined the analysis with its own checks (the emission
       // gives it `shippable`), and `broadcastAsync()` reads the same value.
@@ -4736,14 +5426,46 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         : undefined;
       this.analysis = analysis;
       this.defaulted = preparation.defaulted;
+      // The options of the host: an input that a `vars` entry maps is read
+      // with the source of the entry, and a host operation is the code that
+      // the existing emitter writes for its entry (`STRUCTURED_SOURCES`).
+      const sources = STRUCTURED_SOURCES.get(target);
       const emission = this.inPhase('emission', () =>
-        emitStructuredProgram(program, names, {
-          trace: this.hooks.trace,
-        })
+        emitStructuredProgram(
+          program,
+          {
+            ...names,
+            input: (name) =>
+              sources?.inputs.get(name)?.source ?? names.input(name),
+          },
+          {
+            trace: this.hooks.trace,
+            host: (binding, operands) => {
+              const text = sources?.hosts.get(`${binding.form}:${binding.name}`);
+              if (text === undefined)
+                throw new Error(
+                  `JS scalar fragment invariant: no source for the host binding ${binding.name}`
+                );
+              return binding.form === 'read'
+                ? text
+                : `${text}(${operands.join(', ')})`;
+            },
+          }
+        )
       );
       this.endPhase('emission', time);
+      // An input read with a source that is not its own spelling (`_.z` or
+      // `_["u"]` for `u`) is not a read of the vars object that the existing
+      // compiler records (`CompileTarget.varsObjectRefs`), so it has no entry
+      // check either.
+      const inputs = new Set(
+        [...emission.inputs].filter(
+          (name) => sources?.inputs.get(name)?.recorded !== false
+        )
+      );
       return {
         ...emission,
+        inputs,
         mode: program.numericPolicy,
         ...(analysis !== undefined
           ? { shippable: analysis.workerPortable.holds }
@@ -4807,6 +5529,10 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
   ): { expr: Expression; target: CompileTarget<Expression> } {
     if (!this.inProfile) return this.prepareFragment(expr, options, batch);
     if (this.optionDecline !== undefined) throw this.optionDecline;
+    // An import that is not a function throws the error of the existing
+    // route (`JavaScriptTarget.prepareCompilation()`), not an internal error.
+    for (const x of options.imports ?? [])
+      if (typeof x !== 'function') throw new Error(`Unsupported import \`${x}\``);
     try {
       return this.prepareFragment(expr, options, batch);
     } catch (e) {
@@ -4821,14 +5547,19 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
   ): { expr: Expression; target: CompileTarget<Expression> } {
     const structured = this.admission.structured;
     const start = structured ? this.clock() : 0;
+    // The structured route admits the options of the host (`vars`,
+    // `functions`, the record form of `operators`, `imports`, `preamble`;
+    // `structuredHosts()`) and makes no batch body for `broadcast`.
     if (
       batch !== undefined ||
-      options.broadcast ||
-      isGivenOption(options.functions) ||
-      isGivenOption(options.operators) ||
-      isGivenOption(options.vars) ||
-      options.preamble ||
-      options.imports?.length ||
+      (!structured &&
+        (options.broadcast ||
+          isGivenOption(options.functions) ||
+          isGivenOption(options.operators) ||
+          isGivenOption(options.vars) ||
+          options.preamble ||
+          options.imports?.length)) ||
+      typeof options.operators === 'function' ||
       (options.mode !== undefined &&
         options.mode !== 'strict' &&
         options.mode !== 'complex')
@@ -4853,6 +5584,22 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     // The annotation, with the facts of the body of a root function and of
     // the helper definitions, is built here, before any emission.
     const registry = structuredRegistry(admission, prepared.target);
+    if (registry !== undefined) {
+      registry.hosts = structuredHosts(prepared.expr, options, prepared.target);
+      // A root symbol that an `operators` entry maps compiles to a function
+      // of the operator on the existing route (`(a, b) => a op b`).
+      if (
+        isSymbol(prepared.expr) &&
+        registry.hosts.heads.has(prepared.expr.symbol) &&
+        options.operators !== undefined &&
+        Object.hasOwn(options.operators, prepared.expr.symbol)
+      )
+        throw new Error(
+          `JS scalar fragment: the root is the symbol ${prepared.expr.symbol}, ` +
+            `which an \`operators\` entry maps: the existing compiler compiles ` +
+            `it to a function of the operator`
+        );
+    }
     if (isFunction(prepared.expr, 'Function')) {
       // A refusal that no inner check records names the function itself.
       atNode(prepared.expr, () =>
@@ -4915,6 +5662,12 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (!node.isValid || node.type.type === 'error')
         throw new Error('JS scalar fragment: invalid expression');
       if (isNumber(node)) return;
+      // A call of a function of the host (`hostHeadOf()`).
+      if (hostHeadOf(node, registry) !== undefined) {
+        for (const operand of (node as Expression & { ops: Expression[] }).ops)
+          check(operand);
+        return;
+      }
       // A block of one value and a comprehension, on the structured route
       // (`structuredValueParts()`); `Typed` is not the value of a body here.
       const parts = structured ? structuredValueParts(node, false) : undefined;
@@ -4942,9 +5695,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         if (node.symbol === 'True' || node.symbol === 'False') return;
         if (indexes.has(node.symbol)) return;
         symbolTypes.set(node.symbol, node.type.type);
+        // A `vars` entry: a read of the host, or an input whose reads are
+        // the source of the entry (`varsEntryOf()`).
+        const mapped = varsEntryOf(node, registry);
+        if (mapped?.form === 'read') return admitHostRead(node, registry!);
         // The structured route reads a captured binding as its snapshot.
         if (
           registry &&
+          mapped === undefined &&
           node.valueDefinition?.value !== undefined &&
           recordCapture(registry, node)
         )
@@ -5455,7 +6213,10 @@ function attachRootBlock(
         name === 'False' ||
         bound.has(name) ||
         indexes.has(name) ||
-        node.valueDefinition?.value !== undefined ||
+        // A name that a `vars` entry maps is a free symbol, also with a
+        // value: `varsEntryOf()` refuses that value.
+        (node.valueDefinition?.value !== undefined &&
+          !registry.hosts?.vars.has(name)) ||
         free.some((s) => s.symbol === name)
       )
         return;
@@ -5527,6 +6288,10 @@ function attachRootBlock(
   for (const node of free)
     atNode(node, () => {
       symbolTypes.set(node.symbol, node.type.type);
+      // A `vars` entry: a read of the host, or an input whose reads are the
+      // source of the entry (`varsEntryOf()`).
+      if (varsEntryOf(node, registry)?.form === 'read')
+        return admitHostRead(node, registry);
       if (hasNoDeclaredType(node)) {
         defaulted.add(node.symbol);
         return;
@@ -5904,11 +6669,26 @@ function admitFunctionBody(
         node.symbol === 'False'
       )
         return;
+      // A free symbol that a `vars` entry maps, read in the body of the root
+      // `Function` or of a helper: the parameters are the only inputs there.
+      if (registry?.hosts?.vars.has(node.symbol))
+        throw new Error(
+          `JS scalar fragment: the option \`vars\` maps ${node.symbol}, which ` +
+            `the ${isRoot ? 'body of the root Function' : 'body of a helper'} ` +
+            `reads: the structured route maps a free symbol of an expression ` +
+            `or of a root Block only`
+        );
       // The structured route reads a captured binding as its snapshot.
       if (registry && recordCapture(registry, node)) return checkCollisions();
       throw new Error(
         `JS scalar fragment: unsupported ${isRoot ? '' : 'helper '}capture ${node.symbol}`
       );
+    }
+    // A call of a function of the host (`hostHeadOf()`).
+    if (hostHeadOf(node, registry) !== undefined) {
+      for (const operand of (node as Expression & { ops: Expression[] }).ops)
+        checkValue(operand);
+      return;
     }
     // In the body of a helper, a library head that the route does not admit
     // reaches the refusal below.
@@ -6393,6 +7173,9 @@ type StructuredRegistry = {
    *  the fact of each write again. A local whose declaration is not here is
    *  not a length local. */
   readonly lengthDeclarations: Set<Expression>;
+  /** The options of the host (`structuredHosts()`), and the bindings of the
+   *  host that the admission finds. */
+  hosts?: StructuredHosts;
 };
 
 /** The calls of helpers of a compilation. `helper` is the one helper of
@@ -6820,7 +7603,12 @@ function annotateStructured(
       Assign: { walk: walkAssign },
       ...Object.fromEntries(
         Object.entries(
-          modeRules(registry.mode, snapshotReader(registry), registry.forms)
+          modeRules(
+            registry.mode,
+            snapshotReader(registry),
+            registry.forms,
+            registry.hosts?.vars
+          )
         ).map(([head, rule]) => [head, withoutListOperands(head, rule)])
       ),
       // `Typed` reads the mode for a `number` ascription (`typedRule()`).
@@ -6828,6 +7616,20 @@ function annotateStructured(
         walk: (node, scope, context, w) =>
           typedRule(node, scope, context, w, registry.mode),
       },
+      // A function of the host takes real operands, and its result has the
+      // type of its binding (`hostHeadOf()`).
+      ...Object.fromEntries(
+        [...(registry.hosts?.bindings.values() ?? [])]
+          .filter((binding) => binding.form === 'call')
+          .map((binding) => [
+            binding.name,
+            {
+              signatures: [
+                { operands: [], rest: 'real', result: binding.result },
+              ],
+            } satisfies FragmentRule<ScalarRepresentation>,
+          ])
+      ),
     },
     localType: (local) =>
       structuredLocalType(

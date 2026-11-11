@@ -547,6 +547,40 @@ export type IRSeeded = OperationBase & {
   readonly body: IRRegion;
 };
 
+/**
+ * A call of code that the host of the compilation supplies
+ * (`IRProgram.hosts[host]`): a function of the host called with the
+ * operands, or, with no operand, a value of the host read at this position.
+ * The operands are scalars, evaluated once, in order, before the call; the
+ * result is a scalar of the type that the binding states.
+ *
+ * The effect is `pure` when the host declared the function pure
+ * (`IRHostBinding.pure`), and `unknown` otherwise: the code of the host can
+ * do anything. A host operation names no state. The host can count its
+ * calls, so a transformation never removes a host operation, never merges
+ * two, never runs one more or fewer times than the program does, and never
+ * changes the order of two host operations or of a host operation and an
+ * operation that is not pure; this holds also for a `pure` one.
+ */
+export type IRHostCall = OperationBase & {
+  readonly kind: 'host';
+  readonly host: number;
+};
+
+/** A binding of the host that the program reads or calls (`IRHostCall`). */
+export type IRHostBinding = {
+  /** The name of the binding in the source program: the head of a call, or
+   *  the name of a symbol that is read. */
+  readonly name: string;
+  /** `call`: a function of the host, called with operands; `read`: a value
+   *  of the host, read with no operand. */
+  readonly form: 'call' | 'read';
+  /** The type of the value of each call or read. */
+  readonly result: ScalarKind;
+  /** The host declared the function pure. A read is never pure. */
+  readonly pure: boolean;
+};
+
 /** The last operation of an open region: its operands are the values of
  *  the region. A region of an `if` yields one value per result of the `if`,
  *  and the body of a `loop` one value per result of the `loop`; every other
@@ -601,6 +635,7 @@ export type IROperation =
   | IRTrace
   | IRDraw
   | IRSeeded
+  | IRHostCall
   | IRYield
   | IRExit;
 
@@ -686,7 +721,16 @@ export type IRProgram = {
    *  a function (`IRCaptureRead`). */
   readonly captures: readonly IRCapture[];
   readonly functions: readonly IRFunction[];
+  /** The bindings of the host that the program reads or calls
+   *  (`IRHostCall`); absent when there is none. */
+  readonly hosts?: readonly IRHostBinding[];
   readonly root: IRRegion;
+  /** The ids of the values that a local holds: a value that a `Declare` or
+   *  an `Assign` writes. The existing emitter writes such a value as the
+   *  name of its local, so a target that writes a literal operand as a
+   *  constant (the parts of a complex sum, a term `0` that it drops) writes
+   *  such a value as a value. Absent when there is none. No check reads it. */
+  readonly localValues?: ReadonlySet<number>;
 };
 
 const EFFECT_RANK: Readonly<Record<EffectFact, number>> = {
@@ -773,6 +817,67 @@ export function operationCanAbort(
   if (op.kind === 'call' && functions[op.function]?.body.canAbort === true)
     return true;
   return regionsOf(op).some((region) => region.canAbort === true);
+}
+
+/** The answer of `reachesHost()` for each region, once per region object. */
+const REGION_REACHES_HOST = new WeakMap<IRRegion, boolean>();
+
+/** Whether the evaluation of `op` runs a host operation (`IRHostCall`): `op`
+ *  is one, a region that it evaluates holds one, or it calls a function
+ *  whose body reaches one. `functions`: the functions of the program. Such
+ *  an operation is never shared or removed, also when it is `pure`. */
+export function reachesHost(
+  op: IROperation,
+  functions: readonly IRFunction[]
+): boolean {
+  if (op.kind === 'host') return true;
+  const regions: IRRegion[] = [...regionsOf(op)];
+  if (op.kind === 'call') {
+    const body = functions[op.function]?.body;
+    if (body !== undefined) regions.push(body);
+  }
+  return regions.some((region) => regionReachesHost(region, functions));
+}
+
+/** The regions that `regionReachesHost()` is answering, with their depth. */
+const REGIONS_IN_PROGRESS = new Map<IRRegion, number>();
+/** The least depth of a region in progress that the current walk read. */
+let lowestInProgress = Infinity;
+
+/**
+ * Whether `region` reaches a host operation. A call cycle (the verifier
+ * accepts one) reaches a region again while it is being answered: that
+ * read answers `false`, and the answer of the cycle comes from its other
+ * operations. An answer is remembered only when it is `true`, or when the
+ * walk read no region in progress outside `region` (the outermost region of
+ * the cycle has seen all of it); otherwise it depends on a region whose
+ * answer is not known yet.
+ */
+function regionReachesHost(
+  region: IRRegion,
+  functions: readonly IRFunction[]
+): boolean {
+  const known = REGION_REACHES_HOST.get(region);
+  if (known !== undefined) return known;
+  const open = REGIONS_IN_PROGRESS.get(region);
+  if (open !== undefined) {
+    lowestInProgress = Math.min(lowestInProgress, open);
+    return false;
+  }
+  const depth = REGIONS_IN_PROGRESS.size;
+  REGIONS_IN_PROGRESS.set(region, depth);
+  const outer = lowestInProgress;
+  lowestInProgress = Infinity;
+  let result: boolean;
+  try {
+    result = region.operations.some((op) => reachesHost(op, functions));
+  } finally {
+    REGIONS_IN_PROGRESS.delete(region);
+  }
+  const complete = lowestInProgress >= depth;
+  if (result || complete) REGION_REACHES_HOST.set(region, result);
+  lowestInProgress = Math.min(outer, complete ? Infinity : lowestInProgress);
+  return result;
 }
 
 /** The regions that `op` evaluates. */

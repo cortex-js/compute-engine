@@ -110,13 +110,11 @@ export function implicitCompile(
  * profile for `consumer` with `options` (`tryProfile()`).
  *
  * The profile is tried when `consumer` is in the list of the switch (or the
- * list is absent), the options do not select another target (`to` other
- * than `javascript`, `target`) or a profile, and they have no `vars` (a
- * function, or an object with at least one key; an empty object is an
- * absent option, as for the profile itself): the profile declines every
- * `vars`, so such a consumer (`series`) is left out and not counted. The
- * other options are passed: the profile declines those it does not have,
- * and that decline is counted.
+ * list is absent) and the options do not select another target (`to` other
+ * than `javascript`, `target`) or a profile. The other options are passed:
+ * the profile declines those it does not have, and that decline is counted.
+ * The `vars` of the series walk (`_["k"]`, `compiledSeriesTerm()`) is the
+ * read of an input under another name, which the profile admits.
  */
 function profileApplies(
   profile: JsProfileSwitch,
@@ -129,8 +127,7 @@ function profileApplies(
     options !== undefined &&
     ((options.to !== undefined && options.to !== 'javascript') ||
       options.target !== undefined ||
-      options.profile !== undefined ||
-      isGivenVars(options.vars))
+      options.profile !== undefined)
   );
 }
 
@@ -200,14 +197,6 @@ function tryProfile(
   if (attemptRefs !== undefined)
     for (const name of attemptRefs) varsObjectRefs!.add(name);
   return result;
-}
-
-/** Whether the option `vars` is given: a function, or an object with at
- * least one key (`isGivenOption()` in `javascript-fragment-target.ts`). */
-function isGivenVars(value: unknown): boolean {
-  if (value === undefined || value === null) return false;
-  if (typeof value === 'function') return true;
-  return typeof value !== 'object' || Object.keys(value).length > 0;
 }
 
 /**

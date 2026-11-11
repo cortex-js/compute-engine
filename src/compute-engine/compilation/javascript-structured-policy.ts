@@ -113,6 +113,10 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
       results: ['number', 'boolean', 'complex'],
       operands: ['number', 'complex'],
     },
+    // A function of the host called with numbers, or a value of the host
+    // read at its position, as the existing emitter writes a `functions`
+    // or `operators` entry and a `vars` source: a number.
+    'host': { results: ['number'], operands: ['number'] },
   },
   // The emitter writes each function as the existing emitter writes it for
   // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):

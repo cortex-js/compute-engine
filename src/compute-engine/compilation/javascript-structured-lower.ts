@@ -79,6 +79,13 @@
  * a term of a `Sum` or in a loop body runs only when that region runs. An
  * operation that evaluates a region, and a call, name the states of their
  * regions and of the body of the function (`IROperation.touches`).
+ *
+ * A node whose head is a `call` binding of the host (a `functions` or
+ * `operators` entry) is a host operation of its operands, and a read of a
+ * free symbol that is a `read` binding of the host (a `vars` source that is
+ * not the read of an input) is a host operation with no operand
+ * (`IRHostCall`, `StructuredPreparation.hosts`). Each is lowered where its
+ * node is, once per occurrence, and is never shared.
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
@@ -105,11 +112,13 @@ import {
   exitsIn,
   joinEffects,
   operationCanAbort,
+  reachesHost,
   regionsOf,
   touchesField,
   type EffectFact,
   type IRCapture,
   type IRFunction,
+  type IRHostBinding,
   type IRInput,
   type IROperation,
   type IRProgram,
@@ -267,6 +276,12 @@ export type StructuredPreparation = {
   /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
    *  recorded on each `loop`. */
   readonly iterationBudget?: number;
+  /** The bindings of the host that the program reads or calls
+   *  (`IRProgram.hosts`). A `read` binding is a free symbol of its name,
+   *  which the annotation binds in the root scope and which is not an input;
+   *  a `call` binding is a head: each node of that head is a host
+   *  operation. */
+  readonly hosts?: readonly IRHostBinding[];
 };
 
 const PREPARATIONS = new WeakMap<
@@ -609,6 +624,9 @@ class Lowering {
   }[] = [];
   /** The names of each function node (`namesIn()`). */
   private readonly names = new Map<Expression, ReadonlySet<string>>();
+  /** The ids of the values that a `Declare` or an `Assign` writes to a
+   *  local (`toLocal()`, `IRProgram.localValues`). */
+  private readonly localValues = new Set<number>();
 
   constructor(private readonly prep: StructuredPreparation) {}
 
@@ -627,7 +645,11 @@ class Lowering {
       numericPolicy: this.prep.numericPolicy,
       captures: this.captures,
       functions: this.functions,
+      ...(this.prep.hosts !== undefined && this.prep.hosts.length > 0
+        ? { hosts: this.prep.hosts }
+        : {}),
       root: this.region(operations, root, value),
+      ...(this.localValues.size > 0 ? { localValues: this.localValues } : {}),
     };
   }
 
@@ -739,6 +761,21 @@ class Lowering {
   /** A change of the values of `bound`: a new number for `epoch`. */
   private changed(): void {
     this.epoch = ++this.epochs;
+  }
+
+  /**
+   * After an operation with the effect `unknown` (a read or a call of the
+   * host that is not declared pure, or a call of a helper whose body has
+   * one): the host can change the vars object, so no value remembered
+   * before it is valid after it. A new epoch, and a write outside every
+   * open `inScope()`, so that none brings an older epoch back across it.
+   * A draw changes only the random stream, which no remembered value
+   * reads.
+   */
+  private afterUnknown(effect: EffectFact): void {
+    if (effect !== 'unknown') return;
+    this.changed();
+    for (const frame of this.scopes) frame.outside = true;
   }
 
   /**
@@ -910,9 +947,15 @@ class Lowering {
     const start = operations.length;
     const value = this.lower(node, scope, operations);
     if (epoch !== this.epoch) return value;
+    // A host operation is never shared, also a pure one: the host can count
+    // its calls (`IRHostCall`).
     for (let i = start; i < operations.length; i++) {
       const op = operations[i];
-      if (op.effect !== 'pure' || operationCanAbort(op, this.functions))
+      if (
+        op.effect !== 'pure' ||
+        operationCanAbort(op, this.functions) ||
+        reachesHost(op, this.functions)
+      )
         return value;
     }
     let byScope = region.values.get(node);
@@ -1045,20 +1088,42 @@ class Lowering {
     if (operator === 'WithRandomSeed')
       return this.seeded(node, facts, scope, operations);
 
+    // A head of a `call` binding of the host: its operands, then the call.
+    const host = this.hostIndex(operator, 'call');
+    if (host >= 0) {
+      const operands = this.operands(node, facts, scope, operations);
+      const result = this.resultOf(facts);
+      const hostEffect: EffectFact = this.prep.hosts![host].pure
+        ? 'pure'
+        : 'unknown';
+      operations.push({
+        kind: 'host',
+        host,
+        result,
+        operands,
+        effect: hostEffect,
+        origin: node,
+      });
+      this.afterUnknown(hostEffect);
+      return result;
+    }
+
     const entry = this.prep.annotation.functions.get(operator);
     if (entry !== undefined && this.prep.helpers.has(operator)) {
       const args = this.operands(node, facts, scope, operations);
       const index = this.helper(operator, args, facts, node);
       const result = this.resultOf(facts);
+      const callEffect = joinEffects(effect, this.functions[index].body.effect);
       operations.push({
         kind: 'call',
         function: index,
         result,
         operands: args,
-        effect: joinEffects(effect, this.functions[index].body.effect),
+        effect: callEffect,
         ...touchesField(this.states(node), this.functions[index].body.touches),
         origin: node,
       });
+      this.afterUnknown(callEffect);
       return result;
     }
 
@@ -2365,6 +2430,21 @@ class Lowering {
       if (s !== this.prep.annotation.scope)
         return fail(`the name ${name} is read before its value is lowered`);
       const facts = this.facts(node, scope);
+      // A `read` binding of the host: a read of the host at this position.
+      const host = this.hostIndex(name, 'read');
+      if (host >= 0) {
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'host',
+          host,
+          result,
+          operands: [],
+          effect: 'unknown',
+          origin: node,
+        });
+        this.afterUnknown('unknown');
+        return result;
+      }
       const input = this.prep.inputs.findIndex((i) => i.name === name);
       if (input < 0) return fail(`the name ${name} is not an input`);
       const result = this.resultOf(facts);
@@ -2379,6 +2459,15 @@ class Lowering {
       return result;
     }
     return this.captureRead(node, scope, operations);
+  }
+
+  /** The index of the host binding of the name `name` and the form `form`
+   *  in `StructuredPreparation.hosts`, or -1. */
+  private hostIndex(name: string, form: 'call' | 'read'): number {
+    return (
+      this.prep.hosts?.findIndex((h) => h.name === name && h.form === form) ??
+      -1
+    );
   }
 
   /**
@@ -2610,8 +2699,10 @@ class Lowering {
     operations: IROperation[]
   ): IRValue {
     const type = valueType(binding.type);
-    if (value.type === type && value.representation === binding.representation)
+    if (value.type === type && value.representation === binding.representation) {
+      this.localValues.add(value.id);
       return value;
+    }
     const conversion =
       value.type === 'integer' && type === 'real'
         ? 'integer-to-real'
@@ -2631,6 +2722,7 @@ class Lowering {
       effect: 'pure',
       origin: node,
     });
+    this.localValues.add(result.id);
     return result;
   }
 
@@ -3068,8 +3160,10 @@ class Lowering {
  *  evaluates, or of the body of a function that it calls, can throw on
  *  JavaScript: `mod` (`_SYS.floorMod` throws for an operand beyond the safe
  *  integer range) and `replace-at` (`_SYS.replaceAt` throws for an index
- *  out of range). A throw is not an effect, so the lowering keeps such an
- *  operation where the existing emitter evaluates it (`ifStatement()`).
+ *  out of range), and `host`, a function of the host, which can throw and
+ *  whose calls the host can count, also when it is declared pure. A throw
+ *  is not an effect, so the lowering keeps such an operation where the
+ *  existing emitter evaluates it (`ifStatement()`).
  *  `bodyThrows` answers for the function of index `i` of the program (a
  *  called function is lowered before its call). */
 function canThrow(
@@ -3079,6 +3173,7 @@ function canThrow(
   return (
     op.kind === 'mod' ||
     op.kind === 'replace-at' ||
+    op.kind === 'host' ||
     (op.kind === 'call' && bodyThrows(op.function)) ||
     regionsOf(op).some((region) =>
       region.operations.some((inner) => canThrow(inner, bodyThrows))
