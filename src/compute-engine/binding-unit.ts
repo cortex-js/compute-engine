@@ -1,6 +1,10 @@
 import { BoxedType } from '../common/type/boxed-type.js';
 import { narrow } from '../common/type/utils.js';
-import { recordObjectRead } from './boxed-expression/object-deps.js';
+import {
+  countObjectRead,
+  noObjectDepsCollector,
+  recordObjectRead,
+} from './boxed-expression/object-deps.js';
 import type { Scope } from './types-kernel-evaluation.js';
 
 /**
@@ -387,6 +391,7 @@ export class UnitEnvironment {
    * instead (`devolveUnappliedOperator()`, `validate.ts`).
    */
   readsAsVariable(scope: object, name: string): boolean {
+    if (!variableReadingNames.has(name)) return false;
     if (this._variableReadings?.get(scope)?.has(name) === true) return true;
     return this.parents().some((parent) => parent.readsAsVariable(scope, name));
   }
@@ -420,6 +425,7 @@ export class UnitEnvironment {
   /** Record that the unit reads `name` as a variable in the scope `scope`
    * (`readsAsVariable()`). */
   setReadsAsVariable(scope: object, name: string): void {
+    variableReadingNames.add(name);
     this._variableReadings ??= new Map();
     let names = this._variableReadings.get(scope);
     if (names === undefined)
@@ -471,6 +477,12 @@ export class UnitEnvironment {
     entries.set(name, value);
   }
 }
+
+/** Each name that an environment reads as a variable, or did
+ * (`UnitEnvironment.setReadsAsVariable()`): the names of library operators
+ * used as values, a small set. A read of another name is answered without
+ * a walk of the parents (`UnitEnvironment.readsAsVariable()`). */
+const variableReadingNames = new Set<string>();
 
 /** For each entry and each entry it was met with
  * (`UnitEnvironment._lookupInParents()`), the result of the meet. */
@@ -526,6 +538,7 @@ function readsAsVariableIn(
   scope: object,
   name: string
 ): boolean {
+  if (!variableReadingNames.has(name)) return false;
   return (
     context.currentOperation()?.readsAsVariable(scope, name) === true ||
     env?.readsAsVariable(scope, name) === true
@@ -559,6 +572,9 @@ class UnitReadToken {
    * dependencies are read after its computation reads it again then
    * (`stampObjectDepsAtEnd()`, `object-deps.ts`). */
   readonly _readAgainAtEnd = true;
+
+  /** See `VersionedObject._ref` (`object-deps.ts`). */
+  readonly _ref = new WeakRef(this);
 
   get _version(): number {
     if (this._variable)
@@ -611,6 +627,10 @@ export function readUnitEntry(
   name: string
 ): BoxedType | undefined {
   const entry = unitEntryOf(context, env, key, name);
+  if (noObjectDepsCollector()) {
+    countObjectRead();
+    return entry;
+  }
   recordObjectRead(
     unitReadToken(context, env, key, name, false),
     definitionId(entry)
@@ -628,6 +648,10 @@ export function readsUnitVariable(
   name: string
 ): boolean {
   const result = readsAsVariableIn(context, env, scope, name);
+  if (noObjectDepsCollector()) {
+    countObjectRead();
+    return result;
+  }
   recordObjectRead(
     unitReadToken(context, env, scope, name, true),
     result ? 1 : 0
@@ -900,6 +924,9 @@ let lastDefinitionId = 0;
 class ResolutionToken {
   constructor(private readonly _resolve: () => object | undefined) {}
 
+  /** See `VersionedObject._ref` (`object-deps.ts`). */
+  readonly _ref = new WeakRef(this);
+
   get _version(): number {
     return definitionId(this._resolve());
   }
@@ -944,6 +971,10 @@ export function noteResolutionRead<D extends object>(
   key: string,
   resolve: () => D | undefined
 ): D | undefined {
+  if (noObjectDepsCollector()) {
+    countObjectRead();
+    return resolve();
+  }
   let byKey = resolutionTokens.get(engine);
   if (byKey === undefined) resolutionTokens.set(engine, (byKey = new Map()));
   let tokens = byKey.get(key);

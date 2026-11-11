@@ -121,6 +121,10 @@ export type VersionedObject = {
    * context, not a counter: the read of an entry of a unit environment
    * (`UnitReadToken`, `binding-unit.ts`). See {@link stampObjectDepsAtEnd}. */
   readonly _readAgainAtEnd?: boolean;
+  /** A weak reference to the object, for an object that is read often and
+   * lives long (a token of `binding-unit.ts`): a dependency on it uses this
+   * reference and allocates none. */
+  readonly _ref?: WeakRef<VersionedObject>;
 };
 
 /** One recorded read: the object, held weakly, and its version at read time.
@@ -145,6 +149,11 @@ export type ObjectDeps = ObjectDep[];
  * empty whenever no cache-backed computation is running).
  */
 const _collectors: ObjectDeps[] = [];
+
+/** For each open collector, the entry of each live object in it, made at
+ * the first read that the collector records. The maps hold the objects
+ * only while their collector is open. */
+const _collectorIndexes: (Map<VersionedObject, ObjectDep> | undefined)[] = [];
 
 /**
  * How many field reads have happened in this process, ever. Monotonic, and
@@ -216,6 +225,7 @@ export function engineHasObjects(engine: object): boolean {
  * MUST pair this with exactly one {@link endObjectDeps}, in a `finally`. */
 export function beginObjectDeps(): void {
   _collectors.push([]);
+  _collectorIndexes.push(undefined);
 }
 
 /**
@@ -227,6 +237,7 @@ export function beginObjectDeps(): void {
  */
 export function endObjectDeps(): ObjectDeps | undefined {
   const deps = _collectors.pop();
+  _collectorIndexes.pop();
   return deps === undefined || deps.length === 0 ? undefined : deps;
 }
 
@@ -270,7 +281,40 @@ export function recordObjectRead(
 ): void {
   _objectReads += 1;
   if (_collectors.length === 0) return;
-  for (const deps of _collectors) addDep(deps, obj, version);
+  for (let i = 0; i < _collectors.length; i++) collect(i, obj, version);
+}
+
+/** Add one read to the open collector of index `i`, as {@link addDep} adds
+ * it to a dependency set: a repeat read of an object keeps the lowest
+ * version seen, or the version of the first read for an object read again
+ * at the end. */
+function collect(i: number, obj: VersionedObject, version: number): void {
+  let index = _collectorIndexes[i];
+  if (index === undefined) _collectorIndexes[i] = index = new Map();
+  const dep = index.get(obj);
+  if (dep !== undefined) {
+    if (version < dep[1] && obj._readAgainAtEnd !== true) dep[1] = version;
+    return;
+  }
+  const added: ObjectDep = [obj._ref ?? new WeakRef(obj), version];
+  _collectors[i].push(added);
+  index.set(obj, added);
+}
+
+/**
+ * True when no collector is open. A caller whose record of a read needs a
+ * lookup of the object to report (`readUnitEntry()`, `binding-unit.ts`)
+ * tests this first, counts the read ({@link countObjectRead}) and skips the
+ * lookup.
+ */
+export function noObjectDepsCollector(): boolean {
+  return _collectors.length === 0;
+}
+
+/** Count one read with no object to report: what {@link recordObjectRead}
+ * does when no collector is open. */
+export function countObjectRead(): void {
+  _objectReads += 1;
 }
 
 /**
@@ -297,7 +341,7 @@ export function mergeObjectDeps(deps: ObjectDeps | undefined): void {
     // because the read finds one of them now: that version is what the
     // enclosing computation read.
     const read = obj._readAgainAtEnd === true ? obj._version : version;
-    for (const c of _collectors) addDep(c, obj, read);
+    for (let i = 0; i < _collectors.length; i++) collect(i, obj, read);
   }
 }
 
@@ -380,7 +424,7 @@ function addDep(
         return;
       }
     }
-    deps.push([new WeakRef(obj), version]);
+    deps.push([obj._ref ?? new WeakRef(obj), version]);
     if (deps.length >= DEP_INDEX_THRESHOLD) {
       index = new WeakMap();
       for (const dep of deps) {
@@ -396,7 +440,7 @@ function addDep(
     if (version < dep[1] && obj._readAgainAtEnd !== true) dep[1] = version;
     return;
   }
-  const added: ObjectDep = [new WeakRef(obj), version];
+  const added: ObjectDep = [obj._ref ?? new WeakRef(obj), version];
   deps.push(added);
   index.set(obj, added);
 }

@@ -34,6 +34,22 @@ export function withStaticTypingView<T>(ce: ViewEngine, f: () => T): T {
   }
 }
 
+/** Enter the static view of the bindings of `ce` and return what
+ * {@link leaveStaticTypingView} needs to leave it. The pair does what
+ * {@link withStaticTypingView} does, with no closure: the type of a symbol
+ * is read often. The caller leaves in a `finally`. */
+export function enterStaticTypingView(ce: ViewEngine): ViewEngine | undefined {
+  const outer = viewEngine;
+  viewEngine = ce;
+  return outer;
+}
+
+/** Leave the view that {@link enterStaticTypingView} entered; `outer` is
+ * its result. */
+export function leaveStaticTypingView(outer: ViewEngine | undefined): void {
+  viewEngine = outer;
+}
+
 /** For each call frame of a function literal, the body scope of the
  * literal (`noteCallFrame()`). */
 const frameBodyScopes = new WeakMap<object, object>();

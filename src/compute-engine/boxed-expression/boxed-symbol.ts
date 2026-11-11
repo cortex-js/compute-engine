@@ -127,6 +127,8 @@ import {
   mergeObjectDeps,
   objectDepsValid,
   type ObjectDeps,
+  countObjectRead,
+  noObjectDepsCollector,
 } from './object-deps.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -153,6 +155,8 @@ import {
   staticBindingIn,
   staticParentOf,
   withStaticTypingView,
+  enterStaticTypingView,
+  leaveStaticTypingView,
 } from '../static-typing-view.js';
 import {
   assignmentLocalsOf,
@@ -340,6 +344,23 @@ function homeScopeKey(home: Scope): number {
   let key = HOME_SCOPE_KEYS.get(home);
   if (key === undefined) HOME_SCOPE_KEYS.set(home, (key = nextHomeScopeKey++));
   return key;
+}
+
+/** The definition that the free name `name`, of home scope `home`, resolves
+ * to in the current context, in the static view of the bindings
+ * (`BoxedSymbol._unitType()`). */
+function resolveFreeNameForType(
+  ce: ComputeEngine,
+  name: string,
+  asVariable: boolean,
+  home: Scope
+): BoxedDefinition | undefined {
+  const outer = enterStaticTypingView(ce);
+  try {
+    return freeNameBindingInContext(ce, name, undefined, asVariable, home);
+  } finally {
+    leaveStaticTypingView(outer);
+  }
 }
 
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
@@ -1166,20 +1187,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // The type and the value read the same definition
       // (`_freeNameBinding()`): in the evaluation of a stored value, both
       // skip the local of a block that is not around the home scope.
-      const resolve = () =>
-        withStaticTypingView(ce, () =>
-          freeNameBindingInContext(ce, name, undefined, asVariable, home)
-        );
       // A type cached on a compound expression is computed again when the
       // name resolves to another definition (a declaration in a pushed
       // scope, or the pop of that scope). The resolution depends on the home
-      // scope, so the home scope is in the key.
-      const resolved = noteResolutionRead(
-        ce,
-        name,
-        `${asVariable ? 'variable' : 'name'}:${homeScopeKey(home)}`,
-        resolve
-      );
+      // scope, so the home scope is in the key. With no cache being
+      // computed there is nothing to record, and the read makes no closure:
+      // this is the common case of the most frequent read of the engine.
+      let resolved: BoxedDefinition | undefined;
+      if (noObjectDepsCollector()) {
+        countObjectRead();
+        resolved = resolveFreeNameForType(ce, name, asVariable, home);
+      } else
+        resolved = noteResolutionRead(
+          ce,
+          name,
+          `${asVariable ? 'variable' : 'name'}:${homeScopeKey(home)}`,
+          () => resolveFreeNameForType(ce, name, asVariable, home)
+        );
       if (resolved === undefined) return entry ?? BoxedType.unknown;
       if (isOperatorDef(resolved)) return resolved.operator.signature;
       return this._typeOfDefinitionInUnit(resolved.value, entry);
