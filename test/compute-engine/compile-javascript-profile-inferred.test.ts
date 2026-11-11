@@ -8,12 +8,10 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // A type that the host wrote with `ce.infer()`, `ce.assume()` or
 // `ce.assign()`, under the `numeric-kernel` profile
 // (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md, "Names with no
-// declared type"). With the engine flag `_bindingUnits` (the default),
-// boxing writes no inferred type on a definition of the host's scopes, so
-// such a type is read as a declared type: the name takes the kind of its
-// type, as the existing compiler reads it, and it is not listed in
-// `defaultedSymbols`. With the flag off, boxing writes inferred types, and
-// the profile does not read them.
+// declared type"). Boxing writes no inferred type on a definition of the
+// host's scopes, so such a type is read as a declared type: the name takes
+// the kind of its type, as the existing compiler reads it, and it is not
+// listed in `defaultedSymbols`.
 //
 // The values are compared with the existing compiler (`cse: false`,
 // `constantFold: false`, the same mode) with `Object.is`.
@@ -326,8 +324,8 @@ describe('ce.assign(): a symbol with a value', () => {
 
 describe('order independence', () => {
   // Boxing, evaluating and compiling other expressions that use the name
-  // does not change the answer of the profile: with `_bindingUnits` on, only
-  // a call of the host writes the type of a free symbol.
+  // does not change the answer of the profile: only a call of the host
+  // writes the type of a free symbol.
   const uses: MathJsonExpression[] = [
     ['Mod', 'x', 2],
     ['At', 'x', 1],
@@ -472,31 +470,5 @@ describe('the names that are not read as typed by the host', () => {
     ce.declare('w', 'unknown');
     const got = profile(ce.box(['Sin', 'w']), 'strict');
     expect('result' in got && got.result.defaultedSymbols).toEqual(['w']);
-  });
-});
-
-describe('the engine flag _bindingUnits off', () => {
-  // Boxing writes inferred types: the profile cannot tell a type that the
-  // host wrote, and it reads none.
-  test.each(ROWS.filter((r) => r.name.startsWith('ce.infer(): real') || r.name.startsWith('ce.assume')).map((r) => [r.name, r] as const))(
-    '%s takes the default kind',
-    (_name, row) => {
-      const ce = new ComputeEngine();
-      ce._bindingUnits = false;
-      row.write(ce);
-      const got = profile(ce.box(row.body), 'strict');
-      expect('result' in got && got.result.defaultedSymbols).toEqual(['x']);
-      const complex = profile(ce.box(['Sin', 'x']), 'complex');
-      expect('result' in complex && complex.result.code).toBe('_SYS.csin(_SYS.cplx(_.x))');
-    }
-  );
-
-  test('ce.assign(): the value is captured', () => {
-    const ce = new ComputeEngine();
-    ce._bindingUnits = false;
-    ce.assign('a', 3);
-    const result = expectSameValues(ce.box(['Add', 'x', 'a']), 'strict', XS);
-    expect(result.code).toBe('3 + _.x');
-    expect(result.defaultedSymbols).toEqual(['x']);
   });
 });

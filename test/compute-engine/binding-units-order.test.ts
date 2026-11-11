@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import type { Expression as MathJson } from '../../src/math-json/types';
 
-// Slice 1 of binding units, with the engine flag `_bindingUnits` on
+// Slice 1 of binding units
 // (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`): boxing declares
 // no name, and the requirements of the uses of a name with no explicit type
 // go in the environment of the unit (one outermost boxing). So the result of
@@ -21,9 +21,7 @@ import type { Expression as MathJson } from '../../src/math-json/types';
 type Input = string | MathJson;
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 function box(ce: ComputeEngine, input: Input): Expression {

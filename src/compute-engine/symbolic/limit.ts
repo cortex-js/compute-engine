@@ -2735,7 +2735,7 @@ type ProbeEntry = {
   definitionVersion: number;
   factsHidden: boolean;
   deps: MemoDeps;
-  /** With the engine flag `_bindingUnits`: the environments that the types
+  /** The environments that the types
    * of the free names of the expression read, each with its counter
    * (`unitEnvironmentStamp()`). A compilation reads these types, so a write
    * in one of these environments gives a new probe (rule 9 of
@@ -2755,9 +2755,7 @@ function compiledProbe(
 ): ((x: number) => number) | null {
   const key = e as unknown as object;
   const cached = cacheOff('limitprobe') ? undefined : probeCache.get(key);
-  const units = ce._bindingUnits
-    ? unitEnvironmentStamp(ce._boxingState.currentOperation(), [e])
-    : undefined;
+  const units = unitEnvironmentStamp(ce._boxingState.currentOperation(), [e]);
   if (
     cached !== undefined &&
     cached.x === x &&
@@ -2801,9 +2799,7 @@ function compiledProbe(
     deps,
     // Read after the compilation: its own requirements are written in the
     // environment of the operation in progress.
-    units: ce._bindingUnits
-      ? unitEnvironmentStamp(ce._boxingState.currentOperation(), [e])
-      : undefined,
+    units: unitEnvironmentStamp(ce._boxingState.currentOperation(), [e]),
   });
   return fn;
 }

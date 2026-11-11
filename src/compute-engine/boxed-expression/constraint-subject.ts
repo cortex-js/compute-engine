@@ -712,8 +712,8 @@ export type FactIndex = {
    * subject definition whose declared type is `unknown`. They are not in
    * `typeByDefinition`: an exclusion needs a base to be excluded from. A
    * read that supplies its own base, the type that a binding unit reads
-   * for an occurrence (the engine flag `_bindingUnits`,
-   * `BoxedValueDefinition._typeWithFacts()`), adds them to that base.
+   * for an occurrence (`BoxedValueDefinition._typeWithFacts()`), adds them
+   * to that base.
    */
   exclusionsByDefinition: Map<BoxedValueDefinition, Type[]>;
 };

@@ -12,15 +12,12 @@ import { unitEnvironmentOfOperands } from '../../src/compute-engine/binding-unit
 import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
-// Phase E of slice 1 of binding units, with the engine flag `_bindingUnits`
-// on: the caches that read the entries of unit environments hit across
+// Phase E of slice 1 of binding units: the caches that read the entries of unit environments hit across
 // operations, and are computed again when what they read changed (rules 4
 // and 9 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 /** The number of calls of `differentiate()` from outside its own module

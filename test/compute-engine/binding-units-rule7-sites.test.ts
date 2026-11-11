@@ -1,6 +1,5 @@
 // Rule 7 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md` ("a free
-// name is not an unbound symbol"), with the engine flag `_bindingUnits` set
-// per engine: sites that read "no definition" as "an unbound symbol" or "not
+// name is not an unbound symbol"): sites that read "no definition" as "an unbound symbol" or "not
 // a function" read the definition that a free name, a free call head or a
 // forward call reference resolves to now.
 
@@ -13,9 +12,7 @@ import {
 import type { Expression } from '../../src/compute-engine';
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 /** The first call of `name` in `e`, depth first. */

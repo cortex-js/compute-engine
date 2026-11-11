@@ -1943,20 +1943,19 @@ export function namedLiteralSignatureType(
 
 /**
  * The signature of the function literal `expr` as a call site reads it
- * (`functionLiteralSignatureType()`). With the engine flag `_bindingUnits`,
- * the type of an occurrence is read through the definition that its name
+ * (`functionLiteralSignatureType()`). The type of an occurrence is read
+ * through the definition that its name
  * resolves to in the current context, so the parameter and result types
  * are derived in the scope that the literal is written in, as its
  * evaluation reads that scope: with a global `P: list<real>` and
  * `angle := t ↦ P`, the result of `angle` read inside the body of a
  * function whose parameter is named `P` is still `list<real>`. The effects
- * are those derived in the current context, as without the flag: a call of
- * a parameter in the body is a call of an unknown function there.
+ * are those derived in the current context: a call of a parameter in the
+ * body is a call of an unknown function there.
  */
 export function functionLiteralCallSignatureType(expr: Expression): Type {
   const ce = expr.engine;
-  if (!ce._bindingUnits || !isFunction(expr))
-    return functionLiteralSignatureType(expr);
+  if (!isFunction(expr)) return functionLiteralSignatureType(expr);
   const body = expr.ops[0];
   const written = body?.isScoped ? body.localScope?.parent : undefined;
   if (!written || written === ce.context?.lexicalScope)

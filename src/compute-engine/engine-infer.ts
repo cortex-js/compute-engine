@@ -60,8 +60,7 @@ type Candidate = {
  *
  * A name read as a variable (`N`) is declared as a variable, which shadows
  * the library operator of that name, and a call head (`f` in `f(x)`) is
- * declared with its function type, as the boxing declared them without the
- * engine flag `_bindingUnits`.
+ * declared with its function type.
  */
 export function inferFn(
   ce: ComputeEngine,
@@ -215,8 +214,7 @@ export function inferFn(
     } else {
       const def = ce._declareSymbolValue(name, { type, inferred: true }, scope);
       // The type came from the uses of the name: record it as an inference
-      // write, as the narrowing of the declaration that the boxing made
-      // without the flag records it, so that an assignment narrows it
+      // write, so that an assignment narrows it
       // (`deriveAndWriteAssignedType()`, `engine-declarations.ts`).
       const written = isValueDef(def)
         ? { half: def.value, type: def.value.type }
@@ -230,8 +228,7 @@ export function inferFn(
           axis: 'type',
           epoch: currentBoxingEpoch(ce),
         });
-      // A call head is a name to resolve when the call is evaluated, as the
-      // declaration that the boxing made without the flag
+      // A call head is a name to resolve when the call is evaluated
       // (`markForwardCallReference()`, `box.ts`).
       if (ce.type(type).matches('function'))
         markForwardCallReference(def, scope);

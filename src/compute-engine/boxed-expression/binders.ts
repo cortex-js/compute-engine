@@ -243,8 +243,8 @@ function scopeStandsFor(scope: Scope, home: Scope): boolean {
 /**
  * The temporary scopes that lend an operator definition to the head of a
  * call (`withBorrowedBinding()`, and the scope in which `simplify()` masks
- * the calls of a shadowed library operator), with the names lent. With the
- * engine flag `_bindingUnits`, a symbol does not read such a binding
+ * the calls of a shadowed library operator), with the names lent. A symbol
+ * does not read such a binding
  * (`bindingInContext()`): it is lent to a call head. The type of an occurrence is read by name in the current
  * context (rule 3 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`),
  * so with `N` declared a real variable, the operand `N` of `Range(1, N)`,
@@ -584,10 +584,7 @@ export function bindingInContext(
     const found = staticBindingIn(scope, name, scope === start);
     if (
       found !== undefined &&
-      !(
-        ce._bindingUnits &&
-        BORROWED_OPERATOR_SCOPES.get(scope)?.has(name) === true
-      )
+      !(BORROWED_OPERATOR_SCOPES.get(scope)?.has(name) === true)
     ) {
       if ('value' in found && isForeignBinderBinding(found.value, own)) {
         skippedBinder ??= found;
@@ -625,8 +622,8 @@ export function bindingInContext(
   if (own !== undefined) {
     const caller = callerBinding(ce, name, own, start, null);
     if (caller !== undefined) return caller;
-    // A free name of the body of a function literal (engine flag
-    // `_bindingUnits`) does not read the variable of a binder or the
+    // A free name of the body of a function literal does not read the
+    // variable of a binder or the
     // parameter activation of a call frame (rule 3 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
     if (skippedBinder !== undefined && BODY_FREE_NAMES.has(own))
@@ -640,15 +637,15 @@ export function bindingInContext(
 }
 
 /**
- * The value definitions that a boxing made, with the engine flag
- * `_bindingUnits`, for a name with no definition in a scope that the boxing
+ * The value definitions that a boxing made
+ * for a name with no definition in a scope that the boxing
  * created (the body of a function literal): see `markBodyFreeName()`.
  */
 const BODY_FREE_NAMES = new WeakSet<object>();
 
 /**
  * Record that the value definition `def` stands for a free name of the body
- * of a function literal, with the engine flag `_bindingUnits`.
+ * of a function literal.
  *
  * The boxing declares such a name in the scope of the body, which it made,
  * and writes its requirements under the scope that the literal is written
@@ -683,7 +680,7 @@ export function bodyFreeNameHome(def: object): object | undefined {
 }
 
 /**
- * With the engine flag `_bindingUnits`: `result`, the value of a call of a
+ * `result`, the value of a call of a
  * function literal, or a body that leaves its literal without a call
  * (`partialFromFunctionLiteral()` in `symbolic/derivative.ts`,
  * `betaReduceLambda()` in `utils.ts`), with each copy of a free name of a body

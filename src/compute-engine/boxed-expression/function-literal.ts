@@ -1049,8 +1049,8 @@ function outerBindingOf(
 }
 
 /** A binding that a call of a function literal reads for a captured symbol,
- * with its type when the type of the definition was inferred. With the
- * engine flag `_bindingUnits`, boxing declares no outer binding for the copy
+ * with its type when the type of the definition was inferred. Boxing
+ * declares no outer binding for the copy
  * that the body scope declared for a free symbol: the entry then has no
  * `binding`, and the binding is found by name from `literal` when the entry
  * is read (`capturedTypeWidenings()`). */
@@ -1093,7 +1093,7 @@ export function noteDefinitionCapturedTypes(
     const copy =
       own !== undefined && own.inferredType && own.value === undefined;
     const outer = copy ? outerBindingOf(literal, entry.name) : undefined;
-    if (copy && outer === undefined && literal.engine._bindingUnits) {
+    if (copy && outer === undefined) {
       // A free symbol of the body that has no outer binding yet: the type
       // is the type of the occurrence (rule 4 of the binding units), and
       // the binding is the one that a later declaration or assignment of

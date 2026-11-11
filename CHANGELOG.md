@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The environment variable `CE_BINDING_UNITS` and the internal field
+  `ce._bindingUnits` are removed.** Boxing declares no name, as it does by
+  default since 0.187.0, and no setting gives the earlier behavior:
+  `CE_BINDING_UNITS=0` and `ce._bindingUnits = false` have no effect. A host
+  that set either one declares its names, or calls `ce.infer()` on the
+  expressions that use them.
+
 ### Resolved Issues
 
 - **`ce.infer()` gives a type to a symbol declared with the type

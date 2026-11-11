@@ -2,14 +2,11 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
-// Limits and definite integrals with a free parameter, with the engine flag
-// `_bindingUnits` on (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`,
-// rules 1 and 7).
+// Limits and definite integrals with a free parameter
+// (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`, rules 1 and 7).
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 /** Composite Simpson rule on `[a, b]` with `n` (even) panels. */

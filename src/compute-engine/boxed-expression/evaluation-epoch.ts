@@ -69,7 +69,7 @@ export type AsyncEvaluation = {
    * evaluation. `undefined` when no span enclosed the call. */
   deadlineFrame?: DeadlineFrame;
   /**
-   * With the engine flag `_bindingUnits`: the environment of the operation
+   * The environment of the operation
    * that this evaluation is (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), captured when
    * the evaluation starts. Each synchronous part of the evaluation that an

@@ -1438,7 +1438,7 @@ export class BoxedFunction
       }
     | undefined = undefined;
 
-  /** With the engine flag `_bindingUnits`: the definition that the name of
+  /** The definition that the name of
    * this call holds now (`callableBindingInContext`), when the call is bound
    * to a forward-call reference (`isForwardCallReference`): a call in the
    * body of a function literal boxed before its name had a definition. That
@@ -1447,7 +1447,6 @@ export class BoxedFunction
    * it through `readBinding()` (`type-guards.ts`).
    * @internal */
   _forwardCalleeBinding(): BoxedDefinition | undefined {
-    if (!this.engine._bindingUnits) return undefined;
     const own = this._def;
     if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
       return undefined;
@@ -1662,8 +1661,8 @@ export class BoxedFunction
    * derived from a field's contents. The payload is an effect set, which
    * cannot contain an expression, let alone an object, so the
    * no-object-in-a-payload rule is satisfied by construction too. Bypassing
-   * `cachedValue` therefore costs this slot nothing. With the engine flag
-   * `_bindingUnits`, the entry keeps the lookup record of its computation
+   * `cachedValue` therefore costs this slot nothing. The entry keeps the
+   * lookup record of its computation
    * (`_effectsDeps`, `EffectsLookups` in `effects-of.ts`), outside the
    * `object-deps.ts` channel. */
   private _effects: CachedValue<ComputedEffects> = {
@@ -1689,12 +1688,12 @@ export class BoxedFunction
    * only in that view, and an entry computed outside it only outside it. */
   private _effectsStaticView = false;
 
-  /** With the engine flag `_bindingUnits`: the lookup record of the
+  /** The lookup record of the
    * `_effects` entry (`lookupByName()`, `effects-of.ts`), the definition of
    * each name the projection resolved by name. A free name has no
    * definition when it is read, and a later declaration of it advances no
    * axis: the entry is computed again when one of these names resolves to
-   * another definition. Always `undefined` without the flag. */
+   * another definition. */
   private _effectsDeps: EffectsLookups | undefined = undefined;
 
   /** Re-entrancy marker for the lazy-collection evaluate memo — see
@@ -1834,19 +1833,19 @@ export class BoxedFunction
   private _literalListTree: boolean | undefined;
 
   /**
-   * With the engine flag `_bindingUnits`: the home scope of the head of a
+   * The home scope of the head of a
    * canonical call whose head had no definition when the call was boxed (a
    * free call head, `f` in `f(x)`, `binding-unit.ts`). The boxing
    * declares no function for the head: the call is canonical with no
    * definition, and its head is resolved when the call is evaluated
    * (`_canonicalToEvaluate()`). Declared, not initialized, so that a call
-   * carries no own property for it while the flag is off.
+   * whose head is not free carries no own property for it.
    * @internal
    */
   declare _freeHeadScope?: Scope;
 
   /**
-   * With the engine flag `_bindingUnits`: for a free call head
+   * For a free call head
    * (`_freeHeadScope`), the environment that holds the `function` reading of
    * the head (rule 2 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`):
    * the environment of the unit, or of the operation, that boxed the call.
@@ -1895,8 +1894,7 @@ export class BoxedFunction
   /** True while `_reboxedForFreeHead()` boxes this call again. A read of the
    * same call during that boxing (`a := f(1)`, then `f := t ↦ a + 1`, then
    * the type of `a`) gets `undefined`. Declared, not initialized, so that a
-   * call carries no own property for it while the engine flag
-   * `_bindingUnits` is off. */
+   * call whose head is not free carries no own property for it. */
   declare private _freeHeadReboxing?: boolean;
 
   /**
@@ -2013,7 +2011,7 @@ export class BoxedFunction
       /** Are the integer-valued elements of the store floats
        * (`_numericStoreFloats`)? */
       numericStoreFloats?: boolean;
-      /** With the engine flag `_bindingUnits`: the home scope of a free
+      /** The home scope of a free
        * call head (`_freeHeadScope`), used only when `canonical` is true
        * and the head has no definition. */
       freeHead?: Scope;
@@ -2055,8 +2053,7 @@ export class BoxedFunction
       if (
         this._def === undefined &&
         options?.canonical === true &&
-        options.freeHead !== undefined &&
-        ce._bindingUnits
+        options.freeHead !== undefined
       ) {
         this._freeHeadScope = options.freeHead;
         noteFreeNameMade(ce, this._operator);
@@ -2558,10 +2555,8 @@ export class BoxedFunction
 
     this._effectsInFlight = true;
     const before = _effectsProvisionalReads;
-    // With the engine flag, the lookups of the projection are recorded
-    // (`_effectsDeps`). Without it, no record is made.
-    const collect = this.engine._bindingUnits;
-    if (collect) beginEffectsLookups();
+    // The lookups of the projection are recorded (`_effectsDeps`).
+    beginEffectsLookups();
     let deps: EffectsLookups | undefined;
     try {
       const prev = this._effects.value;
@@ -2569,7 +2564,7 @@ export class BoxedFunction
       try {
         value = applicationEffects(this);
       } finally {
-        if (collect) deps = endEffectsLookups();
+        deps = endEffectsLookups();
       }
       _effectsComputeCount += 1;
       if (_effectsProvisionalReads === before) {
@@ -3439,8 +3434,7 @@ export class BoxedFunction
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -3882,8 +3876,7 @@ export class BoxedFunction
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
   ): Expression | null {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -3897,8 +3890,7 @@ export class BoxedFunction
     pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -5073,8 +5065,7 @@ export class BoxedFunction
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -5105,8 +5096,7 @@ export class BoxedFunction
     if (this._declinedByHandler) return this;
     // Written-out data is its own value too: see `_isLiteralData()`.
     if (this._isLiteralData(options)) return this;
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(true))
@@ -5448,14 +5438,13 @@ export class BoxedFunction
     // application is rebuilt when it is evaluated again
     // (`applyFunctionLiteralWith`). A node over other operands is another
     // expression, and the source text of this node does not describe it.
-    // With the engine flag `_bindingUnits`, the evaluation of a symbol with
+    // The evaluation of a symbol with
     // no value can give another symbol of the same name (the free name of
     // the host in place of the copy of a body, `rebindBodyFreeNames()`): the
     // source text of this node still describes the result.
     const sameText =
       sameOps ||
-      (this.engine._bindingUnits &&
-        ops.length === this.ops.length &&
+      (ops.length === this.ops.length &&
         ops.every((x, i) => {
           const o = this.ops[i];
           return x === o || (isSymbol(x) && isSymbol(o, x.symbol));
@@ -6623,7 +6612,7 @@ export class BoxedFunction
     // part of (see `recordLazyViewContext` below).
     const contextStackAtStart =
       options._contextStack ?? this.engine._evalContextStack;
-    // With the engine flag `_bindingUnits`, an asynchronous evaluation is an
+    // An asynchronous evaluation is an
     // operation (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): it captures
     // its operation environment when it starts, and each synchronous part
@@ -7050,8 +7039,7 @@ export class BoxedFunction
     | ReadonlyArray<Expression>
     | Record<string, Expression>
     | Array<Record<string, Expression>> {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -16556,7 +16544,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
   // the engine may assemble a `Function` literal's signature: a second builder
   // silently reintroduces the inline-callback gap. Guarded by
   // `test/compute-engine/effects-seam.test.ts`.
-  // With the engine flag `_bindingUnits`, the parameter and result types
+  // The parameter and result types
   // are read in the scope that the literal is written in
   // (`functionLiteralCallSignatureType()`).
   if (expr.operator === 'Function')
@@ -16586,12 +16574,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       binding.value.type.type === 'function'
     )
       return 'unknown';
-    // With the engine flag `_bindingUnits`, the knot of a name that is a free
+    // The knot of a name that is a free
     // name holds no binding (`library/core.ts`): a call of the name that
     // resolves to nothing, with a free head or bound to a forward-call
     // reference of the body, is the self-call.
     if (
-      expr.engine._bindingUnits &&
       binding === undefined &&
       (expr._freeHeadScope !== undefined ||
         (expr.valueDefinition !== undefined &&
@@ -17732,7 +17719,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     );
   }
 
-  // With the engine flag `_bindingUnits`: a call whose free head resolves to
+  // A call whose free head resolves to
   // no definition reads the `function` reading of its unit.
   if (isFreeCallHead(expr) && freeBinding(expr) === undefined)
     return freeHeadCallType(expr);
@@ -17749,8 +17736,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
  * its unit (rule 2 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`):
  * a function with no signature and no value. The call is typed as the
  * value-definition route of `boundCallType()` types a call of a name with
- * the inferred type `function` and no value, the definition that the boxing
- * declares when the engine flag `_bindingUnits` is off: the result is
+ * the inferred type `function` and no value: the result is
  * `unknown`, lifted over a collection operand (`lambdaBroadcastType()`), so
  * with `L = [1, 3, 5]`, `foo(L)` is typed `list<unknown^3>`
  * (`docs/BROADCAST-MODEL.md`). With no function literal, no rule of that
@@ -18019,7 +18005,7 @@ function hasInferredUnknown(expr: Expression): boolean {
       if (!unknowns.has(x.symbol)) return false;
       // A free name (`isFreeName()`) has an inferred type when its name
       // resolves to no definition or to an inferred one.
-      // With the engine flag `_bindingUnits`, a definition of type `unknown`
+      // A definition of type `unknown`
       // counts too: its occurrence reads the requirement of its unit (rule 4
       // of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), which is
       // no proof about the value the definition holds (`hasInferredType()`).

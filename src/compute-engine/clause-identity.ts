@@ -60,12 +60,11 @@ export function canonInstallSkipped(def: object | undefined): boolean {
 /**
  * The names whose canonicalization-time clause install was skipped while the
  * name had no definition, by the scope that the install would have gone in.
- * With the engine flag `_bindingUnits`, boxing declares no name, so a generic
+ * Boxing declares no name, so a generic
  * first clause (`function f<T>(x: T) { … }`) that the canonical route skips
  * leaves no definition to mark (`noteCanonInstallSkipped()`): the skip is
  * recorded under the name, so that a later clause of the name skips its
- * install too, as it does when the boxing declared the name. Weakly keyed on
- * the scope, which dies with its record.
+ * install too. Weakly keyed on the scope, which dies with its record.
  */
 const CANON_INSTALL_SKIPPED_NAMES = new WeakMap<object, Set<string>>();
 

@@ -43,7 +43,7 @@ export function isNumber(
 
 /**
  * True when `expr` is a free name: a canonical symbol that has no
- * definition. With the engine flag `_bindingUnits`, boxing declares no name,
+ * definition. Boxing declares no name,
  * and a name that has no definition when it is boxed becomes a free name
  * (`binding-unit.ts`). The predicate gives the kind of the occurrence: it
  * stays true after a later declaration of the name, which the occurrence
@@ -62,7 +62,7 @@ export function isFreeName(expr: Expression | null | undefined): boolean {
 
 /**
  * True when `expr` is a call with a free head: a canonical call whose head
- * had no definition when it was boxed, with the engine flag `_bindingUnits`
+ * had no definition when it was boxed
  * (`BoxedFunction._freeHeadScope`, `binding-unit.ts`). Like a free name,
  * the head is not a raw occurrence and never denotes the variable of a
  * binder or a parameter: it was not inside a binder when it was boxed.
@@ -116,8 +116,8 @@ export function resolvedValueDefinition(
  * The binding that the symbol or call `expr` reads: its own value or
  * operator definition, or, for a free name (`isFreeName()`) or a free call
  * head (`isFreeCallHead()`), the definition that its name resolves to in
- * the current context (`freeBinding()`). With the engine flag
- * `_bindingUnits`, a call bound to a forward-call reference (a call in the
+ * the current context (`freeBinding()`). A call bound to a forward-call
+ * reference (a call in the
  * body of a function literal boxed before its name had a definition) reads
  * the definition that its name holds now (`_forwardCalleeBinding()`,
  * `boxed-function.ts`). `undefined` when there is none.
@@ -143,9 +143,9 @@ export function readBinding(expr: Expression): BoxedDefinition | undefined {
  * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), and it is narrowed
  * by its uses as an inferred definition is.
  *
- * With the engine flag `_bindingUnits`, a symbol bound to a definition
+ * A symbol bound to a definition
  * declared `unknown` gives the same answer as a free name that resolves to
- * that definition. Without the flag, only an inferred type counts.
+ * that definition.
  */
 export function hasInferredType(expr: Expression | null | undefined): boolean {
   if (expr === null || expr === undefined) return false;
@@ -153,7 +153,7 @@ export function hasInferredType(expr: Expression | null | undefined): boolean {
     const own = expr.valueDefinition;
     if (own === undefined) return false;
     if (own.inferredType) return true;
-    return expr.engine._bindingUnits && own.declaredType.isUnknown;
+    return own.declaredType.isUnknown;
   }
   const def = freeBinding(expr);
   if (def === undefined) return true;

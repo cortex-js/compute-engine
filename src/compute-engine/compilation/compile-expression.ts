@@ -283,7 +283,7 @@ function compileExpression<
   expr: Expression,
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
-  // A compilation is an operation: with the engine flag `_bindingUnits`, it
+  // A compilation is an operation: it
   // runs in an operation environment of its own, whose parents are the
   // environments of the occurrences of `expr`. Each occurrence of an input
   // then reads the meet of the requirements of the units of `expr`, and an

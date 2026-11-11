@@ -297,7 +297,7 @@ export function cachedValue<T>(
   // instead of 15 ms.
   // (`test/compute-engine/ce-582-recursive-type-facts-hidden.test.ts`)
   //
-  // With the engine flag `_bindingUnits`, a cell whose previous value is not
+  // With an engine, a cell whose previous value is not
   // valid (the same-cell serve above refused it) is answered as an empty
   // cell. Its dependencies include the reads of entries of unit
   // environments, which an operation can change: a type computed when the
@@ -312,9 +312,7 @@ export function cachedValue<T>(
     reentrantEmpty !== undefined &&
     generation !== undefined &&
     cell.inFlight &&
-    (cell.value === null ||
-      (engine as { _bindingUnits?: boolean } | undefined)?._bindingUnits ===
-        true) &&
+    (cell.value === null || engine !== undefined) &&
     cell.generation === generation
   ) {
     // Counted as provisional only where the engine has objects, as the

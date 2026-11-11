@@ -2931,7 +2931,7 @@ class Harvester {
       return false;
 
     if (operand.type.matches('function')) return true;
-    // A free name (`isFreeName()`, engine flag `_bindingUnits`) has no
+    // A free name (`isFreeName()`) has no
     // definition of its own: its type, read above, is that of the
     // definition that it resolves to, met with the requirements of its unit
     // (rule 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The

@@ -398,18 +398,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   /**
    * The environment of the binding unit of this occurrence: that of the
-   * outermost boxing that made it (`binding-unit.ts`). Set only when the
-   * engine flag `_bindingUnits` is true. A symbol made outside a boxing gets
-   * an environment of its own at the first requirement written on it.
-   * Declared, not initialized, so that a symbol carries no own property for
-   * it while the flag is off.
+   * outermost boxing that made it (`binding-unit.ts`). A symbol made outside
+   * a boxing gets an environment of its own at the first requirement
+   * written on it. Declared, not initialized: the constructor sets it only
+   * for a symbol that a boxing makes.
    * @internal
    */
   declare _env?: UnitEnvironment;
 
   /**
-   * The home scope of a free name (a canonical symbol with no definition),
-   * with the engine flag `_bindingUnits` only. It is set at construction: the
+   * The home scope of a free name (a canonical symbol with no definition).
+   * It is set at construction: the
    * first scope up the chain that existed before the boxing and is not
    * `noAutoDeclare`, where a declaration of the name would go. The entry of
    * `_env` for a free name is keyed on (home scope, name). A symbol with a
@@ -418,8 +417,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   declare _homeScope?: Scope;
 
-  /** Note: to indicate that the symbol should be canonical, pass a def, or,
-   * with the engine flag `_bindingUnits`, a `homeScope` for a free name. */
+  /** Note: to indicate that the symbol should be canonical, pass a def, or
+   * a `homeScope` for a free name. */
   constructor(
     ce: ComputeEngine,
     name: MathJsonSymbol,
@@ -427,8 +426,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       metadata?: Metadata;
       def?: BoxedDefinition;
       /** The home scope of a free name (`binding-unit.ts`): the symbol is
-       * canonical and has no definition. Read only with the engine flag
-       * `_bindingUnits`, and only when `def` is undefined. */
+       * canonical and has no definition. Read only when `def` is
+       * undefined. */
       homeScope?: Scope;
     }
   ) {
@@ -440,29 +439,27 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
     this._id = name;
     this._def = options?.def;
-    if (ce._bindingUnits) {
-      const env = ce._boxingState.unitEnvironment();
-      if (env !== undefined) this._env = env;
-      if (options?.def === undefined && options?.homeScope !== undefined) {
-        noteFreeNameMade(ce, name);
-        // A free name that an operation makes takes the home scope of the
-        // same name in the input of the operation, when the scope it is made
-        // in is that scope or a descendant of it (rule 8 of
-        // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): a name
-        // made in a scope that the operation pushed is then the same binding
-        // as the name of the input.
-        const operation = ce._boxingState.currentOperation();
-        this._homeScope =
-          operation !== undefined
-            ? operation.homeScopeOf(name, options.homeScope)
-            : options.homeScope;
-      }
+    const env = ce._boxingState.unitEnvironment();
+    if (env !== undefined) this._env = env;
+    if (options?.def === undefined && options?.homeScope !== undefined) {
+      noteFreeNameMade(ce, name);
+      // A free name that an operation makes takes the home scope of the
+      // same name in the input of the operation, when the scope it is made
+      // in is that scope or a descendant of it (rule 8 of
+      // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): a name
+      // made in a scope that the operation pushed is then the same binding
+      // as the name of the input.
+      const operation = ce._boxingState.currentOperation();
+      this._homeScope =
+        operation !== undefined
+          ? operation.homeScopeOf(name, options.homeScope)
+          : options.homeScope;
     }
   }
 
   /**
    * True for a free name: a canonical symbol that has no definition, made
-   * with the engine flag `_bindingUnits` when its name had no definition.
+   * when its name had no definition.
    * It stays true after a later declaration of the name: the occurrence then
    * reads that declaration (`_resolvedFreeDefinition()`).
    * @internal
@@ -505,10 +502,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       def: this._def,
     });
     // A copy is the same occurrence: it keeps the unit and the home scope.
-    if (this.engine._bindingUnits) {
-      result._env = this._env;
-      if (this._homeScope !== undefined) result._homeScope = this._homeScope;
-    }
+    result._env = this._env;
+    if (this._homeScope !== undefined) result._homeScope = this._homeScope;
     result._parseScope = this._parseScope;
     // A copy for diagnostics keeps the structural form of its source.
     if (this._structuralForm) result._structuralForm = true;
@@ -1124,16 +1119,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
-   * With the engine flag `_bindingUnits`: the home scope under which a
+   * The home scope under which a
    * requirement on the definition `def` of this occurrence is written in the
    * environment of the unit, or `undefined` when it is written on the
-   * definition, as without the flag.
+   * definition.
    *
    * Boxing writes no requirement on a definition that it did not make. A
    * definition that the root construction in progress made in a scope that
    * the construction created (a parameter of a function literal, the index
-   * of a `Sum`, a local of a block) is still narrowed by its uses, as without
-   * the flag: the boxing state records each definition made during the
+   * of a `Sum`, a local of a block) is still narrowed by its uses: the
+   * boxing state records each definition made during the
    * construction (`EngineBoxingState.noteDefinitionMade()`). A definition
    * that the construction made in a scope that existed before it (the
    * declaration of a free name of the body of a function literal in the
@@ -1149,11 +1144,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * chain of the current scope (a definition of a popped scope, or of a
    * scope that a `scope` option gave to an earlier boxing). A write outside
    * a boxing (during an evaluation) is made on the definition, also inside
-   * an operation: rule 8 of the spec writes every requirement of an
-   * operation in its environment, but the narrowing writes on definitions
-   * stay until the flag is turned on for good and they are removed (phase E
-   * of section 10 of the spec). Only a free name, and a boxing inside an
-   * operation, write in the environment of the operation.
+   * an operation, although rule 8 of the spec writes every requirement of
+   * an operation in its environment. Only a free name, and a boxing inside
+   * an operation, write in the environment of the operation.
    *
    * The key of the entry is the value definition itself: it does not depend
    * on the context of the write or of the read. The scope that holds the
@@ -1162,7 +1155,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * scope was popped or the definition was replaced.
    */
   private _unitWriteScope(def: BoxedDefinition): object | undefined {
-    if (!this.engine._bindingUnits || !isValueDef(def)) return undefined;
+    if (!isValueDef(def)) return undefined;
     const state = this.engine._boxingState;
     if (!state.isRootActive) return undefined;
     let scope: Scope | undefined = undefined;
@@ -1183,9 +1176,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
-   * With the engine flag `_bindingUnits`: the type of this occurrence when
+   * The type of this occurrence when
    * it reads the environment of its unit, or `undefined` when it reads the
-   * type of its definition, as without the flag (`binding-unit.ts`).
+   * type of its definition (`binding-unit.ts`).
    *
    * - A free name reads the definition that its name resolves to in the
    *   current context (`freeNameBindingInContext()`, in the static view of
@@ -1255,7 +1248,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // chain of the current scope (the variable of a binder whose scope
       // is not current, a definition of a popped scope), a definition of
       // the same name is another variable, and the occurrence reads its
-      // own, as without the flag: the variable `a` of `D(a^2, a)` in the
+      // own: the variable `a` of `D(a^2, a)` in the
       // body of `(a: real) ↦ …` is not the parameter, and the `i` of the
       // closed form of `∫₀¹ i·x dx`, declared in a scope that was popped,
       // is not the constant `i`.
@@ -1267,7 +1260,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // A local of a block, when the definition of the occurrence is not
       // one, is the local of a block that the occurrence was not written in
       // (the type of the body of a function read at a call in the block):
-      // the occurrence reads its own definition, as without the flag.
+      // the occurrence reads its own definition.
       !(v._blockLocal !== true && isBlockLocalBinding(resolved))
     ) {
       if (isOperatorDef(resolved)) return resolved.operator.signature;
@@ -1356,14 +1349,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
-   * With the engine flag `_bindingUnits`: a free name of the same name as
+   * A free name of the same name as
    * this symbol, with the home scope `home`, that the unit of the boxing in
    * progress reads as a variable (`UnitEnvironment.setReadsAsVariable()`).
    * Its resolution skips the library operator of its name.
    *
    * This is the reading of a library operator name used as a value (`N` in
-   * `N + 1`). Without the flag, the boxing declares a variable that shadows
-   * the operator in `home` (`devolveUnappliedOperator()`, `validate.ts`).
+   * `N + 1`, `devolveUnappliedOperator()`, `validate.ts`).
    * @internal
    */
   _asFreeVariable(home: Scope): BoxedSymbol {
@@ -1376,7 +1368,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
-   * With the engine flag `_bindingUnits`: a free name of the same name as
+   * A free name of the same name as
    * this symbol, with the home scope `home`. The value of a call of a
    * function literal puts it in place of a copy of a free name of the body
    * (`markBodyFreeName()`), so the value is the binding of the host's name
@@ -1438,13 +1430,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * pushed after the boxing that declares the same name must not receive
    * the write. When the name resolves to no definition, it is declared in
    * its home scope, with the type `unknown`, inferred, as `ce.assign()` and
-   * `ce.declare()` declare a name, and as the boxing of the name declares it
-   * when the engine flag `_bindingUnits` is off. The write runs in the scope
+   * `ce.declare()` declare a name. The write runs in the scope
    * that holds the definition, so that a write by name (`ce.assign()`,
    * `ce.forget()`) reaches that definition.
    *
    * A home scope that is no longer on the current chain (it was popped)
-   * throws `Unknown symbol`, as the write throws when the flag is off: a
+   * throws `Unknown symbol`, as a write on a definition of a popped scope
+   * throws: a
    * definition declared in a popped scope cannot be read again, so the
    * write would be lost with no error.
    */
@@ -1613,15 +1605,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // is under a registered scratch scope, so it is made only in that case.
     if (ce._resolveOnlyDepth > 0 && scratchRootOf(ce, outerScope) === undefined)
       return;
-    // With the engine flag `_bindingUnits`, boxing declares no name: the
+    // Boxing declares no name: the
     // narrowing is a requirement on the free name, under its home scope (the
     // scope that the literal is written in), in the environment of the unit
     // (`binding-unit.ts`). A call of the literal reads the binding of that
-    // scope by name, as it does without the flag.
-    if (
-      ce._bindingUnits &&
-      ce._boxingState.isPersistentScope(outerScope) !== false
-    ) {
+    // scope by name.
+    if (ce._boxingState.isPersistentScope(outerScope) !== false) {
       new BoxedSymbol(ce, name, { homeScope: outerScope })._infer(
         () => t,
         'narrow'
@@ -1673,7 +1662,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       )
         return false;
       if (def.value.inferredType || def.value.type.isUnknown) {
-        // With the engine flag `_bindingUnits`, boxing does not narrow,
+        // Boxing does not narrow,
         // widen or mark a definition that existed before it: the
         // requirement goes in the environment of the unit
         // (`binding-unit.ts`).
@@ -2069,8 +2058,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   ) {
     // A free name: a host write that declares the name in its home scope
     // when it has no definition (`_hostWrite()`). A wildcard (`_x`) is
-    // written the same way: without the engine flag `_bindingUnits`, the
-    // boxing of `_x` declares it, and the write sets its value.
+    // written the same way.
     if (this._isFreeName) {
       this._hostWrite((target) => {
         target.value = value;
@@ -2242,10 +2230,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * 'unknown'
    */
   get type(): BoxedType {
-    if (this.engine._bindingUnits) {
-      const unitType = this._unitType();
-      if (unitType !== undefined) return unitType;
-    }
+    const unitType = this._unitType();
+    if (unitType !== undefined) return unitType;
     const def = this._def;
     // The definition's own type, faithfully — Design E retired the R-D5
     // display projection with the `callback<S>` constructor: an honest arrow
@@ -2425,8 +2411,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -2759,8 +2744,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -2773,8 +2757,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(true))
@@ -2821,8 +2804,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // With no value, a copy of a free name of the body of a function
         // literal evaluates to the free name of the host, as the value of a
         // call has it (`rebindBodyFreeNames()`).
-        if (expr === undefined)
-          return this.engine._bindingUnits ? rebindBodyFreeNames(this) : this;
+        if (expr === undefined) return rebindBodyFreeNames(this);
         // The exact evaluation, which a numeric read tests (`_testedRead()`).
         const exact = options?.numericApproximation
           ? { ...options, numericApproximation: false }
@@ -2941,7 +2923,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       this.engine,
       options?._contextStack
     );
-    // With the engine flag `_bindingUnits`, the evaluation is an operation
+    // The evaluation is an operation
     // (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), as
     // in `BoxedFunction.evaluateAsync()`.
     this.engine._captureAsyncOperation(evaluation, this);
@@ -3331,8 +3313,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   N(): Expression {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(true))
@@ -3430,8 +3411,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
     options?: Partial<ReplaceOptions>
   ): Expression | null {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
@@ -3445,8 +3425,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))

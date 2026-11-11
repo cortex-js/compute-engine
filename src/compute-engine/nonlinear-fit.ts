@@ -2676,9 +2676,9 @@ function solveSetup(
 }
 
 /**
- * With the engine flag `_bindingUnits`: the operation environment of a fit
+ * The operation environment of a fit
  * or a root search on `ops`, or `undefined` when the call runs in the
- * operation in progress (`ce._opensOperation()`), and without the flag.
+ * operation in progress (`ce._opensOperation()`).
  *
  * A fit makes new names for its parameters, rebuilds the model over them
  * with `subs()` and compiles the result. The compilation reads the types

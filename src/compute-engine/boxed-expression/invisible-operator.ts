@@ -310,16 +310,9 @@ function canonicalJuxtaposition(
           // Uh. Oh. It's a symbol with a value that is not a function.
           return ce.typeError('function', def.value.type, lhsCanon);
         }
-        // Auto-declared function application is a heuristic guess, not an
-        // assertion by the user: mark the declaration INFERRED so a later
-        // scalar use or `ce.assign(sym, value)` can widen/override it
-        // (D11). A genuine function use keeps working — the inferred type
-        // still matches `function`. With the engine flag `_bindingUnits`,
-        // boxing declares no name: the call boxed below writes the
+        // Boxing declares no name: the call boxed below writes the
         // `function` reading of the head in the environment of the unit
         // (`makeCanonicalFunctionCore()`).
-        if (!ce._bindingUnits)
-          ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
         return ce.expr([lhsCanon.symbol]);
       }
 
@@ -343,15 +336,10 @@ function canonicalJuxtaposition(
       // Multiple comma-separated args like `f(2, 1)` → always a function call,
       // since commas strongly signal function application, not multiplication.
       if (args.length > 1) {
-        // Inferred (see above): a heuristic auto-declaration the user can
-        // later widen/override.
-        // With the engine flag `_bindingUnits`, boxing declares no name:
-        // the call boxed below writes the `function` reading of the head
-        // in the environment of the unit (`makeCanonicalFunctionCore()`).
-        if (!def) {
-          if (!ce._bindingUnits)
-            ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
-        } else if (!isOperatorDef(def) && def.value?.type?.isUnknown) {
+        // Boxing declares no name: the call boxed below writes the
+        // `function` reading of the head in the environment of the unit
+        // (`makeCanonicalFunctionCore()`).
+        if (def && !isOperatorDef(def) && def.value?.type?.isUnknown) {
           markBodyCopyAsForwardCall(ce, lhsCanon.symbol);
           lhsCanon._infer(() => 'function');
         }
@@ -475,13 +463,9 @@ function canonicalJuxtaposition(
       // if the head later gains a value.
       if (def !== undefined && !isOperatorDef(def) && def.value.type.isUnknown)
         return applyUndeclaredHead(ce, lhsCanon, args);
-      // Inferred (see above): a heuristic auto-declaration the user can
-      // later widen/override.
-      // With the engine flag `_bindingUnits`, boxing declares no name:
-      // the call boxed below writes the `function` reading of the head
-      // in the environment of the unit (`makeCanonicalFunctionCore()`).
-      if (!def && !ce._bindingUnits)
-        ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
+      // Boxing declares no name: the call boxed below writes the
+      // `function` reading of the head in the environment of the unit
+      // (`makeCanonicalFunctionCore()`).
       return ce.function(lhsCanon.symbol, args);
     }
 
@@ -1090,8 +1074,7 @@ function functionSymbolOf(
   // A bare head is a raw symbol: a free name is read through its canonical
   // occurrence, which holds the `function` reading that an earlier call of
   // the name wrote in the unit (`g(x)g(x)^{-1}`).
-  const occurrence =
-    occurrenceOf(ce, sym, ce.lookupDefinition(sym.symbol)) ?? sym;
+  const occurrence = occurrenceOf(sym, ce.lookupDefinition(sym.symbol)) ?? sym;
   if (!isDeclaredFunction(ce, sym.symbol, occurrence)) return undefined;
   return sym.symbol;
 }
@@ -1203,7 +1186,7 @@ function combineFunctionApplications(
       // A head with no type information applied through a power or a
       // factorial (`2f(3)^2`): the application, as on the two-operand route.
       const def = ce.lookupDefinition(op.symbol);
-      const occurrence = occurrenceOf(ce, op, def);
+      const occurrence = occurrenceOf(op, def);
       if (headHasNoTypeInformation(ce, op.symbol, def, occurrence)) {
         const head = op.canonical;
         const applied = isSymbol(head)
@@ -1232,7 +1215,7 @@ function combineFunctionApplications(
     ) {
       const symName = op.symbol;
       const def = ce.lookupDefinition(symName);
-      const occurrence = occurrenceOf(ce, op, def);
+      const occurrence = occurrenceOf(op, def);
       const delim = ops[i + 1] as Expression & {
         op1: Expression;
         ops: ReadonlyArray<Expression>;
@@ -1257,15 +1240,10 @@ function combineFunctionApplications(
         let args: ReadonlyArray<Expression> = delim.op1.ops;
         args = flatten(args);
         if (args.length > 1) {
-          // Inferred: a heuristic auto-declaration the user can later
-          // widen/override (D11).
-          // With the engine flag `_bindingUnits`, boxing declares no name:
-          // the call boxed below writes the `function` reading of the head
-          // in the environment of the unit (`makeCanonicalFunctionCore()`).
-          if (!def) {
-            if (!ce._bindingUnits)
-              ce.declare(symName, { type: 'function', inferred: true });
-          } else if (!isOperatorDef(def) && def.value?.type?.isUnknown) {
+          // Boxing declares no name: the call boxed below writes the
+          // `function` reading of the head in the environment of the unit
+          // (`makeCanonicalFunctionCore()`).
+          if (def && !isOperatorDef(def) && def.value?.type?.isUnknown) {
             markBodyCopyAsForwardCall(ce, symName);
             op.canonical._infer(() => 'function');
           }
@@ -1608,19 +1586,18 @@ function couldBecomeFunction(
   return def.value.type.isUnknown;
 }
 
-/** With the engine flag `_bindingUnits`: the canonical occurrence of the
+/** The canonical occurrence of the
  * symbol `op`, whose type the tests of a call head read for a free name
- * (`isDeclaredFunction()`). `undefined` without the flag, and when the name
+ * (`isDeclaredFunction()`). `undefined` when the name
  * has a definition `def`: the tests then read `def`, and only a free name
  * reads its occurrence. The caller computes it once per head: the canonical
  * form of a raw symbol is a new symbol at each read, and its boxing can
  * write in the scope of the boxing. */
 function occurrenceOf(
-  ce: ComputeEngine,
   op: Expression,
   def: ReturnType<ComputeEngine['lookupDefinition']>
 ): Expression | undefined {
-  return ce._bindingUnits && def === undefined ? op.canonical : undefined;
+  return def === undefined ? op.canonical : undefined;
 }
 
 /**

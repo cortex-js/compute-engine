@@ -157,7 +157,7 @@ export function expand(
 
 /**
  * Run `fn`, an operation on `input` (`expand()`, `factor()`), in an
- * operation environment of its own, with the engine flag `_bindingUnits`
+ * operation environment of its own
  * (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
  * `ce._opensOperation()`).
  *

@@ -1713,7 +1713,7 @@ function readsAnyName(
 /**
  * The body walk shared by `callResultType` and `appliedLiteralResultType`.
  *
- * With the engine flag `_bindingUnits`, the type of an occurrence is read
+ * The type of an occurrence is read
  * through the definition that its name resolves to in the current context
  * (rule 3 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The
  * body of a function literal reads the scope that the literal is written
@@ -1749,16 +1749,15 @@ function literalBodyResultType(
 
 /**
  * Run `fn`, which reads the types of the occurrences of the body of the
- * function literal `literal`, in the scope that the literal is written in,
- * with the engine flag `_bindingUnits`; without the flag, or when that
- * scope is the current one, `fn()`. See `literalBodyResultType()`.
+ * function literal `literal`, in the scope that the literal is written in;
+ * when that scope is the current one, `fn()`. See
+ * `literalBodyResultType()`.
  */
 export function inLiteralScope<T>(
   engine: IComputeEngine,
   literal: Expression & FunctionInterface,
   fn: () => T
 ): T {
-  if (!engine._bindingUnits) return fn();
   const body = literal.ops[0];
   const written = body?.isScoped ? body.localScope?.parent : undefined;
   if (!written || written === engine.context?.lexicalScope) return fn();

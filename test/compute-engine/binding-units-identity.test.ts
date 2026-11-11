@@ -1,15 +1,11 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// Phase E of slice 1 of binding units, with the engine flag `_bindingUnits`
-// on: the identity and the resolution of a free name made in a scope that
-// another scope encloses (rules 3, 7 and 8 of
-// `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Each answer is the
-// answer of the engine with the flag off.
+// Phase E of slice 1 of binding units: the identity and the resolution of a
+// free name made in a scope that another scope encloses (rules 3, 7 and 8 of
+// `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 describe('BINDING UNITS: A FREE NAME MADE IN A SCOPE THAT AN OPERATION PUSHED', () => {

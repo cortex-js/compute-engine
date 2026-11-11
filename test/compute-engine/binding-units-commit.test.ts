@@ -6,15 +6,12 @@ import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 import { isValueDef } from '../../src/compute-engine/boxed-expression/utils';
 import { unitEnvironmentsOf } from '../../src/compute-engine/binding-unit';
 
-// Phase D of slice 1 of binding units, with the engine flag `_bindingUnits`
-// on: rules 11 (`ce.infer()`), 12 (`ce.assume()`) and 13 (trials, rollback
+// Phase D of slice 1 of binding units: rules 11 (`ce.infer()`), 12 (`ce.assume()`) and 13 (trials, rollback
 // frames and checkpoints) of
 // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`.
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 /** The first occurrence of the symbol `name` in `expr`, depth first. */
@@ -387,7 +384,7 @@ describe('RULE 13: trials, rollback frames and checkpoints', () => {
     declare(ce);
     const e = ce.box(['G', 'x']);
     // Each arm is tried in an environment that is thrown away, so both arms
-    // are viable for the free `x`, as without the flag.
+    // are viable for the free `x`.
     expect(e.op1.type.toString()).toBe(expected);
     expect(e.type.toString()).toBe(off.box(['G', 'y']).type.toString());
     expect(entries([e])).toEqual(['x: integer | string']);

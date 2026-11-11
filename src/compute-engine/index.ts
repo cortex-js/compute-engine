@@ -395,21 +395,6 @@ import type {
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
-/** The default of the engine flag `_bindingUnits`: true, unless the
- * environment variable `CE_BINDING_UNITS` is `0`. The variable and the flag
- * are kept for one release, so that a host can compare the two behaviors;
- * the removal of the flag and of the code that runs without it is the last
- * step of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`. */
-function bindingUnitsDefault(): boolean {
-  try {
-    const env = (globalThis as { process?: { env?: Record<string, string> } })
-      .process?.env;
-    return env?.CE_BINDING_UNITS !== '0';
-  } catch {
-    return true;
-  }
-}
-
 /** True if `x`, a part of a complex value given as a double or a big
  * decimal, is zero. `undefined` (a part that is not given) is zero. */
 /**
@@ -1733,17 +1718,10 @@ export class ComputeEngine implements IComputeEngine {
    */
   _debugBindings = debugBindingsDefault();
 
-  /** See `IComputeEngine._bindingUnits`. True by default; false when the
-   * environment variable `CE_BINDING_UNITS` is `0` (`bindingUnitsDefault()`).
-   * @internal
-   */
-  _bindingUnits = bindingUnitsDefault();
-
   /** See `IComputeEngine._opensOperation()`.
    * @internal
    */
   _opensOperation(evaluation: boolean): boolean {
-    if (!this._bindingUnits) return false;
     const state = this._boxingState;
     const current = state.currentOperation();
     if (current === undefined) return true;
@@ -1775,7 +1753,7 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _captureAsyncOperation(evaluation: AsyncEvaluation, input: unknown): void {
-    if (!this._bindingUnits || evaluation.operation !== undefined) return;
+    if (evaluation.operation !== undefined) return;
     const state = this._boxingState;
     if (this._opensOperation(true)) {
       evaluation.operation = UnitEnvironment.forOperation(
@@ -1793,7 +1771,6 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _withProgramEnvironment<T>(fn: () => T): T {
-    if (!this._bindingUnits) return fn();
     return this._boxingState.withOperation(
       UnitEnvironment.forOperation(undefined, this.context?.lexicalScope),
       fn

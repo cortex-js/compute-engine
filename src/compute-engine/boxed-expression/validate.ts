@@ -187,16 +187,15 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 // result typing.
 
 /**
- * The trial `trial` of an arm of an overloaded operator. With the engine
- * flag `_bindingUnits`, it runs in a trial environment
+ * The trial `trial` of an arm of an overloaded operator, run in a trial
+ * environment
  * (`EngineBoxingState.withTrial()`), which is thrown away when the trial
  * ends: a requirement that the trial writes on an operand is not kept, and
  * does not refuse the trial of the next arm (rule 13 of
  * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). A rollback frame
- * does not undo a write in an environment. Without the flag, `trial`.
+ * does not undo a write in an environment.
  */
 function inTrialEnvironment(ce: ComputeEngine, trial: ArmTrialFn): ArmTrialFn {
-  if (!ce._bindingUnits) return trial;
   return (declared, instance, solution, ops) =>
     ce._boxingState.withTrial(() => trial(declared, instance, solution, ops));
 }
@@ -480,34 +479,12 @@ export function inferNumericArgs(
   ops: ReadonlyArray<Expression>
 ): void {
   ce._withoutFacts(() => {
-    // The tier written onto a valueless operand: `real` when every operand,
-    // and every cell of an eager collection operand, is provably real, and
-    // `number` otherwise. The cells count because they are narrowed below:
-    // without them, `2·[y]` read only the two operands `2` and `[y]` (a list
-    // is not itself a non-real number) and wrote `real` onto `y`, so the
-    // product was typed `vector<real^1>` while `y` may be complex, where the
-    // scalar `2·y` narrows `y` to `number`.
-    const couldBeNonReal = (x: Expression): boolean => {
-      if (x.type.facts.couldBeNonReal) return true;
-      // Read the cells one at a time and stop at the first one that may be
-      // non-real; a lazy collection is not walked (see below).
-      if (isFiniteIndexedCollection(x) && !x.isLazyCollection)
-        for (const y of x.each()) if (y.type.facts.couldBeNonReal) return true;
-      return false;
-    };
-    let inferredType: Type = 'real';
-    // With the engine flag `_bindingUnits`, the requirement is kept in the
-    // unit of the expression, and it outlives the types that the operands
-    // have now: with `x := 2`, the `real` of `x + 1` would still be read
-    // after `x := 1 + i`. The use requires a number, whatever the operands
-    // are when it is boxed.
-    if (ce._bindingUnits) inferredType = 'number';
-    else
-      for (const x of ops)
-        if (couldBeNonReal(x)) {
-          inferredType = 'number';
-          break;
-        }
+    // The tier written onto a valueless operand, and onto each cell of an
+    // eager collection operand. The requirement is kept in the unit of the
+    // expression, and it outlives the types that the operands have now: with
+    // `x := 2`, a `real` of `x + 1` would still be read after `x := 1 + i`.
+    // The use requires a number, whatever the operands are when it is boxed.
+    const inferredType: Type = 'number';
     for (const x of ops)
       if (isFiniteIndexedCollection(x)) {
         // `.each()` on a lazy collection materializes every element, so never
@@ -1133,16 +1110,13 @@ function devolveUnappliedOperator(
     let declareScope = ce.context.lexicalScope;
     while (declareScope.noAutoDeclare && declareScope.parent)
       declareScope = declareScope.parent;
-    // With the engine flag `_bindingUnits`, boxing declares no name: the
+    // Boxing declares no name: the
     // occurrence becomes a free name that its unit reads as a variable, and
     // the resolution of the name in that unit skips the library operator
     // (`BoxedSymbol._asFreeVariable()`, `binding-unit.ts`). A scope that
     // the boxing created (the body of a function literal) still gets the
     // declaration below, as a free name does (`createSymbolExpression()`).
-    if (
-      ce._bindingUnits &&
-      ce._boxingState.isPersistentScope(declareScope) !== false
-    )
+    if (ce._boxingState.isPersistentScope(declareScope) !== false)
       return (
         op as unknown as { _asFreeVariable(home: Scope): Expression }
       )._asFreeVariable(declareScope);
@@ -1452,8 +1426,8 @@ export function devolveAtValuePositions(
     const devolved = canonicalValueOperand(ce, op);
     // Only a repaired operand replaces the operand: a raw operand that was
     // not repaired stays raw, for the operator to canonicalize itself.
-    // With the engine flag `_bindingUnits`, the repaired operand is a free
-    // name that its unit reads as a variable (`BoxedSymbol._asFreeVariable()`).
+    // The repaired operand can be a free name that its unit reads as a
+    // variable (`BoxedSymbol._asFreeVariable()`).
     if (
       devolved === op ||
       !isSymbol(devolved) ||
@@ -1628,7 +1602,7 @@ export function checkNumericArgs(
       !(isFreeName(op) && !op.type.isUnknown)
     ) {
       // We have an unknown symbol, we'll infer it's a number later. A free
-      // name (engine flag `_bindingUnits`) that its unit already requires to
+      // name that its unit already requires to
       // be something is checked by the branches below, as a symbol with an
       // inferred definition is: in `o \cdot o(t)` the factor `o` is a
       // function, and an `incompatible-type` error.
@@ -3011,8 +2985,8 @@ function evidenceGuardedNarrow(
   param: Type,
   noInference = false
 ): 'narrowed' | 'admitted' | 'fall-through' {
-  // A free name (`isFreeName()`, engine flag `_bindingUnits`) reads the
-  // definition that it resolves to, and with none it is valueless.
+  // A free name (`isFreeName()`) reads the definition that it resolves to,
+  // and with none it is valueless.
   const def = resolvedValueDefinition(op);
   const held = def?.value;
   const staticEvidence =
@@ -4452,7 +4426,7 @@ export function validateArguments(
     // mirror filter, whose gate conditions had to track this function's
     // admission logic by hand.
     //
-    // With the engine flag `_bindingUnits`, each trial also runs in an
+    // Each trial also runs in an
     // environment of its own (`inTrialEnvironment()`), which is thrown away
     // when it ends.
     const mkArmTrial =
@@ -6096,7 +6070,7 @@ function hasNonNumericShapeEvidence(type: Type): boolean {
 
 /**
  * Where the fresh-matrix repair retypes a name whose requirements are in a
- * unit environment (`binding-unit.ts`), with the engine flag `_bindingUnits`.
+ * unit environment (`binding-unit.ts`).
  * - `env`: the environment that the write goes in: that of the trial in
  *   progress, else of the operation in progress (rule 8 of
  *   `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), else of the
@@ -6117,10 +6091,10 @@ type UnitRepairSite = {
 };
 
 /**
- * With the engine flag `_bindingUnits`: the entry of a unit environment that
+ * The entry of a unit environment that
  * the fresh-matrix repair retypes for the name `name` of `op`
  * (`UnitRepairSite`), or `undefined` when the repair retypes the definition
- * of the name, as without the flag.
+ * of the name.
  *
  * Boxing writes no definition (rule 1 of
  * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the requirements of
@@ -6130,14 +6104,13 @@ type UnitRepairSite = {
  * definition that the root construction made in a scope that it created (a
  * parameter of a function literal) is still narrowed by its uses
  * (`BoxedSymbol._unitWriteScope()`): its uses wrote no entry, and the repair
- * retypes it as without the flag.
+ * retypes that definition.
  */
 function unitRepairSite(
   ce: ComputeEngine,
   op: Expression,
   name: string
 ): UnitRepairSite | undefined {
-  if (!ce._bindingUnits) return undefined;
   const occurrence = symbolOccurrence(op, name);
   if (occurrence === undefined) return undefined;
   const sym = occurrence as Expression & {
@@ -6165,8 +6138,7 @@ function unitRepairSite(
     // in progress did not make was typed before it, by `ce.infer()`, an
     // assignment or an evaluation (boxing writes no definition, rule 1). It
     // is the evidence of an earlier expression, as an entry that an earlier
-    // boxing wrote: the repair does not retype the name, as without the
-    // flag a definition inferred before the boxing is not eligible.
+    // boxing wrote: the repair does not retype the name.
     if (!def.declaredType.isUnknown && !ce._boxingState.isDefinitionMade(def))
       return { env: undefined, key: def, eligible: false };
     key = def;
@@ -6246,7 +6218,7 @@ function repairFreshMatrixInference(
   if (!freshlyInferred || !targetType) return null;
 
   const eligible = new Set<string>();
-  // With the engine flag `_bindingUnits`: the names whose entry of a unit
+  // The names whose entry of a unit
   // environment the repair replaces (`unitRepairSite()`).
   const sites = new Map<string, UnitRepairSite>();
   for (const name of op.freeVariables) {
@@ -6344,7 +6316,7 @@ function repairFreshMatrixInference(
   // `axisMaskOf`). One binding outside a scratch scope keeps the full
   // advance.
   let allScratch = true;
-  // With the engine flag `_bindingUnits`: for each environment that the
+  // For each environment that the
   // repair writes in, the length of its journal before the first write. The
   // failure leg undoes the writes after it: the entries that the repair
   // replaced, and the requirements that the discarded re-box wrote. A write

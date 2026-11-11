@@ -487,7 +487,7 @@ function betaReduceLambda(call: Expression): Expression | undefined {
   // free name of the body is the free name of the host
   // (`rebindBodyFreeNames()`).
   const value = body.subs(substitution);
-  return call.engine._bindingUnits ? rebindBodyFreeNames(value) : value;
+  return rebindBodyFreeNames(value);
 }
 
 /**

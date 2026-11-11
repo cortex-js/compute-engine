@@ -113,7 +113,7 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
     const ce = new ComputeEngine();
     const T: MathJsonExpression = ['Function', ['Add', 'z_9', 1], 'u_9'];
     const first = ce.box(T);
-    // With the engine flag `_bindingUnits`, the requirement of the body is
+    // The requirement of the body is
     // a requirement on the free name until an operation commits it.
     ce.infer([first]);
     expect(ce.box('z_9').type.toString()).toBe('number');

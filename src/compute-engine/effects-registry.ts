@@ -186,7 +186,6 @@ export function runWithEvaluationEffects<T, C>(
     _requestedPrecision?: number | undefined;
     _withTransientPrecision?: <R>(digits: number, fn: () => R) => R;
     _deadlineFrame?: DeadlineFrame | undefined;
-    _bindingUnits?: boolean;
     _boxingState?: {
       withOperation<R>(env: UnitEnvironment, fn: () => R): R;
       asProgramStatement<R>(fn: () => R): R;
@@ -197,14 +196,11 @@ export function runWithEvaluationEffects<T, C>(
   contextStack?: C[],
   precisionWindow?: PrecisionWindow
 ): T {
-  // With the engine flag `_bindingUnits`, the operation environment of the
-  // asynchronous evaluation that owns `contextStack`
-  // (`AsyncEvaluation.operation`) is put in place for the slice, and the
-  // previous one is put back when it returns or throws (rule 8 of
-  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): it is never in
-  // place across an `await`.
-  if (engine._bindingUnits !== true)
-    return runSlice(engine, effects, fn, contextStack, precisionWindow);
+  // The operation environment of the asynchronous evaluation that owns
+  // `contextStack` (`AsyncEvaluation.operation`) is put in place for the
+  // slice, and the previous one is put back when it returns or throws (rule
+  // 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): it is never
+  // in place across an `await`.
   const evaluation = asyncEvaluationOf(contextStack);
   const operation = evaluation?.operation;
   const state = engine._boxingState;

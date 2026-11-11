@@ -148,8 +148,7 @@ export function analyzeReferences(
   // the input. An occurrence of
   // such a name is not recorded for the type of the input
   // (`noteTypedOccurrence()`), in the integral or after it: the input then
-  // has the type of its first occurrence in `expr`, as without the flag
-  // `_bindingUnits`.
+  // has the type of its first occurrence in `expr`.
   const binderInputNames = new Set<string>();
   const addFree = (e: Expression & { symbol: string }): void => {
     // The placeholder `_` of a destructuring target (`(a, _) ≔ v`) is not
@@ -158,11 +157,7 @@ export function analyzeReferences(
     if (writing !== undefined && e.symbol === '_') return;
     free.add(e.symbol);
     if (occurrences === undefined) return;
-    if (
-      engine._bindingUnits &&
-      !assignTargets.has(e) &&
-      !binderInputNames.has(e.symbol)
-    )
+    if (!assignTargets.has(e) && !binderInputNames.has(e.symbol))
       noteTypedOccurrence(occurrences, e);
     if (indirectDepth !== 0) return;
     const recorded = occurrences.get(e.symbol);
@@ -1356,7 +1351,7 @@ export function freeSymbolOccurrence(
 }
 
 /**
- * With the engine flag `_bindingUnits`: for the map of occurrences of one
+ * For the map of occurrences of one
  * reference analysis, for each free symbol, the occurrences that can read
  * different types (`noteTypedOccurrence()`).
  */
@@ -1378,8 +1373,8 @@ function unitKeyOf(e: Expression): { env: unknown; key: unknown } {
 }
 
 /**
- * Record the occurrence `e` of a free symbol of the compiled expression,
- * with the engine flag `_bindingUnits`. Boxing declares no name, so the
+ * Record the occurrence `e` of a free symbol of the compiled expression.
+ * Boxing declares no name, so the
  * type of an input is in the environments of the units that use it: the
  * unit of the expression, the unit of an assigned value that the code
  * folds (`b := c + 1`), the unit of the body of a function that the code

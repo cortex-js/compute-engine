@@ -4,16 +4,14 @@ import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
-// Phase E of slice 1 of binding units, package A, with the engine flag
-// `_bindingUnits` on: the compilation of an expression whose inputs are
+// Phase E of slice 1 of binding units, package A: the compilation of an
+// expression whose inputs are
 // typed by several units, the operations that a target opens, and the scope
 // that the body of a stored function reads
 // (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`, rules 3 and 8).
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 type Run = (vars: Record<string, unknown>) => unknown;

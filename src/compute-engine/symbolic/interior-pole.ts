@@ -1298,11 +1298,11 @@ function isUntypedFree(
   expr: Expression
 ): boolean {
   const def = ce.lookupDefinition(name);
-  // With the engine flag `_bindingUnits`, a symbol that was never declared
+  // A symbol that was never declared
   // is a free name, with no definition (rule 7 of
   // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): its type is the
   // type of its occurrence, which its uses require.
-  if (def === undefined && ce._bindingUnits) {
+  if (def === undefined) {
     const type = occurrenceOf(expr, name)?.type;
     if (type === undefined || type.isUnknown) return true;
     return type.matches('number') && !type.matches('real');

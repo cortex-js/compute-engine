@@ -101,11 +101,11 @@ export function unusedVariableName(
     for (const name of collectBinderNames(e)) used.add(name);
   }
   const ce = exprs[0]?.engine;
-  // With the engine flag `_bindingUnits`, boxing declares no name, so a
+  // Boxing declares no name, so a
   // symbol that the integrand reads through an assigned value or the body of
   // a user function can have no definition. These symbols are collected
   // from the values and the bodies.
-  if (ce?._bindingUnits) {
+  if (ce !== undefined) {
     const pending = [...used];
     const visited = new Set<string>();
     while (pending.length > 0) {

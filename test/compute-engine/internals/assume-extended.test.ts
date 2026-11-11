@@ -87,8 +87,7 @@ describe('Greater(Imaginary(tau), 0)', () => {
     // declared-domain operator produces) — and the disequality it derives
     // (`Im(tau)` bounded away from zero implies `tau ≠ 0`) excludes the one
     // value the type can name. The type is read on the operand of a use:
-    // with the engine flag `_bindingUnits`, the requirement of the use is
-    // in the environment of its unit.
+    // the requirement of the use is in the environment of its unit.
     expect(
       ce.expr(['Imaginary', 'tau']).op1.type.toString()
     ).toBe('complex & !0 | infinity');

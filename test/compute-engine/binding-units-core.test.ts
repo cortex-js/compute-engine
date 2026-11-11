@@ -10,17 +10,14 @@ import {
 } from '../../src/compute-engine/binding-unit';
 import { EngineBoxingState } from '../../src/compute-engine/engine-boxing-state';
 
-// Phase A of slice 1 of binding units, with the engine flag `_bindingUnits`
-// on: boxing writes no definition, a name with no definition is a free name,
+// Phase A of slice 1 of binding units: boxing writes no definition, a name with no definition is a free name,
 // the requirements of the uses of a name with no explicit type go in the
 // environment of the unit, and a read resolves the definition when it
 // happens. The rows are those of section 2 of
 // `docs/plans/2026-11-09-binding-units-slice-1-spec.md` that phase A covers.
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 function envOf(expr: unknown): UnitEnvironment | undefined {
@@ -785,7 +782,7 @@ describe('BINDING UNITS: FREE CALL HEADS AND HOST WRITES', () => {
     const ce = engine();
     const call = ce.box(['f', 'x']);
     ce.declare('f', '((integer) -> integer) & ((string) -> boolean)');
-    // Both arms are viable for the free `x`, as without the flag. The trial
+    // Both arms are viable for the free `x`. The trial
     // of each arm runs in an environment of its own (rule 13).
     expect(call.type.toString()).toBe('boolean | integer');
     ce.assign('x', ce.string('hello'));
@@ -883,50 +880,39 @@ describe('BINDING UNITS: RULE CONDITIONS AND INFERRED TYPES', () => {
   });
 
   test('`hasInferredType()` of a bound symbol declared `unknown`', () => {
-    for (const flag of [true, false]) {
-      const ce = new ComputeEngine();
-      ce._bindingUnits = flag;
-      ce.declare('u', 'unknown');
-      expect([flag, hasInferredType(ce.box('u'))]).toEqual([flag, flag]);
-    }
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    expect(hasInferredType(ce.box('u'))).toBe(true);
   });
 
-  test('the setters of a wildcard give the same result with each flag', () => {
-    const results = [true, false].map((flag) => {
-      const ce = new ComputeEngine();
-      ce._bindingUnits = flag;
-      const outcome = (fn: () => void): string => {
-        try {
-          fn();
-          return 'ok';
-        } catch {
-          return 'throws';
-        }
-      };
-      const value = outcome(() => {
-        ce.box('_x').value = 3;
-      });
-      const type = outcome(() => {
-        ce.box('_y').type = 'integer';
-      });
-      return { value, type };
+  test('the setters of a wildcard', () => {
+    const ce = new ComputeEngine();
+    const outcome = (fn: () => void): string => {
+      try {
+        fn();
+        return 'ok';
+      } catch {
+        return 'throws';
+      }
+    };
+    const value = outcome(() => {
+      ce.box('_x').value = 3;
     });
-    expect(results[0]).toEqual(results[1]);
-    expect(results[0].value).toBe('ok');
+    const type = outcome(() => {
+      ce.box('_y').type = 'integer';
+    });
+    expect({ value, type }).toEqual({ value: 'ok', type: 'throws' });
   });
 });
 
 describe('BINDING UNITS: A HOST WRITE AFTER THE HOME SCOPE WAS POPPED', () => {
-  test('throws, as it does with the flag off', () => {
-    for (const flag of [false, true]) {
-      const ce = new ComputeEngine();
-      ce._bindingUnits = flag;
-      ce.pushScope();
-      const w = ce.box('w');
-      ce.popScope();
-      expect(() => {
-        (w as unknown as { value: unknown }).value = 3;
-      }).toThrow(/Unknown symbol/);
-    }
+  test('throws', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const w = ce.box('w');
+    ce.popScope();
+    expect(() => {
+      (w as unknown as { value: unknown }).value = 3;
+    }).toThrow(/Unknown symbol/);
   });
 });

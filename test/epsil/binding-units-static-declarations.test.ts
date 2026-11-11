@@ -3,16 +3,14 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 
-// With the engine flag `_bindingUnits`, boxing declares no name, so the Epsil
+// Boxing declares no name, so the Epsil
 // static check declares the names that a top-level assignment or declaration
 // binds, in its own scope, before it pins the signature of a function literal
 // (`declareStatementNames()`, src/epsil/static-diagnostics.ts; rule 10 of
 // docs/plans/2026-11-09-binding-units-slice-1-spec.md).
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 /** `[description, code]` of each static diagnostic of `source`. */

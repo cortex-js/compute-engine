@@ -5397,7 +5397,7 @@ function partialFromFunctionLiteral(
   // The body leaves its literal, as the value of a call does: a copy of a
   // free name of the body is the free name of the host
   // (`rebindBodyFreeNames()`).
-  return ce._bindingUnits ? rebindBodyFreeNames(value) : value;
+  return rebindBodyFreeNames(value);
 }
 
 /**

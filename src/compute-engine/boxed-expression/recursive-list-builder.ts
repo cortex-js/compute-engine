@@ -58,8 +58,8 @@ export function listRecursionPlan(
   // declaration gets an OPERATOR definition, which keeps the literal it
   // applies (`_lambdaLiteral`). Both are read at application time, so a
   // later assignment of another function to the symbol is seen.
-  // The binding is read with `readBinding()`: with the engine flag
-  // `_bindingUnits`, a self-call boxed before the assignment is bound to a
+  // The binding is read with `readBinding()`: a self-call boxed before the
+  // assignment is bound to a
   // forward-call reference, or is a free name, and reads the definition that
   // the name holds now.
   const isSelf = (expr: Expression): boolean => {

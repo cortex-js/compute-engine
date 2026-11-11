@@ -1683,16 +1683,6 @@ export interface IComputeEngine {
    * @internal */
   _debugBindings: boolean;
 
-  /** When true, boxing writes no definition: a name with no definition is a
-   * free name, and the requirements of the uses of a name with no explicit
-   * type go in the environment of the binding unit (`binding-unit.ts`).
-   * On by default. The flag is kept for one release, for a comparison of
-   * the two behaviors: set it to false right after the engine is made, or
-   * set the environment variable `CE_BINDING_UNITS` to `0`
-   * (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`, section 10).
-   * @internal */
-  _bindingUnits: boolean;
-
   /** When set, `implicitCompile()` tries the `numeric-kernel` profile of the
    * JavaScript target first, for the consumers in `consumers` (all of them
    * when it is absent), and uses the existing compiler when the profile
@@ -1712,9 +1702,8 @@ export interface IComputeEngine {
 
   /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
    * that starts now opens an environment of its own (rule 8 of
-   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the engine flag
-   * `_bindingUnits` is on, and no operation is in progress, or the
-   * operation in progress is an Epsil program (rule 10). An operation
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): no operation
+   * is in progress, or the operation in progress is an Epsil program (rule 10). An operation
    * nested in an operation that is not a program opens none: it reads and
    * writes in the environment of the operation that encloses it, so the
    * symbols of its result read the requirements that it wrote. In the
@@ -1737,24 +1726,23 @@ export interface IComputeEngine {
    * @internal */
   _withOperation<T>(input: unknown, fn: () => T): T;
 
-  /** With the engine flag `_bindingUnits`: give the asynchronous
+  /** Give the asynchronous
    * evaluation `evaluation`, which starts now on `input`, its operation
    * environment (`AsyncEvaluation.operation`), when it has none: a new
    * environment when an operation starts now (`_opensOperation()`), else
    * the environment in progress (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Each synchronous
    * part of the evaluation puts it in place (`runWithEvaluationEffects()`,
-   * `effects-registry.ts`). Without the flag, nothing.
+   * `effects-registry.ts`).
    * @internal */
   _captureAsyncOperation(
     evaluation: { operation?: unknown },
     input: unknown
   ): void;
 
-  /** With the engine flag `_bindingUnits`: run `fn`, an Epsil run or an
+  /** Run `fn`, an Epsil run or an
    * Epsil static check, in a program environment (rule 10). Every outermost
    * boxing during `fn` joins it. The environment is discarded at the end.
-   * Without the flag, `fn()`.
    * @internal */
   _withProgramEnvironment<T>(fn: () => T): T;
 

@@ -2,15 +2,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
 import { lowerMapSpine } from '../../src/compute-engine/library/map-lowering';
 
-// Defects that showed with the engine flag `_bindingUnits` on (phase E,
-// package C of docs/plans/2026-11-10-binding-units-phase-e-handoff.md). Each
-// test turns the flag on for its own engine. The rules are those of
-// docs/plans/2026-11-09-binding-units-slice-1-spec.md.
+// Defects of binding units (phase E, package C of
+// docs/plans/2026-11-10-binding-units-phase-e-handoff.md). The rules are
+// those of docs/plans/2026-11-09-binding-units-slice-1-spec.md.
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 describe('BINDING UNITS: an assumption declares the names it constrains (rule 12)', () => {
@@ -192,11 +189,9 @@ describe('BINDING UNITS: a free name that is assigned a collection later', () =>
 });
 
 describe('The type of a derivative does not keep the range of its body', () => {
-  // This does not depend on the flag: `Abs(x)` is `real<0..>`, and its
-  // derivative is `-1` for a negative `x`.
-  test.each([false, true])('D(Abs(x), x), flag %s', (flag) => {
+  // `Abs(x)` is `real<0..>`, and its derivative is `-1` for a negative `x`.
+  test('D(Abs(x), x)', () => {
     const ce = new ComputeEngine();
-    ce._bindingUnits = flag;
     ce.declare('x', 'real');
     const d = ce.box(['D', ['Abs', 'x'], 'x']);
     expect(d.type.toString()).not.toContain('<0..>');

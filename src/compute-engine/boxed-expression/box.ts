@@ -459,11 +459,11 @@ export function boxFunction(
   // A construction that starts here starts at the root of the JS stack too,
   // so the nesting counter starts over (see `boxingDepth`).
   boxingDepth = 0;
-  // With the engine flag `_bindingUnits`, a call with a boxed operand is not
+  // A call with a boxed operand is not
   // a new binding unit: the symbols that it makes take the environment of
   // its first boxed operand (`binding-unit.ts`). A call whose operands are
   // all raw is a unit, with an environment of its own.
-  const env = ce._bindingUnits ? unitEnvironmentOfOperands(ops) : undefined;
+  const env = unitEnvironmentOfOperands(ops);
   if (env !== undefined)
     return withDevolveRepair(ce, options?.scope, () => {
       ce._boxingState.setUnitEnvironment(env);
@@ -1517,21 +1517,19 @@ function withDevolveRepair(
       }
       return false;
     },
-    // With the engine flag `_bindingUnits` only: the scope of these chains
+    // The scope of these chains
     // whose bindings hold the definition `def` under `name`
     // (`BoxedSymbol._unitWriteScope()`).
-    ce._bindingUnits
-      ? (name, def) => {
-          for (const base of bases) {
-            let cur: Scope | null | undefined = base;
-            while (cur) {
-              if (cur.bindings.get(name) === def) return cur;
-              cur = cur.parent;
-            }
-          }
-          return undefined;
+    (name, def) => {
+      for (const base of bases) {
+        let cur: Scope | null | undefined = base;
+        while (cur) {
+          if (cur.bindings.get(name) === def) return cur;
+          cur = cur.parent;
         }
-      : undefined
+      }
+      return undefined;
+    }
   );
 }
 
@@ -3356,7 +3354,7 @@ function makeCanonicalFunctionCore(
       let autoScope = ce.context.lexicalScope;
       while (autoScope.noAutoDeclare && autoScope.parent)
         autoScope = autoScope.parent;
-      // With the engine flag `_bindingUnits`, boxing declares no name: the
+      // Boxing declares no name: the
       // `function` reading of the head is a requirement on the free name
       // in the environment of the unit (`binding-unit.ts`), and the head
       // is resolved when the call is evaluated. A scope that the boxing
@@ -3364,11 +3362,8 @@ function makeCanonicalFunctionCore(
       // literal, still get the declaration below. The home scope of the
       // free head skips the scope of a binder also when the call is boxed
       // outside the canonicalization of the binder (`freeNameHomeScope()`).
-      const homeScope = ce._bindingUnits
-        ? freeNameHomeScope(autoScope)
-        : autoScope;
+      const homeScope = freeNameHomeScope(autoScope);
       if (
-        ce._bindingUnits &&
         !ce._isShadowedParameter(name) &&
         ce.lookupDefinition(name) === undefined &&
         ce._boxingState.isPersistentScope(homeScope) !== false

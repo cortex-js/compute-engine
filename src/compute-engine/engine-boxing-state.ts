@@ -28,8 +28,7 @@ export class EngineBoxingState<Scope extends object> {
   private _rootActive = false;
 
   /**
-   * The operations in progress, innermost last, with the engine flag
-   * `_bindingUnits` only (rule 8 of
+   * The operations in progress, innermost last (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The bottom can
    * be the environment of an Epsil program (rule 10). A symbol made while an
    * operation is in progress belongs to the innermost one, a boxing that
@@ -52,8 +51,8 @@ export class EngineBoxingState<Scope extends object> {
 
   /**
    * The environments of the trials in progress, innermost last (rule 13 of
-   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), with the engine
-   * flag `_bindingUnits` only. A trial is a computation whose writes are not
+   * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). A trial is a
+   * computation whose writes are not
    * kept: the admission of an arm of an overloaded operator
    * (`validate.ts`). Every requirement written during a trial goes in its
    * environment, and a read takes the entry of that environment first. The
@@ -158,8 +157,8 @@ export class EngineBoxingState<Scope extends object> {
 
   /**
    * The environment of the binding unit of the root construction in
-   * progress (`binding-unit.ts`), used only when the engine flag
-   * `_bindingUnits` is true. Made at the first request. It is cleared at the
+   * progress (`binding-unit.ts`). Made at the first request. It is cleared at
+   * the
    * start of each build pass of the root, because a rebuild boxes every
    * occurrence again. A construction that continues the unit of an operand
    * sets it instead (`setUnitEnvironment()`).
@@ -182,7 +181,7 @@ export class EngineBoxingState<Scope extends object> {
    * The value definitions that the root construction in progress made (a
    * parameter of a function literal, the index of a `Sum`, a local of a
    * block, the declaration of a free name of the body of a function literal
-   * in an outer scope), with the engine flag `_bindingUnits` only. A use of
+   * in an outer scope). A use of
    * such a definition narrows it when the definition is in a scope that the
    * construction created; when it is in a scope that existed before the
    * construction, the use writes its requirement in the environment of the
@@ -194,15 +193,14 @@ export class EngineBoxingState<Scope extends object> {
 
   /**
    * The free names of the active root construction that are the outer
-   * binding of a free symbol of a binder body, with their home scope, with
-   * the engine flag `_bindingUnits` only (`noteOuterFreeName()`). Kept
-   * across the build passes of the root, as the outer declaration that it
-   * replaces is, and cleared when the root construction ends.
+   * binding of a free symbol of a binder body, with their home scope
+   * (`noteOuterFreeName()`). Kept across the build passes of the root, and
+   * cleared when the root construction ends.
    */
   private _outerFreeNames: Map<string, Scope> | null = null;
 
   /**
-   * With the engine flag `_bindingUnits`, for the active root construction:
+   * For the active root construction:
    * the names whose use in a binder body wrote a requirement on the free
    * name of a persistent scope, with that scope (`noteOuterFreeName()`),
    * and the free names that the construction made in a persistent scope
@@ -396,11 +394,11 @@ export class EngineBoxingState<Scope extends object> {
   }
 
   /**
-   * With the engine flag `_bindingUnits`: the use of a free symbol of a
+   * The use of a free symbol of a
    * binder body, which the running construction auto-declared into a scope
    * of its own making, wrote its requirement on the free name `name` of the
-   * persistent scope `home`, in place of the outer declaration that
-   * `noteDeclarationIn()` sees without the flag.
+   * persistent scope `home`, in place of an outer declaration that
+   * `noteDeclarationIn()` sees.
    *
    * When the construction also made a free name `name` outside the body
    * (`noteRootFreeName()`: the point `a` of
@@ -421,7 +419,7 @@ export class EngineBoxingState<Scope extends object> {
     this._mergeOuterFreeName(name);
   }
 
-  /** With the engine flag `_bindingUnits`: the active root construction
+  /** The active root construction
    * made the free name `name` in a persistent scope (see
    * `noteOuterFreeName()`). */
   noteRootFreeName(name: string): void {

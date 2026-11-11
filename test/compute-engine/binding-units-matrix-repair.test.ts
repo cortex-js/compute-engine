@@ -3,16 +3,14 @@ import type { Expression } from '../../src/compute-engine';
 import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
 // The fresh-matrix repair (`repairFreshMatrixInference()`, `validate.ts`)
-// with the engine flag `_bindingUnits` on: the repair replaces the entry of
+// replaces the entry of
 // the unit environment of a name that has no explicit type (rules 1, 2, 4, 6
 // and 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), not its
 // definition. The type of each occurrence of the result reads the repaired
 // entry.
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 const typeOf = (expr: Expression) => expr.type.toString();

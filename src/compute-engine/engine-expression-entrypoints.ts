@@ -342,7 +342,7 @@ export function createSymbolExpression(
   let autoScope = engine.context.lexicalScope;
   while (autoScope.noAutoDeclare && autoScope.parent)
     autoScope = autoScope.parent;
-  // With the engine flag `_bindingUnits`, boxing declares no name
+  // Boxing declares no name
   // (`binding-unit.ts`): a name with no definition is a free name, a
   // canonical symbol with no definition, whose home scope is the scope that
   // the declaration below would go in. This applies to a scope that existed
@@ -351,23 +351,20 @@ export function createSymbolExpression(
   // the declaration below. The home scope skips the scope of a binder also
   // when the name is boxed outside the canonicalization of the binder
   // (`freeNameHomeScope()`).
-  if (engine._bindingUnits) {
-    const homeScope = freeNameHomeScope(autoScope);
-    if (engine._boxingState.isPersistentScope(homeScope) !== false) {
-      engine._boxingState.noteRootFreeName(name);
-      return new BoxedSymbol(engine, name, { metadata, homeScope });
-    }
-    // In a scope that the boxing made, a name that the construction took as
-    // the free name of an enclosing persistent scope (a free symbol of a
-    // binder body that is also a free name outside the body,
-    // `EngineBoxingState.noteOuterFreeName()`) is that free name, as it
-    // reads the outer declaration without the flag.
-    const home = engine._boxingState.outerFreeNameHome(name);
-    if (home !== undefined) {
-      for (let s: typeof autoScope | null = autoScope; s; s = s.parent)
-        if (s === home)
-          return new BoxedSymbol(engine, name, { metadata, homeScope: home });
-    }
+  const homeScope = freeNameHomeScope(autoScope);
+  if (engine._boxingState.isPersistentScope(homeScope) !== false) {
+    engine._boxingState.noteRootFreeName(name);
+    return new BoxedSymbol(engine, name, { metadata, homeScope });
+  }
+  // In a scope that the boxing made, a name that the construction took as
+  // the free name of an enclosing persistent scope (a free symbol of a
+  // binder body that is also a free name outside the body,
+  // `EngineBoxingState.noteOuterFreeName()`) is that free name.
+  const home = engine._boxingState.outerFreeNameHome(name);
+  if (home !== undefined) {
+    for (let s: typeof autoScope | null = autoScope; s; s = s.parent)
+      if (s === home)
+        return new BoxedSymbol(engine, name, { metadata, homeScope: home });
   }
   def = engine._declareSymbolValue(
     name,
@@ -391,7 +388,7 @@ export function createSymbolExpression(
   if (engine._boxingState.isPersistentScope(autoScope) === false) {
     engine._boxingState.noteTransientAutoDeclare(name);
     markFreeSymbolDeclaration(def);
-    if (engine._bindingUnits && isValueDef(def))
+    if (isValueDef(def))
       markBodyFreeName(
         def.value,
         bodyFreeNameHomeScope(engine, name, autoScope)
@@ -413,7 +410,7 @@ export function createSymbolExpression(
 }
 
 /**
- * With the engine flag `_bindingUnits`: the home scope of the free name
+ * The home scope of the free name
  * `name` whose copy a boxing declares in `autoScope`, a scope that the
  * boxing made (the body of a function literal). It is the home scope that
  * the name would have if it were boxed in the first persistent scope up the

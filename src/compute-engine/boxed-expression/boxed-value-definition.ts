@@ -518,9 +518,9 @@ export class _BoxedValueDefinition
   ) {
     this._engine = ce;
     this.name = name;
-    // With the engine flag `_bindingUnits`, a definition made during a
-    // boxing is narrowed by the uses of that boxing (`binding-unit.ts`).
-    if (ce._bindingUnits) ce._boxingState.noteDefinitionMade(this);
+    // A definition made during a boxing is narrowed by the uses of that
+    // boxing (`binding-unit.ts`).
+    ce._boxingState.noteDefinitionMade(this);
     // The whole constructor is a type WRITE: the `declare(name, { value })`
     // route derives `_type` from the value it is handed, and that derived type
     // is a contract the next `forget()` must not falsify. Running the body

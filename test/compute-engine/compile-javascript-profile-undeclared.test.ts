@@ -386,7 +386,7 @@ describe('the strict mode', () => {
   });
 
   test('an assumption gives the name the type that it writes', () => {
-    // `n` is assumed an integer: with `_bindingUnits` on, the type that the
+    // `n` is assumed an integer: the type that the
     // assumption wrote is read as a declared type, so `n` is not listed in
     // `defaultedSymbols`. The profile keeps `Floor(n)`; the existing
     // compiler writes `_.n`. The two differ only for a value outside the
@@ -483,21 +483,10 @@ describe('declarations and conflicts', () => {
     }
   });
 
-  test('a name declared unknown declines (with the engine flag _bindingUnits off)', () => {
-    // With `_bindingUnits` on, a definition declared `unknown` counts as one
-    // with no declared type (`hasInferredType()`), so this test holds only
-    // with the flag off. With the flag off, a use that narrows the type
-    // (`Sin(w)`) makes the type of the definition inferred, and the name
-    // then takes the default type: the forms here do not narrow it.
-    const ce = engine();
-    ce._bindingUnits = false;
-    ce.declare('w', 'unknown');
-    for (const json of ['w', ['Less', 'w', 1]] as MathJsonExpression[])
-      expect(profile(ce.expr(json), 'strict')).toEqual({
-        message: expect.stringMatching(/unsupported binding w/),
-      });
+  test('a parameter typed unknown is the parameter', () => {
     // A parameter `Typed(x, 'unknown')` is the parameter `x`: the canonical
     // form of the `Function` literal drops the declaration.
+    const ce = engine();
     const fn = ce.expr(['Function', ['Sin', 'x'], typed('x', 'unknown')]);
     expect(fn.ops![1].toString()).toBe('x');
     expect(profile(fn, 'strict')).toMatchObject({ result: { defaultedSymbols: ['x'] } });
@@ -610,10 +599,9 @@ describe('the field defaultedSymbols', () => {
   });
 });
 
-describe('the engine flag _bindingUnits', () => {
+describe('a free symbol', () => {
   test('an undeclared free symbol takes the default type under the profile', () => {
     const ce = engine();
-    ce._bindingUnits = true;
     const expr = ce.expr(['Sin', 'x']);
     const got = profile(expr, 'strict');
     if (!('result' in got)) throw new Error(got.message);

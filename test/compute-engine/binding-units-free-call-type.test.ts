@@ -1,18 +1,15 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { isFreeCallHead } from '../../src/compute-engine/boxed-expression/type-guards';
 
-// Slice 1 of binding units, with the engine flag `_bindingUnits` on: a call
+// Slice 1 of binding units: a call
 // whose head has no definition (a free call head, `isFreeCallHead()`) reads
 // the `function` reading of its unit (rule 2 of
 // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Its type and its
-// broadcast behavior are those of the call when the flag is off, where the
-// boxing declares the head with the inferred type `function`: the result is
-// `unknown`, lifted over a collection operand.
+// broadcast behavior are those of a call of a head with the inferred type
+// `function`: the result is `unknown`, lifted over a collection operand.
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 function withList(): ComputeEngine {

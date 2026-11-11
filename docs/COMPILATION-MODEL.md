@@ -2073,9 +2073,7 @@ real in both modes and is not in `defaultedSymbols`, and after
 name, or calls
 `ce.infer()` before `compile()`. A type that boxing writes on a parameter
 of a `Function` literal or on a local of the program is not read, so the
-kind of a name never depends on what was boxed before. With the engine
-flag `_bindingUnits` off (`CE_BINDING_UNITS=0`), boxing writes inferred
-types on the host's scopes too, and the profile reads no inferred type.
+kind of a name never depends on what was boxed before.
 The host supplies a scalar number for a name with no declared type; a
 value of another shape is outside its type. The result,
 and the positive answer of `canCompile()`, list these names in

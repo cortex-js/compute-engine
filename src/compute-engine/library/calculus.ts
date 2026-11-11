@@ -5514,8 +5514,8 @@ type DerivativeRecord = {
 };
 
 /** A differentiation variable of a `D` node, the definition it is bound to
- * and its type, as a string. With the engine flag `_bindingUnits`, also its
- * type before the differentiation (`withDerivativeMemo()`). */
+ * and its type, as a string, and its type before the differentiation
+ * (`withDerivativeMemo()`). */
 type VariableStamp = [
   node: Expression,
   def: object | undefined,
@@ -5536,9 +5536,8 @@ function variableStamps(expr: Expression): VariableStamp[] {
  * when it has the same definition there. */
 function withTypesBefore(
   after: VariableStamp[],
-  before: VariableStamp[] | undefined
+  before: VariableStamp[]
 ): VariableStamp[] {
-  if (before === undefined) return after;
   return after.map((stamp, i) =>
     before[i]?.[1] === stamp[1]
       ? [stamp[0], stamp[1], stamp[2], before[i][2]]
@@ -5693,15 +5692,13 @@ function withDerivativeMemo(
   const guard = beginStoreGuard();
   const rewritesBefore = ownBindingRewriteCount();
   const keyUsesBefore = derivativeKeyUseCount();
-  // With the engine flag `_bindingUnits`, the attempt writes the
+  // The attempt writes the
   // requirements on the variables in the environment of the operation. A
   // later check in the same operation reads the types that the attempt left,
   // and a check in the next operation, whose environment does not have these
   // writes, reads the types that the attempt started from: the record keeps
   // both (`variableStampsValid()`).
-  const variablesBefore = ce._bindingUnits
-    ? variableStamps(expression)
-    : undefined;
+  const variablesBefore = variableStamps(expression);
   beginObjectDeps();
   let objectDeps: ObjectDeps | undefined;
   let result: Expression | undefined;
@@ -5714,7 +5711,7 @@ function withDerivativeMemo(
   // types of the variables (`variablesBefore` above): an entry of the
   // environment of the operation that the attempt wrote is the state that
   // the attempt leaves.
-  if (ce._bindingUnits) stampObjectDepsAtEnd(objectDeps);
+  stampObjectDepsAtEnd(objectDeps);
   if (
     (result !== undefined && !result.isValid) ||
     !guard.allowsStore() ||
@@ -8247,7 +8244,7 @@ volumes
             // `x·k²` whose `k` is not the global `k`. The renamed integrand
             // holds the body of `g`: its free `x` is the free name of the
             // host (`rebindBodyFreeNames()`).
-            if (ce._bindingUnits) value = rebindBodyFreeNames(value);
+            value = rebindBodyFreeNames(value);
             return rebindIntegralResult(
               ce,
               value,
@@ -10181,7 +10178,7 @@ volumes
             // is the free name of the host (`rebindBodyFreeNames()`), the
             // binding of the same name in a function that the body calls.
             const symbolic = symbolicLimit(
-              engine._bindingUnits ? rebindBodyFreeNames(f.op1, true) : f.op1,
+              rebindBodyFreeNames(f.op1, true),
               varName,
               x,
               direction,

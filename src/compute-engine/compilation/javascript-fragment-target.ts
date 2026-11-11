@@ -10445,7 +10445,7 @@ function structuredRegistry(
  * (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md, "Names with no
  * declared type").
  *
- * With the engine flag `_bindingUnits` (the default), boxing writes no
+ * Boxing writes no
  * inferred type on a definition of the host's scopes: such a definition
  * holds an inferred type only because the host called `ce.infer()`,
  * `ce.assume()` or `ce.assign()`, or evaluated an assignment. A symbol whose
@@ -10455,9 +10455,7 @@ function structuredRegistry(
  * the type of its occurrence, which the existing compiler reads too. The
  * definition of a parameter or of a local of the program is not that
  * definition, and boxing still narrows its type: such a name has no
- * declared type. Without the flag, boxing narrows the inferred type of
- * every name each time an expression that uses it is boxed, so the type is
- * never read: a rule that read it would depend on what was boxed before.
+ * declared type.
  *
  * The first test is `hasInferredType()` (`type-guards.ts`), which follows
  * the storage of bindings and of inferred types; every rule of the profile
@@ -10465,7 +10463,6 @@ function structuredRegistry(
  */
 export function hasNoDeclaredType(symbol: Expression): boolean {
   if (!isSymbol(symbol) || !hasInferredType(symbol)) return false;
-  if (!symbol.engine._bindingUnits) return true;
   const definition = resolvedValueDefinition(symbol);
   if (definition === undefined || definition.type.isUnknown) return true;
   const ambient = symbol.engine.lookupDefinition(symbol.symbol);

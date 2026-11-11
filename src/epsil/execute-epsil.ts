@@ -169,7 +169,7 @@ export function executeEpsil(
   source: string,
   options?: ExecuteEpsilOptions
 ): ExecuteEpsilResult {
-  // With the engine flag `_bindingUnits`, the run has one program
+  // The run has one program
   // environment (rule 10 of
   // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): each statement
   // is boxed in it, and its evaluation by this driver writes in it, so a
@@ -241,17 +241,18 @@ export async function executeEpsilAsync(
   // closed the span since).
   const runFrame = ce._deadlineFrame;
   let outsideFrame = runFrame;
-  // With the engine flag `_bindingUnits`, the program environment of the run
+  // The program environment of the run
   // (rule 10 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
   // `executeEpsil()`). It is put in place for each synchronous part of the
   // run, and never across an `await`: other work can run on the engine
   // then. The evaluation of a statement captures it when it starts
   // (`AsyncEvaluation.operation`).
-  const program = ce._bindingUnits
-    ? UnitEnvironment.forOperation(undefined, ce.context?.lexicalScope)
-    : undefined;
+  const program = UnitEnvironment.forOperation(
+    undefined,
+    ce.context?.lexicalScope
+  );
   const inProgram = <T>(fn: () => T): T =>
-    program === undefined ? fn() : ce._boxingState.withOperation(program, fn);
+    ce._boxingState.withOperation(program, fn);
   // The frame outside the run is put back on every exit, an exception
   // included: the span around the call has closed, and its frame must not
   // stay on the engine.

@@ -103,7 +103,7 @@ export function sameBinding(
   const ea = boundA?.get(a.symbol);
   const eb = boundB?.get(b.symbol);
   // The copy of a free name in the scope of the body of a function literal
-  // (`markBodyFreeName()`, with the engine flag `_bindingUnits`) stands for
+  // (`markBodyFreeName()`) stands for
   // the outer name: when the name resolves to a definition, the copy reads
   // it, as a free name does, and is not the variable of the body's scope.
   const ra = bodyCopyReading(a);

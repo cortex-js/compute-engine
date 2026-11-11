@@ -75,7 +75,7 @@ import { isDictionary, isFunction, isString, sym } from './type-guards.js';
  * to the callable axis when `_effects` was re-keyed
  * (`docs/EFFECTS-MODEL.md` §6).
  *
- * With the engine flag `_bindingUnits`, a name can have no definition when
+ * A name can have no definition when
  * it is read (a free name: boxing declares nothing), and a later declaration
  * of it advances no axis. Each by-name lookup of this walk then goes through
  * {@link lookupByName}, which records the name and the definition it
@@ -96,13 +96,12 @@ export type EffectsLookups = Map<
   ReturnType<ComputeEngine['lookupDefinition']>
 >;
 
-/** With the engine flag `_bindingUnits`: one lookup record for each effects
- * computation in progress, the innermost last. Always empty without the
- * flag. */
+/** One lookup record for each effects
+ * computation in progress, the innermost last. */
 const _effectsLookupStack: EffectsLookups[] = [];
 
 /** The definition `name` resolves to in the current context, as
- * `ce.lookupDefinition()` gives it. With the engine flag `_bindingUnits`, the
+ * `ce.lookupDefinition()` gives it. The
  * read is recorded in the lookup record of the innermost effects computation
  * (see the note above). */
 function lookupByName(
@@ -113,9 +112,8 @@ function lookupByName(
   // Only a name with no definition is recorded: its first declaration moves
   // no version that the memo is keyed on. A change of an existing
   // definition, or a declaration that hides it in another scope, changes
-  // the key of the memo (the callable version, the lexical scope), as
-  // without the flag.
-  if (def === undefined && ce._bindingUnits) {
+  // the key of the memo (the callable version, the lexical scope).
+  if (def === undefined) {
     const top = _effectsLookupStack[_effectsLookupStack.length - 1];
     if (top !== undefined && !top.has(name)) top.set(name, def);
   }
@@ -123,8 +121,7 @@ function lookupByName(
 }
 
 /** Start the lookup record of an effects computation. MUST be paired with
- * exactly one {@link endEffectsLookups}, in a `finally`. Called only with
- * the engine flag `_bindingUnits`. */
+ * exactly one {@link endEffectsLookups}, in a `finally`. */
 export function beginEffectsLookups(): void {
   _effectsLookupStack.push(new Map());
 }
@@ -204,7 +201,7 @@ export function effectsOf(expr: Expression): ComputedEffects {
  * same two keys as the `_effects` memo of `BoxedFunction`: the engine's
  * `_callableVersion` and the ambient lexical scope. A dictionary is
  * immutable, so only what its values resolve to can change, and those stamps
- * track exactly that. With the engine flag `_bindingUnits`, the entry also
+ * track exactly that. The entry also
  * keeps the lookup record of its computation (`deps`, see
  * {@link lookupByName}), as the `_effects` memo does.
  *
@@ -235,8 +232,7 @@ function dictionaryEffects(
 
   const stepsBefore = releaseSteps;
   let effects: ComputedEffects = undefined;
-  const collect = ce._bindingUnits;
-  if (collect) beginEffectsLookups();
+  beginEffectsLookups();
   let deps: EffectsLookups | undefined;
   try {
     for (const value of dict.values) {
@@ -245,7 +241,7 @@ function dictionaryEffects(
       effects = unionComputedEffects(effects, effectsOf(value));
     }
   } finally {
-    if (collect) deps = endEffectsLookups();
+    deps = endEffectsLookups();
   }
   if (releaseSteps === stepsBefore)
     dictionaryEffectsMemo.set(dict, { callable, scope, value: effects, deps });
@@ -376,7 +372,7 @@ export function applicationEffects(expr: Expression): ComputedEffects {
   // discharged, and `protocol-property-effects.test.ts` pins it directly
   // ("a node read BEFORE its receiver was typed re-reports afterwards") so that
   // narrowing the selector fails a test instead of silently freezing a label.
-  // With the engine flag `_bindingUnits`, the receiver can be a free name
+  // The receiver can be a free name
   // with no definition, and its first declaration advances no axis: the read
   // of the receiver is then recorded (`lookupByName()`), and the memo depends
   // on it.

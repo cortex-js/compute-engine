@@ -1631,9 +1631,9 @@ export function isUntypedFreeInput(
   if (expr.engine._getSymbolValue(expr.symbol) !== undefined) return false;
   const current = expr.engine.lookupDefinition(expr.symbol);
   const definition = isValueDef(current) ? current.value : expr.valueDefinition;
-  // A free name (`isFreeName()`, engine flag `_bindingUnits`) that resolves
+  // A free name (`isFreeName()`) that resolves
   // to no definition is an undeclared name, as a name with an inferred
-  // definition is with the flag off.
+  // definition is.
   if (definition === undefined && current === undefined && isFreeName(expr))
     return true;
   return definition?.inferredType === true;

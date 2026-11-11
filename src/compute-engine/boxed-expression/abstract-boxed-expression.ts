@@ -1100,8 +1100,7 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   isEqual(other: number | Expression): boolean | undefined {
-    // An operation runs in an operation environment of its own, with the
-    // engine flag `_bindingUnits` (rule 8 of
+    // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))

@@ -33,7 +33,6 @@ import type { Scope } from './types-kernel-evaluation.js';
  * (`readUnitEntry()`), and computes its value again when the same read finds
  * another entry.
  *
- * This mechanism is active only when the engine flag `_bindingUnits` is true.
  * The plan is `docs/plans/2026-11-09-binding-units-slice-1-spec.md`.
  */
 export class UnitEnvironment {
@@ -435,9 +434,7 @@ export class UnitEnvironment {
    * True when the unit reads `name`, a name of a library operator, as a
    * variable in the scope `scope` (`N` in `N + 1`). The resolution of a free
    * name of this unit then skips the library operator
-   * (`freeNameBindingInContext()`). Without the engine flag `_bindingUnits`,
-   * the boxing declares a variable that shadows the library operator
-   * instead (`devolveUnappliedOperator()`, `validate.ts`).
+   * (`freeNameBindingInContext()`).
    */
   readsAsVariable(scope: object, name: string): boolean {
     if (!variableReadingNames.has(name)) return false;

@@ -11513,12 +11513,10 @@ function makeLambda(
 
       // The value leaves the call: a copy of a free name of the body is the
       // free name of the host (`rebindBodyFreeNames()`).
-      if (ce._bindingUnits) {
-        const unrebound = result;
-        result = rebindBodyFreeNames(result);
-        if (viewsMade && result !== unrebound)
-          carryLazyViewContexts(unrebound, result);
-      }
+      const unrebound = result;
+      result = rebindBodyFreeNames(result);
+      if (viewsMade && result !== unrebound)
+        carryLazyViewContexts(unrebound, result);
 
       // Honor a numeric-approximation request (`N(f(2))`) by approximating
       // the (exactly-evaluated) result HERE, while the function's scope

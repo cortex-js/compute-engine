@@ -712,8 +712,7 @@ export function declareSymbolValue(
     callable: defIsCallableShaped(boxedDef),
     shadowsCallable,
     ...(changesBinding ? { changesFrameBinding: true } : {}),
-    ...(ce._bindingUnits &&
-    isValueDef(boxedDef) &&
+    ...(isValueDef(boxedDef) &&
     boxedDef.value.storedValue !== undefined &&
     freeNameWasMade(ce, name) &&
     !isPendingCallScope(scope)
@@ -927,9 +926,7 @@ export function declareSymbolOperator(
     ...(changesBinding ? { changesFrameBinding: true } : {}),
     // A call boxed before this declaration (a free call head) applies the
     // function from now on: see `installsValue`.
-    ...(ce._bindingUnits &&
-    freeNameWasMade(ce, name) &&
-    !isPendingCallScope(scope)
+    ...(freeNameWasMade(ce, name) && !isPendingCallScope(scope)
       ? { installsValue: true }
       : {}),
     // Same resolved-scope test as `declareSymbolValue` above: the two routes
@@ -4306,20 +4303,14 @@ export function withValuesFn<T>(
       );
     let record = ce.lookupDefinition(name);
     if (record === undefined) {
-      if (ce._bindingUnits) {
-        // Boxing declares no name (a free name), so the name is declared
-        // here, in the scope that the boxing of the name would have
-        // declared it in. The test of the bodies that apply the name comes
-        // first: the declaration could rewrite such a body.
-        if (hasProvisionalDependents(ce, name)) throw appliedByBody();
-        let scope = ce.context.lexicalScope;
-        while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
-        ce._declareSymbolValue(
-          name,
-          { type: 'unknown', inferred: true },
-          scope
-        );
-      } else ce.symbol(name);
+      // Boxing declares no name (a free name), so the name is declared
+      // here, in the first scope up the chain that is not `noAutoDeclare`.
+      // The test of the bodies that apply the name comes first: the
+      // declaration could rewrite such a body.
+      if (hasProvisionalDependents(ce, name)) throw appliedByBody();
+      let scope = ce.context.lexicalScope;
+      while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
+      ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
       record = ce.lookupDefinition(name);
     }
     if (record === undefined || !isValueDef(record))

@@ -33,14 +33,13 @@ export type StateEvent =
        * `engine-declarations.ts`). See the `declare` case of
        * {@link axisMaskOf}. */
       parameter?: boolean;
-      /** With the engine flag `_bindingUnits`: the declaration gives a
+      /** The declaration gives a
        * value to a name that the engine made a free name for
        * (`ce.assign('ws', …)` for a name that was only boxed), outside the
        * parameter bindings of a call, or declares a function of that name.
        * A free name boxed before it reads that value from now on (a call
        * with a free head applies the function), so the declaration advances
-       * the `semantic` axis as a value write does. Without the flag, boxing
-       * declares the name, and the assignment is a value write. */
+       * the `semantic` axis as a value write does. */
       installsValue?: boolean;
       /** The declaration installs a value, or replaces a binding of the
        * name, in a scope that a frame on the evaluation stack reads

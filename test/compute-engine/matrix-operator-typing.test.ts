@@ -195,7 +195,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
 
   test('P2: prior numeric inference wins — invalid, A stays number', () => {
     const ce = new ComputeEngine();
-    // With the engine flag `_bindingUnits`, the inference of the earlier
+    // The inference of the earlier
     // expression is in its unit until `ce.infer()` commits it.
     const earlier = ce.box(['Add', 'A', 1]);
     earlier.evaluate();

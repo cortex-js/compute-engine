@@ -10,14 +10,11 @@ import {
   unitEnvironmentStamp,
 } from '../../src/compute-engine/binding-unit';
 
-// Phase C of slice 1 of binding units, with the engine flag `_bindingUnits`
-// on: rules 8 (operations), 9 (caches) and 10 (programs) of
+// Phase C of slice 1 of binding units: rules 8 (operations), 9 (caches) and 10 (programs) of
 // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`.
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 describe('BINDING UNITS: OPERATIONS', () => {
@@ -281,9 +278,8 @@ describe('BINDING UNITS: CACHES', () => {
   });
 
   test('the compiled probes of a limit are read from the cache', () => {
-    const compiles = (bindingUnits: boolean) => {
+    const compiles = () => {
       const ce = new ComputeEngine();
-      ce._bindingUnits = bindingUnits;
       const limit = ce.box([
         'Limit',
         ['Function', ['Divide', ['Ln', ['Ln', 'x']], ['Ln', 'x']], 'x'],
@@ -300,10 +296,9 @@ describe('BINDING UNITS: CACHES', () => {
     // Each evaluation builds its probe expressions again, and the probe
     // cache is keyed on the expression, so the second evaluation compiles
     // as many probes as the first. In one evaluation, the stamp of the
-    // environments (`unitEnvironmentStamp()`) causes no compilation that
-    // the flag off does not make: without the cache, there are 132.
-    const on = compiles(true);
-    expect(on).toEqual(compiles(false));
+    // environments (`unitEnvironmentStamp()`) causes no extra compilation:
+    // without the cache, there are 132.
+    const on = compiles();
     expect(on[1]).toBe(on[0]);
     expect(on[0]).toBeLessThan(20);
   });
@@ -311,15 +306,12 @@ describe('BINDING UNITS: CACHES', () => {
   test('a probe of an expression with a free name is read from the cache', () => {
     // Here `x` is a free name, not a parameter: the dependency walk of the
     // probe cache tracks its resolution instead of refusing to cache.
-    const compiles = (bindingUnits: boolean) => {
-      const ce = new ComputeEngine();
-      ce._bindingUnits = bindingUnits;
-      const e = ce.parse('\\frac{\\ln(\\ln(x))}{\\ln(x)}');
-      const before = limitProbe.limitProbeCompileCount;
-      limitProbe.symbolicLimit(e, 'x', ce.PositiveInfinity, undefined, ce);
-      return limitProbe.limitProbeCompileCount - before;
-    };
-    expect(compiles(true)).toBe(compiles(false));
+    const ce = new ComputeEngine();
+    const e = ce.parse('\\frac{\\ln(\\ln(x))}{\\ln(x)}');
+    const before = limitProbe.limitProbeCompileCount;
+    limitProbe.symbolicLimit(e, 'x', ce.PositiveInfinity, undefined, ce);
+    // The count of a name with a definition (6 probes).
+    expect(limitProbe.limitProbeCompileCount - before).toBe(6);
   });
 
   test('the stamp of a probe moves at a write in the unit of a free name', () => {

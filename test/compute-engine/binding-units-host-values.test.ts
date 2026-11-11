@@ -2,16 +2,13 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-// Slice 1 of binding units, with the engine flag `_bindingUnits` on:
-// `ce.withValues()` for a name that boxing did not declare, the type that a
+// Slice 1 of binding units: `ce.withValues()` for a name that boxing did not declare, the type that a
 // definition records for a captured free symbol (CE-473), and the read of a
 // name declared `unknown` (rule 4 of
 // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
 
 function engine(): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce._bindingUnits = true;
-  return ce;
+  return new ComputeEngine();
 }
 
 function isTypeError(value: Expression): boolean {

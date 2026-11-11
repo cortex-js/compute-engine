@@ -632,7 +632,7 @@ export function staticDiagnostics(
     // The frame must nest inside ONE boxing-pass window; the per-statement
     // `ce.box()` windows then nest inside it.
     //
-    // With the engine flag `_bindingUnits`, the check has one program
+    // The check has one program
     // environment, as a run has (rule 10 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): each statement
     // is boxed in it, so a later statement reads what an earlier one
@@ -877,7 +877,7 @@ function applyAssignmentTypeEffect(
 }
 
 /**
- * With the engine flag `_bindingUnits`, the boxing of `x = …` or `let x = …`
+ * The boxing of `x = …` or `let x = …`
  * declares no name, and the evaluation of the statement, which declares `x`,
  * is not run by this pass. The pass declares the name here, inferred and of
  * type `unknown`, in its home scope: the scope that the pass pushed (rule 10
@@ -892,14 +892,12 @@ function applyAssignmentTypeEffect(
  * (home scope, name) of the free name. The pass calls this before it
  * registers the signature that the statement pins
  * (`registerPinnedSignature()`), so `f := (x: integer) => x` pins its
- * signature on the definition of `f`. Without the flag, the boxing of the
- * statement declares the name, and this does nothing.
+ * signature on the definition of `f`.
  */
 function declareStatementNames(
   ce: ComputeEngine,
   boxed: ReturnType<ComputeEngine['box']>
 ): void {
-  if (!ce._bindingUnits) return;
   if (!isFunction(boxed, 'Assign') && !isFunction(boxed, 'Declare')) return;
   const target = boxed.ops[0];
   const names = isFunction(target, 'Tuple')

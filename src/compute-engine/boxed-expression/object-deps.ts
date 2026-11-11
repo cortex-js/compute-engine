@@ -401,7 +401,7 @@ export function objectDepCollectorDepth(): number {
  * read again at the end (`VersionedObject._readAgainAtEnd`), whose version
  * is not a counter, the record keeps the version of the first read.
  * A set of a few entries is scanned. A larger one has an index
- * (`depIndexes`): with the engine flag `_bindingUnits`, each distinct name
+ * (`depIndexes`): each distinct name
  * that a computation reads is an object of its own (`binding-unit.ts`), and
  * a scan per read made the type of a product of 2 000 distinct symbols
  * quadratic. */
