@@ -148,6 +148,25 @@ Decided by the user, 2026-11-10 (package A):
    that would make them hit is not adopted (spec, "Phase E, package A").
    To revisit with measurements from Tycho's adoption.
 
+7. **The asynchronous memo of a lazy collection stores nothing when the
+   evaluation read an entry of an environment.** The test of
+   `test/compute-engine/lazy-collection-regimes.test.ts` (class DEF-STACK)
+   stays as it is in the code: package D changes its expectation. To
+   revisit with measurements from Tycho's adoption.
+8. **Decision 5: a free name does not count as declared** for
+   `first-assignment-in-branch` (the first option, which package B
+   recommends). `y = x + 1; if y > 0 { x = 2 }; x` gives the diagnostic.
+   Package D updates the test of `block-scope-shadowing`, which declares
+   `x` first.
+9. **Decision 4: none of (a) and (b).** The result of an outermost
+   operation does not keep the environment of the operation. A host that
+   compiles the result of a `subs()` over a symbol made before it calls
+   `ce.infer([result])` or declares the symbol first. Option (c), `FindFit`
+   and `FindRoot` as one operation, stays. This is a breaking change:
+   package D adds it to `CHANGELOG.md` and to the documents of spec
+   section 5, updates `evaluate-at-compile-derivative` ("an indefinite
+   integral at a symbol"), and names it in the message to Tycho.
+
 ## 5. The packages
 
 The counts are tests that fail with the flag on at `7e92c4b0f`. The test

@@ -712,7 +712,12 @@ reverse it.
   also in a statement of an Epsil program and in a direct call of
   `findFitAsync()`: the `subs()` calls that rebuild the model and the
   compilation of the result share its environment. Options (a) and (b) of
-  that decision are still open.
+  that decision are not adopted (user decision, 2026-11-10): the result of
+  an outermost operation does not keep the environment of the operation,
+  so a symbol made before the operation reads `unknown` in the result.
+  The host calls `ce.infer([result])` or declares the symbol before it
+  compiles the result of a `subs()`. This is one more breaking change of
+  section 5.
 - **Rule 4, the record of a derivative.** A cache of one expression keeps,
   for each read of an entry of an environment, what its first read found,
   and is valid when the same read finds it now. The record of a derivative
@@ -726,7 +731,9 @@ reverse it.
   this rule applied it to every cache; the review showed that a type cached
   before a write of its own computation was then served after the write,
   so it is limited to this record.
-- **Not done: the asynchronous memo of a lazy collection** refuses to store
+- **Decided by the user, 2026-11-10: the asynchronous memo of a lazy
+  collection** stays as follows, to revisit with measurements from Tycho's
+  adoption. It refuses to store
   a result when an entry of an environment was read
   (`test/compute-engine/lazy-collection-regimes.test.ts`, one test). A log
   of the reads that an `await` does not break was written and removed: both
