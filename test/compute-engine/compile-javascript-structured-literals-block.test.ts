@@ -832,14 +832,14 @@ describe('the causes of a refused parameter', () => {
       /the parameter b of the function has a default value, which is not in the structured route/,
     ],
     [
-      'a helper whose signature is declared and whose literal has no annotation',
+      'a helper whose signature is declared with a string parameter and whose literal has no annotation',
       () => {
         const ce = engine();
-        ce.declare('g', '(real) -> real');
-        ce.assign('g', ce.expr(['Function', ['Multiply', 't', 2], 't']));
-        return ce.expr(['Add', ['g', 'x'], 1]);
+        ce.declare('g', '(real, string) -> real');
+        ce.assign('g', ce.expr(['Function', ['Multiply', 't', 2], 't', 's']));
+        return ce.expr(['Add', ['g', 'x', "'a'"], 1]);
       },
-      /the parameter t of the helper g has no type annotation, and the helper has a declared signature/,
+      /the parameter s of the helper g has no type annotation, and the helper has a declared signature/,
     ],
   ];
   test.each(REFUSALS)('%s', (_name, make, message) => {

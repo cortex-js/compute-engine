@@ -261,6 +261,16 @@ export type IRArithmetic = OperationBase & {
  *   `round-ties-away` (the nearest integer, a tie away from zero:
  *   `-2.5` gives `-3`): a real operand and a real result whose value is an
  *   integer, `NaN` or infinite.
+ * - `acot`, `acsc`, `asec`, `acoth`, `asech` and `acsch`: the inverse
+ *   cotangent (in `(0, π)` for a real operand), cosecant, secant,
+ *   hyperbolic cotangent, secant and cosecant; `coth`, `sech` and `csch`:
+ *   the hyperbolic cotangent, secant and cosecant. As `asin`: the rule of
+ *   the target decides whether an occurrence with a real operand is real or
+ *   complex.
+ * - `factorial` (`x!`, `Γ(x + 1)` for a real `x` that is not an integer,
+ *   infinity for a negative integer), `factorial2` (the double factorial),
+ *   `trunc` (the integer part, toward zero) and `fract` (`x - floor(x)`): a
+ *   real operand and a real result.
  *
  * Only `abs` has an integer result, and only for an integer operand.
  */
@@ -297,7 +307,20 @@ export type UnaryFunctionName =
   | 'cospi'
   | 'tanpi'
   | 'ceil'
-  | 'round-ties-away';
+  | 'round-ties-away'
+  | 'acot'
+  | 'acsc'
+  | 'asec'
+  | 'acoth'
+  | 'asech'
+  | 'acsch'
+  | 'coth'
+  | 'sech'
+  | 'csch'
+  | 'factorial'
+  | 'factorial2'
+  | 'trunc'
+  | 'fract';
 
 /**
  * The functions of two operands that the representation names, by an
@@ -338,13 +361,23 @@ export type UnaryFunctionName =
  *   interpreter reads `1/n` as a rational with an odd denominator, and not
  *   a number otherwise; `real-pow(x, 1/n)` for every other `x`.
  *
+ * - `hypot(a, b)` is `√(a² + b²)`, infinity when an operand is infinite
+ *   (also with a `NaN` operand).
+ *
  * `abs-pow` and `signed-pow` are the real-root convention of the
  * interpreter for a constant exponent `e = p/q` with an odd `q` (`p` even
  * and `p` odd), decided when the program is made: the rule of the target
  * chooses one of them from the exponent.
  */
 export type BinaryFunctionName =
-  'atan2' | 'pow' | 'abs-pow' | 'signed-pow' | 'real-pow' | 'root' | 'complex';
+  | 'atan2'
+  | 'pow'
+  | 'abs-pow'
+  | 'signed-pow'
+  | 'real-pow'
+  | 'root'
+  | 'complex'
+  | 'hypot';
 
 /**
  * An application of a function of one operand (`unary`) or two operands
@@ -820,9 +853,11 @@ export type IRProgram = {
    *  (`IRHostCall`); absent when there is none. */
   readonly hosts?: readonly IRHostBinding[];
   readonly root: IRRegion;
-  /** The ids of the values that a local holds: a value that a `Declare` or
-   *  an `Assign` writes. The existing emitter writes such a value as the
-   *  name of its local, so a target that writes a literal operand as a
+  /** The ids of the values that a local holds, or that the existing
+   *  emitter writes as a variable: a value that a `Declare` or an `Assign`
+   *  writes, and the value of a block operand (`x + { b0 ⩴ 1; i }`, which
+   *  it writes as a called function). The existing emitter writes such a
+   *  value as a name, so a target that writes a literal operand as a
    *  constant (the parts of a complex sum, a term `0` that it drops) writes
    *  such a value as a value. Absent when there is none. No check reads it. */
   readonly localValues?: ReadonlySet<number>;

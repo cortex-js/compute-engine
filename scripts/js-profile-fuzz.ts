@@ -20,7 +20,9 @@
  * Each program is boxed with `ce.box()`, so it is canonical. The vocabulary
  * is the one of the tables of the profile (docs/COMPILATION-MODEL.md and
  * docs/plans/2026-11-09-js-pilot-emission-rewrites.md): arithmetic, the
- * functions, comparisons and `And`, `Or`, `Not`, `If`, `Which`, `Sum` and
+ * functions (also `Factorial`, `Arccot`, `Coth`, `Truncate`, `Fract`,
+ * `Hypot`, …), comparisons and chains of three or four operands (`Less`,
+ * `LessEqual`, `Equal`, `NotEqual`), and `And`, `Or`, `Not`, `If`, `Which`, `Sum` and
  * `Product` (bounds that are literals, captured numbers or clamped inputs),
  * `At` and `Length` of a list, `Comprehension` over a range, `ReplaceAt`,
  * literals (integers, floats, exact rationals, `Pi`, `ExponentialE`,
@@ -29,13 +31,14 @@
  * parameter declared `number` (`xn`, `nb`), an input declared
  * `nan | real | signed_infinity` (`ex`), an input whose type `real` was
  * written by `ce.infer()` (`xi`), boolean inputs and parameters, calls of user
- * functions with declared and inferred signatures (`HELPERS`), a `Block`
+ * functions with declared and inferred signatures (`HELPERS`; `fh` and `fo`
+ * have a declared signature and a parameter with no annotation), a `Block`
  * at the root and `Function` literals with typed parameters, with a body
  * of locals (a list local made by a `Comprehension`, a local `k0` that
  * holds 0, 1 or -1 in a complex sum or product), writes, `If`
  * statements and a `Loop` over a range with a `Break`; a `Block` in a
  * `Block`, block statements, a block of declarations as an operand
- * (`ValueBlock`), locals declared `unknown`, a first write to a name that
+ * (`ValueBlock`), locals declared `unknown` or `number`, a first write to a name that
  * no `Declare` declares (`t`), local functions (`lf`, declared `function`,
  * `unknown`, with a `let` or with `DefineFunction`, which read the names of
  * the body or not), and a helper declared `function` (`fq`). Collections
@@ -150,8 +153,8 @@
  * differences by shape; the disagreements with the interpreter by shape.
  * Progress goes to stderr, a line per 500 programs.
  *
- * Not generated yet: helpers with random bodies (the seven of `HELPERS` are
- * fixed), a helper that calls another, `Loop` bounds that are not
+ * Not generated yet: helpers with random bodies (the helpers of `HELPERS`
+ * are fixed), a helper that calls another, `Loop` bounds that are not
  * literals or `m`, `Continue`, a `Break` outside the last statement of a
  * branch, more than two real locals, nested `Function` literals, a
  * boolean result, `RandomChoice`, `RandomSample`, `RandomShuffle`
@@ -322,6 +325,13 @@ export function makeEngine(angularUnit: 'rad' | 'deg' = 'rad'): ComputeEngine {
   ce.declare('hq', '(real, real) -> real');
   ce.declare('ho', '(real) -> real');
   ce.declare('hm', '(real) -> real');
+  // `hd` is also a pure function of the engine: the existing compiler reads
+  // a call of it as pure (`isTransitivelyPure()`).
+  ce.declare('hd', '(real) -> real');
+  ce.assign(
+    'hd',
+    ce.expr(['Function', ['Multiply', 't', 2], ['Typed', 't', "'real'"]])
+  );
   return ce;
 }
 
@@ -329,14 +339,17 @@ export function makeEngine(angularUnit: 'rad' | 'deg' = 'rad'): ComputeEngine {
  * The options of the host of `--host`: `vu` and `vz` read other entries of
  * the vars object (`vu_`, `vz_`, which the runner sets to the values of
  * `vu` and `vz`), `vr` reads the host, `hp` is a function of the host
- * declared pure, `hq` one that is not, `hm` one that sets `x` of the vars
- * object of the call (`HOST_VARS`), and `ho` an `operators` entry. Each
- * read and call is logged in `HOST_LOG` (`hostCalls()`).
+ * declared pure, `hd` one declared pure whose name the engine also defines
+ * as a pure function, `hq` one that is not, `hm` one that sets `x` of the
+ * vars object of the call (`HOST_VARS`), and `ho` an `operators` entry.
+ * Each read and call is logged in `HOST_LOG` (`hostCalls()`), and so is
+ * each draw (`withStubbedRandom()`), so the log gives their order.
  */
 const HOST_OPTIONS = {
   vars: { vu: '_["vu_"]', vz: '_.vz_', vr: '__fuzzRead()' },
   functions: {
     hp: { source: '__fuzzPure', pure: true },
+    hd: { source: '__fuzzDefined', pure: true },
     hq: '__fuzzImpure',
     hm: '__fuzzMutate',
   },
@@ -353,6 +366,10 @@ hostGlobals.__fuzzRead = () => {
 hostGlobals.__fuzzPure = (t: number) => {
   HOST_LOG.push(`hp(${t})`);
   return t * t - 0.5;
+};
+hostGlobals.__fuzzDefined = (t: number) => {
+  HOST_LOG.push(`hd(${t})`);
+  return 2 * t;
 };
 hostGlobals.__fuzzImpure = (a: number, b: number) => {
   HOST_LOG.push(`hq(${a},${b})`);
@@ -385,6 +402,7 @@ function usesHost(json: Json): boolean {
   if (!Array.isArray(json)) return false;
   return (
     json[0] === 'hp' ||
+    json[0] === 'hd' ||
     json[0] === 'hq' ||
     json[0] === 'ho' ||
     json[0] === 'hm' ||
@@ -488,6 +506,24 @@ const HELPERS: readonly {
       ['Add', ['Multiply', 3, 'v'], ['Divide', 'v', ['Add', ['Multiply', 'v', 'v'], 2]]],
       'v',
     ],
+    arguments: ['real'],
+  },
+  {
+    // A declared signature and a parameter with no annotation: the
+    // parameter has the type of the signature.
+    name: 'fh',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['Add', ['Multiply', 'v', 'v'], ['Sqrt', ['Abs', 'v']]],
+      'v',
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fo',
+    signature: '(number) -> number',
+    definition: ['Function', ['Add', ['Sin', 'v'], ['Divide', 1, 'v']], 'v'],
     arguments: ['real'],
   },
   {
@@ -963,6 +999,19 @@ const UNARY = [
   'Ceil',
   'Round',
   'Sqrt',
+  'Factorial',
+  'Factorial2',
+  'Arccot',
+  'Arccsc',
+  'Arcsec',
+  'Arcoth',
+  'Arsech',
+  'Arcsch',
+  'Coth',
+  'Sech',
+  'Csch',
+  'Truncate',
+  'Fract',
 ];
 
 const EXPONENTS: readonly (readonly [Json | 'gen', number])[] = [
@@ -999,6 +1048,7 @@ type Head =
   | 'MinMax'
   | 'Mod'
   | 'Arctan2'
+  | 'Hypot'
   | 'LogBase'
   | 'If'
   | 'Which'
@@ -1022,6 +1072,7 @@ const HEADS: readonly (readonly [Head, number])[] = [
   ['MinMax', 3],
   ['Mod', 2],
   ['Arctan2', 1],
+  ['Hypot', 1],
   ['LogBase', 1],
   ['If', 3],
   ['Which', 2],
@@ -1052,6 +1103,7 @@ function genReal(ctx: GenContext, depth: number): Json {
   if (ctx.host && rng() < 0.08)
     return pick<() => Json>(rng, [
       () => ['hp', sub()],
+      () => ['hd', sub()],
       () => ['hq', sub(), sub()],
       () => ['ho', sub()],
       () => ['hm', sub()],
@@ -1104,6 +1156,8 @@ function genReal(ctx: GenContext, depth: number): Json {
       return ['Mod', sub(), rng() < 0.6 ? pick(rng, [2, 3, 1, 0.5]) : sub()];
     case 'Arctan2':
       return ['Arctan2', sub(), sub()];
+    case 'Hypot':
+      return ['Hypot', sub(), sub()];
     case 'LogBase':
       return [
         'Log',
@@ -1257,7 +1311,8 @@ function genValueBlock(ctx: GenContext, depth: number): Json {
     symbols: [...ctx.symbols, ...names.map((name): [Json, number] => [name, 30])],
   });
   const d = Math.min(depth + 1, ctx.maxDepth);
-  const type = (): Json => pick(rng, ["'real'", "'real'", "'unknown'"]);
+  const type = (): Json =>
+    pick(rng, ["'real'", "'real'", "'unknown'", "'number'"]);
   const statements: Json[] = [['Declare', first, type(), genReal(ctx, d)]];
   const names = [first];
   if (rng() < 0.3) {
@@ -1366,6 +1421,27 @@ function genCondition(ctx: GenContext, depth: number): Json {
       ...(rng() < 0.5 ? [closed, other] : [other, closed]),
     ];
   }
+  // With `--random` and `--host`, a chain that mixes a draw and a call of
+  // a host function declared pure, in any order.
+  if (ctx.random && ctx.host && rng() < 0.1) {
+    const operands: Json[] = [
+      [pick(rng, ['hp', 'hd']), genReal(ctx, d)],
+      genDraw(ctx),
+      genReal(ctx, d),
+    ];
+    for (let i = operands.length - 1; i > 0; i--) {
+      const j = intBetween(rng, 0, i);
+      [operands[i], operands[j]] = [operands[j], operands[i]];
+    }
+    return [pick(rng, ['Less', 'LessEqual', 'Equal', 'NotEqual']), ...operands];
+  }
+  // A chain of three or four operands (`a < b <= c` with two heads is an
+  // `And` of pairs in the canonical form).
+  if (rng() < 0.12)
+    return [
+      pick(rng, ['Less', 'LessEqual', 'Equal', 'NotEqual']),
+      ...Array.from({ length: intBetween(rng, 3, 4) }, () => genReal(ctx, d)),
+    ];
   return [pick(rng, COMPARISONS), genReal(ctx, d), genReal(ctx, d)];
 }
 
@@ -1815,6 +1891,7 @@ function withStubbedRandom<T>(f: () => T): { value: T; draws: number } {
   let draws = 0;
   Math.random = () => {
     draws += 1;
+    HOST_LOG.push('draw');
     return next();
   };
   try {

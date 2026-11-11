@@ -94,7 +94,7 @@ const points = [{ x: 0.5 }, { x: 2 }, { x: -3 }];
 describe('the setting changes no result', () => {
   test.each<[string, (ce: ComputeEngine) => Expression]>([
     ['a program the profile admits', (ce) => ce.parse('x^2 + 1')],
-    ['a program the profile declines', (ce) => ce.box(['Sech', 'x'])],
+    ['a program the profile declines', (ce) => ce.box(['Heaviside', 'x'])],
     ['a program the existing compiler declines', (ce) => ce.box(['Foo', 'x'])],
     [
       'a user function',
@@ -199,7 +199,7 @@ describe('the counters', () => {
     try {
       compile(ce.parse('x^2 + 1'));
       compile(ce.parse('y^2 + 1'));
-      compile(ce.box(['Sech', 'x']));
+      compile(ce.box(['Heaviside', 'x']));
       compile(ce.box(['Foo', 'x']));
       expect(() =>
         compile(ce.box(['Foo', 'x']), { fallback: false })
@@ -221,7 +221,7 @@ describe('the counters', () => {
       baselineDeclinedAdmitted: 0,
     });
     expect(stats.public.declinedMessages).toEqual({
-      "Could not compile with the profile 'numeric-kernel': unsupported head Sech": 1,
+      "Could not compile with the profile 'numeric-kernel': unsupported head Heaviside": 1,
     });
     // The counters of the switch are separate.
     expect(_jsProfileStats(ce)).toEqual({});
@@ -286,7 +286,7 @@ describe('the counters', () => {
   test('a compilation that follows an attempt of the switch is not measured', () => {
     const ce = engine(true);
     ce._jsProfile = { profile: 'numeric-kernel' };
-    expect(implicitCompile(ce, ce.box(['Sech', 'x']), 'nd')?.success).toBe(
+    expect(implicitCompile(ce, ce.box(['Heaviside', 'x']), 'nd')?.success).toBe(
       true
     );
     expect(_jsProfileStats(ce).nd).toMatchObject({ attempts: 1, declined: 1 });

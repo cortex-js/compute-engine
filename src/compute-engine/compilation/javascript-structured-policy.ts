@@ -197,6 +197,23 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'tanpi': { results: ['number'], operands: ['number'] },
     'ceil': { results: ['number'], operands: ['number'] },
     'round-ties-away': { results: ['number'], operands: ['number'] },
+    // The real code of the handler of the head (an expression for `acot`,
+    // `acsc`, …, `coth`), and its runtime helper of an `{re, im}` object.
+    acot: { results: ['number', 'complex'], operands: 'same' },
+    acsc: { results: ['number', 'complex'], operands: 'same' },
+    asec: { results: ['number', 'complex'], operands: 'same' },
+    acoth: { results: ['number', 'complex'], operands: 'same' },
+    asech: { results: ['number', 'complex'], operands: 'same' },
+    acsch: { results: ['number', 'complex'], operands: 'same' },
+    coth: { results: ['number', 'complex'], operands: 'same' },
+    // The rule of `Sech` and `Csch` admits a complex operand only.
+    sech: { results: ['complex'], operands: ['complex'] },
+    csch: { results: ['complex'], operands: ['complex'] },
+    factorial: { results: ['number'], operands: ['number'] },
+    factorial2: { results: ['number'], operands: ['number'] },
+    trunc: { results: ['number'], operands: ['number'] },
+    fract: { results: ['number'], operands: ['number'] },
+    hypot: { results: ['number'], operands: ['number'] },
   },
 };
 

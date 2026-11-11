@@ -129,7 +129,7 @@ const ROWS: Row[] = [
     name: 'x^y',
     body: ['Power', 'x', 'y'],
     strict: true,
-    complex: /Power with a complex operand and an exponent that is not a number literal/,
+    complex: true,
   },
   {
     name: 'x^1.6',

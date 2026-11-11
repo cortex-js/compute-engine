@@ -969,9 +969,9 @@ describe('declined', () => {
       'strict',
     ],
     [
-      'Which with a condition of three operands',
-      fn(['Which', ['LessEqual', 0, 'y', 5], 'y', 'True', 0], ['y', 'real']),
-      /LessEqual with 3 operands/,
+      'Which with a condition of three operands, one of them complex',
+      fn(['Which', ['LessEqual', 0, 'y', 5], 1, 'True', 0], ['y', 'complex']),
+      /LessEqual with a complex operand/,
       'strict',
     ],
     [

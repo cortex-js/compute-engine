@@ -573,8 +573,9 @@ describe('canCompile() and compile() agree', () => {
     expect(compiled).toBeGreaterThanOrEqual(60);
     // `Sum(j, j = 1..5)` and `A ↦ Sum over A` compile since `Sum` is in the
     // profile; list literals, tuples, folds and element-wise arithmetic
-    // since slice 1 of docs/plans/2026-11-11-structured-collections-and-lambdas.md.
-    expect(declined).toBeGreaterThanOrEqual(23);
+    // since slice 1 of docs/plans/2026-11-11-structured-collections-and-lambdas.md;
+    // `Factorial(k)` (both modes) since `Factorial` is in the profile.
+    expect(declined).toBeGreaterThanOrEqual(21);
   });
 
   test.each(PRELUDES)(

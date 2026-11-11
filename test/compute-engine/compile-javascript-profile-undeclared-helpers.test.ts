@@ -396,13 +396,25 @@ describe('the other signatures keep their decline, each with its message', () =>
     expect('message' in got && got.message).toMatch(/the helper g has an optional parameter/);
   });
 
-  test('a declared signature with an untyped parameter of the literal keeps its decline', () => {
+  test('a declared signature with an untyped parameter of the literal: the parameter has the type of the signature', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(real) -> real');
     ce.assign('g', ce.expr(['Function', ['Multiply', 't', 2], 't'] as MathJsonExpression));
-    const got = profile(ce.expr(root));
+    const fn = ce.expr(root);
+    const got = profile(fn);
+    expect('message' in got).toBe(false);
+    expectAgreement(fn, 'strict');
+  });
+
+  test('a declared signature of a type outside the profile with an untyped parameter keeps its decline', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(real, string) -> real');
+    ce.assign('g', ce.expr(['Function', ['Multiply', 't', 2], 't', 's'] as MathJsonExpression));
+    const got = profile(
+      ce.expr(['Function', ['Block', ['g', 'x', "'a'"]], typed('x', 'real')] as MathJsonExpression)
+    );
     expect('message' in got && got.message).toMatch(
-      /the parameter t of the helper g has no type annotation, and the helper has a declared signature/
+      /the parameter s of the helper g has no type annotation, and the helper has a declared signature/
     );
   });
 

@@ -70,6 +70,7 @@ import { rewriteAngularUnit } from './angular-unit.js';
 import { isLibraryOperator, systemScopeBinding } from './builtin-callback.js';
 import { isOpaqueVarsSource, varsObjectSpelling } from './cse.js';
 import { entryIsPure, inferSourcePurity } from './function-purity.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
   typeFragment,
   walkIf,
@@ -417,27 +418,36 @@ function boundBelowRoot(
 }
 
 /**
- * `Less`, `LessEqual`, `Equal` and `NotEqual`: two real operands, a boolean
+ * `Less`, `LessEqual`, `Equal` and `NotEqual`: real operands, a boolean
  * result. The
  * canonical form writes `GreaterEqual(a, b)` as `LessEqual(b, a)`. A
  * comparison that reads no input, parameter or local is refused
  * (`closedJumpRefusal()`): the existing compiler writes its exact value as
- * a literal also with `constantFold: false`. A comparison of three operands or more is a conjunction of pairs
- * that the existing emitter writes with temporaries. `Equal` is the exact
+ * a literal also with `constantFold: false`. `Equal` is the exact
  * comparison `===` of two numbers, and `NotEqual` its negation `!==`, which
  * is true for a `NaN` operand, as the interpreter answers (the existing
  * emitter, `compileJSEquality()`); a complex operand needs a comparison per
  * component, which the structured route does not have.
+ *
+ * A comparison of three operands or more (a chain) is the conjunction of
+ * its adjacent pairs, which stops at the first pair that is false, as the
+ * interpreter evaluates it (`evaluateChainOperands()` in
+ * `library/relational-operator.ts`); `NotEqual` too (adjacent pairs, not
+ * "pairwise distinct"; the canonical form keeps a `NotEqual` chain only when
+ * a middle operand is not pure). The lowering evaluates each operand once
+ * (`chain()` in `javascript-structured-lower.ts`); the order of the
+ * evaluations and the refusals that keep the order of the existing emitter
+ * are `chainForms()`.
  */
 function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal' | 'NotEqual') {
   return {
     walk: (node, scope, context, w) => {
       const nops = isFunction(node) ? node.nops : 0;
-      if (nops !== 2)
+      if (nops < 2)
         return w.refuse(
           node,
           'signature',
-          `${operator} with ${nops} operands is not in the structured route, which admits two`
+          `${operator} with ${nops} operands is not in the structured route, which admits two or more`
         );
       const closed = closedJumpRefusal(operator, node);
       if (closed !== undefined) return w.refuse(node, 'signature', closed);
@@ -474,7 +484,9 @@ function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal' | 'NotEqual') {
           `${operator} with a boolean operand is not in the structured route`
         );
       return w.signatures(node, scope, context, [
-        { operands: ['real', 'real'], result: 'boolean' },
+        nops === 2
+          ? { operands: ['real', 'real'], result: 'boolean' }
+          : { operands: ['real'], rest: 'real', result: 'boolean' },
       ]);
     },
   } satisfies FragmentRule<ScalarRepresentation>;
@@ -1284,6 +1296,33 @@ type ComplexOperands = 'any' | 'no-pi' | 'name' | 'none';
  * refused for an operand with an exact constant that no double holds
  * (`inexactJumpConstant()`).
  */
+/**
+ * The heads of an operand of `Fract` whose code on the existing route is
+ * never a name or digits: an operation written with an operator, or a call
+ * of a function with no identity lowering. `Abs`, `Conjugate`, `Ceil`,
+ * `Floor`, `Round`, `Truncate`, `Typed` and a block can be written as their
+ * operand (`identityPassthrough()`), and are not here.
+ */
+const FRACT_OPERAND_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Sqrt',
+  'Exp',
+  'Ln',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Arctan',
+  'Erf',
+  'Gamma',
+]);
+
 const SCALAR_FUNCTION_HEADS: Readonly<
   Record<
     string,
@@ -1291,6 +1330,9 @@ const SCALAR_FUNCTION_HEADS: Readonly<
       readonly lane: ScalarFunctionLane;
       readonly complex: ComplexOperands;
       readonly jump?: 'jump' | 'rounding';
+      /** The refusal of a real operand: the handler writes code that a
+       *  parent can group wrongly. */
+      readonly realRefusal?: string;
     }
   >
 > = {
@@ -1316,6 +1358,46 @@ const SCALAR_FUNCTION_HEADS: Readonly<
   Sign: { lane: 'operand', complex: 'any', jump: 'jump' },
   Ceil: { lane: 'type', complex: 'none', jump: 'rounding' },
   Round: { lane: 'type', complex: 'none', jump: 'rounding' },
+  // `(Math.PI / 2 - Math.atan(x))`, `Math.asinh(1 / (x))`; a complex
+  // operand: `_SYS.cacot(z)`, `_SYS.cacsch(z)`.
+  Arccot: { lane: 'type', complex: 'any' },
+  Arcsch: { lane: 'type', complex: 'any' },
+  // `Math.asin(1 / (x))`, `Math.acos(1 / (x))`, `Math.atanh(1 / (x))`,
+  // `Math.acosh(1 / (x))`; the complex helper of the converted operand for
+  // a type of numbers that are not real (`resultIsComplexValued()`).
+  Arccsc: { lane: 'inverse', complex: 'any' },
+  Arcsec: { lane: 'inverse', complex: 'any' },
+  Arcoth: { lane: 'inverse', complex: 'any' },
+  Arsech: { lane: 'inverse', complex: 'any' },
+  // `(Math.cosh(x) / Math.sinh(x))`, the operand evaluated once; a complex
+  // operand `i·π·u`: `_SYS.ccothipi(u)` (`imaginaryPiMultiple()`).
+  Coth: { lane: 'type', complex: 'no-pi' },
+  // A real operand is `1 / Math.cosh(x)` and `1 / Math.sinh(x)` with no
+  // parentheses, which a parent groups as written: `2 / Sech(x)` is
+  // `2 / 1 / Math.cosh(x)`, `2·sech(x)`.
+  Sech: {
+    lane: 'type',
+    complex: 'no-pi',
+    realRefusal:
+      'Sech of a real operand is not in the structured route: the existing ' +
+      'emitter writes 1 / Math.cosh(x) with no parentheses, which a parent ' +
+      'groups as written',
+  },
+  Csch: {
+    lane: 'type',
+    complex: 'no-pi',
+    realRefusal:
+      'Csch of a real operand is not in the structured route: the existing ' +
+      'emitter writes 1 / Math.sinh(x) with no parentheses, which a parent ' +
+      'groups as written',
+  },
+  // `_SYS.factorial(x)`, `_SYS.factorial2(x)`, `Math.trunc(x)` and
+  // `x - Math.floor(x)`: real lowerings only. `Fract` of a name or a number
+  // literal is declined (`structuredScalarFunctionRule()`).
+  Factorial: { lane: 'type', complex: 'none' },
+  Factorial2: { lane: 'type', complex: 'none' },
+  Truncate: { lane: 'type', complex: 'none', jump: 'rounding' },
+  Fract: { lane: 'type', complex: 'none', jump: 'rounding' },
 };
 
 /**
@@ -1397,7 +1479,7 @@ function structuredScalarFunctionRule(
   mode: 'strict' | 'complex',
   forms: Map<Expression, StructuredForm>
 ) {
-  const { lane, complex, jump } = SCALAR_FUNCTION_HEADS[head];
+  const { lane, complex, jump, realRefusal } = SCALAR_FUNCTION_HEADS[head];
   return {
     walk: (node, scope, context, w) => {
       if (!isFunction(node) || node.nops !== 1)
@@ -1444,6 +1526,30 @@ function structuredScalarFunctionRule(
           w.convert(facts, facts.type)!,
         ]);
       }
+      if (realRefusal !== undefined)
+        return w.refuse(node, 'signature', realRefusal);
+      // The handler of `Fract` writes `t - Math.floor(t)` in its parent with
+      // no parentheses when the code of the operand is a name or digits
+      // (`inlineExpression()`): `2 · Fract(b)` with a parameter `b` is
+      // `2 * b - Math.floor(b)` (CE-1196), and so is `2 · Fract(Abs(p))`
+      // with `p: real<0..>`, whose operand the existing emitter writes as
+      // `p` (`identityPassthrough()`). The rule admits only an operand whose
+      // code is certainly not a name or digits: an arithmetic operation with
+      // an operator, or a call that no lowering writes as its operand
+      // (`FRACT_OPERAND_HEADS`); another operand is bound in a function
+      // that the handler calls, one term.
+      if (
+        head === 'Fract' &&
+        !(isFunction(node.op1) && FRACT_OPERAND_HEADS.has(node.op1.operator))
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `Fract of the operand ${nodeText(node.op1)} is not in the ` +
+            `structured route: the existing emitter writes x - Math.floor(x) ` +
+            `in its parent with no parentheses when the code of the operand ` +
+            `is a name or digits (CE-1196)`
+        );
       if (head === 'Tan' && readsAsPiMultiple(node.op1))
         return piMultipleFacts(head, node, facts, forms, w, mode);
       let result: 'real' | 'complex' = 'real';
@@ -1480,7 +1586,8 @@ function structuredScalarFunctionRule(
 }
 
 /**
- * `Sin`, `Cos`, `Tanh`, `Abs` (one operand) and `Arctan2` (two operands) on
+ * `Sin`, `Cos`, `Tanh`, `Abs` (one operand), `Arctan2` and `Hypot` (two
+ * operands; `Math.hypot(a, b)` for two real operands) on
  * the structured route, for the compile mode `mode`. The real code of each
  * is total, and its result is real for real operands: the handler of the
  * existing emitter (`javascript-target.ts`) writes `Math.sin`, `Math.cos`,
@@ -1509,7 +1616,7 @@ function structuredScalarFunctionRule(
  *   operand of `Abs` that is a name; it declines the others. In the
  *   `complex` mode the handler wraps the helper of `Sin`, `Cos` and `Tanh`
  *   in `_SYS.cplx()`, which returns the object of the helper as it is.
- *   `Arctan2` with a complex operand is declined.
+ *   `Arctan2` and `Hypot` with a complex operand are declined.
  * - A real operand and a node whose type, without its infinities and
  *   `NaN`, is not real in the `complex` mode, or one of numbers that are
  *   not real: the compiler wraps the real call in `_SYS.cplx()` there
@@ -1526,11 +1633,11 @@ function structuredScalarFunctionRule(
  * `Math.abs` would give `Infinity`. Every other `Abs` records `abs`.
  */
 function structuredFunctionRule(
-  head: 'Sin' | 'Cos' | 'Tanh' | 'Abs' | 'Arctan2',
+  head: 'Sin' | 'Cos' | 'Tanh' | 'Abs' | 'Arctan2' | 'Hypot',
   mode: 'strict' | 'complex',
   forms: Map<Expression, StructuredForm>
 ) {
-  const arity = head === 'Arctan2' ? 2 : 1;
+  const arity = head === 'Arctan2' || head === 'Hypot' ? 2 : 1;
   return {
     walk: (node, scope, context, w) => {
       if (!isFunction(node) || node.nops !== arity)
@@ -1550,8 +1657,8 @@ function structuredFunctionRule(
         return piMultipleFacts(head, node, facts[0], forms, w, mode);
       if (facts.some((f) => f.type.kind === 'complex')) {
         const refusal =
-          head === 'Arctan2'
-            ? 'Arctan2 with a complex operand is not in the structured route'
+          head === 'Arctan2' || head === 'Hypot'
+            ? `${head} with a complex operand is not in the structured route`
             : head === 'Abs'
               ? !isSymbol(node.op1)
                 ? `Abs of the complex operand ${nodeText(node.op1)} is in the ` +
@@ -1764,11 +1871,38 @@ function structuredPowerRule(
         );
       if (form === 'variable') {
         const type = finitePartOfType(node.type.type);
+        // A complex base or exponent: the handler writes `_SYS.cpow(b, e)`
+        // of the code of both operands, which reads a real operand `x` as
+        // `x + 0i`, the value of the converted operand (the form
+        // `complex-pow`). Its other complex branches read a constant
+        // exponent (a chain of products for an integer from 2 to 8,
+        // `tryGetConstant()`), declined with an exponent that has no
+        // unknown, as for a real power.
+        if (base.type.kind === 'complex' || exponent.type.kind === 'complex') {
+          if (isSymbol(node.op1, 'ExponentialE'))
+            return w.refuse(
+              node,
+              'signature',
+              `Power of a symbol ExponentialE that a scope declares is not ` +
+                `in the structured route`
+            );
+          if (node.op2.unknowns.length === 0)
+            return w.refuse(
+              node,
+              'signature',
+              `Power with a complex operand and the exponent ` +
+                `${nodeText(node.op2)}, which has no unknown, is not in the ` +
+                `structured route: the existing emitter can read such an ` +
+                `exponent as a constant (tryGetConstant())`
+            );
+          forms.set(node, 'complex-pow');
+          return w.valueFacts(node, { kind: 'complex' }, [
+            w.convert(base, { kind: 'complex' })!,
+            w.convert(exponent, { kind: 'complex' })!,
+          ]);
+        }
         const refusal =
-          base.type.kind === 'complex' || exponent.type.kind === 'complex'
-            ? `Power with a complex operand and an exponent that is not a ` +
-              `number literal is not in the structured route`
-            : isSymbol(node.op1, 'ExponentialE')
+          isSymbol(node.op1, 'ExponentialE')
               ? `Power of a symbol ExponentialE that a scope declares is not ` +
                 `in the structured route`
               : node.op2.unknowns.length === 0
@@ -2399,6 +2533,7 @@ function modeRules(
     Tanh: structuredFunctionRule('Tanh', mode, forms),
     Abs: structuredFunctionRule('Abs', mode, forms),
     Arctan2: structuredFunctionRule('Arctan2', mode, forms),
+    Hypot: structuredFunctionRule('Hypot', mode, forms),
     Log: structuredLogRule(mode, snapshotOf, forms),
     WithRandomSeed: seededRule(mode),
     ...Object.fromEntries(
@@ -2431,6 +2566,7 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Tanh: withoutMode('Tanh'),
   Abs: withoutMode('Abs'),
   Arctan2: withoutMode('Arctan2'),
+  Hypot: withoutMode('Hypot'),
   Log: withoutMode('Log'),
   ...Object.fromEntries(
     Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [head, withoutMode(head)])
@@ -2647,6 +2783,10 @@ function declaredLocalType(
     case 'real':
     case 'boolean':
       return { kind: declared };
+    // A local declared `number`, which the admission admits in the `strict`
+    // mode only (`admitFunctionBody()`).
+    case 'number':
+      return mode === 'strict' ? { kind: 'real' } : undefined;
     case 'list<real>':
       return { kind: 'list', element: { kind: 'real' } };
     case 'list<integer>':
@@ -4413,7 +4553,9 @@ function refuseHaversineLocal(
  * values of the type `number` makes): the existing compiler wraps the read
  * in `_SYS.cplx()` there (`liftWideResult()` in `compile-inner.ts`), and
  * the route reads a number. The refusal is wider than that rule, which
- * also asks whether the node is complex-valued (`isComplexValued()`).
+ * also asks whether the node is complex-valued (`isComplexValued()`). The
+ * `strict` mode has its own pass, after the admission
+ * (`refuseStrictWideReads()`).
  */
 function refuseWideRead(
   node: Expression,
@@ -4431,6 +4573,104 @@ function refuseWideRead(
         `${node.type.toString()}, which is not real, in the complex mode: the ` +
         `existing compiler wraps the read in _SYS.cplx`
     );
+}
+
+/**
+ * Throw, on the structured route in the `strict` mode, for an admitted `At`
+ * node of a numeric type that is not real (`At(Comprehension(√y, …), 2)`
+ * has the type `complex`): the existing compiler reads the element with the
+ * type tag of the node (`_SYS.atNumeric(l, i, "complex")`, which gives a
+ * number) and its parent as a complex value, so `x · At(…)` is
+ * `{re: NaN, im: NaN}` also where `y = 4`, and `Arcsch` of such a read calls
+ * `_SYS.cacsch` of a number. A pass over the admitted program, so that the
+ * refusal of a list that the route does not have (a comprehension of complex
+ * numbers, `ReplaceAt` with a complex value) keeps its message.
+ */
+function refuseStrictWideReads(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  mode: 'strict' | 'complex' | undefined
+): void {
+  if (mode === 'complex') return;
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const node of scope.facts.keys())
+      if (
+        isFunction(node, 'At') &&
+        isSubtype(node.type.type, 'number') &&
+        !isSubtype(finitePartOfType(node.type.type), 'real')
+      )
+        throw new Error(
+          `JS scalar fragment: ${nodeText(node)} has the type ` +
+            `${node.type.toString()}, which is not real: the existing ` +
+            `compiler reads it as a complex value`
+        );
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+}
+
+/**
+ * On the structured route, refuse two uses of a call of a local function
+ * (`LocalFunction`, declared `function`, `unknown` or with a `let`), which
+ * the existing compiler writes in another form:
+ *
+ * - A `Multiply`, a `Divide` or a `Power` with an operand that is an
+ *   arithmetic expression of such a call: the type of the call is
+ *   `unknown`, which the existing compiler reads as a possible list
+ *   (`mayBeCollectionValued()`), and it writes each operation of the call by
+ *   its shape at run time (`_SYS.bcast`), the operand as one value. The
+ *   route writes a product or a quotient of products and quotients as one
+ *   chain of `*` and `/`, so `x · (-1/3) / lf(1)` is
+ *   `x * -1 / (3 * lf(1))` there and `x * (-1 / (3 * lf(1)))` on the
+ *   existing compiler, another double. An operation whose operands are the
+ *   call itself and other values (`2 · lf(x)`, `lf(x)^2`) is the same
+ *   operation in the closure of `_SYS.bcast`, and so are a sum and a
+ *   negation.
+ * - In the `strict` mode, a call whose value is complex (a local function
+ *   whose body is complex, `lf(v) ≔ 0.5 − i`): the existing compiler reads
+ *   the value of the call as a real number, and gives `NaN` (`Math.tanh` of
+ *   the object, `-lf(1)`) or a string (`x + lf(1)`).
+ */
+function refuseLocalFunctionArithmetic(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  localFunctions: ReadonlySet<string>,
+  mode: 'strict' | 'complex' | undefined
+): void {
+  if (localFunctions.size === 0) return;
+  const isCall = (node: Expression): boolean =>
+    isFunction(node) && localFunctions.has(node.operator);
+  const readsCall = (node: Expression): boolean =>
+    isCall(node) || (isFunction(node) && node.ops.some(readsCall));
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const [node, facts] of scope.facts) {
+      if (
+        mode !== 'complex' &&
+        isCall(node) &&
+        'representation' in facts &&
+        facts.representation === 'complex'
+      )
+        throw new Error(
+          `JS scalar fragment: the call ${nodeText(node)} of a local function has a ` +
+            `complex value, which is not in the structured route in the strict mode: the ` +
+            `existing compiler reads the value of the call as a real number`
+        );
+      if (!isFunction(node, 'Multiply') && !isFunction(node, 'Divide') && !isFunction(node, 'Power'))
+        continue;
+      const operand = node.ops.find(
+        (op) => !isCall(op) && isFunction(op) && readsCall(op)
+      );
+      if (operand !== undefined)
+        throw new Error(
+          `JS scalar fragment: ${node.operator} of the operand ${nodeText(operand)}, which ` +
+            `reads a call of a local function, is not in the structured route: the ` +
+            `existing compiler reads the call as a possible list and writes the ` +
+            `operand as one value (_SYS.bcast)`
+        );
+    }
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
 }
 
 /**
@@ -5025,6 +5265,159 @@ function refusePureHostInAggregates(
   };
   check(annotation.root);
   for (const helper of helpers.values()) check(helper.body);
+}
+
+/**
+ * The order of evaluation of each comparison chain of `annotation` (a
+ * `Less`, `LessEqual`, `Equal` or `NotEqual` of three operands or more),
+ * recorded in `forms`, or a refusal. The lowering evaluates the first two
+ * operands, compares them, and evaluates each later operand only when the
+ * pairs before it hold (`chain()` in `javascript-structured-lower.ts`).
+ * The existing emitter evaluates each operand once too, in the same order,
+ * except in the cases below. An operand "has an effect" here when it
+ * draws, or reads or calls the host, also in the body of a helper that it
+ * calls (`drawReaders()`, `hosts`).
+ *
+ * - `Less`, `LessEqual` (`compileExprOperator()` in `compile-operators.ts`):
+ *   the first two operands are bound to temporaries of a function around
+ *   the whole chain, called with them in order, or written in the first
+ *   pair. The second one is bound when it is not a name or a number
+ *   literal; both are bound, in order, when a middle operand is impure
+ *   (`isPure` is false, or it reads or calls a binding of the host that is
+ *   not declared pure: caller code) and the operand is impure too, or is
+ *   not a literal or a constant and comes before the last caller code. So
+ *   when the second operand is bound and the first is not, the second one
+ *   is evaluated first (the form `chain-swap`): `Less(hm(1), x + 1, w)`
+ *   reads `x` before the host call `hm` can change it, and
+ *   `Less(Random(), x + 1, w)` evaluates `x + 1` before it draws. The rule
+ *   reads the same predicates. A chain with an effect and a call of a
+ *   helper is refused: a helper can be caller code of the existing compiler
+ *   (a local function) where the rule does not see it.
+ * - `Equal`, `NotEqual` (`compileJSEquality()`): when no middle operand has
+ *   an effect of the existing compiler (`isTransitivelyPure()`, caller
+ *   code), each operand is written in both pairs that read it, and a middle
+ *   operand is evaluated twice. A middle operand that reads or calls the
+ *   host, or calls a helper, is refused: a host counts its calls, and a
+ *   helper that draws is evaluated twice there. When a middle operand is
+ *   impure, the operands are bound as for `Less` (with
+ *   `isTransitivelyPure()` in place of `isPure`), each bound operand from
+ *   the second on at the pair that reads it: so when the second operand is
+ *   bound and the first is not, the second one is evaluated first
+ *   (`chain-swap`). `Equal(hp(x), Random(), 1)` with `hp` a function of the
+ *   user that the options map to a host function declared pure draws
+ *   before it calls `hp`, as on the existing compiler.
+ */
+function chainForms(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  helpers: ReadonlyMap<string, ResolvedHelper>,
+  hosts: StructuredHosts | undefined,
+  forms: Map<Expression, StructuredForm>
+): void {
+  const { draws } = drawReaders(helpers);
+  const memo = new Map<Expression, boolean>();
+  /** Whether `node`, or the body of a helper that it calls, reads or calls
+   *  the host (`withHelpers`), or calls a helper. */
+  const reaches = (node: Expression, withHelpers: boolean): boolean => {
+    if (isSymbol(node))
+      return hosts?.bindings.has(`read:${node.symbol}`) === true;
+    if (!isFunction(node)) return false;
+    const key = withHelpers ? node : undefined;
+    const known = key === undefined ? undefined : memo.get(key);
+    if (known !== undefined) return known;
+    const result =
+      hosts?.bindings.has(`call:${node.operator}`) === true ||
+      (helpers.has(node.operator) &&
+        (withHelpers || reaches(helpers.get(node.operator)!.body, false))) ||
+      node.ops.some((op) => reaches(op, withHelpers));
+    if (key !== undefined) memo.set(key, result);
+    return result;
+  };
+  const hasEffect = (node: Expression): boolean =>
+    draws(node) || reaches(node, false);
+  /** Whether `node` reads a binding of the host or calls one that is not
+   *  declared pure: caller code of the existing compiler. */
+  const readsImpureHost = (node: Expression): boolean =>
+    isSymbol(node)
+      ? hosts?.bindings.has(`read:${node.symbol}`) === true
+      : isFunction(node) &&
+        (hosts?.bindings.get(`call:${node.operator}`)?.pure === false ||
+          node.ops.some(readsImpureHost));
+  const callsHelper = (node: Expression): boolean =>
+    isFunction(node) &&
+    (helpers.has(node.operator) || node.ops.some(callsHelper));
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const node of scope.facts.keys()) {
+      if (
+        !isFunction(node) ||
+        node.nops < 3 ||
+        !['Less', 'LessEqual', 'Equal', 'NotEqual'].includes(node.operator)
+      )
+        continue;
+      const middles = node.ops.slice(1, -1);
+      if (node.operator === 'Equal' || node.operator === 'NotEqual') {
+        const middle = middles.find((op) => reaches(op, true));
+        if (middle !== undefined)
+          throw new Error(
+            `JS scalar fragment: the middle operand ${nodeText(middle)} of the chain ${nodeText(node)} ` +
+              `reads or calls the host or calls a helper: the existing emitter evaluates a middle ` +
+              `operand of an equality chain once per pair that reads it`
+          );
+        // The predicates of `compileJSEquality()`: when a middle operand
+        // is impure, every impure operand, and every operand before the
+        // last caller code that is not a literal or a constant, is bound;
+        // a bound operand from the second on is evaluated before the pair
+        // that reads it, and so before an unbound first operand.
+        const [first, second] = node.ops;
+        if (!hasEffect(first)) continue;
+        if (node.ops.some((op) => callsHelper(op)))
+          throw new Error(
+            `JS scalar fragment: the chain ${nodeText(node)} has an effect and a call of a ` +
+              `helper: the order in which the existing emitter evaluates its operands is not ` +
+              `in the structured route`
+          );
+        const callerCode = node.ops.map(readsImpureHost);
+        const impure = (op: Expression, i: number) =>
+          !isTransitivelyPure(op) || callerCode[i];
+        if (!middles.some((op, i) => impure(op, i + 1))) continue;
+        const lastCallerCode = callerCode.lastIndexOf(true);
+        const bound = (op: Expression, i: number) =>
+          impure(op, i) ||
+          (i < lastCallerCode &&
+            !isNumber(op) &&
+            !isString(op) &&
+            !(isSymbol(op) && op.isConstant));
+        if (bound(second, 1) && !bound(first, 0))
+          forms.set(node, 'chain-swap');
+        continue;
+      }
+      const [first, second] = node.ops;
+      if (!hasEffect(first) || isSymbol(second) || isNumber(second)) continue;
+      if (node.ops.some((op) => callsHelper(op)))
+        throw new Error(
+          `JS scalar fragment: the chain ${nodeText(node)} has an effect and a call of a ` +
+            `helper: the order in which the existing emitter evaluates its operands is not ` +
+            `in the structured route`
+        );
+      // The predicates of `compileExprOperator()`, for the first two
+      // operands.
+      const callerCode = node.ops.map(readsImpureHost);
+      const impure = (op: Expression, i: number) =>
+        op.isPure === false || callerCode[i];
+      const impureMiddle = middles.some((op, i) => impure(op, i + 1));
+      const lastCallerCode = impureMiddle ? callerCode.lastIndexOf(true) : -1;
+      const captured = (op: Expression, i: number) =>
+        i < lastCallerCode &&
+        !isNumber(op) &&
+        !isString(op) &&
+        !(isSymbol(op) && op.isConstant);
+      const firstBound =
+        impureMiddle && (impure(first, 0) || captured(first, 0));
+      if (!firstBound) forms.set(node, 'chain-swap');
+    }
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
 }
 
 /**
@@ -5770,6 +6163,13 @@ function recordStructured(
   refuseLazyDraws(prepared.annotation, registry.helpers);
   refuseHoistedDraws(prepared.annotation, registry.helpers, hosts);
   refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
+  chainForms(prepared.annotation, registry.helpers, hosts, registry.forms);
+  refuseStrictWideReads(prepared.annotation, registry.mode);
+  refuseLocalFunctionArithmetic(
+    prepared.annotation,
+    registry.localFunctionNames,
+    registry.mode
+  );
   /** The names of the free symbols that are reads of the host: not
    *  inputs. */
   const reads = new Set(
@@ -7299,10 +7699,19 @@ function admitFunctionBody(
       );
     // The structured route also admits a local declared as a list
     // (`structuredListLocalType()`).
+    // A local declared `number` in the `strict` mode is a real local
+    // (`declaredLocalType()`): the existing compiler writes `let a = v` and
+    // reads `a`, as for a local declared `real`. In the `complex` mode it
+    // reads each read as `_SYS.cplx(a)`, whatever the shape of the value.
     if (
       !declared ||
       !['real', 'integer', 'complex', 'boolean', 'let']
         .concat(admission.structured ? ['list<real>', 'list<integer>'] : [])
+        .concat(
+          admission.structured && named.structured?.mode === 'strict'
+            ? ['number']
+            : []
+        )
         .includes(declared) ||
       parameters.includes(local) ||
       locals.has(local) ||
@@ -9419,12 +9828,52 @@ function resolveHelper(
     const defaultType = inferred
       ? defaultedParameterKind(parameter, registry)
       : undefined;
-    const scalar = defaultType ?? typeOf(type, name);
+    // On the structured route a parameter with no annotation of a helper
+    // with a declared signature has the type of the signature, when that
+    // type is a base kind (`real`, `integer`, `number`, `complex`,
+    // `boolean`): the existing compiler writes the helper of such a
+    // signature as it writes the helper with the annotation (`(t) =>
+    // Math.sqrt(t)` for `(real) -> real`, `_SYS.csqrt(_SYS.cplx(t))` for
+    // `(number) -> number` in the `complex` mode). It also reads a range of
+    // the signature in the body (`Abs(t)` is `t` for `(real<0..>) -> real`,
+    // `-2.5` where the argument is `-2.5`), which the route does not, so a
+    // signature type with a range or a literal is refused. The nodes of the
+    // body keep their own types, which the rules and the existing compiler
+    // read alike. A list type keeps the refusal of the annotation rule.
+    const signatureType =
+      registry !== undefined &&
+      !inferred &&
+      !functionTyped &&
+      defaultType === undefined &&
+      type === undefined &&
+      !isFunction(parameter)
+        ? signature?.args?.[parameters.length]?.type
+        : undefined;
+    if (
+      signatureType !== undefined &&
+      !['real', 'integer', 'number', 'complex', 'boolean'].includes(
+        typeToString(signatureType)
+      ) &&
+      typeOf(signatureType, name) !== undefined &&
+      typeOf(signatureType, name)?.kind !== 'list'
+    )
+      throw new Error(
+        `JS scalar fragment: the parameter ${name} of the helper ${call.operator} has no ` +
+          `type annotation, and the type ${typeToString(signatureType)} of its signature is ` +
+          `not a base kind: the existing compiler reads the range of the signature in the ` +
+          `body. Annotate the parameter in the function literal`
+      );
+    const signatureScalar =
+      signatureType === undefined ? undefined : typeOf(signatureType, name);
+    const fromSignature =
+      signatureScalar !== undefined && signatureScalar.kind !== 'list';
+    const scalar =
+      defaultType ?? (fromSignature ? signatureScalar : typeOf(type, name));
     const refusal = parameterRefusal(
       parameter,
       name,
       scalar,
-      defaultType !== undefined,
+      defaultType !== undefined || fromSignature,
       parameters,
       `the helper ${call.operator}`,
       true
@@ -9443,10 +9892,11 @@ function resolveHelper(
       : signature!.args?.[parameters.length]?.type;
     const declaredScalar = defaultType ?? typeOf(declared, name);
     defaulted.push(defaultType !== undefined);
+    const effective = fromSignature ? signatureType : type;
     wide.push(
       registry !== undefined &&
-        type !== undefined &&
-        declaredNumberKind(type, registry.mode)?.lifted === true
+        effective !== undefined &&
+        declaredNumberKind(effective, registry.mode)?.lifted === true
     );
     if (
       !declaredScalar ||

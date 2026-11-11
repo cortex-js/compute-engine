@@ -854,22 +854,10 @@ describe('slice 3: the code', () => {
 describe('slice 3: what stays declined', () => {
   const declined: [string, MathJsonExpression, Mode, RegExp][] = [
     [
-      'z^x: an exponent that is not a number literal',
-      ['Power', 'z', 'x'],
+      'z^π: an exponent with no unknown (the existing emitter can read it as a constant)',
+      ['Power', 'z', 'Pi'],
       'strict',
-      /Power with a complex operand and an exponent that is not a number literal is not in the structured route/,
-    ],
-    [
-      'x^z',
-      ['Power', 'x', 'z'],
-      'strict',
-      /Power with a complex operand and an exponent that is not a number literal is not in the structured route/,
-    ],
-    [
-      'z^w',
-      ['Power', 'z', 'w'],
-      'strict',
-      /Power with a complex operand and an exponent that is not a number literal is not in the structured route/,
+      /Power with a complex operand and the exponent .* which has no unknown/,
     ],
     [
       'z^(2i): a complex literal exponent',

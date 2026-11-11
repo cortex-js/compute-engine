@@ -171,7 +171,9 @@
  *   `Math.pow(Math.abs(b), e)` and its signed form (`abs-pow`,
  *   `signed-pow`), `Math.cbrt(x)` and `_SYS.root(x, n)`. `haversine` and
  *   `round-ties-away` are the expressions of their handlers
- *   (`TemplateFunctionName`). `haversine` of an operand that is not the
+ *   (`TemplateFunctionName`), and so is the real code of `acot`, `acsc`,
+ *   `asec`, `acoth`, `asech`, `acsch`, `coth` and `fract`
+ *   (`REAL_TEMPLATES`). `haversine` of an operand that is not the
  *   read of an input written `_.x` fails in a parent that needs
  *   parentheses around it: the existing emitter writes that code in its
  *   parent with no parentheses (`Source.bare`).
@@ -254,6 +256,46 @@ const FUNCTION_CODE: Readonly<
   cospi: { real: '_SYS.cospi' },
   tanpi: { real: '_SYS.tanpi' },
   ceil: { real: 'Math.ceil' },
+  acot: { complex: 'cacot' },
+  acsc: { complex: 'cacsc' },
+  asec: { complex: 'casec' },
+  acoth: { complex: 'cacoth' },
+  asech: { complex: 'casech' },
+  acsch: { complex: 'cacsch' },
+  coth: { complex: 'ccoth' },
+  sech: { complex: 'csech' },
+  csch: { complex: 'ccsch' },
+  factorial: { real: '_SYS.factorial' },
+  factorial2: { real: '_SYS.factorial2' },
+  trunc: { real: 'Math.trunc' },
+  // The real code of `fract` is a template (`REAL_TEMPLATES`).
+  fract: {},
+  hypot: { real: 'Math.hypot' },
+};
+
+/**
+ * The real code of the functions whose handler writes an expression, not
+ * one call, for a real operand `x` (`Arccot`, `Arccsc`, `Arcsec`,
+ * `Arcoth`, `Arsech`, `Arcsch` in `javascript-target.ts`): the text, and
+ * its precedence. `coth` is `(Math.cosh(x) / Math.sinh(x))` and `fract`
+ * `x - Math.floor(x)`, with the operand read twice (`usesOf()`).
+ */
+const REAL_TEMPLATES: Readonly<
+  Partial<
+    Record<UnaryFunctionName, (x: string) => { text: string; precedence: number }>
+  >
+> = {
+  acot: (x) => ({ text: `(Math.PI / 2 - Math.atan(${x}))`, precedence: CALL }),
+  acsc: (x) => ({ text: `Math.asin(1 / (${x}))`, precedence: CALL }),
+  asec: (x) => ({ text: `Math.acos(1 / (${x}))`, precedence: CALL }),
+  acoth: (x) => ({ text: `Math.atanh(1 / (${x}))`, precedence: CALL }),
+  asech: (x) => ({ text: `Math.acosh(1 / (${x}))`, precedence: CALL }),
+  acsch: (x) => ({ text: `Math.asinh(1 / (${x}))`, precedence: CALL }),
+  coth: (x) => ({
+    text: `(Math.cosh(${x}) / Math.sinh(${x}))`,
+    precedence: CALL,
+  }),
+  fract: (x) => ({ text: `${x} - Math.floor(${x})`, precedence: ADDITIVE }),
 };
 
 /** The functions whose code is not one call: `haversine` is
@@ -451,7 +493,10 @@ function usesOf(program: IRProgram): Map<number, Use> {
                 ((op.kind === 'loop' || op.kind === 'build') && i <= 1) ||
                 (op.kind === 'append' && i === 0) ||
                 (op.kind === 'binary' && op.fn === 'signed-pow') ||
-                (op.kind === 'unary' && op.fn === 'round-ties-away')
+                (op.kind === 'unary' &&
+                  (op.fn === 'round-ties-away' ||
+                    op.fn === 'coth' ||
+                    op.fn === 'fract'))
               ? 2
               : 1;
       for (const [i, value] of op.operands.entries()) {
@@ -906,6 +951,15 @@ class Emitter {
         }
         const code = FUNCTION_CODE[fn];
         if (!op.operands.some((v) => v.representation === 'complex')) {
+          const template =
+            op.kind === 'unary' ? REAL_TEMPLATES[op.fn] : undefined;
+          if (template !== undefined)
+            return template(
+              operand(
+                operands[0],
+                op.fn === 'fract' ? MULTIPLICATIVE : CONDITIONAL
+              )
+            );
           const real = code.real;
           if (real === undefined)
             return fail(`the function ${op.fn} has a real operand`);

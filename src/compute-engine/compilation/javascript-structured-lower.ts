@@ -212,7 +212,8 @@ export type StructuredForm =
   | 'cbrt'
   | 'root'
   | 'abs'
-  | 'abs-identity';
+  | 'abs-identity'
+  | 'chain-swap';
 
 /**
  * A binding of the engine that the program reads and does not bind, with
@@ -408,6 +409,20 @@ const FUNCTIONS: Readonly<
   // The rule of `Round` admits it only for `ce.roundingTies`
   // `'away-from-zero'`.
   Round: { kind: 'unary', fn: 'round-ties-away' },
+  Arccot: { kind: 'unary', fn: 'acot' },
+  Arccsc: { kind: 'unary', fn: 'acsc' },
+  Arcsec: { kind: 'unary', fn: 'asec' },
+  Arcoth: { kind: 'unary', fn: 'acoth' },
+  Arsech: { kind: 'unary', fn: 'asech' },
+  Arcsch: { kind: 'unary', fn: 'acsch' },
+  Coth: { kind: 'unary', fn: 'coth' },
+  Sech: { kind: 'unary', fn: 'sech' },
+  Csch: { kind: 'unary', fn: 'csch' },
+  Factorial: { kind: 'unary', fn: 'factorial' },
+  Factorial2: { kind: 'unary', fn: 'factorial2' },
+  Truncate: { kind: 'unary', fn: 'trunc' },
+  Fract: { kind: 'unary', fn: 'fract' },
+  Hypot: { kind: 'binary', fn: 'hypot' },
 };
 
 /** The function of `u` for `Sin`, `Cos` and `Tan` of `Multiply(Pi, u)`
@@ -1544,10 +1559,87 @@ class Lowering {
       ? OPERATIONS[operator]
       : undefined;
     if (kind === undefined) return fail(`no lowering for the head ${operator}`);
+    if (
+      node.nops > 2 &&
+      (kind === 'less' ||
+        kind === 'less-equal' ||
+        kind === 'equal' ||
+        kind === 'not-equal')
+    )
+      return this.chain(node, kind, facts, scope, operations, effect);
     const operands = this.operands(node, facts, scope, operations);
     const result = this.resultOf(facts);
     operations.push({ kind, result, operands, effect, origin: node });
     return result;
+  }
+
+  /**
+   * A comparison of three operands or more, which the rule of the
+   * comparison admitted: the conjunction of its adjacent pairs, each operand
+   * evaluated once. The first two operands are evaluated here, in the order
+   * that the rule recorded (`chainForms()` in `javascript-fragment-target.ts`:
+   * the second one first for the form `chain-swap`), then compared; each
+   * later operand is evaluated in an `and` region that runs only when the
+   * pairs before it hold, and compared with the operand before it, whose
+   * value is the one of the earlier pair. The interpreter stops at the first
+   * pair that is false, and so does the existing emitter.
+   */
+  private chain(
+    node: Expression & { ops: readonly Expression[] },
+    kind: 'less' | 'less-equal' | 'equal' | 'not-equal',
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const values: IRValue[] = [];
+    const operand = (i: number, ops: IROperation[]) => {
+      values[i] = this.convert(
+        this.value(node.ops[i], scope, ops),
+        facts.conversions?.[i],
+        node,
+        ops
+      );
+    };
+    for (const i of this.prep.forms.get(node) === 'chain-swap'
+      ? [1, 0]
+      : [0, 1])
+      operand(i, operations);
+    const compare = (i: number, ops: IROperation[]): IRValue => {
+      const result = this.newValue('boolean', 'boolean');
+      ops.push({
+        kind,
+        result,
+        operands: [values[i], values[i + 1]],
+        effect,
+        origin: node,
+      });
+      return result;
+    };
+    // The pairs from the pair of the operands `i - 1` and `i` on, after the
+    // value `first` of the pairs before them.
+    const rest = (i: number, ops: IROperation[], first: IRValue): IRValue => {
+      if (i === node.ops.length) return first;
+      const inner: IROperation[] = [];
+      const value = this.inRegion(inner, () => {
+        operand(i, inner);
+        return rest(i + 1, inner, compare(i - 1, inner));
+      });
+      const region = this.region(inner, node.ops[i], value);
+      const result =
+        i === 2 ? this.resultOf(facts) : this.newValue('boolean', 'boolean');
+      ops.push({
+        kind: 'and',
+        result,
+        operands: [first],
+        rest: [region],
+        effect: joinEffects(effect, region.effect),
+        ...touchesField(this.states(node), region.touches),
+        origin: node,
+      });
+      return result;
+    };
+    return rest(2, operations, compare(0, operations));
   }
 
   /**
@@ -2950,7 +3042,14 @@ class Lowering {
       )
     )
       fail('a statement of a block that has a value is a Break');
-    return this.value(last, inner, operations);
+    const value = this.value(last, inner, operations);
+    // The existing emitter writes a block operand as a function that it
+    // calls, never as the literal of its value, so a complex sum reads the
+    // parts of the value and drops no term of it: `x + { b0 ⩴ 1; i }` is
+    // `{ re: x + t.re, im: t.im }`, `+0` where `x` is `-0`. The value is
+    // read as a value that a local holds (`IRProgram.localValues`).
+    this.localValues.add(value.id);
+    return value;
   }
 
   /**

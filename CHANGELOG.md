@@ -124,7 +124,25 @@
   The code draws the numbers of the ordinary compiler, in the same order
   and the same number of times; a draw in a comprehension declines, as do
   `RandomChoice`, `RandomSample`, `RandomShuffle` and `Random` of a domain
-  known only at run time.
+  known only at run time. A comparison of three operands or more
+  (`0 < x < 1`, `a = b = c`) evaluates each operand once and stops at the
+  first pair that is false. `Factorial`, `Factorial2`, `Arccot`, `Arccsc`,
+  `Arcsec`, `Arcoth`, `Arsech`, `Arcsch`, `Coth`, `Truncate`, `Fract` of an
+  arithmetic operand, `Hypot` of two operands, `Sech` and `Csch` of a
+  complex operand, and a power with a complex base or exponent and an
+  exponent that is not a number literal (`z^x`, `2^z`) are admitted. A
+  parameter of a user function with a declared
+  signature that has no annotation (`g: (real) -> real`, `g := t ↦ 2t`)
+  has the type of the signature when that type is `real`, `integer`,
+  `number`, `complex` or `boolean`; it declined. In the `strict` mode a
+  local declared `number` is a real local. A product, a quotient or a
+  power of an arithmetic expression of a call of a local function, and in
+  the `strict` mode a call of a local function whose value is complex,
+  decline: the ordinary compiler writes them in another form.
+  An element of a list whose type is not real (`At(Comprehension(√y, …), 2)`)
+  declines in the `strict` mode too, and the sum of a number and a block
+  operand whose value is a complex literal (`x + { b0 ⩴ 1; i }`) gives the
+  real part `0` at `x = -0`, as the ordinary compiler does; it gave `-0`.
   A block of statements can be the compiled expression itself, with its free
   symbols as the inputs, and a power or a root of two number literals is
   written as the value that the ordinary compiler folds it to. A block can

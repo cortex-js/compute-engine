@@ -482,10 +482,10 @@ describe('refusals', () => {
     // A complex base with an exponent that is not a number literal, and a
     // complex radicand: `_SYS.cpow`, `_SYS.croot`.
     [
-      'z^k',
-      ['Power', 'z', 'k'],
+      'z^π',
+      ['Power', 'z', 'Pi'],
       'strict',
-      /Power with a complex operand and an exponent that is not a number literal is not in the structured route/,
+      /Power with a complex operand and the exponent .* which has no unknown/,
     ],
     [
       'Root(z, 3)',

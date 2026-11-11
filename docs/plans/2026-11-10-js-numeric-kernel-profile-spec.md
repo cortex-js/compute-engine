@@ -181,6 +181,27 @@ listed in `defaultedSymbols`. The body of every helper is now rewritten for the
 angular unit of the engine, as the root is; before, it was compiled in
 radians whatever the unit.
 
+**A helper with a declared signature and a parameter with no annotation
+(2026-11-11).** A parameter of the `Function` literal of a helper with a
+declared signature (`g: (real) -> real`, `g := t ↦ 2t`) that has no
+annotation has the type of the signature, as the annotated parameter has,
+when that type is a base kind (`real`, `integer`, `number`, `complex`,
+`boolean`). The existing compiler writes the helper of such a signature as
+it writes the annotated one (`(t) => Math.sqrt(t)` for `(real) -> real`,
+`_SYS.csqrt(_SYS.cplx(t))` for `(number) -> number` in the `complex` mode).
+It also reads a range of the signature in the body (`Abs(t)` is `t` for
+`(real<0..>) -> real`, `-2.5` where the argument is `-2.5`), which the
+profile does not: a signature type with a range or a literal declines, with
+a message that asks for an annotation.
+The nodes of the body keep their own types, which the rules of the profile
+and the existing compiler read alike: `Arcsin(t)` has the type `number`
+without the annotation and `complex` with it, and both compilers write
+`Math.asin(t)` and `_SYS.casin(…)` for the two. Before, such a helper
+declined ("has no type annotation, and the helper has a declared
+signature"); a parameter whose signature type has no kind in the profile
+(`string`) keeps that decline. A helper whose signature the engine
+inferred keeps the rule above.
+
 **Names declared `number` (2026-11-11, slice 1 of
 [the options and bindings note](2026-11-11-structured-options-and-bindings.md)).**
 A name declared `number` (an input, a parameter of a `Function` literal or of

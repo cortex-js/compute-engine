@@ -913,8 +913,7 @@ describe('admission of the structured route', () => {
     // The engine types these `true` and `false` (`booleanClaim()`).
     ['Less with no free symbol', () => scalarEngine().expr(['Less', 1, 2]), /1 < 2 has the type true/],
     ['Equal with no free symbol', () => scalarEngine().expr(['Equal', 1, 2]), /1 == 2 has the type false/],
-    ['Less with three operands', () => scalarEngine().expr(['Less', 'x', 'y', 1]), /Less with 3 operands is not in the structured route/],
-    ['Equal with three operands', () => scalarEngine().expr(['Equal', 'x', 'y', 'x']), /Equal with 3 operands is not in the structured route/],
+    ['Less chain with a complex operand', () => scalarEngine().expr(['Less', 'x', 'z', 1]), /Less with a complex operand/],
     ['Less with a complex operand', () => scalarEngine().expr(['Less', 'z', 'x']), /Less with a complex operand/],
     ['Equal with a complex operand', () => scalarEngine().expr(['Equal', 'z', 'x']), /Equal with a complex operand/],
     ['Less with a boolean operand', () => scalarEngine().expr(['Less', 'C', 'x']), /Less with a boolean operand/],

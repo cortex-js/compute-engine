@@ -861,10 +861,10 @@ describe('refusals', () => {
       /only for a base that it proves non-negative, and not for x \(the complex mode\)/,
     ],
     [
-      'z^x',
-      ['Power', 'z', 'x'],
+      'z^π',
+      ['Power', 'z', 'Pi'],
       'strict',
-      /Power with a complex operand and an exponent that is not a number literal/,
+      /Power with a complex operand and the exponent .* which has no unknown/,
     ],
     [
       'x^(1 + 2i)',
@@ -936,27 +936,10 @@ describe('refusals', () => {
       'strict',
       /Power with the exponent -0\.5 is not in the structured route: the existing emitter writes the reciprocal of Math\.sqrt/,
     ],
-    [
-      'x^z',
-      ['Power', 'x', 'z'],
-      'strict',
-      /Power with a complex operand and an exponent that is not a number literal/,
-    ],
     // Two finite literals fold to `Math.pow(b, e)`, as on the existing
     // emitter: compile-javascript-structured-literals-block.test.ts.
-    // A complex base or exponent: `_SYS.cpow`.
-    [
-      'z^y',
-      ['Power', 'z', 'y'],
-      'strict',
-      /Power with a complex operand and an exponent that is not a number literal/,
-    ],
-    [
-      'x^(i·y)',
-      ['Power', 'x', ['Multiply', 'ImaginaryUnit', 'y']],
-      'strict',
-      /a product with a complex operand|Power with a complex operand/,
-    ],
+    // A complex base or exponent that is not a number literal:
+    // `_SYS.cpow`, compile-javascript-structured-scalar2.test.ts.
     // An exponent with no unknown. The rule declines each one; the existing
     // compiler replaces only an exponent that reads an assigned symbol and
     // has a value that is not an integer (`knownExponentPower()`), so for
@@ -1007,10 +990,10 @@ describe('refusals', () => {
       /the engine knows that the operand -a of Ln is negative/,
     ],
     [
-      'Sech, not in the route',
+      'Sech of a real operand, not in the route',
       ['Sech', 'x'],
       'strict',
-      /unsupported head Sech/,
+      /Sech of a real operand is not in the structured route/,
     ],
     // The existing emitter folds the power of two finite number literals to
     // the literal `Math.pow(b, e)`, whatever `constantFold` is, and the
