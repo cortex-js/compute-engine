@@ -53,8 +53,10 @@ does that today.
 
 Under the profile, a parameter of a `Function` literal or a free symbol with
 no **declared** type is a real number in the `strict` mode and a complex
-number in the `complex` mode. The type that the engine inferred for it is
-not read. The first rule of this spec required a declared type; the run of
+number in the `complex` mode. The type that boxing inferred for it is not
+read; a type that the host wrote with `ce.infer()`, `ce.assume()` or
+`ce.assign()` is read as a declared type ("Result of the later change",
+below). The first rule of this spec required a declared type; the run of
 the engine's own compilations with the profile
 ([result](2026-11-10-js-profile-first-consumer.md)) showed that this rule
 alone caused about 5,200 of 5,801 declines.
@@ -98,7 +100,8 @@ above, each found by the review:
 - An assumption (`n` assumed an integer) does not change the kind. The
   profile gives the interpreter's value for every real `n`; the existing
   compiler drops `Floor(n)`. The two differ only for a value outside the
-  assumption.
+  assumption. (Replaced by the later change below: `n` now has the type
+  `integer` that the assumption writes, and is not in `defaultedSymbols`.)
 - A name declared `unknown` declines only until a use narrows it; it then
   takes the default (with `_bindingUnits` on, it always does).
 
@@ -108,6 +111,45 @@ type that `ce.infer()` wrote is read by the profile as a declared type is:
 the guidance for a host is then "declare the types, or call `ce.infer()`
 before `compile()`". Until then the rule above stands and `ce.infer()`
 changes nothing for the profile.
+
+**Result of the later change (2026-11-11, this change).** With
+`_bindingUnits` on (the default since `627ed80e1`), boxing, evaluation,
+`simplify()`, `N()`, `solve()`, integration, limits and a compilation write
+no definition for a free symbol, and do not change the type of a
+definition that the host made (probed on `595af0206`). A definition of the
+host's scopes with an inferred type exists only after `ce.infer()` (marked
+`inferredType`), `ce.assume()` (a definition of type `unknown`, whose type
+the assumption narrows: `x > 0` gives `real<0<..>`, `x ∈ ℤ` gives
+`integer`), `ce.assign()` or an evaluated `Assign` (the type of the value).
+`hasNoDeclaredType()` now reads such a type as declared: a symbol whose
+definition (its own, or the one that its free name resolves to) is the one
+that `ce.lookupDefinition()` finds where the program is compiled, with a
+type that is not `unknown`, has a declared type. The profile reads the type
+of the occurrence, as the existing compiler does (the type that the host
+wrote, met with what the expression requires of the name), with the
+mapping of a declared type (`scalarType()`, `declaredNumberKind()`); a type
+with no kind (`complex | infinity`, `matrix`) declines as a declared one
+does, and the name is not in `defaultedSymbols`. Both compilers then put
+the name on the same lane: before this change, after
+`ce.infer([Mod(x, 2)])` the profile compiled `Sin(x)` in the `complex` mode
+on the complex lane while the existing compiler used the real lane. A
+parameter of a `Function` literal or a local keeps the rule above: boxing
+still narrows the type of its definition, which is not a definition of the
+host's scopes. With `_bindingUnits` off, every inferred type is ignored, as
+before. A free name boxed before the host assigned it a value is now
+captured: the profile reads the value through the definition that the name
+resolves to (`resolvedValueDefinition()`), where it read only the
+definition of the occurrence and compiled the name as an input. The other
+rules that judge a captured value (`inexactJumpConstant()`, the `Haversine`
+grouping, the `vars` check) read that definition too, and a helper call
+whose head was free when it was boxed reads the definition its name
+resolves to (`readBinding()`), with the same identity checks: the outcome
+of a program is the same whether it is boxed before or after
+`ce.assign()`. The reads that stay on the occurrence's own definition are
+the check of a library binding in `varsEntryOf()` (a library name is
+bound when it is boxed) and the calls of a local function (a definition
+of the program). The engine's consumers (46 test files) admit as many programs as before
+(5,391 of 5,510). Tests: `compile-javascript-profile-inferred.test.ts`.
 
 In the `strict` mode the existing compiler already computes with an untyped
 name as a real number: for 37 of 43 bodies its code for an untyped parameter

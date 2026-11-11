@@ -385,11 +385,12 @@ describe('the strict mode', () => {
     expect('result' in after).toBe(false);
   });
 
-  test('an assumption on an undeclared name does not change its kind', () => {
-    // `n` is assumed an integer and has no declared type: the profile
-    // computes with a real, as the interpreter does for a value that is not
-    // an integer. The existing compiler reads the assumption and writes
-    // `_.n` for `Floor(n)`.
+  test('an assumption gives the name the type that it writes', () => {
+    // `n` is assumed an integer: with `_bindingUnits` on, the type that the
+    // assumption wrote is read as a declared type, so `n` is not listed in
+    // `defaultedSymbols`. The profile keeps `Floor(n)`; the existing
+    // compiler writes `_.n`. The two differ only for a value outside the
+    // type (`2.5`), where the result is unspecified.
     const ce = engine();
     ce.assume(ce.expr(['Element', 'n', 'Integers']));
     const got = profile(ce.expr(['Floor', 'n']), 'strict');
@@ -397,8 +398,7 @@ describe('the strict mode', () => {
       'Math.floor(_.n)'
     );
     if ('result' in got) {
-      expect(got.result.defaultedSymbols).toEqual(['n']);
-      expect(got.result.run!({ n: 2.5 })).toBe(2);
+      expect(got.result.defaultedSymbols).toBeUndefined();
       expect(got.result.run!({ n: 3 })).toBe(3);
     }
   });

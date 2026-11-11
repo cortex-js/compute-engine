@@ -13,6 +13,8 @@ import {
   isNumber,
   isString,
   isSymbol,
+  readBinding,
+  resolvedValueDefinition,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -700,7 +702,7 @@ function inexactJumpConstant(
       // `True` and `False` are not numbers: the rule of `Floor` refuses a
       // boolean operand.
       if (isSymbol(node, 'True') || isSymbol(node, 'False')) return undefined;
-      if (isSymbol(node) && safeInteger(node.valueDefinition?.value))
+      if (isSymbol(node) && safeInteger(resolvedValueDefinition(node)?.value))
         return undefined;
       return node;
     }
@@ -4927,7 +4929,7 @@ function varsEntryOf(
       `JS scalar fragment: the option \`vars\` maps ${node.symbol}, a constant ` +
         `or an operator of the library, which the rules of the structured route read as the library defines it`
     );
-  if (node.valueDefinition?.value !== undefined)
+  if (resolvedValueDefinition(node)?.value !== undefined)
     throw new Error(
       `JS scalar fragment: the option \`vars\` maps ${node.symbol}, which ` +
         `holds a value that the compilation does not hide (a constant, or a ` +
@@ -5707,7 +5709,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         (op) =>
           isSymbol(op) &&
           !indexes.has(op.symbol) &&
-          op.valueDefinition?.value === undefined
+          resolvedValueDefinition(op)?.value === undefined
       );
       refuseWideRead(node, admission, registry?.mode);
       if (!node.isValid || node.type.type === 'error')
@@ -5754,11 +5756,11 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         if (
           registry &&
           mapped === undefined &&
-          node.valueDefinition?.value !== undefined &&
+          resolvedValueDefinition(node)?.value !== undefined &&
           recordCapture(registry, node)
         )
           return;
-        if (node.valueDefinition?.value !== undefined)
+        if (resolvedValueDefinition(node)?.value !== undefined)
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
           );
@@ -6243,7 +6245,7 @@ function attachRootBlock(
         indexes.has(name) ||
         // A name that a `vars` entry maps is a free symbol, also with a
         // value: `varsEntryOf()` refuses that value.
-        (node.valueDefinition?.value !== undefined &&
+        (resolvedValueDefinition(node)?.value !== undefined &&
           !registry.hosts?.vars.has(name)) ||
         free.some((s) => s.symbol === name)
       )
@@ -7863,19 +7865,40 @@ function structuredRegistry(
  * route such a name takes the default kind of the compile mode
  * (`defaultKind()`) where it is a parameter of the root `Function` literal
  * or a free symbol with no value, and a captured snapshot takes the kind of
- * its value (`numericSnapshot()`). The type that the engine inferred for the
- * name is never read: the engine narrows it each time an expression that
- * uses the name is boxed, so a rule that read it would depend on what was
- * boxed before (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md,
- * "Names with no declared type"). A symbol declared with a type, even
- * `number` or `any`, has a declared type.
+ * its value (`numericSnapshot()`). A symbol declared with a type, even
+ * `number` or `any`, has a declared type
+ * (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md, "Names with no
+ * declared type").
  *
- * The answer is `hasInferredType()` (`type-guards.ts`), which follows the
- * storage of bindings and of inferred types; every rule of the profile that
- * asks this question calls this function.
+ * With the engine flag `_bindingUnits` (the default), boxing writes no
+ * inferred type on a definition of the host's scopes: such a definition
+ * holds an inferred type only because the host called `ce.infer()`,
+ * `ce.assume()` or `ce.assign()`, or evaluated an assignment. A symbol whose
+ * definition is the one that the engine finds for its name where the
+ * program is compiled, with a type that is not `unknown` (an inferred type,
+ * or the type `unknown` that an assumption narrowed), has a declared type:
+ * the type of its occurrence, which the existing compiler reads too. The
+ * definition of a parameter or of a local of the program is not that
+ * definition, and boxing still narrows its type: such a name has no
+ * declared type. Without the flag, boxing narrows the inferred type of
+ * every name each time an expression that uses it is boxed, so the type is
+ * never read: a rule that read it would depend on what was boxed before.
+ *
+ * The first test is `hasInferredType()` (`type-guards.ts`), which follows
+ * the storage of bindings and of inferred types; every rule of the profile
+ * that asks this question calls this function.
  */
 export function hasNoDeclaredType(symbol: Expression): boolean {
-  return isSymbol(symbol) && hasInferredType(symbol);
+  if (!isSymbol(symbol) || !hasInferredType(symbol)) return false;
+  if (!symbol.engine._bindingUnits) return true;
+  const definition = resolvedValueDefinition(symbol);
+  if (definition === undefined || definition.type.isUnknown) return true;
+  const ambient = symbol.engine.lookupDefinition(symbol.symbol);
+  return (
+    ambient === undefined ||
+    !('value' in ambient) ||
+    ambient.value !== definition
+  );
 }
 
 /** The kind of a name with no declared type (`hasNoDeclaredType()`) in the
@@ -7970,10 +7993,15 @@ function numericSnapshot(
 ):
   | { binding: object; value: Expression; assertCurrent: () => void }
   | undefined {
-  const binding = node.valueDefinition;
+  const binding = resolvedValueDefinition(node);
   const value = binding?.value;
   const ambient = node.engine.lookupDefinition(node.symbol);
-  const undeclared = hasNoDeclaredType(node);
+  // The existing route captures only a binding that the host declared: a
+  // type that `ce.assign()` or `ce.infer()` wrote is not a declaration
+  // there, and keeps the refusal of a binding with no declared type.
+  const isUndeclared = (n: Expression) =>
+    admitsUndeclared ? hasNoDeclaredType(n) : hasInferredType(n);
+  const undeclared = isUndeclared(node);
   if (
     !binding ||
     (undeclared && !admitsUndeclared) ||
@@ -8003,8 +8031,8 @@ function numericSnapshot(
         !current ||
         !('value' in current) ||
         current.value !== binding ||
-        node.valueDefinition !== binding ||
-        hasNoDeclaredType(node) !== undeclared ||
+        resolvedValueDefinition(node) !== binding ||
+        isUndeclared(node) !== undeclared ||
         (!undeclared && binding.type.type !== declaredType) ||
         binding.value !== value ||
         node.engine._getSymbolValue(node.symbol) !== value
@@ -8102,7 +8130,7 @@ function collectStructuredHelper(
       registry.resolving.pop();
     }
   } else {
-    if ((node.valueDefinition ?? node.operatorDefinition) !== known.binding)
+    if (helperBinding(node).binding !== known.binding)
       throw new Error(
         `JS scalar fragment: two definitions of the helper ${name}`
       );
@@ -8510,6 +8538,26 @@ function refuseClosedComplex(scope: FragmentScope<ScalarRepresentation>) {
 }
 
 /**
+ * The definition that the helper call `call` reads (`readBinding()`): its
+ * own value or operator definition, or, for a call whose head was free when
+ * it was boxed (`isFreeCallHead()`, a call boxed before the host assigned
+ * the function), the definition that its name resolves to now, as the
+ * existing compiler reads it.
+ */
+function helperBinding(call: Expression) {
+  const read = readBinding(call);
+  const valueDefinition =
+    read !== undefined && 'value' in read ? read.value : undefined;
+  const operatorDefinition =
+    read !== undefined && 'operator' in read ? read.operator : undefined;
+  return {
+    binding: valueDefinition ?? operatorDefinition,
+    valueDefinition,
+    operatorDefinition,
+  };
+}
+
+/**
  * Resolve the helper that `call` calls and check its body. On the
  * structured route (`named.structured`), the body has the admission of the
  * body of the root function (`admitFunctionBody()`): locals, writes, `If`
@@ -8527,10 +8575,11 @@ function resolveHelper(
   const registry = named?.structured;
   if (!isFunction(call))
     throw new Error('JS scalar fragment: expected helper call');
-  const binding = call.valueDefinition ?? call.operatorDefinition;
+  const { binding, valueDefinition, operatorDefinition } =
+    helperBinding(call);
   const held =
-    call.valueDefinition?.value ??
-    (call.operatorDefinition as { _lambdaLiteral?: Expression } | undefined)
+    valueDefinition?.value ??
+    (operatorDefinition as { _lambdaLiteral?: Expression } | undefined)
       ?._lambdaLiteral;
   if (!binding || !held || !isFunction(held, 'Function'))
     throw new Error(`JS scalar fragment: unsupported head ${call.operator}`);
@@ -8549,7 +8598,7 @@ function resolveHelper(
   const functionTyped =
     registry !== undefined &&
     signature === undefined &&
-    call.valueDefinition?.type.type === 'function';
+    valueDefinition?.type.type === 'function';
   // On the structured route, a signature that the engine inferred from the
   // definition (`f(x) := …`, `ce.assign('f', …)`) declares no type, and a
   // signature derived from a literal with an annotated parameter
@@ -8563,7 +8612,7 @@ function resolveHelper(
     (registry !== undefined &&
       signature !== undefined &&
       (userFunctionSignatureIsInferred(call.engine, call.operator) ||
-        (call.operatorDefinition?._derivedSignature === true &&
+        (operatorDefinition?._derivedSignature === true &&
           literal.ops
             .slice(1)
             .some((p) => functionLiteralParameterType(p) === undefined))));
@@ -8759,7 +8808,7 @@ function resolveHelper(
       if (
         capture &&
         !capture.symbols.has(node) &&
-        [...capture.symbols][0].valueDefinition !== snapshot.binding
+        resolvedValueDefinition([...capture.symbols][0]) !== snapshot.binding
       )
         throw new Error(
           'JS scalar fragment: only one numeric capture is supported'

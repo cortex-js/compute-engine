@@ -27,7 +27,8 @@
  * `ImaginaryUnit`, `Complex(1, 2)`, `i·x`), captured numbers with and
  * without a declared type (`cn` declared `number`), an input and a
  * parameter declared `number` (`xn`, `nb`), an input declared
- * `nan | real | signed_infinity` (`ex`), boolean inputs and parameters, calls of user
+ * `nan | real | signed_infinity` (`ex`), an input whose type `real` was
+ * written by `ce.infer()` (`xi`), boolean inputs and parameters, calls of user
  * functions with declared and inferred signatures (`HELPERS`), a `Block`
  * at the root and `Function` literals with typed parameters, with a body
  * of locals (a list local made by a `Comprehension`, a local `k0` that
@@ -217,7 +218,8 @@ type InputKind =
   | 'number'
   | 'realnan'
   | 'list'
-  | 'boolean';
+  | 'boolean'
+  | 'inferred';
 
 /** The free inputs of an expression program and their kinds. */
 const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
@@ -230,6 +232,8 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   u: 'undeclared',
   xn: 'number',
   ex: 'realnan',
+  // Real, by `ce.infer()` of `Mod(xi, 2)` (`makeEngine()`).
+  xi: 'inferred',
   L: 'list',
   B: 'boolean',
   // The names that `HOST_OPTIONS` maps to another entry of the vars object
@@ -259,13 +263,15 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   realnan: 'nan | real | signed_infinity',
   list: 'list<real>',
   boolean: 'boolean',
+  inferred: 'real, written by ce.infer()',
 };
 
 /** The declarations of the engine, as the report prints them. */
 export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
   'L: list<real>; B: boolean; u: no declared type; xn: number; ' +
-  'ex: nan | real | signed_infinity; h: real, assigned 2.5; ' +
+  'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
+  'Mod(xi, 2); h: real, assigned 2.5; ' +
   'm: integer, assigned 3; cn: number, assigned 1.5; w: assigned 3 and ' +
   'g: assigned 0.75, with no declared type; the helpers of `HELPERS`, ' +
   'assigned in the scope of each program';
@@ -278,7 +284,8 @@ export function makeEngine(): ComputeEngine {
   const ce = new ComputeEngine();
   if (ANGULAR_UNIT !== 'rad') ce.angularUnit = ANGULAR_UNIT;
   for (const [name, kind] of Object.entries(GLOBAL_INPUTS))
-    if (kind !== 'undeclared') ce.declare(name, TYPE_OF_KIND[kind]);
+    if (kind === 'inferred') ce.infer([ce.expr(['Mod', name, 2])]);
+    else if (kind !== 'undeclared') ce.declare(name, TYPE_OF_KIND[kind]);
   ce.declare('h', 'real');
   ce.assign('h', 2.5);
   ce.declare('m', 'integer');
@@ -584,6 +591,7 @@ const LISTS_EDGE: number[][] = [[NaN, Infinity]];
 function gridOf(kind: InputKind, mode: Mode): Value[] {
   switch (kind) {
     case 'real':
+    case 'inferred':
       return [...REAL_IN, ...NON_FINITE];
     case 'integer':
       return INTEGERS;
@@ -614,6 +622,7 @@ const isComplex = (v: unknown): v is Complex =>
 function inType(kind: InputKind, v: Value, mode: Mode): boolean {
   switch (kind) {
     case 'real':
+    case 'inferred':
       return typeof v === 'number' && Number.isFinite(v);
     case 'integer':
       return typeof v === 'number' && Number.isInteger(v);
@@ -1125,6 +1134,7 @@ const EXPRESSION_SYMBOLS: readonly (readonly [Json, number])[] = [
   ['u', 10],
   ['xn', 8],
   ['ex', 4],
+  ['xi', 4],
   ['z', 4],
   ['h', 4],
   ['m', 2],

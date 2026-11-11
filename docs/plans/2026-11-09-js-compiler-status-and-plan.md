@@ -839,7 +839,11 @@ nine preludes under the profile; `compile-javascript-profile.test.ts`
   change before that: until then the profile cannot tell such a type from
   one that boxing wrote. The predicate is one function,
   `hasNoDeclaredType()`; the change also needs the spec, the model document
-  and the guide to say "declare, or call `ce.infer()`".
+  and the guide to say "declare, or call `ce.infer()`". **Done (this
+  change):** with `_bindingUnits` on, a type of a definition of the host's
+  scopes is read as declared (`ce.infer()`, `ce.assume()`, `ce.assign()`);
+  a parameter or a local keeps the default kind; with the flag off nothing
+  changes. The result is in the spec, "Result of the later change".
 - **Constant folding.** The profile folds no constant; against the default
   options of the existing compiler a result can differ in the last place.
   No test of the suite changed with the switch on. Decide before a consumer
@@ -886,6 +890,10 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `a50de59f9910c56ab46f95d85f71d1c5edc60ddb` | The random differential tester `scripts/js-profile-fuzz.ts` ([description](2026-11-10-js-profile-first-consumer.md)) |
 | `1c448807b4e9fc40fbb33c2b72babd151cb505a7` | A subexpression reached several times is lowered once ([design and result](2026-11-11-structured-shared-subexpressions.md)); CE-1198 fixed |
 | `eac9ab939ef63e0914ba506454feb3d821c293ed` | Names declared `number` ([options and bindings](2026-11-11-structured-options-and-bindings.md), slice 1) |
+| `1652626570dcdbb481e5ec15f5ccd890ce1b4113` | Effectful operations: `Random` and `WithRandomSeed` ([design and result](2026-11-11-structured-random-and-effects.md)) |
+| `50e3e41a43ba6c1febb9b5f291a78d2e6bc28feb` | Fixes of the classes that the random tester found (a local has its declared type; nested quotients; refusals) |
+| `775bc003b8ae9fcb40a0766fd62e2b5b40163759` | The options `vars`, `functions`, `operators`, `imports`, `preamble` (options and bindings, slices 3 to 5) |
+| `595af0206767dcc4b416d5b24ec1a49ed7eab54c` | Nested blocks, blocks as operands, implicit locals, local functions, helpers declared `function` (options and bindings, slices 2 and 6) |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -904,6 +912,8 @@ clean worktree):
 | `4422cd7bf64eca17935bd7655e6a5f0a972a3199` | 5,375 of 6,192 (87%) | 83,353 passed, 0 failed |
 | `6ac31a524af52fecc8744852886ebaba2fac18c8` | 5,614 of 6,204 (90%) | 83,671 passed, 1 failed (CE-1186, a known flaky test) |
 | `eac9ab939ef63e0914ba506454feb3d821c293ed` | 8,711 of 9,234 (94%) | 85,729 passed, 0 failed |
+| `775bc003b8ae9fcb40a0766fd62e2b5b40163759` | 8,907 of 9,427 (94.5%) | 85,906 passed, 0 failed |
+| `595af0206767dcc4b416d5b24ec1a49ed7eab54c` | 8,923 of 9,428 (94.6%) | 86,022 passed, 1 failed (CE-1197, the timeout under load) |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -920,6 +930,8 @@ the existing compiler compiles, and those of them that the profile admits):
 | `07a20e284a8282d60f158840c7cb69f3262d571f` | 8,465 of 22,739 (37%) | 3,070 of 16,539 (19%) |
 | `6ebc2b1574cd75487533e999288fe7339ea71228` | 15,704 of 27,945 (56%) | 7,009 of 18,724 (37%) |
 | `eac9ab939ef63e0914ba506454feb3d821c293ed` | 17,057 of 29,322 (58%) | 8,338 of 20,094 (41%) |
+| `775bc003b8ae9fcb40a0766fd62e2b5b40163759` | 17,384 of 29,256 (59%) | 8,475 of 20,035 (42%) |
+| `595af0206767dcc4b416d5b24ec1a49ed7eab54c` | 17,758 of 29,450 (60%) | 8,828 of 20,225 (44%) |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11
@@ -953,6 +965,26 @@ the profile. The declines by cause, most frequent first:
 
 In 17 compilations the profile admits a program that the existing compiler
 declines; they are not yet examined.
+
+### The nightly run (2026-11-11)
+
+The nightly full run fails since `627ed80e1` (binding units on by default)
+on `test/compute-engine/nightly/js-parity-fuzz.test.ts` (9 of 171 cases): the
+existing compiler declines the untyped inputs of the test, because boxing
+writes no inferred type any more. The test passes at
+`6ac31a524af52fecc8744852886ebaba2fac18c8`. The failure belongs to the
+binding-units work and is not claimed; this workstream did not change it.
+
+### The random differential tester
+
+`scripts/js-profile-fuzz.ts` (options `--random`, `--host`, `--deg`)
+compares the profile with the existing compiler and the interpreter on
+random programs. On each commit from `50e3e41a43ba6c1febb9b5f291a78d2e6bc28feb`
+on, runs of 20,000 to 50,000 programs report no internal failure and no
+difference of value, shape, draws or host calls from the existing compiler,
+except the existing compiler's defect CE-1203 and one documented crafted
+shape difference (`docs/COMPILATION-MODEL.md`, the limits of names with no
+declared type). Every change of coverage ends with such a run.
 
 ### What blocks retirement beyond coverage
 

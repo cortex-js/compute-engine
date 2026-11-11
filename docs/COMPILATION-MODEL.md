@@ -2026,10 +2026,22 @@ nothing changes.
 **A name with no declared type.** Under the profile, a parameter of a
 `Function` literal or a free symbol with no declared type is a real number
 in the `strict` mode and a complex number in the `complex` mode (the
-compiled code then accepts a number or a complex value for it). The type
-that the engine inferred for the name is not read, so the kind of the name
-does not depend on what was boxed before. The host supplies a scalar number
-for such a name; a value of another shape is outside its type. The result,
+compiled code then accepts a number or a complex value for it). Boxing
+writes no type on a definition of the host's scopes, so a type there comes
+from a call of the host: `ce.infer()`, `ce.assume()` or `ce.assign()`
+(an evaluated assignment too). Such a type is read as a declared type is,
+with the same kinds: after `ce.infer([ce.box(['Mod', 'x', 2])])`, `x` is
+real in both modes and is not in `defaultedSymbols`, and after
+`ce.assume(ce.parse('x > 0'))` it has the type `real<0<..>`; after
+`ce.infer([ce.parse('x + 1')])` it is `number`. So a host declares each
+name, or calls
+`ce.infer()` before `compile()`. A type that boxing writes on a parameter
+of a `Function` literal or on a local of the program is not read, so the
+kind of a name never depends on what was boxed before. With the engine
+flag `_bindingUnits` off (`CE_BINDING_UNITS=0`), boxing writes inferred
+types on the host's scopes too, and the profile reads no inferred type.
+The host supplies a scalar number for a name with no declared type; a
+value of another shape is outside its type. The result,
 and the positive answer of `canCompile()`, list these names in
 `defaultedSymbols`: with `u` undeclared, `x + u` compiles and `u` is an
 input. A symbol with a value and no declared type (`ce.assign('a', 3)`) is

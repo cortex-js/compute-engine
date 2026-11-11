@@ -140,9 +140,19 @@
   `binding`); `fallback` applies as for any other decline, and the ordinary
   compiler is never used for a part of the program. A parameter or a free
   symbol with no declared type is a real number in the `strict` mode and a
-  complex number in the `complex` mode, whatever type the engine inferred
-  for it; the result and the positive answer of `canCompile()` list such
-  names in the new field `defaultedSymbols`. The same rule applies to a
+  complex number in the `complex` mode, whatever type boxing inferred for
+  it; the result and the positive answer of `canCompile()` list such names
+  in the new field `defaultedSymbols`. A type that the host wrote for a
+  free symbol with `ce.infer()`, `ce.assume()` or `ce.assign()` is read as
+  a declared type, so a host declares each name or calls `ce.infer()`
+  before `compile()`: after `ce.infer([ce.box(['Mod', 'x', 2])])`, `x` is
+  real in both modes, as on the ordinary compiler, and is not listed in
+  `defaultedSymbols`. With `CE_BINDING_UNITS=0`, where boxing writes
+  inferred types, no inferred type is read. A free symbol boxed before the
+  host assigned it a number is captured with that number; it was compiled
+  as an input. A call boxed before the host assigned its function
+  (`g(x) + 1`, then `ce.assign('g', …)`) calls that function, as on the
+  ordinary compiler; it declined. The same rule applies to a
   call of a user function with no declared signature (`f(x) := x^2 + 1`):
   each parameter with no annotation has the default type, the result is
   the type of the body, an argument of another type declines, and
