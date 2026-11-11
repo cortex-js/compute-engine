@@ -816,6 +816,17 @@ The rational number one half (1/2).
 // ➔ [1/2,3/2]
 ```
 
+### harmonicNumber
+
+MathJSON `HarmonicNumber` · `(complex | infinity, (complex | infinity)?) -> number`
+
+Harmonic number H_n = Σ_&#123;k=1&#125;^n 1/k, exact at a non-negative integer and continued by ψ(n+1) + γ; with a second argument r, the generalized H_n^(r) = Σ_&#123;k=1&#125;^n 1/k^r = ζ(r) − ζ(r, n+1).
+
+```epsil
+[harmonicNumber(10), harmonicNumber(10, 2), N(harmonicNumber(1/2))]
+// ➔ [7381/2520,1968329/1270080,0.613705638880109381166]
+```
+
 ### heaviside
 
 MathJSON `Heaviside` · `(real | signed_infinity) -> rational<0..1>`

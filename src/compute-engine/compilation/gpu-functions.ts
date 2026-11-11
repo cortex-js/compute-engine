@@ -1,6 +1,7 @@
 // GPU_FUNCTIONS, the table of built-in lowerings, together with the large
 // entries (At, Sum and Product, broadcast) that recurse through the table.
 
+import { harmonicNumberDesugared } from './complex-continuation.js';
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isCallerMapped } from './cse.js';
@@ -2636,6 +2637,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     declineComplexContinuation('HurwitzZeta', args);
     return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  // As in the JavaScript target: lowered through `Digamma`, `Zeta` and
+  // `HurwitzZeta`, which are real-only here and carry the pole and
+  // complex-continuation rules.
+  HarmonicNumber: (args, compile) => {
+    if (args.length < 1 || args.length > 2)
+      throw new Error(
+        'Could not compile `HarmonicNumber`: it takes one or two operands'
+      );
+    return compile(harmonicNumberDesugared(args));
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` takes real
   // operands and is NaN where Φ is complex (real z > 1 with s not a

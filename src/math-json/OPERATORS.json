@@ -3533,6 +3533,21 @@
       ]
     },
     {
+      "name": "HarmonicNumber",
+      "category": "Arithmetic",
+      "arity": "optional",
+      "signature": "(complex | infinity, (complex | infinity)?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Harmonic number H_n = Σ_{k=1}^n 1/k, exact at a non-negative integer and continued by ψ(n+1) + γ; with a second argument r, the generalized H_n^(r) = Σ_{k=1}^n 1/k^r = ζ(r) − ζ(r, n+1).",
+      "examples": [
+        "[HarmonicNumber(10), HarmonicNumber(10, 2), N(HarmonicNumber(1/2))]"
+      ]
+    },
+    {
       "name": "Haversine",
       "category": "Trigonometry",
       "arity": "1",

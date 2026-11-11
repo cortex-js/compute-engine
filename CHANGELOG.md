@@ -2,6 +2,16 @@
 
 ### New Features
 
+- **`HarmonicNumber(n)` and `HarmonicNumber(n, r)`** are the harmonic number
+  H<sub>n</sub> = Σ 1/k and the generalized H<sub>n</sub><sup>(r)</sup> = Σ 1/k<sup>r</sup>
+  (Wolfram's `HarmonicNumber`). A non-negative integer `n` with an integer
+  `r` is an exact rational (`HarmonicNumber(10)` is `7381/2520`), left
+  unevaluated past a work cap; elsewhere, under `N()` or with an inexact
+  operand, the value is the continuation ψ(n+1) + γ, or ζ(r) − ζ(r, n+1) for
+  `r` other than 1, for real and complex `n`. A negative integer `n` is the
+  pole `~oo`. It compiles to JavaScript and GLSL, and d/dn H<sub>n</sub> is
+  `Trigamma(n + 1)`.
+
 - **Experimental: the `numeric-kernel` profile of the JavaScript target.**
   `compile(expr, { to: 'javascript', profile: 'numeric-kernel' })` compiles
   the expression with the structured compiler of the JavaScript target. It

@@ -6,6 +6,7 @@ import {
   scalarOperandRepresentation,
   scalarConvertOperand,
 } from './javascript-fragment-facts.js';
+import { harmonicNumberDesugared } from './complex-continuation.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import {
@@ -9328,6 +9329,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       target,
       () => `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`
     );
+  },
+  // H_n = ψ(n+1) + γ and H_n^(r) = ζ(r) − ζ(r, n+1) (r ≠ 1), lowered through
+  // the heads they are built from, so the realness, complex-continuation and
+  // pole rules are theirs. A run-time `r` is tested against 1 (ζ(1) is a pole).
+  HarmonicNumber: (args, compile) => {
+    if (args.length < 1 || args.length > 2)
+      throw new Error(
+        'Could not compile `HarmonicNumber`: it takes one or two operands'
+      );
+    return compile(harmonicNumberDesugared(args));
   },
   // Φ(z, s, a) is complex for z > 1 and for a < 0 with a non-integer s: that
   // value takes `_SYS.clerchPhi` (the interpreter's `lerchPhiComplex`); the

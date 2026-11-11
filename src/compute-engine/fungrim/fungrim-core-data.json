@@ -85,7 +85,6 @@
 "HH": {"signature":"set<complex>","description":"Upper complex half-plane"},
 "HankelH1": {"signature":"(complex, complex) -> complex","description":"Hankel function of the first kind","arity":2},
 "HankelH2": {"signature":"(complex, complex) -> complex","description":"Hankel function of the second kind","arity":2},
-"HarmonicNumber": {"signature":"(integer) -> complex","description":null,"arity":1},
 "HermitePolynomial": {"signature":"(any, complex) -> complex","description":null,"arity":2},
 "Hypergeometric0F1": {"signature":"(complex, complex) -> complex","description":"Confluent hypergeometric limit function","arity":2},
 "Hypergeometric0F1Regularized": {"signature":"(complex, complex) -> complex","description":"Regularized confluent hypergeometric limit function","arity":2},
