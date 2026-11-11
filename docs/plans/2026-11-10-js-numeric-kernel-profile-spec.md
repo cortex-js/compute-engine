@@ -102,6 +102,13 @@ above, each found by the review:
 - A name declared `unknown` declines only until a use narrows it; it then
   takes the default (with `_bindingUnits` on, it always does).
 
+**Later change, decided 2026-11-10.** When boxing no longer writes
+inferred types (the binding-units work, `_bindingUnits` on by default), a
+type that `ce.infer()` wrote is read by the profile as a declared type is:
+the guidance for a host is then "declare the types, or call `ce.infer()`
+before `compile()`". Until then the rule above stands and `ce.infer()`
+changes nothing for the profile.
+
 In the `strict` mode the existing compiler already computes with an untyped
 name as a real number: for 37 of 43 bodies its code for an untyped parameter
 is the code for `x: real`, and the 6 others use operators outside the

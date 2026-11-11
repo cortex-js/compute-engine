@@ -832,8 +832,14 @@ nine preludes under the profile; `compile-javascript-profile.test.ts`
   list still needs `ce.declare()`. Once boxing writes no inferred type
   (binding units, flag `_bindingUnits`), a definition marked inferred exists
   only because the host called `ce.infer()`, `ce.assume()` or `ce.assign()`,
-  and the profile could then read it without depending on the order of
-  boxing. Not decided. The predicate is one function, `hasNoDeclaredType()`.
+  and the profile can then read it without depending on the order of
+  boxing. **Decided by the user 2026-11-10:** the profile ignores inferred
+  types now, and reads a type written by `ce.infer()` once the binding work
+  has landed (boxing writes no inferred type by default). Do not make the
+  change before that: until then the profile cannot tell such a type from
+  one that boxing wrote. The predicate is one function,
+  `hasNoDeclaredType()`; the change also needs the spec, the model document
+  and the guide to say "declare, or call `ce.infer()`".
 - **Constant folding.** The profile folds no constant; against the default
   options of the existing compiler a result can differ in the last place.
   No test of the suite changed with the switch on. Decide before a consumer
