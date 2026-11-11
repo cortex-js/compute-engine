@@ -5845,7 +5845,11 @@ function compileDerivative(
     // here, or the radian-based `Math.cos` the target emits would disagree
     // with `evaluate()`. Same reason `prepareUserFunctionBody` rewrites an
     // emitted function-literal body.
-    return compile(rewriteAngularUnit(value)) || undefined;
+    // In parentheses: the caller writes this text as an operand, and a closed
+    // form that is a sum would otherwise regroup with the parent's operator
+    // (`1 / D(x^3 + x, x)` as `1 / 3 * (x * x) + 1`).
+    const code = compile(rewriteAngularUnit(value));
+    return code ? `(${code})` : undefined;
   } catch (e) {
     throwIfCallerCancellation(e, ce._deadlineFrame);
     // The closed form contains a head this target cannot lower (`Digamma` on

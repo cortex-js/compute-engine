@@ -36,19 +36,19 @@ describe('COMPILE DERIVATIVE — closed-form lowering', () => {
   test('D(x^2, x) compiles on javascript', () => {
     const result = compile(ce.box(['D', ['Power', 'x', 2], 'x']));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('2 * _.x');
+    expect(result.code).toBe('(2 * _.x)');
   });
 
   test('\\frac{d}{dx} x^2 compiles on javascript', () => {
     const result = compile(ce.parse('\\frac{d}{dx} x^2'));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('2 * _.x');
+    expect(result.code).toBe('(2 * _.x)');
   });
 
   test('\\frac{d}{dx}\\sin(x) compiles on javascript', () => {
     const result = compile(ce.parse('\\frac{d}{dx}\\sin(x)'));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('Math.cos(_.x)');
+    expect(result.code).toBe('(Math.cos(_.x))');
   });
 
   test("Derivative-spelled \\sin'(x) compiles on javascript", () => {
@@ -66,7 +66,7 @@ describe('COMPILE DERIVATIVE — closed-form lowering', () => {
     expect(result.success).toBe(true);
     // A function value with no consumer is the scalar variant: the literal
     // itself.
-    expect(result.code).toBe('((x) => Math.cos(x))');
+    expect(result.code).toBe('(((x) => Math.cos(x)))');
   });
 
   test('ND at a numeric point compiles to its value', () => {
@@ -80,7 +80,7 @@ describe('COMPILE DERIVATIVE — closed-form lowering', () => {
   test('a derivative nested in a larger expression compiles', () => {
     const result = compile(ce.parse('2 + \\frac{d}{dx} x^3'));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('3 * (_.x * _.x) + 2');
+    expect(result.code).toBe('(3 * (_.x * _.x)) + 2');
   });
 });
 
@@ -89,19 +89,19 @@ describe('COMPILE DERIVATIVE — glsl', () => {
 
   test('D(x^2, x) compiles on glsl', () => {
     expect(glsl.compile(ce.box(['D', ['Power', 'x', 2], 'x'])).code).toBe(
-      '2.0 * x'
+      '(2.0 * x)'
     );
   });
 
   test('\\frac{d}{dx}\\sin(x) compiles on glsl', () => {
     expect(glsl.compile(ce.parse('\\frac{d}{dx}\\sin(x)')).code).toBe(
-      '_gpu_cos(x)'
+      '(_gpu_cos(x))'
     );
   });
 
   test('\\frac{d}{dx}(x^3 + \\cos(x)) compiles on glsl', () => {
     expect(glsl.compile(ce.parse('\\frac{d}{dx}(x^3+\\cos(x))')).code).toBe(
-      '3.0 * (x * x) + -_gpu_sin(x)'
+      '(3.0 * (x * x) + -_gpu_sin(x))'
     );
   });
 });
@@ -673,7 +673,7 @@ describe('COMPILE DERIVATIVE — the no-closed-form guard is head-aware', () => 
     const expr = engine.box(['D', ['Multiply', 'D', ['Power', 'x', 2]], 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
-    expect(result.code).toBe('2 * _.D * _.x');
+    expect(result.code).toBe('(2 * _.D * _.x)');
   });
 
   test('a surviving derivative APPLICATION still declines', () => {
@@ -717,14 +717,14 @@ describe('COMPILE DERIVATIVE — compiling does not mutate the engine', () => {
 
       const result = compile(expr);
       expect(result.success).toBe(true);
-      expect(result.code).toBe('2 * _.D * _.x');
+      expect(result.code).toBe('(2 * _.D * _.x)');
 
       expect(engine.lookupDefinition('D')).toBe(afterBoxing);
 
       // ...and a later derivative still compiles on the same engine.
       const later = compile(engine.box(['D', ['Power', 'x', 2], 'x']));
       expect(later.success).toBe(true);
-      expect(later.code).toBe('2 * _.x');
+      expect(later.code).toBe('(2 * _.x)');
     }
   );
 
@@ -742,6 +742,32 @@ describe('COMPILE DERIVATIVE — compiling does not mutate the engine', () => {
     ).toBe('2x');
     const result = compile(engine.box(['D', ['Power', 'x', 2], 'x']));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('2 * _.x');
+    expect(result.code).toBe('(2 * _.x)');
+  });
+});
+
+describe('COMPILE DERIVATIVE — the closed form is one operand (CE-1216)', () => {
+  // The closed form of `D(x^3 + x, x)` is a sum. Written with no parentheses
+  // it regrouped with the operator of the parent: `1 / 3 * (x * x) + 1`.
+  const body = ['Add', ['Power', 'x', 3], 'x'];
+  const cases: [string, unknown, number][] = [
+    ['a quotient', ['Divide', 1, ['D', body, 'x']], 1 / 13],
+    ['a negation', ['Negate', ['D', body, 'x']], -13],
+    ['a product', ['Multiply', 'a', ['D', body, 'x']], 65],
+    ['a difference', ['Subtract', 'a', ['D', body, 'x']], -8],
+    ['a power', ['Power', ['D', body, 'x'], 2], 169],
+  ];
+  test.each(cases)('%s of a derivative', (_label, json, expected) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('a', 'real');
+    const expr = ce.box(json as never);
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: 2, a: 5 })).toBeCloseTo(expected, 12);
+    expect(expr.subs({ x: 2, a: 5 }).evaluate().N().re).toBeCloseTo(
+      expected,
+      12
+    );
   });
 });
