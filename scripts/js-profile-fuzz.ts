@@ -136,6 +136,18 @@
  *   --deg                Each engine has the angular unit `deg`: the
  *                        same programs, compiled and interpreted in
  *                        degrees.
+ *   --bigint             Integer programs in the compile mode `bigint`, in
+ *                        place of the programs above
+ *                        (`scripts/js-profile-fuzz-bigint.ts`): a `bigint`
+ *                        or a `boolean` result must be the same (`===`) on
+ *                        both compilers, and equal to the exact value of the
+ *                        interpreter; the inputs are given as `bigint`
+ *                        values and, at some points, as `number` values.
+ *                        `--modes`, `--random`, `--host` and `--deg` do not
+ *                        apply.
+ *
+ *   timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
+ *     --seed 131,132,133 --count 10000 --bigint
  *   --json <file>        Also write the whole result as JSON.
  *   --quiet              Print the counts only, not the programs.
  *
@@ -171,6 +183,7 @@ import {
 } from '../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../src/math-json/types';
+import { printBigintResult, runBigintFuzz } from './js-profile-fuzz-bigint';
 
 //
 // Seeded random numbers
@@ -3292,10 +3305,41 @@ async function main(): Promise<void> {
       random: { type: 'boolean', default: false },
       host: { type: 'boolean', default: false },
       deg: { type: 'boolean', default: false },
+      bigint: { type: 'boolean', default: false },
     },
   });
   const int = (s: string | undefined, d: number) =>
     s === undefined ? d : Number.parseInt(s, 10);
+  if (values.bigint!) {
+    const result = await runBigintFuzz(
+      {
+        seeds: values.seed!.split(',').map((s) => Number.parseInt(s, 10)),
+        count: int(values.count, DEFAULT_OPTIONS.count),
+        depth: int(values.depth, DEFAULT_OPTIONS.depth),
+        size: int(values.size, DEFAULT_OPTIONS.size),
+        points: int(values.points, 60),
+        interp: int(values.interp, DEFAULT_OPTIONS.interp),
+        shrink: int(values.shrink, DEFAULT_OPTIONS.shrink),
+      },
+      (line) => process.stderr.write(line + '\n')
+    );
+    process.stdout.write(printBigintResult(result, values.quiet!) + '\n');
+    if (values.json !== undefined)
+      writeFileSync(
+        values.json,
+        JSON.stringify(
+          result,
+          (_k, v) =>
+            typeof v === 'bigint'
+              ? `${String(v)}n`
+              : typeof v === 'number' && !Number.isFinite(v)
+                ? String(v)
+                : v,
+          2
+        ) + '\n'
+      );
+    return;
+  }
   const options: FuzzOptions = {
     seeds: values.seed!.split(',').map((s) => Number.parseInt(s, 10)),
     count: int(values.count, DEFAULT_OPTIONS.count),

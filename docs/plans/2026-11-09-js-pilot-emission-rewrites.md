@@ -350,6 +350,37 @@ operations, with no function value.
 | `Apply((t) ↦ body, a)` | `(((t) => t + 1))(_.x)`, complex-lifted in the `complex` mode | The body with its parameters bound to the values of the arguments, evaluated before it; in the `complex` mode declined |
 | A body that draws, calls or reads the host, or holds a `Loop` | Called once per element, when the existing code runs `map` | Declined (`refuseLazyFunctionOperands()`): the interpreter's `Map`, `Filter` and `Scan` compute an element when it is read |
 
+### The compile mode `bigint`
+
+Read from `emitBigintLane()` (`compile-bigint-emit.ts`) and the helpers of
+`bigint-runtime.ts` at `5906581bb` (2026-11-11), with `n`, `m` declared
+`integer` and `k0` `integer<0..>`, `mode: 'bigint', cse: false,
+constantFold: false`, by probes; the design is slices 1 and 2 of
+[2026-11-11-structured-bigint-mode.md](2026-11-11-structured-bigint-mode.md)
+and the tests are
+`test/compute-engine/compile-javascript-structured-bigint.test.ts`. The
+existing emitter puts parentheses around each operation; the route writes
+the parentheses of the precedence of the operators, which gives the same
+`bigint` values.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| An integer input | Read once, before the code: `const _tv1 = typeof _.n === 'number' ? _SYS.toBigint(_.n) : _.n;` | The same, in the order of the first reads (`IRInput.lifted`) |
+| The wrapper of the entry | `(() => { <lifts> try { return <code>; } catch (_tv3) { if (_tv3 instanceof _SYS.NonFiniteValue) return _tv3.value; throw _tv3; } })()`, when the code lifts an input or calls a helper; none for a literal (`7n`) | The same text, when the program lifts an input or can abort with `no-value` (choice C4) |
+| `n + 2m − 3` | `((2n * _tv1) + _tv2 + (-3n))` | `add`, `multiply` of `bigint` values: `2n * _tv1 + _tv2 + -3n` |
+| A constant subtree | Folded from `evaluate()`, also with `constantFold: false`: `2^70 + n` is `(_tv1 + 1180591620717411303424n)`; `Fibonacci(10^9)` declines | A literal of the exact value (choice C2): `_tv1 + 1180591620717411303424n`; the same decline |
+| A constant pole | `(-1)! + n` is `(_tv1 + (() => { throw new _SYS.NonFiniteValue(Infinity); })())` | A `no-value` operation, the same throw where it is evaluated |
+| `n^3`, `n^k0`, `(−1)^n` | `_SYS.bpow(_tv1, 3n)`, `_SYS.bpow(_tv1, _tv2)`, `_SYS.bnegOnePow(_tv1)` | `int-pow`, `neg-one-pow`: the same calls |
+| `Mod`, `Remainder`, `GCD`, `LCM`, `Factorial`, `Factorial2`, `Binomial`, `Fibonacci`, `IsPrime` | `_SYS.bfloorMod(_tv1, _tv2)`, `_SYS.bremainder(…)`, `_SYS.bgcd(_tv1, _tv2, 6n)`, `_SYS.blcm(…)`, `_SYS.bfactorial(_tv1)`, `_SYS.bfactorial2(…)`, `_SYS.bbinomial(…)`, `_SYS.bfibonacci(…)`, `_SYS.isPrimeBigint(_tv1)` | `mod` and the integer functions: the same calls |
+| `Min`, `Max`, `Abs`, `Sign` | `_SYS.bmax(_tv1, _tv2, 4n)`, `_SYS.babs(_SYS.bsign(_tv1))` | `max`, `min`, and `abs`, `sign` of a `bigint`: the same calls |
+| `Floor(n/m)`, `Ceil`, `Round`, `Truncate` | `_SYS.bfloorDiv(_tv1, _tv2)`, `_SYS.bceilDiv`, `_SYS.broundDiv` (a tie away from zero), `_SYS.btruncDiv` | `quotient` with the rounding of the parent: the same calls |
+| `Floor(n/2) + Ceil(n/2)` | `(_SYS.bfloorDiv(1n * _tv1, 2n) + _SYS.bceilDiv(1n * _tv1, 2n))` | Two quotients (a rounded quotient is shared only under the same parent): `const _tv2 = _SYS.bfloorDiv(1n * _tv1, 2n); return _tv2 + _SYS.bceilDiv(1n * _tv1, 2n);` (a value that can abort is not moved across another one) |
+| `Typed(n/2, integer)`, `Typed(n^m, integer)` | `_SYS.bexactDiv(1n * _tv1, 2n)`, `_SYS.bexactDiv(..._SYS.bpowRational(_tv1, _tv2))`: a `RangeError` for a remainder | `quotient` and `rounded-pow` with the rounding `exact`: the same calls |
+| `Floor(√n)`, `Ceil(√n)`, `Round(√n)` | `_SYS.bisqrt(_tv1)`, `_SYS.bceilSqrt(_tv1)`, `_SYS.broundSqrt(_tv1)`; under an integer promise, declined | `isqrt` with the rounding of the parent: the same calls; the same decline |
+| `n < 7/2`, `n = 1/2` | `(2n * _tv1 < 7n)`; `(_tv1, false)` | `2n * _tv1 < 7n`; the lane operand bound to a `const`, then `false` |
+| `If`, `Which`, `Boole` | `((_tv1 < 0n) ? 0n : _SYS.bfactorial(_tv1))`; `(((_tv1 < 3n) && (0n < _tv2)) ? 1n : 0n)` | `if`: `_tv1 < 0n ? 0n : _SYS.bfactorial(_tv1)`, `_tv1 < 3n && 0n < _tv2 ? 1n : 0n` |
+| Two operations that can abort | `(_SYS.bfactorial(_tv1) < _SYS.bfactorial(_tv2))`: the left one first | `const _tv2 = _SYS.bfactorial(_tv1); return _tv2 < _SYS.bfactorial(_tv3);`: the order of the existing emitter, so the same abort ends the call |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a

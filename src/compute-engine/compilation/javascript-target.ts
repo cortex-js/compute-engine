@@ -12465,7 +12465,7 @@ export type JavaScriptBody = {
   /** The helpers of the runtime object `_SYS` that the body calls. */
   readonly runtime: ReadonlySet<string>;
   /** The compile mode that the result reports (`CompilationResult.mode`). */
-  readonly mode: 'strict' | 'complex';
+  readonly mode: 'strict' | 'complex' | 'bigint';
   /** When present, the result is shippable only when this is `true` and
    *  the checks of the assembly say so too (`CompilationResult.shippable`):
    *  the emitter knows facts of the program that the text of the code does

@@ -6,6 +6,7 @@ import {
   type Finding,
   type FuzzResult,
 } from '../../scripts/js-profile-fuzz';
+import { runBigintFuzz } from '../../scripts/js-profile-fuzz-bigint';
 
 // The random differential tester of the `numeric-kernel` profile
 // (scripts/js-profile-fuzz.ts) with three fixed seeds and a small count.
@@ -143,4 +144,30 @@ test('the same seed gives the same result', async () => {
   expect(JSON.stringify(again, (_k, v) => (Number.isNaN(v) ? 'NaN' : v))).toBe(
     JSON.stringify(once, (_k, v) => (Number.isNaN(v) ? 'NaN' : v))
   );
+}, 300_000);
+
+// The `--bigint` run (scripts/js-profile-fuzz-bigint.ts): integer programs
+// in the compile mode `bigint`. A `bigint` or a `boolean` result of the
+// profile is the result of the existing compiler (`===`) and the exact
+// value of the interpreter, and a thrown error has the class of the error
+// of the existing compiler.
+test('the bigint run: no difference, no failure, no disagreement with the interpreter', async () => {
+  const run = await runBigintFuzz({
+    seeds: [1, 2],
+    count: 150,
+    depth: 4,
+    size: 40,
+    points: 40,
+    interp: 2,
+    shrink: 100,
+  });
+  expect(run.programs).toBe(300);
+  expect(run.classes['both compile']).toBeGreaterThan(200);
+  expect(run.classes['profile declines only']).toBe(0);
+  expect(run.interpreterPoints.compared).toBeGreaterThan(300);
+  expect(
+    run.findings
+      .filter((f) => f.class !== 'number')
+      .map((f) => `${f.class} ${JSON.stringify(f.minimal)}`)
+  ).toEqual([]);
 }, 300_000);

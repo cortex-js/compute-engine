@@ -41,8 +41,13 @@ facts in the result. Nothing changes for a call that does not pass the option.
 
 Under the profile, the options `cse` and `constantFold` have no effect on the
 code: the route does neither, and it ignores both options while the profile
-is experimental. The guide says so. The modes are `strict` and `complex`;
-`bigint` declines.
+is experimental. The guide says so. The modes are `strict`, `complex` and
+`bigint`. In the `bigint` mode the admission is the lane analysis of the
+existing compiler, and the profile admits its scalar programs and its
+integer-forcing parents; `Sum`, `Product`, user functions, lists, a root
+`Function` literal and the options of the host decline
+(`docs/plans/2026-11-11-structured-bigint-mode.md`, "Result of slices 1
+and 2"). A result of the mode is `pure` and `shippable`.
 
 There is no `requires` option. A host that needs a property reads it in the
 result, or in the answer of `canCompile()`, and decides. An option would be
@@ -237,8 +242,8 @@ with a pure arithmetic body declines (the existing emitter evaluates it
 before the arguments), and so does a source with a line terminator or a
 comment. The
 function form of `operators`, an infix `operators` entry, an entry for an
-operator or a constant of the library, and `mode: 'bigint'` decline with
-`outside-profile`. The rules are in `docs/COMPILATION-MODEL.md`, "The options
+operator or a constant of the library, and in the mode `bigint` every option
+of the host decline with `outside-profile`. The rules are in `docs/COMPILATION-MODEL.md`, "The options
 of the host"; the result is in the note, "Result of slices 3 to 5".
 
 ## The two facts, defined

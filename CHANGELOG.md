@@ -1,3 +1,35 @@
+## [Unreleased]
+
+### New Features
+
+- **The `numeric-kernel` profile compiles in the mode `bigint`.**
+  `compile(expr, { profile: 'numeric-kernel', mode: 'bigint' })` compiled
+  nothing (`outside-profile`: "the option `mode: 'bigint'` is not in the
+  profile"). It now compiles a program of `integer` inputs made of
+  arithmetic, `Mod`, `Remainder`, `GCD`, `LCM`, `Factorial`, `Factorial2`,
+  `Binomial`, `Fibonacci`, `IsPrime`, `Abs`, `Sign`, `Min`, `Max`, `Boole`,
+  `If`, `Which`, the comparisons and the connectives, and `Floor`, `Ceil`,
+  `Round`, `Truncate` and an integer `Typed` of a quotient, a power or a
+  square root. A `bigint` or `boolean` result is the result of the mode
+  without the profile; a pole gives `NaN` or `Infinity`. The result reports
+  `pure: true` and `shippable: true`, and `canCompile()` gives the same
+  answer.
+
+  ```js
+  ce.declare('n', 'integer');
+  ce.declare('m', 'integer');
+  const q = compile(ce.box(['Floor', ['Divide', 'n', 'm']]), {
+    profile: 'numeric-kernel',
+    mode: 'bigint',
+  });
+  q.run({ n: 2n ** 64n + 7n, m: 3 }); // ➔ 6148914691236517207n
+  q.run({ n: 5n, m: 0n });            // ➔ Infinity
+  ```
+
+  `Sum`, `Product`, calls of user functions, lists, a `Function` literal and
+  the options `vars`, `functions`, `operators`, `imports` and `preamble`
+  still decline with `outside-profile` in the mode.
+
 ## 0.187.0 _2026-11-11_
 
 ### Breaking Changes

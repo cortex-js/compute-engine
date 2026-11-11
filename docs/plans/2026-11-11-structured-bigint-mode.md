@@ -261,3 +261,88 @@ After slice 5, about 461 of the 471 are admitted; the other 10 are §5.
   not probed; the batch routes refuse the mode, so no consumer does it.
 - The 17 programs the shadow measure counts as admitted by the profile and
   declined by the existing compiler were not examined for this mode.
+
+## Result of slices 1 and 2
+
+Implemented 2026-11-11 on `5906581bb`, with the recommended options C1 to
+C5. Files: `javascript-structured-bigint.ts` (the lowering, new),
+`structured-ir.ts`, `structured-verify.ts`, `javascript-structured-policy.ts`
+(`JAVASCRIPT_BIGINT_POLICY`), `javascript-structured-emit.ts`,
+`javascript-fragment-target.ts` (`prepareBigint()`, `bigintBody()`); tests
+in `compile-javascript-structured-bigint.test.ts` (171),
+`compile-javascript-structured-ir.test.ts` (11 verifier tests of the
+policy) and `js-profile-fuzz.test.ts` (one bigint run); the tester
+`scripts/js-profile-fuzz-bigint.ts`, run by
+`scripts/js-profile-fuzz.ts --bigint`.
+
+**Admitted.** Every program that `requireBigintLane()` accepts and whose
+nodes are those of slices 1 and 2: the scalar core of slice 1 and the
+integer-forcing parents of slice 2 over a quotient, a rational product, a
+power and (not under `Typed`) a square root. The root is a value; the
+inputs are `integer`, read once at the entry.
+
+**Declined, with the reason.** A decline of the lane analysis
+(`outside-profile`, with the lane message and `value`); `Sum`, `Product`,
+`Reduce`, `Fold`, `Range`, `List`, `Map`, `Length`, `Count`, `At`, `First`,
+`Last`, `Take`, `Drop`, `ReplaceAt`, a `Function` literal at the root and a
+call of a user function ("X is not in the profile in the mode bigint":
+slices 3 to 5); the options `vars`, `functions`, `operators`, `preamble`
+and `imports`; a batch (`broadcast`). The structured route without the
+profile still refuses the mode.
+
+**The measure.** The shadow measure on the 13 test files that compile in
+the mode (`CE_JS_PROFILE_SHADOW=1`), before and after:
+
+| | admitted | declined | failed |
+| --- | --- | --- | --- |
+| before | 330 | 600 (470 with the message of the mode) | 0 |
+| after | 693 | 237 (107 with a reason of the mode) | 0 |
+
+363 of the 470 compilations of the mode are admitted; the 107 others are
+the heads of slices 3 to 5 (`Sum` 18, `At` 16, a root `Function` 12, calls
+of user functions 18, `Map` 7, the other list heads 31, two options). The
+estimate of §6 was about 366 for slices 1 and 2. Of the 106 distinct
+witness programs of the two slices, 104 compile and give the values of the
+existing compiler at the grid of the tests; the other two read a user
+function or a symbol with a value in the file they came from, and are not
+programs of the slices when replayed alone.
+
+**The tester.** `--bigint --seed 131,132,133 --count 10000`: 30,000
+programs, 26,802 compiled by both, 3,031 declined by both, 0 declined by
+one only, 0 failures; 1,608,120 points compared, 0 differences of a
+`bigint`, a `boolean` or an error class, 0 differences of two numbers;
+75,938 points compared with `evaluate()`, 0 disagreements, 28 points where
+the interpreter has no exact value (CE-1212: a `subs()` of a conditional
+whose other branch is an error stays unevaluated).
+
+**Where the implementation differs from the note.**
+
+- The abort kinds are a field of the operation (`OperationBase.aborts`),
+  which the verifier compares with `policy.aborts(op)`; the program records
+  its `noValueResult` (`number`), present exactly when an operation can
+  abort with `no-value`. The integer functions are one operation kind
+  (`IRIntegerFunction`, with `fn` and `rounding`), and a constant pole is an
+  operation `no-value`.
+- The emitter does not move a value whose code can abort across another
+  such value (`writtenAtUse()`, `abortsHere` in `region()`; an operand
+  written into the code of its user counts). The rule reads only the abort
+  kinds that the policy states (`statesAbort()`: an operation with
+  `aborts`, a region or a function body that holds one), not an iteration
+  budget or a seed, so the code of the `strict` and `complex` modes does
+  not change. Without it, the first run of
+  the tester found 57 programs where the profile threw a `RangeError` and
+  the existing compiler gave `NaN`, or the reverse: `bpow` bound to a
+  `const` first, and a `remainder` by `0` written later at its use.
+- The options of the host decline in the mode (the note did not say).
+- A literal holds the kind of value of its representation: the policy
+  hook `literalAdmits()` refuses a JavaScript number in a `bigint` literal,
+  and a `bigint` in a `number` literal of the double policy.
+- The policy states no `collection` and no list operation, so the
+  functions of lists and the function operands of the collections slices 2
+  and 3 decline in the mode (`Map`, `Sort`, `Range` as a value).
+- An `Equal` or a `NotEqual` with a rational constant that the lane
+  analysis folds lowers its lane operand (which can abort) and then gives
+  the literal, as the existing emitter writes `(_tv1, false)`.
+- The measure ran on the 13 files whose compilations use the mode, not the
+  18 of the census.
+- `JavaScriptBody.mode` in `javascript-target.ts` admits `'bigint'`.

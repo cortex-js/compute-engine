@@ -18,9 +18,13 @@
  *   expression of the use, when all of these are true: the operation is
  *   `pure`; the value has exactly one use; that use is in the region of the
  *   definition, not in a nested region; every operation between the
- *   definition and the use is `pure`. The evaluation of the value then moves
- *   from its definition to its use, and only across pure operations, so no
- *   effect changes its order. A read of an input is `pure`: compiled code
+ *   definition and the use is `pure`; and, when the code of the value can
+ *   abort with a kind that the policy states (`statesAbort()`, also of an
+ *   operand written into it: not an iteration budget or a seed), the
+ *   code of no operation between the two can. The evaluation of the value
+ *   then moves from its definition to its use, and only across pure
+ *   operations, so no effect changes its order, and the first abort of a
+ *   call is the one of the program. A read of an input is `pure`: compiled code
  *   treats an input as a value, and the order and the number of the reads of
  *   a getter of the vars object are unspecified. Neither the entry check of
  *   `run()` nor `rawCall` makes a snapshot of the vars object, so a getter
@@ -100,6 +104,16 @@
  *   b)` is `({ re: a, im: b })`, and `pow` of complex operands
  *   `_SYS.cpow`. An object literal is in parentheses, so that it is never
  *   read as a block.
+ * - In the mode `bigint` (`IRProgram.numericPolicy`), an integer is a
+ *   JavaScript `bigint`: a literal is `123n`, `add`, `negate`, `multiply`
+ *   and the comparisons are the operators of `bigint` values, and `mod`,
+ *   `min`, `max`, `abs`, `sign` and each integer function
+ *   (`IRIntegerFunction`) call the helper of `bigint-runtime.ts` that the
+ *   bigint emitter of the existing compiler calls (`BIGINT_CODE`). A
+ *   `no-value` is the throw of a `_SYS.NonFiniteValue`. The code of the
+ *   program is in the wrapper of the entry of that emitter
+ *   (`entryWrapper()`): each lifted input read once into a local, and one
+ *   catch of the `NonFiniteValue` of a pole.
  * - A list and a tuple are a JavaScript array of numbers. `list` and
  *   `tuple` are the array literal `[a, b, …]`, and `get` of the position
  *   `i` is `t[i - 1]`, as the existing emitter writes a list literal, a
@@ -197,9 +211,54 @@ import {
   type IRRegion,
   type IRValue,
   type BinaryFunctionName,
+  type IntegerFunctionName,
+  type IntegerRounding,
   type UnaryFunctionName,
 } from './structured-ir.js';
 import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
+
+/**
+ * The helpers of `bigint-runtime.ts` that the bigint emitter of the existing
+ * compiler calls for each integer function (`compile-bigint-emit.ts`): a
+ * name of `_SYS`, or a name per rounding. `rounded-pow` is the division
+ * helper of its rounding applied to `_SYS.bpowRational(a, e)`, the exact
+ * quotient of the power; `isqrt` with the rounding `floor` or `truncate` is
+ * `_SYS.bisqrt`.
+ */
+const BIGINT_CODE: Readonly<
+  Record<
+    Exclude<IntegerFunctionName, 'quotient' | 'isqrt' | 'rounded-pow'>,
+    string
+  >
+> = {
+  'remainder': 'bremainder',
+  'int-pow': 'bpow',
+  'neg-one-pow': 'bnegOnePow',
+  'gcd': 'bgcd',
+  'lcm': 'blcm',
+  'factorial': 'bfactorial',
+  'factorial2': 'bfactorial2',
+  'binomial': 'bbinomial',
+  'fibonacci': 'bfibonacci',
+  'is-prime': 'isPrimeBigint',
+};
+
+/** The division helper of each rounding (`bfloorDiv`, …, `bexactDiv`). */
+const BIGINT_DIVISION: Readonly<Record<IntegerRounding, string>> = {
+  'floor': 'bfloorDiv',
+  'ceil': 'bceilDiv',
+  'round-ties-away': 'broundDiv',
+  'truncate': 'btruncDiv',
+  'exact': 'bexactDiv',
+};
+
+/** The integer square root of each rounding; `exact` has none. */
+const BIGINT_SQRT: Readonly<Partial<Record<IntegerRounding, string>>> = {
+  'floor': 'bisqrt',
+  'truncate': 'bisqrt',
+  'ceil': 'bceilSqrt',
+  'round-ties-away': 'broundSqrt',
+};
 
 /**
  * The JavaScript code of each function of the representation: the function
@@ -434,6 +493,14 @@ function numberSource(n: number): Source {
   return text.startsWith('-') ? { text, precedence: UNARY } : atom(text);
 }
 
+/** The source of the exact integer `n` as a JavaScript `bigint` literal
+ *  (`123n`); a negative one has the precedence of a unary minus, as a
+ *  negative number has (`numberSource()`). */
+function bigintSource(n: bigint): Source {
+  const text = `${String(n)}n`;
+  return n < 0n ? { text, precedence: UNARY } : atom(text);
+}
+
 /** Write the code of `program`, which `verifyProgram()` accepted. */
 export function emitStructuredProgram(
   program: IRProgram,
@@ -446,6 +513,17 @@ export function emitStructuredProgram(
   );
   const statements: string[] = [];
   const value = emitter.openRegion(program.root, statements, true)[0].text;
+  if (
+    program.numericPolicy === 'bigint' &&
+    (program.noValueResult !== undefined || emitter.lifted.size > 0)
+  )
+    return {
+      definitions,
+      statements: [],
+      value: emitter.entryWrapper(statements, value),
+      inputs: emitter.inputs,
+      runtime: emitter.runtime,
+    };
   return {
     definitions,
     statements,
@@ -537,6 +615,10 @@ class Emitter {
   >();
   readonly inputs = new Set<string>();
   readonly runtime = new Set<string>();
+  /** The name of the local of each `bigint` input that the host can give as
+   *  a `number` (`IRInput.lifted`), by the name of the input: the input is
+   *  read once, at the entry (`entryWrapper()`). */
+  readonly lifted = new Map<string, string>();
   /** The values that are reads of an input, by their ids (`haversine`). */
   private readonly inputValues = new Set<number>();
   /** The declared element type of each list value that is an input or a
@@ -582,6 +664,29 @@ class Emitter {
     ].join(' ')} }`;
   }
 
+  /**
+   * The code of a program of the mode `bigint` (`emitStructuredProgram()`),
+   * whose root has the statements `statements` and the value `value`, in
+   * the wrapper of the entry of the existing emitter (`entryWrapper()` in
+   * `compile-bigint-emit.ts`): each lifted input is read once into its
+   * local, a `number` converted with `_SYS.toBigint`, a `bigint` kept; one
+   * `try`/`catch` around the code returns the `number` of the
+   * `_SYS.NonFiniteValue` that a pole throws (`IRProgram.noValueResult`),
+   * and throws every other error again.
+   */
+  entryWrapper(statements: readonly string[], value: string): string {
+    const lifts = [...this.lifted]
+      .map(([name, id]) => {
+        const read = this.names.input(name);
+        return `const ${id} = typeof ${read} === 'number' ? _SYS.toBigint(${read}) : ${read}; `;
+      })
+      .join('');
+    if (this.lifted.size > 0) this.runtime.add('toBigint');
+    this.runtime.add('NonFiniteValue');
+    const e = this.names.fresh();
+    return `(() => { ${lifts}try { ${[...statements, `return ${value};`].join(' ')} } catch (${e}) { if (${e} instanceof _SYS.NonFiniteValue) return ${e}.value; throw ${e}; } })()`;
+  }
+
   /** `region()` of a region that is open. */
   openRegion(region: IRRegion, out: string[], readsInputs: boolean): Source[] {
     return (
@@ -616,6 +721,40 @@ class Emitter {
             ? 0
             : 1)
       );
+    // `abortsHere[k]`: whether the code of the operation at position `k` can
+    // abort as it is written, with an abort kind that the policy states
+    // (`statesAbort()`: an iteration budget and a seed are not such aborts,
+    // and the code of the `strict` and `complex` modes does not depend on
+    // this rule), or an operand that can be written into this code can (an operand that
+    // an earlier operation of the region defines and that has one use, there:
+    // a loop, a build and a seeded are statements, and their results are
+    // names). `aborting[k]`: the number of operations before position `k`
+    // whose code can abort. A value whose code can abort is not moved across
+    // another one: the abort that ends the call would change.
+    const abortsHere: boolean[] = [];
+    const definedAt = new Map<number, number>();
+    for (const [k, op] of operations.entries()) {
+      const writtenInto = (v: IRValue) => {
+        const at = definedAt.get(v.id);
+        const use = this.uses.get(v.id);
+        return (
+          at !== undefined &&
+          abortsHere[at] &&
+          use?.count === 1 &&
+          use.region === region
+        );
+      };
+      abortsHere.push(
+        statesAbort(op, this.program.functions) ||
+          op.operands.some(writtenInto)
+      );
+      if (op.kind !== 'loop' && op.kind !== 'build' && op.kind !== 'seeded')
+        for (const v of op.kind === 'if' ? op.results : op.result ? [op.result] : [])
+          definedAt.set(v.id, k);
+    }
+    const aborting = [0];
+    for (const aborts of abortsHere)
+      aborting.push(aborting[aborting.length - 1] + (aborts ? 1 : 0));
     for (const [index, op] of operations.entries()) {
       if (op.kind === 'yield') return op.operands.map((v) => this.source(v));
       if (op.kind === 'exit') {
@@ -625,7 +764,12 @@ class Emitter {
       const code = this.operation(op, out, readsInputs);
       if (code === undefined) continue;
       const result = singleResult(op)!;
-      if (this.writtenAtUse(result, op, region, index, impure))
+      if (
+        this.writtenAtUse(result, op, region, index, impure, {
+          here: abortsHere[index],
+          before: aborting,
+        })
+      )
         this.define(result, code);
       else out.push(`const ${this.bind(result)} = ${code.text};`);
     }
@@ -691,19 +835,23 @@ class Emitter {
    * `region`, is written at its use: `op` is pure and runs no code of the
    * host (`reachesHost()`: the host can count its calls and their order), its
    * value has one use, in `region`, and every operation between the two is
-   * pure.
+   * pure; and, when the code of `op` can abort (`aborts.here`), the code of
+   * no operation between the two can (`aborts.before`, `region()`).
    */
   private writtenAtUse(
     result: IRValue,
     op: IROperation,
     region: IRRegion,
     index: number,
-    impure: readonly number[]
+    impure: readonly number[],
+    aborts: { readonly here: boolean; readonly before: readonly number[] }
   ): boolean {
     if (op.effect !== 'pure' || reachesHost(op, this.program.functions))
       return false;
     const use = this.uses.get(result.id);
     if (use === undefined || use.count !== 1 || use.region !== region)
+      return false;
+    if (aborts.here && aborts.before[use.index] - aborts.before[index + 1] !== 0)
       return false;
     return impure[use.index] - impure[index + 1] === 0;
   }
@@ -757,7 +905,9 @@ class Emitter {
             ? atom(String(value))
             : typeof value === 'number'
               ? numberSource(value)
-              : atom(
+              : typeof value === 'bigint'
+                ? bigintSource(value)
+                : atom(
                   `({ re: ${numberSource(value.re).text}, im: ${numberSource(value.im).text} })`
                 )
         );
@@ -777,7 +927,18 @@ class Emitter {
         if (input.elementLabel !== undefined)
           this.elementLabels.set(op.result.id, input.elementLabel);
         this.inputValues.add(op.result.id);
-        // A lifted input is converted at each read, as the existing
+        // A lifted `bigint` input is read once, at the entry, into a local
+        // (`entryWrapper()`), as the bigint emitter of the existing compiler
+        // reads it.
+        if (input.lifted && input.representation === 'bigint') {
+          let id = this.lifted.get(input.name);
+          if (id === undefined) {
+            id = this.names.fresh();
+            this.lifted.set(input.name, id);
+          }
+          return atom(id);
+        }
+        // A lifted complex input is converted at each read, as the existing
         // emitter writes a wide name in the `complex` mode.
         return atom(
           input.lifted
@@ -868,6 +1029,10 @@ class Emitter {
           return leftAssociative(operands, MULTIPLICATIVE, '/');
         return this.complexQuotient(op.operands, operands, out);
       case 'mod':
+        if (op.result.representation === 'bigint') {
+          this.runtime.add('bfloorMod');
+          return call('_SYS.bfloorMod', operands);
+        }
         this.runtime.add('floorMod');
         return call('_SYS.floorMod', operands);
       case 'floor':
@@ -948,6 +1113,17 @@ class Emitter {
         if (fn === 'complex') {
           const [re, im] = operands.map((o) => operand(o, CONDITIONAL));
           return atom(`({ re: ${re}, im: ${im} })`);
+        }
+        // `_SYS.babs` and `_SYS.bsign` of a `bigint`.
+        if (op.operands[0].representation === 'bigint') {
+          const helper =
+            fn === 'abs'
+              ? 'babs'
+              : fn === 'sign'
+                ? 'bsign'
+                : fail(`the function ${fn} has a bigint operand`);
+          this.runtime.add(helper);
+          return call(`_SYS.${helper}`, operands);
         }
         const code = FUNCTION_CODE[fn];
         if (!op.operands.some((v) => v.representation === 'complex')) {
@@ -1052,9 +1228,42 @@ class Emitter {
         return undefined;
       }
       case 'min':
-        return call('Math.min', operands);
       case 'max':
-        return call('Math.max', operands);
+        if (op.result.representation === 'bigint') {
+          const helper = op.kind === 'min' ? 'bmin' : 'bmax';
+          this.runtime.add(helper);
+          return call(`_SYS.${helper}`, operands);
+        }
+        return call(op.kind === 'min' ? 'Math.min' : 'Math.max', operands);
+      case 'integer': {
+        // The helper of `bigint-runtime.ts` that the existing emitter calls.
+        const fn = op.fn;
+        if (fn === 'quotient' || fn === 'rounded-pow') {
+          const division = BIGINT_DIVISION[op.rounding ?? 'exact'];
+          this.runtime.add(division);
+          if (fn === 'quotient') return call(`_SYS.${division}`, operands);
+          this.runtime.add('bpowRational');
+          const [a, e] = operands.map((o) => operand(o, CONDITIONAL));
+          return {
+            text: `_SYS.${division}(..._SYS.bpowRational(${a}, ${e}))`,
+            precedence: CALL,
+          };
+        }
+        const helper =
+          fn === 'isqrt'
+            ? (BIGINT_SQRT[op.rounding ?? 'exact'] ??
+              fail(`an isqrt with the rounding ${String(op.rounding)}`))
+            : BIGINT_CODE[fn];
+        this.runtime.add(helper);
+        return call(`_SYS.${helper}`, operands);
+      }
+      case 'no-value':
+        // The throw of a folded pole, as the existing emitter writes it.
+        this.runtime.add('NonFiniteValue');
+        return {
+          text: `(() => { throw new _SYS.NonFiniteValue(${op.value === 'undefined' ? 'NaN' : 'Infinity'}); })()`,
+          precedence: CALL,
+        };
       case 'convert':
         // An identity conversion of a write to a local of a wider type is
         // the text of its operand: a literal or a name is written at each
@@ -1439,4 +1648,33 @@ class Emitter {
       last,
     };
   }
+}
+
+/** The answer of `statesAbort()` for each region, once per region object. */
+const REGION_STATES_ABORT = new WeakMap<IRRegion, boolean>();
+
+/** Whether the evaluation of `op` can abort with an abort kind that the
+ *  policy states (`OperationBase.aborts`): `op` has one, a region that it
+ *  evaluates holds such an operation, or it calls a function whose body
+ *  holds one. `functions`: the functions of the program. */
+function statesAbort(
+  op: IROperation,
+  functions: readonly IRFunction[]
+): boolean {
+  if (op.aborts !== undefined) return true;
+  const regions: IRRegion[] = [...regionsOf(op)];
+  if (op.kind === 'call') {
+    const body = functions[op.function]?.body;
+    if (body !== undefined) regions.push(body);
+  }
+  return regions.some((region) => {
+    let answer = REGION_STATES_ABORT.get(region);
+    if (answer === undefined) {
+      // A function that calls itself reaches its body again: false meanwhile.
+      REGION_STATES_ABORT.set(region, false);
+      answer = region.operations.some((o) => statesAbort(o, functions));
+      REGION_STATES_ABORT.set(region, answer);
+    }
+    return answer;
+  });
 }

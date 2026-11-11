@@ -25,16 +25,20 @@ import {
   type EffectFact,
   type IRState,
   type IRExit,
+  type IRLiteral,
   type IRLoop,
   type IROperation,
   type IRProgram,
   type IRRegion,
   type IRValue,
+  type AbortKind,
   type BinaryFunctionName,
   type CollectionFunctionName,
+  type IntegerFunctionName,
   type Representation,
   type UnaryFunctionName,
   type ValueType,
+  ROUNDED_INTEGER_FUNCTIONS,
 } from './structured-ir.js';
 
 /** The operations whose operands and result the policy constrains, with no
@@ -69,13 +73,6 @@ export type PolicyOperationKind =
   | 'seeded'
   | 'host'
   | 'collection';
-
-/** The operations of `PolicyOperationKind` that a target can lack: a target
- *  with no random stream (GLSL) has no `draw` and no `seeded`, a target
- *  that calls no code of the host has no `host`, and a target with no
- *  functions of lists has no `collection`; the verifier refuses them
- *  there. */
-type OptionalPolicyOperationKind = 'draw' | 'seeded' | 'host' | 'collection';
 
 /** The representations of the operands and of the result of an operation
  *  on a target. */
@@ -125,12 +122,14 @@ export type RepresentationPolicy = {
       }
     >
   >;
+  /** The rule of each operation that the target has. A target that does not
+   *  list an operation does not have it, and the verifier refuses it there:
+   *  a target with no random stream (GLSL) has no `draw` and no `seeded`, a
+   *  target that calls no code of the host has no `host`, a target with
+   *  no functions of lists has no `collection`, and a target whose integer
+   *  is exact has no `sqrt` and no `divide`. */
   readonly operations: Readonly<
-    Record<
-      Exclude<PolicyOperationKind, OptionalPolicyOperationKind>,
-      OperationRule
-    > &
-      Partial<Record<OptionalPolicyOperationKind, OperationRule>>
+    Partial<Record<PolicyOperationKind, OperationRule>>
   >;
   /** The functions of one or two operands that the target has
    *  (`IRUnaryFunction`, `IRBinaryFunction`), each with the representations
@@ -145,6 +144,31 @@ export type RepresentationPolicy = {
   readonly collections?: Readonly<
     Partial<Record<CollectionFunctionName, OperationRule>>
   >;
+  /** The integer functions that the target has (`IRIntegerFunction`), each
+   *  with the representations of its operands and of its result; absent:
+   *  none. A function that is not listed is not in the target. */
+  readonly integers?: Readonly<
+    Partial<Record<IntegerFunctionName, OperationRule>>
+  >;
+  /** The kinds of abort of the operation `op` itself (`AbortKind`), sorted,
+   *  or `undefined` when it does not abort: each operation carries them
+   *  (`OperationBase.aborts`), and the verifier checks that they are these.
+   *  Absent: no operation of the target aborts by itself (a `loop` with an
+   *  iteration budget and a `seeded` with a seed operand abort with no such
+   *  field, `operationCanAbort()`). */
+  readonly aborts?: (op: IROperation) => readonly AbortKind[] | undefined;
+  /** The representation of the value that a call gives when its evaluation
+   *  aborts with `no-value` (`IRProgram.noValueResult`); absent: no
+   *  operation of the target aborts with `no-value`. */
+  readonly noValueResult?: Representation;
+  /** Whether a literal of the representation `representation` can hold the
+   *  value `value` (`IRLiteral.value`): the target writes each kind of
+   *  value in its own representation. Absent: the kind of the value agrees
+   *  with the type of the literal only. */
+  readonly literalAdmits?: (
+    representation: Representation,
+    value: IRLiteral['value']
+  ) => boolean;
 };
 
 /**
@@ -515,6 +539,7 @@ export function verifyProgram(
       }
       verifySignature(op, program, policy, fail);
       verifyStates(op, program, fail);
+      if (verifyAborts(op, policy, fail)) noValue = true;
       effects.push(op.effect);
       states.push(op.touches);
     });
@@ -547,6 +572,8 @@ export function verifyProgram(
       );
   };
 
+  /** Whether an operation of the program aborts with `no-value`. */
+  let noValue = false;
   // A function body sees its parameters and its own values only.
   for (const fn of program.functions) {
     verifyRegion(fn.body, [], true, 1);
@@ -566,6 +593,56 @@ export function verifyProgram(
       );
   }
   verifyRegion(program.root, [], false, 1);
+  // The value of a call that aborts with `no-value` is the one of the
+  // policy, named exactly when an operation can give it.
+  if (program.noValueResult !== undefined) {
+    if (policy.noValueResult === undefined)
+      fail(
+        `the program has a no-value result ${program.noValueResult}, and the target has none`
+      );
+    if (program.noValueResult !== policy.noValueResult)
+      fail(
+        `the program has the no-value result ${program.noValueResult}, and the target ${policy.noValueResult}`
+      );
+  }
+  if (noValue !== (program.noValueResult !== undefined))
+    fail(
+      noValue
+        ? 'an operation aborts with no-value, and the program has no no-value result'
+        : 'the program has a no-value result, and no operation aborts with no-value'
+    );
+}
+
+/**
+ * The check of the abort kinds of `op` itself (`OperationBase.aborts`): a
+ * list of kinds, sorted, with no duplicate, and not empty, equal to the
+ * kinds that the policy states for the operation (`RepresentationPolicy.
+ * aborts`); none when the policy states none. Returns whether `op` aborts
+ * with `no-value`.
+ */
+function verifyAborts(
+  op: IROperation,
+  policy: RepresentationPolicy,
+  fail: (message: string) => never
+): boolean {
+  const aborts = op.aborts;
+  if (aborts !== undefined) {
+    if (
+      !Array.isArray(aborts) ||
+      aborts.length === 0 ||
+      aborts.some((k) => k !== 'error' && k !== 'no-value') ||
+      aborts.some((k, i) => i > 0 && aborts[i - 1] >= k)
+    )
+      fail(`the operation ${op.kind} has a malformed list of abort kinds`);
+  }
+  const expected = op.kind === 'yield' || op.kind === 'exit' ? undefined : policy.aborts?.(op);
+  const text = (kinds: readonly AbortKind[] | undefined) =>
+    kinds === undefined || kinds.length === 0 ? 'none' : kinds.join(', ');
+  if (text(aborts) !== text(expected))
+    fail(
+      `the operation ${op.kind} has the abort kinds ${text(aborts)}, and the target states ${text(expected)}`
+    );
+  return aborts?.includes('no-value') === true;
 }
 
 const isEffect = (e: unknown): e is EffectFact =>
@@ -703,6 +780,8 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'divide',
   'unary',
   'binary',
+  'integer',
+  'no-value',
   'and',
   'or',
   'trace',
@@ -746,13 +825,15 @@ function verifySignature(
         `the result of the operation ${op.kind} has the representation ${op.result?.representation}`
       );
   };
+  /** The rule of the operation `kind` in the policy: a target that does not
+   *  list it does not have it. */
+  const ruleOf = (kind: PolicyOperationKind): OperationRule =>
+    policy.operations[kind] ?? fail(`the target has no operation ${kind}`);
   /** The representations that the rule of `kind` admits for an operand. */
   const operandRule = (
     kind: PolicyOperationKind
   ): readonly Representation[] => {
-    const rule =
-      policy.operations[kind] ?? fail(`the target has no operation ${kind}`);
-    const operands = rule.operands;
+    const operands = ruleOf(kind).operands;
     return operands === 'same' ? [op.result?.representation ?? ''] : operands;
   };
   // An arithmetic result is an integer only when every operand is one.
@@ -793,7 +874,9 @@ function verifySignature(
       const types: readonly ValueType[] | undefined =
         typeof value === 'number'
           ? ['real', 'integer']
-          : typeof value === 'boolean'
+          : typeof value === 'bigint'
+            ? ['integer']
+            : typeof value === 'boolean'
             ? ['boolean']
             : typeof value === 'object' &&
                 value !== null &&
@@ -801,7 +884,11 @@ function verifySignature(
                 typeof value.im === 'number'
               ? ['complex']
               : undefined;
-      if (types === undefined || !types.includes(op.result.type))
+      if (
+        types === undefined ||
+        !types.includes(op.result.type) ||
+        policy.literalAdmits?.(op.result.representation, value) === false
+      )
         fail(
           `a literal of the representation ${op.result.representation} holds another kind of value`
         );
@@ -843,7 +930,7 @@ function verifySignature(
     }
     case 'sqrt':
       arity(1);
-      resultIn(policy.operations.sqrt.results);
+      resultIn(ruleOf('sqrt').results);
       operandsIn(operandRule('sqrt'));
       // A square root is not an integer, also of an integer operand.
       if (op.result.type === 'integer')
@@ -854,7 +941,7 @@ function verifySignature(
     case 'min':
     case 'max':
       atLeast(2);
-      resultIn(policy.operations[op.kind].results);
+      resultIn(ruleOf(op.kind).results);
       operandsIn(operandRule(op.kind));
       integerOnlyFromIntegers();
       // A complex sum or product has a complex operand; a real operand of a
@@ -879,20 +966,20 @@ function verifySignature(
       return;
     case 'mod':
       arity(2);
-      resultIn(policy.operations.mod.results);
+      resultIn(ruleOf('mod').results);
       operandsIn(operandRule('mod'));
       integerOnlyFromIntegers();
       return;
     case 'floor':
       arity(1);
-      resultIn(policy.operations.floor.results);
+      resultIn(ruleOf('floor').results);
       operandsIn(operandRule('floor'));
       if (op.result.type !== 'integer')
         fail(`the operation floor has a result of the type ${op.result.type}`);
       return;
     case 'divide':
       arity(2);
-      resultIn(policy.operations.divide.results);
+      resultIn(ruleOf('divide').results);
       operandsIn(operandRule('divide'));
       // A quotient of integers is not an integer.
       if (op.result.type === 'integer')
@@ -925,7 +1012,8 @@ function verifySignature(
         fail(`the function ${op.fn} has a boolean operand or result`);
       // The rule of each identifier (`UnaryFunctionName`,
       // `BinaryFunctionName`): `abs` has a real result, an integer only for
-      // an integer operand; `complex` has two real operands and a complex
+      // an integer operand, and `sign` of an integer operand an integer or a
+      // real result; `complex` has two real operands and a complex
       // result; `pow` has two real operands and a real result, or two
       // complex operands and a complex result; each other function of two
       // operands has real operands and a real result; every other function
@@ -933,7 +1021,7 @@ function verifySignature(
       // or an integer operand.
       const complexOperands = types.filter((t) => t === 'complex').length;
       const expected: readonly ValueType[] =
-        op.fn === 'abs'
+        op.fn === 'abs' || (op.fn === 'sign' && types[0] === 'integer')
           ? types[0] === 'integer'
             ? ['integer', 'real']
             : ['real']
@@ -954,15 +1042,74 @@ function verifySignature(
         );
       return;
     }
+    case 'integer': {
+      const rule = Object.hasOwn(policy.integers ?? {}, op.fn)
+        ? policy.integers![op.fn]
+        : undefined;
+      if (rule === undefined)
+        return fail(`the target has no integer function ${op.fn}`);
+      // The number of operands of each function (`IntegerFunctionName`).
+      if (op.fn === 'gcd' || op.fn === 'lcm') atLeast(1);
+      else
+        arity(
+          op.fn === 'remainder' ||
+            op.fn === 'quotient' ||
+            op.fn === 'rounded-pow' ||
+            op.fn === 'int-pow' ||
+            op.fn === 'binomial'
+            ? 2
+            : 1
+        );
+      resultIn(rule.results);
+      operandsIn(
+        rule.operands === 'same' ? [op.result.representation] : rule.operands
+      );
+      if (op.effect !== 'pure') fail(`the integer function ${op.fn} is not pure`);
+      if (op.operands.some((operand) => operand.type !== 'integer'))
+        fail(`the integer function ${op.fn} has an operand that is not an integer`);
+      const type = op.fn === 'is-prime' ? 'boolean' : 'integer';
+      if (op.result.type !== type)
+        fail(
+          `the integer function ${op.fn} has a result of the type ${op.result.type}, not ${type}`
+        );
+      // A rounding exactly for the functions that have one; the square root
+      // of an integer is never exact.
+      const rounding = op.rounding;
+      if (ROUNDED_INTEGER_FUNCTIONS.has(op.fn)) {
+        if (
+          rounding !== 'floor' &&
+          rounding !== 'ceil' &&
+          rounding !== 'round-ties-away' &&
+          rounding !== 'truncate' &&
+          !(rounding === 'exact' && op.fn !== 'isqrt')
+        )
+          fail(
+            `the integer function ${op.fn} has the rounding ${String(rounding)}`
+          );
+      } else if (rounding !== undefined)
+        fail(`the integer function ${op.fn} has a rounding`);
+      return;
+    }
+    case 'no-value': {
+      arity(0);
+      if (op.value !== 'undefined' && op.value !== 'infinite')
+        fail(`a no-value operation names the value ${String(op.value)}`);
+      if (op.result.type !== 'integer')
+        fail(`a no-value operation has a result of the type ${op.result.type}`);
+      if (op.effect !== 'pure') fail('a no-value operation is not pure');
+      if (!op.aborts?.includes('no-value'))
+        fail('a no-value operation does not abort with no-value');
+      return;
+    }
     case 'negate':
       arity(1);
-      resultIn(policy.operations.negate.results);
+      resultIn(ruleOf('negate').results);
       operandsIn(operandRule('negate'));
       integerOnlyFromIntegers();
       return;
     case 'not':
       arity(1);
-      resultIn(policy.operations.not.results);
+      resultIn(ruleOf('not').results);
       operandsIn(operandRule('not'));
       if (op.operands[0].type !== 'boolean' || op.result.type !== 'boolean')
         fail(
@@ -1001,7 +1148,7 @@ function verifySignature(
         fail(
           `the body of a build yields a value of the type ${value.type}, and its result has the type ${op.result.type}`
         );
-      resultIn(policy.operations.build.results);
+      resultIn(ruleOf('build').results);
       // The effect of the body is checked with the region
       // (`verifyRegion()`).
       operandsIn(operandRule('build'));
@@ -1034,7 +1181,7 @@ function verifySignature(
         fail(
           `the operation replace-at writes a ${value.type} element into a ${list.type} and has a result of the type ${op.result.type}`
         );
-      resultIn(policy.operations['replace-at'].results);
+      resultIn(ruleOf('replace-at').results);
       operandsIn(operandRule('replace-at'));
       if (op.effect !== 'pure') fail('the operation replace-at is not pure');
       return;
@@ -1044,7 +1191,7 @@ function verifySignature(
     case 'equal':
     case 'not-equal':
       arity(2);
-      resultIn(policy.operations[op.kind].results);
+      resultIn(ruleOf(op.kind).results);
       operandsIn(operandRule(op.kind));
       return;
     case 'convert': {
@@ -1130,7 +1277,7 @@ function verifySignature(
         fail(
           `the operation ${op.kind} of a ${op.operands[0].type} has a result of the type ${op.result.type}, not ${type}`
         );
-      resultIn(policy.operations[op.kind].results);
+      resultIn(ruleOf(op.kind).results);
       operandsIn(operandRule(op.kind));
       // A list is a value: no operation changes it, so a read has no effect.
       if (op.effect !== 'pure') fail(`the operation ${op.kind} is not pure`);
@@ -1163,7 +1310,7 @@ function verifySignature(
             `the element ${i + 1} of the operation ${op.kind} has the type ${operand.type}, and its result the type ${type}`
           );
       });
-      resultIn(policy.operations[op.kind].results);
+      resultIn(ruleOf(op.kind).results);
       operandsIn(operandRule(op.kind));
       if (op.effect !== 'pure') fail(`the operation ${op.kind} is not pure`);
       return;
@@ -1188,7 +1335,7 @@ function verifySignature(
         fail(
           `the operation get of the position ${position} of a ${tuple} has a result of the type ${op.result.type}`
         );
-      resultIn(policy.operations.get.results);
+      resultIn(ruleOf('get').results);
       operandsIn(operandRule('get'));
       if (op.effect !== 'pure') fail('the operation get is not pure');
       return;
@@ -1212,7 +1359,7 @@ function verifySignature(
         fail(
           `the operation append writes a ${value.type} element after a ${list.type} and has a result of the type ${op.result.type}`
         );
-      resultIn(policy.operations.append.results);
+      resultIn(ruleOf('append').results);
       operandsIn(operandRule('append'));
       if (op.effect !== 'pure') fail('the operation append is not pure');
       return;
@@ -1226,7 +1373,7 @@ function verifySignature(
       arity(1);
       const operands = operandRule(op.kind);
       operandsIn(operands);
-      resultIn(policy.operations[op.kind].results);
+      resultIn(ruleOf(op.kind).results);
       if (op.rest.length === 0)
         fail(`the operation ${op.kind} has no region after its first operand`);
       for (const region of op.rest)
@@ -1271,7 +1418,7 @@ function verifySignature(
         fail('a trace operation has no trace id');
       // The rule of the policy for the test operation.
       operandsIn(operandRule('trace'));
-      resultIn(policy.operations.trace.results);
+      resultIn(ruleOf('trace').results);
       return;
     case 'draw': {
       // The states and the effect are checked by `verifyStates()`.

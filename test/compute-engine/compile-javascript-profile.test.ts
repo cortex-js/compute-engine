@@ -785,8 +785,26 @@ describe('the options', () => {
 
   // The other options are admitted
   // (`compile-javascript-structured-options.test.ts`).
+  // The mode `bigint` is admitted for a program that the lane analysis of
+  // the mode accepts (`compile-javascript-structured-bigint.test.ts`); a
+  // real input declines with the reason of the lane analysis.
+  test('the mode bigint with real inputs declines with outside-profile', () => {
+    const options = { mode: 'bigint' } as const;
+    const got = outcome(expr, options);
+    expect('diagnostic' in got && got.diagnostic).toEqual({
+      code: 'outside-profile',
+      kind: 'capability',
+      message:
+        "Could not compile with the profile 'numeric-kernel' in the mode 'bigint': `x` (type `real`) is not on the integer lane: the mode accepts only bindings of a subtype of `integer`, or of `list<integer>`.",
+      value: 'x',
+    });
+    expect(canCompile(expr, { ...PROFILE, ...options })).toEqual({
+      ok: false,
+      diagnostic: 'diagnostic' in got ? got.diagnostic : undefined,
+    });
+  });
+
   test.each([
-    ["the option `mode: 'bigint'`", { mode: 'bigint' }],
     [
       'the function form of the option `operators`',
       { operators: () => undefined },

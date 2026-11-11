@@ -18,6 +18,8 @@ import {
   elementOf,
   isTupleType,
   listType,
+  type AbortKind,
+  type IROperation,
   type IRProgram,
   type ValueType,
 } from './structured-ir.js';
@@ -54,6 +56,14 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'array',
   ]),
   representationOf: representationOfKind,
+  // A JavaScript number is a `number`, a boolean a `boolean` and `{ re, im }`
+  // a `complex`; a `bigint` value has no representation here.
+  literalAdmits: (representation, value) =>
+    typeof value === 'number'
+      ? representation === 'number'
+      : typeof value === 'boolean'
+        ? representation === 'boolean'
+        : typeof value === 'object' && representation === 'complex',
   conversions: {
     'real-to-complex': { from: 'number', to: 'complex', type: 'complex' },
     // A value written to a local of a wider type (an integer to a real
@@ -242,11 +252,128 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   },
 };
 
+/** The kinds of abort of the operation `op` itself on the `bigint` policy
+ *  (`JAVASCRIPT_BIGINT_POLICY.aborts`): a pole is the abort `no-value`, a
+ *  helper above the size limit of the mode (10^6 decimal digits,
+ *  `bigint-runtime.ts`) and an `exact` quotient with a remainder throw a
+ *  `RangeError`, the abort `error`. */
+function bigintAborts(op: IROperation): readonly AbortKind[] | undefined {
+  const both: readonly AbortKind[] = ['error', 'no-value'];
+  if (op.kind === 'mod' || op.kind === 'no-value') return ['no-value'];
+  if (op.kind !== 'integer') return undefined;
+  switch (op.fn) {
+    // `_SYS.bremainder`, `_SYS.bisqrt` at a zero divisor or a negative
+    // operand.
+    case 'remainder':
+    case 'isqrt':
+      return ['no-value'];
+    // `_SYS.bexactDiv` throws a `RangeError` for a remainder.
+    case 'quotient':
+      return op.rounding === 'exact' ? both : ['no-value'];
+    // `_SYS.bpow` and `_SYS.bpowRational`: `0^0`, `0^e` for `e < 0`, the
+    // size limit; `_SYS.bfactorial`: a negative operand, the size limit.
+    case 'rounded-pow':
+    case 'int-pow':
+    case 'factorial':
+      return both;
+    // The size limit only.
+    case 'factorial2':
+    case 'binomial':
+    case 'fibonacci':
+      return ['error'];
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The policy of the JavaScript target in the compile mode `bigint` (the
+ * policy `JS-bigint`): an integer is a JavaScript `bigint` (`bigint`), a
+ * boolean a JavaScript boolean (`boolean`), as the bigint emitter of the
+ * existing compiler holds them (`compile-bigint-emit.ts`). A real and a
+ * complex number have no representation, so no value of the program is
+ * real: the verifier refuses a real value, which makes the exactness of the
+ * mode a check of the representation. There is no conversion: a `number`
+ * input is lifted at the entry, a boundary rule of the input
+ * (`IRInput.lifted`).
+ *
+ * A pole aborts with `no-value` (`bigintAborts()`): the helper throws a
+ * `_SYS.NonFiniteValue`, which one catch at the entry turns into the
+ * `number` of the call, `NaN` or `Infinity` (`noValueResult`). No list is
+ * held yet: the lists of the mode are not on the structured route.
+ */
+export const JAVASCRIPT_BIGINT_POLICY: RepresentationPolicy = {
+  name: 'JS-bigint',
+  representations: new Set(['bigint', 'boolean']),
+  representationOf: (type) =>
+    type === 'integer' ? 'bigint' : type === 'boolean' ? 'boolean' : undefined,
+  // An integer literal is a JavaScript `bigint` (`123n`), never a number.
+  literalAdmits: (representation, value) =>
+    typeof value === 'bigint'
+      ? representation === 'bigint'
+      : typeof value === 'boolean' && representation === 'boolean',
+  conversions: {},
+  // The operators of `bigint` values (`+`, unary `-`, `*`, `<`, `<=`,
+  // `===`, `!==`), `_SYS.bmin`, `_SYS.bmax` and `_SYS.bfloorMod`, as the
+  // existing emitter writes them; `&&`, `||` and `!` of booleans.
+  operations: {
+    'add': { results: ['bigint'], operands: ['bigint'] },
+    'negate': { results: ['bigint'], operands: ['bigint'] },
+    'multiply': { results: ['bigint'], operands: ['bigint'] },
+    'min': { results: ['bigint'], operands: ['bigint'] },
+    'max': { results: ['bigint'], operands: ['bigint'] },
+    'less': { results: ['boolean'], operands: ['bigint'] },
+    'less-equal': { results: ['boolean'], operands: ['bigint'] },
+    'equal': { results: ['boolean'], operands: ['bigint'] },
+    'not-equal': { results: ['boolean'], operands: ['bigint'] },
+    'mod': { results: ['bigint'], operands: ['bigint'] },
+    'and': { results: ['boolean'], operands: ['boolean'] },
+    'or': { results: ['boolean'], operands: ['boolean'] },
+    'not': { results: ['boolean'], operands: ['boolean'] },
+  },
+  // `_SYS.babs` and `_SYS.bsign`.
+  functions: {
+    abs: { results: ['bigint'], operands: ['bigint'] },
+    sign: { results: ['bigint'], operands: ['bigint'] },
+  },
+  // No list is held in the mode: no `collection` (no function of lists),
+  // and none of `list`, `tuple`, `at`, `length`, `get`, `build`, `append`
+  // and `replace-at` in `operations`; the heads that make them decline at
+  // the lowering (`javascript-structured-bigint.ts`).
+  collections: {},
+  // The helpers of `bigint-runtime.ts` that the existing emitter calls for
+  // the same heads (`javascript-structured-emit.ts`, `BIGINT_CODE`).
+  integers: {
+    'remainder': { results: ['bigint'], operands: ['bigint'] },
+    'quotient': { results: ['bigint'], operands: ['bigint'] },
+    'isqrt': { results: ['bigint'], operands: ['bigint'] },
+    'rounded-pow': { results: ['bigint'], operands: ['bigint'] },
+    'int-pow': { results: ['bigint'], operands: ['bigint'] },
+    'neg-one-pow': { results: ['bigint'], operands: ['bigint'] },
+    'gcd': { results: ['bigint'], operands: ['bigint'] },
+    'lcm': { results: ['bigint'], operands: ['bigint'] },
+    'factorial': { results: ['bigint'], operands: ['bigint'] },
+    'factorial2': { results: ['bigint'], operands: ['bigint'] },
+    'binomial': { results: ['bigint'], operands: ['bigint'] },
+    'fibonacci': { results: ['bigint'], operands: ['bigint'] },
+    'is-prime': { results: ['boolean'], operands: ['bigint'] },
+  },
+  aborts: bigintAborts,
+  noValueResult: 'number',
+};
+
 /** Throw when `program` is not a well-formed program of the JavaScript
- *  fragment target (`verifyProgram()` with `JAVASCRIPT_POLICY`). */
+ *  fragment target (`verifyProgram()` with `JAVASCRIPT_POLICY`, or with
+ *  `JAVASCRIPT_BIGINT_POLICY` for a program of the mode `bigint`). */
 export function verifyJavaScriptProgram(
   program: IRProgram,
   preparedNodes: ReadonlySet<Expression>
 ): void {
-  verifyProgram(program, preparedNodes, JAVASCRIPT_POLICY);
+  verifyProgram(
+    program,
+    preparedNodes,
+    program.numericPolicy === 'bigint'
+      ? JAVASCRIPT_BIGINT_POLICY
+      : JAVASCRIPT_POLICY
+  );
 }

@@ -39,7 +39,9 @@ import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
   JavaScriptTarget,
   isNonFiniteBound,
+  type JavaScriptBody,
   type JavaScriptBodyEmitter,
+  type JavaScriptBodyNames,
 } from './javascript-target.js';
 import { BaseCompiler } from './base-compiler.js';
 import { exactRationalDivisor } from './compiler-type-facts.js';
@@ -107,7 +109,12 @@ import {
   isImpurityLabel,
   isPureComputedEffects,
 } from '../../common/type/effects.js';
-import type { EffectFact, IRHostBinding, IRState } from './structured-ir.js';
+import type {
+  EffectFact,
+  IRHostBinding,
+  IRProgram,
+  IRState,
+} from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import {
   COLLECTION_HEADS,
@@ -135,6 +142,11 @@ import { staticCollectionWidth } from './compile-linear-algebra.js';
 import { linearAlgebraLane } from './compile-lanes.js';
 import { MIN_UNROLLED_WIDTH } from './fixed-width-unroll.js';
 import { emitStructuredProgram } from './javascript-structured-emit.js';
+import {
+  lowerBigintProgram,
+  StructuredBigintRefusal,
+} from './javascript-structured-bigint.js';
+import { bigintLaneAnalysisFor } from './compile-bigint-lane.js';
 import {
   analyzeExecution,
   type ExecutionAnalysis,
@@ -6317,9 +6329,10 @@ function profileDecline(e: unknown): unknown {
  * `options`: the decline `'outside-profile'` that names the first one, or
  * `undefined`. `cse` and `constantFold` are not in this list: the profile
  * ignores them. `vars`, `functions`, the record form of `operators`,
- * `imports` and `preamble` are admitted (`structuredHosts()`), and
- * `broadcast` is ignored: the route makes no batch body, so `broadcast()`
- * runs the ordinary body for each cell, as with `broadcast: false`.
+ * `imports` and `preamble` are admitted (`structuredHosts()`), except in the
+ * mode `bigint` (`bigintOptionRefusal()`), and `broadcast` is ignored: the
+ * route makes no batch body, so `broadcast()` runs the ordinary body for
+ * each cell, as with `broadcast: false`.
  */
 function profileOptionDecline(
   options: CompilationOptions<Expression>
@@ -6327,9 +6340,7 @@ function profileOptionDecline(
   const option =
     typeof options.operators === 'function'
       ? 'the function form of the option `operators`'
-      : options.mode === 'bigint'
-        ? "the option `mode: 'bigint'`"
-        : undefined;
+      : undefined;
   if (option === undefined) return undefined;
   return new CompileDeclineError({
     code: 'outside-profile',
@@ -6339,6 +6350,52 @@ function profileOptionDecline(
       `is not in the profile.`,
   });
 }
+
+/**
+ * The first option of `options` that the profile does not admit in the mode
+ * `bigint`, or `undefined`: `vars`, `functions`, the record form of
+ * `operators`, `preamble` and `imports`. The lane analysis of the existing
+ * compiler reads a `vars` entry, a `functions` entry or an `operators` entry
+ * as code that computes with doubles, and the structured route reads none
+ * of them in the mode.
+ */
+function bigintOptionRefusal(
+  options: CompilationOptions<Expression>
+): string | undefined {
+  if (isGivenOption(options.vars)) return 'vars';
+  if (isGivenOption(options.functions)) return 'functions';
+  if (isGivenOption(options.operators)) return 'operators';
+  if (options.preamble) return 'preamble';
+  if (options.imports?.length) return 'imports';
+  return undefined;
+}
+
+/**
+ * The decline `'outside-profile'` of the `bigint-lane` decline `e` of the
+ * lane analysis of the mode `bigint` (`requireBigintLane()`): the reason of
+ * the lane analysis, and the node it names.
+ */
+function bigintLaneProfileDecline(e: CompileDeclineError): CompileDeclineError {
+  const diagnostic = e.diagnostic;
+  const reason = diagnostic.message.replace(
+    /^Could not compile in mode 'bigint': /,
+    ''
+  );
+  return new CompileDeclineError({
+    code: 'outside-profile',
+    kind: 'capability',
+    message: `Could not compile with the profile 'numeric-kernel' in the mode 'bigint': ${reason}`,
+    ...(diagnostic.value !== undefined ? { value: diagnostic.value } : {}),
+  });
+}
+
+/** The program of the mode `bigint` that the preparation of a compilation
+ *  with the profile lowered (`prepareBigint()`), by the target of the
+ *  compilation, with the nodes of its lane analysis. */
+const BIGINT_PROGRAMS = new WeakMap<
+  CompileTarget<Expression>,
+  { readonly program: IRProgram; readonly preparedNodes: ReadonlySet<Expression> }
+>();
 
 //
 // The options of the host on the structured route: `vars`, `functions` and
@@ -7224,6 +7281,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     target: CompileTarget<Expression>
   ): JavaScriptBodyEmitter | undefined {
     if (this.route !== 'structured') return undefined;
+    const bigint = BIGINT_PROGRAMS.get(target);
+    if (bigint !== undefined) return (names) => this.bigintBody(bigint, names);
     const preparation = structuredPreparationOf(target);
     return (names) => {
       let time = this.clock();
@@ -7303,6 +7362,43 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
   }
 
   /**
+   * The body of a program of the mode `bigint` (`prepareBigint()`): the
+   * program verified with the policy `JS-bigint`, its analysis, and its code
+   * in the wrapper of the entry (`emitStructuredProgram()`). The result
+   * reports the mode `bigint`.
+   */
+  private bigintBody(
+    lowered: {
+      readonly program: IRProgram;
+      readonly preparedNodes: ReadonlySet<Expression>;
+    },
+    names: JavaScriptBodyNames
+  ): JavaScriptBody {
+    const { program, preparedNodes } = lowered;
+    let time = this.clock();
+    this.inPhase('verification', () =>
+      verifyJavaScriptProgram(program, preparedNodes)
+    );
+    time = this.endPhase('verification', time);
+    const analysis = this.inProfile
+      ? this.inPhase('analysis', () => analyzeExecution(program))
+      : undefined;
+    this.analysis = analysis;
+    this.defaulted = undefined;
+    const emission = this.inPhase('emission', () =>
+      emitStructuredProgram(program, names)
+    );
+    this.endPhase('emission', time);
+    return {
+      ...emission,
+      mode: 'bigint',
+      ...(analysis !== undefined
+        ? { shippable: analysis.workerPortable.holds }
+        : {}),
+    };
+  }
+
+  /**
    * Run `step`, a phase of the structured route after the admission. With
    * the profile, an error of the phase is an internal error that names the
    * phase (`profileInternalError()`), never a refusal: the admission has
@@ -7363,10 +7459,63 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (typeof x !== 'function')
         throw new Error(`Unsupported import \`${x}\``);
     try {
+      if (options.mode === 'bigint' && this.admission.structured)
+        return this.prepareBigint(expr, options, batch);
       return this.prepareFragment(expr, options, batch);
     } catch (e) {
       throw profileDecline(e);
     }
+  }
+
+  /**
+   * The preparation of a compilation with the profile in the mode `bigint`
+   * (`docs/plans/2026-11-11-structured-bigint-mode.md`). The preparation of
+   * the JavaScript target runs the lane analysis of the mode
+   * (`requireBigintLane()`), which is the admission: a `bigint-lane` decline
+   * is the decline `'outside-profile'` with its reason. The program is
+   * lowered here (`lowerBigintProgram()`), so that a node that the route
+   * does not lower yet declines too, and is verified and emitted by the
+   * emitter of the body (`bodyEmitter()`). The admission of `fragment.ts`
+   * does not run: it types the double and the complex modes only.
+   */
+  private prepareBigint(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    batch: unknown
+  ): { expr: Expression; target: CompileTarget<Expression> } {
+    if (batch !== undefined)
+      throw new Error('JS scalar fragment: unsupported compile options');
+    const option = bigintOptionRefusal(options);
+    if (option !== undefined)
+      throw new Error(
+        `JS scalar fragment: the option \`${option}\` is not in the profile in the mode bigint`
+      );
+    let prepared: { expr: Expression; target: CompileTarget<Expression> };
+    try {
+      prepared = super.prepareCompilation(expr, options);
+    } catch (e) {
+      if (isCompileDeclineError(e) && e.diagnostic.code === 'bigint-lane')
+        throw bigintLaneProfileDecline(e);
+      throw e;
+    }
+    const analysis = bigintLaneAnalysisFor(prepared.expr, prepared.target);
+    const time = this.clock();
+    const lowered = this.inPhase('lowering', () => {
+      try {
+        return lowerBigintProgram(prepared.expr, analysis);
+      } catch (e) {
+        if (e instanceof StructuredBigintRefusal) return e;
+        throw e;
+      }
+    });
+    this.endPhase('lowering', time);
+    if (lowered instanceof StructuredBigintRefusal) {
+      const refusal = new Error(`${FRAGMENT_PREFIX}${lowered.reason}`);
+      noteRefusedNode(refusal, { node: lowered.node });
+      throw refusal;
+    }
+    BIGINT_PROGRAMS.set(prepared.target, lowered);
+    return prepared;
   }
 
   private prepareFragment(

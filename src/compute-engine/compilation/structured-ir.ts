@@ -135,6 +135,26 @@ export function elementOf(type: ValueType): ScalarKind | undefined {
 /** The name of a representation of a target (`RepresentationPolicy`). */
 export type Representation = string;
 
+/**
+ * How the evaluation of an operation can end the call of the compiled code
+ * before the program has a value (an abort, `IRRegion.canAbort`):
+ *
+ * - `no-value`: the operation has no value for its operands (an integer
+ *   operation of `IRIntegerFunction` at a pole, `IRNoValue`). The call
+ *   gives the value that the target holds for a program with no value
+ *   (`IRProgram.noValueResult`): no other operation receives a value of
+ *   the operation.
+ * - `error`: the call ends with an error (a result above the size limit of
+ *   the target, an `exact` quotient with a remainder, an iteration budget
+ *   that runs out).
+ *
+ * The policy of a target states the kinds of each operation
+ * (`RepresentationPolicy.aborts`): a target whose integer is a bounded
+ * float holds a pole as a value, and the same operation does not abort
+ * there.
+ */
+export type AbortKind = 'error' | 'no-value';
+
 export type IRValue = {
   /** The program that defines the value (`IRProgram.owner`). */
   readonly owner: object;
@@ -158,15 +178,27 @@ type OperationBase = {
    *  or of the body of that function too, so a summary keeps the named
    *  states apart from `unknown`. */
   readonly touches?: readonly IRState[];
+  /** The kinds of abort of the evaluation of the operation itself, not of a
+   *  region that it evaluates or of a function that it calls (`AbortKind`):
+   *  sorted, with no duplicate, and absent when there is none. The policy of
+   *  the target states them (`RepresentationPolicy.aborts`). A `loop` with
+   *  an iteration budget and a `seeded` with a seed operand abort with an
+   *  error, and have no such field (`operationCanAbort()`). */
+  readonly aborts?: readonly AbortKind[];
   /** The prepared node that the operation comes from. */
   readonly origin: Expression;
 };
 
-/** A number, a boolean or a complex number. */
+/** A number, a boolean or a complex number. A `bigint` is an exact integer
+ *  of any size, a value of the type `integer`: the value of the compiler,
+ *  not a value of a target, which holds it in its own representation. */
 export type IRLiteral = OperationBase & {
   readonly kind: 'literal';
   readonly value:
-    number | boolean | { readonly re: number; readonly im: number };
+    | number
+    | bigint
+    | boolean
+    | { readonly re: number; readonly im: number };
 };
 
 /** A read of the input `IRProgram.inputs[input]` at this position. */
@@ -396,6 +428,91 @@ export type IRUnaryFunction = OperationBase & {
 export type IRBinaryFunction = OperationBase & {
   readonly kind: 'binary';
   readonly fn: BinaryFunctionName;
+};
+
+/**
+ * The functions of exact integers that the representation names, by an
+ * identifier that names no target. Each has integer operands and an
+ * integer result (a boolean for `is-prime`), and denotes the exact integer
+ * of its operands. Where that integer does not exist, the operation has no
+ * value: it is `undefined` (the `NaN` of the interpreter) or `infinite`
+ * (its `~oo`), as `IRNoValue` names them. A policy whose integer is exact
+ * (`RepresentationPolicy.aborts`) aborts there with `no-value`; it can also
+ * abort with `error` past a size limit of its own.
+ *
+ * - `remainder(a, b)`: `a - b·k`, where `k` is the integer nearest to
+ *   `a/b`, a tie rounded toward `+∞` (`remainder(-7, 3)` is `-1`,
+ *   `remainder(5, 2)` is `-1`); undefined for `b = 0`.
+ * - `quotient(a, b)`: `a/b` rounded by `rounding` (`IntegerRounding`);
+ *   for `b = 0`, undefined when `a = 0` and infinite otherwise. With the
+ *   rounding `exact`, a quotient that is not an integer is an `error`: the
+ *   program promised an integer (`Typed(n/2, integer)`).
+ * - `isqrt(t)`: the square root of `t` rounded by `rounding` (not
+ *   `exact`; `floor` and `truncate` agree), undefined for `t < 0`.
+ * - `rounded-pow(a, e)`: `a^e` for any integer `e`, rounded by `rounding`:
+ *   the quotient of `1` by `a^(-e)` for `e < 0`; undefined for `0^0`,
+ *   infinite for `0^e` with `e < 0`.
+ * - `int-pow(a, e)`: `a^e` for `e ≥ 0`, undefined for `0^0`. The rule of
+ *   the target writes it only for an exponent that the program proves not
+ *   negative: the value for a negative `e` is not defined here.
+ * - `neg-one-pow(k)`: `(-1)^k`, `1` for an even `k` and `-1` for an odd
+ *   one, also for a negative `k`.
+ * - `gcd` and `lcm` of one operand or more: not negative; `gcd(0, 0)` is
+ *   `0`, `lcm(0, n)` is `0`.
+ * - `factorial(n)`: `n!`, infinite for `n < 0`. `factorial2(n)`: `n!!`,
+ *   for `n ≥ 0` (the rule of the target writes it only for an operand that
+ *   the program proves not negative).
+ * - `binomial(n, k)`: the binomial coefficient, extended to negative
+ *   operands as the interpreter extends it (`Binomial(-1, 2)` is `1`,
+ *   `Binomial(5, 7)` is `0`).
+ * - `fibonacci(n)`: `F(n)`, with `F(-n) = (-1)^(n+1)·F(n)`.
+ * - `is-prime(n)`: whether `n` is a prime: a boolean.
+ *
+ * Every integer function is `pure`: an abort is not an effect.
+ */
+export type IntegerFunctionName =
+  | 'remainder'
+  | 'quotient'
+  | 'isqrt'
+  | 'rounded-pow'
+  | 'int-pow'
+  | 'neg-one-pow'
+  | 'gcd'
+  | 'lcm'
+  | 'factorial'
+  | 'factorial2'
+  | 'binomial'
+  | 'fibonacci'
+  | 'is-prime';
+
+/** The rounding of a `quotient`, an `isqrt` and a `rounded-pow`: toward
+ *  `-∞`, toward `+∞`, to the nearest integer with a tie away from zero
+ *  (`-5/2` gives `-3`), toward zero, or `exact` (the value must be an
+ *  integer). */
+export type IntegerRounding =
+  'floor' | 'ceil' | 'round-ties-away' | 'truncate' | 'exact';
+
+/** The integer functions that have a rounding (`IntegerFunctionName`). */
+export const ROUNDED_INTEGER_FUNCTIONS: ReadonlySet<IntegerFunctionName> =
+  new Set(['quotient', 'isqrt', 'rounded-pow']);
+
+/** An application of the integer function `fn` (`IntegerFunctionName`),
+ *  with the rounding `rounding` for a function that has one. */
+export type IRIntegerFunction = OperationBase & {
+  readonly kind: 'integer';
+  readonly fn: IntegerFunctionName;
+  readonly rounding?: IntegerRounding;
+};
+
+/** An operation that has no value: no operand, an integer result that it
+ *  never gives, and the abort `no-value` where it is evaluated. `value`
+ *  names the missing value: `undefined` (the `NaN` of the interpreter) or
+ *  `infinite` (its `~oo`). It is a constant of the program whose value is
+ *  not finite (`(-1)!`, a folded pole): a branch that does not run does
+ *  not abort. `pure`. */
+export type IRNoValue = OperationBase & {
+  readonly kind: 'no-value';
+  readonly value: 'undefined' | 'infinite';
 };
 
 /**
@@ -780,6 +897,7 @@ export type IRYield = {
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
   readonly touches?: undefined;
+  readonly aborts?: undefined;
   readonly origin: Expression;
 };
 
@@ -802,6 +920,7 @@ export type IRExit = {
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
   readonly touches?: undefined;
+  readonly aborts?: undefined;
   readonly origin: Expression;
 };
 
@@ -812,6 +931,8 @@ export type IROperation =
   | IRArithmetic
   | IRUnaryFunction
   | IRBinaryFunction
+  | IRIntegerFunction
+  | IRNoValue
   | IRListRead
   | IRMake
   | IRGet
@@ -860,10 +981,15 @@ export type IRInput = {
    *  `list<real>` does not keep. A label for a target that names the
    *  element type in its code or its messages; no check reads it. */
   readonly elementLabel?: string;
-  /** A complex input that the host can give as a number or as a complex
-   *  value (`{ re, im }`): a name with no declared type in the `complex`
-   *  mode. Each read converts the value to a complex value, as the existing
-   *  emitter does (`_SYS.cplx`, which keeps a complex value as it is). */
+  /** An input that the host can give in another representation than the
+   *  one of the input, which the target converts: a boundary rule of the
+   *  input, not an operation of the program. A complex input that the host
+   *  can give as a number or as a complex value (`{ re, im }`), a name with
+   *  no declared type in the `complex` mode: each read converts the value
+   *  to a complex value, as the existing emitter does (`_SYS.cplx`, which
+   *  keeps a complex value as it is). An integer input of an exact policy
+   *  that the host can give as a `number`: the value is converted once, at
+   *  the entry. */
   readonly lifted?: true;
 };
 
@@ -908,7 +1034,13 @@ export type IRProgram = {
   readonly revision: number;
   readonly inputs: readonly IRInput[];
   /** The compile mode of the compilation. */
-  readonly numericPolicy: 'strict' | 'complex';
+  readonly numericPolicy: 'strict' | 'complex' | 'bigint';
+  /** The representation of the value that a call gives when its evaluation
+   *  aborts with `no-value` (`AbortKind`): the representation that the
+   *  policy of the target names (`RepresentationPolicy.noValueResult`),
+   *  which is not the representation of a value of the program. Present
+   *  exactly when an operation of the program can abort with `no-value`. */
+  readonly noValueResult?: Representation;
   /** The bindings that the program reads as snapshots, in the root or in
    *  a function (`IRCaptureRead`). */
   readonly captures: readonly IRCapture[];
@@ -998,7 +1130,8 @@ export function definedValues(op: IROperation): readonly IRValue[] {
   return op.result === undefined ? [] : [op.result];
 }
 
-/** Whether the evaluation of `op` can abort: a `loop` with an iteration
+/** Whether the evaluation of `op` can abort: an operation with an abort
+ *  kind of its own (`OperationBase.aborts`), a `loop` with an iteration
  *  budget, a `seeded` whose seed is not a literal (an invalid seed throws),
  *  an operation whose region can abort, or a call of a function whose body
  *  can abort (`IRLoop`). `functions`: the functions of the program. */
@@ -1006,6 +1139,7 @@ export function operationCanAbort(
   op: IROperation,
   functions: readonly IRFunction[]
 ): boolean {
+  if (op.aborts !== undefined) return true;
   if (op.kind === 'loop' && op.iterationBudget !== undefined) return true;
   if (op.kind === 'seeded' && op.operands.length > 0) return true;
   if (op.kind === 'call' && functions[op.function]?.body.canAbort === true)

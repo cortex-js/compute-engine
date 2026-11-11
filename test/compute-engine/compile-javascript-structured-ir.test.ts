@@ -7,9 +7,12 @@ import {
   type StructuredPreparation,
 } from '../../src/compute-engine/compilation/javascript-structured-lower';
 import {
+  JAVASCRIPT_BIGINT_POLICY,
   JAVASCRIPT_POLICY,
   verifyJavaScriptProgram as verifyProgram,
 } from '../../src/compute-engine/compilation/javascript-structured-policy';
+import { lowerBigintProgram } from '../../src/compute-engine/compilation/javascript-structured-bigint';
+import { requireBigintLane } from '../../src/compute-engine/compilation/compile-bigint-lane';
 import {
   verifyProgram as verifyCore,
   type RepresentationPolicy,
@@ -1139,5 +1142,234 @@ describe('the verifier: lists and tuples', () => {
     const kinds = build!.kind === 'build' ? build!.body.operations.map((op) => op.kind) : [];
     expect(kinds).toEqual(['at', 'input', 'multiply', 'yield']);
     expect(program.functions).toEqual([]);
+  });
+});
+
+//
+// The policy `JS-bigint` of the compile mode `bigint`
+//
+
+describe('the verifier: the policy JS-bigint', () => {
+  /** The program of `json` in the mode `bigint`, lowered from the lane
+   *  analysis of the existing compiler (`lowerBigintProgram()`). */
+  function bigint(json: MathJsonExpression) {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    ce.declare('m', 'integer');
+    const expr = ce.box(json);
+    return lowerBigintProgram(expr, requireBigintLane(expr));
+  }
+
+  /** The program with the first operation of the kind `kind` of its root
+   *  replaced by `edit(op)`. */
+  function edited(
+    lowered: ReturnType<typeof bigint>,
+    kind: string,
+    edit: (op: IROperation) => IROperation
+  ): IRProgram {
+    const { program } = lowered;
+    const index = program.root.operations.findIndex((op) => op.kind === kind);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const operations = [...program.root.operations];
+    operations[index] = edit(operations[index]);
+    return { ...program, root: { ...program.root, operations } };
+  }
+
+  const PROGRAM: MathJsonExpression = [
+    'Add',
+    ['Floor', ['Divide', 'n', 'm']],
+    ['Mod', 'n', 'm'],
+    ['Factorial', 'n'],
+  ];
+
+  test('a lowered program verifies, with the abort kinds of the policy', () => {
+    const { program, preparedNodes } = bigint(PROGRAM);
+    expect(() => verifyProgram(program, preparedNodes)).not.toThrow();
+    expect(program.numericPolicy).toBe('bigint');
+    expect(program.noValueResult).toBe('number');
+    const aborts = Object.fromEntries(
+      program.root.operations.map((op) => [
+        op.kind === 'integer' ? `${op.fn} ${op.rounding ?? ''}`.trim() : op.kind,
+        op.aborts,
+      ])
+    );
+    expect(aborts).toEqual({
+      'input': undefined,
+      'quotient floor': ['no-value'],
+      'mod': ['no-value'],
+      'factorial': ['error', 'no-value'],
+      'add': undefined,
+      'yield': undefined,
+    });
+    expect(program.root.canAbort).toBe(true);
+  });
+
+  test('a real value has no representation in the policy', () => {
+    const lowered = bigint(PROGRAM);
+    const program = edited(lowered, 'add', (op) => ({
+      ...op,
+      result: { ...op.result!, type: 'real' },
+    }) as IROperation);
+    expect(() => verifyProgram(program, lowered.preparedNodes)).toThrow(
+      /JS-bigint structured representation: the value \d+ has the type real, which the target does not hold/
+    );
+  });
+
+  test('an operation that the policy does not have', () => {
+    const lowered = bigint(['Add', 'n', 'm']);
+    const program = edited(lowered, 'add', (op) => ({ ...op, kind: 'divide' }) as IROperation);
+    expect(() => verifyProgram(program, lowered.preparedNodes)).toThrow(
+      /the target has no operation divide/
+    );
+  });
+
+  test('an integer function on the double policy', () => {
+    const lowered = bigint(PROGRAM);
+    expect(() =>
+      verifyCore(lowered.program, lowered.preparedNodes, JAVASCRIPT_POLICY)
+    ).toThrow(/^JS structured representation: the value \d+ has the representation bigint, which the target does not have/);
+    // Under a policy that holds `bigint` values, with no integer function.
+    const { integers: _integers, ...noIntegers } = JAVASCRIPT_BIGINT_POLICY;
+    expect(() =>
+      verifyCore(lowered.program, lowered.preparedNodes, noIntegers)
+    ).toThrow(/the target has no integer function quotient/);
+  });
+
+  test('the abort kinds of an operation are those of the policy', () => {
+    const lowered = bigint(PROGRAM);
+    const missing = edited(lowered, 'integer', (op) => {
+      const { aborts: _aborts, ...rest } = op;
+      return rest as IROperation;
+    });
+    expect(() => verifyProgram(missing, lowered.preparedNodes)).toThrow(
+      /the operation integer has the abort kinds none, and the target states no-value/
+    );
+    const extra = edited(lowered, 'add', (op) => ({ ...op, aborts: ['error'] }) as IROperation);
+    expect(() => verifyProgram(extra, lowered.preparedNodes)).toThrow(
+      /the operation add has the abort kinds error, and the target states none/
+    );
+    const unsorted = edited(lowered, 'integer', (op) => ({ ...op, aborts: ['no-value', 'error'] }) as IROperation);
+    expect(() => verifyProgram(unsorted, lowered.preparedNodes)).toThrow(
+      /the operation integer has a malformed list of abort kinds/
+    );
+  });
+
+  test('an exact quotient can abort with an error; a rounded one cannot', () => {
+    const { program } = bigint(['Typed', ['Divide', 'n', 'm'], "'integer'"]);
+    const quotient = program.root.operations.find((op) => op.kind === 'integer');
+    expect(quotient).toMatchObject({ fn: 'quotient', rounding: 'exact', aborts: ['error', 'no-value'] });
+  });
+
+  test('the no-value result is named exactly when an operation can abort with no-value', () => {
+    const lowered = bigint(PROGRAM);
+    const { noValueResult: _none, ...without } = lowered.program;
+    expect(() => verifyProgram(without, lowered.preparedNodes)).toThrow(
+      /an operation aborts with no-value, and the program has no no-value result/
+    );
+    const plain = bigint(['Add', 'n', ['Multiply', 2, 'm']]);
+    expect(plain.program.noValueResult).toBeUndefined();
+    expect(() =>
+      verifyProgram({ ...plain.program, noValueResult: 'number' }, plain.preparedNodes)
+    ).toThrow(/the program has a no-value result, and no operation aborts with no-value/);
+    expect(() =>
+      verifyProgram({ ...plain.program, noValueResult: 'boolean' }, plain.preparedNodes)
+    ).toThrow(/the program has the no-value result boolean, and the target number/);
+  });
+
+  test('a rounding exactly for the functions that have one', () => {
+    const lowered = bigint(PROGRAM);
+    const none = edited(lowered, 'integer', (op) => {
+      const { rounding: _rounding, ...rest } = op as IROperation & { rounding?: string };
+      return rest as IROperation;
+    });
+    expect(() => verifyProgram(none, lowered.preparedNodes)).toThrow(
+      /the integer function quotient has the rounding undefined/
+    );
+    const sqrt = bigint(['Floor', ['Sqrt', 'n']]);
+    const exact = edited(sqrt, 'integer', (op) => ({ ...op, rounding: 'exact' }) as IROperation);
+    expect(() => verifyProgram(exact, sqrt.preparedNodes)).toThrow(
+      /the integer function isqrt has the rounding exact/
+    );
+    const factorial = bigint(['Factorial', 'n']);
+    const rounded = edited(factorial, 'integer', (op) => ({ ...op, rounding: 'floor' }) as IROperation);
+    expect(() => verifyProgram(rounded, factorial.preparedNodes)).toThrow(
+      /the integer function factorial has a rounding/
+    );
+  });
+
+  test('an integer function with an operand that is not an integer, or the wrong count', () => {
+    const lowered = bigint(['Less', ['Factorial', 'n'], 'm']);
+    const boolean = edited(lowered, 'integer', (op) => ({
+      ...op,
+      result: { ...op.result!, type: 'boolean', representation: 'boolean' },
+    }) as IROperation);
+    expect(() => verifyProgram(boolean, lowered.preparedNodes)).toThrow(
+      /the result of the operation integer has the representation boolean/
+    );
+    const two = edited(lowered, 'integer', (op) => ({ ...op, operands: [op.operands[0], op.operands[0]] }) as IROperation);
+    expect(() => verifyProgram(two, lowered.preparedNodes)).toThrow(
+      /the operation integer has 2 operands, not 1/
+    );
+  });
+
+  test('a constant pole is a no-value operation that aborts with no-value', () => {
+    const lowered = bigint(['Add', 'n', ['Factorial', -1]]);
+    const op = lowered.program.root.operations.find((o) => o.kind === 'no-value');
+    expect(op).toMatchObject({ value: 'infinite', aborts: ['no-value'], effect: 'pure' });
+    const wrong = edited(lowered, 'no-value', (o) => ({ ...o, value: 'nan' }) as IROperation);
+    expect(() => verifyProgram(wrong, lowered.preparedNodes)).toThrow(
+      /a no-value operation names the value nan/
+    );
+  });
+
+  test('a bigint literal is an integer', () => {
+    const lowered = bigint(['Add', 'n', ['Power', 2, 70]]);
+    const literal = lowered.program.root.operations.find((o) => o.kind === 'literal');
+    expect(literal).toMatchObject({ value: 2n ** 70n });
+    expect(() => verifyProgram(lowered.program, lowered.preparedNodes)).not.toThrow();
+    const boolean = edited(lowered, 'literal', (o) => ({
+      ...o,
+      result: { ...o.result!, type: 'boolean', representation: 'boolean' },
+    }) as IROperation);
+    expect(() => verifyProgram(boolean, lowered.preparedNodes)).toThrow(
+      /a literal of the representation boolean holds another kind of value/
+    );
+  });
+
+  test('a literal holds the kind of value of its representation (literalAdmits)', () => {
+    // A JavaScript number in a `bigint` literal of the type `integer`.
+    const lowered = bigint(['Add', 'n', 3]);
+    const number = edited(lowered, 'literal', (o) => ({ ...o, value: 3 }) as IROperation);
+    expect(() => verifyProgram(number, lowered.preparedNodes)).toThrow(
+      /^JS-bigint structured representation: a literal of the representation bigint holds another kind of value/
+    );
+    // A `bigint` value in a `number` literal of the type `integer`, on the
+    // policy of the `strict` mode.
+    const preparation = new ScalarFragmentJavaScriptTarget(
+      'structured'
+    ).prepareStructured(
+      new ComputeEngine().expr([
+        'Function',
+        ['Block', ['Add', 'k', 3]],
+        typed('k', 'integer'),
+      ] as MathJsonExpression),
+      OPTIONS
+    );
+    const program = lowerStructuredFragment(preparation);
+    const index = program.root.operations.findIndex((op) => op.kind === 'literal');
+    expect(program.root.operations[index]).toMatchObject({
+      value: 3,
+      result: { type: 'integer', representation: 'number' },
+    });
+    const operations = [...program.root.operations];
+    operations[index] = { ...operations[index], value: 3n } as IROperation;
+    expect(() =>
+      verifyProgram(
+        { ...program, root: { ...program.root, operations } },
+        preparedNodesOf(preparation)
+      )
+    ).toThrow(
+      /^JS structured representation: a literal of the representation number holds another kind of value/
+    );
   });
 });

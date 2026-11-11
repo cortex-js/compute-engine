@@ -104,7 +104,15 @@ Two occurrences of one node object lower to one value when all of these hold:
    `structured-ir.ts`). An operand found in the memo is earlier and already
    passed the test. A test operation declared impure, a call of a helper
    whose body loops under an iteration budget, and anything `unknown` are
-   lowered again at each occurrence.
+   lowered again at each occurrence. In the compile mode `bigint`, an
+   operation that aborts with `no-value` or `error` from its own operands
+   (`OperationBase.aborts`: a pole, the size limit, an `exact` quotient with
+   a remainder) is shared too, where the first lowering dominates the reuse:
+   the reuse aborts exactly when the first did (choice C3 of
+   [2026-11-11-structured-bigint-mode.md](2026-11-11-structured-bigint-mode.md),
+   `javascript-structured-bigint.ts`). An abort of an iteration budget is
+   still excluded: its counter depends on the passes. The double and the
+   complex modes have no such operation, so the rule is the same there.
 
 Why this changes no value. A pure operation of the route applied to the same
 operand values gives the same double; the first occurrence dominates the
