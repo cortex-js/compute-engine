@@ -193,9 +193,10 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
       expect(Math.abs(Math.sin(root))).toBeLessThan(1e-12);
     }
 
-    // The same for a `t` that the user used in an expression.
+    // The same for a `t` that the user used in an expression and committed
+    // with `ce.infer()` (boxing alone declares nothing).
     const used = new ComputeEngine();
-    used.box(['Add', 't', 1]);
+    used.infer([used.box(['Add', 't', 1])]);
     expect(solveSin(used).has('t')).toBe(false);
 
     // A `t` that the user declared in an inner scope is not the parameter

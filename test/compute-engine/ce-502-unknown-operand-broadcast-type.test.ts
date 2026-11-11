@@ -264,8 +264,9 @@ describe('CE-502: an application over an operand of type unknown', () => {
 
   test('the inference of a valueless symbol is not changed', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('x+1').type.toString()).toBe('number');
-    expect(ce.symbol('x').type.toString()).toBe('number');
+    const sum = ce.parse('x+1');
+    expect(sum.type.toString()).toBe('number');
+    expect(sum.op1.type.toString()).toBe('number');
     expect(ce.parse('g := x \\mapsto x + 10').evaluate().type.toString()).toBe(
       '(x: unknown) -> number'
     );

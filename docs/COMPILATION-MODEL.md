@@ -660,7 +660,9 @@ follow the paths of control flow to find a shape. The rule has six parts.
 code, as `freeSymbols` lists it. An input whose static type is `unknown` or
 `any` declines on every target, with the diagnostic code `'untyped-input'`
 and the name of the input in `unsupported`: with `m` undeclared,
-`If(m < 3, m, 0)` declines, and `unsupported` is `["m"]`. A declared union of
+`If(m < 3, m, 0)` declines, and `unsupported` is `["m"]`. An input with no
+declared type has the type that the compiled expression requires of it
+(below). A declared union of
 shapes (`real | list<real>`) is a type, and compiles (R4). "An input with no
 type declines", under "Fail closed", gives the details. One exception: the
 experimental `numeric-kernel` profile of the JavaScript target takes an input
@@ -906,7 +908,9 @@ steps off.
 - Declare the type and the shape of each input that you will pass:
   `ce.declare("x", "real")`, `ce.declare("L", "list<real>")`,
   `ce.declare("P", "tuple<real, real>")`. An input with no type declines
-  (R1).
+  (R1). An undeclared input has only the type that the compiled expression
+  requires of it; `ce.infer(exprs)` declares the types that several
+  expressions require.
 - When an input can have two shapes, compile one function for each shape,
   or declare the union (`real | tuple<real, real>`). The first has no
   run-time test. The second costs one test for each run, where the input is
@@ -1027,13 +1031,31 @@ between the pole and the result. See "Compile modes", "The `bigint` mode".
 **An input with no type declines.** The compiled code reads each input (a
 free symbol of the code, as `freeSymbols` lists it) in one shape, and the
 shape comes from the type of the input. An input whose static type is
-`unknown` or `any`, because nothing declares it and nothing infers a type for
-it, declines on every target: with `M` undeclared, `If(M < 3, M, 0)`
+`unknown` or `any`, because nothing declares it and the compiled expression
+requires no type of it, declines on every target: with `M` undeclared, `If(M < 3, M, 0)`
 declines, where the code read `M` as a number and gave `0` for `M = [1, 5]`
 (the interpreter gives `[1, 0]`). The `unsupported` list of the result has
 the name of each such input (`["M"]`), and the diagnostic has the code
 `'untyped-input'` and the kind `'correctness'`. A host declares the input
-(`ce.declare("M", "real")`). A declared union of shapes
+(`ce.declare("M", "real")`), or commits the types that its expressions
+require with `ce.infer()`, before it compiles.
+
+An input with no declared type has the meet of the types that its
+occurrences require: the occurrences in the compiled expression, in the
+assigned values that the code folds, and in the bodies of the functions that
+the code calls. A type that only another expression requires is not used,
+because boxing writes no definition: after `a = ce.parse('x + 1')`,
+`compile(ce.parse('x > 1'))` declines with `'untyped-input'`, and compiles
+with `x: number` after `ce.infer([a, b])`, where `b` is the second
+expression. The result of an operation (`subs()`, `simplify()`, …) does not
+carry the types that the operation required of a symbol that the host made
+before it: with `q = ce.symbol('q0')`,
+`compile(ce.parse('a \\cos(x)').subs({ a: q }))` declines, and
+`ce.infer()` of that result does not type `q0`; the host declares `q0`. A
+name of the library that an expression reads as a variable (`N` in `N + 1`)
+has no type until it is declared, so `compile(ce.parse('N + 1'))` declines.
+
+A declared union of shapes
 (`real | list<real>`) is a type, and is not refused. A parameter of a
 function literal, of a user function or of the root function is not an input
 and is not refused: `t ↦ 2t` compiles, and a list passed to its untyped
@@ -2005,9 +2027,10 @@ parameter or an effect, declines. Three limits:
 - A body that uses the name as a list, as a condition or as an integer (a
   loop bound, an index) declines: declare the name.
 - Some rules read the type of a node, which the engine computes from the
-  type it inferred for the name. An earlier use can then make a program
-  decline (`Exp(Sqrt(x))` after `Mod(x, 2)` was boxed); it never changes
-  the code of a program that compiles.
+  type that the uses of the name in the expression require. Another use can
+  then make a program decline (`Exp(Sqrt(x)) + Mod(x, 2)`, where
+  `Exp(Sqrt(x))` alone compiles); it never changes the code of a program
+  that compiles.
 - An assumption does not change the kind: with `n` assumed an integer and
   not declared, `Floor(n)` is `Math.floor(_.n)`, the interpreter's value for
   every real `n`. The existing compiler reads the assumption and writes

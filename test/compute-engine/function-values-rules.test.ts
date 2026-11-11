@@ -422,14 +422,18 @@ describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', ()
     expect(value(ce, ['Map', 'gm', ['List', 3, 2]])).toBe('[6,4]');
   });
   test('a function literal with `mode = Auto`: compiled code gives the value of the interpreter', () => {
-    for (const json of [
-      ['Apply', modeLiteral, 'u'],
-      ['gm', 'u'],
-    ] as MathJsonExpression[]) {
-      const r = compiled(ce, json);
+    const calls = [
+      ce.box(['Apply', modeLiteral, 'u']),
+      ce.box(['gm', 'u']),
+    ];
+    for (const expr of calls) {
+      const r = compile(expr);
       expect(r.success).toBe(true);
       expect(r.run!({ u: 3 })).toBe(6);
     }
+    // The `Map` does not type the default `Auto` of the body of `gm`: the
+    // type that the calls above give it is committed with `ce.infer()`.
+    ce.infer(calls);
     const r = compiled(ce, ['Map', 'gm', ['List', 'u', 2]]);
     expect(r.success).toBe(true);
     expect(r.run!({ u: 3 })).toEqual([6, 4]);

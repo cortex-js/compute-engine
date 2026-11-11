@@ -226,23 +226,26 @@ describe('FRACTAL POINT OPERANDS ARE COMPLEX', () => {
   });
 
   it('an undeclared point symbol infers complex', () => {
+    // The type is read on the occurrence of each operand.
     const ce = new ComputeEngine();
-    ce.expr(['Mandelbrot', 'c', 100]);
-    ce.expr(['Julia', 'z', 'w', 100]);
-    expect(ce.symbol('c').type.toString()).toBe('complex');
-    expect(ce.symbol('z').type.toString()).toBe('complex');
-    expect(ce.symbol('w').type.toString()).toBe('complex');
+    const mandelbrot = ce.expr(['Mandelbrot', 'c', 100]);
+    const julia = ce.expr(['Julia', 'z', 'w', 100]);
+    expect(mandelbrot.op1.type.toString()).toBe('complex');
+    expect(julia.op1.type.toString()).toBe('complex');
+    expect(julia.op2.type.toString()).toBe('complex');
   });
 
   it('GLSL: a point symbol is read as a complex vec2', () => {
     const ce = new ComputeEngine();
-    const m = glsl.compile(ce.expr(['Mandelbrot', 'c', 100]));
+    const mandelbrot = ce.expr(['Mandelbrot', 'c', 100]);
+    const m = glsl.compile(mandelbrot);
     expect(m.code).toBe('_fractal_mandelbrot(c, 100)');
-    expect(ce.box('c').type.toString()).toBe('complex');
-    const j = glsl.compile(ce.expr(['Julia', 'z', 'c', 'n']));
+    expect(mandelbrot.op1.type.toString()).toBe('complex');
+    const julia = ce.expr(['Julia', 'z', 'c', 'n']);
+    const j = glsl.compile(julia);
     expect(j.code).toBe('_fractal_julia(z, c, int(n))');
-    expect(ce.box('z').type.toString()).toBe('complex');
-    expect(ce.box('n').type.toString()).toBe('integer');
+    expect(julia.op1.type.toString()).toBe('complex');
+    expect(julia.op3.type.toString()).toBe('integer');
   });
 
   it('a real point is lifted to a vec2', () => {
@@ -262,9 +265,11 @@ describe('FRACTAL POINT OPERANDS ARE COMPLEX', () => {
       [glsl, 'c + vec2(_fractal_mandelbrot(c, 100), 0.0)'],
     ] as const) {
       const ce = new ComputeEngine();
-      const r = target.compile(ce.expr(['Add', ['Mandelbrot', 'c', 100], 'c']));
+      const sum = ce.expr(['Add', ['Mandelbrot', 'c', 100], 'c']);
+      const r = target.compile(sum);
       expect(r.code).toBe(expected);
-      expect(ce.box('c').type.toString()).toBe('complex');
+      const c = sum.ops!.find((op) => op.symbol === 'c')!;
+      expect(c.type.toString()).toBe('complex');
       const s = target.compile(
         new ComputeEngine().expr(['Add', ['Mandelbrot', 'u', 50], ['Sin', 'u']])
       );

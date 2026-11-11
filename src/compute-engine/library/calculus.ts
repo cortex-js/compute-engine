@@ -82,6 +82,7 @@ import {
   ownBindingRewriteCount,
   parameterActivationValue,
   parameterValueVariesWith,
+  rebindBodyFreeNames,
   rewriteWithBinders,
   sameBindingDef,
   withCallableBinding,
@@ -8239,7 +8240,10 @@ volumes
             // integral is on top, so it is bound to the variable of this
             // integral, and so is a fresh name that the value keeps (`k_1`).
             // Else `∫ g(k) dk` with `g := a ↦ a·k·x` and `k := 2` gives an
-            // `x·k²` whose `k` is not the global `k`.
+            // `x·k²` whose `k` is not the global `k`. The renamed integrand
+            // holds the body of `g`: its free `x` is the free name of the
+            // host (`rebindBodyFreeNames()`).
+            if (ce._bindingUnits) value = rebindBodyFreeNames(value);
             return rebindIntegralResult(
               ce,
               value,
@@ -10169,8 +10173,11 @@ volumes
           if (varName) {
             const direction =
               dir && Number.isFinite(dir.re) ? dir.re : undefined;
+            // The body leaves its literal: a copy of a free name of the body
+            // is the free name of the host (`rebindBodyFreeNames()`), the
+            // binding of the same name in a function that the body calls.
             const symbolic = symbolicLimit(
-              f.op1,
+              engine._bindingUnits ? rebindBodyFreeNames(f.op1, true) : f.op1,
               varName,
               x,
               direction,

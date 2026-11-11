@@ -45,20 +45,16 @@ describe('CE-663: A LITERAL LIST DOES NOT INFER ITS FREE SYMBOLS', () => {
   test('a boxed list does not make a later boolean use an error', () => {
     // GitHub issue #485.
     const ce = new ComputeEngine();
-    ce.box(['List', 'p', 'q']);
+    ce.infer([ce.box(['List', 'p', 'q'])]);
     expect(ce.box('p').type.toString()).toBe('unknown');
-    expect(ce.box(['And', 'p', 'q']).evaluate().json).toEqual([
-      'And',
-      'p',
-      'q',
-    ]);
-    expect(ce.box('p').type.toString()).toBe('boolean');
+    const and = ce.box(['And', 'p', 'q']);
+    expect(and.evaluate().json).toEqual(['And', 'p', 'q']);
+    expect(and.op1.type.toString()).toBe('boolean');
   });
 
   test('a use that requires a number still infers the symbol', () => {
     const ce = new ComputeEngine();
-    ce.box(['List', 'p', 'q']);
-    ce.box(['Add', 'p', 1]);
+    ce.infer([ce.box(['List', 'p', 'q']), ce.box(['Add', 'p', 1])]);
     expect(ce.box('p').type.toString()).toBe('number');
     expect(ce.box('q').type.toString()).toBe('unknown');
   });
@@ -67,7 +63,7 @@ describe('CE-663: A LITERAL LIST DOES NOT INFER ITS FREE SYMBOLS', () => {
     const ce = new ComputeEngine();
     const list = ce.box(['List', 'A', ['And', 'A', 'B']]);
     expect(list.type.toString()).toBe('list<boolean^2>');
-    expect(ce.box('A').type.toString()).toBe('boolean');
+    expect(list.op1.type.toString()).toBe('boolean');
   });
 
   test('a cell that blocks the number reading leaves the symbols unknown', () => {
@@ -117,7 +113,9 @@ describe('CE-39.6: ARITHMETIC CELLS OVER FREE SYMBOLS', () => {
 describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
   test('Determinant infers the cells as numbers', () => {
     const ce = new ComputeEngine();
-    ce.box(['Determinant', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]]);
+    ce.infer([
+      ce.box(['Determinant', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]]),
+    ]);
     for (const s of ['a', 'b', 'c', 'd'])
       expect(ce.box(s).type.toString()).toBe('number');
   });
@@ -125,7 +123,9 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
   test('a declared symbol keeps its type', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'integer');
-    ce.box(['Determinant', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]]);
+    ce.infer([
+      ce.box(['Determinant', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]]),
+    ]);
     expect(ce.box('a').type.toString()).toBe('integer');
     expect(ce.box('b').type.toString()).toBe('number');
   });
@@ -163,7 +163,7 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
       // Only the collection arm admits a list, so the cells are numbers. The
       // `nothing` arm of the element type is not written on a symbol.
       const ce = new ComputeEngine();
-      ce.box([op, ['List', 'p', 'q']]);
+      ce.infer([ce.box([op, ['List', 'p', 'q']])]);
       expect(ce.box('p').type.toString()).toBe('number');
       expect(ce.box('q').type.toString()).toBe('number');
       expect(ce.box(['And', 'p', 'q']).isValid).toBe(false);
@@ -189,7 +189,7 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
     const ce = new ComputeEngine();
     ce.declareType('nums', 'list<number> | boolean', { alias: true });
     ce.declare('f', '(nums) -> number');
-    ce.box(['f', ['List', 'p', 'q']]);
+    ce.infer([ce.box(['f', ['List', 'p', 'q']])]);
     expect(ce.box('p').type.toString()).toBe('number');
   });
 
@@ -216,7 +216,7 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
       signature: '(list<T>) -> T where T: number',
       evaluate: () => ce.number(0),
     } as any);
-    ce.box(['G', ['List', 'p', 'q']]);
+    ce.infer([ce.box(['G', ['List', 'p', 'q']])]);
     expect(ce.box('p').type.toString()).toBe('number');
   });
 
@@ -258,7 +258,7 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
         '((list<number>, number) -> number) & ((T, string) -> T where T: any)',
       evaluate: () => ce.number(0),
     } as any);
-    ce.box(['F', ['List', 'p', 'q'], 1]);
+    ce.infer([ce.box(['F', ['List', 'p', 'q'], 1])]);
     expect(ce.box('p').type.toString()).toBe('number');
   });
 
@@ -285,8 +285,8 @@ describe('CE-39.4: WHICH SYMBOLS A LITERAL LIST READS AS NUMBERS', () => {
     ce.pushScope();
     const list = ce.box(['List', ['Negate', 'u2'], 'v2']);
     expect(list.type.toString()).toBe('vector<2>');
-    expect(ce.box('u2').type.toString()).toBe('number');
-    expect(ce.box('v2').type.toString()).toBe('unknown');
+    expect(list.op1.op1.type.toString()).toBe('number');
+    expect(list.op2.type.toString()).toBe('unknown');
     ce.popScope();
   });
 

@@ -6,7 +6,7 @@ const glsl = new GLSLTarget();
 
 // The shared engine's inputs are declared: compilation refuses an input with
 // no type.
-for (const s of ['x', 'y', 'm', 'n'])
+for (const s of ['x', 'y', 'm', 'n', 't'])
   ce.declare(s, 'real | signed_infinity | nan');
 
 /**

@@ -392,3 +392,26 @@ describe('THE RESULT OF A BOXING DOES NOT DEPEND ON THE ORDER', () => {
     );
   });
 });
+
+// A bare call head after a call of the same free name: the second head is a
+// raw symbol, and the reading of the head through a power of its argument
+// list reads its canonical occurrence, which holds the `function` reading the
+// first call wrote in the unit. A head that the expression uses as a factor
+// (`x(x)`, whose argument refers to the head) stays a product.
+describe('A CALL HEAD AFTER A CALL OF THE SAME FREE NAME', () => {
+  test.each([
+    ['g(x)g(x)^{-1}', ['Multiply', ['g', 'x'], ['Power', ['g', 'x'], -1]]],
+    [
+      'g(x)^2g(x)^{-1}',
+      ['Multiply', ['Power', ['g', 'x'], 2], ['Power', ['g', 'x'], -1]],
+    ],
+    [
+      'f(x)^{-1}f(x)^{-1}',
+      ['Multiply', ['Power', ['f', 'x'], -1], ['Power', ['f', 'x'], -1]],
+    ],
+    ['2x(x)^{-1}', ['Multiply', 2, 'x', ['Divide', 1, 'x']]],
+    ['x(x)x(x)^{-1}', ['Multiply', 'x', 'x', 'x', ['Divide', 1, 'x']]],
+  ])('%s', (latex, expected) => {
+    expect(engine().parse(latex).json).toEqual(expected);
+  });
+});

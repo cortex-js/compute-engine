@@ -661,13 +661,80 @@ const BODY_FREE_NAMES = new WeakSet<object>();
  * view `Map(F, [1, 2])` read inside a call `g(10, …)` of `g := (d, v) ↦ …`
  * reads the top-level `d`, not the parameter.
  */
-export function markBodyFreeName(def: object): void {
+export function markBodyFreeName(def: object, home?: object): void {
   BODY_FREE_NAMES.add(def);
+  if (home !== undefined) BODY_FREE_NAME_HOMES.set(def, home);
 }
 
 /** True when `def` stands for a free name of a body (`markBodyFreeName()`). */
 export function isBodyFreeName(def: object): boolean {
   return BODY_FREE_NAMES.has(def);
+}
+
+/** For a definition marked by `markBodyFreeName()`: the home scope of the
+ * free name that it stands for, the scope that the literal is written in
+ * (rule 1 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). */
+const BODY_FREE_NAME_HOMES = new WeakMap<object, object>();
+
+/** The home scope recorded by `markBodyFreeName()` for `def`, or
+ * `undefined`. */
+export function bodyFreeNameHome(def: object): object | undefined {
+  return BODY_FREE_NAME_HOMES.get(def);
+}
+
+/**
+ * With the engine flag `_bindingUnits`: `result`, the value of a call of a
+ * function literal, or a body that leaves its literal without a call
+ * (`partialFromFunctionLiteral()` in `symbolic/derivative.ts`,
+ * `betaReduceLambda()` in `utils.ts`), with each copy of a free name of a body
+ * (`markBodyFreeName()`) replaced by the free name of its home scope, the
+ * scope that the literal is written in (rule 1 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). A copy with
+ * assignment evidence (a local of the body), with no recorded home scope,
+ * that became a parameter (`isFunctionLiteralParameter()`), or that a binder
+ * of `result` lists (the copy of a literal that the call returns, under the
+ * `Block` of its body) is kept. With `g(a) := a x`, the
+ * `x` of `g(2)` is then the same binding as the `x` of `2x`
+ * (`sameBinding()`, `compare.ts`), and `g(2) - 2x` is `0`. Inside the
+ * literal, the copy stays: the record of the captured types reads it
+ * (`noteDefinitionCapturedTypes()`).
+ *
+ * With `isBody`, `result` is the body of a literal taken out of it (the
+ * `Block` of `Limit(t ↦ …, 1)`): what its root `Block` lists is not a binder
+ * of the value, and a copy that it lists is replaced too.
+ */
+export function rebindBodyFreeNames(
+  result: Expression,
+  isBody = false
+): Expression {
+  const made = new Map<object, Expression>();
+  return rewriteWithBinders(
+    result,
+    (sym, shadowed) => {
+      const def = sym.valueDefinition;
+      if (
+        def === undefined ||
+        !isBodyFreeName(def) ||
+        (def as { _assignmentEvidence?: boolean })._assignmentEvidence ===
+          true ||
+        isFunctionLiteralParameter(def) ||
+        shadowed?.has(sym.symbol) === true
+      )
+        return sym;
+      let free = made.get(def);
+      if (free === undefined) {
+        const home = bodyFreeNameHome(def);
+        if (home === undefined) return sym;
+        free = (
+          sym as unknown as { _asFreeName(home: Scope): Expression }
+        )._asFreeName(home as Scope);
+        made.set(def, free);
+      }
+      return free;
+    },
+    undefined,
+    isBody
+  );
 }
 
 /**
@@ -777,7 +844,8 @@ const storedValueScopes = new WeakSet<Scope>();
 
 /** True when `scope` is `home` or an ancestor of `home`. */
 function isScopeOrAncestor(scope: Scope, home: Scope): boolean {
-  for (let s: Scope | null = home; s; s = s.parent) if (s === scope) return true;
+  for (let s: Scope | null = home; s; s = s.parent)
+    if (s === scope) return true;
   return false;
 }
 

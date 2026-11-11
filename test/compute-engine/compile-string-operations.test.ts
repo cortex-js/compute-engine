@@ -1125,8 +1125,10 @@ describe('a `string | character` free variable reads as a string', () => {
     agreesWithInterpreterAtRuntime(expr, { s: E_ACUTE_PRECOMPOSED });
   });
 
+  // Boxing declares no name: `ce.infer()` commits the type that the earlier
+  // use requires, so the later expressions read it.
   test('a type inferred from `ToUpperCase` admits the same lowering', () => {
-    ce.box(['ToUpperCase', 's']);
+    ce.infer([ce.box(['ToUpperCase', 's'])]);
     expect(ce.symbol('s').type.toString()).toBe('character | string');
     agreesWithInterpreterAtRuntime(ce.box(['Length', 's']), {
       s: `a${ZWJ_FAMILY}b`,
@@ -1140,7 +1142,7 @@ describe('a `string | character` free variable reads as a string', () => {
     // A `string` matches `collection<any>`, but the operand must not be read
     // through the run-time array check, which throws for a string.
     ce.declare('f', '(string) -> integer');
-    ce.box(['f', 's']);
+    ce.infer([ce.box(['f', 's'])]);
     expect(ce.symbol('s').type.toString()).toBe('string');
     agreesWithInterpreterAtRuntime(ce.box(['At', 's', 2]), {
       s: `a${ZWJ_FAMILY}b`,

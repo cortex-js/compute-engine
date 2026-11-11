@@ -944,9 +944,11 @@ describe('Together reduces to lowest terms', () => {
 // full common factor `y·(x+1)`, reducing all the way to `1 / (x+1)`.
 describe('cancelCommonFactors: nonconstant-but-incomplete univariate GCD', () => {
   test('y(x+1)/(y(x+1)^2) reduces to lowest terms 1/(x+1)', () => {
+    // A juxtaposed `y(x+1)` in a new parse is a call of an undeclared `y`:
+    // the product is spelled with `\cdot`.
     const expr = ce.function('Divide', [
-      parse('y(x+1)'),
-      parse('y(x+1)^2'),
+      parse('y\\cdot(x+1)'),
+      parse('y\\cdot(x+1)^2'),
     ]);
     expect(cancelCommonFactors(expr, 'x').toString()).toBe('1 / (x + 1)');
   });

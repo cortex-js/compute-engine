@@ -8,6 +8,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { effectsOf } from '../../src/compute-engine/boxed-expression/effects-of';
 
 const ce = new ComputeEngine();
+// Boxing declares no name: the compiled input `x` is declared.
+ce.declare('x', 'real');
 
 describe('Composition canonical form', () => {
   // [input, canonical form]

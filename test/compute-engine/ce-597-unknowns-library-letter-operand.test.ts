@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import {
+  isFreeName,
   isFunction,
   isSymbol,
 } from '../../src/compute-engine/boxed-expression/type-guards';
@@ -278,13 +279,16 @@ describe('CE-597: evaluate(), N() and subs() agree with unknowns', () => {
     expect(expr.evaluate().toString()).toBe('12');
   });
 
-  test('the integrand letter is bound to a value definition', () => {
+  // Boxing declares nothing: the letter is a free name, with no value
+  // definition and not the library operator.
+  test('the integrand letter is a free name, not the library operator', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('\\int_0^1 N\\,dt');
     if (!isFunction(expr, 'Integrate')) throw new Error('expected Integrate');
     const n = expr.op1;
     expect(isSymbol(n, 'N')).toBe(true);
-    expect(n.valueDefinition).toBeDefined();
+    expect(isFreeName(n)).toBe(true);
+    expect(n.valueDefinition).toBeUndefined();
     expect(n.operatorDefinition).toBeUndefined();
   });
 });
@@ -537,9 +541,9 @@ describe('CE-597: `IdenticallyEqual` compares values', () => {
 });
 
 // The LaTeX parser reads `N(2.3)` as a call or a product from the binding of
-// `N`. Once a value use has made `N` a variable typed as a number (`x + N`),
-// the product is the consistent reading (user decision 2026-10-28). A
-// variable that is not typed as a number (the operand of `N = 2`, of `f(N)`,
+// `N`. Once `ce.infer()` has committed a value use that makes `N` a variable
+// typed as a number (`x + N`), the product is the consistent reading (user
+// decision 2026-10-28). A variable that is not typed as a number (the operand of `N = 2`, of `f(N)`,
 // the coordinate of a tuple, the element of a list) is not, so the parser
 // still reads the call of the library `N`. A list literal does not infer its
 // elements (ROADMAP CE-663, user decision 2026-10-30).
@@ -552,7 +556,7 @@ describe('CE-597: the LaTeX `N(2.3)` after a value use of `N`', () => {
     ['f(N)', ['N', 2.3]],
   ])('after `%s`', (latex, expected) => {
     const ce = new ComputeEngine();
-    ce.parse(latex);
+    ce.infer([ce.parse(latex)]);
     expect(ce.parse('N(2.3)').json).toEqual(expected);
   });
 });

@@ -4,6 +4,9 @@ import { simplify } from '../utils';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 export const ce = new ComputeEngine();
+// `x` is a number: `x(-2)` is a product, not a call. Boxing declares
+// nothing, so a use does not type `x` for a later expression.
+ce.declare('x', 'number');
 
 /**
  * Helper: parse input, simplify, check semantic equality with expected.

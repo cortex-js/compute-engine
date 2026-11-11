@@ -31,12 +31,6 @@ function historyOf(
 }
 
 describe('INFERENCE PROVENANCE — auto-declared anchor', () => {
-  test('boxing a free symbol records its creation, with the occurrence as cause', () => {
-    const ce = new ComputeEngine();
-    ce.box('v');
-    expect(historyOf(ce, 'v')).toEqual([['auto-declared', 'unknown', 'v']]);
-  });
-
   test('a user declaration records no entry (inferredType === false is the marker)', () => {
     const ce = new ComputeEngine();
     ce.declare('d', 'integer');
@@ -45,55 +39,23 @@ describe('INFERENCE PROVENANCE — auto-declared anchor', () => {
 });
 
 describe('INFERENCE PROVENANCE — inferred writes carry the enclosing operator as cause', () => {
-  test('box route: narrowing from an arithmetic use', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'number');
-    ce.box(['Multiply', 'x', 'v']);
-    expect(historyOf(ce, 'v')).toEqual([
-      ['auto-declared', 'unknown', 'v'],
-      ['inferred', 'number', 'x * v'],
-    ]);
-  });
-
-  test('parse route: the same evidence records the same history', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'number');
-    ce.parse('x \\cdot v');
-    const history = historyOf(ce, 'v');
-    expect(history.map(([kind]) => kind)).toEqual([
-      'auto-declared',
-      'inferred',
-    ]);
-    expect(history[1][1]).toBe('number');
-  });
-
-  test('monotone use-narrowing appends one entry per actual change', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'number');
-    ce.declare('g', '(integer) -> integer');
-    ce.box(['Multiply', 'x', 'v']);
-    ce.box(['g', 'v']);
-    expect(historyOf(ce, 'v')).toEqual([
-      ['auto-declared', 'unknown', 'v'],
-      ['inferred', 'number', 'x * v'],
-      ['inferred', 'integer', 'g(v)'],
-    ]);
-  });
-
   test('a no-op re-inference records nothing', () => {
+    // Boxing writes no definition: `ce.infer()` commits the type of a use.
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
-    ce.box(['Multiply', 'x', 'v']);
-    ce.box(['Multiply', 'x', 'v']);
-    ce.box(['Add', 'v', 1]);
-    expect(historyOf(ce, 'v')).toHaveLength(2);
+    const use = ce.box(['Multiply', 'x', 'v']);
+    ce.infer([use]);
+    const before = historyOf(ce, 'v');
+    ce.infer([use]);
+    ce.infer([ce.box(['Add', 'v', 1])]);
+    expect(historyOf(ce, 'v')).toEqual(before);
   });
 });
 
 describe('INFERENCE PROVENANCE — an assumption writes nothing', () => {
   test('an assumption records no provenance entry at all', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', 'q', 1]);
+    ce.infer([ce.box(['Add', 'q', 1])]);
     const before = historyOf(ce, 'q');
     ce.assume(ce.parse('q > 0'));
     // An assumption is a FACT, not a write: what it proves is merged into the
@@ -103,7 +65,8 @@ describe('INFERENCE PROVENANCE — an assumption writes nothing', () => {
     expect(historyOf(ce, 'q')).toEqual(before);
     expect(ce.box('q').type.toString()).toBe('real<0<..>');
     // ...and it is gone again once the fact is retracted, with no rewind:
-    // what is left is exactly the type the USE inferred (`q + 1` ⇒ `number`).
+    // what is left is exactly the type that `ce.infer()` committed from the
+    // USE (`q + 1` ⇒ `number`).
     ce.forget('q');
     expect(ce.box('q').type.toString()).toBe('number');
   });
@@ -115,7 +78,7 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
     // landing exactly where the reverse order lands.
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
-    ce.box(['Multiply', 'x', 'v']);
+    ce.infer([ce.box(['Multiply', 'x', 'v'])]);
     expect(ce.box('v').type.toString()).toBe('number');
     ce.assign('v', 5);
     expect(ce.box('v').type.toString()).toBe('integer');
@@ -189,7 +152,7 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
     // is adopted instead.
     const ce = new ComputeEngine();
     ce.declare('gfin', '(real<0..10>) -> real');
-    ce.box(['gfin', 'wfin']);
+    ce.infer([ce.box(['gfin', 'wfin'])]);
     expect(ce.box('wfin').type.toString()).toBe('real<0..10>');
     ce.assign('wfin', 5);
     expect(ce.box('wfin').type.toString()).toBe('5');
@@ -197,7 +160,7 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
     // there the promotion is installed.
     const ce2 = new ComputeEngine();
     ce2.declare('g2', '(real) -> real');
-    ce2.box(['g2', 'w2']);
+    ce2.infer([ce2.box(['g2', 'w2'])]);
     ce2.assign('w2', 5);
     expect(ce2.box('w2').type.toString()).toBe('integer');
     expect(ce.type('integer').matches('real')).toBe(true);
@@ -206,7 +169,7 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
   test('the narrow records a value-derived provenance entry with the value as cause', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
-    ce.box(['Multiply', 'x', 'v']);
+    ce.infer([ce.box(['Multiply', 'x', 'v'])]);
     ce.assign('v', 5);
     const history = historyOf(ce, 'v');
     expect(history[history.length - 1]).toEqual([
@@ -214,31 +177,6 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
       'integer',
       '5',
     ]);
-  });
-});
-
-describe('INFERENCE PROVENANCE — the boxing epoch', () => {
-  test('entries from different top-level boxings carry different epochs; same boxing, same epoch', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'number');
-    ce.box(['Multiply', 'x', 'v']); // creates v, infers number — one pass
-    ce.box(['Add', 'v', 'w']); // creates w — a later pass
-    const epochsOf = (s: string) => {
-      const def = ce.lookupDefinition(s);
-      if (!def || !isValueDef(def)) return [];
-      return (def.value._typeProvenance ?? []).map((e) => e.epoch);
-    };
-    const vEpochs = epochsOf('v');
-    const wEpochs = epochsOf('w');
-    // Both of v's entries (creation + inference) come from the same pass…
-    expect(new Set(vEpochs).size).toBe(1);
-    expect(vEpochs[0]).toBeDefined();
-    // …and w's pass is a different, later one: `entry.epoch` answers "was
-    // this entry recorded by the pass running now?" in O(1), the query the
-    // first-boxing binding-divergence fix (Tycho item 178) consults on its
-    // auto-declare decision path.
-    expect(new Set(wEpochs).size).toBe(1);
-    expect(wEpochs[0]).toBeGreaterThan(vEpochs[0]!);
   });
 });
 
@@ -311,8 +249,7 @@ describe('ASSIGNMENT TO A DECLARED `unknown` — the placeholder takes the value
     // Control: with no value to type from, the use is still what decides.
     const ce2 = new ComputeEngine();
     ce2.declare('u', 'unknown');
-    ce2.parse('u + 1');
-    expect(ce2.box('u').type.toString()).toBe('number');
+    expect(ce2.parse('u + 1').op1.type.toString()).toBe('number');
   });
 
   test('the move is recorded as value-derived', () => {

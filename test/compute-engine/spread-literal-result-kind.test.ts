@@ -607,13 +607,23 @@ describe('Compilation of a consumer of a join over an inferred collection', () =
     ['Append', 'a', 0],
     ['ListJoin', 'a', ['List', 0]],
   ];
+  /** The first occurrence of the symbol `name` in `e`. */
+  const occurrence = (e: Expression, name: string): Expression | undefined => {
+    if (e.symbol === name) return e;
+    for (const op of e.ops ?? []) {
+      const found = occurrence(op, name);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
   for (const [name, make, expected] of SHAPES) {
     for (const inner of INNER) {
       test(`${name} of ${inner[0]}, top level`, () => {
         const ce = new ComputeEngine();
         if (name === 'Sum') ce.declare('a', 'list<real>');
         const e = ce.box(make(inner));
-        expect(ce.symbol('a').type.toString()).toBe(name === 'Sum' ? 'list<real>' : 'collection<any>');
+        // Boxing declares nothing: the use types the occurrence of `a`
+        expect(occurrence(e, 'a')?.type.toString()).toBe(name === 'Sum' ? 'list<real>' : 'collection<any>');
         const result = compile(e, { to: 'javascript', fallback: false } as any);
         expect(result.success).toBe(true);
         expect(result.run!({ a: [4, 5] } as any)).toEqual(expected);

@@ -254,17 +254,20 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
 
   test('ACCEPTED TIGHTENING — a non-inferable `unknown` operand absorbs', () => {
     // §4.3 bound-join table: raw `widen(unknown, X) = X` DISCARDED the
-    // unknown and overstated the result; `joinBounds` absorbs to `unknown`.
-    // The old `type: widen(a, b)` handler produced `number` here (after the
-    // operand was narrowed on admission); the generic signature yields
-    // `unknown` and, per D8, defers the narrowing write.
+    // unknown and overstated the result; `joinBounds` absorbs to `unknown`
+    // for an operand that has no requirement (the `unknown` result of an
+    // application below).
     const ce = engine();
     ce.declare('remU', 'unknown');
     expect(ce.box('remU').valueDefinition!.inferredType).toBe(false);
 
-    expect(ce.box(['Remainder', 'remU', 3]).type.toString()).toBe('unknown');
-    expect(ce.box(['Remainder', 3, 'remU']).type.toString()).toBe('unknown');
-    // D8: the position is admitted PROVISIONALLY, so nothing is written back.
+    // A name declared `unknown` reads the requirement of its use, as a free
+    // name does: its occurrence is the instantiated parameter `integer`.
+    expect(ce.box(['Remainder', 'remU', 3]).type.toString()).toBe('integer');
+    expect(ce.box(['Remainder', 3, 'remU']).type.toString()).toBe(
+      'integer | nan'
+    );
+    // Boxing writes nothing back to the declaration.
     expect(ce.box('remU').type.toString()).toBe('unknown');
 
     // Same edge through an unknown-result application (never narrowable):
@@ -278,8 +281,9 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     // §4.3 table, last row: the free symbol contributes nothing, `T` solves
     // from the literal, and the symbol narrows to the instantiated parameter.
     const ce = engine();
-    expect(ce.box(['Remainder', 'remX', 3]).type.toString()).toBe('integer');
-    expect(ce.box('remX').type.toString()).toBe('integer');
+    const e = ce.box(['Remainder', 'remX', 3]);
+    expect(e.type.toString()).toBe('integer');
+    expect(e.op1.type.toString()).toBe('integer');
   });
 
   test('the declared bound still rejects a non-number', () => {

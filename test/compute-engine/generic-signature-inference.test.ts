@@ -26,7 +26,7 @@ describe('a canonical-handler head with a generic numeric signature', () => {
     });
     const expr = ce.box(['Twice', 'q']);
     expect(expr.isValid).toBe(true);
-    expect(ce.symbol('q').type.toString()).toBe('number');
+    expect(expr.op1.type.toString()).toBe('number');
     expect(expr.type.toString()).toBe('number');
     expect(ce.box(['Twice', 3]).evaluate().toString()).toBe('6');
   });
@@ -47,11 +47,12 @@ describe('a generic head whose bound has a function arm', () => {
   it('forwards a numeric requirement on its result to the operand', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(T) -> T where T: number | function');
-    ce.box(['f', 'u']);
-    expect(ce.symbol('u').type.toString()).toBe('function | number');
+    const call = ce.box(['f', 'u']);
+    expect(call.op1.type.toString()).toBe('function | number');
+    // The sum is another unit: its requirement reaches its own `u`.
     const sum = ce.box(['Add', ['f', 'u'], 1]);
     expect(sum.isValid).toBe(true);
-    expect(ce.symbol('u').type.toString()).toBe('number');
+    expect(sum.op1.op1.type.toString()).toBe('number');
     expect(sum.type.toString()).toBe('number');
   });
 
@@ -97,7 +98,7 @@ describe('a generic head whose bound has a function arm', () => {
   it('does not forward a function requirement', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(T) -> T where T: number | function');
-    ce.box(['Apply', ['f', 'v'], 1]);
-    expect(ce.symbol('v').type.toString()).toBe('function | number');
+    const apply = ce.box(['Apply', ['f', 'v'], 1]);
+    expect(apply.op1.op1.type.toString()).toBe('function | number');
   });
 });

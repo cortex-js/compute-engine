@@ -482,6 +482,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
   // plain uniform read, which is not caller code: it stays in place unless
   // caller code comes after it in the statement.
   const cev = new ComputeEngine();
+  cev.declare('a', 'real | signed_infinity | nan');
   cev.declare('b', 'real | signed_infinity | nan');
   cev.declare('n', 'real | signed_infinity | nan');
   cev.declare('V', 'list<real^3>');

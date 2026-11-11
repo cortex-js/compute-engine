@@ -10,6 +10,9 @@ import { expand } from '../../src/compute-engine/boxed-expression/expand';
 // (ROADMAP CE-462).
 
 const ce = new ComputeEngine();
+// Boxing declares nothing: `x(…)` is read as a product only when `x` is
+// declared as a number.
+ce.declare('x', 'real');
 
 const NOTATION = [
   'Multiply',

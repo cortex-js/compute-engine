@@ -15,18 +15,24 @@ describe('Logic', () => {
   });
 
   it('should parse Not', () => {
-    expect(ce.parse('\\neg p').json).toMatchInlineSnapshot(`
+    const neg = ce.parse('\\neg p');
+    expect(neg.json).toMatchInlineSnapshot(`
       [
         Not,
         p,
       ]
     `);
-    expect(ce.parse('\\lnot p').json).toMatchInlineSnapshot(`
+    const lnot = ce.parse('\\lnot p');
+    expect(lnot.json).toMatchInlineSnapshot(`
       [
         Not,
         p,
       ]
     `);
+    // With `p` a boolean, `\operatorname{not} p` is not a product.
+    // Boxing declares nothing, so `ce.infer()` commits the type of the
+    // uses above.
+    ce.infer([neg, lnot]);
     expect(ce.parse('\\operatorname{not} p').json).toMatchInlineSnapshot(`
       [
         Tuple,

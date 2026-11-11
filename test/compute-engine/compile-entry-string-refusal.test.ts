@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { createJavaScriptRuntime } from '../../src/runtime';
+import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * The JavaScript target reads a binding declared with a collection type
@@ -299,18 +300,19 @@ describe('COMPILE: an extremum or a sum over a scalar-or-collection union that a
 });
 
 describe('COMPILE entry: an inferred collection type refuses a string too', () => {
-  // The engine infers a type for an undeclared symbol from its uses
-  // (`Drop(S, 1)` infers `indexed_collection<unknown>`). The compiled code
+  // An undeclared symbol is a free name whose occurrence has the type of its
+  // use (`Drop(S, 1)` gives `indexed_collection<any>`). The compiled code
   // reads such a symbol as an array exactly as it reads a declared one, so
   // the refusal applies alike; otherwise `Drop(S, 1)` of `"😀a"` gave a
   // broken half of the emoji.
   it('refuses a string for a symbol inferred `indexed_collection`', () => {
     const ce = new ComputeEngine();
-    const r = compile(ce.box(['Length', ['Drop', 'S', 1]]), {
-      constantFold: false,
-    })!;
+    const expr = ce.box(['Length', ['Drop', 'S', 1]]);
+    const r = compile(expr, { constantFold: false })!;
     expect(r.success).toBe(true);
-    expect(ce.symbol('S').valueDefinition?.inferredType).toBe(true);
+    const s = expr.op1.op1;
+    expect(isFreeName(s)).toBe(true);
+    expect(s.type.toString()).toBe('indexed_collection<any>');
     expect(r.run!({ S: [1, 2, 3] } as any)).toBe(2);
     expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
       /does not accept a string/
@@ -319,9 +321,11 @@ describe('COMPILE entry: an inferred collection type refuses a string too', () =
 
   it('refuses a string for a symbol inferred `collection`', () => {
     const ce = new ComputeEngine();
-    const r = compile(ce.box(['Length', 'S']), { constantFold: false })!;
+    const expr = ce.box(['Length', 'S']);
+    const r = compile(expr, { constantFold: false })!;
     expect(r.success).toBe(true);
-    expect(ce.symbol('S').valueDefinition?.inferredType).toBe(true);
+    expect(isFreeName(expr.op1)).toBe(true);
+    expect(expr.op1.type.toString()).toBe('collection');
     expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
     expect(() => r.run!({ S: 'abc' } as any)).toThrow(
       /does not accept a string/

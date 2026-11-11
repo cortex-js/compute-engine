@@ -17,6 +17,8 @@ import {
 // scalar, the caller-owned output array, and the interval kind codes.
 
 const ce = new ComputeEngine();
+// Boxing declares no name: `x > 1` and `x` alone give `x` no type.
+ce.declare('x', 'real');
 
 /** `n` cells over `[lo, hi]`, one value each. */
 function samples(n: number, lo = -5, hi = 5): Float64Array {

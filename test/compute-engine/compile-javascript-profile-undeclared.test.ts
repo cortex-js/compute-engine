@@ -371,16 +371,17 @@ describe('the strict mode', () => {
 
   test('an earlier use can make a Power form decline, and never changes the code', () => {
     // The rules of `Power` read the type of the node, which the engine
-    // computes from the type it inferred for `x`: after `Mod(x, 2)`, `x` is
-    // real, `e^(sqrt(x))` has the type complex, and the existing compiler
-    // writes a complex power. The profile then declines.
+    // computes from the type inferred for `x`: once `ce.infer()` commits the
+    // use `Mod(x, 2)`, `x` is real, `e^(sqrt(x))` has the type complex, and
+    // the existing compiler writes a complex power. The profile then
+    // declines.
     const fresh = engine();
     const before = profile(fresh.expr(['Exp', ['Sqrt', 'x']]), 'strict');
     expect('result' in before ? before.result.code : before.message).toBe(
       'Math.exp(Math.sqrt(_.x))'
     );
     const narrowed = engine();
-    narrowed.expr(['Mod', 'x', 2]);
+    narrowed.infer([narrowed.expr(['Mod', 'x', 2])]);
     const after = profile(narrowed.expr(['Exp', ['Sqrt', 'x']]), 'strict');
     expect('result' in after).toBe(false);
   });

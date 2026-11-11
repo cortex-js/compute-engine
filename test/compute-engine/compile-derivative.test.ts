@@ -18,6 +18,10 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const ce = new ComputeEngine();
 ce.declare('n', 'real');
+// An input whose only use is an argument of an applied derivative
+// (`\sin'(x)`) has no type from that use.
+ce.declare('x', 'number');
+ce.declare('y', 'number');
 
 /** Central difference of `f` at `x` — an independent numeric reference. */
 function finiteDiff(latex: string, x: number): number {

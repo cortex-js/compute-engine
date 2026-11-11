@@ -354,8 +354,7 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
 
   test('I4 — an unconstrained symbol infers the bare param, never |missing', () => {
     const e = new ComputeEngine();
-    e.box(['Sin', 'y']).type;
-    expect(e.box('y').type.toString()).toBe('number');
+    expect(e.box(['Sin', 'y']).op1.type.toString()).toBe('number');
   });
 
   test('I4 — \\max(x, 2x-1) does not widen x by missing', () => {
@@ -364,7 +363,8 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
     expect(m.operator).toBe('Max');
     // The product `2x` narrows `x` to `number`, as `2\\cdot x` does
     // (ROADMAP CE-32); the type still has no `missing` arm.
-    expect(e.box('x').type.toString()).toBe('number');
+    expect(m.op1.symbol).toBe('x');
+    expect(m.op1.type.toString()).toBe('number');
   });
 });
 

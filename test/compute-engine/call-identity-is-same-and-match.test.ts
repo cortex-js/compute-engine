@@ -116,6 +116,9 @@ describe('isSame compares the definition of a call', () => {
 
   test('a call of a copy of the library definition that keeps the handlers', () => {
     const ce = new ComputeEngine();
+    // Declared, so that the `x` boxed in the pushed scope is the same
+    // binding: a free name boxed there has that scope as its home scope.
+    ce.declare('x', 'real');
     const before = ce.box(['Sqrt', 'x']);
     const def = ce.lookupDefinition('Sqrt') as any;
     ce.pushScope();

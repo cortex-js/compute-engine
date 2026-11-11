@@ -9,6 +9,9 @@ import type {
 } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 
+// Compilation refuses an input with no type, and boxing declares none.
+ce.declare('x', 'real | signed_infinity | nan');
+
 /**
  * Example custom target: Python-like compilation
  */

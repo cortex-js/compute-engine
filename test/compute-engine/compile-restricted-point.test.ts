@@ -30,8 +30,10 @@ function engineWithT(): ComputeEngine {
 /** `P` shown only when `1 < t`. */
 const gated = (v: unknown = P) => ['If', ['Less', 1, 't'], v];
 
+/** The compiled value at `t`. Boxing declares no name, so the code is
+ * compiled on an engine where `t` is declared. */
 function run(json: unknown, t: number, to = 'javascript'): unknown {
-  const r = compile(ce.box(json as never), { to } as never);
+  const r = compile(engineWithT().box(json as never), { to } as never);
   expect(r.success).toBe(true);
   return r.run!({ t } as never);
 }
@@ -189,7 +191,7 @@ describe('Shapes the interpreter refuses for a restricted point', () => {
   });
 
   test('the magnitude of the point is its norm on Python, not a component-wise abs', () => {
-    const r = compile(ce.box(['Abs', gated()] as never), {
+    const r = compile(engineWithT().box(['Abs', gated()] as never), {
       to: 'python',
     } as never);
     expect(r.success).toBe(true);
@@ -204,7 +206,10 @@ describe('Shader targets keep the supported shapes', () => {
     ['the point plus a point', ['Add', gated(), ['PointList', 2, 't']]],
     ['two plain points', ['Add', P, ['PointList', 2, 't']]],
   ])('%s compiles', (_l, json) => {
-    expect(declines(json, 'glsl')).toBe(false);
+    const r = compile(engineWithT().box(json as never), {
+      to: 'glsl',
+    } as never);
+    expect(r.success).toBe(true);
   });
 });
 

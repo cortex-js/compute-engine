@@ -129,8 +129,11 @@ describe('a valueless untyped symbol as the value of a declared symbol is narrow
   test('assign route', () => {
     const ce = new ComputeEngine();
     ce.declare('q', 'integer');
-    ce.assign('q', ce.box('uu'));
-    expect(ce.box('uu').type.toString()).toBe('integer');
+    // The occurrence of `uu` in the value is narrowed; a new boxing of `uu`
+    // is another unit, which does not read it.
+    const uu = ce.box('uu');
+    ce.assign('q', uu);
+    expect(uu.type.toString()).toBe('integer');
     const t = ce.box(['Tuple', 'q']);
     expect(t.type.toString()).toBe('tuple<integer>');
     expect(t.evaluate().type.toString()).toBe('tuple<integer>');
@@ -138,8 +141,9 @@ describe('a valueless untyped symbol as the value of a declared symbol is narrow
 
   test('declare-with-value route', () => {
     const ce = new ComputeEngine();
-    ce.declare('r', { type: 'real', value: ce.box('zz') });
-    expect(ce.box('zz').type.toString()).toBe('real');
+    const zz = ce.box('zz');
+    ce.declare('r', { type: 'real', value: zz });
+    expect(zz.type.toString()).toBe('real');
   });
 
   test('a symbol with a value is not narrowed', () => {

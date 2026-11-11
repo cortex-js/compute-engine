@@ -14,14 +14,16 @@ const BOXED = ['D', ['Function', ['Block', 'f'], 'x'], 'x'];
 const LATEX = '\\frac{\\mathrm{d}f}{\\mathrm{d}x}';
 
 describe('the free name of a function literal', () => {
-  test('a boxed and a later parsed derivative have one `.json` but are not isSame', () => {
+  // The parse declares no `f`, so the `f` of each literal is a free name
+  // with the same home scope and name: the same binding.
+  test('a boxed and a later parsed derivative have one `.json` and are isSame', () => {
     const ce = new ComputeEngine();
     const boxed = ce.box(BOXED as any);
     const parsed = ce.parse(LATEX);
     expect(boxed.json).toEqual(BOXED);
     expect(parsed.json).toEqual(BOXED);
-    expect(boxed.isSame(parsed)).toBe(false);
-    expect(parsed.isSame(boxed)).toBe(false);
+    expect(boxed.isSame(parsed)).toBe(true);
+    expect(parsed.isSame(boxed)).toBe(true);
   });
 
   test('a boxed and a later parsed derivative have one value', () => {

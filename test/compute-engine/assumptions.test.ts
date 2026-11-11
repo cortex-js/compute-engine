@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
 import '../utils'; // For snapshot serializers
 
@@ -488,9 +489,9 @@ describe('CONJUNCTION ATOMICITY (SYM P2-9)', () => {
 describe('A ROLLED-BACK assume() LEAVES THE SCOPE AS IT FOUND IT', () => {
   // A rollback gives back only the bindings the `assume()` call itself
   // created: the names the scope did not already bind when the call was
-  // entered. `ce.parse()` and `ce.box()` auto-declare every free symbol they
-  // meet, so a caller who parses or boxes the predicate first owns the
-  // placeholder for `p`, and the rollback must leave it alone.
+  // entered. `ce.parse()` and `ce.box()` declare no name, so a predicate
+  // parsed first leaves no binding, and a binding the caller declared
+  // before the call is the caller's: the rollback must leave it alone.
   test('MathJSON route: no residual declaration', () => {
     const ce = new ComputeEngine();
     // The predicate is boxed INSIDE assume(), so `p` is the call's own.
@@ -500,39 +501,29 @@ describe('A ROLLED-BACK assume() LEAVES THE SCOPE AS IT FOUND IT', () => {
     expect(ce.lookupDefinition('p')).toBeUndefined();
   });
 
-  test('pre-parsed route: the caller-made placeholder survives', () => {
+  test('pre-parsed route: no residual declaration', () => {
     const ce = new ComputeEngine();
-    // `ce.parse()` auto-declared `p` before assume() was entered, so the
-    // rollback leaves exactly what a bare `ce.parse('p > 0')` leaves: an
-    // empty placeholder, still bound, still the same definition the
-    // pre-parsed expression holds.
+    // `ce.parse()` declares no name, so the rollback leaves exactly what a
+    // bare `ce.parse('p > 0')` leaves: no binding for `p`.
     const parsed = ce.parse('p > 0 \\land p < -5');
-    const before = ce.lookupDefinition('p');
-    expect(before).toBeDefined();
+    expect(ce.lookupDefinition('p')).toBeUndefined();
 
     expect(ce.assume(parsed)).toBe('contradiction');
 
-    const after = ce.lookupDefinition('p');
-    expect(after).toBe(before);
-    const def = (after as { value: { disposed: boolean } }).value;
-    expect(def.disposed).toBe(false);
-    // Still an empty placeholder: no type the assumption left behind, and no
-    // value.
+    expect(ce.lookupDefinition('p')).toBeUndefined();
+    // No type the assumption left behind...
     expect(ce.box('p').type.isUnknown).toBe(true);
-    expect(ce.box('p').valueDefinition).toBe(def);
-    expect((def as unknown as { storedValue: unknown }).storedValue).toBe(
-      undefined
-    );
     // ...and the refuted bound is not in force.
     expect(ce.box('p').isPositive).toBe(undefined);
   });
 
   test('a binding the caller made before the call keeps its identity', () => {
-    // The caller holds an expression that points at the placeholder
-    // `ce.box('x')` auto-declared. A rollback that disposed and unbound it
-    // would leave that expression pointing at a dead definition, and a later
-    // `ce.box('x')` would resolve to a different one.
+    // The caller holds an expression that points at the empty placeholder
+    // it declared. A rollback that disposed and unbound it would leave that
+    // expression pointing at a dead definition, and a later `ce.box('x')`
+    // would resolve to a different one.
     const ce = new ComputeEngine();
+    ce.declare('x', 'unknown');
     const x = ce.box('x');
     const heldDef = x.valueDefinition;
     expect(heldDef).toBeDefined();
@@ -581,8 +572,10 @@ describe('A REFUSED CONJUNCT LEAVES NO STALE DEFINITION BEHIND', () => {
   // with it have to name the same definition.
   //
   // The predicate is passed as MathJSON, not pre-boxed: only a binding the
-  // `assume()` call itself created is ever discarded, so pre-boxing it would
-  // make `y` the caller's and no definition would be disposed of at all.
+  // `assume()` call itself created is ever discarded.
+  //
+  // A `y` node of a stored fact is either bound to the live definition or a
+  // free name, which has no definition of its own and resolves by name.
   test('the surviving conjunct is recorded against the live definition', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(['And', ['Foo', 'y'], ['Greater', 'y', 3]])).toBe(
@@ -597,7 +590,11 @@ describe('A REFUSED CONJUNCT LEAVES NO STALE DEFINITION BEHIND', () => {
     // Every symbol node of every stored fact resolves to a live definition.
     for (const [fact] of ce.context.assumptions) {
       const visit = (expr: typeof fact): void => {
-        if (expr.symbol === 'y') expect(expr.valueDefinition).toBe(live);
+        if (expr.symbol === 'y') {
+          if (expr.valueDefinition === undefined)
+            expect(isFreeName(expr)).toBe(true);
+          else expect(expr.valueDefinition).toBe(live);
+        }
         for (const op of expr.ops ?? []) visit(op);
       };
       visit(fact);

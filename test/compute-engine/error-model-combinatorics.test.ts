@@ -829,11 +829,13 @@ describe('the flipped declarations and the routes', () => {
   });
 
   test('a fresh symbol used as an operand infers the carrier', () => {
-    // The flipped carrier is what a valueless symbol narrows to on use.
+    // The flipped carrier is what a valueless symbol narrows to on use. The
+    // requirement is read on the occurrences of the operands.
     const ce = new ComputeEngine();
-    ce.box(['Binomial', 'nFresh', 'kFresh']).evaluate();
-    expect(ce.box('nFresh').type.toString()).toBe('complex | infinity');
-    expect(ce.box('kFresh').type.toString()).toBe('complex | infinity');
+    const expr = ce.box(['Binomial', 'nFresh', 'kFresh']);
+    expr.evaluate();
+    expect(expr.op1.type.toString()).toBe('complex | infinity');
+    expect(expr.op2.type.toString()).toBe('complex | infinity');
   });
 
   test('the box, parse and function routes agree', () => {

@@ -9,6 +9,8 @@ import {
   stampObjectDepsAtEnd,
 } from '../../src/compute-engine/boxed-expression/object-deps';
 import { unitEnvironmentOfOperands } from '../../src/compute-engine/binding-unit';
+import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 // Phase E of slice 1 of binding units, with the engine flag `_bindingUnits`
 // on: the caches that read the entries of unit environments hit across
@@ -154,6 +156,37 @@ describe('BINDING UNITS: CACHES', () => {
     expect(unitEnvironmentOfOperands([top, kv('s', q)])).toBe(env);
   });
 
+  test('a held node reads a later declaration of a free name in its effects', () => {
+    // `p` is a free name when the nodes are boxed: the projection finds no
+    // definition, and the declaration advances no axis. The effects memo of
+    // a node, and the memo of a dictionary, depend on the resolution of `p`.
+    const ce = engine();
+    executeEpsil(ce, 'type R = record{age: integer}');
+    const stmt = ['Assign', ['Field', 'p', { str: 'age' }], 43];
+    const node = ce.box(stmt as never);
+    const block = ce.box(['Block', stmt] as never);
+    const dict = ce.box([
+      'Dictionary',
+      ['KeyValuePair', { str: 'a' }, stmt],
+    ] as never);
+    expect(node.effects).toEqual(['state']);
+    expect(block.effects).toEqual(['state']);
+    expect(dict.effects).toEqual(['state']);
+    // With nothing declared, a second read is served by the memos.
+    const count = effectsComputeCount();
+    expect(node.effects).toEqual(['state']);
+    expect(block.effects).toEqual(['state']);
+    expect(dict.effects).toEqual(['state']);
+    expect(effectsComputeCount()).toBe(count);
+
+    ce.declare('p', 'R');
+
+    expect(node.effects).toEqual(['scope']);
+    expect(block.effects).toEqual(['scope']);
+    expect(dict.effects).toEqual(['scope']);
+    expect(node.isPure).toBe(false);
+  });
+
   test('an evaluation enters the public evaluate() once', () => {
     const ce = engine();
     const e = ce.box(['Divisors', 12]);
@@ -170,5 +203,101 @@ describe('BINDING UNITS: CACHES', () => {
       proto.evaluate = original;
     }
     expect(calls).toBe(1);
+  });
+
+  test('a recursive function typed again in an operation', () => {
+    // The type of the body was cached when `m3` was assigned, with no entry
+    // for the parameter `x` of the callback. The evaluation of a call writes
+    // one (the rebuild of `x - 1` requires a number), so that type is not
+    // valid in the operation, and the re-entrant read of the recursive call
+    // is answered as an empty cell is, not computed again with no end.
+    const ce = engine();
+    ce.box([
+      'Assign',
+      'm3',
+      [
+        'Function',
+        [
+          'Map',
+          [
+            'Function',
+            [
+              'If',
+              ['Less', 'x', 1],
+              'y',
+              ['m3', ['Subtract', 'x', 1], ['Add', 'y', 'x']],
+            ],
+            'x',
+          ],
+          ['List', 'n'],
+        ],
+        'n',
+        'y',
+      ],
+    ]).evaluate();
+    expect(ce.box(['m3', 1, 10]).evaluate().toString()).toBe('[[11]]');
+    expect(ce.box(['m3', 3, 10]).evaluate().toString()).toBe('[[[[16]]]]');
+  });
+
+  test('a stored value whose call rebuilds the index of a comprehension', () => {
+    // A call of `u2` rebuilds the comprehension of its body, and the index
+    // `i` is given the type `integer` of its range again: the type that the
+    // boxing of the body gave it. That requirement is not written in the
+    // environment of the operation, so each operation reads the stored body
+    // as the one before it did, and the stored value of `h` is served.
+    const ce = engine();
+    let calls = 0;
+    ce.declare('tick', {
+      signature: '(number) -> number',
+      pure: true,
+      evaluate: (ops) => {
+        calls += 1;
+        return ops[0].evaluate();
+      },
+    });
+    const counting = (run: () => unknown): [unknown, number] => {
+      const before = calls;
+      const value = run();
+      return [value, calls - before];
+    };
+    ce.declare('u2', 'function');
+    ce.assign(
+      'u2',
+      ce.box([
+        'Function',
+        [
+          'Comprehension',
+          ['tick', ['At', 'l', ['Ceil', ['Divide', 'i', 2]]]],
+          ['Element', 'i', ['Range', 1, ['Multiply', 2, ['Length', 'l']]]],
+        ],
+        'l',
+      ])
+    );
+    ce.assign('base', ce.box(['List', 1, 2, 3, 4]));
+    ce.assign('h', ce.box(['u2', ['u2', 'base']]));
+    const scan = () =>
+      [
+        ...ce
+          .box([
+            'Comprehension',
+            ['At', 'h', 'i'],
+            ['Element', 'i', ['Range', 1, 16]],
+          ])
+          .evaluate()
+          .each(),
+      ].map((x) => x.re);
+    const [first, c1] = counting(scan);
+    expect(first).toEqual([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4]);
+    expect(c1).toBeLessThan(2 * (8 + 16) + 8);
+    expect(counting(scan)).toEqual([first, 0]);
+    for (let k = 0; k < 3; k++)
+      expect(counting(() => ce.box(['At', 'h', 3]).evaluate().re)).toEqual([
+        1, 0,
+      ]);
+    // A write to a value that the stored value reads is still seen.
+    ce.assign('base', ce.box(['List', 10, 20, 30, 40]));
+    const [v, c2] = counting(() => ce.box(['At', 'h', 3]).evaluate().re);
+    expect(v).toBe(10);
+    expect(c2).toBeGreaterThan(0);
   });
 });

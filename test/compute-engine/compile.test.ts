@@ -1216,14 +1216,17 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
   });
 
   it('non-canonical right-associative grouping is preserved (P0-45)', () => {
+    // A non-canonical form puts no requirement on its inputs: declare them.
+    const e = new ComputeEngine();
+    for (const name of ['a', 'b', 'c']) e.declare(name, 'real');
     const div = compile(
-      ce.box(['Divide', 'a', ['Divide', 'b', 'c']], { canonical: false })
+      e.box(['Divide', 'a', ['Divide', 'b', 'c']], { canonical: false })
     )!;
     expect(div.success).toBe(true);
     expect(div.run!({ a: 12, b: 6, c: 2 })).toBe(4);
 
     const sub = compile(
-      ce.box(['Subtract', 'a', ['Subtract', 'b', 'c']], { canonical: false })
+      e.box(['Subtract', 'a', ['Subtract', 'b', 'c']], { canonical: false })
     )!;
     expect(sub.success).toBe(true);
     expect(sub.run!({ a: 5, b: 3, c: 1 })).toBe(3);
@@ -1716,7 +1719,9 @@ describe('COMPILE interpreter-alignment (CO-P2-24)', () => {
     // (`True.N()` stays `True`), and the compiled runner matches it rather
     // than coercing. A caller that needs a number maps it at its own value
     // boundary.
-    const r = compile(ce.box(['Greater', 'x', 0]), { fallback: false })!;
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    const r = compile(e.box(['Greater', 'x', 0]), { fallback: false })!;
     expect(r.run!({ x: 5 })).toBe(true);
     expect(r.run!({ x: -5 })).toBe(false);
   });
@@ -1726,8 +1731,12 @@ describe('COMPILE interpreter-alignment (CO-P2-24)', () => {
 // (matching the interpreter), not twice — otherwise `a < Random() < b` draws
 // two different values.
 describe('COMPILE chained relation binds shared middle once (CO-P2-23c)', () => {
+  // A comparison puts no requirement on its operands: declare the inputs.
+  const e = new ComputeEngine();
+  for (const name of ['a', 'b', 'x']) e.declare(name, 'real');
+
   it('a non-trivial middle operand is bound to a single temporary', () => {
-    const r = compile(ce.box(['Less', 'a', ['Random'], 'b']), {
+    const r = compile(e.box(['Less', 'a', ['Random'], 'b']), {
       fallback: false,
     })!;
     // Exactly one draw, reused in both comparisons via an IIFE. (A duplicated
@@ -1740,7 +1749,7 @@ describe('COMPILE chained relation binds shared middle once (CO-P2-23c)', () => 
   });
 
   it('a symbol/number middle stays inline (no temp, no churn)', () => {
-    const r = compile(ce.box(['Less', -1, 'x', 1]), { fallback: false })!;
+    const r = compile(e.box(['Less', -1, 'x', 1]), { fallback: false })!;
     expect(r.code).not.toContain('=>');
     expect(r.run!({ x: 0 })).toBe(true);
     expect(r.run!({ x: 5 })).toBe(false);

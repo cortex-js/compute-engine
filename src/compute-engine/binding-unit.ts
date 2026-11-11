@@ -690,37 +690,90 @@ export function unitEnvironmentOfOperands(
     ops?: readonly unknown[];
     values?: readonly unknown[];
   };
-  const stack: unknown[] = [...ops].reverse();
+  // The walk keeps the path from the operand to the current node: each
+  // compound node on it, with the number of symbols seen when it was entered
+  // (`seen`), and the index of its next child.
+  type Frame = {
+    node: object;
+    children: readonly unknown[];
+    next: number;
+    seen: number;
+  };
+  const path: Frame[] = [];
   const visited = new Set<object>();
-  let symbolSeen = false;
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (typeof node !== 'object' || node === null) continue;
-    if (visited.has(node) || symbolFreeNodes.has(node)) continue;
-    visited.add(node);
-    const n = node as Node;
-    if (n._kind === undefined) continue;
-    if (n._kind === 'symbol') {
-      if (n._env !== undefined) return n._env;
-      symbolSeen = true;
-      continue;
+  let symbolsSeen = 0;
+  // Give `env` as the first environment of each node of the path in which no
+  // symbol came before the one that has `env` (`firstEnvironments`).
+  const found = (env: UnitEnvironment): UnitEnvironment => {
+    for (const frame of path)
+      if (frame.seen === symbolsSeen) firstEnvironments.set(frame.node, env);
+    return env;
+  };
+  for (const op of ops) {
+    let node: unknown = op;
+    for (;;) {
+      if (
+        typeof node === 'object' &&
+        node !== null &&
+        (node as Node)._kind !== undefined
+      ) {
+        if (symbolFreeNodes.has(node)) {
+          // Nothing to count.
+        } else if (visited.has(node)) {
+          // A node shared with a part already walked holds a symbol with no
+          // environment (it would have ended the walk otherwise).
+          symbolsSeen += 1;
+        } else {
+          visited.add(node);
+          const n = node as Node;
+          const first = firstEnvironments.get(node);
+          if (first !== undefined) return found(first);
+          if (n._kind === 'symbol') {
+            if (n._env !== undefined) return found(n._env);
+            symbolsSeen += 1;
+          } else {
+            const children = n._kind === 'dictionary' ? n.values : n.ops;
+            if (children !== undefined && children.length > 0)
+              path.push({ node, children, next: 0, seen: symbolsSeen });
+            else symbolFreeNodes.add(node);
+          }
+        }
+      }
+      // The next child of the innermost node of the path that has one; a
+      // node whose children are all walked leaves the path.
+      let frame = path[path.length - 1];
+      while (frame !== undefined && frame.next >= frame.children.length) {
+        // No symbol in any node under it: a later walk skips it. A tower of
+        // shared dictionaries with no symbol was walked to its bottom at
+        // each `ce.function()` that built a level of it.
+        if (frame.seen === symbolsSeen) symbolFreeNodes.add(frame.node);
+        path.pop();
+        frame = path[path.length - 1];
+      }
+      if (frame === undefined) break;
+      node = frame.children[frame.next++];
     }
-    const children = n._kind === 'dictionary' ? n.values : n.ops;
-    if (children !== undefined)
-      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
   }
-  // No symbol in any node of the walk: each of them holds none, and a later
-  // walk skips it. A tower of shared dictionaries with no symbol was walked
-  // to its bottom at each `ce.function()` that built a level of it.
-  if (!symbolSeen) for (const node of visited) symbolFreeNodes.add(node);
   return undefined;
 }
 
 /** The boxed expressions that hold no symbol, at any depth, found by a walk
  * of `unitEnvironmentOfOperands()`. The operands of a boxed expression do
- * not change, so the record stays true (a symbol can gain an environment
- * later, which is why a found environment is not recorded). */
+ * not change, so the record stays true. */
 const symbolFreeNodes = new WeakSet<object>();
+
+/**
+ * For a boxed expression whose first symbol occurrence, in the order of
+ * `unitEnvironmentOfOperands()`, has an environment: that environment. The
+ * record stays true: the operands of a boxed expression do not change, so
+ * the first symbol occurrence stays the same, and the environment of a
+ * symbol, once set, does not change (`BoxedSymbol._env` is set at
+ * construction or by `??=`). An expression whose first symbol has no
+ * environment is not recorded: that symbol can gain one later. A tower
+ * `Sin(Sin(…(x)))` built one level at a time was walked to `x` at each
+ * level.
+ */
+const firstEnvironments = new WeakMap<object, UnitEnvironment>();
 
 /** For a value definition that is the key of an entry of a unit
  * environment: the scope that held it when the first entry was written

@@ -189,17 +189,19 @@ describe('the box route: a character operand gives the result of the one-charact
 
   test('a free symbol at a string parameter is typed `string | character`', () => {
     const local = new ComputeEngine();
-    local.box(['ToUpperCase', 'w']);
-    expect(local.box('w').type.toString()).toBe('character | string');
+    const upper = local.box(['ToUpperCase', 'w']);
+    expect(upper.op1.type.toString()).toBe('character | string');
   });
 
   test('a later collection use narrows the inferred union to `string`', () => {
     // `Sort` admits `string` but not `character`: the two uses together
-    // allow only `string`. The order of the uses does not matter.
+    // allow only `string`. The order of the uses does not matter. Uses in
+    // two expressions are met by `ce.infer()`.
     const local = new ComputeEngine();
-    local.box(['ToUpperCase', 'w']);
+    const upper = local.box(['ToUpperCase', 'w']);
     const sorted = local.box(['Sort', 'w']);
     expect(sorted.isValid).toBe(true);
+    local.infer([upper, sorted]);
     expect(local.box('w').type.toString()).toBe('string');
 
     const tuple = local.box([
@@ -208,7 +210,7 @@ describe('the box route: a character operand gives the result of the one-charact
       ['IndexOf', 'v', str('l')],
     ]);
     expect(tuple.isValid).toBe(true);
-    expect(local.box('v').type.toString()).toBe('string');
+    expect(tuple.op1.op1.type.toString()).toBe('string');
   });
 
   test('a DECLARED `character | string` is not narrowed by a collection use', () => {
@@ -228,7 +230,7 @@ describe('the box route: a character operand gives the result of the one-charact
       ['Determinant', 'w'],
     ]);
     expect(expr.isValid).toBe(false);
-    expect(local.box('w').type.toString()).toBe('character | string');
+    expect(expr.op1.op1.type.toString()).toBe('character | string');
   });
 });
 

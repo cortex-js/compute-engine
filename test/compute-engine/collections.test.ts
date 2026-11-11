@@ -46,6 +46,8 @@ const bigRange: Expression = ['Range', 2, 200, 3];
 const linspace: Expression = ['Linspace', 2, 100, 89];
 const expression: Expression = ['Add', 2, ['Multiply', 3, 'x']];
 const symbol: Expression = 'x';
+// `expression` and `symbol` are numbers, which no collection operator takes.
+engine.declare('x', 'number');
 const dict: Expression = [
   'Dictionary',
   ['Tuple', { str: 'x' }, 1],

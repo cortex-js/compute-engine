@@ -30,7 +30,9 @@ function errorCode(json: unknown): string | undefined {
 describe('a declared parameter type is checked when a later value decides it', () => {
   test('the block form gives the error, not a value of the body', () => {
     const ce = engineWith();
-    ce.symbol('m');
+    // Boxing declares no name, so `m` is declared: inferred, with no type
+    // yet.
+    ce.declare('m', { type: 'unknown', inferred: true });
     const block = ce.box([
       'Tuple',
       ['Block', ['Assign', 'r', ['g', ['h', 'm']]], ['Assign', 'm', 1.5], 'r'],

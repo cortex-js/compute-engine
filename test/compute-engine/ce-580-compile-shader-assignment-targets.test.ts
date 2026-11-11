@@ -9,6 +9,8 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 // refused when the shader is compiled.
 
 const ce = new ComputeEngine();
+// The free `x` of the expressions below is a real input.
+ce.declare('x', 'real');
 const glsl = new GLSLTarget();
 
 describe('CE-580 a valid output assignment compiles as before', () => {

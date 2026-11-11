@@ -139,6 +139,7 @@ import {
   freeNameBindingAndScope,
   isBodyFreeName,
   isBlockLocalBinding,
+  rebindBodyFreeNames,
   sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
@@ -983,6 +984,36 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // earlier requirement, and no occurrence reads the type `never`.
     if (inferenceMode === 'narrow' && to.type === 'never') return false;
     if (from !== undefined && to.type === from.type) return true;
+    // In an operation, a first requirement on the value definition of this
+    // occurrence that the inferred type of the definition already meets is
+    // not written: an occurrence that resolves to the definition reads the
+    // meet of that type and the entry (`_typeOfDefinitionInUnit()`), which
+    // is that type with or without the entry. This is the index of a
+    // comprehension in the body of a function, which a call rebuilds with
+    // the type that the boxing of the body gave the index. Written, the
+    // entry changed what the occurrences of the stored body read for the
+    // rest of the operation: a value cached before the write was not valid
+    // after it, and a value cached after it was not valid in the next
+    // operation, which starts with no entry. A stored value that calls the
+    // function was evaluated again at each read. The write of a boxing that
+    // is not in an operation stays: `ce.infer()` reports its entries (rule
+    // 11).
+    // (`test/compute-engine/binding-units-caches.test.ts`, "a stored value
+    // whose call rebuilds the index of a comprehension")
+    const def = this._def;
+    if (
+      trial === undefined &&
+      env === state.currentOperation() &&
+      from === undefined &&
+      inferenceMode === 'narrow' &&
+      def !== undefined &&
+      isValueDef(def) &&
+      def.value === home &&
+      def.value.inferredType &&
+      def.value.declaredType.type !== 'never' &&
+      isSubtype(def.value.declaredType.type, to.type)
+    )
+      return true;
     env.set(home, name, to);
     return true;
   }
@@ -1285,6 +1316,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     ce._boxingState.noteUnitWrite(env);
     env.setReadsAsVariable(home, this._id);
     return result;
+  }
+
+  /**
+   * With the engine flag `_bindingUnits`: a free name of the same name as
+   * this symbol, with the home scope `home`. The value of a call of a
+   * function literal puts it in place of a copy of a free name of the body
+   * (`markBodyFreeName()`), so the value is the binding of the host's name
+   * (`rebindBodyFreeNames()`, `binders.ts`).
+   * @internal
+   */
+  _asFreeName(home: Scope): BoxedSymbol {
+    return new BoxedSymbol(this.engine, this._id, { homeScope: home });
   }
 
   /**
@@ -2718,7 +2761,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       ) {
         const binding = this._contextBinding();
         const expr = valueOfBinding(binding);
-        if (expr === undefined) return this;
+        // With no value, a copy of a free name of the body of a function
+        // literal evaluates to the free name of the host, as the value of a
+        // call has it (`rebindBodyFreeNames()`).
+        if (expr === undefined)
+          return this.engine._bindingUnits ? rebindBodyFreeNames(this) : this;
         // The exact evaluation, which a numeric read tests (`_testedRead()`).
         const exact = options?.numericApproximation
           ? { ...options, numericApproximation: false }

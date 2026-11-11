@@ -8,9 +8,25 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 
-function typeOf(ce: ComputeEngine, name: string): string {
-  return ce.box(name).type.toString();
+// The type of the first occurrence of `name` in `expr`: the requirements of
+// the uses are read by the occurrences of the same expression.
+function typeOf(expr: Expression, name: string): string | undefined {
+  if (expr.symbol === name) return expr.type.toString();
+  for (const op of expr.ops ?? []) {
+    const t = typeOf(op, name);
+    if (t !== undefined) return t;
+  }
+  return undefined;
+}
+
+// The type that `ce.infer()` commits for the head `name` of a call in `expr`.
+function headType(ce: ComputeEngine, expr: Expression, name: string) {
+  return ce
+    .infer([expr])
+    .declared.find((d) => d.name === name)
+    ?.type.toString();
 }
 
 describe('CE-32: A JUXTAPOSED PRODUCT NARROWS ITS VALUELESS SYMBOLS', () => {
@@ -23,21 +39,23 @@ describe('CE-32: A JUXTAPOSED PRODUCT NARROWS ITS VALUELESS SYMBOLS', () => {
     const expr = ce.parse(latex);
     expect(expr.json).toEqual(json);
     expect(expr.latex).toBe(out);
-    for (const s of symbols) expect([s, typeOf(ce, s)]).toEqual([s, 'number']);
+    for (const s of symbols)
+      expect([s, typeOf(expr, s)]).toEqual([s, 'number']);
   });
 
   test('the box route with an InvisibleOperator', () => {
     const ce = new ComputeEngine();
     const expr = ce.box(['InvisibleOperator', 2, 't']);
     expect(expr.json).toEqual(['Multiply', 2, 't']);
-    expect(typeOf(ce, 't')).toBe('number');
+    expect(typeOf(expr, 't')).toBe('number');
   });
 
   test('a juxtaposition in parentheses narrows its factors too', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('3(b c)').json).toEqual(['Multiply', 3, 'b', 'c']);
-    expect(typeOf(ce, 'b')).toBe('number');
-    expect(typeOf(ce, 'c')).toBe('number');
+    const expr = ce.parse('3(b c)');
+    expect(expr.json).toEqual(['Multiply', 3, 'b', 'c']);
+    expect(typeOf(expr, 'b')).toBe('number');
+    expect(typeOf(expr, 'c')).toBe('number');
   });
 
   test('the type of a function literal is the one of the \\cdot spelling', () => {
@@ -52,13 +70,15 @@ describe('CE-32: A JUXTAPOSED PRODUCT NARROWS ITS VALUELESS SYMBOLS', () => {
 
   test('a function application keeps its reading', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('f(x)').json).toEqual(['f', 'x']);
-    expect(typeOf(ce, 'f')).toBe('function');
-    expect(typeOf(ce, 'x')).toBe('unknown');
+    const fx = ce.parse('f(x)');
+    expect(fx.json).toEqual(['f', 'x']);
+    expect(typeOf(fx, 'x')).toBe('unknown');
+    expect(headType(ce, fx, 'f')).toBe('function');
     // The argument of the application is a product, and its factors are
     // narrowed; the head stays a function.
-    expect(ce.parse('g(b c)').json).toEqual(['g', ['Multiply', 'b', 'c']]);
-    expect(typeOf(ce, 'g')).toBe('function');
-    expect(typeOf(ce, 'b')).toBe('number');
+    const gbc = ce.parse('g(b c)');
+    expect(gbc.json).toEqual(['g', ['Multiply', 'b', 'c']]);
+    expect(typeOf(gbc, 'b')).toBe('number');
+    expect(headType(ce, gbc, 'g')).toBe('function');
   });
 });

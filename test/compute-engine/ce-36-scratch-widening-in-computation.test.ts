@@ -35,9 +35,12 @@ function inScope<T>(scratch: boolean, f: (s: Setup) => T): T {
   const body = () =>
     (ce as any)._inScope(scope, () => {
       ce.declare('x', 'unknown');
+      // The sum is boxed before the narrowing: its unit then requires
+      // `number` of `x`, not the type that `x` has at that time.
+      const sum = ce.box(['Add', 'x', 1]);
       const x = ce.box('x') as any;
       x._infer(() => 'integer', 'narrow');
-      return f({ ce, x, sum: ce.box(['Add', 'x', 1]) });
+      return f({ ce, x, sum });
     });
   return scratch ? withScratchScope(ce as any, scope, body) : body();
 }

@@ -1,6 +1,18 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { expectTypeBetween } from '../utils';
 
+/** The type of the first occurrence of the symbol `name` in `expr`. Boxing
+ * declares nothing, so a type inferred from a use is read on the
+ * occurrence, not through a new boxing of the name. */
+function occurrenceType(expr: any, name: string): string | undefined {
+  if (expr.symbol === name) return expr.type.toString();
+  for (const op of expr.ops ?? []) {
+    const t = occurrenceType(op, name);
+    if (t !== undefined) return t;
+  }
+  return undefined;
+}
+
 /**
  * Collection-aware result typing for `Multiply` (and the `Add` widening it
  * feeds) on DECLARED matrix/vector symbols — decision (d) of the
@@ -129,13 +141,14 @@ describe('Matrix-operator typing (undeclared symbols)', () => {
     const e = ce.parse('\\det(A+2B)');
     expect(e.isValid).toBe(true);
     expect(e.type.toString()).toBe('number');
-    expect(ce.symbol('A').type.toString()).toBe('matrix');
-    expect(ce.symbol('B').type.toString()).toBe('matrix');
+    expect(occurrenceType(e, 'A')).toBe('matrix');
+    expect(occurrenceType(e, 'B')).toBe('matrix');
   });
 
   test('does not rewrite an inference made by an earlier expression', () => {
     const ce = new ComputeEngine();
-    ce.parse('A+1');
+    // `ce.infer()` commits the inference of the earlier expression.
+    ce.infer([ce.parse('A+1')]);
     const e = ce.parse('\\det(A)');
     expect(e.isValid).toBe(false);
     expect(ce.symbol('A').type.matches('number')).toBe(true);
@@ -174,57 +187,66 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
 
   test('P1: Det(A+B), both fresh → valid, both matrix', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(true);
-    expect(sym(ce, 'A')).toBe('matrix');
-    expect(sym(ce, 'B')).toBe('matrix');
+    const e = ce.box(['Determinant', ['Add', 'A', 'B']]);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('matrix');
+    expect(occurrenceType(e, 'B')).toBe('matrix');
   });
 
   test('P2: prior numeric inference wins — invalid, A stays number', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', 'A', 1]).evaluate();
+    // With the engine flag `_bindingUnits`, the inference of the earlier
+    // expression is in its unit until `ce.infer()` commits it.
+    const earlier = ce.box(['Add', 'A', 1]);
+    earlier.evaluate();
+    ce.infer([earlier]);
     expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(false);
     expect(sym(ce, 'A')).toBe('number');
   });
 
   test('P3: Det(a·A), both fresh → ambiguous product never guessed', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Determinant', ['Multiply', 'a', 'A']]).isValid).toBe(false);
-    expect(sym(ce, 'a')).toBe('number');
-    expect(sym(ce, 'A')).toBe('number');
+    const e = ce.box(['Determinant', ['Multiply', 'a', 'A']]);
+    expect(e.isValid).toBe(false);
+    expect(occurrenceType(e, 'a')).toBe('number');
+    expect(occurrenceType(e, 'A')).toBe('number');
   });
 
   test('P4: Det(2·A) → literal scalar is unambiguous, A matrix', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Determinant', ['Multiply', 2, 'A']]).isValid).toBe(true);
-    expect(sym(ce, 'A')).toBe('matrix');
+    const e = ce.box(['Determinant', ['Multiply', 2, 'A']]);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('matrix');
   });
 
   test('P5: Negate / integer Power / Subtract forms all promote', () => {
     {
       const ce = new ComputeEngine();
-      expect(ce.box(['Determinant', ['Negate', 'A']]).isValid).toBe(true);
-      expect(sym(ce, 'A')).toBe('matrix');
+      const e = ce.box(['Determinant', ['Negate', 'A']]);
+      expect(e.isValid).toBe(true);
+      expect(occurrenceType(e, 'A')).toBe('matrix');
     }
     {
       const ce = new ComputeEngine();
-      expect(ce.box(['Determinant', ['Power', 'A', 2]]).isValid).toBe(true);
-      expect(sym(ce, 'A')).toBe('matrix');
+      const e = ce.box(['Determinant', ['Power', 'A', 2]]);
+      expect(e.isValid).toBe(true);
+      expect(occurrenceType(e, 'A')).toBe('matrix');
     }
     {
       const ce = new ComputeEngine();
-      expect(ce.box(['Determinant', ['Subtract', 'A', 'B']]).isValid).toBe(
-        true
-      );
-      expect(sym(ce, 'A')).toBe('matrix');
-      expect(sym(ce, 'B')).toBe('matrix');
+      const e = ce.box(['Determinant', ['Subtract', 'A', 'B']]);
+      expect(e.isValid).toBe(true);
+      expect(occurrenceType(e, 'A')).toBe('matrix');
+      expect(occurrenceType(e, 'B')).toBe('matrix');
     }
   });
 
   test('P6: non-strict engine — no repair, fresh symbols infer number', () => {
     const ce = new ComputeEngine();
     ce.strict = false;
-    expect(ce.box(['Determinant', ['Add', 'A', 'B']]).isValid).toBe(true);
-    expect(sym(ce, 'A')).toBe('number');
+    const e = ce.box(['Determinant', ['Add', 'A', 'B']]);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('number');
   });
 
   test('P7: nested sub-operator — Det(Dot(u,v)): inner signature governs, no matrix promotion', () => {
@@ -242,49 +264,54 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     // its point-list broadcast (one inner product per point, ruled
     // 2026-09-22); the union is read straight off `Dot`'s signature, so it
     // grows with every operand shape the operator accepts.
-    expect(sym(ce, 'u')).toBe('list<tuple> | matrix | tuple | vector');
-    expect(sym(ce, 'v')).toBe('list<tuple> | matrix | tuple | vector');
+    expect(occurrenceType(e, 'u')).toBe('list<tuple> | matrix | tuple | vector');
+    expect(occurrenceType(e, 'v')).toBe('list<tuple> | matrix | tuple | vector');
   });
 
   test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {
     const ce = new ComputeEngine();
     ce.declare('M', 'matrix');
-    expect(ce.box(['Determinant', ['Multiply', 'A', 'M']]).isValid).toBe(true);
-    expect(sym(ce, 'A')).toBe('number');
+    const e = ce.box(['Determinant', ['Multiply', 'A', 'M']]);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('number');
   });
 
   test('P9: Det(A·v) with declared v: vector — failed repair rolls A back to number', () => {
     const ce = new ComputeEngine();
     ce.declare('v', 'vector');
-    expect(ce.box(['Determinant', ['Multiply', 'A', 'v']]).isValid).toBe(false);
-    expect(sym(ce, 'A')).toBe('number');
+    const e = ce.box(['Determinant', ['Multiply', 'A', 'v']]);
+    expect(e.isValid).toBe(false);
+    expect(occurrenceType(e, 'A')).toBe('number');
   });
 
   test('P10: Det(A/A) — argument folds to 1, invalid, A ends number', () => {
+    // The argument folds to `1`, so no occurrence of `A` is left; the failed
+    // repair leaves no definition of `A` either.
     const ce = new ComputeEngine();
     expect(ce.box(['Determinant', ['Divide', 'A', 'A']]).isValid).toBe(false);
-    expect(sym(ce, 'A')).toBe('number');
+    expect(ce.lookupDefinition('A')).toBeUndefined();
   });
 
   test('P11: Det(f(A)) — A never enters numeric inference, not force-typed', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Determinant', ['f', 'A']]).isValid).toBe(true);
-    expect(sym(ce, 'A')).toBe('unknown');
+    const e = ce.box(['Determinant', ['f', 'A']]);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('unknown');
   });
 
   test('supplied optional argument still repairs (CharacteristicPolynomial)', () => {
     const ce = new ComputeEngine();
-    expect(
-      ce.box(['CharacteristicPolynomial', ['Add', 'A', 'B'], 'x']).isValid
-    ).toBe(true);
-    expect(sym(ce, 'A')).toBe('matrix');
+    const e = ce.box(['CharacteristicPolynomial', ['Add', 'A', 'B'], 'x']);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('matrix');
   });
 
   test('union parameter (matrix|vector) still repairs (LinearSolve)', () => {
     const ce = new ComputeEngine();
     ce.declare('M', 'matrix');
-    expect(ce.box(['LinearSolve', 'M', ['Add', 'A', 'B']]).isValid).toBe(true);
-    expect(sym(ce, 'A')).toBe('matrix');
+    const e = ce.box(['LinearSolve', 'M', ['Add', 'A', 'B']]);
+    expect(e.isValid).toBe(true);
+    expect(occurrenceType(e, 'A')).toBe('matrix');
   });
 
   test('non-plannable term excludes only itself: Det(A + Cos(t)·B)', () => {
@@ -294,9 +321,9 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
       ['Add', 'A', ['Multiply', ['Cos', 't'], 'B']],
     ]);
     expect(e.isValid).toBe(true);
-    expect(sym(ce, 't')).toBe('number');
-    expect(sym(ce, 'A')).toBe('matrix');
-    expect(sym(ce, 'B')).toBe('matrix');
+    expect(occurrenceType(e, 't')).toBe('number');
+    expect(occurrenceType(e, 'A')).toBe('matrix');
+    expect(occurrenceType(e, 'B')).toBe('matrix');
   });
 
   // `Length(xs)` narrows an untyped `xs` to `collection` earlier in the same
@@ -376,35 +403,16 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
 });
 
 describe('Fresh-matrix repair — phase 2a slot restore (docs/TYPE-SYSTEM.md)', () => {
-  const historyOf = (ce: ComputeEngine, name: string) =>
-    (ce.lookupDefinition(name) as any).value._typeProvenance?.map((e: any) => [
-      e.kind,
-      e.type.toString(),
-      e.cause?.toString(),
-    ]) ?? [];
-
-  test('success leg: the repair write records provenance with the operand as cause', () => {
-    const ce = new ComputeEngine();
-    const e = ce.parse('\\det(A+2B)');
-    expect(e.isValid).toBe(true);
-    const history = historyOf(ce, 'A');
-    // Creation, bottom-up numeric inference, then the repair's matrix write —
-    // previously channel-invisible, now recorded as evidence.
-    expect(history[history.length - 1]).toEqual([
-      'inferred',
-      'matrix',
-      'A + 2B',
-    ]);
-  });
-
-  test('failure leg: type restored and provenance byte-identical (no phantom matrix entry)', () => {
+  test('failure leg: the replaced entries are put back (no phantom matrix type)', () => {
+    // The repair replaces the entries of the unit's environment and writes
+    // no definition; when the repaired form is refused, it puts the entries
+    // back.
     const ce = new ComputeEngine();
     const e = ce.parse('\\det(\\frac{A}{B})');
     expect(e.isValid).toBe(false);
-    expect(ce.symbol('A').type.toString()).toBe('number');
-    // The failed repair's matrix entry must NOT survive in the history.
-    const kinds = historyOf(ce, 'A').map(([, t]: [string, string]) => t);
-    expect(kinds).not.toContain('matrix');
+    expect(occurrenceType(e, 'A')).toBe('number');
+    expect(occurrenceType(e, 'B')).toBe('number');
+    expect(ce.lookupDefinition('A')).toBeUndefined();
   });
 
   test('the slot restore preserves an assigned value and BoxedType identity', () => {

@@ -151,7 +151,9 @@ describe('the narrowing branch does not narrow AWAY an effect', () => {
       evaluate: (_ops, { engine }) => engine.number(2),
     });
     // `k` is inferred as `(any) random -> number` by the first call…
-    expect(ce.box(['needsRandom', 'k']).isValid).toBe(true);
+    const first = ce.box(['needsRandom', 'k']);
+    expect(first.isValid).toBe(true);
+    ce.infer([first]);
     expect(ce.box('k').type.toString()).toBe('(any) random -> number');
     // …and the pure bound must REJECT it rather than narrow the symbol.
     expect(ce.box(['integ', 'k', 0, 1]).isValid).toBe(false);
@@ -168,8 +170,11 @@ describe('the narrowing branch does not narrow AWAY an effect', () => {
       signature: '(set) -> integer',
       evaluate: (_ops, { engine }) => engine.number(1),
     });
-    expect(ce.box(['wide', 'S']).isValid).toBe(true);
-    expect(ce.box(['narrow', 'S']).isValid).toBe(true);
+    const wide = ce.box(['wide', 'S']);
+    const narrow = ce.box(['narrow', 'S']);
+    expect(wide.isValid).toBe(true);
+    expect(narrow.isValid).toBe(true);
+    ce.infer([wide, narrow]);
     expect(ce.box('S').type.toString()).toBe('set');
   });
 });

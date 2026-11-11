@@ -23,6 +23,9 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 
 const ce = new ComputeEngine();
 ce.declare('xs', 'real | list<real> | list<list<real>>');
+// Boxing declares no name, and a `Match` does not type its subject: the
+// subject `x` of the tests on this engine is declared.
+ce.declare('x', 'number');
 
 describe('COMPILE Match — JavaScript tier 0/1', () => {
   it('compiles constant + or-alternative + pin-of-Pi to chained ternaries', () => {

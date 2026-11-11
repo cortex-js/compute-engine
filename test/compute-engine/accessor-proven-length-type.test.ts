@@ -401,8 +401,10 @@ describe('an element read over a base that declares any elements', () => {
     (t) => {
       const ce = declared(t);
       expect(ce.parse('P[i]').type.toString()).toBe('unknown');
-      expect(ce.parse('P[i]-P[j]').type.toString()).toBe('number');
-      expect(ce.symbol('P').type.toString()).toBe('indexed_collection<number>');
+      const diff = ce.parse('P[i]-P[j]');
+      expect(diff.type.toString()).toBe('number');
+      // The use refines the occurrence of `P` in the same expression
+      expect(diff.op1.op1.type.toString()).toBe('indexed_collection<number>');
     }
   );
 
@@ -464,7 +466,8 @@ describe('an element read over a base that declares any elements', () => {
   // `unknown` as a read of `P` is, not `any`.
   test('P inferred, a read of Rest(P) is unknown', () => {
     const ce = declared();
-    ce.box(['First', 'P']);
+    // Boxing declares nothing: `ce.infer()` commits the type of the use
+    ce.infer([ce.box(['First', 'P'])]);
     expect(ce.symbol('P').type.toString()).toBe('indexed_collection<any>');
     expect(typeOf(ce, ['At', ['Rest', 'P'], 1])).toBe('unknown');
     expect(typeOf(ce, ['Add', ['At', ['Rest', 'P'], 1], 1])).toBe(

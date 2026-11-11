@@ -39,6 +39,8 @@ const U3 = '(unknown, unknown, unknown) -> unknown';
  */
 function heatMap(): ComputeEngine {
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
   ce.declare('z', 'real');
   ce.declare('t_0', 'real');
   ce.assign('t_0', 2.855);

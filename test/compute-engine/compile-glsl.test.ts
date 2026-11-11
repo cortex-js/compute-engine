@@ -15,6 +15,12 @@ const glsl = new GLSLTarget();
  */
 const NO_FOLD = { constantFold: false } as const;
 
+// A compiled input has the type of its declaration or of its uses in the
+// expression compiled. `\max(x, y)` and `x > 0.5` do not type `x` and `y`
+// as numbers, so they are declared.
+ce.declare('x', 'number');
+ce.declare('y', 'number');
+
 describe('GLSL COMPILATION', () => {
   describe('Basic Expressions', () => {
     it('should compile simple arithmetic', () => {

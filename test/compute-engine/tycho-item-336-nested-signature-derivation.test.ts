@@ -349,30 +349,42 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     for (const e of repairs) expect(e).toMatchObject({ scratch: true });
   });
 
-  test('the matrix repair of scratch bindings is a scratch inference', () => {
-    // `\det(P + 2Q)` retypes the fresh `P` and `Q` as matrices. In a scratch
-    // scope both bindings are scratch bindings; outside one, they are not.
-    const scratch = new ComputeEngine();
-    const inside = eventsOf(scratch, () =>
-      inScratch(scratch, newScope(scratch), () =>
-        expect(scratch.parse('\\det(P+2Q)').isValid).toBe(true)
-      )
-    );
-    const plain = new ComputeEngine();
-    const outside = eventsOf(plain, () =>
-      expect(plain.parse('\\det(P+2Q)').isValid).toBe(true)
-    );
+  test('the matrix repair of free names writes no binding, in a scratch scope or not', () => {
+    // `\det(P + 2Q)` reads the free `P` and `Q` as matrices. The repair
+    // writes in the environment of the boxing: it declares no binding, in
+    // the scratch scope or outside one, and sends no inference event.
     const matrixInference = (events: StateEvent[]) =>
       events.filter(
         (e) =>
           e.kind === 'inference' && e.valueType !== true && !e.symbolSignature
       );
-    expect(matrixInference(inside).length).toBeGreaterThan(0);
-    for (const e of matrixInference(inside))
-      expect(e).toMatchObject({ scratch: true });
-    expect(matrixInference(outside).length).toBeGreaterThan(0);
-    for (const e of matrixInference(outside))
-      expect((e as { scratch?: boolean }).scratch).toBeUndefined();
+    const check = (
+      ce: ComputeEngine,
+      det: ReturnType<ComputeEngine['parse']>
+    ) => {
+      expect(det.isValid).toBe(true);
+      expect(det.op1.ops!.map((op) => op.type.toString())).toEqual([
+        'matrix',
+        'matrix',
+      ]);
+      expect(ce.lookupDefinition('P')).toBeUndefined();
+      expect(ce.lookupDefinition('Q')).toBeUndefined();
+    };
+    const scratch = new ComputeEngine();
+    const scope = newScope(scratch);
+    const inside = eventsOf(scratch, () =>
+      check(
+        scratch,
+        inScratch(scratch, scope, () => scratch.parse('\\det(P+2Q)'))
+      )
+    );
+    expect([...scope.bindings.keys()]).toEqual([]);
+    expect(matrixInference(inside)).toEqual([]);
+    const plain = new ComputeEngine();
+    const outside = eventsOf(plain, () =>
+      check(plain, plain.parse('\\det(P+2Q)'))
+    );
+    expect(matrixInference(outside)).toEqual([]);
   });
 
   test('a fresh declaration advances the definition version only through a rebuild', () => {
@@ -404,13 +416,11 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     const home = ce.context.lexicalScope;
     const body = ['Block', ['Add', 'freeZ', ['PointX', 'ceArg_1']]];
     ce.declare('W', { signature: `(unknown, ${POINT}) -> unknown` });
-    // The boxing of the literal itself declares `freeZ` in the home scope:
-    // the use `freeZ + …` in the body narrows the outer binding of the free
-    // symbol, as a use outside the literal does (user decision 2026-10-25 on
-    // CE-473 in `ROADMAP.md`). The derivation of the signature declares
-    // nothing more.
+    // The boxing of the literal declares no name: `freeZ` is a free name,
+    // with the home scope as its home. The derivation of the signature
+    // declares nothing either.
     const literal = ce.box(['Function', body, 'ceArg_0', 'ceArg_1'] as any);
-    expect(home.bindings.has('freeZ')).toBe(true);
+    expect(home.bindings.has('freeZ')).toBe(false);
     const before = new Set(home.bindings.keys());
     ce.assign('W', literal);
     const derived = ce.box('W').type.toString();

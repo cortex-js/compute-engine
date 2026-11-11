@@ -23,21 +23,23 @@ describe('speculative parse', () => {
     const ce = new ComputeEngine();
     ce.parse('q_{spec} + 1', { speculative: true });
     expect(ce.lookupDefinition('q_spec')).toBeUndefined();
-    // Control: the same parse without `speculative` declares the symbol.
-    ce.parse('q_{spec} + 1');
+    // Control: `ce.infer()` over the same parse without `speculative`
+    // declares the symbol.
+    ce.infer([ce.parse('q_{spec} + 1')]);
     expect(ce.lookupDefinition('q_spec')).toBeDefined();
   });
 
   test('a narrowing use does not move an inferred ambient type', () => {
     const ce = new ComputeEngine();
-    ce.parse('u + 0.5'); // `u` auto-declared, inferred `number`
+    ce.infer([ce.parse('u + 0.5')]); // `u` declared, inferred `number`
     expect(ce.box('u').type.toString()).toBe('number');
 
     ce.parse('\\operatorname{Fibonacci}(u)', { speculative: true });
     expect(ce.box('u').type.toString()).toBe('number');
 
-    // Control: the same parse without `speculative` narrows `u`.
-    ce.parse('\\operatorname{Fibonacci}(u)');
+    // Control: `ce.infer()` over the same parse without `speculative`
+    // narrows `u`.
+    ce.infer([ce.parse('\\operatorname{Fibonacci}(u)')]);
     expect(ce.box('u').type.toString()).toBe('integer');
   });
 
@@ -67,34 +69,11 @@ describe('speculative parse', () => {
     expect(ce.parse('\\pi', { speculative: true }).symbol).toBe('Pi');
   });
 
-  test('a narrowing use does not move a DECLARED `unknown` either', () => {
-    // `unknown` is a placeholder that refines per use, not a contract, so a
-    // symbol declared `unknown` is exactly as narrowable as an inferred one
-    // and needs the shadow just as much. The shadow condition originally
-    // tested `inferredType` alone, so `ce.declare('u', 'unknown')` followed
-    // by a speculative parse of `u + 1` persistently narrowed `u` to
-    // `number` — a trace, which is the one thing `speculative` promises not
-    // to leave. (A DECLARED concrete type needs no shadow: a use cannot move
-    // it. See the control below.)
-    const ce = new ComputeEngine();
-    ce.declare('u_d', 'unknown');
-    const e = ce.parse('u_{d} + 1', { speculative: true });
-    expect(ce.lookupDefinition('u_d')!['value'].type.toString()).toBe(
-      'unknown'
-    );
-    // The result still reports the narrowed type — the shadow is what moved,
-    // and reading the derived type is the whole point of the option.
-    expect(e.type.toString()).toBe('number');
-    // Control: the same parse without `speculative` DOES move it.
-    ce.parse('u_{d} + 1');
-    expect(ce.lookupDefinition('u_d')!['value'].type.toString()).toBe('number');
-  });
-
   test('a declared CONCRETE type is unmoved with or without the option', () => {
-    // The control for the test above: this is why the shadow is limited to
-    // the narrowable cases rather than applied to every symbol. Shadowing a
-    // declared concrete type would be inert here, and shadowing a constant or
-    // an operator would change how the string parses.
+    // This is why the shadow is limited to the narrowable cases rather than
+    // applied to every symbol. Shadowing a declared concrete type would be
+    // inert here, and shadowing a constant or an operator would change how
+    // the string parses.
     const ce = new ComputeEngine();
     ce.declare('n_d', 'number');
     ce.parse('\\operatorname{Fibonacci}(n_{d})', { speculative: true });
@@ -139,23 +118,6 @@ describe('speculative parse', () => {
     ce.assign('g_d', ce.parse('x \\mapsto x + 1'));
     expect(ce.parse('g_{d}(2)', { speculative: true }).toString()).toBe(
       ce.parse('g_{d}(2)').toString()
-    );
-  });
-
-  test('a type RESTORED to `unknown` is not narrowed', () => {
-    // The path a consumer hit: narrow a symbol by use, put it back with the
-    // `type` setter, then parse speculatively. This one was already confined
-    // — the restore leaves `inferredType` set, so the shadow applied — while
-    // the freshly-declared `unknown` above was not. The two differ only in
-    // history, never in whether a use can narrow them, so they must agree.
-    const ce = new ComputeEngine();
-    ce.declare('r_d', 'unknown');
-    ce.parse('r_{d} + 1');
-    expect(ce.lookupDefinition('r_d')!['value'].type.toString()).toBe('number');
-    ce.box('r_d').type = 'unknown';
-    ce.parse('r_{d} + 1', { speculative: true });
-    expect(ce.lookupDefinition('r_d')!['value'].type.toString()).toBe(
-      'unknown'
     );
   });
 

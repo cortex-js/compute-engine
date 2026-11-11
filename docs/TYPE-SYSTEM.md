@@ -400,11 +400,14 @@ type is read as a number cell: `[[a, b], [c, d]]` is `matrix<2x2>`, and the list
 does not infer the symbols (`narrowFreeSymbolCells()`, `canonical-utils.ts`). A
 cell whose type can hold a list (`matrix`, `tensor`, `number | tensor`, `value`)
 removes the shape of the literal, because the cell can be a matrix and the
-literal a block matrix: after `Determinant(a)`, which gives `a` the type
-`matrix`, `[[a, b], [c, d]]` is `list<list<unknown>>`, and the matrix operators
-leave it unevaluated. The same holds after `Trace(a)` (`number | tensor`, the
-parameter of `Trace`), `Norm(a)`, `Flatten(a)`, or a declaration of `a` with
-such a type. A literal operand of a parameter that is a tensor of unknown rank
+literal a block matrix: in an expression where `Determinant(a)` gives `a`
+the type `matrix` (`Determinant(a) + Determinant([[a, b], [c, d]])`), or after
+`a` is declared with that type (also by `ce.infer()`), `[[a, b], [c, d]]` is
+`list<list<unknown>>`, and the matrix operators leave it unevaluated. A use of
+`a` in another expression does not change the literal: after
+`ce.box(['Determinant', 'a'])`, `[[a, b], [c, d]]` boxed alone is
+`matrix<2x2>`. The same holds for a use in `Trace(a)` (`number | tensor`, the
+parameter of `Trace`), `Norm(a)` or `Flatten(a)`. A literal operand of a parameter that is a tensor of unknown rank
 does not give its cells the element type `number | tensor`
 (`distributeLiteralElementInference()`, `validate.ts`; GitHub issue #505), so
 `Trace([[a, b], [c, d]])` keeps the shape of its own operand.
@@ -435,7 +438,8 @@ may be any number, so the result does not take the tier of the other operand
 (`[1, 2] + u` is `broadcastable<number>`, not `vector<integer^2>`). The type
 does not hold a point or a ragged list that comes through such an operand: if
 `f` returns `(1, 2)`, `f(x) + f(y)` is the point `(2, 4)`. This is the rule
-that a use of an unknown symbol follows: the use narrows the symbol to a number.
+that a use of an unknown symbol follows: the use requires a number of the
+symbol.
 
 The subtype relation does not depend on these rules: a list with dimensions is
 read by its cells, whatever its cell type. A stricter rule, under which every
@@ -718,8 +722,8 @@ state into real evaluation.
 Within one Epsil batch, duplicate type/protocol/sum declarations and duplicate
 function clauses are checked as one compilation unit. Across batches the newer
 definition replaces the older one; clients that require notebook replay use
-checkpoint/restore rather than depending on partially updated historical
-state.
+checkpoint/restore (deprecated, `CHECKPOINT-MODEL.md`) rather than depending
+on partially updated historical state.
 
 A constant is a property of the binding, not of the type. `isConstant` is
 stored on the value definition, next to its type, value and `holdUntil`
@@ -1561,6 +1565,56 @@ expressions, mutation increments the object version, and equality is identity
 unless an explicit protocol supplies other semantics. Objects are references,
 not structural records, and do not gain structural subtyping.
 
+## The type of a name with no explicit type
+
+Boxing (`ce.parse()`, `ce.box()`, `ce.expr()`, `ce.function()`) declares no
+name, and it does not narrow, widen or mark an existing definition, also one
+that is inferred or of type `unknown`. A name with no definition is a free
+name (`SCOPING-MODEL.md`, "Free names"). A use of a name puts a requirement on
+it (`x + 1` requires `number`). When the name has no explicit type (no
+definition, an inferred definition, or the type `unknown`), the requirement is
+kept with the expression: one outermost boxing is one unit, and its
+environment holds, for each (home scope, name), the meet of the requirements
+of its uses (`binding-unit.ts`). A requirement whose meet with the entry is
+`never` is not written, and the entry keeps the earlier requirement.
+
+The type of an occurrence is, in this order:
+
+1. the type of its resolved definition, when that type is explicit;
+2. the meet of the type of an inferred or `unknown` definition and the entry
+   of the unit; when the meet is `never`, the type of the definition;
+3. the entry of the unit, when there is no definition;
+4. `unknown`.
+
+With `a = ce.parse('x + 1')`: `a.op1.type` is `number`,
+`ce.box('x').type` is `unknown` (a unit with no use of `x`), and
+`ce.lookupDefinition('x')` is `undefined`. After `ce.declare('x', 'string')`,
+`a.op1.type` is `string`; after `ce.assign('x', ce.string('ab'))`, it is
+`string` too (the meet is `never`, so the definition wins).
+
+An operation (`evaluate()`, `simplify()`, `subs()`, `compile()`, …) writes its
+requirements in an environment of its own, which reads the environments of
+its input. It does not change the types that the input reads. The
+environment of an outermost operation is thrown away: a symbol that the host
+made before the operation reads `unknown` in the result
+(`COMPILATION-MODEL.md`, "An input with no type declines").
+
+`ce.infer(exprs)` commits the requirements. For each (home scope, name) in
+the units of `exprs`, it takes the meet of their entries, met with the type
+of an inferred definition that the home scope holds, and declares the name
+there, marked as inferred, or narrows that inferred definition. It skips a
+name, and reports the reason, when the home scope is not the current scope or
+an ancestor of it (`'out-of-scope'`), when the name has an explicit
+definition there (`'defined'`), when the meet is `never` (`'conflict'`), or
+when it is `unknown` (`'untyped'`). The order of `exprs` does not change the
+result. With `c = ce.parse('x(3)')`, `ce.infer([a, c])` skips `x` as a
+conflict; `ce.infer([a])` declares `x: number`, and a later `ce.infer([c])`
+skips `x` as a conflict. A library name that a unit reads as a variable (`N`
+in `N + 1`) is declared as a variable that shadows the library name in that
+scope, and a call head as a `function` (`p + q(2) + 1` declares `p: number`
+and `q: function`). `ce.assume()` declares the names that it constrains, as
+it is a host statement and not a boxing.
+
 ## Inference provenance and rollback
 
 Provenance belongs to definitions, not `Type` objects. Every inference write
@@ -1568,7 +1622,10 @@ can record its source expression and axis. Rollback frames journal all
 inference-visible state changed during a trial, including type/effect writes,
 fresh-inference bookkeeping, and provisional registry changes. Frames nest;
 rollback is unconditional for speculative checks and must restore both values
-and invalidation metadata.
+and invalidation metadata. A write in the environment of a unit or an
+operation is not journaled: a trial (the admission of an overloaded operator,
+the Epsil static check) runs in an environment that is thrown away when it
+ends.
 
 The current implementation entry points are the definition provenance journal,
 the engine inference transaction helpers, and the state-event funnel described

@@ -235,8 +235,10 @@ describe('UNDEFINED is an ordinary symbol, not an absent value', () => {
 
   it('a list cell that is Undefined is not typed missing', () => {
     expect(ce.box(['List', 1, 'Undefined']).type.toString()).toBe('vector<2>');
+    // A tuple puts no requirement on its cells, so `Undefined` is `unknown`
+    // there, not `missing`.
     expect(ce.box(['Tuple', 1, 'Undefined']).type.toString()).toBe(
-      'tuple<integer, number>'
+      'tuple<integer, unknown>'
     );
   });
 
@@ -255,13 +257,14 @@ describe('UNDEFINED is an ordinary symbol, not an absent value', () => {
   });
 
   // `Undefined` is an unknown symbol like any other: its type is `unknown`
-  // until a use narrows it. Boxing `Undefined + 1` narrows it to `number` on
-  // that engine, as it narrows `Foo` in `Foo + 1`.
+  // until a use narrows it. In `Undefined + 1` its occurrence is `number`,
+  // as the occurrence of `Foo` in `Foo + 1` is.
   it('its type is `unknown` until a use narrows it', () => {
     const fresh = new ComputeEngine();
     expect(fresh.box('Undefined').type.toString()).toBe('unknown');
-    fresh.box(['Add', 'Undefined', 1]);
-    expect(fresh.box('Undefined').type.toString()).toBe('number');
+    const sum = fresh.box(['Add', 'Undefined', 1]);
+    expect(sum.op1.symbol).toBe('Undefined');
+    expect(sum.op1.type.toString()).toBe('number');
   });
 });
 

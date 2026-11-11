@@ -204,9 +204,12 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
           expect(v).toBe(202);
         } else expect(compiled).toBeUndefined();
       }
+      // The `x` of the outer call was boxed before the scope was pushed and
+      // the `x` of the value of `a` after it: they are free names of two
+      // home scopes, so two bindings, and the two terms are not merged.
       expect(
         ce.function('Add', [outerCall, ce.symbol('a')]).evaluate().json
-      ).toEqual(['Multiply', 101, 'x']);
+      ).toEqual(['Add', 'x', ['Multiply', 100, 'x']]);
       ce.popScope();
     });
 

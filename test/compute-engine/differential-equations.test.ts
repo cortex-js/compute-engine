@@ -1,8 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
-// The solver compiles its right-hand side with the state of the system as
-// inputs; compilation refuses an input with no type.
+// The solver compiles its right-hand side with the state of the system and
+// the independent variable as inputs; compilation refuses an input with no
+// type.
+engine.declare('x', 'real');
 engine.declare('ndsolveystate', 'real');
 engine.declare('ndsolveystate0', 'real');
 engine.declare('ndsolvezstate1', 'real');

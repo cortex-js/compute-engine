@@ -1876,7 +1876,7 @@ describe('Derivative order operand', () => {
     const e = ce.parse('f^{(n)}');
     expect(e.json).toEqual(['Derivative', 'f', 'n']);
     expect(e.isValid).toBe(true);
-    expect(ce.symbol('n').type.toString()).toBe('number');
+    expect(e.op2.type.toString()).toBe('number');
     expect(e.evaluate().json).toEqual(['Derivative', 'f', 'n']);
   });
 

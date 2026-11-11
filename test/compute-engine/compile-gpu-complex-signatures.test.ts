@@ -556,7 +556,8 @@ describe('GPU: the declared result type and the value of the body', () => {
 describe('GPU: the engine type of each free symbol after the compile', () => {
   // A host reads these types to declare its uniforms: a `number` is a
   // `float`, a `complex` a `vec2`, a tuple of 3 reals a `vec3`, a `boolean` a
-  // `bool`.
+  // `bool`. Boxing declares no name, so the type of an undeclared symbol is
+  // read from the compilation result, not from a new boxing of the name.
   function typedEngine(): ComputeEngine {
     const ce = new ComputeEngine();
     // `f` makes an undeclared `x` complex once `f(x)` is canonicalized.
@@ -583,8 +584,8 @@ describe('GPU: the engine type of each free symbol after the compile', () => {
     p: 'tuple<real, real, real>',
     B: 'boolean',
   };
-  const typesOf = (ce: ComputeEngine, names: string[]) =>
-    Object.fromEntries(names.map((n) => [n, ce.box(n).type.toString()]));
+  const typesOf = (r: any, names: string[]) =>
+    Object.fromEntries(names.map((n) => [n, r.freeSymbolTypes[n].type]));
 
   for (const [name, run] of [['GLSL', glsl]] as const) {
     it(`${name}, parse and box routes`, () => {
@@ -592,16 +593,18 @@ describe('GPU: the engine type of each free symbol after the compile', () => {
         const ce = typedEngine();
         const r = run(ce, input);
         expect(r.success).toBe(true);
-        expect(typesOf(ce, r.freeSymbols)).toEqual(expected);
+        expect(typesOf(r, r.freeSymbols)).toEqual(expected);
       }
     });
   }
 
   it('the complex argument is read as a vec2 in the emitted code', () => {
     const ce = typedEngine();
-    expect(glsl(ce, ['f', 'x']).code).toBe('_fn_f(x)');
-    expect(ce.box('x').type.toString()).toBe('complex');
-    expect(glsl(ce, ['f', 'x']).preamble).toContain('vec2 _fn_f(vec2 z)');
+    const r = glsl(ce, ['f', 'x']);
+    expect(r.code).toBe('_fn_f(x)');
+    expect(r.freeSymbolTypes.x.type).toBe('complex');
+    expect(r.freeSymbolTypes.x.lowered).toBe('vec2');
+    expect(r.preamble).toContain('vec2 _fn_f(vec2 z)');
   });
 
   it('a complex argument built from real symbols leaves them real', () => {
@@ -610,19 +613,24 @@ describe('GPU: the engine type of each free symbol after the compile', () => {
     expect(r.success).toBe(true);
     expect([...r.freeSymbols].sort()).toEqual(['u', 'v']);
     for (const n of r.freeSymbols)
-      expect(ce.box(n).type.matches('complex')).toBe(false);
+      expect(ce.type(r.freeSymbolTypes[n].type).matches('complex')).toBe(
+        false
+      );
   });
 
   it('a Mandelbrot point symbol is complex', () => {
     const ce = new ComputeEngine();
     const r = glsl(ce, ['Mandelbrot', 'c', 100]);
     expect(r.code).toBe('_fractal_mandelbrot(c, 100)');
-    expect(ce.box('c').type.toString()).toBe('complex');
+    expect(r.freeSymbolTypes.c.type).toBe('complex');
   });
 });
 
 describe('GPU: real-only lowerings reject a complex argument', () => {
   const ce = new ComputeEngine();
+  // The order of `BesselJ` is real: alone, `BesselJ(u, x)` reads `u` as
+  // complex.
+  ce.declare('u', 'real');
   // Before, each of these emitted either a helper call no shader compiler
   // accepts (`_gpu_gamma(vec2(x, y))`) or a componentwise builtin with a
   // different value than the interpreter (`asinh(1.0 / (vec2(x, y)))`),

@@ -479,10 +479,12 @@ describe('THE OPERATORS THAT NAME `quantity`', () => {
 
   test('a use at `Abs` or `Arctan` does not infer `quantity` for a symbol', () => {
     const ce2 = new ComputeEngine();
-    ce2.box(['Abs', 'x']).evaluate();
-    ce2.box(['Arctan', 'y']).evaluate();
-    expect(ce2.box('x').type.toString()).toBe('complex | infinity');
-    expect(ce2.box('y').type.toString()).toBe('complex | signed_infinity');
+    const abs = ce2.box(['Abs', 'x']);
+    abs.evaluate();
+    const arctan = ce2.box(['Arctan', 'y']);
+    arctan.evaluate();
+    expect(abs.op1.type.toString()).toBe('complex | infinity');
+    expect(arctan.op1.type.toString()).toBe('complex | signed_infinity');
   });
 });
 

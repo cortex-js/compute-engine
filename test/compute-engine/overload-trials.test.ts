@@ -31,7 +31,7 @@ describe('OVERLOAD TRIALS — write-freedom via rollback', () => {
     ce.box('y');
     const call = ce.box(['f', 'y', { str: 'a' }]);
     expect(call.isValid).toBe(true);
-    expect(ce.box('y').type.toString()).toBe('integer');
+    expect(call.ops[0].type.toString()).toBe('integer');
   });
 
   test('§4.3 — inference into an operand is the JOIN of the surviving arms', () => {
@@ -44,8 +44,8 @@ describe('OVERLOAD TRIALS — write-freedom via rollback', () => {
     expect(call.isValid).toBe(true);
     // Both arms survive: S gets widen(set<real>, collection) = collection,
     // never the selected (more specific) arm's set<real>.
-    expect(ce.box('S').type.toString()).toBe('collection');
-    expect(ce.box('n').type.toString()).toBe('integer');
+    expect(call.ops[0].type.toString()).toBe('collection');
+    expect(call.ops[1].type.toString()).toBe('integer');
   });
 
   test('a no-match call leaves ALL trial writes rolled back', () => {
@@ -176,7 +176,8 @@ describe('OVERLOAD TRIALS — select once, no fallback', () => {
     const call = ce.box(['q', ['Multiply', 'A', 'v']]);
     expect(call.isValid).toBe(true);
     expect(call.type.toString()).toBe('string'); // the collection arm's result
-    expect(ce.box('A').type.toString()).toBe('number'); // no phantom matrix
+    // The occurrence of `A`: no phantom matrix.
+    expect(call.ops[0].ops![0].type.toString()).toBe('number');
   });
 });
 
@@ -229,7 +230,7 @@ describe('OVERLOAD TRIALS — trials nest inside enclosing rollback frames', () 
       ce._withRolledBackInference(() => {
         const call = ce.box(['g', 'S2', 'n2']);
         expect(call.isValid).toBe(true);
-        expect(ce.box('S2').type.toString()).toBe('collection');
+        expect(call.ops[0].type.toString()).toBe('collection');
       })
     );
     // The enclosing frame (the static checking pass's shape) undoes the

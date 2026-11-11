@@ -1,6 +1,108 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Boxing an expression no longer declares its symbols.** `ce.parse()`,
+  `ce.box()`, `ce.expr()` and `ce.function()` declare no name, and they do not
+  change the type of a name that has no declared type. A symbol with no
+  definition keeps its name and evaluates through the definition that the name
+  has when the expression is evaluated. The type that the uses of a symbol
+  require (`x + 1` requires a number) is kept with the expression, not on a
+  definition that every expression shares.
+
+  ```js
+  const a = ce.parse('x + 1');
+  ce.lookupDefinition('x');   // was a definition of type number, is undefined
+  ce.box('x').type;           // was number, is unknown
+  a.op1.type;                 // number, as before: the `x` of `x + 1`
+  ce.assign('x', 3);
+  a.evaluate();               // 4, as before
+  ```
+
+  What changes for a host:
+
+  - `ce.lookupDefinition(name)`, `expr.valueDefinition` and the inspection of
+    a scope do not see a name that was only boxed. Declare the name
+    (`ce.declare()`, `ce.assign()`), or call `ce.infer()`, described below.
+  - To read the type that an expression requires of a symbol, read the type of
+    the symbol in that expression (`a.op1.type`), or
+    `freeSymbolTypes` in the result of `compile()`. A symbol boxed alone
+    (`ce.box('x')`) has no use, so its type is `unknown`.
+  - An expression that the host keeps reads a declaration made later: after
+    `ce.declare('x', 'string')`, `a.op1.type` is `string`.
+  - An operation on an expression (`evaluate()`, `simplify()`, `subs()`,
+    `compile()`, …) does not change the types that the expression reads.
+  - `narrowings()` of an inspectable scope has nothing to report.
+
+- **The reading of an expression no longer depends on the expressions boxed
+  before it.** A type inferred from one expression is not used to read
+  another one.
+
+  ```js
+  ce.parse('x + 1');
+  ce.parse('x(3)').json;      // was ["Multiply", 3, "x"], is ["x", 3]
+  ```
+
+- **`compile()` types an input from the expression that it compiles.** An
+  input with no declared type has the type that the compiled expression
+  requires of it, including the assigned values and the function bodies that
+  the code reads. A type that only another expression requires is not used:
+  the compilation declines with `untyped-input`, until the input is declared
+  or `ce.infer()` commits the type.
+
+  ```js
+  const a = ce.parse('x + 1');
+  const b = ce.parse('x > 1');
+  compile(b).success;         // was true, is false: `x > 1` requires no type
+  ce.infer([a, b]);           // declares x: number
+  compile(b).success;         // true
+  ```
+
+  A name of the library that an expression reads as a variable (`N` in
+  `N + 1`) has no type until it is declared: `compile(ce.parse('N + 1'))`
+  declines, and compiles after `ce.declare('N', 'real')`.
+
+  The result of an operation does not carry the types that the operation
+  required of a symbol that the host made before it. Declare such a symbol
+  before compiling the result:
+
+  ```js
+  const q = ce.symbol('q0');
+  const r = ce.parse('a \\cos(x)').subs({ a: q });
+  compile(r).success;         // was true, is false: `q0` has no type
+  ce.declare('q0', 'real');
+  compile(r).success;         // true
+  ```
+
+- **In an Epsil program, an assignment in a branch to a name that an earlier
+  statement only reads is a first assignment.** A read does not declare the
+  name, so `y = x + 1; if y > 0 { x = 2 }; x` reports
+  `first-assignment-in-branch`. Assign or declare `x` before the branch.
+
+- **`ce.checkpoint()`, `ce.restore()` and `ce.discard()` are deprecated.**
+  They keep working in this release. Use `ce.withValues()` to evaluate with
+  temporary values, and `ce.pushScope()` / `ce.popScope()` for temporary
+  declarations. A `restore()` does not undo a type that an expression boxed
+  before the checkpoint came to require after it.
+
 ### New Features
+
+- **`ce.infer(exprs)` declares the symbols of expressions with the types that
+  their uses require.** For each symbol of `exprs` that has no declared type,
+  it combines the types that the expressions require and declares the symbol
+  with the result, marked as inferred, in the scope where a declaration of the
+  name would go. The order of `exprs` does not change the result. A symbol
+  whose uses conflict is not declared and is reported:
+
+  ```js
+  const a = ce.parse('x + 1');
+  const c = ce.parse('x(3)');
+  ce.infer([a]);      // { declared: [{ name: 'x', type: number, … }], skipped: [] }
+  ce.infer([a, c]);   // in a new engine: skipped: [{ name: 'x', reason: 'conflict', … }]
+  ```
+
+  The reasons of `skipped` are `'conflict'`, `'untyped'` (no use requires a
+  type), `'defined'` (the name has a declared type) and `'out-of-scope'`.
 
 - **Experimental: the `numeric-kernel` profile of the JavaScript target.**
   `compile(expr, { to: 'javascript', profile: 'numeric-kernel' })` compiles

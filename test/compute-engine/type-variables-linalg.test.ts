@@ -77,8 +77,9 @@ describe('Conjugate — (T) -> T where T: number', () => {
   test('an inferable symbol operand narrows to the declared bound', () => {
     const ce = fresh();
     // §4.2 rule 1: the operand narrows to the instantiated ground parameter.
-    expect(ce.box(['Conjugate', 'qq']).type.toString()).toBe('number');
-    expect(ce.box('qq').type.toString()).toBe('number');
+    const e = ce.box(['Conjugate', 'qq']);
+    expect(e.type.toString()).toBe('number');
+    expect(e.op1.type.toString()).toBe('number');
   });
 
   // D10 (§4.4): a lift-admitted operand at a bare-variable pattern is admitted

@@ -16,6 +16,7 @@ import {
   markCallableFrame,
   markCallableHome,
   markSweptBinding,
+  rebindBodyFreeNames,
   rebindToBindings,
   rewriteWithBinders,
   sameBindingDef,
@@ -11508,6 +11509,15 @@ function makeLambda(
           result = bindingKeyedSubs(result, subs, keptNodes);
           if (viewsMade) carryLazyViewContexts(unsubstituted, result);
         }
+      }
+
+      // The value leaves the call: a copy of a free name of the body is the
+      // free name of the host (`rebindBodyFreeNames()`).
+      if (ce._bindingUnits) {
+        const unrebound = result;
+        result = rebindBodyFreeNames(result);
+        if (viewsMade && result !== unrebound)
+          carryLazyViewContexts(unrebound, result);
       }
 
       // Honor a numeric-approximation request (`N(f(2))`) by approximating

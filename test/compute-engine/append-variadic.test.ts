@@ -638,7 +638,6 @@ describe('Append: a source whose type does not fix its kind', () => {
 
   test.each([
     ['any', 'a', 'collection<any>'],
-    ['unknown', 'u', 'collection<any>'],
     ['collection<integer>', 'c', 'collection<integer>'],
     ['list<integer>', 'l', 'list<integer>'],
     ['an unresolved call', ['f', 'x'], 'collection<integer>'],
@@ -650,16 +649,25 @@ describe('Append: a source whose type does not fix its kind', () => {
     }
   );
 
-  test.each(['a', 'u'])(
-    'the structural form of the nested expression over %s is a collection',
-    (src) =>
-      // The structural form binds the symbol to its definition, as the
-      // canonical form does, so the inner node reads the declared source
-      // type, and both forms give `collection<any>`.
-      expect(
-        freshStructural(['Append', ['Append', src, 1], 2]).type.toString()
-      ).toBe('collection<any>')
-  );
+  test('a source declared unknown: the canonical form requires a collection of it', () => {
+    // The canonical `Append` requires a collection of its source, and `u`
+    // reads that requirement in the expression. A structural node writes
+    // no requirement, so `u` reads `unknown` there and the result has the
+    // placeholder element type, as over an unresolved call.
+    expect(typeOf(['Append', 'u', 1, 2])).toBe('collection<any>');
+    expect(nestedOver('u').type.toString()).toBe('collection<integer>');
+    expect(
+      freshStructural(['Append', ['Append', 'u', 1], 2]).type.toString()
+    ).toBe('collection<integer>');
+  });
+
+  test('the structural form of the nested expression over a is a collection', () =>
+    // The structural form binds the symbol to its definition, as the
+    // canonical form does, so the inner node reads the declared source
+    // type, and both forms give `collection<any>`.
+    expect(
+      freshStructural(['Append', ['Append', 'a', 1], 2]).type.toString()
+    ).toBe('collection<any>'));
 
   test('the value of an `any` source decides the kind', () => {
     const e = new ComputeEngine();

@@ -233,8 +233,12 @@ describe('point accessors over an empty collection — compiled JavaScript', () 
     // flat-point reading cannot reach that dispatch — it is asked for by an
     // element type that proves numbers, and such an operand is settled
     // statically (see the `list<number>` case below).
+    //
+    // Boxing declares no name, and `PointZ(v)` alone leaves `v` untyped:
+    // `ce.infer()` commits the type that `PointX` requires,
+    // `collection<any> | tuple`, which does not settle the shape.
     const ce = new ComputeEngine();
-    ce.declare('v', 'unknown');
+    ce.infer([ce.box(['PointX', 'v'])]);
     for (const head of ['PointX', 'PointY', 'PointZ']) {
       const r = js.compile(ce.box([head, 'v']));
       expect(r.success).toBe(true);

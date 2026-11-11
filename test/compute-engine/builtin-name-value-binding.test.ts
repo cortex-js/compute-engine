@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
 //
 // A single-uppercase-letter name that is BOTH a standard-library operator
@@ -129,7 +130,9 @@ describe('an operand boxed by the caller is rebound too', () => {
     const op = expr.ops![0];
     expect(op.symbol).toBe('N');
     expect(op.operatorDefinition).toBeUndefined();
-    expect(op.valueDefinition).toBeDefined();
+    // The variable is a free name: boxing declares no definition for it.
+    expect(op.valueDefinition).toBeUndefined();
+    expect(isFreeName(op)).toBe(true);
     expect(n.operatorDefinition).toBeDefined();
     expect(ce.box(['N', 2.3]).evaluate().toString()).toBe('2.3');
   });

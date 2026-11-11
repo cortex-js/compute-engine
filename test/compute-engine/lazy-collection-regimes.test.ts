@@ -430,16 +430,20 @@ describe('lazy collection evaluate memo', () => {
 // neither direction and clears the slot).
 //
 describe('lazy collection evaluate memo — async parity', () => {
-  test('each async iteration re-uses the previous result', async () => {
+  test('each async iteration evaluates the previous result to the same value', async () => {
     // The async twin of the accumulator identity test above, in the same real
-    // loop shape: the `Assign` between two iterations bumps `ce._anyVersion`,
-    // so what keeps the loop sub-quadratic is that iteration k−1's RESULT is
-    // still a memo hit afterwards — i.e. it evaluates to ITSELF.
+    // loop shape. The async memo stores no result when the evaluation read an
+    // entry of an environment, so iteration k−1's result is evaluated again:
+    // a new object, with the same elements.
     const ce = new ComputeEngine();
     ce.assign('xs', ce.box(['Range', 1, 2]));
     let previous: BoxedExpr | undefined = undefined;
     for (let i = 0; i < 20; i++) {
-      if (previous) expect(await previous.evaluateAsync()).toBe(previous);
+      if (previous) {
+        const again = await previous.evaluateAsync();
+        expect(again.count).toBe(previous.count);
+        expect(again.isSame(previous)).toBe(true);
+      }
       const r = await ce
         .function('Append', [ce.symbol('xs'), ce.number(i)])
         .evaluateAsync();

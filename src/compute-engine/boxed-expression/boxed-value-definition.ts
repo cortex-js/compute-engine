@@ -57,6 +57,7 @@ import {
   type FactIndex,
   contextAssumedValues,
   contextAssumptions,
+  exclusionsFor,
   getFactIndex,
   isDeclaredTypeOnly,
   isValueShielded,
@@ -1588,7 +1589,15 @@ export class _BoxedValueDefinition
     if (isDeclaredTypeOnly(this)) return declared;
 
     const index = getFactIndex(ce);
-    const contributions = typeFor(index, this);
+    let contributions = typeFor(index, this);
+    // A read that supplies its own base (`memoize` false) also gets the
+    // exclusions that need a base, when the base is not `unknown`
+    // (`FactIndex.exclusionsByDefinition`).
+    if (!memoize && !declared.isUnknown) {
+      const exclusions = exclusionsFor(index, this);
+      if (exclusions.length > 0)
+        contributions = [...contributions, ...exclusions];
+    }
     if (contributions.length === 0) return declared;
 
     // The index is rebuilt whenever the facts change (a new engine generation

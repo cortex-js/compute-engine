@@ -163,7 +163,7 @@ describe('The Function-literal construction seam is the only builder', () => {
     )![1];
 
     expect(src).toContain(
-      "if (expr.operator === 'Function') return functionLiteralSignatureType(expr);"
+      "if (expr.operator === 'Function')\n    return functionLiteralCallSignatureType(expr);"
     );
     // The shape accessors are the raw material of an arrow. `boxed-function.ts`
     // must not touch them: it delegates.

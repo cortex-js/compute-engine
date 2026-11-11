@@ -473,14 +473,18 @@ describe('A FACTOR THAT CAN BE A MATRIX KEEPS ITS POSITION', () => {
 
   test('a juxtaposition in parentheses that is not a product with a matrix does not change', () => {
     // A product with no matrix has the canonical form of the juxtaposition
-    // written with no parentheses
+    // written with no parentheses. `ce.infer()` over that juxtaposition
+    // declares its symbols numbers, so `x(yz)` is not an application.
     for (const [nested, flat] of [
       ['2(3x)', '6x'],
       ['x(yz)', 'xyz'],
       ['(xy)(zw)', 'xyzw'],
       ['2(g(x)k(x)g(x))', '2g(x)k(x)g(x)'],
-    ])
-      expect(str(ce.parse(nested))).toBe(str(ce.parse(flat)));
+    ]) {
+      const flatExpr = ce.parse(flat);
+      ce.infer([flatExpr]);
+      expect(str(ce.parse(nested))).toBe(str(flatExpr));
+    }
     // A mixed number, an imaginary number and a function application are
     // read as before
     expect(str(ce.parse('A(2\\frac{1}{3})'))).toBe('A * (2 + 1/3)');
@@ -652,15 +656,15 @@ describe('NESTED PRODUCTS: TIME, REPLACED DEFINITIONS, NEGATION, INVALID OPERAND
   });
 
   test('a negation or a quotient by an integer of a nested product is spliced', () => {
-    expect(
-      str(
-        ce.box([
-          'Multiply',
-          'A',
-          ['Negate', ['Multiply', ['g', 'x'], ['k', 'x']]],
-        ])
-      )
-    ).toBe('-(A * g(x) * k(x))');
+    const negated = ce.box([
+      'Multiply',
+      'A',
+      ['Negate', ['Multiply', ['g', 'x'], ['k', 'x']]],
+    ]);
+    expect(str(negated)).toBe('-(A * g(x) * k(x))');
+    // `ce.infer()` declares `g` a function, so the parse reads `g(x)` as a
+    // call.
+    ce.infer([negated]);
     expect(str(ce.parse('A\\cdot(-g(x)k(x))'))).toBe('-(A * g(x) * k(x))');
     expect(
       str(

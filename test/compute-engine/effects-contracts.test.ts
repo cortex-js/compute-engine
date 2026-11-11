@@ -2539,8 +2539,9 @@ describe('CE-58: the default-`!scope` ceiling on `ce.declare()` with a value', (
       )
     ).toBe(true);
     expect(ce.lookupDefinition('dv_f')).toBeUndefined();
-    // An auto-declared binding (inferred, with no value) stays in place.
-    ce.box('dv_g');
+    // An inferred binding with no value stays in place. Boxing declares
+    // nothing, so `ce.infer()` commits the type of a use.
+    ce.infer([ce.box(['Add', 'dv_g', 1])]);
     const before = ce.lookupDefinition('dv_g');
     expect(before).toBeDefined();
     expect(

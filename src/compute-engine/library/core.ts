@@ -286,6 +286,10 @@ import {
   type ClauseAttributes,
 } from '../multi-clause.js';
 import {
+  canonInstallSkippedName,
+  noteCanonInstallSkippedName,
+} from '../clause-identity.js';
+import {
   ascribeDeclaredParameterTypes,
   assertAssignable,
   assignValueAsOperatorDef,
@@ -7802,6 +7806,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             const binding = ce.lookupDefinition(knotName);
             if (binding !== undefined)
               ce._recursionKnots.set(knotName, { depth: 1, binding });
+            // With the engine flag `_bindingUnits`, the name is a free name
+            // until the install below declares it (rule 7 of
+            // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the knot
+            // holds the scope of the definition in place of a placeholder
+            // binding, and a self-call of the body, bound to a forward-call
+            // reference, types `unknown` while the name resolves to nothing
+            // (`boxed-function.ts`).
+            else if (ce._bindingUnits)
+              ce._recursionKnots.set(knotName, {
+                depth: 1,
+                binding: ce.context.lexicalScope,
+              });
           }
         }
         const releaseKnot = () => {
@@ -7941,14 +7957,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             isFunction(canonFn, 'Function')
           ) {
             const target = ce.lookupDefinition(symbolName);
+            // With the engine flag `_bindingUnits`, a name with no definition
+            // keeps the skip by name (`noteCanonInstallSkippedName()`).
+            const skipScope =
+              ce._bindingUnits && target === undefined
+                ? ce.context.lexicalScope
+                : undefined;
             if (
               isGenericClauseLiteral(canonFn) ||
               isGenericTarget(target) ||
-              canonInstallSkipped(target)
+              canonInstallSkipped(target) ||
+              (skipScope !== undefined &&
+                canonInstallSkippedName(skipScope, symbolName))
             ) {
               // Skipping one clause of a name obliges us to skip the rest of
               // them; `canonInstallSkipped` explains why.
               noteCanonInstallSkipped(target);
+              if (skipScope !== undefined)
+                noteCanonInstallSkippedName(skipScope, symbolName);
             } else {
               try {
                 // REDEFINITION DISCIPLINE — anchored on the RAW name operand,

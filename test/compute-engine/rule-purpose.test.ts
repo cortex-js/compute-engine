@@ -114,8 +114,11 @@ describe('cost gate: no rewrite may make the expression more expensive', () => {
     // untagged `expand` rule (declared earlier) also produced this rewrite,
     // the `transform` tag was dropped and the gate discarded the result.
     // `expand` now declines a negated sum. A negated *product* must still
-    // reach `expand`.
-    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-x - 1');
+    // reach `expand`. `ce.infer()` over the negated sum declares `x` a
+    // number, so `x(y+1)` is a product, not an application.
+    const negatedSum = ce.parse('-(x+1)');
+    expect(negatedSum.simplify().toString()).toBe('-x - 1');
+    ce.infer([negatedSum]);
     expect(ce.parse('-(x(y+1))').simplify().toString()).toBe('-x * y - x');
   });
 

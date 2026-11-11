@@ -69,12 +69,12 @@ describe('nested broadcast does not re-infer a value-bearing symbol', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'unknown');
     ce.declare('v', 'unknown');
-    ce.box(['Multiply', 2, ['List', 'u', 'v']]);
+    const expr = ce.box(['Multiply', 2, ['List', 'u', 'v']]);
     // `number`, as the scalar `2 · u` narrows `u`: a cell of unknown type may
     // be a complex number, so the context is not `real` (ROADMAP CE-364;
     // before, the cells were not read and `real` was written onto them).
-    expect(ce.symbol('u').type.toString()).toBe('number');
-    expect(ce.symbol('v').type.toString()).toBe('number');
+    expect(expr.op2.op1.type.toString()).toBe('number');
+    expect(expr.op2.op2.type.toString()).toBe('number');
   });
 
   test('a FLAT broadcast over the symbol is unaffected', () => {

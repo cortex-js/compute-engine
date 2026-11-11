@@ -1,5 +1,6 @@
 import { Expression } from '../../../src/math-json/types.ts';
 import { engine as ce, latex, check } from '../../utils';
+import { ComputeEngine } from '../../../src/compute-engine';
 
 describe('OPERATOR oprel', () => {
   test('x=1', () =>
@@ -692,10 +693,17 @@ describe('APPLY', () => {
     expect(
       ce.parse('x |> f(\\square, \\square)', { canonical: false }).json
     ).toEqual(['f', 'x', 'x']));
-  test('pipeline topic marker: chains', () =>
+  test('pipeline topic marker: chains', () => {
+    // A call head is parsed as a call when it is declared a function, and
+    // boxing declares no name.
+    const engine = new ComputeEngine();
+    engine.declare('f', 'function');
+    engine.declare('g', 'function');
     expect(
-      ce.parse('a |> f(\\square) |> g(\\square)', { canonical: false }).json
-    ).toEqual(['g', ['f', 'a']]));
+      engine.parse('a |> f(\\square) |> g(\\square)', { canonical: false })
+        .json
+    ).toEqual(['g', ['f', 'a']]);
+  });
 
   // Prefix pipeline: the lhs is implied, so the stage is an anonymous unary
   // function over the topic. The caller applies it to the piped value.

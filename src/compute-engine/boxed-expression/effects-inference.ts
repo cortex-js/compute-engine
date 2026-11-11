@@ -1942,6 +1942,41 @@ export function namedLiteralSignatureType(
 }
 
 /**
+ * The signature of the function literal `expr` as a call site reads it
+ * (`functionLiteralSignatureType()`). With the engine flag `_bindingUnits`,
+ * the type of an occurrence is read through the definition that its name
+ * resolves to in the current context, so the parameter and result types
+ * are derived in the scope that the literal is written in, as its
+ * evaluation reads that scope: with a global `P: list<real>` and
+ * `angle := t ↦ P`, the result of `angle` read inside the body of a
+ * function whose parameter is named `P` is still `list<real>`. The effects
+ * are those derived in the current context, as without the flag: a call of
+ * a parameter in the body is a call of an unknown function there.
+ */
+export function functionLiteralCallSignatureType(expr: Expression): Type {
+  const ce = expr.engine;
+  if (!ce._bindingUnits || !isFunction(expr))
+    return functionLiteralSignatureType(expr);
+  const body = expr.ops[0];
+  const written = body?.isScoped ? body.localScope?.parent : undefined;
+  if (!written || written === ce.context?.lexicalScope)
+    return functionLiteralSignatureType(expr);
+  // The scope of the literal first: the types that its derivation caches on
+  // the body are those of that scope.
+  const there = ce._inScope(written, () => functionLiteralSignatureType(expr));
+  const here = functionLiteralSignatureType(expr);
+  if (
+    typeof here !== 'object' ||
+    here.kind !== 'signature' ||
+    typeof there !== 'object' ||
+    there.kind !== 'signature'
+  )
+    return here;
+  const { effects: _effects, ...shape } = there;
+  return here.effects === undefined ? shape : { ...shape, effects: here.effects };
+}
+
+/**
  * The positional parameter slots of the `Function` literal `expr` with the
  * body `body`, or `undefined` when it has none. A rest parameter is not a
  * slot: `restParameterSignatureTail()` gives its variadic tail.

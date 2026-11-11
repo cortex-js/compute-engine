@@ -95,15 +95,13 @@ describe('THE RESULT UNDER DECLARED PARAMETER TYPES IS MEMOIZED', () => {
     ce.declare('f', '(integer) -> unknown');
     ce.assign('f', ce.parse('x \\mapsto b + x'));
     expect(ce.box('f').type.toString()).toBe('(integer) -> number');
-    // The use `b + x` in the body declared `b` in the global scope with the
-    // inferred type `number` (user decision 2026-10-25 on CE-473 in
-    // `ROADMAP.md`). The value `1.5` is of that type, so the assignment does
-    // not change the type of `b`, and the result stays `number`, which holds
-    // the value of each call. Before, the assignment declared `b` for the
-    // first time, and the result was derived again as `real`.
+    // Boxing the body declares nothing: `b` is a free name, and the use
+    // `b + x` makes the result `number`. The assignment declares `b` for the
+    // first time, with the type `real` of its value, and the result is
+    // derived again as `real`.
     ce.assign('b', 1.5);
-    expect(ce.box('b').type.toString()).toBe('number');
-    expect(ce.box('f').type.toString()).toBe('(integer) -> number');
+    expect(ce.box('b').type.toString()).toBe('real');
+    expect(ce.box('f').type.toString()).toBe('(integer) -> real');
   });
 
   test('a recursive declared function has a signature', () => {

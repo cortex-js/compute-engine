@@ -359,18 +359,57 @@ export function objectDepCollectorDepth(): number {
  * repeat read of the same object to the LOWEST version seen. For an object
  * read again at the end (`VersionedObject._readAgainAtEnd`), whose version
  * is not a counter, the record keeps the version of the first read.
- * Collectors hold a handful of entries at most, so the linear scan beats a
- * map. */
+ * A set of a few entries is scanned. A larger one has an index
+ * (`depIndexes`): with the engine flag `_bindingUnits`, each distinct name
+ * that a computation reads is an object of its own (`binding-unit.ts`), and
+ * a scan per read made the type of a product of 2 000 distinct symbols
+ * quadratic. */
 function addDep(
   deps: ObjectDeps,
   obj: VersionedObject,
   version: number
 ): void {
-  for (const dep of deps) {
-    if (dep[0].deref() === obj) {
-      if (version < dep[1] && obj._readAgainAtEnd !== true) dep[1] = version;
-      return;
+  // A set below the threshold has no index: the lookup is made only for a
+  // large set, so a small set costs what it cost before the index.
+  let index =
+    deps.length < DEP_INDEX_THRESHOLD ? undefined : depIndexes.get(deps);
+  if (index === undefined) {
+    for (const dep of deps) {
+      if (dep[0].deref() === obj) {
+        if (version < dep[1] && obj._readAgainAtEnd !== true) dep[1] = version;
+        return;
+      }
     }
+    deps.push([new WeakRef(obj), version]);
+    if (deps.length >= DEP_INDEX_THRESHOLD) {
+      index = new WeakMap();
+      for (const dep of deps) {
+        const o = dep[0].deref();
+        if (o !== undefined && !index.has(o)) index.set(o, dep);
+      }
+      depIndexes.set(deps, index);
+    }
+    return;
   }
-  deps.push([new WeakRef(obj), version]);
+  const dep = index.get(obj);
+  if (dep !== undefined) {
+    if (version < dep[1] && obj._readAgainAtEnd !== true) dep[1] = version;
+    return;
+  }
+  const added: ObjectDep = [new WeakRef(obj), version];
+  deps.push(added);
+  index.set(obj, added);
 }
+
+/** The size of a dependency set from which {@link addDep} keeps an index. */
+const DEP_INDEX_THRESHOLD = 32;
+
+/** For a dependency set of {@link DEP_INDEX_THRESHOLD} entries or more, the
+ * entry of each live object in it. Both maps are weak: the index keeps
+ * neither the set nor an object alive (ruling B12). Only {@link addDep} adds
+ * a live object to a set, so the index holds each of them; an entry whose
+ * object was collected is pushed as is and never matched. */
+const depIndexes = new WeakMap<
+  ObjectDeps,
+  WeakMap<VersionedObject, ObjectDep>
+>();

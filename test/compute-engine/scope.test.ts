@@ -253,13 +253,13 @@ describe('DECLARING', () => {
   // D11 (USER DECISION 2026-07-02): the juxtaposition parser's function-
   // application auto-declaration is a heuristic guess, so it is marked
   // INFERRED. A later scalar use / assign must be able to override it.
-  test('D11: strict-mode auto-declared function symbol widens to a scalar', () => {
+  test('D11: strict-mode inferred function symbol widens to a scalar', () => {
     const ce2 = new ComputeEngine();
     expect(ce2.strict).toBe(true);
     // `gcd(12,8)` misparses to `c·g·d(12,8)` — the `d` symbol is applied to
-    // (12,8) and auto-declared as a function. That declaration must be
-    // inferred (a guess), not a permanent assertion.
-    ce2.parse('gcd(12,8)');
+    // (12,8) and read as a function. The declaration that `ce.infer()`
+    // commits for it must be inferred (a guess), not a permanent assertion.
+    ce2.infer([ce2.parse('gcd(12,8)')]);
     const def: any = ce2.lookupDefinition('d');
     expect(def && 'value' in def ? def.value.inferredType : false).toBe(true);
     // Reassigning a scalar value must not throw and must take over the type…

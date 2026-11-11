@@ -1,6 +1,23 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { canonicalForm } from '../../src/compute-engine/boxed-expression/canonical';
 import type { CanonicalOptions } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine';
+
+/** Commit the uses of `exprs` with `ce.infer()` while `scope` is current, so
+ * that the names whose home scope is `scope` are declared there. Boxing
+ * itself declares nothing. */
+function commitIn(
+  ce: ComputeEngine,
+  scope: Parameters<ComputeEngine['pushScope']>[0],
+  exprs: Expression[]
+): void {
+  ce.pushScope(scope);
+  try {
+    ce.infer(exprs);
+  } finally {
+    ce.popScope();
+  }
+}
 
 /**
  * A parse or box under a PARTIAL canonical form (`canonical: ['Number']`, …)
@@ -81,16 +98,18 @@ describe('PARTIAL FORMS still resolve', () => {
 });
 
 describe('PARTIAL FORMS: unchanged routes (pins)', () => {
-  it('a fully canonical parse still declares', () => {
+  // Boxing declares nothing, under any form: a name that was only boxed has
+  // no definition.
+  it('a fully canonical parse declares nothing either', () => {
     const ce = new ComputeEngine();
     ce.parse('w + 1');
-    expect(ce.lookupDefinition('w')).toBeDefined();
+    expect(ce.lookupDefinition('w')).toBeUndefined();
   });
 
-  it('a fully canonical box still declares', () => {
+  it('a fully canonical box declares nothing either', () => {
     const ce = new ComputeEngine();
     ce.box(['Add', 'w', 1]);
-    expect(ce.lookupDefinition('w')).toBeDefined();
+    expect(ce.lookupDefinition('w')).toBeUndefined();
   });
 
   it('`canonical: false` remains inert', () => {
@@ -116,24 +135,31 @@ describe('PARTIAL FORMS: unchanged routes (pins)', () => {
  */
 
 describe('SCOPE OPTION contains the writes', () => {
-  it('parse route: declares into the supplied scope, not the engine scope', () => {
+  // The supplied scope is the home scope of the free names: a commit with
+  // `ce.infer()` declares them there, not in the engine scope. A name with no
+  // type (`s_2`) is not committed.
+  it('parse route: commits into the supplied scope, not the engine scope', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope();
-    ce.parse('g(s_2)', { scope });
+    const expr = ce.parse('g(s_2)', { scope });
+    expect(scope.declarations()).toEqual([]);
+    commitIn(ce, scope, [expr]);
 
     expect(ce.lookupDefinition('g')).toBeUndefined();
     expect(ce.lookupDefinition('s_2')).toBeUndefined();
-    expect(scope.declarations().map((x) => x.name)).toEqual(['g', 's_2']);
+    expect(scope.declarations().map((x) => x.name)).toEqual(['g']);
   });
 
-  it('expr route: declares into the supplied scope, not the engine scope', () => {
+  it('expr route: commits into the supplied scope, not the engine scope', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope();
-    ce.expr(['g2', 'y2'], { scope });
+    const expr = ce.expr(['g2', 'y2'], { scope });
+    expect(scope.declarations()).toEqual([]);
+    commitIn(ce, scope, [expr]);
 
     expect(ce.lookupDefinition('g2')).toBeUndefined();
     expect(ce.lookupDefinition('y2')).toBeUndefined();
-    expect(scope.declarations().map((x) => x.name)).toEqual(['g2', 'y2']);
+    expect(scope.declarations().map((x) => x.name)).toEqual(['g2']);
   });
 
   it('the engine scope is untouched by a contained parse of a definition', () => {
@@ -219,7 +245,8 @@ describe('InspectableScope.declarations(): the harvest', () => {
   it('reports post-inference types and the inferred flag', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope({ h: 'function' });
-    ce.parse('h(u) = u^2', { scope });
+    const expr = ce.parse('h(u) = u^2', { scope });
+    commitIn(ce, scope, [expr]);
 
     const byName = Object.fromEntries(
       scope.declarations().map((d) => [d.name, d])
@@ -227,26 +254,30 @@ describe('InspectableScope.declarations(): the harvest', () => {
     // An initializer entry is EXPLICITLY declared, even once inference has
     // narrowed it.
     expect(byName['h'].inferred).toBe(false);
-    // An auto-declared name is flagged inferred, with its post-inference type.
+    // A name committed by `ce.infer()` is flagged inferred, with its
+    // post-inference type.
     expect(byName['u'].inferred).toBe(true);
     expect(byName['u'].type.toString()).toBe('number');
   });
 
-  it('narrows an initializer entry in place', () => {
+  // Boxing narrows no definition: the use types the occurrence, and the
+  // entry keeps its declared type.
+  it('does not narrow an initializer entry', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(integer) -> integer');
     const scope = ce.createScope({ v_1: 'unknown' });
-    ce.parse('g(v_1)', { scope });
+    const expr = ce.parse('g(v_1)', { scope });
 
     const [entry] = scope.declarations();
     expect(entry.name).toBe('v_1');
-    expect(entry.type.toString()).toBe('integer');
+    expect(entry.type.toString()).toBe('unknown');
+    expect(expr.op1.type.toString()).toBe('integer');
   });
 
   it('is sorted lexicographically, independent of declare order', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope();
-    ce.parse('z_1 + a_1 + k_1', { scope });
+    commitIn(ce, scope, [ce.parse('z_1 + a_1 + k_1', { scope })]);
 
     const names = scope.declarations().map((d) => d.name);
     expect(names).toEqual([...names].sort());
@@ -256,8 +287,8 @@ describe('InspectableScope.declarations(): the harvest', () => {
   it('accumulates across several calls against the same scope', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope();
-    ce.parse('a_1 + 1', { scope });
-    ce.parse('b_1 + 1', { scope });
+    commitIn(ce, scope, [ce.parse('a_1 + 1', { scope })]);
+    commitIn(ce, scope, [ce.parse('b_1 + 1', { scope })]);
     expect(scope.declarations().map((d) => d.name)).toEqual(['a_1', 'b_1']);
   });
 });
@@ -266,7 +297,7 @@ describe('createScope: re-installing a harvested definition', () => {
   it('installs the SAME definition object, with no write-version bump', () => {
     const ce = new ComputeEngine();
     const a = ce.createScope();
-    ce.parse('w + 1', { scope: a });
+    commitIn(ce, a, [ce.parse('w + 1', { scope: a })]);
     const harvested = a.declarations()[0];
     expect(harvested.name).toBe('w');
     const writeVersion = harvested.def.value!._writeVersion;
@@ -280,11 +311,11 @@ describe('createScope: re-installing a harvested definition', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(integer) -> integer');
     const a = ce.createScope();
-    ce.parse('w + 1', { scope: a });
+    commitIn(ce, a, [ce.parse('w + 1', { scope: a })]);
     expect(a.declarations()[0].type.toString()).toBe('number');
 
     const b = ce.createScope({ w: a.declarations()[0].def });
-    ce.parse('g(w)', { scope: b });
+    commitIn(ce, b, [ce.parse('g(w)', { scope: b })]);
 
     expect(b.declarations()[0].type.toString()).toBe('integer');
     expect(a.declarations()[0].type.toString()).toBe('integer');
@@ -292,27 +323,29 @@ describe('createScope: re-installing a harvested definition', () => {
 });
 
 describe('InspectableScope.narrowings(): the phase-1 residual', () => {
-  it('reports an OUTER definition narrowed by a contained parse', () => {
+  // Boxing narrows no definition, so a contained parse of a use of a name
+  // declared `unknown` has no narrowing to report: the use types the
+  // occurrence only.
+  it('reports no OUTER definition for a contained parse', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'unknown');
     const scope = ce.createScope();
-    ce.parse('p + 1', { scope });
+    const expr = ce.parse('p + 1', { scope });
 
-    expect(scope.narrowings().map((n) => [n.name, n.from.toString(), n.to.toString()])).toEqual([
-      ['p', 'unknown', 'number'],
-    ]);
-    expect(scope.narrowings()[0].def).toBe(ce.lookupDefinition('p'));
-    // The narrowed name is NOT one of the scope's own declarations.
+    expect(scope.narrowings()).toEqual([]);
+    expect(ce.lookupDefinition('p')!.value!.type.toString()).toBe('unknown');
+    expect(expr.op1.type.toString()).toBe('number');
     expect(scope.declarations()).toEqual([]);
   });
 
   it('never reports the scope’s own bindings', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope({ q: 'unknown' });
-    ce.parse('q + 1', { scope });
+    const expr = ce.parse('q + 1', { scope });
 
     expect(scope.narrowings()).toEqual([]);
-    expect(scope.declarations()[0].type.toString()).toBe('number');
+    expect(scope.declarations()[0].type.toString()).toBe('unknown');
+    expect(expr.op1.type.toString()).toBe('number');
   });
 
   it('never reports an auto-declared name (containment worked)', () => {
@@ -322,14 +355,14 @@ describe('InspectableScope.narrowings(): the phase-1 residual', () => {
     expect(scope.narrowings()).toEqual([]);
   });
 
-  it('is sorted lexicographically', () => {
+  it('reports nothing for several outer definitions', () => {
     const ce = new ComputeEngine();
     ce.declare('z_9', 'unknown');
     ce.declare('a_9', 'unknown');
     const scope = ce.createScope();
     ce.parse('z_9 + a_9 + 1', { scope });
 
-    expect(scope.narrowings().map((n) => n.name)).toEqual(['a_9', 'z_9']);
+    expect(scope.narrowings()).toEqual([]);
   });
 
   it('reports an OUTER inferred FUNCTION signature narrowed by a contained parse', () => {
@@ -343,14 +376,6 @@ describe('InspectableScope.narrowings(): the phase-1 residual', () => {
     ).toEqual([['q', '(unknown) -> unknown', '(unknown) -> number']]);
     expect(scope.narrowings()[0].def).toBe(ce.lookupDefinition('q'));
     expect(scope.declarations()).toEqual([]);
-  });
-
-  it('does not capture when no inspectable scope is supplied', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'unknown');
-    ce.parse('p + 1');
-    // Nothing to observe — the point of the pin is that the capture is OFF.
-    expect(ce.lookupDefinition('p')!.value!.type.toString()).toBe('number');
   });
 });
 
@@ -377,7 +402,7 @@ describe('InspectableScope.dispose()', () => {
   it('does not dispose a RE-INSTALLED harvested definition (it is borrowed)', () => {
     const ce = new ComputeEngine();
     const origin = ce.createScope();
-    ce.parse('w + 1', { scope: origin });
+    commitIn(ce, origin, [ce.parse('w + 1', { scope: origin })]);
     const borrowed = origin.declarations()[0].def;
     const borrowedWriteVersion = borrowed.value!._writeVersion;
 

@@ -28,6 +28,9 @@ import { TEST_PYTHON } from './test-python';
 
 const ce = new ComputeEngine();
 ce.declare('k', 'real');
+// `GCD` and `LCM` do not type their operands, so the inputs are declared.
+ce.declare('x', 'real');
+ce.declare('m', 'real');
 
 const MAX = Number.MAX_SAFE_INTEGER;
 

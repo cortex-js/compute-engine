@@ -166,21 +166,20 @@ describe('use-narrowing evidence guard', () => {
   test('CAS persona: a use of a VALUELESS symbol still narrows (declaration reading)', () => {
     const ce = new ComputeEngine();
     ce.declare('k', '(integer) -> integer');
-    ce.box(['k', 'n']);
-    expect(ce.box('n').type.toString()).toBe('integer');
+    // Boxing declares nothing: the type is read on the occurrence.
+    expect(ce.box(['k', 'n']).op1.type.toString()).toBe('integer');
   });
 
   test('the documented inference example is unchanged', () => {
-    // Argument positions infer the type of an unknown symbol, and later uses
-    // refine it.
+    // Argument positions infer the type of an occurrence of a symbol
+    // declared `unknown`. Each expression reads the requirements of its own
+    // uses.
     const ce = new ComputeEngine();
     ce.declare('n', 'unknown');
     ce.declare('f', '(number) -> number');
-    ce.box(['f', 'n']);
-    expect(ce.box('n').type.toString()).toBe('number');
+    expect(ce.box(['f', 'n']).op1.type.toString()).toBe('number');
     ce.declare('g', '(integer) -> number');
-    ce.box(['g', 'n']);
-    expect(ce.box('n').type.toString()).toBe('integer');
+    expect(ce.box(['g', 'n']).op1.type.toString()).toBe('integer');
   });
 
   test('WIDENED evidence: the held VALUE decides, not the widened symbol type', () => {
@@ -196,12 +195,14 @@ describe('use-narrowing evidence guard', () => {
     const call = ce.box(['Q', 'v']);
     expect(call.isValid).toBe(true);
     // The post-validation inference pass then sharpens the widened `number`
-    // to `complex` — a write LICENSED by the evidence (admission required
-    // `held.type.matches(param)`, so the stored type remains an
-    // over-approximation of the held value; contrast the PROGRAM-persona
-    // test above, where the inconsistent write is refused and the stored
-    // type stays put).
-    expect(ce.box('v').type.toString()).toBe('complex');
+    // to `complex` on the occurrence — a requirement LICENSED by the
+    // evidence (admission required `held.type.matches(param)`, so the
+    // stored type remains an over-approximation of the held value; contrast
+    // the PROGRAM-persona test above, where the inconsistent write is
+    // refused and the stored type stays put). Boxing writes no definition,
+    // so the stored type of `v` stays `number`.
+    expect(call.op1.type.toString()).toBe('complex');
+    expect(ce.box('v').type.toString()).toBe('number');
   });
 
   test('an assigned symbol whose type already fits is admitted without a write (pre-existing matches branch)', () => {

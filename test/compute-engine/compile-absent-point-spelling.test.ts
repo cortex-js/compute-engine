@@ -41,6 +41,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const ce = new ComputeEngine();
 ce.declare('c', 'real');
 ce.declare('d', 'real');
+ce.declare('t', 'real');
 
 // Using an unregistered target deterministically forces the fallback.
 const FORCE = { to: 'no-such-target' };

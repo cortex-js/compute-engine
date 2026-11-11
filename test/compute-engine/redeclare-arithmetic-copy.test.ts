@@ -128,6 +128,8 @@ describe('an unchanged copy of an arithmetic operator definition', () => {
     );
     const sum = add.parse('1+w');
     expect(sum.type.toString()).toBe('number');
+    // The use types `w` once `ce.infer()` commits it.
+    add.infer([sum]);
     expect(add.box('w').type.toString()).toBe('number');
 
     const sqrt = redeclared('Sqrt');

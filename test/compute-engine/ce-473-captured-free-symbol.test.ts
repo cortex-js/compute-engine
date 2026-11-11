@@ -72,6 +72,9 @@ describe('CE-473 (a): THE USE NARROWS THE OUTER BINDING', () => {
     const ce = new ComputeEngine();
     const g = ce.box(['Function', ['Not', 'W'], 'x']);
     expect(g.type.toString()).toBe('(x: unknown) -> boolean');
+    // The requirement is on the outer `W`: `ce.infer()` commits it in the
+    // scope of the literal.
+    ce.infer([g]);
     expect(ce.box('W').type.toString()).toBe('boolean');
   });
 
@@ -86,7 +89,7 @@ describe('CE-473 (a): THE USE NARROWS THE OUTER BINDING', () => {
     // A symbol that a top-level use inferred `number` accepts a string: the
     // inferred type is replaced. A captured symbol is handled the same way.
     const top = new ComputeEngine();
-    top.box(['Add', 'z', 1]);
+    top.infer([top.box(['Add', 'z', 1])]);
     expect(top.box('z').type.toString()).toBe('number');
     top.assign('z', top.string('abc'));
     expect(top.box('z').type.toString()).toBe('string');
@@ -123,6 +126,7 @@ describe('CE-473 (c): A CALL CHECKS THE CAPTURED VALUES', () => {
   test('a value written on the definition directly is refused', () => {
     const ce = new ComputeEngine();
     const g = ce.box(NUMERIC_LITERAL as any);
+    ce.infer([g]);
     const def = ce.lookupDefinition('y') as {
       value: { value: Expression | undefined };
     };
@@ -136,6 +140,7 @@ describe('CE-473 (c): A CALL CHECKS THE CAPTURED VALUES', () => {
     const ce = new ComputeEngine();
     const h = ce.box(['Function', ['List', ['Multiply', 2, 'u']]]);
     expect(h.type.toString()).toBe('() -> vector<1>');
+    ce.infer([h]);
     const def = ce.lookupDefinition('u') as {
       value: { value: Expression | undefined };
     };
@@ -216,6 +221,7 @@ describe('CE-473: THE COMPILED ROUTE GIVES THE VALUE OF THE INTERPRETER OR REFUS
   test('a value written on the definition directly is refused', () => {
     const ce = new ComputeEngine();
     const g = ce.box(NUMERIC_LITERAL as any);
+    ce.infer([g]);
     const def = ce.lookupDefinition('y') as {
       value: { value: Expression | undefined };
     };
@@ -239,6 +245,9 @@ describe('CE-473: THE COMPILED ROUTE GIVES THE VALUE OF THE INTERPRETER OR REFUS
     // number cell, so the check compares the value with `number`.
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(LITERAL as any));
+    // Boxing declares no `y`: the list puts no requirement on it, so the
+    // test declares it to write a value on its definition.
+    ce.declare('y', 'unknown');
     const def = ce.lookupDefinition('y') as {
       value: { value: Expression | undefined };
     };
@@ -334,9 +343,10 @@ describe('CE-473 (c): THE COMPILED ROUTE WHATEVER THE TYPE OF THE DEFINITION', (
 
 describe('CE-473 (c): A CHECKPOINT RESTORES THE RECORDED CAPTURED TYPES', () => {
   test('a list cell is recorded from the types when the definition is assigned', () => {
-    // `z` is a string when `g` is first assigned, and `unknown` again after
-    // the restore. The second assignment records `z` as a number cell, so a
-    // string written on its definition later makes the call an error.
+    // `z` is a string when `g` is first assigned, and has no definition
+    // again after the restore. The second assignment records no type for
+    // `z`, so a string assigned to it later is the cell of the result, and
+    // the type of the call says so.
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
@@ -349,13 +359,11 @@ describe('CE-473 (c): A CHECKPOINT RESTORES THE RECORDED CAPTURED TYPES', () => 
     ce.restore(cp);
     ce.assign('g', literal);
     ce.assign('y', 5);
-    const def = ce.lookupDefinition('z') as {
-      value: { value: Expression | undefined };
-    };
-    def.value.value = ce.string('abc');
+    expect(ce.lookupDefinition('z')).toBeUndefined();
+    ce.assign('z', ce.string('abc'));
     const call = ce.box(['g', 3]);
-    expect(call.type.toString()).toBe('vector<3>');
-    expect(isTypeError(sound(call))).toBe(true);
+    expect(call.type.toString()).toBe('list<integer | string>');
+    expect(sound(call).json).toEqual(['List', -3, 5, "'abc'"]);
   });
 
   test('the types recorded for a definition come back with its value', () => {

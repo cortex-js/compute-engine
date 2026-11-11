@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -28,14 +29,27 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const typeOf = (ce: ComputeEngine, name: string) =>
   ce.box(name).type.toString();
 
+// The type of the first occurrence of `name` in `expr`. A use writes its
+// requirement in the unit of the expression: the occurrences of that
+// expression read it, and `ce.infer()` commits it for a later boxing.
+function occurrenceType(expr: Expression, name: string): string | undefined {
+  if (expr.symbol === name) return expr.type.toString();
+  for (const op of expr.ops ?? []) {
+    const t = occurrenceType(op, name);
+    if (t !== undefined) return t;
+  }
+  return undefined;
+}
+
 describe('the six programs of the plan (box route)', () => {
   test('xs[1] + 1 refines the element to number, and the read then types number', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'xs', 1], 1]);
-    expect(typeOf(ce, 'xs')).toBe('indexed_collection<number>');
-    expect(ce.box(['At', 'xs', 1]).type.toString()).toBe('number');
-    // Dispatch visibility: the refined element is what later
+    const e = ce.box(['Add', ['At', 'xs', 1], 1]);
+    expect(occurrenceType(e, 'xs')).toBe('indexed_collection<number>');
+    // Dispatch visibility: once committed, the refined element is what later
     // canonicalizations read.
+    ce.infer([e]);
+    expect(ce.box(['At', 'xs', 1]).type.toString()).toBe('number');
     expect(ce.box(['Power', ['At', 'xs', 1], 2]).type.toString()).toBe(
       'number'
     );
@@ -43,31 +57,33 @@ describe('the six programs of the plan (box route)', () => {
 
   test('a numeric function argument refines the same way', () => {
     const ce = new ComputeEngine();
-    ce.box(['Sin', ['At', 's1', 1]]);
-    expect(typeOf(ce, 's1')).toBe('indexed_collection<number>');
+    const e = ce.box(['Sin', ['At', 's1', 1]]);
+    expect(occurrenceType(e, 's1')).toBe('indexed_collection<number>');
   });
 
   test('a non-broadcasting typed parameter writes its own type', () => {
     const ce = new ComputeEngine();
     ce.declare('k', { type: '(integer) -> integer' });
-    ce.box(['k', ['At', 'k1', 1]]);
-    expect(typeOf(ce, 'k1')).toBe('indexed_collection<integer>');
+    const e = ce.box(['k', ['At', 'k1', 1]]);
+    expect(occurrenceType(e, 'k1')).toBe('indexed_collection<integer>');
   });
 
   test('First/Second/Third/Last write indexed_collection<r>', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['First', 'f1'], 1]);
-    ce.box(['Add', ['Second', 'f2'], 1]);
-    ce.box(['Add', ['Third', 'f3'], 1]);
-    ce.box(['Add', ['Last', 'f4'], 1]);
-    for (const n of ['f1', 'f2', 'f3', 'f4'])
-      expect(typeOf(ce, n)).toBe('indexed_collection<number>');
+    const uses = [
+      ['f1', ce.box(['Add', ['First', 'f1'], 1])],
+      ['f2', ce.box(['Add', ['Second', 'f2'], 1])],
+      ['f3', ce.box(['Add', ['Third', 'f3'], 1])],
+      ['f4', ce.box(['Add', ['Last', 'f4'], 1])],
+    ] as const;
+    for (const [n, e] of uses)
+      expect(occurrenceType(e, n)).toBe('indexed_collection<number>');
   });
 
   test('a chained access reaches the outer collection through the forwarding', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', ['At', 'm', 1], 2], 1]);
-    expect(typeOf(ce, 'm')).toBe(
+    const e = ce.box(['Add', ['At', ['At', 'm', 1], 2], 1]);
+    expect(occurrenceType(e, 'm')).toBe(
       'indexed_collection<indexed_collection<number>>'
     );
   });
@@ -87,8 +103,8 @@ describe('the six programs of the plan (box route)', () => {
 describe('route parity', () => {
   test('parse route: y[1] + 1', () => {
     const ce = new ComputeEngine();
-    ce.parse('y[1] + 1');
-    expect(typeOf(ce, 'y')).toBe('indexed_collection<number>');
+    const e = ce.parse('y[1] + 1');
+    expect(occurrenceType(e, 'y')).toBe('indexed_collection<number>');
   });
 
   test('Epsil route: a lambda and a named function', () => {
@@ -103,40 +119,40 @@ describe('route parity', () => {
 describe('the index kind selects the arm', () => {
   test('a string index writes the dictionary arm only', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'd1', { str: 'a' }], 1]);
-    expect(typeOf(ce, 'd1')).toBe('dictionary<number>');
+    const e = ce.box(['Add', ['At', 'd1', { str: 'a' }], 1]);
+    expect(occurrenceType(e, 'd1')).toBe('dictionary<number>');
   });
 
   test('a symbolic index of open kind keeps both arms', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'i1', 'j'], 1]);
-    expect(typeOf(ce, 'i1')).toBe(
+    const e = ce.box(['Add', ['At', 'i1', 'j'], 1]);
+    expect(occurrenceType(e, 'i1')).toBe(
       'dictionary<number> | indexed_collection<number>'
     );
     // The read still types from the union: both arms carry `number`.
-    expect(ce.box(['At', 'i1', 'j']).type.toString()).toBe('number');
+    expect(e.op1.operator).toBe('At');
+    expect(e.op1.type.toString()).toBe('number');
     // The index symbol keeps the index slot's own type.
-    expect(typeOf(ce, 'j')).toBe(
+    expect(occurrenceType(e, 'j')).toBe(
       'boolean | character | indexed_collection<any> | number | string'
     );
   });
 
   test('a gather index names the elements and writes the indexed arm only', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'g1', ['List', 1, 2]], 1]);
-    expect(typeOf(ce, 'g1')).toBe('indexed_collection<number>');
+    const e = ce.box(['Add', ['At', 'g1', ['List', 1, 2]], 1]);
+    expect(occurrenceType(e, 'g1')).toBe('indexed_collection<number>');
     // The gather itself still reads as a LIST of the refined elements (the
     // out-of-range marker of a numeric element is `nan`, inside `number`).
-    expect(ce.box(['At', 'g1', ['List', 1, 2]]).type.toString()).toBe(
-      'list<number>'
-    );
+    expect(e.op1.operator).toBe('At');
+    expect(e.op1.type.toString()).toBe('list<number>');
   });
 
   test('a string key is a keyed lookup, never a possible gather', () => {
     const ce = new ComputeEngine();
     ce.declare('kl', { type: '(list<real>) -> real' });
-    ce.box(['kl', ['At', 'd2', { str: 'a' }]]);
-    expect(typeOf(ce, 'd2')).toBe('dictionary<list<real>>');
+    const e = ce.box(['kl', ['At', 'd2', { str: 'a' }]]);
+    expect(occurrenceType(e, 'd2')).toBe('dictionary<list<real>>');
   });
 
   test('a union base with a record arm reads the field values, not the iteration pair', () => {
@@ -154,29 +170,35 @@ describe('a collection-typed requirement', () => {
   test('under a provably scalar index the elements ARE collections', () => {
     const ce = new ComputeEngine();
     ce.declare('kl', { type: '(list<real>) -> real' });
-    ce.box(['kl', ['At', 'w1', 1]]);
-    expect(typeOf(ce, 'w1')).toBe('indexed_collection<list<real>>');
+    const e = ce.box(['kl', ['At', 'w1', 1]]);
+    expect(occurrenceType(e, 'w1')).toBe('indexed_collection<list<real>>');
   });
 
   test('under an index that could be a gather it is ambiguous and declined', () => {
     const ce = new ComputeEngine();
     ce.declare('kl', { type: '(list<real>) -> real' });
-    ce.box(['kl', ['At', 'w2', 'jj']]);
-    expect(typeOf(ce, 'w2')).toBe('dictionary<any> | indexed_collection<any>');
+    const e = ce.box(['kl', ['At', 'w2', 'jj']]);
+    expect(occurrenceType(e, 'w2')).toBe(
+      'dictionary<any> | indexed_collection<any>'
+    );
   });
 });
 
 describe('declined and guarded cases', () => {
   test('a multi-index access writes nothing', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'm2', 1, 2], 1]);
-    expect(typeOf(ce, 'm2')).toBe('dictionary<any> | indexed_collection<any>');
+    const e = ce.box(['Add', ['At', 'm2', 1, 2], 1]);
+    expect(occurrenceType(e, 'm2')).toBe(
+      'dictionary<any> | indexed_collection<any>'
+    );
   });
 
   test('an `any`-typed consumer carries no requirement', () => {
     const ce = new ComputeEngine();
-    ce.box(['Length', ['At', 'n1', 1]]);
-    expect(typeOf(ce, 'n1')).toBe('dictionary<any> | indexed_collection<any>');
+    const e = ce.box(['Length', ['At', 'n1', 1]]);
+    expect(occurrenceType(e, 'n1')).toBe(
+      'dictionary<any> | indexed_collection<any>'
+    );
   });
 
   test('a symbol with assignment evidence is not rewritten', () => {
@@ -199,7 +221,7 @@ describe('declined and guarded cases', () => {
 
   test('the write is revisable: a later assignment replaces it', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'xs', 1], 1]);
+    ce.infer([ce.box(['Add', ['At', 'xs', 1], 1])]);
     expect(typeOf(ce, 'xs')).toBe('indexed_collection<number>');
     ce.assign('xs', ce.box(['List', { str: 'a' }, { str: 'b' }]));
     expect(typeOf(ce, 'xs')).toBe('list<string^2>');
@@ -212,29 +234,17 @@ describe('declined and guarded cases', () => {
     // A single-letter name: in LaTeX `sp` is the product `s·p`.
     ce.parse('w[1] + 1', { speculative: true });
     expect(ce.lookupDefinition('w')).toBeUndefined();
-    ce.parse('w[1] + 1');
-    expect(typeOf(ce, 'w')).toBe('indexed_collection<number>');
-  });
-
-  test('the write is journaled: a rolled-back frame restores the type', () => {
-    const ce = new ComputeEngine();
-    ce.box('rb');
-    expect(typeOf(ce, 'rb')).toBe('unknown');
-    ce._withBoxingPassWindow(() =>
-      ce._withRolledBackInference(() => {
-        ce.box(['Add', ['At', 'rb', 1], 1]);
-        expect(typeOf(ce, 'rb')).toBe('indexed_collection<number>');
-      })
-    );
-    expect(typeOf(ce, 'rb')).toBe('unknown');
+    const e = ce.parse('w[1] + 1');
+    expect(occurrenceType(e, 'w')).toBe('indexed_collection<number>');
   });
 });
 
 describe('R2: a boolean use commits the element like a scalar', () => {
   test('And(b[1], B) writes a boolean element; a later numeric use is an error', () => {
     const ce = new ComputeEngine();
-    ce.box(['And', ['At', 'b1', 1], 'B']);
-    expect(typeOf(ce, 'b1')).toBe('indexed_collection<boolean>');
+    const use = ce.box(['And', ['At', 'b1', 1], 'B']);
+    expect(occurrenceType(use, 'b1')).toBe('indexed_collection<boolean>');
+    ce.infer([use]);
     const e = ce.box(['Add', ['At', 'b1', 1], 1]);
     expect(e.isValid).toBe(false);
     expect(e.toString()).toContain('incompatible-type');
@@ -244,10 +254,11 @@ describe('R2: a boolean use commits the element like a scalar', () => {
 
   test('the same conflict through a two-arm base', () => {
     const ce = new ComputeEngine();
-    ce.box(['And', ['At', 'i2', 'j2'], 'B']);
-    expect(typeOf(ce, 'i2')).toBe(
+    const use = ce.box(['And', ['At', 'i2', 'j2'], 'B']);
+    expect(occurrenceType(use, 'i2')).toBe(
       'dictionary<boolean> | indexed_collection<boolean>'
     );
+    ce.infer([use]);
     expect(ce.box(['Add', ['At', 'i2', 'j2'], 1]).isValid).toBe(false);
     expect(typeOf(ce, 'i2')).toBe(
       'dictionary<boolean> | indexed_collection<boolean>'

@@ -140,12 +140,14 @@ describe('Conjugate of a function', () => {
 describe('Conjugate of a number is unchanged', () => {
   it('narrows a valueless operand to number', () => {
     const ce = new ComputeEngine();
+    // The requirement is read on the occurrence of the operand.
     const conj = ce.box(['Conjugate', 'z']);
-    expect(ce.symbol('z').type.toString()).toBe('number');
+    expect(conj.op1.type.toString()).toBe('number');
     expect(conj.type.toString()).toBe('number');
     const sum = ce.box(['Add', ['Conjugate', 'u'], 1]);
     expect(sum.type.toString()).toBe('number');
-    expect(ce.symbol('u').type.toString()).toBe('number');
+    const conjU = sum.ops!.find((op) => op.operator === 'Conjugate')!;
+    expect(conjU.op1.type.toString()).toBe('number');
   });
 
   it('keeps the operand type and folds literals', () => {

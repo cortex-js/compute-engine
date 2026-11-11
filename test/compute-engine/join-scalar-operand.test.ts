@@ -72,7 +72,7 @@ describe('a scalar operand is one element', () => {
     const ce2 = new ComputeEngine();
     const e = ce2.box(['Join', 'xs', 3]);
     expect(e.json).toEqual(['Join', 'xs', ['List', 3]]);
-    expect(String(ce2.symbol('xs').type)).toBe('collection<any>');
+    expect(String(e.op1.type)).toBe('collection<any>');
     ce2.box(['Assign', 'xs', ['List', 1, 2]]).evaluate();
     expect(e.evaluate().toString()).toBe('[1,2,3]');
   });

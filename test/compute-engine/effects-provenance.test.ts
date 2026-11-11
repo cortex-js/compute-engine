@@ -98,10 +98,12 @@ describe('EFFECTS PROVENANCE — history survives redefinition', () => {
 
   test('the TYPE axis rides the same transfer (new behavior, pinned)', () => {
     const ce = new ComputeEngine();
-    ce.parse('g(t)\\coloneq 2t').evaluate(); // auto-declare then redefine
-    // The auto-declared anchor recorded on the pre-assignment value half is
-    // visible on the post-assignment operator half.
-    expect(historyOf(ce, 'g')).toContainEqual(['type', 'auto-declared', 'g']);
+    ce.declare('g', 'unknown');
+    ce.assign('g', 3); // records a `value-derived` entry on the value half
+    ce.parse('g(t)\\coloneq 2t').evaluate(); // redefine as a function
+    // The entry recorded on the pre-assignment value half is visible on the
+    // post-assignment operator half.
+    expect(historyOf(ce, 'g')).toContainEqual(['type', 'value-derived', '3']);
   });
 });
 
@@ -294,8 +296,9 @@ describe('EFFECTS PROVENANCE — rollback and the cap', () => {
       cause: ce.box(i),
     }));
     // A 9th append (any axis) displaces index 1 — here the effects entry —
-    // exactly as the axis-blind phase-1 policy says.
-    ce.box(['Add', 'w', 1]);
+    // exactly as the axis-blind phase-1 policy says. An assignment that
+    // moves the type appends a `value-derived` entry.
+    ce.assign('w', 1);
     const history = def.value._typeProvenance!;
     expect(history).toHaveLength(8);
     expect(history[0].cause?.toString()).toBe('0');

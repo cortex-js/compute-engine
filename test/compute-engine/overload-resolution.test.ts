@@ -355,21 +355,23 @@ describe('overload resolution: inference (design §4.3)', () => {
     const ce = engine();
     ce.declare('x', 'unknown');
     ce.declare('y', 'unknown');
-    expect(ce.box(['Rnd', 'x', 'y']).isValid).toBe(true);
+    const call = ce.box(['Rnd', 'x', 'y']);
+    expect(call.isValid).toBe(true);
     // Position 0: arms 2 and 3 are viable (arm 1 is out on arity);
     // widen(set<real>, collection) === collection.
-    expect(ce.symbol('x').type.toString()).toBe('collection');
+    expect(call.op1.type.toString()).toBe('collection');
     // Position 1: both viable arms say `number`, so the join IS `number`.
-    expect(ce.symbol('y').type.toString()).toBe('number');
+    expect(call.op2.type.toString()).toBe('number');
   });
 
   it('infers the join across all three arms for a one-argument call', () => {
     const ce = engine();
     ce.declare('x', 'unknown');
-    expect(ce.box(['Rnd', 'x']).isValid).toBe(true);
+    const call = ce.box(['Rnd', 'x']);
+    expect(call.isValid).toBe(true);
     // `set<real>` is a `collection` (see the two-argument case above), so
     // the join of the three arms is `collection | number`.
-    expect(ce.symbol('x').type.toString()).toBe(
+    expect(call.op1.type.toString()).toBe(
       'collection | number'
     );
   });
@@ -414,12 +416,12 @@ describe('overload resolution: inference (design §4.3)', () => {
     );
     ce.declare('x', 'unknown');
     ce.declare('y', 'unknown');
-    ce.box(['Rnd', 'x', 'y']);
+    const call = ce.box(['Rnd', 'x', 'y']);
     // Both positions join to `number | string`, which permits `x: number,
     // y: number` — a combination neither arm accepts. Imprecision, not
     // unsoundness: the constraint is WEAKER than the truth.
-    expect(ce.symbol('x').type.toString()).toBe('number | string');
-    expect(ce.symbol('y').type.toString()).toBe('number | string');
+    expect(call.op1.type.toString()).toBe('number | string');
+    expect(call.op2.type.toString()).toBe('number | string');
   });
 });
 
@@ -431,16 +433,19 @@ describe('overload resolution: write-freedom (design §4.2)', () => {
       evaluate: () => ce.Nothing,
     });
     ce.declare('A', 'set');
-    // `s` is auto-declared with an INFERRED `value` type, which arm 1's `set`
-    // parameter would narrow during a naive trial validation of that arm.
-    ce.box(['SetMinus', 'A', 's']);
+    // `ce.infer()` declares `s` with an INFERRED `value` type, which arm 1's
+    // `set` parameter would narrow during a naive trial validation of that
+    // arm.
+    ce.infer([ce.box(['SetMinus', 'A', 's'])]);
     expect(ce.symbol('s').type.toString()).toBe('value');
 
     // A boolean second operand refutes BOTH arms, so no arm is selected.
-    expect(ce.box(['G', 's', true]).isValid).toBe(false);
+    const call = ce.box(['G', 's', true]);
+    expect(call.isValid).toBe(false);
 
     // Had resolution run arms through the real validator, arm 1 would have
     // narrowed `s` to `set` before being rejected.
+    expect(call.op1.type.toString()).toBe('value');
     expect(ce.symbol('s').type.toString()).toBe('value');
   });
 });

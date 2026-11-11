@@ -45,9 +45,10 @@ describe('un-applied builtin operator devolves to a symbol', () => {
   });
 
   test('devolved symbol gets an inferred numeric type', () => {
+    // Boxing declares no name: the occurrence carries the type.
     const ce = new ComputeEngine();
-    ce.parse('N + 1');
-    expect(ce.box('N').type.matches('number')).toBe(true);
+    const n = ce.parse('N + 1').ops!.find((op) => op.symbol === 'N')!;
+    expect(n.type.matches('number')).toBe(true);
   });
 
   test('geometry labels containing D no longer poison the expression', () => {

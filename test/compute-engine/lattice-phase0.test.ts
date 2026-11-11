@@ -353,11 +353,11 @@ describe('LATTICE PHASE 1: assignment promotion', () => {
   });
 
   it('applies the same rungs when the incumbent type came from a use', () => {
-    // `p` is auto-declared `number` by the arithmetic use, so the assignment
-    // takes the `engine-declarations.ts` copy of the table rather than the
-    // fresh-declaration one.
+    // `ce.infer()` declares `p` `number` from the arithmetic use, so the
+    // assignment takes the `engine-declarations.ts` copy of the table rather
+    // than the fresh-declaration one.
     const e = new ComputeEngine();
-    e.box(['Add', 'p', 1]).evaluate();
+    e.infer([e.box(['Add', 'p', 1])]);
     expect(e.box('p').type.toString()).toBe('number');
     e.assign('p', e.box(Infinity));
     expect(e.box('p').type.toString()).toBe('infinity');

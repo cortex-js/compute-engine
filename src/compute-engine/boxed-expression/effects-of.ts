@@ -74,7 +74,89 @@ import { isDictionary, isFunction, isString, sym } from './type-guards.js';
  * original spelling of this guard was the coarse `ce._anyVersion`; it moved
  * to the callable axis when `_effects` was re-keyed
  * (`docs/EFFECTS-MODEL.md` §6).
+ *
+ * With the engine flag `_bindingUnits`, a name can have no definition when
+ * it is read (a free name: boxing declares nothing), and a later declaration
+ * of it advances no axis. Each by-name lookup of this walk then goes through
+ * {@link lookupByName}, which records the name and the definition it
+ * resolves to in the lookup record of the effects computation in progress
+ * ({@link EffectsLookups}): the `_effects` memo of a node, and the
+ * dictionary memo below, are computed again when one of the names of their
+ * record resolves to another definition. These records are private to the
+ * effects memos: they do not go through the shared collectors of
+ * `object-deps.ts`, so no other cache that encloses an effects computation
+ * (the memo of a stored value, the element memo of a lazy collection)
+ * depends on them.
  */
+
+/** The names that one effects computation resolved by name, each with the
+ * definition it resolved to (`undefined` for none). */
+export type EffectsLookups = Map<
+  string,
+  ReturnType<ComputeEngine['lookupDefinition']>
+>;
+
+/** With the engine flag `_bindingUnits`: one lookup record for each effects
+ * computation in progress, the innermost last. Always empty without the
+ * flag. */
+const _effectsLookupStack: EffectsLookups[] = [];
+
+/** The definition `name` resolves to in the current context, as
+ * `ce.lookupDefinition()` gives it. With the engine flag `_bindingUnits`, the
+ * read is recorded in the lookup record of the innermost effects computation
+ * (see the note above). */
+function lookupByName(
+  ce: ComputeEngine,
+  name: string
+): ReturnType<ComputeEngine['lookupDefinition']> {
+  const def = ce.lookupDefinition(name);
+  // Only a name with no definition is recorded: its first declaration moves
+  // no version that the memo is keyed on. A change of an existing
+  // definition, or a declaration that hides it in another scope, changes
+  // the key of the memo (the callable version, the lexical scope), as
+  // without the flag.
+  if (def === undefined && ce._bindingUnits) {
+    const top = _effectsLookupStack[_effectsLookupStack.length - 1];
+    if (top !== undefined && !top.has(name)) top.set(name, def);
+  }
+  return def;
+}
+
+/** Start the lookup record of an effects computation. MUST be paired with
+ * exactly one {@link endEffectsLookups}, in a `finally`. Called only with
+ * the engine flag `_bindingUnits`. */
+export function beginEffectsLookups(): void {
+  _effectsLookupStack.push(new Map());
+}
+
+/** End the lookup record of the innermost effects computation, add its
+ * names to the record of the computation that encloses it (which depends on
+ * them too), and return it, or `undefined` when it is empty. */
+export function endEffectsLookups(): EffectsLookups | undefined {
+  const record = _effectsLookupStack.pop();
+  if (record === undefined || record.size === 0) return undefined;
+  mergeEffectsLookups(record);
+  return record;
+}
+
+/** True when each name of `record` still resolves to the definition it
+ * resolved to when it was recorded. */
+export function effectsLookupsValid(
+  ce: ComputeEngine,
+  record: EffectsLookups
+): boolean {
+  for (const [name, def] of record)
+    if (ce.lookupDefinition(name) !== def) return false;
+  return true;
+}
+
+/** Add the names of `record` (a served memo's) to the record of the
+ * innermost effects computation in progress, if any. */
+export function mergeEffectsLookups(record: EffectsLookups): void {
+  const top = _effectsLookupStack[_effectsLookupStack.length - 1];
+  if (top === undefined) return;
+  for (const [name, def] of record) if (!top.has(name)) top.set(name, def);
+}
 
 /**
  * The effects of evaluating `expr` — the projection rule above.
@@ -122,7 +204,9 @@ export function effectsOf(expr: Expression): ComputedEffects {
  * same two keys as the `_effects` memo of `BoxedFunction`: the engine's
  * `_callableVersion` and the ambient lexical scope. A dictionary is
  * immutable, so only what its values resolve to can change, and those stamps
- * track exactly that.
+ * track exactly that. With the engine flag `_bindingUnits`, the entry also
+ * keeps the lookup record of its computation (`deps`, see
+ * {@link lookupByName}), as the `_effects` memo does.
  *
  * A result is stored only when its computation took no release step (see
  * {@link releaseSteps}). Following a binding at a `ReleaseHold` is the only
@@ -142,19 +226,29 @@ function dictionaryEffects(
   if (
     cached !== undefined &&
     cached.callable === callable &&
-    cached.scope === scope
-  )
+    cached.scope === scope &&
+    (cached.deps === undefined || effectsLookupsValid(ce, cached.deps))
+  ) {
+    if (cached.deps !== undefined) mergeEffectsLookups(cached.deps);
     return cached.value;
+  }
 
   const stepsBefore = releaseSteps;
   let effects: ComputedEffects = undefined;
-  for (const value of dict.values) {
-    // `'any'` absorbs under union.
-    if (effects === 'any') break;
-    effects = unionComputedEffects(effects, effectsOf(value));
+  const collect = ce._bindingUnits;
+  if (collect) beginEffectsLookups();
+  let deps: EffectsLookups | undefined;
+  try {
+    for (const value of dict.values) {
+      // `'any'` absorbs under union.
+      if (effects === 'any') break;
+      effects = unionComputedEffects(effects, effectsOf(value));
+    }
+  } finally {
+    if (collect) deps = endEffectsLookups();
   }
   if (releaseSteps === stepsBefore)
-    dictionaryEffectsMemo.set(dict, { callable, scope, value: effects });
+    dictionaryEffectsMemo.set(dict, { callable, scope, value: effects, deps });
   return effects;
 }
 
@@ -163,7 +257,12 @@ function dictionaryEffects(
  * under. A `WeakMap`, so an entry lives only as long as its dictionary. */
 const dictionaryEffectsMemo = new WeakMap<
   object,
-  { callable: number; scope: unknown; value: ComputedEffects }
+  {
+    callable: number;
+    scope: unknown;
+    value: ComputedEffects;
+    deps: EffectsLookups | undefined;
+  }
 >();
 
 /** Count of the release steps {@link applicationEffects} has taken: each time
@@ -277,6 +376,10 @@ export function applicationEffects(expr: Expression): ComputedEffects {
   // discharged, and `protocol-property-effects.test.ts` pins it directly
   // ("a node read BEFORE its receiver was typed re-reports afterwards") so that
   // narrowing the selector fails a test instead of silently freezing a label.
+  // With the engine flag `_bindingUnits`, the receiver can be a free name
+  // with no definition, and its first declaration advances no axis: the read
+  // of the receiver is then recorded (`lookupByName()`), and the memo depends
+  // on it.
   let effects: ComputedEffects = mutationEffects(
     expr,
     ownEffects(expr.engine, expr.ops, def)
@@ -704,7 +807,7 @@ export function hasDefinedEffect(
     // values it is passed. A head with neither stated effects nor a value
     // (an unimplemented declaration, an undeclared name, a parameter) does
     // not count.
-    const def = expr.engine.lookupDefinition(expr.operator);
+    const def = lookupByName(expr.engine, expr.operator);
     const head =
       def !== undefined && 'value' in def
         ? valueBindingEffects(def.value)
@@ -982,7 +1085,7 @@ function layoutDeclaresField(
     t !== undefined && objectLayoutOfType(t)?.elements[name] !== undefined;
   const root = sym(receiver);
   if (root !== undefined) {
-    const def = receiver.engine.lookupDefinition(root);
+    const def = lookupByName(receiver.engine, root);
     if (def === undefined || !('value' in def)) return false;
     return layoutOf(def.value.type.type);
   }
@@ -1185,7 +1288,7 @@ function isObjectFieldStore(target: Expression | undefined): boolean {
 
   const root = sym(receiver);
   if (root !== undefined) {
-    const def = target.engine.lookupDefinition(root);
+    const def = lookupByName(target.engine, root);
     // The value-definition test is spelled inline rather than through
     // `isValueDef()` (`boxed-expression/utils.ts`) for the same layering reason
     // as the note above: importing that module here closes the cycle
@@ -1218,7 +1321,7 @@ function isObjectFieldStore(target: Expression | undefined): boolean {
 function releasedContent(op: Expression): Expression {
   const name = sym(op);
   if (name !== undefined) {
-    const def = op.engine.lookupDefinition(name);
+    const def = lookupByName(op.engine, name);
     const value =
       def !== undefined && 'value' in def ? def.value.value : undefined;
     if (value !== undefined && isQuote(value)) return value.ops[0] ?? op;
@@ -1337,7 +1440,7 @@ function hasSignatureArm(t: Type | undefined): boolean {
 function valueHeadEffects(
   expr: Expression & { operator: string }
 ): ComputedEffects | typeof NOT_CALLABLE {
-  const def = expr.engine.lookupDefinition(expr.operator);
+  const def = lookupByName(expr.engine, expr.operator);
   if (def === undefined || !('value' in def)) return NOT_CALLABLE;
   const effects = valueBindingEffects(def.value);
   return effects === UNIMPLEMENTED ? 'any' : effects;
@@ -1366,7 +1469,7 @@ function latentEffectsOf(op: Expression): ComputedEffects {
 
   const name = sym(op);
   if (name !== undefined) {
-    const def = op.engine.lookupDefinition(name);
+    const def = lookupByName(op.engine, name);
     if (def === undefined) return undefined;
     if ('operator' in def) return def.operator.effects;
     // A value binding: a stored literal, or an opaque function declared with a
@@ -1430,6 +1533,6 @@ function lookupOperatorDefinition(
   ce: ComputeEngine,
   name: string
 ): BoxedOperatorDefinition | undefined {
-  const def = ce.lookupDefinition(name);
+  const def = lookupByName(ce, name);
   return def && 'operator' in def ? def.operator : undefined;
 }

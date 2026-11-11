@@ -496,11 +496,18 @@ export function inferNumericArgs(
       return false;
     };
     let inferredType: Type = 'real';
-    for (const x of ops)
-      if (couldBeNonReal(x)) {
-        inferredType = 'number';
-        break;
-      }
+    // With the engine flag `_bindingUnits`, the requirement is kept in the
+    // unit of the expression, and it outlives the types that the operands
+    // have now: with `x := 2`, the `real` of `x + 1` would still be read
+    // after `x := 1 + i`. The use requires a number, whatever the operands
+    // are when it is boxed.
+    if (ce._bindingUnits) inferredType = 'number';
+    else
+      for (const x of ops)
+        if (couldBeNonReal(x)) {
+          inferredType = 'number';
+          break;
+        }
     for (const x of ops)
       if (isFiniteIndexedCollection(x)) {
         // `.each()` on a lazy collection materializes every element, so never
@@ -6154,6 +6161,17 @@ function unitRepairSite(
     const def = sym.valueDefinition;
     if (def === undefined || (!def.inferredType && !def.type.isUnknown))
       return undefined;
+    // A definition with a concrete inferred type that the root construction
+    // in progress did not make was typed before it, by `ce.infer()`, an
+    // assignment or an evaluation (boxing writes no definition, rule 1). It
+    // is the evidence of an earlier expression, as an entry that an earlier
+    // boxing wrote: the repair does not retype the name, as without the
+    // flag a definition inferred before the boxing is not eligible.
+    if (
+      !def.declaredType.isUnknown &&
+      !ce._boxingState.isDefinitionMade(def)
+    )
+      return { env: undefined, key: def, eligible: false };
     key = def;
   }
   if (key === undefined) return undefined;

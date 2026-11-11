@@ -70,10 +70,11 @@ describe('what a fact contributes to the type', () => {
   test('a part-bound never proves the whole value is real', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Greater', ['Real', 's'], 1]))).toBe('ok');
-    // The type is the carrier the use under `Real` infers into the fresh
-    // symbol (`complex | infinity`); the fact itself adds no realness.
-    expect(ce.box('s').type.toString()).toBe('complex | infinity');
-    expect(ce.box('s').type.matches('real')).toBe(false);
+    // The type of an occurrence under `Real` is the carrier that the use
+    // requires (`complex | infinity`); the fact itself adds no realness.
+    const s = ce.box(['Real', 's']).op1;
+    expect(s.type.toString()).toBe('complex | infinity');
+    expect(s.type.matches('real')).toBe(false);
   });
 
   test('a finite modulus bound proves the whole value is finite', () => {
@@ -238,9 +239,10 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     // Direction 1: the inner definition is not what the outer fact is about,
     // so nothing is merged into it — a name-keyed merge would answer `never`.
     expect(ce.box('x').type.toString()).toBe('string');
-    // Direction 2: a HELD reference to the outer definition still reads the
-    // fact, even from inside the scope that shadows the name.
-    expect(outer.type.toString()).toBe('real<3<..>');
+    // Direction 2: a HELD reference resolves its name when it is read, so
+    // inside the scope that shadows the name it reads the inner definition,
+    // and after the pop it reads the outer definition and its fact.
+    expect(outer.type.toString()).toBe('string');
     // @fixme The SIGN channel is still keyed by NAME, so it answers from the
     // enclosing scope's fact about a value the shadowing `x` is not. Folding
     // it onto the definition is the next round
@@ -250,6 +252,7 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     ce.popScope();
 
     expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(outer.type.toString()).toBe('real<3<..>');
   });
 
   test('two definitions of one name each keep their own facts', () => {
@@ -262,7 +265,8 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     ce.declare('x', 'integer');
     expect(ce.assume(ce.parse('x < 10'))).toBe('ok');
     expect(ce.box('x').type.toString()).toBe('integer<..9>');
-    expect(outer.type.toString()).toBe('real<3<..>');
+    // A held reference reads the definition that its name resolves to now
+    expect(outer.type.toString()).toBe('integer<..9>');
 
     // Re-asserting the enclosing scope's bound is NOT redundant here: the
     // inherited record is about the OTHER definition, and this one has no
@@ -270,6 +274,7 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     expect(ce.assume(ce.parse('x > 3'))).toBe('ok');
     expect(ce.box('x').type.toString()).toBe('integer<4..9>');
     ce.popScope();
+    expect(outer.type.toString()).toBe('real<3<..>');
   });
 
   test('re-asserting a bound about the SAME definition is still a tautology', () => {

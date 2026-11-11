@@ -21,6 +21,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+// `t` is the real input of every case.
+ce.declare('t', 'real');
 ce.declare('P', 'list<tuple<number, number>>');
 ce.assign('P', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
 
@@ -173,6 +175,7 @@ describe('Python fallback: the spelling of an absent value', () => {
   afterAll(() => warn.mockRestore());
 
   const py = new ComputeEngine();
+  py.declare('t', 'real');
   py.declare('P', 'list<tuple<number, number>>');
   py.assign('P', py.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
   py.assign('g', py.box(['Function', 'x', 'x']));

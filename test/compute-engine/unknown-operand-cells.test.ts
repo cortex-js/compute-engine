@@ -23,8 +23,8 @@ describe('P1 — the `unknown` widening happens at boxing, not in the derivation
     const ce = new ComputeEngine();
     ce.declare('u', 'unknown');
     expect(ce.symbol('u').type.toString()).toBe('unknown');
-    ce.box(['Add', 'u', 1]);
-    expect(ce.symbol('u').type.toString()).toBe('number');
+    // The use narrows the occurrence in its own expression
+    expect(ce.box(['Add', 'u', 1]).op1.type.toString()).toBe('number');
   });
 
   test('row 1 — Add(u, 1) types `number` (the widen of the inferred operand)', () => {

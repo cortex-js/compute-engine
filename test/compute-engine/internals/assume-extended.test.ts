@@ -86,8 +86,12 @@ describe('Greater(Imaginary(tau), 0)', () => {
     // `complex | infinity` into the fresh symbol (the inference every
     // declared-domain operator produces) — and the disequality it derives
     // (`Im(tau)` bounded away from zero implies `tau ≠ 0`) excludes the one
-    // value the type can name.
-    expect(ce.expr('tau').type.toString()).toBe('complex & !0 | infinity');
+    // value the type can name. The type is read on the operand of a use:
+    // with the engine flag `_bindingUnits`, the requirement of the use is
+    // in the environment of its unit.
+    expect(
+      ce.expr(['Imaginary', 'tau']).op1.type.toString()
+    ).toBe('complex & !0 | infinity');
   });
 
   it('stores the bound on the im:tau subject in the fact index', () => {
@@ -146,8 +150,11 @@ describe('Greater(Real(s), 1)', () => {
   it('does NOT retype s as real (the destructive-retype bug)', () => {
     expect(ce.expr('s').isExtendedReal).not.toBe(true);
     // The use under `Real` infers its carrier `complex | infinity` — not
-    // `real`.
-    expect(ce.expr('s').type.toString()).toBe('complex | infinity');
+    // `real`. The type is read on that use: a new boxing of `s` does not
+    // use it under `Real`.
+    expect(ce.expr(['Real', 's']).op1.type.toString()).toBe(
+      'complex | infinity'
+    );
   });
 
   it('stores the bound on the re:s subject', () => {
@@ -224,9 +231,11 @@ describe('Less(Abs(q), 1)', () => {
     // |r| > 2 says nothing about finiteness. The use `Abs(r)` infers `r`
     // from `Abs`'s parameter carrier — `complex | infinity`, every number
     // except NaN (signature flip of 2026-09-01) — which still admits every
-    // infinity; nothing here narrows to a finite type.
-    expect(ce2.expr('r').type.toString()).toBe('complex | infinity');
-    expect(ce2.expr('r').type.matches('complex')).toBe(false);
+    // infinity; nothing here narrows to a finite type. The type is read on
+    // that use.
+    const r = ce2.expr(['Abs', 'r']).op1;
+    expect(r.type.toString()).toBe('complex | infinity');
+    expect(r.type.matches('complex')).toBe(false);
   });
 });
 

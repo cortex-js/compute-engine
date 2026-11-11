@@ -46,16 +46,13 @@ describe('Apply with a callee of unknown type (issue #426)', () => {
   });
 
   test('the parse routes agree with the box route', () => {
-    expect(ce.parse('\\operatorname{Apply}(g(f), x)').evaluate().json).toEqual([
-      'Apply',
-      ['g', 'f'],
-      'x',
-    ]);
-    expect(ce.parse('g(f) \\lhd x').evaluate().json).toEqual([
-      'Apply',
-      ['g', 'f'],
-      'x',
-    ]);
+    const apply = ce.parse('\\operatorname{Apply}(g(f), x)');
+    expect(apply.evaluate().json).toEqual(['Apply', ['g', 'f'], 'x']);
+    const lhd = ce.parse('g(f) \\lhd x');
+    expect(lhd.evaluate().json).toEqual(['Apply', ['g', 'f'], 'x']);
+    // The parse of `g(f)` after `\rhd` reads `g` as a function only when `g`
+    // is declared one: the earlier calls are committed with `ce.infer()`.
+    ce.infer([apply, lhd]);
     // A pipe into a stage of unknown type stays a `Pipe`, as a pipe into an
     // undefined symbol does.
     expect(ce.parse('x \\rhd g(f)').evaluate().json).toEqual([

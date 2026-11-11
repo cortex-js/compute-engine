@@ -71,8 +71,10 @@ describe('declared single-uppercase symbols are type-checked', () => {
 describe('the standard-library devolve repair is preserved', () => {
   test('bare `N` in value position still devolves', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('N + 1').json).toEqual(['Add', 'N', 1]);
-    expect(ce.box('N').type.matches('number')).toBe(true);
+    const e = ce.parse('N + 1');
+    expect(e.json).toEqual(['Add', 'N', 1]);
+    // The occurrence is read as a variable; boxing declares nothing.
+    expect(e.op1.type.matches('number')).toBe(true);
   });
 
   test('repeated occurrences in one expression (the shadow branch)', () => {

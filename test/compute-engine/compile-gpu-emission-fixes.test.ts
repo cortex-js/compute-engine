@@ -9,6 +9,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 
 const ce = new ComputeEngine();
+ce.declare('x', 'real | signed_infinity | nan');
 ce.declare('y', 'real | signed_infinity | nan');
 ce.declare('u', 'real');
 ce.declare('n', 'integer');

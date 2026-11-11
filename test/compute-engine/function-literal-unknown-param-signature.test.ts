@@ -204,8 +204,10 @@ describe('A USE DOES NOT REWRITE A SIGNATURE DERIVED FROM A BODY', () => {
     const ce = new ComputeEngine();
     ce.assign('k', ce.parse('x \\mapsto x'));
     expect(ce.box('k').type.toString()).toBe('(x: unknown) -> unknown');
+    // The use requires a number of the result: the requirement of an
+    // arithmetic use does not depend on the types of the other operands.
     ce.box(['Add', ['k', 1], 2]);
-    expect(ce.box('k').type.toString()).toBe('(x: unknown) -> real');
+    expect(ce.box('k').type.toString()).toBe('(x: unknown) -> number');
   });
 });
 

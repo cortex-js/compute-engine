@@ -195,9 +195,12 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     // The mode is resolved BEFORE `_mode` is written: the decline throws
     // outside the try/finally that restores it, so a latch mutated ahead of
     // the resolution would stay stuck.
-    const glsl = ce._getCompilationTarget('glsl')!.createTarget();
+    // The input is declared, so the decline is the one of the mode.
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    const glsl = e._getCompilationTarget('glsl')!.createTarget();
     expect(() =>
-      compile(ce.parse('x'), {
+      compile(e.parse('x'), {
         target: glsl,
         mode: 'complex',
         fallback: false,

@@ -916,12 +916,10 @@ describe('undeclared-symbol honors the resolveSymbol hook (E2)', () => {
   });
 });
 
-describe('undeclared-symbol is per-engine order-dependent (E4, documented)', () => {
-  // Documents (does not change) the warm-engine statefulness of code 1: the
-  // first canonical parse of an undeclared name auto-declares it, so an
-  // identical second parse on the SAME engine no longer flags it. A validation
-  // gate should use a fresh engine (as `diags()` does).
-  test('same engine: second identical parse no longer flags the name', () => {
+describe('undeclared-symbol does not depend on an earlier parse', () => {
+  // A parse declares no name, so an identical second parse on the SAME
+  // engine flags the name again.
+  test('same engine: a second identical parse flags the name too', () => {
     const ce = new ComputeEngine();
     const first = ce.parse('u + 1', { diagnostics: true });
     expect(
@@ -935,7 +933,7 @@ describe('undeclared-symbol is per-engine order-dependent (E4, documented)', () 
       byCode(second.parseDiagnostics ?? [], 'undeclared-symbol').some(
         (d) => d.detail?.name === 'u'
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

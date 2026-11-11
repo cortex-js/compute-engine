@@ -1028,15 +1028,22 @@ describe('COMPILE — `Nothing` is never emitted as a variable reference', () =>
 
   test('a variable legitimately NAMED `Nothing` in `vars` still compiles', () => {
     // The `vars` lookup precedes the guard, so a caller that really pins a
-    // runtime input called `Nothing` keeps it.
-    const r = compile(
-      ce.box(['Sum', 'x', ['Limits', 'i', 1, 'Nothing']] as any),
-      {
-        vars: { Nothing: '_.Nothing', x: '_.x' },
-      }
-    );
-    expect(r.success).toBe(true);
-    expect(r.run({ Nothing: 3, x: 2 }) as number).toBe(6);
+    // runtime input called `Nothing` keeps it. A compiled input needs a
+    // type, so `x` is declared.
+    ce.pushScope();
+    try {
+      ce.declare('x', 'real');
+      const r = compile(
+        ce.box(['Sum', 'x', ['Limits', 'i', 1, 'Nothing']] as any),
+        {
+          vars: { Nothing: '_.Nothing', x: '_.x' },
+        }
+      );
+      expect(r.success).toBe(true);
+      expect(r.run({ Nothing: 3, x: 2 }) as number).toBe(6);
+    } finally {
+      ce.popScope();
+    }
   });
 });
 

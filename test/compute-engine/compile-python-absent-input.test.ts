@@ -71,14 +71,14 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
   });
 
   it('reads an input with an inferred `number` type as it is (CE-460)', () => {
-    // A use narrows each free symbol to `number`. The type is inferred, not
-    // declared.
+    // A use types each free symbol `number` in its expression. The type is
+    // inferred, not declared: the name has no definition.
     const ce = new ComputeEngine();
     const code = (latex: string): string =>
       python.compile(ce.parse(latex)).code;
     expect(code('\\sin(s)')).toBe('np.sin(s)');
-    expect(ce.symbol('s').type.toString()).toBe('number');
-    expect(ce.symbol('s').valueDefinition?.inferredType).toBe(true);
+    expect(ce.parse('\\sin(s)').op1.type.toString()).toBe('number');
+    expect(ce.lookupDefinition('s')).toBeUndefined();
     expect(code('t^2+1')).toBe('t ** 2 + 1');
     expect(code('u+v')).toBe('u + v');
   });
@@ -245,7 +245,8 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
     // `r` is a free symbol of a parsed expression. Its type is inferred:
     // `unknown`, or `number` if the product narrows its symbols.
     const e = ce.parse('2\\pi r');
-    expect(ce.symbol('r').valueDefinition?.inferredType).toBe(true);
+    // Boxing declares nothing: `r` has no definition.
+    expect(ce.lookupDefinition('r')).toBeUndefined();
     // An operator over `Missing` gives `Missing` in the interpreter.
     expect(e.subs({ r: ce.Missing }).evaluate().symbol).toBe('Missing');
     const script =
@@ -262,7 +263,13 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
     const ce = new ComputeEngine();
     for (const latex of ['\\sin(r)', 'r^2+1', '\\sum_{k=1}^{10} k r']) {
       const e = ce.parse(latex);
-      expect(ce.symbol('r').type.toString()).toBe('number');
+      // The type that the expression requires of `r`, read on an
+      // occurrence: a `r` boxed alone has no use.
+      const occurrence = (x: any): any =>
+        x.symbol === 'r'
+          ? x
+          : (x.ops ?? []).map(occurrence).find((y: any) => y !== undefined);
+      expect(occurrence(e).type.toString()).toBe('number');
       expect(e.subs({ r: ce.Missing }).evaluate().symbol).toBe('Missing');
       const script =
         `import numpy as np\nimport math\n` +

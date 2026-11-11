@@ -141,8 +141,9 @@ describe('only the annotated slots of a function literal are a contract', () => 
   test('a bare slot still narrows an untyped symbol argument', () => {
     const ce = new ComputeEngine();
     ce.assign('k', partlyAnnotated(ce));
-    ce.box(['k', 'zs', 1]);
-    expect(ce.box('zs').type.toString()).toBe('indexed_collection<number>');
+    expect(ce.box(['k', 'zs', 1]).op1.type.toString()).toBe(
+      'indexed_collection<number>'
+    );
   });
 
   test('a rest parameter does not turn the bare slots back into contracts', () => {

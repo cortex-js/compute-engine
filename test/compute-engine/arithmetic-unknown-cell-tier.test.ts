@@ -52,14 +52,13 @@ describe('ARITHMETIC OVER A CELL OF UNKNOWN TYPE', () => {
   test('a free symbol in a list literal is narrowed to number, as a scalar is', () => {
     const ce = fresh();
     // Before: vector<real^1>, and `y` narrowed to `real`.
-    expect(ce.box(['Multiply', 2, ['List', 'y']]).type.toString()).toBe(
-      'vector<1>'
-    );
-    expect(ce.box('y').type.toString()).toBe('number');
+    const inList = ce.box(['Multiply', 2, ['List', 'y']]);
+    expect(inList.type.toString()).toBe('vector<1>');
+    expect(inList.op2.op1.type.toString()).toBe('number');
 
     const ce2 = fresh();
-    ce2.box(['Multiply', 2, 'y']);
-    expect(ce2.box('y').type.toString()).toBe('number');
+    const scalar = ce2.box(['Multiply', 2, 'y']);
+    expect(scalar.op2.type.toString()).toBe('number');
   });
 
   test('the cells of a list literal decide the tier', () => {

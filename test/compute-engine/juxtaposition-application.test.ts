@@ -71,20 +71,20 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
     });
 
     test('every route infers the head as a function', () => {
-      // On the multi-operand route the head symbol is canonicalized, which
-      // auto-declares it with an unknown type, before it is applied; the
-      // application must still infer `function`, as the two-operand route
-      // does.
+      // On the multi-operand route the head symbol is canonicalized before
+      // it is applied; the application must still infer `function`, as the
+      // two-operand route does. Boxing declares no name: `ce.infer()`
+      // commits the reading of the head.
       for (const source of ['f(3)', '2f(3)', '2f(3)^2']) {
         const ce = new ComputeEngine();
-        ce.parse(source);
+        ce.infer([ce.parse(source)]);
         expect([source, ce.symbol('f').type.toString()]).toEqual([
           source,
           'function',
         ]);
       }
       const ce = new ComputeEngine();
-      ce.box(['InvisibleOperator', 2, 'f', ['Delimiter', 3]]);
+      ce.infer([ce.box(['InvisibleOperator', 2, 'f', ['Delimiter', 3]])]);
       expect(ce.symbol('f').type.toString()).toBe('function');
     });
 
@@ -401,12 +401,12 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
     });
 
     test('an inferred function declaration yields to the handler', () => {
-      // A raw parse canonicalized while the handler was not consulted left
-      // `b` an inferred, bodiless function; a later canonical parse must
+      // A use committed by `ce.infer()` while the handler was not consulted
+      // left `b` an inferred, bodiless function; a later canonical parse must
       // still read the product the handler asks for, and a coefficient
       // handler that answers `value` counts as a value.
       const ce = new ComputeEngine();
-      ce.parse('b(y+1)'); // `b` is now an inferred function
+      ce.infer([ce.parse('b(y+1)')]); // `b` is now an inferred function
       expect(ce.lookupDefinition('b')).toBeDefined();
       ce.latexOptions = {
         ...ce.latexOptions,
@@ -421,7 +421,7 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       // An `unknown` answer is a value answer too, and a parenthesized head
       // in a longer product takes the same override.
       const forgotten = new ComputeEngine();
-      forgotten.parse('b(y+1)');
+      forgotten.infer([forgotten.parse('b(y+1)')]);
       forgotten.latexOptions = {
         ...forgotten.latexOptions,
         resolveSymbol: (id) => (id === 'b' ? { type: 'unknown' } : undefined),
@@ -646,7 +646,7 @@ describe('JUXTAPOSITION WITH A FUNCTION-TYPED OPERAND', () => {
 
   test('parse route: the juxtaposition gives the error of the explicit operator', () => {
     const ce = new ComputeEngine();
-    ce.parse('f(x)'); // Infers `f` as a function.
+    ce.infer([ce.parse('f(x)')]); // Declares `f` an inferred function.
     for (const [juxtaposed, explicit] of [
       ['fy', 'f\\times y'],
       ['f y', 'f\\cdot y'],

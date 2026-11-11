@@ -427,6 +427,64 @@ describe('BINDING UNITS: THE INPUT OF AN OPERATION', () => {
       spy.mockRestore();
     }
   });
+
+  // `at()` and `each()` run the collection handlers of their receiver, so
+  // they are operations on the receiver: an element is computed with the
+  // entries of every unit of the receiver, as `evaluate()` of the receiver
+  // computes it. Here `u` is a number only in the unit of the outer boxing,
+  // and the element at 2 comes from `sum`, whose unit has no entry for `u`:
+  // read in the unit of `sum` alone, the lifted `If` gained a `Missing`
+  // branch that the evaluation of `join` does not have. A walk with
+  // `each()` fills the element memo of `join`, which a later `at()` serves.
+  describe('at() and each() read the units of their receiver', () => {
+    const pt = (a: unknown, b: unknown) => ['Pair', a, b];
+    const make = () => {
+      const ce = engine();
+      const sum = ce.box([
+        'Add',
+        ['List', ['If', ['Less', 0, 'u'], pt('u', 1)], pt(2, 3)],
+        ['PointList', 1.8, 0],
+      ]);
+      const join = ce.box([
+        'ListJoin',
+        ['List', pt(['Add', 'u', 1], ['Multiply', 'v', 1])],
+        sum,
+      ]);
+      return { sum, join };
+    };
+    const inSum = [
+      'If',
+      ['Less', 0, 'u'],
+      ['Tuple', ['Add', 'u', 1.8], 1],
+      'Missing',
+    ];
+    const inJoin = ['If', ['Less', 0, 'u'], ['Tuple', ['Add', 'u', 1.8], 1]];
+
+    test('at()', () => {
+      const { sum, join } = make();
+      // An element read before, in the unit of `sum` only.
+      expect(sum.at(1)!.json).toEqual(inSum);
+      const expected = join.evaluate().at(2)!;
+      expect(expected.json).toEqual(inJoin);
+      expect(join.at(2)!.evaluate().isSame(expected)).toBe(true);
+    });
+
+    test('each(), then at()', () => {
+      const { sum, join } = make();
+      expect([...sum.each()][0].json).toEqual(inSum);
+      expect([...join.each()][1].json).toEqual(inJoin);
+      expect(join.at(2)!.json).toEqual(inJoin);
+    });
+
+    test('a walk left early', () => {
+      const { join } = make();
+      for (const element of join.each()) {
+        expect(element.json).toEqual(['Tuple', ['Add', 'u', 1], 'v']);
+        break;
+      }
+      expect(join.at(2)!.json).toEqual(inJoin);
+    });
+  });
 });
 
 describe('BINDING UNITS: PROGRAMS', () => {
@@ -463,5 +521,21 @@ describe('BINDING UNITS: PROGRAMS', () => {
     // The environment of the program is discarded when the run ends.
     expect(ce.box('w').type.toString()).toBe('unknown');
     expect(ce.lookupDefinition('w')).toBeUndefined();
+  });
+
+  test('the self-call of a recursive function with no signature', () => {
+    // The name of the function is a free name while its body is boxed: the
+    // self-call types `unknown` under the recursion knot, and the result of
+    // the function is the type of the base clause, not the broadcast guess
+    // of a call of a bare `function` over a list.
+    const ce = engine();
+    const r = executeEpsil(
+      ce,
+      'function r(xs, n) { if n <= 0 { mean(xs) } else { r(xs, n - 1) } }\nr([1, 2, 3], 2)'
+    );
+    expect((r.value as Expression).toString()).toBe('2');
+    expect(ce.symbol('r').type.toString()).toBe(
+      '(xs: collection<number> | value, n: unknown) -> number'
+    );
   });
 });

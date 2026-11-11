@@ -58,14 +58,6 @@ describe('BINDING UNITS: FREE NAMES', () => {
     ce.declare('x', 'real');
     expect(isFreeName(ce.parse('x + 1').op1)).toBe(false);
   });
-
-  test('the flag off keeps the declaration at boxing', () => {
-    const ce = new ComputeEngine();
-    const a = ce.parse('x + 1');
-    expect(isFreeName(a.op1)).toBe(false);
-    expect(ce.lookupDefinition('x')).toBeDefined();
-    expect(ce.box('x').type.toString()).toBe('number');
-  });
 });
 
 describe('BINDING UNITS: TYPES', () => {

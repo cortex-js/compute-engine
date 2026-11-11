@@ -12,14 +12,16 @@
  * application typed `any` (a call of a function declared `-> any`, the power
  * `a^2`), and a top-typed cell of an abstract collection.
  *
- * Unchanged on purpose: a symbol declared `unknown` and an auto-declared
- * symbol are read as scalars (the arithmetic's inference refines them), a
- * call of an undeclared function keeps its `broadcastable<number>` reading,
+ * Unchanged on purpose: a symbol declared `unknown` and a free name (a
+ * symbol with no definition) are read as scalars (the arithmetic's
+ * inference refines them), a call of an undeclared function keeps its
+ * `broadcastable<number>` reading,
  * and a comparison over the symbol keeps `broadcastable<boolean>` (its value
  * is never a point). Compiled code declines arithmetic over the symbol,
  * because its value can be a list.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
+import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
 const ce = new ComputeEngine();
 ce.declare('a', 'any');
@@ -219,9 +221,11 @@ describe('unchanged readings', () => {
     expect(typeOf('u + 1')).toBe('number');
   });
 
-  test('an auto-declared symbol is read as a scalar', () => {
-    expect(typeOf('2w')).toBe('number');
-    expect(ce.lookupDefinition('w')?.value?.inferredType).toBe(true);
+  test('a free name is read as a scalar', () => {
+    const e = ce.parse('2w');
+    expect(e.type.toString()).toBe('number');
+    expect(isFreeName(e.op2)).toBe(true);
+    expect(e.op2.type.toString()).toBe('number');
   });
 
   test('`Add` and `Negate` answer `any` as before', () => {

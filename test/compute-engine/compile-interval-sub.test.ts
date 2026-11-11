@@ -14,6 +14,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { IntervalArithmetic as IA } from '../../src/compute-engine/interval/index';
 
 const ce = new ComputeEngine();
+// Boxing declares no name: `ce.symbol('x')` alone gives `x` no type.
+ce.declare('x', 'real');
 
 type IntervalRun = {
   success: boolean;

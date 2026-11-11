@@ -351,8 +351,8 @@ describe('Collection operator on a symbol: what is not rewritten', () => {
 
   test('the LaTeX route narrows the source too', () => {
     const ce = new ComputeEngine();
-    ce.parse('\\operatorname{Filter}(w, x \\mapsto x>1)');
-    expect(ce.symbol('w').type.toString()).toBe('collection<unknown>');
+    const e = ce.parse('\\operatorname{Filter}(w, x \\mapsto x>1)');
+    expect(e.op1.type.toString()).toBe('collection<unknown>');
   });
 });
 

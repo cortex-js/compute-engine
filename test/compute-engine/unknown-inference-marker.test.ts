@@ -166,7 +166,7 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     ];
     const e = ce.box(['Sort', 'zs', cmp]);
     expect(e.type.toString()).toBe('list<any> | string');
-    expect(ce.box('zs').type.toString()).toBe('indexed_collection<any>');
+    expect(e.op1.type.toString()).toBe('indexed_collection<any>');
     const ce2 = new ComputeEngine();
     const r = executeEpsil(
       ce2,

@@ -761,6 +761,9 @@ describe('review fixes', () => {
   // (`inlineReservedParameterCalls()`), so the typing pass types the tree
   // that the emitter writes, and `canCompile()` and `compile()` agree.
   describe('a parameter named `discard`', () => {
+    // The argument `v` of the calls below is an input mapped by `vars`: it
+    // has a declared type, so the walk reaches the body of the callee.
+    ce.declare('v', 'real');
     ce.assign(
       'discardSquare',
       ce.box(['Function', ['Multiply', 'discard', 'discard'], 'discard'])

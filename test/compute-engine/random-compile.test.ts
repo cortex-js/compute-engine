@@ -780,6 +780,9 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   // in the `…pure…` tests).
   const ce = new ComputeEngine();
   ce.declare('x', 'real');
+  // Boxing declares no name: the inputs of the comparison chains are declared.
+  ce.declare('a', 'real');
+  ce.declare('c', 'real');
   const glsl = () => ce._getCompilationTarget('glsl')!;
   /** GLSL source for `json`, unframed (fragment-stage spatial noise). */
   const gpuCode = (json: any): string =>

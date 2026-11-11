@@ -8,6 +8,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 ce.declare('x', 'real');
+ce.declare('y', 'real');
+ce.declare('n', 'real');
 
 /** The whole emitted artifact: the constant table and the definitions the
  *  preamble carries, then the expression that reads them. Every constant
@@ -2018,6 +2020,8 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
   // whose index folds to a constant integer selects its element at compile
   // time and never reads the array at all.
   const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('k', 'integer');
   const h = Array.from({ length: 120 }, (_, i) => (i + 1) / 8);
   ce.assign('h', ce.box(['List', ...h]));
 
@@ -2154,6 +2158,7 @@ describe('INTERVAL JS - NORM OF A POINT WITH A LIST COMPONENT', () => {
   // as the explicit `√(Σ cᵢ²)` when the lists have one known length, and as a
   // run-time zip of the points otherwise.
   const ceN = new ComputeEngine();
+  ceN.declare('x', 'real');
   ceN.declare('y', 'real');
   ceN.declare('L', 'list<real>');
 

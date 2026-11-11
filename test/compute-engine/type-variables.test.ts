@@ -1853,7 +1853,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     // the symbol ends ground — never narrowed to a type variable.
     const e = ce.box(['g', 'zz']);
     expect(e.isValid).toBe(true);
-    const inferred = ce.box('zz').type.toString();
+    const inferred = e.op1.type.toString();
     expect(inferred).toBe('list<unknown> | set<unknown>');
     expect(inferred).not.toContain('T');
   });

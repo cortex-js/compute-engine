@@ -175,9 +175,14 @@ describe('LIBRARY BOOTSTRAP DECLARES NO NAME', () => {
     for (const name of ['km', 'h', 'm']) expect(user.has(name)).toBe(false);
   });
 
-  test('a free `K` is declared in the current scope and can be undeclared', () => {
+  test('a free `K` is committed in the current scope and can be undeclared', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('K + 1').json).toEqual(['Add', 'K', 1]);
+    const expr = ce.parse('K + 1');
+    expect(expr.json).toEqual(['Add', 'K', 1]);
+    // The parse declares nothing; `ce.infer()` declares `K` in its home
+    // scope, the current scope, not in the scope of the library.
+    expect(ce.context.lexicalScope.bindings.has('K')).toBe(false);
+    ce.infer([expr]);
     expect(ce.context.lexicalScope.bindings.has('K')).toBe(true);
     expect(ce.contextStack[0].lexicalScope.bindings.has('K')).toBe(false);
     expect(() => ce.undeclare('K')).not.toThrow();

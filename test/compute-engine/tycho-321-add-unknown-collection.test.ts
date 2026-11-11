@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json';
 
 // Tycho item 321. When an `unknown` symbol is an operand of arithmetic that
@@ -56,6 +57,17 @@ const CASES: [string, MathJsonExpression][] = [
   ],
 ];
 
+/** The type of the first occurrence of the symbol `name` in `e`. Boxing
+ * declares nothing, so the type of a use is read on its occurrence. */
+function occurrenceType(e: Expression, name: string): string | undefined {
+  if (e.symbol === name) return e.type.toString();
+  for (const op of e.ops ?? []) {
+    const found = occurrenceType(op, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 function freshEngine(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('P_0', 'unknown');
@@ -69,16 +81,18 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     const ce = freshEngine();
     const expr = ce.box(json);
     expect(expr.isValid).toBe(true);
-    expect(ce.expr('P_0').type.matches('collection<any>')).toBe(true);
+    expect(
+      ce.type(occurrenceType(expr, 'P_0')!).matches('collection<any>')
+    ).toBe(true);
   });
 
   test('a scalar term of the sum gives P_0 the same type as a scalar factor', () => {
     const ce1 = freshEngine();
-    ce1.box(['Histogram', ['Add', 'P_0', 0.5], ['Divide', 1, 100]]);
+    const e1 = ce1.box(['Histogram', ['Add', 'P_0', 0.5], ['Divide', 1, 100]]);
     const ce2 = freshEngine();
-    ce2.box(['Histogram', ['Multiply', 2, 'P_0'], ['Divide', 1, 100]]);
-    expect(ce1.expr('P_0').type.toString()).toBe('list<number>');
-    expect(ce2.expr('P_0').type.toString()).toBe('list<number>');
+    const e2 = ce2.box(['Histogram', ['Multiply', 2, 'P_0'], ['Divide', 1, 100]]);
+    expect(occurrenceType(e1, 'P_0')).toBe('list<number>');
+    expect(occurrenceType(e2, 'P_0')).toBe('list<number>');
   });
 
   // Only a CONSTANT term of a sum is taken as a scalar. A term with a free
@@ -90,7 +104,7 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     const ce = freshEngine();
     const expr = ce.box(['Histogram', ['Subtract', 'P_0', 'v'], 2]);
     expect(expr.isValid).toBe(false);
-    expect(ce.expr('P_0').type.toString()).toBe('number');
+    expect(occurrenceType(expr, 'P_0')).toBe('number');
   });
 
   test('a denominator with a declared real symbol is a scalar', () => {
@@ -101,7 +115,7 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
       2,
     ]);
     expect(expr.isValid).toBe(true);
-    expect(ce.expr('P_0').type.toString()).toBe('list<number>');
+    expect(occurrenceType(expr, 'P_0')).toBe('list<number>');
   });
 
   test('a matrix-consuming operator gets the same repair: Determinant(A + 1)', () => {
@@ -109,7 +123,7 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     ce.declare('A', 'unknown');
     const expr = ce.box(['Determinant', ['Add', 'A', 1]]);
     expect(expr.isValid).toBe(true);
-    expect(ce.expr('A').type.toString()).toBe('matrix');
+    expect(occurrenceType(expr, 'A')).toBe('matrix');
   });
 
   test('a term with the symbol but no plan still fails closed', () => {
@@ -117,7 +131,7 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     ce.declare('A', 'unknown');
     const expr = ce.box(['Determinant', ['Add', 'A', ['Sin', 'A']]]);
     expect(expr.isValid).toBe(false);
-    expect(ce.expr('A').type.toString()).toBe('number');
+    expect(occurrenceType(expr, 'A')).toBe('number');
   });
 
   test('a denominator with the symbol is not a scalar', () => {
@@ -138,7 +152,7 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
       ce.declare('x', 'unknown');
       const expr = ce.box(json);
       expect(expr.isValid).toBe(true);
-      expect(ce.expr('x').type.toString()).toBe('number');
+      expect(occurrenceType(expr, 'x')).toBe('number');
     }
   });
 });

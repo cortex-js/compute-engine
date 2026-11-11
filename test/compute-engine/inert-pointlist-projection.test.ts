@@ -74,11 +74,13 @@ describe('a coordinate accessor over an inert PointList head', () => {
 
   test('stays unevaluated when another column is a scalar by inference only', () => {
     const ce = engine();
-    // `y` is undeclared: its first use as a number infers `number` for it,
-    // and an inferred type is not proof (the symbol may still receive a
-    // list, and the projection would then answer a list of the wrong
-    // length). `x0`, declared `real`, is proof.
-    ce.box(['Add', 'y', 1]).evaluate();
+    // `y` is undeclared: `ce.infer()` over a use as a number infers
+    // `number` for it, and an inferred type is not proof (the symbol may
+    // still receive a list, and the projection would then answer a list of
+    // the wrong length). `x0`, declared `real`, is proof.
+    const use = ce.box(['Add', 'y', 1]);
+    use.evaluate();
+    ce.infer([use]);
     expect(ce.box('y').type.toString()).toBe('number');
     const v = ce.box(['PointY', ['PointList', 'y', 's']]).evaluate();
     expect(v.operator).toBe('PointY');

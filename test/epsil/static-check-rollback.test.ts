@@ -72,10 +72,10 @@ describe('STATIC CHECK — engine state rolls back', () => {
     // function-typed BEFORE canonicalizing the body (the recursion knot,
     // `library/core.ts`) — a direct type write that can land on a
     // PRE-EXISTING inferred binding from an enclosing scope. Checking a
-    // program that defines `f` must not leave a session's auto-declared `f`
+    // program that defines `f` must not leave a session's inferred `f`
     // retyped `function`.
     const ce = new ComputeEngine();
-    ce.parse('f + 1').evaluate(); // auto-declares f, inferred number
+    ce.infer([ce.parse('f + 1')]); // declares f, inferred number
     const def = ce.lookupDefinition('f')!;
     if (!isValueDef(def)) throw new Error('expected a value definition');
     const typeBefore = def.value.type.toString();
@@ -93,10 +93,11 @@ describe('STATIC CHECK — engine state rolls back', () => {
     // pins so LATER statements check named calls against it
     // (`registerPinnedSignature`, static-diagnostics.ts). When the name
     // pre-exists as an outer inferred binding (a previous cell's forward
-    // reference auto-declared it wildcard `function`), the registration
-    // writes onto that OUTER definition — the rollback frame must undo it.
+    // reference, committed by `ce.infer()`, declared it wildcard
+    // `function`), the registration writes onto that OUTER definition — the
+    // rollback must undo it.
     const ce = new ComputeEngine();
-    ce.box(['g', 1]).evaluate();
+    ce.infer([ce.box(['g', 1])]);
     const def = ce.lookupDefinition('g')!;
     if (!isValueDef(def)) throw new Error('expected a value definition');
     const typeBefore = def.value.type.toString();

@@ -2,6 +2,15 @@
 
 **Status:** normative internal reference for the implemented checkpoint API.
 
+**Deprecated.** `ce.checkpoint()`, `ce.restore()` and `ce.discard()` keep
+working and are deprecated; a later release removes them, with the internal
+`_restoreCheckpointSnapshot()`. The replacements are `ce.withValues()`, to
+evaluate with temporary values, and `ce.pushScope()` / `ce.popScope()`, for
+temporary declarations. The two uses inside the engine, which make a library
+registration all-or-nothing, are the group-theory registration, which checks
+its input before it declares anything, and `loadLibrary()`, which keeps its
+internal checkpoint until the API is removed.
+
 The checkpoint API supports linear notebook replay:
 
 ```text
@@ -77,6 +86,23 @@ Unbounded mutable state is copy-on-write journaled after the checkpoint:
 definition fields, scope-map changes, object slots/versions, and expression
 memos without a safe generation key. Derived state that is cheaper to rebuild
 is purged on restore.
+
+A write in the environment of a unit (the type that an expression requires of
+a name with no explicit type, `TYPE-SYSTEM.md`, "The type of a name with no
+explicit type") is not journaled. So a `restore()` does not undo a requirement
+written after the checkpoint on an expression boxed before it:
+
+```js
+const a = ce.parse('x');                 // a.type is unknown
+const cp = ce.checkpoint();
+ce.function('Add', [a, ce.number(1)]);   // requires a number of `x`
+ce.restore(cp);
+a.type;                                  // number: the requirement stays
+```
+
+A declaration that `ce.infer()` makes is a declaration, and a checkpoint
+journals it: after `ce.infer([ce.parse('y + 1')])` and a `restore()` to a
+checkpoint taken before it, `ce.lookupDefinition('y')` is `undefined`.
 
 Journal hooks are attached to mutation funnels, not individual callers. A new
 field or write path must either join the snapshot/journal, be safely derived,

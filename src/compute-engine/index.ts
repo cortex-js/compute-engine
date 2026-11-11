@@ -395,16 +395,18 @@ import type {
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
-/** The default of the engine flag `_bindingUnits`: true when the
- * environment variable `CE_BINDING_UNITS` is `1`. Temporary, for phase E of
- * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`. */
+/** The default of the engine flag `_bindingUnits`: true, unless the
+ * environment variable `CE_BINDING_UNITS` is `0`. The variable and the flag
+ * are kept for one release, so that a host can compare the two behaviors;
+ * the removal of the flag and of the code that runs without it is the last
+ * step of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`. */
 function bindingUnitsDefault(): boolean {
   try {
     const env = (globalThis as { process?: { env?: Record<string, string> } })
       .process?.env;
-    return env?.CE_BINDING_UNITS === '1';
+    return env?.CE_BINDING_UNITS !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -1731,10 +1733,8 @@ export class ComputeEngine implements IComputeEngine {
    */
   _debugBindings = debugBindingsDefault();
 
-  /** See `IComputeEngine._bindingUnits`. True by default when the
-   * environment variable `CE_BINDING_UNITS` is `1`: a temporary switch for
-   * phase E of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, which
-   * its last step removes.
+  /** See `IComputeEngine._bindingUnits`. True by default; false when the
+   * environment variable `CE_BINDING_UNITS` is `0` (`bindingUnitsDefault()`).
    * @internal
    */
   _bindingUnits = bindingUnitsDefault();

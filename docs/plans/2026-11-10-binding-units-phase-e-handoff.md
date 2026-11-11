@@ -140,13 +140,10 @@ Open, for the user:
 
 Decided by the user, 2026-11-10 (package A):
 
-6. **A cache filled after the operation wrote an entry misses in the next
-   operation.** The three tests of class DEF-MEMO-STORED
-   (`test/compute-engine/comprehension-memo.test.ts`) stay as they are in
-   the code: package D changes their expected counts (the stored chain
-   runs once more in a later operation, with the same value). The rule
-   that would make them hit is not adopted (spec, "Phase E, package A").
-   To revisit with measurements from Tycho's adoption.
+6. **Withdrawn.** The decision to keep the miss of the stored-value memo
+   was taken on a wrong description (one more evaluation; measured: the
+   memo never hit). The cause is fixed (spec, "Phase E, package A", rule
+   6), and the three tests of `comprehension-memo` pass unchanged.
 
 7. **The asynchronous memo of a lazy collection stores nothing when the
    evaluation read an entry of an environment.** The test of
@@ -160,8 +157,10 @@ Decided by the user, 2026-11-10 (package A):
    `x` first.
 9. **Decision 4: none of (a) and (b).** The result of an outermost
    operation does not keep the environment of the operation. A host that
-   compiles the result of a `subs()` over a symbol made before it calls
-   `ce.infer([result])` or declares the symbol first. Option (c), `FindFit`
+   compiles the result of a `subs()` over a symbol made before it declares
+   the symbol first. `ce.infer([result])` does not type that symbol
+   (checked 2026-11-10): the requirement was in the environment of the
+   operation, which no occurrence of the result reads. Option (c), `FindFit`
    and `FindRoot` as one operation, stays. This is a breaking change:
    package D adds it to `CHANGELOG.md` and to the documents of spec
    section 5, updates `evaluate-at-compile-derivative` ("an indefinite
@@ -334,6 +333,94 @@ commit (`ce-139-derivative-enclosing-binding`, `compile-admission`,
 `compile-javascript-profile-undeclared`); `epsil/formatter` (1) was NEW at
 `7e92c4b0f` already; the garbage-collection test of `ce-1102` is CE-1165
 and passes alone.
+
+## 5c. Package D: result (2026-11-10, session compute-engine-f4)
+
+**Done.**
+
+- The flag `ce._bindingUnits` is true by default. `CE_BINDING_UNITS=0`, or
+  `ce._bindingUnits = false` right after the engine is made, gives the old
+  behavior, for a comparison during Tycho's validation.
+- The tests are updated for the breaking changes (about 170 files; the
+  remedies are those of the triage). No snapshot marked `@fixme` changed.
+- The defects that the test updates found are fixed; the rules that the
+  fixes add are in the spec, "Phase E, package D".
+- `CHANGELOG.md` (`[Unreleased]`: Breaking Changes, and `ce.infer()` under
+  New Features), `ARCHITECTURE.md`, `docs/COMPILATION-MODEL.md`,
+  `docs/TYPE-SYSTEM.md`, `docs/SCOPING-MODEL.md`,
+  `docs/CHECKPOINT-MODEL.md`, and nine pages of
+  `~/dev/cortexjs.io/docs/compute-engine/` (04, 05b, 06, 07, 08, 10, 13,
+  14, 17; edited in place, no git command run there).
+- Full suite with the flag on by default, at
+  `6ac31a524af52fecc8744852886ebaba2fac18c8` plus the package: 83,681
+  passed, 0 failed (2026-11-10, under the box lock). Lint, `check:docs`,
+  `check:deps`, `test:tools`, the corpus pipeline, `test:glsl` and
+  `test:python` were run with the flag on.
+
+**Not done.**
+
+- **The removal of the flag and of the code that runs without it** (step 1
+  of package D: the declaration at boxing, the narrowing writes on
+  definitions, the capture of narrowings). The flag is kept for one
+  release so that Tycho can compare the two behaviors. One narrowing write
+  is still made with the flag on: a use refines the inferred result of an
+  assigned function on its definition (`k := x ↦ x`, then `k(1) + 2`,
+  gives `k: (x: unknown) -> number`).
+- **The timing of acceptance item 10** was not measured. Seen in the full
+  runs: `ce-882-shared-copies` takes 38 s alone with the flag on and 6 s
+  with it off (a tower of 20,000 nested calls built one level at a time;
+  each type-cache hit checks three recorded reads, and the `isFinite`
+  getter is not cached, with or without the flag). No other file is
+  slower by more than the spread of two runs.
+- **The result paragraph of section 8 of the model**, and the message to
+  Tycho: the text of the message is below.
+- `bash scripts/test-types.sh` needs a production build; a release runs it.
+
+**For the user.**
+
+1. `ce-614`: a free `x` boxed before a host `pushScope()` and one boxed
+   after it are two bindings, so `x + 100x` is not merged (package B's
+   recommendation, applied to the test). The alternative is in the spec.
+2. `ce.infer()` skips a name that the host declared `unknown` (reason
+   `defined`). Rule 2 treats such a definition as having no explicit type;
+   rule 11 says "no explicit definition".
+3. `ce.infer()` returns an empty `skipped` for a name with no requirement
+   and for a name with a declared type, where the type `InferResult` lists
+   the reasons `untyped` and `defined`.
+4. A generated name (the parameter `t` of a periodic family of `Solve`)
+   does not avoid a name that an expression only uses: a name that was
+   only boxed is not seen as used. The held `t + 1` then reads the
+   solver's `t: integer`.
+5. At the top level of an Epsil program, an `incompatible-type` error no
+   longer says where the conflicting type was inferred (the provenance
+   note): a free name has no definition to carry it.
+6. A held function literal keeps a wider type after a definition that it
+   read goes away (a popped scope, a restored checkpoint):
+   `list<unknown>` where a new boxing gives `vector<2>`. Not fixed
+   (checkpoints are deprecated; the type is wider, not wrong).
+
+**For Tycho** (session `tycho-desk`), with the release:
+
+- Boxing declares nothing. `ce.lookupDefinition(name)`,
+  `expr.valueDefinition` and the inspection of a scope do not see a name
+  that was only boxed; read the type of a symbol on its occurrence in the
+  expression, or in `freeSymbolTypes` of a compilation.
+- `compile()` types an input from the expression that it compiles (its
+  folded values and called bodies included). An input that only another
+  expression types declines with `untyped-input`: declare the inputs, or
+  call `ce.infer([...expressions])` first.
+- The result of `subs()` over a symbol made before it: declare that
+  symbol before compiling (`ce.infer()` does not type it). `FindFit` and
+  `FindRoot` are not affected.
+- A name of the library read as a variable (`N` in `N + 1`) has no type
+  until declared.
+- Checkpoints are deprecated; `withValuesHidden()` moves to
+  `ce.withValues()` (already checked on 0.185.1).
+- A parse no longer depends on the expressions parsed before it: `x(3)`
+  after `x + 1` is the call `["x", 3]`.
+- To compare with the old behavior during validation: `CE_BINDING_UNITS=0`
+  in the environment, or `ce._bindingUnits = false` right after the engine
+  is made.
 
 ## 6. Prompts
 

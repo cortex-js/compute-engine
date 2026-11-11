@@ -31,10 +31,11 @@ describe('the KEEP table — admission the compatibility relation preserves (§2
 
   it('an undeclared source stays `collection<unknown>` (R-E3: no callback→domain inference)', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['CountIf', 'zs', 'IsPrime']).isValid).toBe(true);
+    const e = ce.box(['CountIf', 'zs', 'IsPrime']);
+    expect(e.isValid).toBe(true);
     // The predicate's `(number)` domain must NOT manufacture
     // `collection<number>` out of the wildcard source.
-    expect(ce.box('zs').type.toString()).toBe('collection<unknown>');
+    expect(e.op1.type.toString()).toBe('collection<unknown>');
   });
 
   it('a wildcard `function`-typed symbol is admitted', () => {

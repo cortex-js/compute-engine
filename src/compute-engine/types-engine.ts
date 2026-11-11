@@ -1677,9 +1677,10 @@ export interface IComputeEngine {
   /** When true, boxing writes no definition: a name with no definition is a
    * free name, and the requirements of the uses of a name with no explicit
    * type go in the environment of the binding unit (`binding-unit.ts`).
-   * Off by default while the change is in progress
+   * On by default. The flag is kept for one release, for a comparison of
+   * the two behaviors: set it to false right after the engine is made, or
+   * set the environment variable `CE_BINDING_UNITS` to `0`
    * (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`, section 10).
-   * A test sets it right after the engine is made.
    * @internal */
   _bindingUnits: boolean;
 

@@ -257,22 +257,22 @@ describe('TYPE VARIABLES / BaseForm — `(T, (string|number)?) -> T where T: num
 
   test('an inferable free symbol narrows to the bound', () => {
     const ce = engine();
-    expect(ce.box(['BaseForm', 'bfFree', 16]).type.toString()).toBe('number');
-    expect(ce.box('bfFree').type.toString()).toBe('number');
+    const e = ce.box(['BaseForm', 'bfFree', 16]);
+    expect(e.type.toString()).toBe('number');
+    expect(e.op1.type.toString()).toBe('number');
   });
 
-  test('ACCEPTED TIGHTENING — a non-inferable `unknown` operand absorbs (D8)', () => {
-    // The one delta of this conversion, the same §4.3 bound-join edge that
-    // `Remainder` recorded: the old handler echoed `unknown`, which the fixed
-    // declared result (`-> number`) then narrowed back to `number`. The bound
-    // variable absorbs instead, and per D8 the position is admitted
-    // PROVISIONALLY, so nothing is written back to the symbol.
+  test('an operand declared `unknown` reads the bound of its use', () => {
+    // A name declared `unknown` reads the requirement of its use, as a name
+    // with no declaration does: the operand and the result are `number`.
+    // Nothing is written back to the declaration.
     const ce = engine();
     ce.declare('bfU', 'unknown');
     expect(ce.box('bfU').valueDefinition!.inferredType).toBe(false);
     const e = ce.box(['BaseForm', 'bfU', 16]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('unknown');
+    expect(e.type.toString()).toBe('number');
+    expect(e.op1.type.toString()).toBe('number');
     expect(ce.box('bfU').type.toString()).toBe('unknown');
   });
 

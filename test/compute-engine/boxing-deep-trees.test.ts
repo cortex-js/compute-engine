@@ -323,9 +323,6 @@ describe('the devolved route gives the same expression as the recursive one', ()
 
     expect(JSON.stringify(devolved.json)).toBe(JSON.stringify(recursive.json));
     expect(devolved.latex).toBe(recursive.latex);
-    expect(devolvedEngine.box('zz').type.toString()).toBe(
-      recursiveEngine.box('zz').type.toString()
-    );
 
     // Which way round: the first operand is the one that got to infer, the
     // second is the one holding the error.
@@ -334,11 +331,11 @@ describe('the devolved route gives the same expression as the recursive one', ()
       while (node.operator !== 'Tuple') node = node.op1;
       expect(node.op1.operator).toBe('Not');
       expect(node.op1.op1.symbol).toBe('zz');
+      expect(node.op1.op1.type.toString()).toBe('boolean');
       expect(node.op1.isValid).toBe(true);
       expect(node.op2.operator).toBe('Sin');
       expect(node.op2.isValid).toBe(false);
     }
-    expect(recursiveEngine.box('zz').type.toString()).toBe('boolean');
   });
 
   test('a deep tree canonicalized after a raw box', () => {

@@ -84,12 +84,9 @@ describe('undeclare: each kind of binding', () => {
     ce.undeclare('f');
 
     expect(json(ce.expr(['f', 2]).evaluate())).toBe('["f",2]');
-    expect(ce.context.lexicalScope.bindings.has('f')).toBe(
-      // Boxing `f(2)` declares `f` again, as an application head with no
-      // definition.
-      true
-    );
-    expect(ce.lookupDefinition('f')!.operator?.evaluate).toBeUndefined();
+    // Boxing `f(2)` declares nothing: `f` stays undeclared.
+    expect(ce.context.lexicalScope.bindings.has('f')).toBe(false);
+    expect(ce.lookupDefinition('f')).toBeUndefined();
   });
 
   test('a scope made with createScope', () => {

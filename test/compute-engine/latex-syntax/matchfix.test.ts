@@ -314,6 +314,14 @@ describe('EVALUATEAT LATEX ROUND TRIP', () => {
 });
 
 describe('MATCHFIX abs and norm', () => {
+  // The norm of a number is its absolute value. Boxing declares nothing, so
+  // `a` is declared a number in a scope for these tests.
+  beforeAll(() => {
+    engine.pushScope();
+    engine.declare('a', 'number');
+  });
+  afterAll(() => engine.popScope());
+
   test('1+|a|+2', () =>
     expect(check('1+|a|+2')).toMatchInlineSnapshot(`
       box       = ["Add", 1, ["Abs", "a"], 2]

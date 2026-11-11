@@ -1206,8 +1206,9 @@ describe('a big op over a body that MIGHT be a collection stays inert', () => {
     // valueless collection reduction and stays inert, exactly as the cases
     // above; before that ruling `y` kept the type `unknown` and the sum
     // folded to the scalar identity `y`.
-    expect(ce.box(['Sum', 'y']).evaluate().toString()).toBe('sum(y)');
-    expect(ce.symbol('y').type.toString()).toBe('collection');
+    const sumY = ce.box(['Sum', 'y']);
+    expect(sumY.evaluate().toString()).toBe('sum(y)');
+    expect(sumY.op1.type.toString()).toBe('collection');
     // A scalar body with a free variable is a sum with no index: it stays
     // unevaluated, it is not the single term `k + 1` (CE-961).
     ce.declare('k', 'number');

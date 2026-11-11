@@ -131,8 +131,12 @@ describe('the run-time reading mirrors the interpreter', () => {
     // `Float64Array` is read as a plain array of numbers instead, as the
     // other list kernels of the runtime read it.
     const ce = engine();
-    const x = compile(ce.parse('\\mathrm{PointX}(v)'), { to: 'javascript' });
+    const pointX = ce.parse('\\mathrm{PointX}(v)');
+    const x = compile(pointX, { to: 'javascript' });
     expect(x.run!({ v: Float64Array.from([1, 2]) })).toBe(1);
+    // `PointZ(v)` alone does not type `v`: the use in `PointX(v)` is
+    // committed.
+    ce.infer([pointX]);
     const z = compile(ce.parse('\\mathrm{PointZ}(v)'), { to: 'javascript' });
     expect(z.run!({ v: Float64Array.from([1, 2, 3]) })).toBe(3);
     expect(z.run!({ v: Float64Array.from([1, 2]) })).toBeNaN();

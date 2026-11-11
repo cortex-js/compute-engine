@@ -58,6 +58,37 @@ export function canonInstallSkipped(def: object | undefined): boolean {
 }
 
 /**
+ * The names whose canonicalization-time clause install was skipped while the
+ * name had no definition, by the scope that the install would have gone in.
+ * With the engine flag `_bindingUnits`, boxing declares no name, so a generic
+ * first clause (`function f<T>(x: T) { … }`) that the canonical route skips
+ * leaves no definition to mark (`noteCanonInstallSkipped()`): the skip is
+ * recorded under the name, so that a later clause of the name skips its
+ * install too, as it does when the boxing declared the name. Weakly keyed on
+ * the scope, which dies with its record.
+ */
+const CANON_INSTALL_SKIPPED_NAMES = new WeakMap<object, Set<string>>();
+
+export function noteCanonInstallSkippedName(scope: object, name: string): void {
+  let names = CANON_INSTALL_SKIPPED_NAMES.get(scope);
+  if (names === undefined)
+    CANON_INSTALL_SKIPPED_NAMES.set(scope, (names = new Set()));
+  names.add(name);
+}
+
+/** True when `noteCanonInstallSkippedName()` recorded `name` in `scope` or
+ * in a scope up its chain (`parent`). */
+export function canonInstallSkippedName(scope: object, name: string): boolean {
+  for (
+    let s: object | null | undefined = scope;
+    s;
+    s = (s as { parent?: object | null }).parent
+  )
+    if (CANON_INSTALL_SKIPPED_NAMES.get(s)?.has(name) === true) return true;
+  return false;
+}
+
+/**
  * CLAUSE PROVENANCE — the two side-channels that describe a LONE clause, which
  * `multi-clause.ts` §4.2 keeps in the plain single-function representation
  * rather than in clause storage, so neither has anywhere else to live:

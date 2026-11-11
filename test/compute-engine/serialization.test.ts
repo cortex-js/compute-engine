@@ -927,7 +927,9 @@ describe('a product with a `never`-typed factor serializes', () => {
   test('the corpus row serializes and round-trips', () => {
     const ce = new ComputeEngine();
     const t = ce.parse(CORPUS_ROW);
-    expect(ce.symbol('f').type.toString()).toBe('function');
+    // The calls read `f` as a function: `ce.infer()` commits that reading.
+    const f = ce.infer([t]).declared.find((d) => d.name === 'f');
+    expect(f?.type.toString()).toBe('function');
     const latex = t.latex;
     expect(latex).toBe('f(f(b))-f(f(a))=(b-a)f^{\\prime}(c)^2');
     expect(ce.parse(latex).isSame(t)).toBe(true);

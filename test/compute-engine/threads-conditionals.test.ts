@@ -460,9 +460,11 @@ describe('A threaded operand whose present result type is unknown', () => {
   });
 
   test('a chained access still infers number elements', () => {
+    // The type of `m` is read on its occurrence.
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', ['At', 'm', 1], 2], 1]);
-    expect(ce.box('m').type.toString()).toBe(
+    const sum = ce.box(['Add', ['At', ['At', 'm', 1], 2], 1]);
+    const read = sum.ops!.find((op) => op.operator === 'At')!;
+    expect(read.op1.op1.type.toString()).toBe(
       'indexed_collection<indexed_collection<number>>'
     );
   });

@@ -147,18 +147,20 @@ const ROUTINES: Routine[] = [
     read: (ce) =>
       parameterType((ce as unknown as { _probe: unknown })._probe, 'u'),
   },
+  // Boxing declares no name: the requirements of a use are stored on a
+  // definition by `ce.infer()`.
   {
-    name: "_infer: Length's operand",
+    name: "ce.infer(): Length's operand",
     store: (ce) => {
-      ce.box(['Length', 'lenArg']);
+      ce.infer([ce.box(['Length', 'lenArg'])]);
     },
     read: (ce) => storedType(ce, 'lenArg'),
   },
   {
-    name: '_infer: the collection-parameter narrow against a declared signature',
+    name: 'ce.infer(): the collection-parameter narrow against a declared signature',
     store: (ce) => {
       ce.declare('hh', '(list<integer>) -> integer');
-      ce.box(['hh', 'zz']);
+      ce.infer([ce.box(['hh', 'zz'])]);
     },
     read: (ce) => storedType(ce, 'zz'),
   },

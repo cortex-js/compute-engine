@@ -203,7 +203,7 @@ function bump() scope -> integer { counter = counter + 1
     expect(node.effects).toEqual(['state']);
     expect(block.effects).toEqual(['state']);
 
-    run('let p: R = {"age" -> 1}', ce);
+    ce.declare('p', 'R');
 
     // The SAME node objects, not fresh ones — a fresh box would miss the memo
     // and pass whatever the axis does.

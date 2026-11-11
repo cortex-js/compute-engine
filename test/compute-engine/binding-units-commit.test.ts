@@ -208,6 +208,39 @@ describe('RULE 11: ce.infer()', () => {
     expect(inferredType(ce, 'x')).toBe('string');
   });
 
+  test('an assignment narrows a type that ce.infer() declared', () => {
+    // The declaration is an inference write, so an assignment narrows it as
+    // it narrows any inferred type.
+    const ce = engine();
+    ce.infer([ce.box(['Multiply', 'x', 'v'])]);
+    expect(ce.box('v').type.toString()).toBe('number');
+    ce.assign('v', 5);
+    expect(ce.box('v').type.toString()).toBe('integer');
+
+    const ce2 = engine();
+    ce2.infer([ce2.box(['Multiply', 'x', 'w'])]);
+    ce2.assign('w', ce2.box(Infinity));
+    expect(ce2.box('w').type.toString()).toBe('infinity');
+  });
+
+  test('the fresh-matrix repair does not retype a name that ce.infer() typed', () => {
+    const ce = engine();
+    const a = ce.box(['Add', 'A', 1]);
+    a.evaluate();
+    ce.infer([a]);
+    expect(inferredType(ce, 'A')).toBe('number (inferred)');
+    const det = ce.box(['Determinant', ['Add', 'A', 'B']]);
+    expect(det.isValid).toBe(false);
+    expect(inferredType(ce, 'A')).toBe('number (inferred)');
+    // A name that only an earlier unit required is still repaired: the
+    // requirement of that unit is not committed.
+    const other = engine();
+    other.box(['Add', 'A', 1]).evaluate();
+    const repaired = other.box(['Determinant', ['Add', 'A', 'B']]);
+    expect(repaired.isValid).toBe(true);
+    expect(typeOf(repaired, 'A')).toBe('matrix');
+  });
+
   test('a home scope that was popped', () => {
     const ce = engine();
     ce.pushScope();
@@ -296,13 +329,6 @@ describe('RULE 11: ce.infer()', () => {
     expect(ce.lookupDefinition('x')).toBeUndefined();
     ce.discard(cp);
   });
-
-  test('without the flag, boxing declares the names and there is nothing to commit', () => {
-    const ce = new ComputeEngine();
-    const a = ce.parse('x + 1');
-    expect(ce.infer([a])).toEqual({ declared: [], skipped: [] });
-    expect(inferredType(ce, 'x')).toBe('number (inferred)');
-  });
 });
 
 describe('RULE 12: ce.assume() declares the names it constrains', () => {
@@ -327,6 +353,21 @@ describe('RULE 12: ce.assume() declares the names it constrains', () => {
     const ce = engine();
     expect(ce.assume(ce.box(['Element', 'z', 'RealNumbers']))).toBe('ok');
     expect(inferredType(ce, 'z')).toBe('real (inferred)');
+  });
+
+  test('a disequality derived from a part bound narrows the type of a use', () => {
+    // `Im(tau) > 0` derives `tau ≠ 0`. The definition that `assume()` made
+    // has the type `unknown`, and the use under `Imaginary` requires
+    // `complex | infinity` in its unit: the exclusion is added to that.
+    const ce = engine();
+    ce.assume(
+      ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+    );
+    expect(ce.expr(['Imaginary', 'tau']).op1.type.toString()).toBe(
+      'complex & !0 | infinity'
+    );
+    // A use that requires nothing gets no exclusion: `!0` needs a base.
+    expect(ce.expr('tau').type.toString()).toBe('number');
   });
 });
 
@@ -447,5 +488,46 @@ describe('RULE 13: trials, rollback frames and checkpoints', () => {
     ce.restore(cp);
     expect(a.op1.type.toString()).toBe('number');
     ce.discard(cp);
+  });
+});
+
+describe('RULES 3 AND 4: a stored literal and a name declared unknown', () => {
+  test('the signature of a stored literal is read in the scope it is written in', () => {
+    // The body of `angle` reads the global `P`. The literal of `point` has a
+    // parameter `P`, and its block reads the signature of `angle` from the
+    // scope of that parameter: the result is still `list<real>`, so the
+    // local `q` declared `unknown` with the value `angle(P)` is a list.
+    const ce = engine();
+    ce.declare('P', 'list<real>');
+    ce.declare('angle', 'function');
+    ce.assign('angle', ce.box(['Function', ['Block', 'P'], 't']));
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'q', "'unknown'", ['angle', 'P']],
+        ['Tuple', ['Cos', 'q'], ['Sin', 'q']],
+      ],
+      'P',
+    ]);
+    expect(typeOf(literal.op1.ops[1], 'q')).toBe('list<real>');
+    expect(literal.op1.ops[0].ops[2].type.toString()).toBe('list<real>');
+  });
+
+  test('the requirement of a unit on a name declared unknown does not let a call skip its argument check', () => {
+    // `h(m)` requires `m: integer`, and the occurrence of `m`, declared
+    // `unknown`, reads that requirement (rule 4). It is no proof about the
+    // value: the call stays `h(m)`, and with `m := 1.5` it is an error.
+    const ce = engine();
+    ce.declare('h', '(integer) -> integer');
+    ce.assign('h', ce.box(['Function', ['Multiply', 2, 'k'], 'k']));
+    ce.declare('m', 'unknown');
+    const expr = ce.box([
+      'Tuple',
+      ['Block', ['Assign', 'r', ['g', ['h', 'm']]], ['Assign', 'm', 1.5], 'r'],
+    ]);
+    const value = expr.evaluate().op1;
+    expect(value.operator).toBe('Error');
+    expect(value.toString()).toMatch(/incompatible-type/);
   });
 });

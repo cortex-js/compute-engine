@@ -110,12 +110,12 @@ describe('CE-622: subs() keeps the function of each call it rebuilds', () => {
     ce.popScope();
   });
 
-  test('a name declared during the rebuild of a call stays declared', () => {
+  test('a new name in the rebuild of a call is declared nowhere', () => {
     // The rebuild of `h(…)` runs in a temporary scope that binds `h` to the
     // outer function (`withCallableBinding()`, `boxed-expression/binders.ts`).
-    // A new name in an operand of a raw form is declared when the call is
-    // boxed: the declaration goes to the enclosing scope, not to the
-    // temporary scope, which is removed after the rebuild.
+    // A new name in an operand of a raw form is a free name when the call is
+    // boxed: boxing declares nothing, and the name still evaluates after the
+    // temporary scope is removed.
     const ce = new ComputeEngine();
     define(ce, 'h', ['Function', ['Multiply', 'a', 'x'], 'a']);
     const e = ce.function('Add', [
@@ -127,11 +127,11 @@ describe('CE-622: subs() keeps the function of each call it rebuilds', () => {
     const mapped = e.map((x) =>
       x.symbol === 'a' ? ce.symbol('yy', { canonical: false }) : x
     );
-    expect(ce.lookupDefinition('yy')).toBeDefined();
+    expect(ce.lookupDefinition('yy')).toBeUndefined();
     expect(mapped.evaluate().json).toEqual(['Add', ['Multiply', 'x', 'yy'], 1]);
     const raw = ce.box(['Add', 'ww', 1], { canonical: false });
     const replaced = e.map((x) => (x.symbol === 'a' ? raw : x));
-    expect(ce.lookupDefinition('ww')).toBeDefined();
+    expect(ce.lookupDefinition('ww')).toBeUndefined();
     expect(replaced.evaluate().json).toEqual([
       'Add',
       ['Multiply', 'x', ['Add', 'ww', 1]],

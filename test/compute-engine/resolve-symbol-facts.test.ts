@@ -26,7 +26,7 @@ describe('external symbol facts', () => {
 
   test('an application decision can supersede an earlier inferred number', () => {
     const ce = new ComputeEngine();
-    ce.parse('f+1');
+    ce.infer([ce.parse('f+1')]);
     expect(ce.symbol('f').type.toString()).toBe('number');
     const result = ce.parse('f(x)', {
       resolveApplication: () => 'apply',
@@ -37,7 +37,7 @@ describe('external symbol facts', () => {
 
   test('a raw parse does not replace an inferred ambient binding', () => {
     const ce = new ComputeEngine();
-    ce.parse('f(x)');
+    ce.infer([ce.parse('f(x)')]);
     const before = ce.lookupDefinition('f');
     const raw = ce.parse('f(x+1)', {
       form: 'raw',
@@ -172,6 +172,8 @@ describe('external symbol facts', () => {
     });
     expect(ce.lookupDefinition('x')).toBeUndefined();
     expect(parsed.canonical.type.toString()).toBe('real');
+    // `ce.infer()` commits the requirement on `x` in the caller scope.
+    ce.infer([parsed.canonical]);
     expect(ce.symbol('x').type.toString()).toBe('real');
     expect(ce.parse('x(t)').json).toEqual(['Multiply', 't', 'x']);
     ce.assign('x', 5);
@@ -207,11 +209,11 @@ describe('external symbol facts', () => {
   });
 
   test('an inferred binding of the name made before the parse does not replace the fact', () => {
-    // `ce.parse('f')` declares `f` with no value in the global scope. That
-    // binding does not define `f`, so the call keeps the type of the fact
-    // until `f` is assigned.
+    // An inferred binding of `f` with no value in the global scope does not
+    // define `f`, so the call keeps the type of the fact until `f` is
+    // assigned.
     const ce = new ComputeEngine();
-    ce.parse('f').evaluate();
+    ce.declare('f', { type: 'unknown', inferred: true });
     expect(ce.lookupDefinition('f')).toBeDefined();
     const call = ce.parse('f(2)', {
       form: 'raw',
@@ -289,7 +291,7 @@ describe('external symbol facts', () => {
 
   test('an unresolved oracle preserves the ordinary inference environment', () => {
     const ce = new ComputeEngine();
-    ce.parse('f(x)', { resolveSymbol: () => undefined });
+    ce.infer([ce.parse('f(x)', { resolveSymbol: () => undefined })]);
     expect(ce.symbol('f').type.toString()).toBe('function');
   });
 
@@ -297,7 +299,7 @@ describe('external symbol facts', () => {
     '%s occurrence decisions can supersede an earlier inferred function',
     (form) => {
       const ce = new ComputeEngine();
-      ce.parse('f(x)');
+      ce.infer([ce.parse('f(x)')]);
       const result = ce.parse('f(x+1)', {
         form,
         resolveApplication: () => 'multiply',

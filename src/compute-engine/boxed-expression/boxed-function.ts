@@ -573,7 +573,7 @@ import {
 import { admissionOf, concreteValueOf } from './value-membership.js';
 import {
   functionLiteralArrowEffects,
-  functionLiteralSignatureType,
+  functionLiteralCallSignatureType,
   inferFunctionLiteralEffects,
   namedLiteralSignatureType,
 } from './effects-inference.js';
@@ -588,8 +588,13 @@ import {
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import {
   applicationEffects,
+  beginEffectsLookups,
+  effectsLookupsValid,
+  endEffectsLookups,
   isMergeable,
+  mergeEffectsLookups,
   publicEffects,
+  type EffectsLookups,
 } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import {
@@ -1656,7 +1661,10 @@ export class BoxedFunction
    * derived from a field's contents. The payload is an effect set, which
    * cannot contain an expression, let alone an object, so the
    * no-object-in-a-payload rule is satisfied by construction too. Bypassing
-   * `cachedValue` therefore costs this slot nothing. */
+   * `cachedValue` therefore costs this slot nothing. With the engine flag
+   * `_bindingUnits`, the entry keeps the lookup record of its computation
+   * (`_effectsDeps`, `EffectsLookups` in `effects-of.ts`), outside the
+   * `object-deps.ts` channel. */
   private _effects: CachedValue<ComputedEffects> = {
     value: null,
     generation: -1,
@@ -1679,6 +1687,14 @@ export class BoxedFunction
    * read a parameter of the call with no value. Such an entry is served
    * only in that view, and an entry computed outside it only outside it. */
   private _effectsStaticView = false;
+
+  /** With the engine flag `_bindingUnits`: the lookup record of the
+   * `_effects` entry (`lookupByName()`, `effects-of.ts`), the definition of
+   * each name the projection resolved by name. A free name has no
+   * definition when it is read, and a later declaration of it advances no
+   * axis: the entry is computed again when one of these names resolves to
+   * another definition. Always `undefined` without the flag. */
+  private _effectsDeps: EffectsLookups | undefined = undefined;
 
   /** Re-entrancy marker for the lazy-collection evaluate memo — see
    * `_memoizedLazyCollectionValue()`. */
@@ -2505,9 +2521,13 @@ export class BoxedFunction
       this._effects.generation === callableVersion &&
       this._effects.value !== null &&
       this._effectsScope === scope &&
-      this._effectsStaticView === staticViewDiverges(this.engine)
+      this._effectsStaticView === staticViewDiverges(this.engine) &&
+      (this._effectsDeps === undefined ||
+        effectsLookupsValid(this.engine, this._effectsDeps))
     ) {
       if (CACHE_STATS) recordCache('effects', 'hit');
+      if (this._effectsDeps !== undefined)
+        mergeEffectsLookups(this._effectsDeps);
       // Canary (`CE_EFFECTS_PARANOID`, design §6): on every served hit,
       // recompute the projection and compare — a divergence is a
       // callable-axis coverage hole and throws. Latched: the recompute
@@ -2537,9 +2557,19 @@ export class BoxedFunction
 
     this._effectsInFlight = true;
     const before = _effectsProvisionalReads;
+    // With the engine flag, the lookups of the projection are recorded
+    // (`_effectsDeps`). Without it, no record is made.
+    const collect = this.engine._bindingUnits;
+    if (collect) beginEffectsLookups();
+    let deps: EffectsLookups | undefined;
     try {
       const prev = this._effects.value;
-      const value = applicationEffects(this);
+      let value: ComputedEffects;
+      try {
+        value = applicationEffects(this);
+      } finally {
+        if (collect) deps = endEffectsLookups();
+      }
       _effectsComputeCount += 1;
       if (_effectsProvisionalReads === before) {
         if (CACHE_STATS) {
@@ -2562,6 +2592,7 @@ export class BoxedFunction
         this._effects.value = value;
         this._effectsScope = scope;
         this._effectsStaticView = staticViewDiverges(this.engine);
+        this._effectsDeps = deps;
       } else if (CACHE_STATS) recordCache('effects', 'declineStore');
       return value;
     } finally {
@@ -5416,11 +5447,23 @@ export class BoxedFunction
     // application is rebuilt when it is evaluated again
     // (`applyFunctionLiteralWith`). A node over other operands is another
     // expression, and the source text of this node does not describe it.
+    // With the engine flag `_bindingUnits`, the evaluation of a symbol with
+    // no value can give another symbol of the same name (the free name of
+    // the host in place of the copy of a body, `rebindBodyFreeNames()`): the
+    // source text of this node still describes the result.
+    const sameText =
+      sameOps ||
+      (this.engine._bindingUnits &&
+        ops.length === this.ops.length &&
+        ops.every((x, i) => {
+          const o = this.ops[i];
+          return x === o || (isSymbol(x) && isSymbol(o, x.symbol));
+        }));
     const result = new BoxedFunction(
       this.engine,
       this._operator,
       ops,
-      sameOps
+      sameText
         ? {
             metadata: {
               latex: this.verbatimLatex,
@@ -7900,6 +7943,26 @@ export class BoxedFunction
    * flag of the operator is tested first: it is a field read, and most nodes
    * are not such views. */
   each(): Generator<Expression> {
+    // An operation on the receiver, as `at()` is: each step of the walk runs
+    // in the one environment of the operation, which is not left installed
+    // between two steps.
+    const ce = this.engine;
+    if (ce._opensOperation(false)) {
+      const env = UnitEnvironment.forOperation(this, ce.context?.lexicalScope);
+      const state = ce._boxingState;
+      const inner = state.withOperation(env, () => this.each());
+      return (function* () {
+        try {
+          for (;;) {
+            const step = state.withOperation(env, () => inner.next());
+            if (step.done) return;
+            yield step.value;
+          }
+        } finally {
+          state.withOperation(env, () => inner.return(undefined));
+        }
+      })();
+    }
     if (this.operatorDefinition?.collection?.callsCallbackOnRead !== true)
       return this._eachInReadingContext();
     return eachInLazyViewContext(this, () => this._eachInReadingContext());
@@ -8036,6 +8099,8 @@ export class BoxedFunction
    * (`lazy-view-context.ts`); any other node is read where it is read. The
    * flag of the operator is tested first, as in `each()`. */
   at(index: number): Expression | undefined {
+    if (this.engine._opensOperation(false))
+      return this.engine._withOperation(this, () => this.at(index));
     if (this.operatorDefinition?.collection?.callsCallbackOnRead !== true)
       return this._atInReadingContext(index);
     return inLazyViewContext(this, () => this._atInReadingContext(index));
@@ -16490,7 +16555,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
   // the engine may assemble a `Function` literal's signature: a second builder
   // silently reintroduces the inline-callback gap. Guarded by
   // `test/compute-engine/effects-seam.test.ts`.
-  if (expr.operator === 'Function') return functionLiteralSignatureType(expr);
+  // With the engine flag `_bindingUnits`, the parameter and result types
+  // are read in the scope that the literal is written in
+  // (`functionLiteralCallSignatureType()`).
+  if (expr.operator === 'Function')
+    return functionLiteralCallSignatureType(expr);
 
   // A call to a function whose clause body is being canonicalized under the
   // recursion knot of `DefineFunction` (`IComputeEngine._recursionKnots`)
@@ -16514,6 +16583,18 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       isValueDef(binding) &&
       binding.value.inferredType &&
       binding.value.type.type === 'function'
+    )
+      return 'unknown';
+    // With the engine flag `_bindingUnits`, the knot of a name that is a free
+    // name holds no binding (`library/core.ts`): a call of the name that
+    // resolves to nothing, with a free head or bound to a forward-call
+    // reference of the body, is the self-call.
+    if (
+      expr.engine._bindingUnits &&
+      binding === undefined &&
+      (expr._freeHeadScope !== undefined ||
+        (expr.valueDefinition !== undefined &&
+          isForwardCallReference(expr.valueDefinition)))
     )
       return 'unknown';
   }
@@ -17937,9 +18018,12 @@ function hasInferredUnknown(expr: Expression): boolean {
       if (!unknowns.has(x.symbol)) return false;
       // A free name (`isFreeName()`) has an inferred type when its name
       // resolves to no definition or to an inferred one.
-      if (isFreeName(x)) return hasInferredType(x);
-      if (x.valueDefinition !== undefined)
-        return x.valueDefinition.inferredType === true;
+      // With the engine flag `_bindingUnits`, a definition of type `unknown`
+      // counts too: its occurrence reads the requirement of its unit (rule 4
+      // of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), which is
+      // no proof about the value the definition holds (`hasInferredType()`).
+      if (isFreeName(x) || x.valueDefinition !== undefined)
+        return hasInferredType(x);
       const binding = x.engine.lookupDefinition(x.symbol);
       return isValueDef(binding) && binding.value.inferredType === true;
     }

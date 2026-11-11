@@ -14,6 +14,9 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 
 const ce = new ComputeEngine();
+// Boxing declares nothing: an input that a test reads as a list element has
+// no type unless it is declared.
+ce.declare('x', 'real');
 
 /** The code and preamble of a successful compilation, together. */
 function emitted(fn: { code: string; preamble?: string }): string {

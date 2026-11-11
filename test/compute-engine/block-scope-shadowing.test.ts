@@ -42,12 +42,20 @@ describe('bare Break/Continue in statement position → Error', () => {
   });
 
   test('function form `Continue()` in an If branch inside a Loop stays valid', () => {
-    const loop = ce.box([
-      'Loop',
-      ['If', ['Equal', 'x', 1], ['Continue'], ['Assign', 'x', 1]],
-      ['Element', 'i', ['Range', 1, 3]],
-    ]);
-    expect(hasError(loop)).toBe(false);
+    // A free name does not count as declared for an assignment in a branch
+    // (`first-assignment-in-branch`), so `x` is declared first.
+    ce.pushScope();
+    try {
+      ce.declare('x', 'integer');
+      const loop = ce.box([
+        'Loop',
+        ['If', ['Equal', 'x', 1], ['Continue'], ['Assign', 'x', 1]],
+        ['Element', 'i', ['Range', 1, 3]],
+      ]);
+      expect(hasError(loop)).toBe(false);
+    } finally {
+      ce.popScope();
+    }
   });
 
   test('bare `Return` is left untouched (not an error)', () => {

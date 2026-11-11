@@ -93,7 +93,7 @@ describe('A CALLBACK IN THE WRONG POSITION IN THE BODY OF A FUNCTION', () => {
 
   test('a global inferred as a number by `2n` is not a domain: `ArgMax(f, n)`', () => {
     const ce = new ComputeEngine();
-    ce.box(['Multiply', 2, 'n']);
+    ce.infer([ce.box(['Multiply', 2, 'n'])]);
     const e = ce.box(['ArgMax', F, 'n']);
     expect(e.isValid).toBe(false);
     expect(e.toString()).toMatch(/^ArgMax\(Error\(ErrorCode\("incompatible-type", "indexed_collection"/);

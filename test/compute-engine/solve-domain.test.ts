@@ -1186,13 +1186,22 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
       ],
       [['Multiply', ['Subtract', 'x', 2], ['Exp', 'x']], [2]],
       [['Multiply', ['Subtract', 'x', 2], ['Add', ['Exp', 'x'], 1]], [2]],
-      [['Multiply', ['Subtract', 'x', 2], ['Add', ['Power', 'x', 2], 1]], [2]],
       [['Multiply', 'x', ['Ln', 'x']], [1]],
     ];
     for (const [g, expected] of cases) {
       expect(solutions(ce.box(['Solve', g, 'x']))).toEqual(expected);
       expect(solutions(solveIn(g, 'RealNumbers'))).toEqual(expected);
     }
+    // `x² + 1` has no real root. With no domain, the roots `±i` are roots
+    // too when `x` has no type, so only the real domain is checked.
+    expect(
+      solutions(
+        solveIn(
+          ['Multiply', ['Subtract', 'x', 2], ['Add', ['Power', 'x', 2], 1]],
+          'RealNumbers'
+        )
+      )
+    ).toEqual([2]);
 
     // Over a bounded domain, the numeric scan can show that the list is
     // complete: `Haversine(x)` gives no root, and has none in [0.5, 6].

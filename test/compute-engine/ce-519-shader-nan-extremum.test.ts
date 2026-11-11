@@ -27,6 +27,8 @@ ce.declare('v', 'vector<real^3>');
 // helper tests. The cells of `v` are finite for certain, so the operations on
 // `v` and on finite scalars call the built-ins (CE-565.2).
 ce.declare('n', 'vector<3>');
+// Boxing declares no name, so the scalar input of the shaders is declared.
+ce.declare('x', 'number');
 
 const ROOT = ['Sqrt', ['Subtract', 1, ['Square', 'x']]];
 

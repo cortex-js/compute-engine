@@ -27,14 +27,26 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
+
+// The type of the first occurrence of `name` in `expr`: the refinement is
+// read by the occurrences of the expression that uses the name.
+function typeOf(expr: Expression, name: string): string | undefined {
+  if (expr.symbol === name) return expr.type.toString();
+  for (const op of expr.ops ?? []) {
+    const t = typeOf(op, name);
+    if (t !== undefined) return t;
+  }
+  return undefined;
+}
 
 describe('Tycho 258 — a gather index does not make the base nested', () => {
   // The importer's normalization scope declares nothing: values never enter it.
   test('a chained gather leaves the base a flat collection', () => {
     const ce = new ComputeEngine();
     const gather = ['At', 'Z', ['Range', 1, ['Subtract', 'p', 1]]];
-    ce.box(['Equal', ['At', gather, 'W'], ['At', 'Z', 'p']]);
-    const z = ce.symbol('Z')?.type.toString();
+    const expr = ce.box(['Equal', ['At', gather, 'W'], ['At', 'Z', 'p']]);
+    const z = typeOf(expr, 'Z');
     expect(z).toBe('dictionary<any> | indexed_collection<any>');
     expect(z).not.toMatch(/indexed_collection<(dictionary|indexed_collection)/);
   });
@@ -72,20 +84,16 @@ describe('Tycho 258 — a gather index does not make the base nested', () => {
   // The controls: the refinement must keep working where it was right.
   test('a scalar index still refines the element type', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'ys', 1], 1]);
-    expect(ce.symbol('ys')?.type.toString()).toBe(
-      'indexed_collection<number>'
-    );
+    const expr = ce.box(['Add', ['At', 'ys', 1], 1]);
+    expect(typeOf(expr, 'ys')).toBe('indexed_collection<number>');
   });
 
   test('a gather with a SCALAR requirement still refines the element type', () => {
     // The consumer broadcasts over the selected list, so this really does
     // prove the elements are numbers.
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'xs', ['List', 1, 2]], 1]);
-    expect(ce.symbol('xs')?.type.toString()).toBe(
-      'indexed_collection<number>'
-    );
+    const expr = ce.box(['Add', ['At', 'xs', ['List', 1, 2]], 1]);
+    expect(typeOf(expr, 'xs')).toBe('indexed_collection<number>');
   });
 
   test('a declared base is unaffected', () => {

@@ -1086,8 +1086,13 @@ function functionSymbolOf(
   if (isParenthesizedFactorName(ce, op)) return undefined;
   const sym =
     isFunction(op, 'Delimiter') && op.nops === 1 ? canonicalOnce(op.op1) : op;
-  if (!isSymbol(sym) || !isDeclaredFunction(ce, sym.symbol, sym))
-    return undefined;
+  if (!isSymbol(sym)) return undefined;
+  // A bare head is a raw symbol: a free name is read through its canonical
+  // occurrence, which holds the `function` reading that an earlier call of
+  // the name wrote in the unit (`g(x)g(x)^{-1}`).
+  const occurrence =
+    occurrenceOf(ce, sym, ce.lookupDefinition(sym.symbol)) ?? sym;
+  if (!isDeclaredFunction(ce, sym.symbol, occurrence)) return undefined;
   return sym.symbol;
 }
 

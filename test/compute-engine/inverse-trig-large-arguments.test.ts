@@ -2538,8 +2538,9 @@ describe('Arctan: the type of a symbol operand', () => {
     // The `canonical` handler of `Arctan` runs the validation that a head
     // without one runs, so the operand is typed as before.
     const engine = new ComputeEngine();
-    engine.box(['Arctan', 'y']).evaluate();
-    expect(engine.box('y').type.toString()).toBe('complex | signed_infinity');
+    const expr = engine.box(['Arctan', 'y']);
+    expr.evaluate();
+    expect(expr.op1.type.toString()).toBe('complex | signed_infinity');
   });
 });
 

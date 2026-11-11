@@ -752,11 +752,80 @@ reverse it.
   reviewers showed that it took its last versions outside the operation of
   the evaluation, and that a caller that joins a pending walk did not check
   them. No entry is always safe.
-- **Decided by the user, 2026-11-10: a cache filled after the operation
-  wrote an entry misses in the next operation**
-  (`test/compute-engine/comprehension-memo.test.ts`, three tests). The
-  stored expression is evaluated once more, with the same value. The
-  alternative, a rule that an entry written by the operation in progress
-  is derived state and not a dependency, is not adopted: the cache would
-  not record what that write depended on. To revisit with measurements
-  from Tycho's adoption.
+- **Rule 6, a requirement that the definition already satisfies.** Inside
+  an operation, a requirement on a value definition whose inferred type is
+  already a subtype of it is not written (`_inferInEnvironment()`). The
+  call of a stored function rebuilt the index of its comprehension at each
+  evaluation and wrote `i: integer` in the environment of the operation,
+  under the definition of the index; the memo of the stored value and the
+  element memo then read another entry at each read and never hit (292
+  calls of the body where 46 are needed, and a full run again at each
+  later read). The entry was redundant: an occurrence reads the meet of
+  the definition's type and the entry. This replaces the user decision of
+  2026-11-10 to keep that miss, which was taken on a wrong description
+  (one more evaluation): the three tests of `comprehension-memo` pass
+  unchanged.
+
+### Phase E, package D: rules added or made precise (2026-11-10)
+
+Each item fixes a defect that the test updates of package D found with the
+flag on. The user can reverse it.
+
+- **Rule 4, a re-entrant read of a type in flight.** A re-entrant read of
+  a cached type whose previous value is no longer valid (an entry that it
+  read changed) is answered as a read of an empty cell, with `unknown`,
+  and the cell commits by the rule of a first computation (`cache.ts`).
+  Before, a recursive function typed again in an operation recursed with
+  no end.
+- **Rule 6, a numeric requirement is `number`.** The requirement that an
+  arithmetic use writes is `number`, whatever the types of the operands
+  when it is boxed (`inferNumericArgs()`): a `real` taken from the value
+  that `x` held then was still read after `x := 1 + i`.
+- **Rule 7, the sites added.** The juxtaposition code reads a call head
+  through its canonical occurrence (`g(x)g(x)^{-1}`); the recursion knot
+  of a function whose name is a free name is registered, and the self-call
+  types `unknown` while it is open; the install of a later clause of a
+  generic function is skipped by (scope, name) when the name has no
+  definition.
+- **Rule 7, the free name of the body of a function literal.** Its copy in
+  the scope of the body has the identity of the outer name when that name
+  resolves; when it does not, the copy under the `Block` of its literal is
+  the free name of its home scope, and the value of a call is rebound to
+  that free name when it leaves the call (`rebindBodyFreeNames()`): with
+  `g(a) := a x`, `g(2) - 2x` is 0. A copy taken out of its literal is
+  compared by its definition, as before (the decision of 2026-11-05 in
+  `docs/SCOPING-MODEL.md`).
+- **Rule 7, two home scopes.** A free `x` boxed before a host
+  `pushScope()` and one boxed after it are two bindings: `x + 100x` is not
+  merged (`ce-614`, the recommendation of package B, applied). The
+  alternative: two free names that resolve to no definition are the same
+  binding when both home scopes are on the chain of the current scope.
+- **Rule 8, `at()` and `each()`** of an expression are operations on their
+  receiver: an element is typed as it is when the whole collection is
+  evaluated.
+- **Rule 8, the result of an operation** (user decision of 2026-11-10: no
+  environment is kept). `ce.infer([result])` does not type a symbol that
+  the host made before the operation: the requirement was in the
+  environment of the operation. The host declares that symbol.
+- **Rule 11, `ce.infer()` records an inferred type.** The declaration that
+  it makes carries a provenance entry of kind `inferred`, so a later
+  assignment narrows the type as it narrowed a type inferred at boxing.
+  The fresh-matrix repair does not retype a name whose definition has a
+  concrete inferred type that this boxing did not make.
+- **Rule 12, a disequality fact** derived from an assumption applies to the
+  type of an occurrence whose base type (the definition's type met with
+  the requirement of the unit) is not `unknown`.
+- **Effects.** The memo of the effects of a node depends on the definition
+  that each name it looked up resolves to (a private record of the effects
+  walk, not the shared dependency collectors), so a held node reads a
+  later declaration of a free name.
+- **The type of a function literal** is derived in the scope that the
+  literal is written in, as the type of its call is.
+- **Not changed, to decide:** `ce.infer()` skips a name that the host
+  declared `unknown`, with the reason `defined` (rule 11 says "no explicit
+  definition"; rule 2 counts a definition of type `unknown` as having no
+  explicit type). `ce.infer()` reports an empty `skipped` for a name with
+  no requirement and for a name with a declared type. A generated name (the
+  parameter of a periodic family of `Solve`) does not avoid a name that was
+  only boxed. At the top level of an Epsil program, an `incompatible-type`
+  error no longer says where the conflicting type was inferred.

@@ -33,7 +33,9 @@ function interpretedAtPole(expr: any): number {
 describe('COMPILED POLE BOUNDARY — a `~oo` argument projects to Infinity', () => {
   it('projects a boxed `~oo` bound to a real free symbol, matching the interpreter', () => {
     // Each row is a compiled expression over one real symbol. The compiled
-    // answer and the interpreter's answer for `x := ~oo` must agree.
+    // answer and the interpreter's answer for `x := ~oo` must agree. The row
+    // `x` alone does not type `x`, so `x` is declared.
+    ce.declare('x', 'real');
     const rows: [any, number][] = [
       [['Add', 'x', 1], Infinity],
       ['x', Infinity],

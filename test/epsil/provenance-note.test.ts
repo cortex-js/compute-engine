@@ -23,17 +23,15 @@ function staticDiagnosticsOf(source: string) {
 }
 
 describe('EPSIL PROVENANCE NOTE — two-site incompatible-type diagnostics', () => {
-  test('top level: a boolean-inferred symbol used numerically names the inferring site', () => {
+  test('top level: a boolean-inferred free name used numerically is a static type error', () => {
+    // A free name of the program has no definition, so there is no
+    // provenance to name the inferring site from: the diagnostic has no note.
     const diagnostics = staticDiagnosticsOf(
       ['let b = p && q', 'let y = p + 1', 'y'].join('\n')
     );
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message[1]).toBe(
       'expected `number`, got `boolean` at `p`'
-    );
-    const notes = (diagnostics[0].notes ?? []).map((n) => n.message);
-    expect(notes).toContain(
-      '`p` was inferred to have type `boolean` from its use in `p && q`'
     );
   });
 

@@ -296,11 +296,25 @@ export function cachedValue<T>(
   // also measured and rejected, for the same reason: that read took 3.3 s
   // instead of 15 ms.
   // (`test/compute-engine/ce-582-recursive-type-facts-hidden.test.ts`)
+  //
+  // With the engine flag `_bindingUnits`, a cell whose previous value is not
+  // valid (the same-cell serve above refused it) is answered as an empty
+  // cell. Its dependencies include the reads of entries of unit
+  // environments, which an operation can change: a type computed when the
+  // function was assigned read no entry for its parameter `x`, and the
+  // `evaluate()` of a call wrote one (the rebuild of `x - 1` requires a
+  // number). Each re-entrant read refused that value and computed again,
+  // with no end. The stale value is still not served; the stand-in is the
+  // one that the first computation of the cell was given.
+  // (`test/compute-engine/binding-units-caches.test.ts`, "a recursive
+  // function typed again in an operation")
   if (
     reentrantEmpty !== undefined &&
     generation !== undefined &&
     cell.inFlight &&
-    cell.value === null &&
+    (cell.value === null ||
+      (engine as { _bindingUnits?: boolean } | undefined)?._bindingUnits ===
+        true) &&
     cell.generation === generation
   ) {
     // Counted as provisional only where the engine has objects, as the

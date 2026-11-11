@@ -45,6 +45,8 @@ describe('COMPILE a big operator over a shared or large body', () => {
   it('compiles a body shared under binders at depth 10 in time', () => {
     const ce = new ComputeEngine();
     defineH(ce, 10);
+    // The argument of `H`, a `function`, has no requirement: declare it.
+    ce.declare('x', 'real');
     const start = Date.now();
     const result = compileJs(ce.box(['H', 'x']));
     const elapsed = Date.now() - start;
@@ -58,6 +60,7 @@ describe('COMPILE a big operator over a shared or large body', () => {
   it('gives the value of evaluate() for a shared body', () => {
     const ce = new ComputeEngine();
     defineH(ce, 6);
+    ce.declare('x', 'real');
     const result = compileJs(ce.box(['H', 'x']));
     expect(result.success).toBe(true);
     for (const x of [0.5, 1, -0.75]) {

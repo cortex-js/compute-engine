@@ -60,14 +60,13 @@ describe('boxing validation seam for canonical-handler heads', () => {
     // `Sin` and the ranged carrier of `PoissonDistribution` are checked,
     // not inferred.
     const ce = new ComputeEngine();
-    ce.box(['Sin', 'x']);
-    expect(ce.box('x').type.toString()).toBe('number');
-    ce.box(['PoissonDistribution', 'lam']);
-    expect(ce.box('lam').type.toString()).toBe('number');
+    expect(ce.box(['Sin', 'x']).op1.type.toString()).toBe('number');
+    expect(ce.box(['PoissonDistribution', 'lam']).op1.type.toString()).toBe(
+      'number'
+    );
     // Same through the public boxing route, which opens its own window.
     const e = new ComputeEngine();
-    e.expr(['Sin', 'y']);
-    expect(e.box('y').type.toString()).toBe('number');
+    expect(e.expr(['Sin', 'y']).op1.type.toString()).toBe('number');
     expect(e.expr(['Ln', 'z']).type.toString()).toBe('number');
   });
 
@@ -115,10 +114,11 @@ describe('boxing validation seam for canonical-handler heads', () => {
     // parameters, or number literals inside them, skips the validation
     // machinery; anything the machinery could refuse still reaches it.
     const ce = new ComputeEngine();
-    // The first boxing types `lam` as `number` (numeric context); the second
-    // boxing admits it by overlap with `real<0<..>`, as the full path does.
-    expect(ce.box(['PoissonDistribution', 'lam']).isValid).toBe(true);
-    expect(ce.box('lam').type.toString()).toBe('number');
+    // The occurrence of `lam` types `number` (numeric context), which the
+    // boxing admits by overlap with `real<0<..>`, as the full path does.
+    const lam = ce.box(['PoissonDistribution', 'lam']);
+    expect(lam.isValid).toBe(true);
+    expect(lam.op1.type.toString()).toBe('number');
     expect(ce.box(['PoissonDistribution', 'lam']).isValid).toBe(true);
     ce.declare('k', 'integer');
     expect(ce.box(['PoissonDistribution', 'k']).isValid).toBe(true);

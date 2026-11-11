@@ -24,31 +24,15 @@ function withFrame<T>(ce: ComputeEngine, fn: () => T): T {
   return ce._withBoxingPassWindow(() => ce._withRolledBackInference(fn));
 }
 
-describe('ROLLBACK FRAMES — family 1: value-definition type slots', () => {
-  test('an in-frame inference rolls back to the pre-frame type, in place', () => {
-    const ce = new ComputeEngine();
-    ce.box('q'); // auto-declares q: unknown (inferred) with an anchor entry
-    const def = ce.lookupDefinition('q')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
-    expect(def.value.type.toString()).toBe('unknown');
-    const provenanceBefore = def.value._typeProvenance?.slice() ?? [];
-
-    withFrame(ce, () => {
-      ce.box(['Add', 'q', 1]);
-      expect(def.value.type.toString()).toBe('number');
-    });
-
-    // Same definition object, pre-frame slots, byte-identical history.
-    expect(ce.lookupDefinition('q')).toBe(def);
-    expect(def.value.type.toString()).toBe('unknown');
-    expect(def.value.inferredType).toBe(true);
-    const provenanceAfter = def.value._typeProvenance ?? [];
-    expect(provenanceAfter.length).toBe(provenanceBefore.length);
-    provenanceBefore.forEach((entry, i) =>
-      expect(provenanceAfter[i]).toBe(entry)
-    );
-  });
-});
+/** The first occurrence of the symbol `name` in `expr`. */
+function occurrence(expr: Expression, name: string): Expression | undefined {
+  if (expr.symbol === name) return expr;
+  for (const op of expr.ops ?? []) {
+    const found = occurrence(op, name);
+    if (found) return found;
+  }
+  return undefined;
+}
 
 describe('ROLLBACK FRAMES — family 2: operator signature writes', () => {
   test('abort after a signature replacement restores the BoxedType by identity', () => {
@@ -160,78 +144,8 @@ describe('ROLLBACK FRAMES — family 5 + cascade: provisional re-derivation', ()
   });
 });
 
-describe('ROLLBACK FRAMES — family 6: the fresh-inference set', () => {
-  test('an already-fresh member survives an in-frame re-add (prior-presence bit)', () => {
-    const ce = new ComputeEngine();
-    ce._withBoxingPassWindow(() => {
-      // Pre-frame, in-window: fsym transitions unknown → concrete and joins
-      // the set.
-      ce.box(['Add', 'fsym', 1]);
-      const def = ce.lookupDefinition('fsym')!;
-      if (!isValueDef(def)) throw new Error('expected a value definition');
-      expect(ce._freshlyInferred?.has(def.value)).toBe(true);
-
-      ce._withRolledBackInference(() => {
-        // Scaffolding: reset the slots directly (unjournaled) so the
-        // in-frame inference attempts an unknown → concrete `.add()` of the
-        // ALREADY-PRESENT member — the silent no-op whose naive
-        // "remove what was added" undo would evict pre-frame evidence.
-        def.value.type = ce.type('unknown');
-        def.value.inferredType = true;
-        ce.box(['Add', 'fsym', 1]);
-        expect(ce._freshlyInferred?.has(def.value)).toBe(true);
-      });
-
-      expect(ce._freshlyInferred?.has(def.value)).toBe(true);
-    });
-  });
-
-  test('a member added by the frame is removed on rollback', () => {
-    const ce = new ComputeEngine();
-    ce.box('gsym'); // declared OUTSIDE any window: not fresh
-    const def = ce.lookupDefinition('gsym')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
-    ce._withBoxingPassWindow(() => {
-      ce._withRolledBackInference(() => {
-        ce.box(['Add', 'gsym', 1]);
-        expect(ce._freshlyInferred?.has(def.value)).toBe(true);
-      });
-      expect(ce._freshlyInferred?.has(def.value) ?? false).toBe(false);
-    });
-  });
-});
-
-describe('ROLLBACK FRAMES — family 7: provenance history at the cap', () => {
-  test('an aborted append at capacity reinserts the displaced entry', () => {
-    const ce = new ComputeEngine();
-    ce.box('capsym');
-    const def = ce.lookupDefinition('capsym')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
-    // Scaffolding: a full history (the cap is 8; the oldest entry is the
-    // anchor, the second-oldest is what an over-cap append displaces).
-    def.value._typeProvenance = Array.from({ length: 8 }, (_, i) => ({
-      type: ce.type('integer'),
-      kind: 'inferred' as const,
-      axis: 'type' as const,
-      cause: ce.box(i),
-    }));
-    const entriesBefore = def.value._typeProvenance.slice();
-
-    withFrame(ce, () => {
-      ce.box(['Add', 'capsym', 1]); // appends → displaces entry at index 1
-      const inFrame = def.value._typeProvenance!;
-      expect(inFrame).toHaveLength(8);
-      expect(inFrame[1]).toBe(entriesBefore[2]); // the eviction happened
-    });
-
-    const after = def.value._typeProvenance!;
-    expect(after).toHaveLength(8);
-    after.forEach((entry, i) => expect(entry).toBe(entriesBefore[i]));
-  });
-});
-
 describe('ROLLBACK FRAMES — the fresh-matrix repair inside a frame', () => {
-  test('a SUCCESSFUL repair rolls back with the frame', () => {
+  test('a SUCCESSFUL repair inside a frame changes no definition', () => {
     const ce = new ComputeEngine();
     // The test declares `A` before the frame opens, as an unknown-typed
     // value definition; `B` has no declaration.
@@ -244,112 +158,66 @@ describe('ROLLBACK FRAMES — the fresh-matrix repair inside a frame', () => {
     withFrame(ce, () => {
       const e = ce.parse('\\det(A+2B)'); // repair promotes A, B to matrix
       expect(e.isValid).toBe(true);
-      expect(ce.symbol('A').type.toString()).toBe('matrix');
+      expect(occurrence(e, 'A')!.type.toString()).toBe('matrix');
+      // The repair writes the environment of the boxing, not the
+      // definition.
+      expect(aDef.value.type.toString()).toBe('unknown');
     });
 
-    // The pre-existing `A` is restored in place; the frame-declared `B` is
-    // removed — no phantom matrix typing survives either way.
+    // No phantom matrix typing survives: `A` keeps its definition and `B`
+    // has none.
     expect(ce.lookupDefinition('A')).toBe(aDef);
     expect(aDef.value.type.toString()).toBe('unknown');
     expect(ce.lookupDefinition('B')).toBeUndefined();
   });
 
-  test('a FAILED repair inside a frame: repair-local restore and frame replay compose', () => {
-    // The failure leg restores immediately (repair-local records) AND the
-    // frame journal replays over that already-restored state at close. The
-    // families involved are idempotent/inert on the second pass — see the
-    // composition comment in `repairFreshMatrixInference` (`validate.ts`).
-    const ce = new ComputeEngine();
-    // Pre-frame definition so post-frame state is observable (not removed
-    // with a frame-created binding), with a non-trivial history.
-    ce.box(['Add', 'A', 1]); // auto-declared, then inferred number
-    const def = ce.lookupDefinition('A')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
-    const typeBefore = def.value.type;
-    const historyBefore = def.value._typeProvenance?.slice() ?? [];
-
-    withFrame(ce, () => {
-      const e = ce.parse('\\det(\\frac{A}{B})'); // repair runs, then fails
-      expect(e.isValid).toBe(false);
-      // The failure leg already restored A — while the frame is still open.
-      expect(def.value.type.toString()).toBe('number');
-    });
-
-    expect(ce.lookupDefinition('A')).toBe(def);
-    expect(def.value.type).toBe(typeBefore); // BoxedType identity
-    const historyAfter = def.value._typeProvenance ?? [];
-    expect(
-      historyAfter.map((e) => [e.kind, e.type.toString()])
-    ).toEqual(historyBefore.map((e) => [e.kind, e.type.toString()]));
-  });
-});
-
-describe('ROLLBACK FRAMES — family 8: the narrowing sink', () => {
-  test('a narrowing recorded during an aborted frame is retracted', () => {
-    const ce = new ComputeEngine();
-    ce.box('outerSym'); // outer definition, unknown
-    const scope = ce.createScope();
-    withFrame(ce, () => {
-      ce.parse('\\mathrm{outerSym} + 1', { scope });
-      expect(scope.narrowings()).toHaveLength(1);
-    });
-    // A rejected frame must not leave `narrowings()` reporting a narrowing
-    // that never took effect.
-    expect(scope.narrowings()).toHaveLength(0);
-  });
 });
 
 describe('ROLLBACK FRAMES — nesting and exceptions', () => {
-  test('nested frames touching one definition unwind to each open point', () => {
+  test('nested frames touching one name unwind to each open point', () => {
     const ce = new ComputeEngine();
-    ce.box('nsym');
-    const def = ce.lookupDefinition('nsym')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
+    ce.declare('nsym', 'integer');
+    const before = ce.lookupDefinition('nsym');
 
     withFrame(ce, () => {
-      ce.box(['Add', 'nsym', 1]); // unknown → number (family 1, outer)
-      expect(def.value.type.toString()).toBe('number');
+      // Family 4, outer: replace the binding.
+      ce._declareSymbolValue('nsym', { type: 'boolean' });
       const outerBinding = ce.lookupDefinition('nsym');
+      expect(outerBinding).not.toBe(before);
       ce._withRolledBackInference(() => {
-        // Family 4, inner: replace the binding outright.
+        // Family 4, inner: replace the binding again.
         ce._declareSymbolValue('nsym', { type: 'string' });
         expect(ce.lookupDefinition('nsym')).not.toBe(outerBinding);
       });
-      // Inner rollback restored the OUTER frame's state — the same binding,
-      // still carrying the outer frame's inference — not the pre-frame
-      // state.
+      // Inner rollback restored the OUTER frame's state — the binding the
+      // outer frame made — not the pre-frame state.
       expect(ce.lookupDefinition('nsym')).toBe(outerBinding);
-      expect(def.value.type.toString()).toBe('number');
+      expect(ce.box('nsym').type.toString()).toBe('boolean');
     });
-    expect(def.value.type.toString()).toBe('unknown');
+    expect(ce.lookupDefinition('nsym')).toBe(before);
+    expect(ce.box('nsym').type.toString()).toBe('integer');
   });
 
   test('a throw from the body rolls back and rethrows the body error', () => {
     const ce = new ComputeEngine();
-    ce.box('tsym');
-    const def = ce.lookupDefinition('tsym')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
     expect(() =>
       withFrame(ce, () => {
-        ce.box(['Add', 'tsym', 1]);
+        ce._declareSymbolValue('tsym', { type: 'real' });
         throw new Error('body-error');
       })
     ).toThrow('body-error');
-    expect(def.value.type.toString()).toBe('unknown');
+    expect(ce.lookupDefinition('tsym')).toBeUndefined();
   });
 
   test('a throw DURING undo continues best-effort and never masks the result (release mode)', () => {
     const ce = new ComputeEngine();
     ce._debugBindings = false;
-    ce.box('usym');
-    const def = ce.lookupDefinition('usym')!;
-    if (!isValueDef(def)) throw new Error('expected a value definition');
     const assertSpy = jest
       .spyOn(console, 'assert')
       .mockImplementation(() => {});
     try {
       const result = withFrame(ce, () => {
-        ce.box(['Add', 'usym', 1]); // journaled first → undone SECOND
+        ce._declareSymbolValue('usym', { type: 'real' }); // undone SECOND
         // Poisoned entry, undone FIRST (strict LIFO): the unwind must
         // continue past it.
         ce._rollbackFrames[ce._rollbackFrames.length - 1].record({
@@ -361,7 +229,7 @@ describe('ROLLBACK FRAMES — nesting and exceptions', () => {
       });
       expect(result).toBe(42);
       // The entries after the poisoned one still ran.
-      expect(def.value.type.toString()).toBe('unknown');
+      expect(ce.lookupDefinition('usym')).toBeUndefined();
       // The failure was reported through console.assert.
       expect(
         assertSpy.mock.calls.some((call) => call[0] === false)
@@ -406,7 +274,8 @@ describe('ROLLBACK FRAMES — the escape rule (debug builds)', () => {
     ce._debugBindings = true;
     let retained: Expression | undefined;
     withFrame(ce, () => {
-      retained = ce.box('escapee'); // auto-declared INSIDE the frame
+      ce._declareSymbolValue('escapee', { type: 'real' }); // INSIDE the frame
+      retained = ce.box('escapee');
       ce.box(['Add', 'escapee', 1]);
     });
     // Rendering resolves no bindings and is explicitly permitted.

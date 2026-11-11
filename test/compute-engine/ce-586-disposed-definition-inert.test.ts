@@ -16,14 +16,16 @@ describe('CE-586: a symbol bound to a disposed definition is inert', () => {
     ce.discard(cp);
     expect(e.evaluate().toString()).toBe('w + 1');
 
+    // Boxing declared nothing in the window, so `w` is a free name: the held
+    // expression reads the later declaration, as a new expression does.
     ce.declare('w', { type: 'integer', value: 9 });
-    expect(e.evaluate().toString()).toBe('w + 1');
-    expect(e.N().toString()).toBe('w + 1');
-    expect(isFunction(e) ? e.ops[0].value : 'not a function').toBeUndefined();
-    // The symbol still counts as unknown, consistent with its evaluation.
-    expect(e.unknowns).toEqual(['w']);
-    expect(e.freeVariables).toEqual(['w']);
-    // A new expression reads the new definition.
+    expect(e.evaluate().toString()).toBe('10');
+    expect(e.N().toString()).toBe('10');
+    expect(isFunction(e) ? e.ops[0].value?.toString() : 'not a function').toBe(
+      '9'
+    );
+    expect(e.unknowns).toEqual([]);
+    expect(e.freeVariables).toEqual([]);
     expect(ce.parse('w + 1').evaluate().toString()).toBe('10');
   });
 

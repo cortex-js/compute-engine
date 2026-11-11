@@ -23,8 +23,8 @@ describe('a scalar factor of an inferred or unknown type (CE-481)', () => {
   test('an inferred `number` factor widens the cells of a declared list', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<integer>');
-    // A use as a number infers `u` as `number`.
-    ce.parse('u+1').evaluate();
+    // A use as a number, committed by `ce.infer()`, infers `u` as `number`.
+    ce.infer([ce.parse('u+1')]);
     expect(ce.symbol('u').type.toString()).toBe('number');
     const product = ce.box(['Multiply', 'L', 'u']);
     expect(product.type.toString()).toBe('list<number>');

@@ -387,7 +387,7 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
     const ce = rowEngine('(unknown) -> list');
     ce.assign('k', ce.box(ELEMENT as any));
     ce.declare('h', '(value) -> number');
-    ce.box(['h', 'w']);
+    ce.infer([ce.box(['h', 'w'])]);
     expect(ce.box('w').type.toString()).toBe('value');
     const code = compile(ce.box(['Add', 'w', 1]), {
       to: 'javascript',

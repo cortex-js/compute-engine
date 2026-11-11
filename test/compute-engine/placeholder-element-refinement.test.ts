@@ -117,16 +117,19 @@ describe('Phase 2: literal downward distribution', () => {
   test('a typed collection parameter infers the literal SYMBOL elements', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(list<number>) -> number');
-    ce.box(['f', ['List', 'a', 'b']]);
-    expect(ce.box('a').type.toString()).toBe('number');
-    expect(ce.box('b').type.toString()).toBe('number');
+    // Boxing declares no name: the occurrences carry the inferred type.
+    const call = ce.box(['f', ['List', 'a', 'b']]);
+    expect(call.op1.op1.type.toString()).toBe('number');
+    expect(call.op1.op2.type.toString()).toBe('number');
   });
 
   test('Epsil route: f([a, b]) infers a and b', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(list<number>) -> number');
-    executeEpsil(ce, 'f([a, b])');
-    expect(ce.box('a').type.toString()).toBe('number');
-    expect(ce.box('b').type.toString()).toBe('number');
+    // The run declares no name: the occurrences of the value of the
+    // statement carry the inferred type.
+    const call = executeEpsil(ce, 'f([a, b])').value!;
+    expect(call.op1.op1.type.toString()).toBe('number');
+    expect(call.op1.op2.type.toString()).toBe('number');
   });
 });

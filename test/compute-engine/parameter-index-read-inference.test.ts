@@ -147,21 +147,24 @@ describe('a read at an index that is not a literal joins the requirements', () =
 describe('a free symbol keeps one element type for every element', () => {
   test('xs[1] + 1 at the top level', () => {
     const ce = new ComputeEngine();
-    ce.box(['Add', ['At', 'xs', 1], 1]);
-    expect(ce.symbol('xs').type.toString()).toBe('indexed_collection<number>');
+    const sum = ce.box(['Add', ['At', 'xs', 1], 1]);
+    const read = sum.ops!.find((op) => op.operator === 'At')!;
+    expect(read.op1.type.toString()).toBe('indexed_collection<number>');
   });
 });
 
 // A free symbol passed to a bare parameter learns one element type only when
 // the parameter's tuple came from index reads. A tuple that a call in the
-// body requires is a contract, and the free symbol learns it.
+// body requires is a contract, and the free symbol learns it. The type of the
+// free symbol is read on its occurrence in the call.
 describe('a free symbol at an inferred tuple slot', () => {
   function slotOf(body: MathJsonExpression): string {
     const ce = new ComputeEngine();
     ce.declare('g', '(tuple<number, number>) -> number');
     ce.assign('h', ce.box(['Function', body, 'p']));
-    expect(ce.box(['h', 'zs']).isValid).toBe(true);
-    return ce.symbol('zs').type.toString();
+    const call = ce.box(['h', 'zs']);
+    expect(call.isValid).toBe(true);
+    return call.op1.type.toString();
   }
 
   test('index reads only: one element type', () => {
@@ -205,10 +208,12 @@ describe('a free symbol at an inferred tuple slot', () => {
     ce.assign('h', ce.box(['Function', ['g', 'p'], 'p']));
     ce.assign('fk', ce.box(['Function', ['k', 'q'], 'q']));
     ce.assign('fh', ce.box(['Function', ['h', 'q'], 'q']));
-    ce.box(['fk', 'xs']);
-    ce.box(['fh', 'ys']);
-    expect(ce.symbol('xs').type.toString()).toBe('indexed_collection<number>');
-    expect(ce.symbol('ys').type.toString()).toBe('tuple<number, number>');
+    expect(ce.box(['fk', 'xs']).op1.type.toString()).toBe(
+      'indexed_collection<number>'
+    );
+    expect(ce.box(['fh', 'ys']).op1.type.toString()).toBe(
+      'tuple<number, number>'
+    );
   });
 });
 
@@ -232,8 +237,9 @@ describe('an index-read tuple does not fix the length', () => {
       expect(fn.isValid).toBe(true);
       expect(fn.type.toString()).toBe('(p: tuple<number, number>) -> number');
       ce.assign('h', fn);
-      ce.box(['h', 'zs']);
-      expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+      expect(ce.box(['h', 'zs']).op1.type.toString()).toBe(
+        'tuple<number, number>'
+      );
     }
   });
 
@@ -261,8 +267,7 @@ describe('an index-read tuple does not fix the length', () => {
       '(p: tuple<real | signed_infinity | ~oo, real | signed_infinity | ~oo>) -> number'
     );
     ce.assign('h', fn);
-    ce.box(['h', 'zs']);
-    expect(ce.symbol('zs').type.toString()).toBe(
+    expect(ce.box(['h', 'zs']).op1.type.toString()).toBe(
       'tuple<real | signed_infinity | ~oo, real | signed_infinity | ~oo>'
     );
   });
@@ -304,8 +309,9 @@ describe('an index-read tuple does not fix the length', () => {
       expect(fn.isValid).toBe(true);
       expect(fn.type.toString()).toBe('(p: tuple<number, number>) -> number');
       ce.assign('h', fn);
-      ce.box(['h', 'zs']);
-      expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+      expect(ce.box(['h', 'zs']).op1.type.toString()).toBe(
+        'tuple<number, number>'
+      );
     }
 
     // A component that the reads gave and that no arm admits is still an
@@ -329,21 +335,29 @@ describe('an index-read tuple does not fix the length', () => {
   });
 });
 
+// The types of the free arguments are read on their occurrences: in Epsil, in
+// a last statement of the program, which reads what the earlier statements
+// required.
 describe('the three routes that define a function agree on a free argument', () => {
   test.each([
-    ['let', 'let k = p => p[1] + p[2]\nlet h = p => g(p)\nk(ws)\nh(zs)'],
+    [
+      'let',
+      'let k = p => p[1] + p[2]\nlet h = p => g(p)\nk(ws)\nh(zs)\n(ws, zs)',
+    ],
     [
       'function',
-      'function k(p) { p[1] + p[2] }\nfunction h(p) { g(p) }\nk(ws)\nh(zs)',
+      'function k(p) { p[1] + p[2] }\nfunction h(p) { g(p) }\nk(ws)\nh(zs)\n(ws, zs)',
     ],
   ])('Epsil %s', (_, source) => {
     const ce = new ComputeEngine();
     ce.declare('g', '(tuple<number, number>) -> number');
     const parseLatex = (latex: string): MathJsonExpression =>
       ce.parse(latex).json;
-    executeEpsil(ce, source, { parseLatex });
-    expect(ce.symbol('ws').type.toString()).toBe('indexed_collection<number>');
-    expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+    const result = executeEpsil(ce, source, { parseLatex });
+    expect(result.diagnostics).toEqual([]);
+    const [ws, zs] = result.value!.ops!;
+    expect(ws.type.toString()).toBe('indexed_collection<number>');
+    expect(zs.type.toString()).toBe('tuple<number, number>');
   });
 
   test('ce.assign', () => {
@@ -354,10 +368,12 @@ describe('the three routes that define a function agree on a free argument', () 
       ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], 'p'])
     );
     ce.assign('h', ce.box(['Function', ['g', 'p'], 'p']));
-    ce.box(['k', 'ws']);
-    ce.box(['h', 'zs']);
-    expect(ce.symbol('ws').type.toString()).toBe('indexed_collection<number>');
-    expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+    expect(ce.box(['k', 'ws']).op1.type.toString()).toBe(
+      'indexed_collection<number>'
+    );
+    expect(ce.box(['h', 'zs']).op1.type.toString()).toBe(
+      'tuple<number, number>'
+    );
   });
 });
 

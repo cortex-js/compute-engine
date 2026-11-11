@@ -3,11 +3,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 //
 // AN EXPRESSION BOXED BEFORE A NARROWING READS THE NARROWED TYPE
 //
-// A use of a symbol can narrow its inferred type (`Mod(x, 2)` makes `x`
-// `real`). The narrowing cannot advance the type caches where it happens (it
-// happens while a type is being computed), so it advances them when that
-// computation ends. Before, an expression boxed earlier kept the type it had
-// computed with the wider type of the symbol.
+// `ce.infer()` over a use of a symbol declares its inferred type
+// (`Mod(x, 2)` makes `x` `real`). An expression boxed before reads that
+// definition: its cached type is computed again, and it does not keep the
+// type it computed with the wider type of the symbol.
 //
 
 describe('a narrowing reaches the types of expressions boxed before it', () => {
@@ -18,7 +17,7 @@ describe('a narrowing reaches the types of expressions boxed before it', () => {
     expect(l.type.toString()).toBe('vector<1>');
     expect(s.type.toString()).toBe('number');
 
-    ce.box(['Mod', 'x', 2]).evaluate();
+    ce.infer([ce.box(['Mod', 'x', 2])]);
     expect(ce.symbol('x').type.toString()).toBe('real');
 
     expect(l.type.toString()).toBe(ce.box(['List', 'x']).type.toString());
@@ -32,7 +31,7 @@ describe('a narrowing reaches the types of expressions boxed before it', () => {
     // Read (and cache) the type and the sign with the wide type of `y`.
     const typeBefore = q.type.toString();
     void q.sgn;
-    ce.box(['Mod', 'y', 2]).evaluate();
+    ce.infer([ce.box(['Mod', 'y', 2])]);
     expect(ce.symbol('y').type.toString()).toBe('real');
     const fresh = ce.box(['Abs', ['Add', 'y', 1]]);
     expect(q.type.toString()).toBe(fresh.type.toString());
@@ -46,7 +45,7 @@ describe('a narrowing reaches the types of expressions boxed before it', () => {
     expect(l.type.toString()).toBe('vector<1>');
     ce._withBoxingPassWindow(() =>
       ce._withRolledBackInference(() => {
-        ce.box(['Mod', 'z', 2]);
+        ce.infer([ce.box(['Mod', 'z', 2])]);
         expect(ce.symbol('z').type.toString()).toBe('real');
         // Cached with the narrowed type, inside the frame.
         expect(l.type.toString()).toBe('vector<real^1>');

@@ -92,6 +92,45 @@ block local, a binder index or the host binds, so no binding changes what
 a qualified name reads. LaTeX has no spelling of the
 qualifier: a parse of `\pi` in such a scope reads the local.
 
+### Free names
+
+Boxing declares no name (`TYPE-SYSTEM.md`, "The type of a name with no
+explicit type"). A name that has no definition when it is boxed is a **free
+name**: a canonical symbol with no definition (`isFreeName()`,
+`type-guards.ts`; `binding-unit.ts`). Its `valueDefinition` and
+`operatorDefinition` are `undefined`, and `ce.lookupDefinition(name)` is
+`undefined` until the name is declared. It keeps its name and its **home
+scope**: the first scope up the chain that existed before the boxing and is
+not `noAutoDeclare` (`freeNameHomeScope()`). The home scope also skips the
+scope of a binder when the name is boxed in that scope after the binder was
+canonicalized (by a `subs()` during its evaluation). The free name of the
+body of a function literal has its home scope in the scope that the literal
+is written in.
+
+**Resolution.** For a type read, an evaluation, a compilation and a
+comparison, the definition of a free name is found when the read happens,
+from the current context (`bindingInContext()`). The resolution skips the
+variables of binders, because a free name was not inside a binder when it was
+boxed, and it skips a library operator for a name that the expression reads as
+a variable (`N` in `N + 1`). With no definition, a free name stays symbolic.
+So `a = ce.parse('x + 1'); ce.assign('x', 3); a.evaluate()` is `4`, also when
+the assignment is made in a pushed scope. A free name of the body of a
+function literal has a definition in the scope of the body, which the boxing
+made, and is a free name for the resolution: when the scope of the body is
+not current, it does not read the variable of a binder or a parameter of a
+call that has its name. An occurrence that has a definition reads another
+definition of its name only when that definition hides its own (a
+declaration in a scope pushed under the scope that holds its definition).
+
+**Identity.** Two occurrences are the same binding (`sameBinding()`,
+`compare.ts`) when both resolve to the same definition. When neither
+resolves, they are the same binding when both are free names with the same
+home scope and name. A free name is never the variable of a binder.
+
+The setters `value` and `type` of a free name are host writes: they declare
+the name in its home scope, as `ce.assign()` and `ce.declare()` do
+(`ce.box('w').value = 3` declares `w`).
+
 ## Callable resolution
 
 A callable name denotes the binding selected where the call or callback was
@@ -285,9 +324,10 @@ and `Σ_{w=1}^{3} W(w)[1]` answers `6w` — exactly what the spelling
 value's free name: with `a := n + 1`, `Σ_{n=1}^{3} a` is `3n + 3`, not `9`.
 This replaces the compatibility hatch the 2026-08-21 symbol-resolution round
 kept for an ordinary declaration, which a comprehension or `Sum` binder was
-treated as. Two conditions bound the skip. An occurrence with NO binding still
-reads the innermost binding by name, because it denotes nothing in
-particular. And an occurrence whose own binding is itself a binder's variable
+treated as. Two conditions bound the skip. An occurrence with NO binding that
+is not a free name (a raw symbol) still reads the innermost binding
+by name, because it denotes nothing in particular; a free name skips the
+binder bindings ("Free names" above). And an occurrence whose own binding is itself a binder's variable
 also reads by name: two big operators that use the same index name can be
 evaluated at once (the asynchronous lane suspends one mid-loop), and the
 loop's per-term assignment and the body's read must resolve the name the same
@@ -480,14 +520,12 @@ statement types (a bare `f`, a tuple, an equation) is declared in the scope
 of that `Block`. So `ce.box(['Function', ['Block', 'f'], 'x'])` and a later
 `ce.box('f')` are not `isSame`, although evaluation reads the same value.
 
-A derivative of such a literal shows the same difference. On an engine where
-`f` is not declared, `ce.box(['D', ['Function', ['Block', 'f'], 'x'], 'x'])`
-and a later `ce.parse('\\frac{\\mathrm{d}f}{\\mathrm{d}x}')` have the same
-`.json` but are not `isSame`, because the parse binds a global `f`. Their values
-are the same: both are `0`, also after `f := 5`. They are `isSame` when `f` is
-declared before the literal is boxed (by `ce.declare()`, by `ce.box('f')`, or by
-a parse that runs first). A host that compares expressions from the two routes
-compares their `.json`.
+Two literals made by two routes are `isSame`: on an engine where `f` is not
+declared, `ce.box(['D', ['Function', ['Block', 'f'], 'x'], 'x'])` and a later
+`ce.parse('\\frac{\\mathrm{d}f}{\\mathrm{d}x}')` are `isSame`, and both
+evaluate to `0`, also after `f := 5`. The `f` of a literal and a symbol `f`
+outside every literal are not `isSame`. A host that compares such
+expressions compares their `.json`.
 
 This limit stays by a user decision (2026-11-05), because each fix that was
 tried costs more than the `isSame` result is worth:

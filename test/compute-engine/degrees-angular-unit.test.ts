@@ -86,6 +86,9 @@ describe('DEGREE LITERALS IN EVERY ANGULAR UNIT', () => {
 describe('DEGREE LITERALS — compiled output agrees with evaluate()', () => {
   test.each(UNITS)('%s: javascript', (unit) => {
     const ce = engine(unit);
+    // In degree mode `x^\circ` is the bare input `x`, which has no type of
+    // its own.
+    ce.declare('x', 'real');
     const js = ce._getCompilationTarget('javascript')!;
     expect(js.compile(ce.parse('\\sin(x^\\circ)')).run!({ x: 30 })).toBeCloseTo(
       0.5,

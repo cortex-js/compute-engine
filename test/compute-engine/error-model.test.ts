@@ -2438,11 +2438,13 @@ describe('SIGNATURE-GUIDELINES §3.3 — a membership predicate answers False fo
     // infinities, written onto a name the program will use elsewhere. The wide
     // `(number)` carrier infers what every other numeric predicate does.
     const ce2 = new ComputeEngine();
-    ce2.box(['IsPrime', 'n_zz']).evaluate();
-    expect(ce2.symbol('n_zz').type.toString()).toBe('number');
+    const isPrime = ce2.box(['IsPrime', 'n_zz']);
+    isPrime.evaluate();
+    expect(isPrime.op1.type.toString()).toBe('number');
     const ce3 = new ComputeEngine();
-    ce3.box(['IsComposite', 'm_zz']).evaluate();
-    expect(ce3.symbol('m_zz').type.toString()).toBe('number');
+    const isComposite = ce3.box(['IsComposite', 'm_zz']);
+    isComposite.evaluate();
+    expect(isComposite.op1.type.toString()).toBe('number');
   });
 
   test('a string operand is still the wanted boxing Error, not a total-predicate False', () => {
@@ -3998,8 +4000,11 @@ describe('the arithmetic core declares its domains', () => {
     // A fresh symbol is still inferred `number`, not the declared carrier:
     // the inference comes from `checkNumericArgs`, which the canonical
     // handler runs in place of the signature validation.
-    expect(ce.box(['Divide', 'vB11', 2]).type.toString()).toBe('number');
-    expect(ce.box('vB11').type.toString()).toBe('number');
+    const quotient = ce.box(['Divide', 'vB11', 2]);
+    expect(quotient.type.toString()).toBe('number');
+    // The canonical form is `Multiply(1/2, vB11)`.
+    expect(quotient.op2.symbol).toBe('vB11');
+    expect(quotient.op2.type.toString()).toBe('number');
     // A symbolic numerator that may be zero keeps the quotient until it has
     // a value: `xB11/0` is `0/0` at `xB11 = 0` (ROADMAP CE-95). A numerator
     // that is not zero is a pole.
@@ -4215,9 +4220,8 @@ describe('the arithmetic core declares its domains', () => {
     // `Divide`: these heads have no `canonical` handler, so the signature
     // validation — which is what infers — actually runs. The clamp itself
     // lies between its bounds whatever the operand is (2026-09-26).
-    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe(
-      'real<0..1>'
-    );
-    expect(ce.box('cB11').type.toString()).toBe('real | signed_infinity');
+    const clamp = ce.box(['Clamp', 'cB11', 0, 1]);
+    expect(clamp.type.toString()).toBe('real<0..1>');
+    expect(clamp.op1.type.toString()).toBe('real | signed_infinity');
   });
 });

@@ -93,12 +93,19 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
       )
     ).toBe(6));
 
-  test('an indefinite integral at a symbol', () =>
+  test('an indefinite integral at a symbol', () => {
+    // The result of an outermost `subs()` does not keep the requirements of
+    // the operation, and `y` is only the point of the `EvaluateAt`, so the
+    // host declares it.
+    const engine = new ComputeEngine();
+    engine.declare('y', 'real');
     expect(
-      run(ce.box(['Integrate', 'x', 'x']).subs({ x: ce.symbol('y') }), {
-        y: 2,
-      })
-    ).toBe(2));
+      run(
+        engine.box(['Integrate', 'x', 'x']).subs({ x: engine.symbol('y') }),
+        { y: 2 }
+      )
+    ).toBe(2);
+  });
 
   test('two bounds', () => {
     expect(run(ce.box(['EvaluateAt', square, 1, 3]))).toBe(8);

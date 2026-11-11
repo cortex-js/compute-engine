@@ -19,7 +19,7 @@ const glsl = new GLSLTarget();
 // In Python, a free symbol with an INFERRED `number` type is read through a
 // `None` test (ROADMAP CE-460); a DECLARED `number` is read as is. So the
 // inputs are declared.
-for (const s of ['u', '_cse1']) ce.declare(s, 'number');
+for (const s of ['u', 'x', '_cse1']) ce.declare(s, 'number');
 for (const s of ['m', 'n']) ce.declare(s, 'real | signed_infinity | nan');
 
 /** The design's motivating probe: `sin(6u)` three times in one expression. */

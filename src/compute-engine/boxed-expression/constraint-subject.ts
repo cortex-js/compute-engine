@@ -707,6 +707,15 @@ export type FactIndex = {
    * its own contributions.
    */
   typeByDefinition: Map<BoxedValueDefinition, Type[]>;
+  /**
+   * The exclusions (`!0`, from a disequality) that the facts prove about a
+   * subject definition whose declared type is `unknown`. They are not in
+   * `typeByDefinition`: an exclusion needs a base to be excluded from. A
+   * read that supplies its own base, the type that a binding unit reads
+   * for an occurrence (the engine flag `_bindingUnits`,
+   * `BoxedValueDefinition._typeWithFacts()`), adds them to that base.
+   */
+  exclusionsByDefinition: Map<BoxedValueDefinition, Type[]>;
 };
 
 /** A single ≥ edge `u ≥ to` (strict = `u > to`) in the assumed-inequality graph. */
@@ -718,11 +727,21 @@ const EMPTY_FACT_INDEX: FactIndex = Object.freeze({
   geEdges: new Map<string, GeEdge[]>(),
   inequalitySubjects: new Set<string>(),
   typeByDefinition: new Map<BoxedValueDefinition, Type[]>(),
+  exclusionsByDefinition: new Map<BoxedValueDefinition, Type[]>(),
 });
 
 /** The type contributions the facts make to `def`, or an empty array. */
 export function typeFor(index: FactIndex, def: BoxedValueDefinition): Type[] {
   return index.typeByDefinition.get(def) ?? [];
+}
+
+/** The exclusions the facts make to `def` when its declared type is
+ * `unknown` (`FactIndex.exclusionsByDefinition`), or an empty array. */
+export function exclusionsFor(
+  index: FactIndex,
+  def: BoxedValueDefinition
+): Type[] {
+  return index.exclusionsByDefinition.get(def) ?? [];
 }
 
 /**
@@ -1124,7 +1143,8 @@ function machineNumberValue(expr: Expression): number | undefined {
 function collectTypeContributions(
   assumption: Expression,
   record: FactRecord,
-  out: Map<BoxedValueDefinition, Type[]>
+  out: Map<BoxedValueDefinition, Type[]>,
+  exclusions: Map<BoxedValueDefinition, Type[]>
 ): void {
   if (record.truth !== true) return;
   // An assertion about a definition whose scope is gone is about a value that
@@ -1196,12 +1216,13 @@ function collectTypeContributions(
       // symbol's type as a numeric DOMAIN cannot use: the solver's root
       // filter answered "no roots at all" for `assume(x ≠ 3); Solve(x² = 9)`.
       // The disequality stays a fact either way, and the fact index serves it
-      // to every query that asks.
-      if (target.def.declaredType.isUnknown) continue;
-      addContribution(out, target.def, {
-        kind: 'negation',
-        type: { kind: 'value', value: k },
-      });
+      // to every query that asks. A read that supplies its own base gets
+      // the exclusion (`FactIndex.exclusionsByDefinition`).
+      addContribution(
+        target.def.declaredType.isUnknown ? exclusions : out,
+        target.def,
+        { kind: 'negation', type: { kind: 'value', value: k } }
+      );
     }
     return;
   }
@@ -1229,6 +1250,7 @@ function buildFactIndex(
   const geEdges = new Map<string, GeEdge[]>();
   const inequalitySubjects = new Set<string>();
   const typeByDefinition = new Map<BoxedValueDefinition, Type[]>();
+  const exclusionsByDefinition = new Map<BoxedValueDefinition, Type[]>();
 
   const addGeEdge = (from: string, to: string, strict: boolean): void => {
     let arr = geEdges.get(from);
@@ -1267,7 +1289,12 @@ function buildFactIndex(
     // other index below is keyed by subject NAME and reads the key's
     // assertions as a whole.
     for (const record of records)
-      collectTypeContributions(assumption, record, typeByDefinition);
+      collectTypeContributions(
+        assumption,
+        record,
+        typeByDefinition,
+        exclusionsByDefinition
+      );
 
     // Collect the legacy-scan gate set BEFORE the truth-value filter: the
     // legacy scan iterates every stored entry regardless of its value, so
@@ -1333,6 +1360,7 @@ function buildFactIndex(
     geEdges,
     inequalitySubjects,
     typeByDefinition,
+    exclusionsByDefinition,
   };
 }
 

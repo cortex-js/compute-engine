@@ -413,8 +413,9 @@ describe('Playground regressions', () => {
       const ce = new ComputeEngine();
       ce.declare('g', { signature: '(integer) -> number' });
       ce.declare('y', { type: 'unknown' });
-      ce.parse('g(y)');
-      expect(ce.box('y').type.toString()).toBe('integer');
+      // The requirement is on the occurrence in the call, not on a new boxing
+      const call = ce.parse('g(y)');
+      expect(call.op1.type.toString()).toBe('integer');
     });
   });
 

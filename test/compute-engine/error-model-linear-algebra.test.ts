@@ -93,8 +93,8 @@ describe('Norm — Contract B declaration', () => {
 
   test('an undeclared operand symbol is inferred from the flipped carrier', () => {
     const ce = new ComputeEngine();
-    ce.box(['Norm', 'normArg'] as any);
-    expect(ce.box('normArg').type.toString()).toBe(
+    const e = ce.box(['Norm', 'normArg'] as any);
+    expect(e.op1.type.toString()).toBe(
       'list<tuple> | number | tensor | tuple'
     );
   });
@@ -314,8 +314,8 @@ describe('Trace — Contract B declaration', () => {
 
   test('an undeclared operand symbol is inferred from the flipped carrier', () => {
     const ce = new ComputeEngine();
-    ce.box(['Trace', 'traceArg'] as any);
-    expect(ce.box('traceArg').type.toString()).toBe('number | tensor');
+    const e = ce.box(['Trace', 'traceArg'] as any);
+    expect(e.op1.type.toString()).toBe('number | tensor');
   });
 
   test('the parse route agrees with the box route', () => {
@@ -353,8 +353,8 @@ describe('MatrixPower — Contract B declaration', () => {
 
   test('an undeclared exponent symbol is inferred `real`', () => {
     const ce = new ComputeEngine();
-    ce.box(['MatrixPower', M, 'mpExp'] as any);
-    expect(ce.box('mpExp').type.toString()).toBe('real');
+    const e = ce.box(['MatrixPower', M, 'mpExp'] as any);
+    expect(e.op2.type.toString()).toBe('real');
   });
 
   test('integer powers, and the non-matrix operands the carrier refuses', () => {

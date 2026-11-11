@@ -3,6 +3,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
+// Boxing declares no name, so the parameter `t` of the curve tests is
+// declared. The `x` of the untyped-symbol tests stays undeclared.
+ce.declare('t', 'real');
+
 describe('COMPILE COMPLEX - isComplexValued', () => {
   it('real number literal is not complex', () => {
     expect(BaseCompiler.isComplexValued(ce.expr(3))).toBe(false);
@@ -768,8 +772,11 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
   });
 
   it('If with mixed real/complex arms produces one convention', () => {
+    // A comparison does not type its operand, so the input is declared.
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
     const res = compile(
-      ce.box(['Abs', ['If', ['Less', 'x', 0], 0, ['Complex', 3, 4]]]),
+      e.box(['Abs', ['If', ['Less', 'x', 0], 0, ['Complex', 3, 4]]]),
       { fallback: false }
     );
     expect(res.run!({ x: -1 })).toBe(0);

@@ -433,6 +433,8 @@ describe('COMPILE three-valued connectives — value position', () => {
   ce.declare('BN', 'list<boolean>');
   ce.declare('p', 'boolean');
   ce.declare('q', 'boolean');
+  // Boxing declares nothing: an input compared with a number is declared
+  ce.declare('x', 'real');
   const M = ['At', 'BM', 1];
   const N = ['At', 'BN', 1];
 

@@ -1231,12 +1231,13 @@ describe('`canonical` / `structural` options on parse/expr/function', () => {
     expect(ce.context.lexicalScope.bindings.has('a')).toBe(false);
   });
 
-  test('parse() default still canonicalizes and auto-declares', () => {
+  test('parse() default still canonicalizes and declares nothing', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
     const expr = ce.parse('a + 1');
     expect(expr.isCanonical).toBe(true);
-    expect(ce.context.lexicalScope.bindings.has('a')).toBe(true);
+    // Boxing writes no definition: `a` is a free name.
+    expect(ce.context.lexicalScope.bindings.has('a')).toBe(false);
   });
 
   test('parse({ structural: true }) is structural', () => {

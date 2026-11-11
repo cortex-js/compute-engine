@@ -113,6 +113,9 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
     const ce = new ComputeEngine();
     const T: MathJsonExpression = ['Function', ['Add', 'z_9', 1], 'u_9'];
     const first = ce.box(T);
+    // With the engine flag `_bindingUnits`, the requirement of the body is
+    // a requirement on the free name until an operation commits it.
+    ce.infer([first]);
     expect(ce.box('z_9').type.toString()).toBe('number');
     expect(first.isSame(ce.box(T))).toBe(true);
   });
@@ -141,7 +144,11 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
       ['Function', ['Add', 'r_7', 1], 's_7'],
       ['Function', ['Add', 'r_7', 2], 't_7'],
     ];
-    expect(ce.box(T).isSame(ce.box(T))).toBe(true);
+    const first = ce.box(T);
+    expect(first.isSame(ce.box(T))).toBe(true);
+    // The requirements are on the outer `r_7`: `ce.infer()` commits them in
+    // the scope that the literals are written in.
+    ce.infer([first]);
     expect(ce.box('r_7').type.toString()).toBe('number');
   });
 

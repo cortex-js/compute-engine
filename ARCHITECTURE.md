@@ -635,10 +635,14 @@ A known function — an operator or a value with a function type — is applied 
 **call**. For a head not already recognized as a function, `f(x)` parses to
 `InvisibleOperator(f, Delimiter(x))`, and canonicalization decides whether it is
 a call or a product. It is a **call** when the head has no type information: the
-head is undeclared, the engine declared it itself from a bare use and its
-type is still an inferred `unknown`, or it is a parameter of the function
+head has no definition (a free name, `docs/SCOPING-MODEL.md`), its definition
+is inferred and of type `unknown`, or it is a parameter of the function
 literal being canonicalized that has no type annotation and no type from the
-caller (user decision 2026-11-05). So `s(x+1)`, `f(3)^2` and `2f(x)` all
+caller (user decision 2026-11-05). The decision reads the definition of the
+head and the uses of the head in the same expression, not a type that another
+expression requires: after `ce.parse('k + 1')`, `ce.parse('k(2)')` is the call
+`["k", 2]`; after `ce.infer()` declared `k` a number, it is the product
+`2k`. So `s(x+1)`, `f(3)^2` and `2f(x)` all
 contain the call of an undeclared head, and `(g \mapsto \int_0^1 g(x)\,dx)(t
 \mapsto t^2)` is `1/3`. In this fallback, a value name stays a
 **product** factor when:
@@ -680,14 +684,17 @@ public API groups into:
 - **Operations**: `evaluate()`, `N()`, `simplify()`, `expand()`/`expandAll()`,
   `factor()`, `solve()`.
 - **Declarations & assignment**: `declare()`, `declareType()`,
-  `declareSequence()`, `assign()`.
+  `declareSequence()`, `assign()`, `infer()` (declares the symbols of
+  expressions with the types that their uses require; boxing declares no
+  name).
 - **Reasoning**: `assume()`, `ask()`, `verify()`, `forget()`.
 - **Compilation**: `compile()` on boxed expressions and the standalone
   `compile()` export. The target registry is internal
   (`_registerCompilationTarget()`, `_getCompilationTarget()`,
   `_listCompilationTargets()`, `_unregisterCompilationTarget()`).
-- **Replay**: `checkpoint()`, `restore()`, and `discard()` provide linear,
-  cell-boundary state rewind. See
+- **Replay** (deprecated): `checkpoint()`, `restore()`, and `discard()`
+  provide linear, cell-boundary state rewind. The replacements are
+  `withValues()` and `pushScope()`/`popScope()`. See
   [`docs/CHECKPOINT-MODEL.md`](./docs/CHECKPOINT-MODEL.md).
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit` (default
@@ -1258,11 +1265,13 @@ These properties are intentional and enforced; preserve them when contributing:
    `toLatex()` must not declare a symbol, infer a type, or change any scope. The
    serializer can re-canonicalize a structural copy (the `Multiply` → `Divide`
    prettification does), and canonicalizing a call of an undeclared head
-   declares that head. So `serializeJson()` (`boxed-expression/serialize.ts`)
-   runs inside `ce._resolveOnly()`, and the auto-declaration in `box.ts` is
-   skipped while `ce._resolveOnlyDepth > 0`. Without this, an expression parsed
-   against one scope could declare its heads in the scope that is current when
-   it is serialized.
+   writes the `function` reading of that head: a requirement in the
+   environment of the expression, or a declaration in the scope of the body of
+   a function literal. So `serializeJson()` (`boxed-expression/serialize.ts`)
+   runs inside `ce._resolveOnly()`, and these writes (`box.ts`,
+   `BoxedSymbol._infer()`) are skipped while `ce._resolveOnlyDepth > 0`.
+   Without this, an expression parsed against one scope could declare its
+   heads in the scope that is current when it is serialized.
 
 ## Implementation conventions
 
@@ -1371,8 +1380,12 @@ collection contracts. In particular:
   `listTensorRank()` rather than assuming every present value is an array. Use
   `cellTypeMayCarryDimensions()` before attaching dimensions;
   `cellTypeCanHoldANumber()` controls printing, not validity.
-- A valueless symbol can narrow from use; assignment evidence is checked rather
-  than rewritten by use. Bare-constructor declarations refine element types
+- A use of a symbol with no explicit type (no definition, an inferred one, or
+  the type `unknown`) requires a type of it. The requirement is kept with the
+  expression (its unit), not written on a definition: boxing declares no name
+  and narrows no definition. `ce.infer(exprs)` commits the requirements as
+  inferred declarations. Assignment evidence is checked rather than rewritten
+  by use. Bare-constructor declarations refine element types
   while keeping the declared constructor contract.
 - Declared types enforce presence. Declare `string | missing` or `real | nan`
   when those values are permitted. `AssertPresent` is spelled `x?!` in Epsil;

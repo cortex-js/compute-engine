@@ -38,8 +38,7 @@ describe('a big op over an untyped symbol infers a collection', () => {
 
   test('a global sum with no limits reads its symbol as a collection', () => {
     const ce = new ComputeEngine();
-    ce.parse('\\sum x');
-    expect(ce.symbol('x').type.toString()).toBe('collection');
+    expect(ce.parse('\\sum x').op1.type.toString()).toBe('collection');
     // A later scalar use still evaluates.
     expect(ce.parse('\\sin x').evaluate().toString()).toBe('sin(x)');
   });

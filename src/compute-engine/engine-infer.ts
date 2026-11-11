@@ -9,7 +9,11 @@ import type {
 import { definitionHome, unitEnvironmentsOf } from './binding-unit.js';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol.js';
 import { markForwardCallReference } from './boxed-expression/forward-call-reference.js';
-import { isValueDef } from './boxed-expression/utils.js';
+import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import {
+  currentBoxingEpoch,
+  recordTypeProvenance,
+} from './boxed-expression/type-provenance.js';
 
 /** The requirements on one name in its home scope: `type` is the meet of the
  * type entries, `undefined` when the name has only a reading as a variable
@@ -175,6 +179,22 @@ export function inferFn(
         continue;
     } else {
       const def = ce._declareSymbolValue(name, { type, inferred: true }, scope);
+      // The type came from the uses of the name: record it as an inference
+      // write, as the narrowing of the declaration that the boxing made
+      // without the flag records it, so that an assignment narrows it
+      // (`deriveAndWriteAssignedType()`, `engine-declarations.ts`).
+      const written = isValueDef(def)
+        ? { half: def.value, type: def.value.type }
+        : isOperatorDef(def)
+          ? { half: def.operator, type: def.operator.signature }
+          : undefined;
+      if (written !== undefined)
+        recordTypeProvenance(ce, written.half, {
+          type: written.type,
+          kind: 'inferred',
+          axis: 'type',
+          epoch: currentBoxingEpoch(ce),
+        });
       // A call head is a name to resolve when the call is evaluated, as the
       // declaration that the boxing made without the flag
       // (`markForwardCallReference()`, `box.ts`).

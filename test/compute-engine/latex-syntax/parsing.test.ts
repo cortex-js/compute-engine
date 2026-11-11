@@ -251,9 +251,10 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('Strict mode rejects bare function names', () => {
-      // In strict mode, 'sin' should be parsed as individual symbols
+      // In strict mode, 'sin' should be parsed as individual symbols. The
+      // undeclared `n` before a parenthesized argument is applied.
       expect(parse('sin(x)')).toMatchInlineSnapshot(
-        `["Multiply", ["Complex", 0, 1], "n", "s", "x"]`
+        `["Multiply", ["Complex", 0, 1], "s", ["n", "x"]]`
       );
     });
 

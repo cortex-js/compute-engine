@@ -186,7 +186,8 @@ describe('a guard that CHOOSES a type is bracketed with the write', () => {
       const ce = new ComputeEngine();
       ce.declare('c', 'number');
       if (assumed) expect(ce.assume(ce.box(['Greater', 'c', 0]))).toBe('ok');
-      ce.box(['Multiply', 'c', ['List', 'g1', 'g2']]);
+      // Boxing declares nothing: `ce.infer()` commits what the use requires.
+      ce.infer([ce.box(['Multiply', 'c', ['List', 'g1', 'g2']])]);
       return storedType(ce, 'g1');
     };
     expect(inferredOnto(false)).toBe('number');

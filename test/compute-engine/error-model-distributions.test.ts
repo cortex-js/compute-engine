@@ -463,8 +463,8 @@ describe('Contract B — PDF and CDF carriers', () => {
 
   test('a fresh symbol at the point slot is inferred `real | signed_infinity`', () => {
     const e = new ComputeEngine();
-    e.box(['PDF', UNIFORM, 'pt']);
-    expect(e.symbol('pt').type.toString()).toBe('real | signed_infinity');
+    const pdf = e.box(['PDF', UNIFORM, 'pt']);
+    expect(pdf.op2.type.toString()).toBe('real | signed_infinity');
   });
 });
 
