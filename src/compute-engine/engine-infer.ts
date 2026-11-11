@@ -45,11 +45,18 @@ type Candidate = {
  * - The name is declared in its home scope, inferred, or its inferred
  *   definition there is narrowed to the candidate, when the home scope is on
  *   the current chain (else `out-of-scope`), the name has no definition
- *   there that is not inferred (else `defined`), and the candidate is not
+ *   there with an explicit type (else `defined`; a definition that is
+ *   inferred, or whose declared type is `unknown`, has none), and the
+ *   candidate is not
  *   `never` (`conflict`) or `unknown` (`untyped`). Otherwise nothing
  *   changes, and the name is reported with the reason. A narrowing that
  *   writes nothing (the definition already has the candidate type) is not
  *   reported.
+ * - A symbol of `exprs` that has no requirement is a candidate with no type:
+ *   it is reported as `untyped` when it has no definition or one of type
+ *   `unknown`, and as `defined` when it has a definition with an explicit
+ *   type. A name of the library, a parameter and a binder's variable are
+ *   not reported.
  *
  * A name read as a variable (`N`) is declared as a variable, which shadows
  * the library operator of that name, and a call head (`f` in `f(x)`) is
@@ -109,6 +116,28 @@ export function inferFn(
       candidate(scope as Scope, name);
   }
 
+  // A symbol of `exprs` with no requirement is a candidate too, so that it
+  // is reported: a free name under its home scope, and a name bound to a
+  // value definition under the scope of the current chain that holds that
+  // definition. A definition of the library (the outermost scope) and the
+  // definition of a parameter or of a binder's variable (in no scope of the
+  // chain) are not names of the host, and are left out.
+  const systemScope = chain[chain.length - 1];
+  for (const symbol of symbolsOf(exprs)) {
+    if (symbol._isFreeName) {
+      candidate(symbol._homeScope!, symbol.symbol);
+      continue;
+    }
+    const def = symbol.valueDefinition;
+    if (def === undefined) continue;
+    const scope = chain.find((s) => {
+      const b = s.bindings.get(symbol.symbol);
+      return b !== undefined && isValueDef(b) && b.value === def;
+    });
+    if (scope !== undefined && scope !== systemScope)
+      candidate(scope, symbol.symbol);
+  }
+
   /** The depth of a scope: the number of its ancestors. */
   const depth = (scope: Scope): number => {
     let n = 0;
@@ -129,9 +158,15 @@ export function inferFn(
         continue;
       }
       const existing = scope.bindings.get(name);
+      // A definition with the declared type `unknown` has no explicit type
+      // (rule 2), so it is narrowed as an inferred definition is.
       if (
         existing !== undefined &&
-        !(isValueDef(existing) && existing.value.inferredType)
+        !(
+          isValueDef(existing) &&
+          (existing.value.inferredType ||
+            existing.value.declaredType.isUnknown)
+        )
       ) {
         skipped.push({ name, scope, reason: 'defined' });
         continue;
@@ -212,6 +247,33 @@ export function inferFn(
     });
   }
   return { declared, skipped };
+}
+
+/** The symbol occurrences of `exprs`, at any depth. The walk is that of
+ * `unitEnvironmentsOf()`. */
+function symbolsOf(exprs: ReadonlyArray<Expression>): BoxedSymbol[] {
+  const found: BoxedSymbol[] = [];
+  const stack: unknown[] = [...exprs];
+  const visited = new Set<object>();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (typeof node !== 'object' || node === null || visited.has(node))
+      continue;
+    visited.add(node);
+    if (node instanceof BoxedSymbol) {
+      found.push(node);
+      continue;
+    }
+    const n = node as {
+      _kind?: string;
+      ops?: readonly unknown[];
+      values?: readonly unknown[];
+    };
+    if (n._kind === undefined) continue;
+    const children = n._kind === 'dictionary' ? n.values : n.ops;
+    if (children !== undefined) for (const child of children) stack.push(child);
+  }
+  return found;
 }
 
 /** True when `key`, a key of a unit environment, is a scope (it has a map of

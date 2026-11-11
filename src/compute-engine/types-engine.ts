@@ -494,15 +494,24 @@ export type DeclareOptions = {
  *
  * - `declared`: each name that `ce.infer()` declared in its home scope, or
  *   whose inferred definition it narrowed there, with the type it has now.
- * - `skipped`: each name that it did not change, with the reason:
+ * - `skipped`: each symbol of the expressions that it did not change, with
+ *   the reason:
  *   - `'conflict'`: the expressions require types that have no common
  *     subtype (`x + 1` and `x(3)`), or a type that has none in common with
  *     the inferred definition of the name;
- *   - `'untyped'`: the requirements give the type `unknown`;
- *   - `'defined'`: the home scope holds a definition of the name that is not
- *     inferred (a `ce.declare()`, for example);
+ *   - `'untyped'`: no use requires a type of the name (`q` in `[q]`), or the
+ *     requirements give the type `unknown`;
+ *   - `'defined'`: the home scope holds a definition of the name with a
+ *     declared type (`ce.declare('x', 'real')`). A definition with the
+ *     declared type `unknown` states no type: `ce.infer()` gives it the type
+ *     that the uses require;
  *   - `'out-of-scope'`: the home scope is not the current scope or one of its
  *     ancestors (it was popped).
+ *
+ * A symbol whose type is already the type that the uses require, a symbol
+ * of the library (`Pi`), a parameter of a function literal, the variable of
+ * a binder (the index of a `Sum`) and a symbol declared in a scope that was
+ * popped are in neither list.
  *
  * Each list is sorted by name, then by the depth of the scope.
  *

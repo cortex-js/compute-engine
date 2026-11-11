@@ -312,7 +312,9 @@ findings of round 2 and was not reviewed again.
       the inferred definition there to the candidate, when all of these
       hold:
       - the home scope is the current scope or an ancestor of it;
-      - the name has no explicit definition in its home scope;
+      - the name has no definition with an explicit type in its home scope
+        (rule 2: an inferred definition and one declared `unknown` have
+        none);
       - the candidate is neither `never` (a conflict) nor `unknown`.
     - Otherwise it changes nothing and reports the reason.
     - The library variables and call-head readings of rule 2 are committed
@@ -800,6 +802,8 @@ flag on. The user can reverse it.
   merged (`ce-614`, the recommendation of package B, applied). The
   alternative: two free names that resolve to no definition are the same
   binding when both home scopes are on the chain of the current scope.
+  User decision of 2026-11-11: the two bindings stay; a host that wants one
+  `x` declares it.
 - **Rule 8, `at()` and `each()`** of an expression are operations on their
   receiver: an element is typed as it is when the whole collection is
   evaluated.
@@ -821,11 +825,28 @@ flag on. The user can reverse it.
   later declaration of a free name.
 - **The type of a function literal** is derived in the scope that the
   literal is written in, as the type of its call is.
-- **Not changed, to decide:** `ce.infer()` skips a name that the host
-  declared `unknown`, with the reason `defined` (rule 11 says "no explicit
-  definition"; rule 2 counts a definition of type `unknown` as having no
-  explicit type). `ce.infer()` reports an empty `skipped` for a name with
-  no requirement and for a name with a declared type. A generated name (the
-  parameter of a periodic family of `Solve`) does not avoid a name that was
-  only boxed. At the top level of an Epsil program, an `incompatible-type`
-  error no longer says where the conflicting type was inferred.
+
+After package D (user decisions of 2026-11-11):
+
+- **Rule 11, a name declared `unknown`.** `ce.infer()` narrows a definition
+  whose declared type is `unknown` as it narrows an inferred definition:
+  such a definition has no explicit type (rule 2). The definition is marked
+  as inferred by the write. "No explicit definition" in rule 11 reads "no
+  definition with an explicit type".
+- **Rule 11, `skipped`.** Each symbol occurrence of `exprs` is a candidate,
+  with or without a requirement: a free name under its home scope, and a
+  name bound to a value definition under the scope of the current chain
+  that holds it. A candidate with no requirement is reported as `untyped`
+  (no definition, or one of type `unknown`) or `defined` (a definition with
+  an explicit type). A definition of the library scope, a parameter and the
+  variable of a binder are not candidates.
+- **A generated name avoids a free name.** `freshParameters()` (the
+  parameter of a family of roots of `Solve`) skips a name that the engine
+  made a free name of (`freeNameWasMade()`): with `t + 1` made before the
+  solve, the parameter is `t_1`.
+- **The cause of a requirement.** An environment keeps, for each entry, the
+  writes that changed it with the node that was boxed (`UnitEnvironment.
+  writes()`), and a free name gives them in the form of a provenance history
+  (`BoxedSymbol._unitTypeProvenance`). The `incompatible-type` error of an
+  Epsil program names the use that the conflicting type of a free name came
+  from, as it does for a definition.

@@ -23,9 +23,9 @@ function staticDiagnosticsOf(source: string) {
 }
 
 describe('EPSIL PROVENANCE NOTE — two-site incompatible-type diagnostics', () => {
-  test('top level: a boolean-inferred free name used numerically is a static type error', () => {
-    // A free name of the program has no definition, so there is no
-    // provenance to name the inferring site from: the diagnostic has no note.
+  test('top level: a boolean-inferred free name used numerically gets the note', () => {
+    // A free name of the program has no definition: the note is read from
+    // the requirements of the program's unit (`_unitTypeProvenance`).
     const diagnostics = staticDiagnosticsOf(
       ['let b = p && q', 'let y = p + 1', 'y'].join('\n')
     );
@@ -33,6 +33,19 @@ describe('EPSIL PROVENANCE NOTE — two-site incompatible-type diagnostics', () 
     expect(diagnostics[0].message[1]).toBe(
       'expected `number`, got `boolean` at `p`'
     );
+    expect((diagnostics[0].notes ?? []).map((n) => n.message)).toEqual([
+      '`p` was inferred to have type `boolean` from its use in `p && q`',
+    ]);
+  });
+
+  test('top level: a number-inferred free name used as a boolean gets the note', () => {
+    const diagnostics = staticDiagnosticsOf(
+      ['let s = Sin(v)', 'let b = v && q', 'b'].join('\n')
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect((diagnostics[0].notes ?? []).map((n) => n.message)).toEqual([
+      '`v` was inferred to have type `number` from its use in `sin(v)`',
+    ]);
   });
 
   test('parameter shadowing a same-named global: the note names the PARAMETER’s own evidence, not the global’s', () => {

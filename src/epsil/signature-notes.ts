@@ -189,7 +189,11 @@ function provenanceNote(
     if (typeof name === 'string')
       return noteFromHistory(
         name,
-        whereOp.valueDefinition?._typeProvenance,
+        // A free name (an undeclared name of the top level) has no
+        // definition: its unit keeps the requirements that typed it.
+        whereOp.valueDefinition?._typeProvenance ??
+          (whereOp as { _unitTypeProvenance?: TypeProvenance })
+            ._unitTypeProvenance,
         actual
       );
     // A non-symbol faulted operand has no binding to explain; route 2's
@@ -209,13 +213,17 @@ function provenanceNote(
   return noteFromHistory(name, history, actual);
 }
 
+type TypeProvenance = NonNullable<
+  BoxedExpr['valueDefinition']
+>['_typeProvenance'];
+
 /** The note for the most recent history entry that (1) resulted from
  * evidence — an inference; a creation anchor explains nothing, and an
  * assumption never writes a type — (2) knows what expression committed it,
  * and (3) installed the type the error reports as the actual type. */
 function noteFromHistory(
   name: string,
-  history: NonNullable<BoxedExpr['valueDefinition']>['_typeProvenance'],
+  history: TypeProvenance,
   actual: string
 ): DiagnosticNote | undefined {
   if (history === undefined) return undefined;

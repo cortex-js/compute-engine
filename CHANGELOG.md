@@ -1,3 +1,28 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`ce.infer()` gives a type to a symbol declared with the type
+  `unknown`.** After `ce.declare('x', 'unknown')`, `ce.infer([ce.parse('x +
+  1')])` changed nothing and reported `x` in `skipped` with the reason
+  `'defined'`. It now gives `x` the type `number`, as it does for a symbol
+  with no declaration: a declaration with the type `unknown` states no type.
+- **`ce.infer()` reports each symbol that it did not change.** `skipped` was
+  empty for a symbol that no use gives a type to (`q` in `[q]`) and for a
+  symbol with a declared type. It now lists the first with the reason
+  `'untyped'` and the second with the reason `'defined'`, as the
+  documentation of `InferResult` states. A symbol of the library (`Pi`), a
+  parameter of a function literal and the index of a `Sum` are not listed.
+- **A parameter that `Solve` generates does not take the name of a symbol
+  that an expression already uses.** With `t + 1` made before
+  `Solve(sin(x) = 0, x)`, the family of roots was `π t`, and the `t` of
+  `t + 1` then had the type `integer` of the parameter. The family is now
+  `π t_1`. With no earlier use of `t`, the parameter is `t`, as before.
+- **Epsil: a type error on an undeclared name of the top level says where
+  its type came from.** Since 0.187.0, the error of `let b = p && q` followed
+  by `let y = p + 1` had no note. It has the note "`p` was inferred to have
+  type `boolean` from its use in `p && q`" again.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

@@ -8,6 +8,7 @@ import {
 } from '../../common/type/utils.js';
 
 import { isFunction, sym } from './type-guards.js';
+import { freeNameWasMade } from '../binding-unit.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { asRational, asBigint, asSmallInteger } from './numerics.js';
 import { expand } from './expand.js';
@@ -306,8 +307,9 @@ function definitionOf(ce: ComputeEngine, name: string): object | undefined {
  *
  * A name is skipped when it occurs in the equation, or when it has a
  * definition in the current scope chain that `freshParameters()` did not
- * create (a symbol that the user declared, or used in a canonical
- * expression). A name whose definition `freshParameters()` created is used
+ * create (a symbol that the user declared), or when the engine made a free
+ * name of it (a symbol that the user used in a canonical expression with no
+ * declaration). A name whose definition `freshParameters()` created is used
  * again, unless it has a different type (an identity after a family of roots
  * gets `t_1`), is bound to a value (the value would evaluate inside the
  * result), or is named by an assumption in force.
@@ -351,6 +353,11 @@ export function freshParameters(
       if (isAssumedAbout(ce, name)) continue;
     } else {
       if (isAssumedAbout(ce, name)) continue;
+      // A name that an expression uses with no declaration (a free name,
+      // `binding-unit.ts`) is a symbol of the user too: a declaration of the
+      // parameter would give its type to that expression (`t + 1` made
+      // before the solve would read `t: integer`).
+      if (freeNameWasMade(ce, name)) continue;
       // A temporary scope (the scope of a renamed solve, the activation
       // scope of a function call) ends when its evaluation ends. A parameter
       // declared there would disappear, and a later `ce.assign('t', 0.5)`

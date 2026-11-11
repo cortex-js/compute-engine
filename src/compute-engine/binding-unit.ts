@@ -46,6 +46,15 @@ export class UnitEnvironment {
   private _scalarUsesMap: Map<object, Map<string, boolean>> | undefined =
     undefined;
 
+  /** For each entry, the writes that changed its type, oldest first, each
+   * with the cause context of the engine when it was made (the node that
+   * was boxed, `_inferenceCause`). A diagnostic names the use that a type
+   * came from (`writes()`). A write that a journal removes stays in the
+   * list: the next pass makes the same write again. */
+  private _writes:
+    | Map<object, Map<string, { type: BoxedType; cause: object }[]>>
+    | undefined = undefined;
+
   /** For each scope, the names of library operators that the unit reads as
    * variables (`readsAsVariable()`). */
   private _variableReadings: Map<object, Set<string>> | undefined = undefined;
@@ -299,13 +308,46 @@ export class UnitEnvironment {
     }
   }
 
-  set(scope: object, name: string, type: BoxedType): void {
+  set(scope: object, name: string, type: BoxedType, cause?: object): void {
     this._types ??= new Map();
     let entries = this._types.get(scope);
     if (entries === undefined) this._types.set(scope, (entries = new Map()));
     this._journalWrite(entries, name, true);
     entries.set(name, type);
     this._counter += 1;
+    if (cause !== undefined) {
+      this._writes ??= new Map();
+      let writes = this._writes.get(scope);
+      if (writes === undefined) this._writes.set(scope, (writes = new Map()));
+      let list = writes.get(name);
+      if (list === undefined) writes.set(name, (list = []));
+      // A pass that is built again makes the same write again, with a new
+      // cause context (`undoJournal()` does not remove a write from this
+      // list): the write of the later pass replaces it.
+      const last = list[list.length - 1];
+      if (last !== undefined && last.type.toString() === type.toString())
+        list.pop();
+      list.push({ type, cause });
+      // Keep the first write and the last ones, as the history of a
+      // definition does (`recordTypeProvenance()`).
+      if (list.length > 8) list.splice(1, 1);
+    }
+  }
+
+  /** The writes that changed the entry for `name` under `key`, oldest
+   * first, with their causes (see `_writes`): those of this environment, or,
+   * when it has none, those of the first parent that has some. */
+  writes(
+    key: object,
+    name: string
+  ): readonly { type: BoxedType; cause: object }[] | undefined {
+    const own = this._writes?.get(key)?.get(name);
+    if (own !== undefined) return own;
+    for (const parent of this.parents()) {
+      const found = parent.writes(key, name);
+      if (found !== undefined) return found;
+    }
+    return undefined;
   }
 
   /**

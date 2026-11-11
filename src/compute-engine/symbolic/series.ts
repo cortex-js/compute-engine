@@ -2097,9 +2097,12 @@ function taylorCoeffs(
   return expandViaSeeds(f, x, x0, ce, W) ?? expandByDerivative(f, x, x0, ce, W);
 }
 
-/** A fresh symbol name not equal to `avoid` and not occurring free in `f`. */
+/** A fresh symbol name not equal to `avoid` and not occurring free in `f`.
+ * `t` is not a candidate: it is the name of the parameter of a family of
+ * roots, which is not given to a name that the engine made a symbol of
+ * (`freshParameters()`, `boxed-expression/diophantine.ts`). */
 export function freshSymbol(f: Expression, avoid: string): string {
-  for (const name of ['t', 's', 'u', 'w', 'q', 'z', 'tau', 'xi']) {
+  for (const name of ['s', 'u', 'w', 'q', 'z', 'tau', 'xi']) {
     if (name !== avoid && !f.has(name)) return name;
   }
   return '_seriesT';

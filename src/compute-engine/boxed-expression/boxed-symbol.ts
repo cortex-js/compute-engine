@@ -54,6 +54,7 @@ import type {
   Scope,
   SymbolInterface,
   StaticShape,
+  TypeProvenanceEntry,
 } from '../global-types.js';
 
 import { activeRollbackFrame } from '../inference-rollback.js';
@@ -1036,8 +1037,39 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       isSubtype(def.value.declaredType.type, to.type)
     )
       return true;
-    env.set(home, name, to);
+    env.set(home, name, to, ce._inferenceCause ?? undefined);
     return true;
+  }
+
+  /**
+   * For a free name: the requirements that its unit wrote for it, oldest
+   * first, in the form of the provenance history of a definition
+   * (`_typeProvenance`), each with the expression whose boxing made it. A
+   * diagnostic reads it to name the use that a type came from
+   * (`provenanceNote()`, `src/epsil/signature-notes.ts`). `undefined` for a
+   * symbol that is not a free name, and when the unit wrote none.
+   */
+  get _unitTypeProvenance(): TypeProvenanceEntry[] | undefined {
+    if (!this._isFreeName) return undefined;
+    const ce = this.engine;
+    const home = this._homeScope!;
+    const state = ce._boxingState;
+    const writes =
+      state.trialEnvironment()?.writes(home, this._id) ??
+      state.currentOperation()?.writes(home, this._id) ??
+      this._env?.writes(home, this._id);
+    if (writes === undefined) return undefined;
+    return writes.map(({ type, cause }) => {
+      // The expression of the cause is made at the first read, as
+      // `_noteInferenceWrite()` makes it (`index.ts`).
+      const ctx = cause as NonNullable<ComputeEngine['_inferenceCause']>;
+      ctx.expr ??= ce._fn(
+        ctx.operator,
+        ctx.ops.map((o) => ce.expr(o, { form: 'raw' })),
+        { canonical: false }
+      );
+      return { type, kind: 'inferred', axis: 'type', cause: ctx.expr };
+    });
   }
 
   /**

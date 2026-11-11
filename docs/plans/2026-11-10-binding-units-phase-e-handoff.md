@@ -399,6 +399,13 @@ and passes alone.
    `list<unknown>` where a new boxing gives `vector<2>`. Not fixed
    (checkpoints are deprecated; the type is wider, not wrong).
 
+**Decided by the user, 2026-11-11** (session compute-engine-18): point 1
+stays as applied. Points 2 to 5 are fixed: `ce.infer()` types a name
+declared `unknown` and reports in `skipped` each symbol that it did not
+change; a generated parameter avoids a name that was made a free name; the
+Epsil error has its provenance note again. The rules are in the spec, "After
+package D". Point 6 is CE-1201.
+
 **For Tycho** (session `tycho-desk`), with the release:
 
 - Boxing declares nothing. `ce.lookupDefinition(name)`,
