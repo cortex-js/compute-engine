@@ -533,11 +533,6 @@ const LN_PROGRAMS: Program[] = [
 /** The programs that the structured route declines, with the mode, and
  *  the reason. Each one is checked in the tests of each mode. */
 const DECLINED = new Map<string, RegExp>([
-  // The existing emitter wraps the complex helper in `_SYS.cplx()` in the
-  // `complex` mode.
-  ['Sin(z) (complex)', /Sin of a complex operand in the complex mode/],
-  ['Cos(z) (complex)', /Cos of a complex operand in the complex mode/],
-  ['Tanh(z) (complex)', /Tanh of a complex operand in the complex mode/],
   // In the `complex` mode, a power with an exponent that is not a literal
   // and a type that is not real is complex (`_SYS.cpow`).
   [
@@ -546,11 +541,6 @@ const DECLINED = new Map<string, RegExp>([
   ],
   ['x^(y/2) (complex)', /the power .* has the type number, which is not real/],
   ['(-2)^y (complex)', /the power .* has the type number, which is not real/],
-  // `Ln(x)` is complex in the `complex` mode.
-  [
-    'Ln(x)^1.6 (complex)',
-    /Power with a float exponent and a complex base is not in the structured route/,
-  ],
   // The value of `Ln(x)` is complex in the `complex` mode; `Max` has no
   // complex operand.
   [
@@ -568,11 +558,7 @@ const DECLINED = new Map<string, RegExp>([
     'Sqrt(Exp(x)) (complex)',
     /the engine knows that the operand e\^x of Sqrt is non-negative/,
   ],
-  // `Tanh` and `Abs` admit a complex operand only when it is a name.
-  [
-    'Tanh(Ln(x)) (complex)',
-    /Tanh of the complex operand ln\(x\) is in the structured route only when the operand is a name/,
-  ],
+  // `Abs` admits a complex operand only when it is a name.
   [
     'Abs(Ln(x)) (complex)',
     /Abs of the complex operand ln\(x\) is in the structured route only when the operand is a name/,
@@ -849,17 +835,17 @@ describe('refusals', () => {
       /the exponential of the number literal sqrt\(2\)/,
     ],
     [
-      'Exp of a complex sum',
-      ['Exp', ['Add', 'z', 1]],
+      'Exp of x + i·π·y',
+      ['Exp', ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'Pi', 'y']]],
       'strict',
-      /the exponential of the complex operand .* is in the structured route only when the operand is a name/,
+      /the exponential of the complex operand .*, which reads Pi, is not in the structured route/,
     ],
-    // The existing emitter writes `_SYS.cexppi(x)`; the product refuses first.
+    // The existing emitter writes `_SYS.cexppi(x)`.
     [
       'Exp of i·π·x',
       ['Exp', ['Multiply', 'ImaginaryUnit', 'Pi', 'x']],
       'strict',
-      /a product with a complex operand is in the structured route only as the product of two complex operands/,
+      /the exponential of the complex operand .*, which reads Pi, is not in the structured route/,
     ],
     // `realRadicalPower()`: `_SYS.pow5h(b)` for a base proved non-negative.
     [
@@ -875,10 +861,10 @@ describe('refusals', () => {
       /only for a base that it proves non-negative, and not for x \(the complex mode\)/,
     ],
     [
-      'z^1.5',
-      ['Power', 'z', 1.5],
+      'z^x',
+      ['Power', 'z', 'x'],
       'strict',
-      /Power with the exponent 1.5 and a complex base/,
+      /Power with a complex operand and an exponent that is not a number literal/,
     ],
     [
       'x^(1 + 2i)',
@@ -951,10 +937,10 @@ describe('refusals', () => {
       /Power with the exponent -0\.5 is not in the structured route: the existing emitter writes the reciprocal of Math\.sqrt/,
     ],
     [
-      'z^1.6',
-      ['Power', 'z', 1.6],
+      'x^z',
+      ['Power', 'x', 'z'],
       'strict',
-      /Power with a float exponent and a complex base/,
+      /Power with a complex operand and an exponent that is not a number literal/,
     ],
     // Two finite literals fold to `Math.pow(b, e)`.
     [
@@ -1012,10 +998,10 @@ describe('refusals', () => {
       /Arctan2 with a complex operand is not in the structured route/,
     ],
     [
-      'Sin of a complex operand, complex mode',
-      ['Sin', 'z'],
+      'Tanh of i·π·x, complex mode',
+      ['Tanh', ['Multiply', 'ImaginaryUnit', 'Pi', 'x']],
       'complex',
-      /Sin of a complex operand in the complex mode is not in the structured route/,
+      /Tanh of the complex operand .*, which reads Pi, is not in the structured route/,
     ],
     // `assume(a > 0)`: the engine knows that `-a` is negative; the rules of
     // the route do not model `Negate`.
@@ -1588,14 +1574,10 @@ const BRANCH_ROWS: BranchRow[] = [
   ['z + offset', ['Add', 'z', 'offset']],
   ['z + Sqrt(p)', ['Add', 'z', ['Sqrt', 'p']]],
   ['-x + z', ['Add', ['Negate', 'x'], 'z']],
-  // Complex Multiply: two complex operands only.
+  // Complex Multiply: a real operand is not converted.
   ['z · w', ['Multiply', 'z', 'w']],
   ['(1 + 2i) · z', ['Multiply', ['Complex', 1, 2], 'z']],
-  [
-    'x · z',
-    ['Multiply', 'x', 'z'],
-    /a product with a complex operand is in the structured route only as the product of two complex operands/,
-  ],
+  ['x · z', ['Multiply', 'x', 'z']],
   // Negate of a real operand, converted by its parent.
   ['Ln(-x)', ['Ln', ['Negate', 'x']]],
   ['-z', ['Negate', 'z']],

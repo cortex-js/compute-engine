@@ -666,25 +666,27 @@ function verifySignature(
       resultIn(policy.operations[op.kind].results);
       operandsIn(operandRule(op.kind));
       integerOnlyFromIntegers();
-      // A complex sum has a complex operand; its real operands are read as
-      // their real parts. A real sum has no complex operand.
+      // A complex sum or product has a complex operand; a real operand of a
+      // sum is read as its real part, of a product as a real factor of each
+      // part. A real sum or product has no complex operand.
       if (
-        op.kind === 'add' &&
+        (op.kind === 'add' || op.kind === 'multiply') &&
         (op.result.type === 'complex') !==
           op.operands.some((o) => o.type === 'complex')
       )
         fail(
-          `the operation add has a result of the type ${op.result.type} and ` +
+          `the operation ${op.kind} has a result of the type ${op.result.type} and ` +
             `${op.result.type === 'complex' ? 'no' : 'a'} complex operand`
         );
-      // A complex product is the product of two complex operands.
+      // A complex product has two operands.
       if (
         op.kind === 'multiply' &&
         op.result.type === 'complex' &&
-        (op.operands.length !== 2 ||
-          op.operands.some((o) => o.type !== 'complex'))
+        op.operands.length !== 2
       )
-        fail('a complex multiply does not have two complex operands');
+        fail(
+          `a complex multiply has ${op.operands.length} operands, not two`
+        );
       return;
     case 'mod':
       arity(2);
@@ -706,6 +708,15 @@ function verifySignature(
       // A quotient of integers is not an integer.
       if (op.result.type === 'integer')
         fail('the operation divide has an integer result');
+      // A complex quotient has a complex operand; a real quotient has none.
+      if (
+        (op.result.type === 'complex') !==
+        op.operands.some((o) => o.type === 'complex')
+      )
+        fail(
+          `the operation divide has a result of the type ${op.result.type} and ` +
+            `${op.result.type === 'complex' ? 'no' : 'a'} complex operand`
+        );
       return;
     case 'unary':
     case 'binary': {
@@ -725,19 +736,29 @@ function verifySignature(
         fail(`the function ${op.fn} has a boolean operand or result`);
       // The rule of each identifier (`UnaryFunctionName`,
       // `BinaryFunctionName`): `abs` has a real result, an integer only for
-      // an integer operand; each function of two operands has real operands
-      // and a real result; every other function has a complex result for a
-      // complex operand and a real one for a real or an integer operand.
+      // an integer operand; `complex` has two real operands and a complex
+      // result; `pow` has two real operands and a real result, or two
+      // complex operands and a complex result; each other function of two
+      // operands has real operands and a real result; every other function
+      // has a complex result for a complex operand and a real one for a real
+      // or an integer operand.
+      const complexOperands = types.filter((t) => t === 'complex').length;
       const expected: readonly ValueType[] =
         op.fn === 'abs'
           ? types[0] === 'integer'
             ? ['integer', 'real']
             : ['real']
-          : op.kind === 'binary'
-            ? types.includes('complex')
-              ? []
-              : ['real']
-            : [types[0] === 'complex' ? 'complex' : 'real'];
+          : op.fn === 'complex'
+            ? complexOperands === 0
+              ? ['complex']
+              : []
+            : op.fn === 'pow' && complexOperands === 2
+              ? ['complex']
+              : op.kind === 'binary'
+                ? complexOperands > 0
+                  ? []
+                  : ['real']
+                : [types[0] === 'complex' ? 'complex' : 'real'];
       if (!expected.includes(op.result.type))
         fail(
           `the function ${op.fn} of ${types.join(', ')} has a result of the type ${op.result.type}`

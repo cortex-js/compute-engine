@@ -51,8 +51,13 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'add': { results: ['number', 'complex'], operands: ['number', 'complex'] },
     'negate': { results: ['number', 'complex'], operands: 'same' },
     // A complex product is written per component, as the existing emitter
-    // writes it.
-    'multiply': { results: ['number', 'complex'], operands: 'same' },
+    // writes it; a real operand of it is a number, with no conversion. The
+    // verifier checks that a complex product has a complex operand and a
+    // real product none.
+    'multiply': {
+      results: ['number', 'complex'],
+      operands: ['number', 'complex'],
+    },
     'min': { results: ['number'], operands: ['number'] },
     'max': { results: ['number'], operands: ['number'] },
     'less': { results: ['boolean'], operands: ['number'] },
@@ -60,10 +65,14 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'equal': { results: ['boolean'], operands: ['number'] },
     'not-equal': { results: ['boolean'], operands: ['number'] },
     // `_SYS.floorMod`, `Math.floor` and `/`, as the existing emitter writes
-    // them.
+    // them. A complex quotient is the guarded text of the existing emitter
+    // (`Divide` in `javascript-target.ts`), with a real operand as a number.
     'mod': { results: ['number'], operands: ['number'] },
     'floor': { results: ['number'], operands: ['number'] },
-    'divide': { results: ['number'], operands: ['number'] },
+    'divide': {
+      results: ['number', 'complex'],
+      operands: ['number', 'complex'],
+    },
     'and': { results: ['boolean'], operands: ['boolean'] },
     'or': { results: ['boolean'], operands: ['boolean'] },
     // `Math.sqrt` of a number, `_SYS.csqrt` of an `{re, im}` object.
@@ -96,9 +105,10 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     tanh: { results: ['number', 'complex'], operands: 'same' },
     abs: { results: ['number'], operands: ['number', 'complex'] },
     atan2: { results: ['number'], operands: ['number'] },
-    // `_SYS.pow(b, e)`, and `Math.pow(Math.abs(b), e)` with the sign rule of
+    // `_SYS.pow(b, e)` of numbers and `_SYS.cpow(b, e)` of `{re, im}`
+    // objects, and `Math.pow(Math.abs(b), e)` with the sign rule of
     // `signed-pow`, as the existing emitter writes `Power`.
-    pow: { results: ['number'], operands: ['number'] },
+    pow: { results: ['number', 'complex'], operands: 'same' },
     'abs-pow': { results: ['number'], operands: ['number'] },
     'signed-pow': { results: ['number'], operands: ['number'] },
     // `Math.pow(b, e)` for a constant exponent, `Math.cbrt(x)` and
@@ -106,6 +116,8 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'real-pow': { results: ['number'], operands: ['number'] },
     cbrt: { results: ['number'], operands: ['number'] },
     root: { results: ['number'], operands: ['number'] },
+    // `({ re: a, im: b })`.
+    complex: { results: ['complex'], operands: ['number'] },
     // The functions of the special and trigonometric heads: a runtime helper
     // of an `{re, im}` object where the existing emitter has one (`_SYS.ctan`,
     // `_SYS.casin`, `_SYS.clog10`, …), and a real kernel only otherwise.
@@ -119,6 +131,9 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     asinh: { results: ['number', 'complex'], operands: 'same' },
     gamma: { results: ['number', 'complex'], operands: 'same' },
     sign: { results: ['number', 'complex'], operands: 'same' },
+    // `_SYS.cconj(z)`; the rule of `Conjugate` writes a real operand as
+    // itself.
+    conjugate: { results: ['complex'], operands: ['complex'] },
     asin: { results: ['number', 'complex'], operands: 'same' },
     acos: { results: ['number', 'complex'], operands: 'same' },
     acosh: { results: ['number', 'complex'], operands: 'same' },

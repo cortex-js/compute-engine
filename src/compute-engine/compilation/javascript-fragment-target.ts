@@ -258,18 +258,25 @@ function closedJumpRefusal(
 }
 
 /**
- * `Multiply`: real operands, or two complex operands. A product with an
- * exact rational factor `p/q` whose denominator is not a power of two
- * (`exactRationalDivisor()`: the canonical form writes `x/49` as
- * `Multiply(1/49, x)`) has a real result, and the lowering writes it as the
- * existing emitter does, a division by `q` (`multiplyByRational()`). The code of a complex
- * product is the one of the existing emitter (`Multiply` in
- * `javascript-target.ts`): each operand is read once, and the real and the
- * imaginary parts are written from its components. The product of a real
- * and a complex operand, and a complex product of more than two operands,
- * are not in the structured route: the existing emitter writes the first
- * with no conversion of the real operand, which the structured route has
- * no operation for.
+ * `Multiply`: real operands, or operands of which at least one is complex.
+ * A real product with an exact rational factor `p/q` whose denominator is
+ * not a power of two (`exactRationalDivisor()`: the canonical form writes
+ * `x/49` as `Multiply(1/49, x)`) has a real result, and the lowering writes
+ * it as the existing emitter does, a division by `q`
+ * (`multiplyByRational()`).
+ *
+ * A product with a complex operand has a complex result, and each operand
+ * keeps its fact: a real operand is not converted. The lowering writes the
+ * code of the existing emitter (`Multiply` in `javascript-target.ts`), each
+ * operand evaluated once, in order: for two operands, the product of the
+ * parts, with a real operand as a factor of each part (`x·z` is
+ * `{ re: x * z.re, im: x * z.im }`), and for a complex literal with finite
+ * parts and a real operand `v` the parts `p·v` and `q·v` of the literal
+ * `p + qi`, a part 0 written `0` and a part 1 written `v` (`i·x` is
+ * `{ re: 0, im: x }`); for three operands or more, the left fold of the
+ * products in their order, with the run of real factors before the first
+ * complex one as one real product. A rational factor of a complex product
+ * is its double, as the existing emitter writes it.
  */
 const multiplyRule = {
   walk: (node, scope, context, w) => {
@@ -281,16 +288,17 @@ const multiplyRule = {
       );
     const facts = operandFacts(node, scope, context, w);
     if (facts.some((f) => f.type.kind === 'complex')) {
-      if (node.nops !== 2 || facts.some((f) => f.type.kind !== 'complex'))
+      if (facts.some((f) => f.type.kind === 'boolean'))
         return w.refuse(
           node,
           'signature',
-          'a product with a complex operand is in the structured route only as ' +
-            'the product of two complex operands'
+          'a product with a boolean operand is not in the structured route'
         );
-      return w.signatures(node, scope, context, [
-        { operands: ['complex', 'complex'], result: 'complex' },
-      ]);
+      return w.valueFacts(
+        node,
+        { kind: 'complex' },
+        facts.map((f) => w.convert(f, f.type)!)
+      );
     }
     // A product with an exact rational factor `p/q` is a division by `q`
     // (`multiplyByRational()` in the lowering): its result is real.
@@ -597,8 +605,35 @@ function inexactJumpConstant(
  * `±Infinity` or `NaN`, where the interpreter gives `ComplexInfinity` or
  * `NaN`, as on the existing route. The canonical form writes a quotient by
  * a number literal as a product (`Divide(k, 2)` is `Multiply(1/2, k)`).
+ *
+ * A quotient with a complex operand has a complex result, and each operand
+ * keeps its fact: a real operand is not converted. The emitter writes the
+ * code of the existing emitter (`Divide` in `javascript-target.ts`): the
+ * quotient of each part by a real divisor, and for a complex divisor the
+ * textbook formula guarded by the test of `complexQuotient()`, with
+ * `_SYS.cdivedge` where the formula is not accurate.
  */
-const divideRule = realOperatorFacts('Divide', 2, () => 'real');
+const realDivideRule = realOperatorFacts('Divide', 2, () => 'real');
+const divideRule = {
+  walk: (node, scope, context, w) => {
+    if (isFunction(node) && node.nops === 2) {
+      const facts = operandFacts(node, scope, context, w);
+      if (facts.some((f) => f.type.kind === 'boolean'))
+        return w.refuse(
+          node,
+          'signature',
+          'Divide with a boolean operand is not in the structured route'
+        );
+      if (facts.some((f) => f.type.kind === 'complex'))
+        return w.valueFacts(
+          node,
+          { kind: 'complex' },
+          facts.map((f) => w.convert(f, f.type)!)
+        );
+    }
+    return realDivideRule.walk(node, scope, context, w);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
 
 /**
  * `Loop` over `Element(k, Range(a, b))`, as a statement: the rule of a
@@ -1080,47 +1115,102 @@ function piMultipleFacts(
 type ScalarFunctionLane = 'type' | 'inverse' | 'operand';
 
 /**
+ * Which complex operands of a head the structured route admits, from the
+ * code that the handler of the existing emitter writes for them:
+ *
+ * - `any`: every complex operand, in both modes. The handler tests whether
+ *   the operand is complex (`isComplexValued()`) before any other form, and
+ *   writes the runtime helper of the operand.
+ * - `no-pi`: a complex operand that does not read `Pi`, in both modes. For
+ *   an operand `i·π·u` the handler writes another helper
+ *   (`imaginaryPiMultiple()`: `_SYS.csinhipi(u)`), and that form reads
+ *   `Pi`.
+ * - `name`: a complex operand that is a name, in the `strict` mode. The
+ *   handlers of `Arcosh` and `Artanh` test the operand as those of `any`
+ *   do; no compilation of the engine has another complex operand for them.
+ * - `none`: no complex operand: the head has a real lowering only.
+ *
+ * In the `complex` mode the existing compiler wraps the helper in
+ * `_SYS.cplx()` when the type of the node is wide (`liftWideResult()` in
+ * `compile-inner.ts`); a complex helper returns an `{re, im}` object, which
+ * `_SYS.cplx()` returns as it is, so the route writes the helper alone.
+ */
+type ComplexOperands = 'any' | 'no-pi' | 'name' | 'none';
+
+/**
  * The heads of `structuredScalarFunctionRule()`: the lane rule of each, and
- * whether the handler writes a runtime helper for a complex operand that is
- * a name (`complex`). `jump`: a head of `JUMP_FUNCTIONS`, refused when it
- * reads no input, parameter or local (`closedJumpRefusal()`); `rounding`:
- * a head of `SHIFT_JUMP_HEADS`, refused for an operand with an exact
- * constant that no double holds (`inexactJumpConstant()`).
+ * the complex operands that it admits (`ComplexOperands`). `jump`: a head
+ * of `JUMP_FUNCTIONS`, refused when it reads no input, parameter or local
+ * (`closedJumpRefusal()`); `rounding`: a head of `SHIFT_JUMP_HEADS`,
+ * refused for an operand with an exact constant that no double holds
+ * (`inexactJumpConstant()`).
  */
 const SCALAR_FUNCTION_HEADS: Readonly<
   Record<
     string,
     {
       readonly lane: ScalarFunctionLane;
-      readonly complex: boolean;
+      readonly complex: ComplexOperands;
       readonly jump?: 'jump' | 'rounding';
     }
   >
 > = {
-  Tan: { lane: 'type', complex: true },
-  Cot: { lane: 'type', complex: true },
-  Sec: { lane: 'type', complex: true },
-  Csc: { lane: 'type', complex: true },
-  Sinh: { lane: 'type', complex: true },
-  Cosh: { lane: 'type', complex: true },
-  Arctan: { lane: 'type', complex: true },
-  Arsinh: { lane: 'type', complex: true },
-  Gamma: { lane: 'type', complex: true },
-  // `_SYS.cconj(z)` of a complex operand has no function of the
-  // representation: declined.
-  Conjugate: { lane: 'type', complex: false },
-  Erf: { lane: 'type', complex: false },
-  Erfc: { lane: 'type', complex: false },
-  Digamma: { lane: 'type', complex: false },
-  Haversine: { lane: 'type', complex: false },
-  Arcsin: { lane: 'inverse', complex: true },
-  Arccos: { lane: 'inverse', complex: true },
-  Arcosh: { lane: 'inverse', complex: true },
-  Artanh: { lane: 'inverse', complex: true },
-  Sign: { lane: 'operand', complex: true, jump: 'jump' },
-  Ceil: { lane: 'type', complex: false, jump: 'rounding' },
-  Round: { lane: 'type', complex: false, jump: 'rounding' },
+  Tan: { lane: 'type', complex: 'any' },
+  Cot: { lane: 'type', complex: 'any' },
+  Sec: { lane: 'type', complex: 'any' },
+  Csc: { lane: 'type', complex: 'any' },
+  Sinh: { lane: 'type', complex: 'no-pi' },
+  Cosh: { lane: 'type', complex: 'no-pi' },
+  Arctan: { lane: 'type', complex: 'any' },
+  Arsinh: { lane: 'type', complex: 'any' },
+  Gamma: { lane: 'type', complex: 'any' },
+  // `_SYS.cconj(z)`, the function `conjugate`.
+  Conjugate: { lane: 'type', complex: 'any' },
+  Erf: { lane: 'type', complex: 'none' },
+  Erfc: { lane: 'type', complex: 'none' },
+  Digamma: { lane: 'type', complex: 'none' },
+  Haversine: { lane: 'type', complex: 'none' },
+  Arcsin: { lane: 'inverse', complex: 'any' },
+  Arccos: { lane: 'inverse', complex: 'any' },
+  Arcosh: { lane: 'inverse', complex: 'name' },
+  Artanh: { lane: 'inverse', complex: 'name' },
+  Sign: { lane: 'operand', complex: 'any', jump: 'jump' },
+  Ceil: { lane: 'type', complex: 'none', jump: 'rounding' },
+  Round: { lane: 'type', complex: 'none', jump: 'rounding' },
 };
+
+/**
+ * The refusal of the complex operand `operand` of `head` in the mode `mode`
+ * by the rule `complex` (`ComplexOperands`), or `undefined`.
+ */
+function complexOperandRefusal(
+  head: string,
+  operand: Expression,
+  complex: ComplexOperands,
+  mode: 'strict' | 'complex'
+): string | undefined {
+  if (complex === 'none')
+    return `${head} with a complex operand is not in the structured route`;
+  if (complex === 'no-pi')
+    return operand.symbols.includes('Pi')
+      ? `${head} of the complex operand ${operand.toString()}, which reads ` +
+          `Pi, is not in the structured route: the existing emitter writes ` +
+          `another helper for a multiple of i·π`
+      : undefined;
+  if (complex === 'name') {
+    if (!isSymbol(operand))
+      return (
+        `${head} of the complex operand ${operand.toString()} is in the ` +
+        `structured route only when the operand is a name`
+      );
+    if (mode === 'complex')
+      return (
+        `${head} of a complex operand in the complex mode is not in the ` +
+        `structured route`
+      );
+  }
+  return undefined;
+}
 
 /**
  * The functions of one operand of `SCALAR_FUNCTION_HEADS` on the structured
@@ -1129,14 +1219,14 @@ const SCALAR_FUNCTION_HEADS: Readonly<
  *
  * - For a complex operand (`isComplexValued()`), a runtime helper of it:
  *   `_SYS.ctan(z)`, `_SYS.casin(z)`, `_SYS.cgamma(z)`, `_SYS.csign(z)`,
- *   `_SYS.cconj(z)` (which the route declines), …; `Sinh` and `Cosh` write `_SYS.csinhipi(u)` and
- *   `_SYS.ccoshipi(u)` for `i·π·u` (`imaginaryPiMultiple()`, which does not
- *   read a name). `Erf`, `Erfc`, `Digamma`, `Ceil` and `Round` have a real
- *   lowering only (`isRealOnlyLowering()`), which declines a complex
- *   operand in the `strict` mode and guards it in the `complex` mode;
- *   `Haversine` writes its real code. The route admits a complex operand
- *   that is a name, in the `strict` mode, for the heads with a helper, and
- *   declines every other complex operand.
+ *   `_SYS.cconj(z)` (the form `conjugate`), …; `Sinh` and `Cosh` write
+ *   `_SYS.csinhipi(u)` and `_SYS.ccoshipi(u)` for `i·π·u`
+ *   (`imaginaryPiMultiple()`). `Erf`, `Erfc`, `Digamma`, `Ceil` and `Round`
+ *   have a real lowering only (`isRealOnlyLowering()`), which declines a
+ *   complex operand in the `strict` mode and guards it in the `complex`
+ *   mode; `Haversine` writes its real code. The route admits the complex
+ *   operands of `ComplexOperands`, the same helper of the same operand, and
+ *   declines the others.
  * - `Tan` of a multiple of `Pi`: `_SYS.tanpi(u)`, as `Sin` and `Cos`
  *   (`piMultipleFacts()`).
  * - `Arcsin`, `Arccos`, `Arcosh`, `Artanh` of a real operand, when the
@@ -1208,17 +1298,9 @@ function structuredScalarFunctionRule(
           `${head} with a boolean operand is not in the structured route`
         );
       if (facts.type.kind === 'complex') {
-        const refusal = !complex
-          ? `${head} with a complex operand is not in the structured route`
-          : !isSymbol(node.op1)
-            ? `${head} of the complex operand ${node.op1.toString()} is in the ` +
-              `structured route only when the operand is a name: the existing ` +
-              `emitter writes other code for some complex operands`
-            : mode === 'complex'
-              ? `${head} of a complex operand in the complex mode is not in the ` +
-                `structured route`
-              : undefined;
+        const refusal = complexOperandRefusal(head, node.op1, complex, mode);
         if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
+        if (head === 'Conjugate') forms.set(node, 'conjugate');
         return w.valueFacts(node, { kind: 'complex' }, [
           w.convert(facts, facts.type)!,
         ]);
@@ -1278,13 +1360,17 @@ function structuredScalarFunctionRule(
  *   wider than that rule. An operand that reads `Pi` under another head
  *   (`Math.asin(a) + Math.PI`) is the call of the operand on both routes.
  * - A complex operand: the handler writes one runtime helper of the
- *   operand (`_SYS.csin`, `_SYS.ccos`, `_SYS.ctanh`, `_SYS.cabs`) when the
- *   operand is a name, which the route admits. For another operand it can
- *   write other code (`Math.hypot(a, b)` for `Abs(a + i·b)`,
- *   `_SYS.ctanhipi(u)` for `Tanh(i·π·u)`); the route declines it. In the
+ *   operand (`_SYS.csin`, `_SYS.ccos`, `_SYS.ctanh`, `_SYS.cabs`), tested
+ *   before every other form, but `Tanh` of `i·π·u` is `_SYS.ctanhipi(u)`
+ *   and `Abs` of a sum of a real and an imaginary part is
+ *   `Math.hypot(a, b)` (`tryGetJSComplexParts()`). The route admits every
+ *   complex operand of `Sin` and `Cos` that does not read as a multiple of
+ *   `Pi` (`readsAsPiMultiple()`), a complex operand of `Tanh` that
+ *   does not read `Pi` (`ComplexOperands`), in both modes, and a complex
+ *   operand of `Abs` that is a name; it declines the others. In the
  *   `complex` mode the handler wraps the helper of `Sin`, `Cos` and `Tanh`
- *   in `_SYS.cplx()`, and the route declines it too. `Arctan2` with a
- *   complex operand is declined.
+ *   in `_SYS.cplx()`, which returns the object of the helper as it is.
+ *   `Arctan2` with a complex operand is declined.
  *
  * `Abs` of a real operand that the existing emitter proves non-negative
  * (`isNonNegative()` of `compile-conditions.ts`: a number literal that is
@@ -1322,14 +1408,19 @@ function structuredFunctionRule(
         const refusal =
           head === 'Arctan2'
             ? 'Arctan2 with a complex operand is not in the structured route'
-            : !isSymbol(node.op1)
-              ? `${head} of the complex operand ${node.op1.toString()} is in the ` +
-                `structured route only when the operand is a name: the existing ` +
-                `emitter writes other code for some complex operands`
-              : mode === 'complex' && head !== 'Abs'
-                ? `${head} of a complex operand in the complex mode is not in the ` +
-                  `structured route: the existing emitter wraps its helper in _SYS.cplx`
-                : undefined;
+            : head === 'Abs'
+              ? !isSymbol(node.op1)
+                ? `Abs of the complex operand ${node.op1.toString()} is in the ` +
+                  `structured route only when the operand is a name: the ` +
+                  `existing emitter writes Math.hypot of the parts of some ` +
+                  `complex operands`
+                : undefined
+              : complexOperandRefusal(
+                  head,
+                  node.op1,
+                  head === 'Tanh' ? 'no-pi' : 'any',
+                  mode
+                );
         if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
         if (head === 'Abs') forms.set(node, 'abs');
         return w.valueFacts(
@@ -1375,8 +1466,11 @@ function structuredFunctionRule(
  *   number literal exponent (`Math.sqrt(Math.E)` for `e^c` with
  *   `c = 0.5`). For a complex exponent it
  *   writes `_SYS.cexp(z)`, or `_SYS.cexppi(u)` for `a + iπu`
- *   (`eulerPiSplit()`); the route admits a complex exponent that is a name
- *   only. For a real exponent the handler reads the type of the node,
+ *   (`eulerPiSplit()`, which needs an exponent that reads `Pi`); the route
+ *   admits a complex exponent that does not read `Pi` (`e^(i·x)` is
+ *   `_SYS.cexp(({ re: 0, im: _.x }))`), in both modes: the compiler does
+ *   not wrap a `Power` in `_SYS.cplx()`. For a real exponent the handler
+ *   reads the type of the node,
  *   without its infinities and `NaN` (`resultIsComplexValued()`, and
  *   `resultIsWideUnderComplexDiscipline()` in the `complex` mode): the
  *   route declines a real exponent for which that type is one of numbers
@@ -1427,11 +1521,14 @@ function structuredFunctionRule(
  *   the complex promotion, in both modes, and the parent reads the node as
  *   real (`isComplexValued()`). The route writes `abs-pow` (an even
  *   numerator) or `signed-pow` (an odd one), and declines the exponent
- *   `2/3` (`_SYS.pow2(Math.cbrt(b))`, `realRadicalPower()`) and a complex
- *   base. A base that the engine proves non-negative and an exponent with
- *   an even or no recovered denominator take the other branches of the
- *   handler, as an integer exponent (`x^3`, `x^-2`) and an exact exponent
- *   (`5/2`) do: `constantPowerForm()` gives the form of each.
+ *   `2/3` (`_SYS.pow2(Math.cbrt(b))`, `realRadicalPower()`). A complex base
+ *   takes the branch of the handler for it, before these:
+ *   `_SYS.cpow(b, e)`, or a chain of products for an integer exponent from
+ *   3 to 8 (`constantPowerForm()`). A base that the engine proves
+ *   non-negative and an exponent with an even or no recovered denominator
+ *   take the other branches of the handler, as an integer exponent (`x^3`,
+ *   `x^-2`) and an exact exponent (`5/2`) do: `constantPowerForm()` gives
+ *   the form of each.
  *
  * The rule records the form of each node that it admits
  * (`StructuredForm`); the lowering reads that record.
@@ -1471,9 +1568,10 @@ function structuredPowerRule(
                   `input, parameter or local, is not in the structured route: ` +
                   `the existing compiler replaces such an exponent by its value ` +
                   `when the value is not an integer (knownExponentPower())`
-                : kind === 'complex' && !isSymbol(node.op2)
-                  ? `the exponential of the complex operand ${node.op2.toString()} ` +
-                    `is in the structured route only when the operand is a name`
+                : kind === 'complex' && node.op2.symbols.includes('Pi')
+                  ? `the exponential of the complex operand ${node.op2.toString()}, ` +
+                    `which reads Pi, is not in the structured route: the ` +
+                    `existing emitter writes _SYS.cexppi for an exponent a + iπu`
                   : kind !== 'complex' &&
                       (mode === 'strict'
                         ? isNonRealNumber(finitePartOfType(node.type.type))
@@ -1573,6 +1671,16 @@ function structuredPowerRule(
       if (typeof chosen === 'object')
         return w.refuse(node, 'signature', chosen.refusal);
       forms.set(node, chosen);
+      // A complex base: the chain lowers the base only, `pow` both operands,
+      // the exponent converted.
+      if (chosen === 'complex-chain' || chosen === 'complex-pow')
+        return w.valueFacts(node, { kind: 'complex' }, [
+          w.convert(base, base.type)!,
+          w.convert(
+            exponent,
+            chosen === 'complex-pow' ? { kind: 'complex' } : exponent.type
+          )!,
+        ]);
       // The products of `product-power` keep an integer base an integer, as
       // `square` does; the other forms have a real result. Only the base of
       // `three-halves`, `product-power` and `reciprocal-square` is lowered.
@@ -1598,7 +1706,12 @@ function structuredPowerRule(
  * the code that the `Power` handler of the existing emitter writes, in the
  * order of its branches:
  *
- * - A complex base: a chain of products, or `_SYS.cpow`. Refused.
+ * - A complex base (tested before every other branch): for an integer
+ *   exponent from 2 to 8, a chain of complex products of the base, bound
+ *   once, the form `complex-chain` (the exponent 2 is the form `square` of
+ *   `powerForm()`); for every other exponent `_SYS.cpow(b, e)`, the form
+ *   `complex-pow`, whose exponent is converted (`real-to-complex`):
+ *   `_SYS.cpow` reads a number `e` as `e + 0i`.
  * - A float exponent with an odd recovered denominator `q`, for a base that
  *   the engine does not prove non-negative (`realPowerExponent()`, before
  *   the complex lane): `abs-pow` or `signed-pow` (above), but `2/3`, for
@@ -1641,12 +1754,9 @@ function constantPowerForm(
   const [base, exponent] = [node.op1, node.op2];
   const value = exponent.re;
   if (baseKind === 'complex')
-    return refuse(
-      form === 'float'
-        ? 'Power with a float exponent and a complex base is not in the structured route'
-        : `Power with the exponent ${exponent.toString()} and a complex base ` +
-            `is not in the structured route`
-    );
+    return Number.isInteger(value) && value >= 3 && value <= 8
+      ? 'complex-chain'
+      : 'complex-pow';
   if (isSymbol(base, 'ExponentialE'))
     return refuse(
       `Power of a symbol ExponentialE that a scope declares is not in the ` +

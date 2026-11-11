@@ -891,9 +891,9 @@ describe('refusals', () => {
       /Floor with a complex operand is not in the structured route/,
     ],
     [
-      'Divide with a complex operand',
-      fn([typed('z', 'complex'), typed('x', 'real')], declare('t', 'real', 0), ['Divide', 'x', 'z']),
-      /Divide with a complex operand is not in the structured route/,
+      'Less of a complex quotient',
+      fn([typed('z', 'complex'), typed('x', 'real')], declare('t', 'real', 0), ['Less', ['Divide', 'x', 'z'], 1]),
+      /Less with a complex operand is not in the structured route/,
     ],
     [
       'LessEqual with a boolean operand',
@@ -901,9 +901,9 @@ describe('refusals', () => {
       /LessEqual with a boolean operand is not in the structured route|No signature/,
     ],
     [
-      'the product of a real and a complex operand',
-      fn([typed('z', 'complex'), typed('x', 'real')], declare('t', 'real', 0), ['Multiply', 'x', 'z']),
-      /a product with a complex operand is in the structured route only as the product of two complex operands/,
+      'Abs of the product of a real and a complex operand',
+      fn([typed('z', 'complex'), typed('x', 'real')], declare('t', 'real', 0), ['Abs', ['Multiply', 'x', 'z']]),
+      /Abs of the complex operand .* is in the structured route only when the operand is a name/,
     ],
   ];
   test.each(refusals)('%s', (_name, json, reason) => {

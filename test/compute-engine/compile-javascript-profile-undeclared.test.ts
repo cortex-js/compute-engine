@@ -92,7 +92,7 @@ const ROWS: Row[] = [
     name: 'Sin(x)/x',
     body: ['Divide', ['Sin', 'x'], 'x'],
     strict: true,
-    complex: /Sin of a complex operand in the complex mode/,
+    complex: true,
   },
   { name: 'Sqrt(x)', body: ['Sqrt', 'x'], strict: true, complex: true },
   { name: 'x^2', body: ['Power', 'x', 2], strict: true, complex: true },
@@ -123,7 +123,7 @@ const ROWS: Row[] = [
     name: 'x^1.5',
     body: ['Power', 'x', 1.5],
     strict: true,
-    complex: /exponent 1\.5 and a complex base/,
+    complex: true,
   },
   {
     name: 'x^y',
@@ -135,7 +135,7 @@ const ROWS: Row[] = [
     name: 'x^1.6',
     body: ['Power', 'x', 1.6],
     strict: true,
-    complex: /float exponent and a complex base/,
+    complex: true,
   },
   {
     name: 'Arctan2(y, x)',

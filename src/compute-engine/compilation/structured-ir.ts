@@ -110,12 +110,27 @@ export type IRInputRead = OperationBase & {
  *
  *  `add` of a complex result has at least one complex operand; a real
  *  operand of it is not converted, and adds to the real part only.
- *  `multiply` of a complex result has two complex operands. `mod` is the
+ *  `multiply` of a complex result has two operands, at least one of them
+ *  complex. A real operand `a` of it is not converted: the product of `a`
+ *  and a complex `b` is `(a·b.re, a·b.im)`, where the product of the
+ *  converted `a + 0i` would add the terms `0·b.im` and `0·b.re`, which are
+ *  not a number for an infinite part. Two complex operands give
+ *  `(a.re·b.re - a.im·b.im, a.re·b.im + a.im·b.re)`. `mod` is the
  *  floored remainder: its result has the sign of the divisor, as the
  *  interpreter gives it (`Mod(-7, 3)` is `2`, `Mod(7, -3)` is `-2`,
  *  `Mod(-7.5, 2)` is `0.5`), and a zero divisor gives not a number.
- *  `floor` has an integer result. `divide` has a real result, also for
- *  integer operands. `not` is the negation of one boolean operand.
+ *  `floor` has an integer result. `divide` has a real result for real
+ *  operands, also for integer operands, and a complex result exactly when
+ *  an operand is complex; a complex `divide` has two operands, and a real
+ *  operand of it is not converted. Its value for a real divisor `b` is the
+ *  quotient of each part of the dividend by `b`. For a complex divisor it
+ *  is the quotient of the interpreter (`complexQuotient()` in
+ *  `numerics/numeric-complex.ts`): the textbook formula
+ *  `((a.re·b.re + a.im·b.im) / d, (a.im·b.re - a.re·b.im) / d)` with
+ *  `d = b.re² + b.im²`, where that formula is accurate, and a scaled
+ *  quotient, a pole or not a number elsewhere. A real dividend `a` reads as
+ *  the parts `a` and `0` in the test of accuracy, and its products are
+ *  `a·b.re` and `-a·b.im`. `not` is the negation of one boolean operand.
  *  `not-equal` is the negation of `equal`: true when an operand is not a
  *  number. */
 export type IRArithmetic = OperationBase & {
@@ -157,6 +172,8 @@ export type IRArithmetic = OperationBase & {
  * - `tan`, `cot`, `sec`, `csc`, `sinh`, `cosh`, `atan`, `asinh`, `gamma`
  *   (the gamma function Γ) and `sign` (`-1`, `0` or `1` for a real
  *   operand, `z/|z|` for a complex one): as `exp`.
+ * - `conjugate`: the complex conjugate `a - bi` of `a + bi`, as `exp`; a
+ *   real operand is its own conjugate.
  * - `asin`, `acos`, `acosh` and `atanh`: as `ln`, the rule of the target
  *   decides whether an occurrence with a real operand is real (`NaN` off
  *   the real domain) or complex (the principal value, the real operand
@@ -191,6 +208,7 @@ export type UnaryFunctionName =
   | 'asinh'
   | 'gamma'
   | 'sign'
+  | 'conjugate'
   | 'asin'
   | 'acos'
   | 'acosh'
@@ -210,7 +228,7 @@ export type UnaryFunctionName =
 /**
  * The functions of two operands that the representation names, by an
  * identifier that names no target. Each has two real operands and a real
- * result:
+ * result, except `complex`, and `pow` of complex operands:
  *
  * - `atan2(y, x)` is the angle of the point `(x, y)` from the positive first
  *   axis, in `[-π, π]`.
@@ -220,7 +238,14 @@ export type UnaryFunctionName =
  *   interpreter reads the exponent as a rational `p/q` with an odd `q`
  *   (`|b|^e`, negative when `p` is odd: `(-8)^(1/3)` is `-2`), and is not a
  *   number for another exponent; every other pair has the power of the
- *   real numbers (`(-2)^3` is `-8`, `0^(-1)` is infinity).
+ *   real numbers (`(-2)^3` is `-8`, `0^(-1)` is infinity). For two complex
+ *   operands the result is complex, and continues the real convention:
+ *   `0^w` is `0` for `Re w > 0`, the pole for a negative real `w`, and not
+ *   a number otherwise; two operands whose imaginary parts are zero have the
+ *   real value of the real `pow` where it has one (`(-8)^(1/3)` is `-2`);
+ *   every other pair has the principal value `exp(w·ln b)`.
+ * - `complex(re, im)` is the complex number of the real part `re` and the
+ *   imaginary part `im`: two real operands, a complex result.
  * - `abs-pow(b, e)` is `|b|^e`, the power of the absolute value of `b`, with
  *   `|b|^0 = 1` also for `b = 0`.
  * - `signed-pow(b, e)` is `|b|^e` when `b` is not negative, and `-(|b|^e)`
@@ -245,7 +270,13 @@ export type UnaryFunctionName =
  * chooses one of them from the exponent.
  */
 export type BinaryFunctionName =
-  'atan2' | 'pow' | 'abs-pow' | 'signed-pow' | 'real-pow' | 'root';
+  | 'atan2'
+  | 'pow'
+  | 'abs-pow'
+  | 'signed-pow'
+  | 'real-pow'
+  | 'root'
+  | 'complex';
 
 /**
  * An application of a function of one operand (`unary`) or two operands

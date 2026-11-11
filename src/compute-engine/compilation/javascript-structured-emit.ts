@@ -31,8 +31,9 @@
  *   statement, so the statements keep the order of the effects of the
  *   program.
  * - A value that the code reads twice (a complex operand of a complex sum,
- *   whose text is written once per component) counts as two uses, so it is
- *   evaluated once, into a `const`.
+ *   whose text is written once per component, an operand of a complex
+ *   product or quotient) counts as two uses, so it is evaluated once, into a
+ *   `const`.
  * - A region whose statements are all written into its value is one
  *   expression. An `if` whose two regions are expressions is the conditional
  *   operator `c ? a : b`, and an `and` or an `or` whose regions after the
@@ -90,10 +91,15 @@
  *   component, with the real operands in the real part only, as the
  *   existing emitter writes it, a complex negation calls the runtime helper `_SYS.cneg`, a
  *   real square root is `Math.sqrt` and a complex one calls `_SYS.csqrt`,
- *   a complex product is written per component, `mod` calls
- *   `_SYS.floorMod`, `floor` is `Math.floor` and `divide` is `/`, as the
- *   existing emitter does. An object literal is in parentheses, so that it
- *   is never read as a block.
+ *   a complex product is written per component, with a real operand as a
+ *   factor of each part, `mod` calls `_SYS.floorMod`, `floor` is
+ *   `Math.floor` and `divide` is `/`, as the existing emitter does. A
+ *   complex quotient is the guarded text of the existing emitter: three
+ *   `const` statements and a conditional that calls `_SYS.cdivedge` where
+ *   the textbook formula is not accurate (`complexQuotient()`). `complex(a,
+ *   b)` is `({ re: a, im: b })`, and `pow` of complex operands
+ *   `_SYS.cpow`. An object literal is in parentheses, so that it is never
+ *   read as a block.
  * - A list is a JavaScript array of numbers. `at` calls the runtime helper
  *   `_SYS.atNumeric(list, index, element type)` and `length` reads
  *   `list.length`, as the existing emitter writes a read of a list input or
@@ -174,7 +180,7 @@ const FUNCTION_CODE: Readonly<
       UnaryFunctionName | BinaryFunctionName,
       PowerFunctionName | TemplateFunctionName
     >,
-    { readonly real: string; readonly complex?: string }
+    { readonly real?: string; readonly complex?: string }
   >
 > = {
   exp: { real: 'Math.exp', complex: 'cexp' },
@@ -196,6 +202,9 @@ const FUNCTION_CODE: Readonly<
   asinh: { real: 'Math.asinh', complex: 'casinh' },
   gamma: { real: '_SYS.gamma', complex: 'cgamma' },
   sign: { real: 'Math.sign', complex: 'csign' },
+  // A real operand of `Conjugate` is the operand itself (the form
+  // `identity` of the lowering): no real call.
+  conjugate: { complex: 'cconj' },
   asin: { real: 'Math.asin', complex: 'casin' },
   acos: { real: 'Math.acos', complex: 'cacos' },
   acosh: { real: 'Math.acosh', complex: 'cacosh' },
@@ -212,11 +221,12 @@ const FUNCTION_CODE: Readonly<
 };
 
 /** The functions whose code is not one call: `haversine` is
- *  `(1 - Math.cos(x)) / 2`, as the handler of `Haversine` writes it, and
+ *  `(1 - Math.cos(x)) / 2`, as the handler of `Haversine` writes it,
  *  `round-ties-away` is `(Math.sign(x) * Math.round(Math.abs(x)))`, as the
  *  handler of `Round` writes it for `ce.roundingTies` `'away-from-zero'`
- *  (`jsRoundToInteger()`), with the operand read twice. */
-type TemplateFunctionName = 'haversine' | 'round-ties-away';
+ *  (`jsRoundToInteger()`), with the operand read twice, and `complex` is
+ *  the object `({ re: a, im: b })`. */
+type TemplateFunctionName = 'haversine' | 'round-ties-away' | 'complex';
 
 /** The powers and the roots of numbers (`BinaryFunctionName`, and `cbrt`
  *  of `UnaryFunctionName`), which the emitter writes as the `Power` and
@@ -374,9 +384,11 @@ function usesOf(program: IRProgram): Map<number, Use> {
   const visit = (region: IRRegion) => {
     region.operations.forEach((op, index) => {
       // The text of a complex operand of a complex sum is written twice,
-      // once per component (a real operand once: it has no imaginary part),
-      // and of a complex product four times. The code of a loop
-      // reads the text of each of its bounds more than once.
+      // once per component (a real operand once: it has no imaginary part).
+      // The text of an operand of a complex product is written four times
+      // when both operands are complex, and twice when one is real; the text
+      // of an operand of a complex quotient at least twice. The code of a
+      // loop reads the text of each of its bounds more than once.
       const complex = op.result?.representation === 'complex';
       const readsOf = (i: number) =>
         op.kind === 'add' && complex
@@ -384,8 +396,11 @@ function usesOf(program: IRProgram): Map<number, Use> {
             ? 2
             : 1
           : op.kind === 'multiply' && complex
-            ? 4
-            : ((op.kind === 'loop' || op.kind === 'build') && i <= 1) ||
+            ? op.operands.every((v) => v.representation === 'complex')
+              ? 4
+              : 2
+            : (op.kind === 'divide' && complex) ||
+                ((op.kind === 'loop' || op.kind === 'build') && i <= 1) ||
                 (op.kind === 'binary' && op.fn === 'signed-pow') ||
                 (op.kind === 'unary' && op.fn === 'round-ties-away')
               ? 2
@@ -712,15 +727,32 @@ class Emitter {
       case 'multiply': {
         if (op.result.representation !== 'complex')
           return leftAssociative(operands, MULTIPLICATIVE, '*');
-        // `(a.re b.re - a.im b.im) + i (a.re b.im + a.im b.re)`, the text
-        // of the existing emitter.
-        const [a, b] = operands.map((o) => operand(o, CALL));
-        return atom(
-          `({ re: ${a}.re * ${b}.re - ${a}.im * ${b}.im, im: ${a}.re * ${b}.im + ${a}.im * ${b}.re })`
-        );
+        // The texts of the existing emitter (`Multiply` in
+        // `javascript-target.ts`): `(a.re b.re - a.im b.im) + i (a.re b.im +
+        // a.im b.re)` for two complex operands, `a b.re + i a b.im` for a
+        // real `a`, and `a.re b + i a.im b` for a real `b`. A part of a
+        // complex literal is its constant (`parts()`).
+        const [ca, cb] = op.operands.map((v) => v.representation === 'complex');
+        if (ca && cb) {
+          const [ar, ai] = this.parts(op.operands[0], operands[0]);
+          const [br, bi] = this.parts(op.operands[1], operands[1]);
+          return atom(
+            `({ re: ${ar} * ${br} - ${ai} * ${bi}, im: ${ar} * ${bi} + ${ai} * ${br} })`
+          );
+        }
+        if (cb) {
+          const a = operand(operands[0], MULTIPLICATIVE);
+          const [br, bi] = this.parts(op.operands[1], operands[1]);
+          return atom(`({ re: ${a} * ${br}, im: ${a} * ${bi} })`);
+        }
+        const [ar, ai] = this.parts(op.operands[0], operands[0]);
+        const b = operand(operands[1], MULTIPLICATIVE + 1);
+        return atom(`({ re: ${ar} * ${b}, im: ${ai} * ${b} })`);
       }
       case 'divide':
-        return leftAssociative(operands, MULTIPLICATIVE, '/');
+        if (op.result.representation !== 'complex')
+          return leftAssociative(operands, MULTIPLICATIVE, '/');
+        return this.complexQuotient(op.operands, operands, out);
       case 'mod':
         this.runtime.add('floorMod');
         return call('_SYS.floorMod', operands);
@@ -751,6 +783,11 @@ class Emitter {
           // read twice, and is bound to a name (`usesOf()`). `Root`:
           // `Math.cbrt(x)` for the degree 3, `_SYS.root(x, n)` for a degree
           // that is not a literal.
+          // `_SYS.cpow(b, e)` for complex operands.
+          if (fn === 'pow' && op.result.representation === 'complex') {
+            this.runtime.add('cpow');
+            return call('_SYS.cpow', operands);
+          }
           if (fn === 'pow' || fn === 'root') {
             this.runtime.add(fn);
             return call(`_SYS.${fn}`, operands);
@@ -794,11 +831,18 @@ class Emitter {
           const x = operand(operands[0], CONDITIONAL);
           return atom(`(Math.sign(${x}) * Math.round(Math.abs(${x})))`);
         }
+        if (fn === 'complex') {
+          const [re, im] = operands.map((o) => operand(o, CONDITIONAL));
+          return atom(`({ re: ${re}, im: ${im} })`);
+        }
         const code = FUNCTION_CODE[fn];
         if (!op.operands.some((v) => v.representation === 'complex')) {
-          if (code.real.startsWith('_SYS.'))
-            this.runtime.add(code.real.slice('_SYS.'.length));
-          return call(code.real, operands);
+          const real = code.real;
+          if (real === undefined)
+            return fail(`the function ${op.fn} has a real operand`);
+          if (real.startsWith('_SYS.'))
+            this.runtime.add(real.slice('_SYS.'.length));
+          return call(real, operands);
         }
         if (code.complex === undefined)
           return fail(`the function ${op.fn} has a complex operand`);
@@ -939,6 +983,84 @@ class Emitter {
           `no emission for the operation ${(op as { kind: string }).kind}`
         );
     }
+  }
+
+  /**
+   * The texts of the real and the imaginary part of the complex value
+   * `value`, whose source is `source`: `source.re` and `source.im`, or, for
+   * a complex literal, its two constants, so that a product or a quotient
+   * does not write the object of the literal at each read of a part, as the
+   * existing emitter binds it once. A constant has the double of the part,
+   * `-0` included (`numberSource()`); a negative constant has the
+   * precedence of a unary minus, which every place of a part admits (a
+   * factor, a divisor, an argument).
+   */
+  private parts(value: IRValue, source: Source): [string, string] {
+    const literal = this.complexLiterals.get(value.id);
+    if (literal !== undefined)
+      return [numberSource(literal.re).text, numberSource(literal.im).text];
+    const text = operand(source, CALL);
+    return [`${text}.re`, `${text}.im`];
+  }
+
+  /**
+   * The value of a complex `divide` of `values`, whose sources are
+   * `sources`: the text of the existing emitter (`Divide` in
+   * `javascript-target.ts`). For a real divisor `b`, the quotient of each
+   * part, `{ re: a.re / b, im: a.im / b }`. For a complex divisor, three
+   * `const` statements in `out` (the squared modulus `d` of the divisor and
+   * the two parts `nr`, `ni` of the numerator), then the conditional that
+   * reads the quotient from `_SYS.cdivedge` where the textbook formula is
+   * not accurate, the test of `complexQuotient()` in
+   * `numerics/numeric-complex.ts`: `d` is subnormal, zero or infinite, a
+   * part of the numerator is not finite or is subnormal, or one of the
+   * products of the parts is not an exact zero and not a normal double
+   * (`_SYS.cprodok`). A real dividend `a` has the products `a * b.re` and
+   * `-a * b.im`, and is the parts `a` and `0` of `_SYS.cdivedge`. Each
+   * operand is read several times, and is bound to a name (`usesOf()`).
+   */
+  private complexQuotient(
+    values: readonly IRValue[],
+    sources: readonly Source[],
+    out: string[]
+  ): Source {
+    const [ca, cb] = values.map((v) => v.representation === 'complex');
+    if (!cb) {
+      const [ar, ai] = this.parts(values[0], sources[0]);
+      const divisor = operand(sources[1], MULTIPLICATIVE + 1);
+      return atom(`({ re: ${ar} / ${divisor}, im: ${ai} / ${divisor} })`);
+    }
+    const [br, bi] = this.parts(values[1], sources[1]);
+    const d = this.names.fresh();
+    const nr = this.names.fresh();
+    const ni = this.names.fresh();
+    const min = '2.2250738585072014e-308';
+    let tests: string;
+    let edge: string;
+    if (ca) {
+      const [ar, ai] = this.parts(values[0], sources[0]);
+      out.push(
+        `const ${d} = ${br} * ${br} + ${bi} * ${bi};`,
+        `const ${nr} = ${ar} * ${br} + ${ai} * ${bi};`,
+        `const ${ni} = ${ai} * ${br} - ${ar} * ${bi};`
+      );
+      tests = `!_SYS.cprodok(${ar}, ${br}) || !_SYS.cprodok(${ai}, ${bi}) || !_SYS.cprodok(${ai}, ${br}) || !_SYS.cprodok(${ar}, ${bi})`;
+      edge = `_SYS.cdivedge(${ar}, ${ai}, ${br}, ${bi})`;
+    } else {
+      const real = operand(sources[0], CONDITIONAL);
+      out.push(
+        `const ${d} = ${br} * ${br} + ${bi} * ${bi};`,
+        `const ${nr} = ${operand(sources[0], MULTIPLICATIVE)} * ${br};`,
+        `const ${ni} = -${operand(sources[0], CALL)} * ${bi};`
+      );
+      tests = `!_SYS.cprodok(${real}, ${br}) || !_SYS.cprodok(${real}, ${bi})`;
+      edge = `_SYS.cdivedge(${real}, 0, ${br}, ${bi})`;
+    }
+    this.runtime.add('cprodok');
+    this.runtime.add('cdivedge');
+    return atom(
+      `(${d} < ${min} || ${d} === Infinity || ${nr} - ${nr} !== 0 || ${ni} - ${ni} !== 0 || (${nr} !== 0 && Math.abs(${nr}) < ${min}) || (${ni} !== 0 && Math.abs(${ni}) < ${min}) || ${tests} ? ${edge} : { re: ${nr} / ${d}, im: ${ni} / ${d} })`
+    );
   }
 
   /**

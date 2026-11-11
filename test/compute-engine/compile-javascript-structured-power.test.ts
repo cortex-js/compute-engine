@@ -462,18 +462,19 @@ describe('Power with a number literal exponent and Root, differential', () => {
 
 describe('refusals', () => {
   const REFUSALS: [string, MathJsonExpression, Mode, RegExp][] = [
-    // A complex base: a chain of products, `_SYS.cpow`.
+    // A complex base with an exponent that is not a number literal, and a
+    // complex radicand: `_SYS.cpow`, `_SYS.croot`.
     [
-      'z^3',
-      ['Power', 'z', 3],
+      'z^k',
+      ['Power', 'z', 'k'],
       'strict',
-      /Power with the exponent 3 and a complex base is not in the structured route/,
+      /Power with a complex operand and an exponent that is not a number literal is not in the structured route/,
     ],
     [
-      'z^(5/2)',
-      ['Power', 'z', ['Rational', 5, 2]],
+      'Root(z, 3)',
+      ['Root', 'z', 3],
       'strict',
-      /Power with the exponent 5\/2 and a complex base/,
+      /Root with a complex operand is not in the structured route/,
     ],
     // Two finite literals: folded.
     [

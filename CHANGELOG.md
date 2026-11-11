@@ -5,7 +5,9 @@
 - **Experimental: the `numeric-kernel` profile of the JavaScript target.**
   `compile(expr, { to: 'javascript', profile: 'numeric-kernel' })` compiles
   the expression with the structured compiler of the JavaScript target. It
-  admits scalar arithmetic, conditionals, calls of user functions with
+  admits scalar arithmetic of real and complex numbers (with a complex
+  operand: products, quotients, powers with a number literal exponent and
+  the elementary functions, `e^(i·x)`, `1/(t·ln t)`), conditionals, calls of user functions with
   declared signatures, captured numbers, loops over an integer range (with
   `Break` at the end of a branch of an `If`), and
   lists of numbers made with a comprehension and updated with `ReplaceAt`.

@@ -114,6 +114,12 @@ export type StructuredInput = IRInput;
  *   `(b·b)·b`, `s·s` and `(s·s)·b` with `s = b·b`.
  * - `reciprocal-square`: `Power` with the exponent -2, the two divisions
  *   `(1 / b) / b`.
+ * - `complex-chain`: `Power` of a complex base with an integer exponent `k`
+ *   from 3 to 8, the chain of complex products of the existing emitter:
+ *   `b^k` is the square of `b^(k/2)` for an even `k`, the product of
+ *   `b^(k-1)` and `b` for an odd `k`.
+ * - `complex-pow`: `Power` of a complex base with another number literal
+ *   exponent, the function `pow` of the base and the converted exponent.
  * - `cbrt`, `root`: `Root` written as the function of that name, `cbrt` of
  *   the radicand for the degree 3, `root` of the radicand and the degree
  *   for a degree that is not a number literal.
@@ -126,6 +132,8 @@ export type StructuredInput = IRInput;
  *   as the existing emitter writes it (`piMultiple()`).
  * - `identity`: `Conjugate` of a real operand, written as the operand
  *   itself, as the existing emitter writes it (`identityPassthrough()`).
+ * - `conjugate`: `Conjugate` of a complex operand, the function `conjugate`
+ *   of the operand (`_SYS.cconj(z)` on the existing emitter).
  * - `log10`, `log2`: `Log` with no base or with the base 10 or 2, the
  *   function of that name of the first operand; `log-quotient`: `Log(x, b)`
  *   with another base, the quotient `ln(x) / ln(b)`, as the existing emitter
@@ -134,6 +142,7 @@ export type StructuredInput = IRInput;
 export type StructuredForm =
   | 'pi-multiple'
   | 'identity'
+  | 'conjugate'
   | 'log10'
   | 'log2'
   | 'log-quotient'
@@ -146,6 +155,8 @@ export type StructuredForm =
   | 'real-pow'
   | 'product-power'
   | 'reciprocal-square'
+  | 'complex-chain'
+  | 'complex-pow'
   | 'cbrt'
   | 'root'
   | 'abs'
@@ -801,19 +812,49 @@ class Lowering {
         form === 'pow' ||
         form === 'abs-pow' ||
         form === 'signed-pow' ||
-        form === 'real-pow'
+        form === 'real-pow' ||
+        form === 'complex-pow'
       ) {
         const operands = this.operands(node, facts, scope, operations);
         const result = this.resultOf(facts);
         operations.push({
           kind: 'binary',
-          fn: form,
+          fn: form === 'complex-pow' ? 'pow' : form,
           result,
           operands,
           effect,
           origin: node,
         });
         return result;
+      }
+      if (form === 'complex-chain') {
+        // The base is evaluated once; the literal exponent has no
+        // operation. The products are in the order of `pow()` of the
+        // existing emitter (`Power` in `javascript-target.ts`).
+        const base = this.convert(
+          this.value(node.ops[0], scope, operations),
+          facts.conversions?.[0],
+          node,
+          operations
+        );
+        const k = (node.ops[1] as Expression & { re: number }).re;
+        const power = (n: number): IRValue => {
+          if (n === 1) return base;
+          const half = n % 2 === 0 ? power(n / 2) : undefined;
+          const operands =
+            half !== undefined ? [half, half] : [power(n - 1), base];
+          const result =
+            n === k ? this.resultOf(facts) : this.newValue('complex', 'complex');
+          operations.push({
+            kind: 'multiply',
+            result,
+            operands,
+            effect,
+            origin: node,
+          });
+          return result;
+        };
+        return power(k);
       }
       if (
         form !== 'square' &&
@@ -949,6 +990,19 @@ class Lowering {
     }
     if (special === 'identity')
       return this.operands(node, facts, scope, operations)[0];
+    if (special === 'conjugate') {
+      const operands = this.operands(node, facts, scope, operations);
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'unary',
+        fn: 'conjugate',
+        result,
+        operands,
+        effect,
+        origin: node,
+      });
+      return result;
+    }
     if (special === 'log10' || special === 'log2') {
       // The base, a literal or absent, has no operation.
       const operand = this.convert(
@@ -1023,9 +1077,11 @@ class Lowering {
       return result;
     }
 
+    if (operator === 'Multiply' && facts.representation === 'complex')
+      return this.complexProduct(node, facts, scope, operations, effect);
+
     if (
       operator === 'Multiply' &&
-      facts.representation !== 'complex' &&
       node.ops.some((op) => exactRationalDivisor(op) !== undefined)
     )
       return this.multiplyByRational(node, facts, scope, operations, effect);
@@ -1092,6 +1148,119 @@ class Lowering {
       origin: node,
     });
     return result;
+  }
+
+  /**
+   * A product with a complex result, which the rule of `Multiply` admitted
+   * with each operand in its own representation, lowered as the existing
+   * emitter writes it (`Multiply` in `javascript-target.ts`):
+   *
+   * - Two operands, one a complex literal `p + qi` with finite parts and
+   *   the other a real `v`: the function `complex` of the two parts, each
+   *   `0` for a part 0, `v` for a part 1 and the real product `k·v`
+   *   otherwise (`i·x` is `complex(0, x)`). The literal has no operation.
+   * - Two other operands: one `multiply`.
+   * - Three operands or more: the left fold of binary products in the
+   *   order of the operands, after one real product of the real factors
+   *   that come before the first complex one. A real factor scales both
+   *   parts of the complex product so far, as the existing emitter
+   *   accumulates them; a complex literal is a factor of the fold.
+   *
+   * A rational factor is a literal of its double. Every operand is
+   * evaluated once, in order, before the first product.
+   */
+  private complexProduct(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const push = (
+      kind: 'multiply',
+      operands: IRValue[],
+      result: IRValue
+    ): IRValue => {
+      operations.push({ kind, result, operands, effect, origin: node });
+      return result;
+    };
+    if (node.ops.length === 2) {
+      const index = node.ops.findIndex(
+        (op, i) =>
+          isNumber(op) &&
+          op.im !== 0 &&
+          Number.isFinite(op.re) &&
+          Number.isFinite(op.im) &&
+          this.facts(op, scope).representation === 'complex' &&
+          this.facts(node.ops[1 - i], scope).representation !== 'complex'
+      );
+      if (index >= 0) {
+        const literal = node.ops[index];
+        const v = this.convert(
+          this.value(node.ops[1 - index], scope, operations),
+          facts.conversions?.[1 - index],
+          node,
+          operations
+        );
+        const part = (k: number): IRValue => {
+          if (k === 1) return v;
+          const constant = this.newValue('real', 'number');
+          operations.push({
+            kind: 'literal',
+            value: k === 0 ? 0 : k,
+            result: constant,
+            operands: [],
+            effect: 'pure',
+            origin: literal,
+          });
+          if (k === 0) return constant;
+          return push('multiply', [constant, v], this.newValue('real', 'number'));
+        };
+        const re = part(literal.re);
+        const im = part(literal.im);
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'binary',
+          fn: 'complex',
+          result,
+          operands: [re, im],
+          effect,
+          origin: node,
+        });
+        return result;
+      }
+    }
+    const values = this.operands(node, facts, scope, operations);
+    const first = values.findIndex((v) => v.representation === 'complex');
+    if (first < 0) return fail(`no complex factor in ${node.toString()}`);
+    const real = values.slice(0, first);
+    let product: IRValue | undefined =
+      real.length === 0
+        ? undefined
+        : real.length === 1
+          ? real[0]
+          : push(
+              'multiply',
+              real,
+              this.newValue(
+                real.every((v) => v.type === 'integer') ? 'integer' : 'real',
+                'number'
+              )
+            );
+    values.slice(first).forEach((v, i) => {
+      if (product === undefined) {
+        product = v;
+        return;
+      }
+      product = push(
+        'multiply',
+        [product, v],
+        first + i === values.length - 1
+          ? this.resultOf(facts)
+          : this.newValue('complex', 'complex')
+      );
+    });
+    return product!;
   }
 
   /**

@@ -550,27 +550,10 @@ const DECLINED = new Map<string, RegExp>([
   // `Log(x, y)` of operands not proved non-negative is complex in the
   // `complex` mode, a quotient of complex logarithms.
   ['Log(x, y) (complex)', /Log of x in the base y is complex/],
-  // A complex operand in the `complex` mode.
-  ['Tan(z) (complex)', /Tan of a complex operand in the complex mode/],
-  ['Sinh(z) (complex)', /Sinh of a complex operand in the complex mode/],
-  ['Gamma(z) (complex)', /Gamma of a complex operand in the complex mode/],
-  ['Sign(z) (complex)', /Sign of a complex operand in the complex mode/],
-  ['Arcsin(z) (complex)', /Arcsin of a complex operand in the complex mode/],
-  ['Arctan(z) (complex)', /Arctan of a complex operand in the complex mode/],
   // A name with no declared type is complex in the `complex` mode.
   ['Erf(t) (complex)', /Erf with a complex operand is not in the structured route/],
-  ['Gamma(t) (complex)', /Gamma of a complex operand in the complex mode/],
-  ['Tan(t) (complex)', /Tan of a complex operand in the complex mode/],
-  ['Sign(t) (complex)', /Sign of a complex operand in the complex mode/],
-  ['Cot(t) (complex)', /Cot of a complex operand in the complex mode/],
-  ['Arcsin(t) (complex)', /Arcsin of a complex operand in the complex mode/],
-  ['Arccos(t) (complex)', /Arccos of a complex operand in the complex mode/],
   ['Log(t) (complex)', /Log with a complex operand/],
-  ['-a + Cos(Arccos(a)) (complex)', /Arccos of a complex operand in the complex mode/],
-  ['a + Sin(-Arcsin(a)) (complex)', /Arcsin of a complex operand in the complex mode/],
-  ['-a + Tan(Arctan(a)) (complex)', /Arctan of a complex operand in the complex mode/],
   ['3 Log(a, a) - 3 (complex)', /Log with a complex operand/],
-  ['a + Sin(Arcsin(a) + Pi) (complex)', /Arcsin of a complex operand in the complex mode/],
   ['Cot(4 Sin(x)) - 1 (complex)', /has the type number, which is not real, in the complex mode/],
 ]);
 
@@ -852,16 +835,16 @@ describe('refusals', () => {
       /Erf with a complex operand is not in the structured route/,
     ],
     [
-      'Conjugate of a complex operand',
-      ['Conjugate', 'z'],
+      'Erfc of a complex operand',
+      ['Erfc', 'z'],
       'strict',
-      /Conjugate with a complex operand is not in the structured route/,
+      /Erfc with a complex operand is not in the structured route/,
     ],
     [
-      'Tan of a complex sum',
-      ['Tan', ['Add', 'z', 1]],
+      'Artanh of a complex sum',
+      ['Artanh', ['Add', 'z', 1]],
       'strict',
-      /Tan of the complex operand .* is in the structured route only when the operand is a name/,
+      /Artanh of the complex operand .* is in the structured route only when the operand is a name/,
     ],
     [
       'Log of a complex operand',

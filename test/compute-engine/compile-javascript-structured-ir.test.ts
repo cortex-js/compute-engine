@@ -5,7 +5,14 @@ import {
   lowerStructuredFragment,
   type StructuredPreparation,
 } from '../../src/compute-engine/compilation/javascript-structured-lower';
-import { verifyJavaScriptProgram as verifyProgram } from '../../src/compute-engine/compilation/javascript-structured-policy';
+import {
+  JAVASCRIPT_POLICY,
+  verifyJavaScriptProgram as verifyProgram,
+} from '../../src/compute-engine/compilation/javascript-structured-policy';
+import {
+  verifyProgram as verifyCore,
+  type RepresentationPolicy,
+} from '../../src/compute-engine/compilation/structured-verify';
 import {
   type EffectFact,
   type IROperation,
@@ -758,6 +765,101 @@ describe('the verifier', () => {
     );
   });
 
+  // Complex arithmetic (docs/plans/2026-11-10-structured-complex-arithmetic.md,
+  // "Each part").
+  /** `madeProgram()` with the operations of `make` in its then branch,
+   *  after the read of `x` and a complex literal `c`, before its yield. */
+  function madeComplex(make: (m: ReturnType<typeof madeProgram>, c: IRValue) => Op[]) {
+    const m = madeProgram();
+    const c = m.value('complex');
+    m.thenOps.splice(
+      1,
+      0,
+      { kind: 'literal', value: { re: 1, im: 2 }, result: c, operands: [], effect: 'pure', origin: m.origin },
+      ...make(m, c)
+    );
+    return m;
+  }
+
+  test('control: a mixed product and quotient, and complex(x, x)', () => {
+    const m = madeComplex((m, c) => [
+      { kind: 'multiply', result: m.value('complex'), operands: [m.x, c], effect: 'pure', origin: m.origin },
+      { kind: 'multiply', result: m.value('complex'), operands: [c, c], effect: 'pure', origin: m.origin },
+      { kind: 'divide', result: m.value('complex'), operands: [m.x, c], effect: 'pure', origin: m.origin },
+      { kind: 'divide', result: m.value('complex'), operands: [c, m.x], effect: 'pure', origin: m.origin },
+      { kind: 'binary', fn: 'complex', result: m.value('complex'), operands: [m.x, m.x], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(m.program, m.prepared)).not.toThrow();
+  });
+
+  test('a complex multiply of three operands', () => {
+    const m = madeComplex((m, c) => [
+      { kind: 'multiply', result: m.value('complex'), operands: [m.x, c, c], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /a complex multiply has 3 operands, not two/
+    );
+  });
+
+  test('a real multiply with a complex operand', () => {
+    const m = madeComplex((m, c) => [
+      { kind: 'multiply', result: m.value('real'), operands: [m.x, c], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /the operation multiply has a result of the type real and a complex operand/
+    );
+  });
+
+  // The rule of the core, under a policy that admits any representation of
+  // the operands of the functions: the JavaScript policy refuses these
+  // operands by their representation first.
+  const anyOperands: RepresentationPolicy = {
+    ...JAVASCRIPT_POLICY,
+    functions: Object.fromEntries(
+      Object.keys(JAVASCRIPT_POLICY.functions).map((fn) => [
+        fn,
+        { results: ['number', 'complex'], operands: ['number', 'complex'] },
+      ])
+    ),
+  };
+
+  test('complex of a complex operand', () => {
+    const m = madeComplex((m, c) => [
+      { kind: 'binary', fn: 'complex', result: m.value('complex'), operands: [c, m.x], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /an operand of the operation binary has the representation complex/
+    );
+    expect(() => verifyCore(m.program, m.prepared, anyOperands)).toThrow(
+      /the function complex of complex, real has a result of the type complex/
+    );
+  });
+
+  test('a pow of complex operands, and a pow with one complex operand', () => {
+    const control = madeComplex((m, c) => [
+      { kind: 'binary', fn: 'pow', result: m.value('complex'), operands: [c, c], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(control.program, control.prepared)).not.toThrow();
+    const m = madeComplex((m, c) => [
+      { kind: 'binary', fn: 'pow', result: m.value('complex'), operands: [c, m.x], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /an operand of the operation binary has the representation number/
+    );
+    expect(() => verifyCore(m.program, m.prepared, anyOperands)).toThrow(
+      /the function pow of complex, real has a result of the type complex/
+    );
+  });
+
+  test('a complex divide with no complex operand', () => {
+    const m = madeComplex((m) => [
+      { kind: 'divide', result: m.value('complex'), operands: [m.x, m.x], effect: 'pure', origin: m.origin },
+    ]);
+    expect(() => verifyProgram(m.program, m.prepared)).toThrow(
+      /the operation divide has a result of the type complex and no complex operand/
+    );
+  });
+
   test('a region with no yield', () => {
     const m = madeProgram();
     m.thenOps.pop();
@@ -816,7 +918,8 @@ describe('admission of the structured route', () => {
     // the witness is a made node.
     ['And with a real operand', () => made('And'), /And with an operand that is not a boolean/],
     ['Or with a real operand', () => made('Or'), /Or with an operand that is not a boolean/],
-    ['Multiply of a real and a complex operand', () => scalarEngine().expr(['Multiply', 'x', 'z']), /a product with a complex operand is in the structured route only as the product of two complex operands/],
+    ['Multiply of a boolean and a complex operand', () => made('Multiply', ['C', 'z']), /a product with a boolean operand/],
+    ['Divide of a boolean and a complex operand', () => made('Divide', ['C', 'z']), /Divide with a boolean operand/],
     // The canonical form keeps `Min(x)`, `And(C)` and `Or(C)`, and writes
     // `Multiply(x)` as `x`: the unary product is a made node.
     ['Min of one operand', () => scalarEngine().expr(['Min', 'x']), /Min of fewer than two operands/],

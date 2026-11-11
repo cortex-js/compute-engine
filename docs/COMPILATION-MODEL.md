@@ -129,6 +129,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
+- `javascript`, `complex` mode, `t` with no declared type: `-1/(t·ln t)`,
+  `1/(t·ln(t)^2)` and `sin(ln t)/t` at `t = ±Infinity` give `NaN`. The
+  interpreter gives `0`.
+- `javascript`, `complex` mode, `t` with no declared type: `ln(t)^1.6` at
+  `t = 0` gives `NaN` (the complex power of `-Infinity`). The interpreter
+  gives `+Infinity`.
+- `javascript`, `x: real`, `z: complex`: `x·z` at `x = +Infinity`, `z = 1`
+  gives `{ re: Infinity, im: NaN }`. The interpreter gives `+Infinity`.
 - `javascript`, `L: list<real>`: the simplified form of `Sqrt(L - L) + 1` at
   `L = [-1, 0, 2]` gives `[NaN, 1, 1]`. `simplify()` takes the zero out of the
   root and gives `0·Sqrt(L) + 1`, so the code computes `0 * Math.sqrt(-1)`. The
@@ -1946,8 +1954,8 @@ nothing changes.
 
 | Admitted | Examples |
 | --- | --- |
-| Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` of a real base with the exponent 2, an integer exponent 3 to 5 or −2, another constant exponent that the existing emitter writes with `Math.pow` (`x^10`, `x^-3`, `x^1.1`, `x^(5/2)`), 1.5, the base `e`, a real exponent that is not a literal (`s^(d/2)`, a real result), or a float literal exponent with an odd recovered denominator and a base not proved non-negative (`u^1.6`); `Root` with the degree 3 or a degree that is not a literal |
-| Functions | `Sqrt`, `Ln`, `Log` (base 10, 2 or a real base of a real logarithm), `Exp`, `Sin`, `Cos`, `Tan` (also of `π·u`), `Cot`, `Sec`, `Csc`, `Tanh`, `Sinh`, `Cosh`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh` (complex where the type of the node is complex: `Arcsin(x)` with `x: real`), `Arctan2`, `Abs`, `Sign`, `Gamma` (one operand), `Erf`, `Erfc`, `Digamma`, `Haversine`, `Conjugate` (a real operand), `Min`, `Max`, `Floor`, `Ceil`, `Round` (ties away from zero), `Mod` |
+| Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` of a real base with the exponent 2, an integer exponent 3 to 5 or −2, another constant exponent that the existing emitter writes with `Math.pow` (`x^10`, `x^-3`, `x^1.1`, `x^(5/2)`), 1.5, the base `e`, a real exponent that is not a literal (`s^(d/2)`, a real result), or a float literal exponent with an odd recovered denominator and a base not proved non-negative (`u^1.6`); `Root` with the degree 3 or a degree that is not a literal. With a complex operand: a product of any number of operands, a real operand not converted (`x·z`, `i·x`, `x + i·y`, `2i·x·y`); a quotient, with the guarded formula of the existing emitter for a complex divisor (`z/x`, `1/(t·ln t)`); `Power` of a complex base with a number literal exponent (`z^3`, `z^1.1`) |
+| Functions | `Sqrt`, `Ln`, `Log` (base 10, 2 or a real base of a real logarithm), `Exp`, `Sin`, `Cos`, `Tan` (also of `π·u`), `Cot`, `Sec`, `Csc`, `Tanh`, `Sinh`, `Cosh`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh` (complex where the type of the node is complex: `Arcsin(x)` with `x: real`), `Arctan2`, `Abs`, `Sign`, `Gamma` (one operand), `Erf`, `Erfc`, `Digamma`, `Haversine`, `Conjugate`, `Min`, `Max`, `Floor`, `Ceil`, `Round` (ties away from zero), `Mod`. A complex operand, in both modes: any for `Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Sign`, `Gamma`, `Ln`, `Sqrt` and `Conjugate` (`cos(arccos(a))` with `a: real`, `sin(t)/t` in the `complex` mode); one that does not read `Pi` for `Exp`, `Sinh`, `Cosh` and `Tanh` (`e^(i·x)`); a name for `Abs`, and for `Arcosh` and `Artanh` in the `strict` mode |
 | Conditions | `If`, `Less`, `LessEqual`, `Equal`, `NotEqual` (real and integer operands), `And`, `Or`, `Not` |
 | Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot), names with no declared type (below) |
 | Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature or with no declared signature (below), whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines |
@@ -1956,7 +1964,8 @@ nothing changes.
 | Declined with `outside-profile` | Example |
 | --- | --- |
 | A head outside the list | `Sech(x)`, `LogGamma(x)`, `Integrate(sin(x), x)`, `Random()` (`operator: 'Random'`) |
-| A form the existing emitter writes in a special way | `x^0.5`, `x^(8/5)`, `Mod(x, 1)`, `Sin(z)` in the `complex` mode, a closed comparison |
+| A form the existing emitter writes in a special way | `x^0.5`, `x^(8/5)`, `Mod(x, 1)`, `Sinh(i·π·x)`, `e^(x + i·π·y)`, `\|x + i\|`, a closed comparison |
+| A complex form with no compilation of the engine that needs it | `z^x`, `x^z`, `z^w` (an exponent that is not a number literal), `Real(z)`, `Argument(z)`, `Equal(z, w)` |
 | A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
 | A name declared with a type that is not numeric | `x + u` with `u` declared `number` or `any` (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
 | A statement outside the list | `Continue` in a `Loop` (`operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Loop` over a list |
