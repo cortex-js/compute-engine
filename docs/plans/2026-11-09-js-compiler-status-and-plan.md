@@ -899,6 +899,8 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | Chained comparisons, helper parameter types from a signature, `Factorial` and other scalar heads, complex `Power` with a non-literal exponent |
 | `3177128edc798982b7a349dbeade87a27c20d1d9` | Functions of lists; `Map`, `Filter`, `Count`, `Reduce`, `Scan`, `Apply` with a function literal or a library operator (collections, slices 2 and 3) |
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | The compile mode `mode: 'bigint'` in the profile ([bigint mode](2026-11-11-structured-bigint-mode.md), slices 1 and 2) |
+| `d89290f1b82fafad8e16cdc8db807176a3d5cdfe` | The bigint mode: sums and products, user functions, lists of integers, a root function literal (slices 3 to 5) |
+| `114403d0b44156730f1f943b12362d0c74f90fc8` | User functions as function operands, `Range` with a step, lists of tuples, rotations (collections, slices 4 and 5 in part) |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -922,6 +924,7 @@ clean worktree):
 | `950f70f962bbf39e14786091dca564835e5a4dc1` | 8,973 of 9,446 (95.0%) | 86,191 passed, 1 failed (CE-1197) |
 | `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | 8,961 of 9,433 (95.0%) | 86,639 passed, 0 failed |
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | 8,955 of 9,426 (95.0%) | 86,995 passed, 2 failed (CE-1197; CE-1186, the formatter's stack overflow, which passed in the shadow run on the same content) |
+| `114403d0b44156730f1f943b12362d0c74f90fc8` | 8,958 of 9,430 (95.0%) | 87,201 passed, 1 failed (CE-1197) |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -943,6 +946,7 @@ the existing compiler compiles, and those of them that the profile admits):
 | `950f70f962bbf39e14786091dca564835e5a4dc1` | 18,130 of 29,684 (61%) | 9,171 of 20,462 (45%) |
 | `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | 19,696 of 30,429 (65%) | 10,733 of 21,204 (51%) |
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | 20,959 of 31,049 (67.5%) | 11,989 of 21,817 (55%) |
+| `114403d0b44156730f1f943b12362d0c74f90fc8` | 21,438 of 31,283 (68.5%) | 12,464 of 22,046 (56.5%) |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11
