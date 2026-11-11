@@ -1032,30 +1032,41 @@ export function capturedSymbols(
 }
 
 /** The binding that a call of `literal` reads for the captured symbol
- * `entry`: the binding of the name in the scope that encloses the body of
+ * `name`: the binding of the name in the scope that encloses the body of
  * the literal, or `undefined` when there is none. */
 function outerBindingOf(
   literal: Expression,
-  entry: CapturedSymbol
+  name: string
 ): BoxedValueDefinition | undefined {
   const body = isFunction(literal, 'Function') ? literal.ops[0] : undefined;
   const bodyScope = body?.isScoped ? body.localScope : undefined;
   for (let s: Scope | null | undefined = bodyScope?.parent; s; s = s.parent) {
-    const b = s.bindings.get(entry.name);
+    const b = s.bindings.get(name);
     if (b === undefined) continue;
     return 'value' in b ? b.value : undefined;
   }
   return undefined;
 }
 
+/** A binding that a call of a function literal reads for a captured symbol,
+ * with its type when the type of the definition was inferred. With the
+ * engine flag `_bindingUnits`, boxing declares no outer binding for the copy
+ * that the body scope declared for a free symbol: the entry then has no
+ * `binding`, and the binding is found by name from `literal` when the entry
+ * is read (`capturedTypeWidenings()`). */
+type CapturedTypeEntry = readonly [
+  binding: BoxedValueDefinition | undefined,
+  type: BoxedType,
+  name: string,
+  literal?: Expression,
+];
+
 /** For each definition made from a function literal, the type of each
  * binding that a call of the literal reads for a captured symbol, when the
  * type of the definition was inferred (`noteDefinitionCapturedTypes()`). */
 const DEFINITION_CAPTURED_TYPES = new WeakMap<
   object,
-  ReadonlyArray<
-    readonly [binding: BoxedValueDefinition, type: BoxedType, name: string]
-  >
+  ReadonlyArray<CapturedTypeEntry>
 >();
 
 /**
@@ -1074,17 +1085,28 @@ export function noteDefinitionCapturedTypes(
   literal: Expression
 ): void {
   if (!isFunction(literal, 'Function')) return;
-  const bindings: Array<
-    readonly [binding: BoxedValueDefinition, type: BoxedType, name: string]
-  > = [];
+  const bindings: Array<CapturedTypeEntry> = [];
   // Computed once for this record, from the types of now.
   let cells: Set<object> | undefined;
   for (const entry of capturedSymbols(literal)) {
     const own = entry.occurrence.valueDefinition;
-    const binding =
-      own !== undefined && own.inferredType && own.value === undefined
-        ? (outerBindingOf(literal, entry) ?? own)
-        : own;
+    const copy =
+      own !== undefined && own.inferredType && own.value === undefined;
+    const outer = copy ? outerBindingOf(literal, entry.name) : undefined;
+    if (copy && outer === undefined && literal.engine._bindingUnits) {
+      // A free symbol of the body that has no outer binding yet: the type
+      // is the type of the occurrence (rule 4 of the binding units), and
+      // the binding is the one that a later declaration or assignment of
+      // the name makes, found by name when the record is read.
+      let type = entry.occurrence.type;
+      if (type.isUnknown) {
+        cells ??= numberCellBindings(literal);
+        if (cells.has(own)) type = literal.engine.type('number');
+      }
+      bindings.push([undefined, type, entry.name, literal] as const);
+      continue;
+    }
+    const binding = copy ? (outer ?? own) : own;
     if (binding === undefined) continue;
     // The type of a list literal reads an element that is a free symbol of
     // type `unknown` as a number cell (`[-x, y]` is typed `vector<2>`), but
@@ -1197,7 +1219,11 @@ export function capturedTypeWidenings(
   const snapshot = DEFINITION_CAPTURED_TYPES.get(def);
   if (snapshot === undefined) return [];
   const out: Array<{ name: string; before: BoxedType; now: BoxedType }> = [];
-  for (const [binding, before, name] of snapshot) {
+  for (const [recorded, before, name, literal] of snapshot) {
+    const binding =
+      recorded ??
+      (literal !== undefined ? outerBindingOf(literal, name) : undefined);
+    if (binding === undefined) continue;
     const now = binding.type;
     if (now === before) continue;
     if (now.isUnknown) {

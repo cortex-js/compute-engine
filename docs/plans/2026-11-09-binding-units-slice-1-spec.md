@@ -129,6 +129,14 @@ findings of round 2 and was not reviewed again.
      declare the name in its home scope, as `ce.assign()` and `ce.declare()`
      do, and are journaled like them. Today `ce.box('w').value = 3` declares
      `w`; that stays the same.
+   - The record of the captured types of a definition made from a function
+     literal (`noteDefinitionCapturedTypes()`): a captured name whose
+     body-scope copy has no outer binding is recorded by name, with the type
+     of its occurrence (rule 4). Its binding is found by name from the scope
+     of the literal when the record is read. (Added 2026-11-10, in phase E.)
+   - The operand structure of a call (`structureOfExpression()`) reads a
+     name declared `unknown` as inferred, as it reads a free name. (Added
+     2026-11-10, in phase E.)
 
 **Operations**
 
@@ -245,6 +253,10 @@ findings of round 2 and was not reviewed again.
       environment is not journaled, so a `restore()` does not undo a
       requirement written after the checkpoint on an expression boxed before
       it. `docs/CHECKPOINT-MODEL.md` states this limit with that example.
+    - `ce.withValues()` declares a name that has no definition, inferred and
+      of type `unknown`, in the first scope up the chain that is not
+      `noAutoDeclare`. It first checks that no stored body applies the name.
+      (Added 2026-11-10, in phase E.)
     - Tycho, the only known host that calls a checkpoint, moves its one use
       (`withValuesHidden()`, `src/plot-core/ce-module-registry.ts:947`) to
       `ce.withValues()`. Tycho checked that move on CE 0.185.1. The two

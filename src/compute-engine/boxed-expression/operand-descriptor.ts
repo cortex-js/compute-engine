@@ -462,7 +462,9 @@ function structureOfExpression(
         ambient.value !== def
       )
         node.lookupByName = false;
-      if (def.inferredType === true) node.inferred = true;
+      // `hasInferredType()`: with the engine flag `_bindingUnits`, a
+      // definition declared `unknown` counts too, as for a free name.
+      if (hasInferredType(op)) node.inferred = true;
       if (def._blockLocal === true) node.local = true;
       if (isFreeSymbol(op)) node.free = true;
       const systemBinding =

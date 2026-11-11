@@ -4285,9 +4285,22 @@ export function withValuesFn<T>(
 
   const saved: WithValuesBinding[] = [];
   for (const name of names) {
+    const appliedByBody = () =>
+      new Error(
+        `withValues(): the body of a function applies "${name}" as a function, and a value would change that body for good. Declare "${name}" first`
+      );
     let record = ce.lookupDefinition(name);
     if (record === undefined) {
-      ce.symbol(name);
+      if (ce._bindingUnits) {
+        // Boxing declares no name (a free name), so the name is declared
+        // here, in the scope that the boxing of the name would have
+        // declared it in. The test of the bodies that apply the name comes
+        // first: the declaration could rewrite such a body.
+        if (hasProvisionalDependents(ce, name)) throw appliedByBody();
+        let scope = ce.context.lexicalScope;
+        while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
+        ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+      } else ce.symbol(name);
       record = ce.lookupDefinition(name);
     }
     if (record === undefined || !isValueDef(record))
@@ -4295,10 +4308,7 @@ export function withValuesFn<T>(
         `withValues(): "${name}" is bound to a function definition. withValues() gives a value to a variable only`
       );
     if (record.value.isConstant) throw new ConstantAssignmentError(name);
-    if (hasProvisionalDependents(ce, name))
-      throw new Error(
-        `withValues(): the body of a function applies "${name}" as a function, and a value would change that body for good. Declare "${name}" first`
-      );
+    if (hasProvisionalDependents(ce, name)) throw appliedByBody();
     const input = values[name];
     if (
       input !== undefined &&
