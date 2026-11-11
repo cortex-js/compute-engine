@@ -100,8 +100,12 @@
  *   b)` is `({ re: a, im: b })`, and `pow` of complex operands
  *   `_SYS.cpow`. An object literal is in parentheses, so that it is never
  *   read as a block.
- * - A list is a JavaScript array of numbers. `at` calls the runtime helper
- *   `_SYS.atNumeric(list, index, element type)` and `length` reads
+ * - A list and a tuple are a JavaScript array of numbers. `list` and
+ *   `tuple` are the array literal `[a, b, …]`, and `get` of the position
+ *   `i` is `t[i - 1]`, as the existing emitter writes a list literal, a
+ *   tuple and a term of the sum of a tuple. `at` calls the runtime helper
+ *   `_SYS.atNumeric(list, index, element type)`, or `_SYS.at(tuple, index)`
+ *   for a tuple, and `length` reads
  *   `list.length`, as the existing emitter writes a read of a list input or
  *   parameter (`At` and `Length` in `javascript-target.ts`). The helper
  *   returns the element at an integer index in range, counts a negative
@@ -115,7 +119,13 @@
  *   array, filled in the order of the index, as the existing emitter writes
  *   a comprehension over a range (`compileComprehension()` in
  *   `compile-loops.ts`). Like the existing emitter, it counts no pass of the
- *   iteration budget.
+ *   iteration budget. A `build` or a `loop` with `ascending` counts up from
+ *   `from` to `to`, and runs no pass when `to` is less than `from`.
+ * - An `append` is `(r.push(x), r)` when `inPlaceUpdates()` admits it: the
+ *   array of the operand gets the element and is the result, as the
+ *   `result.push()` of the guarded comprehension of the existing emitter;
+ *   otherwise it is the copy `[...r, x]`. The in-place form reads the text
+ *   of the list twice, which is bound to a name (`usesOf()`).
  * - A `replace-at` calls `_SYS.replaceAt(list, index, value)`, which copies
  *   the array, or `_SYS.replaceAtInPlace(list, index, value)`, which writes
  *   the array of the operand and returns it, when `inPlaceUpdates()`
@@ -172,6 +182,7 @@
 import {
   elementOf,
   isClosedRegion,
+  isTupleType,
   reachesHost,
   regionsOf,
   yieldedValues,
@@ -438,6 +449,7 @@ function usesOf(program: IRProgram): Map<number, Use> {
               : 2
             : (op.kind === 'divide' && complex) ||
                 ((op.kind === 'loop' || op.kind === 'build') && i <= 1) ||
+                (op.kind === 'append' && i === 0) ||
                 (op.kind === 'binary' && op.fn === 'signed-pow') ||
                 (op.kind === 'unary' && op.fn === 'round-ties-away')
               ? 2
@@ -907,6 +919,10 @@ class Emitter {
         return call(`_SYS.${code.complex}`, operands);
       }
       case 'at':
+        if (isTupleType(op.operands[0].type)) {
+          this.runtime.add('at');
+          return call('_SYS.at', operands);
+        }
         this.runtime.add('atNumeric');
         return call('_SYS.atNumeric', [
           ...operands,
@@ -924,6 +940,27 @@ class Emitter {
         };
       case 'not':
         return { text: `!${operand(operands[0], UNARY)}`, precedence: UNARY };
+      case 'list':
+      case 'tuple':
+        return atom(
+          `[${operands.map((o) => operand(o, CONDITIONAL)).join(', ')}]`
+        );
+      case 'get':
+        return {
+          text: `${operand(operands[0], CALL)}[${op.position - 1}]`,
+          precedence: CALL,
+        };
+      case 'append': {
+        const [list, element] = operands;
+        if (!this.inPlace.has(op))
+          return atom(
+            `[...${operand(list, CONDITIONAL)}, ${operand(element, CONDITIONAL)}]`
+          );
+        const name = operand(list, CALL);
+        return atom(
+          `(${name}.push(${operand(element, CONDITIONAL)}), ${name})`
+        );
+      }
       case 'replace-at': {
         const helper = this.inPlace.has(op) ? 'replaceAtInPlace' : 'replaceAt';
         this.runtime.add(helper);
@@ -938,7 +975,7 @@ class Emitter {
         if (index === undefined) return fail('a build has no index');
         const name = this.bind(op.result);
         const k = this.bind(index);
-        const range = this.rangeHeader(k, from, to);
+        const range = this.rangeHeader(k, from, to, op.ascending === true);
         const body: string[] = [range.index];
         const [element] = this.openRegion(op.body, body, readsInputs);
         body.push(`${name}.push(${operand(element, CONDITIONAL)});`);
@@ -1181,7 +1218,7 @@ class Emitter {
       this.plain.add(p.id);
     });
     const k = this.bind(index);
-    const range = this.rangeHeader(k, from, to);
+    const range = this.rangeHeader(k, from, to, op.ascending === true);
     const body: string[] = [range.index];
     if (op.iterationBudget !== undefined)
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
@@ -1228,16 +1265,27 @@ class Emitter {
    * once. A bound that is not finite, or a range of more than 2^32 − 1
    * elements, is not refused: the loop runs until the iteration budget
    * stops it, or for ever without one, where the existing emitter throws a
-   * `RangeError`.
+   * `RangeError`. With `ascending`, the step is 1 and there is no pass when
+   * `to` is less than `from` (the last value of the counter is negative):
+   * the pass over the elements of a list, from 1 to its length.
    */
   private rangeHeader(
     k: string,
     from: Source,
-    to: Source
+    to: Source,
+    ascending = false
   ): { before: string[]; header: string; index: string } {
-    const step = this.names.fresh();
+    const step = ascending ? '' : this.names.fresh();
     const last = this.names.fresh();
     const counter = this.names.fresh();
+    if (ascending)
+      return {
+        before: [
+          `const ${last} = ${operand(to, ADDITIVE)} - ${operand(from, ADDITIVE + 1)};`,
+        ],
+        header: `for (let ${counter} = 0; ${counter} <= ${last}; ${counter}++)`,
+        index: `const ${k} = ${operand(from, ADDITIVE)} + ${counter};`,
+      };
     return {
       before: [
         `const ${step} = ${operand(to, RELATIONAL + 1)} < ${operand(from, RELATIONAL + 1)} ? -1 : 1;`,

@@ -277,6 +277,38 @@ and the tests are
 | A complex operand next to inline code | A complex value is bound to a `const` ahead of the expression, and a real operand is written inline in the `re` part (`{ re: <real> + _tv1.re, im: _tv1.im }`), so the complex operand is evaluated first. | Declined when the program draws two or more times and a draw is in a complex value (`refuseHoistedDraws()`); one draw, or draws only in real values, are admitted. |
 | A closed jump node that draws (`Less(Random(), 1/2)`, `Floor(6·Random())`) | `closedExactJump()` answers true, but the fold evaluates only a pure node (`constantFoldValue()`), so the code is the structural code. | The structural code: `closedJumpRefusal()` and `inexactJumpConstant()` do not refuse a node that is not pure. |
 
+### Lists, tuples, folds and element-wise arithmetic
+
+Read from the handlers of `javascript-target.ts` and `compile-broadcast.ts`
+at `50e3e41a4` (2026-11-11), with `cse: false, constantFold: false`, by
+probes in both modes; the design is slice 1 of
+[2026-11-11-structured-collections-and-lambdas.md](2026-11-11-structured-collections-and-lambdas.md)
+and the tests are
+`test/compute-engine/compile-javascript-structured-collections.test.ts`.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `List` | `[_.x, _.y, 1]`, a number literal hoisted to a preamble constant (`_lit_1`) shared by the calls | A `list` operation of the elements, a new array at each call: `[_.x, _.y, 1]`. Each element real or integer; a list of lists, of booleans or of complex numbers: declined |
+| `Tuple` | `[_.x, _.y]` | A `tuple` operation, the same array. An element that is not real or integer, a named tuple type (`tuple<x: real, y: real>`): declined |
+| `At` of a list | `_SYS.atNumeric(L, k, "real")` (also of a list literal) | The same call |
+| `At` of a tuple | `_SYS.at(P, k)` | The same call; `NaN` out of range in both |
+| `Length` | `(P).length` | The same |
+| `Sum`, `Product` of a list | `(L).reduce((_a, _b) => _a + _b, 0)`, the product from `1`; of a list whose length the compiler knows, `(0 + t[0] + t[1] + t[2])` | An ascending `loop` from the integer `0` (`1`) over the elements: the same additions in the same order |
+| `Sum`, `Product` of an operand whose type is not real | `_SYS.cplx(…reduce(_SYS.sadd, 0))` in the `complex` mode, and in both modes when an element is complex valued (`Product(I·√x)`); in the `complex` mode also for a type with `NaN` or an infinity and for a local, which it reads with `_SYS.cplx(R)` | Declined (`refuseUnsettledFold()`), except for an input or a parameter, whose fold is not wrapped |
+| `Sum` of a list literal, `Product` of one (canonical `Reduce(L, Multiply, 1)`) | The preparation makes the sum or the product of the elements (`Sum([2, x - 0.1])` is `Add(2, Add(x, -0.1))`), which the emitter writes as one chain `2 + _.x + -0.1`, `_.y * _.u * _.x` | A list literal with no element of the head of the fold: the same sum or product. With one: declined (`refuseSumOfNestedSums()`) |
+| An operand whose type admits a list and a number | A call of a user function with a list argument has such a type (`list<any> \| real`); `Multiply` and `Divide` of it are `_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), 10, 2 / _fn_fm(_.I))`, the quotient not in the chain of the product; `exp(f(L) + 2)` is `_SYS.bcast((_tv1, _tv2) => _SYS.pow(_tv1, _tv2), Math.E, …)`; a complex sum keeps the term of the real part of a complex literal (`(_tv1).re + _tv2`); in the `complex` mode each operation is complex. A name with no declared type next to a list is multiplied by `_SYS.mulChecked`, which multiplies the scalars first | Declined (`refuseMixedOperand()`): every broadcastable operation but a comparison, a connective, and in the `strict` mode a sum or a negation of real operands, also for an operand expression of the type `any`, which `-f(L)/x` has; and the element-wise rule for a name with no declared type). A comparison of such a call is scalar code on both (`flips(B, k, p) > 0`) |
+| `Sum`, `Product` of a tuple | `(0 + P[0] + P[1])`, `(1 * P[0] * P[1])` | One `add` (`multiply`) of `0` (`1`) and the `get` of each position: the same operations in the same order |
+| `Max`, `Min` of one list or tuple | `_l.length === 0 ? NaN : _l.reduce(Math.max, -Infinity)`, `Min` from `Infinity` | An `if` on the length `0`, `NaN`, else an ascending `loop` of `max` from `-Infinity` (`min` from `Infinity`): `Math.max` of two operands in the order of `reduce` |
+| `Max(L, x)`, `Min(L, x)` | A loop with no test of an empty list | Declined |
+| `Product` of a list literal | Canonical form `Reduce(L, Multiply, 1)` | Declined (`Reduce`) |
+| `L + 1`, `L · x`, `-L`, `x/L` | `_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), L, 1)`, the operands evaluated once before the closure, the closure applied element by element; `2L + 1` one fused closure; `L/3` is `Multiply(1/3, L)`, the double `0.3333333333333333` times each element | An ascending `build` over the length of the first list operand, with the scalar operands evaluated once before it and the scalar operation of the head applied to the elements: the same doubles in the same order |
+| Two list operands | `_SYS.bcast` gives the scalar `NaN` when the lengths differ | Admitted when the lengths are equal by construction (`lengthKey()`: the same name, list literals of one length, an element-wise result or a `ReplaceAt` of such a list); otherwise declined |
+| `[x, 1] + [1, 2]` | `[(x + 1), (1 + 2)]` | An element-wise `build` over two list literals of one length: the same doubles |
+| `L^2`, `sqrt(L)`, `exp(L)`, `abs(L)` | `_SYS.pow(_tv1, _tv2)` in the closure, not the scalar square; the functions differ by mode | Declined |
+| A tuple operand of arithmetic | `[(_.P[0] + 1), (_.P[1] + 2)]` | Declined (a later slice) |
+| `Comprehension(body, Element(k, Range(a, b), guard))` | `const result = []`; `_SYS.rangeCount(a, b, step)` with the step `(b >= a ? 1 : -1)`, a `RangeError` when the count is over 2^32 − 1; a loop with `if (guard) { result.push(body); }` | A `loop` that carries the list, from the `list` of no element, whose body is an `if` of the guard: an `append` of the body (`(acc.push(v), acc)` when the list is not read elsewhere, else `[...acc, v]`) or the list. A guard or body that is not pure, and a bound that is not an integer literal of at most 2^31 − 1 in magnitude or a `Length` (the route has no test of the count): declined |
+| A list result | The array that the code made, or the input array itself (`If(c, L, [1, 2])` returns `_.L`) | The same: results are read-only, so the alias is allowed |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a

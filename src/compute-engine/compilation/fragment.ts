@@ -2737,7 +2737,7 @@ export function walkBlock<R>(
               ? definition.value.type.type
               : undefined,
         }) ?? localType(value.type);
-      if (type.kind === 'list')
+      if (type.kind === 'list' && w.definition.listLocals !== true)
         return void w.refuse(
           s,
           'signature',

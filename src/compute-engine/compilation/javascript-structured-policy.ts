@@ -14,20 +14,32 @@
  */
 import type { Expression } from '../global-types.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
-import { elementOf, type IRProgram, type ValueType } from './structured-ir.js';
+import {
+  elementOf,
+  isTupleType,
+  listType,
+  type IRProgram,
+  type ValueType,
+} from './structured-ir.js';
 import {
   verifyProgram,
   type RepresentationPolicy,
 } from './structured-verify.js';
 
 /** The representation that holds a value of the type `type`, or
- *  `undefined` for a list of booleans or of complex numbers. */
+ *  `undefined` for a list or a tuple of booleans or of complex numbers. A
+ *  tuple of reals or of integers is an array of numbers, as a list is: the
+ *  existing emitter writes both `[a, b]`. */
 export function representationOfKind(
   type: ValueType
 ): ScalarRepresentation | undefined {
   const element = elementOf(type);
   if (element !== undefined)
     return element === 'real' || element === 'integer' ? 'array' : undefined;
+  if (isTupleType(type))
+    return type.elements.every((e) => e === 'real' || e === 'integer')
+      ? 'array'
+      : undefined;
   return type === 'real' || type === 'integer'
     ? 'number'
     : (type as 'boolean' | 'complex');
@@ -51,7 +63,7 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'integer-list-to-real-list': {
       from: 'array',
       to: 'array',
-      type: 'list<real>',
+      type: listType('real'),
     },
   },
   operations: {
@@ -88,9 +100,20 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // `Math.sqrt` of a number, `_SYS.csqrt` of an `{re, im}` object.
     'sqrt': { results: ['number', 'complex'], operands: 'same' },
     // `_SYS.atNumeric(list, index, element type)` and `list.length`, as the
-    // existing emitter writes them for a list input or parameter.
+    // existing emitter writes them for a list input or parameter, and
+    // `_SYS.at(tuple, index)` for a tuple.
     'at': { results: ['number'], operands: ['array', 'number'] },
     'length': { results: ['number'], operands: ['array'] },
+    // `[a, b, …]`, the array literal of the existing emitter for a list
+    // literal and a tuple; `t[i]` for the element of a tuple at a literal
+    // position.
+    'list': { results: ['array'], operands: ['number'] },
+    'tuple': { results: ['array'], operands: ['number'] },
+    'get': { results: ['number'], operands: ['array'] },
+    // `(r.push(x), r)` when the emitter writes the element into the array
+    // in place, `[...r, x]` otherwise: the `result.push()` of the guarded
+    // comprehension of the existing emitter.
+    'append': { results: ['array'], operands: ['array', 'number'] },
     // `!x`, as the existing emitter writes `Not`.
     'not': { results: ['boolean'], operands: ['boolean'] },
     // A new array of numbers, filled in the order of the index. The

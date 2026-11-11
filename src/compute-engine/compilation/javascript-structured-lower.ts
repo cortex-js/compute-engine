@@ -109,8 +109,13 @@ import { nodeText } from './fragment.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
   dischargedEffect,
+  elementOf,
   exitsIn,
+  isListType,
+  isTupleType,
   joinEffects,
+  listType,
+  tupleType,
   operationCanAbort,
   reachesHost,
   regionsOf,
@@ -505,12 +510,19 @@ function scalarKind(type: { readonly kind: string }): ScalarKind {
   return fail(`the type ${type.kind} is not a scalar type`);
 }
 
-/** The type of a value: a scalar type, or a list of reals or of integers,
- *  whatever its length. */
-function valueType(type: {
+/** The type of a value: a scalar type, a list of reals or of integers,
+ *  whatever its length, or a tuple (a fragment point) of reals. */
+export function valueType(type: {
   readonly kind: string;
   readonly element?: { readonly kind: string };
+  readonly size?: number;
 }): ValueType {
+  if (type.kind === 'point') {
+    const size = type.size;
+    if (size === undefined || !Number.isInteger(size) || size < 1)
+      return fail(`a tuple type has the size ${String(size)}`);
+    return tupleType(new Array<ScalarKind>(size).fill('real'));
+  }
   if (type.kind !== 'list') return scalarKind(type);
   const element =
     type.element === undefined ? undefined : scalarKind(type.element);
@@ -518,7 +530,7 @@ function valueType(type: {
     return fail(
       `the list type of elements ${type.element?.kind} is not in the structured route`
     );
-  return `list<${element}>`;
+  return listType(element);
 }
 
 /** Lower and verify the program that `preparation` describes. */
@@ -1016,6 +1028,32 @@ class Lowering {
         this.build(node, facts, scope, operations, effect)
       );
 
+    // A list literal and a tuple: the operation `list` or `tuple` of the
+    // elements, each evaluated once, in order.
+    if (operator === 'List' || operator === 'Tuple') {
+      const operands = this.operands(node, facts, scope, operations);
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: operator === 'List' ? 'list' : 'tuple',
+        result,
+        operands,
+        effect,
+        origin: node,
+      });
+      return result;
+    }
+
+    // A fold of one list or tuple (`foldRule()` in
+    // `javascript-fragment-target.ts`).
+    if (
+      (operator === 'Sum' ||
+        operator === 'Product' ||
+        operator === 'Max' ||
+        operator === 'Min') &&
+      node.nops === 1
+    )
+      return this.fold(node, facts, scope, operations, effect);
+
     if (operator === 'Which' || (operator === 'If' && node.nops === 2))
       return this.selection(node, facts, scope, operations, effect);
 
@@ -1166,6 +1204,17 @@ class Lowering {
       });
       return result;
     }
+
+    // An operator of a list operand, applied to each element
+    // (`elementwiseRule()` in `javascript-fragment-target.ts`).
+    if (
+      (operator === 'Add' ||
+        operator === 'Multiply' ||
+        operator === 'Negate' ||
+        operator === 'Divide') &&
+      facts.type.kind === 'list'
+    )
+      return this.elementwise(node, facts, scope, operations, effect);
 
     // `Power` in the form that its rule recorded (`StructuredForm`, the
     // forms of `powerForm()`). `Power(x, 2)`: the product of
@@ -1519,12 +1568,26 @@ class Lowering {
       inner === undefined ||
       node.ops.length !== 2 ||
       !isFunction(spec, 'Element') ||
-      spec.nops !== 2 ||
+      (spec.nops !== 2 && spec.nops !== 3) ||
       !isSymbol(spec.op1) ||
       !isFunction(spec.op2, 'Range') ||
       spec.op2.nops !== 2
     )
       return fail(`no lowering for the comprehension ${nodeText(node)}`);
+    if (spec.nops === 3)
+      return this.guardedBuild(
+        body,
+        spec.op1.symbol,
+        spec.op2.op1,
+        spec.op2.op2,
+        spec.op3,
+        node,
+        facts,
+        scope,
+        inner,
+        operations,
+        effect
+      );
     const bound = (b: Expression) => {
       const value = this.value(b, scope, operations);
       if (value.type !== 'integer')
@@ -1553,6 +1616,322 @@ class Lowering {
       body: region,
       effect: joinEffects(effect, region.effect),
       ...touchesField(this.states(node), region.touches),
+      origin: node,
+    });
+    return result;
+  }
+
+  /**
+   * `Comprehension(body, Element(j, Range(a, b), guard))`, a comprehension
+   * with a guard, which the rule of `Comprehension` checked: the code of the
+   * existing emitter (`compileComprehension()` in `compile-loops.ts`),
+   * `const result = []; for (…) { if (guard) result.push(body); }`. The
+   * bounds are evaluated here, before the loop. The `loop` carries the list,
+   * whose initial value is the empty `list`; its body evaluates the guard
+   * with the index bound, then an `if` whose first branch evaluates `body`
+   * and `append`s it, and whose other branch yields the list as it is. The
+   * loop visits `Range(a, b)` as the interpreter does, in steps of -1 when
+   * `b < a`, and has no iteration budget: the existing emitter counts no pass
+   * of a comprehension. The rule refused a guard or a body that is not pure.
+   */
+  private guardedBuild(
+    body: Expression,
+    indexName: string,
+    fromNode: Expression,
+    toNode: Expression,
+    guard: Expression,
+    node: Expression,
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    inner: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const bound = (b: Expression) => {
+      const value = this.value(b, scope, operations);
+      if (value.type !== 'integer')
+        fail(`the bound ${nodeText(b)} of a comprehension is not an integer`);
+      return value;
+    };
+    const from = bound(fromNode);
+    const to = bound(toNode);
+    const type = valueType(facts.type);
+    if (!isListType(type))
+      return fail(`the comprehension ${nodeText(node)} does not make a list`);
+    const empty = this.newValue(type, 'array');
+    operations.push({
+      kind: 'list',
+      result: empty,
+      operands: [],
+      effect: 'pure',
+      origin: node,
+    });
+    const index = this.newValue('integer', 'number');
+    const list = this.newValue(type, 'array');
+    this.bound.set(inner, new Map([[indexName, index]]));
+    this.wrote(inner);
+    this.changed();
+    const bodyOperations: IROperation[] = [];
+    const next = this.inRegion(bodyOperations, () =>
+      this.conditional(
+        this.value(guard, inner, bodyOperations),
+        (into) => {
+          const element = this.value(body, inner, into);
+          const result = this.newValue(type, 'array');
+          into.push({
+            kind: 'append',
+            result,
+            operands: [list, element],
+            effect: 'pure',
+            origin: node,
+          });
+          return result;
+        },
+        () => list,
+        node,
+        bodyOperations
+      )
+    );
+    const region: IRRegion = {
+      ...this.region(bodyOperations, body, next),
+      parameters: [index, list],
+    };
+    const result = this.resultOf(facts);
+    operations.push({
+      kind: 'loop',
+      results: [result],
+      operands: [from, to, empty],
+      body: region,
+      effect: joinEffects(effect, region.effect),
+      ...touchesField(this.states(node), region.touches),
+      origin: node,
+    });
+    return result;
+  }
+
+  /** The literal `1` and the `length` of `list` at the end of
+   *  `operations`: the bounds of a pass over its elements. */
+  private elementRange(
+    list: IRValue,
+    origin: Expression,
+    operations: IROperation[]
+  ): [IRValue, IRValue] {
+    const one = this.numberLiteral(1, 'integer', origin, operations);
+    const length = this.newValue('integer', 'number');
+    operations.push({
+      kind: 'length',
+      result: length,
+      operands: [list],
+      effect: 'pure',
+      origin,
+    });
+    return [one, length];
+  }
+
+  /** The element of `list` (a list, or a tuple of reals) at `index`, at the
+   *  end of `operations`. */
+  private element(
+    list: IRValue,
+    index: IRValue,
+    origin: Expression,
+    operations: IROperation[]
+  ): IRValue {
+    const type = list.type;
+    const result = this.newValue(
+      isTupleType(type)
+        ? type.elements[0]
+        : (elementOf(type) ?? fail(`${nodeText(origin)} reads no list`)),
+      'number'
+    );
+    operations.push({
+      kind: 'at',
+      result,
+      operands: [list, index],
+      effect: 'pure',
+      origin,
+    });
+    return result;
+  }
+
+  /**
+   * `Sum(L)`, `Product(L)`, `Max(L)` or `Min(L)` of one list or tuple `L`,
+   * which the rule of the fold checked (`foldRule()` in
+   * `javascript-fragment-target.ts`), as the existing emitter writes it:
+   *
+   * - A sum or a product of a tuple: one `add` (`multiply`) of `0` (`1`)
+   *   and the elements in order (`get`), `(0 + P[0] + P[1])`.
+   * - A sum or a product of a list: a `loop` over the elements, from 1 to
+   *   the length (`ascending`, so an empty list gives the initial value),
+   *   whose carried value starts at `0` (`1`) and adds (multiplies) the
+   *   element: the order of `(L).reduce((_a, _b) => _a + _b, 0)`.
+   * - A maximum or a minimum of a list or a tuple: the same `loop` from
+   *   `-Infinity` (`Infinity`) with `max` (`min`), in the else branch of an
+   *   `if` on an empty list, whose value is `NaN`: `_l.length === 0 ? NaN :
+   *   _l.reduce((_a, _b) => Math.max(_a, _b), -Infinity)`.
+   *
+   * The list is evaluated once, before the loop. The operations of the fold
+   * are `pure`.
+   */
+  private fold(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const operator = node.operator;
+    const kind =
+      operator === 'Sum'
+        ? 'add'
+        : operator === 'Product'
+          ? 'multiply'
+          : operator === 'Max'
+            ? 'max'
+            : 'min';
+    const collection = this.convert(
+      this.value(node.ops[0], scope, operations),
+      facts.conversions?.[0],
+      node,
+      operations
+    );
+    const type = valueType(facts.type);
+    if (type !== 'real' && type !== 'integer')
+      return fail(`the fold ${nodeText(node)} is not a number`);
+    const tuple = collection.type;
+    if (isTupleType(tuple) && (kind === 'add' || kind === 'multiply')) {
+      const terms = [
+        this.numberLiteral(kind === 'add' ? 0 : 1, 'integer', node, operations),
+        ...tuple.elements.map((element, i) => {
+          const result = this.newValue(element, 'number');
+          operations.push({
+            kind: 'get',
+            position: i + 1,
+            result,
+            operands: [collection],
+            effect: 'pure',
+            origin: node,
+          });
+          return result;
+        }),
+      ];
+      const result = this.resultOf(facts);
+      operations.push({ kind, result, operands: terms, effect, origin: node });
+      return result;
+    }
+    const [one, length] = this.elementRange(collection, node, operations);
+    const loop = (into: IROperation[]): IRValue => {
+      const index = this.newValue('integer', 'number');
+      const accumulator = this.newValue(type, 'number');
+      const body: IROperation[] = [];
+      const next = this.newValue(type, 'number');
+      body.push({
+        kind,
+        result: next,
+        operands: [accumulator, this.element(collection, index, node, body)],
+        effect: 'pure',
+        origin: node,
+      });
+      const region: IRRegion = {
+        ...this.region(body, node, next),
+        parameters: [index, accumulator],
+      };
+      const initial =
+        kind === 'add' || kind === 'multiply'
+          ? this.numberLiteral(kind === 'add' ? 0 : 1, 'integer', node, into)
+          : this.numberLiteral(
+              kind === 'max' ? -Infinity : Infinity,
+              'real',
+              node,
+              into
+            );
+      const result = this.newValue(type, 'number');
+      into.push({
+        kind: 'loop',
+        results: [result],
+        operands: [one, length, initial],
+        body: region,
+        effect: region.effect,
+        ...touchesField(region.touches),
+        ascending: true,
+        origin: node,
+      });
+      return result;
+    };
+    if (kind === 'add' || kind === 'multiply') return loop(operations);
+    const zero = this.numberLiteral(0, 'integer', node, operations);
+    const empty = this.newValue('boolean', 'boolean');
+    operations.push({
+      kind: 'equal',
+      result: empty,
+      operands: [length, zero],
+      effect: 'pure',
+      origin: node,
+    });
+    return this.conditional(
+      empty,
+      (into) => this.numberLiteral(NaN, 'real', node, into),
+      loop,
+      node,
+      operations,
+      effect
+    );
+  }
+
+  /**
+   * `Add`, `Multiply`, `Negate` or `Divide` with a list operand, which the
+   * rule of the head admitted (`elementwiseRule()` in
+   * `javascript-fragment-target.ts`): each operand evaluated once, in
+   * order, then a `build` over the elements of the first list operand, from
+   * 1 to its length (`ascending`), whose body applies the operation of the
+   * head to the elements of the list operands at the index (`at`) and to
+   * the values of the scalar operands, as the closure of `_SYS.bcast` does:
+   * `(_tv1 + _tv2)`, `(_tv1 * _tv2 * _tv3)` in the order of the operands,
+   * `(-(_tv1))`, `((_tv1) / (_tv2))`. The rule admitted two list operands
+   * only when their lengths are equal by construction.
+   */
+  private elementwise(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const operator = node.operator;
+    const kind =
+      operator === 'Add'
+        ? 'add'
+        : operator === 'Multiply'
+          ? 'multiply'
+          : operator === 'Negate'
+            ? 'negate'
+            : 'divide';
+    const values = this.operands(node, facts, scope, operations);
+    const list =
+      values.find((v) => isListType(v.type)) ??
+      fail(`no list operand in ${nodeText(node)}`);
+    const type = valueType(facts.type);
+    const element = elementOf(type) ?? fail(`${nodeText(node)} is not a list`);
+    const [one, length] = this.elementRange(list, node, operations);
+    const index = this.newValue('integer', 'number');
+    const body: IROperation[] = [];
+    const operands = values.map((v) =>
+      isListType(v.type) ? this.element(v, index, node, body) : v
+    );
+    const value = this.newValue(element, 'number');
+    body.push({ kind, result: value, operands, effect: 'pure', origin: node });
+    const region: IRRegion = {
+      ...this.region(body, node, value),
+      parameters: [index],
+    };
+    const result = this.resultOf(facts);
+    operations.push({
+      kind: 'build',
+      result,
+      operands: [one, length],
+      body: region,
+      effect: joinEffects(effect, region.effect),
+      ...touchesField(this.states(node), region.touches),
+      ascending: true,
       origin: node,
     });
     return result;
@@ -2747,7 +3126,7 @@ class Lowering {
     const conversion =
       value.type === 'integer' && type === 'real'
         ? 'integer-to-real'
-        : value.type === 'list<integer>' && type === 'list<real>'
+        : value.type === listType('integer') && type === listType('real')
           ? 'integer-list-to-real-list'
           : undefined;
     if (conversion === undefined)
@@ -3245,7 +3624,8 @@ function widerType(a: ValueType, b: ValueType): ValueType | undefined {
   if (a === b) return a;
   const pair = new Set([a, b]);
   if (pair.has('integer') && pair.has('real')) return 'real';
-  if (pair.has('list<integer>') && pair.has('list<real>')) return 'list<real>';
+  if (pair.has(listType('integer')) && pair.has(listType('real')))
+    return listType('real');
   return undefined;
 }
 

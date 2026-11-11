@@ -15,6 +15,7 @@ import type {
   IRProgram,
   IRRegion,
 } from '../../src/compute-engine/compilation/structured-ir';
+import { listType } from '../../src/compute-engine/compilation/structured-ir';
 import type { CompilationResult } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../../src/math-json/types';
@@ -214,9 +215,9 @@ describe('heatneighbor: the interpreter decides, the existing emitter checks', (
   test('the representation: a list input, a list parameter, an at of the element type', () => {
     const preparation = structured().prepareStructured(engine().expr(HEATNEIGHBOR_CALL), OPTIONS);
     const program = lowerStructuredFragment(preparation);
-    expect(program.inputs[0]).toEqual({ name: 'H', type: 'list<real>', representation: 'array', elementLabel: 'real' });
+    expect({ ...program.inputs[0], type: String(program.inputs[0].type) }).toEqual({ name: 'H', type: 'list<real>', representation: 'array', elementLabel: 'real' });
     const neighbor = program.functions.find((f) => f.name === 'heatneighbor')!;
-    expect(neighbor.parameters.map((p) => [p.type, p.representation])).toEqual([
+    expect(neighbor.parameters.map((p) => [String(p.type), p.representation])).toEqual([
       ['list<real>', 'array'],
       ['integer', 'number'],
       ['integer', 'number'],
@@ -227,7 +228,7 @@ describe('heatneighbor: the interpreter decides, the existing emitter checks', (
     const reads = operationsOf(neighbor.body).filter((op) => op.kind === 'at');
     expect(reads).toHaveLength(1);
     expect(reads[0].result!.type).toBe('real');
-    expect(reads[0].operands.map((o) => o.type)).toEqual(['list<real>', 'integer']);
+    expect(reads[0].operands.map((o) => String(o.type))).toEqual(['list<real>', 'integer']);
     expect(reads[0].effect).toBe('pure');
   });
 });
@@ -369,7 +370,7 @@ describe('the spellings of a list of reals or of integers', () => {
     const ce = engine();
     const json = fn([typed('V', spelling), I], declare('t', 'real', 0), ['Add', ['At', 'V', 'i'], ['Multiply', 100, ['Length', 'V']]]);
     const program = lowerStructuredFragment(structured().prepareStructured(ce.expr(json), OPTIONS));
-    expect(program.inputs[0].type).toBe(type);
+    expect(String(program.inputs[0].type)).toBe(type);
     const result = structured().compile(ce.expr(json), OPTIONS);
     const existing = compile(ce.expr(json), { ...OPTIONS, fallback: false });
     const V = [3, -4, 7, 1, 2];
@@ -424,7 +425,7 @@ describe('a list passed through two helpers', () => {
   test('both helpers have a list parameter, and the list is passed as it is', () => {
     const ce = withHelpers();
     const program = lowerStructuredFragment(structured().prepareStructured(ce.expr(json), OPTIONS));
-    expect(program.functions.map((f) => [f.name, f.parameters[0].type])).toEqual([
+    expect(program.functions.map((f) => [f.name, String(f.parameters[0].type)])).toEqual([
       ['inner', 'list<real>'],
       ['outer', 'list<real>'],
     ]);
@@ -531,12 +532,12 @@ describe('refusals', () => {
     ['At with a string index', body([L, I], ['At', 'L', "'a'"]), /At with a string index is not in the structured route/],
     ['At with a Range index', body([L, I], ['Add', ['At', 'L', ['Range', 1, 2]], 0]), /At with a Range index \(a slice\) is not in the structured route/],
     ['At of a number', body([L, I], ['At', 'i', 1]), /invalid bound expression/],
-    ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list input or a list parameter of reals or integers, and its operand has the type `integer`/],
+    ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list of reals or integers or a tuple of reals, and its operand has the type `integer`/],
     ['a list of lists', body([typed('L', 'list<list<real>>'), I], ['At', ['At', 'L', 'i'], 1]), /the parameter L has the type list<list<real>>, and the structured route admits a list only of the type list<real> or list<integer>/],
     ['a matrix', body([typed('L', 'matrix<real>'), I], 'i'), /the parameter L has the type matrix<real>/],
     // A type that is not a list type keeps the message of a parameter that
     // the route has no type for.
-    ['a tuple parameter', body([typed('T', 'tuple<real, real>'), I], ['At', 'T', 'i']), /the parameter T of the function has the type tuple<real, real>, which is not in the structured route: a parameter is a number, a boolean, or a list of reals or of integers/],
+    ['a named tuple parameter', body([typed('T', 'tuple<x: real, y: real>'), I], ['At', 'T', 'i']), /the parameter T of the function has the type tuple<x: real, y: real>, which is not in the structured route: a parameter is a number, a boolean, a list of reals or of integers, or a tuple of reals/],
     ['a list of complex numbers', body([typed('L', 'list<complex>'), I], ['At', 'L', 'i']), /the parameter L has the type list<complex>/],
     ['a list of booleans', body([typed('L', 'list<boolean>'), I], 'i'), /the parameter L has the type list<boolean>/],
     ['vector, a list of numbers', body([typed('L', 'vector'), I], 'i'), /the parameter L has the type vector/],
@@ -549,7 +550,7 @@ describe('refusals', () => {
     // docs/plans/2026-11-10-structured-ir-loops-and-lists.md); these forms
     // stay out.
     ['Comprehension over a list', body([L], ['At', ['Comprehension', 'x', ['Element', 'x', 'L']], 1]), /Comprehension over Element\(x, L\) is not in the structured route, which admits a comprehension over Element\(j, Range\(a, b\)\) only, and not over a list/],
-    ['Comprehension with a guard', body([L], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 3], ['Less', 'j', 2]]], 1]), /Comprehension with a guard is not in the structured route/],
+    ['Comprehension with a guard that draws', body([L], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 3], ['Less', ['Random'], 0.5]]], 1]), /Comprehension with a guard whose guard or body has the node Random\(\), which is not pure, is not in the structured route/],
     ['Comprehension with two generators', body([L], ['At', ['Comprehension', ['Add', 'j', 'm'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'm', ['Range', 1, 3]]], 1]), /Comprehension with other than one generator is not in the structured route/],
     ['Comprehension of lists (nested lists)', body([L], ['At', ['At', ['Comprehension', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 2]]], ['Element', 'm', ['Range', 1, 3]]], 1], 1]), /Comprehension whose body is a list \(a list of lists\) is not in the structured route/],
     ['Comprehension of booleans', body([L], ['At', ['Comprehension', ['Less', 'j', 2], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `boolean` is not in the structured route/],
@@ -561,12 +562,12 @@ describe('refusals', () => {
     ['ReplaceAt of a number', body([L, I], ['At', ['ReplaceAt', 'i', 1, 2], 1]), /invalid bound expression/],
     ['Typed that is not the value of the body', body([L, I], ['Add', ['Typed', 'i', "'integer'"], 1]), /Typed is in the structured route only around the value of a function body/],
     ['Typed with another type than its value', fn([L, I], declare('t', 'real', 0), ['Typed', 't', "'integer'"]), /Typed with the ascribed type `integer` and a value of the type `real` is not in the structured route/],
-    ['a list literal', body([L, I], ['At', ['List', 1, 2], 'i']), /a list literal is not in the structured route/],
-    ['a tuple literal', body([L, I], ['At', ['Tuple', 1, 2], 'i']), /a tuple is not in the structured route/],
-    ['arithmetic on a list', body([L, I], ['At', ['Add', 'L', 1], 'i']), /Add with the list operand L is not in the structured route, which reads a list only with At and Length/],
-    ['a product of a list', body([L], ['Multiply', 'L', 2]), /Multiply with the list operand L is not in the structured route/],
+    ['a list literal of lists', body([L, I], ['At', ['At', ['List', ['List', 1], ['List', 2]], 'i'], 1]), /a list literal whose element is a list \(a list of lists\) is not in the structured route/],
+    ['a tuple of booleans', body([L, I], ['At', ['Tuple', ['Less', 't', 1], 1], 1]), /a tuple with an element of the type `boolean` is not in the structured route/],
+    ['arithmetic on a list and a complex number', body([L, typed('z', 'complex')], ['At', ['Add', 'L', 'z'], 1]), /Add of a list and the operand z of the type `complex` is not in the structured route/],
+    ['a product of two lists', body([L, typed('M', 'list<real>')], ['Multiply', 'L', 'M']), /Multiply of the lists L and M, whose lengths are not equal by construction, is not in the structured route/],
     ['a comparison of lists', body([L, typed('M', 'list<real>')], ['If', ['Equal', 'L', 'M'], 1, 0]), /Equal with the list operand L is not in the structured route/],
-    ['Negate of a list', body([L], ['Negate', 'L']), /Negate with the list operand L is not in the structured route/],
+    ['a product of a tuple', body([typed('P', 'tuple<real, real>'), I], ['At', ['Multiply', 'P', 'i'], 1]), /Multiply with the tuple operand P is not in the structured route/],
     ['Sqrt of a list', body([L], ['Add', ['Sqrt', 'L'], 0]), /Sqrt with the list operand L is not in the structured route/],
     ['Min of a list and a number', body([L, typed('x', 'real')], ['Min', 'L', 'x']), /Min with the list operand L is not in the structured route/],
     ['Less of a list and a number', body([L, typed('x', 'real')], ['Less', 'L', 'x']), /Less with the list operand L is not in the structured route/],
@@ -590,7 +591,7 @@ describe('refusals', () => {
   // A string, a tuple and a symbol with a value keep their earlier messages.
   test.each([
     ['a string input', 'string', undefined],
-    ['a tuple input', 'tuple<real, real>', undefined],
+    ['a named tuple input', 'tuple<x: real, y: real>', undefined],
     ['a list symbol with a value', 'list<real>', ['List', 1, 2]],
   ] as [string, string, MathJsonExpression | undefined][])('%s', (_name, type, value) => {
     const ce = engine();
@@ -769,9 +770,9 @@ describe('the verifier, at and length', () => {
 
   test('a list of a type that the target does not hold', () => {
     const m = lowered();
-    const read = m.ops.findIndex((op) => op.kind === 'input' && op.result!.type === 'list<real>');
+    const read = m.ops.findIndex((op) => op.kind === 'input' && String(op.result!.type) === 'list<real>');
     const op = m.ops[read];
-    const changed = { ...op, result: { ...op.result!, type: 'list<boolean>' } } as IROperation;
+    const changed = { ...op, result: { ...op.result!, type: listType('boolean') } } as IROperation;
     expect(() => verifyJavaScriptProgram(m.replace(read, changed), m.nodes)).toThrow(
       /has the type list<boolean>, which the target does not hold/
     );

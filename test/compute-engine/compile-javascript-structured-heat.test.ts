@@ -18,6 +18,7 @@ import type {
   IRProgram,
   IRRegion,
 } from '../../src/compute-engine/compilation/structured-ir';
+import { listType } from '../../src/compute-engine/compilation/structured-ir';
 import type { CompilationResult } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -363,9 +364,9 @@ describe('heatstep: the interpreter decides, the existing emitter checks', () =>
     const program = lowerStructuredFragment(preparation);
     const ops = allOperations(program.root);
     const build = ops.find((op) => op.kind === 'build')!;
-    expect(build.result!.type).toBe('list<integer>');
+    expect(String(build.result!.type)).toBe('list<integer>');
     const loop = ops.find((op) => op.kind === 'loop')!;
-    expect(loop.kind === 'loop' && loop.results.map((r) => r.type)).toEqual(['list<real>']);
+    expect(loop.kind === 'loop' && loop.results.map((r) => String(r.type))).toEqual(['list<real>']);
     const updates = ops.filter((op) => op.kind === 'replace-at');
     expect(updates).toHaveLength(2);
     const inPlace = inPlaceUpdates(program);
@@ -535,7 +536,7 @@ function f(n: integer) -> real {
     const build = allOperations(program.root).find((op) => op.kind === 'build')!;
     expect(build.operands.map((v) => v.type)).toEqual(['integer', 'integer']);
     expect(build.kind === 'build' && build.body.parameters?.map((p) => p.type)).toEqual(['integer']);
-    expect(build.result!.type).toBe('list<integer>');
+    expect(String(build.result!.type)).toBe('list<integer>');
     expect(build.effect).toBe('pure');
   });
 });
@@ -923,7 +924,7 @@ describe('the verifier, build and replace-at', () => {
   test('a replace-at of a real element with a result of integers', () => {
     const m = lowered();
     const op = m.ops[m.replace];
-    const changed = { ...op, result: { ...op.result!, type: 'list<integer>' } } as IROperation;
+    const changed = { ...op, result: { ...op.result!, type: listType('integer') } } as IROperation;
     expect(() => verifyJavaScriptProgram(m.change(m.replace, changed), m.nodes)).toThrow(
       /the operation replace-at writes a real element into a list<integer> and has a result of the type list<integer>/
     );
@@ -970,10 +971,14 @@ function f(H: real) -> real { ${call.replace('H, 1, 2', 'H, 1')} }`);
     }
   });
 
-  test('a list literal declines', () => {
+  // A list literal is a value of the structured route since slice 1 of
+  // docs/plans/2026-11-11-structured-collections-and-lambdas.md
+  // (compile-javascript-structured-collections.test.ts).
+  test('a list literal read at an index', () => {
     const ce = engineWith(`function f(k: integer) -> real { [1, 2, 3][k] }`);
-    expect(() => structured().compile(literal(ce, 'f'), OPTIONS)).toThrow(
-      /a list literal is not in the structured route/
-    );
+    const result = structured().compile(literal(ce, 'f'), OPTIONS);
+    const existing = compile(literal(ce, 'f'), { ...OPTIONS, fallback: false });
+    for (const k of [1, 3, 4, 0, -1])
+      expect([k, run(result, [k])]).toEqual([k, run(existing, [k])]);
   });
 });

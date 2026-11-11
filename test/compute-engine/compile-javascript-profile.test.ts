@@ -572,8 +572,9 @@ describe('canCompile() and compile() agree', () => {
     expect(EXPRESSIONS.length).toBeGreaterThanOrEqual(60);
     expect(compiled).toBeGreaterThanOrEqual(60);
     // `Sum(j, j = 1..5)` and `A ↦ Sum over A` compile since `Sum` is in the
-    // profile.
-    expect(declined).toBeGreaterThanOrEqual(33);
+    // profile; list literals, tuples, folds and element-wise arithmetic
+    // since slice 1 of docs/plans/2026-11-11-structured-collections-and-lambdas.md.
+    expect(declined).toBeGreaterThanOrEqual(23);
   });
 
   test.each(PRELUDES)(
@@ -599,9 +600,9 @@ describe('canCompile() and compile() agree', () => {
       ],
       [['Add', 'x', 'u'], { binding: 'u', value: 'u' }],
       [['Power', 'x', 0.5], { operator: 'Power' }],
-      [['List', 'x', 'y'], { operator: 'List' }],
+      [['List', ['List', 'x'], 'y'], { operator: 'List' }],
       // A parameter of a type outside the profile: its name.
-      [fn([['At', 'T', 1]], ['T', 'tuple<real, real>']), { binding: 'T' }],
+      [fn([['At', 'T', 1]], ['T', 'tuple<x: real, y: real>']), { binding: 'T' }],
       // A statement outside the profile, in a function body: its head.
       [
         fn(
@@ -1052,6 +1053,41 @@ describe('an internal error', () => {
     // The text of the code has no draw from the random stream: the checks
     // of the assembly alone would ship it.
     expect(result.willUsePool!(1e9)).toBe(false);
+  });
+
+  // The existing emitter writes the code of a Haversine with no parentheses
+  // in a product, except for a read of an input (`_.x`): these declined at
+  // the emission (`compile-error`), and decline at the admission now.
+  test.each([
+    [
+      'a read of the host',
+      ['Multiply', 0.5, ['Haversine', 'vr']],
+      ['Haversine', 'vr'],
+      { vars: { vr: 'globalThis.hostRead()' } },
+      'Haversine of "vr" as an operand of Multiply',
+    ],
+    [
+      'the value of an operand block',
+      [
+        'Multiply',
+        'y',
+        ['Block', ['Declare', 'b0', "'unknown'", 1], ['Haversine', -0.25]],
+      ],
+      ['Block', ['Declare', 'b0', "'unknown'", 1], ['Haversine', -0.25]],
+      {},
+      'Haversine of -0.25 as an operand of Multiply',
+    ],
+  ] as const)('a Haversine of %s in a product declines with outside-profile', (_, json, whole, options, text) => {
+    const ce = engine();
+    for (const mode of ['strict', 'complex']) {
+      const got = outcome(ce.expr(json as never), { ...options, mode });
+      expect('diagnostic' in got && got.diagnostic.code).toBe('outside-profile');
+      // The complex mode refuses the source of `vr` first.
+      if (mode === 'strict' || Object.keys(options).length === 0)
+        expect('diagnostic' in got && got.diagnostic.message).toContain(text);
+    }
+    // The Haversine as the whole value is not in a parent: it compiles.
+    expect('result' in outcome(ce.expr(whole as never), { ...options, mode: 'strict' })).toBe(true);
   });
 });
 

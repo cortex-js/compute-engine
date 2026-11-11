@@ -38,7 +38,19 @@
  * (`ValueBlock`), locals declared `unknown`, a first write to a name that
  * no `Declare` declares (`t`), local functions (`lf`, declared `function`,
  * `unknown`, with a `let` or with `DefineFunction`, which read the names of
- * the body or not), and a helper declared `function` (`fq`).
+ * the body or not), and a helper declared `function` (`fq`). Collections
+ * (`genCollectionReal()`, `genList()`, `genTuple()`): list literals of
+ * numbers and of expressions, tuples, the inputs `I: list<integer>` and
+ * `P: tuple<real, real>` and the parameters `W` and `T` of these types,
+ * `Sum`, `Product`, `Max` and `Min` of a list or a tuple, `At` and `Length`
+ * of one, element-wise arithmetic of a list and reals (two lists only as
+ * one expression twice), comprehensions with and without a guard, calls of
+ * the helpers of `COLLECTION_HELPERS` (a list or a tuple result), of
+ * `SLICE_HELPERS` (a fold, an element-wise sum and comprehensions in the
+ * body) and of `LIST_PARAMETER_HELPER` (a list parameter), a write of a
+ * local after a list local that reads it, and a list or a tuple as the
+ * value of a program or a body. A list or a tuple value is compared
+ * element by element, with its length and the shape of each element.
  *
  * A difference is reported only for inputs in the type of each input; a
  * difference that occurs only for inputs outside their type (`±Infinity`
@@ -150,7 +162,10 @@ import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { ComputeEngine } from '../src/compute-engine';
 import { compile } from '../src/compile';
-import { isNumber } from '../src/compute-engine/boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+} from '../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../src/math-json/types';
 
@@ -218,6 +233,8 @@ type InputKind =
   | 'number'
   | 'realnan'
   | 'list'
+  | 'intlist'
+  | 'tuple'
   | 'boolean'
   | 'inferred';
 
@@ -235,6 +252,8 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   // Real, by `ce.infer()` of `Mod(xi, 2)` (`makeEngine()`).
   xi: 'inferred',
   L: 'list',
+  I: 'intlist',
+  P: 'tuple',
   B: 'boolean',
   // The names that `HOST_OPTIONS` maps to another entry of the vars object
   // (`--host`).
@@ -249,6 +268,8 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
   ['n', 'integer', 'integer'],
   ['nb', 'number', 'number'],
   ['V', 'list', 'list<real>'],
+  ['W', 'intlist', 'list<integer>'],
+  ['T', 'tuple', 'tuple<real, real>'],
   ['c', 'boolean', 'boolean'],
 ];
 
@@ -262,6 +283,8 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   number: 'number',
   realnan: 'nan | real | signed_infinity',
   list: 'list<real>',
+  intlist: 'list<integer>',
+  tuple: 'tuple<real, real>',
   boolean: 'boolean',
   inferred: 'real, written by ce.infer()',
 };
@@ -269,20 +292,19 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
 /** The declarations of the engine, as the report prints them. */
 export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
-  'L: list<real>; B: boolean; u: no declared type; xn: number; ' +
+  'L: list<real>; I: list<integer>; P: tuple<real, real>; B: boolean; ' +
+  'u: no declared type; xn: number; ' +
   'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
   'Mod(xi, 2); h: real, assigned 2.5; ' +
   'm: integer, assigned 3; cn: number, assigned 1.5; w: assigned 3 and ' +
   'g: assigned 0.75, with no declared type; the helpers of `HELPERS`, ' +
   'assigned in the scope of each program';
 
-/** An engine with the declarations of every program. */
-/** The angular unit of each engine (`--deg`). */
-let ANGULAR_UNIT: 'rad' | 'deg' = 'rad';
-
-export function makeEngine(): ComputeEngine {
+/** An engine with the declarations of every program, and the angular unit
+ *  `angularUnit` (`--deg`). */
+export function makeEngine(angularUnit: 'rad' | 'deg' = 'rad'): ComputeEngine {
   const ce = new ComputeEngine();
-  if (ANGULAR_UNIT !== 'rad') ce.angularUnit = ANGULAR_UNIT;
+  if (angularUnit !== 'rad') ce.angularUnit = angularUnit;
   for (const [name, kind] of Object.entries(GLOBAL_INPUTS))
     if (kind === 'inferred') ce.infer([ce.expr(['Mod', name, 2])]);
     else if (kind !== 'undeclared') ce.declare(name, TYPE_OF_KIND[kind]);
@@ -507,10 +529,144 @@ const RANDOM_HELPERS: typeof HELPERS = [
   },
 ];
 
-/** Assigns the helpers of `HELPERS` and `RANDOM_HELPERS` in the current
- *  scope of `ce`. */
+/** The helpers whose result is a list or a tuple, or whose parameter is a
+ *  list: a list or a tuple of the generator (`genList()`, `genTuple()`)
+ *  calls the first three, a real calls the last one. */
+const COLLECTION_HELPERS: typeof HELPERS = [
+  {
+    name: 'fl',
+    signature: '(real) -> list<real>',
+    definition: [
+      'Function',
+      ['List', 'v', ['Multiply', 2, 'v'], 1],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fg',
+    signature: '(integer) -> list<integer>',
+    definition: [
+      'Function',
+      [
+        'Comprehension',
+        ['Multiply', 'j', 'j'],
+        ['Element', 'j', ['Range', 1, 6], ['Less', 'e', 'j']],
+      ],
+      ['Typed', 'e', "'integer'"],
+    ],
+    arguments: ['integer'],
+  },
+  {
+    name: 'fp',
+    signature: '(real, real) -> tuple<real, real>',
+    definition: [
+      'Function',
+      ['Tuple', ['Add', 'v', 'e'], ['Multiply', 'v', 'e']],
+      ['Typed', 'v', "'real'"],
+      ['Typed', 'e', "'real'"],
+    ],
+    arguments: ['real', 'real'],
+  },
+];
+
+/** The helpers whose body holds a list or a tuple of the slice: a fold of
+ *  a list literal (with and without an element of the head of the fold),
+ *  `At` of an element-wise sum of a list literal, an element-wise list
+ *  result, and guarded comprehensions. A real of the generator calls the
+ *  real ones (`genCollectionReal()`), a list the list one (`genList()`). */
+const SLICE_HELPERS: typeof HELPERS = [
+  {
+    name: 'fu',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['Sum', ['List', 2, ['Add', 'v', -0.1], ['Multiply', 3, 'v']]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fw',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['Add', ['Max', ['List', 'v', ['Multiply', 2, 'v'], 1]], ['Product', ['Tuple', 'v', 0.5]]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fx',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['At', ['Add', ['List', 1, 'v'], ['Add', 'v', -0.1]], 2],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fz',
+    signature: '(real) -> integer',
+    definition: [
+      'Function',
+      ['Length', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 6], ['Less', 'v', 'j']]]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fk',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      [
+        'Sum',
+        [
+          'Comprehension',
+          ['Multiply', 'j', 'v'],
+          ['Element', 'j', ['Range', 1, 4], ['Less', 'j', ['Add', 'v', 3]]],
+        ],
+      ],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fy',
+    signature: '(real) -> list<real>',
+    definition: [
+      'Function',
+      ['Multiply', ['List', 'v', 1], ['Add', 'v', 0.5]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+];
+
+/** A helper with a list parameter and a real result. */
+const LIST_PARAMETER_HELPER = {
+  name: 'fm',
+  signature: '(list<real>) -> real',
+  definition: [
+    'Function',
+    ['Add', ['Sum', 'Q'], ['Max', 'Q']],
+    ['Typed', 'Q', "'list<real>'"],
+  ] as Json,
+};
+
+/** Assigns the helpers of `HELPERS`, `RANDOM_HELPERS`,
+ *  `COLLECTION_HELPERS`, `SLICE_HELPERS` and `LIST_PARAMETER_HELPER` in the current scope of
+ *  `ce`. */
 function defineHelpers(ce: ComputeEngine): void {
-  for (const helper of [...HELPERS, ...RANDOM_HELPERS]) {
+  for (const helper of [
+    ...HELPERS,
+    ...RANDOM_HELPERS,
+    ...COLLECTION_HELPERS,
+    ...SLICE_HELPERS,
+    LIST_PARAMETER_HELPER,
+  ]) {
     if (helper.signature !== undefined)
       ce.declare(helper.name, helper.signature);
     ce.assign(helper.name, ce.expr(helper.definition as MathJsonExpression));
@@ -585,6 +741,14 @@ const LISTS_IN: number[][] = [
   [2.5, -2.5, 0.4641588833612779, 1e-160],
 ];
 const LISTS_EDGE: number[][] = [[NaN, Infinity]];
+const INTLISTS_IN: number[][] = [[], [3], [1, -2, 7], [0, 2 ** 53, -4]];
+const TUPLES_IN: number[][] = [
+  [1, 2],
+  [-0, 0.5],
+  [1e300, -3],
+  [1 / 3, 0.1],
+];
+const TUPLES_EDGE: number[][] = [[NaN, 1]];
 
 /** The values of an input of the kind `kind` in the mode `mode`: those in
  *  its type first, then those outside it. */
@@ -610,6 +774,10 @@ function gridOf(kind: InputKind, mode: Mode): Value[] {
       return [...REAL_IN, ...NON_FINITE];
     case 'list':
       return [...LISTS_IN, ...LISTS_EDGE];
+    case 'intlist':
+      return INTLISTS_IN;
+    case 'tuple':
+      return [...TUPLES_IN, ...TUPLES_EDGE];
     case 'boolean':
       return [true, false];
   }
@@ -645,6 +813,12 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
       );
     case 'list':
       return Array.isArray(v) && v.every((x) => Number.isFinite(x));
+    case 'intlist':
+      return Array.isArray(v) && v.every((x) => Number.isInteger(x));
+    case 'tuple':
+      return (
+        Array.isArray(v) && v.length === 2 && v.every((x) => Number.isFinite(x))
+      );
     case 'boolean':
       return typeof v === 'boolean';
   }
@@ -681,6 +855,8 @@ interface GenContext {
   readonly booleans: readonly string[];
   /** The list names. */
   readonly lists: readonly string[];
+  /** The names of tuples of two reals. */
+  readonly tuples?: readonly string[];
   /** Whether to generate draws (`--random`). */
   readonly random?: boolean;
   /** Whether to generate reads and calls of the host (`--host`). */
@@ -831,7 +1007,8 @@ type Head =
   | 'ImaginaryTimes'
   | 'Comprehension'
   | 'QuotientFactor'
-  | 'ValueBlock';
+  | 'ValueBlock'
+  | 'Collection';
 
 const HEADS: readonly (readonly [Head, number])[] = [
   ['Add', 16],
@@ -854,6 +1031,7 @@ const HEADS: readonly (readonly [Head, number])[] = [
   ['Comprehension', 1],
   ['QuotientFactor', 3],
   ['ValueBlock', 2],
+  ['Collection', 6],
 ];
 
 /** The exact rationals of a quotient factor (`QuotientFactor`). */
@@ -970,7 +1148,98 @@ function genReal(ctx: GenContext, depth: number): Json {
       return genQuotientFactor(ctx, d);
     case 'ValueBlock':
       return genValueBlock(ctx, d);
+    case 'Collection':
+      return genCollectionReal(ctx, d);
   }
+}
+
+/**
+ * A real that reads a list or a tuple: a fold (`Sum`, `Product`, `Max`,
+ * `Min`) of a list or a tuple, `At` of one, `Length` of one, or a call of
+ * the helper with a list parameter.
+ */
+function genCollectionReal(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const r = rng();
+  const collection = (): Json =>
+    rng() < 0.75 ? genList(ctx, depth) : genTuple(ctx, depth);
+  if (r < 0.45)
+    return [pick(rng, ['Sum', 'Sum', 'Product', 'Max', 'Min']), collection()];
+  if (r < 0.7) return ['At', collection(), genIndex(ctx)];
+  if (r < 0.8) return ['Length', collection()];
+  if (r < 0.9)
+    return [
+      pick(rng, SLICE_HELPERS.slice(0, 5)).name,
+      genReal(ctx, Math.min(depth + 1, ctx.maxDepth)),
+    ];
+  return [LIST_PARAMETER_HELPER.name, genList(ctx, depth)];
+}
+
+/**
+ * A list of reals or of integers: a list name, a list literal (of 0 to 3
+ * elements), an operator applied to its elements (a list and reals; two
+ * lists only when they are the same expression, whose lengths are equal by
+ * construction), a comprehension with or without a guard, or a call of a
+ * helper whose result is a list.
+ */
+function genList(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const sub = () => genReal(ctx, d);
+  if (depth >= ctx.maxDepth || rng() < 0.3) {
+    if (ctx.lists.length > 0 && rng() < 0.7) return pick(rng, ctx.lists);
+    return ['List', ...Array.from({ length: intBetween(rng, 0, 3) }, sub)];
+  }
+  const r = rng();
+  const list = () => genList(ctx, d);
+  if (r < 0.15)
+    return ['List', ...Array.from({ length: intBetween(rng, 1, 3) }, sub)];
+  if (r < 0.3) {
+    const ops = [list(), sub()];
+    if (rng() < 0.3) ops.push(sub());
+    if (rng() < 0.5) ops.reverse();
+    return ['Add', ...ops];
+  }
+  if (r < 0.42) {
+    const ops = [sub(), list()];
+    if (rng() < 0.5) ops.reverse();
+    return ['Multiply', ...ops];
+  }
+  if (r < 0.48) return ['Negate', list()];
+  if (r < 0.56)
+    return rng() < 0.5 ? ['Divide', list(), sub()] : ['Divide', sub(), list()];
+  if (r < 0.64) {
+    const l = list();
+    return [pick(rng, ['Add', 'Multiply', 'Subtract']), l, l];
+  }
+  if (r < 0.84) {
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['j', 30]] };
+    const spec: Json[] = ['Element', 'j', ['Range', pick(rng, [1, 1, 0, 3]), intBetween(rng, 0, 5)]];
+    if (rng() < 0.7) spec.push(genCondition(inner, d));
+    return ['Comprehension', genReal(inner, d), spec];
+  }
+  if (rng() < 0.3) return [SLICE_HELPERS[5].name, sub()];
+  const helper = pick(rng, COLLECTION_HELPERS.slice(0, 2));
+  return [
+    helper.name,
+    helper.arguments[0] === 'real'
+      ? sub()
+      : ctx.integers.length > 0 && rng() < 0.6
+        ? pick(rng, ctx.integers)
+        : pick(rng, [0, 1, 3, 5]),
+  ];
+}
+
+/** A tuple of two reals: a tuple name, a tuple literal, or a call of the
+ *  helper whose result is a tuple. */
+function genTuple(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const tuples = ctx.tuples ?? [];
+  const r = rng();
+  if (tuples.length > 0 && r < 0.5) return pick(rng, tuples);
+  if (r < 0.85) return ['Tuple', genReal(ctx, d), genReal(ctx, d)];
+  return [COLLECTION_HELPERS[2].name, genReal(ctx, d), genReal(ctx, d)];
 }
 
 /** A block used as a value: one or two declarations with a value (a
@@ -1150,7 +1419,8 @@ const EXPRESSION_CONTEXT: ContextBase = {
   integers: ['k'],
   reals: ['x', 'y'],
   booleans: ['B'],
-  lists: ['L'],
+  lists: ['L', 'I'],
+  tuples: ['P'],
 };
 
 /** The statements of a block: one or two real locals, maybe a list local
@@ -1198,6 +1468,11 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
           : genReal(ctx(locals, 2), 0);
     statements.push(['Declare', 'R', "'list<real>'", value]);
     listLocals.push('R');
+    // A write of a local that the comprehension can read, after it: the
+    // interpreter stores the elements at the declaration
+    // (`listedAssignedValue()`), as the compiled code does.
+    if (rng() < 0.5)
+      statements.push(['Assign', 't', genReal(ctx(locals, 2), 0)]);
   }
   // A local function of one parameter `v`, which can read the locals
   // declared before it and the inputs: a closure of the block, which the
@@ -1283,6 +1558,12 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
     }
   }
   if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
+  else if (rng() < 0.12)
+    statements.push(
+      rng() < 0.75
+        ? genList(ctx(locals, 1, listLocals), 0)
+        : genTuple(ctx(locals, 1, listLocals), 0)
+    );
   else
     statements.push(
       genReal({ ...ctx(locals, 1, listLocals), localFunctions }, 0)
@@ -1364,7 +1645,13 @@ function genFunction(
     ['g', 1],
   ];
   for (const [name, kind] of parameters)
-    if (kind !== 'list' && kind !== 'boolean') symbols.push([name, 20]);
+    if (
+      kind !== 'list' &&
+      kind !== 'intlist' &&
+      kind !== 'tuple' &&
+      kind !== 'boolean'
+    )
+      symbols.push([name, 20]);
   const block = (statements: Json[]): Json =>
     rng() < 0.15 ? ['Block', ['Block', ...statements]] : ['Block', ...statements];
   return [
@@ -1375,7 +1662,8 @@ function genFunction(
         integers: names.includes('n') ? ['n'] : [],
         reals: ['a'],
         booleans: names.includes('c') ? ['c'] : [],
-        lists: names.includes('V') ? ['V'] : [],
+        lists: names.filter((n) => n === 'V' || n === 'W'),
+        tuples: names.includes('T') ? ['T'] : [],
         random,
         host,
       })
@@ -1417,7 +1705,14 @@ export function generateProgram(
           ? ['Block', ['Block', ...statements]]
           : ['Block', ...statements];
     } else {
-      json = genReal({ rng, maxDepth: options.depth, ...context }, 0);
+      const ctx = { rng, maxDepth: options.depth, ...context };
+      const value = rng();
+      json =
+        value < 0.06
+          ? genList(ctx, 0)
+          : value < 0.08
+            ? genTuple(ctx, 0)
+            : genReal(ctx, 0);
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
     }
     if (nodeCount(json) <= options.size)
@@ -1464,9 +1759,10 @@ type Runner = (inputs: Inputs) => Outcome;
 const PROFILE_PREFIX = /^Could not compile with the profile 'numeric-kernel': /;
 
 /** The shape of a value: `number`, `boolean`, `complex` (an object with
- *  `re` and `im`, also with `im` 0), `list`, or its `typeof`. */
+ *  `re` and `im`, also with `im` 0), `list[…]` with the shape of each
+ *  element, or its `typeof`. */
 export function valueShape(v: unknown): string {
-  if (Array.isArray(v)) return 'list';
+  if (Array.isArray(v)) return `list[${v.map(valueShape).join(', ')}]`;
   if (isComplex(v)) return 'complex';
   return typeof v;
 }
@@ -1718,42 +2014,56 @@ function pointInType(
 // The interpreter
 //
 
-function boxValue(ce: ComputeEngine, v: Value): Expression {
+function boxValue(ce: ComputeEngine, v: Value, name?: string): Expression {
   if (typeof v === 'boolean') return v ? ce.True : ce.False;
   if (typeof v === 'number') return ce.number(v);
   if (Array.isArray(v))
     return ce.function(
-      'List',
+      name === 'P' || name === 'T' ? 'Tuple' : 'List',
       v.map((x) => ce.number(x))
     );
   return ce.expr(['Complex', v.re, v.im]);
 }
 
-/** The value of `program` by the interpreter: `{re, im}`, or the MathJSON
- *  of the result as text when it is not a number. */
+/** The value of `program` by the interpreter: `{re, im}`, the list of the
+ *  values of a list or a tuple of numbers, or the MathJSON of the result as
+ *  text when it is not a number. */
 function interpret(
   ce: ComputeEngine,
   program: Program,
   expr: Expression,
   point: Inputs
-): Complex | string {
+): Complex | Complex[] | string {
   let value: Expression;
   if (program.parameters !== undefined)
     value = ce
       .function('Apply', [
         expr,
-        ...program.parameters.map((name) => boxValue(ce, point[name])),
+        ...program.parameters.map((name) => boxValue(ce, point[name], name)),
       ])
       .evaluate();
   else
     value = expr
       .subs(
         Object.fromEntries(
-          Object.entries(point).map(([k, v]) => [k, boxValue(ce, v)])
+          Object.entries(point).map(([k, v]) => [k, boxValue(ce, v, k)])
         )
       )
       .evaluate();
-  const n = value.N();
+  // A comprehension is a lazy view: its elements are read here.
+  const n = (
+    isFunction(value, 'Comprehension')
+      ? ce.function('List', [...value.each()])
+      : value
+  ).N();
+  if (
+    (isFunction(n, 'List') || isFunction(n, 'Tuple')) &&
+    n.ops.every((op) => isNumber(op))
+  )
+    return n.ops.map((op) => ({
+      re: (op as Expression & { re: number }).re,
+      im: (op as Expression & { im: number }).im,
+    }));
   if (!isNumber(n)) return JSON.stringify(value.json).slice(0, 200);
   return { re: n.re, im: n.im };
 }
@@ -1782,9 +2092,25 @@ const TOLERANCE = 1e-7;
  */
 function compareWithInterpreter(
   value: unknown,
-  expected: Complex | string,
+  expected: Complex | Complex[] | string,
   mode: Mode
 ): 'agree' | 'no-number' | 'disagree' {
+  // A list or a tuple: the same length, and each element by the rule of a
+  // number.
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(value) || value.length !== expected.length)
+      return 'disagree';
+    const verdicts = expected.map((e, i) =>
+      compareWithInterpreter(value[i], e, mode)
+    );
+    return verdicts.includes('disagree')
+      ? 'disagree'
+      : verdicts.includes('no-number')
+        ? 'no-number'
+        : 'agree';
+  }
+  if (Array.isArray(value))
+    return typeof expected === 'string' ? 'no-number' : 'disagree';
   const v = asComplex(value);
   const finite = (c: Complex) => Number.isFinite(c.re) && Number.isFinite(c.im);
   if (typeof expected === 'string' || !finite(expected))
@@ -1858,6 +2184,8 @@ export interface FuzzOptions {
   readonly random?: boolean;
   /** Generate reads and calls of the host (`--host`). */
   readonly host?: boolean;
+  /** The angular unit of each engine (`--deg`); `rad` when absent. */
+  readonly angularUnit?: 'rad' | 'deg';
 }
 
 export const DEFAULT_OPTIONS: FuzzOptions = {
@@ -2073,7 +2401,7 @@ function interpreterPredicate(mode: Mode, point: Inputs): Predicate {
     if (!p.ok) return undefined;
     const a = p.run(point);
     if (a.kind !== 'value') return undefined;
-    let expected: Complex | string;
+    let expected: Complex | Complex[] | string;
     try {
       expected = interpret(ce, program, expr, point);
     } catch {
@@ -2286,7 +2614,7 @@ async function runFuzzQuietly(
 ): Promise<FuzzResult> {
   // A new engine every `ENGINE_PROGRAMS` programs, after a return to the
   // event loop (see `ENGINE_PROGRAMS`).
-  let ce = makeEngine();
+  let ce = makeEngine(options.angularUnit);
   const classes: Record<string, number> = {
     'both compile': 0,
     'both decline': 0,
@@ -2327,7 +2655,7 @@ async function runFuzzQuietly(
       findings.set(hintKey, existing);
       return;
     }
-    const fresh = makeEngine();
+    const fresh = makeEngine(options.angularUnit);
     const freshEngine =
       scoped(fresh, () => predicate(fresh, shrunk.program)) !== undefined;
     const w = shrunk.witness;
@@ -2360,7 +2688,7 @@ async function runFuzzQuietly(
     for (let index = 0; index < options.count; index++) {
       if (programs > 0 && programs % ENGINE_PROGRAMS === 0) {
         await new Promise((resolve) => setImmediate(resolve));
-        ce = makeEngine();
+        ce = makeEngine(options.angularUnit);
       }
       const program = generateProgram(seed, index, options);
       programs += 1;
@@ -2537,7 +2865,7 @@ async function runFuzzQuietly(
               const point = ordinaryPoints[i];
               const a = p.run(point);
               if (a.kind !== 'value') continue;
-              let expected: Complex | string;
+              let expected: Complex | Complex[] | string;
               try {
                 expected = interpret(ce, program, expr, point);
               } catch {
@@ -2635,7 +2963,10 @@ export function printResult(result: FuzzResult, quiet: boolean): string {
   const o = result.options;
   lines.push(
     `seeds ${o.seeds.join(',')}; ${result.programs} programs (${result.invalid} not valid after boxing); ` +
-      `depth ${o.depth}, size ${o.size}, points ${o.points}, modes ${o.modes.join(',')}`
+      `depth ${o.depth}, size ${o.size}, points ${o.points}, modes ${o.modes.join(',')}, ` +
+      `angular unit ${o.angularUnit ?? 'rad'}` +
+      (o.random ? ', draws' : '') +
+      (o.host ? ', host' : '')
   );
   lines.push(`declarations: ${DECLARATIONS}`);
   lines.push('');
@@ -2726,7 +3057,6 @@ async function main(): Promise<void> {
       deg: { type: 'boolean', default: false },
     },
   });
-  if (values.deg) ANGULAR_UNIT = 'deg';
   const int = (s: string | undefined, d: number) =>
     s === undefined ? d : Number.parseInt(s, 10);
   const options: FuzzOptions = {
@@ -2743,6 +3073,7 @@ async function main(): Promise<void> {
         : (values.modes.split(',') as Mode[]),
     random: values.random!,
     host: values.host!,
+    angularUnit: values.deg! ? 'deg' : 'rad',
   };
   const result = await runFuzz(options, (line) =>
     process.stderr.write(line + '\n')

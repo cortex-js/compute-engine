@@ -853,9 +853,9 @@ describe('the representation', () => {
 describe('declined', () => {
   const DECLINES: [string, MathJsonExpression, RegExp, Mode][] = [
     [
-      'a sum of a collection',
-      fn(['Multiply', 't', ['Sum', 'L']], ['t', 'real'], ['L', 'list<real>']),
-      /Sum of a collection \(with no index set\) is not in the structured route/,
+      'a sum of one number',
+      fn(['Multiply', 't', ['Sum', 'x']], ['t', 'real'], ['x', 'real']),
+      /Sum of one operand of the type `real` is not in the structured route/,
       'strict',
     ],
     [

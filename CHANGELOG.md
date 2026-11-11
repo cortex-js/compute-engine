@@ -113,6 +113,12 @@
   declared signatures, captured numbers, loops over an integer range (with
   `Break` at the end of a branch of an `If`),
   lists of numbers made with a comprehension and updated with `ReplaceAt`,
+  list literals of numbers (`[x, y, 1]`) and tuples of reals (`(x, y)`) as
+  values, inputs, parameters and results, `Sum`, `Product`, `Max` and `Min`
+  of a list or a tuple, arithmetic of a list and numbers applied to each
+  element (`L + 1`, `2·L`, `x/L`; two lists only when their lengths are
+  equal by construction), a comprehension with a pure guard
+  (`[k for k in 1..64 if B[k] == p]`, with literal or `Length` bounds),
   and random draws: `Random()`, `Random` of a literal `Interval` or
   `Range`, `WithRandomSeed`, and calls of user functions whose body draws.
   The code draws the numbers of the ordinary compiler, in the same order

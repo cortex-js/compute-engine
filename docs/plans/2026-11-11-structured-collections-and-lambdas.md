@@ -336,3 +336,159 @@ Not determined: counts per slice over the whole suite (the sample is 200
 files, and its counts and the shadow counts cannot be added); whether each
 library operator symbol (`Map(Sin, L)` writes `_fn_Sin`) gives the doubles of
 its scalar operation.
+
+## 9. Result of slice 1
+
+Implemented on `50e3e41a4` and moved onto `775bc003b` (the options `vars`,
+`functions`, `operators`: the `host` operation), then onto `595af0206`
+(nested blocks, operand blocks, local functions), with options 1, 3, 5 and 8 as recommended (no
+function values; `ascending`; two lists only when their lengths are equal
+by construction; interned types). Tests:
+`test/compute-engine/compile-javascript-structured-collections.test.ts`
+(both modes, against the existing compiler with `Object.is` element by
+element and against the interpreter), the verifier cases in
+`compile-javascript-structured-ir.test.ts`, and the generators of
+`scripts/js-profile-fuzz.ts` (list literals, tuples, list and tuple inputs
+and parameters, element-wise arithmetic, folds, guarded comprehensions,
+helpers with list and tuple results and a list parameter; shapes compared
+element by element).
+
+**Admitted.** `list` and `tuple` operations; `get` (a literal position of a
+tuple); `at` and `length` of a tuple whose elements have one type; `append`;
+tuple inputs and parameters of unnamed `tuple<real, …>` types; lists and
+tuples as values of locals and branches and as results of the program and
+of helpers. Folds: `Sum` and `Product` of a list (an ascending `loop` from
+the integer `0` or `1`) or of a tuple (one `add` or `multiply` of the
+`get`s), `Max` and `Min` of one list or tuple (an `if` on the length `0`,
+then a loop from `∓Infinity`). Element-wise `Add`, `Subtract`, `Negate`,
+`Multiply` and `Divide` of a list and reals or integers, and of lists whose
+`lengthKey()` is one (a name, a literal length, an element-wise result or a
+`ReplaceAt` of one). The guarded comprehension: a `loop` that carries the
+list from an empty `list`, with an `if` of the guard and an `append`, in
+place when the list is not read elsewhere (`(acc.push(v), acc)`). The three
+corpus witnesses compile, are `pure` and `shippable`, and equal the
+existing compiler on two boards and three players.
+
+**Where the implementation differs from the note.**
+
+- `number` as `real` in `strict`, captured lists, `Reduce` by an operator,
+  `Count`, `First`, `Last` and a loop over a list are not in this slice:
+  they still decline.
+- A tuple is `tuple<real, …>` only (a `point` fact of the fragment); a tuple
+  of integers is a tuple of reals. An `at` with a list or tuple result does
+  not occur (no nested lists), so the third addition of section 5 is not
+  needed yet; `get` is a use of rule 3 of `inPlaceUpdates()`.
+- Declines that the existing compiler needs and the note did not foresee,
+  each found by the random tester:
+  - a fold of an operand other than a name whose type is not real
+    (`Sum(I/2.5)` has the type `number`: the existing compiler wraps it in
+    `_SYS.cplx` in the `complex` mode, `Product(I·√x)` in both modes); in
+    the `complex` mode a `Sum` or `Product` of a type with `NaN` or an
+    infinity or of a local list, which it reads with `_SYS.cplx(R)`;
+  - a `Sum` of a list literal with a sum as an element: the preparation of
+    the existing compiler makes `Sum([2, x - 0.1])` the sum
+    `Add(2, Add(x, -0.1))`, which the existing emitter writes as one chain;
+    the same for a `Product` of a list literal with a product as an element
+    (canonical `Reduce(L, Multiply, 1)`). The refusal is made on the root
+    and on the body of each helper and local function
+    (`admitFunctionBody()`); in the body of a helper, the existing compiler
+    also writes the element of an element-wise sum of a list literal as one
+    sum in an order of its own (`([1, 2] + (x - 0.1))[2]` is
+    `x + 2 + -0.1`, and `([1, 2] + x + 0.1)[2]` differs in the last bit at
+    `x = -0.7`), so every `At` of an element-wise sum or product of a list
+    literal declines there. The other refusals of the admission are made on
+    each node of every body (the root walk and `admitFunctionBody()`), or
+    on the whole annotation;
+  - element-wise arithmetic with a name of no declared type (the existing
+    compiler multiplies by the run-time shape, `_SYS.mulChecked`, scalars
+    first), and a broadcastable operation other than a comparison or a
+    connective of an operand whose type admits a list and a number, or of an
+    expression of the type `any` (a call `f(L)` of `f: (list<real>) -> real`
+    has the type `list<any> | real`; the existing compiler broadcasts it),
+    except a sum or a negation of real operands in the `strict` mode;
+  - a guarded comprehension whose bound is not an integer literal of at
+    most 2^31 − 1 in magnitude or a `Length`: the existing emitter throws for
+    a range of more than 2^32 − 1 elements, and the route has no such test.
+- A call boxed before its function was defined (`score` before `stones` in
+  the prelude) holds a definition with no literal: the structured route
+  reads the definition that the name has at compile time, as the existing
+  compiler does (`resolveHelper()`).
+- With the `host` operation: a function of the host takes and gives
+  numbers, so a host call with a list argument or a list result declines,
+  and no list reaches the host; an in-place update (`inPlaceUpdates()`)
+  writes only a list that the program made, which no host call can hold,
+  so it needs no new rule. A list value read before an `unknown` host
+  operation is read again after it (the new epoch of `afterUnknown()`). A
+  guarded comprehension whose guard or body calls the host declines, also
+  for a function declared pure (the admission reads the effect of the
+  engine); an element-wise operand that calls the host is evaluated once
+  before the elements, as `_SYS.bcast` evaluates its arguments. The new
+  operations hold no region, so `reachesHost()` reads them through the
+  `loop` and `build` that hold them.
+- With the blocks of `595af0206`: a list or a tuple is a local of a nested
+  block, of a block of declarations as an operand, of `Declare(a,
+  'unknown', v)`, and the value of a first write to an undeclared name (the
+  implicit local of `fragment.ts` admits a list when the definition has
+  list locals, as `Declare` does). A local function takes a list
+  parameter and gives a list or a tuple result. A local function that reads
+  a list local of the body declines ("the parameter `R` of `g` has no type
+  in the profile"): the list would be an extra parameter, and the body can
+  update it in place between two calls. In the `complex` mode a tuple local
+  and the fold of a list local decline, as for a `Declare`.
+- `refuseMixedOperand()` reads an operand of the type `any` or `unknown`
+  as a possible list only when it reads a list or a tuple: a call of a
+  local function of scalar arguments has the type `unknown` and is scalar
+  code on both compilers.
+
+**Counts**, before (`50e3e41a4`) and after, measured 2026-11-11:
+
+- Shadow measure on the 100 test files of `test/compute-engine/compile*`
+  that name a list, a tuple or a comprehension (3,067 compilations that the
+  existing compiler compiles): the profile admits 385 before and 425 after,
+  with 0 failures; the messages "a list literal" (93), "a tuple" (34) and
+  "Sum of a collection" (80) are gone. Of the 796 compilations that the
+  existing compiler declines, the profile admits 6 before and 7 after.
+- The 45 consumer test files (`limit*`, `find-fit*`, `nintegrate*`,
+  `integrate*`, `solve*`, `map-auto-compile*`): 1,956 tests pass with and
+  without `CE_JS_PROFILE=numeric-kernel`; the `Map` consumer admits 50 of 64
+  before and 51 after, the other consumers are unchanged.
+- The prelude census (the functions of 14 of the 15 showcase preludes of
+  Tycho; `turing-patterns` did not finish executing in 15 minutes): 22 of
+  44 functions compile before, 26 after on `50e3e41a4`, 27 on `595af0206`
+  (`blackhole` compiles since the blocks change): `legal`, `stones`, `score`
+  (`score` calls `stones`, defined after it) and `csqrt` of
+  `apollonian-gasket` (a tuple). The others decline as before; the
+  list-related ones are `tangent` and `admitted` (`At` of a real: a list of
+  tuples, slice 4), `seen` (`Count`), `generations` (a list of tuples),
+  `fill` (a loop over a list) and `life` (`RotateLeft`, slice 5).
+- `scripts/js-profile-fuzz.ts` on `595af0206`: `--seed 71,72,73,74,75
+  --count 10000`, `--seed 61,62 --count 5000 --host`, `--seed 41,42 --count
+  5000 --random` and `--seed 91,92 --count 5000 --deg`. No difference of
+  shape; one difference of value, of the class CE-1203
+  (`arccos(At(Comprehension(log k, …, guard), 3))` in the `strict` mode).
+  Two failures of the profile with `--host`, of the base and outside lists:
+  `0.5·hav(vr)` with a host read `vr`, and `y·{b0 ⩴ 1; hav(-0.25)}`, gave
+  a `compile-error` in the emitter (Haversine in a parent that needs
+  parentheses). They decline at the admission now
+  (`refuseHaversineGrouping()`: a read of the host is not an input, and the
+  value of an operand block is checked as the operand); this also declines
+  `y·{b0 ⩴ 1; hav(x)}`, which the existing emitter writes correctly. On
+  `d221dfaf6`, with that change, `--seed 71,72,73 --count 10000` and
+  `--seed 61,62 --count 5000 --host` have no difference of value or shape
+  and no failure of the profile. The disagreements with the interpreter are the classes of
+  the precision caveat, CE-1206, and an interpreter defect outside the
+  slice: a guarded comprehension, the value of a nested block, whose guard
+  reads an implicit local of that block gives `[]` (its lazy view reads the
+  local after the block ends; with `Declare` or in the outer block it
+  gives the elements). An `At` of an element-wise product of a list literal
+  with a product element (`At(y·[1, 7x], 2)`, which the preparation makes
+  `y·(7x)`) declines, as `Sum` of a
+  list literal with a sum element does.
+- A list local made before a write of a local that it reads keeps the
+  values of the declaration on the three sides: the interpreter's
+  comprehension is a lazy view, but an assignment stores the elements of a
+  lazy collection that reads a variable (`listedAssignedValue()` in
+  `library/core.ts`), so `let xs = [k for k in 1..3 if cutoff < k];
+  cutoff = 2; length(xs)` is 2 with `cutoff = 1` at the declaration, also
+  for a body, a bound, an element-wise sum, a loop and a local function
+  that reads the local. No decline is needed; the tests lock these values.

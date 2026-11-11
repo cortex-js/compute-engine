@@ -3,6 +3,7 @@ import { ScalarFragmentJavaScriptTarget } from '../../src/compute-engine/compila
 import { core } from '../../src/compute-engine/compilation/compiler-core-hooks';
 import {
   lowerStructuredFragment,
+  preparedNodesOf,
   type StructuredPreparation,
 } from '../../src/compute-engine/compilation/javascript-structured-lower';
 import {
@@ -21,6 +22,8 @@ import {
   type IRRegion,
   type IRValue,
   type ScalarKind,
+  listType,
+  tupleType,
 } from '../../src/compute-engine/compilation/structured-ir';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { isShadowedSymbol } from '../../src/compute-engine/library-shadowing';
@@ -927,7 +930,7 @@ describe('admission of the structured route', () => {
     ['Divide of a boolean and a complex operand', () => made('Divide', ['C', 'z']), /Divide with a boolean operand/],
     // The canonical form keeps `Min(x)`, `And(C)` and `Or(C)`, and writes
     // `Multiply(x)` as `x`: the unary product is a made node.
-    ['Min of one operand', () => scalarEngine().expr(['Min', 'x']), /Min of fewer than two operands/],
+    ['Min of one operand', () => scalarEngine().expr(['Min', 'x']), /Min of one operand of the type `real` is not in the structured route, which folds a list or a tuple/],
     ['And of one operand', () => scalarEngine().expr(['And', 'C']), /And of fewer than two operands/],
     ['Or of one operand', () => scalarEngine().expr(['Or', 'C']), /Or of fewer than two operands/],
     ['Multiply of one operand', () => made('Multiply', ['x']), /a product of fewer than two operands/],
@@ -987,5 +990,74 @@ describe('admission of the structured route', () => {
     expect(() =>
       target.compile(heatEngine().expr(HEATCELL), { fallback: false })
     ).toThrow(/unsupported head Min/);
+  });
+});
+
+// Slice 1 of docs/plans/2026-11-11-structured-collections-and-lambdas.md:
+// the operations `list`, `tuple` and `get`, and a list operand of an
+// arithmetic operation.
+describe('the verifier: lists and tuples', () => {
+  const structured = () => new ScalarFragmentJavaScriptTarget('structured');
+  const fn = (
+    body: MathJsonExpression,
+    ...parameters: [string, string][]
+  ): MathJsonExpression =>
+    [
+      'Function',
+      ['Block', body],
+      ...parameters.map(([n, t]) => typed(n, t)),
+    ] as MathJsonExpression;
+  const X: [string, string] = ['x', 'real'];
+  const P: [string, string] = ['P', 'tuple<real, real>'];
+  const prepare = (json: MathJsonExpression) =>
+    structured().prepareStructured(new ComputeEngine().expr(json), OPTIONS);
+  /** The program of `json` with the first operation of the kind `kind` of
+   *  the root replaced by `change(op)`. */
+  function changed(
+    json: MathJsonExpression,
+    kind: IROperation['kind'],
+    change: (op: IROperation) => IROperation
+  ): () => void {
+    const preparation = prepare(json);
+    const program = lowerStructuredFragment(preparation);
+    const index = program.root.operations.findIndex((op) => op.kind === kind);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const operations = [...program.root.operations];
+    operations[index] = change(operations[index]);
+    const root = { ...program.root, operations };
+    return () => verifyProgram({ ...program, root }, preparedNodesOf(preparation));
+  }
+
+  test('a list whose element is a real and whose type is a list of integers', () => {
+    expect(
+      changed(fn(['List', 'x', 1], X), 'list', (op) => ({
+        ...op,
+        result: { ...op.result!, type: listType('integer') },
+      }) as IROperation)
+    ).toThrow(/the element 1 of the operation list has the type real, and its result the type list<integer>/);
+  });
+
+  test('a tuple of a length other than its type', () => {
+    expect(
+      changed(fn(['Tuple', 'x', 1], X), 'tuple', (op) => ({
+        ...op,
+        result: { ...op.result!, type: tupleType(['real', 'real', 'real']) },
+      }) as IROperation)
+    ).toThrow(/the operation tuple has 2 operands, not 3/);
+  });
+
+  test('a get of a position out of range', () => {
+    expect(
+      changed(fn(['Sum', 'P'], P), 'get', (op) => ({ ...op, position: 3 }) as IROperation)
+    ).toThrow(/the operation get reads the position 3 of a tuple<real, real>/);
+  });
+
+  test('an arithmetic operation of a list operand', () => {
+    expect(
+      changed(fn(['Add', ['At', ['List', 'x', 1], 1], 1], X), 'list', (op) => ({
+        ...op,
+        kind: 'add',
+      }) as IROperation)
+    ).toThrow(/the operation add has a list operand or a list result/);
   });
 });

@@ -40,6 +40,8 @@ import type { Expression } from '../global-types.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
 import {
   exitsOf,
+  isListType,
+  isTupleType,
   operationCanAbort,
   regionsOf,
   yieldedValues,
@@ -182,7 +184,8 @@ type Visit = (
  * that the root calls, is `effectful` or `unknown` (each such operation is a
  * blocker, at the deepest operation that has the effect: a call is a blocker
  * only when the body of its function has no such operation), or when an
- * update in place writes an array that the host or a caller can hold. The
+ * update in place (a `replace-at` or an `append`) writes an array that the
+ * host or a caller can hold. The
  * rule of `inPlaceUpdates()` never selects such an update: it writes in
  * place only a list that this invocation made, and an input, a capture or a
  * parameter of a function is never such a list. This function checks that
@@ -296,7 +299,7 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
     program.functions.find((f) => f.name === fn)?.body ?? program.root;
   walk(program.root, undefined, (op, fn) => {
     if (
-      op.kind === 'replace-at' &&
+      (op.kind === 'replace-at' || op.kind === 'append') &&
       inPlace.has(op) &&
       shared.has(op.operands[0].id)
     )
@@ -472,7 +475,8 @@ export function hostArrays(
   const shared = new Set<number>();
   /** For each function: whether its value can be an array of its caller. */
   const returnsShared: boolean[] = [];
-  const isList = (v: IRValue) => v.type.startsWith('list<');
+  // A tuple is an array of the host too, although no operation writes one.
+  const isList = (v: IRValue) => isListType(v.type) || isTupleType(v.type);
   const body = (region: IRRegion): boolean => {
     let size = -1;
     while (size !== shared.size) {
@@ -487,7 +491,7 @@ export function hostArrays(
           if (op.kind === 'call' && returnsShared[op.function] === true)
             add(op.result);
           if (
-            op.kind === 'replace-at' &&
+            (op.kind === 'replace-at' || op.kind === 'append') &&
             inPlace.has(op) &&
             shared.has(op.operands[0].id)
           )
@@ -590,7 +594,7 @@ function judgeLoop(
 
   for (let i = 0; i < loop.results.length; i++) {
     const parameter = parameters[i + 1];
-    if (!parameter.type.startsWith('list<')) {
+    if (!isListType(parameter.type)) {
       const definer = definitionIn(loop.body, next[i].id);
       return fail(
         definer ?? loop,

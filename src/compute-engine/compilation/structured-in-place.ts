@@ -1,9 +1,10 @@
 /**
- * Where an emitter may write the result of a `replace-at` into the array of
- * its operand list, in place of a copy (`structured-ir.ts`, `IRReplaceAt`).
+ * Where an emitter may write the result of a `replace-at` or of an
+ * `append` into the array of its operand list, in place of a copy
+ * (`structured-ir.ts`, `IRReplaceAt`, `IRAppend`).
  *
- * A list is a value: `replace-at` gives a new list and leaves its operand
- * unchanged. An update in place gives the same values only when no code
+ * A list is a value: `replace-at` and `append` give a new list and leave
+ * their operand unchanged. An update in place gives the same values only when no code
  * that runs after the update reads the old array. This file decides that on
  * the representation, from the definitions and the uses of the values; it
  * names no target.
@@ -160,18 +161,19 @@ function order(
 }
 
 /**
- * The `replace-at` operations of `program` that an emitter may write in
- * place: it writes the element into the array of the operand list and
- * gives that array as the result, in place of a copy. Every other
- * `replace-at` copies.
+ * The `replace-at` and `append` operations of `program` that an emitter
+ * may write in place: it writes the element into the array of the operand
+ * list (at the index, or after the last element) and gives that array as
+ * the result, in place of a copy. Every other such operation copies.
  *
- * The rule. A `replace-at` R of the list X updates in place when X is
- * consumable by R. A value X is consumable by the operation C that uses it
- * when all of these hold:
+ * The rule. A `replace-at` or an `append` R of the list X updates in place
+ * when X is consumable by R. A value X is consumable by the operation C
+ * that uses it when all of these hold:
  *
  * 1. X is unique: its array is made by this invocation of the body, and at
  *    the definition of X no other value of the program holds it. These
- *    values are unique: the result of a `build` and of a `replace-at`; the
+ *    values are unique: the result of a `build`, of a `list`, of a `tuple`,
+ *    of a `replace-at` and of an `append`; the
  *    result of a call of a function whose body yields a unique value; the
  *    result `i` of an `if` when the value `i` that each open branch yields
  *    is consumable by the yield of that branch (a closed branch yields
@@ -191,8 +193,9 @@ function order(
  *    such a body; a `draw` reads no list.
  * 3. C uses X once, and every other use of X either is in the other branch
  *    of an `if` that holds C (it does not run when C runs), or runs before
- *    C and is an `at` or a `length`, whose result is a number and holds no
- *    array, or does not run when C runs because of an `exit` (below).
+ *    C and is an `at`, a `get` or a `length`, whose result is a number and
+ *    holds no array, or does not run when C runs because of an `exit`
+ *    (below).
  *
  * An operand of an `exit` (`IRExit`) is a use, as an operand of the yield
  * of the loop body is: the `exit` hands the array to the result of its
@@ -272,7 +275,10 @@ function analyzeInPlace(program: IRProgram): {
       const op = definition.op;
       switch (op.kind) {
         case 'build':
+        case 'list':
+        case 'tuple':
         case 'replace-at':
+        case 'append':
           return true;
         case 'call':
           return yieldsUnique[op.function] === true;
@@ -370,7 +376,9 @@ function analyzeInPlace(program: IRProgram): {
         return (
           when === 'exclusive' ||
           (when === 'before' &&
-            (use.op.kind === 'at' || use.op.kind === 'length')) ||
+            (use.op.kind === 'at' ||
+              use.op.kind === 'get' ||
+              use.op.kind === 'length')) ||
           // An `exit` and a use that the body of its loop holds after it.
           (when === 'before' &&
             use.op.kind === 'exit' &&
@@ -386,7 +394,7 @@ function analyzeInPlace(program: IRProgram): {
       region.operations.forEach((op, index) => {
         const position = [...outer, { region, index }];
         if (
-          op.kind === 'replace-at' &&
+          (op.kind === 'replace-at' || op.kind === 'append') &&
           consumable(op.operands[0], op, position)
         )
           inPlace.add(op);
@@ -413,8 +421,8 @@ function analyzeInPlace(program: IRProgram): {
 }
 
 /**
- * Whether `op` writes an array in place: it is a `replace-at` of
- * `inPlace`, or it evaluates a region that holds one. An emitter that
+ * Whether `op` writes an array in place: it is a `replace-at` or an
+ * `append` of `inPlace`, or it evaluates a region that holds one. An emitter that
  * moves the evaluation of a pure value to its use must not move it across
  * such an operation: the value can be a read of the array that the
  * operation writes, which the program evaluates before the write.

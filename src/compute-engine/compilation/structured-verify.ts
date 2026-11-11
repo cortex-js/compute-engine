@@ -13,6 +13,9 @@ import {
   dischargedEffect,
   elementOf,
   isClosedRegion,
+  isListType,
+  isTupleType,
+  listType,
   joinEffects,
   operationCanAbort,
   regionsOf,
@@ -56,6 +59,10 @@ export type PolicyOperationKind =
   | 'not'
   | 'build'
   | 'replace-at'
+  | 'list'
+  | 'tuple'
+  | 'get'
+  | 'append'
   | 'trace'
   | 'draw'
   | 'seeded'
@@ -152,9 +159,15 @@ export type RepresentationPolicy = {
  * type and the representation; each origin is one of `preparedNodes`, the
  * nodes of the prepared artifact that the program was lowered from.
  *
- * For a list: an `at` reads a list and an integer index and has the type of
- * an element; a `length` reads a list and has the type `integer`; both are
- * `pure`. A `build` reads two integer bounds, its body has one integer
+ * For a list: an `at` reads a list, or a tuple whose elements have one
+ * type, and an integer index and has the type of an element; a `length`
+ * reads a list or such a tuple and has the type `integer`; both are `pure`.
+ * A `list` reads its elements, each a real or an integer that fits the
+ * element type of its result; a `tuple` reads one element per position of
+ * its result type, each fitting that position; a `get` reads a tuple and
+ * has the type of its position, which is in range; an `append` reads a
+ * list and an element by the rule of `replace-at`; the four are `pure`.
+ * A `build` reads two integer bounds, its body has one integer
  * parameter (the index) and yields a real or an integer element, and its
  * result is a list whose elements hold that element (an integer element in
  * a list of reals is accepted, a real element in a list of integers is
@@ -163,10 +176,12 @@ export type RepresentationPolicy = {
  * elements of the list and the element by the same rule. The result of a
  * function, of an `if`, and a carried value of a loop can be a list; a
  * list of integers is a valid list of reals there, as an integer is a valid
- * real. No other operation that computes a value (an arithmetic
+ * real; a tuple is valid where its type fits position by position. No
+ * other operation that computes a value (an arithmetic
  * operation, a comparison, `and`, `or`, a conversion, a trace) has a list
- * operand or a list result: the interpreter applies such an operation to
- * each element of a list, and the representation has no such operation.
+ * or a tuple operand or result: the interpreter applies such an operation
+ * to each element of a list, and the representation has no such operation
+ * (the route writes it as a `build` over the elements).
  *
  * For a `loop`: its bounds are integers; only the body of a loop has
  * parameters, each defined once, at the entry of the body, and visible in
@@ -623,16 +638,24 @@ function verifyStates(
 }
 
 /** Whether a value of the type `type` is a valid value of the type
- *  `wider`: the same type, an integer for a real, or a list of integers
+ *  `wider`: the same type, an integer for a real, a list of integers
  *  for a list of reals (the elements of a list of integers are valid
- *  reals). A real is not an integer. */
+ *  reals), or a tuple of the length of `wider` whose element at each
+ *  position fits the element of `wider` there. A real is not an integer. */
 function fitsType(type: ValueType, wider: ValueType): boolean {
+  if (type === wider || (type === 'integer' && wider === 'real')) return true;
+  if (type === listType('integer') && wider === listType('real')) return true;
   return (
-    type === wider ||
-    (type === 'integer' && wider === 'real') ||
-    (type === 'list<integer>' && wider === 'list<real>')
+    isTupleType(type) &&
+    isTupleType(wider) &&
+    type.elements.length === wider.elements.length &&
+    type.elements.every((e, i) => fitsType(e, wider.elements[i]))
   );
 }
+
+/** Whether `type` is a list or a tuple type: a value of several elements. */
+const isAggregate = (type: ValueType): boolean =>
+  isListType(type) || isTupleType(type);
 
 /** The type of a value that is either a value of the type `a` or of the
  *  type `b` (the result of an `if`), or `undefined` when no type holds
@@ -645,8 +668,8 @@ function mergedType(a: ValueType, b: ValueType): ValueType | undefined {
 
 /** The operations that compute a value from scalar operands. The
  *  interpreter applies each to the elements of a list operand; the
- *  representation has no such operation, so none has a list operand or a
- *  list result. */
+ *  representation has no such operation, so none has a list or a tuple
+ *  operand, or a list or a tuple result. */
 const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   IROperation['kind']
 >([
@@ -729,14 +752,15 @@ function verifySignature(
         `the operation ${op.kind} has an integer result and an operand that is not an integer`
       );
   };
-  // A list is an operand only of `at`, `length`, `replace-at`, a call, a
-  // loop (as a carried value), a yield and a conversion of the
-  // representation of a list, and the result only of an input, a call, an
-  // `if`, a loop, a `build`, a `replace-at` and such a conversion.
+  // A list or a tuple is an operand only of `at`, `length`, `get`,
+  // `replace-at`, `append`, a call, a loop (as a carried value), a yield and
+  // a conversion of the representation of a list, and the result only of an
+  // input, a call, an `if`, a loop, a `build`, a `list`, a `tuple`, a
+  // `replace-at`, an `append` and such a conversion.
   if (
     ELEMENTWISE_KINDS.has(op.kind) &&
-    (op.operands.some((operand) => elementOf(operand.type) !== undefined) ||
-      (op.result !== undefined && elementOf(op.result.type) !== undefined))
+    (op.operands.some((operand) => isAggregate(operand.type)) ||
+      (op.result !== undefined && isAggregate(op.result.type)))
   )
     fail(`the operation ${op.kind} has a list operand or a list result`);
   switch (op.kind) {
@@ -1073,10 +1097,17 @@ function verifySignature(
     case 'at':
     case 'length': {
       arity(op.kind === 'at' ? 2 : 1);
-      const element = elementOf(op.operands[0].type);
+      const base = op.operands[0].type;
+      // A tuple is read by `at` when its elements have one kind.
+      const element = isTupleType(base)
+        ? base.elements.every((e) => e === base.elements[0])
+          ? base.elements[0]
+          : undefined
+        : elementOf(base);
       if (element === undefined)
         fail(
-          `the operation ${op.kind} reads a value of the type ${op.operands[0].type}, not a list`
+          `the operation ${op.kind} reads a value of the type ${op.operands[0].type}, not a list` +
+            (isTupleType(base) ? ' or a tuple of elements of one kind' : '')
         );
       if (op.kind === 'at' && op.operands[1].type !== 'integer')
         fail(
@@ -1091,6 +1122,87 @@ function verifySignature(
       operandsIn(operandRule(op.kind));
       // A list is a value: no operation changes it, so a read has no effect.
       if (op.effect !== 'pure') fail(`the operation ${op.kind} is not pure`);
+      return;
+    }
+    case 'list':
+    case 'tuple': {
+      // Each element fits its place: the element kind of a list, the kind
+      // of its position in a tuple.
+      const type = op.result.type;
+      const places =
+        op.kind === 'list'
+          ? isListType(type)
+            ? op.operands.map(() => type.element)
+            : undefined
+          : isTupleType(type)
+            ? type.elements
+            : undefined;
+      if (places === undefined)
+        return fail(
+          `the operation ${op.kind} has a result of the type ${type}, not a ${op.kind}`
+        );
+      if (op.kind === 'tuple') arity(places.length);
+      op.operands.forEach((operand, i) => {
+        if (
+          (operand.type !== 'real' && operand.type !== 'integer') ||
+          !fitsType(operand.type, places[i])
+        )
+          fail(
+            `the element ${i + 1} of the operation ${op.kind} has the type ${operand.type}, and its result the type ${type}`
+          );
+      });
+      resultIn(policy.operations[op.kind].results);
+      operandsIn(operandRule(op.kind));
+      if (op.effect !== 'pure') fail(`the operation ${op.kind} is not pure`);
+      return;
+    }
+    case 'get': {
+      arity(1);
+      const tuple = op.operands[0].type;
+      if (!isTupleType(tuple))
+        return fail(
+          `the operation get reads a value of the type ${tuple}, not a tuple`
+        );
+      const position = op.position;
+      if (
+        !Number.isInteger(position) ||
+        position < 1 ||
+        position > tuple.elements.length
+      )
+        return fail(
+          `the operation get reads the position ${String(position)} of a ${tuple}`
+        );
+      if (op.result.type !== tuple.elements[position - 1])
+        fail(
+          `the operation get of the position ${position} of a ${tuple} has a result of the type ${op.result.type}`
+        );
+      resultIn(policy.operations.get.results);
+      operandsIn(operandRule('get'));
+      if (op.effect !== 'pure') fail('the operation get is not pure');
+      return;
+    }
+    case 'append': {
+      arity(2);
+      const [list, value] = op.operands;
+      const element = elementOf(list.type);
+      const resultElement = elementOf(op.result.type);
+      if (element === undefined || resultElement === undefined)
+        return fail(
+          `the operation append reads a ${list.type} and has a result of the type ${op.result.type}: both are lists`
+        );
+      // The result holds the elements of the list and the new element, by
+      // the rule of `replace-at`.
+      if (
+        (value.type !== 'real' && value.type !== 'integer') ||
+        !fitsType(value.type, resultElement) ||
+        !fitsType(element, resultElement)
+      )
+        fail(
+          `the operation append writes a ${value.type} element after a ${list.type} and has a result of the type ${op.result.type}`
+        );
+      resultIn(policy.operations.append.results);
+      operandsIn(operandRule('append'));
+      if (op.effect !== 'pure') fail('the operation append is not pure');
       return;
     }
     case 'loop':

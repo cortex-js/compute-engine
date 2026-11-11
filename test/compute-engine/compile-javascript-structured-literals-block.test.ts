@@ -808,17 +808,17 @@ describe('the causes of a refused parameter', () => {
     [
       'a parameter of a type that has no kind',
       () => engine().expr(['Function', ['Add', 'a', 1], typed('a', 'any')]),
-      /the parameter a of the function has the type any, which is not in the structured route: a parameter is a number, a boolean, or a list of reals or of integers/,
+      /the parameter a of the function has the type any, which is not in the structured route: a parameter is a number, a boolean, a list of reals or of integers, or a tuple of reals/,
     ],
     [
-      'a tuple parameter',
+      'a named tuple parameter',
       () =>
         engine().expr([
           'Function',
           ['At', 'T', 1],
-          typed('T', 'tuple<real, real>'),
+          typed('T', 'tuple<x: real, y: real>'),
         ]),
-      /the parameter T of the function has the type tuple<real, real>, which is not in the structured route/,
+      /the parameter T of the function has the type tuple<x: real, y: real>, which is not in the structured route/,
     ],
     [
       'a parameter with a default value',

@@ -64,18 +64,72 @@ export type ScalarKind = 'real' | 'integer' | 'boolean' | 'complex';
 
 /** A list of elements of one scalar kind. The length is not part of the
  *  type: two lists of the same element type and different lengths have one
- *  type. A list is a value: no operation changes a list. */
-export type ListType = `list<${ScalarKind}>`;
+ *  type. A list is a value: no operation changes a list. A list type is an
+ *  interned object (`listType()`): two list types of one element type are
+ *  the same object, so `===` compares them, as it compares two scalar
+ *  kinds. Its text (`toString()`) is `list<real>`. */
+export type ListType = {
+  readonly kind: 'list';
+  readonly element: ScalarKind;
+  toString(): string;
+};
 
-/** The semantic type of a value: a scalar or a list. */
-export type ValueType = ScalarKind | ListType;
+/** A tuple: a fixed number of elements, each of the scalar kind of its
+ *  position. The length is part of the type. A point is a tuple. A tuple
+ *  type is interned, as a list type is (`tupleType()`); its text is
+ *  `tuple<real, real>`. A tuple is a value: no operation changes it. */
+export type TupleType = {
+  readonly kind: 'tuple';
+  readonly elements: readonly ScalarKind[];
+  toString(): string;
+};
+
+/** The semantic type of a value: a scalar, a list or a tuple. */
+export type ValueType = ScalarKind | ListType | TupleType;
+
+const LIST_TYPES = new Map<ScalarKind, ListType>();
+const TUPLE_TYPES = new Map<string, TupleType>();
+
+/** The list type of elements of the kind `element`, interned. */
+export function listType(element: ScalarKind): ListType {
+  let type = LIST_TYPES.get(element);
+  if (type === undefined) {
+    const text = `list<${element}>`;
+    type = Object.freeze({ kind: 'list', element, toString: () => text });
+    LIST_TYPES.set(element, type);
+  }
+  return type;
+}
+
+/** The tuple type of the elements of the kinds `elements`, interned. */
+export function tupleType(elements: readonly ScalarKind[]): TupleType {
+  const text = `tuple<${elements.join(', ')}>`;
+  let type = TUPLE_TYPES.get(text);
+  if (type === undefined) {
+    type = Object.freeze({
+      kind: 'tuple',
+      elements: Object.freeze([...elements]),
+      toString: () => text,
+    });
+    TUPLE_TYPES.set(text, type);
+  }
+  return type;
+}
+
+/** Whether `type` is a list type. */
+export function isListType(type: ValueType): type is ListType {
+  return typeof type === 'object' && type.kind === 'list';
+}
+
+/** Whether `type` is a tuple type. */
+export function isTupleType(type: ValueType): type is TupleType {
+  return typeof type === 'object' && type.kind === 'tuple';
+}
 
 /** The kind of the elements of `type`, or `undefined` when `type` is not a
  *  list type. */
 export function elementOf(type: ValueType): ScalarKind | undefined {
-  return type.startsWith('list<')
-    ? (type.slice(5, -1) as ScalarKind)
-    : undefined;
+  return isListType(type) ? type.element : undefined;
 }
 
 /** The name of a representation of a target (`RepresentationPolicy`). */
@@ -318,21 +372,54 @@ export type IRBinaryFunction = OperationBase & {
 };
 
 /**
- * A read of a list. Both are `pure`: a list is a value, and no operation
- * changes it.
+ * A read of a list or a tuple. Both are `pure`: a list and a tuple are
+ * values, and no operation changes them.
  *
- * - `at`: the operands are a list and an integer index, counted from 1 as in
- *   the language; a negative index counts from the end (`-1` is the last
- *   element). The result has the type of an element. An index out of range
- *   (0, beyond the length, or beyond the length from the end) gives the
- *   absent value of the target for the element type: every other operation
- *   applied to that value is unspecified (`docs/COMPILATION-MODEL.md`,
- *   "Caveats of compiled code").
- * - `length`: the operand is a list; the result is the number of its
- *   elements, an integer.
+ * - `at`: the operands are a list, or a tuple whose elements have one kind,
+ *   and an integer index, counted from 1 as in the language; a negative
+ *   index counts from the end (`-1` is the last element). The result has
+ *   the type of an element. An index out of range (0, beyond the length, or
+ *   beyond the length from the end) gives the absent value of the target
+ *   for the element type: every other operation applied to that value is
+ *   unspecified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+ * - `length`: the operand is a list or a tuple; the result is the number of
+ *   its elements, an integer.
  */
 export type IRListRead = OperationBase & {
   readonly kind: 'at' | 'length';
+};
+
+/**
+ * A value that the program makes from its elements. Both are `pure`, and
+ * the result is a new value.
+ *
+ * - `list`: the operands are the elements, in order, each of the element
+ *   kind of the result (an integer is a valid element of a list of reals);
+ *   there can be none (the empty list).
+ * - `tuple`: the operands are the elements, one per position of the
+ *   result, each of the kind of its position (an integer is a valid real).
+ */
+export type IRMake = OperationBase & {
+  readonly kind: 'list' | 'tuple';
+};
+
+/** The element of a tuple at the literal `position`, counted from 1, in
+ *  the range of the tuple: one operand, the tuple; the result has the kind
+ *  of that position. `pure`. */
+export type IRGet = OperationBase & {
+  readonly kind: 'get';
+  readonly position: number;
+};
+
+/** A new list, the list of the first operand with the second operand, an
+ *  element, after its last element. The element has the element kind of
+ *  the result (an integer is a valid element of a list of reals); the
+ *  result is a list of integers only when the list and the element are
+ *  integers. `pure`: the operand list is not changed. An emitter can write
+ *  the element into the array of the operand when no later code reads that
+ *  array (`inPlaceUpdates()` in `structured-in-place.ts`). */
+export type IRAppend = OperationBase & {
+  readonly kind: 'append';
 };
 
 /**
@@ -345,7 +432,10 @@ export type IRListRead = OperationBase & {
  *   evaluated once per integer from `from` to `to`, both included, in
  *   steps of 1, or of -1 when `to` is less than `from`, as the interpreter
  *   iterates `Range(from, to)`: a range always has at least one element
- *   (`Range(1, 0)` has the elements 1 and 0). The result is the list of the
+ *   (`Range(1, 0)` has the elements 1 and 0). With `ascending`, the steps
+ *   are always 1 and there is no element when `to` is less than `from`: the
+ *   build over the elements of a list, from 1 to its length, makes the
+ *   empty list for an empty list. The result is the list of the
  *   elements in that order; it is a list of integers only when the body
  *   yields an integer. A `build` does not count passes of the iteration
  *   budget: the interpreter and the existing compiler count the passes of
@@ -365,6 +455,9 @@ export type IRListRead = OperationBase & {
 export type IRBuild = OperationBase & {
   readonly kind: 'build';
   readonly body: IRRegion;
+  /** No element when `to` is less than `from`; absent: the steps of
+   *  `Range(from, to)`. */
+  readonly ascending?: true;
 };
 
 export type IRReplaceAt = OperationBase & {
@@ -443,6 +536,9 @@ export type IRIf =Omit<OperationBase, 'result'> & {
  * A loop over the integers from `from` to `to`, both included, in steps of
  * 1, or of -1 when `to` is less than `from`, as the interpreter iterates
  * `Range(from, to)`: the range from 1 to 0 has the two elements 1 and 0.
+ * With `ascending`, the steps are always 1 and the loop runs no iteration
+ * when `to` is less than `from`: a fold over the elements of a list, from 1
+ * to its length, gives its initial value for an empty list.
  * The operands are `from`, `to` and the initial value of each carried
  * value, evaluated once, before the first iteration.
  *
@@ -479,6 +575,8 @@ export type IRLoop = Omit<OperationBase, 'result'> & {
   readonly results: readonly IRValue[];
   readonly body: IRRegion;
   readonly iterationBudget?: number;
+  /** No iteration when `to` is less than `from` (`IRBuild.ascending`). */
+  readonly ascending?: true;
 };
 
 /**
@@ -625,6 +723,9 @@ export type IROperation =
   | IRUnaryFunction
   | IRBinaryFunction
   | IRListRead
+  | IRMake
+  | IRGet
+  | IRAppend
   | IRBuild
   | IRReplaceAt
   | IRConvert
