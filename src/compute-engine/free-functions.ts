@@ -168,7 +168,7 @@ export function expand(
  */
 function asOperation<T>(input: Expression, fn: () => T): T {
   const ce = input.engine;
-  return ce._opensOperation(false) ? ce._withOperation(input, fn, false) : fn();
+  return ce._opensOperation(false) ? ce._withOperation(input, fn) : fn();
 }
 
 export function solve(

@@ -3,6 +3,7 @@ import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import {
   UnitEnvironment,
+  isUnitReadToken,
   operationInput,
   unitCounterOfOperands,
 } from '../binding-unit.js';
@@ -499,7 +500,6 @@ import {
   objectDepsValid,
   objectReadCount,
   engineHasObjects,
-  recordObjectRead,
   type ObjectDeps,
 } from './object-deps.js';
 import {
@@ -1423,9 +1423,7 @@ export class BoxedFunction
         call: Expression;
         scope?: Scope;
         unitCounter?: number;
-        readsOperation?: boolean;
-        operation?: number;
-        operationCounter?: number;
+        unitReads?: ObjectDeps;
         typeGeneration?: number;
         definitionVersion?: number;
       }
@@ -1886,10 +1884,12 @@ export class BoxedFunction
    *   (`unitCounterOfOperands()`): the overload that the boxing selects,
    *   and the canonical handler, read the types of the operands, and a
    *   narrowing of an operand in its unit moves that sum;
-   * - when the boxing read an entry through the operation in progress, the
-   *   version of `EngineBoxingState.operationToken` and the counter of the
-   *   environment of the operation: the boxing reads the entries of that environment
-   *   first (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`);
+   * - each read of an entry of a unit or operation environment that the
+   *   boxing made (`readUnitEntry()`, `readsUnitVariable()`), with the
+   *   entry it found: the boxing reads the entries of the operation in
+   *   progress first (rule 8 of
+   *   `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), and the call
+   *   is boxed again when one of these reads finds another entry now;
    * - the key of the type cache of the engine (`ce._typeCacheGeneration()`),
    *   which every inference and every value write advances, also one that
    *   does not advance the definition version (a value-type inference, or
@@ -1907,10 +1907,6 @@ export class BoxedFunction
     if (!isApplicableDef(current)) return undefined;
     const scope = found!.scope;
     const unitCounter = unitCounterOfOperands(this._ops);
-    const state = ce._boxingState;
-    const operation = state.operationToken._version;
-    const operationCounter =
-      operation === 0 ? 0 : state.currentOperation()!.counter;
     const typeGeneration = ce._typeCacheGeneration();
     const definitionVersion = ce._definitionVersion;
     const memo = this._forwardRebox;
@@ -1920,17 +1916,12 @@ export class BoxedFunction
       memo.version === half._writeVersion &&
       memo.scope === scope &&
       memo.unitCounter === unitCounter &&
-      (memo.readsOperation !== true ||
-        (memo.operation === operation &&
-          memo.operationCounter === operationCounter)) &&
+      objectDepsValid(memo.unitReads) &&
       memo.typeGeneration === typeGeneration &&
       memo.definitionVersion === definitionVersion
     ) {
-      // The read of the boxing, for the caches that are being computed.
-      if (memo.readsOperation === true) {
-        const token = state.operationToken;
-        recordObjectRead(token, token._version);
-      }
+      // The reads of the boxing, for the caches that are being computed.
+      mergeObjectDeps(memo.unitReads);
       return memo.call;
     }
     this._freeHeadReboxing = true;
@@ -1943,10 +1934,9 @@ export class BoxedFunction
       this._freeHeadReboxing = false;
       reads = endObjectDeps();
     }
-    // A boxing that read no entry through the operation in progress gives
-    // the same call in another operation.
-    const readsOperation =
-      reads?.some(([ref]) => ref.deref() === state.operationToken) === true;
+    // The reads of entries of the environments: a boxing whose reads find
+    // the same entries gives the same call, also in another operation.
+    const unitReads = reads?.filter(([ref]) => isUnitReadToken(ref.deref()));
     if (
       fresh === this ||
       !fresh.isCanonical ||
@@ -1964,12 +1954,7 @@ export class BoxedFunction
       call: fresh,
       scope,
       unitCounter: unitCounterOfOperands(this._ops),
-      readsOperation,
-      operation: readsOperation ? state.operationToken._version : undefined,
-      operationCounter:
-        readsOperation && state.operationToken._version !== 0
-          ? state.currentOperation()!.counter
-          : 0,
+      unitReads: unitReads?.length === 0 ? undefined : unitReads,
       typeGeneration: ce._typeCacheGeneration(),
       definitionVersion: ce._definitionVersion,
     };

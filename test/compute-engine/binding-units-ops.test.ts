@@ -55,7 +55,7 @@ describe('BINDING UNITS: OPERATIONS', () => {
     expect(a.op1.type.toString()).toBe('unknown');
   });
 
-  test('a nested operation does not narrow the enclosing operation', () => {
+  test('a nested operation writes in the enclosing operation', () => {
     const ce = engine();
     const seen: string[] = [];
     ce.declare('Probe', {
@@ -78,48 +78,63 @@ describe('BINDING UNITS: OPERATIONS', () => {
     });
     const a = ce.box(['Tuple', 'x']);
     ce.box(['Outer', a.op1]).evaluate();
-    expect(seen).toEqual(['number', 'unknown']);
+    // The requirement that `Probe` wrote is read for the rest of `Outer`.
+    expect(seen).toEqual(['number', 'number']);
+    // Not after it: the outermost operation is thrown away.
+    expect(a.op1.type.toString()).toBe('unknown');
   });
 
   test('the environment of a nested operation', () => {
     const ce = engine();
     const state = ce._boxingState;
     const a = ce.box(['Tuple', 'x']);
-    ce._withOperation(
-      a,
-      () => {
-        const outer = state.currentOperation()!;
-        ce._withOperation(
-          a,
-          () => {
-            // No environment until the first write.
-            expect(state.currentOperation()).toBe(outer);
-            ce.function('Sqrt', [a.op1]);
-            const nested = state.currentOperation()!;
-            expect(nested).not.toBe(outer);
-            expect(nested.parents()).toEqual([outer]);
-            expect(a.type.toString()).toBe('tuple<number>');
-          },
-          false
-        );
+    ce._withOperation(a, () => {
+      const outer = state.currentOperation()!;
+      // A nested operation opens no environment.
+      expect(ce._opensOperation(false)).toBe(false);
+      expect(ce._opensOperation(true)).toBe(false);
+      ce._withOperation(a, () => {
         expect(state.currentOperation()).toBe(outer);
-        expect(a.type.toString()).toBe('tuple<unknown>');
-        // Also after a throw.
-        expect(() =>
-          ce._withOperation(
-            a,
-            () => {
-              ce.function('Sqrt', [a.op1]);
-              throw new Error('stop');
-            },
-            false
-          )
-        ).toThrow('stop');
+        ce.function('Sqrt', [a.op1]);
         expect(state.currentOperation()).toBe(outer);
-      },
-      false
-    );
+        expect(a.type.toString()).toBe('tuple<number>');
+      });
+      // The write of the nested operation is kept in the enclosing one.
+      expect(state.currentOperation()).toBe(outer);
+      expect(a.type.toString()).toBe('tuple<number>');
+      // Also after a throw.
+      expect(() =>
+        ce._withOperation(a, () => {
+          ce.function('Sqrt', [a.op1]);
+          throw new Error('stop');
+        })
+      ).toThrow('stop');
+      expect(state.currentOperation()).toBe(outer);
+    });
     expect(state.currentOperation()).toBeUndefined();
+    expect(a.type.toString()).toBe('tuple<unknown>');
+  });
+
+  test('the result of a nested operation keeps its requirements', () => {
+    // FindFit makes fresh names and substitutes them in the model with
+    // `subs()`, a nested operation, then compiles the result.
+    const ce = engine();
+    const m = ce.box([
+      'Add',
+      ['Multiply', 'a', ['Cos', ['Add', ['Multiply', 'b', 'x'], 'c']]],
+      ['Multiply', 'd', 'x'],
+    ]);
+    const success = ce._withOperation(m, () => {
+      const r = m.canonical.subs({
+        a: ce.symbol('q0'),
+        b: ce.symbol('q1'),
+        c: ce.symbol('q2'),
+        d: ce.symbol('q3'),
+        x: ce.symbol('w0'),
+      }).canonical;
+      return ce._compile(r, { fallback: false }).success;
+    });
+    expect(success).toBe(true);
   });
 
   test('a name boxed again in a scope that an operation pushed', () => {

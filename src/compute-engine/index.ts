@@ -394,6 +394,19 @@ import type {
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
+/** The default of the engine flag `_bindingUnits`: true when the
+ * environment variable `CE_BINDING_UNITS` is `1`. Temporary, for phase E of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`. */
+function bindingUnitsDefault(): boolean {
+  try {
+    const env = (globalThis as { process?: { env?: Record<string, string> } })
+      .process?.env;
+    return env?.CE_BINDING_UNITS === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** True if `x`, a part of a complex value given as a double or a big
  * decimal, is zero. `undefined` (a part that is not given) is zero. */
 /**
@@ -1712,10 +1725,13 @@ export class ComputeEngine implements IComputeEngine {
    */
   _debugBindings = debugBindingsDefault();
 
-  /** See `IComputeEngine._bindingUnits`.
+  /** See `IComputeEngine._bindingUnits`. True by default when the
+   * environment variable `CE_BINDING_UNITS` is `1`: a temporary switch for
+   * phase E of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, which
+   * its last step removes.
    * @internal
    */
-  _bindingUnits = false;
+  _bindingUnits = bindingUnitsDefault();
 
   /** See `IComputeEngine._opensOperation()`.
    * @internal
@@ -1723,33 +1739,29 @@ export class ComputeEngine implements IComputeEngine {
   _opensOperation(evaluation: boolean): boolean {
     if (!this._bindingUnits) return false;
     const state = this._boxingState;
-    // The method that opened the operation, called again in it.
-    if (state.takeReentry()) return false;
     const current = state.currentOperation();
+    if (current === undefined) return true;
+    // An operation nested in an operation that is not a program runs in the
+    // environment of the enclosing operation: the method that opened the
+    // operation, called again in it, and every operation of library code.
+    if (!current.isProgram) return false;
     // In the environment of a program, an evaluation in the evaluation of a
     // statement by the run driver runs in it.
-    if (current === undefined || !current.isProgram) return true;
     return !(evaluation && state.inProgramStatement);
   }
 
   /** See `IComputeEngine._withOperation()`.
    * @internal
    */
-  _withOperation<T>(input: unknown, fn: () => T, reentry = true): T {
+  _withOperation<T>(input: unknown, fn: () => T): T {
     const state = this._boxingState;
     const current = state.currentOperation();
-    // A nested operation has an environment of its own, whose parent is the
-    // environment of the enclosing operation, and which is made at its
-    // first write (`withNestedOperation()`). Library code calls
-    // `evaluate()` on each operand that it evaluates, and a walk of the
-    // input at each of these calls costs a time proportional to the size of
-    // the input at each node.
-    if (current !== undefined && !current.isProgram)
-      return state.withNestedOperation(fn, reentry);
+    // A nested operation writes in the environment of the operation that
+    // encloses it (see `_opensOperation()`).
+    if (current !== undefined && !current.isProgram) return fn();
     return state.withOperation(
       UnitEnvironment.forOperation(input, this.context?.lexicalScope),
-      fn,
-      reentry
+      fn
     );
   }
 
@@ -1760,11 +1772,10 @@ export class ComputeEngine implements IComputeEngine {
     if (!this._bindingUnits || evaluation.operation !== undefined) return;
     const state = this._boxingState;
     if (this._opensOperation(true)) {
-      const current = state.currentOperation();
-      evaluation.operation =
-        current !== undefined && !current.isProgram
-          ? UnitEnvironment.forNested(current)
-          : UnitEnvironment.forOperation(input, this.context?.lexicalScope);
+      evaluation.operation = UnitEnvironment.forOperation(
+        input,
+        this.context?.lexicalScope
+      );
       return;
     }
     evaluation.operation = state.currentOperation();

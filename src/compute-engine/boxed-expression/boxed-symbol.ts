@@ -63,6 +63,8 @@ import {
   noteDefinitionHome,
   noteResolutionRead,
   operationInput,
+  readUnitEntry,
+  readsUnitVariable,
 } from '../binding-unit.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
 import {
@@ -123,7 +125,6 @@ import {
   endObjectDeps,
   mergeObjectDeps,
   objectDepsValid,
-  recordObjectRead,
   type ObjectDeps,
 } from './object-deps.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
@@ -928,7 +929,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const trial = state.trialEnvironment();
     const env =
       trial ??
-      state.writableOperation() ??
+      state.currentOperation() ??
       (this._env ??= new UnitEnvironment());
     if (trial === undefined) state.noteUnitWrite(env);
     const name = this._id;
@@ -971,11 +972,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * of the occurrence, through its parents (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
    *
-   * The read is recorded for the caches of compound expressions: the
-   * counter of each environment that it visited (`UnitEnvironment.lookup()`),
-   * and the operation in progress (`EngineBoxingState.operationToken`): a
-   * type cached in an operation is computed again after it, and a type
-   * cached outside is computed again in it. The definition that a free name resolves to is recorded in
+   * The read is recorded for the caches of compound expressions, with the
+   * entry that it found (`readUnitEntry()`): a cached type is computed
+   * again when the same read, in the current trial and operation, finds
+   * another entry. The definition that a free name resolves to is recorded in
    * `_unitType()`. Rule 4 of the spec also keys a cached type on a counter
    * of each name that it resolved; no such counter exists: the key of the
    * type cache (`ce._typeCacheGeneration()`), which a declaration and a
@@ -985,26 +985,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * environment of the trial is read first (rule 13).
    */
   private _unitEntry(key: object): BoxedType | undefined {
-    const state = this.engine._boxingState;
-    const token = state.operationToken;
-    recordObjectRead(token, token._version);
-    const operation = state.currentOperation();
-    return (
-      state.trialEnvironment()?.lookup(key, this._id) ??
-      operation?.lookup(key, this._id) ??
-      this._env?.lookup(key, this._id)
-    );
+    return readUnitEntry(this.engine._boxingState, this._env, key, this._id);
   }
 
   /** True when the unit of this occurrence, or the operation in progress,
    * reads the name as a variable in the scope `home` (`N` in `N + 1`,
-   * `UnitEnvironment.readsAsVariable()`). */
+   * `UnitEnvironment.readsAsVariable()`). The read is recorded for the
+   * caches (`readsUnitVariable()`). */
   private _readsAsVariable(home: object): boolean {
-    return (
-      this.engine._boxingState
-        .currentOperation()
-        ?.readsAsVariable(home, this._id) === true ||
-      this._env?.readsAsVariable(home, this._id) === true
+    return readsUnitVariable(
+      this.engine._boxingState,
+      this._env,
+      home,
+      this._id
     );
   }
 

@@ -595,6 +595,12 @@ export class BoxedDictionary
     const entries = Object.entries(this._keyValues);
     if (entries.every(([, v]) => isEvaluatedValue(v, numericApproximation)))
       return this;
+    // An operation runs in an operation environment of its own, with the
+    // engine flag `_bindingUnits` (rule 8 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
+    // `ce._opensOperation()`).
+    if (this.engine._opensOperation(true))
+      return this.engine._withOperation(this, () => this.evaluate(options));
     const ce = this.engine;
     // Cells are nested evaluations, so a Block cell is not a top-level program.
     // Direct dictionary evaluation starts an epoch, as BoxedFunction does.

@@ -2,9 +2,6 @@ import { BoxedType } from '../common/type/boxed-type.js';
 import { narrow } from '../common/type/utils.js';
 import { recordObjectRead } from './boxed-expression/object-deps.js';
 
-/** The last number given to an environment (`UnitEnvironment.id`). */
-let lastEnvironmentId = 0;
-
 /**
  * The environment of a binding unit.
  *
@@ -25,9 +22,11 @@ let lastEnvironmentId = 0;
  * name with a value definition, the key is that definition. So every
  * occurrence of a name in a unit reads one entry, from any context.
  *
- * The counter moves at each write that changes an entry. A cache that depends
- * on the entries of an environment keeps the counter that it read, and
- * computes its value again when the counter moved.
+ * The counter moves at each write that changes an entry. A cache shared
+ * between expressions keeps the counters (`unitEnvironmentStamp()`). A cache
+ * of one expression keeps, for each read, the entry that the read found
+ * (`readUnitEntry()`), and computes its value again when the same read finds
+ * another entry.
  *
  * This mechanism is active only when the engine flag `_bindingUnits` is true.
  * The plan is `docs/plans/2026-11-09-binding-units-slice-1-spec.md`.
@@ -48,10 +47,6 @@ export class UnitEnvironment {
 
   /** The number of writes that changed an entry. */
   private _counter = 0;
-
-  /** A number that no other environment has. The version of the token of
-   * the operation in progress (`EngineBoxingState.operationToken`). */
-  readonly id = ++lastEnvironmentId;
 
   /** While a journal is open: for each write, a function that puts back the
    * entry or the record of the uses as it was before that write, and true
@@ -94,9 +89,9 @@ export class UnitEnvironment {
     return env;
   }
 
-  /** The environment of an operation nested in the operation whose
-   * environment is `enclosing` (`EngineBoxingState.withNestedOperation()`):
-   * its only parent is `enclosing`. */
+  /** The environment of a trial nested in the trial whose environment is
+   * `enclosing` (`EngineBoxingState.withTrial()`): its only parent is
+   * `enclosing`. */
   static forNested(enclosing: UnitEnvironment): UnitEnvironment {
     const env = new UnitEnvironment();
     env._parents = [enclosing];
@@ -114,28 +109,6 @@ export class UnitEnvironment {
   }
 
   get counter(): number {
-    return this._counter;
-  }
-
-  /** True once `hasWrites()` found a write. A counter never decreases, so
-   * the result stays true. */
-  private _written = false;
-
-  /** True when a write moved the counter of this environment or of one of
-   * its parents, at any depth. When it is false, a read through this
-   * environment (`lookup()`) finds no entry. */
-  hasWrites(): boolean {
-    if (this._written) return true;
-    if (this._counter !== 0 || this.parents().some((p) => p.hasWrites()))
-      this._written = true;
-    return this._written;
-  }
-
-  /** The version that a cache entry keeps when it read this environment
-   * (`recordObjectRead()`, `object-deps.ts`): the counter. A cache keyed on
-   * the versions of the objects it read is computed again when a write
-   * moved the counter. */
-  get _version(): number {
     return this._counter;
   }
 
@@ -161,12 +134,11 @@ export class UnitEnvironment {
    *   parent holds an entry for. These entries are met. When the meet is
    *   `never`, the result is `unknown`: the units of the input disagree.
    *
-   * `undefined` when no environment of the chain has an entry. The read is
-   * recorded for the caches that depend on the counter of each environment
-   * that it visited (`recordObjectRead()`).
+   * `undefined` when no environment of the chain has an entry. The same
+   * entries give the same result object (`meetEntries()`). The read is not
+   * recorded for the caches: see `readUnitEntry()`.
    */
   lookup(key: object, name: string): BoxedType | undefined {
-    recordObjectRead(this, this._counter);
     const own = this.get(key, name);
     if (own !== undefined) return own;
     return this._lookupInParents(key, name);
@@ -183,9 +155,8 @@ export class UnitEnvironment {
       if (entry === undefined) continue;
       if (result === undefined) result = entry;
       else if (result !== entry) {
-        const meet = narrow(result.type, entry.type);
-        if (meet === 'never') return BoxedType.unknown;
-        result = new BoxedType(meet, result.typeResolver);
+        result = meetEntries(result, entry);
+        if (result === BoxedType.unknown) return result;
       }
     }
     return result;
@@ -197,7 +168,6 @@ export class UnitEnvironment {
    * same way (`_lookupInParents()`). So an entry of an environment is read
    * before the entries of its parents, also at a farther ancestor. */
   private _lookupNearest(key: object, name: string): BoxedType | undefined {
-    recordObjectRead(this, this._counter);
     for (
       let k: object | null | undefined = key;
       k;
@@ -419,8 +389,8 @@ export class UnitEnvironment {
 
   /** The end of a trial (`EngineBoxingState.withTrial()`): the environment
    * is thrown away. When a write was made in it, the counter moves, so a
-   * type cached from one of its entries is computed again
-   * (`recordObjectRead()`). */
+   * cache keyed on the counters (`unitEnvironmentStamp()`) is computed
+   * again. */
   discard(): void {
     if (this._counter !== 0) this._counter += 1;
   }
@@ -478,6 +448,170 @@ export class UnitEnvironment {
     this._journalWrite(entries, name, false);
     entries.set(name, value);
   }
+}
+
+/** For each entry and each entry it was met with
+ * (`UnitEnvironment._lookupInParents()`), the result of the meet. */
+const meets = new WeakMap<BoxedType, WeakMap<BoxedType, BoxedType>>();
+
+/** The meet of the entries `a` and `b`, or `BoxedType.unknown` when it is
+ * `never`. The same two entries give the same object, so the version of a
+ * read that finds it (`readUnitEntry()`) does not move. */
+function meetEntries(a: BoxedType, b: BoxedType): BoxedType {
+  let byB = meets.get(a);
+  if (byB === undefined) meets.set(a, (byB = new WeakMap()));
+  let result = byB.get(b);
+  if (result === undefined) {
+    const meet = narrow(a.type, b.type);
+    result =
+      meet === 'never'
+        ? BoxedType.unknown
+        : new BoxedType(meet, a.typeResolver);
+    byB.set(b, result);
+  }
+  return result;
+}
+
+/** What a read of an entry needs of the engine: the environments of the
+ * trial and of the operation in progress (`EngineBoxingState`). */
+export type UnitReadContext = {
+  trialEnvironment(): UnitEnvironment | undefined;
+  currentOperation(): UnitEnvironment | undefined;
+};
+
+/** The entry that an occurrence whose environment is `env` reads for `name`
+ * under `key`: the entry of the trial in progress, else of the operation in
+ * progress, else of `env`, each through its parents (rules 8 and 13 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). */
+function unitEntryOf(
+  context: UnitReadContext,
+  env: UnitEnvironment | undefined,
+  key: object,
+  name: string
+): BoxedType | undefined {
+  return (
+    context.trialEnvironment()?.lookup(key, name) ??
+    context.currentOperation()?.lookup(key, name) ??
+    env?.lookup(key, name)
+  );
+}
+
+/** True when the operation in progress, or `env`, reads `name` as a
+ * variable in the scope `scope` (`UnitEnvironment.readsAsVariable()`). */
+function readsAsVariableIn(
+  context: UnitReadContext,
+  env: UnitEnvironment | undefined,
+  scope: object,
+  name: string
+): boolean {
+  return (
+    context.currentOperation()?.readsAsVariable(scope, name) === true ||
+    env?.readsAsVariable(scope, name) === true
+  );
+}
+
+/**
+ * A read of the environments by an occurrence: of the entry for a name
+ * under a key (`readUnitEntry()`), or of the record that the name is read
+ * as a variable (`readsUnitVariable()`). Its version (`_version`) is what
+ * the read finds now, read again in the current context: the number of
+ * the entry found (`definitionId()`), 0 for none; for the record, 1 or 0.
+ *
+ * A cache entry that keeps this version (`recordObjectRead()`) is valid
+ * exactly when the same read finds the same entry now (`objectDepsValid()`,
+ * `object-deps.ts`): a type computed outside an operation is read again in
+ * an operation that has no entry for the name, and computed again in one
+ * that has; a type computed in an operation is read again in the next
+ * operation when that one finds the same entries.
+ */
+class UnitReadToken {
+  constructor(
+    private readonly _context: UnitReadContext,
+    private readonly _env: UnitEnvironment | undefined,
+    private readonly _key: object,
+    private readonly _name: string,
+    private readonly _variable: boolean
+  ) {}
+
+  get _version(): number {
+    if (this._variable)
+      return readsAsVariableIn(this._context, this._env, this._key, this._name)
+        ? 1
+        : 0;
+    return definitionId(
+      unitEntryOf(this._context, this._env, this._key, this._name)
+    );
+  }
+}
+
+/** For each occurrence environment (or, for an occurrence with none, the
+ * read context), each key and each name, its two tokens: the read of the
+ * entry and the read of the variable record. */
+const unitReadTokens = new WeakMap<
+  object,
+  WeakMap<object, Map<string, [UnitReadToken?, UnitReadToken?]>>
+>();
+
+/** The token of a read (see `UnitReadToken`), made at the first read. */
+function unitReadToken(
+  context: UnitReadContext,
+  env: UnitEnvironment | undefined,
+  key: object,
+  name: string,
+  variable: boolean
+): UnitReadToken {
+  const owner: object = env ?? context;
+  let byKey = unitReadTokens.get(owner);
+  if (byKey === undefined) unitReadTokens.set(owner, (byKey = new WeakMap()));
+  let byName = byKey.get(key);
+  if (byName === undefined) byKey.set(key, (byName = new Map()));
+  let pair = byName.get(name);
+  if (pair === undefined) byName.set(name, (pair = [undefined, undefined]));
+  const index = variable ? 1 : 0;
+  return (pair[index] ??= new UnitReadToken(context, env, key, name, variable));
+}
+
+/**
+ * The entry that an occurrence whose environment is `env` reads for `name`
+ * under `key` (a home scope or a value definition), see `unitEntryOf()`.
+ * The read is recorded for the caches that are being computed, with the
+ * entry found as its version (`UnitReadToken`).
+ */
+export function readUnitEntry(
+  context: UnitReadContext,
+  env: UnitEnvironment | undefined,
+  key: object,
+  name: string
+): BoxedType | undefined {
+  const entry = unitEntryOf(context, env, key, name);
+  recordObjectRead(
+    unitReadToken(context, env, key, name, false),
+    definitionId(entry)
+  );
+  return entry;
+}
+
+/** True when the operation in progress, or `env`, reads `name` as a
+ * variable in the scope `scope` (`N` in `N + 1`). The read is recorded for
+ * the caches, as `readUnitEntry()` records a read. */
+export function readsUnitVariable(
+  context: UnitReadContext,
+  env: UnitEnvironment | undefined,
+  scope: object,
+  name: string
+): boolean {
+  const result = readsAsVariableIn(context, env, scope, name);
+  recordObjectRead(
+    unitReadToken(context, env, scope, name, true),
+    result ? 1 : 0
+  );
+  return result;
+}
+
+/** True when `obj` is the token of a read by an occurrence
+ * (`readUnitEntry()`, `readsUnitVariable()`). */
+export function isUnitReadToken(obj: unknown): boolean {
+  return obj instanceof UnitReadToken;
 }
 
 /**
@@ -657,7 +791,8 @@ export function unitCounterOfOperands(ops: readonly unknown[]): number {
 }
 
 /** A number for each definition that a free name resolves to, given at
- * its first read (`noteResolutionRead()`). */
+ * its first read (`noteResolutionRead()`), and for each entry that a read
+ * of an environment found (`readUnitEntry()`). */
 const definitionIds = new WeakMap<object, number>();
 let lastDefinitionId = 0;
 
@@ -678,7 +813,8 @@ class ResolutionToken {
   }
 }
 
-/** The number of the definition `def` (`definitionIds`), or 0 for none. */
+/** The number of the definition or the entry `def` (`definitionIds`), or 0
+ * for none. */
 function definitionId(def: object | undefined): number {
   if (def === undefined) return 0;
   let id = definitionIds.get(def);

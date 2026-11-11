@@ -156,8 +156,15 @@ findings of round 2 and was not reviewed again.
    - **Writes.** A write goes to the operation environment only, also for an
      expression built from the input's operands (rule 6). An operation does
      not narrow the environment of the host's expression.
-   - **Nesting.** Nested operations form a stack, which is restored on exit,
-     also on a throw.
+   - **Nesting.** An operation that starts inside another operation runs in
+     the environment of that operation and opens none of its own: what it
+     returns to the enclosing operation keeps its requirements (the model
+     that `FindFit` rebuilds with `subs()` must compile). The environment
+     of the outermost operation is the one that is thrown away. Only the
+     environment of a program and the operations of its statements form a
+     stack, which is restored on exit, also on a throw. (Changed
+     2026-11-10, in phase E: with a stack of nested environments, the fit
+     ran interpreted and 72 tests failed.)
    - **Async.** An async operation captures its environment when it starts
      and carries it in its evaluation context. Each synchronous segment
      installs the environment and restores the previous one. The

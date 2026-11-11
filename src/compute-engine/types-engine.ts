@@ -1695,11 +1695,14 @@ export interface IComputeEngine {
   /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
    * that starts now opens an environment of its own (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the engine flag
-   * `_bindingUnits` is on, also in another operation (nested operations
-   * form a stack, `_withOperation()`). In the environment of an Epsil
-   * program (rule 10), an evaluation (`evaluation` true: `evaluate()` and
-   * `N()`) inside the evaluation of a statement by the run driver opens
-   * none: it writes in the environment of the program.
+   * `_bindingUnits` is on, and no operation is in progress, or the
+   * operation in progress is an Epsil program (rule 10). An operation
+   * nested in an operation that is not a program opens none: it reads and
+   * writes in the environment of the operation that encloses it, so the
+   * symbols of its result read the requirements that it wrote. In the
+   * environment of a program, an evaluation (`evaluation` true:
+   * `evaluate()` and `N()`) inside the evaluation of a statement by the run
+   * driver opens none: it writes in the environment of the program.
    *
    * An operation method starts with
    * `if (ce._opensOperation(…)) return ce._withOperation(this, () => <the
@@ -1710,15 +1713,11 @@ export interface IComputeEngine {
 
   /** Run `fn`, an operation on `input`, in a new operation environment
    * whose parents are the environments of the occurrences of `input`
-   * (rule 8). In an operation that is not a program, the parent of the new
-   * environment is the environment of that operation instead, and the
-   * environment is made at its first write. The environment in progress
-   * before is put back at the end, also on a throw.
-   *
-   * `reentry` (the default) states that `fn` calls the method that opened
-   * the operation again: its first `_opensOperation()` call is then false.
+   * (rule 8). In an operation that is not a program, `fn()`: it runs in
+   * the environment of that operation. The environment in progress before
+   * is put back at the end, also on a throw.
    * @internal */
-  _withOperation<T>(input: unknown, fn: () => T, reentry?: boolean): T;
+  _withOperation<T>(input: unknown, fn: () => T): T;
 
   /** With the engine flag `_bindingUnits`: give the asynchronous
    * evaluation `evaluation`, which starts now on `input`, its operation

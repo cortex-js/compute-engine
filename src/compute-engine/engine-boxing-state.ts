@@ -14,23 +14,6 @@ type DevolveRepairFrame<Scope extends object> = {
  */
 const MAX_REPAIR_REBUILDS = 3;
 
-/** See `EngineBoxingState.operationToken`. */
-function operationToken(
-  current: () => UnitEnvironment | undefined,
-  trial: () => UnitEnvironment | undefined
-): {
-  readonly _version: number;
-} {
-  return {
-    get _version(): number {
-      const t = trial();
-      if (t !== undefined && t.hasWrites()) return t.id;
-      const env = current();
-      return env !== undefined && env.hasWrites() ? env.id : 0;
-    },
-  };
-}
-
 /**
  * Per-engine coordination for the un-applied-operator repair performed while
  * boxing expressions.
@@ -52,49 +35,20 @@ export class EngineBoxingState<Scope extends object> {
    * operation is in progress belongs to the innermost one, a boxing that
    * starts then joins it, and a requirement is written in it.
    *
+   * An operation nested in an operation that is not a program pushes no
+   * entry: it reads and writes in the environment of the operation that
+   * encloses it (`ce._opensOperation()`), so the requirements that it
+   * writes are kept for the rest of the enclosing operation, and the
+   * symbols of its result read them.
+   *
    * Each entry holds:
-   * - `env`: the environment of the operation, or `undefined` for a nested
-   *   operation that has made no symbol and written nothing yet
-   *   (`withNestedOperation()`);
-   * - `read`: the environment that a read starts in, `env` or, while `env`
-   *   is `undefined`, the environment of the enclosing operation. A nested
-   *   environment has the enclosing one as its only parent and no entry
-   *   until its first write, so the two give the same reads;
-   * - `programStatement`: see `inProgramStatement`;
-   * - `reentry`: true from the push until the first `takeReentry()` call:
-   *   the method that opened the operation calls itself again in it
-   *   (`ce._opensOperation()`).
+   * - `env`: the environment of the operation;
+   * - `programStatement`: see `inProgramStatement`.
    */
   private _operations: {
-    env: UnitEnvironment | undefined;
-    read: UnitEnvironment;
+    env: UnitEnvironment;
     programStatement: boolean;
-    reentry: boolean;
   }[] = [];
-
-  /**
-   * An object whose version (`_version`) is the number
-   * (`UnitEnvironment.id`) of the environment that a read starts in
-   * (`currentOperation()`), or 0 when no operation is in progress. A type
-   * that read an entry through the operation in progress
-   * (`BoxedSymbol._unitEntry()`) records it (`recordObjectRead()`), so that
-   * it is computed again in another operation, and outside one (rule 8).
-   *
-   * The version is also 0 when no write was made in that environment or in
-   * one of its parents (`UnitEnvironment.hasWrites()`): a read then finds
-   * the entry of the environment of the occurrence, as outside an
-   * operation. So a type cached in one evaluation is read in the next one
-   * when neither wrote a requirement.
-   *
-   * During a trial (`withTrial()`) whose environment has a write, the
-   * version is the number of that environment: a type cached before the
-   * trial is computed again in it, and a type cached in it is computed
-   * again after it.
-   */
-  readonly operationToken: { readonly _version: number } = operationToken(
-    () => this.currentOperation(),
-    () => this.trialEnvironment()
-  );
 
   /**
    * The environments of the trials in progress, innermost last (rule 13 of
@@ -137,73 +91,21 @@ export class EngineBoxingState<Scope extends object> {
   }
 
   /** The environment of the operation in progress, or `undefined`: the
-   * environment that a read starts in. */
+   * environment that a read starts in, and that a write goes in. */
   currentOperation(): UnitEnvironment | undefined {
     const ops = this._operations;
-    return ops.length === 0 ? undefined : ops[ops.length - 1].read;
-  }
-
-  /** The environment that a write of the operation in progress goes in, or
-   * `undefined` when no operation is in progress. The environment of a
-   * nested operation is made at its first write
-   * (`withNestedOperation()`). */
-  writableOperation(): UnitEnvironment | undefined {
-    const ops = this._operations;
-    if (ops.length === 0) return undefined;
-    const top = ops[ops.length - 1];
-    if (top.env === undefined) {
-      top.env = UnitEnvironment.forNested(top.read);
-      top.read = top.env;
-    }
-    return top.env;
+    return ops.length === 0 ? undefined : ops[ops.length - 1].env;
   }
 
   /** Run `fn` with `env` as the environment of the operation in progress,
-   * and put back the previous one at the end, also on a throw. With
-   * `reentry`, see `_operations`. */
-  withOperation<T>(env: UnitEnvironment, fn: () => T, reentry = false): T {
-    return this._push(env, env, fn, reentry);
-  }
-
-  /**
-   * Run `fn`, an operation nested in the operation in progress, with an
-   * environment of its own (rule 8: nested operations form a stack). The
-   * environment has the environment of the enclosing operation as its only
-   * parent: the environments of the occurrences of the input are read
-   * through the environment of each occurrence, so no walk of the input
-   * is needed. It is made at the first write (`writableOperation()`): a
-   * nested operation that writes nothing makes nothing. The enclosing one
-   * is put back at the end, also on a throw. With no operation in
-   * progress, `fn()`.
-   */
-  withNestedOperation<T>(fn: () => T, reentry = false): T {
-    const enclosing = this.currentOperation();
-    if (enclosing === undefined) return fn();
-    return this._push(undefined, enclosing, fn, reentry);
-  }
-
-  private _push<T>(
-    env: UnitEnvironment | undefined,
-    read: UnitEnvironment,
-    fn: () => T,
-    reentry: boolean
-  ): T {
-    this._operations.push({ env, read, programStatement: false, reentry });
+   * and put back the previous one at the end, also on a throw. */
+  withOperation<T>(env: UnitEnvironment, fn: () => T): T {
+    this._operations.push({ env, programStatement: false });
     try {
       return fn();
     } finally {
       this._operations.pop();
     }
-  }
-
-  /** True once after a push with `reentry` (see `_operations`). */
-  takeReentry(): boolean {
-    const ops = this._operations;
-    if (ops.length === 0) return false;
-    const top = ops[ops.length - 1];
-    if (!top.reentry) return false;
-    top.reentry = false;
-    return true;
   }
 
   /**
@@ -315,13 +217,11 @@ export class EngineBoxingState<Scope extends object> {
   /** The environment of the root construction in progress. Outside a root
    * construction, the environment of the operation in progress, or
    * `undefined`. A root construction that starts inside an operation joins
-   * the environment of the operation and does not start a unit (rule 8).
-   * A symbol made in a nested operation belongs to it, so its environment
-   * is made then (`writableOperation()`). */
+   * the environment of the operation and does not start a unit (rule 8). */
   unitEnvironment(): UnitEnvironment | undefined {
-    if (!this._rootActive) return this.writableOperation();
+    if (!this._rootActive) return this.currentOperation();
     if (this._unitEnvironment === null) {
-      const operation = this.writableOperation();
+      const operation = this.currentOperation();
       this._unitEnvironment = operation ?? new UnitEnvironment();
     }
     return this._unitEnvironment;
