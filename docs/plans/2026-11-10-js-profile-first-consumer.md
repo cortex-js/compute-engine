@@ -1,6 +1,7 @@
 # Moving the engine's own compilations to the `numeric-kernel` profile (step 7, second part)
 
-**Status: proposal, not approved. No code is written.**
+**Status: approved 2026-11-10** (the switch over all consumers, "profile
+first", off by default).
 
 ## The situation
 
