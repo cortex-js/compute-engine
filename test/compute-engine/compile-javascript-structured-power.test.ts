@@ -340,6 +340,23 @@ const PROGRAMS: Program[] = [
       over('k', [-3, -2, 1, 2, 3, 4, 5], { x })
     ),
   },
+  // Two finite literals: the literal that the existing emitter folds them
+  // to (compile-javascript-structured-literals-block.test.ts).
+  {
+    name: 'x + 2.5^3',
+    json: ['Add', 'x', ['Power', 2.5, 3]],
+    inputs: over('x', BASES),
+  },
+  {
+    name: 'x + 10^-30',
+    json: ['Add', 'x', ['Power', 10, -30]],
+    inputs: over('x', BASES),
+  },
+  {
+    name: 'x + Root(8, 3)',
+    json: ['Add', 'x', ['Root', 8, 3]],
+    inputs: over('x', BASES),
+  },
   {
     name: 'Root(8, y)',
     json: ['Root', 8, 'y'],
@@ -476,19 +493,6 @@ describe('refusals', () => {
       'strict',
       /Root with a complex operand is not in the structured route/,
     ],
-    // Two finite literals: folded.
-    [
-      'x + 2.5^3',
-      ['Add', 'x', ['Power', 2.5, 3]],
-      'strict',
-      /Power of the number literal 2\.5 is not in the structured route: the existing emitter folds it/,
-    ],
-    [
-      'x + 10^-30',
-      ['Add', 'x', ['Power', 10, -30]],
-      'strict',
-      /Power of the number literal 10 is not in the structured route/,
-    ],
     // `realRadicalPower()` reads through a square root under an integer
     // exponent of at least 2.
     [
@@ -576,12 +580,6 @@ describe('refusals', () => {
       ['Root', 'x', 4],
       'strict',
       /Root with the degree 4 is not in the structured route/,
-    ],
-    [
-      'x + Root(8, 3)',
-      ['Add', 'x', ['Root', 8, 3]],
-      'strict',
-      /Root of the number literal 8 is not in the structured route: the existing emitter folds it/,
     ],
     [
       'Root(z, 3)',

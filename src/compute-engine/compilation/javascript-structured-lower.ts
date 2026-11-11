@@ -147,8 +147,14 @@ export type StructuredInput = IRInput;
  *   function of that name of the first operand; `log-quotient`: `Log(x, b)`
  *   with another base, the quotient `ln(x) / ln(b)`, as the existing emitter
  *   writes them.
+ * - `{ folded }`: `Power` or `Root` of two finite real number literals,
+ *   which the existing emitter folds to the literal of its value
+ *   (`foldedLiteralPower()`, `foldedLiteralRoot()` in
+ *   `javascript-fragment-target.ts`): the value is written as a literal, and
+ *   the operands have no operation.
  */
 export type StructuredForm =
+  | { readonly folded: number | { readonly re: number; readonly im: number } }
   | 'pi-multiple'
   | 'identity'
   | 'conjugate'
@@ -559,6 +565,50 @@ class Lowering {
     return this.newValue(valueType(facts.type), facts.representation);
   }
 
+  /**
+   * The folded value `value` of the `Power` or `Root` `node` of two number
+   * literals (the form `{ folded }`): a real literal, or the function
+   * `complex` of the literals of the two parts. A complex value is not a
+   * complex literal: the existing emitter writes the folded object, and a
+   * parent reads its parts from it (`x + (-8)^(3/2)` is `x + 0` in the real
+   * part, `+0` at `x = -0`), where it writes the constants of a literal and
+   * drops a part that is `0`.
+   */
+  private folded(
+    node: Expression,
+    value: number | { readonly re: number; readonly im: number },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    effect: EffectFact,
+    operations: IROperation[]
+  ): IRValue {
+    const literal = (v: number, result: IRValue): IRValue => {
+      operations.push({
+        kind: 'literal',
+        value: v,
+        result,
+        operands: [],
+        effect,
+        origin: node,
+      });
+      return result;
+    };
+    const result = this.resultOf(facts);
+    if (typeof value === 'number') return literal(value, result);
+    const parts = [
+      literal(value.re, this.newValue('real', 'number')),
+      literal(value.im, this.newValue('real', 'number')),
+    ];
+    operations.push({
+      kind: 'binary',
+      fn: 'complex',
+      result,
+      operands: parts,
+      effect,
+      origin: node,
+    });
+    return result;
+  }
+
   /** End `operations` with the yield of `value` (of each value of an
    *  array) and summarize its effects. */
   private region(
@@ -803,6 +853,8 @@ class Lowering {
     // (the rule of `Power` types no base for this form).
     if (operator === 'Power') {
       const form = this.prep.forms.get(node);
+      if (typeof form === 'object')
+        return this.folded(node, form.folded, facts, effect, operations);
       if (form === 'exp') {
         const exponent = this.convert(
           this.value(node.ops[1], scope, operations),
@@ -946,6 +998,8 @@ class Lowering {
     // and the degree.
     if (operator === 'Root') {
       const form = this.prep.forms.get(node);
+      if (typeof form === 'object')
+        return this.folded(node, form.folded, facts, effect, operations);
       if (form !== 'cbrt' && form !== 'root')
         return fail(`no recorded form for the root ${node.toString()}`);
       const operands =
@@ -1100,6 +1154,17 @@ class Lowering {
       node.ops.some((op) => exactRationalDivisor(op) !== undefined)
     )
       return this.multiplyByRational(node, facts, scope, operations, effect);
+
+    if (operator === 'Multiply')
+      return this.realProduct(
+        node,
+        node.ops.map((_, i) => i),
+        facts,
+        scope,
+        operations,
+        effect,
+        this.resultOf(facts)
+      );
 
     const kind = Object.hasOwn(OPERATIONS, operator)
       ? OPERATIONS[operator]
@@ -1725,18 +1790,6 @@ class Lowering {
     );
     const rational = node.ops[index];
     const { p, q } = exactRationalDivisor(rational)!;
-    const factors = node.ops.flatMap((operand, i) =>
-      i === index
-        ? []
-        : [
-            this.convert(
-              this.value(operand, scope, operations),
-              facts.conversions?.[i],
-              node,
-              operations
-            ),
-          ]
-    );
     const literal = (value: number): IRValue => {
       const result = this.newValue('integer', 'number');
       operations.push({
@@ -1757,17 +1810,16 @@ class Lowering {
       operations.push({ kind, result, operands, effect, origin: node });
       return result;
     };
-    const numerator =
-      factors.length > 1
-        ? push(
-            'multiply',
-            factors,
-            this.newValue(
-              factors.every((f) => f.type === 'integer') ? 'integer' : 'real',
-              'number'
-            )
-          )
-        : factors[0];
+    // The other factors, in parentheses on the existing emitter: their
+    // product is read as the product of the parent (`realProduct()`).
+    const numerator = this.realProduct(
+      node,
+      node.ops.flatMap((_, i) => (i === index ? [] : [i])),
+      facts,
+      scope,
+      operations,
+      effect
+    );
     const quotient = push(
       'divide',
       [numerator, literal(q)],
@@ -1781,6 +1833,100 @@ class Lowering {
       [quotient, literal(p)],
       this.newValue('real', 'number')
     );
+  }
+
+  /**
+   * The real product of the operands of `node` at `indexes`, in order, each
+   * with its conversion in `facts`, as the existing emitter writes it:
+   * `compileExprOperator()` (`compile-operators.ts`) joins the codes of the
+   * factors with ` * `, and a factor that is a real quotient is written
+   * `n / d` with no parentheses (`Divide` binds tighter than `Multiply` on
+   * the JavaScript target), so JavaScript reads the text from left to
+   * right: `x * (1/y)` is `x * 1 / y`, that is `(x * 1) / y`, and
+   * `x * (z/y) * (w/z)` is `((x * w) / z * z) / y` in the canonical order of
+   * the factors. A factor after the first that is a real quotient
+   * multiplies the product by its numerator (a numerator that is a quotient
+   * in turn is read the same way, `a / b / c`) and divides it by its
+   * denominator; a denominator is in parentheses, and so is a numerator
+   * that is a product. The first factor and every other factor are one
+   * operand. The multiplications between two divisions are one `multiply`
+   * of their operands, so a product with no quotient factor is one
+   * `multiply`, as before. `result`: the value of the last operation.
+   */
+  private realProduct(
+    node: Expression & { ops: readonly Expression[] },
+    indexes: readonly number[],
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact,
+    result?: IRValue
+  ): IRValue {
+    const factor = (i: number) =>
+      this.convert(
+        this.value(node.ops[i], scope, operations),
+        facts.conversions?.[i],
+        node,
+        operations
+      );
+    const quotientOf = (operand: Expression) =>
+      isFunction(operand, 'Divide') &&
+      operand.nops === 2 &&
+      this.facts(operand, scope).representation === 'number'
+        ? operand
+        : undefined;
+    const steps: { kind: 'multiply' | 'divide'; value: IRValue }[] = [];
+    const quotient = (q: Expression & { ops: readonly Expression[] }) => {
+      const qFacts = this.facts(q, scope);
+      const part = (i: number) =>
+        this.convert(
+          this.value(q.ops[i], scope, operations),
+          qFacts.conversions?.[i],
+          q,
+          operations
+        );
+      const inner = quotientOf(q.ops[0]);
+      if (inner !== undefined) quotient(inner);
+      else steps.push({ kind: 'multiply', value: part(0) });
+      steps.push({ kind: 'divide', value: part(1) });
+    };
+    const first = factor(indexes[0]);
+    for (const i of indexes.slice(1)) {
+      const q = quotientOf(node.ops[i]);
+      if (q !== undefined) quotient(q);
+      else steps.push({ kind: 'multiply', value: factor(i) });
+    }
+    let product = first;
+    let pending: IRValue[] = [first];
+    const push = (
+      kind: 'multiply' | 'divide',
+      operands: IRValue[],
+      last: boolean
+    ): IRValue => {
+      const type =
+        kind === 'multiply' && operands.every((v) => v.type === 'integer')
+          ? 'integer'
+          : 'real';
+      const value =
+        last && result !== undefined ? result : this.newValue(type, 'number');
+      operations.push({ kind, result: value, operands, effect, origin: node });
+      return value;
+    };
+    steps.forEach((step, i) => {
+      const last = i === steps.length - 1;
+      if (step.kind === 'multiply') {
+        pending.push(step.value);
+        if (last) product = push('multiply', pending, true);
+        return;
+      }
+      const dividend =
+        pending.length > 1 ? push('multiply', pending, false) : pending[0];
+      product = push('divide', [dividend, step.value], last);
+      pending = [product];
+    });
+    if (steps.length === 0 && result !== undefined)
+      return push('multiply', pending, true);
+    return product;
   }
 
   /**

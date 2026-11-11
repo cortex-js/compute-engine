@@ -22,7 +22,15 @@ import {
   indexElementType,
   isNonRealNumber,
 } from '../../common/type/utils.js';
-import { fixedLogBase, withoutNaNMember } from './compile-real-analysis.js';
+import {
+  assumedRealNonNegative,
+  fixedLogBase,
+  withoutNaNMember,
+} from './compile-real-analysis.js';
+import {
+  negativeBaseRealPow,
+  principalComplexPow,
+} from './constant-folding.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { realPowerBranchTerms } from '../numerics/real-power.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
@@ -1374,6 +1382,11 @@ function structuredScalarFunctionRule(
  *   `complex` mode the handler wraps the helper of `Sin`, `Cos` and `Tanh`
  *   in `_SYS.cplx()`, which returns the object of the helper as it is.
  *   `Arctan2` with a complex operand is declined.
+ * - A real operand and a node whose type, without its infinities and
+ *   `NaN`, is not real in the `complex` mode, or one of numbers that are
+ *   not real: the compiler wraps the real call in `_SYS.cplx()` there
+ *   (`liftWideResult()`), or reads it as complex. `Sin(a/y)` with `a`, `y`
+ *   of the type `real` has the type `number`.
  *
  * `Abs` of a real operand that the existing emitter proves non-negative
  * (`isNonNegative()` of `compile-conditions.ts`: a number literal that is
@@ -1432,6 +1445,28 @@ function structuredFunctionRule(
           [w.convert(facts[0], facts[0].type)!]
         );
       }
+      // A real operand: the handler writes the real call, and the compiler
+      // reads the node by its type, as for the lane `type` of
+      // `ScalarFunctionLane`. In the `complex` mode it wraps the call in
+      // `_SYS.cplx()` when the type is wide (`Sin(a/y)` with `a`, `y` of
+      // the type `real` has the type `number`).
+      const type = finitePartOfType(node.type.type);
+      if (isNonRealNumber(type))
+        return w.refuse(
+          node,
+          'signature',
+          `${node.toString()} has the type ${node.type.toString()}, which is ` +
+            `not real: the existing compiler reads its value as complex, and ` +
+            `its handler writes the real call`
+        );
+      if (mode === 'complex' && !isSubtype(type, 'real'))
+        return w.refuse(
+          node,
+          'signature',
+          `${node.toString()} has the type ${node.type.toString()}, which is ` +
+            `not real, in the complex mode: the existing compiler wraps the ` +
+            `real call in _SYS.cplx`
+        );
       if (head === 'Abs') {
         const operand = node.op1;
         const nonNegative = isNumber(operand)
@@ -1489,14 +1524,16 @@ function structuredFunctionRule(
  *   handler writes `Math.pow(b, 1.5)` in the `strict` mode, the form
  *   `real-pow` (`constantPowerForm()`), and `_SYS.cpow` in the `complex`
  *   mode, declined.
- * - A real number literal base, with a number literal exponent: the handler
- *   folds the power of two finite number literals to the literal
- *   `Math.pow(b, e)` before every other rule, also with `constantFold:
- *   false` (`tryGetConstant()` of both operands). `b * Math.sqrt(b)` is not
- *   the same double for about a quarter of the bases (`10^1.5` is
- *   `31.622776601683793` folded and `31.622776601683796` as a product), and
- *   no rule of the language makes `Math.pow(b, 2)` equal to `b * b`: every
- *   form with a number literal exponent declines a finite literal base.
+ * - A finite real number literal base, with a number literal exponent: the
+ *   handler folds the power of two finite number literals to a literal
+ *   before every other rule, also with `constantFold: false`
+ *   (`tryGetConstant()` of both operands): `Math.pow(b, e)`, or for a `NaN`
+ *   power the principal complex value, the real root of a negative base or
+ *   `NaN` (`foldedLiteralPower()`). The route writes the same literal, the
+ *   form `{ folded }`, and declines a folded value whose shape is not the
+ *   one that the parent reads. It is not a product of the base: `10^1.5` is
+ *   `31.622776601683793` folded and `31.622776601683796` as
+ *   `b * Math.sqrt(b)`.
  * - An exponent that is not a number literal (`s^(d/2)`): the handler
  *   writes `_SYS.pow(b, e)` (the power of the interpreter for a real base
  *   and a real exponent, the function `pow`) when both operands are real
@@ -1627,14 +1664,21 @@ function structuredPowerRule(
         ]);
       }
       const literal = node.op1;
-      if (isNumber(literal) && literal.im === 0 && Number.isFinite(literal.re))
-        return w.refuse(
+      if (
+        isNumber(literal) &&
+        literal.im === 0 &&
+        Number.isFinite(literal.re)
+      ) {
+        const folded = foldedLiteralPower(node, mode);
+        if ('refusal' in folded)
+          return w.refuse(node, 'signature', folded.refusal);
+        forms.set(node, folded);
+        return w.valueFacts(
           node,
-          'signature',
-          `Power of the number literal ${literal.toString()} is not in the ` +
-            `structured route: the existing emitter folds it to the literal ` +
-            `Math.pow(b, e), which can differ from the product it writes`
+          { kind: typeof folded.folded === 'number' ? 'real' : 'complex' },
+          [w.convert(base, base.type)!, w.convert(exponent, exponent.type)!]
         );
+      }
       if (form === 'square') {
         // The existing emitter reads through a square root under an even
         // power (`realRadicalPower()` in `javascript-target.ts`): for a
@@ -1649,6 +1693,24 @@ function structuredPowerRule(
             `the square of the square root ${node.op1.toString()} is not in ` +
               `the structured route: the existing emitter writes the radicand ` +
               `itself when it proves it non-negative`
+          );
+        // For a real base, the handler writes `_SYS.cpow` before the square
+        // when the node is on the complex lane, as for the other number
+        // literal exponents (`constantPowerForm()`): `Power(Floor(a/y), 2)`
+        // has the type `number`.
+        const nodeType = finitePartOfType(node.type.type);
+        if (
+          base.type.kind !== 'complex' &&
+          (mode === 'strict'
+            ? isNonRealNumber(nodeType)
+            : !isSubtype(nodeType, 'real'))
+        )
+          return w.refuse(
+            node,
+            'signature',
+            `the power ${node.toString()} has the type ${node.type.toString()}, ` +
+              `which is not real${mode === 'complex' ? ', in the complex mode' : ''}: ` +
+              `the existing emitter writes the complex power`
           );
         forms.set(node, 'square');
         const type =
@@ -1701,6 +1763,189 @@ function structuredPowerRule(
   } satisfies FragmentRule<ScalarRepresentation>;
 }
 
+/** A value written as the existing emitter writes it, `String(v)`, and read
+ *  back: the same double, but `0` for `-0`. */
+const printedDouble = (v: number): number => Number(String(v));
+
+/**
+ * Whether `head(...ops)` has a type, without its infinities and `NaN`, that
+ * is one of numbers that are not real: the test of the existing emitter for
+ * a folded literal (`resultIsComplexValued()` in `javascript-target.ts`),
+ * which reads the type of the structural form of the node.
+ */
+function foldsToComplex(
+  head: 'Power' | 'Root',
+  ops: readonly Expression[]
+): boolean {
+  try {
+    const type = ops[0].engine.function(head, [...ops], {
+      form: 'structural',
+    }).type;
+    return isNonRealNumber(finitePartOfType(type.type));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The folded value of `node`, a `Power` or a `Root` of two finite real
+ * number literals whose value `value` the existing emitter writes, or the
+ * refusal of the route. `readsComplex`: the parent of the node in the
+ * existing compiler reads it as a complex value (`isComplexValued()`). A
+ * complex value must be read as complex. A real value read as complex is,
+ * in the `complex` mode and for a type that is not one of numbers that are
+ * not real, the complex value `v + 0i`: the existing compiler writes
+ * `_SYS.cplx(v)` around it (`Root(-2, 2.2)` has the type `number`, and
+ * `Root(-2, -4)` is promoted: `_SYS.cplx(NaN)`), as a value that is not a
+ * literal. Every other real value read as complex is refused.
+ */
+function foldedLiteral(
+  node: Expression,
+  value: number | { re: number; im: number },
+  mode: 'strict' | 'complex',
+  readsComplex: boolean
+): { folded: number | { re: number; im: number } } | { refusal: string } {
+  // A `NaN` fold where the interpreter has a finite value is not a caveat
+  // of compiled code: `Root(-2, -4)` folds to `NaN` (and to `_SYS.cplx(NaN)`
+  // in the `complex` mode), and its value is `0.5946… - 0.5946…i`. A `NaN`
+  // fold whose interpreter value is not a finite number (`(-1e-200)^(-5/3)`
+  // is `-2.15e333`, an infinity as a double) is kept.
+  const nan =
+    typeof value === 'number'
+      ? Number.isNaN(value)
+      : Number.isNaN(value.re) || Number.isNaN(value.im);
+  if (nan) {
+    const exact = node.N();
+    if (Number.isFinite(exact.re) && Number.isFinite(exact.im))
+      return {
+        refusal:
+          `the ${node.operator === 'Power' ? 'power' : 'root'} ${node.toString()} ` +
+          `of number literals is folded to NaN by the existing emitter, and ` +
+          `its value is the finite number ${exact.toString()}`,
+      };
+  }
+  const type = finitePartOfType(node.type.type);
+  if (
+    mode === 'complex' &&
+    typeof value === 'number' &&
+    readsComplex &&
+    !isNonRealNumber(type)
+  )
+    return { folded: { re: value, im: 0 } };
+  if (readsComplex !== (typeof value === 'object'))
+    return {
+      refusal:
+        `the ${node.operator === 'Power' ? 'power' : 'root'} ${node.toString()} ` +
+        `of number literals has the type ${node.type.toString()}, and the ` +
+        `existing compiler folds it to a ${typeof value === 'object' ? 'complex' : 'real'} ` +
+        `value that it reads as ${readsComplex ? 'complex' : 'real'}` +
+        (mode === 'complex' ? ' in the complex mode' : ''),
+    };
+  return { folded: value };
+}
+
+/**
+ * `Power(b, e)` of two finite real number literals (the base is one; the
+ * forms of `powerForm()` other than `exp` and `variable` have a finite real
+ * number literal exponent): the `Power` handler of the existing emitter
+ * folds it before every other branch, also with `constantFold: false`, and
+ * writes `String(v)`:
+ *
+ * - `v = Math.pow(b, e)` when it is not `NaN`;
+ * - otherwise the principal complex power of the interpreter
+ *   (`principalComplexPow()`, written `({ re: …, im: … })`) when the type of
+ *   the node is one of numbers that are not real, the real root of a
+ *   negative base when the exponent is read as a rational with an odd
+ *   denominator (`negativeBaseRealPow()`), and `NaN` otherwise.
+ *
+ * The route writes the same value as a literal, the form `{ folded }`: the
+ * printed double, so `-0` is `0` as in the code of the existing emitter.
+ */
+function foldedLiteralPower(
+  node: Expression,
+  mode: 'strict' | 'complex'
+): { folded: number | { re: number; im: number } } | { refusal: string } {
+  if (!isFunction(node) || !isNumber(node.op1) || !isNumber(node.op2))
+    return { refusal: 'Power of two number literals expected' };
+  const [base, exponent] = [node.op1.re, node.op2.re];
+  const r = Math.pow(base, exponent);
+  let value: number | { re: number; im: number };
+  if (!Number.isNaN(r)) value = printedDouble(r);
+  else if (foldsToComplex('Power', node.ops)) {
+    const c = principalComplexPow(base, exponent);
+    value = { re: printedDouble(c.re), im: printedDouble(c.im) };
+  } else
+    value = printedDouble(negativeBaseRealPow(base, node.op2, exponent) ?? NaN);
+  // How the parent reads the node (`isComplexValued()`): real for an
+  // exponent read as a rational with an odd denominator
+  // (`realPowerExponent()`, before the other branches); complex, in the
+  // `complex` mode, for an exponent that is not an integer and a base not
+  // proved non-negative (`promotesRadicalToComplex()`); else complex for a
+  // type, without its infinities and `NaN`, that is one of numbers that are
+  // not real, or that is not real in the `complex` mode.
+  const type = finitePartOfType(node.type.type);
+  const readsComplex =
+    BaseCompiler.realPowerExponent(node.ops) === undefined &&
+    (isNonRealNumber(type) ||
+      (mode === 'complex' &&
+        (!isSubtype(type, 'real') ||
+          (!Number.isInteger(exponent) && !assumedRealNonNegative(node.op1)))));
+  return foldedLiteral(node, value, mode, readsComplex);
+}
+
+/**
+ * `Root(x, n)` of two finite real number literals, with `n` not 0: the
+ * `Root` handler of the existing emitter folds it first, and writes
+ * `String(v)`: `v = Math.pow(x, 1/n)` when it is not `NaN`; otherwise, for a
+ * negative radicand, `-Math.pow(-x, 1/n)` for an odd integer degree or a
+ * degree read as a rational with an odd numerator and an odd denominator
+ * (`realRootDegreeTerms()`), `Math.pow(-x, 1/n)` for one with an even
+ * numerator, the principal complex power for a node whose type is one of
+ * numbers that are not real, and `NaN` otherwise. The route writes the same
+ * value as a literal (the form `{ folded }`).
+ */
+function foldedLiteralRoot(
+  node: Expression,
+  mode: 'strict' | 'complex'
+): { folded: number | { re: number; im: number } } | { refusal: string } {
+  if (!isFunction(node) || !isNumber(node.op1) || !isNumber(node.op2))
+    return { refusal: 'Root of two number literals expected' };
+  const [radicand, degree] = [node.op1.re, node.op2.re];
+  const r = Math.pow(radicand, 1 / degree);
+  let value: number | { re: number; im: number };
+  if (!Number.isNaN(r)) value = printedDouble(r);
+  else {
+    const realRoot =
+      radicand < 0 ? BaseCompiler.realRootDegreeTerms(node.op2) : undefined;
+    if (
+      radicand < 0 &&
+      ((Number.isInteger(degree) && degree % 2 !== 0) ||
+        realRoot?.oddNumerator === true)
+    )
+      value = printedDouble(-Math.pow(-radicand, 1 / degree));
+    else if (realRoot !== undefined)
+      value = printedDouble(Math.pow(-radicand, 1 / degree));
+    else if (foldsToComplex('Root', node.ops)) {
+      const c = principalComplexPow(radicand, 1 / degree);
+      value = { re: printedDouble(c.re), im: printedDouble(c.im) };
+    } else value = NaN;
+  }
+  // How the parent reads the node (`isComplexValued()`): complex for a
+  // type, without its infinities and `NaN`, that is one of numbers that are
+  // not real; in the `complex` mode also for a type that is not real, and
+  // for an even integer degree and a radicand not proved non-negative
+  // (`promotesRadicalToComplex()`).
+  const type = finitePartOfType(node.type.type);
+  const readsComplex =
+    isNonRealNumber(type) ||
+    (mode === 'complex' &&
+      (!isSubtype(type, 'real') ||
+        (Number.isInteger(degree) &&
+          degree % 2 === 0 &&
+          !assumedRealNonNegative(node.op1))));
+  return foldedLiteral(node, value, mode, readsComplex);
+}
+
 /**
  * The form of `Power(b, e)` for a real number literal exponent `e` other
  * than 2 (the forms `float`, `integer`, `rational` and `three-halves` of
@@ -1750,7 +1995,7 @@ function constantPowerForm(
   baseKind: string,
   mode: 'strict' | 'complex',
   snapshotOf: SnapshotOf
-): StructuredForm | { refusal: string } {
+): Extract<StructuredForm, string> | { refusal: string } {
   const refuse = (refusal: string) => ({ refusal });
   if (!isFunction(node) || !isNumber(node.op2))
     return refuse('Power with an exponent that is not a number literal');
@@ -1878,7 +2123,9 @@ function constantPowerForm(
  * `Root` handler of the existing emitter (`javascript-target.ts`) writes,
  * for a real radicand and a real degree:
  *
- * - two finite number literals: folded. Refused.
+ * - two finite number literals, with a degree that is not 0: folded
+ *   (`foldedLiteralRoot()`). The route writes the same literal, the form
+ *   `{ folded }`.
  * - a complex radicand or degree: `_SYS.croot`. Refused.
  * - a node on the complex lane (in the `strict` mode a type that is one of
  *   numbers that are not real; an even integer degree and a radicand that
@@ -1924,30 +2171,44 @@ function structuredRootRule(
         );
       const type = finitePartOfType(node.type.type);
       const literal = isNumber(node.op2);
-      const refusal =
+      // Two finite real literals, with a degree that is not 0: folded.
+      if (
         literal &&
         isNumber(node.op1) &&
         node.op1.im === 0 &&
-        Number.isFinite(node.op1.re)
-          ? `Root of the number literal ${node.op1.toString()} is not in the ` +
-            `structured route: the existing emitter folds it`
-          : literal && !(isNumber(node.op2) && node.op2.isSame(3))
-            ? `Root with the degree ${node.op2.toString()} is not in the ` +
-              `structured route, which has the degree 3 and a degree that is ` +
-              `not a number literal`
-            : !literal && node.op2.unknowns.length === 0
-              ? `the degree ${node.op2.toString()} of Root has no unknown ` +
-                `(each symbol in it has a value), and is not in the ` +
-                `structured route`
-              : mode === 'strict' && isNonRealNumber(type)
+        Number.isFinite(node.op1.re) &&
+        node.op2.im === 0 &&
+        Number.isFinite(node.op2.re) &&
+        node.op2.re !== 0
+      ) {
+        const folded = foldedLiteralRoot(node, mode);
+        if ('refusal' in folded)
+          return w.refuse(node, 'signature', folded.refusal);
+        forms.set(node, folded);
+        return w.valueFacts(
+          node,
+          { kind: typeof folded.folded === 'number' ? 'real' : 'complex' },
+          [w.convert(radicand, radicand.type)!, w.convert(degree, degree.type)!]
+        );
+      }
+      const refusal =
+        literal && !(isNumber(node.op2) && node.op2.isSame(3))
+          ? `Root with the degree ${node.op2.toString()} is not in the ` +
+            `structured route, which has the degree 3 and a degree that is ` +
+            `not a number literal`
+          : !literal && node.op2.unknowns.length === 0
+            ? `the degree ${node.op2.toString()} of Root has no unknown ` +
+              `(each symbol in it has a value), and is not in the ` +
+              `structured route`
+            : mode === 'strict' && isNonRealNumber(type)
+              ? `the root ${node.toString()} has the type ` +
+                `${node.type.toString()}, which is not real: the existing ` +
+                `emitter writes the complex power`
+              : mode === 'complex' && !isSubtype(type, 'real')
                 ? `the root ${node.toString()} has the type ` +
-                  `${node.type.toString()}, which is not real: the existing ` +
-                  `emitter writes the complex power`
-                : mode === 'complex' && !isSubtype(type, 'real')
-                  ? `the root ${node.toString()} has the type ` +
-                    `${node.type.toString()}, which is not real, in the ` +
-                    `complex mode: the existing emitter writes a complex value`
-                  : undefined;
+                  `${node.type.toString()}, which is not real, in the ` +
+                  `complex mode: the existing emitter writes a complex value`
+                : undefined;
       if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
       forms.set(node, literal ? 'cbrt' : 'root');
       return w.valueFacts(node, { kind: 'real' }, [
@@ -3149,6 +3410,32 @@ function structuredListRefusal(node: Expression): string | undefined {
 }
 
 /**
+ * Throw, on the structured route, for a number literal that is an
+ * undirected infinity (`ComplexInfinity`) with a real part other than
+ * `+Infinity`: the existing compiler writes every such literal `Infinity`
+ * (`compileExpr()` in `compiler-core.ts`, the pole-encoding ruling), and the
+ * route writes its real part. `Negate(Power(0, -1))` canonicalizes to the
+ * literal `-oo - oo·i`, which the route wrote `-Infinity`.
+ */
+function refuseUndirectedInfinity(
+  node: Expression,
+  admission: Admission
+): void {
+  if (
+    admission.structured &&
+    isNumber(node) &&
+    node.isInfinity === true &&
+    node.isComplex === true &&
+    node.re !== Infinity
+  )
+    throw new Error(
+      `JS scalar fragment: the undirected infinity ${node.toString()} with ` +
+        `the real part ${node.re} is not in the structured route: the ` +
+        `existing compiler writes Infinity`
+    );
+}
+
+/**
  * Throw, on the structured route, for a function node whose engine type is
  * the value `true` or `false` (`booleanClaim()` in `compile-conditions.ts`):
  * the existing compiler writes that literal in place of the node before any
@@ -3915,6 +4202,21 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (structured) this.endPhase('annotation', annotationStart);
       return prepared;
     }
+    // A root `Block` with statements, on the structured route: the
+    // admission of the body of a root function, with the free symbols as
+    // the inputs (`attachRootBlock()`).
+    if (
+      registry !== undefined &&
+      isFunction(prepared.expr, 'Block') &&
+      isLibraryOperator(prepared.expr, 'Block') &&
+      prepared.expr.nops > 1
+    ) {
+      atNode(prepared.expr, () =>
+        attachRootBlock(prepared.expr, prepared.target, admission, registry)
+      );
+      this.endPhase('annotation', annotationStart);
+      return prepared;
+    }
     const named: NamedCalls = { calls: new Set(), structured: registry };
     const seen = new Set<Expression>();
     /** The declared type of each free symbol, for the label of a list
@@ -3933,6 +4235,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       seen.add(node);
       refuseListHead(node, admission);
       refuseBooleanClaim(node, admission);
+      refuseUndirectedInfinity(node, admission);
       refuseHaversineGrouping(
         node,
         admission,
@@ -4008,6 +4311,27 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           'JS scalar fragment: the structured route admits a Loop only as a ' +
             'statement of the body of a root Function'
         );
+      // A block of one value is a value (`structuredValueParts()`, above).
+      if (
+        structured &&
+        isFunction(node, 'Block') &&
+        isLibraryOperator(node, 'Block') &&
+        node.nops === 0
+      )
+        throw new Error(
+          'JS scalar fragment: an empty Block is not in the structured route: ' +
+            'it has no value'
+        );
+      if (
+        structured &&
+        isFunction(node, 'Block') &&
+        isLibraryOperator(node, 'Block')
+      )
+        throw new Error(
+          'JS scalar fragment: the structured route admits a Block with ' +
+            'statements only as the root of the compiled expression or as the ' +
+            'body of a Function, and not as an operand'
+        );
       if (isFunction(node) && !Object.hasOwn(definition.rules, node.operator)) {
         collectHelper(node, prepared.target, named, admission);
         for (const operand of node.ops) check(operand);
@@ -4030,7 +4354,10 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         ((node.operator === 'Sqrt' || node.operator === 'Negate') &&
           node.nops !== 1)
       )
-        throw new Error('JS scalar fragment: unsupported arity');
+        throw new Error(
+          `JS scalar fragment: unsupported arity: ${node.operator} with ` +
+            `${node.nops} operands`
+        );
       if (structured) refuseSelection(node);
       checkCondition(node);
       if (node.operator === 'Sqrt') readsSqrt = true;
@@ -4215,6 +4542,58 @@ function scalarType(type: Type) {
   return undefined;
 }
 
+/**
+ * The refusal of the parameter `parameter` of a `Function` literal, named
+ * `name`, that the route has no scalar or list input for, with its cause;
+ * `type` is its kind (`undefined` when it has none), `undeclared` whether
+ * it took the default kind of the mode, and `seen` the names of the
+ * parameters before it. `owner` names the function in the message: the root
+ * function, or a helper (`helper`). `undefined` when the parameter is
+ * admitted.
+ */
+function parameterRefusal(
+  parameter: Expression,
+  name: string,
+  type: unknown,
+  undeclared: boolean,
+  seen: readonly string[],
+  owner: string,
+  helper = false
+): string | undefined {
+  const which = name ? `the parameter ${name} of ${owner}` : '';
+  if (!name)
+    return (
+      `the parameter ${parameter.toString()} of ${owner} is not a name: ` +
+      `a destructuring pattern is not in the structured route`
+    );
+  if (isFunction(parameter, 'Optional'))
+    return `${which} has a default value, which is not in the structured route`;
+  if (isFunction(parameter, 'Spread'))
+    return `${which} is variadic, which is not in the structured route`;
+  if (!undeclared && (!isFunction(parameter, 'Typed') || parameter.nops !== 2))
+    return (
+      `${which} has no type annotation` +
+      (helper
+        ? `, and the helper has a declared signature: the structured route ` +
+          `reads the type of a parameter from the annotation of the literal`
+        : `, and its binding has the declared type ` +
+          `${parameter.type.toString()}: the structured route reads the type ` +
+          `of a parameter from its annotation`)
+    );
+  if (name === 'True' || name === 'False')
+    return `${which} has the name of a boolean constant`;
+  if (seen.includes(name)) return `${which} has the name of another parameter`;
+  const declared = functionLiteralParameterType(parameter);
+  if (!type)
+    return (
+      `${which} has the type ` +
+      `${declared === undefined ? parameter.type.toString() : typeToString(declared)}, which is not in ` +
+      `the structured route: a parameter is a number, a boolean, or a list ` +
+      `of reals or of integers`
+    );
+  return undefined;
+}
+
 function attachBoundFunction(
   fn: Expression,
   target: CompileTarget<Expression>,
@@ -4249,17 +4628,23 @@ function attachBoundFunction(
           : admission.structured
             ? structuredParameterType(declared, name)
             : scalarType(declared);
-      if (
-        (!undeclared &&
-          (!isFunction(parameter, 'Typed') || parameter.nops !== 2)) ||
-        !name ||
-        !type ||
-        name === 'True' ||
-        name === 'False' ||
-        inputs.some((input) => input.name === name)
-      )
+      const refusal = parameterRefusal(
+        parameter,
+        name,
+        type,
+        undeclared,
+        inputs.map((input) => input.name),
+        'the function'
+      );
+      // `parameterRefusal()` refuses a parameter with no type. The existing
+      // route keeps its message.
+      if (refusal !== undefined || !type)
         throw new Error(
-          'JS scalar fragment: explicit distinct scalar parameters required'
+          `JS scalar fragment: ${
+            admission.structured
+              ? refusal
+              : 'explicit distinct scalar parameters required'
+          }`
         );
       inputs.push({ name, type, declared: type.kind });
       if (declared !== undefined) declaredTypes.set(name, declared);
@@ -4270,6 +4655,8 @@ function attachBoundFunction(
     }
   }
   const body = fn.op1.canonical;
+  if (admission.structured)
+    refuseLocalFunctions(body, 'the body of a Function');
   const named: NamedCalls = { calls: new Set(), structured: registry };
   admitFunctionBody(
     body,
@@ -4309,6 +4696,175 @@ function attachBoundFunction(
           input.type!,
           declaredTypes.get(input.name),
           defaulted.has(input.name) && registry?.mode === 'complex'
+        )
+      ),
+    defaulted,
+  });
+}
+
+/**
+ * Refuse a local function in `body`, the body of a root function or a root
+ * block (`place` names it): a `DefineFunction`, or a `Declare` whose value
+ * is a `Function` literal. The body admission (`admitFunctionBody()`)
+ * refuses each local function, but it resolves a call of one that a later
+ * statement defines as a helper first, and that fails with no refusal
+ * (`assertCapturedCallableBindings()`: "the captured callable definition is
+ * not in scope").
+ */
+function refuseLocalFunctions(body: Expression, place: string): void {
+  const visit = (node: Expression): void => {
+    if (!isFunction(node)) return;
+    if (
+      node.operator === 'DefineFunction' ||
+      (node.operator === 'Declare' &&
+        isFunction(declareValueOperand(node.ops), 'Function'))
+    )
+      throw new Error(
+        `JS scalar fragment: the structured route admits no local function ` +
+          `in ${place} (${node.operator} of ${node.op1.toString()})`
+      );
+    for (const op of node.ops) visit(op);
+  };
+  visit(body);
+}
+
+/**
+ * A root `Block` with statements, `body`, on the structured route: the
+ * existing compiler writes it as a function that it calls at once, with the
+ * free symbols read as the inputs `_.x` (`(() => { let a = …; return a + 1
+ * })()`). The route admits it as the body of a root function
+ * (`admitFunctionBody()`), whose parameters are the free symbols: the names
+ * that the block does not bind (`boundNames()`) and that hold no value (a
+ * symbol with a value is a captured binding). Each free symbol is then an
+ * input, typed as a free symbol of an expression (a name with no declared
+ * type has the default kind of the mode), in the order of its first read.
+ *
+ * A write to a free symbol is refused: the existing compiler makes the name
+ * a local of the block, and the route admits a write only to a local that a
+ * `Declare` declares.
+ */
+function attachRootBlock(
+  body: Expression,
+  target: CompileTarget<Expression>,
+  admission: Admission,
+  registry: StructuredRegistry
+): void {
+  const bound = new Set(boundNames(body));
+  /** The free symbols, the first read of each name. */
+  const free: (Expression & { symbol: string })[] = [];
+  /** The indexes of the aggregates and comprehensions around the node. */
+  const indexes = new Set<string>();
+  const collect = (node: Expression): void => {
+    if (isSymbol(node)) {
+      const name = node.symbol;
+      if (
+        name === 'True' ||
+        name === 'False' ||
+        bound.has(name) ||
+        indexes.has(name) ||
+        node.valueDefinition?.value !== undefined ||
+        free.some((s) => s.symbol === name)
+      )
+        return;
+      free.push(node);
+      return;
+    }
+    if (!isFunction(node)) return;
+    if (
+      node.operator === 'Assign' &&
+      isSymbol(node.op1) &&
+      !bound.has(node.op1.symbol)
+    )
+      throw new Error(
+        `JS scalar fragment: the structured route admits a write in a root ` +
+          `Block only to a local that a Declare declares, and ` +
+          `${node.op1.symbol} is not declared (the existing compiler makes ` +
+          `it a local of the block)`
+      );
+    // The name and the type of a declaration are not reads.
+    if (node.operator === 'Declare') {
+      const value = declareValueOperand(node.ops);
+      if (value !== undefined) collect(value);
+      return;
+    }
+    // The index of a `Sum`, a `Product` or a comprehension is not a free
+    // symbol where the form binds it (`structuredValueParts()`). A form
+    // that the admission refuses is read as any other node here: the
+    // admission gives its refusal.
+    let parts: ReturnType<typeof structuredValueParts>;
+    try {
+      parts = structuredValueParts(node, false);
+    } catch {
+      parts = undefined;
+    }
+    if (parts?.indexes !== undefined) {
+      for (const op of parts.outer) collect(op);
+      const added: string[] = [];
+      for (const { index, bounds } of parts.indexes) {
+        for (const b of bounds) collect(b);
+        if (!indexes.has(index)) {
+          indexes.add(index);
+          added.push(index);
+        }
+      }
+      for (const op of parts.inner) collect(op);
+      for (const index of added) indexes.delete(index);
+      return;
+    }
+    for (const op of node.ops) collect(op);
+  };
+  refuseLocalFunctions(body, 'a root Block');
+  collect(body);
+  const named: NamedCalls = { calls: new Set(), structured: registry };
+  admitFunctionBody(
+    body,
+    free.map((s) => s.symbol),
+    target,
+    admission,
+    named
+  );
+  /** The declared type of each free symbol, for the label of a list
+   *  input (`elementLabel()`). */
+  const symbolTypes = new Map<string, Type>();
+  /** The free symbols with no declared type (`hasNoDeclaredType()`). */
+  const defaulted = new Set<string>();
+  for (const node of free)
+    atNode(node, () => {
+      symbolTypes.set(node.symbol, node.type.type);
+      if (hasNoDeclaredType(node)) {
+        defaulted.add(node.symbol);
+        return;
+      }
+      const list = structuredListType(node.type.type);
+      if (list !== undefined && 'refusal' in list)
+        throw new Error(
+          `JS scalar fragment: the input ${node.symbol} has ${list.refusal}`
+        );
+      if (admission.definition.typeOfSymbol(node) === undefined)
+        throw new Error(
+          `JS scalar fragment: unsupported binding ${node.symbol}`
+        );
+    });
+  const annotation = annotateCalls(body, admission.definition, named);
+  checkLocalWrites(body, annotation.scope);
+  attachScalarFragment(target, {
+    root: body,
+    helper: named.helper,
+    annotation,
+  });
+  // The inputs are the free symbols, in the order of their first read: the
+  // pass binds each one in the root scope there.
+  recordStructured(target, admission, {
+    root: body,
+    annotation,
+    named,
+    inputs: () =>
+      [...annotation.scope.bindings].map(([name, facts]) =>
+        structuredInput(
+          name,
+          facts.type,
+          symbolTypes.get(name),
+          defaulted.has(name) && registry.mode === 'complex'
         )
       ),
     defaulted,
@@ -4552,6 +5108,7 @@ function admitFunctionBody(
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
+    refuseUndirectedInfinity(node, admission);
     refuseHaversineGrouping(node, admission, () => false);
     if (!node.isValid || node.type.type === 'error')
       throw new Error(
@@ -5694,17 +6251,22 @@ function resolveHelper(
       ? defaultedParameterKind(parameter, registry)
       : undefined;
     const scalar = defaultType ?? typeOf(type, name);
-    if (
-      (defaultType === undefined &&
-        (!isFunction(parameter, 'Typed') || parameter.nops !== 2)) ||
-      !name ||
-      !scalar ||
-      parameters.includes(name) ||
-      name === 'True' ||
-      name === 'False'
-    )
+    const refusal = parameterRefusal(
+      parameter,
+      name,
+      scalar,
+      defaultType !== undefined,
+      parameters,
+      `the helper ${call.operator}`,
+      true
+    );
+    // `parameterRefusal()` refuses a parameter with no type. The existing
+    // route keeps its message.
+    if (refusal !== undefined || !scalar)
       throw new Error(
-        'JS scalar fragment: helper requires explicit scalar parameters'
+        `JS scalar fragment: ${
+          registry ? refusal : 'helper requires explicit scalar parameters'
+        }`
       );
     const declared = signature.args?.[parameters.length]?.type;
     const declaredScalar = defaultType ?? typeOf(declared, name);
@@ -5744,6 +6306,7 @@ function resolveHelper(
   const checkNode = (node: Expression, root: boolean): void => {
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
+    refuseUndirectedInfinity(node, admission);
     refuseHaversineGrouping(node, admission, () => false);
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid helper body');

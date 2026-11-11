@@ -536,11 +536,11 @@ describe('refusals', () => {
     ['a matrix', body([typed('L', 'matrix<real>'), I], 'i'), /the parameter L has the type matrix<real>/],
     // A type that is not a list type keeps the message of a parameter that
     // the route has no type for.
-    ['a tuple parameter', body([typed('T', 'tuple<real, real>'), I], ['At', 'T', 'i']), /explicit distinct scalar parameters required/],
+    ['a tuple parameter', body([typed('T', 'tuple<real, real>'), I], ['At', 'T', 'i']), /the parameter T of the function has the type tuple<real, real>, which is not in the structured route: a parameter is a number, a boolean, or a list of reals or of integers/],
     ['a list of complex numbers', body([typed('L', 'list<complex>'), I], ['At', 'L', 'i']), /the parameter L has the type list<complex>/],
     ['a list of booleans', body([typed('L', 'list<boolean>'), I], 'i'), /the parameter L has the type list<boolean>/],
     ['vector, a list of numbers', body([typed('L', 'vector'), I], 'i'), /the parameter L has the type vector/],
-    ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], 'i'), /explicit distinct scalar parameters required/],
+    ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], 'i'), /the parameter L of the function has the type indexed_collection<real>, which is not in the structured route/],
     ['First', body([L], ['First', 'L']), /First is not in the structured route, which reads a list with At and Length/],
     ['Last', body([L], ['Last', 'L']), /Last is not in the structured route/],
     ['Rest', body([L], ['At', ['Rest', 'L'], 1]), /Rest makes a list, which the structured route does not have/],

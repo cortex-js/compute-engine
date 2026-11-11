@@ -390,7 +390,9 @@ describe('the other signatures keep their decline, each with its message', () =>
     ce.declare('g', '(real) -> real');
     ce.assign('g', ce.expr(['Function', ['Multiply', 't', 2], 't'] as MathJsonExpression));
     const got = profile(ce.expr(root));
-    expect('message' in got && got.message).toMatch(/helper requires explicit scalar parameters/);
+    expect('message' in got && got.message).toMatch(
+      /the parameter t of the helper g has no type annotation, and the helper has a declared signature/
+    );
   });
 
   test('a declared result type that is not a number', () => {

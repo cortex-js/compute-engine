@@ -163,7 +163,8 @@ const ROWS: Row[] = [
     complex: /NotEqual with a complex operand/,
   },
   {
-    // A local, a loop and `Break`. A block is the body of a function only.
+    // A local, a loop and `Break`: the body of a function, or a root block
+    // whose free symbols are the inputs.
     name: 'a loop with a local and Break',
     body: [
       'Block',
@@ -180,9 +181,7 @@ const ROWS: Row[] = [
       's',
     ],
     strict: true,
-    strictFree: /unsupported head Block/,
     complex: COMPLEX_LESS,
-    complexFree: /unsupported head Block/,
   },
   {
     name: 'a call of the helper twice: (real) -> real',
@@ -475,7 +474,9 @@ describe('declarations and conflicts', () => {
       expectAgreement(expr, 'strict');
       const fn = ce.expr(['Function', ['Sin', 'x'], typed('x', type)]);
       expect(profile(fn, 'strict')).toEqual({
-        message: expect.stringMatching(/explicit distinct scalar parameters required/),
+        message: expect.stringMatching(
+          new RegExp(`the parameter x of the function has the type ${type}, which is not in the profile`)
+        ),
       });
     }
   });

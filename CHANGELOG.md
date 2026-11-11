@@ -113,6 +113,9 @@
   declared signatures, captured numbers, loops over an integer range (with
   `Break` at the end of a branch of an `If`), and
   lists of numbers made with a comprehension and updated with `ReplaceAt`.
+  A block of statements can be the compiled expression itself, with its free
+  symbols as the inputs, and a power or a root of two number literals is
+  written as the value that the ordinary compiler folds it to.
   A program outside the profile declines with the diagnostic code
   `outside-profile`, which names the first node outside it (`operator` or
   `binding`); `fallback` applies as for any other decline, and the ordinary

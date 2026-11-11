@@ -942,13 +942,8 @@ describe('refusals', () => {
       'strict',
       /Power with a complex operand and an exponent that is not a number literal/,
     ],
-    // Two finite literals fold to `Math.pow(b, e)`.
-    [
-      'Power of a literal, exponent 1.6',
-      ['Add', 'x', ['Power', 2.5, 1.6]],
-      'strict',
-      /Power of the number literal 2\.5 is not in the structured route: the existing emitter folds it/,
-    ],
+    // Two finite literals fold to `Math.pow(b, e)`, as on the existing
+    // emitter: compile-javascript-structured-literals-block.test.ts.
     // A complex base or exponent: `_SYS.cpow`.
     [
       'z^y',
@@ -1018,21 +1013,9 @@ describe('refusals', () => {
       /unsupported head Sech/,
     ],
     // The existing emitter folds the power of two finite number literals to
-    // the literal `Math.pow(b, e)`, whatever `constantFold` is:
-    // `x + 10^1.5` is `x + 31.622776601683793`, and `10 * Math.sqrt(10)` is
-    // `31.622776601683796`.
-    [
-      'Power of a literal, exponent 1.5',
-      ['Add', 'x', ['Power', 10, 1.5]],
-      'strict',
-      /Power of the number literal 10 is not in the structured route: the existing emitter folds it/,
-    ],
-    [
-      'Power of a literal, exponent 2',
-      ['Add', 'x', ['Power', 1.1, 2]],
-      'strict',
-      /Power of the number literal 1\.1 is not in the structured route/,
-    ],
+    // the literal `Math.pow(b, e)`, whatever `constantFold` is, and the
+    // route writes the same literal: `x + 10^1.5` is `x + 31.622776601683793`
+    // (compile-javascript-structured-literals-block.test.ts).
     // The existing emitter writes the radicand itself for a square of a
     // square root of a non-negative operand; the product of two square roots
     // is another double.
@@ -1668,11 +1651,8 @@ const BRANCH_ROWS: BranchRow[] = [
   ['k^2', ['Power', 'k', 2]],
   ['z^2', ['Power', 'z', 2]],
   ['Sqrt(x)^2', ['Power', ['Sqrt', 'x'], 2], /the square of the square root/],
-  [
-    '1.1^2 + x',
-    ['Add', ['Power', 1.1, 2], 'x'],
-    /Power of the number literal 1\.1/,
-  ],
+  // The literal of the folded power, `Math.pow(1.1, 2)`.
+  ['1.1^2 + x', ['Add', ['Power', 1.1, 2], 'x']],
   ['p^1.5', ['Power', 'p', 1.5]],
   ['Abs(x)^1.5', ['Power', ['Abs', 'x'], 1.5]],
   ['m^1.5', ['Power', 'm', 1.5]],
