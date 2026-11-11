@@ -128,6 +128,10 @@ import {
 } from './checkpoint.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 import {
+  jsProfileSwitchDefault,
+  type JsProfileSwitch,
+} from './js-profile-switch.js';
+import {
   _mapAutoCompileStats,
   type MapAutoCompileStats,
 } from './map-auto-compile-stats.js';
@@ -1693,6 +1697,11 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _boxingEpoch = 0;
+
+  /** See `IComputeEngine._jsProfile`.
+   * @internal
+   */
+  _jsProfile: JsProfileSwitch | undefined = jsProfileSwitchDefault();
 
   /** When true, a scope being discarded tombstones its value definitions and
    * the symbol resolution sites report a use of a dead binding with both

@@ -14,6 +14,14 @@ import {
   callableBindingInContext,
 } from './boxed-expression/binders.js';
 import { isForwardCallReference } from './boxed-expression/forward-call-reference.js';
+import {
+  compileDiagnosticOf,
+  isCompileDeclineError,
+} from './compilation/diagnostics.js';
+import {
+  recordJsProfileAttempt,
+  type JsProfileSwitch,
+} from './js-profile-switch.js';
 
 /**
  * Compile `expr` for an **implicit** (engine-initiated) code-generation path —
@@ -39,6 +47,11 @@ import { isForwardCallReference } from './boxed-expression/forward-call-referenc
  * request keeps failing loudly with the environment's own error, regardless
  * of the flag.
  *
+ * `consumer` names the caller (`map`, `integrand`, `nd`, …). With the
+ * internal switch `ce._jsProfile` on for this consumer, the compilation is
+ * tried with the `numeric-kernel` profile first, and the existing compiler
+ * runs when the profile does not give code (`tryProfile()`).
+ *
  * The compile mode is the target's default, `'strict'`, unless `options`
  * names one: an operation whose value is complex (`Sqrt(x)` at `x = -4`)
  * gives `NaN`. Each caller either reads only real values and treats a `NaN`
@@ -54,19 +67,25 @@ import { isForwardCallReference } from './boxed-expression/forward-call-referenc
 export function implicitCompile(
   ce: IComputeEngine,
   expr: Expression,
+  consumer: string,
   options?: Record<string, unknown>
 ): ReturnType<IComputeEngine['_compile']> | undefined {
   if (ce.jit === 'off') return undefined;
+  const profile = ce._jsProfile;
   try {
     // `entryChecks: false`: an implicit caller owns its argument contract and
     // validates the runner's result itself (see `CompilationOptions.entryChecks`).
-    return withCapturedCallBindings(ce, expr, () =>
-      ce._compile(expr, {
+    return withCapturedCallBindings(ce, expr, () => {
+      if (profile !== undefined) {
+        const result = tryProfile(ce, expr, profile, consumer, options);
+        if (result !== undefined) return result;
+      }
+      return ce._compile(expr, {
         ...options,
         fallback: false,
         entryChecks: false,
-      })
-    );
+      });
+    });
   } catch (e) {
     if (e instanceof EvalError) {
       ce.jit = 'off';
@@ -75,6 +94,102 @@ export function implicitCompile(
     if (e instanceof CancellationError) throw e;
     return undefined;
   }
+}
+
+/**
+ * The compilation of `expr` with the `numeric-kernel` profile, for
+ * `implicitCompile()` with the switch `profile` on, or `undefined` when the
+ * profile is not tried or does not give code; the existing compiler then
+ * runs, with the options of the caller.
+ *
+ * The profile is tried when `consumer` is in the list of the switch (or the
+ * list is absent), the options do not select another target (`to` other
+ * than `javascript`, `target`) or a profile, and they have no `vars` (a
+ * function, or an object with at least one key; an empty object is an
+ * absent option, as for the profile itself): the profile declines every
+ * `vars`, so such a consumer (`series`) is left out and not counted. The
+ * other options are passed: the profile declines those it does not have,
+ * and that decline is counted.
+ *
+ * The sets that the compiler fills (`symbolDeps`, `varsObjectRefs`) are
+ * replaced by fresh sets for the attempt, and their contents are added to
+ * the sets of the caller only when the profile gives code: an attempt that
+ * does not leaves no trace.
+ *
+ * A decline with the code `outside-profile` is counted `declined`; another
+ * failure is counted `failed`. An `EvalError` or a `CancellationError` is
+ * thrown again, for `implicitCompile()` to handle as for the existing
+ * compiler.
+ */
+function tryProfile(
+  ce: IComputeEngine,
+  expr: Expression,
+  profile: JsProfileSwitch,
+  consumer: string,
+  options: Record<string, unknown> | undefined
+): ReturnType<IComputeEngine['_compile']> | undefined {
+  if (profile.consumers !== undefined && !profile.consumers.has(consumer))
+    return undefined;
+  if (
+    options !== undefined &&
+    ((options.to !== undefined && options.to !== 'javascript') ||
+      options.target !== undefined ||
+      options.profile !== undefined ||
+      isGivenVars(options.vars))
+  )
+    return undefined;
+  const symbolDeps = options?.symbolDeps as Set<string> | undefined;
+  const varsObjectRefs = options?.varsObjectRefs as Set<string> | undefined;
+  const attemptDeps = symbolDeps === undefined ? undefined : new Set<string>();
+  const attemptRefs =
+    varsObjectRefs === undefined ? undefined : new Set<string>();
+  let result: ReturnType<IComputeEngine['_compile']>;
+  try {
+    result = ce._compile(expr, {
+      ...options,
+      ...(attemptDeps === undefined ? {} : { symbolDeps: attemptDeps }),
+      ...(attemptRefs === undefined ? {} : { varsObjectRefs: attemptRefs }),
+      profile: 'numeric-kernel',
+      fallback: false,
+      entryChecks: false,
+    });
+  } catch (e) {
+    if (e instanceof EvalError || e instanceof CancellationError) throw e;
+    const diagnostic = compileDiagnosticOf(e);
+    recordJsProfileAttempt(
+      ce,
+      consumer,
+      isCompileDeclineError(e) && diagnostic.code === 'outside-profile'
+        ? 'declined'
+        : 'failed',
+      diagnostic.message
+    );
+    return undefined;
+  }
+  if (result.success !== true) {
+    const diagnostic = result.diagnostic;
+    recordJsProfileAttempt(
+      ce,
+      consumer,
+      diagnostic?.code === 'outside-profile' ? 'declined' : 'failed',
+      diagnostic?.message ?? result.error
+    );
+    return undefined;
+  }
+  recordJsProfileAttempt(ce, consumer, 'admitted');
+  if (attemptDeps !== undefined)
+    for (const name of attemptDeps) symbolDeps!.add(name);
+  if (attemptRefs !== undefined)
+    for (const name of attemptRefs) varsObjectRefs!.add(name);
+  return result;
+}
+
+/** Whether the option `vars` is given: a function, or an object with at
+ * least one key (`isGivenOption()` in `javascript-fragment-target.ts`). */
+function isGivenVars(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'function') return true;
+  return typeof value !== 'object' || Object.keys(value).length > 0;
 }
 
 /**
@@ -267,15 +382,16 @@ function withCapturedCallBindings<T>(
  * at these call sites, which has since been removed
  * (`docs/COMPILATION-MODEL.md`).
  *
- * `options` are compile options passed to `implicitCompile()`, such as
- * `vars`.
+ * `consumer` and `options` are passed to `implicitCompile()`; `options`
+ * are compile options, such as `vars`.
  */
 export function implicitCompileNumeric(
   ce: IComputeEngine,
   expr: Expression,
+  consumer: string,
   options?: Record<string, unknown>
 ): ((vars: Record<string, number>) => number) | undefined {
-  return implicitCompileNumericResult(ce, expr, options)?.fn;
+  return implicitCompileNumericResult(ce, expr, consumer, options)?.fn;
 }
 
 /**
@@ -286,6 +402,7 @@ export function implicitCompileNumeric(
 export function implicitCompileNumericResult(
   ce: IComputeEngine,
   expr: Expression,
+  consumer: string,
   options?: Record<string, unknown>
 ):
   | {
@@ -293,7 +410,7 @@ export function implicitCompileNumericResult(
       result: ReturnType<IComputeEngine['_compile']>;
     }
   | undefined {
-  const compiled = implicitCompile(ce, expr, options);
+  const compiled = implicitCompile(ce, expr, consumer, options);
   if (!compiled?.success || typeof compiled.run !== 'function')
     return undefined;
   const run = compiled.run as (vars: Record<string, number>) => unknown;

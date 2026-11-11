@@ -31,6 +31,11 @@ function fixture() {
 
 function scenario(route: 'fragment' | 'legacy' | 'off') {
   const { ce, map } = fixture();
+  // The test compares the routes of the existing compiler, which the spy
+  // below selects. The switch that tries the `numeric-kernel` profile first
+  // (`CE_JS_PROFILE`) is turned off: the profile admits this callback, so
+  // with the switch on neither route would run.
+  ce._jsProfile = undefined;
   if (route === 'off') ce.jit = 'off';
   const original = ce._compile.bind(ce);
   const artifacts: CompilationResult[] = [];

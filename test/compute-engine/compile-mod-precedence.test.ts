@@ -17,7 +17,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const ce = new ComputeEngine();
 
 function compiled(fnJson: unknown): (x: number) => number {
-  const r = implicitCompile(ce, ce.box(fnJson as any), {});
+  const r = implicitCompile(ce, ce.box(fnJson as any), 'test', {});
   if (!r || typeof r.run !== 'function')
     throw new Error('expression did not compile');
   return r.run as (x: number) => number;

@@ -90,6 +90,15 @@ import type {
  * (`exactPredicateShape()`): its compiled code gives a boolean. */
 type MapCompileTier = 'marked' | 'exact' | 'predicate';
 
+/** The consumer name that `implicitCompile()` receives for a tier. */
+function mapConsumer(tier: MapCompileTier): string {
+  return tier === 'marked'
+    ? 'map'
+    : tier === 'exact'
+      ? 'map-exact'
+      : 'map-predicate';
+}
+
 interface MapCompileCache {
   state: 'compiled' | 'no-compile';
   tier: MapCompileTier;
@@ -742,7 +751,7 @@ function attemptCompileOnce(
   // `EvalError` latch, and propagates `CancellationError` (a deadline expiry
   // leaves no mark — D4). A latch is distinguished from an ordinary compile
   // failure by the flag having flipped.
-  const result = implicitCompile(ce, literal, {
+  const result = implicitCompile(ce, literal, mapConsumer(tier), {
     symbolDeps: deps,
     varsObjectRefs,
   });

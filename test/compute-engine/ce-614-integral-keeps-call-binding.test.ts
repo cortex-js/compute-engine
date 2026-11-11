@@ -146,7 +146,7 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
             1,
           ]);
           pushShadowingCAndN(ce);
-          const compiled = implicitCompile(ce, call) as
+          const compiled = implicitCompile(ce, call, 'test') as
             | { success: boolean; run: (v: { x: number }) => unknown }
             | undefined;
           expect(compiled?.success).toBe(true);
@@ -162,7 +162,7 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
       const call = ce.box(['c', 'x']);
       pushShadowingCAndN(ce);
       const both = ce.function('Add', [call, ce.box(['n', 'x'])]);
-      expect(implicitCompile(ce, both)).toBeUndefined();
+      expect(implicitCompile(ce, both, 'test')).toBeUndefined();
       // The interpreter gives (x² + 1) + 100.
       expect(both.evaluate().json).toEqual(['Add', ['Power', 'x', 2], 101]);
       ce.popScope();
@@ -193,7 +193,7 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
           'x',
         ]),
       ]) {
-        const compiled = implicitCompile(ce, e) as
+        const compiled = implicitCompile(ce, e, 'test') as
           | { success: boolean; run: (...args: unknown[]) => unknown }
           | undefined;
         if (compiled?.success) {

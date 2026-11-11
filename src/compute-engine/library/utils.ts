@@ -2058,7 +2058,7 @@ function compiledSeriesTerm(
   body: Expression,
   index: string
 ): ((vars: Record<string, number>) => number) | undefined {
-  return implicitCompileNumeric(ce, body, {
+  return implicitCompileNumeric(ce, body, 'series', {
     vars: { [index]: `_[${JSON.stringify(index)}]` },
   });
 }

@@ -11314,7 +11314,7 @@ const reduceEvaluate = <R>(
     !elementsAreCollections(collection)
   ) {
     // If we're dealing with real numbers, we can compile.
-    const compiled = implicitCompile(ce, fn);
+    const compiled = implicitCompile(ce, fn, 'reduce');
     // Only take the compiled fast path if the function actually compiled
     // to a lambda; otherwise fall through to the interpreted path below
     // (previously this returned `undefined`, leaving Reduce unevaluated).

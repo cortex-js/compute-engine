@@ -2780,7 +2780,7 @@ function compiledProbe(
     // Budgeted so a probe of a Sum/Product with a variable-dependent (or
     // infinite) bound stays cheap — over-budget calls read as NaN, which the
     // callers of the probes treat as "unreliable, bail".
-    const compiled = implicitCompile(ce, lit, {
+    const compiled = implicitCompile(ce, lit, 'limit-probe', {
       iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
     }) as { run?: (x: number) => number } | undefined;
     if (typeof compiled?.run === 'function') fn = compiled.run;

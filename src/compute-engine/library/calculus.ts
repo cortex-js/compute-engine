@@ -1709,7 +1709,9 @@ function withComplexAtNaN<A extends number[]>(
     const v = run(...args);
     if (typeof v !== 'number' || !Number.isNaN(v)) return v;
     if (complexRun === undefined) {
-      const compiled = implicitCompile(ce, fn, { mode: 'complex' });
+      const compiled = implicitCompile(ce, fn, 'integrand-complex', {
+        mode: 'complex',
+      });
       complexRun = compiled?.success
         ? (compiled.run as (...args: A) => unknown)
         : null;
@@ -1771,7 +1773,8 @@ function withLogSpaceFallback<A extends number[]>(
     if (alternative === undefined) {
       const compiled = implicitCompile(
         ce,
-        ce.function('Function', [body, ...parameters])
+        ce.function('Function', [body, ...parameters]),
+        'integrand-log'
       );
       alternative = compiled?.success
         ? (compiled.run as (...args: A) => unknown)
@@ -2444,7 +2447,7 @@ function integrandPartsOf(
   fn: Expression,
   shield: <T>(run: () => T) => T
 ): { integrand: IntegrandParts; compiled: boolean } {
-  const compiled = shield(() => implicitCompile(ce, fn));
+  const compiled = shield(() => implicitCompile(ce, fn, 'integrand'));
   const raw: (x: number) => unknown = compiled?.success
     ? shield(() =>
         withLogSpaceFallback(ce, fn, compiled.run as (x: number) => unknown)
@@ -4353,7 +4356,7 @@ function nIntegrateMultiple(
     if (syms.some((s) => vars.indexOf(s) >= d)) return undefined;
     if (syms.some((s) => vars.includes(s))) {
       const fn = ce.expr(['Function', b, ...vars.slice(0, d)]);
-      const compiledB = implicitCompile(ce, fn);
+      const compiledB = implicitCompile(ce, fn, 'multiple-integral-bound');
       if (compiledB?.success) {
         const run = compiledB.run as (...args: number[]) => number;
         return (outer) => run(...outer);
@@ -4632,7 +4635,7 @@ function nIntegrateMultiple(
         ? ce.NegativeInfinity
         : ce.NaN;
 
-  const compiled = implicitCompile(ce, fnExpr);
+  const compiled = implicitCompile(ce, fnExpr, 'multiple-integral');
   let raw: (...args: number[]) => unknown;
   if (compiled?.success)
     raw = withLogSpaceFallback(
@@ -6105,7 +6108,7 @@ function numericApplier(
       return [...value.each()].map((c) => (isNumber(c) ? realPart(c) : NaN));
     return NaN;
   };
-  const run = implicitCompile(ce, lit)?.run as
+  const run = implicitCompile(ce, lit, 'nd')?.run as
     ((x: number) => unknown) | undefined;
   if (run === undefined) return interpreted;
   return (x) => {
@@ -6344,7 +6347,7 @@ function numericLimitValue(
     // ladder interruptible: an unbudgeted compiled Sum/Product with a
     // variable-dependent bound runs an arbitrarily long loop that no
     // deadline check can reach (see LIMIT_PROBE_ITERATION_BUDGET).
-    const compiled = implicitCompile(engine, f, {
+    const compiled = implicitCompile(engine, f, 'nlimit', {
       iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
     });
     const run = compiled?.run as ((x: number) => number) | undefined;

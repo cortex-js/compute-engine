@@ -159,7 +159,7 @@ describe('CE-626: a call in an integrand made before its function exists', () =>
       .evaluate()
       .re;
     expect(interpreted).toBeCloseTo(1, 12);
-    const compiled = implicitCompile(ce, F);
+    const compiled = implicitCompile(ce, F, 'test');
     if (compiled?.success)
       expect((compiled.run as (x: number) => number)(0.5)).toBeCloseTo(
         interpreted,

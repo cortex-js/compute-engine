@@ -1556,7 +1556,9 @@ export function solveOverDomain(
   // 10,000 elements, it gives no answer.
   const fnLit = ce.function('Function', [predBody, ce.symbol(unknown)]);
   const compiled =
-    isUncompiledChain(ceq) || inexact ? undefined : implicitCompile(ce, fnLit);
+    isUncompiledChain(ceq) || inexact
+      ? undefined
+      : implicitCompile(ce, fnLit, 'solve-enumeration');
   const useCompiled =
     compiled !== undefined &&
     compiled.success === true &&
@@ -1836,7 +1838,7 @@ export function solveOverMultipleDomains(
   const compiled =
     isUncompiledChain(ceq) || hasInexactLiteral(ceq)
       ? undefined
-      : implicitCompile(ce, fnLit);
+      : implicitCompile(ce, fnLit, 'solve-enumeration');
   const useCompiled =
     compiled !== undefined &&
     compiled.success === true &&
@@ -4073,7 +4075,7 @@ function realFunction(
   rootFree: (lo: number, hi: number) => boolean;
 } {
   const rootFree = cellHasNoRootProof(ce, body, unknown);
-  const run = implicitCompileNumeric(ce, body);
+  const run = implicitCompileNumeric(ce, body, 'periodic-roots');
   if (run !== undefined) {
     return {
       f: (x) => {
@@ -4331,7 +4333,9 @@ function intervalFunction(
   body: Expression,
   unknown: string
 ): ((lo: number, hi: number) => CellEnclosure | undefined) | undefined {
-  const compiled = implicitCompile(ce, body, { to: 'interval-js' });
+  const compiled = implicitCompile(ce, body, 'interval-proof', {
+    to: 'interval-js',
+  });
   if (!compiled?.success || typeof compiled.run !== 'function')
     return undefined;
   const run = compiled.run as (vars: Record<string, unknown>) => unknown;

@@ -662,7 +662,7 @@ function makeNumericFn(
   expr: Expression,
   freeNames: string[]
 ): { fn: NumFn; stored: StoredKernel | undefined } {
-  const compiled = implicitCompileNumericResult(ce, expr);
+  const compiled = implicitCompileNumericResult(ce, expr, 'fit');
   if (compiled)
     return { fn: compiled.fn, stored: storedKernel(compiled.result) };
   const fn = (vars: Record<string, number>) => {

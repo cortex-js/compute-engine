@@ -44,7 +44,9 @@ _setProduct(Product);
 // fallback takes over. The compilation is in the default `'strict'` mode;
 // `stochasticEqual` evaluates a point where the compiled value is `NaN`
 // again with the interpreter, which gives the complex value.
-_setCompile((expr) => implicitCompile(expr.engine, expr) ?? {});
+_setCompile(
+  (expr) => implicitCompile(expr.engine, expr, 'stochastic-equal') ?? {}
+);
 _setGetPolynomialCoefficients(getPolynomialCoefficients);
 _setGetPolynomialDegree(polynomialDegree);
 _setFindUnivariateRoots(findUnivariateRoots);

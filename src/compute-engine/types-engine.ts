@@ -16,6 +16,7 @@ import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import type { StateEvent } from './engine-configuration-lifecycle.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
+import type { JsProfileSwitch } from './js-profile-switch.js';
 import type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type { CacheStatsControl } from '../common/cache-stats.js';
 export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
@@ -1681,6 +1682,15 @@ export interface IComputeEngine {
    * A test sets it right after the engine is made.
    * @internal */
   _bindingUnits: boolean;
+
+  /** When set, `implicitCompile()` tries the `numeric-kernel` profile of the
+   * JavaScript target first, for the consumers in `consumers` (all of them
+   * when it is absent), and uses the existing compiler when the profile
+   * declines (`js-profile-switch.ts`). Off (`undefined`) by default; the
+   * initial value comes from the `CE_JS_PROFILE` and
+   * `CE_JS_PROFILE_CONSUMERS` environment variables.
+   * @internal */
+  _jsProfile: JsProfileSwitch | undefined;
 
   /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
    * that starts now opens an environment of its own (rule 8 of

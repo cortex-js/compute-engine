@@ -325,7 +325,7 @@ function prepareODE(
         independentName,
         stateNames
       );
-      const compiled = implicitCompileNumeric(ce, compiledRhs);
+      const compiled = implicitCompileNumeric(ce, compiledRhs, 'ndsolve');
       if (!compiled) return undefined;
       runs.push(compiled);
     }
@@ -375,7 +375,7 @@ function prepareODE(
       independentName,
       stateNames
     );
-    const run = implicitCompileNumeric(ce, compiledRhs);
+    const run = implicitCompileNumeric(ce, compiledRhs, 'ndsolve');
     if (!run) return undefined;
 
     return {
@@ -403,7 +403,7 @@ function prepareODE(
     independentName,
     stateName
   );
-  const run = implicitCompileNumeric(ce, compiledRhs);
+  const run = implicitCompileNumeric(ce, compiledRhs, 'ndsolve');
   if (!run) return undefined;
 
   return {
