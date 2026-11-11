@@ -108,6 +108,15 @@
   f.run({ LP: [[0, 1], [2, 3], [-1, 5]], x: 1 });  // [[0, 1], [-1, 5]]
   ```
 
+### Resolved Issues
+
+- **`expr.subs(map)` reads `map` only for the names of `expr`.** Since
+  0.187.0, `subs()` listed every key of the substitution and read each
+  value, also the keys that the expression does not name. A host whose
+  substitution computes a value when it is read (a `Proxy`, a getter)
+  computed every value at each call. `subs()` again reads only the keys of
+  the symbols and the operators of the expression.
+
 ## 0.187.0 _2026-11-11_
 
 ### Breaking Changes
@@ -194,6 +203,11 @@
   temporary values, and `ce.pushScope()` / `ce.popScope()` for temporary
   declarations. A `restore()` does not undo a type that an expression boxed
   before the checkpoint came to require after it.
+- **The engine needs `WeakRef`.** The engine makes a `WeakRef` in ordinary
+  use (the type of an expression with an undeclared symbol), so a runtime
+  without `WeakRef` cannot use it. Earlier releases made one only on some
+  routes. A Cloudflare Worker with an old compatibility date needs the
+  compatibility flag `enable_weak_ref`.
 
 ### New Features
 

@@ -64,6 +64,7 @@ import {
   noteFreeNameMade,
   noteResolutionRead,
   operationInput,
+  substitutionInput,
   readUnitEntry,
   readsUnitVariable,
 } from '../binding-unit.js';
@@ -3417,7 +3418,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
-      return this.engine._withOperation(operationInput(this, sub), () =>
+      return this.engine._withOperation(substitutionInput(this, sub), () =>
         this.subs(sub, options)
       );
     // A structural symbol with no requested form keeps the structural form:

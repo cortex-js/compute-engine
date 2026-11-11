@@ -6,6 +6,7 @@ import {
   isUnitReadToken,
   noteFreeNameMade,
   operationInput,
+  substitutionInput,
   unitCounterOfOperands,
 } from '../binding-unit.js';
 import {
@@ -3443,7 +3444,7 @@ export class BoxedFunction
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
-      return this.engine._withOperation(operationInput(this, sub), () =>
+      return this.engine._withOperation(substitutionInput(this, sub), () =>
         this.subs(sub, options)
       );
     // A node met again in the same call and the same context is given the

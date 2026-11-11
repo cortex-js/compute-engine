@@ -428,6 +428,37 @@ describe('BINDING UNITS: THE INPUT OF AN OPERATION', () => {
     }
   });
 
+  // A host can give `subs()` a substitution whose values are computed when
+  // they are read. Only the keys that the expression names are read.
+  test('subs() reads the substitution only for the names of the expression', () => {
+    const ce = engine();
+    const read: string[] = [];
+    const target: Record<string, unknown> = {
+      C: ce.box(['List', 2, 4, 6]),
+      B: ce.box(['List', 1]),
+      f: ce.parse('w + 1'),
+    };
+    const sub = new Proxy(target, {
+      get: (t, key) => {
+        read.push(String(key));
+        return t[key as string];
+      },
+    });
+    const expr = ce.parse('C[2]+1');
+    const spy = jest.spyOn(ce, '_withOperation');
+    try {
+      expect(expr.subs(sub as never).evaluate().json).toBe(5);
+      expect(spy.mock.calls[0][0]).toEqual([expr, target.C]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(new Set(read)).toEqual(new Set(['C']));
+    // The name of an operator is a name of the expression.
+    read.length = 0;
+    ce.box(['f', 'B']).subs(sub as never);
+    expect(new Set(read)).toEqual(new Set(['f', 'B']));
+  });
+
   // `at()` and `each()` run the collection handlers of their receiver, so
   // they are operations on the receiver: an element is computed with the
   // entries of every unit of the receiver, as `evaluate()` of the receiver

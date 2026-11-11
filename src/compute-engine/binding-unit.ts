@@ -668,7 +668,8 @@ export function isUnitReadToken(obj: unknown): boolean {
 
 /**
  * The input of an operation on `receiver` whose argument `argument` can
- * hold boxed expressions (`subs()`, `replace()`, `match()`, rule 8 of
+ * hold boxed expressions (`replace()`, `match()`; `subs()` has
+ * `substitutionInput()`; rule 8 of
  * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): `receiver`, and
  * the boxed expressions of `argument`. These are found in its arrays and
  * its plain objects (a substitution, a rule, a rule set), to a depth of
@@ -687,6 +688,52 @@ export function operationInput(receiver: object, argument: unknown): unknown[] {
     for (const child of children) visit(child, depth - 1);
   };
   visit(argument, 3);
+  return input;
+}
+
+/**
+ * The input of `receiver.subs(sub)` (rule 8): `receiver`, and the boxed
+ * expressions of the values of `sub` for the names that `receiver` reads,
+ * its symbols and its operators. Only these keys of `sub` are read, each
+ * as `subs()` reads it (an own property): a host can give a substitution
+ * whose values are computed when they are read, and a value that the
+ * expression does not name is not computed.
+ */
+export function substitutionInput(
+  receiver: object,
+  sub: Readonly<Record<string, unknown>>
+): unknown[] {
+  type Node = {
+    _kind?: string;
+    symbol?: unknown;
+    operator?: unknown;
+    ops?: readonly unknown[];
+    values?: readonly unknown[];
+  };
+  const names = new Set<string>();
+  const visited = new Set<object>();
+  const stack: unknown[] = [receiver];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (typeof node !== 'object' || node === null || visited.has(node))
+      continue;
+    visited.add(node);
+    const n = node as Node;
+    if (n._kind === undefined) continue;
+    if (typeof n.symbol === 'string') names.add(n.symbol);
+    if (typeof n.operator === 'string') names.add(n.operator);
+    for (const children of [n.ops, n.values])
+      if (children) for (const child of children) stack.push(child);
+  }
+  const input: unknown[] = [receiver];
+  for (const name of names) {
+    if (!Object.hasOwn(sub, name)) continue;
+    // The value when it is boxed, or the boxed expressions of a value
+    // that is an array or a plain object (`operationInput()`, whose first
+    // item is its receiver).
+    const found = operationInput(receiver, [sub[name]]);
+    for (let i = 1; i < found.length; i++) input.push(found[i]);
+  }
   return input;
 }
 
