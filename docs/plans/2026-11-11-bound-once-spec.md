@@ -1,7 +1,9 @@
 # Binding units: an expression is bound once
 
-Status: DRAFT for the user's approval. No code is written. Not yet reviewed
-with `/review-spec`.
+Status: the direction is approved by the user on 2026-11-11 ("I'm on board
+with the spec"), and so is the delivery rule of section 7. The decisions D1
+to D4 of section 8 wait for the measurements M1 to M3. No code is written.
+Not yet reviewed with `/review-spec`.
 
 Model: `docs/plans/2026-11-09-binding-units-model.md`. This spec replaces
 rules 3 and 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md` and
@@ -155,6 +157,17 @@ options. The compile options are the smallest change of the engine.
 
 Each is a spec of its own. Steps 3 and 4 can change places; the user
 decides (model decision 3).
+
+**Delivery to Tycho** (user decision 2026-11-11). A step is delivered to
+Tycho only when Tycho can delete code with it, even if the adoption is work.
+Step 1 alone would make Tycho add a rebind around each expansion of a
+function and after each swap of its document scope, so Tycho does not adopt
+it alone: it stays on 0.187.1 until the steps that replace those
+workarounds exist (the macro kind for the expansion, the batch for the
+swap). The compile options can be adopted when they exist, since they only
+delete code. Until an adoption, Tycho checks each step with its codegen
+audit and its `othello` instrument on a scratch build, as on 2026-11-11.
+A release of the engine between two adoptions is the user's decision.
 
 ## 8. Measurements before approval, and decisions
 
