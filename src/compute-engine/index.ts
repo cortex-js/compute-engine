@@ -4510,13 +4510,13 @@ export class ComputeEngine implements IComputeEngine {
    *
    * `options.scope` RECEIVES the parse's writes: the whole parse runs with
    * that scope as the current lexical scope, so name resolution (including the
-   * parser's symbol oracle) walks `scope → parents`, and every auto-declare
-   * and inference lands rooted there. Discarding the scope discards the
-   * writes. Use `ce.createScope()` to make one that can be read back.
+   * parser's symbol oracle) walks `scope → parents`, and every declaration
+   * and inference made while it runs lands rooted there. Boxing itself
+   * declares no name. Discarding the scope discards the writes. Use `ce.createScope()` to make one that can be read back.
    *
    * `options.speculative` leaves NO trace in the engine's type state: the
-   * parse runs inside a transient scope (auto-declares land there and are
-   * discarded with it), and every ambient symbol whose type is currently
+   * parse runs inside a transient scope (declarations and inferences land
+   * there and are discarded with it), and every ambient symbol whose type is currently
    * inferred is shadowed in that scope with its current type — so a narrowing
    * use in `latex` refines the discarded shadow instead of persistently
    * narrowing the ambient symbol. Use it for derive-style parses that only
