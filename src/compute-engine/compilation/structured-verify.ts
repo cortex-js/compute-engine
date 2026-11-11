@@ -635,7 +635,8 @@ function verifyAborts(
     )
       fail(`the operation ${op.kind} has a malformed list of abort kinds`);
   }
-  const expected = op.kind === 'yield' || op.kind === 'exit' ? undefined : policy.aborts?.(op);
+  const expected =
+    op.kind === 'yield' || op.kind === 'exit' ? undefined : policy.aborts?.(op);
   const text = (kinds: readonly AbortKind[] | undefined) =>
     kinds === undefined || kinds.length === 0 ? 'none' : kinds.join(', ');
   if (text(aborts) !== text(expected))
@@ -885,13 +886,13 @@ function verifySignature(
           : typeof value === 'bigint'
             ? ['integer']
             : typeof value === 'boolean'
-            ? ['boolean']
-            : typeof value === 'object' &&
-                value !== null &&
-                typeof value.re === 'number' &&
-                typeof value.im === 'number'
-              ? ['complex']
-              : undefined;
+              ? ['boolean']
+              : typeof value === 'object' &&
+                  value !== null &&
+                  typeof value.re === 'number' &&
+                  typeof value.im === 'number'
+                ? ['complex']
+                : undefined;
       if (
         types === undefined ||
         !types.includes(op.result.type) ||
@@ -1072,9 +1073,12 @@ function verifySignature(
       operandsIn(
         rule.operands === 'same' ? [op.result.representation] : rule.operands
       );
-      if (op.effect !== 'pure') fail(`the integer function ${op.fn} is not pure`);
+      if (op.effect !== 'pure')
+        fail(`the integer function ${op.fn} is not pure`);
       if (op.operands.some((operand) => operand.type !== 'integer'))
-        fail(`the integer function ${op.fn} has an operand that is not an integer`);
+        fail(
+          `the integer function ${op.fn} has an operand that is not an integer`
+        );
       const type = op.fn === 'is-prime' ? 'boolean' : 'integer';
       if (op.result.type !== type)
         fail(
@@ -1563,9 +1567,7 @@ function verifyCollection(
   const operands = op.operands;
   const count = (ok: boolean) => {
     if (!ok)
-      fail(
-        `the function of lists ${fn} has ${operands.length} operands`
-      );
+      fail(`the function of lists ${fn} has ${operands.length} operands`);
   };
   const listOperand = (i: number, tuples = false) =>
     numericElement(operands[i].type, tuples) ??
@@ -1635,10 +1637,7 @@ function verifyCollection(
       // Two integer bounds, or two bounds and a step, each a real or an
       // integer: a list of integers when the three are integers.
       count(operands.length === 2 || operands.length === 3);
-      if (
-        operands.length === 2 &&
-        operands.some((o) => o.type !== 'integer')
-      )
+      if (operands.length === 2 && operands.some((o) => o.type !== 'integer'))
         fail('the bounds of the function of lists range are not integers');
       if (operands.some((o) => o.type !== 'integer' && o.type !== 'real'))
         fail(
@@ -1658,9 +1657,8 @@ function verifyCollection(
     );
   for (const operand of operands)
     if (
-      !(rule.operands === 'same'
-        ? [op.result.representation]
-        : rule.operands
+      !(
+        rule.operands === 'same' ? [op.result.representation] : rule.operands
       ).includes(operand.representation)
     )
       fail(

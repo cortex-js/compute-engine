@@ -1956,24 +1956,23 @@ function structuredPowerRule(
             w.convert(exponent, { kind: 'complex' })!,
           ]);
         }
-        const refusal =
-          isSymbol(node.op1, 'ExponentialE')
-              ? `Power of a symbol ExponentialE that a scope declares is not ` +
-                `in the structured route`
-              : node.op2.unknowns.length === 0
-                ? `the exponent ${nodeText(node.op2)} of Power has no ` +
-                  `unknown (each symbol in it has a value), and is not in ` +
-                  `the structured route: the existing compiler can replace ` +
-                  `such an exponent by its value (knownExponentPower())`
-                : mode === 'strict' && isNonRealNumber(type)
-                  ? `the power ${nodeText(node)} has the type ` +
-                    `${node.type.toString()}, which is not real: the existing ` +
-                    `emitter writes the complex power`
-                  : mode === 'complex' && !isSubtype(type, 'real')
-                    ? `the power ${nodeText(node)} has the type ` +
-                      `${node.type.toString()}, which is not real, in the ` +
-                      `complex mode: the existing emitter writes the complex power`
-                    : undefined;
+        const refusal = isSymbol(node.op1, 'ExponentialE')
+          ? `Power of a symbol ExponentialE that a scope declares is not ` +
+            `in the structured route`
+          : node.op2.unknowns.length === 0
+            ? `the exponent ${nodeText(node.op2)} of Power has no ` +
+              `unknown (each symbol in it has a value), and is not in ` +
+              `the structured route: the existing compiler can replace ` +
+              `such an exponent by its value (knownExponentPower())`
+            : mode === 'strict' && isNonRealNumber(type)
+              ? `the power ${nodeText(node)} has the type ` +
+                `${node.type.toString()}, which is not real: the existing ` +
+                `emitter writes the complex power`
+              : mode === 'complex' && !isSubtype(type, 'real')
+                ? `the power ${nodeText(node)} has the type ` +
+                  `${node.type.toString()}, which is not real, in the ` +
+                  `complex mode: the existing emitter writes the complex power`
+                : undefined;
         if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
         forms.set(node, 'pow');
         return w.valueFacts(node, { kind: 'real' }, [
@@ -3328,8 +3327,7 @@ function atRule(
   const [base, index] = operandFacts(node, scope, context, w);
   // An element of a list of tuples is a tuple (a point).
   const point = listElementType(base);
-  const element =
-    point?.kind === 'point' ? point : collectionElement(base);
+  const element = point?.kind === 'point' ? point : collectionElement(base);
   if (element === undefined)
     return w.refuse(
       node,
@@ -3373,7 +3371,10 @@ function lengthRule(
       'Length with other than one operand is not in the structured route'
     );
   const [base] = operandFacts(node, scope, context, w);
-  if (collectionElement(base) === undefined && listElementType(base) === undefined)
+  if (
+    collectionElement(base) === undefined &&
+    listElementType(base) === undefined
+  )
     return w.refuse(
       node,
       'signature',
@@ -4101,9 +4102,7 @@ function listLiteralRule(
   const first = facts[0]?.type;
   if (first?.kind === 'point') {
     if (
-      facts.some(
-        (f) => f.type.kind !== 'point' || f.type.size !== first.size
-      )
+      facts.some((f) => f.type.kind !== 'point' || f.type.size !== first.size)
     )
       return w.refuse(
         node,
@@ -4426,8 +4425,7 @@ function collectionRule(
       const tupleAt = facts.findIndex(
         (f) => listElementType(f)?.kind === 'point'
       );
-      const first =
-        tupleAt < 0 ? listElementAt(0) : listElementAt(tupleAt);
+      const first = tupleAt < 0 ? listElementAt(0) : listElementAt(tupleAt);
       if (first.kind === 'point') {
         facts.forEach((_, i) => {
           const element = listElementAt(i);
@@ -4788,7 +4786,10 @@ function functionOperandRule(
           !predicate &&
           !isSubtype(engineType, 'number') &&
           !isSubtype(engineType, 'boolean') &&
-          !(head === 'Map' && structuredTupleType(engineType, mode) !== undefined)
+          !(
+            head === 'Map' &&
+            structuredTupleType(engineType, mode) !== undefined
+          )
         )
           refuse(
             `whose function has a value of the type ${lambda!.body.type.toString()} is not in the ` +
@@ -4891,9 +4892,7 @@ function functionOperandRule(
           predicate(body([element], true));
           return w.valueFacts(
             node,
-            head === 'Filter'
-              ? { kind: 'list', element }
-              : { kind: 'integer' },
+            head === 'Filter' ? { kind: 'list', element } : { kind: 'integer' },
             [w.convert(facts, facts.type)!]
           );
         }
@@ -5740,7 +5739,11 @@ function refuseLocalFunctionArithmetic(
             `complex value, which is not in the structured route in the strict mode: the ` +
             `existing compiler reads the value of the call as a real number`
         );
-      if (!isFunction(node, 'Multiply') && !isFunction(node, 'Divide') && !isFunction(node, 'Power'))
+      if (
+        !isFunction(node, 'Multiply') &&
+        !isFunction(node, 'Divide') &&
+        !isFunction(node, 'Power')
+      )
         continue;
       const operand = node.ops.find(
         (op) => !isCall(op) && isFunction(op) && readsCall(op)
@@ -6657,8 +6660,7 @@ function chainForms(
             !isNumber(op) &&
             !isString(op) &&
             !(isSymbol(op) && op.isConstant));
-        if (bound(second, 1) && !bound(first, 0))
-          forms.set(node, 'chain-swap');
+        if (bound(second, 1) && !bound(first, 0)) forms.set(node, 'chain-swap');
         continue;
       }
       const [first, second] = node.ops;
@@ -6953,7 +6955,10 @@ function bigintLaneProfileDecline(e: CompileDeclineError): CompileDeclineError {
  *  compilation, with the nodes of its lane analysis. */
 const BIGINT_PROGRAMS = new WeakMap<
   CompileTarget<Expression>,
-  { readonly program: IRProgram; readonly preparedNodes: ReadonlySet<Expression> }
+  {
+    readonly program: IRProgram;
+    readonly preparedNodes: ReadonlySet<Expression>;
+  }
 >();
 
 //
@@ -9259,7 +9264,11 @@ function admitFunctionBody(
         node.operator === 'Typed'
       ) {
         const ascribed =
-          structuredParameterType(node.type.type, helper.name, registry?.mode) ??
+          structuredParameterType(
+            node.type.type,
+            helper.name,
+            registry?.mode
+          ) ??
           (isSubtype(node.type.type, REAL_WITH_NON_FINITE_TYPE)
             ? ({ kind: 'real' } as const)
             : undefined);
@@ -9756,18 +9765,21 @@ function admitFunctionBody(
           `that a name holds, and not over ${nodeText(spec)}`
       );
     if (overList) checkValue(spec.op2);
-    else for (const bound of (spec.op2 as Expression & { ops: readonly Expression[] }).ops) {
-      indexPositions.add(bound);
-      checkValue(bound);
-      // A bound computed from the length of a list with integer arithmetic
-      // (`integerFromListLength()`), which the engine does not type
-      // `integer`: the rule that `loopBoundFromFact` reads in the pass, with
-      // the length locals as the integer names.
-      if (!fromLength(bound) && !isSubtype(bound.type.type, 'integer'))
-        throw new Error(
-          `JS scalar fragment: the bound ${nodeText(bound)} of a Loop does not have the type integer`
-        );
-    }
+    else
+      for (const bound of (
+        spec.op2 as Expression & { ops: readonly Expression[] }
+      ).ops) {
+        indexPositions.add(bound);
+        checkValue(bound);
+        // A bound computed from the length of a list with integer arithmetic
+        // (`integerFromListLength()`), which the engine does not type
+        // `integer`: the rule that `loopBoundFromFact` reads in the pass, with
+        // the length locals as the integer names.
+        if (!fromLength(bound) && !isSubtype(bound.type.type, 'integer'))
+          throw new Error(
+            `JS scalar fragment: the bound ${nodeText(bound)} of a Loop does not have the type integer`
+          );
+      }
     const index = spec.op1.symbol;
     if (
       names.has(index) ||
@@ -11220,8 +11232,11 @@ function resolveHelper(
   const numberResult =
     registry === undefined || signature === undefined || inferred
       ? undefined
-      : structuredParameterType(signature.result, call.operator, registry.mode) ===
-          undefined
+      : structuredParameterType(
+            signature.result,
+            call.operator,
+            registry.mode
+          ) === undefined
         ? declaredNumberKind(signature.result, registry.mode)
         : undefined;
   const bodyResult =

@@ -539,10 +539,7 @@ class BigintLowering {
       }
       if (!isFunction(e)) return;
       const head = e.operator;
-      if (
-        !this.dependencies.has(head) &&
-        isUserDefinedFunction(engine, head)
-      ) {
+      if (!this.dependencies.has(head) && isUserDefinedFunction(engine, head)) {
         this.dependencies.add(head);
         const literal = userFunctionLiteral(engine, head);
         if (literal !== undefined) visit(literal.ops[0]);
@@ -633,7 +630,9 @@ class BigintLowering {
         // `a - b - c`: the operands in order, the later ones negated.
         const [first, ...rest] = ops.map((op, i) => {
           const v = this.value(op);
-          return i === 0 ? v : this.push({ kind: 'negate', operands: [v] }, 'integer', node);
+          return i === 0
+            ? v
+            : this.push({ kind: 'negate', operands: [v] }, 'integer', node);
         });
         return this.arithmetic('add', [first, ...rest], node);
       }
@@ -667,7 +666,10 @@ class BigintLowering {
         );
       case 'Mod':
         return this.push(
-          { kind: 'mod', operands: [this.value(node.op1), this.value(node.op2)] },
+          {
+            kind: 'mod',
+            operands: [this.value(node.op1), this.value(node.op2)],
+          },
           'integer',
           node
         );
@@ -800,7 +802,10 @@ class BigintLowering {
         ops.map((op) => this.argument(op)),
         node
       );
-    return this.refuse(node, `${head} is not in the profile in the mode bigint`);
+    return this.refuse(
+      node,
+      `${head} is not in the profile in the mode bigint`
+    );
   }
 
   /** `add`, `multiply`, `min` or `max` of `operands`; one operand is its
@@ -948,11 +953,7 @@ class BigintLowering {
     operands: readonly IRValue[],
     node: Expression
   ): IRValue {
-    return this.push(
-      { kind: 'collection', fn, operands },
-      INTEGER_LIST,
-      node
-    );
+    return this.push({ kind: 'collection', fn, operands }, INTEGER_LIST, node);
   }
 
   // -------------------------------------------------------------------------

@@ -173,17 +173,17 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   // `_SYS.range(a, b, step)`, `_SYS.rotl(L, k)` and `_SYS.rotr(L, k)`. Each
   // list result is a new array.
   collections: {
-    norm: { results: ['number'], operands: ['array'] },
-    mean: { results: ['number'], operands: ['array'] },
-    median: { results: ['number'], operands: ['array'] },
-    variance: { results: ['number'], operands: ['array'] },
-    dot: { results: ['number'], operands: ['array'] },
-    take: { results: ['array'], operands: ['array', 'number'] },
-    drop: { results: ['array'], operands: ['array', 'number'] },
-    reverse: { results: ['array'], operands: ['array'] },
-    sort: { results: ['array'], operands: ['array'] },
-    join: { results: ['array'], operands: ['array'] },
-    range: { results: ['array'], operands: ['number'] },
+    'norm': { results: ['number'], operands: ['array'] },
+    'mean': { results: ['number'], operands: ['array'] },
+    'median': { results: ['number'], operands: ['array'] },
+    'variance': { results: ['number'], operands: ['array'] },
+    'dot': { results: ['number'], operands: ['array'] },
+    'take': { results: ['array'], operands: ['array', 'number'] },
+    'drop': { results: ['array'], operands: ['array', 'number'] },
+    'reverse': { results: ['array'], operands: ['array'] },
+    'sort': { results: ['array'], operands: ['array'] },
+    'join': { results: ['array'], operands: ['array'] },
+    'range': { results: ['array'], operands: ['number'] },
     // `_SYS.rotl(L, k)` and `_SYS.rotr(L, k)`, a new array.
     'rotate-left': { results: ['array'], operands: ['array', 'number'] },
     'rotate-right': { results: ['array'], operands: ['array', 'number'] },
@@ -246,21 +246,21 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'round-ties-away': { results: ['number'], operands: ['number'] },
     // The real code of the handler of the head (an expression for `acot`,
     // `acsc`, …, `coth`), and its runtime helper of an `{re, im}` object.
-    acot: { results: ['number', 'complex'], operands: 'same' },
-    acsc: { results: ['number', 'complex'], operands: 'same' },
-    asec: { results: ['number', 'complex'], operands: 'same' },
-    acoth: { results: ['number', 'complex'], operands: 'same' },
-    asech: { results: ['number', 'complex'], operands: 'same' },
-    acsch: { results: ['number', 'complex'], operands: 'same' },
-    coth: { results: ['number', 'complex'], operands: 'same' },
+    'acot': { results: ['number', 'complex'], operands: 'same' },
+    'acsc': { results: ['number', 'complex'], operands: 'same' },
+    'asec': { results: ['number', 'complex'], operands: 'same' },
+    'acoth': { results: ['number', 'complex'], operands: 'same' },
+    'asech': { results: ['number', 'complex'], operands: 'same' },
+    'acsch': { results: ['number', 'complex'], operands: 'same' },
+    'coth': { results: ['number', 'complex'], operands: 'same' },
     // The rule of `Sech` and `Csch` admits a complex operand only.
-    sech: { results: ['complex'], operands: ['complex'] },
-    csch: { results: ['complex'], operands: ['complex'] },
-    factorial: { results: ['number'], operands: ['number'] },
-    factorial2: { results: ['number'], operands: ['number'] },
-    trunc: { results: ['number'], operands: ['number'] },
-    fract: { results: ['number'], operands: ['number'] },
-    hypot: { results: ['number'], operands: ['number'] },
+    'sech': { results: ['complex'], operands: ['complex'] },
+    'csch': { results: ['complex'], operands: ['complex'] },
+    'factorial': { results: ['number'], operands: ['number'] },
+    'factorial2': { results: ['number'], operands: ['number'] },
+    'trunc': { results: ['number'], operands: ['number'] },
+    'fract': { results: ['number'], operands: ['number'] },
+    'hypot': { results: ['number'], operands: ['number'] },
   },
 };
 
@@ -279,7 +279,8 @@ function bigintAborts(op: IROperation): readonly AbortKind[] | undefined {
   // `_SYS.breplaceAt` at an index out of range, and `_SYS.brange` of more
   // than 2^32 - 1 elements, throw a `RangeError`.
   if (op.kind === 'replace-at') return ['error'];
-  if (op.kind === 'collection') return op.fn === 'range' ? ['error'] : undefined;
+  if (op.kind === 'collection')
+    return op.fn === 'range' ? ['error'] : undefined;
   if (op.kind !== 'integer') return undefined;
   switch (op.fn) {
     // `_SYS.bremainder`, `_SYS.bisqrt` at a zero divisor or a negative

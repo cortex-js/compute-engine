@@ -205,10 +205,7 @@ type OperationBase = {
 export type IRLiteral = OperationBase & {
   readonly kind: 'literal';
   readonly value:
-    | number
-    | bigint
-    | boolean
-    | { readonly re: number; readonly im: number };
+    number | bigint | boolean | { readonly re: number; readonly im: number };
 };
 
 /** A read of the input `IRProgram.inputs[input]` at this position. */

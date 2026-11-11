@@ -2336,10 +2336,7 @@ class Lowering {
           COLLECTION_HEADS[operator] as CollectionFunctionName,
           operands.length === 2
             ? operands
-            : [
-                operands[0],
-                this.numberLiteral(1, 'integer', node, operations),
-              ]
+            : [operands[0], this.numberLiteral(1, 'integer', node, operations)]
         );
       case 'Dot': {
         const [a, b] = operands;
@@ -2549,8 +2546,7 @@ class Lowering {
       value: number,
       kind: 'real' | 'integer',
       into: IROperation[]
-    ) =>
-      this.numberLiteral(value, kind, node, into);
+    ) => this.numberLiteral(value, kind, node, into);
     /** A pass over the elements from the index `from` to the length: a
      *  `loop` that carries one value per entry of `carried` (its initial
      *  value and its type), whose body computes the next values from the
@@ -4216,7 +4212,10 @@ class Lowering {
         origin: node,
       });
     } else {
-      const range = spec.op2 as Expression & { op1: Expression; op2: Expression };
+      const range = spec.op2 as Expression & {
+        op1: Expression;
+        op2: Expression;
+      };
       from = bound(range.op1);
       to = bound(range.op2);
     }

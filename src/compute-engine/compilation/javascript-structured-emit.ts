@@ -348,7 +348,10 @@ const FUNCTION_CODE: Readonly<
  */
 const REAL_TEMPLATES: Readonly<
   Partial<
-    Record<UnaryFunctionName, (x: string) => { text: string; precedence: number }>
+    Record<
+      UnaryFunctionName,
+      (x: string) => { text: string; precedence: number }
+    >
   >
 > = {
   acot: (x) => ({ text: `(Math.PI / 2 - Math.atan(${x}))`, precedence: CALL }),
@@ -755,11 +758,14 @@ class Emitter {
         );
       };
       abortsHere.push(
-        statesAbort(op, this.program.functions) ||
-          op.operands.some(writtenInto)
+        statesAbort(op, this.program.functions) || op.operands.some(writtenInto)
       );
       if (op.kind !== 'loop' && op.kind !== 'build' && op.kind !== 'seeded')
-        for (const v of op.kind === 'if' ? op.results : op.result ? [op.result] : [])
+        for (const v of op.kind === 'if'
+          ? op.results
+          : op.result
+            ? [op.result]
+            : [])
           definedAt.set(v.id, k);
     }
     const aborting = [0];
@@ -861,7 +867,10 @@ class Emitter {
     const use = this.uses.get(result.id);
     if (use === undefined || use.count !== 1 || use.region !== region)
       return false;
-    if (aborts.here && aborts.before[use.index] - aborts.before[index + 1] !== 0)
+    if (
+      aborts.here &&
+      aborts.before[use.index] - aborts.before[index + 1] !== 0
+    )
       return false;
     return impure[use.index] - impure[index + 1] === 0;
   }
@@ -918,8 +927,8 @@ class Emitter {
               : typeof value === 'bigint'
                 ? bigintSource(value)
                 : atom(
-                  `({ re: ${numberSource(value.re).text}, im: ${numberSource(value.im).text} })`
-                )
+                    `({ re: ${numberSource(value.re).text}, im: ${numberSource(value.im).text} })`
+                  )
         );
         return undefined;
       }
