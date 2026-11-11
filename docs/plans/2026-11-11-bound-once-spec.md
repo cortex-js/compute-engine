@@ -195,3 +195,35 @@ Decisions:
   Recommended: without them every host must push a scope or rebind to
   compile.
 - **D4. The order of section 7.**
+
+## 9. Results of the measurements
+
+### M2, first part (2026-11-11): the answers, with nothing deleted
+
+A prototype at `eed70f79a` changes four places of `boxed-symbol.ts`
+(`docs/plans/2026-11-11-bound-once-evidence/prototype-four-sites.patch.txt`,
+about 30 lines): a free name resolves from its home scope for its type and
+for its value, and a symbol with a definition reads that definition unless
+it is a parameter, the variable of a binder or the local of a block. It
+deletes nothing and keeps the caches as they are.
+
+- The nine rows of section 3 give the "Proposed" column, except row 8,
+  whose value is `1 + Module(Pi)` and not `π + 1` (not examined).
+- Full suite (no nightly tests): 287 of 88,610 tests fail, in 107 of 2,038
+  files. Step 0 had counted 294 files with a read that depends on the
+  current scope: in most of them the answer does not depend on it.
+- 32 of the 107 files push a scope in the test itself (the list is in the
+  evidence folder). They test the old rule, or use the host pattern that
+  `rebind` or the compile options replace.
+- 75 files do not (180 of the 287 failures). The largest groups are the
+  compile fallback, which evaluates the expression with its inputs declared
+  in a scope of its own (`compile-absent-point-spelling` 26,
+  `compile-fallback-absent-spelling` 24, `compile-entry-string-refusal` 11,
+  `interval-fallback-answers` 4), compiled calls of user functions
+  (`multi-clause-compile` 7, `compile-unemittable-function-value` 7), and a
+  free name captured by a function literal (`ce-473-captured-free-symbol`
+  6, `issue-489-curried-function-capture` 6, `hold-values` 5). `Solve`, the
+  integrals and the limits do not fail.
+
+Not done: M1 (the engine function behind each of the 75 files), the
+deletions of section 5, M3.

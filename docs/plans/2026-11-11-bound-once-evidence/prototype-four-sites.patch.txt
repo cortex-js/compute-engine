@@ -1,0 +1,79 @@
+diff --git a/src/compute-engine/boxed-expression/binders.ts b/src/compute-engine/boxed-expression/binders.ts
+index 672178550..d5ae35e77 100644
+--- a/src/compute-engine/boxed-expression/binders.ts
++++ b/src/compute-engine/boxed-expression/binders.ts
+@@ -1462,7 +1462,9 @@ export function markBinderVariable(scope: Scope, name: string): void {
+ }
+ 
+ /** Is `def` a binder's variable (see `markBinderVariable`)? */
+-function isBinderVariable(def: BoxedBaseDefinition | undefined): boolean {
++export function isBinderVariable(
++  def: BoxedBaseDefinition | undefined
++): boolean {
+   return (def as BinderVariable | undefined)?._isBinderVariable === true;
+ }
+ 
+diff --git a/src/compute-engine/boxed-expression/boxed-symbol.ts b/src/compute-engine/boxed-expression/boxed-symbol.ts
+index beca9ca0b..ce5d2d099 100644
+--- a/src/compute-engine/boxed-expression/boxed-symbol.ts
++++ b/src/compute-engine/boxed-expression/boxed-symbol.ts
+@@ -142,6 +142,7 @@ import {
+   freeNameBindingInContext,
+   freeNameBindingAndScope,
+   isBodyFreeName,
++  isBinderVariable,
+   isBlockLocalBinding,
+   rebindBodyFreeNames,
+   sameBindingDef,
+@@ -359,7 +360,8 @@ function resolveFreeNameForType(
+ ): BoxedDefinition | undefined {
+   const outer = enterStaticTypingView(ce);
+   try {
+-    return freeNameBindingInContext(ce, name, undefined, asVariable, home);
++    // PROTOTYPE (bound once): from the home scope.
++    return freeNameBindingInContext(ce, name, home, asVariable, home);
+   } finally {
+     leaveStaticTypingView(outer);
+   }
+@@ -1236,9 +1238,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     }
+     if (!isValueDef(def)) return undefined;
+     const v = def.value;
+-    const resolved = withStaticTypingView(this.engine, () =>
+-      this._contextBinding()
+-    );
++    // PROTOTYPE (bound once): an occurrence with a definition reads it.
++    const resolved = undefined as BoxedDefinition | undefined;
+     if (
+       resolved !== undefined &&
+       !(isValueDef(resolved) && sameBindingDef(resolved.value, v)) &&
+@@ -1388,10 +1389,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+    * around the home scope.
+    */
+   private _freeNameBinding(): BoxedDefinition | undefined {
++    // PROTOTYPE (bound once): from the home scope.
+     return freeNameBindingInContext(
+       this.engine,
+       this._id,
+-      undefined,
++      this._homeScope,
+       this._readsAsVariable(this._homeScope!),
+       this._homeScope
+     );
+@@ -2010,6 +2012,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+    */
+   private _contextBinding(): BoxedDefinition | undefined {
+     const def = this._def;
++    // PROTOTYPE (bound once): a definition that is not a parameter, the
++    // variable of a binder or the local of a block is read as it is.
++    if (
++      def !== undefined &&
++      'value' in def &&
++      !isFunctionLiteralParameter(def.value) &&
++      !isBinderVariable(def.value) &&
++      def.value._blockLocal !== true
++    )
++      return def;
+     return bindingInContext(
+       this.engine,
+       this._id,

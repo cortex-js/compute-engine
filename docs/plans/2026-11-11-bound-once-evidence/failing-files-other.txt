@@ -1,0 +1,75 @@
+test/compute-engine/apply-literal-maps.test.ts
+test/compute-engine/assign-overlap-declared-type.test.ts
+test/compute-engine/binding-units-host-values.test.ts
+test/compute-engine/block-later-declarations.test.ts
+test/compute-engine/ce-107-function-literal-free-name-is-same.test.ts (5.128 s)
+test/compute-engine/ce-1102-provisional-registry-weak-references.test.ts (31.464 s)
+test/compute-engine/ce-1120-local-function-string-argument.test.ts
+test/compute-engine/ce-473-captured-free-symbol.test.ts
+test/compute-engine/ce-480-loop-index-argument-finite.test.ts (5.071 s)
+test/compute-engine/ce-535-531-binder-declaration-cache.test.ts
+test/compute-engine/ce-564-function-literal-list-and-recursive-call.test.ts
+test/compute-engine/ce-581-runner-list-argument-type.test.ts (11.833 s)
+test/compute-engine/ce-586-disposed-definition-inert.test.ts
+test/compute-engine/ce-597-unknowns-library-letter-operand.test.ts
+test/compute-engine/ce-601-shared-evaluation.test.ts (12.504 s)
+test/compute-engine/ce-631-633-boolean-results-and-inputs.test.ts
+test/compute-engine/ce-712-2-declared-union-dispatch.test.ts
+test/compute-engine/ce-806-settled-shape.test.ts
+test/compute-engine/clause-scope-free-variables.test.ts
+test/compute-engine/compile-absent-point-spelling.test.ts
+test/compute-engine/compile-admission.test.ts (13.833 s)
+test/compute-engine/compile-block-scalar-facts.test.ts (6.516 s)
+test/compute-engine/compile-color-value-representation.test.ts
+test/compute-engine/compile-complex-mode-list-input.test.ts (7.679 s)
+test/compute-engine/compile-declared-any-arithmetic.test.ts (6.341 s)
+test/compute-engine/compile-decline-diagnostics.test.ts
+test/compute-engine/compile-dictionary.test.ts
+test/compute-engine/compile-entry-string-refusal.test.ts
+test/compute-engine/compile-escalation-route-parity.test.ts
+test/compute-engine/compile-expression-declared-input.test.ts
+test/compute-engine/compile-fallback-absent-spelling.test.ts
+test/compute-engine/compile-fallback.test.ts
+test/compute-engine/compile-fold-collection-accumulator-arithmetic.test.ts
+test/compute-engine/compile-fold-shared-values.test.ts
+test/compute-engine/compile-fold-size-guard.test.ts
+test/compute-engine/compile-free-function-typing.test.ts
+test/compute-engine/compile-generic-monomorphization.test.ts
+test/compute-engine/compile-gpu-complex-signatures.test.ts
+test/compute-engine/compile-gpu-shared-calls.test.ts (5.173 s)
+test/compute-engine/compile-gpu-unsized-list-input.test.ts
+test/compute-engine/compile-javascript-profile.test.ts
+test/compute-engine/compile-jump-integer-shift.test.ts
+test/compute-engine/compile-list-entry.test.ts
+test/compute-engine/compile-loop-value-nothing.test.ts
+test/compute-engine/compile-mode-plumbing.test.ts
+test/compute-engine/compile-sort-iterate-pipe.test.ts
+test/compute-engine/compile-sum-over-declared-top.test.ts
+test/compute-engine/compile-unemittable-function-value.test.ts
+test/compute-engine/compile-user-call-arity.test.ts
+test/compute-engine/compile-userfn-result-shape.test.ts
+test/compute-engine/compile.test.ts (16.815 s)
+test/compute-engine/compiled-interpreter-agreement.test.ts
+test/compute-engine/derivative-user-function-body.test.ts
+test/compute-engine/enclosure-compile.test.ts
+test/compute-engine/function-values-rules.test.ts
+test/compute-engine/generic-function-literals.test.ts
+test/compute-engine/gpu-point-complex-component.test.ts
+test/compute-engine/hold-values.test.ts
+test/compute-engine/interval-fallback-answers.test.ts
+test/compute-engine/issue-489-curried-function-capture.test.ts
+test/compute-engine/jacobian-matrix.test.ts
+test/compute-engine/lambda-param-element-inference.test.ts
+test/compute-engine/multi-clause-compile.test.ts
+test/compute-engine/multiply-matrix-product.test.ts
+test/compute-engine/parameter-substitution-shadowing.test.ts
+test/compute-engine/placeholder-signature-refinement.test.ts
+test/compute-engine/pointlist-compile-zip.test.ts
+test/compute-engine/random-compile.test.ts (6.443 s)
+test/compute-engine/simplify.test.ts (12.315 s)
+test/compute-engine/solve.test.ts (14.938 s)
+test/compute-engine/subs-capture-avoiding.test.ts
+test/compute-engine/tycho-325-integrate-list-limit-broadcast.test.ts (5.41 s)
+test/compute-engine/tycho-items-233-234-point-list-add-oklch-hue.test.ts
+test/compute-engine/value-shield-scratch-scope.test.ts
+test/epsil/documentation.test.ts (89.711 s)
