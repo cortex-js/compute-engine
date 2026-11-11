@@ -92,7 +92,12 @@ function definingPolynomial(g: Expression): RationalCoefficient[] | undefined {
 const certifiedFields = new Map<string, RationalNumberField>();
 const MAX_CERTIFIED_FIELDS = 64;
 
-function certifiedField(
+/**
+ * The field of an irreducible rational polynomial. Throws `RangeError` when
+ * it is reducible, and `PolynomialBudgetExceeded` when the proof does not
+ * finish within the budget.
+ */
+export function certifiedField(
   polynomial: readonly RationalCoefficient[],
   options: NumberFieldFactorOptions
 ): RationalNumberField {
