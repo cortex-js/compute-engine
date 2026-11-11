@@ -61,6 +61,7 @@ import {
   UnitEnvironment,
   definitionHome,
   noteDefinitionHome,
+  noteFreeNameMade,
   noteResolutionRead,
   operationInput,
   readUnitEntry,
@@ -145,7 +146,11 @@ import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { beginStoreGuard } from './store-guard.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
-import { withStaticTypingView } from '../static-typing-view.js';
+import {
+  staticBindingIn,
+  staticParentOf,
+  withStaticTypingView,
+} from '../static-typing-view.js';
 import {
   assignmentLocalsOf,
   markFreeSymbolDeclaration,
@@ -403,6 +408,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const env = ce._boxingState.unitEnvironment();
       if (env !== undefined) this._env = env;
       if (options?.def === undefined && options?.homeScope !== undefined) {
+        noteFreeNameMade(ce, name);
         // A free name that an operation makes takes the home scope of the
         // same name in the input of the operation, when the scope it is made
         // in is that scope or a descendant of it (rule 8 of
@@ -960,6 +966,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         env.setScalarUsesMap(home, name, undefined);
     }
     if (to.isUnknown && inferenceMode !== 'replace') return false;
+    // A requirement that the entry excludes (`q(t)` after `2q` in the same
+    // unit: a function and a number) is not written: the entry keeps the
+    // earlier requirement, and no occurrence reads the type `never`.
+    if (inferenceMode === 'narrow' && to.type === 'never') return false;
     if (from !== undefined && to.type === from.type) return true;
     env.set(home, name, to);
     return true;
@@ -1133,7 +1143,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
     if (
       resolved !== undefined &&
-      !(isValueDef(resolved) && sameBindingDef(resolved.value, v))
+      !(isValueDef(resolved) && sameBindingDef(resolved.value, v)) &&
+      // Another definition is read only when it hides the definition of
+      // this occurrence: a declaration in a scope pushed under the scope
+      // that holds it. When the definition of the occurrence is not on the
+      // chain of the current scope (the variable of a binder whose scope
+      // is not current, a definition of a popped scope), a definition of
+      // the same name is another variable, and the occurrence reads its
+      // own, as without the flag: the variable `a` of `D(a^2, a)` in the
+      // body of `(a: real) ↦ …` is not the parameter, and the `i` of the
+      // closed form of `∫₀¹ i·x dx`, declared in a scope that was popped,
+      // is not the constant `i`.
+      this._ownDefinitionOnChain(v)
     ) {
       if (isOperatorDef(resolved)) return resolved.operator.signature;
       return this._typeOfDefinitionInUnit(resolved.value, this._unitEntry(v));
@@ -1145,6 +1166,31 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const entry = this._unitEntry(v);
     if (entry === undefined) return undefined;
     return this._typeOfDefinitionInUnit(v, entry);
+  }
+
+  /**
+   * True when a scope of the chain of the current scope holds the value
+   * definition `v` of this occurrence. The walk is that of the resolution
+   * of `_unitType()`: in the static view of the bindings
+   * (`withStaticTypingView()`), where a parameter that an application took
+   * out of the scope of its body is still read, and with the definitions
+   * compared as `bindingInContext()` compares them (`sameBindingDef()`).
+   */
+  private _ownDefinitionOnChain(v: BoxedValueDefinition): boolean {
+    const name = this._id;
+    return withStaticTypingView(this.engine, () => {
+      const start: Scope | null = this.engine.context?.lexicalScope ?? null;
+      for (let s: Scope | null = start; s; s = staticParentOf(s)) {
+        const found = staticBindingIn(s, name, s === start);
+        if (
+          found !== undefined &&
+          isValueDef(found) &&
+          sameBindingDef(found.value, v)
+        )
+          return true;
+      }
+      return false;
+    });
   }
 
   /**
@@ -3298,11 +3344,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get _asCollection(): CollectionHandlers | undefined {
+    // A free name answers the collection protocol below through the
+    // definition that its name resolves to in the current context
+    // (`_resolvedFreeSymbol()`, rule 7 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): with `ws`
+    // assigned a list after `Map(f, ws)` was boxed, the view has the
+    // elements of the list. With no value definition, it answers as a
+    // symbol with no definition does.
     if (isValueDef(this._def)) return this._def.value.collection;
     return undefined;
   }
 
   get isCollection(): boolean {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.isCollection ?? false;
     if (this._asCollection?.iterator !== undefined) return true;
     const def = this._def;
     if (def === undefined) return false;
@@ -3316,6 +3371,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isIndexedCollection(): boolean {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.isIndexedCollection ?? false;
     if (this._asCollection?.at !== undefined) return true;
     const def = this._def;
     if (def === undefined) return false;
@@ -3329,6 +3386,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isLazyCollection(): boolean {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.isLazyCollection ?? false;
     const def = this._def;
     if (def === undefined) return false;
     const guard = enterCycleQuery(def, CycleQuery.IsLazyCollection);
@@ -3345,6 +3404,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   contains(rhs: Expression): boolean | undefined {
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.contains(rhs);
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.Contains);
@@ -3368,6 +3428,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // FALLBACK: a value that disagrees with its declared size is a type error
     // reported elsewhere, and the value is the more specific answer regardless.
     const fromType = typeElementCount(this.type.type);
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.count ?? fromType;
     const def = this._def;
     if (def === undefined) return fromType;
     const guard = enterCycleQuery(def, CycleQuery.Count);
@@ -3397,6 +3459,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isEmptyCollection(): boolean | undefined {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.isEmptyCollection;
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.IsEmptyCollection);
@@ -3418,6 +3482,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isFiniteCollection(): boolean | undefined {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.isFiniteCollection;
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.IsFiniteCollection);
@@ -3448,6 +3514,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * answers `["a","a"]` — the alias must not change the result.
    */
   get isEnumerableCollection(): boolean | undefined {
+    if (this._isFreeName) {
+      // With no value definition, `false`, as for a symbol with no
+      // definition. Otherwise the answer of the definition, `undefined`
+      // included (a `Sort(…)` value is undecided until it is evaluated).
+      const resolved = this._resolvedFreeSymbol();
+      return resolved === undefined ? false : resolved.isEnumerableCollection;
+    }
     const def = this._def;
     if (def === undefined) return false;
     const guard = enterCycleQuery(def, CycleQuery.IsEnumerableCollection);
@@ -3470,6 +3543,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   each(): Generator<Expression> {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.each() ?? (function* () {})();
     // The guard spans this method's SYNCHRONOUS body only — that is where the
     // delegation to another symbol's `each()` happens, so it is enough to
     // break a cycle — and not the consumption of the returned generator, which
@@ -3505,6 +3580,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   at(index: number): Expression | undefined {
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.at(index);
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleDepthQuery(def, CycleDepthQuery.At);
@@ -3545,6 +3621,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get(index: Expression | string): Expression | undefined {
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.get(index);
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.Get);
@@ -3557,6 +3634,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   indexWhere(predicate: (element: Expression) => boolean): number | undefined {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.indexWhere(predicate);
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.IndexWhere);
@@ -3571,6 +3650,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   subsetOf(rhs: Expression, strict: boolean): boolean | undefined {
+    if (this._isFreeName)
+      return this._resolvedFreeSymbol()?.subsetOf(rhs, strict);
     // No definition, or a self-referential query: undecided rather than `no`
     // — an undeclared symbol may still be assigned a collection later.
     const def = this._def;

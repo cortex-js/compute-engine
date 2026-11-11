@@ -193,7 +193,10 @@ import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
 } from './provisional-application.js';
-import { unitEnvironmentOfOperands } from '../binding-unit.js';
+import {
+  freeNameHomeScope,
+  unitEnvironmentOfOperands,
+} from '../binding-unit.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -3358,15 +3361,20 @@ function makeCanonicalFunctionCore(
       // in the environment of the unit (`binding-unit.ts`), and the head
       // is resolved when the call is evaluated. A scope that the boxing
       // created (the body of a function literal), and a parameter of a
-      // literal, still get the declaration below.
+      // literal, still get the declaration below. The home scope of the
+      // free head skips the scope of a binder also when the call is boxed
+      // outside the canonicalization of the binder (`freeNameHomeScope()`).
+      const homeScope = ce._bindingUnits
+        ? freeNameHomeScope(autoScope)
+        : autoScope;
       if (
         ce._bindingUnits &&
         !ce._isShadowedParameter(name) &&
         ce.lookupDefinition(name) === undefined &&
-        ce._boxingState.isPersistentScope(autoScope) !== false
+        ce._boxingState.isPersistentScope(homeScope) !== false
       ) {
         ce.symbol(name)._infer(() => 'function');
-        freeHead = autoScope;
+        freeHead = homeScope;
       } else {
         ce.declare(name, { type: 'function', inferred: true }, autoScope);
         const declared = autoScope.bindings.get(name);

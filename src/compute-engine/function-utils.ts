@@ -63,6 +63,7 @@ import {
   isFreeName,
   isFreeCallHead,
   freeBinding,
+  readBinding,
 } from './boxed-expression/type-guards.js';
 import {
   adoptLazyView,
@@ -11785,8 +11786,21 @@ function appliesLiteral(
   if (seen.has(expr)) return false;
   seen.add(expr);
   if (isFunction(expr) || isSymbol(expr)) {
-    if (expr.valueDefinition?.value === literal) return true;
-    const opDef = expr.operatorDefinition as
+    // A call or a symbol boxed before the function was defined has no
+    // definition of its own (a free name): it reads the definition that its
+    // name resolves to now.
+    const binding = readBinding(expr);
+    if (
+      binding !== undefined &&
+      'value' in binding &&
+      binding.value.value === literal
+    )
+      return true;
+    const opDef = (
+      binding !== undefined && 'operator' in binding
+        ? binding.operator
+        : undefined
+    ) as
       | (BoxedOperatorDefinition & {
           _multiClauseFunction?: {
             clauses?: ReadonlyArray<{ literal: Expression }>;

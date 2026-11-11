@@ -1,6 +1,6 @@
 import type { Expression } from '../types-expression.js';
 import type { Type } from '../../common/type/types.js';
-import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol, readBinding } from './type-guards.js';
 import { errorValue } from './error-value.js';
 import {
   CancellationError,
@@ -58,10 +58,18 @@ export function listRecursionPlan(
   // declaration gets an OPERATOR definition, which keeps the literal it
   // applies (`_lambdaLiteral`). Both are read at application time, so a
   // later assignment of another function to the symbol is seen.
-  const isSelf = (expr: Expression): boolean =>
-    (isFunction(expr) || isSymbol(expr)) &&
-    (expr.valueDefinition?.value === literal ||
-      expr.operatorDefinition?._lambdaLiteral === literal);
+  // The binding is read with `readBinding()`: with the engine flag
+  // `_bindingUnits`, a self-call boxed before the assignment is bound to a
+  // forward-call reference, or is a free name, and reads the definition that
+  // the name holds now.
+  const isSelf = (expr: Expression): boolean => {
+    if (!isFunction(expr) && !isSymbol(expr)) return false;
+    const binding = readBinding(expr);
+    if (binding === undefined) return false;
+    return 'value' in binding
+      ? binding.value.value === literal
+      : binding.operator._lambdaLiteral === literal;
+  };
   // Only the direct call in a Join arm is lowered. A nested self-call in a
   // guard, an element, or a next argument needs its own continuation.
   const containsSelf = (expr: Expression): boolean => {
@@ -248,8 +256,13 @@ function declaresParameterTypes(
 ): boolean {
   if (!isFunction(call)) return false;
   let signature: Type | undefined;
-  const vdef = call.valueDefinition;
-  const odef = call.operatorDefinition;
+  const binding = readBinding(call);
+  const vdef =
+    binding !== undefined && 'value' in binding ? binding.value : undefined;
+  const odef =
+    binding !== undefined && 'operator' in binding
+      ? binding.operator
+      : undefined;
   if (vdef?.value === literal) {
     if (vdef.inferredType) return false;
     signature = vdef.type.type;

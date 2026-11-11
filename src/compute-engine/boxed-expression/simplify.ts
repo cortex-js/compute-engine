@@ -27,6 +27,7 @@ import {
 } from './utils.js';
 import {
   hasCallableHome,
+  markBorrowedOperator,
   markCallableHome,
   markShieldDeclaration,
   withCallableBinding,
@@ -56,6 +57,7 @@ import {
   isFunction,
   isString,
   isContinuationOperand,
+  isFreeCallHead,
 } from './type-guards.js';
 
 type InternalSimplifyOptions = SimplifyOptions & {
@@ -1227,8 +1229,18 @@ function simplifyOperands(
     return build(simplifiedOps);
   }
 
-  // Use _fn() since operands are already canonical (simplified above)
-  const build = (o: Expression[]) => expr.engine._fn(expr.operator, o);
+  // Use _fn() since operands are already canonical (simplified above). A
+  // call with a free head (`isFreeCallHead()`, `binding-unit.ts`) has no
+  // definition for `_fn()` to bind, so it is rebuilt with the free head of
+  // `expr`: a node from `_fn()` would not be canonical.
+  const build = (o: Expression[]) =>
+    isFreeCallHead(expr)
+      ? (
+          expr as unknown as {
+            _withSameBinding(ops: ReadonlyArray<Expression>): Expression;
+          }
+        )._withSameBinding(o)
+      : expr.engine._fn(expr.operator, o);
   const simplifiedOps: Expression[] = [];
   for (let i = 0; i < ops.length; i++) {
     const x = ops[i];
@@ -2090,6 +2102,7 @@ function simplifyShadowedCallsMasked(
         if (system !== undefined && !hasCallableHome(library))
           markCallableHome(library, system);
         maskScope.bindings.set(name, library);
+        if ('operator' in library) markBorrowedOperator(maskScope, name);
       }
       inner = simplify(masked, {
         ...options,

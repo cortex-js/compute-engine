@@ -1,6 +1,7 @@
 import { BoxedType } from '../common/type/boxed-type.js';
 import { narrow } from '../common/type/utils.js';
 import { recordObjectRead } from './boxed-expression/object-deps.js';
+import type { Scope } from './types-kernel-evaluation.js';
 
 /**
  * The environment of a binding unit.
@@ -49,10 +50,17 @@ export class UnitEnvironment {
   private _counter = 0;
 
   /** While a journal is open: for each write, a function that puts back the
-   * entry or the record of the uses as it was before that write, and true
-   * when the write was on a type entry (not on the record of the uses). */
-  private _journal: { undo: () => void; type: boolean }[] | undefined =
-    undefined;
+   * entry or the record of the uses as it was before that write, true when
+   * the write was on a type entry (not on the record of the uses), and the
+   * map and the name that it wrote (`journaledEntry()`). */
+  private _journal:
+    | {
+        undo: () => void;
+        type: boolean;
+        entries?: Map<string, unknown>;
+        name?: string;
+      }[]
+    | undefined = undefined;
 
   /**
    * For the environment of an operation (rule 8 of
@@ -353,7 +361,21 @@ export class UnitEnvironment {
         else entries.delete(name);
       },
       type,
+      entries,
+      name,
     });
+  }
+
+  /** True when the open journal holds a write on the type entry for `name`
+   * under `key`: the root construction in progress wrote that entry
+   * (`EngineBoxingState.noteUnitWrite()`). The fresh-matrix repair
+   * (`validate.ts`) retypes only such an entry. */
+  journaledEntry(key: object, name: string): boolean {
+    const entries = this._types?.get(key);
+    if (this._journal === undefined || entries === undefined) return false;
+    return this._journal.some(
+      (w) => w.type && w.entries === entries && w.name === name
+    );
   }
 
   /**
@@ -928,4 +950,53 @@ export function sameUnitEnvironmentStamp(
   if (a.size !== b.size) return false;
   for (const [env, counter] of a) if (b.get(env) !== counter) return false;
   return true;
+}
+
+/**
+ * The home scope of a free name (rule 1 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`) that is boxed while
+ * `autoScope` is the scope that a declaration of the name would go in. It
+ * is `autoScope`, or, when that is the scope of a binder (a scope with
+ * `binderNames`: `Sum`, `Product`, a loop), the first scope above it that
+ * is neither a binder's scope nor marked `noAutoDeclare`. A binder marks its
+ * scope `noAutoDeclare` only while it is canonicalized, so a name boxed
+ * later in that scope (the body of a `Sum` shifted by `subs()` when it is
+ * evaluated) would otherwise get the binder's scope as its home scope, and
+ * would not be the same binding as the occurrence of the same name in the
+ * body (`sameBinding()`, `compare.ts`).
+ */
+export function freeNameHomeScope<S extends Scope>(autoScope: S): S {
+  let scope = autoScope;
+  while (
+    (scope.binderNames !== undefined || scope.noAutoDeclare === true) &&
+    scope.parent
+  )
+    scope = scope.parent as S;
+  return scope;
+}
+
+/**
+ * The names that an engine made a free name or a free call head for
+ * (`noteFreeNameMade()`).
+ */
+const FREE_NAMES_MADE = new WeakMap<object, Set<string>>();
+
+/**
+ * Record that `engine` made a free name, or a call with a free head, of the
+ * name `name`.
+ */
+export function noteFreeNameMade(engine: object, name: string): void {
+  let names = FREE_NAMES_MADE.get(engine);
+  if (names === undefined) FREE_NAMES_MADE.set(engine, (names = new Set()));
+  names.add(name);
+}
+
+/**
+ * True when `engine` made a free name, or a call with a free head, of the
+ * name `name`. A declaration that gives such a name a value changes what an
+ * expression boxed before it evaluates to, as a value write does
+ * (`installsValue`, `engine-configuration-lifecycle.ts`).
+ */
+export function freeNameWasMade(engine: object, name: string): boolean {
+  return FREE_NAMES_MADE.get(engine)?.has(name) === true;
 }

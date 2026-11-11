@@ -19,6 +19,7 @@ import {
   functionResult,
   isPointElementType,
   stripMissingFromType,
+  stripNumericRanges,
 } from '../../common/type/utils.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
@@ -3418,7 +3419,11 @@ function callOfDataSymbolError(
   e: Expression
 ): Expression | undefined {
   if (!isFunction(e) || e.operatorDefinition !== undefined) return undefined;
-  const own = e.valueDefinition;
+  // A free call head (`isFreeCallHead()`, `binding-unit.ts`) has no
+  // definition of its own: it reads the value definition that its name
+  // resolves to now.
+  const read = readBinding(e);
+  const own = read !== undefined && 'value' in read ? read.value : undefined;
   if (own === undefined) return undefined;
   const binding = callableBindingInContext(ce, e.operator, { value: own });
   if (binding === undefined || !isValueDef(binding)) return undefined;
@@ -7017,9 +7022,11 @@ volumes
       signature: '(expression, variables:symbol*) -> expression',
       type: ([body], { engine }) => {
         if (!body) return undefined;
-        const t = body.type;
         // The derivative of a numeric expression is numeric — preserve the
-        // concrete numeric type (e.g. `number` for `D(Sin(x),x)`).
+        // numeric tier (e.g. `number` for `D(Sin(x),x)`), without the range
+        // of the body: `Abs(x)` is `real<0..>`, and its derivative is `-1`
+        // for a negative `x`.
+        const t = stripNumericRanges(body.type);
         if (isSubtype(t, 'number'))
           return BoxedType.forResult(t, engine._typeResolver);
         // A numeric TUPLE or COLLECTION body differentiates component-wise and

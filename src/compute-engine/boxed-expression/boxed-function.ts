@@ -4,6 +4,7 @@ import { isForwardCallReference } from './forward-call-reference.js';
 import {
   UnitEnvironment,
   isUnitReadToken,
+  noteFreeNameMade,
   operationInput,
   unitCounterOfOperands,
 } from '../binding-unit.js';
@@ -270,6 +271,8 @@ import {
   kindValueIsNaN,
   isNaNPointValue,
   isFreeName,
+  isFreeCallHead,
+  freeBinding,
   hasInferredType,
 } from './type-guards.js';
 import {
@@ -1429,6 +1432,23 @@ export class BoxedFunction
       }
     | undefined = undefined;
 
+  /** With the engine flag `_bindingUnits`: the definition that the name of
+   * this call holds now (`callableBindingInContext`), when the call is bound
+   * to a forward-call reference (`isForwardCallReference`): a call in the
+   * body of a function literal boxed before its name had a definition. That
+   * reference is declared in a scope that the boxing made, so a later
+   * definition of the name does not replace it. `undefined` otherwise. Read
+   * it through `readBinding()` (`type-guards.ts`).
+   * @internal */
+  _forwardCalleeBinding(): BoxedDefinition | undefined {
+    if (!this.engine._bindingUnits) return undefined;
+    const own = this._def;
+    if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
+      return undefined;
+    const current = callableBindingInContext(this.engine, this._operator, own);
+    return current === own ? undefined : current;
+  }
+
   /** This call boxed again against the definition that its name holds now,
    * when the call was boxed before the name had a value (a forward
    * reference, `isForwardCallReference`) and the name now has a definition.
@@ -2022,6 +2042,7 @@ export class BoxedFunction
         ce._bindingUnits
       ) {
         this._freeHeadScope = options.freeHead;
+        noteFreeNameMade(ce, this._operator);
         const env = ce._boxingState.unitEnvironment();
         if (env !== undefined) this._freeHeadEnv = env;
       }
@@ -17613,10 +17634,52 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     );
   }
 
+  // With the engine flag `_bindingUnits`: a call whose free head resolves to
+  // no definition reads the `function` reading of its unit.
+  if (isFreeCallHead(expr) && freeBinding(expr) === undefined)
+    return freeHeadCallType(expr);
+
   // We want to return the result of evaluating the function, so since
   // we don't know (somehow?) we return 'unknown', not 'function', which
   // is the type of the function itself, not of its result.
   return 'unknown';
+}
+
+/**
+ * The type of the call `expr` with a free head (`isFreeCallHead()`) whose
+ * name resolves to no definition. The head reads the `function` reading of
+ * its unit (rule 2 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`):
+ * a function with no signature and no value. The call is typed as the
+ * value-definition route of `boundCallType()` types a call of a name with
+ * the inferred type `function` and no value, the definition that the boxing
+ * declares when the engine flag `_bindingUnits` is off: the result is
+ * `unknown`, lifted over a collection operand (`lambdaBroadcastType()`), so
+ * with `L = [1, 3, 5]`, `foo(L)` is typed `list<unknown^3>`
+ * (`docs/BROADCAST-MODEL.md`). With no function literal, no rule of that
+ * route that reads the literal or a signature applies.
+ */
+function freeHeadCallType(expr: BoxedFunction): Type {
+  if (expr.ops.some((x) => x.type.type === 'never')) return 'never';
+  const sig: Type = 'function';
+  const threadable = paramsAreScalar(sig);
+  const sigResult =
+    instantiatedResultType(sig, expr.ops, { threadable }) ??
+    functionResult(sig) ??
+    'unknown';
+  if (threadable) {
+    const lifted = lambdaBroadcastType(
+      expr.ops.map((x) => new LambdaCallOperandOfExpression(x)),
+      sigResult,
+      undefined,
+      true
+    );
+    if (lifted !== undefined) return lifted;
+  }
+  return (
+    (threadable
+      ? wholeAbsentTupleArgumentType(expr.ops, sigResult, true, undefined, sig)
+      : undefined) ?? sigResult
+  );
 }
 
 /** The boxed form of the signature `declaredScalarConformance` checks

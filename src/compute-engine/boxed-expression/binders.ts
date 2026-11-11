@@ -240,6 +240,30 @@ function scopeStandsFor(scope: Scope, home: Scope): boolean {
   return false;
 }
 
+/**
+ * The temporary scopes that lend an operator definition to the head of a
+ * call (`withBorrowedBinding()`, and the scope in which `simplify()` masks
+ * the calls of a shadowed library operator), with the names lent. With the
+ * engine flag `_bindingUnits`, a symbol does not read such a binding
+ * (`bindingInContext()`): it is lent to a call head. The type of an occurrence is read by name in the current
+ * context (rule 3 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`),
+ * so with `N` declared a real variable, the operand `N` of `Range(1, N)`,
+ * read while a call of the library operator `N` is rebuilt, would have the
+ * type of that operator.
+ */
+const BORROWED_OPERATOR_SCOPES = new WeakMap<Scope, Set<string>>();
+
+/**
+ * Record that `scope`, a temporary scope, lends an operator definition under
+ * `name` to the head of a call (`BORROWED_OPERATOR_SCOPES`).
+ */
+export function markBorrowedOperator(scope: Scope, name: string): void {
+  let names = BORROWED_OPERATOR_SCOPES.get(scope);
+  if (names === undefined)
+    BORROWED_OPERATOR_SCOPES.set(scope, (names = new Set()));
+  names.add(name);
+}
+
 /** Preserve a callable's binding while canonicalizing rewritten operands. */
 export function withCallableBinding<T>(expr: Expression, build: () => T): T {
   if (!isFunction(expr)) return build();
@@ -287,6 +311,7 @@ export function withBorrowedBinding<T>(
         break;
       }
   const bindings = new Map([[name, binding]]);
+  const borrowsOperator = 'operator' in binding;
   // The scope holds only the borrowed binding. A name that the build
   // declares automatically (a new symbol of a raw operand) goes to the
   // enclosing scope: a declaration in this scope would be lost when the
@@ -296,6 +321,7 @@ export function withBorrowedBinding<T>(
     bindings,
     noAutoDeclare: true,
   });
+  if (borrowsOperator) markBorrowedOperator(ce.context.lexicalScope, name);
   try {
     return build();
   } finally {
@@ -556,7 +582,13 @@ export function bindingInContext(
     // Inside a type computation, the static view of the bindings
     // (`static-typing-view.ts`): a call frame does not answer.
     const found = staticBindingIn(scope, name, scope === start);
-    if (found !== undefined) {
+    if (
+      found !== undefined &&
+      !(
+        ce._bindingUnits &&
+        BORROWED_OPERATOR_SCOPES.get(scope)?.has(name) === true
+      )
+    ) {
       if ('value' in found && isForeignBinderBinding(found.value, own)) {
         skippedBinder ??= found;
       } else if (
@@ -593,12 +625,44 @@ export function bindingInContext(
   if (own !== undefined) {
     const caller = callerBinding(ce, name, own, start, null);
     if (caller !== undefined) return caller;
+    // A free name of the body of a function literal (engine flag
+    // `_bindingUnits`) does not read the variable of a binder or the
+    // parameter activation of a call frame (rule 3 of
+    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
+    if (skippedBinder !== undefined && BODY_FREE_NAMES.has(own))
+      return undefined;
     return skippedBinder !== undefined &&
       readsNoOtherBinding(ce, name, own, skippedBinder, start)
       ? undefined
       : skippedBinder;
   }
   return skippedBinder;
+}
+
+/**
+ * The value definitions that a boxing made, with the engine flag
+ * `_bindingUnits`, for a name with no definition in a scope that the boxing
+ * created (the body of a function literal): see `markBodyFreeName()`.
+ */
+const BODY_FREE_NAMES = new WeakSet<object>();
+
+/**
+ * Record that the value definition `def` stands for a free name of the body
+ * of a function literal, with the engine flag `_bindingUnits`.
+ *
+ * The boxing declares such a name in the scope of the body, which it made,
+ * and writes its requirements under the scope that the literal is written
+ * in, its home scope (rule 2 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). No declaration is
+ * made in the home scope, so when the scope of the body is not current the
+ * name has no binding of its own to read. It is a free name: it does not
+ * read the variable of a binder or the parameter of a call that has its name
+ * (`bindingInContext()`). With `F := x ↦ x·d` written at the top level, a
+ * view `Map(F, [1, 2])` read inside a call `g(10, …)` of `g := (d, v) ↦ …`
+ * reads the top-level `d`, not the parameter.
+ */
+export function markBodyFreeName(def: object): void {
+  BODY_FREE_NAMES.add(def);
 }
 
 /**

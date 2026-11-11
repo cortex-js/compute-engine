@@ -102,6 +102,11 @@
 
 ### Resolved Issues
 
+- **The type of a derivative no longer keeps the range of its operand.**
+  `D(|x|, x)` had the type `real<0..> | signed_infinity`, the type of `|x|`,
+  although the derivative is `-1` for a negative `x`. The type of `D(f, x)`
+  is now the numeric type of `f` without its range: `real | infinity` here.
+
 - **`ce.withValues()` reports a failed restore when its callback threw.**
   When `fn` threw and putting back the earlier value of a symbol failed too,
   only the error of `fn` was thrown, and the symbol could keep its temporary

@@ -156,8 +156,10 @@ import {
   containsContinuationOperand,
   hasInferredType,
   isFreeName,
+  freeBinding,
   resolvedValueDefinition,
 } from './type-guards.js';
+import type { UnitEnvironment } from '../binding-unit.js';
 import { narrowStringLiteralToCharacter } from './boxed-character.js';
 import { smallCount } from './collection-count.js';
 import {
@@ -1613,8 +1615,16 @@ export function checkNumericArgs(
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
       xs.push(op);
-    } else if (isSymbol(op) && !ce.lookupDefinition(op.symbol)) {
-      // We have an unknown symbol, we'll infer it's a number later
+    } else if (
+      isSymbol(op) &&
+      !ce.lookupDefinition(op.symbol) &&
+      !(isFreeName(op) && !op.type.isUnknown)
+    ) {
+      // We have an unknown symbol, we'll infer it's a number later. A free
+      // name (engine flag `_bindingUnits`) that its unit already requires to
+      // be something is checked by the branches below, as a symbol with an
+      // inferred definition is: in `o \cdot o(t)` the factor `o` is a
+      // function, and an `incompatible-type` error.
       xs.push(op);
     } else if (op.type.isUnknown || op.type.type === 'any') {
       // Unknown or any type. Keep it that way, infer later
@@ -6040,6 +6050,11 @@ function couldRepairFreshMatrixInference(
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
+    const site = unitRepairSite(ce, op, name);
+    if (site !== undefined) {
+      if (site.eligible) eligible.add(name);
+      continue;
+    }
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) continue;
     // Keep this test in step with `repairFreshMatrixInference`, which
@@ -6073,6 +6088,129 @@ function hasNonNumericShapeEvidence(type: Type): boolean {
 }
 
 /**
+ * Where the fresh-matrix repair retypes a name whose requirements are in a
+ * unit environment (`binding-unit.ts`), with the engine flag `_bindingUnits`.
+ * - `env`: the environment that the write goes in: that of the trial in
+ *   progress, else of the operation in progress (rule 8 of
+ *   `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), else of the
+ *   occurrence (rule 6).
+ * - `key`: the key of the entry: the home scope of a free name, or the value
+ *   definition of the occurrence.
+ * - `eligible`: the entry is a fresh numeric guess, as `freshlyInferred`
+ *   states it for a definition: the root construction in progress wrote it,
+ *   or the name has no entry yet, and the occurrence's type (rule 4) is not a
+ *   collection or a text type (`hasNonNumericShapeEvidence()`). An entry
+ *   that an earlier boxing wrote is not retyped: that boxing's evidence
+ *   stays, and its expression keeps its type.
+ */
+type UnitRepairSite = {
+  env: UnitEnvironment | undefined;
+  key: object;
+  eligible: boolean;
+};
+
+/**
+ * With the engine flag `_bindingUnits`: the entry of a unit environment that
+ * the fresh-matrix repair retypes for the name `name` of `op`
+ * (`UnitRepairSite`), or `undefined` when the repair retypes the definition
+ * of the name, as without the flag.
+ *
+ * Boxing writes no definition (rule 1 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the requirements of
+ * a free name, and of a name whose definition has an inferred type or the type
+ * `unknown`, are entries of the environment (rule 2), and the type of an
+ * occurrence reads them (rule 4). The repair replaces that entry. A
+ * definition that the root construction made in a scope that it created (a
+ * parameter of a function literal) is still narrowed by its uses
+ * (`BoxedSymbol._unitWriteScope()`): its uses wrote no entry, and the repair
+ * retypes it as without the flag.
+ */
+function unitRepairSite(
+  ce: ComputeEngine,
+  op: Expression,
+  name: string
+): UnitRepairSite | undefined {
+  if (!ce._bindingUnits) return undefined;
+  const occurrence = symbolOccurrence(op, name);
+  if (occurrence === undefined) return undefined;
+  const sym = occurrence as Expression & {
+    _env?: UnitEnvironment;
+    _homeScope?: object;
+  };
+  const free = isFreeName(sym);
+  let key: object | undefined;
+  if (free) {
+    // A free name that a later declaration with an explicit type resolves
+    // to reads that type (rule 4.1): no entry changes it.
+    const resolved = freeBinding(sym);
+    if (
+      resolved !== undefined &&
+      (!isValueDef(resolved) ||
+        (!resolved.value.inferredType && !resolved.value.type.isUnknown))
+    )
+      return { env: undefined, key: sym, eligible: false };
+    key = sym._homeScope;
+  } else {
+    const def = sym.valueDefinition;
+    if (def === undefined || (!def.inferredType && !def.type.isUnknown))
+      return undefined;
+    key = def;
+  }
+  if (key === undefined) return undefined;
+
+  const state = ce._boxingState;
+  const trial = state.trialEnvironment();
+  const operation = state.currentOperation();
+  const entry =
+    trial?.lookup(key, name) ??
+    operation?.lookup(key, name) ??
+    sym._env?.lookup(key, name);
+  // The uses of a definition wrote on the definition, not in an
+  // environment.
+  if (!free && entry === undefined) return undefined;
+
+  const env = trial ?? operation ?? sym._env;
+  // The failure leg of the repair undoes its writes through the journal that
+  // a root construction opens (`EngineBoxingState.noteUnitWrite()`).
+  if (env === undefined || !state.isRootActive)
+    return { env: undefined, key, eligible: false };
+  const fresh =
+    entry === undefined ||
+    trial?.get(key, name) !== undefined ||
+    operation?.journaledEntry(key, name) === true ||
+    sym._env?.journaledEntry(key, name) === true;
+  return {
+    env,
+    key,
+    eligible: fresh && !hasNonNumericShapeEvidence(sym.type.type),
+  };
+}
+
+/**
+ * The first free occurrence of the symbol `name` in `expr`, depth first. An
+ * operand whose scope binds `name` (the parameter of a function literal, the
+ * index of a `Sum`) is not entered: its occurrences are another variable.
+ */
+function symbolOccurrence(
+  expr: Expression,
+  name: string
+): Expression | undefined {
+  if (isSymbol(expr)) return expr.symbol === name ? expr : undefined;
+  if (!isFunction(expr)) return undefined;
+  const scope = expr.localScope;
+  if (
+    scope !== undefined &&
+    (scope.bindings.has(name) || scope.binderNames?.has(name) === true)
+  )
+    return undefined;
+  for (const operand of expr.ops) {
+    const found = symbolOccurrence(operand, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
  * Repair bottom-up numeric inference when a matrix-consuming operator gives
  * the enclosing context that was unavailable to Add/Multiply. Only symbols
  * first inferred while canonicalizing this argument are eligible. The repair
@@ -6093,7 +6231,18 @@ function repairFreshMatrixInference(
   if (!freshlyInferred || !targetType) return null;
 
   const eligible = new Set<string>();
+  // With the engine flag `_bindingUnits`: the names whose entry of a unit
+  // environment the repair replaces (`unitRepairSite()`).
+  const sites = new Map<string, UnitRepairSite>();
   for (const name of op.freeVariables) {
+    const site = unitRepairSite(ce, op, name);
+    if (site !== undefined) {
+      if (site.eligible) {
+        eligible.add(name);
+        sites.set(name, site);
+      }
+      continue;
+    }
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) continue;
     // "Fresh" = the definition's type was first inferred (unknown → concrete)
@@ -6180,7 +6329,25 @@ function repairFreshMatrixInference(
   // `axisMaskOf`). One binding outside a scratch scope keeps the full
   // advance.
   let allScratch = true;
+  // With the engine flag `_bindingUnits`: for each environment that the
+  // repair writes in, the length of its journal before the first write. The
+  // failure leg undoes the writes after it: the entries that the repair
+  // replaced, and the requirements that the discarded re-box wrote. A write
+  // in an environment sends no engine-wide event (rule 9 of
+  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), so the events
+  // below are sent only for a write on a definition.
+  const marks = new Map<UnitEnvironment, number>();
+  let definitionWrites = false;
   for (const name of names) {
+    const site = sites.get(name);
+    if (site !== undefined) {
+      const env = site.env!;
+      ce._boxingState.noteUnitWrite(env);
+      if (!marks.has(env)) marks.set(env, env.journalLength());
+      env.set(site.key, name, ce.type(targetType));
+      continue;
+    }
+    definitionWrites = true;
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) return null;
     if (!isScratchBinding(ce, def)) allScratch = false;
@@ -6235,15 +6402,17 @@ function repairFreshMatrixInference(
       freshlyAdded.push(def.value);
     }
   }
-  ce._noteStateEvent({
-    kind: 'inference',
-    ...(allScratch ? { scratch: true } : {}),
-  });
+  if (definitionWrites)
+    ce._noteStateEvent({
+      kind: 'inference',
+      ...(allScratch ? { scratch: true } : {}),
+    });
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
     const sink = ce._narrowingSink;
     for (const name of names) {
+      if (sites.has(name)) continue;
       const def = ce.lookupDefinition(name);
       if (def && isValueDef(def)) {
         def.value.inferredType = true;
@@ -6262,17 +6431,20 @@ function repairFreshMatrixInference(
   }
 
   for (const name of names) {
+    if (sites.has(name)) continue;
     const def = ce.lookupDefinition(name);
     if (def && isValueDef(def)) {
       def.value._restoreTypeSlots(snapshots.get(name));
       def.value._typeProvenance = histories.get(name);
     }
   }
+  for (const [env, mark] of marks) env.undoJournal(mark);
   for (const fresh of freshlyAdded) ce._freshlyInferred?.delete(fresh);
-  ce._noteStateEvent({
-    kind: 'inference',
-    ...(allScratch ? { scratch: true } : {}),
-  });
+  if (definitionWrites)
+    ce._noteStateEvent({
+      kind: 'inference',
+      ...(allScratch ? { scratch: true } : {}),
+    });
   return null;
 }
 

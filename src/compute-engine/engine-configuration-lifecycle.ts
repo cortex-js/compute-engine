@@ -33,6 +33,15 @@ export type StateEvent =
        * `engine-declarations.ts`). See the `declare` case of
        * {@link axisMaskOf}. */
       parameter?: boolean;
+      /** With the engine flag `_bindingUnits`: the declaration gives a
+       * value to a name that the engine made a free name for
+       * (`ce.assign('ws', …)` for a name that was only boxed), outside the
+       * parameter bindings of a call, or declares a function of that name.
+       * A free name boxed before it reads that value from now on (a call
+       * with a free head applies the function), so the declaration advances
+       * the `semantic` axis as a value write does. Without the flag, boxing
+       * declares the name, and the assignment is a value write. */
+      installsValue?: boolean;
       /** The declaration installs a value, or replaces a binding of the
        * name, in a scope that a frame on the evaluation stack reads
        * (`changesFrameBinding`, `engine-declarations.ts`). It advances the
@@ -278,7 +287,7 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       // walked and copied it again, so the result's distinct nodes grew
       // quadratically with the depth.
       if (e.parameter) return { any: false, semantic: false, world: false };
-      return { any: true, semantic: false, world: false };
+      return { any: true, semantic: e.installsValue === true, world: false };
     case 'binding-repair':
       // The repair of a NEW name declared in a scratch scope advances
       // nothing: it is `scratch` and `fresh` (the target scope held no

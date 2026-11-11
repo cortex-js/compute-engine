@@ -42,6 +42,13 @@ findings of round 2 and was not reviewed again.
    - `ce.lookupDefinition(name)` is `undefined` until the name is declared;
    - `isFreeName(expr)` is true. This predicate gives the kind of the
      occurrence, and it stays true after a later declaration.
+
+   The home scope also skips the scope of a binder (`Sum`, `Product`, a
+   loop) when the name is boxed in that scope after the binder was
+   canonicalized, for example by a `subs()` during its evaluation: the
+   `g(k+2)` that the telescoping of `Sum(g(k+1) - g(k))` builds is then the
+   same binding as the `g(k+1)` of the body. (Added 2026-11-10, in phase E,
+   package C.)
 2. **One outermost boxing is one unit, with one environment.** Each symbol
    that the boxing makes keeps a reference to it. A use of a name puts a
    requirement on it (`x + 1` requires `number`). When the name has no
@@ -64,6 +71,28 @@ findings of round 2 and was not reviewed again.
      boxed operand.
 
    A `ce.function()` call whose operands are all raw is a unit.
+
+   Added 2026-11-10, in phase E, package C:
+   - **A requirement that the entry excludes is not written.** When the
+     meet of a requirement and the entry of the name in the same unit is
+     `never` (`q(t)` after `2q`: a function and a number), the entry keeps
+     the earlier requirement, as an inferred definition does today. No
+     occurrence reads the type `never`.
+   - **A free name with an entry is checked as an inferred definition is.**
+     In `o \cdot o(t)`, the call makes `o` a function before the product is
+     checked, so the factor `o` is an `incompatible-type` error, as today.
+   - **A call whose free head resolves to no definition** has the type of a
+     call of a head of the inferred type `function` with no value:
+     `unknown`, lifted over a collection operand. It promises no static
+     shape and is not enumerable.
+   - **The fresh-matrix repair** (`Determinant(A + B)`) replaces the entry
+     of a name, in the environment that a write of the boxing in progress
+     goes to. It replaces an entry only when that boxing wrote it, or when
+     there is none: an entry that an earlier boxing wrote is not changed,
+     so with `a = ce.box(A + B)`, `ce.function('Determinant', [a])` stays
+     invalid. When the repaired form is refused, the replaced entries are
+     put back. This is the one place where an entry is replaced and not
+     narrowed (rule 6). It sends no engine-wide event (rule 9).
 3. **Resolution.** For a type read, an evaluation, a compilation and a
    comparison, the definition of an occurrence of a name is found when the
    read happens:
@@ -75,6 +104,29 @@ findings of round 2 and was not reviewed again.
      a free name was not inside a binder when it was boxed.
    - It also skips a library operator, for a name that the unit reads as a
      variable (rule 2, `N`).
+   - A free name of the body of a function literal has a definition in
+     the scope of the body, which the boxing made, and no declaration in
+     its home scope. It is a free name for the resolution: when the scope
+     of the body is not current, it does not read the variable of a binder
+     or the parameter of a call that has its name. A view
+     `Map(x ↦ x·d, [1, 2])` made at the top level and read inside a call
+     of `(d, v) ↦ …` reads the top-level `d`. (Added 2026-11-10, in phase
+     E, package C.)
+   - An occurrence that has a definition reads another definition of its
+     name only when that definition hides its own: a declaration in a
+     scope pushed under the scope that holds its definition. When its own
+     definition is not on the chain of the current scope (the variable of a
+     binder whose scope is not current, a definition of a popped scope), it
+     reads its own definition, as today: the variable `a` of `D(a^2, a)` in
+     the body of `(a: real) ↦ …` is not the parameter, and the `i` of the
+     closed form of `r(y, i) := ∫₀¹ i·x dx` is not the constant `i`.
+     (Added 2026-11-10, in phase E, package C.)
+   - A symbol does not read an operator definition that a temporary scope
+     lends to the head of a call (the rebuild of a call whose name is
+     shadowed, and the scope in which `simplify()` masks a shadowed library
+     operator): with `N` declared a real variable, the operand `N` of
+     `Range(1, N)` keeps its type while a call of the library `N` is
+     rebuilt. (Added 2026-11-10, in phase E, package C.)
 4. **The type of an occurrence** whose resolved definition is absent,
    inferred or of type `unknown`, in this order:
    1. the type of the resolved definition, when that definition has an
@@ -129,6 +181,16 @@ findings of round 2 and was not reviewed again.
      declare the name in its home scope, as `ce.assign()` and `ce.declare()`
      do, and are journaled like them. Today `ce.box('w').value = 3` declares
      `w`; that stays the same.
+   - The collection protocol of a symbol (`isCollection`, `each()`,
+     `at()`, `count`, `contains()`, …) answers through the resolved
+     definition of a free name: with `ws` assigned a list after
+     `Map(f, ws)` was boxed, the view has the elements of the list. (Added
+     2026-11-10, in phase E, package C.)
+   - A call in the body of a function literal whose head had no definition
+     is bound to a placeholder in the scope of the body. A site that reads
+     the definition of such a call (`readBinding()`) reads the definition
+     that the name has now: the self-call of `s(n) := s(n-1) + 1` reads the
+     definition of `s`. (Added 2026-11-10, in phase E, package C.)
    - The record of the captured types of a definition made from a function
      literal (`noteDefinitionCapturedTypes()`): a captured name whose
      body-scope copy has no outer binding is recorded by name, with the type
@@ -194,6 +256,14 @@ findings of round 2 and was not reviewed again.
    - `opaqueSymbolDefinition()` (`compilation/cse.ts`).
 
    The implementation lists the others that it finds.
+
+   A declaration that gives a value or a function to a name that the
+   engine made a free name for (`ce.assign('ws', …)` for a name that was
+   only boxed) changes what an expression boxed before it evaluates to.
+   It advances the `semantic` version of the engine, as a value write
+   does today, when boxing has declared the name. The parameter bindings
+   of a call are excepted. The memo of the lowering of a `Map` is
+   revalidated on that version. (Added 2026-11-10, in phase E, package C.)
 10. **Programs.** An Epsil run and an Epsil static check open one program
     environment for their dynamic extent. It is the bottom of the stack of
     rule 8.

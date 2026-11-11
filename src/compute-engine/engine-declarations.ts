@@ -1,4 +1,5 @@
 import { isPendingCallScope } from './pending-call-scopes.js';
+import { freeNameWasMade } from './binding-unit.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
 import { noteKindTypeDeclaration } from './boxed-expression/residue-class.js';
 import {
@@ -711,6 +712,13 @@ export function declareSymbolValue(
     callable: defIsCallableShaped(boxedDef),
     shadowsCallable,
     ...(changesBinding ? { changesFrameBinding: true } : {}),
+    ...(ce._bindingUnits &&
+    isValueDef(boxedDef) &&
+    boxedDef.value.storedValue !== undefined &&
+    freeNameWasMade(ce, name) &&
+    !isPendingCallScope(scope)
+      ? { installsValue: true }
+      : {}),
     // Keyed on the RESOLVED target scope, never on "is a scratch extent
     // running": a declaration made during one but aimed at a longer-lived
     // scope outlives it and must keep its axis advance. See `axisMaskOf`.
@@ -917,6 +925,13 @@ export function declareSymbolOperator(
     callable: true,
     shadowsCallable,
     ...(changesBinding ? { changesFrameBinding: true } : {}),
+    // A call boxed before this declaration (a free call head) applies the
+    // function from now on: see `installsValue`.
+    ...(ce._bindingUnits &&
+    freeNameWasMade(ce, name) &&
+    !isPendingCallScope(scope)
+      ? { installsValue: true }
+      : {}),
     // Same resolved-scope test as `declareSymbolValue` above: the two routes
     // must agree, or an operator-shaped stand-in would reintroduce the churn
     // the exemption removes.

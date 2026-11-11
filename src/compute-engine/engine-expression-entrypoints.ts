@@ -20,6 +20,8 @@ import {
 import { NumericValue } from './numeric-value/types.js';
 import { isRational } from './numerics/rationals.js';
 import { markFreeSymbolDeclaration } from './assignment-locals.js';
+import { markBodyFreeName } from './boxed-expression/binders.js';
+import { freeNameHomeScope } from './binding-unit.js';
 import type { Rational } from './numerics/types.js';
 import type {
   BoxedDefinition,
@@ -346,12 +348,14 @@ export function createSymbolExpression(
   // the declaration below would go in. This applies to a scope that existed
   // before the boxing started, and to a symbol made outside a boxing. A
   // scope that the boxing made (the body of a function literal) still gets
-  // the declaration below.
-  if (
-    engine._bindingUnits &&
-    engine._boxingState.isPersistentScope(autoScope) !== false
-  )
-    return new BoxedSymbol(engine, name, { metadata, homeScope: autoScope });
+  // the declaration below. The home scope skips the scope of a binder also
+  // when the name is boxed outside the canonicalization of the binder
+  // (`freeNameHomeScope()`).
+  if (engine._bindingUnits) {
+    const homeScope = freeNameHomeScope(autoScope);
+    if (engine._boxingState.isPersistentScope(homeScope) !== false)
+      return new BoxedSymbol(engine, name, { metadata, homeScope });
+  }
   def = engine._declareSymbolValue(
     name,
     { type: 'unknown', inferred: true },
@@ -374,6 +378,7 @@ export function createSymbolExpression(
   if (engine._boxingState.isPersistentScope(autoScope) === false) {
     engine._boxingState.noteTransientAutoDeclare(name);
     markFreeSymbolDeclaration(def);
+    if (engine._bindingUnits && isValueDef(def)) markBodyFreeName(def.value);
   }
   const freeSym = new BoxedSymbol(engine, name, { metadata, def });
   // Provenance: binding created as a side effect of boxing a free symbol —

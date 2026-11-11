@@ -72,6 +72,11 @@ function factSubjects(
     if (subject !== undefined) {
       const key = subjectKey(subject);
       if (!found.has(key)) {
+        // With the engine flag `_bindingUnits`, boxing the fact declared no
+        // name: the assumption declares each name that it constrains (rule
+        // 12 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), so
+        // that a fact about two names (`x > y`) is recorded against both.
+        if (ce._bindingUnits) declareProvisional(ce, subject.symbol);
         const def = ce.lookupDefinition(subject.symbol);
         if (def !== undefined && isValueDef(def))
           found.set(

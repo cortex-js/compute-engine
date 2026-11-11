@@ -323,6 +323,8 @@ import {
   isUnorderedSet,
   sym,
   hasInferredType,
+  isFreeCallHead,
+  freeBinding,
 } from '../boxed-expression/type-guards.js';
 import {
   isRestriction,
@@ -26529,13 +26531,19 @@ function* groupByWalk(
     // element would land in its own garbage group ("Even(1)", "Even(2)",
     // …). Report it like Filter reports a broken predicate. Explicitly
     // declared symbols are untouched — grouping by a symbolic key is
-    // legitimate.
+    // legitimate. A call with a free head (`isFreeCallHead()`,
+    // `binding-unit.ts`) reads the definition that its name resolves to now,
+    // and with none it is such an application too.
     if (isFunction(keyExpr)) {
-      const keyDef = ce.lookupDefinition(keyExpr.operator);
+      const freeHead = isFreeCallHead(keyExpr);
+      const keyDef = freeHead
+        ? freeBinding(keyExpr)
+        : ce.lookupDefinition(keyExpr.operator);
       if (
-        keyDef !== undefined &&
-        'value' in keyDef &&
-        keyDef.value?.inferredType === true
+        (keyDef === undefined && freeHead) ||
+        (keyDef !== undefined &&
+          'value' in keyDef &&
+          keyDef.value?.inferredType === true)
       ) {
         throw new Error(
           `Unknown function "${keyExpr.operator}" in GroupBy key function. ${spellCheckMessage(keyExpr)}`
