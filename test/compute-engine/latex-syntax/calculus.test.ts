@@ -1695,4 +1695,18 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
     ] as const)
       expect(ce.parse(ce.box(j).latex).json).toEqual(j);
   });
+
+  test('a multi-index Derivative order is read by the parser, not by canonicalization', () => {
+    expect(ce.parse('f^{(0,1)}', { canonical: false }).json).toEqual([
+      'Derivative',
+      'f',
+      0,
+      1,
+    ]);
+    expect(ce.parse('f^{(k)}', { canonical: false }).json).toEqual([
+      'Derivative',
+      'f',
+      'k',
+    ]);
+  });
 });
