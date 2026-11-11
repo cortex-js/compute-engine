@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### New Features
+
+- **`EulerE(n)` and `EulerE(n, x)`** (Mathematica's `EulerE`): the Euler
+  numbers Eₙ (1, 0, -1, 0, 5, 0, -61, …) and the Euler polynomials Eₙ(x).
+  `EulerE(n)` is an exact integer for a non-negative integer `n`, computed from
+  the Seidel–Entringer triangle (odd `n` gives 0); past the same work limit as
+  `BernoulliB` it stays symbolic. `EulerE(n, x)` is the exact value at a
+  rational `x`, a float at a float `x`, and the expanded polynomial in `x` for
+  a symbolic `x`. A negative `n` stays symbolic, and the function threads over
+  lists.
+
 ## 0.187.0 _2026-11-11_
 
 ### Breaking Changes

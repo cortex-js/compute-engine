@@ -2846,6 +2846,22 @@
       ]
     },
     {
+      "name": "EulerE",
+      "category": "Number Theory",
+      "arity": "optional",
+      "signature": "(integer, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. Odd-index Euler numbers are 0. Eₙ = 2ⁿ·Eₙ(1/2). A negative or non-integer `n` stays symbolic.",
+      "examples": [
+        "EulerE(4)  // 5",
+        "EulerE(2, x)  // x^2 - x"
+      ]
+    },
+    {
       "name": "Eulerian",
       "category": "Number Theory",
       "arity": "2",

@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 60 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 61 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -166,6 +166,22 @@ Return the sorted list of positive divisors of an integer `n`. The sign of `n` i
 ```epsil
 divisors(12)
 // ➔ [1,2,3,4,6,12]
+```
+
+### eulerE
+
+MathJSON `EulerE` · `(integer, number?) -> number`
+
+Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. Odd-index Euler numbers are 0. Eₙ = 2ⁿ·Eₙ(1/2). A negative or non-integer `n` stays symbolic.
+
+```epsil
+eulerE(4)
+// ➔ 5
+```
+
+```epsil
+eulerE(2, x)
+// ➔ x^2 - x
 ```
 
 ### eulerPhi

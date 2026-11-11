@@ -56,7 +56,7 @@ Modular arithmetic & GCD:
 
 Other primitives:
 
-- IntegerSqrt, CarmichaelLambda, LucasL, CatalanNumber, BernoulliB
+- IntegerSqrt, CarmichaelLambda, LucasL, CatalanNumber, BernoulliB, EulerE
 - ContinuedFraction / FromContinuedFraction
 - IntegerDigits / FromDigits, DigitCount, DigitSum
 
