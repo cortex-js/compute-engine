@@ -581,7 +581,7 @@ describe('canCompile() and compile() agree', () => {
   test('a decline names its node and keeps the message of the refusal', () => {
     const ce = engine();
     // A name declared with a type that the profile has no kind for.
-    ce.declare('u', 'number');
+    ce.declare('u', 'any');
     const cases: [MathJsonExpression, Partial<CompileDiagnostic>][] = [
       [['Add', 'x', ['Random']], { operator: 'Random', value: 'Random()' }],
       [

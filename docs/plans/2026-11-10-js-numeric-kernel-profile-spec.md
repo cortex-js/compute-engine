@@ -132,6 +132,23 @@ with its own message. The body of every helper is now rewritten for the
 angular unit of the engine, as the root is; before, it was compiled in
 radians whatever the unit.
 
+**Names declared `number` (2026-11-11, slice 1 of
+[the options and bindings note](2026-11-11-structured-options-and-bindings.md)).**
+A name declared `number` (an input, a parameter of a `Function` literal or of
+a helper) has the kind of the existing compiler (`wideNumericType()`): real in
+the `strict` mode, complex in the `complex` mode, where an input or a
+parameter of the root is converted at each read (`IRInput.lifted`); a union of
+a real type with `nan` or `signed_infinity` is real in both modes
+(`declaredNumberKind()`). Other wide types (`finite_number`, `complex | nan`)
+keep their decline. A helper declared with the result `number` returns the
+fact of its body, as the existing compiler does; `Typed(v, 'number')` of a
+real `v` declines in the `complex` mode, where the existing emitter makes the
+value complex. A real argument of a helper parameter declared `number`
+declines in the `complex` mode, as for a parameter with no declared type. A
+name declared `number` with a finite real literal value is a capture with the
+kind of its value. These names have a declared type, so `defaultedSymbols`
+does not list them.
+
 ## The two facts, defined
 
 **`pure`.** Two calls of the compiled function, with any arguments, give the

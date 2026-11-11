@@ -1988,7 +1988,7 @@ nothing changes.
 | Functions | `Sqrt`, `Ln`, `Log` (base 10, 2 or a real base of a real logarithm), `Exp`, `Sin`, `Cos`, `Tan` (also of `π·u`), `Cot`, `Sec`, `Csc`, `Tanh`, `Sinh`, `Cosh`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh` (complex where the type of the node is complex: `Arcsin(x)` with `x: real`), `Arctan2`, `Abs`, `Sign`, `Gamma` (one operand), `Erf`, `Erfc`, `Digamma`, `Haversine`, `Conjugate`, `Min`, `Max`, `Floor`, `Ceil`, `Round` (ties away from zero), `Mod`. A complex operand, in both modes: any for `Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Sign`, `Gamma`, `Ln`, `Sqrt` and `Conjugate` (`cos(arccos(a))` with `a: real`, `sin(t)/t` in the `complex` mode); one that does not read `Pi` for `Exp`, `Sinh`, `Cosh` and `Tanh` (`e^(i·x)`); a name for `Abs`, and for `Arcosh` and `Artanh` in the `strict` mode |
 | Conditions | `If`, `If(c, v)` and `Which` with real or integer values (`NaN` when no condition holds and there is no `True` clause), `Less`, `LessEqual`, `Equal`, `NotEqual` (real and integer operands), `And`, `Or`, `Not` |
 | Sums and products | `Sum` and `Product` of a real or integer body over one or more `Limits(k, a, b)` clauses, with bounds that are number literals, captured numbers, or real or integer values of the program (floored, as the existing compiler does); with an iteration budget, a range over it gives `NaN` |
-| Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot), names with no declared type (below) |
+| Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot), names with no declared type and names declared `number` (below) |
 | Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`, `let c: integer = …`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`, `Break` at the end of a branch of an `If` in a loop; calls of user functions with a declared signature or with no declared signature (below), whose body is one value or a body of the same form (locals, writes, `If` statements, loops, `Break`). Each such function is compiled once, not inlined; a function that calls itself, directly or through others, declines. A `Block` with statements as the root of the compiled expression has the body of the same form, and its free symbols are the inputs (`{ a ⩴ x^2; a + 1 }`) |
 | Lists | `At` and `Length` of a list input or parameter, `Comprehension(body, Element(j, Range(a, b)))`, `ReplaceAt` |
 
@@ -1999,7 +1999,7 @@ nothing changes.
 | A complex form with no compilation of the engine that needs it | `z^x`, `x^z`, `z^w` (an exponent that is not a number literal), `Real(z)`, `Argument(z)`, `Equal(z, w)` |
 | A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
 | A sum, a product or a `Which` outside the form | `Sum(L)` of a list, a bound `+∞`, a bound that does not floor to a safe integer, a complex body, `Which` with the value `Nothing` |
-| A name declared with a type that is not numeric | `x + u` with `u` declared `number` or `any` (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
+| A name declared with a type that is not numeric | `x + u` with `u` declared `any` (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
 | A statement outside the list | `Continue` in a `Loop` (`operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Loop` over a list, a write in a root `Block` to a name that no `Declare` declares, a local function, a `Block` with statements as an operand (`{ a ⩴ x; a } + 1`), an empty `Block` |
 | An option outside the profile | `functions`, `operators`, `vars`, `imports`, `preamble`, `broadcast`, `mode: 'bigint'` |
 | A program of more than 100,000 operations | a subexpression in both branches of an `If`, nested 14 times: the profile writes it once per branch (no `operator`) |
@@ -2015,8 +2015,21 @@ and the positive answer of `canCompile()`, list these names in
 `defaultedSymbols`: with `u` undeclared, `x + u` compiles and `u` is an
 input. A symbol with a value and no declared type (`ce.assign('a', 3)`) is
 captured as a number copied at compile time, with the kind of its value. A
-name declared with a type that the profile has no kind for (`number`,
-`any`) declines. The same rule applies to a call of a user function whose
+name declared `number` (an input, a parameter of a `Function` literal or of
+a user function) has the same kind as a name with no declared type, as on
+the existing compiler: real in the `strict` mode, complex in the `complex`
+mode, where an input or a parameter of the root accepts a number or a
+complex value; a name declared a union of a real type with `nan` or
+`signed_infinity` (`nan | real | signed_infinity`) is real in both modes.
+Such a name has a declared type, so `defaultedSymbols` does not list it. A
+user function declared with the result `number` returns the kind of its
+body, as on the existing compiler (`(real) -> number` with the body `t + 1`
+returns a number in the `complex` mode). In the `complex` mode a parameter
+of a user function declared `number` is complex, and a real argument
+declines (the existing compiler converts it in the body). A name declared
+`number` with a real number value is captured as a number, with the kind of
+its value. A name declared with a type that the profile has no kind for
+(`any`, `finite_number`) declines. The same rule applies to a call of a user function whose
 signature the engine inferred (`f(x) := x^2 + 1`, or a literal with an
 annotation on some parameters only): each parameter with no annotation
 has the default kind, the result has the kind of the body, an argument of

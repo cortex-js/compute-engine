@@ -127,7 +127,14 @@
   call of a user function with no declared signature (`f(x) := x^2 + 1`):
   each parameter with no annotation has the default type, the result is
   the type of the body, an argument of another type declines, and
-  `defaultedSymbols` lists the name of the function. The options `cse` and
+  `defaultedSymbols` lists the name of the function. A name declared
+  `number` (an input, a parameter, a parameter of a user function) has the
+  same type as on the ordinary compiler: real in the `strict` mode, complex
+  in the `complex` mode; a name declared a union of a real type with `nan`
+  or `signed_infinity` is real. A user function declared with the result
+  `number` returns the type of its body, and a name declared `number` with
+  a number value is captured. `defaultedSymbols` does not list these names:
+  their type is declared. The options `cse` and
   `constantFold` are ignored under the profile; `functions`, `operators`,
   `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
   with `outside-profile` (an empty object of `functions`, `operators` or

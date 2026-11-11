@@ -1283,7 +1283,7 @@ const INTENDED_DECLINES: [string, () => Expression, Record<string, unknown>, Reg
     'a free symbol declared with a type that is not scalar',
     () => {
       const ce = engine();
-      ce.declare('u', 'number');
+      ce.declare('u', 'any');
       return ce.expr('u');
     },
     {},

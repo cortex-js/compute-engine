@@ -25,7 +25,9 @@
  * `At` and `Length` of a list, `Comprehension` over a range, `ReplaceAt`,
  * literals (integers, floats, exact rationals, `Pi`, `ExponentialE`,
  * `ImaginaryUnit`, `Complex(1, 2)`, `i·x`), captured numbers with and
- * without a declared type, boolean inputs and parameters, calls of user
+ * without a declared type (`cn` declared `number`), an input and a
+ * parameter declared `number` (`xn`, `nb`), an input declared
+ * `nan | real | signed_infinity` (`ex`), boolean inputs and parameters, calls of user
  * functions with declared and inferred signatures (`HELPERS`), a `Block`
  * at the root and `Function` literals with typed parameters, with a body
  * of locals (a list local made by a `Comprehension`), writes, `If`
@@ -90,7 +92,7 @@
  * differences by shape; the disagreements with the interpreter by shape.
  * Progress goes to stderr, a line per 500 programs.
  *
- * Not generated yet: helpers with random bodies (the five of `HELPERS` are
+ * Not generated yet: helpers with random bodies (the seven of `HELPERS` are
  * fixed), a helper that calls another, `Loop` bounds that are not
  * literals or `m`, `Continue`, a `Break` outside the last statement of a
  * branch, more than two real locals, nested `Function` literals, a
@@ -166,6 +168,8 @@ type InputKind =
   | 'unit'
   | 'complex'
   | 'undeclared'
+  | 'number'
+  | 'realnan'
   | 'list'
   | 'boolean';
 
@@ -178,6 +182,8 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   q: 'unit',
   z: 'complex',
   u: 'undeclared',
+  xn: 'number',
+  ex: 'realnan',
   L: 'list',
   B: 'boolean',
 };
@@ -187,6 +193,7 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
   ['a', 'real', 'real'],
   ['b', 'real', 'real'],
   ['n', 'integer', 'integer'],
+  ['nb', 'number', 'number'],
   ['V', 'list', 'list<real>'],
   ['c', 'boolean', 'boolean'],
 ];
@@ -198,6 +205,8 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   unit: 'real<-1..1>',
   complex: 'complex',
   undeclared: '(no declared type)',
+  number: 'number',
+  realnan: 'nan | real | signed_infinity',
   list: 'list<real>',
   boolean: 'boolean',
 };
@@ -205,10 +214,11 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
 /** The declarations of the engine, as the report prints them. */
 export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
-  'L: list<real>; B: boolean; u: no declared type; h: real, assigned 2.5; ' +
-  'm: integer, assigned 3; w: assigned 3 and g: assigned 0.75, with no ' +
-  'declared type; the helpers of `HELPERS`, assigned in the scope of ' +
-  'each program';
+  'L: list<real>; B: boolean; u: no declared type; xn: number; ' +
+  'ex: nan | real | signed_infinity; h: real, assigned 2.5; ' +
+  'm: integer, assigned 3; cn: number, assigned 1.5; w: assigned 3 and ' +
+  'g: assigned 0.75, with no declared type; the helpers of `HELPERS`, ' +
+  'assigned in the scope of each program';
 
 /** An engine with the declarations of every program. */
 export function makeEngine(): ComputeEngine {
@@ -219,6 +229,8 @@ export function makeEngine(): ComputeEngine {
   ce.assign('h', 2.5);
   ce.declare('m', 'integer');
   ce.assign('m', 3);
+  ce.declare('cn', 'number');
+  ce.assign('cn', 1.5);
   ce.assign('w', 3);
   ce.assign('g', 0.75);
   return ce;
@@ -300,6 +312,26 @@ const HELPERS: readonly {
       ['Typed', 'd', "'boolean'"],
     ],
     arguments: ['real', 'boolean'],
+  },
+  {
+    name: 'fn',
+    signature: '(number) -> number',
+    definition: [
+      'Function',
+      ['Add', ['Sin', 'v'], ['Multiply', 'v', 'v']],
+      ['Typed', 'v', "'number'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fr',
+    signature: '(real) -> number',
+    definition: [
+      'Function',
+      ['Divide', 'v', ['Add', ['Multiply', 'v', 'v'], 1]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
   },
 ];
 
@@ -396,9 +428,12 @@ function gridOf(kind: InputKind, mode: Mode): Value[] {
     case 'complex':
       return [...COMPLEX_IN, ...COMPLEX_EDGE];
     case 'undeclared':
+    case 'number':
       return mode === 'strict'
         ? [...REAL_IN, ...NON_FINITE]
         : [...REAL_IN, ...COMPLEX_IN, ...NON_FINITE, ...COMPLEX_EDGE];
+    case 'realnan':
+      return [...REAL_IN, ...NON_FINITE];
     case 'list':
       return [...LISTS_IN, ...LISTS_EDGE];
     case 'boolean':
@@ -422,7 +457,10 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
       return typeof v === 'number' && v >= -1 && v <= 1;
     case 'complex':
       return isComplex(v) && Number.isFinite(v.re) && Number.isFinite(v.im);
+    case 'realnan':
+      return typeof v === 'number';
     case 'undeclared':
+    case 'number':
       if (typeof v === 'number') return Number.isFinite(v);
       return (
         mode === 'complex' &&
@@ -787,9 +825,12 @@ const EXPRESSION_SYMBOLS: readonly (readonly [Json, number])[] = [
   ['p', 8],
   ['q', 4],
   ['u', 10],
+  ['xn', 8],
+  ['ex', 4],
   ['z', 4],
   ['h', 4],
   ['m', 2],
+  ['cn', 2],
   ['w', 2],
   ['g', 2],
 ];
@@ -889,6 +930,7 @@ function genFunction(rng: Rng, maxDepth: number): Json[] {
   const symbols: [Json, number][] = [
     ['h', 3],
     ['m', 2],
+    ['cn', 1],
     ['w', 1],
     ['g', 1],
   ];

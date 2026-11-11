@@ -466,7 +466,9 @@ describe('the complex mode', () => {
 
 describe('declarations and conflicts', () => {
   test('a name declared with a type that the profile has no kind for declines', () => {
-    for (const type of ['number', 'any']) {
+    // A name declared `number` has the kind of `number` in the mode
+    // (compile-javascript-structured-number-names.test.ts).
+    for (const type of ['any']) {
       const ce = engine();
       ce.declare('w', type);
       const expr = ce.expr(['Add', 'x', 'w']);

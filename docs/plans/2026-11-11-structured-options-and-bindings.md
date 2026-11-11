@@ -322,3 +322,63 @@ the admissions gained are fewer (an estimate).
    the existing compiler).
 7. **Crafted-only classes keep their decline** (unused `any` parameters,
    strings, value kinds); alternative: implement every class.
+
+## Result of slice 1
+
+On `1c448807b4e9fc40fbb33c2b72babd151cb505a7`, the `number` names of
+slice 1 except the local declarations (another change owns the rules of
+locals). The rule is `declaredNumberKind()` in
+`javascript-fragment-target.ts`, the lane of `wideNumericType()` of the
+existing compiler:
+
+- **Inputs** declared `number` (or `number | nan`): real in `strict`
+  (`_.xn + 1`, with the entry check of a real input), complex in `complex`,
+  converted at each read (`_SYS.csin(_SYS.cplx(_.xn))`, `IRInput.lifted`).
+  A union of a real type with `nan` or `signed_infinity` is real in both
+  modes (`_SYS.csqrt(({ re: _.ex, im: 0 }))`). Other wide types
+  (`finite_number`, `complex | nan`) keep their decline: no witness.
+- **Parameters** of a `Function` literal: the same; `any` keeps its
+  decline, read or not.
+- **Helpers**: a `number` parameter is real in `strict` and complex in
+  `complex`, where a real argument declines with its own message (the
+  existing compiler passes the number and converts it in the body). A
+  `number` result is the fact of the body: the existing compiler returns a
+  number from `(real) -> number` with the body `t + 1` in the `complex`
+  mode, and a complex value from `(number) -> number` with `sin(t)`. A
+  result `nan | real | signed_infinity` is real. `Typed(v, 'number')`
+  around the value of a body keeps the fact of `v`, and declines in the
+  `complex` mode for a real `v`: the existing emitter writes
+  `_SYS.cplx({ re: v, im: 0 })` there, and the lowering writes no
+  conversion for `Typed`.
+- **Captures**: a name declared `number` (or a mapped union) whose value is
+  a finite real literal is a snapshot with the kind of its value
+  (`1.5 * _.xr`); a complex value keeps its decline.
+- `defaultedSymbols` lists none of these names: their type is declared.
+
+Shadow measure, 110 test files that reached these messages (108 files
+wrote counters): admitted 622 → 835 of the 4,908 compilations that the
+existing compiler compiles. Messages: "unsupported binding" 560 → 325;
+"the declared result type of the helper … is not a number" 351 → 105;
+"the parameter x of the function has the type number" 53 → 0, and "the
+parameter z … has the type any" 182 → 233 (the same crafted file, whose
+`any` parameter is now the first refusal). The programs that pass a
+refusal reach later ones: "the parameter … of the helper has no type
+annotation, and the helper has a declared signature" 13 → 150, a helper
+parameter `tuple<number, number>` 0 → 30, a chained `Less` 0 → 18. A
+value check of the 835 admitted compilations against the existing
+compiler (`cse: false, constantFold: false`, three sets of real inputs)
+found no difference in the 192 that read a name declared `number` or a
+mapped union.
+
+The random differential tester (`scripts/js-profile-fuzz.ts`, inputs `xn`
+and `ex`, a parameter `nb`, a capture `cn`, helpers `(number) -> number`
+and `(real) -> number`; seeds 51 to 53, 15,000 programs) found no new
+class. Two findings reach the known class D5 (an `At` of a `Comprehension`
+whose element type the existing compiler reads as `number`, lifted in the
+`complex` mode) through a `number` name: `i·At(Comprehension(fr(x)), -1)`
+(`0` for `-0`) and `At(Comprehension(cn), 1)` (shape only). The fix of D5
+that declines such an `At` covers both.
+
+The next refusal of the helper witnesses is the annotation rule: a helper
+with a declared signature whose literal has no annotation
+(`f: (unknown) -> number`, `f := t ↦ t² + 1`).

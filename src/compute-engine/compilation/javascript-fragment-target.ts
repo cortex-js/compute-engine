@@ -63,6 +63,7 @@ import {
   userFunctionSignature,
 } from './compile-assignment-checks.js';
 import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
+import { rangeSpecializedParameterTypes } from './compile-user-specialization.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { isLibraryOperator } from './builtin-callback.js';
 import {
@@ -2353,9 +2354,7 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Not: {
     walk: (node, scope, context, w) => notRule.walk(node, scope, context, w),
   },
-  Typed: {
-    walk: (node, scope, context, w) => typedRule(node, scope, context, w),
-  },
+  Typed: withoutMode('Typed'),
 };
 
 /** The heads whose rule reads a list operand itself; every other rule of
@@ -3324,7 +3323,8 @@ function typedRule(
   node: Expression,
   scope: FragmentScope<ScalarRepresentation>,
   context: FragmentContext<ScalarRepresentation>,
-  w: FragmentWalker<ScalarRepresentation>
+  w: FragmentWalker<ScalarRepresentation>,
+  mode: 'strict' | 'complex'
 ): FragmentFacts<ScalarRepresentation> {
   if (!isFunction(node) || node.nops !== 2)
     return w.refuse(
@@ -3334,7 +3334,38 @@ function typedRule(
     );
   const value = w.value(node.op1, scope, context);
   const ascribed = node.type.type;
-  const type = scalarType(ascribed) ?? structuredListType(ascribed);
+  // A numeric ascription that `declaredNumberKind()` maps. `number`: the
+  // fact of a number value, as the result of a helper declared `number` is
+  // the fact of its body; in the `complex` mode the existing emitter makes a
+  // real value complex there (`_SYS.cplx({ re: v, im: 0 })`), and the
+  // lowering writes no conversion for `Typed`: refused. A union of a real
+  // type with `nan` or `signed_infinity` is real.
+  const numberKind =
+    scalarType(ascribed) === undefined
+      ? declaredNumberKind(ascribed, mode)
+      : undefined;
+  if (
+    numberKind !== undefined &&
+    !isSubtype(ascribed, REAL_WITH_NON_FINITE_TYPE) &&
+    (value.type.kind === 'real' ||
+      value.type.kind === 'integer' ||
+      value.type.kind === 'complex')
+  ) {
+    if (mode === 'complex' && value.type.kind !== 'complex')
+      return w.refuse(
+        node,
+        'signature',
+        `Typed with the ascribed type \`${typeToString(ascribed)}\` and a ` +
+          `value of the type \`${fragmentTypeToString(value.type)}\` is not in ` +
+          `the structured route in the \`complex\` mode: the existing compiler ` +
+          `makes the value complex`
+      );
+    return w.valueFacts(node, value.type, [w.convert(value, value.type)!]);
+  }
+  const type =
+    numberKind !== undefined
+      ? ({ kind: 'real' } as const)
+      : (scalarType(ascribed) ?? structuredListType(ascribed));
   const conversion =
     type === undefined || 'refusal' in type
       ? undefined
@@ -4256,6 +4287,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     /** The free symbols with no declared type, which take the default
      *  kind of the mode (`hasNoDeclaredType()`). */
     const defaulted = new Set<string>();
+    /** The free symbols declared `number` in the `complex` mode
+     *  (`declaredNumberKind()`). */
+    const lifted = new Set<string>();
     let readsSqrt = false;
     /** The indexes of the comprehensions around the node being checked. */
     const indexes = new Set<string>();
@@ -4321,6 +4355,15 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         // read.
         if (registry && hasNoDeclaredType(node)) {
           defaulted.add(node.symbol);
+          return;
+        }
+        // A free symbol declared `number` has the kind of `number` in the
+        // mode (`declaredNumberKind()`).
+        const numberKind = registry
+          ? declaredNumberKind(node.type.type, registry.mode)
+          : undefined;
+        if (numberKind !== undefined) {
+          if (numberKind.lifted) lifted.add(node.symbol);
           return;
         }
         const list = structured
@@ -4418,7 +4461,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
             name,
             facts.type,
             symbolTypes.get(name),
-            defaulted.has(name) && registry?.mode === 'complex'
+            (defaulted.has(name) && registry?.mode === 'complex') ||
+              lifted.has(name)
           )
         ),
       defaulted,
@@ -4641,6 +4685,9 @@ function attachBoundFunction(
   /** The parameters with no declared type, which take the default kind of
    *  the mode on the structured route (`hasNoDeclaredType()`). */
   const defaulted = new Set<string>();
+  /** The parameters declared `number` in the `complex` mode, which the host
+   *  can give as a number or a complex value (`declaredNumberKind()`). */
+  const lifted = new Set<string>();
   for (const parameter of fn.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     // A refusal of a parameter names the parameter.
@@ -4651,14 +4698,25 @@ function attachBoundFunction(
       const defaultType = defaultedParameterKind(parameter, registry);
       const undeclared = defaultType !== undefined;
       // The structured route also admits a list parameter
-      // (`structuredListType()`).
+      // (`structuredListType()`), and a numeric parameter that
+      // `declaredNumberKind()` maps (`number`).
+      const numberKind =
+        registry === undefined ||
+        declared === undefined ||
+        undeclared ||
+        structuredParameterType(declared, name) !== undefined
+          ? undefined
+          : declaredNumberKind(declared, registry.mode);
       const type = undeclared
         ? defaultType
         : declared === undefined
           ? undefined
-          : admission.structured
-            ? structuredParameterType(declared, name)
-            : scalarType(declared);
+          : numberKind !== undefined
+            ? { kind: numberKind.kind }
+            : admission.structured
+              ? structuredParameterType(declared, name)
+              : scalarType(declared);
+      if (numberKind?.lifted) lifted.add(name);
       const refusal = parameterRefusal(
         parameter,
         name,
@@ -4726,7 +4784,8 @@ function attachBoundFunction(
           input.name,
           input.type!,
           declaredTypes.get(input.name),
-          defaulted.has(input.name) && registry?.mode === 'complex'
+          (defaulted.has(input.name) && registry?.mode === 'complex') ||
+            lifted.has(input.name)
         )
       ),
     defaulted,
@@ -4859,11 +4918,19 @@ function attachRootBlock(
   const symbolTypes = new Map<string, Type>();
   /** The free symbols with no declared type (`hasNoDeclaredType()`). */
   const defaulted = new Set<string>();
+  /** The free symbols declared `number` in the `complex` mode
+   *  (`declaredNumberKind()`). */
+  const lifted = new Set<string>();
   for (const node of free)
     atNode(node, () => {
       symbolTypes.set(node.symbol, node.type.type);
       if (hasNoDeclaredType(node)) {
         defaulted.add(node.symbol);
+        return;
+      }
+      const numberKind = declaredNumberKind(node.type.type, registry.mode);
+      if (numberKind !== undefined) {
+        if (numberKind.lifted) lifted.add(node.symbol);
         return;
       }
       const list = structuredListType(node.type.type);
@@ -4895,7 +4962,8 @@ function attachRootBlock(
           name,
           facts.type,
           symbolTypes.get(name),
-          defaulted.has(name) && registry.mode === 'complex'
+          (defaulted.has(name) && registry.mode === 'complex') ||
+            lifted.has(name)
         )
       ),
     defaulted,
@@ -5155,7 +5223,11 @@ function admitFunctionBody(
         helper?.result !== undefined &&
         node.operator === 'Typed'
       ) {
-        const ascribed = structuredParameterType(node.type.type, helper.name);
+        const ascribed =
+          structuredParameterType(node.type.type, helper.name) ??
+          (isSubtype(node.type.type, REAL_WITH_NON_FINITE_TYPE)
+            ? ({ kind: 'real' } as const)
+            : undefined);
         if (
           ascribed === undefined ||
           fragmentTypeToString(ascribed) !== fragmentTypeToString(helper.result)
@@ -5624,6 +5696,9 @@ type ResolvedHelper = ScalarFragmentHelper & {
   /** For each parameter of the helper, whether it has no declared type and
    *  took the default kind of the mode (`defaultedParameterKind()`). */
   readonly defaulted: readonly boolean[];
+  /** For each parameter of the helper, whether it is declared `number` in
+   *  the `complex` mode, where it is complex (`declaredNumberKind()`). */
+  readonly wide: readonly boolean[];
   readonly fragment: Omit<FragmentFunction, 'arguments'>;
   /** The label of each list parameter (`elementLabel()`). */
   readonly parameterElementLabels?: readonly (string | undefined)[];
@@ -5722,6 +5797,47 @@ function defaultKind(mode: 'strict' | 'complex') {
     : ({ kind: 'real' } as const);
 }
 
+/** The union of `real` with `nan` and `signed_infinity`: a declared type
+ *  that is a subtype of it holds only doubles (`declaredNumberKind()`). */
+const REAL_WITH_NON_FINITE_TYPE = parseType('real | nan | signed_infinity');
+
+/**
+ * The kind of a name declared with a numeric type that `scalarType()` has no
+ * kind for (an input, a parameter of a `Function` literal or of a helper), on
+ * the structured route in the compile mode `mode`. It is the lane that the
+ * existing compiler gives such a binding (`wideNumericType()` in
+ * `compiler-mode.ts`):
+ *
+ * - `number` (or a union of `number` with `nan`) has the default kind of the
+ *   mode (`defaultKind()`): real in the `strict` mode, complex in the
+ *   `complex` mode. `lifted`: in the `complex` mode the host can give a
+ *   number or a complex value, and the existing compiler converts it at each
+ *   read (`liftWideReference()`).
+ * - A union of a real type with `nan` or `signed_infinity`
+ *   (`nan | real | signed_infinity`) is real in both modes: a double holds
+ *   each member, and the existing compiler keeps it on the real lane in the
+ *   `complex` mode too.
+ *
+ * `undefined` for a type that `scalarType()` maps, and for another type
+ * (`any`, `unknown`, `finite_number`, `complex | nan`, `imaginary | nan`, a
+ * type that is not numeric): a name of such a type keeps its refusal. A name
+ * of a type that this function maps has a declared type, so it is not
+ * listed in `defaultedSymbols`.
+ */
+function declaredNumberKind(
+  type: Type,
+  mode: 'strict' | 'complex'
+):
+  | { readonly kind: 'real' | 'complex'; readonly lifted: boolean }
+  | undefined {
+  if (scalarType(type) !== undefined) return undefined;
+  if (isSubtype(type, 'number') && isSubtype('number', type))
+    return { kind: defaultKind(mode).kind, lifted: mode === 'complex' };
+  if (isSubtype(type, REAL_WITH_NON_FINITE_TYPE))
+    return { kind: 'real', lifted: false };
+  return undefined;
+}
+
 /** The kind of the parameter `parameter` of a `Function` literal on the
  *  structured route (`registry`) when it has no declared type: no
  *  annotation, and `hasNoDeclaredType()`. It is the default kind of the
@@ -5749,10 +5865,12 @@ function defaultedParameterKind(
  * (`hasNoDeclaredType()`), that holds a finite real number literal, and
  * that is the binding the engine finds for the name where the program is
  * compiled (a binding of another scope with the same name is not
- * captured). A binding with no declared type is captured only when
+ * captured). A binding with no declared type, or declared with a numeric
+ * type that `declaredNumberKind()` maps (`number`), is captured only when
  * `admitsUndeclared` (the structured route). The pass types the snapshot
- * in place of each read, so a binding with no declared type takes the kind
- * of its value: `integer` for an integer, `real` for another real number.
+ * in place of each read, so such a binding takes the kind of its value:
+ * `integer` for an integer, `real` for another real number, as the existing
+ * compiler writes the value.
  * `assertCurrent()` throws when the binding, whether its type is declared,
  * its declared type or its value changed after this call.
  */
@@ -5769,7 +5887,12 @@ function numericSnapshot(
   if (
     !binding ||
     (undeclared && !admitsUndeclared) ||
-    (!undeclared && !isSubtype(binding.type.type, 'real')) ||
+    (!undeclared &&
+      !isSubtype(binding.type.type, 'real') &&
+      !(
+        admitsUndeclared &&
+        declaredNumberKind(binding.type.type, 'strict') !== undefined
+      )) ||
     !value ||
     !isNumber(value) ||
     !Number.isFinite(value.re) ||
@@ -5875,7 +5998,44 @@ function collectStructuredHelper(
     // `resolveHelper()` checks this at the first call.
     BaseCompiler.assertCapturedCallableBindings(node, target);
   }
+  if (registry.mode === 'complex') refuseRangeSpecialization(node);
   named.calls.add(node);
+}
+
+/**
+ * Refuse, in the `complex` mode, the call `call` of a helper for which the
+ * existing compiler compiles a copy of the helper typed by an argument (a
+ * range specialization, `rangeSpecializedParameterTypes()`): an argument
+ * typed by a real range (a number literal, `real<0..>`, `|x|`) at a wider
+ * parameter, when that type proves the sign of a radical of the body
+ * (`Sqrt(t)` of `h(2)` is `Math.sqrt`). The structured route compiles one
+ * definition, in which that radical is complex, so the value of the call
+ * would be complex where the existing code makes a number. The question is
+ * asked with a registry of its own: it emits nothing.
+ */
+function refuseRangeSpecialization(call: Expression): void {
+  if (!isFunction(call)) return;
+  const literal = userFunctionLiteral(call.engine, call.operator);
+  if (literal === undefined) return;
+  const types = rangeSpecializedParameterTypes(
+    call.engine,
+    call.operator,
+    literal,
+    call.ops.map((a) => a.type.type),
+    { defs: new Map(), compiling: new Set() }
+  );
+  const i = types?.findIndex((t) => t !== undefined) ?? -1;
+  if (i < 0) return;
+  const e = new Error(
+    `JS scalar fragment: the call ${nodeText(call)} of the helper ` +
+      `${call.operator} is not in the structured route in the \`complex\` ` +
+      `mode: the type ${typeToString(call.ops[i].type.type)} of the ` +
+      `argument ${nodeText(call.ops[i])} proves the sign of a radical of its ` +
+      `body, which the structured route compiles for the type of the ` +
+      `parameter`
+  );
+  noteRefusedNode(e, { node: call });
+  throw e;
 }
 
 function collectHelper(
@@ -6004,6 +6164,11 @@ function annotateStructured(
           modeRules(registry.mode, snapshotReader(registry), registry.forms)
         ).map(([head, rule]) => [head, withoutListOperands(head, rule)])
       ),
+      // `Typed` reads the mode for a `number` ascription (`typedRule()`).
+      Typed: {
+        walk: (node, scope, context, w) =>
+          typedRule(node, scope, context, w, registry.mode),
+      },
     },
     localType: (local) =>
       structuredLocalType(
@@ -6020,10 +6185,14 @@ function annotateStructured(
     },
     // A free symbol with no declared type has the default kind of the mode
     // (`hasNoDeclaredType()`); its inferred type is not read.
-    typeOfInput: (node: Expression) =>
-      hasNoDeclaredType(node)
-        ? defaultKind(registry.mode)
-        : (base.typeOfInput ?? base.typeOfSymbol)(node),
+    typeOfInput: (node: Expression) => {
+      if (hasNoDeclaredType(node)) return defaultKind(registry.mode);
+      // A name declared `number`: the kind of `number` in the mode.
+      const numberKind = declaredNumberKind(node.type.type, registry.mode);
+      return numberKind !== undefined
+        ? { kind: numberKind.kind }
+        : (base.typeOfInput ?? base.typeOfSymbol)(node);
+    },
     functionOf: (call: Expression) => {
       const helper =
         isFunction(call) && calls.has(call)
@@ -6131,7 +6300,9 @@ function argumentRefusal(
       const facts = scope.facts.get(call);
       if (facts === undefined || !('representation' in facts)) continue;
       const i = (facts.conversions ?? []).findIndex(
-        (conversion, j) => conversion.kind !== 'none' && helper.defaulted[j]
+        (conversion, j) =>
+          conversion.kind !== 'none' &&
+          (helper.defaulted[j] || helper.wide[j])
       );
       const argument = i < 0 ? undefined : scope.facts.get(call.ops[i]);
       if (argument === undefined || !('type' in argument)) continue;
@@ -6139,7 +6310,14 @@ function argumentRefusal(
       message =
         `The argument \`${nodeText(call.ops[i])}\` of \`${helper.name}\` has ` +
         `the type \`${fragmentTypeToString(argument.type)}\`, and the parameter ` +
-        `\`${helper.fragment.parameters[i]}\` has no declared type: it is ` +
+        `\`${helper.fragment.parameters[i]}\` ` +
+        (helper.wide[i]
+          ? `has the type \`${typeToString(
+              (isFunction(helper.literal)
+                ? functionLiteralParameterType(helper.literal.ops[i + 1])
+                : undefined) ?? 'number'
+            )}\`, which is `
+          : `has no declared type: it is `) +
         `${kind} in the \`${registry.mode}\` mode`;
       break;
     }
@@ -6226,13 +6404,30 @@ function resolveHelper(
         literal.ops
           .slice(1)
           .some((p) => functionLiteralParameterType(p) === undefined)));
-  // The structured route also admits a list result (`structuredListType()`).
-  const result =
-    signature === undefined || inferred
+  // The structured route also admits a list result (`structuredListType()`),
+  // and a numeric result that `declaredNumberKind()` maps: a union of a real
+  // type with `nan` or `signed_infinity` is a real result, and a `number`
+  // result is the fact of the body, as for an inferred signature. The
+  // existing compiler writes such a result in the lane of the body in each
+  // mode: `(real) -> number` with the body `t + 1` returns a number in the
+  // `complex` mode, `(number) -> number` with `sin(t)` a complex value.
+  const numberResult =
+    registry === undefined || signature === undefined || inferred
       ? undefined
-      : registry
-        ? structuredParameterType(signature.result, call.operator)
-        : scalarType(signature.result);
+      : structuredParameterType(signature.result, call.operator) === undefined
+        ? declaredNumberKind(signature.result, registry.mode)
+        : undefined;
+  const bodyResult =
+    numberResult !== undefined &&
+    !isSubtype(signature!.result, REAL_WITH_NON_FINITE_TYPE);
+  const result =
+    signature === undefined || inferred || bodyResult
+      ? undefined
+      : numberResult !== undefined
+        ? ({ kind: 'real' } as const)
+        : registry
+          ? structuredParameterType(signature.result, call.operator)
+          : scalarType(signature.result);
   if (!signature)
     throw new Error(
       `JS scalar fragment: the helper ${call.operator} has no signature of ground ` +
@@ -6254,7 +6449,7 @@ function resolveHelper(
     throw new Error(
       `JS scalar fragment: the helper ${call.operator} is not pure: its signature has effects`
     );
-  if (!inferred && !result)
+  if (!inferred && !bodyResult && !result)
     throw new Error(
       `JS scalar fragment: the declared result type of the helper ${call.operator} ` +
         `is not ${registry ? 'a number, a boolean or a list of numbers' : 'a number or a boolean'}`
@@ -6266,15 +6461,25 @@ function resolveHelper(
   const parameterSymbols: Expression[] = [];
   const parameterElementLabels: (string | undefined)[] = [];
   // The structured route also admits a list parameter
-  // (`structuredListType()`), passed whole to the helper.
+  // (`structuredListType()`), passed whole to the helper, and a numeric
+  // parameter that `declaredNumberKind()` maps. A `number` parameter is
+  // complex in the `complex` mode, and it is not converted at its reads: an
+  // argument must then be complex (`argumentRefusal()`).
   const typeOf = (type: Type | undefined, name: string | undefined) =>
     type === undefined
       ? undefined
       : registry
-        ? structuredParameterType(type, name)
+        ? (structuredParameterType(type, name) ??
+          (() => {
+            const kind = declaredNumberKind(type, registry.mode);
+            return kind === undefined ? undefined : { kind: kind.kind };
+          })())
         : scalarType(type);
   /** For each parameter, whether it took the default kind of the mode. */
   const defaulted: boolean[] = [];
+  /** For each parameter, whether it is declared `number` in the `complex`
+   *  mode, where it is complex (`declaredNumberKind()`). */
+  const wide: boolean[] = [];
   for (const parameter of literal.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     const type = functionLiteralParameterType(parameter);
@@ -6302,6 +6507,11 @@ function resolveHelper(
     const declared = signature.args?.[parameters.length]?.type;
     const declaredScalar = defaultType ?? typeOf(declared, name);
     defaulted.push(defaultType !== undefined);
+    wide.push(
+      registry !== undefined &&
+        type !== undefined &&
+        declaredNumberKind(type, registry.mode)?.lifted === true
+    );
     if (
       !declaredScalar ||
       structuredRepresentation(declaredScalar) !==
@@ -6412,6 +6622,7 @@ function resolveHelper(
             : representation(result))!,
     declaredResult: result !== undefined,
     defaulted,
+    wide,
     parameterElementLabels,
     fragment: {
       key: call.operator,

@@ -44,6 +44,18 @@ const KNOWN: readonly Known[] = [
         'a real operand of a complex sum is a sum or a conditional'
       ),
   },
+  {
+    name: 'a local declared real keeps the kind of a complex initializer',
+    reason:
+      'the profile does not apply the declared type of a `Declare`: the ' +
+      'local is complex where the existing compiler writes ' +
+      '`_SYS.crealElements(v)` (NaN) in the `complex` mode',
+    reference:
+      'the class D1 of the random differential tester, fixed by the change ' +
+      'to the rules of locals; remove this entry with that change',
+    classes: ['difference', 'shape'],
+    matches: (f) => f.shape.includes("Declare(_, 'real', "),
+  },
 ];
 
 let result: FuzzResult;
