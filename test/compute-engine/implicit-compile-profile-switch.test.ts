@@ -69,7 +69,7 @@ function admittedMap(ce: ComputeEngine): Expression {
   ]);
 }
 
-/** A marked `Map` whose callback the profile declines (`Sinh`) and that
+/** A marked `Map` whose callback the profile declines (`Sech`) and that
  * reads the symbol `k`. */
 function declinedMap(ce: ComputeEngine): Expression {
   ce.declare('k', 'real');
@@ -78,7 +78,7 @@ function declinedMap(ce: ComputeEngine): Expression {
     'Map',
     [
       'Function',
-      ['N', ['Multiply', 'k', ['Sinh', 'x']]],
+      ['N', ['Multiply', 'k', ['Sech', 'x']]],
       ['Typed', 'x', "'real'"],
     ],
     ['Range', 1, 64],
@@ -167,7 +167,7 @@ describe('switch on, Map', () => {
       failed: 0,
     });
     expect(Object.keys(stats.declinedMessages)).toEqual([
-      "Could not compile with the profile 'numeric-kernel': unsupported head Sinh",
+      "Could not compile with the profile 'numeric-kernel': unsupported head Sech",
     ]);
   });
 

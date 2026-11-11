@@ -124,7 +124,18 @@
  *   `Math.exp`, `Math.log`, `Math.sin`, `Math.cos`, `Math.tanh`,
  *   `Math.abs` and `Math.atan2` of numbers, and the runtime helpers
  *   `_SYS.cexp`, `_SYS.cln`, `_SYS.csin`, `_SYS.ccos`, `_SYS.ctanh` and
- *   `_SYS.cabs` of an `{re, im}` object.
+ *   `_SYS.cabs` of an `{re, im}` object; the same for the trigonometric,
+ *   hyperbolic and special functions (`_SYS.tan`, `Math.asin`,
+ *   `_SYS.erf`, …, and `_SYS.ctan`, `_SYS.casin`, …). The powers and roots
+ *   (`PowerFunctionName`) are the code of the `Power` and `Root` handlers:
+ *   `_SYS.pow(b, e)`, `Math.pow(b, e)` (`real-pow`),
+ *   `Math.pow(Math.abs(b), e)` and its signed form (`abs-pow`,
+ *   `signed-pow`), `Math.cbrt(x)` and `_SYS.root(x, n)`. `haversine` and
+ *   `round-ties-away` are the expressions of their handlers
+ *   (`TemplateFunctionName`). `haversine` of an operand that is not the
+ *   read of an input written `_.x` fails in a parent that needs
+ *   parentheses around it: the existing emitter writes that code in its
+ *   parent with no parentheses (`Source.bare`).
  *
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Integration with existing JavaScript compilation".
@@ -152,13 +163,17 @@ import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
  * name of `_SYS`) for an operand of the representation `complex`, or
  * `undefined` when the policy has no complex operand for it
  * (`JAVASCRIPT_POLICY.functions`). These are the calls of the handlers of
- * the existing emitter (`Exp`, `Ln`, `Sin`, `Cos`, `Tanh`, `Abs` and
- * `Arctan2` in `javascript-target.ts`); the rules of the structured route
+ * the existing emitter (`Exp`, `Ln`, `Sin`, `Cos`, `Tanh`, `Abs`,
+ * `Arctan2`, and the trigonometric, hyperbolic and special functions in
+ * `javascript-target.ts`); the rules of the structured route
  * refuse the operands for which those handlers write other code.
  */
 const FUNCTION_CODE: Readonly<
   Record<
-    Exclude<UnaryFunctionName | BinaryFunctionName, PowerFunctionName>,
+    Exclude<
+      UnaryFunctionName | BinaryFunctionName,
+      PowerFunctionName | TemplateFunctionName
+    >,
     { readonly real: string; readonly complex?: string }
   >
 > = {
@@ -169,7 +184,39 @@ const FUNCTION_CODE: Readonly<
   tanh: { real: 'Math.tanh', complex: 'ctanh' },
   abs: { real: 'Math.abs', complex: 'cabs' },
   atan2: { real: 'Math.atan2' },
+  // The heads of `javascript-target.ts` that write one call for a real
+  // operand and one runtime helper for an `{re, im}` object.
+  tan: { real: '_SYS.tan', complex: 'ctan' },
+  cot: { real: '_SYS.cot', complex: 'ccot' },
+  sec: { real: '_SYS.sec', complex: 'csec' },
+  csc: { real: '_SYS.csc', complex: 'ccsc' },
+  sinh: { real: 'Math.sinh', complex: 'csinh' },
+  cosh: { real: 'Math.cosh', complex: 'ccosh' },
+  atan: { real: 'Math.atan', complex: 'catan' },
+  asinh: { real: 'Math.asinh', complex: 'casinh' },
+  gamma: { real: '_SYS.gamma', complex: 'cgamma' },
+  sign: { real: 'Math.sign', complex: 'csign' },
+  asin: { real: 'Math.asin', complex: 'casin' },
+  acos: { real: 'Math.acos', complex: 'cacos' },
+  acosh: { real: 'Math.acosh', complex: 'cacosh' },
+  atanh: { real: 'Math.atanh', complex: 'catanh' },
+  log10: { real: 'Math.log10', complex: 'clog10' },
+  log2: { real: 'Math.log2', complex: 'clog2' },
+  erf: { real: '_SYS.erf' },
+  erfc: { real: '_SYS.erfc' },
+  digamma: { real: '_SYS.digamma' },
+  sinpi: { real: '_SYS.sinpi' },
+  cospi: { real: '_SYS.cospi' },
+  tanpi: { real: '_SYS.tanpi' },
+  ceil: { real: 'Math.ceil' },
 };
+
+/** The functions whose code is not one call: `haversine` is
+ *  `(1 - Math.cos(x)) / 2`, as the handler of `Haversine` writes it, and
+ *  `round-ties-away` is `(Math.sign(x) * Math.round(Math.abs(x)))`, as the
+ *  handler of `Round` writes it for `ce.roundingTies` `'away-from-zero'`
+ *  (`jsRoundToInteger()`), with the operand read twice. */
+type TemplateFunctionName = 'haversine' | 'round-ties-away';
 
 /** The powers and the roots of numbers (`BinaryFunctionName`, and `cbrt`
  *  of `UnaryFunctionName`), which the emitter writes as the `Power` and
@@ -238,15 +285,23 @@ const CALL = 17;
 const ATOM = 20;
 
 /** The text of an expression and the precedence of its outermost
- *  operator. */
-type Source = { readonly text: string; readonly precedence: number };
+ *  operator. `bare`: the existing emitter writes this text in its parent
+ *  with no parentheses, and the emission fails with this message where the
+ *  parent needs them (`haversine`). */
+type Source = {
+  readonly text: string;
+  readonly precedence: number;
+  readonly bare?: string;
+};
 
 const atom = (text: string): Source => ({ text, precedence: ATOM });
 
 /** The text of `source` as an operand that needs at least the precedence
  *  `min`. */
 function operand(source: Source, min: number): string {
-  return source.precedence >= min ? source.text : `(${source.text})`;
+  if (source.precedence >= min) return source.text;
+  if (source.bare !== undefined) fail(source.bare);
+  return `(${source.text})`;
 }
 
 /** The operands of a left-associative operator of precedence `p`: the first
@@ -331,7 +386,8 @@ function usesOf(program: IRProgram): Map<number, Use> {
           : op.kind === 'multiply' && complex
             ? 4
             : ((op.kind === 'loop' || op.kind === 'build') && i <= 1) ||
-                (op.kind === 'binary' && op.fn === 'signed-pow')
+                (op.kind === 'binary' && op.fn === 'signed-pow') ||
+                (op.kind === 'unary' && op.fn === 'round-ties-away')
               ? 2
               : 1;
       for (const [i, value] of op.operands.entries()) {
@@ -372,6 +428,8 @@ class Emitter {
   >();
   readonly inputs = new Set<string>();
   readonly runtime = new Set<string>();
+  /** The values that are reads of an input, by their ids (`haversine`). */
+  private readonly inputValues = new Set<number>();
   /** The declared element type of each list value that is an input or a
    *  parameter, by its id (`IRInput.elementLabel`). */
   private readonly elementLabels = new Map<number, string>();
@@ -601,6 +659,7 @@ class Emitter {
         this.inputs.add(input.name);
         if (input.elementLabel !== undefined)
           this.elementLabels.set(op.result.id, input.elementLabel);
+        this.inputValues.add(op.result.id);
         // A lifted input is converted at each read, as the existing
         // emitter writes a wide name in the `complex` mode.
         return atom(
@@ -704,9 +763,43 @@ class Emitter {
             ? { text: magnitude, precedence: CALL }
             : atom(`(${b} < 0 ? -${magnitude} : ${magnitude})`);
         }
+        if (fn === 'haversine') {
+          // The handler of `Haversine` binds an operand whose code is not a
+          // name or digits in a function that it calls, whose value is this
+          // code in parentheses. It writes the code of another operand (a
+          // parameter, a local, a literal, a node that it writes as its
+          // operand) in its parent with no parentheses
+          // (`inlineExpression()`): `a / Haversine(x)` with a parameter `x`
+          // is `a / (1 - Math.cos(x)) / 2`, `(a / (1 - cos x)) / 2`. So
+          // where its parent needs the parentheses, the code is written only
+          // for the read of an input, which the existing emitter writes
+          // `_.x`, as this emitter does, and not for a parameter, which both
+          // write as a name (`operand()`).
+          return {
+            text: `(1 - Math.cos(${operand(operands[0], CONDITIONAL)})) / 2`,
+            precedence: MULTIPLICATIVE,
+            ...(this.inputValues.has(op.operands[0].id) &&
+            !/^[\p{L}_][\p{L}\p{N}_]*$|^[0-9]+$/u.test(operands[0].text)
+              ? {}
+              : {
+                  bare:
+                    'Haversine of an operand that is not an input, in a parent ' +
+                    'that needs parentheses around it: the existing emitter ' +
+                    'writes it with no parentheses',
+                }),
+          };
+        }
+        if (fn === 'round-ties-away') {
+          // The operand is read twice, and is bound to a name (`usesOf()`).
+          const x = operand(operands[0], CONDITIONAL);
+          return atom(`(Math.sign(${x}) * Math.round(Math.abs(${x})))`);
+        }
         const code = FUNCTION_CODE[fn];
-        if (!op.operands.some((v) => v.representation === 'complex'))
+        if (!op.operands.some((v) => v.representation === 'complex')) {
+          if (code.real.startsWith('_SYS.'))
+            this.runtime.add(code.real.slice('_SYS.'.length));
           return call(code.real, operands);
+        }
         if (code.complex === undefined)
           return fail(`the function ${op.fn} has a complex operand`);
         this.runtime.add(code.complex);

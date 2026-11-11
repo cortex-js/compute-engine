@@ -22,7 +22,7 @@ import {
   indexElementType,
   isNonRealNumber,
 } from '../../common/type/utils.js';
-import { withoutNaNMember } from './compile-real-analysis.js';
+import { fixedLogBase, withoutNaNMember } from './compile-real-analysis.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { realPowerBranchTerms } from '../numerics/real-power.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
@@ -82,6 +82,7 @@ import type { EffectFact } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import {
   lowerStructuredProgram,
+  piMultipleFactor,
   powerForm,
   preparedNodesOf,
   recordStructuredPreparation,
@@ -874,32 +875,382 @@ function structuredRadicalRule(
         );
       let lane: 'real' | 'complex' = 'complex';
       if (facts.representation !== 'complex') {
-        const sign = signOf(node.op1, snapshotOf, mode === 'complex', head);
-        if (typeof sign === 'object')
-          return w.refuse(node, 'signature', sign.refusal);
-        if (
-          mode === 'strict' &&
-          sign === 'negative' &&
-          !isNonRealNumber(finitePartOfType(node.type.type))
-        )
-          return w.refuse(
-            node,
-            'signature',
-            `the operand ${node.op1.toString()} of ${head} is negative and the ` +
-              `type of ${node.toString()} is ${node.type.toString()}: the ` +
-              `existing compiler reads both, and the structured route does not`
-          );
-        lane =
-          mode === 'complex'
-            ? sign === 'nonnegative'
-              ? 'real'
-              : 'complex'
-            : sign === 'negative'
-              ? 'complex'
-              : 'real';
+        const real = radicalLane(node, node.op1, head, mode, snapshotOf);
+        if (typeof real === 'object')
+          return w.refuse(node, 'signature', real.refusal);
+        lane = real;
       }
       return w.signatures(node, scope, context, [
         { operands: [lane], result: lane },
+      ]);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/**
+ * The lane of `node`, an application of `Sqrt`, `Ln` or `Log` (`head`), for
+ * its real operand `operand` (`structuredRadicalRule()`): `complex` in the
+ * `strict` mode when the operand is negative, in the `complex` mode when
+ * it is not proved non-negative, and `real` otherwise; a refusal when the
+ * engine knows a sign that `signOf()` does not find, or, in the `strict`
+ * mode, when the operand is negative and the type of `node` is not one of
+ * numbers that are not real.
+ */
+function radicalLane(
+  node: Expression,
+  operand: Expression,
+  head: 'Sqrt' | 'Ln' | 'Log',
+  mode: 'strict' | 'complex',
+  snapshotOf: SnapshotOf
+): 'real' | 'complex' | { refusal: string } {
+  const sign = signOf(operand, snapshotOf, mode === 'complex', head);
+  if (typeof sign === 'object') return sign;
+  if (
+    mode === 'strict' &&
+    sign === 'negative' &&
+    !isNonRealNumber(finitePartOfType(node.type.type))
+  )
+    return {
+      refusal:
+        `the operand ${operand.toString()} of ${head} is negative and the ` +
+        `type of ${node.toString()} is ${node.type.toString()}: the ` +
+        `existing compiler reads both, and the structured route does not`,
+    };
+  return mode === 'complex'
+    ? sign === 'nonnegative'
+      ? 'real'
+      : 'complex'
+    : sign === 'negative'
+      ? 'complex'
+      : 'real';
+}
+
+/**
+ * `Log` on the structured route, for the compile mode `mode`: `Log(x)` (the
+ * logarithm in base 10) and `Log(x, b)`. The existing emitter (`Log` in
+ * `javascript-target.ts`) decides the lane of `Log` with the rule of `Sqrt`
+ * and `Ln` (`isComplexValued()`, `promotesToComplexLane()`), applied to
+ * every operand: the node is complex when an operand is negative and the
+ * type of the node is not real, or, in the `complex` mode, when an operand
+ * is not proved non-negative (`radicalLane()`).
+ *
+ * - No base, or the number literal 10 or 2 as the base
+ *   (`fixedLogBase()`): `Math.log10(x)` or `Math.log2(x)` on the real lane,
+ *   `_SYS.clog10` or `_SYS.clog2` of the converted operand on the complex
+ *   lane (`Log(x)` with `x: real` in the `complex` mode is
+ *   `_SYS.clog10(({ re: x, im: 0 }))`). The route writes the same calls
+ *   (the forms `log10`, `log2`).
+ * - Another base, both operands on the real lane:
+ *   `(Math.log(x) / Math.log(b))`, as the route writes it (the form
+ *   `log-quotient`). On the complex lane the handler writes a complex
+ *   quotient, which the route declines.
+ * - A complex operand: declined (the handler writes `_SYS.clog10(z)` or
+ *   the complex quotient).
+ */
+function structuredLogRule(
+  mode: 'strict' | 'complex',
+  snapshotOf: SnapshotOf,
+  forms: Map<Expression, StructuredForm>
+) {
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || (node.nops !== 1 && node.nops !== 2))
+        return w.refuse(
+          node,
+          'signature',
+          'Log with other than one or two operands is not in the structured route'
+        );
+      const facts = operandFacts(node, scope, context, w);
+      for (const kind of ['complex', 'boolean'] as const)
+        if (facts.some((f) => f.type.kind === kind))
+          return w.refuse(
+            node,
+            'signature',
+            `Log with a ${kind} operand is not in the structured route`
+          );
+      const fixed = fixedLogBase(node.ops);
+      const lanes: ('real' | 'complex')[] = [];
+      for (const operand of fixed === undefined ? node.ops : [node.op1]) {
+        const lane = radicalLane(node, operand, 'Log', mode, snapshotOf);
+        if (typeof lane === 'object')
+          return w.refuse(node, 'signature', lane.refusal);
+        lanes.push(lane);
+      }
+      if (fixed === undefined) {
+        if (lanes.includes('complex'))
+          return w.refuse(
+            node,
+            'signature',
+            `Log of ${node.op1.toString()} in the base ${node.op2.toString()} ` +
+              `is complex, and the structured route does not have the complex ` +
+              `quotient that the existing emitter writes`
+          );
+        forms.set(node, 'log-quotient');
+        return w.valueFacts(
+          node,
+          { kind: 'real' },
+          facts.map((f) => w.convert(f, { kind: 'real' })!)
+        );
+      }
+      const lane = lanes[0];
+      forms.set(node, fixed === 10 ? 'log10' : 'log2');
+      return w.valueFacts(
+        node,
+        { kind: lane },
+        facts.map((f, i) =>
+          w.convert(f, i === 0 ? { kind: lane } : { kind: 'real' })!
+        )
+      );
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/**
+ * Whether `piMultiple()` (`compile-real-analysis.ts`) reads past the head of
+ * the operand `x` of `Sin`, `Cos` or `Tan`, when `x` reads `Pi`: a symbol (it
+ * answers for `Pi` itself), a negation, a quotient and a product. For every
+ * other operand it answers `undefined`, and the handler writes the call of
+ * the operand (`Math.sin(Math.asin(a) + Math.PI)`), as the route writes it.
+ */
+function readsAsPiMultiple(x: Expression): boolean {
+  return (
+    x.symbols.includes('Pi') &&
+    (isSymbol(x) ||
+      isFunction(x, 'Negate') ||
+      isFunction(x, 'Divide') ||
+      isFunction(x, 'Multiply'))
+  );
+}
+
+/**
+ * The facts of `head` (`Sin`, `Cos` or `Tan`) of a real operand that reads
+ * `Pi`, whose facts are `facts`. The existing emitter writes `_SYS.sinpi(u)`,
+ * `_SYS.cospi(u)` or `_SYS.tanpi(u)` for a multiple `π·u` (`piMultiple()`),
+ * the angle `u` in half-turns, so that `sin(π·u)` is `0` at an integer
+ * `u`, where `Math.sin(Math.PI * 2)` is `-2.4e-16`. The route writes the
+ * same call for `Multiply(Pi, u)` with a real or an integer `u` that does
+ * not read `Pi` (`piMultipleFactor()`, the form `pi-multiple`), with the
+ * code of the same operand `u`. The other operands that `piMultiple()`
+ * reads (`readsAsPiMultiple()`) are refused: a product of more factors, a
+ * quotient, a negation (for which `piMultiple()` builds a new node), and
+ * the symbol `Pi`.
+ */
+function piMultipleFacts(
+  head: 'Sin' | 'Cos' | 'Tan',
+  node: Expression,
+  facts: FragmentValueFacts<ScalarRepresentation>,
+  forms: Map<Expression, StructuredForm>,
+  w: FragmentWalker<ScalarRepresentation>
+) {
+  const u = isFunction(node) ? piMultipleFactor(node.op1) : undefined;
+  if (u === undefined || facts.type.kind === 'complex')
+    return w.refuse(
+      node,
+      'signature',
+      `${head} of an operand that reads Pi is in the structured route only ` +
+        `as Multiply(Pi, u): the existing emitter writes another multiple of ` +
+        `Pi with _SYS.sinpi, _SYS.cospi or _SYS.tanpi of a new expression`
+    );
+  forms.set(node, 'pi-multiple');
+  return w.valueFacts(node, { kind: 'real' }, [
+    w.convert(facts, { kind: 'real' })!,
+  ]);
+}
+
+/**
+ * How the existing emitter decides the lane of a head of
+ * `structuredScalarFunctionRule()` for a real operand:
+ *
+ * - `type`: by the type of the node, without its infinities and `NaN`
+ *   (`isComplexValued()`): a real type is real, a type of numbers that are
+ *   not real is complex, and a wide type (`number`) is real in the `strict`
+ *   mode and complex in the `complex` mode, where the handler writes the
+ *   real call and the compiler wraps it in `_SYS.cplx()` (`Cot(x)` with
+ *   `x: real` has the type `number`). The handler writes the real call, so
+ *   the route admits the real lane only.
+ * - `inverse`: the same reading of the type, but the handler writes the
+ *   complex helper of the converted operand for a type of numbers that are
+ *   not real (`resultIsComplexValued()`): `Arcsin(x)` with `x: real` has
+ *   the type `complex`, and is `_SYS.casin(({ re: x, im: 0 }))`.
+ * - `operand`: the lane of the operand (`COMPLEX_PROPAGATING_HEADS`), the
+ *   type is not read.
+ */
+type ScalarFunctionLane = 'type' | 'inverse' | 'operand';
+
+/**
+ * The heads of `structuredScalarFunctionRule()`: the lane rule of each, and
+ * whether the handler writes a runtime helper for a complex operand that is
+ * a name (`complex`). `jump`: a head of `JUMP_FUNCTIONS`, refused when it
+ * reads no input, parameter or local (`closedJumpRefusal()`); `rounding`:
+ * a head of `SHIFT_JUMP_HEADS`, refused for an operand with an exact
+ * constant that no double holds (`inexactJumpConstant()`).
+ */
+const SCALAR_FUNCTION_HEADS: Readonly<
+  Record<
+    string,
+    {
+      readonly lane: ScalarFunctionLane;
+      readonly complex: boolean;
+      readonly jump?: 'jump' | 'rounding';
+    }
+  >
+> = {
+  Tan: { lane: 'type', complex: true },
+  Cot: { lane: 'type', complex: true },
+  Sec: { lane: 'type', complex: true },
+  Csc: { lane: 'type', complex: true },
+  Sinh: { lane: 'type', complex: true },
+  Cosh: { lane: 'type', complex: true },
+  Arctan: { lane: 'type', complex: true },
+  Arsinh: { lane: 'type', complex: true },
+  Gamma: { lane: 'type', complex: true },
+  // `_SYS.cconj(z)` of a complex operand has no function of the
+  // representation: declined.
+  Conjugate: { lane: 'type', complex: false },
+  Erf: { lane: 'type', complex: false },
+  Erfc: { lane: 'type', complex: false },
+  Digamma: { lane: 'type', complex: false },
+  Haversine: { lane: 'type', complex: false },
+  Arcsin: { lane: 'inverse', complex: true },
+  Arccos: { lane: 'inverse', complex: true },
+  Arcosh: { lane: 'inverse', complex: true },
+  Artanh: { lane: 'inverse', complex: true },
+  Sign: { lane: 'operand', complex: true, jump: 'jump' },
+  Ceil: { lane: 'type', complex: false, jump: 'rounding' },
+  Round: { lane: 'type', complex: false, jump: 'rounding' },
+};
+
+/**
+ * The functions of one operand of `SCALAR_FUNCTION_HEADS` on the structured
+ * route, for the compile mode `mode`. The handler of each in the existing
+ * emitter (`javascript-target.ts`) writes, in its order:
+ *
+ * - For a complex operand (`isComplexValued()`), a runtime helper of it:
+ *   `_SYS.ctan(z)`, `_SYS.casin(z)`, `_SYS.cgamma(z)`, `_SYS.csign(z)`,
+ *   `_SYS.cconj(z)` (which the route declines), …; `Sinh` and `Cosh` write `_SYS.csinhipi(u)` and
+ *   `_SYS.ccoshipi(u)` for `i·π·u` (`imaginaryPiMultiple()`, which does not
+ *   read a name). `Erf`, `Erfc`, `Digamma`, `Ceil` and `Round` have a real
+ *   lowering only (`isRealOnlyLowering()`), which declines a complex
+ *   operand in the `strict` mode and guards it in the `complex` mode;
+ *   `Haversine` writes its real code. The route admits a complex operand
+ *   that is a name, in the `strict` mode, for the heads with a helper, and
+ *   declines every other complex operand.
+ * - `Tan` of a multiple of `Pi`: `_SYS.tanpi(u)`, as `Sin` and `Cos`
+ *   (`piMultipleFacts()`).
+ * - `Arcsin`, `Arccos`, `Arcosh`, `Artanh` of a real operand, when the
+ *   type of the node is one of numbers that are not real
+ *   (`resultIsComplexValued()`): the complex helper of the converted
+ *   operand. The type of `Arcsin(x)` is `complex` for `x: real`, and
+ *   `number` for a name `x` with no declared type, so the same program
+ *   is `_SYS.casin(({ re: x, im: 0 }))` with the declaration and
+ *   `Math.asin(x)` without it. The route reads the same type
+ *   (`ScalarFunctionLane`).
+ * - `Conjugate` of a real operand: the operand itself
+ *   (`identityPassthrough()`, the form `identity`).
+ * - `Ceil` and `Round` of an operand that the compiler proves an integer:
+ *   the operand itself (`identityPassthrough()`). `Math.ceil` and the code
+ *   of `Round` give the same double for every integer, `-0`, an infinity and
+ *   `NaN`, so the route writes them for every real operand. `Round` is
+ *   admitted for `ce.roundingTies` `'away-from-zero'` only, whose code is
+ *   `(Math.sign(x) * Math.round(Math.abs(x)))` (`jsRoundToInteger()`); a
+ *   `Ceil` or a `Round` with a second operand (a step) is declined.
+ * - Otherwise the real call: `_SYS.tan(x)`, `Math.sinh(x)`, `_SYS.erf(x)`,
+ *   `_SYS.gamma(x)`, `Math.sign(x)`, `(1 - Math.cos(x)) / 2` for
+ *   `Haversine`, …. A literal operand is not folded (`_SYS.erf(2.5)`).
+ *
+ * The result of a real operand is real, also for an integer operand; the
+ * result of `Conjugate` has the fact of its operand.
+ */
+function structuredScalarFunctionRule(
+  head: string,
+  mode: 'strict' | 'complex',
+  forms: Map<Expression, StructuredForm>
+) {
+  const { lane, complex, jump } = SCALAR_FUNCTION_HEADS[head];
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || node.nops !== 1)
+        return w.refuse(
+          node,
+          'signature',
+          `${head} with other than one operand is not in the structured route`
+        );
+      if (jump !== undefined) {
+        const closed = closedJumpRefusal(head, node);
+        if (closed !== undefined) return w.refuse(node, 'signature', closed);
+      }
+      if (jump === 'rounding') {
+        const constant = inexactJumpConstant(node.ops);
+        if (constant !== undefined)
+          return w.refuse(
+            node,
+            'signature',
+            `${head} of an operand with the exact constant ${constant.toString()}, ` +
+              `which no double holds exactly, is not in the structured route: the ` +
+              `existing compiler rewrites such a node or declines it ` +
+              `(inexact-jump-operand)`
+          );
+      }
+      if (head === 'Round' && node.engine.roundingTies !== 'away-from-zero')
+        return w.refuse(
+          node,
+          'signature',
+          `Round with the rounding of ties ${node.engine.roundingTies} is not ` +
+            `in the structured route, which has the ties away from zero only`
+        );
+      const [facts] = operandFacts(node, scope, context, w);
+      if (facts.type.kind === 'boolean')
+        return w.refuse(
+          node,
+          'signature',
+          `${head} with a boolean operand is not in the structured route`
+        );
+      if (facts.type.kind === 'complex') {
+        const refusal = !complex
+          ? `${head} with a complex operand is not in the structured route`
+          : !isSymbol(node.op1)
+            ? `${head} of the complex operand ${node.op1.toString()} is in the ` +
+              `structured route only when the operand is a name: the existing ` +
+              `emitter writes other code for some complex operands`
+            : mode === 'complex'
+              ? `${head} of a complex operand in the complex mode is not in the ` +
+                `structured route`
+              : undefined;
+        if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
+        return w.valueFacts(node, { kind: 'complex' }, [
+          w.convert(facts, facts.type)!,
+        ]);
+      }
+      if (head === 'Tan' && readsAsPiMultiple(node.op1))
+        return piMultipleFacts(head, node, facts, forms, w);
+      let result: 'real' | 'complex' = 'real';
+      if (lane !== 'operand') {
+        const type = finitePartOfType(node.type.type);
+        if (isNonRealNumber(type)) {
+          if (lane !== 'inverse')
+            return w.refuse(
+              node,
+              'signature',
+              `${node.toString()} has the type ${node.type.toString()}, which is ` +
+                `not real: the existing compiler reads its value as complex, and ` +
+                `its handler writes the real call`
+            );
+          result = 'complex';
+        } else if (mode === 'complex' && !isSubtype(type, 'real'))
+          return w.refuse(
+            node,
+            'signature',
+            `${node.toString()} has the type ${node.type.toString()}, which is ` +
+              `not real, in the complex mode: the existing compiler wraps the ` +
+              `real call in _SYS.cplx`
+          );
+      }
+      if (head === 'Conjugate') {
+        forms.set(node, 'identity');
+        return w.valueFacts(node, facts.type, [w.convert(facts, facts.type)!]);
+      }
+      return w.valueFacts(node, { kind: result }, [
+        w.convert(facts, { kind: result })!,
       ]);
     },
   } satisfies FragmentRule<ScalarRepresentation>;
@@ -919,8 +1270,11 @@ function structuredRadicalRule(
  * - `Sin` and `Cos` of an operand that reads `Pi`: the handler writes
  *   `_SYS.sinpi(u)` or `_SYS.cospi(u)` for a multiple `π·u`
  *   (`piMultiple()`), which gives `0` for `sin(π)` where `Math.sin(π)` is
- *   `1.2e-16`. The route refuses every operand that reads `Pi`, which is
- *   wider than that rule.
+ *   `1.2e-16`. The route writes the same call for `Multiply(Pi, u)`
+ *   (`piMultipleFacts()`), and refuses the other operands that
+ *   `piMultiple()` reads past their head (`readsAsPiMultiple()`), which is
+ *   wider than that rule. An operand that reads `Pi` under another head
+ *   (`Math.asin(a) + Math.PI`) is the call of the operand on both routes.
  * - A complex operand: the handler writes one runtime helper of the
  *   operand (`_SYS.csin`, `_SYS.ccos`, `_SYS.ctanh`, `_SYS.cabs`) when the
  *   operand is a name, which the route admits. For another operand it can
@@ -960,13 +1314,8 @@ function structuredFunctionRule(
           'signature',
           `${head} with a boolean operand is not in the structured route`
         );
-      if ((head === 'Sin' || head === 'Cos') && node.op1.symbols.includes('Pi'))
-        return w.refuse(
-          node,
-          'signature',
-          `${head} of an operand that reads Pi is not in the structured route: ` +
-            `the existing emitter writes a multiple of Pi with _SYS.sinpi or _SYS.cospi`
-        );
+      if ((head === 'Sin' || head === 'Cos') && readsAsPiMultiple(node.op1))
+        return piMultipleFacts(head, node, facts[0], forms, w);
       if (facts.some((f) => f.type.kind === 'complex')) {
         const refusal =
           head === 'Arctan2'
@@ -1524,6 +1873,13 @@ function modeRules(
     Tanh: structuredFunctionRule('Tanh', mode, forms),
     Abs: structuredFunctionRule('Abs', mode, forms),
     Arctan2: structuredFunctionRule('Arctan2', mode, forms),
+    Log: structuredLogRule(mode, snapshotOf, forms),
+    ...Object.fromEntries(
+      Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [
+        head,
+        structuredScalarFunctionRule(head, mode, forms),
+      ])
+    ),
   };
 }
 
@@ -1548,6 +1904,10 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Tanh: withoutMode('Tanh'),
   Abs: withoutMode('Abs'),
   Arctan2: withoutMode('Arctan2'),
+  Log: withoutMode('Log'),
+  ...Object.fromEntries(
+    Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [head, withoutMode(head)])
+  ),
   Add: withRealFromRealOperands(withListLengthIntegers(structuredAddRule)),
   Negate: withRealFromRealOperands(withListLengthIntegers(negateRule)),
   // The rule of the pass: the value of an `If` can be a list.
@@ -2395,6 +2755,42 @@ function refuseBooleanClaim(node: Expression, admission: Admission): void {
     );
 }
 
+/**
+ * Throw, on the structured route, for a `Haversine` operand of `node` that
+ * the existing emitter can write in `node` with another grouping: a factor
+ * after the first of a `Multiply`, the divisor of a `Divide`, the operand
+ * of a `Negate`. The handler of `Haversine` writes `(1 - Math.cos(t)) / 2`
+ * in its parent with no parentheses when the code `t` of its operand is a
+ * name or digits (`inlineExpression()`), so that `2 / Haversine(x)` with a
+ * parameter `x` is `2 / (1 - Math.cos(x)) / 2`, a quarter of the value
+ * (CE-1196). An operand for which `input` is true is a free symbol that both
+ * emitters write `_.x`, which the handler binds; every other operand is
+ * refused, which is wider than the rule of the handler. The emitter checks
+ * the same case (`Source.bare` in `javascript-structured-emit.ts`).
+ */
+function refuseHaversineGrouping(
+  node: Expression,
+  admission: Admission,
+  input: (operand: Expression) => boolean
+): void {
+  if (!admission.structured || !isFunction(node)) return;
+  const grouped =
+    node.operator === 'Multiply'
+      ? node.ops.slice(1)
+      : node.operator === 'Divide'
+        ? node.ops.slice(1)
+        : node.operator === 'Negate'
+          ? node.ops
+          : [];
+  for (const op of grouped)
+    if (isFunction(op, 'Haversine') && op.nops === 1 && !input(op.op1))
+      throw new Error(
+        `JS scalar fragment: Haversine of ${op.op1.toString()} as an operand ` +
+          `of ${node.operator} is not in the structured route: the existing ` +
+          `emitter writes it in ${node.operator} with no parentheses`
+      );
+}
+
 /** Throw the refusal of `node` (`structuredListRefusal()`) on the
  *  structured route. */
 function refuseListHead(node: Expression, admission: Admission): void {
@@ -3112,6 +3508,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       seen.add(node);
       refuseListHead(node, admission);
       refuseBooleanClaim(node, admission);
+      refuseHaversineGrouping(
+        node,
+        admission,
+        (op) =>
+          isSymbol(op) &&
+          !indexes.has(op.symbol) &&
+          op.valueDefinition?.value === undefined
+      );
       if (!node.isValid || node.type.type === 'error')
         throw new Error('JS scalar fragment: invalid expression');
       if (isNumber(node)) return;
@@ -3651,6 +4055,7 @@ function admitFunctionBody(
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
+    refuseHaversineGrouping(node, admission, () => false);
     if (!node.isValid || node.type.type === 'error')
       throw new Error(
         `JS scalar fragment: invalid ${isRoot ? 'bound expression' : 'helper body'}`
@@ -4710,6 +5115,7 @@ function resolveHelper(
   const checkNode = (node: Expression, root: boolean): void => {
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
+    refuseHaversineGrouping(node, admission, () => false);
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid helper body');
     if (isNumber(node)) return;

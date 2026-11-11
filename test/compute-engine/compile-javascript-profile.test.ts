@@ -565,7 +565,7 @@ describe('canCompile() and compile() agree', () => {
     expect(compiled + declined).toBe(2 * EXPRESSIONS.length);
     expect(EXPRESSIONS.length).toBeGreaterThanOrEqual(60);
     expect(compiled).toBeGreaterThanOrEqual(60);
-    expect(declined).toBeGreaterThanOrEqual(40);
+    expect(declined).toBeGreaterThanOrEqual(35);
   });
 
   test.each(PRELUDES)(

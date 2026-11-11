@@ -154,11 +154,58 @@ export type IRArithmetic = OperationBase & {
  *   for a negative operand (`cbrt(-8)` is `-2`), the principal complex cube
  *   root for a complex operand. As for `ln`, the rule of the target decides
  *   which of the two an occurrence is.
+ * - `tan`, `cot`, `sec`, `csc`, `sinh`, `cosh`, `atan`, `asinh`, `gamma`
+ *   (the gamma function Γ) and `sign` (`-1`, `0` or `1` for a real
+ *   operand, `z/|z|` for a complex one): as `exp`.
+ * - `asin`, `acos`, `acosh` and `atanh`: as `ln`, the rule of the target
+ *   decides whether an occurrence with a real operand is real (`NaN` off
+ *   the real domain) or complex (the principal value, the real operand
+ *   converted first).
+ * - `log10` and `log2`: the logarithms in base 10 and 2, as `ln`.
+ * - `erf`, `erfc` (`1 - erf`), `digamma` (the derivative of `ln Γ`),
+ *   `haversine` (`(1 - cos x) / 2`), `sinpi`, `cospi` and `tanpi` (the sine,
+ *   cosine and tangent of `π·x`, exact at the integers and the halves of
+ *   integers: `sinpi(1)` is `0`): a real operand and a real result.
+ * - `ceil` (the least integer not less than the operand) and
+ *   `round-ties-away` (the nearest integer, a tie away from zero:
+ *   `-2.5` gives `-3`): a real operand and a real result whose value is an
+ *   integer, `NaN` or infinite.
  *
  * Only `abs` has an integer result, and only for an integer operand.
  */
 export type UnaryFunctionName =
-  'exp' | 'ln' | 'sin' | 'cos' | 'tanh' | 'abs' | 'cbrt';
+  | 'exp'
+  | 'ln'
+  | 'sin'
+  | 'cos'
+  | 'tanh'
+  | 'abs'
+  | 'cbrt'
+  | 'tan'
+  | 'cot'
+  | 'sec'
+  | 'csc'
+  | 'sinh'
+  | 'cosh'
+  | 'atan'
+  | 'asinh'
+  | 'gamma'
+  | 'sign'
+  | 'asin'
+  | 'acos'
+  | 'acosh'
+  | 'atanh'
+  | 'log10'
+  | 'log2'
+  | 'erf'
+  | 'erfc'
+  | 'digamma'
+  | 'haversine'
+  | 'sinpi'
+  | 'cospi'
+  | 'tanpi'
+  | 'ceil'
+  | 'round-ties-away';
 
 /**
  * The functions of two operands that the representation names, by an

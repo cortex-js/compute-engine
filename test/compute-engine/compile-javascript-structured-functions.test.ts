@@ -804,11 +804,14 @@ test('the facts of the rules equal isComplexValued(), or the program declines', 
 
 describe('refusals', () => {
   const REFUSALS: [string, MathJsonExpression, Mode, RegExp][] = [
+    // `Sin(Multiply(Pi, x))` is admitted (`_SYS.sinpi(x)`,
+    // compile-javascript-structured-functions2.test.ts); a product of three
+    // factors is not.
     [
-      'Sin of a multiple of Pi',
-      ['Sin', ['Multiply', 'Pi', 'x']],
+      'Sin of a multiple of Pi with three factors',
+      ['Sin', ['Multiply', 'Pi', 'x', 'y']],
       'strict',
-      /Sin of an operand that reads Pi is not in the structured route/,
+      /Sin of an operand that reads Pi is in the structured route only as Multiply\(Pi, u\)/,
     ],
     [
       'Cos of Pi/x',
@@ -1023,10 +1026,10 @@ describe('refusals', () => {
       /the engine knows that the operand -a of Ln is negative/,
     ],
     [
-      'Sinh, not in the route',
-      ['Sinh', 'x'],
+      'Sech, not in the route',
+      ['Sech', 'x'],
       'strict',
-      /unsupported head Sinh/,
+      /unsupported head Sech/,
     ],
     // The existing emitter folds the power of two finite number literals to
     // the literal `Math.pow(b, e)`, whatever `constantFold` is:

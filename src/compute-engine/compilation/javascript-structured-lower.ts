@@ -97,7 +97,8 @@ import { isShadowedSymbol } from '../library-shadowing.js';
 export type StructuredInput = IRInput;
 
 /**
- * The form of a `Power` or `Abs` node that the rule of its head admitted
+ * The form of a `Power`, `Abs`, `Conjugate` or `Log` node, or of a `Sin`,
+ * `Cos` or `Tan` node of a multiple of `Pi`, that the rule of its head admitted
  * (`javascript-fragment-target.ts`), recorded during the annotation:
  *
  * - `square`, `exp`, `three-halves`: the forms of `powerForm()`.
@@ -120,8 +121,22 @@ export type StructuredInput = IRInput;
  * - `abs-identity`: `Abs` of a real operand that the existing emitter proves
  *   non-negative, written as the operand itself, as that emitter writes it
  *   (`identityPassthrough()`): `-0` stays `-0`.
+ * - `pi-multiple`: `Sin`, `Cos` or `Tan` of `Multiply(Pi, u)`
+ *   (`piMultipleFactor()`), the function `sinpi`, `cospi` or `tanpi` of `u`,
+ *   as the existing emitter writes it (`piMultiple()`).
+ * - `identity`: `Conjugate` of a real operand, written as the operand
+ *   itself, as the existing emitter writes it (`identityPassthrough()`).
+ * - `log10`, `log2`: `Log` with no base or with the base 10 or 2, the
+ *   function of that name of the first operand; `log-quotient`: `Log(x, b)`
+ *   with another base, the quotient `ln(x) / ln(b)`, as the existing emitter
+ *   writes them.
  */
 export type StructuredForm =
+  | 'pi-multiple'
+  | 'identity'
+  | 'log10'
+  | 'log2'
+  | 'log-quotient'
   | 'square'
   | 'exp'
   | 'three-halves'
@@ -189,9 +204,11 @@ export type StructuredPreparation = {
   /** For tests only: the heads that lower to the trace operation, with the
    *  trace id of each. */
   readonly testOperations: ReadonlyMap<string, string>;
-  /** The form that the rule of its head chose for each `Power` and `Abs`
-   *  node (`StructuredForm`). The lowering reads it, and no fact of the
-   *  engine; a node of these heads with no form is an error. */
+  /** The form that the rule of its head chose for each `Power`, `Abs`,
+   *  `Conjugate` and `Log` node, and for each `Sin`, `Cos` and `Tan` node of
+   *  a multiple of `Pi` (`StructuredForm`). The lowering reads it, and no
+   *  fact of the engine; a node of the first four heads with no form is an
+   *  error. */
   readonly forms: ReadonlyMap<Expression, StructuredForm>;
   readonly numericPolicy: 'strict' | 'complex';
   /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
@@ -292,7 +309,58 @@ const FUNCTIONS: Readonly<
   Tanh: { kind: 'unary', fn: 'tanh' },
   Abs: { kind: 'unary', fn: 'abs' },
   Arctan2: { kind: 'binary', fn: 'atan2' },
+  Tan: { kind: 'unary', fn: 'tan' },
+  Cot: { kind: 'unary', fn: 'cot' },
+  Sec: { kind: 'unary', fn: 'sec' },
+  Csc: { kind: 'unary', fn: 'csc' },
+  Sinh: { kind: 'unary', fn: 'sinh' },
+  Cosh: { kind: 'unary', fn: 'cosh' },
+  Arctan: { kind: 'unary', fn: 'atan' },
+  Arsinh: { kind: 'unary', fn: 'asinh' },
+  Gamma: { kind: 'unary', fn: 'gamma' },
+  Sign: { kind: 'unary', fn: 'sign' },
+  Arcsin: { kind: 'unary', fn: 'asin' },
+  Arccos: { kind: 'unary', fn: 'acos' },
+  Arcosh: { kind: 'unary', fn: 'acosh' },
+  Artanh: { kind: 'unary', fn: 'atanh' },
+  Erf: { kind: 'unary', fn: 'erf' },
+  Erfc: { kind: 'unary', fn: 'erfc' },
+  Digamma: { kind: 'unary', fn: 'digamma' },
+  Haversine: { kind: 'unary', fn: 'haversine' },
+  Ceil: { kind: 'unary', fn: 'ceil' },
+  // The rule of `Round` admits it only for `ce.roundingTies`
+  // `'away-from-zero'`.
+  Round: { kind: 'unary', fn: 'round-ties-away' },
 };
+
+/** The function of `u` for `Sin`, `Cos` and `Tan` of `Multiply(Pi, u)`
+ *  (the form `pi-multiple`). */
+const PI_MULTIPLE_FUNCTIONS: Readonly<Record<string, UnaryFunctionName>> = {
+  Sin: 'sinpi',
+  Cos: 'cospi',
+  Tan: 'tanpi',
+};
+
+/**
+ * The factor `u` of the operand `Multiply(Pi, u)` of `Sin`, `Cos` or
+ * `Tan`, or `undefined`: a product of two operands, one of them the
+ * constant `Pi` of the library (not a symbol of that name that a scope
+ * declares), the other one an expression that does not read `Pi`. The
+ * existing emitter writes `Sin(π·u)` as `_SYS.sinpi(u)` with the code of
+ * that same operand (`piMultiple()` in `compile-real-analysis.ts`, which
+ * also reads a product of more factors, a quotient and a negation; it builds
+ * a new node for those, and the structured route does not admit them). The
+ * rule of the head and the lowering read the factor from this function, so
+ * they agree.
+ */
+export function piMultipleFactor(operand: Expression): Expression | undefined {
+  if (!isFunction(operand, 'Multiply') || operand.nops !== 2) return undefined;
+  const index = operand.ops.findIndex((op) => isSymbol(op, 'Pi'));
+  const pi = operand.ops[index];
+  if (!isSymbol(pi) || isShadowedSymbol(pi)) return undefined;
+  const u = operand.ops[1 - index];
+  return u.symbols.includes('Pi') ? undefined : u;
+}
 
 /**
  * The form of the `Power` node `node` that the structured route admits, or
@@ -857,6 +925,76 @@ class Lowering {
       );
       return result;
     }
+
+    // The forms of `Sin`, `Cos`, `Tan`, `Conjugate` and `Log` that are not
+    // one function of the operands (`StructuredForm`).
+    const special = this.prep.forms.get(node);
+    if (special === 'pi-multiple') {
+      // The function of the factor `u` of `Multiply(Pi, u)`, which the rule
+      // admitted with a real or an integer fact: the product is not lowered.
+      const u = piMultipleFactor(node.ops[0]);
+      if (u === undefined || !Object.hasOwn(PI_MULTIPLE_FUNCTIONS, operator))
+        return fail(`no multiple of Pi in ${node.toString()}`);
+      const operand = this.value(u, scope, operations);
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'unary',
+        fn: PI_MULTIPLE_FUNCTIONS[operator],
+        result,
+        operands: [operand],
+        effect,
+        origin: node,
+      });
+      return result;
+    }
+    if (special === 'identity')
+      return this.operands(node, facts, scope, operations)[0];
+    if (special === 'log10' || special === 'log2') {
+      // The base, a literal or absent, has no operation.
+      const operand = this.convert(
+        this.value(node.ops[0], scope, operations),
+        facts.conversions?.[0],
+        node,
+        operations
+      );
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'unary',
+        fn: special,
+        result,
+        operands: [operand],
+        effect,
+        origin: node,
+      });
+      return result;
+    }
+    if (special === 'log-quotient') {
+      const logs = this.operands(node, facts, scope, operations).map(
+        (operand) => {
+          const log = this.newValue('real', 'number');
+          operations.push({
+            kind: 'unary',
+            fn: 'ln',
+            result: log,
+            operands: [operand],
+            effect,
+            origin: node,
+          });
+          return log;
+        }
+      );
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'divide',
+        result,
+        operands: logs,
+        effect,
+        origin: node,
+      });
+      return result;
+    }
+    if (operator === 'Conjugate' || operator === 'Log')
+      return fail(`no recorded form for ${node.toString()}`);
 
     const fn = Object.hasOwn(FUNCTIONS, operator)
       ? FUNCTIONS[operator]
