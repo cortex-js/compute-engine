@@ -344,13 +344,7 @@ export type UnaryFunctionName =
  * chooses one of them from the exponent.
  */
 export type BinaryFunctionName =
-  | 'atan2'
-  | 'pow'
-  | 'abs-pow'
-  | 'signed-pow'
-  | 'real-pow'
-  | 'root'
-  | 'complex';
+  'atan2' | 'pow' | 'abs-pow' | 'signed-pow' | 'real-pow' | 'root' | 'complex';
 
 /**
  * An application of a function of one operand (`unary`) or two operands
@@ -524,7 +518,7 @@ export type IRConvert = OperationBase & {
  * branch yields nothing. An `if` with two closed branches has no result, is
  * closed itself, and is the last operation of its region.
  */
-export type IRIf =Omit<OperationBase, 'result'> & {
+export type IRIf = Omit<OperationBase, 'result'> & {
   readonly kind: 'if';
   readonly result?: undefined;
   readonly results: readonly IRValue[];

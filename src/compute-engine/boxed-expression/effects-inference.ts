@@ -1973,7 +1973,9 @@ export function functionLiteralCallSignatureType(expr: Expression): Type {
   )
     return here;
   const { effects: _effects, ...shape } = there;
-  return here.effects === undefined ? shape : { ...shape, effects: here.effects };
+  return here.effects === undefined
+    ? shape
+    : { ...shape, effects: here.effects };
 }
 
 /**

@@ -1397,7 +1397,8 @@ function noteTypedOccurrence(
 ): void {
   if (!isFreeName(e) && !e.valueDefinition) return;
   let byName = typedOccurrences.get(occurrences);
-  if (byName === undefined) typedOccurrences.set(occurrences, (byName = new Map()));
+  if (byName === undefined)
+    typedOccurrences.set(occurrences, (byName = new Map()));
   const list = byName.get(e.symbol);
   if (list === undefined) {
     byName.set(e.symbol, [e]);

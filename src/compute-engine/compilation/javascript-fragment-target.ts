@@ -429,9 +429,7 @@ function boundBelowRoot(
  * emitter, `compileJSEquality()`); a complex operand needs a comparison per
  * component, which the structured route does not have.
  */
-function comparisonRule(
-  operator: 'Less' | 'LessEqual' | 'Equal' | 'NotEqual'
-) {
+function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal' | 'NotEqual') {
   return {
     walk: (node, scope, context, w) => {
       const nops = isFunction(node) ? node.nops : 0;
@@ -2475,8 +2473,7 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Min: foldOrExtremumRule('Min'),
   Max: foldOrExtremumRule('Max'),
   List: {
-    walk: (node, scope, context, w) =>
-      listLiteralRule(node, scope, context, w),
+    walk: (node, scope, context, w) => listLiteralRule(node, scope, context, w),
   },
   Tuple: {
     walk: (node, scope, context, w) => tupleRule(node, scope, context, w),
@@ -2625,8 +2622,7 @@ function structuredLocalType(
 }
 
 type DeclaredLocalType =
-  | { kind: 'integer' | 'real' | 'complex' | 'boolean' }
-  | FragmentListType;
+  { kind: 'integer' | 'real' | 'complex' | 'boolean' } | FragmentListType;
 
 /** The type of a local declared with the type `declared` (its spelling, as
  *  `declaredTypeSource()` reads it), for the declared types that the
@@ -2739,7 +2735,12 @@ function integerFromListLength(
   let found = false;
   for (const operand of node.ops) {
     if (
-      integerFromListLength(operand, isIntegerName, isIntegerCall, isIntegerOperand)
+      integerFromListLength(
+        operand,
+        isIntegerName,
+        isIntegerCall,
+        isIntegerOperand
+      )
     )
       found = true;
     else if (
@@ -4360,10 +4361,7 @@ function refuseHaversineGrouping(
       .flatMap((l) =>
         isFunction(l, 'Limits') && isSymbol(l.op1) ? [l.op1.symbol] : []
       );
-    if (
-      bare(term) ||
-      (isSymbol(term.op1) && indexes.includes(term.op1.symbol))
-    )
+    if (bare(term) || (isSymbol(term.op1) && indexes.includes(term.op1.symbol)))
       grouped.push(term);
   }
   const first = grouped[0] && value(grouped[0]);
@@ -4377,9 +4375,7 @@ function refuseHaversineGrouping(
   if (node.operator !== 'Multiply') return;
   for (const op of node.ops.slice(1)) {
     const haversine =
-      isFunction(op, 'Divide') && op.nops === 2
-        ? numerator(op.op1)
-        : undefined;
+      isFunction(op, 'Divide') && op.nops === 2 ? numerator(op.op1) : undefined;
     if (haversine !== undefined)
       throw new Error(
         `JS scalar fragment: ${nodeText(haversine)} in the numerator of the ` +
@@ -4658,9 +4654,7 @@ function readsCollection(node: Expression): boolean {
   const visit = (e: Expression): boolean => {
     if (!isFunction(e) || seen.has(e)) return false;
     seen.add(e);
-    return e.ops.some(
-      (op) => op.type.matches('collection<any>') || visit(op)
-    );
+    return e.ops.some((op) => op.type.matches('collection<any>') || visit(op));
   };
   return visit(node);
 }
@@ -4907,9 +4901,7 @@ function refuseHoistedDraws(
     hosts !== undefined &&
     [...hosts.bindings.values()].some((binding) => !binding.pure);
   const readsRoot = (node: Expression): boolean =>
-    mutates &&
-    isSymbol(node) &&
-    annotation.scope.bindings.has(node.symbol);
+    mutates && isSymbol(node) && annotation.scope.bindings.has(node.symbol);
   /** Whether each node object, or the body of a helper that it calls, has a
    *  host operation. The calls of the helpers have no cycle
    *  (`collectStructuredHelper()` refuses recursion before this pass), so
@@ -6174,7 +6166,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           {
             trace: this.hooks.trace,
             host: (binding, operands) => {
-              const text = sources?.hosts.get(`${binding.form}:${binding.name}`);
+              const text = sources?.hosts.get(
+                `${binding.form}:${binding.name}`
+              );
               if (text === undefined)
                 throw new Error(
                   `JS scalar fragment invariant: no source for the host binding ${binding.name}`
@@ -6265,7 +6259,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     // An import that is not a function throws the error of the existing
     // route (`JavaScriptTarget.prepareCompilation()`), not an internal error.
     for (const x of options.imports ?? [])
-      if (typeof x !== 'function') throw new Error(`Unsupported import \`${x}\``);
+      if (typeof x !== 'function')
+        throw new Error(`Unsupported import \`${x}\``);
     try {
       return this.prepareFragment(expr, options, batch);
     } catch (e) {
@@ -6337,12 +6332,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     if (isFunction(prepared.expr, 'Function')) {
       // A refusal that no inner check records names the function itself.
       atNode(prepared.expr, () =>
-        attachBoundFunction(
-          prepared.expr,
-          prepared.target,
-          admission,
-          registry
-        )
+        attachBoundFunction(prepared.expr, prepared.target, admission, registry)
       );
       if (structured) this.endPhase('annotation', annotationStart);
       return prepared;
@@ -7139,8 +7129,7 @@ function checkLocalWrites(
       statement.operator === 'Declare'
         ? declareValueOperand(statement.ops)
         : statement.op2;
-    const valueFacts =
-      value === undefined ? undefined : scope.facts.get(value);
+    const valueFacts = value === undefined ? undefined : scope.facts.get(value);
     if (
       !valueFacts ||
       !('representation' in valueFacts) ||
@@ -7301,10 +7290,7 @@ function admitFunctionBody(
     // `rewriteAngularUnit()` does not rewrite the value in the dictionary of
     // a `let` (`Declare(a, {value: sin(x)})`): in another angular unit than
     // radians both compilers read `sin(x)` in radians (CE-1207).
-    if (
-      (letForm || typedLetForm) &&
-      declaration.engine.angularUnit !== 'rad'
-    )
+    if ((letForm || typedLetForm) && declaration.engine.angularUnit !== 'rad')
       throw new Error(
         `JS scalar fragment: the local ${local} is declared with its value in ` +
           `a dictionary, and the angular unit is ` +
@@ -7616,7 +7602,8 @@ function admitFunctionBody(
             ? 'complex'
             : undefined;
       let classes = writtenClasses.get(name);
-      if (classes === undefined) writtenClasses.set(name, (classes = new Set()));
+      if (classes === undefined)
+        writtenClasses.set(name, (classes = new Set()));
       if (kind !== undefined) classes.add(kind);
       if (classes.size > 1)
         throw new Error(
@@ -7833,7 +7820,10 @@ function admitFunctionBody(
     }
     // A block statement: also a statement of the body (`Block(Block(…))`,
     // the form of an Epsil program), whose locals are not visible after it.
-    if (isFunction(statement, 'Block') && isLibraryOperator(statement, 'Block')) {
+    if (
+      isFunction(statement, 'Block') &&
+      isLibraryOperator(statement, 'Block')
+    ) {
       nested(() => {
         statement.ops.forEach((inner, i) => {
           if (i < statement.nops - 1 && exits(inner))
@@ -8050,7 +8040,11 @@ function admitFunctionBody(
           `defines a local function only as the first write to a new local ` +
           `of the block`
       );
-    if (declared !== undefined && declared !== 'function' && declared !== 'unknown')
+    if (
+      declared !== undefined &&
+      declared !== 'function' &&
+      declared !== 'unknown'
+    )
       throw new Error(
         `JS scalar fragment: ${what} is declared ${declared}: the structured ` +
           `route admits a local function declared function or unknown, whose ` +
@@ -8132,11 +8126,7 @@ function admitFunctionBody(
         // existing closure reads the new value. A parameter of a root
         // `Function` literal cannot change, and is refused too: the rule
         // reads only whether the name is a local of the body.
-        if (
-          names.has(node.symbol) &&
-          !locals.has(node.symbol) &&
-          hostEffects()
-        )
+        if (names.has(node.symbol) && !locals.has(node.symbol) && hostEffects())
           throw new Error(
             `JS scalar fragment: ${what} reads the input ${node.symbol}, and ` +
               `the program has a read or a call of the host that is not ` +
@@ -8144,8 +8134,7 @@ function admitFunctionBody(
               `local function at the call, and a host operation can change ` +
               `it before the body reads it`
           );
-        if (names.has(node.symbol))
-          capture(node.symbol, node);
+        if (names.has(node.symbol)) capture(node.symbol, node);
         else if (
           node.symbol !== name &&
           owner.localScope?.bindings.has(node.symbol) === true
@@ -8331,7 +8320,10 @@ function localFunctionStatement(statement: Expression):
     }
   | undefined {
   if (!isFunction(statement) || !isSymbol(statement.op1)) return undefined;
-  if (statement.operator === 'DefineFunction' || statement.operator === 'Assign') {
+  if (
+    statement.operator === 'DefineFunction' ||
+    statement.operator === 'Assign'
+  ) {
     if (statement.nops !== 2 || !isFunction(statement.op2, 'Function'))
       return undefined;
     return {
@@ -8647,9 +8639,7 @@ const REAL_WITH_NON_FINITE_TYPE = parseType('real | nan | signed_infinity');
 function declaredNumberKind(
   type: Type,
   mode: 'strict' | 'complex'
-):
-  | { readonly kind: 'real' | 'complex'; readonly lifted: boolean }
-  | undefined {
+): { readonly kind: 'real' | 'complex'; readonly lifted: boolean } | undefined {
   if (scalarType(type) !== undefined) return undefined;
   if (isSubtype(type, 'number') && isSubtype('number', type))
     return { kind: defaultKind(mode).kind, lifted: mode === 'complex' };
@@ -9187,8 +9177,7 @@ function argumentRefusal(
       if (facts === undefined || !('representation' in facts)) continue;
       const i = (facts.conversions ?? []).findIndex(
         (conversion, j) =>
-          conversion.kind !== 'none' &&
-          (helper.defaulted[j] || helper.wide[j])
+          conversion.kind !== 'none' && (helper.defaulted[j] || helper.wide[j])
       );
       const argument = i < 0 ? undefined : scope.facts.get(call.ops[i]);
       if (argument === undefined || !('type' in argument)) continue;
@@ -9282,8 +9271,7 @@ function resolveHelper(
   const registry = named?.structured;
   if (!isFunction(call))
     throw new Error('JS scalar fragment: expected helper call');
-  const { binding, valueDefinition, operatorDefinition } =
-    helperBinding(call);
+  const { binding, valueDefinition, operatorDefinition } = helperBinding(call);
   const held =
     valueDefinition?.value ??
     (operatorDefinition as { _lambdaLiteral?: Expression } | undefined)

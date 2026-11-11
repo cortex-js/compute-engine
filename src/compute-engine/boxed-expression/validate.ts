@@ -6167,10 +6167,7 @@ function unitRepairSite(
     // is the evidence of an earlier expression, as an entry that an earlier
     // boxing wrote: the repair does not retype the name, as without the
     // flag a definition inferred before the boxing is not eligible.
-    if (
-      !def.declaredType.isUnknown &&
-      !ce._boxingState.isDefinitionMade(def)
-    )
+    if (!def.declaredType.isUnknown && !ce._boxingState.isDefinitionMade(def))
       return { env: undefined, key: def, eligible: false };
     key = def;
   }

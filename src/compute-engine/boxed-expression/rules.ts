@@ -239,8 +239,7 @@ export const CONDITIONS = {
   // that its name resolves to: it is a constant when that definition is
   // one, a variable unless it is one, and a function when it is an
   // operator definition.
-  constant: (x: Expression) =>
-    resolvedValueDefinition(x)?.isConstant ?? false,
+  constant: (x: Expression) => resolvedValueDefinition(x)?.isConstant ?? false,
   variable: (x: Expression) =>
     !(resolvedValueDefinition(x)?.isConstant ?? !isFreeName(x)),
   function: (x: Expression) => {

@@ -189,7 +189,13 @@ export class GLSLTarget extends GPUShaderTarget {
     // `ce._opensOperation()`).
     if (expr.engine._opensOperation(false))
       return expr.engine._withOperation(expr, () =>
-        this.compileFunction(expr, functionName, returnType, parameters, options)
+        this.compileFunction(
+          expr,
+          functionName,
+          returnType,
+          parameters,
+          options
+        )
       );
     // Both branches below put the body in a position that requires a VALUE:
     // the single-line one wraps it in `return`, the multi-line one relies on

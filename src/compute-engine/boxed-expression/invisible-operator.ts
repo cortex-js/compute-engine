@@ -1279,10 +1279,7 @@ function combineFunctionApplications(
       // application here too: `2f(x)` is `2 · f(x)`. Same rule and same
       // exception as the two-operand route (`x y(2y)` keeps `y(2y)` a
       // product).
-      if (
-        headHasNoTypeInformation(ce, symName, def, occurrence) &&
-        delim.op1
-      ) {
+      if (headHasNoTypeInformation(ce, symName, def, occurrence) && delim.op1) {
         const args = flatten(
           isFunction(delim.op1, 'Sequence') ? delim.op1.ops : [delim.op1]
         );

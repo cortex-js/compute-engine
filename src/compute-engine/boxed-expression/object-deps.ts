@@ -275,10 +275,7 @@ export function stampObjectDepsAtEnd(deps: ObjectDeps | undefined): void {
  * far the common case — is one counter increment and a single length check,
  * with no allocation and no iteration.
  */
-export function recordObjectRead(
-  obj: VersionedObject,
-  version: number
-): void {
+export function recordObjectRead(obj: VersionedObject, version: number): void {
   _objectReads += 1;
   if (_collectors.length === 0) return;
   for (let i = 0; i < _collectors.length; i++) collect(i, obj, version);
@@ -408,11 +405,7 @@ export function objectDepCollectorDepth(): number {
  * that a computation reads is an object of its own (`binding-unit.ts`), and
  * a scan per read made the type of a product of 2 000 distinct symbols
  * quadratic. */
-function addDep(
-  deps: ObjectDeps,
-  obj: VersionedObject,
-  version: number
-): void {
+function addDep(deps: ObjectDeps, obj: VersionedObject, version: number): void {
   // A set below the threshold has no index: the lookup is made only for a
   // large set, so a small set costs what it cost before the index.
   let index =

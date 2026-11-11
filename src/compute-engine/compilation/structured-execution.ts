@@ -270,12 +270,11 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
   const effects = effectBlockers(program);
   const independent: ExecutionBlocker[] = effects.map((b) => ({
     ...b.blocker,
-    reason:
-      b.draws
-        ? DRAW_REASON
-        : b.effect === 'unknown'
-          ? 'an operation whose definition does not state its effects'
-          : 'an operation whose definition states an effect',
+    reason: b.draws
+      ? DRAW_REASON
+      : b.effect === 'unknown'
+        ? 'an operation whose definition does not state its effects'
+        : 'an operation whose definition states an effect',
   }));
   // A draw and a seeded region are blockers of their own below, wherever
   // they are.
@@ -386,9 +385,7 @@ function blocker(
  * reported (`onlyRandom()`). Each function is visited once, or once in and
  * once out of a seeded region, and each operation is reported once.
  */
-function effectBlockers(
-  program: IRProgram
-): {
+function effectBlockers(program: IRProgram): {
   blocker: ExecutionBlocker;
   effect: 'effectful' | 'unknown';
   /** The operation touches the random stream only (`onlyRandom()`). */

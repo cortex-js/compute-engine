@@ -418,7 +418,8 @@ export function verifyProgram(
   /** The checks of an `exit` that read its loop (`IRExit`). */
   const verifyExit = (op: IRExit, scope: ExitScope) => {
     const loop = scope.loop;
-    if (loop === undefined) return fail('an exit is outside the body of a loop');
+    if (loop === undefined)
+      return fail('an exit is outside the body of a loop');
     if (scope.barrier !== undefined)
       fail(
         `an exit is in a region of the operation ${scope.barrier}, between it and its loop`
@@ -861,9 +862,7 @@ function verifySignature(
         op.result.type === 'complex' &&
         op.operands.length !== 2
       )
-        fail(
-          `a complex multiply has ${op.operands.length} operands, not two`
-        );
+        fail(`a complex multiply has ${op.operands.length} operands, not two`);
       return;
     case 'mod':
       arity(2);
@@ -1320,7 +1319,9 @@ function verifySignature(
         policy.operations.host ?? fail('the target has no host operation');
       const binding = program.hosts?.[op.host];
       if (binding === undefined)
-        return fail(`a host operation of the binding ${op.host}, which does not exist`);
+        return fail(
+          `a host operation of the binding ${op.host}, which does not exist`
+        );
       if (binding.form === 'read') arity(0);
       operandsIn(operandRule('host'));
       resultIn(rule.results);
@@ -1328,7 +1329,8 @@ function verifySignature(
         fail(
           `a host operation of ${binding.name} has a result of the type ${op.result.type}, and its binding the type ${binding.result}`
         );
-      const effect = binding.pure && binding.form === 'call' ? 'pure' : 'unknown';
+      const effect =
+        binding.pure && binding.form === 'call' ? 'pure' : 'unknown';
       if (op.effect !== effect)
         fail(
           `a host operation of ${binding.name} has the effect ${op.effect}, not ${effect}`

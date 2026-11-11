@@ -218,8 +218,7 @@ export class EngineBoxingState<Scope extends object> {
    * construction is active or none was supplied.
    */
   private _persistentScopeOf:
-    | ((name: string, def: object) => Scope | undefined)
-    | null = null;
+    ((name: string, def: object) => Scope | undefined) | null = null;
 
   /** Record that the root construction in progress made the value
    * definition `def`. Does nothing when no root construction is active. */

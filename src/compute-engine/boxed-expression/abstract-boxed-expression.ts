@@ -1106,7 +1106,9 @@ export abstract class _BoxedExpression implements Expression {
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
       return this.engine._withOperation(
-        typeof other === 'number' ? this : [this, other], () => this.isEqual(other));
+        typeof other === 'number' ? this : [this, other],
+        () => this.isEqual(other)
+      );
     const equal = eq(this, other);
     if (equal !== undefined) return equal;
     // `eq()` reads no bounds. Two assumptions (`b ≥ 0` and `b ≤ 0`) that

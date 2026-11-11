@@ -3216,11 +3216,7 @@ export function findRoot(
 ): Expression | undefined {
   return inFitOperation(ce, fitOperation(ce, ops), () =>
     withSetupDeadline(ce, 'FindRoot', (ctx) =>
-      solveSetup(
-        ce,
-        runStepsSync(findRootSetupSteps(ce, ops, ctx)),
-        'FindRoot'
-      )
+      solveSetup(ce, runStepsSync(findRootSetupSteps(ce, ops, ctx)), 'FindRoot')
     )
   );
 }

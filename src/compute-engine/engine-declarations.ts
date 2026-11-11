@@ -4314,7 +4314,11 @@ export function withValuesFn<T>(
         if (hasProvisionalDependents(ce, name)) throw appliedByBody();
         let scope = ce.context.lexicalScope;
         while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
-        ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+        ce._declareSymbolValue(
+          name,
+          { type: 'unknown', inferred: true },
+          scope
+        );
       } else ce.symbol(name);
       record = ce.lookupDefinition(name);
     }

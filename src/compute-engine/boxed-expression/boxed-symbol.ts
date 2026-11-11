@@ -3529,8 +3529,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // FALLBACK: a value that disagrees with its declared size is a type error
     // reported elsewhere, and the value is the more specific answer regardless.
     const fromType = typeElementCount(this.type.type);
-    if (this._isFreeName)
-      return this._resolvedFreeSymbol()?.count ?? fromType;
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.count ?? fromType;
     const def = this._def;
     if (def === undefined) return fromType;
     const guard = enterCycleQuery(def, CycleQuery.Count);
@@ -3560,8 +3559,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isEmptyCollection(): boolean | undefined {
-    if (this._isFreeName)
-      return this._resolvedFreeSymbol()?.isEmptyCollection;
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.isEmptyCollection;
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.IsEmptyCollection);
@@ -3583,8 +3581,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isFiniteCollection(): boolean | undefined {
-    if (this._isFreeName)
-      return this._resolvedFreeSymbol()?.isFiniteCollection;
+    if (this._isFreeName) return this._resolvedFreeSymbol()?.isFiniteCollection;
     const def = this._def;
     if (def === undefined) return undefined;
     const guard = enterCycleQuery(def, CycleQuery.IsFiniteCollection);

@@ -288,7 +288,8 @@ export class UnitEnvironment {
         continue;
       }
       const children = n._kind === 'dictionary' ? n.values : n.ops;
-      if (children !== undefined) for (const child of children) stack.push(child);
+      if (children !== undefined)
+        for (const child of children) stack.push(child);
     }
   }
 
@@ -1034,8 +1035,7 @@ export function unitEnvironmentStamp(
     if (seen.has(env)) continue;
     seen.add(env);
     const parents = env.parents();
-    if (env.counter !== 0 || parents.length === 0)
-      stamp.set(env, env.counter);
+    if (env.counter !== 0 || parents.length === 0) stamp.set(env, env.counter);
     envs.push(...parents);
   }
   return stamp;

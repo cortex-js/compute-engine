@@ -8058,7 +8058,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // `ce._opensOperation()`).
     if (expr.engine._opensOperation(false))
       return expr.engine._withOperation(expr, () =>
-        this.compileVectorized(expr, functionName, parameters, docstring, options)
+        this.compileVectorized(
+          expr,
+          functionName,
+          parameters,
+          docstring,
+          options
+        )
       );
     // `functionName` is bound below as a bare Python name. The checks of
     // `compileFunction()` see only the `_<name>_scalar` spelling, which is a

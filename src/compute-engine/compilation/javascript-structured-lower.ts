@@ -1283,7 +1283,9 @@ class Lowering {
           const operands =
             half !== undefined ? [half, half] : [power(n - 1), base];
           const result =
-            n === k ? this.resultOf(facts) : this.newValue('complex', 'complex');
+            n === k
+              ? this.resultOf(facts)
+              : this.newValue('complex', 'complex');
           operations.push({
             kind: 'multiply',
             result,
@@ -2126,7 +2128,11 @@ class Lowering {
             origin: literal,
           });
           if (k === 0) return constant;
-          return push('multiply', [constant, v], this.newValue('real', 'number'));
+          return push(
+            'multiply',
+            [constant, v],
+            this.newValue('real', 'number')
+          );
         };
         const re = part(literal.re);
         const im = part(literal.im);
@@ -2215,10 +2221,14 @@ class Lowering {
     const b = this.inRegion(elseOperations, () => otherwise(elseOperations));
     const elseRegion = this.region(elseOperations, origin, b);
     if (a.representation !== b.representation)
-      fail(`the two values of a conditional ${nodeText(origin)} have different representations`);
+      fail(
+        `the two values of a conditional ${nodeText(origin)} have different representations`
+      );
     const result = this.newValue(
       widerType(a.type, b.type) ??
-        fail(`the two values of a conditional ${nodeText(origin)} have no common type`),
+        fail(
+          `the two values of a conditional ${nodeText(origin)} have no common type`
+        ),
       a.representation as ScalarRepresentation
     );
     operations.push({
@@ -2340,11 +2350,15 @@ class Lowering {
     const inner = scope.inner.get(node);
     if (inner === undefined)
       return fail(`no scope for the aggregate ${nodeText(node)}`);
-    const clauses = node.ops.slice(1).map((clause) =>
-      isFunction(clause, 'Limits') && clause.nops === 3 && isSymbol(clause.op1)
-        ? { index: clause.op1.symbol, lower: clause.op2, upper: clause.op3 }
-        : fail(`no lowering for the index set ${nodeText(clause)}`)
-    );
+    const clauses = node.ops
+      .slice(1)
+      .map((clause) =>
+        isFunction(clause, 'Limits') &&
+        clause.nops === 3 &&
+        isSymbol(clause.op1)
+          ? { index: clause.op1.symbol, lower: clause.op2, upper: clause.op3 }
+          : fail(`no lowering for the index set ${nodeText(clause)}`)
+      );
     const body = node.ops[0];
     const sum = node.operator === 'Sum';
     const type = valueType(facts.type);
@@ -2523,7 +2537,10 @@ class Lowering {
         const finiteOperations: IROperation[] = [];
         const finite = push(
           'less',
-          [magnitude, this.numberLiteral(Infinity, 'real', node, finiteOperations)],
+          [
+            magnitude,
+            this.numberLiteral(Infinity, 'real', node, finiteOperations),
+          ],
           'boolean',
           finiteOperations
         );
@@ -2576,11 +2593,7 @@ class Lowering {
           operands: [first],
           rest: checks.slice(1).map((check) => {
             const checkOperations: IROperation[] = [];
-            return this.region(
-              checkOperations,
-              node,
-              check(checkOperations)
-            );
+            return this.region(checkOperations, node, check(checkOperations));
           }),
           effect: 'pure',
           origin: node,
@@ -2745,7 +2758,9 @@ class Lowering {
         // One other factor that is a quotient is written `a / b / d`, a
         // part of the chain; more than one, `(a * …) / d`.
         const single =
-          others.length === 1 ? quotientOf(numerator.ops[others[0]]) : undefined;
+          others.length === 1
+            ? quotientOf(numerator.ops[others[0]])
+            : undefined;
         if (single !== undefined) quotient(single);
         else
           steps.push({
@@ -2993,7 +3008,8 @@ class Lowering {
     // program, lowered at its first call (`helper()`).
     if (
       (isFunction(node, 'Declare') && isFunction(initializer, 'Function')) ||
-      (isFunction(node, 'DefineFunction') && isFunction(node.op2, 'Function')) ||
+      (isFunction(node, 'DefineFunction') &&
+        isFunction(node.op2, 'Function')) ||
       (isFunction(node, 'Assign') && isFunction(node.op2, 'Function'))
     )
       return false;
@@ -3047,10 +3063,7 @@ class Lowering {
         return fail(`the name ${name} is not a declared local`);
       if (!('representation' in binding))
         return fail(`the local ${name} has no representation`);
-      locals.set(
-        name,
-        this.toLocal(written, binding, name, node, operations)
-      );
+      locals.set(name, this.toLocal(written, binding, name, node, operations));
       this.wrote(binder!);
       this.changed();
       return false;
@@ -3119,7 +3132,10 @@ class Lowering {
     operations: IROperation[]
   ): IRValue {
     const type = valueType(binding.type);
-    if (value.type === type && value.representation === binding.representation) {
+    if (
+      value.type === type &&
+      value.representation === binding.representation
+    ) {
       this.localValues.add(value.id);
       return value;
     }
