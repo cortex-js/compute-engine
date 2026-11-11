@@ -143,6 +143,43 @@ export type FragmentScope<R> = {
   readonly inner: Map<Expression, FragmentScope<R>>;
 };
 
+/** The most nodes, counted once per path, of a node whose text a message
+ *  or a diagnostic writes in full (`nodeText()`, `hasShortText()`). */
+export const NODE_TEXT_MAX_PATHS = 100_000;
+
+/**
+ * Whether the text of `node` has at most `NODE_TEXT_MAX_PATHS` nodes. The
+ * text of a node reached on several paths (a DAG) writes it once per path,
+ * so a DAG of depth 40 has no text that fits in memory. Each node object is
+ * walked once; a node too deep to count has no short text either.
+ */
+export function hasShortText(node: Expression): boolean {
+  const memo = new Map<Expression, number>();
+  const count = (n: Expression): number => {
+    const known = memo.get(n);
+    if (known !== undefined) return known;
+    let total = 1;
+    for (const op of isFunction(n) ? n.ops : []) {
+      total += count(op);
+      if (total > NODE_TEXT_MAX_PATHS) break;
+    }
+    memo.set(n, total);
+    return total;
+  };
+  try {
+    return count(node) <= NODE_TEXT_MAX_PATHS;
+  } catch {
+    return false;
+  }
+}
+
+/** The text of `node` for a message: `node.toString()` when it is short
+ *  (`hasShortText()`), otherwise its head and `(…)`, such as `Sin(…)`. */
+export function nodeText(node: Expression): string {
+  if (hasShortText(node)) return node.toString();
+  return isFunction(node) ? `${node.operator}(…)` : '…';
+}
+
 /** Why a node has no type. Each reason has one form of message. */
 export type FragmentRefusalReason =
   /** The head is not in the list (`Integrate`). */
@@ -898,8 +935,8 @@ export function fragmentReplaceOperands(
   const fail = (e: Expression, why: string): never => {
     throw new Error(
       `Internal error: the lowering "${contract.name}" made ` +
-        `\`${e.toString()}\` from ` +
-        `${originals.map((o) => `\`${o.toString()}\``).join(', ')}, ${why}`
+        `\`${nodeText(e)}\` from ` +
+        `${originals.map((o) => `\`${nodeText(o)}\``).join(', ')}, ${why}`
     );
   };
   const check = (e: Expression, outermost: boolean): void => {
@@ -1039,7 +1076,7 @@ function makeWalker<R>(
       return refuse(
         node,
         type.kind === 'list' ? 'limit' : 'signature',
-        `The value of \`${node.toString()}\` has the type ` +
+        `The value of \`${nodeText(node)}\` has the type ` +
           `\`${fragmentTypeToString(type)}\`, which the ${fragment} target ` +
           `cannot hold` +
           (type.kind === 'list'
@@ -1250,7 +1287,7 @@ function makeWalker<R>(
         refuse(
           node,
           'place',
-          `\`${node.toString()}\` is a statement, and it stands where a ` +
+          `\`${nodeText(node)}\` is a statement, and it stands where a ` +
             `value is expected`
         );
       return;
@@ -1270,7 +1307,7 @@ function makeWalker<R>(
       refuse(
         node,
         'place',
-        `The list \`${node.toString()}\` is in the ${fragment} fragment ` +
+        `The list \`${nodeText(node)}\` is in the ${fragment} fragment ` +
           `only as the base of an \`At\``
       );
   };
@@ -1314,7 +1351,7 @@ function makeWalker<R>(
         return refuse(
           node,
           'place',
-          `\`${node.toString()}\` has no value, and it stands where a value ` +
+          `\`${nodeText(node)}\` has no value, and it stands where a value ` +
             `is expected`
         );
       return facts;
@@ -1335,7 +1372,7 @@ function makeWalker<R>(
         node,
         'signature',
         `An index or a bound must be an integer or a real, and ` +
-          `\`${node.toString()}\` has the type ` +
+          `\`${nodeText(node)}\` has the type ` +
           `\`${fragmentTypeToString(facts.type)}\``
       );
     const integer: FragmentValueType = { kind: 'integer' };
@@ -1368,7 +1405,7 @@ function makeWalker<R>(
       return refuse(
         node,
         'head',
-        `\`${node.toString()}\` is outside the ${fragment} fragment`
+        `\`${nodeText(node)}\` is outside the ${fragment} fragment`
       );
 
     // A subtree that the compiler folds to a constant has the type of its
@@ -1849,8 +1886,8 @@ function makeWalker<R>(
       return refuse(
         fn.arguments[unmapped],
         'signature',
-        `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
-          `element of \`${fn.arguments[unmapped].toString()}\`, of the type ` +
+        `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
+          `element of \`${nodeText(fn.arguments[unmapped])}\`, of the type ` +
           `\`${fragmentTypeToString(args[unmapped].type)}\`: the ${fragment} ` +
           `code maps a list of 2 to 4 reals only`
       );
@@ -1863,7 +1900,7 @@ function makeWalker<R>(
       return refuse(
         node,
         'signature',
-        `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+        `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
           `element of lists of different lengths`
       );
     const elementArgs = args.map((a, i) => {
@@ -1908,7 +1945,7 @@ function makeWalker<R>(
             `declared type in the ${fragment} fragment, and it has the type ` +
             `\`${fragmentTypeToString(type.parameters[i].type)}\` of its ` +
             `argument at the first call; the argument ` +
-            `\`${fn.arguments[i].toString()}\` has the type ` +
+            `\`${nodeText(fn.arguments[i])}\` has the type ` +
             `\`${fragmentTypeToString(a.type)}\`. Declare the type of the ` +
             `parameter, or call the function with arguments of one type`,
           fn.parameters[i]
@@ -1927,8 +1964,8 @@ function makeWalker<R>(
           return refuse(
             fn.arguments[i],
             'signature',
-            `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
-              `element of \`${fn.arguments[i].toString()}\`, and the ` +
+            `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
+              `element of \`${nodeText(fn.arguments[i])}\`, and the ` +
               `parameter \`${fn.parameters[i]}\` has the type ` +
               `\`${fragmentTypeToString(parameterType)}\`, not \`real\``
           );
@@ -1960,7 +1997,7 @@ function makeWalker<R>(
         return refuse(
           fn.arguments[i],
           'signature',
-          `The argument \`${fn.arguments[i].toString()}\` of \`${fn.name}\` ` +
+          `The argument \`${nodeText(fn.arguments[i])}\` of \`${fn.name}\` ` +
             `has the type \`${fragmentTypeToString(a.type)}\`, and the ` +
             `parameter \`${fn.parameters[i]}\` has the type ` +
             `\`${fragmentTypeToString(type.parameters[i].type)}\``
@@ -1988,7 +2025,7 @@ function makeWalker<R>(
       return refuse(
         node,
         'signature',
-        `The call \`${node.toString()}\` has the type ` +
+        `The call \`${nodeText(node)}\` has the type ` +
           `\`${node.type.toString()}\`, which admits more than one shape`
       );
     // A call applied to each element of lists of the length `n` is a list
@@ -2006,7 +2043,7 @@ function makeWalker<R>(
         return refuse(
           node,
           'signature',
-          `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+          `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
             `element of a list, and the parameter ` +
             `\`${fn.parameters[converting]}\` has the type ` +
             `\`${fragmentTypeToString(type.parameters[converting].type)}\`: ` +
@@ -2016,7 +2053,7 @@ function makeWalker<R>(
         return refuse(
           node,
           'signature',
-          `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+          `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
             `element of a list, and the value of \`${fn.name}\` has the ` +
             `type \`${fragmentTypeToString(result)}\`, not \`real\``
         );
@@ -2036,7 +2073,7 @@ function makeWalker<R>(
       return refuse(
         node,
         'signature',
-        `The call \`${node.toString()}\` has a list value, and its type ` +
+        `The call \`${nodeText(node)}\` has a list value, and its type ` +
           `\`${node.type.toString()}\` is not a list type`
       );
     return valueFacts(node, result, conversions);
@@ -2222,7 +2259,7 @@ function indexBounds<R>(
         w.refuse(
           node,
           'limit',
-          `The ${which} bound \`${bound.toString()}\` of \`${node.operator}\` ` +
+          `The ${which} bound \`${nodeText(bound)}\` of \`${node.operator}\` ` +
             `is not a finite number`
         );
       if (
@@ -2265,7 +2302,7 @@ export function walkAggregate<R>(
       return w.refuse(
         spec,
         'signature',
-        `The index set \`${spec.toString()}\` of \`${node.operator}\` is not ` +
+        `The index set \`${nodeText(spec)}\` of \`${node.operator}\` is not ` +
           `an integer range`
       );
     // The step of a `Range` index set is 1: an aggregate visits each
@@ -2277,7 +2314,7 @@ export function walkAggregate<R>(
       return w.refuse(
         spec,
         'signature',
-        `The index set \`${spec.toString()}\` of \`${node.operator}\` has a ` +
+        `The index set \`${nodeText(spec)}\` of \`${node.operator}\` has a ` +
           `step, and an aggregate of the ${w.definition.name} fragment visits ` +
           `each integer of its range`
       );
@@ -2360,7 +2397,7 @@ function walkLoop(kind: 'loop' | 'parallel') {
         return w.refuse(
           node,
           'signature',
-          `The ${which} bound \`${bound.toString()}\` of \`${head}\` is read ` +
+          `The ${which} bound \`${nodeText(bound)}\` of \`${head}\` is read ` +
             `at run time, and the ${w.definition.name} fragment admits such ` +
             `a bound only with the static type \`integer\` (it has the type ` +
             `\`${bound.type.toString()}\`)`
@@ -2468,7 +2505,7 @@ function nonLiteralTupleValue(
   value: Expression
 ): string {
   return (
-    `The value of the destructuring ${kind}, \`${value.toString()}\`, ` +
+    `The value of the destructuring ${kind}, \`${nodeText(value)}\`, ` +
     `is not a literal tuple`
   );
 }
@@ -2498,7 +2535,7 @@ function walkDeclare<R>(
     return void w.refuse(
       statement,
       'signature',
-      `The declaration \`${statement.toString()}\` declares a pattern that ` +
+      `The declaration \`${nodeText(statement)}\` declares a pattern that ` +
         `is not a name or a tuple of names`
     );
   const value = declareValueOperand(opsOf(statement));
@@ -2513,7 +2550,7 @@ function walkDeclare<R>(
         return void w.refuse(
           name,
           'symbol',
-          `The local \`${name.toString()}\` has no value and no scalar, ` +
+          `The local \`${nodeText(name)}\` has no value and no scalar, ` +
             `complex or point type`
         );
       w.bind(
@@ -2592,7 +2629,7 @@ function walkDeclare<R>(
       statement,
       'signature',
       `The destructuring declaration has the name ` +
-        `\`${repeated.toString()}\` at more than one position`
+        `\`${nodeText(repeated)}\` at more than one position`
     );
   if (!isDestructurableValue(value, w))
     return void w.refuse(
@@ -3048,7 +3085,7 @@ export function walkPoint<R>(
     return w.refuse(
       node,
       'signature',
-      `The component ${bad + 1} of the point \`${node.toString()}\` has the ` +
+      `The component ${bad + 1} of the point \`${nodeText(node)}\` has the ` +
         `type \`${fragmentTypeToString(facts[bad].type)}\`: a point of the ` +
         `${w.definition.name} fragment has real components`
     );
@@ -3056,7 +3093,7 @@ export function walkPoint<R>(
     return w.refuse(
       node,
       'limit',
-      `The point \`${node.toString()}\` has ${ops.length} components, and a ` +
+      `The point \`${nodeText(node)}\` has ${ops.length} components, and a ` +
         `point of the ${w.definition.name} fragment has 2 to 4`
     );
   return w.valueFacts(
@@ -3094,7 +3131,7 @@ export function walkList<R>(
     return w.refuse(
       node,
       'signature',
-      `The list \`${node.toString()}\` is not a list of reals or of points ` +
+      `The list \`${nodeText(node)}\` is not a list of reals or of points ` +
         `of one size`
     );
   return w.valueFacts(
@@ -3198,7 +3235,7 @@ export function walkTyped<R>(
         node,
         'signature',
         `The ascribed type \`${node.type.toString()}\` says the value is ` +
-          `complex, and the value \`${value.toString()}\` has the type ` +
+          `complex, and the value \`${nodeText(value)}\` has the type ` +
           `\`${fragmentTypeToString(facts.type)}\``
       );
     return w.valueFacts(node, ascribed, [conversion]);
@@ -3214,7 +3251,7 @@ export function walkTyped<R>(
       node,
       'signature',
       `The ascribed type \`${node.type.toString()}\` says the value is ` +
-        `real, and the value \`${value.toString()}\` is complex`
+        `real, and the value \`${nodeText(value)}\` is complex`
     );
   return facts;
 }
@@ -3308,7 +3345,7 @@ export function walkAssign<R>(
       node,
       'signature',
       `\`${head}\` writes a name or a tuple of names, not ` +
-        `\`${ops[0].toString()}\``
+        `\`${nodeText(ops[0])}\``
     );
   if (targets.length > 1 && !isDestructurableValue(ops[1], w))
     return w.refuse(
@@ -3477,7 +3514,7 @@ export function fragmentRefusalDiagnostic(
     code: 'outside-fragment',
     kind: 'capability',
     message: `${refusal.message}.`,
-    value: refusal.node.toString(),
+    value: nodeText(refusal.node),
   };
   if (refusal.operator !== undefined) diagnostic.operator = refusal.operator;
   if (refusal.binding !== undefined) diagnostic.binding = refusal.binding;

@@ -1,6 +1,5 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { entrySource } from './function-purity.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
 import type { Expression, JSSource } from '../global-types.js';
 import type {
   CompileMode,
@@ -218,26 +217,9 @@ function measureProfile(
   baselineSucceeded: boolean
 ): void {
   const ce = expr.engine;
-  // The profile walks the expression as a tree, in a time that grows with
-  // the number of paths (`issues/CE-1198.md`): an expression with more
-  // paths than the cap is counted, not compiled, so the measure cannot hang.
-  let tooManyPaths: boolean;
-  try {
-    tooManyPaths = pathCountAbove(expr, SHADOW_MAX_PATHS);
-  } catch {
-    // A stack overflow on a very deep expression: not compiled either.
-    tooManyPaths = true;
-  }
-  if (tooManyPaths) {
-    recordJsProfileShadow(
-      ce,
-      consumer,
-      baselineSucceeded,
-      'failed',
-      `skipped: the expression has more than ${SHADOW_MAX_PATHS} paths (shared subexpressions)`
-    );
-    return;
-  }
+  // The profile lowers a node reached on several paths once where it can,
+  // and declines a program over its limit of operations
+  // (`STRUCTURED_OPERATION_LIMIT`), so the measure cannot hang.
   shadowDepth += 1;
   try {
     const result = compileExpression(expr, {
@@ -277,29 +259,6 @@ function measureProfile(
   } finally {
     shadowDepth -= 1;
   }
-}
-
-/** The most paths from the root of an expression that the shadow measure
- * compiles with the profile (`measureProfile()`). */
-const SHADOW_MAX_PATHS = 100_000;
-
-/** Whether `expr`, as a tree, has more than `cap` paths from its root to a
- * node: a walk of each distinct node once, which counts a node reached on
- * several paths once per path. */
-function pathCountAbove(expr: Expression, cap: number): boolean {
-  const memo = new Map<Expression, number>();
-  const count = (node: Expression): number => {
-    const known = memo.get(node);
-    if (known !== undefined) return known;
-    let n = 1;
-    for (const op of isFunction(node) ? node.ops : []) {
-      n += count(op);
-      if (n > cap) break;
-    }
-    memo.set(node, n);
-    return n;
-  };
-  return count(expr) > cap;
 }
 
 /** The message of an outcome of the profile, with its code unless the code

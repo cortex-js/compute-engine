@@ -240,18 +240,38 @@ describe('the counters', () => {
     expect(stats.examples[keys[0]]).toBe(keys[0]);
   });
 
-  test('an expression with too many paths is skipped, not compiled with the profile', () => {
-    // A 40-level doubling DAG: the profile walks it as a tree
-    // (issues/CE-1198.md).
+  test('an expression with many paths is compiled with the profile', () => {
+    // A 40-level doubling DAG: the profile lowers each shared level once.
     const ce = engine(true);
     let e: Expression = ce.function('Add', [ce.symbol('x'), ce.One]);
     for (let k = 0; k < 40; k++) e = ce._fn('Add', [e, e]);
     const result = compile(ce.function('Floor', [e]), { constantFold: false });
     expect(result.success).toBe(true);
+    expect(_jsProfileShadowStats(ce).public).toMatchObject({
+      attempts: 1,
+      admitted: 1,
+      failed: 0,
+    });
+  });
+
+  test('a program over the limit of the profile is counted as declined', () => {
+    // A node in both branches of an `If` is lowered once per branch: at
+    // depth 14 the program is over the limit of operations. (The existing
+    // compiler is slow on this shape with its CSE pass.)
+    const ce = engine(true);
+    const x = ce.symbol('x');
+    let e: Expression = ce.function('Add', [x, ce.One]);
+    for (let k = 0; k < 14; k++)
+      e = ce._fn('If', [
+        ce.function('Greater', [x, ce.number(k)]),
+        ce._fn('Add', [e, ce.One]),
+        ce._fn('Multiply', [e, ce.number(2)]),
+      ]);
+    expect(compile(e, { cse: false, constantFold: false }).success).toBe(true);
     const stats = _jsProfileShadowStats(ce).public;
-    expect(stats).toMatchObject({ attempts: 1, failed: 1 });
-    expect(Object.keys(stats.failedMessages)).toEqual([
-      'skipped: the expression has more than <n> paths (shared subexpressions)',
+    expect(stats).toMatchObject({ attempts: 1, declined: 1, failed: 0 });
+    expect(Object.keys(stats.declinedMessages)).toEqual([
+      expect.stringMatching(/operations, the limit of the profile$/),
     ]);
   });
 

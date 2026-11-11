@@ -43,6 +43,10 @@ import { BaseCompiler } from './base-compiler.js';
 import { exactRationalDivisor } from './compiler-type-facts.js';
 import { SHIFT_JUMP_HEADS } from './compile-folding.js';
 import { exactDoubleValue } from '../numeric-value/exact-integer-value.js';
+import {
+  hasUnknownsWithMemo,
+  type ReferencesMemo,
+} from '../boxed-expression/abstract-boxed-expression.js';
 import { CompilerState } from './compiler-state.js';
 import { realOnlyLoweringOf } from './compiler-core.js';
 import {
@@ -70,6 +74,8 @@ import {
   walkCountedLoop,
   walkAggregate,
   fragmentTypeToString,
+  hasShortText,
+  nodeText,
   type FragmentConversion,
   type FragmentDeclaredInput,
   type FragmentListType,
@@ -99,6 +105,8 @@ import {
   powerForm,
   preparedNodesOf,
   recordStructuredPreparation,
+  STRUCTURED_OPERATION_LIMIT,
+  StructuredLimitError,
   structuredPreparationOf,
   type StructuredCapture,
   type StructuredInput,
@@ -473,7 +481,7 @@ const modRule = {
         return w.refuse(
           node,
           'signature',
-          `Mod of ${a.toString()} and ${b.toString()}, each a literal or of a ` +
+          `Mod of ${nodeText(a)} and ${nodeText(b)}, each a literal or of a ` +
             `type in integer<0..2^53 - 1>, is not in the structured route: the ` +
             `existing emitter writes % for it`
         );
@@ -520,7 +528,7 @@ const floorRule = {
       return w.refuse(
         node,
         'signature',
-        `Floor of an operand with the exact constant ${constant.toString()}, ` +
+        `Floor of an operand with the exact constant ${nodeText(constant)}, ` +
           `which no double holds exactly, is not in the structured route: the ` +
           `existing compiler rewrites such a node or declines it ` +
           `(inexact-jump-operand)`
@@ -557,10 +565,17 @@ const floorRule = {
  * so a capture `N = 1/49` in `Floor(N * k)` would be the rounded double
  * `0.0204…`, and the code would give 0 at `k = 49`, where the value is 1.
  * The existing rule gives its exemptions to literals only, too.
+ *
+ * A node object reached on several paths (a DAG) is visited once: the
+ * verdict of a function node does not depend on its parent, and is
+ * remembered, and the question whether a node has unknowns keeps one memo
+ * for the call (`hasUnknownsWithMemo()`).
  */
 function inexactJumpConstant(
   operands: readonly Expression[]
 ): Expression | undefined {
+  const unknowns: ReferencesMemo = new Map();
+  const verdicts = new Map<Expression, Expression | undefined>();
   const exact = (n: Expression): boolean => {
     if (!isNumber(n)) return false;
     if (!n.isExact) return true;
@@ -585,7 +600,7 @@ function inexactJumpConstant(
     node: Expression,
     parent: Expression | undefined
   ): Expression | undefined => {
-    if (node.unknowns.length === 0) {
+    if (!hasUnknownsWithMemo(node, unknowns)) {
       if (isNumber(node))
         return exact(node) || divisionFactor(node, parent) ? undefined : node;
       // `True` and `False` are not numbers: the rule of `Floor` refuses a
@@ -597,11 +612,14 @@ function inexactJumpConstant(
     }
     if (!isFunction(node) || SHIFT_JUMP_HEADS.has(node.operator))
       return undefined;
+    if (verdicts.has(node)) return verdicts.get(node);
+    let found: Expression | undefined;
     for (const op of node.ops) {
-      const found = visit(op, node);
-      if (found !== undefined) return found;
+      found = visit(op, node);
+      if (found !== undefined) break;
     }
-    return undefined;
+    verdicts.set(node, found);
+    return found;
   };
   for (const op of operands) {
     const found = visit(op, undefined);
@@ -671,7 +689,7 @@ const loopRule = {
         return w.refuse(
           node,
           'signature',
-          `The bound \`${bound.toString()}\` of \`Loop\` does not have an integer ` +
+          `The bound \`${nodeText(bound)}\` of \`Loop\` does not have an integer ` +
             `fact: the structured route reads a bound as an integer`
         );
     return walkCountedLoop(node, scope, context, w);
@@ -783,7 +801,7 @@ function signOf(
 ): Sign | { refusal: string } {
   const refusal = (sign: string) => ({
     refusal:
-      `the engine knows that the operand ${node.toString()} of ${head} is ` +
+      `the engine knows that the operand ${nodeText(node)} of ${head} is ` +
       `${sign}, and the structured route does not`,
   });
   /** `realAssumed()` of `assumedRealNonNegative()`: the type of `e` is not
@@ -960,8 +978,8 @@ function radicalLane(
   )
     return {
       refusal:
-        `the operand ${operand.toString()} of ${head} is negative and the ` +
-        `type of ${node.toString()} is ${node.type.toString()}: the ` +
+        `the operand ${nodeText(operand)} of ${head} is negative and the ` +
+        `type of ${nodeText(node)} is ${node.type.toString()}: the ` +
         `existing compiler reads both, and the structured route does not`,
     };
   return mode === 'complex'
@@ -1029,7 +1047,7 @@ function structuredLogRule(
           return w.refuse(
             node,
             'signature',
-            `Log of ${node.op1.toString()} in the base ${node.op2.toString()} ` +
+            `Log of ${nodeText(node.op1)} in the base ${nodeText(node.op2)} ` +
               `is complex, and the structured route does not have the complex ` +
               `quotient that the existing emitter writes`
           );
@@ -1204,14 +1222,14 @@ function complexOperandRefusal(
     return `${head} with a complex operand is not in the structured route`;
   if (complex === 'no-pi')
     return operand.symbols.includes('Pi')
-      ? `${head} of the complex operand ${operand.toString()}, which reads ` +
+      ? `${head} of the complex operand ${nodeText(operand)}, which reads ` +
           `Pi, is not in the structured route: the existing emitter writes ` +
           `another helper for a multiple of i·π`
       : undefined;
   if (complex === 'name') {
     if (!isSymbol(operand))
       return (
-        `${head} of the complex operand ${operand.toString()} is in the ` +
+        `${head} of the complex operand ${nodeText(operand)} is in the ` +
         `structured route only when the operand is a name`
       );
     if (mode === 'complex')
@@ -1288,7 +1306,7 @@ function structuredScalarFunctionRule(
           return w.refuse(
             node,
             'signature',
-            `${head} of an operand with the exact constant ${constant.toString()}, ` +
+            `${head} of an operand with the exact constant ${nodeText(constant)}, ` +
               `which no double holds exactly, is not in the structured route: the ` +
               `existing compiler rewrites such a node or declines it ` +
               `(inexact-jump-operand)`
@@ -1326,7 +1344,7 @@ function structuredScalarFunctionRule(
             return w.refuse(
               node,
               'signature',
-              `${node.toString()} has the type ${node.type.toString()}, which is ` +
+              `${nodeText(node)} has the type ${node.type.toString()}, which is ` +
                 `not real: the existing compiler reads its value as complex, and ` +
                 `its handler writes the real call`
             );
@@ -1335,7 +1353,7 @@ function structuredScalarFunctionRule(
           return w.refuse(
             node,
             'signature',
-            `${node.toString()} has the type ${node.type.toString()}, which is ` +
+            `${nodeText(node)} has the type ${node.type.toString()}, which is ` +
               `not real, in the complex mode: the existing compiler wraps the ` +
               `real call in _SYS.cplx`
           );
@@ -1426,7 +1444,7 @@ function structuredFunctionRule(
             ? 'Arctan2 with a complex operand is not in the structured route'
             : head === 'Abs'
               ? !isSymbol(node.op1)
-                ? `Abs of the complex operand ${node.op1.toString()} is in the ` +
+                ? `Abs of the complex operand ${nodeText(node.op1)} is in the ` +
                   `structured route only when the operand is a name: the ` +
                   `existing emitter writes Math.hypot of the parts of some ` +
                   `complex operands`
@@ -1455,7 +1473,7 @@ function structuredFunctionRule(
         return w.refuse(
           node,
           'signature',
-          `${node.toString()} has the type ${node.type.toString()}, which is ` +
+          `${nodeText(node)} has the type ${node.type.toString()}, which is ` +
             `not real: the existing compiler reads its value as complex, and ` +
             `its handler writes the real call`
         );
@@ -1463,7 +1481,7 @@ function structuredFunctionRule(
         return w.refuse(
           node,
           'signature',
-          `${node.toString()} has the type ${node.type.toString()}, which is ` +
+          `${nodeText(node)} has the type ${node.type.toString()}, which is ` +
             `not real, in the complex mode: the existing compiler wraps the ` +
             `real call in _SYS.cplx`
         );
@@ -1586,7 +1604,7 @@ function structuredPowerRule(
           node,
           'signature',
           isFunction(node) && node.nops === 2
-            ? `Power with the exponent ${node.op2.toString()} is not in the ` +
+            ? `Power with the exponent ${nodeText(node.op2)} is not in the ` +
                 `structured route, which has a finite real number literal ` +
                 `exponent, an exponent that is not a number literal, and the ` +
                 `base ExponentialE`
@@ -1600,23 +1618,23 @@ function structuredPowerRule(
           kind === 'boolean' || kind === 'list'
             ? `the exponential of a ${kind} is not in the structured route`
             : isNumber(node.op2)
-              ? `the exponential of the number literal ${node.op2.toString()} ` +
+              ? `the exponential of the number literal ${nodeText(node.op2)} ` +
                 `is not in the structured route: the existing emitter writes ` +
                 `other code for it`
               : node.op2.unknowns.length === 0
-                ? `the exponential of ${node.op2.toString()}, which reads no ` +
+                ? `the exponential of ${nodeText(node.op2)}, which reads no ` +
                   `input, parameter or local, is not in the structured route: ` +
                   `the existing compiler replaces such an exponent by its value ` +
                   `when the value is not an integer (knownExponentPower())`
                 : kind === 'complex' && node.op2.symbols.includes('Pi')
-                  ? `the exponential of the complex operand ${node.op2.toString()}, ` +
+                  ? `the exponential of the complex operand ${nodeText(node.op2)}, ` +
                     `which reads Pi, is not in the structured route: the ` +
                     `existing emitter writes _SYS.cexppi for an exponent a + iπu`
                   : kind !== 'complex' &&
                       (mode === 'strict'
                         ? isNonRealNumber(finitePartOfType(node.type.type))
                         : !realType)
-                    ? `the exponential ${node.toString()} has the type ` +
+                    ? `the exponential ${nodeText(node)} has the type ` +
                       `${node.type.toString()}, which is not real`
                     : undefined;
         if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
@@ -1643,16 +1661,16 @@ function structuredPowerRule(
               ? `Power of a symbol ExponentialE that a scope declares is not ` +
                 `in the structured route`
               : node.op2.unknowns.length === 0
-                ? `the exponent ${node.op2.toString()} of Power has no ` +
+                ? `the exponent ${nodeText(node.op2)} of Power has no ` +
                   `unknown (each symbol in it has a value), and is not in ` +
                   `the structured route: the existing compiler can replace ` +
                   `such an exponent by its value (knownExponentPower())`
                 : mode === 'strict' && isNonRealNumber(type)
-                  ? `the power ${node.toString()} has the type ` +
+                  ? `the power ${nodeText(node)} has the type ` +
                     `${node.type.toString()}, which is not real: the existing ` +
                     `emitter writes the complex power`
                   : mode === 'complex' && !isSubtype(type, 'real')
-                    ? `the power ${node.toString()} has the type ` +
+                    ? `the power ${nodeText(node)} has the type ` +
                       `${node.type.toString()}, which is not real, in the ` +
                       `complex mode: the existing emitter writes the complex power`
                     : undefined;
@@ -1690,7 +1708,7 @@ function structuredPowerRule(
           return w.refuse(
             node,
             'signature',
-            `the square of the square root ${node.op1.toString()} is not in ` +
+            `the square of the square root ${nodeText(node.op1)} is not in ` +
               `the structured route: the existing emitter writes the radicand ` +
               `itself when it proves it non-negative`
           );
@@ -1708,7 +1726,7 @@ function structuredPowerRule(
           return w.refuse(
             node,
             'signature',
-            `the power ${node.toString()} has the type ${node.type.toString()}, ` +
+            `the power ${nodeText(node)} has the type ${node.type.toString()}, ` +
               `which is not real${mode === 'complex' ? ', in the complex mode' : ''}: ` +
               `the existing emitter writes the complex power`
           );
@@ -1819,9 +1837,9 @@ function foldedLiteral(
     if (Number.isFinite(exact.re) && Number.isFinite(exact.im))
       return {
         refusal:
-          `the ${node.operator === 'Power' ? 'power' : 'root'} ${node.toString()} ` +
+          `the ${node.operator === 'Power' ? 'power' : 'root'} ${nodeText(node)} ` +
           `of number literals is folded to NaN by the existing emitter, and ` +
-          `its value is the finite number ${exact.toString()}`,
+          `its value is the finite number ${nodeText(exact)}`,
       };
   }
   const type = finitePartOfType(node.type.type);
@@ -1835,7 +1853,7 @@ function foldedLiteral(
   if (readsComplex !== (typeof value === 'object'))
     return {
       refusal:
-        `the ${node.operator === 'Power' ? 'power' : 'root'} ${node.toString()} ` +
+        `the ${node.operator === 'Power' ? 'power' : 'root'} ${nodeText(node)} ` +
         `of number literals has the type ${node.type.toString()}, and the ` +
         `existing compiler folds it to a ${typeof value === 'object' ? 'complex' : 'real'} ` +
         `value that it reads as ${readsComplex ? 'complex' : 'real'}` +
@@ -2029,12 +2047,12 @@ function constantPowerForm(
       !Number.isSafeInteger(Number(terms[1]))
     )
       return refuse(
-        `Power with the exact exponent ${exponent.toString()}, whose terms ` +
+        `Power with the exact exponent ${nodeText(exponent)}, whose terms ` +
           `are not safe integers, is not in the structured route`
       );
     if (Number(terms[1]) % 2 !== 0)
       return refuse(
-        `Power with the exact exponent ${exponent.toString()}, whose ` +
+        `Power with the exact exponent ${nodeText(exponent)}, whose ` +
           `denominator is odd, is not in the structured route: the existing ` +
           `emitter writes the real root of a negative base (realPowerExponent())`
       );
@@ -2044,11 +2062,11 @@ function constantPowerForm(
   const notReal =
     mode === 'strict'
       ? isNonRealNumber(type)
-        ? `the power ${node.toString()} has the type ${node.type.toString()}, ` +
+        ? `the power ${nodeText(node)} has the type ${node.type.toString()}, ` +
           `which is not real: the existing emitter writes the complex power`
         : undefined
       : !isSubtype(type, 'real')
-        ? `the power ${node.toString()} has the type ${node.type.toString()}, ` +
+        ? `the power ${nodeText(node)} has the type ${node.type.toString()}, ` +
           `which is not real, in the complex mode: the existing emitter ` +
           `writes the complex power`
         : undefined;
@@ -2056,7 +2074,7 @@ function constantPowerForm(
     if (notReal !== undefined) return refuse(notReal);
     if (!Number.isSafeInteger(value))
       return refuse(
-        `Power with the exponent ${exponent.toString()}, an integer beyond ` +
+        `Power with the exponent ${nodeText(exponent)}, an integer beyond ` +
           `the safe integers, is not in the structured route`
       );
     if (value === 0 || value === 1 || value === -1)
@@ -2067,7 +2085,7 @@ function constantPowerForm(
       );
     if (isFunction(base, 'Sqrt') && value >= 2)
       return refuse(
-        `the power ${node.toString()} of a square root is not in the ` +
+        `the power ${nodeText(node)} of a square root is not in the ` +
           `structured route: the existing emitter reads through the square ` +
           `root (realRadicalPower())`
       );
@@ -2086,7 +2104,7 @@ function constantPowerForm(
   if (mode === 'complex' && sign !== 'nonnegative')
     return refuse(
       `Power with the exponent ${value} is in the structured route only for ` +
-        `a base that it proves non-negative, and not for ${base.toString()} ` +
+        `a base that it proves non-negative, and not for ${nodeText(base)} ` +
         `(the complex mode): the existing emitter writes the complex power`
     );
   if (notReal !== undefined) return refuse(notReal);
@@ -2094,7 +2112,7 @@ function constantPowerForm(
     if (!isSubtype(type, 'real'))
       return refuse(
         `Power with the exponent 1.5 of the non-negative base ` +
-          `${base.toString()} is in the structured route only when the type ` +
+          `${nodeText(base)} is in the structured route only when the type ` +
           `of the power is real, and not for ${node.type.toString()}`
       );
     return 'three-halves';
@@ -2193,19 +2211,19 @@ function structuredRootRule(
       }
       const refusal =
         literal && !(isNumber(node.op2) && node.op2.isSame(3))
-          ? `Root with the degree ${node.op2.toString()} is not in the ` +
+          ? `Root with the degree ${nodeText(node.op2)} is not in the ` +
             `structured route, which has the degree 3 and a degree that is ` +
             `not a number literal`
           : !literal && node.op2.unknowns.length === 0
-            ? `the degree ${node.op2.toString()} of Root has no unknown ` +
+            ? `the degree ${nodeText(node.op2)} of Root has no unknown ` +
               `(each symbol in it has a value), and is not in the ` +
               `structured route`
             : mode === 'strict' && isNonRealNumber(type)
-              ? `the root ${node.toString()} has the type ` +
+              ? `the root ${nodeText(node)} has the type ` +
                 `${node.type.toString()}, which is not real: the existing ` +
                 `emitter writes the complex power`
               : mode === 'complex' && !isSubtype(type, 'real')
-                ? `the root ${node.toString()} has the type ` +
+                ? `the root ${nodeText(node)} has the type ` +
                   `${node.type.toString()}, which is not real, in the ` +
                   `complex mode: the existing emitter writes a complex value`
                 : undefined;
@@ -2688,7 +2706,7 @@ const structuredDefinition: Pick<
     argument.element.kind === 'integer' && parameter.element.kind === 'real',
   bindingLimit: (type, binding) =>
     type.kind === 'list'
-      ? `The ${binding.role} \`${isSymbol(binding.symbol) ? binding.symbol.symbol : binding.symbol.toString()}\` ` +
+      ? `The ${binding.role} \`${isSymbol(binding.symbol) ? binding.symbol.symbol : nodeText(binding.symbol)}\` ` +
         `has the type \`${fragmentTypeToString(type)}\`: the structured route admits a list ` +
         `only as an input, a parameter or a local, and not as a ${binding.role}`
       : undefined,
@@ -2828,7 +2846,7 @@ function comprehensionRefusal(node: Expression): string | undefined {
   if (isFunction(spec, 'Element') && spec.nops === 3)
     return 'Comprehension with a guard is not in the structured route, which admits Comprehension(body, Element(j, Range(a, b)))';
   return (
-    `Comprehension over ${spec.toString()} is not in the structured route, ` +
+    `Comprehension over ${nodeText(spec)} is not in the structured route, ` +
     `which admits a comprehension over Element(j, Range(a, b)) only, and not over a list`
   );
 }
@@ -2866,7 +2884,7 @@ function comprehensionRule(
       return w.refuse(
         node,
         'signature',
-        `The bound \`${bound.toString()}\` of \`Comprehension\` does not have an ` +
+        `The bound \`${nodeText(bound)}\` of \`Comprehension\` does not have an ` +
           `integer fact: the structured route reads a bound as an integer`
       );
   const inner = w.open(node, scope);
@@ -2918,7 +2936,7 @@ function aggregateRefusal(node: Expression): string | undefined {
       !isSymbol(clause.op1)
     )
       return (
-        `${head} over ${clause.toString()} is not in the structured route, ` +
+        `${head} over ${nodeText(clause)} is not in the structured route, ` +
         `which admits an index set Limits(k, a, b)`
       );
     if (names.has(clause.op1.symbol))
@@ -2961,7 +2979,7 @@ function aggregateBoundRefusal(
   bound: Expression,
   snapshotOf: SnapshotOf
 ): string | undefined {
-  const name = `The bound \`${bound.toString()}\` of \`${head}\``;
+  const name = `The bound \`${nodeText(bound)}\` of \`${head}\``;
   if (isNonFiniteBound(bound)) return `${name} is not a finite number`;
   const value = isNumber(bound)
     ? bound.im === 0
@@ -3356,7 +3374,7 @@ function withoutListOperands(
         return w.refuse(
           node,
           'signature',
-          `${operator} with the list operand ${list.toString()} is not in the ` +
+          `${operator} with the list operand ${nodeText(list)} is not in the ` +
             `structured route, which reads a list only with At and Length and ` +
             `passes it whole to a helper`
         );
@@ -3429,7 +3447,7 @@ function refuseUndirectedInfinity(
     node.re !== Infinity
   )
     throw new Error(
-      `JS scalar fragment: the undirected infinity ${node.toString()} with ` +
+      `JS scalar fragment: the undirected infinity ${nodeText(node)} with ` +
         `the real part ${node.re} is not in the structured route: the ` +
         `existing compiler writes Infinity`
     );
@@ -3454,7 +3472,7 @@ function refuseBooleanClaim(node: Expression, admission: Admission): void {
     typeof t.value === 'boolean'
   )
     throw new Error(
-      `JS scalar fragment: ${node.toString()} has the type ${String(t.value)}, ` +
+      `JS scalar fragment: ${nodeText(node)} has the type ${String(t.value)}, ` +
         `and the existing compiler writes the literal ${String(t.value)} in its ` +
         `place: the structured route does not`
     );
@@ -3490,7 +3508,7 @@ function refuseHaversineGrouping(
   for (const op of grouped)
     if (isFunction(op, 'Haversine') && op.nops === 1 && !input(op.op1))
       throw new Error(
-        `JS scalar fragment: Haversine of ${op.op1.toString()} as an operand ` +
+        `JS scalar fragment: Haversine of ${nodeText(op.op1)} as an operand ` +
           `of ${node.operator} is not in the structured route: the existing ` +
           `emitter writes it in ${node.operator} with no parentheses`
       );
@@ -3737,7 +3755,9 @@ function profileDecline(e: unknown): unknown {
     message: `Could not compile with the profile 'numeric-kernel': ${reason}`,
     ...(operator !== undefined ? { operator } : {}),
     ...(binding !== undefined ? { binding } : {}),
-    ...(node !== undefined ? { value: node.toString() } : {}),
+    ...(node !== undefined && hasShortText(node)
+      ? { value: node.toString() }
+      : {}),
   });
 }
 
@@ -4103,7 +4123,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
    * Run `step`, a phase of the structured route after the admission. With
    * the profile, an error of the phase is an internal error that names the
    * phase (`profileInternalError()`), never a refusal: the admission has
-   * accepted the program. A cancellation is thrown as it is.
+   * accepted the program. A cancellation is thrown as it is. A program
+   * over the limit of the lowering (`StructuredLimitError`) declines with
+   * `'outside-profile'`.
    */
   private inPhase<T>(phase: string, step: () => T): T {
     if (!this.inProfile) return step();
@@ -4111,6 +4133,15 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       return step();
     } catch (e) {
       if (isCancellation(e)) throw e;
+      if (e instanceof StructuredLimitError)
+        throw new CompileDeclineError({
+          code: 'outside-profile',
+          kind: 'capability',
+          message:
+            `Could not compile with the profile 'numeric-kernel': the ` +
+            `program has more than ${STRUCTURED_OPERATION_LIMIT} operations, ` +
+            `the limit of the profile`,
+        });
       throw profileInternalError(phase, e);
     }
   }
@@ -4563,7 +4594,7 @@ function parameterRefusal(
   const which = name ? `the parameter ${name} of ${owner}` : '';
   if (!name)
     return (
-      `the parameter ${parameter.toString()} of ${owner} is not a name: ` +
+      `the parameter ${nodeText(parameter)} of ${owner} is not a name: ` +
       `a destructuring pattern is not in the structured route`
     );
   if (isFunction(parameter, 'Optional'))
@@ -4721,7 +4752,7 @@ function refuseLocalFunctions(body: Expression, place: string): void {
     )
       throw new Error(
         `JS scalar fragment: the structured route admits no local function ` +
-          `in ${place} (${node.operator} of ${node.op1.toString()})`
+          `in ${place} (${node.operator} of ${nodeText(node.op1)})`
       );
     for (const op of node.ops) visit(op);
   };
@@ -5448,7 +5479,7 @@ function admitFunctionBody(
     )
       throw new Error(
         `JS scalar fragment: the structured route admits a Loop only over ` +
-          `Element(k, Range(a, b)), with no step and no guard, and not over ${spec.toString()}`
+          `Element(k, Range(a, b)), with no step and no guard, and not over ${nodeText(spec)}`
       );
     for (const bound of spec.op2.ops) {
       checkValue(bound);
@@ -5458,7 +5489,7 @@ function admitFunctionBody(
       // the length locals as the integer names.
       if (!fromLength(bound) && !isSubtype(bound.type.type, 'integer'))
         throw new Error(
-          `JS scalar fragment: the bound ${bound.toString()} of a Loop does not have the type integer`
+          `JS scalar fragment: the bound ${nodeText(bound)} of a Loop does not have the type integer`
         );
     }
     const index = spec.op1.symbol;
@@ -6106,7 +6137,7 @@ function argumentRefusal(
       if (argument === undefined || !('type' in argument)) continue;
       const kind = defaultKind(registry.mode).kind;
       message =
-        `The argument \`${call.ops[i].toString()}\` of \`${helper.name}\` has ` +
+        `The argument \`${nodeText(call.ops[i])}\` of \`${helper.name}\` has ` +
         `the type \`${fragmentTypeToString(argument.type)}\`, and the parameter ` +
         `\`${helper.fragment.parameters[i]}\` has no declared type: it is ` +
         `${kind} in the \`${registry.mode}\` mode`;

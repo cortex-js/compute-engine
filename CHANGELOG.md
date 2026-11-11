@@ -131,9 +131,11 @@
   `constantFold` are ignored under the profile; `functions`, `operators`,
   `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
   with `outside-profile` (an empty object of `functions`, `operators` or
-  `vars` is an absent option). With another target, or in the `compile()`
-  method of a target object, the option is an error. Without the option,
-  nothing changes.
+  `vars` is an absent option). A program of more than 100,000 operations
+  declines with `outside-profile` too, also one with no repeated
+  subexpression (a sum of 30,000 terms `sin(x + c)`). With another target,
+  or in the `compile()` method of a target object, the option is an error.
+  Without the option, nothing changes.
 
   A result compiled with the profile reports `profile: 'numeric-kernel'`,
   the new field `pure` (two calls give the same results in any order or at

@@ -443,7 +443,10 @@ export function verifyProgram(
       fail(
         `the abort fact of a region (${region.canAbort === true}) does not agree with its operations (${aborts})`
       );
-    const joined = joinEffects(...effects);
+    const joined = effects.reduce<EffectFact>(
+      (result, effect) => joinEffects(result, effect),
+      'pure'
+    );
     if (region.effect !== joined)
       fail(
         `the effect of a region (${region.effect}) does not agree with its operations (${joined})`

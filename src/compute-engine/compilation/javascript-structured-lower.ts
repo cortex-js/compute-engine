@@ -12,12 +12,18 @@
  * no compilation. A missing fact throws.
  *
  * It follows the prepared tree: the operands of a node are lowered in their
- * order, and each occurrence of a node is lowered separately, also when two
- * occurrences are the same boxed node. A conversion that the annotation
+ * order. A function node that is reached again (the same node object, a
+ * DAG), in the same scope, is the value of its first lowering when all of
+ * these hold (`value()`): the second occurrence is in the region of the
+ * first lowering or in a region nested in it and opened after it; no local
+ * or parameter changed its value in between (`epoch`); and every operation
+ * of the first lowering is `pure` and cannot abort. Otherwise the node is
+ * lowered again. No operation moves: a value is shared only where its first
+ * evaluation has run on every path. A conversion that the annotation
  * records for an operand is an operation that follows the operand, in the
- * region where the operand is evaluated. A local with one assignment is the
- * value of its initializer, which is evaluated where it is declared; each
- * read of the local is that value.
+ * region where the operand is evaluated, once per use. A local with one
+ * assignment is the value of its initializer, which is evaluated where it is
+ * declared; each read of the local is that value.
  *
  * A read of a binding that the admission captured is a capture read
  * (`IRCaptureRead`) of its snapshot. A helper is lowered once, at its first
@@ -80,6 +86,7 @@ import type {
   FragmentScope,
   FragmentValueFacts,
 } from './fragment.js';
+import { nodeText } from './fragment.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
   exitsIn,
@@ -484,6 +491,29 @@ export function lowerStructuredFragment(
   return program;
 }
 
+/**
+ * The most values that the lowering of one program makes: about one per
+ * operation (an operation of one result makes one, an `if` or a `loop` one
+ * per result, a parameter of a region one). A node reached on several paths
+ * that is not shared (a node in both branches of an `If`, in a DAG of `If`
+ * nodes) is lowered once per path, so the program can be exponential in the
+ * size of the expression; past this limit the lowering throws a
+ * `StructuredLimitError`, which the profile declines with
+ * `'outside-profile'`.
+ */
+export const STRUCTURED_OPERATION_LIMIT = 100_000;
+
+/** The error of a lowering over `STRUCTURED_OPERATION_LIMIT`. */
+export class StructuredLimitError extends Error {
+  constructor() {
+    super(
+      `JS structured lowering: the program has more than ` +
+        `${STRUCTURED_OPERATION_LIMIT} operations`
+    );
+    this.name = 'StructuredLimitError';
+  }
+}
+
 /** Lower the program that `preparation` describes, without verifying it:
  *  the caller verifies it (`lowerStructuredFragment()` does both). */
 export function lowerStructuredProgram(
@@ -531,6 +561,34 @@ class Lowering {
     FragmentScope<ScalarRepresentation>,
     Map<string, IRValue>
   >();
+  /** The number of the current values of `bound` (`changed()`): a value
+   *  that `value()` remembers is valid while the number is the one of its
+   *  lowering. */
+  private epoch = 0;
+  /** The last number given to `epoch`: each number is given once. */
+  private epochs = 0;
+  /** The open `inScope()` calls, the innermost last: the scope of each, and
+   *  whether a value of a scope outside it was written (`wrote()`). */
+  private scopes: {
+    readonly inner: FragmentScope<ScalarRepresentation>;
+    outside: boolean;
+  }[] = [];
+  /** The regions open at this point of the lowering, the innermost last
+   *  (`inRegion()`), each with the values that `value()` remembers in it:
+   *  by node, then by the scope of the node. A helper body starts with its
+   *  own region alone. */
+  private regions: {
+    readonly operations: IROperation[];
+    readonly values: Map<
+      Expression,
+      Map<
+        FragmentScope<ScalarRepresentation>,
+        { readonly value: IRValue; readonly epoch: number }
+      >
+    >;
+  }[] = [];
+  /** The names of each function node (`namesIn()`). */
+  private readonly names = new Map<Expression, ReadonlySet<string>>();
 
   constructor(private readonly prep: StructuredPreparation) {}
 
@@ -539,7 +597,9 @@ class Lowering {
     if (annotation.root !== root)
       fail('the annotation is not the annotation of the prepared root');
     const operations: IROperation[] = [];
-    const value = this.value(root, annotation.scope, operations);
+    const value = this.inRegion(operations, () =>
+      this.value(root, annotation.scope, operations)
+    );
     return {
       owner: this.owner,
       revision: this.revision,
@@ -552,6 +612,8 @@ class Lowering {
   }
 
   private newValue(type: ValueType, representation: ScalarRepresentation) {
+    if (this.nextId >= STRUCTURED_OPERATION_LIMIT)
+      throw new StructuredLimitError();
     return {
       owner: this.owner,
       revision: this.revision,
@@ -627,11 +689,94 @@ class Lowering {
     const canAbort = operations.some((op) =>
       operationCanAbort(op, this.functions)
     );
+    // A loop, not a spread: a region can hold more operations than a call
+    // takes arguments.
+    let effect: EffectFact = 'pure';
+    for (const op of operations) effect = joinEffects(effect, op.effect);
     return {
       operations,
-      effect: joinEffects(...operations.map((op) => op.effect)),
+      effect,
       ...(canAbort ? { canAbort: true as const } : {}),
     };
+  }
+
+  /** Run `step`, which lowers into `operations`, with `operations` the
+   *  innermost open region (`regions`). */
+  private inRegion<T>(operations: IROperation[], step: () => T): T {
+    this.regions.push({ operations, values: new Map() });
+    try {
+      return step();
+    } finally {
+      this.regions.pop();
+    }
+  }
+
+  /** A change of the values of `bound`: a new number for `epoch`. */
+  private changed(): void {
+    this.epoch = ++this.epochs;
+  }
+
+  /**
+   * Note a write to a value of the scope `scope`: in each open `inScope()`
+   * whose scope is not `scope` nor around it, the write is outside. Each
+   * place that sets or deletes a value of `bound` calls it, except
+   * `restore()`: a snapshot that `restore()` brings back was taken by the
+   * same `ifStatement()` or `loopStatement()`, so in an `inScope()` open
+   * around that statement it holds the values of the start of the
+   * `inScope()` for every scope that no noted write changed.
+   */
+  private wrote(scope: FragmentScope<ScalarRepresentation>): void {
+    for (const frame of this.scopes) {
+      if (frame.outside) continue;
+      let within = false;
+      for (let t: typeof scope | undefined = scope; t; t = t.parent)
+        if (t === frame.inner) {
+          within = true;
+          break;
+        }
+      if (!within) frame.outside = true;
+    }
+  }
+
+  /**
+   * Run `step`, which binds names of the scope `inner` (the index of a
+   * `build` or of an aggregate, the parameters of a helper). When `step`
+   * wrote no value of a scope outside `inner` (a scope that is neither
+   * `inner` nor nested in it, `wrote()`), the epoch after `step` is the one
+   * before it: a node outside `inner` reads no name of `inner`, so the
+   * values remembered before `step` are still valid. A value remembered
+   * during `step`, in a region around it, has an epoch that is never
+   * current again, since each number is given once. Otherwise the epoch is
+   * the last change of `step`. The values of `inner` are removed after
+   * `step`: no node outside `inner` reads them, and a new lowering of the
+   * same node binds them again (the written-out terms of an aggregate leave
+   * the index bound to the last literal).
+   */
+  private inScope<T>(
+    inner: FragmentScope<ScalarRepresentation> | undefined,
+    step: () => T
+  ): T {
+    if (inner === undefined) return step();
+    const frame = { inner, outside: false };
+    const epoch = this.epoch;
+    this.scopes.push(frame);
+    let result: T;
+    try {
+      result = step();
+    } finally {
+      this.scopes.pop();
+    }
+    this.bound.delete(inner);
+    // A write outside `inner` was noted in each `inScope()` around this one
+    // whose scope does not hold the written scope.
+    if (!frame.outside) this.epoch = epoch;
+    return result;
+  }
+
+  /** The names of the symbols of `node`, read or written (`namesIn()`),
+   *  once per node object. */
+  private namesOf(node: Expression): ReadonlySet<string> {
+    return namesIn(node, this.names);
   }
 
   private facts(
@@ -640,14 +785,14 @@ class Lowering {
   ): FragmentValueFacts<ScalarRepresentation> {
     const facts = scope.facts.get(node);
     if (facts === undefined || !('representation' in facts))
-      return fail(`no value facts for ${node.toString()}`);
+      return fail(`no value facts for ${nodeText(node)}`);
     return facts;
   }
 
   private effect(node: Expression): EffectFact {
     const effect = this.prep.effects.get(node);
     if (effect === undefined)
-      return fail(`no effect fact for ${node.toString()}`);
+      return fail(`no effect fact for ${nodeText(node)}`);
     return effect;
   }
 
@@ -663,11 +808,11 @@ class Lowering {
     operations: IROperation[]
   ): IRValue {
     if (conversion === undefined)
-      return fail(`no conversion fact for an operand of ${node.toString()}`);
+      return fail(`no conversion fact for an operand of ${nodeText(node)}`);
     if (conversion.kind === 'none') {
       if (conversion.representation !== value.representation)
         fail(
-          `an identity conversion of ${node.toString()} changes the representation`
+          `an identity conversion of ${nodeText(node)} changes the representation`
         );
       return value;
     }
@@ -704,8 +849,50 @@ class Lowering {
     );
   }
 
-  /** Lower `node`, typed in `scope`, at the end of `operations`. */
+  /**
+   * The value of `node`, typed in `scope`, at the end of `operations`, the
+   * innermost open region: the value that an earlier lowering of the same
+   * function node in the same scope gave, in this region or in a region
+   * around it, when no local or parameter changed since; otherwise the
+   * value of a new lowering (`lower()`). The new value is remembered in this
+   * region when its lowering changed no local or parameter and every
+   * operation that it appended is `pure` and cannot abort: an operation of
+   * a nested region is in the effect and the abort fact of the operation
+   * that holds it. A conversion of the value is applied by the caller, once
+   * per use. A leaf (a symbol, a number) is lowered at each use: its
+   * lowering is one operation, and a read of an input written at each use
+   * keeps the code of a program with no shared node as it is.
+   */
   private value(
+    node: Expression,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const region = this.regions[this.regions.length - 1];
+    if (region === undefined || region.operations !== operations)
+      return fail(`${nodeText(node)} is lowered in a region that is not open`);
+    if (!isFunction(node)) return this.lower(node, scope, operations);
+    for (let i = this.regions.length - 1; i >= 0; i--) {
+      const known = this.regions[i].values.get(node)?.get(scope);
+      if (known !== undefined && known.epoch === this.epoch) return known.value;
+    }
+    const epoch = this.epoch;
+    const start = operations.length;
+    const value = this.lower(node, scope, operations);
+    if (epoch !== this.epoch) return value;
+    for (let i = start; i < operations.length; i++) {
+      const op = operations[i];
+      if (op.effect !== 'pure' || operationCanAbort(op, this.functions))
+        return value;
+    }
+    let byScope = region.values.get(node);
+    if (byScope === undefined) region.values.set(node, (byScope = new Map()));
+    byScope.set(scope, { value, epoch });
+    return value;
+  }
+
+  /** Lower `node`, typed in `scope`, at the end of `operations`. */
+  private lower(
     node: Expression,
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[]
@@ -729,7 +916,7 @@ class Lowering {
       return result;
     }
     if (isSymbol(node)) return this.read(node, scope, operations);
-    if (!isFunction(node)) return fail(`no lowering for ${node.toString()}`);
+    if (!isFunction(node)) return fail(`no lowering for ${nodeText(node)}`);
 
     const effect = this.effect(node);
     const operator = node.operator;
@@ -741,13 +928,17 @@ class Lowering {
     if (operator === 'Typed') return this.value(node.ops[0], scope, operations);
 
     if (operator === 'Comprehension')
-      return this.build(node, facts, scope, operations, effect);
+      return this.inScope(scope.inner.get(node), () =>
+        this.build(node, facts, scope, operations, effect)
+      );
 
     if (operator === 'Which' || (operator === 'If' && node.nops === 2))
       return this.selection(node, facts, scope, operations, effect);
 
     if (operator === 'Sum' || operator === 'Product')
-      return this.aggregate(node, facts, scope, operations);
+      return this.inScope(scope.inner.get(node), () =>
+        this.aggregate(node, facts, scope, operations)
+      );
 
     if (operator === 'If') {
       if (node.nops !== 3) fail('an If needs a condition and two branches');
@@ -760,11 +951,13 @@ class Lowering {
       );
       const branch = (operand: Expression, index: number): IRRegion => {
         const inner: IROperation[] = [];
-        const v = this.convert(
-          this.value(operand, scope, inner),
-          facts.conversions?.[index],
-          node,
-          inner
+        const v = this.inRegion(inner, () =>
+          this.convert(
+            this.value(operand, scope, inner),
+            facts.conversions?.[index],
+            node,
+            inner
+          )
         );
         return this.region(inner, operand, v);
       };
@@ -793,11 +986,13 @@ class Lowering {
       );
       const rest = tail.map((operand, i) => {
         const inner: IROperation[] = [];
-        const v = this.convert(
-          this.value(operand, scope, inner),
-          facts.conversions?.[i + 1],
-          node,
-          inner
+        const v = this.inRegion(inner, () =>
+          this.convert(
+            this.value(operand, scope, inner),
+            facts.conversions?.[i + 1],
+            node,
+            inner
+          )
         );
         return this.region(inner, operand, v);
       });
@@ -929,7 +1124,7 @@ class Lowering {
         form !== 'product-power' &&
         form !== 'reciprocal-square'
       )
-        return fail(`no recorded form for the power ${node.toString()}`);
+        return fail(`no recorded form for the power ${nodeText(node)}`);
       const operand = this.convert(
         this.value(node.ops[0], scope, operations),
         facts.conversions?.[0],
@@ -1001,7 +1196,7 @@ class Lowering {
       if (typeof form === 'object')
         return this.folded(node, form.folded, facts, effect, operations);
       if (form !== 'cbrt' && form !== 'root')
-        return fail(`no recorded form for the root ${node.toString()}`);
+        return fail(`no recorded form for the root ${nodeText(node)}`);
       const operands =
         form === 'root'
           ? this.operands(node, facts, scope, operations)
@@ -1044,7 +1239,7 @@ class Lowering {
       // admitted with a real or an integer fact: the product is not lowered.
       const u = piMultipleFactor(node.ops[0]);
       if (u === undefined || !Object.hasOwn(PI_MULTIPLE_FUNCTIONS, operator))
-        return fail(`no multiple of Pi in ${node.toString()}`);
+        return fail(`no multiple of Pi in ${nodeText(node)}`);
       const operand = this.value(u, scope, operations);
       const result = this.resultOf(facts);
       operations.push({
@@ -1117,7 +1312,7 @@ class Lowering {
       return result;
     }
     if (operator === 'Conjugate' || operator === 'Log')
-      return fail(`no recorded form for ${node.toString()}`);
+      return fail(`no recorded form for ${nodeText(node)}`);
 
     const fn = Object.hasOwn(FUNCTIONS, operator)
       ? FUNCTIONS[operator]
@@ -1127,7 +1322,7 @@ class Lowering {
       // is the operand itself (`abs-identity`).
       const form = operator === 'Abs' ? this.prep.forms.get(node) : 'abs';
       if (form !== 'abs' && form !== 'abs-identity')
-        return fail(`no recorded form for ${node.toString()}`);
+        return fail(`no recorded form for ${nodeText(node)}`);
       const operands = this.operands(node, facts, scope, operations);
       if (form === 'abs-identity') return operands[0];
       const result = this.resultOf(facts);
@@ -1201,19 +1396,23 @@ class Lowering {
       !isFunction(spec.op2, 'Range') ||
       spec.op2.nops !== 2
     )
-      return fail(`no lowering for the comprehension ${node.toString()}`);
+      return fail(`no lowering for the comprehension ${nodeText(node)}`);
     const bound = (b: Expression) => {
       const value = this.value(b, scope, operations);
       if (value.type !== 'integer')
-        fail(`the bound ${b.toString()} of a comprehension is not an integer`);
+        fail(`the bound ${nodeText(b)} of a comprehension is not an integer`);
       return value;
     };
     const from = bound(spec.op2.op1);
     const to = bound(spec.op2.op2);
     const index = this.newValue('integer', 'number');
     this.bound.set(inner, new Map([[spec.op1.symbol, index]]));
+    this.wrote(inner);
+    this.changed();
     const bodyOperations: IROperation[] = [];
-    const element = this.value(body, inner, bodyOperations);
+    const element = this.inRegion(bodyOperations, () =>
+      this.value(body, inner, bodyOperations)
+    );
     const region: IRRegion = {
       ...this.region(bodyOperations, body, element),
       parameters: [index],
@@ -1312,7 +1511,7 @@ class Lowering {
     }
     const values = this.operands(node, facts, scope, operations);
     const first = values.findIndex((v) => v.representation === 'complex');
-    if (first < 0) return fail(`no complex factor in ${node.toString()}`);
+    if (first < 0) return fail(`no complex factor in ${nodeText(node)}`);
     const real = values.slice(0, first);
     let product: IRValue | undefined =
       real.length === 0
@@ -1377,16 +1576,16 @@ class Lowering {
     effect: EffectFact = 'pure'
   ): IRValue {
     const thenOperations: IROperation[] = [];
-    const a = then(thenOperations);
+    const a = this.inRegion(thenOperations, () => then(thenOperations));
     const thenRegion = this.region(thenOperations, origin, a);
     const elseOperations: IROperation[] = [];
-    const b = otherwise(elseOperations);
+    const b = this.inRegion(elseOperations, () => otherwise(elseOperations));
     const elseRegion = this.region(elseOperations, origin, b);
     if (a.representation !== b.representation)
-      fail(`the two values of a conditional ${origin.toString()} have different representations`);
+      fail(`the two values of a conditional ${nodeText(origin)} have different representations`);
     const result = this.newValue(
       widerType(a.type, b.type) ??
-        fail(`the two values of a conditional ${origin.toString()} have no common type`),
+        fail(`the two values of a conditional ${nodeText(origin)} have no common type`),
       a.representation as ScalarRepresentation
     );
     operations.push({
@@ -1424,7 +1623,7 @@ class Lowering {
     const ops = node.ops;
     const type = valueType(facts.type);
     if (type !== 'real' && type !== 'integer')
-      return fail(`the value of ${node.toString()} is not a number`);
+      return fail(`the value of ${nodeText(node)} is not a number`);
     const operand = (i: number, into: IROperation[]): IRValue =>
       this.convert(
         this.value(ops[i], scope, into),
@@ -1506,17 +1705,17 @@ class Lowering {
   ): IRValue {
     const inner = scope.inner.get(node);
     if (inner === undefined)
-      return fail(`no scope for the aggregate ${node.toString()}`);
+      return fail(`no scope for the aggregate ${nodeText(node)}`);
     const clauses = node.ops.slice(1).map((clause) =>
       isFunction(clause, 'Limits') && clause.nops === 3 && isSymbol(clause.op1)
         ? { index: clause.op1.symbol, lower: clause.op2, upper: clause.op3 }
-        : fail(`no lowering for the index set ${clause.toString()}`)
+        : fail(`no lowering for the index set ${nodeText(clause)}`)
     );
     const body = node.ops[0];
     const sum = node.operator === 'Sum';
     const type = valueType(facts.type);
     if (type !== 'real' && type !== 'integer')
-      return fail(`the body of ${node.toString()} is not a number`);
+      return fail(`the body of ${nodeText(node)} is not a number`);
     const representation = facts.representation;
     const budget = this.prep.iterationBudget;
     const bodyConversion = facts.conversions?.[2 * clauses.length];
@@ -1534,6 +1733,8 @@ class Lowering {
       const values = new Map(this.bound.get(inner) ?? []);
       values.set(name, value);
       this.bound.set(inner, values);
+      this.wrote(inner);
+      this.changed();
     };
     const push = (
       kind: 'add' | 'negate' | 'multiply' | 'less' | 'less-equal' | 'not',
@@ -1605,7 +1806,7 @@ class Lowering {
               .reduce(
                 (a, b) =>
                   widerType(a, b) ??
-                  fail(`the terms of ${node.toString()} have no common type`)
+                  fail(`the terms of ${nodeText(node)} have no common type`)
               ),
             out
           );
@@ -1635,9 +1836,11 @@ class Lowering {
         const indexValue = this.newValue('integer', 'number');
         const accumulator = this.newValue(type, representation);
         const bodyOperations: IROperation[] = [];
-        const t = term(indexValue, bodyOperations);
+        const t = this.inRegion(bodyOperations, () =>
+          term(indexValue, bodyOperations)
+        );
         if (widerType(type, t.type) !== type)
-          fail(`a term of ${node.toString()} has the type ${t.type}`);
+          fail(`a term of ${nodeText(node)} has the type ${t.type}`);
         const next = push(
           sum ? 'add' : 'multiply',
           [accumulator, t],
@@ -2020,7 +2223,14 @@ class Lowering {
     if (inner === undefined) return fail('no scope for a block');
     if (node.ops.length === 0) return fail('an empty block has no value');
     const last = node.ops[node.ops.length - 1];
-    if (this.statements(node.ops.slice(0, -1), inner, operations, namesIn(last)))
+    if (
+      this.statements(
+        node.ops.slice(0, -1),
+        inner,
+        operations,
+        this.namesOf(last)
+      )
+    )
       fail('a statement of a block that has a value is a Break');
     return this.value(last, inner, operations);
   }
@@ -2044,7 +2254,7 @@ class Lowering {
     let after = new Set(liveOut);
     for (let i = statements.length - 1; i >= 0; i--) {
       live[i] = after;
-      after = new Set([...after, ...namesIn(statements[i])]);
+      after = new Set([...after, ...this.namesOf(statements[i])]);
     }
     let closed = false;
     statements.forEach((s, i) => {
@@ -2095,6 +2305,8 @@ class Lowering {
       let locals = this.bound.get(scope);
       if (locals === undefined) this.bound.set(scope, (locals = new Map()));
       locals.set(name, value);
+      this.wrote(scope);
+      this.changed();
       return false;
     }
     if (isFunction(node, 'Assign') && node.nops === 2 && isSymbol(node.op1)) {
@@ -2119,6 +2331,8 @@ class Lowering {
       )
         fail(`a write to the local ${name} changes its representation`);
       locals.set(name, value);
+      this.wrote(binder!);
+      this.changed();
       return false;
     }
     if (isFunction(node, 'If') && (node.nops === 2 || node.nops === 3))
@@ -2144,7 +2358,7 @@ class Lowering {
       operations.push({ kind: 'exit', operands, effect: 'pure', origin: node });
       return true;
     }
-    return fail(`no lowering for the statement ${node.toString()}`);
+    return fail(`no lowering for the statement ${nodeText(node)}`);
   }
 
   /**
@@ -2165,16 +2379,21 @@ class Lowering {
     liveOut: ReadonlySet<string>
   ): boolean {
     // The operations of the condition, kept apart until the `If` is known
-    // to be lowered.
+    // to be lowered. Their region is not open in the branches nor after the
+    // `If`: the values that it remembers are not shared.
     const condition: IROperation[] = [];
-    const test = this.value(node.ops[0], scope, condition);
+    const test = this.inRegion(condition, () =>
+      this.value(node.ops[0], scope, condition)
+    );
     const before = this.snapshot();
     const branch = (statement: Expression | undefined) => {
       this.restore(before);
       const inner: IROperation[] = [];
       const closed =
         statement !== undefined &&
-        this.statement(statement, scope, inner, liveOut);
+        this.inRegion(inner, () =>
+          this.statement(statement, scope, inner, liveOut)
+        );
       return { operations: inner, values: this.snapshot(), closed };
     };
     const a = branch(node.ops[1]);
@@ -2183,7 +2402,8 @@ class Lowering {
     if (a.closed && b.closed) {
       const then = this.closedRegion(a.operations);
       const otherwise = this.closedRegion(b.operations);
-      operations.push(...condition, {
+      for (const op of condition) operations.push(op);
+      operations.push({
         kind: 'if',
         results: [],
         operands: [test],
@@ -2221,6 +2441,7 @@ class Lowering {
         const otherwise = elseValues.get(binder)?.get(name);
         if (then === value && otherwise === value) continue;
         const target = this.bound.get(binder)!;
+        this.wrote(binder);
         // A local that no later statement reads has no value after the
         // `If`: a read of it throws. A local with no value after a branch
         // is such a local: a nested `If` of the branch removed it, and its
@@ -2241,6 +2462,7 @@ class Lowering {
       return this.newValue(type, m.then.representation as ScalarRepresentation);
     });
     merged.forEach((m, i) => m.locals.set(m.name, results[i]));
+    this.changed();
     const then = a.closed
       ? this.closedRegion(a.operations)
       : this.region(
@@ -2269,11 +2491,13 @@ class Lowering {
       then.canAbort !== true &&
       otherwise.canAbort !== true
     ) {
-      if (joinEffects(...condition.map((op) => op.effect)) !== 'pure')
-        operations.push(...condition);
+      if (condition.some((op) => op.effect !== 'pure'))
+        for (const op of condition) operations.push(op);
       return false;
     }
-    operations.push(...condition);
+    // A loop, not a spread: the condition can hold more operations than a
+    // call takes arguments.
+    for (const op of condition) operations.push(op);
     operations.push({
       kind: 'if',
       results,
@@ -2325,12 +2549,12 @@ class Lowering {
       !isFunction(spec.op2, 'Range') ||
       spec.op2.nops !== 2
     )
-      return fail(`no lowering for the loop ${node.toString()}`);
+      return fail(`no lowering for the loop ${nodeText(node)}`);
     const index = spec.op1.symbol;
     const bound = (b: Expression) => {
       const value = this.value(b, scope, operations);
       if (value.type !== 'integer')
-        fail(`the bound ${b.toString()} of a loop is not an integer`);
+        fail(`the bound ${nodeText(b)} of a loop is not an integer`);
       return value;
     };
     const from = bound(spec.op2.op1);
@@ -2347,7 +2571,7 @@ class Lowering {
       if (binder !== undefined && this.bound.get(binder)?.has(name))
         candidates.push({ binder, name });
     }
-    const exposed = exposedReads(body);
+    const exposed = exposedReads(body, this.names);
     const carried = candidates.filter(
       ({ name }) => liveOut.has(name) || exposed.has(name)
     );
@@ -2367,18 +2591,24 @@ class Lowering {
           initial[i].representation as ScalarRepresentation
         )
       );
-      for (const { binder, name } of candidates)
+      for (const { binder, name } of candidates) {
         this.bound.get(binder)!.delete(name);
+        this.wrote(binder);
+      }
       carried.forEach(({ binder, name }, i) =>
         this.bound.get(binder)!.set(name, parameters[i])
       );
       this.bound.set(loopScope, new Map([[index, indexValue]]));
+      this.wrote(loopScope);
+      this.changed();
       const inner: IROperation[] = [];
       const context = { carried, exits: [] as (readonly IRValue[])[] };
       this.loops.push(context);
       let closed: boolean;
       try {
-        closed = this.statement(body, loopScope, inner, carriedNames);
+        closed = this.inRegion(inner, () =>
+          this.statement(body, loopScope, inner, carriedNames)
+        );
       } finally {
         this.loops.pop();
       }
@@ -2417,11 +2647,14 @@ class Lowering {
       const results = parameters.map((p) =>
         this.newValue(p.type, p.representation as ScalarRepresentation)
       );
-      for (const { binder, name } of candidates)
+      for (const { binder, name } of candidates) {
         this.bound.get(binder)!.delete(name);
+        this.wrote(binder);
+      }
       carried.forEach(({ binder, name }, i) =>
         this.bound.get(binder)!.set(name, results[i])
       );
+      this.changed();
       operations.push({
         kind: 'loop',
         results,
@@ -2456,6 +2689,7 @@ class Lowering {
     this.bound.clear();
     for (const [scope, locals] of snapshot)
       this.bound.set(scope, new Map(locals));
+    this.changed();
   }
 
   /**
@@ -2492,18 +2726,36 @@ class Lowering {
     const parameters = entry.type.parameters.map((p, i) =>
       this.newValue(valueType(p.type), conversions[i].representation)
     );
-    this.bound.set(
-      entry.scope,
-      new Map(entry.type.parameters.map((p, i) => [p.name, parameters[i]]))
-    );
+    const names = entry.type.parameters.map((p) => p.name);
     const operations: IROperation[] = [];
     this.lowering.add(name);
     // A `Break` of the helper leaves a loop of the helper, never a loop of
-    // the code that calls it.
+    // the code that calls it, and a value of the code that calls it is not
+    // visible in the body: the body starts with its own region alone. The
+    // body binds the names of its own scopes (a function scope has the root
+    // scope as its parent), so the values that the caller remembers stay
+    // valid (`inScope()`).
     const loops = this.loops;
+    const regions = this.regions;
     this.loops = [];
-    const value = this.value(entry.body, entry.scope, operations);
-    this.loops = loops;
+    this.regions = [];
+    let value: IRValue;
+    try {
+      value = this.inScope(entry.scope, () => {
+        this.bound.set(
+          entry.scope,
+          new Map(names.map((n, i) => [n, parameters[i]]))
+        );
+        this.wrote(entry.scope);
+        this.changed();
+        return this.inRegion(operations, () =>
+          this.value(entry.body, entry.scope, operations)
+        );
+      });
+    } finally {
+      this.loops = loops;
+      this.regions = regions;
+    }
     this.lowering.delete(name);
     const result = {
       type: valueType(entry.type.result),
@@ -2591,14 +2843,18 @@ function assignedNames(
  * statements `Block`, `Declare`, `Assign`, `If` and `Loop`; any other node
  * is read as an expression.
  */
-function exposedReads(statement: Expression): Set<string> {
+function exposedReads(
+  statement: Expression,
+  memo: Map<Expression, ReadonlySet<string>>
+): Set<string> {
   const exposed = new Set<string>();
   const reads = (
     node: Expression | undefined,
     written: ReadonlySet<string>
   ) => {
     if (node === undefined) return;
-    for (const name of namesIn(node)) if (!written.has(name)) exposed.add(name);
+    for (const name of namesIn(node, memo))
+      if (!written.has(name)) exposed.add(name);
   };
   const visit = (node: Expression, written: Set<string>): Set<string> => {
     if (!isFunction(node)) {
@@ -2639,10 +2895,20 @@ function exposedReads(statement: Expression): Set<string> {
   return exposed;
 }
 
-/** The names of the symbols of `node`, read or written. */
-function namesIn(node: Expression, names = new Set<string>()): Set<string> {
-  if (isSymbol(node)) names.add(node.symbol);
-  else if (isFunction(node))
-    for (const operand of node.ops) namesIn(operand, names);
+/** The names of the symbols of `node`, read or written. `memo` holds the
+ *  names of each function node already seen, so a node reached on several
+ *  paths is walked once. */
+function namesIn(
+  node: Expression,
+  memo: Map<Expression, ReadonlySet<string>>
+): ReadonlySet<string> {
+  if (isSymbol(node)) return new Set([node.symbol]);
+  if (!isFunction(node)) return new Set();
+  const known = memo.get(node);
+  if (known !== undefined) return known;
+  const names = new Set<string>();
+  for (const operand of node.ops)
+    for (const name of namesIn(operand, memo)) names.add(name);
+  memo.set(node, names);
   return names;
 }

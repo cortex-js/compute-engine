@@ -2002,6 +2002,7 @@ nothing changes.
 | A name declared with a type that is not numeric | `x + u` with `u` declared `number` or `any` (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
 | A statement outside the list | `Continue` in a `Loop` (`operator: 'Continue'`), a `Break` that is not the last statement of a branch of an `If`, a `Loop` over a list, a write in a root `Block` to a name that no `Declare` declares, a local function, a `Block` with statements as an operand (`{ a ⩴ x; a } + 1`), an empty `Block` |
 | An option outside the profile | `functions`, `operators`, `vars`, `imports`, `preamble`, `broadcast`, `mode: 'bigint'` |
+| A program of more than 100,000 operations | a subexpression in both branches of an `If`, nested 14 times: the profile writes it once per branch (no `operator`) |
 
 **A name with no declared type.** Under the profile, a parameter of a
 `Function` literal or a free symbol with no declared type is a real number
@@ -2040,8 +2041,9 @@ The decline follows the `fallback` option, as any other decline: with
 `fallback: true` (the default of `compile()`), `success: false` and the
 interpreter; with `fallback: false`, a `CompileDeclineError`. The diagnostic
 has the code `outside-profile`, the kind `capability`, the message of the
-refusal, the node in `value`, and its head in `operator` or a name in
-`binding`. A decline that the preparation of the existing compiler gives
+refusal, the node in `value` (absent for a node whose text would write more
+than 100,000 nodes, such as a subexpression reached on many paths), and its
+head in `operator` or a name in `binding`. A decline that the preparation of the existing compiler gives
 first keeps its own code. The existing
 compiler is never used for a part of the program. An error of the lowering,
 the verifier, the analysis or the emitter is not a decline of the profile:

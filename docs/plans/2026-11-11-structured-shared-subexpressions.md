@@ -242,6 +242,127 @@ make it an internal error), the work is bounded and the skip can go (C4).
   `compile-cse-shared-subtrees.test.ts` pins into an interpreter fallback.
   Alternative: slices 1 and 3 only, and that test expects a decline.
 
+## Result
+
+Implemented on `6ebc2b1574cd75487533e999288fe7339ea71228`, the recommended
+option of each choice (C1 epoch, C2 explicit regions, C3 one `convert` per
+use, C4 a cap of 100,000, C5 slice 2 done). Tests:
+`test/compute-engine/compile-javascript-structured-sharing.test.ts`.
+
+- **Slice 1.** `inexactJumpConstant()` remembers the verdict of each
+  function node and asks `hasUnknownsWithMemo()` with one memo per call in
+  place of `node.unknowns` at each visit. `namesIn()` takes a memo, held by
+  the `Lowering` instance (`namesOf()`) and passed to `exposedReads()`. The
+  spreads of `closedRegion()` and of the two `push(...condition)` of
+  `ifStatement()` are loops.
+- **Slice 2.** `Lowering.value()` is the memo; the former body is
+  `lower()`. `inRegion()` opens a region at each site: the root,
+  the branches of an `If` value, each operand after the first of `And`/`Or`,
+  the body of a `build`, both branches of `conditional()` (so `selection()`
+  and the guard of `aggregate()`), the body of the `loop` of `aggregate()`,
+  the condition and each branch of `ifStatement()`, each pass of the body of
+  `loopStatement()`, and the body of a helper, which starts with an empty
+  stack. `value()` fails when it is asked to lower into an array that is not
+  the innermost open region, so a site without a region is an internal
+  error, not a wrong value. The epoch is a number given once
+  (`changed()`, from a monotonic count) at each change of the values: by
+  `Declare`, `Assign`, the merge of an `If` statement, `restore()`, the
+  parameters of a loop pass and the results of a loop, the index of a
+  `build`, each index binding of `aggregate()` (so each written-out term of
+  a `Sum` lowers its body again) and the parameters of a helper. A
+  `build`, an aggregate and a helper bind the names of their own scope
+  only; `inScope()` gives the epoch of before back after them when no value
+  of a scope outside theirs was written (each write of a binding notes its
+  scope, `wrote()`, in O(1) per open `inScope()`; `restore()` brings back a
+  snapshot of the same statement and is not a write), and removes the
+  values of their scope after them. A comparison of every binding at each
+  exit was quadratic: 3,000 sibling sums took 1 s, now 0.25 s. So a node
+  that contains a `Sum` is remembered and a value lowered before it is
+  shared after it. An entry recorded during them has an epoch that is never
+  current again. The written-out terms leave the index bound to the last
+  literal; no node outside the aggregate reads a name of its scope, and a
+  second lowering of the aggregate binds the index again first. The sites of that base lower in the region where their
+  node is: the factors of `realProduct()` and `multiplyByRational()` and
+  the parts of a quotient factor go through `value()`; a quotient factor
+  itself does not, so a quotient reached twice keeps both divisions, in the
+  order of the existing code. The literal fold of `Power` and `Root` is the
+  lowering of its node, remembered as any other, and a root `Block` is
+  lowered by `block()`.
+- **Slice 3.** `newValue()` throws `StructuredLimitError` past
+  `STRUCTURED_OPERATION_LIMIT` values (one per operation result); with the
+  profile, `inPhase()` makes it the decline `outside-profile` "the program
+  has more than 100000 operations, the limit of the profile". The path skip
+  of the shadow measure (`pathCountAbove()`, `SHADOW_MAX_PATHS`) is removed;
+  its try/catch stays.
+
+Where it differs from the note:
+
+- **Leaves are not remembered.** A symbol or a number is lowered at each
+  use: its lowering is one operation, and remembering an input read would
+  bind it to a `const` where the emitter writes `_.x` at each use, so every
+  program in which a symbol object appears twice would change its code.
+- **A staged condition is not merged** into the enclosing region when it is
+  pushed (C2): every path after the condition changes the epoch (the
+  `restore()` before each branch), so a merged entry could never be used.
+- **C1, the epoch, loses sharing across a statement and a loop**: a value
+  lowered before a `Declare`, an `Assign`, an `If` statement or a `Loop` is
+  lowered again after it, also when the node reads no local that changed.
+  It does not lose sharing across a `Sum`, a `Product`, a `Comprehension` or
+  the first call of a helper (`inScope()`), unless their lowering changed a
+  value of a scope outside theirs.
+- **`structured-verify.ts` changed in one line.** The join of the effects
+  of a region was a spread (`joinEffects(...effects)`); a region can hold
+  close to 100,000 operations, and node 26 overflows the stack near 130,000
+  spread arguments at the top level, less in a deep stack. It is now a fold;
+  the rule is the same.
+- **The `value` of a decline is bounded.** With the path skip removed,
+  the shadow measure of `compile-cse-shared-subtrees.test.ts` did not
+  finish: `Map(Function(Arctan2 DAG of depth 40, t), [-1, 2])` is declined
+  by the admission (`Map` is outside the profile), and `profileDecline()`
+  wrote `node.toString()` of the DAG in `value`, a text of 2^40 nodes (11 s
+  at depth 28). `profileDecline()` now leaves `value` out when the node has
+  more than 100,000 nodes counted per path (`hasShortText()` in
+  `fragment.ts`, a walk of each node object once); `docs/COMPILATION-MODEL.md`
+  says so. Every message of the route that writes the text of a node (the
+  refusals of `javascript-fragment-target.ts` and `fragment.ts`, the
+  `fail()` messages of the lowering, the `value` of a refusal of
+  `fragment.ts`) writes `nodeText()`: the text when it is short, otherwise
+  the head and `(…)`, such as `Add(…)`. The two functions are in
+  `fragment.ts`, not in `javascript-fragment-target.ts`, because the
+  lowering imports them and `javascript-fragment-target.ts` imports the
+  lowering. The emitter and the verifier write no node.
+- **The cap also declines a large program with no sharing**: a sum of
+  30,000 terms `sin(x + c_i)` has more than 100,000 operations and declines
+  (20,000 terms compile, 469 KB of code in 0.6 s). This is choice C4; the
+  CHANGELOG and the guide say so.
+- **The test of the cap uses the `If` shape at depth 20** and the shadow
+  test the `If` shape at depth 14 with `cse: false` (the existing compiler
+  takes many seconds on that shape with its CSE pass).
+
+Measured on the full route (`compile(Floor(e_40), { profile:
+'numeric-kernel', fallback: false })`, one run each after warm-up, a lightly
+loaded machine; ms, code in characters; `scratchpad/sharing/probe.mts` of
+the session):
+
+| shape, d | time | code | before (route) |
+| --- | --- | --- | --- |
+| `Add(e, e)`, 40 | 0.8 | 1,174 | no result in 180 s |
+| `Arctan2(e, e)`, 40 | 0.6 | 1,614 | stack overflow from 16 |
+| `Sin(e) + Cos(e)`, 40 | 1.4 | 1,974 | stack overflow from 16 |
+| `Add(e, If(x > k, e, 1))`, 40 | 2.2 | 1,844 | — |
+| `If(x > k, e + 1, 2e)`, 12 | 204 | 126,966 | 273 (the first table) |
+| `If(x > k, e + 1, 2e)`, 13 | 380 | 253,946 | — |
+| `If(x > k, e + 1, 2e)`, 14, 20, 40 | decline in 21 to 28 | — | — |
+
+The values are `Object.is`-equal to the unshared copy for every shape at
+depths 2 to 12, and to the existing compiler with `cse: false,
+constantFold: false` for the canonical shapes. Of the engine's own
+compilations in the `limit*`, `find-fit*`, `nintegrate*`,
+`map-auto-compile*` and `solve*` tests under `CE_JS_PROFILE=numeric-kernel`,
+176 lowerings reused a value (`2^x`, `3^x`, `ln(x)`, the model terms of
+`findFit`): their code binds a `const` where it repeated the subexpression;
+the tallies of those tests are unchanged.
+
 ## Defects seen, not filed
 
 - The existing compiler with its default options takes 1.9 s at depth 12 and
