@@ -307,3 +307,21 @@ hot paths and in 294 CE test files, and it does not fit a host that swaps
 its scope. Two small changes go first, with any design: skip the lookup of
 an environment that has no entry (5.5 million empty lookups in the
 `othello` call), and CE-1200.
+
+**Tycho's clean figures on 0.187.1** (quiet machine, under the box lock,
+load 2.0 to 3.7, three pairs, `CE_BINDING_UNITS=0` as the base). They are
+the reference for the before-and-after of the counter:
+
+| Case | Units off | Units on | Ratio |
+|---|---|---|---|
+| `othello` instrument, median of 15 rounds | 493, 473, 476 ms | 686, 644, 643 ms | 1.35 to 1.39 |
+| Codegen audit, sum of the document times | 40.5, 42.0, 40.7 s | 50.3, 49.5, 45.6 s | 1.12 to 1.24 |
+| art/khpocp8io0 | 20.1 s | 21.6 to 24.3 s | |
+| showcase/joukowsky-airfoil | 1.4 to 1.6 s | 2.2 to 2.4 s | |
+
+**The host remedy does not apply to Tycho** (its trial of 2026-11-11, not
+committed): declaring `t`, `u`, `v`, `r` and `theta` as `real` before the
+rows are parsed changed the emitted code (1,297 records against 1,295) and
+gave no clear gain. Most undeclared names of its audit are parameters of
+document functions (`ceArg_0` to `ceArg_3`, 17,853 occurrences), which can
+hold a point or a list and so have no type to declare.
