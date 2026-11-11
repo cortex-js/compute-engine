@@ -207,6 +207,12 @@ findings of round 2 and was not reviewed again.
     - The pins of the static check that are keyed on a value definition
       (`static-diagnostics.ts:741, 2254`) are keyed on (home scope, name)
       for a free name.
+    - The static check declares, inferred and of type `unknown`, in the
+      scope that it pushed, each name that a top-level `Assign` or `Declare`
+      binds and that has no definition (each name of a destructuring pattern
+      included), before it registers the signature that the statement pins.
+      That definition is the key (home scope, name) of the free name for
+      the pins and the assignment evidence. (Added 2026-11-10, in phase E.)
     - The program environment is discarded when the run ends.
 
     A host `Block` boxed with one `ce.box()` is already one unit (rule 2).

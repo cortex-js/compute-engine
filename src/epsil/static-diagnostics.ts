@@ -54,6 +54,7 @@ import { expectsCharacterNotString } from '../compute-engine/boxed-expression/va
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
 import { withPairedFunctionNames } from '../compute-engine/assignment-locals.js';
 import { isLibraryDefinition } from '../compute-engine/boxed-expression/implicit-variable-rule.js';
+import { tuplePatternNames } from '../compute-engine/boxed-expression/tuple-pattern.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralReturnType,
@@ -690,31 +691,6 @@ function applyAssignmentTypeEffect(
   const evidence = ce._staticAssignmentEvidence;
   if (evidence === undefined) return;
 
-  // With the engine flag `_bindingUnits`, the boxing of `x = …` or `let x =
-  // …` declares no name, and the evaluation of the statement, which declares
-  // `x`, is not run by this pass. The pass declares the name here, inferred
-  // and of type `unknown`, in its home scope: the scope that the pass pushed
-  // (rule 10 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Its
-  // pop removes the declaration. The later statements of the program then
-  // see the name declared, as they do when the program runs, and the pins
-  // of this pass, which are keyed on the value definition
-  // (`_staticAssignmentEvidence`, `_staticPinnedCallees`), have a
-  // definition to key on: the definition in the home scope is the key
-  // (home scope, name) of the free name. Without the flag, the boxing of
-  // the statement declares the name.
-  if (
-    ce._bindingUnits &&
-    (isFunction(boxed, 'Assign') || isFunction(boxed, 'Declare'))
-  ) {
-    const name = boxed.ops[0];
-    if (
-      isSymbol(name) &&
-      name.symbol !== 'Nothing' &&
-      ce.lookupDefinition(name.symbol) === undefined
-    )
-      ce._declareSymbolValue(name.symbol, { type: 'unknown', inferred: true });
-  }
-
   let target: ReturnType<ComputeEngine['box']> | undefined;
   let rhs: ReturnType<ComputeEngine['box']> | undefined;
   if (isFunction(boxed, 'Assign')) {
@@ -898,6 +874,42 @@ function applyAssignmentTypeEffect(
   // ROADMAP entry "Epsil static evidence diagnostics lost to overlap
   // admission", ruled 2026-08-23).
   evidence.set(def, rhs._literalType ?? raw.type);
+}
+
+/**
+ * With the engine flag `_bindingUnits`, the boxing of `x = …` or `let x = …`
+ * declares no name, and the evaluation of the statement, which declares `x`,
+ * is not run by this pass. The pass declares the name here, inferred and of
+ * type `unknown`, in its home scope: the scope that the pass pushed (rule 10
+ * of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). Its pop removes
+ * the declaration. A destructuring target (`let (a, b) = …`) declares each
+ * name of its pattern, as the run time does.
+ *
+ * The later statements of the program then see the names declared, as they
+ * do when the program runs, and the pins of this pass, which are keyed on the
+ * value definition (`_staticAssignmentEvidence`, `_staticPinnedCallees`),
+ * have a definition to key on: the definition in the home scope is the key
+ * (home scope, name) of the free name. The pass calls this before it
+ * registers the signature that the statement pins
+ * (`registerPinnedSignature()`), so `f := (x: integer) => x` pins its
+ * signature on the definition of `f`. Without the flag, the boxing of the
+ * statement declares the name, and this does nothing.
+ */
+function declareStatementNames(
+  ce: ComputeEngine,
+  boxed: ReturnType<ComputeEngine['box']>
+): void {
+  if (!ce._bindingUnits) return;
+  if (!isFunction(boxed, 'Assign') && !isFunction(boxed, 'Declare')) return;
+  const target = boxed.ops[0];
+  const names = isFunction(target, 'Tuple')
+    ? tuplePatternNames(target)
+    : isSymbol(target)
+      ? [target.symbol]
+      : [];
+  for (const name of names)
+    if (name !== 'Nothing' && ce.lookupDefinition(name) === undefined)
+      ce._declareSymbolValue(name, { type: 'unknown', inferred: true });
 }
 
 function canonicalizationDiagnostics(
@@ -1202,7 +1214,10 @@ function canonicalizationDiagnostics(
     // this program (never to earlier ones — registration follows the walk's
     // source order, so a call written before the assignment still has no
     // names to check, matching the runtime where the callee is unassigned).
-    if (!provableDeclMismatch) registerPinnedSignature(ce, boxed, pinned);
+    if (!provableDeclMismatch) {
+      declareStatementNames(ce, boxed);
+      registerPinnedSignature(ce, boxed, pinned);
+    }
 
     // A `const` declaration that the run time installs makes a later
     // `function` statement for the same name, and a later assignment to it,

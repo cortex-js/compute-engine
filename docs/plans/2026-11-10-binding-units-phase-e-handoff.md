@@ -124,6 +124,20 @@ Open, for the user:
    does a free name count as declared for this Epsil check? Package B gives
    its recommendation with the test.
 
+   Package B (2026-11-10) recommends no, and wrote no code for it. The
+   check is `isDeclaredForAssignment()` (`library/control-structures.ts`),
+   called by the canonical handler of `Assign`.
+   - No: `src/epsil/docs/declarations.md` already says that an assignment
+     in a branch is not a first assignment only when the name was assigned
+     by an earlier top-level statement or declared by the host. The test
+     `block-scope-shadowing` "function form `Continue()` in an If branch
+     inside a Loop stays valid" then declares `x` first; package D updates
+     it. `y = x + 1; if y > 0 { x = 2 }; x` gives
+     `first-assignment-in-branch`, where today it gives no diagnostic.
+   - Yes: a read before the assignment makes the name count, so the
+     diagnostic depends on the order of the statements, and the program
+     above can read `x` with no value.
+
 ## 5. The packages
 
 The counts are tests that fail with the flag on at `7e92c4b0f`. The test
