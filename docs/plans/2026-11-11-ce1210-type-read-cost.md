@@ -222,3 +222,66 @@ environments (R-c) and on `ce._typeCacheGeneration()` only. It changes
 documented behavior of 0.187.0 (a held expression and a declaration in a
 pushed scope), so it needs the counts, the list of tests that change, and
 the user's decision.
+
+## 10. Result of step 0 (2026-11-11)
+
+Counters in a worktree at `830047dc6`, removed after the measure. Full suite
+(88,207 tests, 1,972 test-file records), and four small cases.
+
+**Repeats** (a read or a check that follows the previous one of the same
+symbol or cache entry with no write of an environment, an operation, a
+trial or the scope stack between them; writes of scope bindings are not
+counted, so these are upper bounds):
+
+| | Full suite | Loop, undeclared | Loop, declared | Rule loading | Tycho `othello` call |
+|---|---|---|---|---|---|
+| Type reads of a free name | 86.4 M, 93% repeat | 706 k, 94% | none | 1.1 M, 88% | none |
+| Type reads of a defined name | 212.6 M, 97% repeat | 46 k, 85% | 757 k, 96% | 3 k | 1.9 M, 88% |
+| Checks of a cached type | 98% repeat | 90% | 77% | 89% | 86% |
+
+The counter of section 4 would therefore work. In the `othello` call, 5.5
+million lookups of an environment entry all find nothing.
+
+**Reads whose answer depends on the current scope** (what the rules R-a
+and R-b of section 9 pay for), full suite:
+
+| Read | Total | Finds a definition that the host declared directly | Finds one that the engine declared |
+|---|---|---|---|
+| Type, free name | 86.4 M | 2,165 | 248,871 |
+| Type, defined name | 212.6 M | 37,254 | 160,366 |
+| Value, free name | 24.0 M | 906 | 31,187 |
+| Value, defined name (not a parameter, a binder variable or a block local) | 33.8 M | 50,486 | 4,378 |
+
+"The host declared directly": `ce.declare()` or `ce.assign()` called with at
+most four engine frames before the first frame outside the engine.
+
+- 126 test files have a read that finds a host declaration. Two kinds:
+  a declaration that shadows a library name in the same scope (`Pi` in
+  `shadowed-constants`, `module-qualified-name`, `solve-domain`), and a
+  declaration in a pushed scope read by an expression boxed before it (`s`
+  in `tycho-325-integrate-list-limit-broadcast`, `T` in
+  `compile-gpu-shared-calls`, `t` in the compile fallback tests).
+- 168 more test files have such a read only for a definition that the
+  engine declared: `Solve`, the integrals, `NIntegrate`, the trigonometric
+  simplifications and the GPU compile push a scope, declare a variable in
+  it and read an expression that was boxed outside. These are sites of the
+  engine that reversal B would have to rebind.
+- In the four small cases and in Tycho's `othello` call, no type read
+  depends on the current scope.
+
+**Tycho's source audit** (78 `pushScope` calls): 6 affected sites, 4 that
+are affected by the rule as proposed (a tree rebuilt with `ce.function()`
+from operands boxed outside; a stored value evaluated while its
+dependencies are assigned in a child scope, for which `ce.withValues()` is
+the construct), the rest not affected. Its run of a counting build is
+pending.
+
+**What the figures say.** Both designs are possible. The counter keeps
+every answer and needs the choke points of 4.1. Reversal B removes the
+resolution from the type read and from the caches, changes the answers of
+the reads above, and needs: a rebind at each engine site of the 168 files
+(to be listed from the reports, by engine function), the two kinds of host
+dependence decided (a shadow of a library name in the same scope must keep
+working: a symbol then resolves by name from its home scope, cached on
+`typeVersion`, not from the definition it had at boxing), and six to ten
+edits in Tycho.
