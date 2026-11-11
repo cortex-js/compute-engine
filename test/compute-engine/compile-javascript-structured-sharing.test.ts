@@ -305,13 +305,15 @@ describe('linear code and time at depth 40', () => {
 
 describe('the limit of operations', () => {
   test('a decline of a node reached on many paths has no value text', () => {
-    // `Map` is outside the profile; the text of its 40-level DAG callback
-    // would write 2^40 nodes.
+    // `Map` over two lists is outside the profile; the text of its 40-level
+    // DAG callback would write 2^40 nodes.
     const ce = engine();
     const t = ce.symbol('t');
     let body: Expression = t;
     for (let k = 0; k < 40; k++) body = F(ce, 'Arctan2', body, body);
-    const e = F(ce, 'Map', F(ce, 'Function', body, t), F(ce, 'List', ce.number(-1), ce.number(2)));
+    const s = ce.symbol('s');
+    const list = F(ce, 'List', ce.number(-1), ce.number(2));
+    const e = F(ce, 'Map', F(ce, 'Function', F(ce, 'Add', body, s), t, s), list, list);
     const [outcome, ms] = timed(() => {
       try {
         compile(e, PROFILE);
@@ -324,7 +326,8 @@ describe('the limit of operations', () => {
     expect(outcome?.diagnostic).toMatchObject({ code: 'outside-profile', operator: 'Map' });
     expect(outcome?.diagnostic?.value).toBeUndefined();
     // A small node keeps its text.
-    const small = F(ce, 'Map', F(ce, 'Function', F(ce, 'Sin', t), t), F(ce, 'List', ce.One));
+    const one = F(ce, 'List', ce.One);
+    const small = F(ce, 'Map', F(ce, 'Function', F(ce, 'Add', t, s), t, s), one, one);
     expect(() => compile(small, PROFILE)).toThrow(
       expect.objectContaining({ diagnostic: expect.objectContaining({ value: expect.any(String) }) })
     );

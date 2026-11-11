@@ -341,12 +341,21 @@ export function makeEngine(angularUnit: 'rad' | 'deg' = 'rad'): ComputeEngine {
  * `vu` and `vz`), `vr` reads the host, `hp` is a function of the host
  * declared pure, `hd` one declared pure whose name the engine also defines
  * as a pure function, `hq` one that is not, `hm` one that sets `x` of the
- * vars object of the call (`HOST_VARS`), and `ho` an `operators` entry.
+ * vars object of the call (`HOST_VARS`), and `ho` an `operators` entry;
+ * `Tanh` and `Max` map library operators, which a function operand reads.
  * Each read and call is logged in `HOST_LOG` (`hostCalls()`), and so is
  * each draw (`withStubbedRandom()`), so the log gives their order.
  */
 const HOST_OPTIONS = {
-  vars: { vu: '_["vu_"]', vz: '_.vz_', vr: '__fuzzRead()' },
+  vars: {
+    vu: '_["vu_"]',
+    vz: '_.vz_',
+    vr: '__fuzzRead()',
+    // Library operators as function operands (`Map(Tanh, L)`,
+    // `Reduce(L, Max, x)`): the existing emitter calls these sources.
+    Tanh: '((t) => t + 1)',
+    Max: '((a, b) => a - b)',
+  },
   functions: {
     hp: { source: '__fuzzPure', pure: true },
     hd: { source: '__fuzzDefined', pure: true },
@@ -1214,6 +1223,7 @@ function genReal(ctx: GenContext, depth: number): Json {
  */
 function genCollectionReal(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
+  if (rng() < 0.45) return genFunctionOfListsReal(ctx, depth);
   const r = rng();
   const collection = (): Json =>
     rng() < 0.75 ? genList(ctx, depth) : genTuple(ctx, depth);
@@ -1244,6 +1254,7 @@ function genList(ctx: GenContext, depth: number): Json {
     if (ctx.lists.length > 0 && rng() < 0.7) return pick(rng, ctx.lists);
     return ['List', ...Array.from({ length: intBetween(rng, 0, 3) }, sub)];
   }
+  if (rng() < 0.35) return genFunctionOfListsList(ctx, depth);
   const r = rng();
   const list = () => genList(ctx, d);
   if (r < 0.15)
@@ -1282,6 +1293,155 @@ function genList(ctx: GenContext, depth: number): Json {
         ? pick(rng, ctx.integers)
         : pick(rng, [0, 1, 3, 5]),
   ];
+}
+
+/** The counts of `Take` and `Drop`: in and out of the range of a short
+ *  list, negative, zero. */
+const COUNTS: readonly Json[] = [0, 1, 2, -1, -2, 5, -5];
+
+/**
+ * A function literal of the parameters `names` whose body is a real that
+ * reads them (`genReal()` with the parameters as symbols), or a condition
+ * with `predicate`. The names are new at each depth (`e0`, `a0`, `e1`, …),
+ * so that a nested literal does not reuse the name of an outer one.
+ */
+function genLambda(
+  ctx: GenContext,
+  depth: number,
+  names: readonly string[],
+  predicate = false
+): Json {
+  const inner: GenContext = {
+    ...ctx,
+    symbols: [...ctx.symbols, ...names.map((n): [Json, number] => [n, 30])],
+  };
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  return [
+    'Function',
+    predicate ? genCondition(inner, d) : genReal(inner, d),
+    ...names,
+  ];
+}
+
+/** A function operand of `Map`: a function literal of one parameter, a
+ *  library operator, or a helper of one real parameter (`HELPERS`). */
+function genMapFunction(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  if (rng() < 0.1) return pick(rng, ['fd', 'fi']);
+  if (rng() < 0.35)
+    return pick(rng, [
+      'Sin', 'Cos', 'Exp', 'Sqrt', 'Abs', 'Negate', 'Floor', 'Ln', 'Tanh',
+      'Arctan', 'Sign', 'Erf', 'Gamma', 'Tan', 'Ceil', 'Round',
+      'Factorial', 'Truncate', 'Coth', 'Arccot', 'Arcsch', 'Fract',
+    ]);
+  return genLambda(ctx, depth, [`e${depth}`]);
+}
+
+/** The function operand of `Reduce` and `Scan`: an operator, or a function
+ *  literal of the accumulator and the element. */
+function genFoldFunction(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  if (rng() < 0.5)
+    return pick(rng, ['Add', 'Add', 'Multiply', 'Max', 'Min', 'Subtract']);
+  return genLambda(ctx, depth, [`a${depth}`, `e${depth}`]);
+}
+
+/**
+ * A real computed by a function of lists or with a function operand (slices
+ * 2 and 3 of the collections note): `Norm`, `Mean`, `Median`, `Variance`,
+ * `Dot`, `First`, `Last`, `Count` of a list or a tuple; `Reduce` by an
+ * operator or a function literal, with and without an initial value;
+ * `Count` with a predicate; `At` of a `Map`, a `Filter` or a `Scan`;
+ * `Apply` of a function literal.
+ */
+function genFunctionOfListsReal(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const list = () => genList(ctx, d);
+  const collection = (): Json => (rng() < 0.75 ? list() : genTuple(ctx, d));
+  const r = rng();
+  if (r < 0.2)
+    return [
+      pick(rng, ['Norm', 'Mean', 'Median', 'Variance', 'First', 'Last', 'Count']),
+      collection(),
+    ];
+  if (r < 0.28) {
+    if (rng() < 0.5) {
+      const l = list();
+      return ['Dot', l, rng() < 0.5 ? l : ['Reverse', l]];
+    }
+    if (rng() < 0.4) {
+      // Tuples of four to six reals: the existing compiler writes the sum
+      // of the products below five elements and `_SYS.matmul` from five on.
+      const n = intBetween(rng, 4, 6);
+      const tuple = (): Json => [
+        'Tuple',
+        ...Array.from({ length: n }, () =>
+          rng() < 0.3 ? pick(rng, [0, -0, -1]) : genReal(ctx, d)
+        ),
+      ];
+      return ['Dot', tuple(), tuple()];
+    }
+    return ['Dot', genTuple(ctx, d), genTuple(ctx, d)];
+  }
+  if (r < 0.5) {
+    const op: Json[] = ['Reduce', list(), genFoldFunction(ctx, depth)];
+    if (rng() < 0.6) op.push(genReal(ctx, d));
+    return op;
+  }
+  if (r < 0.62)
+    return ['Count', list(), genLambda(ctx, depth, [`e${depth}`], true)];
+  if (r < 0.88) return ['At', genFunctionOfListsList(ctx, depth), genIndex(ctx)];
+  const n = intBetween(rng, 1, 2);
+  return [
+    'Apply',
+    genLambda(
+      ctx,
+      depth,
+      Array.from({ length: n }, (_, i) => `e${depth}${i === 0 ? '' : 'b'}`)
+    ),
+    ...Array.from({ length: n }, () => genReal(ctx, d)),
+  ];
+}
+
+/**
+ * A list computed by a function of lists or with a function operand:
+ * `Take`, `Drop` (counts of `COUNTS` or an integer input), `Rest`,
+ * `Reverse`, `Sort`, `Join`, `Range` (small literal or clamped bounds),
+ * `Map` of a function literal or an operator, `Filter`, `Scan`.
+ */
+function genFunctionOfListsList(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const list = () => genList(ctx, d);
+  const r = rng();
+  if (r < 0.15)
+    return [
+      pick(rng, ['Take', 'Drop']),
+      list(),
+      ctx.integers.length > 0 && rng() < 0.3
+        ? pick(rng, ctx.integers)
+        : pick(rng, COUNTS),
+    ];
+  if (r < 0.25) return [pick(rng, ['Rest', 'Reverse', 'Sort']), list()];
+  if (r < 0.32) return ['Join', list(), list()];
+  if (r < 0.4)
+    return rng() < 0.3
+      ? ['Range', intBetween(rng, -1, 4)]
+      : [
+          'Range',
+          pick(rng, [1, 1, 0, 3, -2]),
+          rng() < 0.6 || ctx.integers.length === 0
+            ? intBetween(rng, -1, 4)
+            : ['Min', pick(rng, ctx.integers), 4],
+        ];
+  if (r < 0.7)
+    return ['Map', genMapFunction(ctx, depth), rng() < 0.85 ? list() : genTuple(ctx, d)];
+  if (r < 0.85)
+    return ['Filter', list(), genLambda(ctx, depth, [`e${depth}`], true)];
+  const op: Json[] = ['Scan', list(), genFoldFunction(ctx, depth)];
+  if (rng() < 0.5) op.push(genReal(ctx, d));
+  return op;
 }
 
 /** A tuple of two reals: a tuple name, a tuple literal, or a call of the

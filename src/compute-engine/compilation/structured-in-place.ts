@@ -12,6 +12,7 @@
 import {
   exitsOf,
   isClosedRegion,
+  isListType,
   regionsOf,
   type IROperation,
   type IRProgram,
@@ -173,7 +174,8 @@ function order(
  * 1. X is unique: its array is made by this invocation of the body, and at
  *    the definition of X no other value of the program holds it. These
  *    values are unique: the result of a `build`, of a `list`, of a `tuple`,
- *    of a `replace-at` and of an `append`; the
+ *    of a `replace-at`, of an `append` and of a function of lists with a
+ *    list result (`collection`, which copies or joins its operands); the
  *    result of a call of a function whose body yields a unique value; the
  *    result `i` of an `if` when the value `i` that each open branch yields
  *    is consumable by the yield of that branch (a closed branch yields
@@ -194,7 +196,8 @@ function order(
  * 3. C uses X once, and every other use of X either is in the other branch
  *    of an `if` that holds C (it does not run when C runs), or runs before
  *    C and is an `at`, a `get` or a `length`, whose result is a number and
- *    holds no array, or does not run when C runs because of an `exit`
+ *    holds no array, or a function of lists, whose result is a number or a
+ *    new array, or does not run when C runs because of an `exit`
  *    (below).
  *
  * An operand of an `exit` (`IRExit`) is a use, as an operand of the yield
@@ -280,6 +283,11 @@ function analyzeInPlace(program: IRProgram): {
         case 'replace-at':
         case 'append':
           return true;
+        // Each function of lists with a list result makes a new array: a
+        // copy (`take`, `drop`, `reverse`, `sort`) or the elements of its
+        // operands (`join`); none gives the array of an operand.
+        case 'collection':
+          return isListType(op.result.type);
         case 'call':
           return yieldsUnique[op.function] === true;
         // A conversion of a list that keeps its representation (a list of
@@ -378,7 +386,8 @@ function analyzeInPlace(program: IRProgram): {
           (when === 'before' &&
             (use.op.kind === 'at' ||
               use.op.kind === 'get' ||
-              use.op.kind === 'length')) ||
+              use.op.kind === 'length' ||
+              use.op.kind === 'collection')) ||
           // An `exit` and a use that the body of its loop holds after it.
           (when === 'before' &&
             use.op.kind === 'exit' &&

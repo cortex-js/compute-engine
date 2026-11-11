@@ -462,8 +462,10 @@ export type IRAppend = OperationBase & {
  *   (`Range(1, 0)` has the elements 1 and 0). With `ascending`, the steps
  *   are always 1 and there is no element when `to` is less than `from`: the
  *   build over the elements of a list, from 1 to its length, makes the
- *   empty list for an empty list. The result is the list of the
- *   elements in that order; it is a list of integers only when the body
+ *   empty list for an empty list. A build of more than 2^32 - 1 elements
+ *   has no value: compiled code throws before the first element, as the
+ *   existing emitter does. The result is the list of the elements in that
+ *   order; it is a list of integers only when the body
  *   yields an integer. A `build` does not count passes of the iteration
  *   budget: the interpreter and the existing compiler count the passes of
  *   a `Loop`, not the elements of a `Comprehension`
@@ -489,6 +491,67 @@ export type IRBuild = OperationBase & {
 
 export type IRReplaceAt = OperationBase & {
   readonly kind: 'replace-at';
+};
+
+/**
+ * The functions of lists that the representation names, by an identifier
+ * that names no target (`IRCollection`). A list operand is a list of reals
+ * or of integers; where a tuple is allowed, it is a tuple of reals or of
+ * integers. Each is `pure`, and each result is a number or a new list: no
+ * result is, or holds, the array of an operand.
+ *
+ * - `norm`: one list or tuple; the Euclidean norm, a real (`0` for an empty
+ *   list, `+∞` when an element is infinite, also beside a `NaN`).
+ * - `mean`, `median`, `variance`: one list or tuple; the arithmetic mean,
+ *   the median and the sample variance of the elements, a real (not a
+ *   number for an empty list, and the variance of one element).
+ * - `dot`: two lists; the sum of the products of the elements at each
+ *   position, a real (`0` for two empty lists, not a number for lists of
+ *   different lengths).
+ * - `take`, `drop`: a list and an integer count `n`. `take` gives the first
+ *   `n` elements, or the last `-n` for a negative `n`; `drop` gives the list
+ *   without them. A count beyond the length takes, or drops, every element.
+ *   A count that is not a number has no value: the interpreter keeps the
+ *   expression unevaluated, and the result is the absent value of the
+ *   target (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+ * - `reverse`: one list, its elements in the other order.
+ * - `sort`: one list, its elements in ascending order, a `NaN` after every
+ *   number.
+ * - `join`: two or more lists, their elements in order.
+ * - `range`: two integers `a` and `b`, the list of the integers from `a`
+ *   to `b`, in steps of 1, or of -1 when `b < a`, as the interpreter's
+ *   `Range(a, b)` (`Range(1, 0)` is `[1, 0]`); its first element is `a`
+ *   itself (`-0` for `a = -0`). A range of more than 2^32 - 1 elements has
+ *   no value: compiled code throws, as the existing emitter does.
+ *
+ * A list result has the elements of its operands: it is a list of integers
+ * only when every list operand is one.
+ */
+export type CollectionFunctionName =
+  | 'norm'
+  | 'mean'
+  | 'median'
+  | 'variance'
+  | 'dot'
+  | 'take'
+  | 'drop'
+  | 'reverse'
+  | 'sort'
+  | 'join'
+  | 'range';
+
+/**
+ * An application of a function of lists that `fn` names
+ * (`CollectionFunctionName`). One operation kind serves every such
+ * function, as `unary` serves the functions of one number: the core checks
+ * the types of the operands and of the result by the rule of the
+ * identifier, the policy of a target says which identifiers it has, and the
+ * emitter of the target writes each one (a runtime helper of the target).
+ * `pure`.
+ */
+export type IRCollection = OperationBase & {
+  readonly kind: 'collection';
+  readonly fn: CollectionFunctionName;
 };
 
 /**
@@ -755,6 +818,7 @@ export type IROperation =
   | IRAppend
   | IRBuild
   | IRReplaceAt
+  | IRCollection
   | IRConvert
   | IRIf
   | IRLoop

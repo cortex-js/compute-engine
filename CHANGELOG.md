@@ -119,6 +119,14 @@
   element (`L + 1`, `2·L`, `x/L`; two lists only when their lengths are
   equal by construction), a comprehension with a pure guard
   (`[k for k in 1..64 if B[k] == p]`, with literal or `Length` bounds),
+  the functions of lists `Norm`, `Mean`, `Median`, `Variance`, `Dot`,
+  `Take`, `Drop`, `Rest`, `Reverse`, `Sort`, `Join`, `First`, `Last`,
+  `Count` and `Range(a, b)` as a value, `Map`, `Filter` and `Count` with a
+  function literal (`Map((t) ↦ t·x + 1, L)`, `Count(L, (t) ↦ t < x)`),
+  `Map` of a library operator (`Map(Sin, L)`), `Reduce` and `Scan` by
+  `Add`, `Multiply`, `Max`, `Min` or a function literal of two parameters,
+  and `Apply` of a function literal; the body of a function literal is
+  written inline and runs once per element, in order, and must be pure,
   and random draws: `Random()`, `Random` of a literal `Interval` or
   `Range`, `WithRandomSeed`, and calls of user functions whose body draws.
   The code draws the numbers of the ordinary compiler, in the same order

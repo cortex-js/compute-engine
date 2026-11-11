@@ -311,7 +311,7 @@ and the tests are
 | `Sum`, `Product` of a tuple | `(0 + P[0] + P[1])`, `(1 * P[0] * P[1])` | One `add` (`multiply`) of `0` (`1`) and the `get` of each position: the same operations in the same order |
 | `Max`, `Min` of one list or tuple | `_l.length === 0 ? NaN : _l.reduce(Math.max, -Infinity)`, `Min` from `Infinity` | An `if` on the length `0`, `NaN`, else an ascending `loop` of `max` from `-Infinity` (`min` from `Infinity`): `Math.max` of two operands in the order of `reduce` |
 | `Max(L, x)`, `Min(L, x)` | A loop with no test of an empty list | Declined |
-| `Product` of a list literal | Canonical form `Reduce(L, Multiply, 1)` | Declined (`Reduce`) |
+| `Product` of a list literal | Canonical form `Reduce(L, Multiply, 1)` | Admitted as a `Reduce` since slices 2 and 3 (next section); with a product element, declined as above |
 | `L + 1`, `L · x`, `-L`, `x/L` | `_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), L, 1)`, the operands evaluated once before the closure, the closure applied element by element; `2L + 1` one fused closure; `L/3` is `Multiply(1/3, L)`, the double `0.3333333333333333` times each element | An ascending `build` over the length of the first list operand, with the scalar operands evaluated once before it and the scalar operation of the head applied to the elements: the same doubles in the same order |
 | Two list operands | `_SYS.bcast` gives the scalar `NaN` when the lengths differ | Admitted when the lengths are equal by construction (`lengthKey()`: the same name, list literals of one length, an element-wise result or a `ReplaceAt` of such a list); otherwise declined |
 | `[x, 1] + [1, 2]` | `[(x + 1), (1 + 2)]` | An element-wise `build` over two list literals of one length: the same doubles |
@@ -319,6 +319,36 @@ and the tests are
 | A tuple operand of arithmetic | `[(_.P[0] + 1), (_.P[1] + 2)]` | Declined (a later slice) |
 | `Comprehension(body, Element(k, Range(a, b), guard))` | `const result = []`; `_SYS.rangeCount(a, b, step)` with the step `(b >= a ? 1 : -1)`, a `RangeError` when the count is over 2^32 − 1; a loop with `if (guard) { result.push(body); }` | A `loop` that carries the list, from the `list` of no element, whose body is an `if` of the guard: an `append` of the body (`(acc.push(v), acc)` when the list is not read elsewhere, else `[...acc, v]`) or the list. A guard or body that is not pure, and a bound that is not an integer literal of at most 2^31 − 1 in magnitude or a `Length` (the route has no test of the count): declined |
 | A list result | The array that the code made, or the input array itself (`If(c, L, [1, 2])` returns `_.L`) | The same: results are read-only, so the alias is allowed |
+
+### Functions of lists and function operands
+
+Read from the handlers of `javascript-target.ts` at `950f70f96`
+(2026-11-11), with `cse: false, constantFold: false`, by probes in both
+modes; the design is slices 2 and 3 of
+[2026-11-11-structured-collections-and-lambdas.md](2026-11-11-structured-collections-and-lambdas.md)
+and the tests are
+`test/compute-engine/compile-javascript-structured-collections2.test.ts`.
+Each function of lists is one `collection` operation, written as the
+existing code; each function operand is a region of the existing
+operations, with no function value.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `Norm(L)`, `Mean(L)`, `Median(L)`, `Variance(L)` | `_SYS.norm(L)`, `_SYS.mean(L)`, `_SYS.median(L)`, `_SYS.variance(L)`; in the `complex` mode of a local `_SYS.norm(_SYS.cplx(R))`, `_SYS.cmean`, `_SYS.cvariance` | A `collection` operation written as the same call; of a local in the `complex` mode, declined |
+| `Dot(L, M)` of two lists | `_SYS.matmul(L, M)` (`NaN` for lists of different lengths); of two lists whose width the type states (list literals, a helper result of the type `list<real^2>`), `(a[0] * b[0] + a[1] * b[1])` (`compileStaticInnerProduct()`); on the complex lane `_SYS.complexMatmul` | `_SYS.matmul`; a list of a stated width and the complex lane declined (`refuseUnsettledCollection()`: the sum differs in the sign of a zero, `0` against `-0` for `Dot(fy(x), Reverse(fy(x)))` at `x = -0`) |
+| `Dot(P, Q)` of two tuples | `(_.P[0] * _.Q[0] + _.P[1] * _.Q[1])` | `get`, `multiply` and one `add`, the same operations in the same order |
+| `Take(L, n)`, `Drop(L, n)` | A literal count `(L).slice(0, 2)`, `(L).slice(-2)`, `(L).slice(2)`; another count `((_a, _n) => Number.isNaN(_n) ? undefined : _n < 0 ? _a.slice(_n) : _a.slice(0, _n))(L, Math.round(n))` | The same text; a count with a real fact declined (the existing emitter rounds it, the interpreter does not) |
+| `Rest(L)`, `Reverse(L)`, `Sort(L)`, `Join(L, M)` | `(L).slice(1)`, `(L).slice().reverse()`, `(L).slice().sort((_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0))`, `[...(L), ...(M)]` | The same text, a new array (unique for `inPlaceUpdates()`); of a tuple declined (the existing emitter writes an array where the interpreter keeps a tuple) |
+| `First(L)`, `Last(L)`, `Count(L)` | `(L[0] ?? NaN)`, `_SYS.at(L, -1)`, `(L).length` | `at` of `1` and `-1` (`_SYS.atNumeric`, `NaN` for an empty list), `length` |
+| `Range(a, b)` as a value | `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))(a, b)`, a literal range written as an array literal (`[2, 3, 4, 5]`); `materializeRange()` throws `RangeError('Invalid array length')` for more than 2^32 − 1 elements and stores the lower bound itself as element 0 (`-0` for `-0`). `Map`, `Filter` and `Reduce` over a `Range` walk it with the same count test (`RangeError('Range: the element count exceeds the array limit')`) | A `collection` operation `range` written as the same call, also for a literal range and as the operand of `Map`, `Filter`, `Reduce`: the same elements, and a `RangeError` at the same counts |
+| `Comprehension(body, Element(k, Range(a, b)))` (slice 1), the count | `if (count > 4294967295) throw new RangeError('Invalid array length')` before the loop | The same test before the loop of a non-ascending `build` (since slices 2 and 3; the route pushed until the array could not grow). The index of the first element is `a + 0`, `0` for `a = -0`, on both |
+| `Map(f, L)` with a lambda | `((_f) => (L).map((_x) => _f(_x)))(((t = NaN) => body))`; `Sum(Map(f, L))` fused into one `reduce` | An ascending `build` whose body is the body of the lambda, its parameter bound to the element (`at`): the body once per element, in index order |
+| `Map(Sin, L)` | With a `vars`, `functions` or `operators` entry for `Sin`, the source of the entry. Otherwise `_fn_Sin = (_tv1) => Math.sin(_tv1)` in the `strict` mode; in the `complex` mode `_SYS.cplx(_SYS.csin(_SYS.cplx(_tv1)))`, except `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Haversine` | A `build` of the scalar operation (`MAPPED_OPERATORS`); in the `complex` mode only `Floor`; an operator that an option of the host maps declined; a result of a type of numbers that are not real (`Map(Ln, L)`, `list<complex \| signed_infinity>`) declined: the existing compiler reads it on the complex lane |
+| `Filter(L, p)`, `Count(L, p)` | `(L).filter((_x) => _f(_x))`, `.filter(…).length` | A `loop` that carries the list from `[]` with a `conditional` and an `append` (in place), or the count from `0` |
+| `Reduce(L, op)`, `Reduce(L, op, init)` | `((_l) => _l.length === 0 ? NaN : _l.reduce((_a, _b) => _a + _b))(L)`, `(L).reduce((_a, _b) => _a * _b, 1)`, `Math.max(_a, _b)`; with a lambda and init `(L).reduce(((_f) => (_a, _b) => _f(_a, _b))(…), init)`; a lambda with no init throws | An `if` on the length `0` (`NaN`), then a `loop` from the first element over the elements from 2; with init, a `loop` from it; a lambda with no init declined |
+| `Scan(L, op)`, `Scan(L, op, init)` | `_l.map((_x, _i) => (_a = _i === 0 ? _x : _f(_a, _x)))`, `_l.map((_x) => (_a = _f(_a, _x)))`; in the `complex` mode of a list literal with a `NaN` element type, the complex sum | A `loop` that carries the accumulator and the list; with no init an `if` on the length `0` (`[]`); in the `complex` mode an operand other than a name whose element type is not `real` declined |
+| `Apply((t) ↦ body, a)` | `(((t) => t + 1))(_.x)`, complex-lifted in the `complex` mode | The body with its parameters bound to the values of the arguments, evaluated before it; in the `complex` mode declined |
+| A body that draws, calls or reads the host, or holds a `Loop` | Called once per element, when the existing code runs `map` | Declined (`refuseLazyFunctionOperands()`): the interpreter's `Map`, `Filter` and `Scan` compute an element when it is read |
 
 ## What step 1 implements from this list
 

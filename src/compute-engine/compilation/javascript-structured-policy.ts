@@ -140,6 +140,31 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // read at its position, as the existing emitter writes a `functions`
     // or `operators` entry and a `vars` source: a number.
     'host': { results: ['number'], operands: ['number'] },
+    // A runtime helper of arrays, or a method of the array, as the existing
+    // emitter writes the head (`collections`, below).
+    'collection': {
+      results: ['number', 'array'],
+      operands: ['array', 'number'],
+    },
+  },
+  // The emitter writes each function of lists as the existing emitter writes
+  // its head for an array of numbers (`Norm`, `Mean`, `Dot`, `Take`, …, in
+  // `javascript-target.ts`): `_SYS.norm(L)`, `_SYS.mean(L)`,
+  // `_SYS.median(L)`, `_SYS.variance(L)`, `_SYS.matmul(L, M)`, `L.slice(…)`,
+  // `L.slice().reverse()`, `L.slice().sort(…)` and `[...L, ...M]`. Each
+  // list result is a new array.
+  collections: {
+    norm: { results: ['number'], operands: ['array'] },
+    mean: { results: ['number'], operands: ['array'] },
+    median: { results: ['number'], operands: ['array'] },
+    variance: { results: ['number'], operands: ['array'] },
+    dot: { results: ['number'], operands: ['array'] },
+    take: { results: ['array'], operands: ['array', 'number'] },
+    drop: { results: ['array'], operands: ['array', 'number'] },
+    reverse: { results: ['array'], operands: ['array'] },
+    sort: { results: ['array'], operands: ['array'] },
+    join: { results: ['array'], operands: ['array'] },
+    range: { results: ['array'], operands: ['number'] },
   },
   // The emitter writes each function as the existing emitter writes it for
   // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):

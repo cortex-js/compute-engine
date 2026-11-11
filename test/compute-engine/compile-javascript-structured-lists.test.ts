@@ -542,9 +542,11 @@ describe('refusals', () => {
     ['a list of booleans', body([typed('L', 'list<boolean>'), I], 'i'), /the parameter L has the type list<boolean>/],
     ['vector, a list of numbers', body([typed('L', 'vector'), I], 'i'), /the parameter L has the type vector/],
     ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], 'i'), /the parameter L of the function has the type indexed_collection<real>, which is not in the structured route/],
-    ['First', body([L], ['First', 'L']), /First is not in the structured route, which reads a list with At and Length/],
-    ['Last', body([L], ['Last', 'L']), /Last is not in the structured route/],
-    ['Rest', body([L], ['At', ['Rest', 'L'], 1]), /Rest makes a list, which the structured route does not have/],
+    // `First`, `Last`, `Rest` and the other functions of lists are in the
+    // route since slice 2 (compile-javascript-structured-collections2.test.ts).
+    ['Take with a real count', body([L, typed('x', 'real')], ['At', ['Take', 'L', 'x'], 1]), /Take with x of the type `real` is not in the structured route, which reads an integer there/],
+    ['Norm with an order', body([L], ['Norm', 'L', 1]), /Norm with 2 operands is not in the structured route/],
+    ['Range with a step', body([L, I], ['At', ['Range', 1, 'i', 2], 1]), /Range with 3 operands is not in the structured route/],
     // The structured route admits `Comprehension` over one range and
     // `ReplaceAt` (compile-javascript-structured-heat.test.ts; design:
     // docs/plans/2026-11-10-structured-ir-loops-and-lists.md); these forms

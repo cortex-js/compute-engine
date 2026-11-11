@@ -1,6 +1,7 @@
 import {
   DEFAULT_OPTIONS,
   formatValue,
+  generateProgram,
   runFuzz,
   type Finding,
   type FuzzResult,
@@ -78,6 +79,32 @@ test('the generator gives programs that both compilers compile', () => {
   expect(result.programs).toBe(450);
   expect(result.classes['both compile']).toBeGreaterThan(300);
   expect(result.points.inType).toBeGreaterThan(30_000);
+});
+
+test('the generator writes the functions of lists and the function operands', () => {
+  // Slices 2 and 3 of docs/plans/2026-11-11-structured-collections-and-lambdas.md.
+  const heads = new Set<string>();
+  const visit = (json: unknown): void => {
+    if (!Array.isArray(json)) return;
+    if (typeof json[0] === 'string') {
+      heads.add(json[0]);
+      // A function operand that is a function literal of two parameters,
+      // or a library operator.
+      if ((json[0] === 'Reduce' || json[0] === 'Scan') && Array.isArray(json[2]) && json[2].length === 4)
+        heads.add(`${json[0]} of a lambda of two parameters`);
+      if (json[0] === 'Map' && typeof json[1] === 'string') heads.add('Map of an operator');
+    }
+    json.forEach(visit);
+  };
+  for (let i = 0; i < 2000; i++)
+    visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: DEFAULT_OPTIONS.size }).json);
+  for (const head of [
+    'Norm', 'Mean', 'Median', 'Variance', 'Dot', 'Take', 'Drop', 'Rest', 'Reverse', 'Sort',
+    'Join', 'First', 'Last', 'Range', 'Map', 'Map of an operator', 'Filter', 'Count',
+    'Reduce', 'Scan', 'Reduce of a lambda of two parameters', 'Scan of a lambda of two parameters',
+    'Apply',
+  ])
+    expect([head, heads.has(head)]).toEqual([head, true]);
 });
 
 test('no difference between the two compilers and no failure of the profile, but the known ones', () => {

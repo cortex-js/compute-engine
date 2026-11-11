@@ -1059,4 +1059,85 @@ describe('the verifier: lists and tuples', () => {
       }) as IROperation)
     ).toThrow(/the operation add has a list operand or a list result/);
   });
+
+  // Slice 2: the functions of lists (`collection`).
+  const L: [string, string] = ['L', 'list<real>'];
+  const N: [string, string] = ['n', 'integer'];
+  test.each([
+    [
+      'a norm with a list result',
+      fn(['Norm', 'L'], L),
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType('real'), representation: 'array' } }),
+      /the function of lists norm has a result of the type list<real>, not real/,
+    ],
+    [
+      'a take of a real count',
+      fn(['Take', 'L', 'n'], L, N),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: 'real' }] }),
+      /the count of the function of lists take has the type real|is used with another type/,
+    ],
+    [
+      'a take whose result is a list of integers of a list of reals',
+      fn(['Take', 'L', 'n'], L, N),
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType('integer') } }),
+      /the function of lists take has a result of the type list<integer>, not list<real>/,
+    ],
+    [
+      'a dot of one operand',
+      fn(['Dot', 'L', 'L'], L),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0]] }),
+      /the function of lists dot has 1 operands/,
+    ],
+    [
+      'a sort that is not pure',
+      fn(['Sort', 'L'], L),
+      (op: IROperation) => ({ ...op, effect: 'unknown' }),
+      /the function of lists sort is not pure|does not agree with its operations/,
+    ],
+    [
+      'an unknown function of lists',
+      fn(['Reverse', 'L'], L),
+      (op: IROperation) => ({ ...op, fn: 'transpose' }),
+      /the target has no function of lists transpose/,
+    ],
+    [
+      'a range with a real bound',
+      fn(['Range', 1, 'n'], N),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: 'real' }] }),
+      /the bounds of the function of lists range are not integers|is used with another type/,
+    ],
+    [
+      'a join of a tuple',
+      fn(['Join', 'L', 'L'], L),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: tupleType(['real', 'real']) }] }),
+      /reads lists, not a tuple|is used with another type/,
+    ],
+  ] as [string, MathJsonExpression, (op: IROperation) => IROperation, RegExp][])(
+    '%s',
+    (_name, json, change, message) => {
+      expect(changed(json, 'collection', change)).toThrow(message);
+    }
+  );
+
+  test('a target with no functions of lists refuses one', () => {
+    const preparation = prepare(fn(['Mean', 'L'], L));
+    const program = lowerStructuredFragment(preparation);
+    const policy: RepresentationPolicy = { ...JAVASCRIPT_POLICY, collections: undefined };
+    expect(() => verifyCore(program, preparedNodesOf(preparation), policy)).toThrow(
+      /the target has no function of lists mean/
+    );
+  });
+
+  // Slice 3: a function operand is lowered to a region of the existing
+  // operations; no function value is in the program.
+  test('Map of a lambda is a build whose body has the lambda inline', () => {
+    const program = lowerStructuredFragment(
+      prepare(fn(['Map', ['Function', ['Multiply', 't', 'x'], 't'], 'L'], L, X))
+    );
+    const build = program.root.operations.find((op) => op.kind === 'build');
+    expect(build).toBeDefined();
+    const kinds = build!.kind === 'build' ? build!.body.operations.map((op) => op.kind) : [];
+    expect(kinds).toEqual(['at', 'input', 'multiply', 'yield']);
+    expect(program.functions).toEqual([]);
+  });
 });

@@ -130,13 +130,16 @@ import {
   type IRRegion,
   type IRState,
   type IRValue,
+  type CollectionFunctionName,
   type ScalarKind,
+  type TupleType,
   type ValueType,
   type BinaryFunctionName,
   type UnaryFunctionName,
 } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
+import { isLibraryOperator } from './builtin-callback.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { UNROLL_LIMIT } from './javascript-target.js';
 
@@ -424,6 +427,159 @@ const FUNCTIONS: Readonly<
   Fract: { kind: 'unary', fn: 'fract' },
   Hypot: { kind: 'binary', fn: 'hypot' },
 };
+
+/** The heads of the functions of lists of the structured route
+ *  (`collectionRule()`), each with the operation of the lowering. */
+export const COLLECTION_HEADS: Readonly<
+  Record<string, CollectionFunctionName | 'at' | 'length'>
+> = {
+  Norm: 'norm',
+  Mean: 'mean',
+  Median: 'median',
+  Variance: 'variance',
+  Dot: 'dot',
+  Take: 'take',
+  Drop: 'drop',
+  Rest: 'drop',
+  Reverse: 'reverse',
+  Sort: 'sort',
+  Join: 'join',
+  First: 'at',
+  Last: 'at',
+  Count: 'length',
+  Range: 'range',
+};
+
+/** The heads that take a function operand on the structured route
+ *  (`functionOperandRule()`), with the position of the function and the
+ *  number of its parameters. `Apply` has one parameter per argument. */
+export const FUNCTION_OPERAND_HEADS: Readonly<
+  Record<string, { readonly fn: number; readonly arity?: number }>
+> = {
+  Map: { fn: 0, arity: 1 },
+  Filter: { fn: 1, arity: 1 },
+  Count: { fn: 1, arity: 1 },
+  Reduce: { fn: 1, arity: 2 },
+  Scan: { fn: 1, arity: 2 },
+  Apply: { fn: 0 },
+};
+
+/**
+ * The parameters and the body of the function literal `fn`
+ * (`Function(Block(body), p1, …)`, or `Function(body, p1, …)`), with
+ * `arity` parameters, and a body of one value; `undefined` for another
+ * node. A parameter is a symbol, or `Typed(p, T)` with `T` one of
+ * `integer`, `real` and `number` (the preparation of the existing compiler
+ * types the parameter of a `Map` with the element type of its list):
+ * `type` is then `T`.
+ */
+export function functionOperandParts(
+  fn: Expression,
+  arity: number
+):
+  | {
+      readonly parameters: readonly {
+        readonly symbol: Expression & { symbol: string };
+        readonly type?: 'integer' | 'real' | 'number';
+      }[];
+      readonly body: Expression;
+    }
+  | undefined {
+  if (
+    !isFunction(fn, 'Function') ||
+    !isLibraryOperator(fn, 'Function') ||
+    fn.nops !== arity + 1
+  )
+    return undefined;
+  const parameters: {
+    symbol: Expression & { symbol: string };
+    type?: 'integer' | 'real' | 'number';
+  }[] = [];
+  for (const p of fn.ops.slice(1)) {
+    if (isSymbol(p)) {
+      parameters.push({ symbol: p });
+      continue;
+    }
+    if (!isFunction(p, 'Typed') || p.nops !== 2 || !isSymbol(p.op1))
+      return undefined;
+    const type = isString(p.op2) ? p.op2.string : undefined;
+    const declared =
+      type === "'integer'" || type === 'integer'
+        ? 'integer'
+        : type === "'real'" || type === 'real'
+          ? 'real'
+          : type === "'number'" || type === 'number'
+            ? 'number'
+            : undefined;
+    if (declared === undefined) return undefined;
+    parameters.push({ symbol: p.op1, type: declared });
+  }
+  let body = fn.op1;
+  if (isFunction(body, 'Block') && isLibraryOperator(body, 'Block')) {
+    if (body.nops !== 1) return undefined;
+    body = body.op1;
+  }
+  return { parameters, body };
+}
+
+/**
+ * The library operators that `Map(f, L)` admits as `f` on the structured
+ * route, with the operation of each: the code of the function `_fn_F` that
+ * the existing emitter writes for the operator in the `strict` mode
+ * (`(_tv1) => Math.sin(_tv1)`, `(_tv1) => -_tv1`) is the code of that
+ * operation of a number. `complex: true`: the same code in the `complex`
+ * mode; every other operator is a complex function there
+ * (`_SYS.cplx(_SYS.csin(_SYS.cplx(_tv1)))`), whose elements are `{re, im}`
+ * objects. `trig`: a function of an angle, which the existing emitter
+ * converts for `ce.angularUnit`; admitted in radians only.
+ */
+export const MAPPED_OPERATORS: Readonly<
+  Record<
+    string,
+    {
+      readonly kind: 'unary' | 'negate' | 'floor' | 'sqrt';
+      readonly fn?: UnaryFunctionName;
+      readonly complex?: true;
+      readonly trig?: true;
+    }
+  >
+> = {
+  Sin: { kind: 'unary', fn: 'sin', trig: true },
+  Cos: { kind: 'unary', fn: 'cos', trig: true },
+  Tan: { kind: 'unary', fn: 'tan', trig: true },
+  Sec: { kind: 'unary', fn: 'sec', trig: true },
+  Cot: { kind: 'unary', fn: 'cot', trig: true },
+  Arctan: { kind: 'unary', fn: 'atan', trig: true },
+  Arcsin: { kind: 'unary', fn: 'asin', trig: true },
+  Exp: { kind: 'unary', fn: 'exp' },
+  Ln: { kind: 'unary', fn: 'ln' },
+  Abs: { kind: 'unary', fn: 'abs' },
+  Tanh: { kind: 'unary', fn: 'tanh' },
+  Sinh: { kind: 'unary', fn: 'sinh' },
+  Cosh: { kind: 'unary', fn: 'cosh' },
+  Arsinh: { kind: 'unary', fn: 'asinh' },
+  Sign: { kind: 'unary', fn: 'sign' },
+  Erf: { kind: 'unary', fn: 'erf' },
+  Erfc: { kind: 'unary', fn: 'erfc' },
+  Gamma: { kind: 'unary', fn: 'gamma' },
+  Factorial: { kind: 'unary', fn: 'factorial' },
+  Factorial2: { kind: 'unary', fn: 'factorial2' },
+  Truncate: { kind: 'unary', fn: 'trunc' },
+  Coth: { kind: 'unary', fn: 'coth' },
+  Arccot: { kind: 'unary', fn: 'acot', trig: true },
+  Arcsch: { kind: 'unary', fn: 'acsch' },
+  Sqrt: { kind: 'sqrt' },
+  Negate: { kind: 'negate' },
+  Floor: { kind: 'floor', complex: true },
+};
+
+/** The library operators that `Reduce(L, op)` and `Scan(L, op)` admit as
+ *  `op`, with the operation of each: the combiner of the existing emitter
+ *  (`(_a, _b) => _a + _b`, `Math.max(_a, _b)`; `builtinCombiner()` in
+ *  `javascript-target.ts`). */
+export const FOLD_OPERATORS: Readonly<
+  Record<string, 'add' | 'multiply' | 'max' | 'min'>
+> = { Add: 'add', Multiply: 'multiply', Max: 'max', Min: 'min' };
 
 /** The function of `u` for `Sin`, `Cos` and `Tan` of `Multiply(Pi, u)`
  *  (the form `pi-multiple`). */
@@ -1068,6 +1224,19 @@ class Lowering {
       node.nops === 1
     )
       return this.fold(node, facts, scope, operations, effect);
+
+    // A head with a function operand (`functionOperandRule()` in
+    // `javascript-fragment-target.ts`), and a function of lists
+    // (`collectionRule()`). `Count(L)` is the length.
+    if (
+      Object.hasOwn(FUNCTION_OPERAND_HEADS, operator) &&
+      !(operator === 'Count' && node.nops === 1)
+    )
+      return this.inScope(scope.inner.get(node), () =>
+        this.functionOperand(node, facts, scope, operations)
+      );
+    if (Object.hasOwn(COLLECTION_HEADS, operator))
+      return this.collection(node, facts, scope, operations);
 
     if (operator === 'Which' || (operator === 'If' && node.nops === 2))
       return this.selection(node, facts, scope, operations, effect);
@@ -2029,6 +2198,479 @@ class Lowering {
       origin: node,
     });
     return result;
+  }
+
+  /**
+   * A function of lists, which `collectionRule()` (in
+   * `javascript-fragment-target.ts`) admitted: its operands evaluated once,
+   * in order, then
+   *
+   * - `Norm`, `Mean`, `Median`, `Variance`, `Dot` of two lists, `Take`,
+   *   `Drop`, `Reverse`, `Sort` and `Join`: the `collection` operation of the
+   *   head; `Rest(L)` is `drop` of the count `1`;
+   * - `Dot` of two tuples: one `add` of the products of the elements at each
+   *   position (`get`), in order, or the one product of a tuple of one
+   *   element, as the existing emitter writes `(P[0] * Q[0] + P[1] *
+   *   Q[1])`;
+   * - `First(L)` and `Last(L)`: `at` of the index `1` and `-1`; `Count(L)`:
+   *   `length`;
+   * - `Range(a, b)` (`Range(b)` from 1): a `build` from `a` to `b` whose body
+   *   yields its index, in steps of 1, or of -1 when `b < a`.
+   */
+  private collection(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const operator = node.operator;
+    const operands = this.operands(node, facts, scope, operations);
+    const push = (
+      fn: CollectionFunctionName,
+      values: readonly IRValue[],
+      result: IRValue = this.resultOf(facts)
+    ): IRValue => {
+      operations.push({
+        kind: 'collection',
+        fn,
+        result,
+        operands: values,
+        effect: 'pure',
+        origin: node,
+      });
+      return result;
+    };
+    switch (operator) {
+      case 'Norm':
+      case 'Mean':
+      case 'Median':
+      case 'Variance':
+      case 'Take':
+      case 'Drop':
+      case 'Reverse':
+      case 'Sort':
+      case 'Join': {
+        const fn = COLLECTION_HEADS[operator];
+        if (fn === 'at' || fn === 'length')
+          return fail(`no function of lists for ${operator}`);
+        return push(fn, operands);
+      }
+      case 'Rest':
+        return push('drop', [
+          operands[0],
+          this.numberLiteral(1, 'integer', node, operations),
+        ]);
+      case 'Dot': {
+        const [a, b] = operands;
+        if (!isTupleType(a.type) || !isTupleType(b.type))
+          return push('dot', operands);
+        const elements = a.type.elements;
+        const products = elements.map((element, i) => {
+          const get = (tuple: IRValue, kind: ScalarKind) => {
+            const result = this.newValue(kind, 'number');
+            operations.push({
+              kind: 'get',
+              position: i + 1,
+              result,
+              operands: [tuple],
+              effect: 'pure',
+              origin: node,
+            });
+            return result;
+          };
+          const left = get(a, element);
+          const right = get(b, (b.type as TupleType).elements[i]);
+          const result =
+            elements.length === 1
+              ? this.resultOf(facts)
+              : this.newValue('real', 'number');
+          operations.push({
+            kind: 'multiply',
+            result,
+            operands: [left, right],
+            effect: 'pure',
+            origin: node,
+          });
+          return result;
+        });
+        if (products.length === 1) return products[0];
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'add',
+          result,
+          operands: products,
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      }
+      case 'First':
+      case 'Last':
+        return this.element(
+          operands[0],
+          this.numberLiteral(
+            operator === 'First' ? 1 : -1,
+            'integer',
+            node,
+            operations
+          ),
+          node,
+          operations
+        );
+      case 'Count': {
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'length',
+          result,
+          operands,
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      }
+      case 'Range': {
+        const bounds =
+          operands.length === 1
+            ? [this.numberLiteral(1, 'integer', node, operations), operands[0]]
+            : operands;
+        return push('range', bounds);
+      }
+    }
+    return fail(`no lowering for the function of lists ${nodeText(node)}`);
+  }
+
+  /**
+   * A head with a function operand, which `functionOperandRule()` (in
+   * `javascript-fragment-target.ts`) admitted. The operands that are not
+   * the function are evaluated once, in order, before the elements. The
+   * function is applied where the existing emitter calls it, in the same
+   * order and as many times: a lambda by its body, lowered in the region of
+   * each pass with its parameters bound in the scope of the node (the caller
+   * runs this in `inScope()` of that scope); a library operator by its
+   * operation (`MAPPED_OPERATORS`, `FOLD_OPERATORS`). Each pass over the
+   * elements is from 1 to the length (`ascending`), as `map`, `filter` and
+   * `reduce` of an array visit it:
+   *
+   * - `Map(f, L)`: a `build` whose body yields `f` of the element.
+   * - `Filter(L, p)`: a `loop` that carries the list, from the empty list,
+   *   with an `if` of `p` of the element whose first branch `append`s it.
+   *   `Count(L, p)` carries an integer from `0` and adds `1`.
+   * - `Reduce(L, op)`: an `if` on the length `0`, whose value is `NaN`, else
+   *   a `loop` from 2 that carries the accumulator from the first element:
+   *   `_l.length === 0 ? NaN : _l.reduce(op)`. With `init`, the `loop` from 1
+   *   carries it from `init`. A lambda takes the accumulator and the element.
+   * - `Scan`: the same `loop`, which also carries the list of the
+   *   accumulators and `append`s each new one; with no `init`, the list
+   *   starts with the first element, and an empty list gives the empty list.
+   * - `Apply(f, a1, …)`: the body of `f` with each parameter bound to its
+   *   argument, where the node is.
+   *
+   * The operations that the lowering adds are `pure`; the `build`, the
+   * `loop` and the `if` join the effects of their regions (the rule refused
+   * a body that is not pure).
+   */
+  private functionOperand(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const operator = node.operator;
+    const position = FUNCTION_OPERAND_HEADS[operator];
+    const fn = node.ops[position.fn];
+    const lambda = functionOperandParts(
+      fn,
+      position.arity ?? node.ops.length - 1
+    );
+    const inner = scope.inner.get(node);
+    if (lambda !== undefined && inner === undefined)
+      return fail(`no scope for the function of ${nodeText(node)}`);
+    // The operands that are not the function, with their conversions.
+    const others = node.ops
+      .map((operand, i) => ({ operand, i }))
+      .filter(({ i }) => i !== position.fn);
+    const values = others.map(({ operand }, j) =>
+      this.convert(
+        this.value(operand, scope, operations),
+        facts.conversions?.[j],
+        node,
+        operations
+      )
+    );
+    /** The value of the function at `args`, at the end of `into`, the
+     *  innermost open region. */
+    const apply = (args: readonly IRValue[], into: IROperation[]): IRValue => {
+      if (lambda !== undefined) {
+        this.bound.set(
+          inner!,
+          new Map(lambda.parameters.map((p, i) => [p.symbol.symbol, args[i]]))
+        );
+        this.wrote(inner!);
+        this.changed();
+        return this.value(lambda.body, inner!, into);
+      }
+      const name = isSymbol(fn) ? fn.symbol : '';
+      const fold = Object.hasOwn(FOLD_OPERATORS, name)
+        ? FOLD_OPERATORS[name]
+        : undefined;
+      if (fold !== undefined && args.length === 2) {
+        const integer = args.every((a) => a.type === 'integer');
+        const result = this.newValue(integer ? 'integer' : 'real', 'number');
+        into.push({
+          kind: fold,
+          result,
+          operands: [...args],
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      }
+      const mapped = Object.hasOwn(MAPPED_OPERATORS, name)
+        ? MAPPED_OPERATORS[name]
+        : undefined;
+      if (mapped === undefined || args.length !== 1)
+        return fail(`no operation for the function ${nodeText(fn)}`);
+      const integer =
+        mapped.kind === 'floor' ||
+        ((mapped.kind === 'negate' || mapped.fn === 'abs') &&
+          args[0].type === 'integer');
+      const result = this.newValue(integer ? 'integer' : 'real', 'number');
+      into.push(
+        mapped.kind === 'unary'
+          ? {
+              kind: 'unary',
+              fn: mapped.fn!,
+              result,
+              operands: [...args],
+              effect: 'pure',
+              origin: node,
+            }
+          : {
+              kind: mapped.kind,
+              result,
+              operands: [...args],
+              effect: 'pure',
+              origin: node,
+            }
+      );
+      return result;
+    };
+
+    if (operator === 'Apply') return apply(values, operations);
+
+    const list = values[0];
+    const type = valueType(facts.type);
+    const [one, length] = this.elementRange(list, node, operations);
+    const representationOf = (t: ValueType): ScalarRepresentation =>
+      isListType(t) ? 'array' : 'number';
+    const literal = (
+      value: number,
+      kind: 'real' | 'integer',
+      into: IROperation[]
+    ) =>
+      this.numberLiteral(value, kind, node, into);
+    /** A pass over the elements from the index `from` to the length: a
+     *  `loop` that carries one value per entry of `carried` (its initial
+     *  value and its type), whose body computes the next values from the
+     *  element and the carried values (`step`). */
+    const pass = (
+      from: IRValue,
+      carried: readonly {
+        readonly initial: IRValue;
+        readonly type: ValueType;
+      }[],
+      step: (
+        element: IRValue,
+        current: readonly IRValue[],
+        into: IROperation[]
+      ) => readonly IRValue[],
+      into: IROperation[]
+    ): IRValue[] => {
+      const index = this.newValue('integer', 'number');
+      const parameters = carried.map((c) =>
+        this.newValue(c.type, representationOf(c.type))
+      );
+      const body: IROperation[] = [];
+      const next = this.inRegion(body, () =>
+        step(this.element(list, index, node, body), parameters, body)
+      );
+      const region: IRRegion = {
+        ...this.region(body, node, [...next]),
+        parameters: [index, ...parameters],
+      };
+      const results = carried.map((c) =>
+        this.newValue(c.type, representationOf(c.type))
+      );
+      into.push({
+        kind: 'loop',
+        results,
+        operands: [from, length, ...carried.map((c) => c.initial)],
+        body: region,
+        effect: region.effect,
+        ...touchesField(region.touches),
+        ascending: true,
+        origin: node,
+      });
+      return results;
+    };
+    const append = (to: IRValue, element: IRValue, into: IROperation[]) => {
+      const result = this.newValue(to.type, 'array');
+      into.push({
+        kind: 'append',
+        result,
+        operands: [to, element],
+        effect: 'pure',
+        origin: node,
+      });
+      return result;
+    };
+    const empty = (listOf: ValueType, into: IROperation[]) => {
+      const result = this.newValue(listOf, 'array');
+      into.push({
+        kind: 'list',
+        result,
+        operands: [],
+        effect: 'pure',
+        origin: node,
+      });
+      return result;
+    };
+    /** An `if` on an empty list: the value of `none` for one, else the
+     *  value of `some`. */
+    const unlessEmpty = (
+      none: (into: IROperation[]) => IRValue,
+      some: (into: IROperation[]) => IRValue
+    ): IRValue => {
+      const zero = literal(0, 'integer', operations);
+      const test = this.newValue('boolean', 'boolean');
+      operations.push({
+        kind: 'equal',
+        result: test,
+        operands: [length, zero],
+        effect: 'pure',
+        origin: node,
+      });
+      return this.conditional(test, none, some, node, operations);
+    };
+
+    switch (operator) {
+      case 'Map': {
+        const index = this.newValue('integer', 'number');
+        const body: IROperation[] = [];
+        const element = this.inRegion(body, () =>
+          apply([this.element(list, index, node, body)], body)
+        );
+        const region: IRRegion = {
+          ...this.region(body, node, element),
+          parameters: [index],
+        };
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'build',
+          result,
+          operands: [one, length],
+          body: region,
+          effect: region.effect,
+          ...touchesField(region.touches),
+          ascending: true,
+          origin: node,
+        });
+        return result;
+      }
+      case 'Filter':
+      case 'Count': {
+        const filter = operator === 'Filter';
+        const start = filter
+          ? empty(type, operations)
+          : literal(0, 'integer', operations);
+        const [result] = pass(
+          one,
+          [{ initial: start, type }],
+          (element, [current], into) => [
+            this.conditional(
+              apply([element], into),
+              (inner) => {
+                if (filter) return append(current, element, inner);
+                const sum = this.newValue('integer', 'number');
+                inner.push({
+                  kind: 'add',
+                  result: sum,
+                  operands: [current, literal(1, 'integer', inner)],
+                  effect: 'pure',
+                  origin: node,
+                });
+                return sum;
+              },
+              () => current,
+              node,
+              into
+            ),
+          ],
+          operations
+        );
+        return result;
+      }
+      case 'Reduce':
+      case 'Scan': {
+        const scan = operator === 'Scan';
+        const init = values[1];
+        // The type of the accumulator: the element type of a scan, the type
+        // of a reduce with an initial value, and with none the type of the
+        // else branch of the test of an empty list.
+        const accumulator: ValueType = scan
+          ? (elementOf(type) ?? fail(`${nodeText(node)} is not a list`))
+          : init !== undefined
+            ? type
+            : lambda !== undefined
+              ? 'real'
+              : (elementOf(list.type) ?? 'real');
+        const step =
+          (withList: boolean) =>
+          (
+            element: IRValue,
+            current: readonly IRValue[],
+            into: IROperation[]
+          ): readonly IRValue[] => {
+            const value = apply([current[0], element], into);
+            return withList
+              ? [value, append(current[1], value, into)]
+              : [value];
+          };
+        if (init !== undefined) {
+          const carried = [{ initial: init, type: accumulator }];
+          if (scan) carried.push({ initial: empty(type, operations), type });
+          const results = pass(one, carried, step(scan), operations);
+          return results[scan ? 1 : 0];
+        }
+        // No initial value: the first element starts the fold.
+        return unlessEmpty(
+          (into) => (scan ? empty(type, into) : literal(NaN, 'real', into)),
+          (into) => {
+            const first = this.element(list, one, node, into);
+            const carried = [{ initial: first, type: accumulator }];
+            if (scan) {
+              const start = this.newValue(type, 'array');
+              into.push({
+                kind: 'list',
+                result: start,
+                operands: [first],
+                effect: 'pure',
+                origin: node,
+              });
+              carried.push({ initial: start, type });
+            }
+            const results = pass(
+              literal(2, 'integer', into),
+              carried,
+              step(scan),
+              into
+            );
+            return results[scan ? 1 : 0];
+          }
+        );
+      }
+    }
+    return fail(`no lowering for ${nodeText(node)}`);
   }
 
   /**

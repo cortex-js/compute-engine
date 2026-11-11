@@ -1020,6 +1020,8 @@ class Emitter {
         this.runtime.add(helper);
         return call(`_SYS.${helper}`, operands);
       }
+      case 'collection':
+        return this.collection(op, operands, call);
       case 'build': {
         // `const r = []; for (…) { …; r.push(element); }`: one array, filled
         // in the order of the index, as the existing emitter writes a
@@ -1030,6 +1032,15 @@ class Emitter {
         const name = this.bind(op.result);
         const k = this.bind(index);
         const range = this.rangeHeader(k, from, to, op.ascending === true);
+        // The existing emitter tests the count of a comprehension over a
+        // range before its loop (`_SYS.rangeCount()`): no array holds more
+        // than 2^32 - 1 elements. An ascending build runs over the elements
+        // of a list, which has fewer.
+        if (op.ascending !== true)
+          range.before.push(
+            `if (${range.last} > 4294967294) ` +
+              `throw new RangeError('Invalid array length');`
+          );
         const body: string[] = [range.index];
         const [element] = this.openRegion(op.body, body, readsInputs);
         body.push(`${name}.push(${operand(element, CONDITIONAL)});`);
@@ -1171,6 +1182,83 @@ class Emitter {
         return fail(
           `no emission for the operation ${(op as { kind: string }).kind}`
         );
+    }
+  }
+
+  /**
+   * The code of a function of lists (`IRCollection`), whose operands have
+   * the sources `operands`: the code of the existing emitter for the head of
+   * an array of numbers (`javascript-target.ts`). `norm`, `mean`, `median`
+   * and `variance` call the runtime helper of the head; `dot` calls
+   * `_SYS.matmul`, as `Dot` of two lists. `take` and `drop` of a count that
+   * is an integer literal are `L.slice(0, n)` and `L.slice(n)` (`slice(n)`
+   * and `slice(0, n)` for a negative `n`), and of another count the
+   * function of `takeDropSlice()`, which reads `undefined` for a count that
+   * is not a number: `((_a, _n) => Number.isNaN(_n) ? undefined : …)(L,
+   * Math.round(n))`. `reverse` and `sort` copy the array first:
+   * `L.slice().reverse()` and `L.slice().sort(cmp)` with the comparator of
+   * the existing emitter, which puts a `NaN` after every number. `join` is
+   * `[...L, ...M]`. `range` is the call of the existing emitter,
+   * `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))(a, b)`: the
+   * runtime throws for more than 2^32 - 1 elements, and its first element
+   * is `a` itself. Each operand is read once.
+   */
+  private collection(
+    op: Extract<IROperation, { kind: 'collection' }>,
+    operands: readonly Source[],
+    call: (fn: string, args: readonly Source[]) => Source
+  ): Source {
+    const method = (text: string): Source => ({
+      text: `${operand(operands[0], CALL)}.${text}`,
+      precedence: CALL,
+    });
+    switch (op.fn) {
+      case 'norm':
+      case 'mean':
+      case 'median':
+      case 'variance':
+        this.runtime.add(op.fn);
+        return call(`_SYS.${op.fn}`, operands);
+      case 'dot':
+        this.runtime.add('matmul');
+        return call('_SYS.matmul', operands);
+      case 'take':
+      case 'drop': {
+        const count = operands[1].text;
+        const take = op.fn === 'take';
+        if (this.plain.has(op.operands[1].id) && /^-?[0-9]+$/.test(count)) {
+          const negative = count.startsWith('-');
+          return method(
+            take === negative ? `slice(${count})` : `slice(0, ${count})`
+          );
+        }
+        const [before, after] = take
+          ? ['_a.slice(_n)', '_a.slice(0, _n)']
+          : ['_a.slice(0, _n)', '_a.slice(_n)'];
+        return {
+          text: `((_a, _n) => Number.isNaN(_n) ? undefined : _n < 0 ? ${before} : ${after})(${operand(operands[0], CONDITIONAL)}, Math.round(${operand(operands[1], CONDITIONAL)}))`,
+          precedence: CALL,
+        };
+      }
+      case 'reverse':
+        return method('slice().reverse()');
+      case 'sort':
+        return method(
+          'slice().sort((_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0))'
+        );
+      case 'join':
+        return atom(
+          `[${operands.map((o) => `...${operand(o, CALL)}`).join(', ')}]`
+        );
+      case 'range':
+        this.runtime.add('range');
+        return {
+          text:
+            `((_a, _b) => _SYS.range(_a, _b, _b >= _a ? 1 : -1))` +
+            `(${operand(operands[0], CONDITIONAL)}, ` +
+            `${operand(operands[1], CONDITIONAL)})`,
+          precedence: CALL,
+        };
     }
   }
 
@@ -1328,7 +1416,7 @@ class Emitter {
     from: Source,
     to: Source,
     ascending = false
-  ): { before: string[]; header: string; index: string } {
+  ): { before: string[]; header: string; index: string; last: string } {
     const step = ascending ? '' : this.names.fresh();
     const last = this.names.fresh();
     const counter = this.names.fresh();
@@ -1339,6 +1427,7 @@ class Emitter {
         ],
         header: `for (let ${counter} = 0; ${counter} <= ${last}; ${counter}++)`,
         index: `const ${k} = ${operand(from, ADDITIVE)} + ${counter};`,
+        last,
       };
     return {
       before: [
@@ -1347,6 +1436,7 @@ class Emitter {
       ],
       header: `for (let ${counter} = 0; ${counter} <= ${last}; ${counter}++)`,
       index: `const ${k} = ${step} < 0 ? ${operand(from, ADDITIVE)} - ${counter} : ${operand(from, ADDITIVE)} + ${counter};`,
+      last,
     };
   }
 }

@@ -31,6 +31,7 @@ import {
   type IRRegion,
   type IRValue,
   type BinaryFunctionName,
+  type CollectionFunctionName,
   type Representation,
   type UnaryFunctionName,
   type ValueType,
@@ -66,13 +67,15 @@ export type PolicyOperationKind =
   | 'trace'
   | 'draw'
   | 'seeded'
-  | 'host';
+  | 'host'
+  | 'collection';
 
 /** The operations of `PolicyOperationKind` that a target can lack: a target
- *  with no random stream (GLSL) has no `draw` and no `seeded`, and a target
- *  that calls no code of the host has no `host`; the verifier refuses them
+ *  with no random stream (GLSL) has no `draw` and no `seeded`, a target
+ *  that calls no code of the host has no `host`, and a target with no
+ *  functions of lists has no `collection`; the verifier refuses them
  *  there. */
-type OptionalPolicyOperationKind = 'draw' | 'seeded' | 'host';
+type OptionalPolicyOperationKind = 'draw' | 'seeded' | 'host' | 'collection';
 
 /** The representations of the operands and of the result of an operation
  *  on a target. */
@@ -136,6 +139,12 @@ export type RepresentationPolicy = {
   readonly functions: Readonly<
     Partial<Record<UnaryFunctionName | BinaryFunctionName, OperationRule>>
   >;
+  /** The functions of lists that the target has (`IRCollection`), each with
+   *  the representations of its operands and of its result. Absent, or a
+   *  function that is not listed: not in the target. */
+  readonly collections?: Readonly<
+    Partial<Record<CollectionFunctionName, OperationRule>>
+  >;
 };
 
 /**
@@ -176,7 +185,10 @@ export type RepresentationPolicy = {
  * elements of the list and the element by the same rule. The result of a
  * function, of an `if`, and a carried value of a loop can be a list; a
  * list of integers is a valid list of reals there, as an integer is a valid
- * real; a tuple is valid where its type fits position by position. No
+ * real; a tuple is valid where its type fits position by position. A
+ * function of lists (`collection`) has the operands and the result of the
+ * rule of its identifier (`verifyCollection()`), is `pure`, and is one that
+ * the policy lists. No
  * other operation that computes a value (an arithmetic
  * operation, a comparison, `and`, `or`, a conversion, a trace) has a list
  * or a tuple operand or result: the interpreter applies such an operation
@@ -754,10 +766,11 @@ function verifySignature(
       );
   };
   // A list or a tuple is an operand only of `at`, `length`, `get`,
-  // `replace-at`, `append`, a call, a loop (as a carried value), a yield and
-  // a conversion of the representation of a list, and the result only of an
-  // input, a call, an `if`, a loop, a `build`, a `list`, a `tuple`, a
-  // `replace-at`, an `append` and such a conversion.
+  // `replace-at`, `append`, a function of lists, a call, a loop (as a
+  // carried value), a yield and a conversion of the representation of a
+  // list, and the result only of an input, a call, an `if`, a loop, a
+  // `build`, a `list`, a `tuple`, a `replace-at`, an `append`, a function of
+  // lists and such a conversion.
   if (
     ELEMENTWISE_KINDS.has(op.kind) &&
     (op.operands.some((operand) => isAggregate(operand.type)) ||
@@ -1204,6 +1217,8 @@ function verifySignature(
       if (op.effect !== 'pure') fail('the operation append is not pure');
       return;
     }
+    case 'collection':
+      return verifyCollection(op, policy, fail);
     case 'loop':
       return verifyLoop(op, policy, fail);
     case 'and':
@@ -1342,6 +1357,133 @@ function verifySignature(
         `an operation of the unknown kind ${(op as { kind: string }).kind}`
       );
   }
+}
+
+/** The element kind of a list operand of a function of lists, or of a
+ *  tuple where `tuples` admits one: `real` or `integer`, else `undefined`. */
+function numericElement(
+  type: ValueType,
+  tuples: boolean
+): 'real' | 'integer' | undefined {
+  const element = isTupleType(type)
+    ? tuples && type.elements.every((e) => e === 'real' || e === 'integer')
+      ? type.elements.every((e) => e === 'integer')
+        ? 'integer'
+        : 'real'
+      : undefined
+    : elementOf(type);
+  return element === 'real' || element === 'integer' ? element : undefined;
+}
+
+/**
+ * The checks of a function of lists (`IRCollection`), by the rule of its
+ * identifier (`CollectionFunctionName`): `norm`, `mean`, `median` and
+ * `variance` read one list or tuple of numbers and have a real result;
+ * `dot` reads two lists of numbers and has a real result; `take` and `drop`
+ * read a list of numbers and an integer count, `reverse` and `sort` one
+ * list of numbers, `join` two or more, and each has a list result whose
+ * element holds the elements of its list operands (a list of integers only
+ * when every list operand is one). The operation is `pure`, and the policy
+ * of the target lists the identifier and its representations.
+ */
+function verifyCollection(
+  op: Extract<IROperation, { kind: 'collection' }>,
+  policy: RepresentationPolicy,
+  fail: (message: string) => never
+): void {
+  const fn = op.fn;
+  const rule =
+    policy.operations.collection !== undefined &&
+    policy.collections !== undefined &&
+    Object.hasOwn(policy.collections, fn)
+      ? policy.collections[fn]
+      : undefined;
+  if (rule === undefined)
+    return fail(`the target has no function of lists ${fn}`);
+  if (op.effect !== 'pure') fail(`the function of lists ${fn} is not pure`);
+  const operands = op.operands;
+  const count = (ok: boolean) => {
+    if (!ok)
+      fail(
+        `the function of lists ${fn} has ${operands.length} operands`
+      );
+  };
+  const listOperand = (i: number, tuples = false) =>
+    numericElement(operands[i].type, tuples) ??
+    fail(
+      `the operand ${i + 1} of the function of lists ${fn} has the type ${operands[i].type}`
+    );
+  let result: ValueType;
+  switch (fn) {
+    case 'norm':
+    case 'mean':
+    case 'median':
+    case 'variance':
+      count(operands.length === 1);
+      listOperand(0, true);
+      result = 'real';
+      break;
+    case 'dot':
+      count(operands.length === 2);
+      listOperand(0);
+      listOperand(1);
+      if (isTupleType(operands[0].type) || isTupleType(operands[1].type))
+        fail('the function of lists dot reads two lists, not a tuple');
+      result = 'real';
+      break;
+    case 'take':
+    case 'drop': {
+      count(operands.length === 2);
+      if (isTupleType(operands[0].type))
+        fail(`the function of lists ${fn} reads a list, not a tuple`);
+      const element = listOperand(0);
+      if (operands[1].type !== 'integer')
+        fail(
+          `the count of the function of lists ${fn} has the type ${operands[1].type}`
+        );
+      result = listType(element);
+      break;
+    }
+    case 'reverse':
+    case 'sort':
+    case 'join': {
+      count(fn === 'join' ? operands.length >= 2 : operands.length === 1);
+      if (operands.some((o) => isTupleType(o.type)))
+        fail(`the function of lists ${fn} reads lists, not a tuple`);
+      const elements = operands.map((_, i) => listOperand(i));
+      result = listType(
+        elements.every((e) => e === 'integer') ? 'integer' : 'real'
+      );
+      break;
+    }
+    case 'range':
+      count(operands.length === 2);
+      if (operands.some((o) => o.type !== 'integer'))
+        fail('the bounds of the function of lists range are not integers');
+      result = listType('integer');
+      break;
+    default:
+      return fail(`the function of lists ${String(fn)} is not known`);
+  }
+  // A list of integers is a valid list of reals.
+  if (!fitsType(result, op.result.type))
+    fail(
+      `the function of lists ${fn} has a result of the type ${op.result.type}, not ${result}`
+    );
+  for (const operand of operands)
+    if (
+      !(rule.operands === 'same'
+        ? [op.result.representation]
+        : rule.operands
+      ).includes(operand.representation)
+    )
+      fail(
+        `an operand of the function of lists ${fn} has the representation ${operand.representation}`
+      );
+  if (!rule.results.includes(op.result.representation))
+    fail(
+      `the result of the function of lists ${fn} has the representation ${op.result.representation}`
+    );
 }
 
 /** The checks of a `loop` that are not checks of its regions

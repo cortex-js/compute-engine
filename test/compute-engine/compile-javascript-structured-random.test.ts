@@ -1173,7 +1173,7 @@ describe('the declines that stay, each with the cause in its message', () => {
     ['a boolean seed', ['WithRandomSeed', 'C', ['Random']], /the seed C of the type boolean/],
     ['a region whose value is a list', ['WithRandomSeed', 1, 'L'], /list operand L/],
     ['a binding whose value draws', ['Add', 'r', 1], /unsupported binding r/],
-    ['a lambda that draws', ['Map', ['Function', ['Add', 'u', ['Random']], 'u'], 'L'], /unsupported head Map/],
+    ['a lambda that draws', ['Map', ['Function', ['Add', 'u', ['Random']], 'u'], 'L'], /Map whose function has the node Random\(\), which is not pure, draws/],
     [
       'a draw in the domain of a comprehension (the interpreter evaluates it when the list is read)',
       fn(

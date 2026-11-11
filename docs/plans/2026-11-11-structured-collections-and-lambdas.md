@@ -492,3 +492,141 @@ existing compiler on two boards and three players.
   cutoff = 2; length(xs)` is 2 with `cutoff = 1` at the declaration, also
   for a body, a bound, an element-wise sum, a loop and a local function
   that reads the local. No decline is needed; the tests lock these values.
+
+## 10. Result of slices 2 and 3
+
+Implemented on `950f70f96`, with options 1, 2 and 4 of section 8 as
+recommended: no function value (a function operand is a region of the
+existing operations, its body inline, reading the values of the enclosing
+region), and one `collection` operation kind for the library functions,
+written as the existing runtime helpers. Tests:
+`test/compute-engine/compile-javascript-structured-collections2.test.ts`
+(both modes, against the existing compiler with `Object.is` element by
+element and against the interpreter; one test per decline; the host and
+effect declines; the laziness probes; in-place and execution facts), the
+verifier cases of `collection` in `compile-javascript-structured-ir.test.ts`,
+and the generators of `scripts/js-profile-fuzz.ts` (`genFunctionOfListsReal()`,
+`genFunctionOfListsList()`: function literals of one and two parameters whose
+bodies read the element, the inputs, the locals and the captures; library
+operators and helpers as the function operand; counts of `Take` and `Drop`
+in and out of range, negative and zero).
+
+**Admitted (slice 2).** `collection` operations `norm`, `mean`, `median`,
+`variance` (a list or a tuple, a real), `dot` (two lists, `_SYS.matmul`),
+`take`, `drop` (a list and an integer count; `Rest` is `drop` of `1`),
+`reverse`, `sort`, `join` (lists; a new array). Each result is a number or
+a new array that holds no array of an operand, so `inPlaceUpdates()` reads
+a list result as unique and a `collection` as a use of rule 3;
+`analyzeExecution()` needs no change. `Dot` of two tuples is `get`,
+`multiply` and one `add`; `First` and `Last` are `at` of `±1`, `Count(L)`
+is `length`, `Range(a, b)` and `Range(b)` the operation `range`, written as
+the existing call of `_SYS.range` (a `RangeError` for more than 2^32 − 1
+elements, and the lower bound itself as element 0, `-0` for `-0`). The
+non-ascending `build` of a slice-1 comprehension now tests the same count
+before its loop, as the existing emitter does.
+
+**Admitted (slice 3).** `Map(f, L)` and `Map(f, P)` (a `build`), `Filter`
+and `Count` with a predicate (a `loop` with a `conditional`, the list
+carried and appended in place), `Reduce` and `Scan` by `Add`, `Multiply`,
+`Max`, `Min` or a function literal of two parameters (a `loop` from the
+initial value, or an `if` on the length `0` and a loop from the first
+element), and `Apply` of a function literal (its parameters bound to the
+values of the arguments). The parameters of a literal are `index`
+bindings of the scope of the node; the body is lowered once inside the
+region, so it runs once per element, in index order, as the existing
+`map`, `filter` and `reduce` call it. A typed parameter (`Typed(t, 'real')`,
+which the preparation of the existing compiler writes) is read as its
+symbol. Library operators: `MAPPED_OPERATORS` (27 unary operators: on
+`5906581bb` also `Factorial`, `Factorial2`, `Truncate`, `Coth`, `Arccot`
+and `Arcsch`, each the code of the existing `_fn_F`; `Fract` of a name and
+the inverse functions of a complex value decline) for
+`Map`, `FOLD_OPERATORS` for `Reduce` and `Scan`.
+
+**Where the implementation differs from the note.**
+
+- A user function as a function operand (`Map(f, L)`), `Composition`,
+  `Map` over several lists (part (e): no witness needs it), `Distance`,
+  `PointX`, `PointY`, `PointList`, `CountIf`, `Sort` with an ordering and
+  `Range` with a step are not in these slices: they decline. The helper
+  machinery resolves a helper from a call node, and a function operand is
+  not a call.
+- In the `complex` mode every function literal and `Apply` decline (the
+  existing compiler compiles the body with parameters of the type `number`,
+  on the complex lane in places), and of the mapped operators only `Floor`
+  is admitted (the others are complex functions of each element there).
+- Declines that the existing compiler needs and the note did not foresee,
+  each found by the random tester or by a probe
+  (`refuseUnsettledCollection()`, `functionOperandRule()`):
+  - a value whose elements are numbers that are not real (`Map(Ln, L)`, of
+    the type `list<complex | signed_infinity>`): the existing compiler reads
+    them on the complex lane (`At(Map(Ln, [x]), 1) + 2` is `{ re, im }`);
+  - in the `complex` mode, a list operand that reads a local (the existing
+    compiler reads `_SYS.cplx(R)`: `First(R)` is `{ re, im }`, `Mean(R)` is
+    `_SYS.cmean`, `Dot(R, R)` is `_SYS.complexMatmul`), and an operand
+    other than a name whose element type is not `real` (`Last(L·g)`,
+    `Scan([ex, 1, 2], Add)`, `Reduce(I·xi, Multiply, 1)`);
+  - `Dot` of a list whose width its type states (list literals, a helper
+    result): the existing compiler writes the sum of the products
+    (`compileStaticInnerProduct()`), which differs from `_SYS.matmul` in the
+    sign of a zero (`0` against `-0` for `Dot(fy(x), Reverse(fy(x)))` at
+    `x = -0`);
+  - a function of the elements of the empty list literal (`Map(Sin, [])`:
+    the existing compiler declines, its element type is `never`);
+  - a body whose engine type admits a value that is not a number
+    (`Scan(I, (a, e) ↦ fm(L), x)` with `fm(L)` of the type
+    `list<any> | real`: the existing compiler reads the list with
+    `_SYS.atWithValueMarker`, `undefined` out of range);
+  - a library operator as the function that a `vars` entry maps
+    (`Map(Sin, L)` with `vars: { Sin: '((t) => t + 1)' }`: the existing
+    compiler calls the source; a `functions` or `operators` entry for a
+    name of the library was already refused);
+  - a body that draws, reads or calls the host (also a function declared
+    pure), or holds a `Loop` or a `WithRandomSeed`
+    (`refuseLazyFunctionOperands()`, through helper bodies), except for
+    `Apply`, whose body runs once where it is, as the existing compiler
+    calls it.
+- Laziness: an assignment stores the elements of a lazy `Map`, `Filter` or
+  `Scan` that reads a variable (`listedAssignedValue()`), so a list made
+  before a write of a local that its body reads keeps the values of the
+  assignment on the three sides (`Map`, `Filter`, `Scan`, `Take` of a
+  `Map`, `Reduce`, `Count`, a `Map` in a loop that writes the local after
+  it, a `Map` made before such a loop, `Apply`). No decline is needed; the
+  tests lock these values. On `5906581bb` the `Scan` probe (`xs[2]` of a
+  local list made by a `scan`) declines at the `At`
+  (`refuseStrictWideReads()`: the existing compiler types that read
+  `number`), so its test row is gone.
+
+**Counts**, before (`950f70f96`) and after, measured 2026-11-11:
+
+- Shadow measure on the 100 test files of `test/compute-engine/compile*`
+  that name the most heads of these slices (4,829 compilations that the
+  existing compiler compiles): the profile admits 1,062 before and 1,222
+  after, with 0 failures; the messages "unsupported head" of `Reduce` (195),
+  `Map` (179), `Apply` (83), `Dot` (65), `Range` (60), `Norm` (55), `Take`
+  (54), `Count` (37), `Filter` (36), `Scan` (31) and of the other heads of
+  the slices are gone. The most frequent declines of the slices now:
+  `Range` with a step (82), `Reduce` of elements that are not real (44 over
+  two messages), `Range` with a real bound (22), `Map` of a user function
+  (15). Of the 986 compilations that the existing compiler declines, the
+  profile admits 10 before and after.
+- The 52 consumer test files (`map-auto-compile*`, `limit-*`, `find-fit*`,
+  `nintegrate*`, `integrate-*`, `solve*`, and seven collection tests under
+  `N()`): 2,881 tests pass with and without `CE_JS_PROFILE=numeric-kernel`;
+  the admitted counts per consumer are unchanged (the `Map` consumer 51 of
+  64: it compiles the callback, not the `Map`).
+- The prelude census: 27 of 44 functions compile, as before
+  (`fish-swarm` and `turing-patterns` did not finish). `seen` of
+  `apollonian-gasket` now declines at `Count` of a list of tuples
+  (slice 4), not at the head; the other list declines are as in section 9.
+- `scripts/js-profile-fuzz.ts`: `--seed 111` to `115 --count 10000` (one
+  process per seed), `--seed 116,117 --count 5000 --random`, `--seed 118,119
+  --count 5000 --host` and `--seed 120 --count 4000 --deg`: no failure of
+  the profile and no difference of shape. Differences of value: the class
+  of CE-1203 (`At(Comprehension(log(x), …), 2) - 3` in the `strict` mode)
+  and one difference outside these slices, of a block operand with a
+  complex value (`y + {b0 ⩴ -5; i}` at `y = -0`), which another change
+  fixes. The difference `Scan(I, (a, e) ↦ fm(L),
+  x)` declines since; `--seed 117 --random` confirms it. The disagreements
+  with the interpreter are of the scalar classes of section 9 (the
+  precision caveat, `Mod`, `Floor` of a quotient, `Digamma`, `Gamma`), none
+  in a head of these slices.
