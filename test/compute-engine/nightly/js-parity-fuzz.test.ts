@@ -20,6 +20,11 @@ const NIGHTLY = process.env.CE_NIGHTLY === '1';
 const describeNightly = NIGHTLY ? describe : describe.skip;
 
 const ce = new ComputeEngine();
+// The compiler refuses an input with no type, and boxing an expression gives
+// none to a name that the expression only compares or passes to an integer
+// function. The cases are evaluated at real points.
+ce.declare('x', 'real');
+ce.declare('y', 'real');
 
 type Case = { name: string; src: any; vars?: string[]; points?: number[][] };
 
