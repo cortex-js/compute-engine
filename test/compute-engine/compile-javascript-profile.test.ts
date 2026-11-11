@@ -587,7 +587,7 @@ describe('canCompile() and compile() agree', () => {
         { operator: 'Integrate' },
       ],
       [['Add', 'x', 'u'], { binding: 'u', value: 'u' }],
-      [['Power', 'x', 3], { operator: 'Power' }],
+      [['Power', 'x', 0.5], { operator: 'Power' }],
       [['List', 'x', 'y'], { operator: 'List' }],
       // A parameter of a type outside the profile: its name.
       [fn([['At', 'T', 1]], ['T', 'tuple<real, real>']), { binding: 'T' }],

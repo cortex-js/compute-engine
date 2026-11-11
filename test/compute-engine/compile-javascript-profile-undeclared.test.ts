@@ -118,11 +118,11 @@ const ROWS: Row[] = [
   { name: 'Abs(x)', body: ['Abs', 'x'], strict: true, complex: true },
   { name: 'Exp(x)', body: ['Exp', 'x'], strict: true, complex: true },
   {
-    // The profile admits the exponent 1.5 only for a base that it proves
-    // non-negative, also for `x: real`.
+    // `Math.pow(x, 1.5)` for a base that the profile does not prove
+    // non-negative, in the `strict` mode.
     name: 'x^1.5',
     body: ['Power', 'x', 1.5],
-    strict: /exponent 1\.5 is in the profile only for a base that it proves non-negative/,
+    strict: true,
     complex: /exponent 1\.5 and a complex base/,
   },
   {

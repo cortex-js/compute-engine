@@ -158,7 +158,7 @@ import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
  */
 const FUNCTION_CODE: Readonly<
   Record<
-    UnaryFunctionName | Exclude<BinaryFunctionName, PowerFunctionName>,
+    Exclude<UnaryFunctionName | BinaryFunctionName, PowerFunctionName>,
     { readonly real: string; readonly complex?: string }
   >
 > = {
@@ -171,12 +171,19 @@ const FUNCTION_CODE: Readonly<
   atan2: { real: 'Math.atan2' },
 };
 
-/** The powers of two numbers (`BinaryFunctionName`), which the emitter
- *  writes as the `Power` handler of the existing emitter writes them. */
-type PowerFunctionName = 'pow' | 'abs-pow' | 'signed-pow';
+/** The powers and the roots of numbers (`BinaryFunctionName`, and `cbrt`
+ *  of `UnaryFunctionName`), which the emitter writes as the `Power` and
+ *  `Root` handlers of the existing emitter write them. */
+type PowerFunctionName =
+  'pow' | 'abs-pow' | 'signed-pow' | 'real-pow' | 'root' | 'cbrt';
 
 const isPowerFunction = (fn: string): fn is PowerFunctionName =>
-  fn === 'pow' || fn === 'abs-pow' || fn === 'signed-pow';
+  fn === 'pow' ||
+  fn === 'abs-pow' ||
+  fn === 'signed-pow' ||
+  fn === 'real-pow' ||
+  fn === 'root' ||
+  fn === 'cbrt';
 
 /** The names that the assembly of the result gives to the emitter. */
 export type StructuredEmitNames = {
@@ -678,14 +685,19 @@ class Emitter {
         const fn = op.fn;
         if (isPowerFunction(fn)) {
           // `Power` in `javascript-target.ts`: `_SYS.pow(b, e)` for an
-          // exponent that is not a literal, and the real root of a float
-          // literal exponent, `Math.pow(Math.abs(b), e)`, negated for a
-          // negative `b` when the recovered numerator is odd. The base of
-          // `signed-pow` is read twice, and is bound to a name (`usesOf()`).
-          if (fn === 'pow') {
-            this.runtime.add('pow');
-            return call('_SYS.pow', operands);
+          // exponent that is not a literal, `Math.pow(b, e)` for a constant
+          // exponent (`real-pow`), and the real root of a float literal
+          // exponent, `Math.pow(Math.abs(b), e)`, negated for a negative `b`
+          // when the recovered numerator is odd. The base of `signed-pow` is
+          // read twice, and is bound to a name (`usesOf()`). `Root`:
+          // `Math.cbrt(x)` for the degree 3, `_SYS.root(x, n)` for a degree
+          // that is not a literal.
+          if (fn === 'pow' || fn === 'root') {
+            this.runtime.add(fn);
+            return call(`_SYS.${fn}`, operands);
           }
+          if (fn === 'real-pow') return call('Math.pow', operands);
+          if (fn === 'cbrt') return call('Math.cbrt', operands);
           const [b, e] = operands.map((o) => operand(o, CONDITIONAL));
           const magnitude = `Math.pow(Math.abs(${b}), ${e})`;
           return fn === 'abs-pow'

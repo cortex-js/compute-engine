@@ -114,21 +114,37 @@ branches of the `Power` handler of the existing emitter
 | Branch of the existing handler | Emission | Structured route |
 | --- | --- | --- |
 | Before the handler, `knownExponentPower()`: an exponent that reads an assigned symbol, with a value that is not an integer | the exponent replaced by its value | Declined, and wider: every exponent with no unknown. |
-| A complex base, an integer literal exponent 2 to 8 | a chain of squares and products | 2 admitted (`square`); 3 to 8 declined. |
+| A complex base, an integer literal exponent 2 to 8 | a chain of squares and products | 2 admitted (`square`); 3 to 8 declined, and every other number literal exponent of a complex base. |
 | A complex exponent, the base `ExponentialE` | `_SYS.cexppi`, `_SYS.cexp` | An exponent that is a name: admitted (`exp`); others declined. |
 | Another complex base or exponent | `_SYS.cpow` | Declined. |
 | Two finite literals | folded | Declined. |
 | `realPowerExponent()`: the value `2/3` | `_SYS.pow2(Math.cbrt(b))` | Declined. |
 | A float literal exponent, not an integer; a base not proved non-negative; recovered `p/q` with `q` odd, `p` even | `Math.pow(Math.abs(v), e)` | Admitted: `abs-pow` (`J`). |
 | The same with `p` odd | `(v < 0 ? -Math.pow(…) : Math.pow(…))` | Admitted: `signed-pow`. |
-| An exact rational exponent with an odd denominator (`8/5`) | as the two rows above | Declined. |
-| A node on the complex lane (`resultIsComplexValued()`, `promotesToComplexLane()`, `resultIsWideUnderComplexDiscipline()`) | `_SYS.cpow` | Declined: in the `complex` mode `x^y` has the type `number`, so `M` declines there. |
-| `realRadicalPower()`: 1.5 with a base proved non-negative; 2.5; a `Sqrt` base | `(b * Math.sqrt(b))`, `_SYS.pow3h`, `_SYS.pow5h` | 1.5 admitted; the others declined. |
+| An exact rational exponent with an odd denominator (`8/5`) | as the two rows above | Declined; also an exact exponent whose terms are not safe integers. |
+| A node on the complex lane (`resultIsComplexValued()`, `promotesToComplexLane()`, `resultIsWideUnderComplexDiscipline()`) | `_SYS.cpow` | Declined: in the `complex` mode `x^y` has the type `number`, so `M` declines there. For a number literal exponent the route declines a type, without its infinities and `NaN`, that is one of numbers that are not real in the `strict` mode and that is not real in the `complex` mode, and, in the `complex` mode, every exponent that is not an integer with a base that `signOf()` does not prove non-negative (`promotesRadicalToComplex()`): `x^1.1` with `x: real`. |
+| `realRadicalPower()`: 1.5 with a base proved non-negative; 2.5; a `Sqrt` base under an integer exponent of at least 2 | `(b * Math.sqrt(b))`, `_SYS.pow3h`, `_SYS.pow5h`, the radicand power | 1.5 admitted (`three-halves`); the others declined. |
 | The exponent 2 | `(b * b)`, `_SYS.pow2` | Admitted (`square`). |
 | The base `ExponentialE`, a real exponent | `Math.exp(e)` | Admitted (`exp`). |
-| An integer exponent 3 to 5; −2; 0.5; −0.5; 1/3 with a base proved non-negative | `_SYS.pow3` …, `(1 / b / b)`, `Math.sqrt`, `Math.cbrt` | Declined. |
+| An integer exponent 0, 1, −1 | `1`, the base, `(1 / (b))` | Declined (their canonical forms are not a power). |
+| An integer exponent 3 to 5 | `_SYS.pow3(b)`, `_SYS.pow4(b)`, `_SYS.pow5(b)` | Admitted (`product-power`): the products of the helpers in their order, `(b·b)·b`, `s·s` and `(s·s)·b` with `s = b·b`, the base evaluated once; an integer base gives an integer. |
+| The exponent −2, a base that is a name or a literal | `(1 / b / b)` | Admitted (`reciprocal-square`): two divisions, the base evaluated once. Another base takes the last row. |
+| 0.5; −0.5; 1/3 (the float, with a base that the engine proves non-negative) | `Math.sqrt`, `(1 / Math.sqrt(b))`, `Math.cbrt` | Declined. |
 | An exponent that is not a finite literal, both operands real, not on the complex lane | `_SYS.pow(b, e)` | Admitted: `pow` (`M`), when the exponent has an unknown. |
-| Another constant exponent | `Math.pow(b, e)` | Declined. |
+| Another constant exponent | `Math.pow(b, e)` | Admitted (`real-pow`) for a number literal exponent: an integer that is a safe integer (`x^-3`, `x^10`, `(x + 1)^-2`); a float with an even or no recovered denominator in the `strict` mode (`x^1.1`, `x^-0.95`, `x^1.5` for an `x` of unknown sign); an exact exponent with an even denominator (`x^(5/2)`); a float for a base that the engine proves non-negative (`p^1.6`, also in the `complex` mode). An integer beyond the safe integers and a non-finite exponent (`_SYS.pow(b, Infinity)`) are declined. |
+
+The `Root` handler of the existing emitter, for a real radicand and a real
+degree, in its order:
+
+| Branch of the existing handler | Emission | Structured route |
+| --- | --- | --- |
+| Two finite literals | folded | Declined. |
+| A complex radicand or degree | `_SYS.croot` | Declined. |
+| A node on the complex lane (`resultIsComplexValued()`, `promotesRadicalToComplex()`: an even integer degree of a radicand not proved non-negative in the `complex` mode) | `_SYS.cpow` | Declined, and wider: a type that is not real in the `complex` mode (`Root(x, k)` has the type `number`, and the handler writes `_SYS.cplx(_SYS.root(x, k))` there). |
+| The degree 2 | `Math.sqrt(x)` | Declined (the canonical form is `Sqrt`). |
+| The degree 3 | `Math.cbrt(x)` | Admitted (`cbrt`). |
+| An odd integer degree; a degree read as a rational with an odd denominator; another literal degree | `(Math.sign(x) * Math.pow(Math.abs(x), 1/n))`, `Math.pow(Math.abs(x), 1/n)`, `Math.pow(x, 1/n)` | Declined. |
+| A degree that is not a literal | `_SYS.root(x, n)` | Admitted (`root`), when the degree has an unknown. |
 
 In the `complex` mode the route admits a loop that sums `x^1.4` into a local
 of a function with the result type `real`; the existing compiler throws for

@@ -858,11 +858,12 @@ describe('refusals', () => {
       'strict',
       /a product with a complex operand is in the structured route only as the product of two complex operands/,
     ],
+    // `realRadicalPower()`: `_SYS.pow5h(b)` for a base proved non-negative.
     [
-      'x^1.5 with x of unknown sign',
-      ['Power', 'x', 1.5],
+      'Max(0, x)^2.5',
+      ['Power', ['Max', 0, 'x'], 2.5],
       'strict',
-      /Power with the exponent 1.5 is in the structured route only for a base that it proves non-negative, and not for x/,
+      /Power with the exponent 2\.5 of a base that is proved non-negative is not in the structured route/,
     ],
     [
       'x^1.5, complex mode',
@@ -877,46 +878,60 @@ describe('refusals', () => {
       /Power with the exponent 1.5 and a complex base/,
     ],
     [
-      'x^3',
-      ['Power', 'x', 3],
+      'x^(1 + 2i)',
+      ['Power', 'x', ['Complex', 1, 2]],
       'strict',
-      /Power is in the structured route only with the literal exponent 2 or 1\.5, a float literal exponent that is not an integer, an exponent that is not a number literal, or with the base ExponentialE/,
+      /Power with the exponent \(1 \+ 2i\) is not in the structured route, which has a finite real number literal exponent, an exponent that is not a number literal, and the base ExponentialE/,
     ],
     // The branches of `Power` in the existing emitter that the route
     // declines, one row each.
-    // An integer literal exponent other than 2: `1`, the operand, the
-    // reciprocal, `_SYS.pow3` to `_SYS.pow5`, `Math.pow`.
-    // (`x^0` and `x^-1` do not reach `Power`: their canonical forms are `1`
-    // and `1/x`.)
-    ['x^5', ['Power', 'x', 5], 'strict', /only with the literal exponent 2/],
-    ['x^-2', ['Power', 'x', -2], 'strict', /only with the literal exponent 2/],
+    // An integer literal exponent: `realRadicalPower()` reads through a
+    // square root (`Sqrt(p)^3` is `p * Math.sqrt(p)`), and an integer beyond
+    // the safe integers is declined. (`x^0` and `x^-1` do not reach
+    // `Power`: their canonical forms are `1` and `1/x`.)
+    [
+      'Sqrt(p)^3',
+      ['Power', ['Sqrt', 'p'], 3],
+      'strict',
+      /the power sqrt\(p\)\^3 of a square root is not in the structured route/,
+    ],
+    [
+      'x^(2^60)',
+      ['Power', 'x', 2 ** 60],
+      'strict',
+      /an integer beyond the safe integers, is not in the structured route/,
+    ],
     // The float `0.5` has the even recovered denominator 2: `Math.sqrt`.
     [
       'x^0.5',
       ['Power', 'x', 0.5],
       'strict',
-      /the float exponent 0\.5, which the interpreter does not read as a rational with an odd denominator/,
+      /Power with the exponent 0\.5 is not in the structured route: the existing emitter writes Math\.sqrt/,
     ],
-    // An exact rational exponent (`realPowerExponent()` reads its terms).
+    // An exact rational exponent with an odd denominator
+    // (`realPowerExponent()` reads its terms).
     [
       'x^(8/5)',
       ['Power', 'x', ['Rational', 8, 5]],
       'strict',
-      /only with the literal exponent 2/,
+      /Power with the exact exponent 8\/5, whose denominator is odd, is not in the structured route/,
     ],
-    // A float exponent with an even recovered denominator: `Math.pow` in the
-    // `strict` mode, `_SYS.cpow` in the `complex` mode.
+    // `Math.cbrt` for the float `1/3` and a base that the engine proves
+    // non-negative.
     [
-      'x^0.3',
-      ['Power', 'x', 0.3],
+      'p^(1/3 as a float)',
+      ['Power', 'p', 1 / 3],
       'strict',
-      /Power with the float exponent 0\.3, which the interpreter does not read as a rational with an odd denominator/,
+      /Power with the exponent 0\.3333333333333333 is not in the structured route: the existing emitter writes Math\.cbrt/,
     ],
+    // A float exponent with an even recovered denominator: `_SYS.cpow` in
+    // the `complex` mode for a base that the route does not prove
+    // non-negative.
     [
       'x^0.3, complex mode',
       ['Power', 'x', 0.3],
       'complex',
-      /the float exponent 0\.3, which the interpreter does not read as a rational with an odd denominator/,
+      /Power with the exponent 0\.3 is in the structured route only for a base that it proves non-negative, and not for x \(the complex mode\)/,
     ],
     // `realRadicalPower()`: `_SYS.pow2(Math.cbrt(x))`.
     [
@@ -925,12 +940,12 @@ describe('refusals', () => {
       'strict',
       /Power with the exponent 2\/3 is not in the structured route/,
     ],
-    // A base that the engine proves non-negative: `Math.pow(p, 1.6)`.
+    // `(1 / Math.sqrt(x))`.
     [
-      'p^1.6',
-      ['Power', 'p', 1.6],
+      'x^-0.5',
+      ['Power', 'x', -0.5],
       'strict',
-      /Power of p, which the engine proves non-negative, with the float exponent 1\.6/,
+      /Power with the exponent -0\.5 is not in the structured route: the existing emitter writes the reciprocal of Math\.sqrt/,
     ],
     [
       'z^1.6',
@@ -1685,7 +1700,7 @@ const BRANCH_ROWS: BranchRow[] = [
   ['x^1.6', ['Power', 'x', 1.6]],
   ['x^1.4', ['Power', 'x', 1.4]],
   ['k^1.4', ['Power', 'k', 1.4]],
-  ['Abs(x)^1.4', ['Power', ['Abs', 'x'], 1.4], /which the engine proves non-negative/],
+  ['Abs(x)^1.4', ['Power', ['Abs', 'x'], 1.4]],
   ['x^1.6 + z', ['Add', ['Power', 'x', 1.6], 'z']],
   ['Exp(x)', ['Exp', 'x']],
   ['Exp(k)', ['Exp', 'k']],

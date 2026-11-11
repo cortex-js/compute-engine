@@ -101,6 +101,11 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     pow: { results: ['number'], operands: ['number'] },
     'abs-pow': { results: ['number'], operands: ['number'] },
     'signed-pow': { results: ['number'], operands: ['number'] },
+    // `Math.pow(b, e)` for a constant exponent, `Math.cbrt(x)` and
+    // `_SYS.root(x, n)`, as the existing emitter writes `Power` and `Root`.
+    'real-pow': { results: ['number'], operands: ['number'] },
+    cbrt: { results: ['number'], operands: ['number'] },
+    root: { results: ['number'], operands: ['number'] },
   },
 };
 

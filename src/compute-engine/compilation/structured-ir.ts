@@ -150,10 +150,15 @@ export type IRArithmetic = OperationBase & {
  *   a complex `ln` is converted first.
  * - `abs`: the absolute value, or the modulus of a complex operand. The
  *   result is real; it is an integer for an integer operand.
+ * - `cbrt`: the cube root. The real cube root for a real operand, negative
+ *   for a negative operand (`cbrt(-8)` is `-2`), the principal complex cube
+ *   root for a complex operand. As for `ln`, the rule of the target decides
+ *   which of the two an occurrence is.
  *
  * Only `abs` has an integer result, and only for an integer operand.
  */
-export type UnaryFunctionName = 'exp' | 'ln' | 'sin' | 'cos' | 'tanh' | 'abs';
+export type UnaryFunctionName =
+  'exp' | 'ln' | 'sin' | 'cos' | 'tanh' | 'abs' | 'cbrt';
 
 /**
  * The functions of two operands that the representation names, by an
@@ -173,13 +178,27 @@ export type UnaryFunctionName = 'exp' | 'ln' | 'sin' | 'cos' | 'tanh' | 'abs';
  *   `|b|^0 = 1` also for `b = 0`.
  * - `signed-pow(b, e)` is `|b|^e` when `b` is not negative, and `-(|b|^e)`
  *   when `b < 0`: `-0` gives `0^e`.
+ * - `real-pow(b, e)` is the power `b^e` of floating-point numbers, with the
+ *   special values of the `pow` function of IEEE 754 for a finite `e`:
+ *   `b^0 = 1` for every `b`; a negative finite base with an exponent that
+ *   is not an integer is not a number (unlike `pow`, it takes no real
+ *   root); `0^e` is infinity for a negative `e`, with the sign of the base
+ *   for an odd integer `e` (`(-0)^(-3)` is minus infinity). The value for
+ *   an exponent that is not finite is not defined here: the rules of the
+ *   targets write `real-pow` only for a constant, finite exponent.
+ * - `root(x, n)` is the real `n`-th root with the convention of the
+ *   interpreter: for a negative `x`, `-(|x|^(1/n))` when `n` is an odd
+ *   integer (`root(-8, 3)` is `-2`), the real root of `pow` when the
+ *   interpreter reads `1/n` as a rational with an odd denominator, and not
+ *   a number otherwise; `real-pow(x, 1/n)` for every other `x`.
  *
  * `abs-pow` and `signed-pow` are the real-root convention of the
  * interpreter for a constant exponent `e = p/q` with an odd `q` (`p` even
  * and `p` odd), decided when the program is made: the rule of the target
  * chooses one of them from the exponent.
  */
-export type BinaryFunctionName = 'atan2' | 'pow' | 'abs-pow' | 'signed-pow';
+export type BinaryFunctionName =
+  'atan2' | 'pow' | 'abs-pow' | 'signed-pow' | 'real-pow' | 'root';
 
 /**
  * An application of a function of one operand (`unary`) or two operands

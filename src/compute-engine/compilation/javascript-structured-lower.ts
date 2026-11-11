@@ -106,6 +106,16 @@ export type StructuredInput = IRInput;
  *   that is not a number literal (the form `variable` of `powerForm()`),
  *   `abs-pow` and `signed-pow` for a float literal exponent (the form
  *   `float`), which the rule of `Power` chooses from the exponent.
+ * - `real-pow`: `Power` with a constant exponent, written as the function
+ *   `real-pow` of the base and the exponent.
+ * - `product-power`: `Power` with the integer exponent 3, 4 or 5, the
+ *   products of the base that `_SYS.pow3` to `_SYS.pow5` compute:
+ *   `(b·b)·b`, `s·s` and `(s·s)·b` with `s = b·b`.
+ * - `reciprocal-square`: `Power` with the exponent -2, the two divisions
+ *   `(1 / b) / b`.
+ * - `cbrt`, `root`: `Root` written as the function of that name, `cbrt` of
+ *   the radicand for the degree 3, `root` of the radicand and the degree
+ *   for a degree that is not a number literal.
  * - `abs`: `Abs` written as the function `abs`.
  * - `abs-identity`: `Abs` of a real operand that the existing emitter proves
  *   non-negative, written as the operand itself, as that emitter writes it
@@ -118,6 +128,11 @@ export type StructuredForm =
   | 'pow'
   | 'abs-pow'
   | 'signed-pow'
+  | 'real-pow'
+  | 'product-power'
+  | 'reciprocal-square'
+  | 'cbrt'
+  | 'root'
   | 'abs'
   | 'abs-identity';
 
@@ -294,14 +309,33 @@ const FUNCTIONS: Readonly<
  *   `pow` of the base and the exponent.
  * - `float`: a real number literal exponent that is not exact, finite and
  *   not an integer (`1.6`, not `8/5`), the function `abs-pow` or
- *   `signed-pow` of the base and the exponent.
+ *   `signed-pow` of the base and the exponent, or one of the forms of a
+ *   constant exponent below.
+ * - `integer`: a real number literal exponent whose value is an integer
+ *   other than 2 (`3`, `-2`, also the float `3.0`).
+ * - `rational`: an exact real number literal exponent whose value is not an
+ *   integer (`5/2`).
+ *
+ * The rule of `Power` chooses the code of the forms `float`, `integer` and
+ * `rational`, and of `three-halves` for a base that it does not prove
+ * non-negative, by the branches of the existing emitter: the function
+ * `real-pow`, the products of `product-power`, the divisions of
+ * `reciprocal-square` (`StructuredForm`).
  *
  * The rule of `Power` (`javascript-fragment-target.ts`) and the lowering
  * read the form from this function, so they agree.
  */
 export function powerForm(
   node: Expression
-): 'square' | 'exp' | 'three-halves' | 'variable' | 'float' | undefined {
+):
+  | 'square'
+  | 'exp'
+  | 'three-halves'
+  | 'variable'
+  | 'float'
+  | 'integer'
+  | 'rational'
+  | undefined {
   if (!isFunction(node, 'Power') || node.nops !== 2) return undefined;
   const [base, exponent] = node.ops;
   if (isSymbol(base, 'ExponentialE') && !isShadowedSymbol(base)) return 'exp';
@@ -315,6 +349,8 @@ export function powerForm(
     !Number.isInteger(exponent.re)
   )
     return 'float';
+  if (Number.isInteger(exponent.re)) return 'integer';
+  if (exponent.isExact && Number.isFinite(exponent.re)) return 'rational';
   return undefined;
 }
 
@@ -693,7 +729,12 @@ class Lowering {
       }
       // A function of the base and the exponent, both converted by the
       // facts of the rule.
-      if (form === 'pow' || form === 'abs-pow' || form === 'signed-pow') {
+      if (
+        form === 'pow' ||
+        form === 'abs-pow' ||
+        form === 'signed-pow' ||
+        form === 'real-pow'
+      ) {
         const operands = this.operands(node, facts, scope, operations);
         const result = this.resultOf(facts);
         operations.push({
@@ -706,7 +747,12 @@ class Lowering {
         });
         return result;
       }
-      if (form !== 'square' && form !== 'three-halves')
+      if (
+        form !== 'square' &&
+        form !== 'three-halves' &&
+        form !== 'product-power' &&
+        form !== 'reciprocal-square'
+      )
         return fail(`no recorded form for the power ${node.toString()}`);
       const operand = this.convert(
         this.value(node.ops[0], scope, operations),
@@ -714,6 +760,41 @@ class Lowering {
         node,
         operations
       );
+      // The operations of `_SYS.pow3` to `_SYS.pow5` and of `(1 / b / b)`,
+      // in their order, so each rounding is the same.
+      const push = (
+        kind: 'multiply' | 'divide',
+        operands: IRValue[],
+        result: IRValue = this.newValue(valueType(facts.type), 'number')
+      ): IRValue => {
+        operations.push({ kind, result, operands, effect, origin: node });
+        return result;
+      };
+      if (form === 'product-power') {
+        const n = (node.ops[1] as Expression & { re: number }).re;
+        const square = push('multiply', [operand, operand]);
+        const result = this.resultOf(facts);
+        if (n === 3) return push('multiply', [square, operand], result);
+        if (n === 4) return push('multiply', [square, square], result);
+        return push(
+          'multiply',
+          [push('multiply', [square, square]), operand],
+          result
+        );
+      }
+      if (form === 'reciprocal-square') {
+        const one = this.newValue('integer', 'number');
+        operations.push({
+          kind: 'literal',
+          value: 1,
+          result: one,
+          operands: [],
+          effect: 'pure',
+          origin: node,
+        });
+        const reciprocal = push('divide', [one, operand]);
+        return push('divide', [reciprocal, operand], this.resultOf(facts));
+      }
       let factor = operand;
       if (form === 'three-halves') {
         factor = this.newValue('real', 'number');
@@ -733,6 +814,47 @@ class Lowering {
         effect,
         origin: node,
       });
+      return result;
+    }
+
+    // `Root` in the form that its rule recorded: `cbrt` of the radicand
+    // (the literal degree 3 has no operation), or `root` of the radicand
+    // and the degree.
+    if (operator === 'Root') {
+      const form = this.prep.forms.get(node);
+      if (form !== 'cbrt' && form !== 'root')
+        return fail(`no recorded form for the root ${node.toString()}`);
+      const operands =
+        form === 'root'
+          ? this.operands(node, facts, scope, operations)
+          : [
+              this.convert(
+                this.value(node.ops[0], scope, operations),
+                facts.conversions?.[0],
+                node,
+                operations
+              ),
+            ];
+      const result = this.resultOf(facts);
+      operations.push(
+        form === 'cbrt'
+          ? {
+              kind: 'unary',
+              fn: 'cbrt',
+              result,
+              operands,
+              effect,
+              origin: node,
+            }
+          : {
+              kind: 'binary',
+              fn: 'root',
+              result,
+              operands,
+              effect,
+              origin: node,
+            }
+      );
       return result;
     }
 

@@ -876,9 +876,9 @@ describe('refusals', () => {
       /the loop index n has the name of a parameter, a local or another index/,
     ],
     [
-      'a Power with another exponent',
-      body(['Assign', 's', ['Power', 'k', 3]]),
-      /Power is in the structured route only with the literal exponent 2/,
+      'a Power with the exponent 0.5',
+      body(['Assign', 's', ['Power', 'k', 0.5]]),
+      /Power with the exponent 0\.5 is not in the structured route/,
     ],
     [
       'Mod with a complex operand',
