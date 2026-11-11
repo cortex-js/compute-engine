@@ -37,6 +37,40 @@
   // ➔ { ok: true, pure: true, shippable: true }
   ```
 
+- **Algebraic numbers: minimal polynomials and the ring of integers of the
+  field a number generates** (#492, contributed by
+  [enumeratio](https://github.com/enumeratio)). `MinimalPolynomial(1 + ∛2, x)`
+  is `x³ − 3x² + 3x − 3`, `AlgebraicIntegerQ((1 + √−5)/2)` is `False`,
+  `AlgebraicNumberNorm(1 + √2)` is `−1` and `AlgebraicNumberTrace(1 + √2)` is
+  `2`. `NumberFieldDiscriminant(∛19)` is `−1083`,
+  `NumberFieldIntegralBasis(∛19)` is `[1, ∛19, (1 + ∛19 + ∛19²)/3]` and
+  `NumberFieldSignature(∛2)` is `[1, 1]`; the discriminant of the field of a
+  number that lies in a proper subfield is that subfield's
+  (`NumberFieldDiscriminant(∜2²)` is `8`), and a rational generates ℚ.
+
+  `PolynomialRoot(p, x, k)` is Mathematica's `Root[Function[x, p], k]`: the
+  `k`-th root of the polynomial `p` in `x`, a bound variable, real roots first
+  in increasing order and then complex roots by real and imaginary part. It
+  is a numbered embedding, one particular complex number (`N()` gives it, for
+  any degree), where `AlgebraicGenerator` is an abstract root that no
+  embedding picks. The root of a quadratic is a radical, and the root of a
+  cubic or higher stays `PolynomialRoot` until `N()` (`Root` is the n-th root
+  and keeps its meaning).
+
+  An argument is read as a polynomial in one generator: a radical of a
+  rational (`Root(-2, 3)` is the real cube root, as everywhere in the engine,
+  and `Root(-2, 6)` the principal sixth root), `i`, the golden ratio, a
+  `PolynomialRoot` or an `AlgebraicGenerator(List(…))`. Several roots of one
+  irreducible polynomial are read in its splitting field:
+  `MinimalPolynomial(PolynomialRoot(x³ − 2, x, 1) + PolynomialRoot(x³ − 2, x,
+  2), x)` is `x³ + 2`. Anything else, such as `√2 + √3` or `π`, a field of
+  degree above 12, or a polynomial whose irreducibility the factorization does
+  not certify, stays unevaluated, with its argument as written. The
+  arithmetic is exact in bigints (Cohen, _A Course in Computational Algebraic
+  Number Theory_, §§4.5-4.7, 6.1-6.2), the ring of integers comes from Eisenstein's
+  criterion and Round 2, under the engine's deadline, and the answers agree
+  with Mathematica and Sage.
+
 ## 0.186.0 _2026-11-10_
 
 ### Breaking Changes

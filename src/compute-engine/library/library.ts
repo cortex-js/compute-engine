@@ -1,3 +1,4 @@
+import { ALGEBRAIC_NUMBERS_LIBRARY } from './algebraic-numbers.js';
 import { ARITHMETIC_LIBRARY } from './arithmetic.js';
 import { CALCULUS_LIBRARY } from './calculus.js';
 import { COLLECTIONS_LIBRARY } from './collections.js';
@@ -148,7 +149,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
   {
     name: 'number-theory',
     requires: ['arithmetic'],
-    definitions: NUMBER_THEORY_LIBRARY,
+    definitions: [...NUMBER_THEORY_LIBRARY, ALGEBRAIC_NUMBERS_LIBRARY],
   },
   {
     name: 'special-functions',
