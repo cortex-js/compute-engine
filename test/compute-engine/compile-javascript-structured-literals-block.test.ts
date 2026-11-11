@@ -691,23 +691,32 @@ describe('a Block as the root', () => {
 
   const REFUSALS: [string, MathJsonExpression, RegExp][] = [
     [
-      'a write to a name that no Declare declares',
-      ['Block', ['Assign', 's', ['Add', 'x', 1]], ['Add', 's', 1]],
-      /admits a write in a root Block only to a local that a Declare declares, and s is not declared/,
+      'a write to a name of the engine',
+      ['Block', ['Assign', 'y', ['Add', 'x', 1]], ['Add', 'y', 1]],
+      /admits a write in a root Block only to a local of the block, and y is not a local of the block/,
     ],
     [
-      'a Block as an operand',
-      ['Add', ['Block', declare('a', 'real', 'x'), ['Add', 'a', 1]], 1],
-      /admits a Block with statements only as the root of the compiled expression or as the body of a Function/,
+      'a Block with a write as an operand',
+      [
+        'Add',
+        ['Block', declare('a', 'real', 0), ['Assign', 'a', 'x'], ['Add', 'a', 1]],
+        1,
+      ],
+      /the statement Assign\(a, x\) of a Block used as an operand is not a declaration with a value/,
     ],
     [
-      'a local function',
+      'a local function that calls itself',
       [
         'Block',
-        ['DefineFunction', 'g', ['Function', ['Add', 'q', 1], 'q']],
+        [
+          'DefineFunction',
+          'g',
+          ['Function', ['If', ['Less', 'q', 1], 0, ['g', ['Subtract', 'q', 1]]], 'q'],
+        ],
         ['g', 'x'],
       ],
-      /admits no local function in a root Block \(DefineFunction of g\)/,
+      // In the complex mode, a local function declines at its definition.
+      /the helper g calls itself|admits the local function g only in the strict mode/,
     ],
     [
       'a call of a function that a later statement defines',
@@ -721,7 +730,7 @@ describe('a Block as the root', () => {
         ['DefineFunction', 'g', ['Function', ['Block', ['Add', 'q', 1]], 'q']],
         'a',
       ],
-      /admits no local function in a root Block/,
+      /the call g\(3\) does not reach a local function g defined before it in the body/,
     ],
     [
       'an empty Block',
@@ -763,7 +772,7 @@ describe('a Block as the root', () => {
       expect(() =>
         structured().compile(expr, { ...OPTIONS, mode })
       ).toThrow(
-        /admits no local function in the body of a Function \(DefineFunction of g\)/
+        /the call g\(3\) does not reach a local function g defined before it in the body/
       );
     expect(() =>
       compile(expr, {
@@ -772,19 +781,19 @@ describe('a Block as the root', () => {
         fallback: false,
       } as never)
     ).toThrow(
-      /^Could not compile with the profile 'numeric-kernel': the profile admits no local function/
+      /^Could not compile with the profile 'numeric-kernel': the call g\(3\) does not reach a local function g/
     );
   });
 
   test('a decline of the profile names its cause', () => {
     expect(() =>
-      compile(engine().expr(['Block', ['Assign', 's', 'x'], 's']), {
+      compile(engine().expr(['Block', ['Assign', 'y', 'x'], 'y']), {
         ...OPTIONS,
         profile: 'numeric-kernel',
         fallback: false,
       } as never)
     ).toThrow(
-      /^Could not compile with the profile 'numeric-kernel': the profile admits a write in a root Block only to a local that a Declare declares/
+      /^Could not compile with the profile 'numeric-kernel': the profile admits a write in a root Block only to a local of the block/
     );
   });
 });

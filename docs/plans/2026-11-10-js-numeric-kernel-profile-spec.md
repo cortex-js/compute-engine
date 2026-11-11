@@ -126,9 +126,16 @@ a complex value in the `strict` mode, a real value in the `complex` mode),
 so the helper is one function with one parameter type, as in the existing
 compiler for a real argument. `defaultedSymbols` lists the name of such a
 helper after the names of the inputs: a host declares its signature. A
-helper declared `function`, or whose signature has an optional or a
-variadic parameter, a type parameter or effects other than `random`, keeps
-its decline, each with its own message. The body of every helper is now rewritten for the
+helper whose signature has an optional or a variadic parameter, a type
+parameter or effects other than `random` keeps its decline, each with its
+own message. A helper declared `function` has this rule in the `strict`
+mode, an annotated parameter having the type of its annotation, and
+declines in the `complex` mode (2026-11-11, slice 6 of
+[the options and bindings note](2026-11-11-structured-options-and-bindings.md),
+"Result of slices 2 and 6"). A local function of the body of the root
+(`Declare(g, 'function', (t) ↦ …)`, `DefineFunction(g, …)`) has this rule
+too, with one more parameter per name of the body that it reads; it is not
+listed in `defaultedSymbols`. The body of every helper is now rewritten for the
 angular unit of the engine, as the root is; before, it was compiled in
 radians whatever the unit.
 

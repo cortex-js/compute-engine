@@ -32,7 +32,12 @@
  * at the root and `Function` literals with typed parameters, with a body
  * of locals (a list local made by a `Comprehension`, a local `k0` that
  * holds 0, 1 or -1 in a complex sum or product), writes, `If`
- * statements and a `Loop` over a range with a `Break`.
+ * statements and a `Loop` over a range with a `Break`; a `Block` in a
+ * `Block`, block statements, a block of declarations as an operand
+ * (`ValueBlock`), locals declared `unknown`, a first write to a name that
+ * no `Declare` declares (`t`), local functions (`lf`, declared `function`,
+ * `unknown`, with a `let` or with `DefineFunction`, which read the names of
+ * the body or not), and a helper declared `function` (`fq`).
  *
  * A difference is reported only for inputs in the type of each input; a
  * difference that occurs only for inputs outside their type (`±Infinity`
@@ -61,6 +66,8 @@
  *     --seed 11,12,13,14,15 --count 10000 --json <file>
  *   timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
  *     --seed 21,22,23,24,25 --count 10000 --json <file>
+ *   timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
+ *     --seed 81,82,83,84,85 --count 10000 --json <file>
  *
  * Options:
  *   --seed <n[,n…]>      The seeds (default 1). The same seed gives the same
@@ -110,6 +117,9 @@
  *                        interpreter (`interpretsDraws()`). Without the
  *                        option, the programs are those of the same seed
  *                        before the option was added.
+ *   --deg                Each engine has the angular unit `deg`: the
+ *                        same programs, compiled and interpreted in
+ *                        degrees.
  *   --json <file>        Also write the whole result as JSON.
  *   --quiet              Print the counts only, not the programs.
  *
@@ -261,8 +271,12 @@ export const DECLARATIONS =
   'assigned in the scope of each program';
 
 /** An engine with the declarations of every program. */
+/** The angular unit of each engine (`--deg`). */
+let ANGULAR_UNIT: 'rad' | 'deg' = 'rad';
+
 export function makeEngine(): ComputeEngine {
   const ce = new ComputeEngine();
+  if (ANGULAR_UNIT !== 'rad') ce.angularUnit = ANGULAR_UNIT;
   for (const [name, kind] of Object.entries(GLOBAL_INPUTS))
     if (kind !== 'undeclared') ce.declare(name, TYPE_OF_KIND[kind]);
   ce.declare('h', 'real');
@@ -433,6 +447,17 @@ const HELPERS: readonly {
       'Function',
       ['Add', ['Sin', 'v'], ['Multiply', 'v', 'v']],
       ['Typed', 'v', "'number'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    // A helper declared `function`: the rule of an inferred signature.
+    name: 'fq',
+    signature: 'function',
+    definition: [
+      'Function',
+      ['Add', ['Multiply', 3, 'v'], ['Divide', 'v', ['Add', ['Multiply', 'v', 'v'], 2]]],
+      'v',
     ],
     arguments: ['real'],
   },
@@ -651,6 +676,12 @@ interface GenContext {
   readonly random?: boolean;
   /** Whether to generate reads and calls of the host (`--host`). */
   readonly host?: boolean;
+  /** The local functions of the block around the expression, each with
+   *  one real parameter, that a call can reach. */
+  readonly localFunctions?: readonly string[];
+  /** The number of value blocks around the expression: the name of the
+   *  local of a new one (`b0`, `b1`, …). */
+  readonly valueBlocks?: number;
 }
 
 const LITERALS: readonly (readonly [Json, number])[] = [
@@ -790,7 +821,8 @@ type Head =
   | 'Call'
   | 'ImaginaryTimes'
   | 'Comprehension'
-  | 'QuotientFactor';
+  | 'QuotientFactor'
+  | 'ValueBlock';
 
 const HEADS: readonly (readonly [Head, number])[] = [
   ['Add', 16],
@@ -812,6 +844,7 @@ const HEADS: readonly (readonly [Head, number])[] = [
   ['ImaginaryTimes', 1],
   ['Comprehension', 1],
   ['QuotientFactor', 3],
+  ['ValueBlock', 2],
 ];
 
 /** The exact rationals of a quotient factor (`QuotientFactor`). */
@@ -901,6 +934,8 @@ function genReal(ctx: GenContext, depth: number): Json {
     case 'BigOp':
       return genBigOp(ctx, d);
     case 'Call': {
+      if (ctx.localFunctions !== undefined && ctx.localFunctions.length > 0 && rng() < 0.6)
+        return [pick(rng, ctx.localFunctions), sub()];
       const helper =
         ctx.random && rng() < 0.4
           ? pick(rng, RANDOM_HELPERS)
@@ -924,7 +959,34 @@ function genReal(ctx: GenContext, depth: number): Json {
       return ['At', genComprehension(ctx, d), genIndex(ctx)];
     case 'QuotientFactor':
       return genQuotientFactor(ctx, d);
+    case 'ValueBlock':
+      return genValueBlock(ctx, d);
   }
+}
+
+/** A block used as a value: one or two declarations with a value (a
+ *  `where` clause, the only block that the existing compiler admits as an
+ *  operand), then a value that reads them. Its locals are named after the
+ *  number of value blocks around it, so that no local shadows another. */
+function genValueBlock(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const n = ctx.valueBlocks ?? 0;
+  const first = `b${2 * n}`;
+  const second = `b${2 * n + 1}`;
+  const inner = (names: string[]): GenContext => ({
+    ...ctx,
+    valueBlocks: n + 1,
+    symbols: [...ctx.symbols, ...names.map((name): [Json, number] => [name, 30])],
+  });
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const type = (): Json => pick(rng, ["'real'", "'real'", "'unknown'"]);
+  const statements: Json[] = [['Declare', first, type(), genReal(ctx, d)]];
+  const names = [first];
+  if (rng() < 0.3) {
+    statements.push(['Declare', second, type(), genReal(inner(names), d)]);
+    names.push(second);
+  }
+  return ['Block', ...statements, genReal(inner(names), d)];
 }
 
 /** A product with a quotient factor whose numerator is a product with an
@@ -1098,7 +1160,14 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
   });
   const locals: [Json, number][] = [['t', 25]];
   const listLocals: string[] = [];
-  const statements: Json[] = [declareLocal(rng, 't', ctx([], 1))];
+  const localFunctions: string[] = [];
+  // The first local, declared, or by a first write (`t ≔ …`, a local of the
+  // block that no `Declare` declares).
+  const statements: Json[] = [
+    rng() < 0.12
+      ? ['Assign', 't', genReal(ctx([], 1), 0)]
+      : declareLocal(rng, 't', ctx([], 1)),
+  ];
   if (rng() < 0.4) {
     statements.push(declareLocal(rng, 's', ctx(locals, 1)));
     locals.push(['s', 15]);
@@ -1120,19 +1189,61 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
     statements.push(['Declare', 'R', "'list<real>'", value]);
     listLocals.push('R');
   }
+  // A local function of one parameter `v`, which can read the locals
+  // declared before it and the inputs: a closure of the block, which the
+  // profile makes a helper with the captured names as parameters.
+  // With `--host`, a local function is more frequent, and half of them read
+  // an input, a read of the host, and call a function of the host (`hm`
+  // sets `x`).
+  if (rng() < (base.host ? 0.4 : 0.15)) {
+    const body =
+      base.host && rng() < 0.5
+        ? pick<Json>(rng, [
+            ['Add', ['hm', 'v'], 'x'],
+            ['If', ['Less', ['hm', 'v'], 2], 'x', 'vr'],
+            ['Multiply', 'vr', ['hq', 'v', 'x']],
+            ['Add', ['hp', 'v'], 'x', 't'],
+            ['Divide', ['hq', 'v', 't'], 'vr'],
+          ])
+        : genReal(ctx([...locals, ['v', 30]], 2), 0);
+    const literal: Json = ['Function', body, 'v'];
+    statements.push(
+      pick<Json>(rng, [
+        ['Declare', 'lf', "'function'", literal],
+        ['DefineFunction', 'lf', literal],
+        ['Declare', 'lf', "'unknown'", literal],
+        ['Declare', 'lf', ['Dictionary', ['KeyValuePair', "'value'", literal]]],
+      ])
+    );
+    localFunctions.push('lf');
+  }
   const target = () => (locals.length > 1 && rng() < 0.3 ? 's' : 't');
   const count = intBetween(rng, 0, 2);
   for (let i = 0; i < count; i++) {
     const r = rng();
-    const c = (depth: number, extra = locals) => ctx(extra, depth, listLocals);
+    const c = (depth: number, extra = locals): GenContext => ({
+      ...ctx(extra, depth, listLocals),
+      localFunctions,
+    });
     if (listLocals.length > 0 && r < 0.15) {
       statements.push([
         'Assign',
         'R',
         ['ReplaceAt', 'R', pick(rng, [1, 2, -1]), genReal(c(2), 0)],
       ]);
-    } else if (r < 0.4) {
+    } else if (r < 0.3) {
       statements.push(['Assign', target(), genReal(c(1), 0)]);
+    } else if (r < 0.4) {
+      // A block statement, with a local of its own.
+      statements.push(
+        rng() < 0.5
+          ? ['Block', ['Assign', target(), genReal(c(2), 0)]]
+          : [
+              'Block',
+              ['Declare', 'e0', "'real'", genReal(c(2), 0)],
+              ['Assign', target(), genReal(c(2, [...locals, ['e0', 30]]), 0)],
+            ]
+      );
     } else if (r < 0.7) {
       const branch: Json[] = [
         'If',
@@ -1162,7 +1273,10 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
     }
   }
   if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
-  else statements.push(genReal(ctx(locals, 1, listLocals), 0));
+  else
+    statements.push(
+      genReal({ ...ctx(locals, 1, listLocals), localFunctions }, 0)
+    );
   // A local that holds 0, 1 or -1 in a complex sum or product: the existing
   // emitter writes the local as its name, never as a constant term.
   if (rng() < 0.12) {
@@ -1216,6 +1330,7 @@ function declareLocal(rng: Rng, name: string, ctx: GenContext): Json {
   if (r < 0.9)
     return ['Declare', name, "'real'", genComprehension(ctx, 1)];
   if (r < 0.95) return ['Declare', name, "'integer'", integer()];
+  if (r < 0.97) return ['Declare', name, "'unknown'", genReal(ctx, 0)];
   return [
     'Declare',
     name,
@@ -1240,11 +1355,12 @@ function genFunction(
   ];
   for (const [name, kind] of parameters)
     if (kind !== 'list' && kind !== 'boolean') symbols.push([name, 20]);
+  const block = (statements: Json[]): Json =>
+    rng() < 0.15 ? ['Block', ['Block', ...statements]] : ['Block', ...statements];
   return [
     'Function',
-    [
-      'Block',
-      ...genStatements(rng, maxDepth, {
+    block(
+      genStatements(rng, maxDepth, {
         symbols,
         integers: names.includes('n') ? ['n'] : [],
         reals: ['a'],
@@ -1252,8 +1368,8 @@ function genFunction(
         lists: names.includes('V') ? ['V'] : [],
         random,
         host,
-      }),
-    ],
+      })
+    ),
     ...parameters.map(([name, , type]): Json => ['Typed', name, `'${type}'`]),
   ];
 }
@@ -1285,10 +1401,11 @@ export function generateProgram(
       json = fn;
       parameters = fn.slice(2).map((p) => (p as Json[])[1] as string);
     } else if (r < 0.3) {
-      json = [
-        'Block',
-        ...genStatements(rng, options.depth, context),
-      ];
+      const statements = genStatements(rng, options.depth, context);
+      json =
+        rng() < 0.15
+          ? ['Block', ['Block', ...statements]]
+          : ['Block', ...statements];
     } else {
       json = genReal({ rng, maxDepth: options.depth, ...context }, 0);
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
@@ -2596,8 +2713,10 @@ async function main(): Promise<void> {
       quiet: { type: 'boolean', default: false },
       random: { type: 'boolean', default: false },
       host: { type: 'boolean', default: false },
+      deg: { type: 'boolean', default: false },
     },
   });
+  if (values.deg) ANGULAR_UNIT = 'deg';
   const int = (s: string | undefined, d: number) =>
     s === undefined ? d : Number.parseInt(s, 10);
   const options: FuzzOptions = {

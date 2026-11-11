@@ -245,6 +245,10 @@ export type StructuredPreparation = {
       readonly body: Expression;
       /** `IRFunction.parameterElementLabels`. */
       readonly parameterElementLabels?: readonly (string | undefined)[];
+      /** A local function of the body: the arguments of each call after
+       *  its operands, a symbol of each name that the function captures,
+       *  lowered where the call is. */
+      readonly captureArguments?: readonly Expression[];
     }
   >;
   /** The bindings that the program reads as snapshots, in the order of
@@ -622,6 +626,13 @@ class Lowering {
       >
     >;
   }[] = [];
+  /** The names that a call of the helper `operator` reads where it is
+   *  called: the captured names of a local function
+   *  (`StructuredPreparation.helpers`, `captureArguments`). */
+  private readonly capturedNames = (operator: string): readonly string[] =>
+    (this.prep.helpers.get(operator)?.captureArguments ?? []).map((a) =>
+      isSymbol(a) ? a.symbol : ''
+    );
   /** The names of each function node (`namesIn()`). */
   private readonly names = new Map<Expression, ReadonlySet<string>>();
   /** The ids of the values that a `Declare` or an `Assign` writes to a
@@ -838,7 +849,7 @@ class Lowering {
   /** The names of the symbols of `node`, read or written (`namesIn()`),
    *  once per node object. */
   private namesOf(node: Expression): ReadonlySet<string> {
-    return namesIn(node, this.names);
+    return namesIn(node, this.names, this.capturedNames);
   }
 
   private facts(
@@ -1110,7 +1121,20 @@ class Lowering {
 
     const entry = this.prep.annotation.functions.get(operator);
     if (entry !== undefined && this.prep.helpers.has(operator)) {
-      const args = this.operands(node, facts, scope, operations);
+      // The operands, then the captured names of a local function, each
+      // with the conversion of its argument.
+      const captured = this.prep.helpers.get(operator)!.captureArguments ?? [];
+      const args = [
+        ...this.operands(node, facts, scope, operations),
+        ...captured.map((argument, j) =>
+          this.convert(
+            this.value(argument, scope, operations),
+            facts.conversions?.[node.ops.length + j],
+            node,
+            operations
+          )
+        ),
+      ];
       const index = this.helper(operator, args, facts, node);
       const result = this.resultOf(facts);
       const callEffect = joinEffects(effect, this.functions[index].body.effect);
@@ -2586,6 +2610,14 @@ class Lowering {
     const initializer = isFunction(node, 'Declare')
       ? declareValueOperand(node.ops)
       : undefined;
+    // The definition of a local function: its helper is a function of the
+    // program, lowered at its first call (`helper()`).
+    if (
+      (isFunction(node, 'Declare') && isFunction(initializer, 'Function')) ||
+      (isFunction(node, 'DefineFunction') && isFunction(node.op2, 'Function')) ||
+      (isFunction(node, 'Assign') && isFunction(node.op2, 'Function'))
+    )
+      return false;
     if (
       isFunction(node, 'Declare') &&
       initializer !== undefined &&
@@ -2613,12 +2645,21 @@ class Lowering {
       const name = node.op1.symbol;
       const written = this.value(node.op2, scope, operations);
       const binder = bindingScope(scope, name);
-      const locals = binder === undefined ? undefined : this.bound.get(binder);
+      let locals = binder === undefined ? undefined : this.bound.get(binder);
       const binding = binder?.bindings.get(name);
       // The admission and the pass refuse a write to a name that is not a
       // local; an input of the program is bound in the root scope. A local
       // can have no value before the write: a local that a loop body writes
-      // and does not carry (`loopStatement()`).
+      // and does not carry (`loopStatement()`), and a local of a block that
+      // its first write declares (`implicitLocal()` in
+      // `javascript-fragment-target.ts`), whose scope can have no value yet.
+      if (
+        locals === undefined &&
+        binder !== undefined &&
+        binder !== this.prep.annotation.scope &&
+        binding !== undefined
+      )
+        this.bound.set(binder, (locals = new Map()));
       if (
         locals === undefined ||
         binder === this.prep.annotation.scope ||
@@ -2945,7 +2986,7 @@ class Lowering {
       if (binder !== undefined && this.bound.get(binder)?.has(name))
         candidates.push({ binder, name });
     }
-    const exposed = exposedReads(body, this.names);
+    const exposed = exposedReads(body, this.names, this.capturedNames);
     const carried = candidates.filter(
       ({ name }) => liveOut.has(name) || exposed.has(name)
     );
@@ -3261,7 +3302,8 @@ function assignedNames(
  */
 function exposedReads(
   statement: Expression,
-  memo: Map<Expression, ReadonlySet<string>>
+  memo: Map<Expression, ReadonlySet<string>>,
+  captured?: (operator: string) => readonly string[]
 ): Set<string> {
   const exposed = new Set<string>();
   const reads = (
@@ -3269,7 +3311,7 @@ function exposedReads(
     written: ReadonlySet<string>
   ) => {
     if (node === undefined) return;
-    for (const name of namesIn(node, memo))
+    for (const name of namesIn(node, memo, captured))
       if (!written.has(name)) exposed.add(name);
   };
   const visit = (node: Expression, written: Set<string>): Set<string> => {
@@ -3418,18 +3460,21 @@ export function literalSeedOf(seed: Expression): number | string | undefined {
 
 /** The names of the symbols of `node`, read or written. `memo` holds the
  *  names of each function node already seen, so a node reached on several
- *  paths is walked once. */
+ *  paths is walked once. `captured`: the names that a call of the helper of
+ *  a head reads where it is called (a local function), which count as names
+ *  of the call. */
 function namesIn(
   node: Expression,
-  memo: Map<Expression, ReadonlySet<string>>
+  memo: Map<Expression, ReadonlySet<string>>,
+  captured?: (operator: string) => readonly string[]
 ): ReadonlySet<string> {
   if (isSymbol(node)) return new Set([node.symbol]);
   if (!isFunction(node)) return new Set();
   const known = memo.get(node);
   if (known !== undefined) return known;
-  const names = new Set<string>();
+  const names = new Set<string>(captured?.(node.operator) ?? []);
   for (const operand of node.ops)
-    for (const name of namesIn(operand, memo)) names.add(name);
+    for (const name of namesIn(operand, memo, captured)) names.add(name);
   memo.set(node, names);
   return names;
 }

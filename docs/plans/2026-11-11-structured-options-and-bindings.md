@@ -600,3 +600,126 @@ on `50e3e41a4` without this change:
 `a = -0` is `-0` on the profile and `0` on the existing compiler, which
 adds `t`. Without `--host`, seeds 11 and 12 (20,000 programs): no
 difference and no failure.
+
+## Result of slices 2 and 6
+
+On `775bc003b8ae9fcb40a0766fd62e2b5b40163759`. Admission in
+`javascript-fragment-target.ts` (`checkValueBlock()`,
+`checkLocalFunction()`, `resolveLocalFunction()`, `implicitLocal()`,
+`localFunctionStatement()`), the lowering of implicit locals and capture
+arguments in `javascript-structured-lower.ts`, and two hooks of
+`fragment.ts` (`FragmentDefinition.localFunction`, and the `localType`
+hook for an implicit local). Tests:
+`compile-javascript-structured-blocks.test.ts`.
+
+**Slice 2, blocks.**
+
+- `Block(Block(…))` and a block as the value of a body: the inner block's
+  statements in the region of the body, then its value. A block statement
+  at any place is its statements in its own scope.
+- A block whose statements are each a `Declare` with a value, as an
+  operand: the declarations in the region of the operand, in order, then
+  the value (in a branch, a short-circuit operand and a `Sum` term, in the
+  region of that branch, operand or term). Another statement declines, as
+  on the existing compiler. An operand block whose type is not numeric or
+  boolean declines: the existing compiler reads it with `_SYS.bcast` and
+  `_SYS.smul`, whose doubles differ (`0.5 · (u/xn) · {b0 ⩴ 1; u}` in the
+  `complex` mode, with `u` undeclared: `NaN` where the route gives
+  `-Infinity`; found by the random tester).
+- `Declare(a, 'unknown', v)`: a `let` with the type of its value.
+- A first write to a name that the block binds and no `Declare` declares
+  declares a `let` local (the rule of `walkBlock()`), also in a nested block
+  and the body of a `Function`. A first write that reads the name declines.
+- Differences from the note: a local of a nested block with the name of a
+  parameter, an input or an outer local declines (no shadowing), and
+  `Declare(a, 'number', v)` is not done. Two rules of the existing compiler
+  that the random tester found are now rules of the route: in the `strict`
+  mode a `let` local written a real and a complex value declines
+  (`assignedTypesConflict()`), and in the `complex` mode a read of a `let`
+  local declines when its type is not real, boolean or a list (also
+  `missing | real`, the value of a `Which` with no default, which the
+  existing compiler reads `_SYS.cplx(t)`).
+
+**Slice 6, local functions and helpers declared `function`.**
+
+- A local function (`Declare(g, 'function' | 'unknown', F)`, a `let` of a
+  function, `DefineFunction(g, F)`) that is a statement of the body of the
+  root, in the `strict` mode, is a helper of the program: the parameters
+  of the literal, then one parameter per name of the body that the literal
+  reads (directly or through a local function it calls), each passed at
+  the call with its value there. A closure reads that value, so the values
+  are the same (`a ⩴ 2x; g(t) ⩴ t + a; a ⩴ 10; g(3)` is `13`). The
+  parameters follow the rule of a helper with no declared signature.
+- Declined, each with its message: a local function in a branch, a loop, a
+  nested block statement, an operand or the body of a user function; one
+  that calls itself; a second definition; a declared signature
+  (`(real) -> real`); the name of a library operator or of another name of
+  the program; a parameter with the name of a local; a use as a value
+  (`Map(L, g)`); a read of a local that a later statement declares; a local
+  function that no statement calls (its body is typed at its calls, and the
+  existing compiler declines what the closure's body declines: `Min` of a
+  complex operand); every local function in the `complex` mode, where the
+  existing compiler reads the value of each call as a complex value
+  (`_SYS.cplx(lf(…))`, also for a real body).
+- A helper declared `function`: the rule of a helper with no declared
+  signature in the `strict` mode, each annotation of the literal the type
+  of its parameter. In the `complex` mode it declines: the existing
+  compiler reads each parameter, also one annotated `real`, and the value
+  as complex values (`i · f(x)` with `f(t: real) := 2t` has the real part
+  `-0` at `x = -0.75`, and `0` on the route). A body with `Integrate`
+  keeps its decline.
+- Review round 2: a first write of a function literal (`g ≔ (t) ↦ t + 1`)
+  is a local function by the same code path; a local function that reads a
+  `vars` host read declines (the existing closure reads it in its body: not
+  at all in a branch not taken, and after a host call before it), and one
+  that reads an input declines when the options have a host read or a host
+  function not declared pure (`h` that writes `_.x` gives the closure the
+  new value); in another angular unit, a `let` local and a local function
+  in the dictionary form decline (CE-1207; the other forms of a local
+  function, a helper declared `function` and a helper with a signature give
+  `sin(30°) = 0.5`), and so does, in the `complex` mode, a first write that
+  declares a local (the existing compiler reads the local of the rebuilt
+  block as complex: `t ≔ 1; arctan(t)` gives `NaN` where the interpreter
+  gives 45; found by the tester with `--deg`), the calls of a local function reach it through the
+  binding of the block before the rewrite, and its body, a node of the
+  rewritten root, is not rewritten a second time.
+- Differences from the note: the decline of the `complex` mode for both
+  forms, of an uncalled local function, and of a local function declared
+  with a signature (the note gives it the rule of a helper with no
+  signature only when it has none). A local function that writes a name it
+  reads is refused by the existing write rules (a helper body writes no
+  name of the body around it).
+
+**Shadow measure.** The 121 test files that reached the messages of
+these slices: admitted 590 → 768 of the 3,620 compilations that the
+existing compiler compiles (public 479 → 644, `implicit:integrand` 71 →
+81, `implicit:test` 1 → 4). Messages gone: "a Block with statements only
+as the root … and not as an operand" (181), "the helper … has no signature
+of ground types" (213), "no local function in a root Block" (at least 158, the messages listed),
+"a write in a root Block only to a local that a Declare declares" (at
+least 154); "unsupported local declaration" 141 → 83. Admitted where the
+existing compiler declines: 7 → 9; the two new ones read a name with no
+declared type (`f(z)` with `z` undeclared, `G(x) + 1` with `x`
+undeclared), the default kind of the profile.
+
+**Random tester.** The generator adds a `Block` in a `Block`, block
+statements, `ValueBlock` operands, locals declared `unknown`, first writes
+to `t`, local functions `lf` (each form, with and without captures) and the
+helper `fq` declared `function`. Seeds 81 to 85, 50,000 programs: the
+first run found the operand-block class, two `complex` shape classes (a
+local function's call, a `let` local of the type `missing | real`) and two
+programs that the existing compiler declines (an uncalled local function
+with `Min` of a complex operand, a `let` local written a real and a
+complex value). After the fixes: no failure of the profile, no difference
+of value or of shape for inputs in their types; the programs that only the
+existing compiler declines all read the undeclared `u` (the default kind),
+except `fs(Mod(y, 0), 2)` (2 programs, a class from before this change).
+The 43 shapes of disagreement with the interpreter are the precision
+caveat of a discontinuous operator and large arguments of `Gamma`,
+`Sinh` and `Cot`, as before.
+
+**Tycho preludes.** The census of the preludes held in
+`compile-javascript-profile.test.ts`: 40 of 58 admitted before and after;
+one program (`buddhabrot c`, a block of declarations whose value is an
+`Rgb`) now declines for the type of the block operand instead of
+`unsupported head Block`.

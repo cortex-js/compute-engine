@@ -538,6 +538,11 @@ export type FragmentDefinition<R> = {
    *  not known: the pass then reads no `Assign` of the root as a lowered
    *  `+=`. */
   readonly sumAssigned?: ReadonlySet<string>;
+  /** Whether the statement `statement` of a block defines a local function
+   *  that the definition makes a function of its own (`functionOf()`
+   *  reaches it at its calls): the pass does not type the statement.
+   *  Absent: no statement is such a definition. */
+  localFunction?(statement: Expression): boolean;
   /** The user function that a call reaches, or `undefined`. */
   functionOf(
     call: Expression,
@@ -2703,6 +2708,13 @@ export function walkBlock<R>(
   let last: FragmentFacts<R> = { type: { kind: 'statement' } };
   statements.forEach((s, i) => {
     const place = i === statements.length - 1 ? context.place : 'statement';
+    // A local function that the definition types at its calls
+    // (`FragmentDefinition.localFunction`).
+    if (place === 'statement' && w.definition.localFunction?.(s) === true) {
+      inner.statements.add(s);
+      last = { type: { kind: 'statement' } };
+      return;
+    }
     if (
       isFunction(s, 'Assign') &&
       isSymbol(s.op1) &&
@@ -2712,7 +2724,19 @@ export function walkBlock<R>(
       const name = s.op1.symbol;
       implicit.delete(name);
       const value = w.value(s.op2, inner, { ...context, place: 'value' });
-      const type = localType(value.type);
+      // The rule of the definition for a local with no declared type, as
+      // for `Declare(t, {value: …})`.
+      const definition = blockScope?.bindings.get(name);
+      const type =
+        w.definition.localType?.({
+          name,
+          value: value.type,
+          declared: undefined,
+          inferred:
+            definition !== undefined && 'value' in definition
+              ? definition.value.type.type
+              : undefined,
+        }) ?? localType(value.type);
       if (type.kind === 'list')
         return void w.refuse(
           s,

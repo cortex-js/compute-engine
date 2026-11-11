@@ -363,12 +363,15 @@ describe('the arguments of another kind decline', () => {
 describe('the other signatures keep their decline, each with its message', () => {
   const root = ['Function', ['Block', ['g', 'x']], typed('x', 'real')] as MathJsonExpression;
 
-  test('a helper declared `function`: no signature of ground types', () => {
+  // A helper declared `function` has the rule of a helper with an inferred
+  // signature (compile-javascript-structured-blocks.test.ts).
+  test('a helper declared `function` is admitted', () => {
     const ce = new ComputeEngine();
     ce.declare('g', 'function');
     ce.assign('g', ce.expr(['Function', ['Multiply', 't', 't'], 't'] as MathJsonExpression));
-    const got = profile(ce.expr(root));
-    expect('message' in got && got.message).toMatch(/the helper g has no signature of ground types/);
+    const fn = ce.expr(root);
+    expect('message' in profile(fn)).toBe(false);
+    expectAgreement(fn, 'strict');
   });
 
   test('a helper with effects other than random', () => {

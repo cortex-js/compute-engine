@@ -121,7 +121,20 @@
   known only at run time.
   A block of statements can be the compiled expression itself, with its free
   symbols as the inputs, and a power or a root of two number literals is
-  written as the value that the ordinary compiler folds it to.
+  written as the value that the ordinary compiler folds it to. A block can
+  hold a block (a statement whose locals are not visible after it, or the
+  value of the body, the form of an Epsil program), and a block whose
+  statements declare names with a value can be an operand
+  (`{ a ⩴ 3.7x; a − ⌊a⌋ } + 1`, the body of a `Sum`). A local declared
+  `unknown` with a value (`m \coloneq x + 1`) has the type of its value, and
+  a first write to a new name of a block (`s ⩴ x^2`) declares a local, as
+  in the ordinary compiler. In the `strict` mode, a local function of the
+  block (`g(t) \coloneq t + a`, `DefineFunction`) and a user function
+  declared `function` are compiled once as a function of the program; a
+  local function takes the names of the block that it reads as arguments,
+  at each call, so it reads their values there, as a closure does. A local
+  function in a branch, a loop or the `complex` mode, a recursive one, and a
+  local of a nested block with the name of an outer one decline.
   A program outside the profile declines with the diagnostic code
   `outside-profile`, which names the first node outside it (`operator` or
   `binding`); `fallback` applies as for any other decline, and the ordinary
