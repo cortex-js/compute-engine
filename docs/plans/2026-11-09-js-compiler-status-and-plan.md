@@ -735,14 +735,128 @@ next compiler patch.
    Heat/traffic disjoint-output work and Buddhabrot scatter/reduction need
    different ownership arguments.
 
-## Immediate next change
+## State and path forward (2026-11-10, end of the session that did steps 1 to 7)
 
-Implement **step 1 only**. Its first deliverable, the list of rewrites, is a
-document and comes before its code. Steps 2 to 4 are then one experiment that
-ends with a decision of the user. Where this document and the
-[pilot design](2026-11-09-js-structured-scalar-emitter.md) differ on the
-vocabulary, the baseline of the measure or the result of an inconclusive
-measure, this document applies.
+A session that continues this work starts here. The older sections above
+are the record of how each step was decided and measured.
+
+### What exists
+
+- **The structured route** of the JavaScript compiler: admission and typing
+  (`javascript-fragment-target.ts`, `fragment.ts`), a representation with no
+  target in it (`structured-ir.ts`, `structured-verify.ts`,
+  `structured-in-place.ts`, `structured-execution.ts`), the JavaScript
+  policy, lowering and emitter (`javascript-structured-*.ts`). It has
+  scalars, conditionals, helpers with statement bodies, captures, loops
+  over an integer range with `Break`, lists of numbers, and the `Power`
+  forms of [the emission rewrites](2026-11-09-js-pilot-emission-rewrites.md).
+- **The public option** `profile: 'numeric-kernel'`
+  ([spec](2026-11-10-js-numeric-kernel-profile-spec.md)), experimental. A
+  name with no declared type is a real number (`strict`) or a complex number
+  (`complex`); the result reports `profile`, `pure`, `shippable`,
+  `defaultedSymbols`.
+- **The internal switch** `ce._jsProfile` / `CE_JS_PROFILE=numeric-kernel`
+  ([proposal and results](2026-11-10-js-profile-first-consumer.md)):
+  `implicitCompile()` tries the profile first and uses the existing compiler
+  on a decline. Off by default. With it on, the full suite gives the same
+  results, and the profile admits 4,627 of 6,211 of the engine's own
+  compilations.
+- **Coverage on Tycho's prelude showcases**: 20 of 35 functions.
+
+### Decisions of the user that stand
+
+- The representation is general: no target in the core, one definition per
+  value, effects that name what they touch; it must be able to serve other
+  targets, concurrency and optimizations ("Objectives for the
+  representation", above).
+- For each admitted program, the value equals the interpreter's within the
+  caveats and the doubles equal those of the existing compiler with
+  `cse: false, constantFold: false`; a form that cannot meet this declines.
+- The profile ignores `cse` and `constantFold` while it is experimental.
+- The switch stays **off by default** (2026-11-10). No consumer has the
+  profile by default.
+- The order of work: more coverage of the numeric kernel first, then the
+  more general `program` profile (step 9).
+- The guidance for a host of `compile()` will be: give type information, or
+  call `ce.infer()` before `compile()` (stated by the user 2026-11-10; the
+  binding-units work of `docs/plans/2026-11-09-binding-units-model.md` makes
+  boxing stop writing inferred types).
+
+### Next work, in order
+
+1. **Operators that the engine's own compilations need**, from the counters
+   of the switch (the most frequent declines of limit probes: `Erf` 142, a
+   `Power` form outside the profile 124, `Gamma` 33, `Root` 24; of the
+   periodic-roots scan: `Tan`, `Haversine`, `Cot`; of stochastic equality:
+   `Arcsin`, `Arccos`; `Sinh`, `Conjugate`, `LogGamma`). Each operator gets
+   its row in the emission rewrites: the branches of the existing handler,
+   and which the route admits. `Arcsin`, `Arccos`, `Arcosh`, `Artanh` and
+   `Arcsec` need care: the existing compiler writes a real function for an
+   untyped operand and a complex helper for a `real` one.
+2. **Complex arithmetic** (a division with a complex operand, `Sin` and
+   `Cos` of a complex value, mixed products): the complex retry of an
+   integrand is admitted 10 times in 135.
+3. **The prelude functions that still decline** (15): a comprehension with a
+   guard (`legal`, `stones`, `score`), `play`, `c`, `shade` (`Rgb`), `step`
+   (a parallel loop), `life` (`RotateLeft`), and the seven functions of
+   `apollonian-gasket`, which belong to the `program` profile (recursion,
+   lambdas, lists of tuples that grow).
+4. **The `program` profile** (step 9): write its spec first, as for the
+   numeric kernel.
+
+After each change of coverage, run the measure below and record the two
+numbers (engine compilations admitted, prelude functions that compile).
+
+### How to measure
+
+Run on 2026-11-10 in a clean worktree, under the box lock, each once with
+and once without the two variables:
+
+```
+CE_JS_PROFILE=numeric-kernel CE_JS_PROFILE_STATS=<a new directory> npm test
+node scripts/js-profile-stats.mjs <that directory>
+```
+
+The first must give the tallies of `npm test` alone; the second prints the
+table of attempts, admitted and declined per consumer with the most
+frequent messages. The prelude census has no script in the repository: the
+table "Prelude census" above was made by compiling each function of the
+nine preludes under the profile; `compile-javascript-profile.test.ts`
+(`PRELUDES`) holds the heat, traffic, Othello and fractal preludes.
+
+### Open points
+
+- **`ce.infer()` and the profile.** The profile does not read an inferred
+  type, and `ce.infer()` writes its types marked as inferred, so today a
+  call of `ce.infer()` changes nothing for the profile: a name that is a
+  list still needs `ce.declare()`. Once boxing writes no inferred type
+  (binding units, flag `_bindingUnits`), a definition marked inferred exists
+  only because the host called `ce.infer()`, `ce.assume()` or `ce.assign()`,
+  and the profile could then read it without depending on the order of
+  boxing. Not decided. The predicate is one function, `hasNoDeclaredType()`.
+- **Constant folding.** The profile folds no constant; against the default
+  options of the existing compiler a result can differ in the last place.
+  No test of the suite changed with the switch on. Decide before a consumer
+  gets the profile by default.
+- **The cost of the switch** (a second admission for each declined program)
+  is not measured.
+- **`mode: 'bigint'`** is refused by the profile.
+- **Reviews.** Each change from `Break` on had a Claude and a Codex review.
+  The loop header revision (`aa1cc105e`) and the last fix round of the
+  execution analysis were checked by reading and tests only.
+- **Issues found on the way**: `issues/CE-1191.md`, `CE-1193.md`,
+  `CE-1194.md`.
+- **Ideas, not recorded elsewhere**: remove the per-call arrow function of
+  the existing emitter (about 30% of the time of `heatstep`); add the
+  switch-on run to the nightly pipeline.
+
+### How the work was done
+
+One change per subagent in a linked worktree; a design note before a change
+that adds an operation to the representation; a Claude review that runs
+probe programs against the existing compiler, and a Codex review; the route
+tests, the core suite and the type check before each commit; the full suite
+with the switch off and on for a change that the consumers reach.
 
 ## Where each remaining item of the original proposal is done
 
