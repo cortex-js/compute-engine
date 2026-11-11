@@ -49,6 +49,46 @@ result, or in the answer of `canCompile()`, and decides. An option would be
 needed only if a requirement changed how the code is generated, and nothing
 does that today.
 
+## Names with no declared type (approved 2026-11-10, after the first run of the switch)
+
+Under the profile, a parameter of a `Function` literal or a free symbol with
+no **declared** type is a real number in the `strict` mode and a complex
+number in the `complex` mode. The type that the engine inferred for it is
+not read. The first rule of this spec required a declared type; the run of
+the engine's own compilations with the profile
+([result](2026-11-10-js-profile-first-consumer.md)) showed that this rule
+alone caused about 5,200 of 5,801 declines.
+
+- **Why the inferred type is not read.** The engine narrows an undeclared
+  free symbol each time an expression that uses it is boxed, and keeps the
+  result on the engine: `x` is `unknown` after `x < 1`, `number` after
+  `Sin(x)`. A rule that read it would admit or decline a program by what
+  was boxed before it.
+- **The host's part.** A name that the host does not declare is a scalar
+  number. A value of another shape for it is outside its type, and the
+  result is unspecified, as for a declared type. This is an exception, for
+  the profile, to rule R1 of `docs/COMPILATION-MODEL.md` (an input typed
+  `unknown` is refused).
+- **A conflict declines.** A body that uses the name as a list
+  (`At(L, 1)`) or as a condition (`If(b, 1, 2)`) declines: the host
+  declares the name.
+- **The result lists the names** that took the default type, so that a host
+  can find a name it did not mean to leave undeclared (`x + u` with a typo
+  `u` compiles, and `u` is an input).
+- **A symbol with a value and no declared type** (`ce.assign('a', 3)`) is
+  captured as a number copied at compile time and takes the type of that
+  value.
+- **The `complex` mode.** The compiled function accepts a number or a
+  complex value for such a name, as the existing compiler does. Where the
+  profile cannot give exactly the values of the existing compiler, the
+  program declines.
+
+In the `strict` mode the existing compiler already computes with an untyped
+name as a real number: for 37 of 43 bodies its code for an untyped parameter
+is the code for `x: real`, and the 6 others use operators outside the
+profile (`Arcsin`, `Arccos`, `Arcosh`, `Artanh`, `Arcsec`, a parameter as a
+condition).
+
 ## The two facts, defined
 
 **`pure`.** Two calls of the compiled function, with any arguments, give the
