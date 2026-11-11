@@ -340,9 +340,36 @@ describe('switch on: a consumer whose program the profile admits gives the resul
   });
 });
 
-describe('switch on: consumers whose programs the profile does not take', () => {
-  test('solve-enumeration builds an untyped `Function`: the profile declines it, and the result is the same', () => {
-    const r = results(
+// A parameter with no declared type is a real number in the `strict` mode
+// (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md, "Names with no
+// declared type"): the profile admits the untyped programs of these
+// consumers.
+describe('switch on: a consumer whose program has untyped parameters', () => {
+  test.each<Program>([
+    ['nd', (ce) => ce.box(['ND', ['Function', ['Sin', 'x'], 'x'], 1]).N()],
+    [
+      'nlimit',
+      (ce) =>
+        ce
+          .box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+          .N(),
+      true,
+      // With `ce.jit = 'off'` this `NLimit` is `NaN`.
+      false,
+    ],
+    [
+      'reduce',
+      (ce) =>
+        ce
+          .box([
+            'Reduce',
+            ['List', 1.5, 2, 3],
+            ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+          ])
+          .N(),
+    ],
+    [
+      'solve-enumeration',
       (ce) =>
         ce
           .box([
@@ -351,14 +378,18 @@ describe('switch on: consumers whose programs the profile does not take', () => 
             ['Element', 'x', ['Range', 1, 100]],
           ])
           .evaluate(),
-      false
-    );
+      false,
+    ],
+  ])('%s', (consumer, compute, machine = true, sameAsInterpreter = true) => {
+    const r = results(compute, machine);
     expect(r.on).toBe(r.off);
-    expect(r.on).toBe(r.interpreted);
-    expect(r.stats['solve-enumeration']?.declined).toBeGreaterThan(0);
-    expect(r.stats['solve-enumeration']?.admitted).toBe(0);
+    if (sameAsInterpreter) expect(r.on).toBe(r.interpreted);
+    expect(r.offStats).toEqual({});
+    expect(r.stats[consumer]?.admitted).toBeGreaterThan(0);
   });
+});
 
+describe('switch on: consumers whose programs the profile does not take', () => {
   test('series passes `vars`: the profile is not tried, and the result is the same', () => {
     const r = results(
       (ce) => ce.parse('\\sum_{k=1}^\\infty \\frac{1}{k^3+k+1}').N(),

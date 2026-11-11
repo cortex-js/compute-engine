@@ -1279,7 +1279,16 @@ const INTENDED_DECLINES: [string, () => Expression, Record<string, unknown>, Reg
   ['a head outside the vocabulary', () => engine().expr(['Sinh', 'x']), {}, /unsupported head Sinh/],
   ['Power with an exponent other than 2', () => engine().expr(['Power', 'x', 3]), {}, /Power is in the structured route only with the literal exponent 2/],
   ['a list', () => engine().expr(['List', 'x', 'y']), {}, /a list literal is not in the structured route/],
-  ['a free symbol with no scalar type', () => engine().expr('u'), {}, /unsupported binding u/],
+  [
+    'a free symbol declared with a type that is not scalar',
+    () => {
+      const ce = engine();
+      ce.declare('u', 'number');
+      return ce.expr('u');
+    },
+    {},
+    /unsupported binding u/,
+  ],
   ['cse not false', () => engine().expr(['Add', 'x', 'y']), { cse: undefined }, /requires cse: false/],
   ['cse true', () => engine().expr(['Add', 'x', 'y']), { cse: true }, /requires cse: false/],
   ['constantFold not false', () => engine().expr(['Add', 'x', 'y']), { constantFold: undefined }, /requires constantFold: false/],

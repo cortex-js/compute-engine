@@ -470,6 +470,11 @@ export type IRInput = {
    *  `list<real>` does not keep. A label for a target that names the
    *  element type in its code or its messages; no check reads it. */
   readonly elementLabel?: string;
+  /** A complex input that the host can give as a number or as a complex
+   *  value (`{ re, im }`): a name with no declared type in the `complex`
+   *  mode. Each read converts the value to a complex value, as the existing
+   *  emitter does (`_SYS.cplx`, which keeps a complex value as it is). */
+  readonly lifted?: true;
 };
 
 /** A binding that the program reads as a snapshot (`IRCaptureRead`). */

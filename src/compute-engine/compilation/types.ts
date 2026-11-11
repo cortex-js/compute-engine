@@ -3849,6 +3849,22 @@ export type CompilationResult<
   pure?: boolean;
 
   /**
+   * **Experimental.** On a result with `profile`: the names of the
+   * parameters of the compiled `Function` literal, or of the free symbols of
+   * the compiled expression, that have no declared type and took the
+   * default type of the mode: a real number in the `strict` mode, a complex
+   * number in the `complex` mode (the compiled function then accepts a
+   * number or a `{ re, im }` value for it). The type that the engine
+   * inferred for such a name is not read. Parameters in their order, free
+   * symbols in the order of their first read. A host reads it to find a
+   * name that it did not mean to leave undeclared (`x + u` with a typo `u`
+   * compiles, and `u` is an input). Absent when every name has a declared
+   * type. A symbol with a value and no declared type is not listed: the code
+   * holds a copy of its value.
+   */
+  defaultedSymbols?: string[];
+
+  /**
    * Whether `broadcastAsync()` would send a batch of `cells` cells to the
    * engine's worker pool now, or keep it on the calling thread. It reads the
    * pool (`ce.workers`) and the inline threshold at the time of the call:

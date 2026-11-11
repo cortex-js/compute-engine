@@ -7,6 +7,7 @@ import type {
   CompileTarget,
 } from './types.js';
 import {
+  hasInferredType,
   isDictionary,
   isFunction,
   isNumber,
@@ -745,7 +746,10 @@ function signOf(
   if (snapshot !== undefined) sign = fromValue(snapshot);
   else if (isNumber(node))
     sign = node.im === 0 ? fromValue(node.re) : 'unknown';
-  else if (isSymbol(node)) {
+  else if (isSymbol(node) && !hasNoDeclaredType(node)) {
+    // The type of a name with no declared type is inferred, and is not
+    // read: its sign is unknown here, and the check of the engine facts
+    // below declines where the engine knows it.
     const type = withoutNaNMember(node.type.type);
     if (type !== undefined && isSubtype(type, NON_NEGATIVE_REAL_TYPE))
       sign = 'nonnegative';
@@ -1020,9 +1024,13 @@ function structuredFunctionRule(
  *   `c = 0.5`). For a complex exponent it
  *   writes `_SYS.cexp(z)`, or `_SYS.cexppi(u)` for `a + iπu`
  *   (`eulerPiSplit()`); the route admits a complex exponent that is a name
- *   only, and declines a real exponent for which the type of the node,
- *   without its infinities and `NaN`, is not real (the handler reads the
- *   type there).
+ *   only. For a real exponent the handler reads the type of the node,
+ *   without its infinities and `NaN` (`resultIsComplexValued()`, and
+ *   `resultIsWideUnderComplexDiscipline()` in the `complex` mode): the
+ *   route declines a real exponent for which that type is one of numbers
+ *   that are not real in the `strict` mode, and is not real in the
+ *   `complex` mode. The `number` of `e^x` for a name `x` with no declared
+ *   type is `Math.exp(x)` in the `strict` mode.
  * - `Power(b, 1.5)` and `Power(b, 3/2)`, for a real base that `signOf()`
  *   proves non-negative: the handler writes `(b * Math.sqrt(b))` for a
  *   name or a literal and `_SYS.pow3h(b)` (`b * Math.sqrt(b)`) for another
@@ -1110,7 +1118,10 @@ function structuredPowerRule(
                 : kind === 'complex' && !isSymbol(node.op2)
                   ? `the exponential of the complex operand ${node.op2.toString()} ` +
                     `is in the structured route only when the operand is a name`
-                  : kind !== 'complex' && !realType
+                  : kind !== 'complex' &&
+                      (mode === 'strict'
+                        ? isNonRealNumber(finitePartOfType(node.type.type))
+                        : !realType)
                     ? `the exponential ${node.toString()} has the type ` +
                       `${node.type.toString()}, which is not real`
                     : undefined;
@@ -2449,10 +2460,14 @@ function recordStructured(
     named: NamedCalls;
     /** Called on the structured route only. */
     inputs: () => readonly StructuredInput[];
+    /** The names of the inputs with no declared type
+     *  (`hasNoDeclaredType()`), which took the default kind. */
+    defaulted: ReadonlySet<string>;
   }
 ): void {
   const registry = prepared.named.structured;
   if (!admission.structured || registry === undefined) return;
+  const inputs = prepared.inputs();
   const preparation: StructuredPreparation = {
     root: prepared.root,
     functionRoot: prepared.functionRoot,
@@ -2468,7 +2483,10 @@ function recordStructured(
       ])
     ),
     captures: [...registry.captures.values()],
-    inputs: prepared.inputs(),
+    inputs,
+    defaulted: inputs
+      .filter((input) => prepared.defaulted.has(input.name))
+      .map((input) => input.name),
     effects: effectFacts(prepared.annotation),
     testOperations: admission.testOperations,
     forms: registry.forms,
@@ -2583,6 +2601,11 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
    *  profile, set by the emitter of the body (`bodyEmitter()`). */
   private analysis: ExecutionAnalysis | undefined;
 
+  /** The names that took the default kind in the current compilation with
+   *  the profile (`StructuredPreparation.defaulted`), set by the emitter of
+   *  the body. */
+  private defaulted: readonly string[] | undefined;
+
   /** The decline of an option that the profile does not have, found in the
    *  options of the caller (`compileInProfile()`) and thrown by
    *  `prepareCompilation()`, inside the catch of `compile()` that applies
@@ -2614,10 +2637,12 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     const previous = {
       inProfile: this.inProfile,
       analysis: this.analysis,
+      defaulted: this.defaulted,
       optionDecline: this.optionDecline,
     };
     this.inProfile = true;
     this.analysis = undefined;
+    this.defaulted = undefined;
     this.optionDecline = profileOptionDecline(options);
     try {
       const { profile: _profile, ...rest } = options;
@@ -2643,10 +2668,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       result.shippable =
         analysis.workerPortable.holds &&
         (result.shippable ?? isShippableCode(code));
+      const defaulted = this.defaulted as readonly string[] | undefined;
+      if (defaulted !== undefined && defaulted.length > 0)
+        result.defaultedSymbols = [...defaulted];
       return result;
     } finally {
       this.inProfile = previous.inProfile;
       this.analysis = previous.analysis;
+      this.defaulted = previous.defaulted;
       this.optionDecline = previous.optionDecline;
     }
   }
@@ -2700,6 +2729,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         ? this.inPhase('analysis', () => analyzeExecution(program))
         : undefined;
       this.analysis = analysis;
+      this.defaulted = preparation.defaulted;
       const emission = this.inPhase('emission', () =>
         emitStructuredProgram(program, names, {
           trace: this.hooks.trace,
@@ -2824,6 +2854,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     /** The declared type of each free symbol, for the label of a list
      *  input (`elementLabel()`). */
     const symbolTypes = new Map<string, Type>();
+    /** The free symbols with no declared type, which take the default
+     *  kind of the mode (`hasNoDeclaredType()`). */
+    const defaulted = new Set<string>();
     let readsSqrt = false;
     /** The indexes of the comprehensions around the node being checked. */
     const indexes = new Set<string>();
@@ -2871,6 +2904,13 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
           );
+        // A free symbol with no declared type is an input of the default
+        // kind of the mode (`defaultKind()`); its inferred type is not
+        // read.
+        if (registry && hasNoDeclaredType(node)) {
+          defaulted.add(node.symbol);
+          return;
+        }
         const list = structured
           ? structuredListType(node.type.type)
           : undefined;
@@ -2933,8 +2973,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       named,
       inputs: () =>
         [...annotation.scope.bindings].map(([name, facts]) =>
-          structuredInput(name, facts.type, symbolTypes.get(name))
+          structuredInput(
+            name,
+            facts.type,
+            symbolTypes.get(name),
+            defaulted.has(name) && registry?.mode === 'complex'
+          )
         ),
+      defaulted,
     });
     if (structured) this.endPhase('annotation', annotationStart);
     return prepared;
@@ -3045,22 +3091,32 @@ function attachBoundFunction(
   /** The declared type of each parameter, for the label of a list
    *  (`elementLabel()`). */
   const declaredTypes = new Map<string, Type>();
+  /** The parameters with no declared type, which take the default kind of
+   *  the mode on the structured route (`hasNoDeclaredType()`). */
+  const defaulted = new Set<string>();
   for (const parameter of fn.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     // A refusal of a parameter names the parameter.
     try {
       const declared = functionLiteralParameterType(parameter);
+      // On the structured route a parameter with no declared type has the
+      // default kind of the mode; its inferred type is not read.
+      const undeclared =
+        registry !== undefined &&
+        declared === undefined &&
+        hasNoDeclaredType(parameter);
       // The structured route also admits a list parameter
       // (`structuredListType()`).
-      const type =
-        declared === undefined
+      const type = undeclared
+        ? defaultKind(registry.mode)
+        : declared === undefined
           ? undefined
           : admission.structured
             ? structuredParameterType(declared, name)
             : scalarType(declared);
       if (
-        !isFunction(parameter, 'Typed') ||
-        parameter.nops !== 2 ||
+        (!undeclared &&
+          (!isFunction(parameter, 'Typed') || parameter.nops !== 2)) ||
         !name ||
         !type ||
         name === 'True' ||
@@ -3072,6 +3128,7 @@ function attachBoundFunction(
         );
       inputs.push({ name, type, declared: type.kind });
       if (declared !== undefined) declaredTypes.set(name, declared);
+      if (undeclared) defaulted.add(name);
     } catch (e) {
       if (name) noteRefusedNode(e, { node: parameter, binding: name });
       throw e;
@@ -3112,8 +3169,14 @@ function attachBoundFunction(
     named,
     inputs: () =>
       inputs.map((input) =>
-        structuredInput(input.name, input.type!, declaredTypes.get(input.name))
+        structuredInput(
+          input.name,
+          input.type!,
+          declaredTypes.get(input.name),
+          defaulted.has(input.name) && registry?.mode === 'complex'
+        )
       ),
+    defaulted,
   });
 }
 
@@ -3760,11 +3823,14 @@ function elementLabel(type: Type | undefined): string | undefined {
 
 /** The input `name` of the structured route, with the type `type`: a
  *  scalar, or a list of reals or of integers. `declared`: the engine type
- *  of the input, for the label of a list (`elementLabel()`). */
+ *  of the input, for the label of a list (`elementLabel()`). `lifted`: a
+ *  complex input with no declared type in the `complex` mode, which the
+ *  host can give as a number or a complex value (`IRInput.lifted`). */
 function structuredInput(
   name: string,
   type: { readonly kind: string; readonly element?: { readonly kind: string } },
-  declared?: Type
+  declared?: Type,
+  lifted = false
 ): StructuredInput {
   const rep = structuredRepresentation(type);
   const kind = type.kind === 'list' ? `list<${type.element?.kind}>` : type.kind;
@@ -3785,11 +3851,16 @@ function structuredInput(
       `JS scalar fragment invariant: no scalar or list input ${name}`
     );
   const label = type.kind === 'list' ? elementLabel(declared) : undefined;
+  if (lifted && kind !== 'complex')
+    throw new Error(
+      `JS scalar fragment invariant: the lifted input ${name} is not complex`
+    );
   return {
     name,
     type: kind as StructuredInput['type'],
     representation: rep,
     ...(label === undefined ? {} : { elementLabel: label }),
+    ...(lifted ? { lifted: true as const } : {}),
   };
 }
 
@@ -3865,26 +3936,63 @@ function structuredRegistry(
 }
 
 /**
+ * Whether the symbol `symbol` has no declared type: its definition has an
+ * inferred type, or it has no definition (a free name). On the structured
+ * route such a name takes the default kind of the compile mode
+ * (`defaultKind()`) where it is a parameter of the root `Function` literal
+ * or a free symbol with no value, and a captured snapshot takes the kind of
+ * its value (`numericSnapshot()`). The type that the engine inferred for the
+ * name is never read: the engine narrows it each time an expression that
+ * uses the name is boxed, so a rule that read it would depend on what was
+ * boxed before (docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md,
+ * "Names with no declared type"). A symbol declared with a type, even
+ * `number` or `any`, has a declared type.
+ *
+ * The answer is `hasInferredType()` (`type-guards.ts`), which follows the
+ * storage of bindings and of inferred types; every rule of the profile that
+ * asks this question calls this function.
+ */
+export function hasNoDeclaredType(symbol: Expression): boolean {
+  return isSymbol(symbol) && hasInferredType(symbol);
+}
+
+/** The kind of a name with no declared type (`hasNoDeclaredType()`) in the
+ *  compile mode `mode`: a real number in the `strict` mode, a complex
+ *  number in the `complex` mode. */
+function defaultKind(mode: 'strict' | 'complex') {
+  return mode === 'complex'
+    ? ({ kind: 'complex' } as const)
+    : ({ kind: 'real' } as const);
+}
+
+/**
  * The snapshot of the captured binding that the symbol `node` reads, or
- * `undefined` when the binding is not one that the fragment captures: an
- * explicitly declared real or integer binding (not inferred) that holds a
- * finite real number literal, and that is the binding the engine finds
- * for the name where the program is compiled (a binding of another scope
- * with the same name is not captured). `assertCurrent()` throws when the
- * binding, its declared type or its value changed after this call.
+ * `undefined` when the binding is not one that the fragment captures: a
+ * binding declared real or integer, or with no declared type
+ * (`hasNoDeclaredType()`), that holds a finite real number literal, and
+ * that is the binding the engine finds for the name where the program is
+ * compiled (a binding of another scope with the same name is not
+ * captured). A binding with no declared type is captured only when
+ * `admitsUndeclared` (the structured route). The pass types the snapshot
+ * in place of each read, so a binding with no declared type takes the kind
+ * of its value: `integer` for an integer, `real` for another real number.
+ * `assertCurrent()` throws when the binding, whether its type is declared,
+ * its declared type or its value changed after this call.
  */
 function numericSnapshot(
-  node: Expression & { symbol: string }
+  node: Expression & { symbol: string },
+  admitsUndeclared: boolean
 ):
   | { binding: object; value: Expression; assertCurrent: () => void }
   | undefined {
   const binding = node.valueDefinition;
   const value = binding?.value;
   const ambient = node.engine.lookupDefinition(node.symbol);
+  const undeclared = hasNoDeclaredType(node);
   if (
     !binding ||
-    binding.inferredType ||
-    !isSubtype(binding.type.type, 'real') ||
+    (undeclared && !admitsUndeclared) ||
+    (!undeclared && !isSubtype(binding.type.type, 'real')) ||
     !value ||
     !isNumber(value) ||
     !Number.isFinite(value.re) ||
@@ -3906,8 +4014,8 @@ function numericSnapshot(
         !('value' in current) ||
         current.value !== binding ||
         node.valueDefinition !== binding ||
-        binding.inferredType ||
-        binding.type.type !== declaredType ||
+        hasNoDeclaredType(node) !== undeclared ||
+        (!undeclared && binding.type.type !== declaredType) ||
         binding.value !== value ||
         node.engine._getSymbolValue(node.symbol) !== value
       )
@@ -3925,7 +4033,7 @@ function recordCapture(
   registry: StructuredRegistry,
   node: Expression & { symbol: string }
 ): boolean {
-  const snapshot = numericSnapshot(node);
+  const snapshot = numericSnapshot(node, true);
   if (snapshot === undefined) return false;
   let entry = registry.captures.get(snapshot.binding);
   if (entry === undefined) {
@@ -4133,6 +4241,12 @@ function annotateStructured(
       capture.assertCurrent();
       return capture.stored;
     },
+    // A free symbol with no declared type has the default kind of the mode
+    // (`hasNoDeclaredType()`); its inferred type is not read.
+    typeOfInput: (node: Expression) =>
+      hasNoDeclaredType(node)
+        ? defaultKind(registry.mode)
+        : (base.typeOfInput ?? base.typeOfSymbol)(node),
     functionOf: (call: Expression) => {
       const helper =
         isFunction(call) && calls.has(call)
@@ -4361,7 +4475,7 @@ function resolveHelper(
         node.symbol === 'False'
       )
         return;
-      const snapshot = numericSnapshot(node);
+      const snapshot = numericSnapshot(node, false);
       if (snapshot === undefined)
         throw new Error(
           `JS scalar fragment: unsupported helper capture ${node.symbol}`

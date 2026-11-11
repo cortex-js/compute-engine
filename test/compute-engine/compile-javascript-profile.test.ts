@@ -377,7 +377,7 @@ const EXPRESSIONS: [string, MathJsonExpression][] = [
   ['Gamma(x)', ['Gamma', 'x']],
   ['Factorial(k)', ['Factorial', 'k']],
   ['Erf(x)', ['Erf', 'x']],
-  ['x + u (u undeclared)', ['Add', 'x', 'u']],
+  ['x + u (u undeclared: the default type)', ['Add', 'x', 'u']],
   ['String length', ['StringLength', 's']],
   ['Comprehension(j x, j in 1..5)', [
     'Comprehension',
@@ -527,6 +527,9 @@ function agrees(expr: Expression, modes: readonly string[]): boolean[] {
         ok: true,
         pure: got.result.pure,
         shippable: got.result.shippable,
+        ...(got.result.defaultedSymbols === undefined
+          ? {}
+          : { defaultedSymbols: got.result.defaultedSymbols }),
       });
       expect(got.result.success).toBe(true);
       expect(got.result.profile).toBe('numeric-kernel');
@@ -575,6 +578,8 @@ describe('canCompile() and compile() agree', () => {
 
   test('a decline names its node and keeps the message of the refusal', () => {
     const ce = engine();
+    // A name declared with a type that the profile has no kind for.
+    ce.declare('u', 'number');
     const cases: [MathJsonExpression, Partial<CompileDiagnostic>][] = [
       [['Add', 'x', ['Random']], { operator: 'Random', value: 'Random()' }],
       [

@@ -594,7 +594,13 @@ class Emitter {
         this.inputs.add(input.name);
         if (input.elementLabel !== undefined)
           this.elementLabels.set(op.result.id, input.elementLabel);
-        return atom(this.names.input(input.name));
+        // A lifted input is converted at each read, as the existing
+        // emitter writes a wide name in the `complex` mode.
+        return atom(
+          input.lifted
+            ? `_SYS.cplx(${this.names.input(input.name)})`
+            : this.names.input(input.name)
+        );
       }
       case 'add': {
         if (op.result.representation !== 'complex')

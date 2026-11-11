@@ -526,7 +526,14 @@ export function canCompile(
         varsObjectRefs: undefined,
         fallback: false,
       });
-      return { ok: true, pure: result.pure, shippable: result.shippable };
+      return {
+        ok: true,
+        pure: result.pure,
+        shippable: result.shippable,
+        ...(result.defaultedSymbols === undefined
+          ? {}
+          : { defaultedSymbols: result.defaultedSymbols }),
+      };
     } catch (e) {
       return { ok: false, diagnostic: compileDiagnosticOf(e) };
     }

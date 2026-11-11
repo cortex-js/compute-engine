@@ -165,6 +165,10 @@ export type StructuredPreparation = {
   /** The parameters of the root function in order, or the free symbols of
    *  the expression in the order of their first read. */
   readonly inputs: readonly StructuredInput[];
+  /** The names of the inputs with no declared type, which took the default
+   *  kind of the mode, in the order of `inputs`
+   *  (`CompilationResult.defaultedSymbols`). The lowering does not read it. */
+  readonly defaulted?: readonly string[];
   /** The effect fact of each prepared node that the annotation types. */
   readonly effects: ReadonlyMap<Expression, EffectFact>;
   /** For tests only: the heads that lower to the trace operation, with the

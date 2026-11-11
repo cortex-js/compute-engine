@@ -3457,10 +3457,16 @@ export const walkParallelLoop = walkLoop('parallel');
 //
 
 /** The answer of `canCompile()`. With the `numeric-kernel` profile, a
- *  positive answer also carries the `pure` and `shippable` fields of the
- *  result that `compile()` gives (`CompilationResult`). */
+ *  positive answer also carries the `pure`, `shippable` and
+ *  `defaultedSymbols` fields of the result that `compile()` gives
+ *  (`CompilationResult`). */
 export type CanCompileResult =
-  | { ok: true; pure?: boolean; shippable?: boolean }
+  | {
+      ok: true;
+      pure?: boolean;
+      shippable?: boolean;
+      defaultedSymbols?: string[];
+    }
   | { ok: false; diagnostic: CompileDiagnostic };
 
 /** The `outside-fragment` diagnostic of a refusal of the pass. */
