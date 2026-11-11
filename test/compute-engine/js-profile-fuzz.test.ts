@@ -97,7 +97,7 @@ test('the generator writes the functions of lists and the function operands', ()
     }
     json.forEach(visit);
   };
-  for (let i = 0; i < 2000; i++)
+  for (let i = 0; i < 4000; i++)
     visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: DEFAULT_OPTIONS.size }).json);
   for (const head of [
     'Norm', 'Mean', 'Median', 'Variance', 'Dot', 'Take', 'Drop', 'Rest', 'Reverse', 'Sort',
@@ -106,6 +106,33 @@ test('the generator writes the functions of lists and the function operands', ()
     'Apply',
   ])
     expect([head, heads.has(head)]).toEqual([head, true]);
+});
+
+test('the generator writes captured lists and nodes that read no input', () => {
+  const seen = new Set<string>();
+  const visit = (json: unknown): void => {
+    if (!Array.isArray(json)) return;
+    const text = JSON.stringify(json);
+    if (text === '["Floor","cr"]' || text === '["Sign","cr"]') seen.add('a jump of a capture');
+    if (json[0] === 'Mod' && json[2] === 1) seen.add('Mod(v, 1)');
+    if (json[0] === 'At' && json[1] === 'CL') seen.add('a captured list');
+    if (json[0] === 'fcr') seen.add('a helper parameter with the name of a capture');
+    if (json[0] === 'Function')
+      for (const p of json.slice(2))
+        if (Array.isArray(p) && p[0] === 'Typed' && (p[1] === 'cr' || p[1] === 'CL'))
+          seen.add(`a parameter ${p[1]}`);
+    json.forEach(visit);
+  };
+  for (let i = 0; i < 2000; i++)
+    visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: DEFAULT_OPTIONS.size }).json);
+  expect([...seen].sort()).toEqual([
+    'Mod(v, 1)',
+    'a captured list',
+    'a helper parameter with the name of a capture',
+    'a jump of a capture',
+    'a parameter CL',
+    'a parameter cr',
+  ]);
 });
 
 test('the generator writes the forms of slices 4 and 5', () => {

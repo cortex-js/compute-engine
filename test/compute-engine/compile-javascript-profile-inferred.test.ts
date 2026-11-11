@@ -277,7 +277,7 @@ describe('ce.assign(): a symbol with a value', () => {
     ['an integer', (ce) => ce.assign('a', 3), 'capture'],
     ['a real number', (ce) => ce.assign('a', 2.5), 'capture'],
     ['a complex number', (ce) => ce.assign('a', ce.complex(1, 2)), /unsupported binding a/],
-    ['a list', (ce) => ce.assign('a', ce.box(['List', 1, 2])), /unsupported binding a/],
+    ['a list of lists', (ce) => ce.assign('a', ce.box(['List', ['List', 1, 2]])), /unsupported binding a/],
   ])('%s', (_name, assign, expected) => {
     for (const mode of ['strict', 'complex'] as const)
       for (const order of ['after', 'before'] as const) {
@@ -293,6 +293,32 @@ describe('ce.assign(): a symbol with a value', () => {
         } else
           expect(profile(expr, mode)).toEqual({ message: expect.stringMatching(expected) });
       }
+  });
+
+  // A list is captured (compile-javascript-structured-captures.test.ts);
+  // `x + a` is then an element-wise sum with an operand of the default kind:
+  // real in the `strict` mode, with the doubles of the existing compiler,
+  // and complex in the `complex` mode, where it declines.
+  test('a list', () => {
+    for (const order of ['after', 'before'] as const) {
+      const ce = new ComputeEngine();
+      const early = order === 'before' ? ce.box(['Add', 'x', 'a']) : undefined;
+      ce.assign('a', ce.box(['List', 1, 2]));
+      const expr = early ?? ce.box(['Add', 'x', 'a']);
+      const got = profile(expr, 'strict');
+      if (!('result' in got)) throw new Error(got.message);
+      expect(got.result.code).not.toMatch(/_\.a/);
+      expect(got.result.defaultedSymbols).toEqual(['x']);
+      const reference = existing(expr, 'strict');
+      for (const v of XS) {
+        const a = (got.result.run as unknown as (v: object) => number[])(v);
+        const b = (reference.run as unknown as (v: object) => number[])(v);
+        expect([v, a.length, a.every((e, i) => Object.is(e, b[i]))]).toEqual([v, b.length, true]);
+      }
+      expect(profile(expr, 'complex')).toEqual({
+        message: expect.stringMatching(/Add of a list and the operand x of the type `complex`/),
+      });
+    }
   });
 
   test('the existing route of the fragment target captures only a declared binding', () => {

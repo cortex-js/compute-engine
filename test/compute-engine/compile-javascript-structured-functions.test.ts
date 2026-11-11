@@ -1550,10 +1550,11 @@ const BRANCH_ROWS: BranchRow[] = [
   // Comparisons: a literal, a capture, a node whose type is a value.
   ['x < 2', ['Less', 'x', 2]],
   ['offset < x', ['Less', 'offset', 'x']],
+  // A comparison of closed exact operands is the literal of the fold of the
+  // existing compiler (`closedJumpFold()`).
   [
     'If(nearThird < third, x, -x)',
     ['If', ['Less', 'nearThird', 'third'], 'x', ['Negate', 'x']],
-    /Less reads no input, parameter or local: the existing compiler folds it/,
   ],
   [
     '0 <= p·q·r',
@@ -1575,7 +1576,6 @@ const BRANCH_ROWS: BranchRow[] = [
   [
     'If(nearThird != third, x, -x)',
     ['If', ['NotEqual', 'nearThird', 'third'], 'x', ['Negate', 'x']],
-    /NotEqual reads no input, parameter or local: the existing compiler folds it/,
   ],
   [
     'NotEqual(z, w)',
@@ -1593,26 +1593,21 @@ const BRANCH_ROWS: BranchRow[] = [
   [
     'Mod(k, 1) + x',
     ['Add', ['Mod', 'k', 1], 'x'],
-    /Mod with the literal divisor 1 is not in the structured route/,
+    /Mod of the integer k and the literal divisor 1 is not in the structured route/,
   ],
+  // A dividend that is not integer-valued: `_SYS.fract`.
+  ['Mod(x, 1) + y', ['Add', ['Mod', 'x', 1], 'y']],
+  ['Mod(x·y, 1)', ['Mod', ['Multiply', 'x', 'y'], 1]],
   [
     'Mod(m, 2)',
     ['Mod', 'm', 2],
     /Mod of m and 2, each a literal or of a type in integer<0..2\^53 - 1>, is not in the structured route/,
   ],
-  [
-    'x + Mod(seven, tenth)',
-    ['Add', 'x', ['Mod', 'seven', 'tenth']],
-    /Mod reads no input, parameter or local/,
-  ],
+  ['x + Mod(seven, tenth)', ['Add', 'x', ['Mod', 'seven', 'tenth']]],
   // Floor.
   ['Floor(x)', ['Floor', 'x']],
   ['Floor(k)', ['Floor', 'k']],
-  [
-    'x + Floor(third)',
-    ['Add', 'x', ['Floor', 'third']],
-    /Floor reads no input, parameter or local/,
-  ],
+  ['x + Floor(third)', ['Add', 'x', ['Floor', 'third']]],
   // Min, Max, Divide (not jump functions).
   ['Max(0, x) + Min(p, 3)', ['Add', ['Max', 0, 'x'], ['Min', 'p', 3]]],
   ['x / y', ['Divide', 'x', 'y']],

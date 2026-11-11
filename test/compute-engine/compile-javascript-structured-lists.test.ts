@@ -534,15 +534,17 @@ describe('refusals', () => {
     ['At of a number', body([L, I], ['At', 'i', 1]), /invalid bound expression/],
     ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list of reals, integers or tuples or a tuple of reals, and its operand has the type `integer`/],
     ['a list of lists', body([typed('L', 'list<list<real>>'), I], ['At', ['At', 'L', 'i'], 1]), /the parameter L has the type list<list<real>>, and the structured route admits a list only of the type list<real> or list<integer>/],
-    ['a matrix', body([typed('L', 'matrix<real>'), I], 'i'), /the parameter L has the type matrix<real>/],
+    // The body reads the parameter: a parameter that the body never reads is
+    // admitted whatever its type (compile-javascript-structured-captures.test.ts).
+    ['a matrix', body([typed('L', 'matrix<real>'), I], ['Add', ['Length', 'L'], 'i']), /the parameter L has the type matrix<real>/],
     // A type that is not a list type keeps the message of a parameter that
     // the route has no type for.
     ['a named tuple parameter', body([typed('T', 'tuple<x: real, y: real>'), I], ['At', 'T', 'i']), /the parameter T of the function has the type tuple<x: real, y: real>, which is not in the structured route: a parameter is a number, a boolean, a list of reals or of integers, or a tuple of reals/],
     ['a list of complex numbers', body([typed('L', 'list<complex>'), I], ['At', 'L', 'i']), /the parameter L has the type list<complex>/],
-    ['a list of booleans', body([typed('L', 'list<boolean>'), I], 'i'), /the parameter L has the type list<boolean>/],
+    ['a list of booleans', body([typed('L', 'list<boolean>'), I], ['Add', ['Length', 'L'], 'i']), /the parameter L has the type list<boolean>/],
     // `vector`, a list of numbers, is a list of reals in the `strict` mode
     // (compile-javascript-structured-number-inputs.test.ts).
-    ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], 'i'), /the parameter L of the function has the type indexed_collection<real>, which is not in the structured route/],
+    ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], ['Add', ['Length', 'L'], 'i']), /the parameter L of the function has the type indexed_collection<real>, which is not in the structured route/],
     // `First`, `Last`, `Rest` and the other functions of lists are in the
     // route since slice 2 (compile-javascript-structured-collections2.test.ts).
     ['Take with a real count', body([L, typed('x', 'real')], ['At', ['Take', 'L', 'x'], 1]), /Take with x of the type `real` is not in the structured route, which reads an integer there/],
@@ -591,11 +593,13 @@ describe('refusals', () => {
     );
   });
 
-  // A string, a tuple and a symbol with a value keep their earlier messages.
+  // A string, a tuple and a symbol whose value is a list of lists keep their
+  // earlier messages. A list of reals with a value is a captured list
+  // (compile-javascript-structured-captures.test.ts).
   test.each([
     ['a string input', 'string', undefined],
     ['a named tuple input', 'tuple<x: real, y: real>', undefined],
-    ['a list symbol with a value', 'list<real>', ['List', 1, 2]],
+    ['a list of lists with a value', 'list<list<real>>', ['List', ['List', 1, 2]]],
   ] as [string, string, MathJsonExpression | undefined][])('%s', (_name, type, value) => {
     const ce = engine();
     ce.declare('S', type);

@@ -804,20 +804,9 @@ describe('refusals', () => {
       'strict',
       /Round with other than one operand is not in the structured route/,
     ],
-    // A jump function that reads no input, parameter or local: the existing
-    // compiler folds it with the exact value of its operand.
-    [
-      'Sign of a capture',
-      ['Add', ['Sign', 'offset'], 'x'],
-      'strict',
-      /Sign reads no input, parameter or local: the existing compiler folds it/,
-    ],
-    [
-      'Ceil of a capture',
-      ['Add', ['Ceil', 'third'], 'x'],
-      'strict',
-      /Ceil reads no input, parameter or local/,
-    ],
+    // A jump function of closed exact operands (`Sign` and `Ceil` of a
+    // capture) is the literal of the fold of the existing compiler:
+    // `compile-javascript-structured-captures.test.ts`.
     // `jumpShiftRewrite()`: an integer variable and an exact constant that no
     // double holds.
     [

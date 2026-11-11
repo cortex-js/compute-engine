@@ -205,6 +205,7 @@
 import {
   elementOf,
   isClosedRegion,
+  isListType,
   isTupleType,
   reachesHost,
   regionsOf,
@@ -222,7 +223,11 @@ import {
   type IntegerRounding,
   type UnaryFunctionName,
 } from './structured-ir.js';
-import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
+import {
+  inPlaceUpdates,
+  mutatesInPlace,
+  rootYieldsUnique,
+} from './structured-in-place.js';
 
 /**
  * The helpers of `bigint-runtime.ts` that the bigint emitter of the existing
@@ -336,6 +341,10 @@ const FUNCTION_CODE: Readonly<
   trunc: { real: 'Math.trunc' },
   // The real code of `fract` is a template (`REAL_TEMPLATES`).
   fract: {},
+  // `Mod(a, 1)`: the helper that the existing emitter calls for a dividend
+  // that it does not write twice, `(x - Math.floor(x)) % 1`; its inline
+  // form `((a - Math.floor(a)) % 1)` gives the same value.
+  'mod-one': { real: '_SYS.fract' },
   hypot: { real: 'Math.hypot' },
 };
 
@@ -431,6 +440,11 @@ export type StructuredEmission = {
   readonly inputs: ReadonlySet<string>;
   /** The helpers of the runtime object `_SYS` that the code calls. */
   readonly runtime: ReadonlySet<string>;
+  /** One declaration per constant of the program (`IRConstant`):
+   *  `const _tv1 = [10, 20, 30];`. The host runs them once, when it makes
+   *  the compiled function, before the definitions and the statements,
+   *  which read the constants by name. Absent when there is none. */
+  readonly constants?: readonly string[];
 };
 
 const fail = (message: string): never => {
@@ -518,11 +532,20 @@ export function emitStructuredProgram(
   options: StructuredEmitOptions = {}
 ): StructuredEmission {
   const emitter = new Emitter(program, names, options);
+  const constants = emitter.constants();
   const definitions = program.functions.map((fn, i) =>
     emitter.definition(fn, i)
   );
   const statements: string[] = [];
-  const value = emitter.openRegion(program.root, statements, true)[0].text;
+  const root = emitter.openRegion(program.root, statements, true)[0];
+  // A list value that can be the array of a constant is copied: the host
+  // can write the array of the value, and the next call reads the constant.
+  const value =
+    constants.length > 0 &&
+    isListType(yieldedValues(program.root)[0]?.type) &&
+    !rootYieldsUnique(program)
+      ? `${operand(root, CALL)}.slice()`
+      : root.text;
   if (
     program.numericPolicy === 'bigint' &&
     (program.noValueResult !== undefined || emitter.lifted.size > 0)
@@ -540,6 +563,7 @@ export function emitStructuredProgram(
     value,
     inputs: emitter.inputs,
     runtime: emitter.runtime,
+    ...(constants.length > 0 ? { constants } : {}),
   };
 }
 
@@ -612,6 +636,8 @@ class Emitter {
   private readonly sources = new Map<number, Source>();
   /** The name of the JavaScript function of each helper, by its index. */
   private readonly functionNames: string[] = [];
+  /** The name of each constant of the program, by its index. */
+  private readonly constantNames: string[] = [];
   private readonly uses: Map<number, Use>;
   /** The values whose source is a name that the emitter binds, or a
    *  literal: a source that reads no variable that a loop assigns, other
@@ -650,6 +676,17 @@ class Emitter {
     // `replace-at` copies, as `_SYS.breplaceAt` of the existing emitter does.
     this.inPlace =
       program.numericPolicy === 'bigint' ? new Set() : inPlaceUpdates(program);
+  }
+
+  /** One declaration per constant of the program, which names it. */
+  constants(): string[] {
+    return (this.program.constants ?? []).map((constant) => {
+      const name = this.names.fresh();
+      this.constantNames.push(name);
+      return `const ${name} = [${constant.elements
+        .map((e) => numberSource(e).text)
+        .join(', ')}];`;
+    });
   }
 
   /**
@@ -930,6 +967,15 @@ class Emitter {
                     `({ re: ${numberSource(value.re).text}, im: ${numberSource(value.im).text} })`
                   )
         );
+        return undefined;
+      }
+      case 'constant': {
+        // The name that `constants()` declares, as an input is read by its
+        // name: the array of the constant, which no operation writes.
+        const name = this.constantNames[op.constant];
+        if (name === undefined) fail(`no constant ${op.constant}`);
+        this.plain.add(op.result.id);
+        this.define(op.result, atom(name));
         return undefined;
       }
       case 'capture':

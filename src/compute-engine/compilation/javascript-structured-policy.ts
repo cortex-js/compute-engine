@@ -260,6 +260,7 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'factorial2': { results: ['number'], operands: ['number'] },
     'trunc': { results: ['number'], operands: ['number'] },
     'fract': { results: ['number'], operands: ['number'] },
+    'mod-one': { results: ['number'], operands: ['number'] },
     'hypot': { results: ['number'], operands: ['number'] },
   },
 };

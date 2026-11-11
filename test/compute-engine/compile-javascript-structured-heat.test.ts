@@ -671,10 +671,15 @@ function f() -> real {
     expect(H).toEqual([1, 2, 3]);
   });
 
-  test('a captured list declines: a capture is a number', () => {
-    const ce = engineWith(`const K = [1, 2, 3]
-function f() -> list<real> { replaceAt(K, 1, 9) }`);
-    expect(() => structured().compile(literal(ce, 'f'), OPTIONS)).toThrow(/unsupported capture K/);
+  // A captured list is a new array at each call
+  // (compile-javascript-structured-captures.test.ts): the update can write
+  // it, and the next call reads the value of the capture again.
+  test('a captured list: an update of it changes no later call', () => {
+    const source = `const K = [1, 2, 3]
+function f() -> list<real> { replaceAt(K, 1, 9) }`;
+    const result = differential(source, 'f', [[], []]);
+    expect(outcome(() => run(result, []))).toEqual([9, 2, 3]);
+    expect(outcome(() => run(result, []))).toEqual([9, 2, 3]);
   });
 
   test('a list updated in one branch and read in the other: in place', () => {

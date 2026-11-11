@@ -581,8 +581,8 @@ describe('canCompile() and compile() agree', () => {
     // since slice 1 of docs/plans/2026-11-11-structured-collections-and-lambdas.md;
     // `Factorial(k)` (both modes) since `Factorial` is in the profile; the
     // functions of lists and `Map` with a function operand since slices 2
-    // and 3.
-    expect(declined).toBeGreaterThanOrEqual(19);
+    // and 3; `Mod(x, 1)` (both modes) since the form `mod-one`.
+    expect(declined).toBeGreaterThanOrEqual(17);
   });
 
   test.each(PRELUDES)(
@@ -656,12 +656,12 @@ describe('canCompile() and compile() agree', () => {
 
   test('the public wording of a refusal of the internal compiler', () => {
     const ce = engine();
-    // The internal message is "Mod with the literal divisor 1 is not in the
-    // structured route: the existing emitter writes % or the fractional
-    // part for it".
-    const got = outcome(ce.expr(['Mod', 'x', 1]));
+    // The internal message is "Mod of the integer k and the literal divisor
+    // 1 is not in the structured route: the existing emitter writes % for a
+    // dividend that it proves integer-valued and not negative".
+    const got = outcome(ce.expr(['Mod', 'k', 1]));
     expect('diagnostic' in got && got.diagnostic.message).toBe(
-      "Could not compile with the profile 'numeric-kernel': Mod with the literal divisor 1 is not in the profile"
+      "Could not compile with the profile 'numeric-kernel': Mod of the integer k and the literal divisor 1 is not in the profile"
     );
     // "… has the type true, and the existing compiler writes the literal
     // true in its place: the structured route does not".

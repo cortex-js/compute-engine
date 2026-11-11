@@ -185,9 +185,10 @@ function order(
  *    is checked (each iteration starts with the array that the previous one
  *    handed over); the result of the carried value when, in addition, its
  *    operand in each `exit` of the loop is consumable by that `exit`.
- *    An input, a capture, a parameter of a function, and every other value
- *    are not unique: the caller of the code, or of the function, can hold
- *    the array and read it after the call.
+ *    An input, a capture, a constant (`IRConstantRead`, an array that every
+ *    call shares), a parameter of a function, and every other value are not
+ *    unique: the caller of the code, or of the function, or the next call,
+ *    can hold the array and read it after the call.
  * 2. C runs in the same iteration as the definition of X: no body of a
  *    `loop` or of a `build` is between the region of the definition and C.
  *    Otherwise C would run once per iteration on the one array of X. The
@@ -245,9 +246,21 @@ export function consumableLoopInitials(
   return analyzeInPlace(program).loopInitials;
 }
 
+/**
+ * Whether the value of the root of `program` is unique by the rule of
+ * `inPlaceUpdates()`: its array is made by the call, and no input, no
+ * constant (`IRConstantRead`) and no other value of the program holds it. A
+ * target that gives a list value to the host gives a copy of a value that is
+ * not unique and can be the array of a constant, which every call shares.
+ */
+export function rootYieldsUnique(program: IRProgram): boolean {
+  return analyzeInPlace(program).root;
+}
+
 function analyzeInPlace(program: IRProgram): {
   inPlace: Set<IROperation>;
   loopInitials: Map<IROperation, boolean[]>;
+  root: boolean;
 } {
   const inPlace = new Set<IROperation>();
   const loopInitials = new Map<IROperation, boolean[]>();
@@ -425,8 +438,8 @@ function analyzeInPlace(program: IRProgram): {
   program.functions.forEach((fn, i) => {
     yieldsUnique[i] = analyze(fn.body, fn.parameters);
   });
-  analyze(program.root, []);
-  return { inPlace, loopInitials };
+  const root = analyze(program.root, []);
+  return { inPlace, loopInitials, root };
 }
 
 /**

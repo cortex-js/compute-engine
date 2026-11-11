@@ -306,6 +306,10 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
   ['T', 'tuple', 'tuple<real, real>'],
   ['TL', 'tuplelist', 'list<tuple<real, real>>'],
   ['c', 'boolean', 'boolean'],
+  // Parameters with the names of the captured `cr` and `CL`
+  // (`closedNodes()`): the body reads the argument, not the capture.
+  ['cr', 'real', 'real'],
+  ['CL', 'list', 'list<real>'],
 ];
 
 const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
@@ -337,7 +341,9 @@ export const DECLARATIONS =
   'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
   'Mod(xi, 2); h: real, assigned 2.5; ' +
   'm: integer, assigned 3; cn: number, assigned 1.5; w: assigned 3 and ' +
-  'g: assigned 0.75, with no declared type; the helpers of `HELPERS`, ' +
+  'g: assigned 0.75, with no declared type; cr: assigned 1/3 and crn: ' +
+  'assigned 3333333333333333/10^16, with no declared type; CL: ' +
+  'list<real>, assigned [2, -0.5, 3]; the helpers of `HELPERS`, ' +
   'assigned in the scope of each program';
 
 /** An engine with the declarations of every program, and the angular unit
@@ -356,6 +362,13 @@ export function makeEngine(angularUnit: 'rad' | 'deg' = 'rad'): ComputeEngine {
   ce.assign('cn', 1.5);
   ce.assign('w', 3);
   ce.assign('g', 0.75);
+  // Captured exact values and a captured list (`closedNodes()`).
+  ce.assign('cr', ce.expr(['Rational', 1, 3]));
+  ce.assign('crn', ce.expr(['Rational', 3333333333333333, 10 ** 16]));
+  ce.declare('CL', {
+    type: 'list<real>',
+    value: ['List', 2, -0.5, 3],
+  } as never);
   // The names and the functions of the host of `--host` (`HOST_OPTIONS`).
   ce.declare('vr', 'real');
   ce.declare('hp', '(real) -> real');
@@ -468,6 +481,18 @@ const HELPERS: readonly {
   readonly definition: Json;
   readonly arguments: readonly ('real' | 'integer' | 'boolean')[];
 }[] = [
+  // A parameter with the name of the captured `cr = 1/3`: the body reads the
+  // argument, also in the rounding and the sign.
+  {
+    name: 'fcr',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['Add', ['Floor', 'cr'], ['Multiply', 2, 'cr'], ['Sign', 'cr']],
+      ['Typed', 'cr', "'real'"],
+    ],
+    arguments: ['real'],
+  },
   {
     name: 'fd',
     signature: '(real) -> real',
@@ -733,8 +758,9 @@ const LIST_PARAMETER_HELPER = {
   signature: '(list<real>) -> real',
   definition: [
     'Function',
-    ['Add', ['Sum', 'Q'], ['Max', 'Q']],
-    ['Typed', 'Q', "'list<real>'"],
+    ['Add', ['Sum', 'CL'], ['Max', 'CL'], ['At', 'CL', 1]],
+    // The name of the captured list `CL`: the body reads the argument.
+    ['Typed', 'CL', "'list<real>'"],
   ] as Json,
 };
 
@@ -1065,10 +1091,33 @@ function genDraw(ctx: GenContext): Json {
   ]);
 }
 
+/** The leaves of `genLeaf()` that read no input: jump functions of the
+ *  captured exact values `cr` (1/3) and `crn` (3333333333333333/10^16) and
+ *  of closed exact constants, and the remainder by 1 of a symbol of
+ *  `ctx`. */
+function closedNodes(ctx: GenContext): Json[] {
+  return [
+    ['Floor', 'cr'],
+    ['Ceil', ['Negate', 'cr']],
+    ['Sign', 'cr'],
+    ['Mod', 'cr', ['Rational', 1, 7]],
+    ['Boole', ['Less', 'crn', 'cr']],
+    ['If', ['Less', 'crn', 'cr'], 1, -1],
+    ['Floor', ['Divide', ['Add', ['Factorial', 25], -1], ['Factorial', 24]]],
+    ['Fract', ['Multiply', 'Pi', ['Power', 10, 30]]],
+    ['Truncate', ['Rational', -7, 2]],
+    ['Mod', choose(ctx.rng, ctx.symbols), 1],
+    ['At', 'CL', genIndex(ctx)],
+  ];
+}
+
 function genLeaf(ctx: GenContext): Json {
   const { rng } = ctx;
   if (ctx.random && rng() < 0.12) return genDraw(ctx);
   if (ctx.host && rng() < 0.12) return pick(rng, ['vr', 'vr', 'vu', 'vz']);
+  // A node that reads no input (a jump function of captured exact values,
+  // which the existing compiler folds), or `Mod(v, 1)`.
+  if (rng() < 0.03) return pick(rng, closedNodes(ctx));
   if (rng() < 0.55) {
     if (ctx.lists.length > 0 && rng() < 0.08) {
       const list = pick(rng, ctx.lists);
@@ -1907,7 +1956,7 @@ const EXPRESSION_CONTEXT: ContextBase = {
   integers: ['k'],
   reals: ['x', 'y'],
   booleans: ['B'],
-  lists: ['L', 'I', 'LN', 'VN'],
+  lists: ['L', 'I', 'LN', 'VN', 'CL'],
   tuples: ['P'],
   tupleLists: ['LQ'],
 };

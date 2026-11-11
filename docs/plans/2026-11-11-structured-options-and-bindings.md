@@ -807,3 +807,121 @@ interpreter in 17, 15, 3 and 1 programs; in each of them it gives the
 doubles of the existing compiler. Most are a discontinuous operator (`Mod`,
 `Fract`, `Ceil`) at a point where the precision of a double changes the
 result.
+
+## Result of the four extensions: captures, folded nodes, ParallelLoop, unread parameters
+
+Written on `fdbbf509117a374bf1c66cd9d0448403f1873f6d`, where the census,
+shadow and switch measures below were taken; moved to
+`5d5060724e7de7caaca5192bb56fa7ed5c89143d`, where the tests and the
+random tester ran again. Admission in
+`javascript-fragment-target.ts` (`numericSnapshot()`, `isCapturedList()`,
+`frameValue()`, `closedJumpFold()`, `jumpFoldLiteral()`, the rule of
+`Mod`, the unread parameters of `attachBoundFunction()`), the lowering of
+a captured list, of a fold and of the form `mod-one` in
+`javascript-structured-lower.ts`, `IRInput.unread` and the function
+`mod-one` in `structured-ir.ts`, a check of the verifier. Tests:
+`compile-javascript-structured-captures.test.ts`. The rows of the existing
+code are in `2026-11-09-js-pilot-emission-rewrites.md`, "Captured values,
+folded nodes and unread parameters".
+
+**A, captured values.** A name whose value is a list of finite real number
+literals of a type in `list<real>` (declared, or the type of the value) is
+a constant of the program (`IRConstant`, read by `IRConstantRead`): one
+array, declared in the code that the runner evaluates once
+(`preambleOnce`), shared by every call and every helper. A read is never
+unique (`inPlaceUpdates()`), so no update writes it, and a list value of
+the root that is not unique is copied when the program has a constant
+(`rootYieldsUnique()`): `L` is `_tv1.slice()`. The verifier checks the
+constants (a list of reals or of integers, finite elements of the element
+type, one binding each) and each read. `analyzeExecution()` counts a read
+as an array of the host (`hostArrays()`); `pure` and `shippable` are
+unchanged, because the literal of the constant is part of the code that a
+worker loads. The first version made the list once per function at each
+call; the review measured it (a list of 10,000 elements: 78,923
+characters of code and 2.01 µs per call of `x·At(BL, 7)`), and this
+version gives 37 characters of code, the literal once in `preambleOnce`,
+0.04 µs per call (the existing compiler 0.17 µs in the same run), and for
+`x + Sum(h(j), j = 1..1000)` with `h(j) := j + At(BL, j)` over 2,000
+elements 0.73 µs per call (the existing compiler 4.9 µs; the first version
+347.7 µs). A name whose binding holds no value and whose value the engine
+reads in the frame of a call (`frameValue()`) is a snapshot as a captured
+number. Both are in `symbolDeps`, as on the existing compiler. Declined: a
+value that is an expression (`ev := x^2 + 1`; the existing compiler hoists
+`_val_ev`, and the route would need the rewrite of the angular unit, the
+purity and the admission of the stored value), lists of lists, of tuples,
+of strings, of complex or of non-finite values, the empty list, a bare
+`list` declaration whose value is not a list of reals.
+
+**B, nodes that read no input.** The pass asks for the value of each
+function node before its rule (`FragmentDefinition.constantValue`).
+`closedJumpFold()` returns the literal that the existing compiler writes:
+it calls `closedExactJump()` and `tryConstantFold()` with the state of
+the outermost compilation, and reads a number or a boolean back from the
+code; any other code declines. A node that names a parameter of the root
+function is not asked: the prepared target of the route does not bind the
+parameters, and the fold read the engine value of a symbol of the same
+name (`Floor(t)` with `t := 1/3` gave 0; found in review). The pass
+already skips a node that reads a name that a form binds below the root,
+so a helper parameter, a lambda parameter, an index and a local are read
+as themselves. The fold runs at the depth 1 of a compilation, as in the
+existing compiler, so that the compilations it starts (the literal it
+writes, a `Sum` whose body it compiles) do not empty the memos of the
+compilation in progress. The four earlier refusals "… reads no
+input, parameter or local" of `Floor`, `Mod`, `Sign` and the comparisons
+are gone. `Mod(a, 1)` with a dividend that is not integer-valued is
+`_SYS.fract(a)`; an integer dividend, by its engine type, by
+`isIntegerValued()` or by the type of the pass (`Length(LQ)`, a
+`compile-error` before the fix, found by the random tester), declines. Not
+done: an `If` or a `Which` whose condition has the type `true` or `false`
+(the existing compiler selects the arm; the admission, the pass and the
+lowering would each need the selection).
+
+**C, `ParallelLoop` as a sequential loop.** Not done; the decline stays. A
+sequential `loop` gives the values, but the existing compiler opens the
+frames of the passes (`_SYS.parallelPassesBegin()`), which consume an index
+of an enclosing `WithRandomSeed` frame, also one of the interpreter that
+calls an implicit compilation, and records the loop for the worker pool
+(`parallelLoops`, `parallelCode`, `runAsync()`). Matching it needs a flag
+of the IR loop, the emitter form of the frames of the passes and the pool
+records: size L, not S.
+
+**D, unread parameters.** A parameter of the root `Function` that the body
+never names, of any type, is an input with `IRInput.unread`: in the
+signature, with no check and no conversion; the verifier refuses a read of
+it. A name of the body, also the parameter of a nested literal, is a read.
+A default value or a rest parameter keeps its refusal.
+
+**Census witnesses** (112 test files that reached the four rows, replayed
+with the census logger; 6,657 compilations): admitted 3,223 → 3,467,
+declined 3,434 → 3,135, failed 0 → 0. Row A 395 → 186 (left: expression
+values, function values, strings, nested lists, matrices, tuples, complex
+and non-finite values), row B 178 → 38 (left: 34 constant `If`/`Which`
+conditions, 4 `e^(ln(−N))`), row C 73 → 73, row D 242 → 12 (left: a
+parameter declared `any` that the body reads). The replay ran before the
+fix of an integer dividend of `Mod`, which admits fewer programs.
+
+**Shadow measure** (the same 112 files, `CE_JS_PROFILE_SHADOW=1`), before
+→ after: public 2,887 → 3,071 admitted (46.5% → 49.9% of the compilations
+that the existing compiler compiles), `implicit:integrand` 92 → 115,
+`implicit:map-exact` 19 → 51 (all), `implicit:map-predicate` 32 → 36 (all),
+`implicit:map` 19 → 20 (all); failed 0 in both. Admitted where the
+existing compiler declines (public): 91 → 73. The changed test files of
+the change compile 50 fewer programs, so the public totals differ.
+
+**Consumer switch** (81 files of the consumers of the engine,
+`CE_JS_PROFILE=numeric-kernel`): 2,952 tests pass with and without the
+switch, before and after. Admitted, before → after: `integrand` 374 → 393
+of 445, `map-exact` 151 → 183 of 183, `map` 76 → 78 of 89; the other
+consumers unchanged; failed 0.
+
+**Random tester.** The generator adds the captured rationals `cr` and
+`crn`, the captured list `CL`, jumps of captures and of closed exact
+constants, and `Mod(v, 1)`. Seeds 171 and 172 (10,000 programs each) and
+173 (5,000, `--random`): no difference of value or of shape with the
+existing compiler for inputs in their types. Seed 173 found the
+`compile-error` of `Mod(Length(LQ), 1)`; after the fix, 0 failures. The
+disagreements with the interpreter are the precision caveat of `Mod` and
+`Fract` at a jump, and `Fract(10^30·π)`, where `evaluate()` of the
+interpreter loses the fractional part (`2643000000`; `.N()` gives
+`0.5028841971693994`, the value of both compilers): a defect of the
+interpreter.

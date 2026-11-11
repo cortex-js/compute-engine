@@ -398,18 +398,24 @@ describe('a parameter of a Function literal declared number', () => {
     ).toBe('(p) => { return _SYS.csin(_SYS.cplx(p)); }');
   });
 
-  test('a parameter declared any keeps its decline, read or not', () => {
-    for (const mode of ['strict', 'complex'] as const) {
+  test('a parameter declared any keeps its decline when the body reads it', () => {
+    for (const mode of ['strict', 'complex'] as const)
       expect(
         declineOf(['Function', ['Add', 'q', 1], typed('q', 'any')], mode)
       ).toMatch(/the parameter q of the function has the type any/);
+  });
+
+  // A parameter that the body never reads has no representation, whatever
+  // its type (compile-javascript-structured-captures.test.ts).
+  test('a parameter declared any that the body never reads is admitted', () => {
+    for (const mode of ['strict', 'complex'] as const)
       expect(
-        declineOf(
+        expectSameAsExisting(
           ['Function', ['Add', 'p', 1], typed('p', 'real'), typed('q', 'any')],
-          mode
+          mode,
+          ['p', 'q']
         )
-      ).toMatch(/the parameter q of the function has the type any/);
-    }
+      ).toBe('(p, q) => { return p + 1; }');
   });
 });
 

@@ -11,6 +11,41 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles captured lists, folded constants
+  and unread parameters.** Four forms that declined with `outside-profile`
+  now compile, with the values of the existing compiler:
+  - a name whose value is a list of finite real numbers (`ce.declare('L',
+    { type: 'list<integer>', value: [10, 20, 30] })`): the list is one array
+    of the code, made once when the compiled function is made, and the name
+    is in `symbolDeps`;
+  - a name read in the frame of a call that the interpreter is making
+    (`d` in `f(d) := Sum(Map(x ↦ x + d, Range(1, 128)))`);
+  - a rounding, a sign, a remainder or a comparison of exact operands that
+    read no input (`Floor((25! − 1)/24!)`, `Less(a, b)` of two captured
+    rationals), written as the literal of its value; and `Mod(x, 1)` of a
+    dividend that is not integer-valued;
+  - a parameter of the root `Function` that the body never reads, whatever
+    its type.
+
+  ```js
+  ce.declare('x', 'real');
+  ce.declare('k', 'integer');
+  ce.declare('L', { type: 'list<integer>', value: ['List', 10, 20, 30] });
+  const deps = new Set();
+  const f = compile(ce.parse('L_{k} + x'), {
+    profile: 'numeric-kernel',
+    symbolDeps: deps,
+  });
+  f.code; // ➔ "_.x + _SYS.atNumeric(_tv1, _.k, \"integer\")"
+  f.preambleOnce; // ➔ "const _tv1 = [10, 20, 30];\n"
+  f.run({ k: 2, x: 0.5 }); // ➔ 20.5
+  [...deps]; // ➔ ["L"]
+  ```
+
+  A `ParallelLoop`, an `If` whose condition has a constant type, `Mod(k, 1)`
+  of an integer `k`, and a captured value that is an expression of the
+  inputs still decline.
+
 - **The `numeric-kernel` profile of `compile()` admits integrals and
   derivatives that have a closed form.** An `Integrate`, `D`, `ND` or
   `Derivative` node, and an applied derivative (`f'(x)`), declined with

@@ -901,6 +901,9 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | The compile mode `mode: 'bigint'` in the profile ([bigint mode](2026-11-11-structured-bigint-mode.md), slices 1 and 2) |
 | `d89290f1b82fafad8e16cdc8db807176a3d5cdfe` | The bigint mode: sums and products, user functions, lists of integers, a root function literal (slices 3 to 5) |
 | `114403d0b44156730f1f943b12362d0c74f90fc8` | User functions as function operands, `Range` with a step, lists of tuples, rotations (collections, slices 4 and 5 in part) |
+| `52164aa7fdbfe853d332b34c0aabadde54424c01` | CE-1216, a fix of the existing compiler: the closed form of a derivative is written in parentheses |
+| `f56cd5f2908d403d9990aeb1171eee2a726b37b5` | Integrals and derivatives with a closed form ([numeric calculus](2026-11-11-structured-numeric-calculus.md), slice 1) |
+| `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | Names and list elements typed `number` read as reals in the default mode; helper parameter types from the signature |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -925,6 +928,7 @@ clean worktree):
 | `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | 8,961 of 9,433 (95.0%) | 86,639 passed, 0 failed |
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | 8,955 of 9,426 (95.0%) | 86,995 passed, 2 failed (CE-1197; CE-1186, the formatter's stack overflow, which passed in the shadow run on the same content) |
 | `114403d0b44156730f1f943b12362d0c74f90fc8` | 8,958 of 9,430 (95.0%) | 87,201 passed, 1 failed (CE-1197) |
+| `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | 8,964 of 9,424 (95.1%) | 87,356 passed, 1 failed (a 2 s time limit of `dag-shared-walks.test.ts`, at 2.4 s on a loaded machine) |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -947,6 +951,7 @@ the existing compiler compiles, and those of them that the profile admits):
 | `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | 19,696 of 30,429 (65%) | 10,733 of 21,204 (51%) |
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | 20,959 of 31,049 (67.5%) | 11,989 of 21,817 (55%) |
 | `114403d0b44156730f1f943b12362d0c74f90fc8` | 21,438 of 31,283 (68.5%) | 12,464 of 22,046 (56.5%) |
+| `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | 22,035 of 31,522 (69.9%) | 13,059 of 22,291 (58.6%) |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11

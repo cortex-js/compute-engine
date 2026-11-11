@@ -45,7 +45,11 @@ import {
 } from './javascript-target.js';
 import { BaseCompiler } from './base-compiler.js';
 import { exactRationalDivisor } from './compiler-type-facts.js';
-import { SHIFT_JUMP_HEADS } from './compile-folding.js';
+import {
+  SHIFT_JUMP_HEADS,
+  closedExactJump,
+  tryConstantFold,
+} from './compile-folding.js';
 import { exactDoubleValue } from '../numeric-value/exact-integer-value.js';
 import {
   hasUnknownsWithMemo,
@@ -296,28 +300,99 @@ function operandFacts(
 }
 
 /**
- * The refusal of a node of a head of `JUMP_FUNCTIONS` (`jump-functions.ts`)
- * that the structured route admits (`Less`, `LessEqual`, `Equal`, `Mod`,
- * `Floor`) and that reads no input, parameter or local
- * (`unknowns` is empty: every symbol it reads is `True`, `False`, a
- * constant or a captured binding), or `undefined`. The existing compiler
- * folds such a node with the exact value of its operands, also with
- * `constantFold: false` (`closedExactJump()` in `compile-folding.ts`): with
- * the captures `N = 1/3` and `M = 3333333333333333/10^16`, `Less(M, N)` is
- * `true`, and the comparison of their doubles is `false`. The refusal is
- * wider than that rule, which keeps the code of a node with a float literal
- * or of integer literals only. A node that is not pure (`Less(Random(),
- * 1/2)`) is not refused: the fold evaluates only a pure node
- * (`constantFoldValue()`), so the existing compiler writes its code.
+ * The literal that the existing compiler writes in place of the node `node`
+ * with `constantFold: false`, or `undefined` when it writes the code of the
+ * node. The existing compiler folds a function whose result jumps at a point
+ * (`JUMP_FUNCTIONS`: `Floor`, `Mod`, `Sign`, the comparisons, …) applied to
+ * closed exact operands (`closedExactJump()` in `compile-folding.ts`) with
+ * the exact value of its operands, also with `constantFold: false`
+ * (`tryConstantFold()`): with the captures `N = 1/3` and
+ * `M = 3333333333333333/10^16`, `Less(M, N)` is `true`, and the comparison
+ * of their doubles is `false`. Every other node, `Sign(3)` (an integer
+ * literal in the safe range) or `Mod(x, 2)`, keeps its code.
+ *
+ * The route calls the same two functions at the same node: the pass asks
+ * for the value of each function node before its rule
+ * (`FragmentDefinition.constantValue`), top down, as the existing compiler
+ * calls `tryConstantFold()` at each node before its handler, and a node
+ * that reads a name that a form binds is not asked
+ * (`mentionsCompileBoundName()` refuses its fold there). The fold runs with
+ * the compiler state of the outermost compilation
+ * (`withOutermostCompilerState()`). Its code is a number literal or the
+ * literal `true` or `false`, which is read back as its value
+ * (`jumpFoldLiteral()`); the fold records the names that it reads in
+ * `symbolDeps` (`recordJumpFoldReads()`). Any other code declines, and so
+ * does a fold inside another compilation.
  */
-function closedJumpRefusal(
-  operator: string,
-  node: Expression
-): string | undefined {
-  return node.unknowns.length === 0 && node.isPure
-    ? `${operator} reads no input, parameter or local: the existing compiler ` +
-        `folds it with the exact value of its operands (closedExactJump())`
-    : undefined;
+function closedJumpFold(
+  node: Expression,
+  registry: StructuredRegistry
+): Expression | undefined {
+  const known = registry.foldResults.get(node);
+  if (known !== undefined) return known ?? undefined;
+  const { target } = registry;
+  if (!closedExactJump(node, target)) {
+    registry.foldResults.set(node, null);
+    return undefined;
+  }
+  if (CompilerState._compileDepth !== 0)
+    throw new Error(
+      `JS scalar fragment: ${nodeText(node)} reads no input, parameter or ` +
+        `local, and the structured route folds it as the existing compiler ` +
+        `does only in an outermost compilation`
+    );
+  // The existing compiler folds inside its outermost compilation
+  // (`compileExpressionInFrame()`), at a depth of at least 1. The fold
+  // compiles the literal that it writes, and its evaluation can compile
+  // too (a `Sum` compiles its body): at the depth 0 of the route, each such
+  // compilation would be an outermost one, which empties the memos and
+  // resets the shared step budgets of the compilation in progress
+  // (`resetOutermostCompilation()` in `compiler-core.ts`).
+  const code = withOutermostCompilerState(target, () => {
+    CompilerState._compileDepth += 1;
+    try {
+      return tryConstantFold(node, target, 0);
+    } finally {
+      CompilerState._compileDepth -= 1;
+    }
+  });
+  if (code === undefined) {
+    registry.foldResults.set(node, null);
+    return undefined;
+  }
+  const value = jumpFoldLiteral(code);
+  if (value === undefined)
+    throw new Error(
+      `JS scalar fragment: the existing compiler folds ${nodeText(node)} ` +
+        `to the code ${code}, which is not a number or a boolean literal`
+    );
+  registry.folds.set(node, value);
+  const ce = node.engine;
+  const literal =
+    typeof value === 'boolean'
+      ? value
+        ? ce.True
+        : ce.False
+      : ce.number(value);
+  registry.foldResults.set(node, literal);
+  return literal;
+}
+
+/** The value of the JavaScript code `code` of a folded node when it is a
+ *  number literal (`3`, `-0.5`, `1e+30`, `-Infinity`, `NaN`, also in
+ *  parentheses) or `true` or `false`; `undefined` for other code. */
+function jumpFoldLiteral(code: string): number | boolean | undefined {
+  let text = code.trim();
+  while (text.startsWith('(') && text.endsWith(')'))
+    text = text.slice(1, -1).trim();
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  if (
+    /^-?(?:(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|Infinity)$/.test(text) ||
+    text === 'NaN'
+  )
+    return Number(text);
+  return undefined;
 }
 
 /**
@@ -450,9 +525,8 @@ function boundBelowRoot(
  * `Less`, `LessEqual`, `Equal` and `NotEqual`: real operands, a boolean
  * result. The
  * canonical form writes `GreaterEqual(a, b)` as `LessEqual(b, a)`. A
- * comparison that reads no input, parameter or local is refused
- * (`closedJumpRefusal()`): the existing compiler writes its exact value as
- * a literal also with `constantFold: false`. `Equal` is the exact
+ * comparison of closed exact operands that the existing compiler folds is
+ * its literal (`closedJumpFold()`), and does not reach this rule. `Equal` is the exact
  * comparison `===` of two numbers, and `NotEqual` its negation `!==`, which
  * is true for a `NaN` operand, as the interpreter answers (the existing
  * emitter, `compileJSEquality()`); a complex operand needs a comparison per
@@ -478,8 +552,6 @@ function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal' | 'NotEqual') {
           'signature',
           `${operator} with ${nops} operands is not in the structured route, which admits two or more`
         );
-      const closed = closedJumpRefusal(operator, node);
-      if (closed !== undefined) return w.refuse(node, 'signature', closed);
       const pole =
         operator === 'Less' || operator === 'LessEqual'
           ? (node as Expression & { ops: readonly Expression[] }).ops.find(
@@ -588,25 +660,44 @@ const integerWhenAll = (
  *   (`Mod(n, 2)` with `n: integer<0..100>` is `-0` at `n = -0`);
  * - `((a - Math.floor(a)) % 1)` or `_SYS.fract(a)` for every other operand
  *   with the literal divisor 1: `Mod(k, 1)` at `k = 2^60` is `0` there, and
- *   `_SYS.floorMod` throws.
+ *   `_SYS.floorMod` throws. The two spellings compute the same value of `a`
+ *   (`_SYS.fract(x)` is `(x - Math.floor(x)) % 1`), and the route writes
+ *   `_SYS.fract(a)` (the form `mod-one`), `a` evaluated once. It refuses a
+ *   dividend that the compiler proves integer-valued, or that has an integer
+ *   type: with a proof that it is not negative too (a proof that can read
+ *   the range of a loop index), the existing emitter writes `a % 1`, which
+ *   is `-0` at `a = -0`, where `_SYS.fract(a)` is `0`.
  *
- * A `Mod` that reads no input, parameter or local is refused too
- * (`closedJumpRefusal()`).
+ * A `Mod` of closed exact operands that the existing compiler folds is its
+ * literal (`closedJumpFold()`), and does not reach this rule.
  */
 const modFacts = realOperatorFacts('Mod', 2, integerWhenAll);
-const modRule = {
+const modRule = (forms: Map<Expression, StructuredForm>) =>
+  ({
   walk: (node, scope, context, w) => {
     if (isFunction(node) && node.nops === 2) {
       const [a, b] = node.ops;
-      const closed = closedJumpRefusal('Mod', node);
-      if (closed !== undefined) return w.refuse(node, 'signature', closed);
-      if (isNumber(b) && b.im === 0 && b.re === 1)
-        return w.refuse(
-          node,
-          'signature',
-          'Mod with the literal divisor 1 is not in the structured route: the ' +
-            'existing emitter writes % or the fractional part for it'
-        );
+      if (isNumber(b) && b.im === 0 && b.re === 1) {
+        const refuseInteger = () =>
+          w.refuse(
+            node,
+            'signature',
+            `Mod of the integer ${nodeText(a)} and the literal divisor 1 is ` +
+              `not in the structured route: the existing emitter writes % ` +
+              `for a dividend that it proves integer-valued and not negative`
+          );
+        if (
+          isSubtype(a.type.type, 'integer') ||
+          BaseCompiler.isIntegerValued(a)
+        )
+          return refuseInteger();
+        const facts = modFacts.walk(node, scope, context, w);
+        // A dividend that the pass types as an integer, whatever its engine
+        // type (`Length(LQ)`): the form `mod-one` has a real operand.
+        if (facts.type.kind === 'integer') return refuseInteger();
+        forms.set(node, 'mod-one');
+        return facts;
+      }
       if (isSafeNonNegativeInteger(a) && isSafeNonNegativeInteger(b))
         return w.refuse(
           node,
@@ -618,7 +709,7 @@ const modRule = {
     }
     return modFacts.walk(node, scope, context, w);
   },
-} satisfies FragmentRule<ScalarRepresentation>;
+}) satisfies FragmentRule<ScalarRepresentation>;
 
 /** The integers from `0` to `2^53 - 1`, both included. */
 const SAFE_NON_NEGATIVE_INTEGER_TYPE = parseType(
@@ -649,8 +740,6 @@ function isSafeNonNegativeInteger(expr: Expression): boolean {
 const floorFacts = realOperatorFacts('Floor', 1, () => 'integer');
 const floorRule = {
   walk: (node, scope, context, w) => {
-    const closed = closedJumpRefusal('Floor', node);
-    if (closed !== undefined) return w.refuse(node, 'signature', closed);
     const constant = isFunction(node)
       ? inexactJumpConstant(node.ops)
       : undefined;
@@ -1351,8 +1440,9 @@ type ComplexOperands = 'any' | 'no-pi' | 'name' | 'none';
 /**
  * The heads of `structuredScalarFunctionRule()`: the lane rule of each, and
  * the complex operands that it admits (`ComplexOperands`). `jump`: a head
- * of `JUMP_FUNCTIONS`, refused when it reads no input, parameter or local
- * (`closedJumpRefusal()`); `rounding`: a head of `SHIFT_JUMP_HEADS`,
+ * of `JUMP_FUNCTIONS`, whose node of closed exact operands is its literal
+ * when the existing compiler folds it (`closedJumpFold()`); `rounding`: a
+ * head of `SHIFT_JUMP_HEADS`,
  * refused for an operand with an exact constant that no double holds
  * (`inexactJumpConstant()`).
  */
@@ -1548,10 +1638,6 @@ function structuredScalarFunctionRule(
           'signature',
           `${head} with other than one operand is not in the structured route`
         );
-      if (jump !== undefined) {
-        const closed = closedJumpRefusal(head, node);
-        if (closed !== undefined) return w.refuse(node, 'signature', closed);
-      }
       if (jump === 'rounding') {
         const constant = inexactJumpConstant(node.ops);
         if (constant !== undefined)
@@ -2594,6 +2680,7 @@ function modeRules(
     Arctan2: structuredFunctionRule('Arctan2', mode, forms),
     Hypot: structuredFunctionRule('Hypot', mode, forms),
     Log: structuredLogRule(mode, snapshotOf, forms),
+    Mod: modRule(forms),
     WithRandomSeed: seededRule(mode),
     ...Object.fromEntries(
       Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [
@@ -2654,7 +2741,7 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   LessEqual: comparisonRule('LessEqual'),
   Equal: comparisonRule('Equal'),
   NotEqual: comparisonRule('NotEqual'),
-  Mod: modRule,
+  Mod: withoutMode('Mod'),
   Floor: floorRule,
   Divide: divideRule,
   Power: withoutMode('Power'),
@@ -7647,6 +7734,7 @@ function recordStructured(
       ])
     ),
     captures: [...registry.captures.values()],
+    folds: registry.folds,
     inputs,
     // A helper is listed by its name when a parameter took the default
     // kind: the host declares its signature.
@@ -8425,15 +8513,19 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         // the source of the entry (`varsEntryOf()`).
         const mapped = varsEntryOf(node, registry);
         if (mapped?.form === 'read') return admitHostRead(node, registry!);
-        // The structured route reads a captured binding as its snapshot.
+        // The structured route reads a captured binding as its snapshot,
+        // also a value of the frame of a call (`frameValue()`).
+        const held =
+          resolvedValueDefinition(node)?.value !== undefined ||
+          (registry !== undefined && frameValue(node) !== undefined);
         if (
           registry &&
           mapped === undefined &&
-          resolvedValueDefinition(node)?.value !== undefined &&
+          held &&
           recordCapture(registry, node)
         )
           return;
-        if (resolvedValueDefinition(node)?.value !== undefined)
+        if (held)
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
           );
@@ -9202,10 +9294,33 @@ function attachBoundFunction(
   /** The parameters declared `number` in the `complex` mode, which the host
    *  can give as a number or a complex value (`declaredNumberKind()`). */
   const lifted = new Set<string>();
+  /** The parameters that the body never names, on the structured route: a
+   *  parameter of any type, which keeps its position in the signature and
+   *  has no value in the program (`IRInput.unread`). */
+  const unread = new Set<string>();
+  const body = fn.op1.canonical;
   for (const parameter of fn.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     // A refusal of a parameter names the parameter.
     try {
+      // A parameter that the body never names has no representation: its
+      // type is not read, as the existing compiler does not read it
+      // (`(p, q) => p + 1` for `(p: real, q: any) ↦ p + 1`). A name of the
+      // body is a read, also as the parameter of a nested literal.
+      if (
+        registry !== undefined &&
+        admission.structured &&
+        name !== '' &&
+        name !== 'True' &&
+        name !== 'False' &&
+        (isSymbol(parameter) || isFunction(parameter, 'Typed')) &&
+        !inputs.some((input) => input.name === name) &&
+        !body.symbols.includes(name)
+      ) {
+        unread.add(name);
+        inputs.push({ name, type: { kind: 'real' }, declared: 'real' });
+        continue;
+      }
       const declared = functionLiteralParameterType(parameter);
       // On the structured route a parameter with no declared type has the
       // default kind of the mode; its inferred type is not read.
@@ -9257,7 +9372,6 @@ function attachBoundFunction(
       throw e;
     }
   }
-  const body = fn.op1.canonical;
   const named: NamedCalls = { calls: new Set(), structured: registry };
   admitFunctionBody(
     body,
@@ -9297,7 +9411,8 @@ function attachBoundFunction(
           input.type!,
           declaredTypes.get(input.name),
           (defaulted.has(input.name) && registry?.mode === 'complex') ||
-            lifted.has(input.name)
+            lifted.has(input.name),
+          unread.has(input.name)
         )
       ),
     defaulted,
@@ -9344,8 +9459,10 @@ function attachRootBlock(
         bound.has(name) ||
         indexes.has(name) ||
         // A name that a `vars` entry maps is a free symbol, also with a
-        // value: `varsEntryOf()` refuses that value.
-        (resolvedValueDefinition(node)?.value !== undefined &&
+        // value: `varsEntryOf()` refuses that value. A value of the frame
+        // of a call is a captured binding too (`frameValue()`).
+        ((resolvedValueDefinition(node)?.value !== undefined ||
+          frameValue(node) !== undefined) &&
           !registry.hosts?.vars.has(name)) ||
         free.some((s) => s.symbol === name)
       )
@@ -10869,7 +10986,8 @@ function structuredInput(
     readonly size?: number;
   },
   declared?: Type,
-  lifted = false
+  lifted = false,
+  unread = false
 ): StructuredInput {
   const rep = structuredRepresentation(type);
   const kind = type.kind;
@@ -10891,6 +11009,7 @@ function structuredInput(
     representation: rep,
     ...(label === undefined ? {} : { elementLabel: label }),
     ...(lifted ? { lifted: true as const } : {}),
+    ...(unread ? { unread: true as const } : {}),
   };
 }
 
@@ -10932,6 +11051,15 @@ type CaptureEntry = StructuredCapture & {
  */
 type StructuredRegistry = {
   readonly mode: 'strict' | 'complex';
+  /** The target of the compilation, for the fold of a closed jump
+   *  (`closedJumpFold()`). */
+  readonly target: CompileTarget<Expression>;
+  /** The value of each node that the existing compiler writes as a literal
+   *  with `constantFold: false` (`closedJumpFold()`), for the lowering. */
+  readonly folds: Map<Expression, number | boolean>;
+  /** The answer of `closedJumpFold()` for each node that it was asked
+   *  about: the literal, or `null` for a node that keeps its code. */
+  readonly foldResults: Map<Expression, Expression | null>;
   readonly helpers: Map<string, ResolvedHelper>;
   readonly captures: Map<object, CaptureEntry>;
   /** The helpers whose body is being checked, outermost first. */
@@ -11022,6 +11150,9 @@ function structuredRegistry(
       : 'strict';
   return {
     mode,
+    target,
+    folds: new Map(),
+    foldResults: new Map(),
     helpers: new Map(),
     captures: new Map(),
     resolving: [],
@@ -11155,6 +11286,23 @@ function defaultedParameterKind(
  * in place of each read, so such a binding takes the kind of its value:
  * `integer` for an integer, `real` for another real number, as the existing
  * compiler writes the value.
+ *
+ * On the structured route (`admitsUndeclared`) two more bindings are
+ * captured, as the existing compiler writes the value that it reads by the
+ * name (`tryFoldKnownSymbol()` in `compile-folded-values.ts`):
+ *
+ * - A list: a binding declared a list of reals or of integers, or with no
+ *   declared type, that holds a list literal of finite real number literals
+ *   (`isCapturedList()`). `list` is true; the pass types the list literal in
+ *   place of each read, and the lowering makes a new array of its elements
+ *   for each call (`captureRead()` in `javascript-structured-lower.ts`).
+ * - A frame value (`frameValue()`): the value of a parameter or a local of a
+ *   call that the engine evaluates when the program is compiled (`d` of
+ *   `f(d) := Sum(Map(x ↦ x + d, …))`). The binding of `node` holds no value,
+ *   the engine reads the value of the name in the frame of the call, and
+ *   the binding is not the one that the engine finds for the name in the
+ *   current scope.
+ *
  * `assertCurrent()` throws when the binding, whether its type is declared,
  * its declared type or its value changed after this call.
  */
@@ -11162,10 +11310,16 @@ function numericSnapshot(
   node: Expression & { symbol: string },
   admitsUndeclared: boolean
 ):
-  | { binding: object; value: Expression; assertCurrent: () => void }
+  | {
+      binding: object;
+      value: Expression;
+      list: boolean;
+      assertCurrent: () => void;
+    }
   | undefined {
   const binding = resolvedValueDefinition(node);
-  const value = binding?.value;
+  const frame = admitsUndeclared ? frameValue(node) : undefined;
+  const value = frame ?? binding?.value;
   const ambient = node.engine.lookupDefinition(node.symbol);
   // The existing route captures only a binding that the host declared: a
   // type that `ce.assign()` or `ce.infer()` wrote is not a declaration
@@ -11173,22 +11327,24 @@ function numericSnapshot(
   const isUndeclared = (n: Expression) =>
     admitsUndeclared ? hasNoDeclaredType(n) : hasInferredType(n);
   const undeclared = isUndeclared(node);
+  const list =
+    admitsUndeclared && value !== undefined && isCapturedList(value);
   if (
     !binding ||
     (undeclared && !admitsUndeclared) ||
     (!undeclared &&
-      !isSubtype(binding.type.type, 'real') &&
-      !(
-        admitsUndeclared &&
-        declaredNumberKind(binding.type.type, 'strict') !== undefined
-      )) ||
+      (list
+        ? !isSubtype(binding.type.type, LIST_OF_REALS_TYPE)
+        : !isSubtype(binding.type.type, 'real') &&
+          !(
+            admitsUndeclared &&
+            declaredNumberKind(binding.type.type, 'strict') !== undefined
+          ))) ||
     !value ||
-    !isNumber(value) ||
-    !Number.isFinite(value.re) ||
-    value.im !== 0 ||
-    !ambient ||
-    !('value' in ambient) ||
-    ambient.value !== binding ||
+    (!list &&
+      (!isNumber(value) || !Number.isFinite(value.re) || value.im !== 0)) ||
+    (frame === undefined &&
+      (!ambient || !('value' in ambient) || ambient.value !== binding)) ||
     node.engine._getSymbolValue(node.symbol) !== value
   )
     return undefined;
@@ -11196,16 +11352,19 @@ function numericSnapshot(
   return {
     binding,
     value,
+    list,
     assertCurrent: () => {
       const current = node.engine.lookupDefinition(node.symbol);
       if (
-        !current ||
-        !('value' in current) ||
-        current.value !== binding ||
+        (frame === undefined &&
+          (!current ||
+            !('value' in current) ||
+            current.value !== binding ||
+            binding.value !== value)) ||
+        (frame !== undefined && frameValue(node) !== value) ||
         resolvedValueDefinition(node) !== binding ||
         isUndeclared(node) !== undeclared ||
         (!undeclared && binding.type.type !== declaredType) ||
-        binding.value !== value ||
         node.engine._getSymbolValue(node.symbol) !== value
       )
         throw new Error(
@@ -11213,6 +11372,48 @@ function numericSnapshot(
         );
     },
   };
+}
+
+/** The list types of reals and of integers: the type of a captured list
+ *  (`isCapturedList()`). */
+const LIST_OF_REALS_TYPE = parseType('list<real>');
+
+/**
+ * Whether `value`, the value of a binding, is a list that the structured
+ * route captures: a `List` of one or more finite real number literals, a
+ * list of reals or of integers that the route writes as an array of
+ * numbers. A list of lists, of tuples or of other values, and an empty
+ * list, keep their refusal.
+ */
+function isCapturedList(value: Expression): boolean {
+  return (
+    isFunction(value, 'List') &&
+    isLibraryOperator(value, 'List') &&
+    value.nops > 0 &&
+    isSubtype(value.type.type, LIST_OF_REALS_TYPE) &&
+    value.ops.every(
+      (op) => isNumber(op) && op.im === 0 && Number.isFinite(op.re)
+    )
+  );
+}
+
+/**
+ * The value that the symbol `node` reads in the frame of a call, or
+ * `undefined`: the binding of `node` (a parameter or a local of a function
+ * that the engine is calling while the program is compiled) holds no value,
+ * the engine reads the value of the name in the frame of the call
+ * (`_getSymbolValue()`), and the occurrence is not an unknown of the
+ * expression, so the existing compiler writes that value in place of the
+ * name, as it writes an assigned value (`tryFoldKnownSymbol()`).
+ */
+function frameValue(
+  node: Expression & { symbol: string }
+): Expression | undefined {
+  const binding = resolvedValueDefinition(node);
+  if (binding === undefined || binding.value !== undefined) return undefined;
+  const value = node.engine._getSymbolValue(node.symbol);
+  if (value === undefined || node.unknowns.length > 0) return undefined;
+  return value;
 }
 
 /** Record the read `node` of a captured binding on the structured route.
@@ -11231,7 +11432,7 @@ function recordCapture(
       name: node.symbol,
       symbols: new Set(),
       stored: snapshot.value,
-      value: snapshot.value.re,
+      value: snapshot.list ? undefined : snapshot.value.re,
       assertCurrent: snapshot.assertCurrent,
     };
     registry.captures.set(snapshot.binding, entry);
@@ -11530,6 +11731,7 @@ function annotateStructured(
     return undefined;
   };
   const { lengthDeclarations } = registry;
+  const inputNames = new Set((inputs ?? []).map((input) => input.name));
   const definition: FragmentDefinition<ScalarRepresentation> = {
     ...base,
     // A helper body, as the body of the root function, has locals and
@@ -11590,6 +11792,18 @@ function annotateStructured(
       capture.assertCurrent();
       return capture.stored;
     },
+    // A node of closed exact operands that the existing compiler folds has
+    // the type of its literal (`closedJumpFold()`). A node that names a
+    // parameter of the root function is not folded: the existing compiler
+    // binds the parameters (`lambdaTarget()`), and `tryConstantFold()`
+    // refuses a node that reads a bound name, where the prepared target of
+    // the route does not bind them and the fold would read an engine value
+    // of the same name (`Floor(t)` with `t := 1/3`). The pass checks the
+    // names that a form binds below the root (`readsBoundName()`).
+    constantValue: (node: Expression) =>
+      inputNames.size > 0 && node.symbols.some((name) => inputNames.has(name))
+        ? undefined
+        : closedJumpFold(node, registry),
     // A free symbol with no declared type has the default kind of the mode
     // (`hasNoDeclaredType()`); its inferred type is not read.
     typeOfInput: (node: Expression) => {

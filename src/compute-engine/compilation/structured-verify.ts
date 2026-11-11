@@ -358,6 +358,40 @@ export function verifyProgram(
       );
   }
 
+  // The constants of the program: a list of reals or of integers, each with
+  // its own binding, whose elements are finite numbers of the element type.
+  for (const constant of program.constants ?? []) {
+    if (bindings.has(constant.binding))
+      fail(
+        `the constant ${constant.name} has the binding of another capture or constant`
+      );
+    bindings.add(constant.binding);
+    if (
+      !isListType(constant.type) ||
+      (constant.type.element !== 'real' && constant.type.element !== 'integer')
+    )
+      fail(`the constant ${constant.name} has the type ${String(constant.type)}`);
+    if (!policy.representations.has(constant.representation))
+      fail(
+        `the constant ${constant.name} has the representation ${constant.representation}, which the target does not have`
+      );
+    if (policy.representationOf(constant.type) !== constant.representation)
+      fail(
+        `the constant ${constant.name} of the type ${String(constant.type)} has the representation ${constant.representation}`
+      );
+    if (constant.elements.length === 0)
+      fail(`the constant ${constant.name} has no element`);
+    for (const element of constant.elements)
+      if (
+        typeof element !== 'number' ||
+        !Number.isFinite(element) ||
+        (constant.type.element === 'integer' && !Number.isInteger(element))
+      )
+        fail(
+          `the constant ${constant.name} has the element ${String(element)}, which is not a finite number of the type ${String(constant.type.element)}`
+        );
+  }
+
   // The bindings of the host: a scalar result, and a read is never pure.
   for (const binding of program.hosts ?? []) {
     if (binding.form !== 'call' && binding.form !== 'read')
@@ -912,6 +946,8 @@ function verifySignature(
         input.representation !== op.result.representation
       )
         fail(`a read of the input ${op.input} does not match the input`);
+      if (input?.unread)
+        fail(`a read of the input ${input.name}, which the program never reads`);
       return;
     }
     case 'capture': {
@@ -935,6 +971,25 @@ function verifySignature(
       // A snapshot is fixed when the program is compiled.
       if (op.effect !== 'pure')
         fail(`a read of the capture ${capture.name} is not pure`);
+      return;
+    }
+    case 'constant': {
+      arity(0);
+      const constant = program.constants?.[op.constant];
+      if (constant === undefined)
+        return fail(
+          `a read of the constant ${op.constant}, which the program does not list`
+        );
+      if (
+        op.result.type !== constant.type ||
+        op.result.representation !== constant.representation
+      )
+        fail(
+          `a read of the constant ${constant.name} does not match the constant`
+        );
+      // A constant is fixed when the program is compiled.
+      if (op.effect !== 'pure')
+        fail(`a read of the constant ${constant.name} is not pure`);
       return;
     }
     case 'sqrt':

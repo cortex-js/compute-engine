@@ -310,6 +310,11 @@ export type IRArithmetic = OperationBase & {
  *   infinity for a negative integer), `factorial2` (the double factorial),
  *   `trunc` (the integer part, toward zero) and `fract` (`x - floor(x)`): a
  *   real operand and a real result.
+ * - `mod-one`: the floored remainder of the division by 1,
+ *   `(x - floor(x)) mod 1`, in `[0, 1)`, or not a number for an operand
+ *   that is infinite or not a number: `x - floor(x)` rounds up to `1` for a
+ *   tiny negative `x`, and the remainder gives `0` there. A real operand
+ *   and a real result.
  *
  * Only `abs` has an integer result, and only for an integer operand.
  */
@@ -359,7 +364,8 @@ export type UnaryFunctionName =
   | 'factorial'
   | 'factorial2'
   | 'trunc'
-  | 'fract';
+  | 'fract'
+  | 'mod-one';
 
 /**
  * The functions of two operands that the representation names, by an
@@ -728,6 +734,21 @@ export type IRCaptureRead = OperationBase & {
   readonly snapshot: number;
 };
 
+/**
+ * A read of the constant `IRProgram.constants[constant]`: a list that the
+ * program holds once, made from its literal elements when the compiled
+ * function is made, and shared by every call and every function of the
+ * program. The read gives that one array, as a read of a list input gives
+ * the array of the host: the value is never unique (`inPlaceUpdates()`), so
+ * no update writes it, and a target that gives the array of the value of
+ * the program to the host gives a copy of it (`rootYieldsUnique()`). The
+ * read is pure: the constant is fixed when the program is compiled.
+ */
+export type IRConstantRead = OperationBase & {
+  readonly kind: 'constant';
+  readonly constant: number;
+};
+
 /** A conversion that changes the representation, or the type of a value
  *  that a local of a wider type holds (an integer as a real). An identity
  *  conversion of an operand has no operation. The policy of the target
@@ -951,6 +972,7 @@ export type IROperation =
   | IRLiteral
   | IRInputRead
   | IRCaptureRead
+  | IRConstantRead
   | IRArithmetic
   | IRUnaryFunction
   | IRBinaryFunction
@@ -1014,6 +1036,12 @@ export type IRInput = {
    *  that the host can give as a `number`: the value is converted once, at
    *  the entry. */
   readonly lifted?: true;
+  /** A parameter of the root function that the program never reads: it
+   *  keeps its position in the signature of the function, whatever value
+   *  the host gives there, and no operation reads it (the verifier checks
+   *  it). Its type and representation are those of a real number, which no
+   *  check of a value reads. */
+  readonly unread?: true;
 };
 
 /** A binding that the program reads as a snapshot (`IRCaptureRead`). */
@@ -1027,6 +1055,21 @@ export type IRCapture = {
   readonly representation: Representation;
   /** The value of the binding when the program was compiled. */
   readonly snapshot: number;
+};
+
+/** A list that the program holds once (`IRConstantRead`): the value of a
+ *  captured binding when the program was compiled. */
+export type IRConstant = {
+  /** The identity of the binding: the object of the engine that holds it.
+   *  Two constants of a program have different bindings. */
+  readonly binding: object;
+  /** The name of the binding, for a message. */
+  readonly name: string;
+  readonly type: ListType;
+  readonly representation: Representation;
+  /** The elements, each a finite number; an integer for a list of
+   *  integers. */
+  readonly elements: readonly number[];
 };
 
 /** A resolved helper, written once as a function of the program. A helper
@@ -1067,6 +1110,9 @@ export type IRProgram = {
   /** The bindings that the program reads as snapshots, in the root or in
    *  a function (`IRCaptureRead`). */
   readonly captures: readonly IRCapture[];
+  /** The lists that the program holds once (`IRConstantRead`); absent when
+   *  there is none. */
+  readonly constants?: readonly IRConstant[];
   readonly functions: readonly IRFunction[];
   /** The bindings of the host that the program reads or calls
    *  (`IRHostCall`); absent when there is none. */

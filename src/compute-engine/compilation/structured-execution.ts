@@ -16,7 +16,8 @@
  *   operation of the program, or of a function that it calls, is
  *   `effectful` or `unknown`, and no array that the host or a caller can
  *   hold is written in place. Captures are snapshots, fixed when the program
- *   is compiled, so no call can change what another call reads. The
+ *   is compiled, and a constant (`IRConstantRead`) is an array that no
+ *   operation writes, so no call can change what another call reads. The
  *   iteration budget is a caveat, not a failure (`ExecutionCaveat`). A
  *   `seeded` region whose body touches no state but the random stream is
  *   `pure` (`IRSeeded`): each call draws the same numbers from a new frame,
@@ -25,7 +26,9 @@
  *   worker, which rebuilds the function from its stored form with the
  *   runtime of the same version (`createJavaScriptRuntime().load()`). It
  *   holds when every function called is a function of the program, every
- *   capture is a snapshot of a number, no operation is `unknown` (such
+ *   capture is a snapshot of a number (a constant is a list of numbers that
+ *   the code holds: its literal is part of the code that the worker loads),
+ *   no operation is `unknown` (such
  *   an operation can be a closure of the host, which a worker does not
  *   have) or `effectful` (see `workerPortable` in `analyzeExecution()`),
  *   and no operation is a `draw` or a `seeded` region, also when the region
@@ -484,7 +487,8 @@ export function hostArrays(
           const add = (v: IRValue | undefined) => {
             if (v !== undefined && isList(v)) shared.add(v.id);
           };
-          if (op.kind === 'input') add(op.result);
+          // A constant is one array that every call of the code reads.
+          if (op.kind === 'input' || op.kind === 'constant') add(op.result);
           if (op.kind === 'call' && returnsShared[op.function] === true)
             add(op.result);
           if (

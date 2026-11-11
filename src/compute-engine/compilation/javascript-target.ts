@@ -12457,6 +12457,11 @@ export type JavaScriptBody = {
    *  of the body of the arrow function) and run on each call: they are
    *  never hoisted into `preambleOnce`. */
   readonly definitions: readonly string[];
+  /** Declarations of constants that the definitions and the statements
+   *  read by name. They run once per artifact, before the definitions: the
+   *  runner holds them in `preambleOnce`, and `preamble` and `code` hold
+   *  them first. */
+  readonly constants?: readonly string[];
   /** The statements of the body, in order, then the value of the body. */
   readonly statements: readonly string[];
   readonly value: string;
@@ -12499,7 +12504,12 @@ function emitDelegatedBody(
 ): {
   code: string;
   statementBody: string;
+  /** The constants, then the definitions: the text of the preamble. */
   definitions: string;
+  /** The constants, which the runner evaluates once per artifact. */
+  hoisted: string;
+  /** The definitions, which run on each call. */
+  perCall: string;
   inputs: ReadonlySet<string>;
   shippable?: boolean;
 } {
@@ -12519,7 +12529,11 @@ function emitDelegatedBody(
       statements === ''
         ? `return ${body.value};`
         : `${statements} return ${body.value};`,
-    definitions: body.definitions.map((d) => `${d}\n`).join(''),
+    definitions: [...(body.constants ?? []), ...body.definitions]
+      .map((d) => `${d}\n`)
+      .join(''),
+    hoisted: (body.constants ?? []).map((d) => `${d}\n`).join(''),
+    perCall: body.definitions.map((d) => `${d}\n`).join(''),
     inputs: body.inputs,
     ...(body.shippable !== undefined ? { shippable: body.shippable } : {}),
   };
@@ -12695,9 +12709,9 @@ function compileToTarget(
     // The definitions that read no lambda parameter are evaluated once per
     // artifact; the rest stay inside the per-call body (see
     // `splitPreambleDefs`). `toString()` and `code` keep the single-body form.
-    // The definitions of `bodyEmitter` run on each call.
+    // The definitions of `bodyEmitter` run on each call, its constants once.
     const definitionSplit = emitted
-      ? { hoisted: '', perCall: emitted.definitions, perCallNames: [] }
+      ? { hoisted: emitted.hoisted, perCall: emitted.perCall, perCallNames: [] }
       : target.userFunctions
         ? splitPreambleDefs(target.userFunctions, params, false)
         : { hoisted: '', perCall: '', perCallNames: [] };
@@ -12884,9 +12898,9 @@ function compileToTarget(
   // value reaching caller-supplied source is not on `userFunctions.hoistable`.
   // `preamble` above, the text a consumer splices itself, keeps the
   // single-body form.
-  // The definitions of `bodyEmitter` run on each call.
+  // The definitions of `bodyEmitter` run on each call, its constants once.
   const split = emitted
-    ? { hoisted: '', perCall: emitted.definitions }
+    ? { hoisted: emitted.hoisted, perCall: emitted.perCall }
     : target.userFunctions
       ? splitPreambleDefs(target.userFunctions, [], true)
       : { hoisted: '', perCall: '' };

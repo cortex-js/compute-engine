@@ -122,6 +122,7 @@ import {
   touchesField,
   type EffectFact,
   type IRCapture,
+  type IRConstant,
   type IRFunction,
   type IRHostBinding,
   type IRInput,
@@ -216,7 +217,8 @@ export type StructuredForm =
   | 'root'
   | 'abs'
   | 'abs-identity'
-  | 'chain-swap';
+  | 'chain-swap'
+  | 'mod-one';
 
 /**
  * A binding of the engine that the program reads and does not bind, with
@@ -230,8 +232,13 @@ export type StructuredCapture = {
   readonly name: string;
   /** The symbol nodes of the prepared tree that read the binding. */
   readonly symbols: ReadonlySet<Expression>;
-  /** The value of the binding at the admission. */
-  readonly value: number;
+  /** The value of the binding at the admission: a number, or `undefined`
+   *  for a list (`stored`). */
+  readonly value: number | undefined;
+  /** The value that the admission typed in place of each read: a number
+   *  literal, or a list literal of finite real number literals, which the
+   *  lowering writes as a new array at each call (`captureRead()`). */
+  readonly stored: Expression;
   /** Throw when the binding or its value changed after the admission. */
   readonly assertCurrent: () => void;
 };
@@ -263,6 +270,12 @@ export type StructuredPreparation = {
   /** The bindings that the program reads as snapshots, in the order of
    *  their admission. */
   readonly captures: readonly StructuredCapture[];
+  /** The value of each node that the existing compiler writes as a literal
+   *  with `constantFold: false`: a function whose result jumps at a point,
+   *  of closed exact operands (`closedJumpFold()` in
+   *  `javascript-fragment-target.ts`). The lowering writes the literal and
+   *  no operand. */
+  readonly folds?: ReadonlyMap<Expression, number | boolean>;
   /** The parameters of the root function in order, or the free symbols of
    *  the expression in the order of their first read. */
   readonly inputs: readonly StructuredInput[];
@@ -840,6 +853,10 @@ class Lowering {
   private readonly captures: IRCapture[] = [];
   /** The index of each capture in `captures`, by its binding. */
   private readonly captureIndex = new Map<object, number>();
+  /** The lists that the program holds once (`capturedList()`). */
+  private readonly constants: IRConstant[] = [];
+  /** The index of each constant in `constants`, by its binding. */
+  private readonly constantIndex = new Map<object, number>();
   /** The carried locals of each loop whose body is being lowered, the
    *  innermost last, and the operands of each `exit` of that loop: a
    *  `Break` reads the current value of each carried local. */
@@ -910,6 +927,7 @@ class Lowering {
       inputs: this.prep.inputs,
       numericPolicy: this.prep.numericPolicy,
       captures: this.captures,
+      ...(this.constants.length > 0 ? { constants: this.constants } : {}),
       functions: this.functions,
       ...(this.prep.hosts !== undefined && this.prep.hosts.length > 0
         ? { hosts: this.prep.hosts }
@@ -1246,6 +1264,20 @@ class Lowering {
       return this.value(closedForm, scope, operations);
     if (isFunction(node, 'Block')) return this.block(node, scope, operations);
     const facts = this.facts(node, scope);
+    // A node that the existing compiler folds (`StructuredPreparation.folds`).
+    const folded = this.prep.folds?.get(node);
+    if (folded !== undefined) {
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'literal',
+        value: folded,
+        result,
+        operands: [],
+        effect: this.effect(node),
+        origin: node,
+      });
+      return result;
+    }
     if (isNumber(node) || isSymbol(node, 'True') || isSymbol(node, 'False')) {
       const result = this.resultOf(facts);
       operations.push({
@@ -1756,6 +1788,26 @@ class Lowering {
     }
     if (operator === 'Conjugate' || operator === 'Log')
       return fail(`no recorded form for ${nodeText(node)}`);
+    // `Mod(a, 1)` of a dividend that is not integer-valued: the fractional
+    // part of `a`, the literal divisor not lowered (`modRule()`).
+    if (special === 'mod-one') {
+      const operand = this.convert(
+        this.value(node.ops[0], scope, operations),
+        facts.conversions?.[0],
+        node,
+        operations
+      );
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'unary',
+        fn: 'mod-one',
+        result,
+        operands: [operand],
+        effect,
+        origin: node,
+      });
+      return result;
+    }
 
     const fn = Object.hasOwn(FUNCTIONS, operator)
       ? FUNCTIONS[operator]
@@ -3728,6 +3780,8 @@ class Lowering {
     const capture = this.prep.captures.find((c) => c.symbols.has(node));
     if (capture === undefined)
       return fail(`no binding for the name ${node.symbol}`);
+    if (capture.value === undefined)
+      return this.capturedList(capture, operations);
     const facts = this.facts(node, scope);
     const result = this.resultOf(facts);
     let index = this.captureIndex.get(capture.binding);
@@ -3747,6 +3801,49 @@ class Lowering {
       capture: index,
       binding: capture.binding,
       snapshot: capture.value,
+      result,
+      operands: [],
+      effect: 'pure',
+      origin: node,
+    });
+    return result;
+  }
+
+  /**
+   * A read of a captured list (`StructuredCapture.stored`, a list literal of
+   * finite real number literals, which the admission typed in the root
+   * scope): a constant of the program (`IRConstant`), held once and shared
+   * by every call and every function, and one read of it here
+   * (`IRConstantRead`). The existing compiler writes the elements of the
+   * same literals (`_val_L`, an array that it builds once per artifact and
+   * never writes), so the doubles are the same: the double of a number
+   * literal is its `re`, as in the lowering of a literal.
+   */
+  private capturedList(
+    capture: StructuredCapture,
+    operations: IROperation[]
+  ): IRValue {
+    const node = capture.stored;
+    if (!isFunction(node, 'List'))
+      return fail(`the captured value of ${capture.name} is not a list`);
+    const result = this.resultOf(this.facts(node, this.prep.annotation.scope));
+    if (!isListType(result.type))
+      return fail(`the captured value of ${capture.name} is not a list`);
+    let index = this.constantIndex.get(capture.binding);
+    if (index === undefined) {
+      index = this.constants.length;
+      this.constants.push({
+        binding: capture.binding,
+        name: capture.name,
+        type: result.type,
+        representation: result.representation,
+        elements: node.ops.map((element) => element.re),
+      });
+      this.constantIndex.set(capture.binding, index);
+    }
+    operations.push({
+      kind: 'constant',
+      constant: index,
       result,
       operands: [],
       effect: 'pure',
