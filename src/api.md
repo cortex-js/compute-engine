@@ -634,7 +634,7 @@ recomputed at each precision change.
 
 <MemberCard>
 
-##### ComputeEngine.checkpoint() {#checkpoint-1}
+##### ComputeEngine.~~checkpoint()~~ {#checkpoint-1}
 
 ```ts
 checkpoint(label?): EngineCheckpoint
@@ -654,11 +654,18 @@ checkpoint was taken on.
 
 `string`
 
+###### Deprecated
+
+Checkpoints are removed in a later release. To give names
+values for one computation, use `ce.withValues()`; to make declarations
+that are undone together, declare them in a scope pushed with
+`ce.pushScope()` and remove them with `ce.popScope()`.
+
 </MemberCard>
 
 <MemberCard>
 
-##### ComputeEngine.restore() {#restore-1}
+##### ComputeEngine.~~restore()~~ {#restore-1}
 
 ```ts
 restore(cp): void
@@ -700,11 +707,18 @@ artifact rather than as a live boxed node.
 
 [`EngineCheckpoint`](#enginecheckpoint)
 
+###### Deprecated
+
+Checkpoints are removed in a later release. To give names
+values for one computation, use `ce.withValues()`; to make declarations
+that are undone together, declare them in a scope pushed with
+`ce.pushScope()` and remove them with `ce.popScope()`.
+
 </MemberCard>
 
 <MemberCard>
 
-##### ComputeEngine.discard() {#discard-1}
+##### ComputeEngine.~~discard()~~ {#discard-1}
 
 ```ts
 discard(cp): void
@@ -717,6 +731,13 @@ OLDEST makes the state before the next-younger one unreachable.
 ####### cp
 
 [`EngineCheckpoint`](#enginecheckpoint)
+
+###### Deprecated
+
+Checkpoints are removed in a later release. To give names
+values for one computation, use `ce.withValues()`; to make declarations
+that are undone together, declare them in a scope pushed with
+`ce.pushScope()` and remove them with `ce.popScope()`.
 
 </MemberCard>
 
@@ -1203,13 +1224,13 @@ but uses the engine's symbol definitions for better parsing accuracy.
 `options.scope` RECEIVES the parse's writes: the whole parse runs with
 that scope as the current lexical scope, so name resolution (including
 the parser's symbol oracle) walks `scope → parents`, and every
-auto-declare and inference lands rooted there. Discarding the scope
-discards the writes. Use `ce.createScope()` to make one that can be read
+declaration and inference made while it runs lands rooted there. Boxing
+itself declares no name. Discarding the scope discards the writes. Use `ce.createScope()` to make one that can be read
 back.
 
 `options.speculative` leaves NO trace in the engine's type state: the
-parse runs inside a transient scope (auto-declares land there and are
-discarded with it), and every ambient symbol whose type is currently
+parse runs inside a transient scope (declarations and inferences land
+there and are discarded with it), and every ambient symbol whose type is currently
 inferred is shadowed in that scope with its current type — so a
 narrowing use in `latex` refines the discarded shadow instead of
 persistently narrowing the ambient symbol. Use it for derive-style
@@ -2295,6 +2316,46 @@ assume(predicate): AssumeResult
 ####### predicate
 
 `string` \| [`Expression`](#expression-5)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ComputeEngine.infer() {#infer-1}
+
+```ts
+infer(exprs): InferResult
+```
+
+**`Experimental`**
+
+Declare the names that `exprs` use, with the types that their uses
+require.
+
+Each name is declared, marked as inferred, in its home scope: the scope
+that a declaration of the name would go in when the expression that uses
+it was boxed. When the home scope already holds an inferred definition
+of the name, that definition is narrowed instead. The type is the meet of
+the types that the uses in `exprs` require, met with the type of that
+inferred definition. The order of `exprs` does not change the result.
+
+A name is not changed, and is reported in `skipped`, when the uses
+require types that have no common subtype (`x + 1` and `x(3)`), when
+they require no type, when the home scope holds a definition of the name
+that is not inferred, and when the home scope is not the current scope
+or one of its ancestors. Each expression then keeps the type that its
+own uses require.
+
+A library name used as a value (`N` in `N + 1`) is declared as a
+variable, which shadows the library definition in the home scope. A
+call head (`f` in `f(x)`) is declared with a function type.
+
+A checkpoint (`ce.checkpoint()`) records the declarations, as it records
+those of `ce.declare()`.
+
+####### exprs
+
+readonly [`Expression`](#expression-5)[]
 
 </MemberCard>
 
@@ -7389,6 +7450,43 @@ The options of `ce.declare(id, def, options)`.
 - `extend`: when `true`, `def` is a PATCH applied to the operator definition
   currently visible for `id`, not a new definition. See
   [OperatorDefinitionPatch](#operatordefinitionpatch).
+
+</MemberCard>
+
+<MemberCard>
+
+### InferResult {#inferresult}
+
+```ts
+type InferResult = {
+  declared: {
+     name: string;
+     scope: Scope;
+     type: Type;
+    }[];
+  skipped: {
+     name: string;
+     scope: Scope;
+     reason: "conflict" | "untyped" | "defined" | "out-of-scope";
+    }[];
+};
+```
+
+The result of `ce.infer()`.
+
+- `declared`: each name that `ce.infer()` declared in its home scope, or
+  whose inferred definition it narrowed there, with the type it has now.
+- `skipped`: each name that it did not change, with the reason:
+  - `'conflict'`: the expressions require types that have no common
+    subtype (`x + 1` and `x(3)`), or a type that has none in common with
+    the inferred definition of the name;
+  - `'untyped'`: the requirements give the type `unknown`;
+  - `'defined'`: the home scope holds a definition of the name that is not
+    inferred (a `ce.declare()`, for example);
+  - `'out-of-scope'`: the home scope is not the current scope or one of its
+    ancestors (it was popped).
+
+Each list is sorted by name, then by the depth of the scope.
 
 </MemberCard>
 
@@ -13310,7 +13408,7 @@ recomputed at each precision change.
 
 <MemberCard>
 
-##### IComputeEngine.checkpoint() {#checkpoint}
+##### IComputeEngine.~~checkpoint()~~ {#checkpoint}
 
 ```ts
 checkpoint(label?): EngineCheckpoint
@@ -13330,11 +13428,18 @@ checkpoint was taken on.
 
 `string`
 
+###### Deprecated
+
+Checkpoints are removed in a later release. To give names
+values for one computation, use `ce.withValues()`; to make declarations
+that are undone together, declare them in a scope pushed with
+`ce.pushScope()` and remove them with `ce.popScope()`.
+
 </MemberCard>
 
 <MemberCard>
 
-##### IComputeEngine.restore() {#restore}
+##### IComputeEngine.~~restore()~~ {#restore}
 
 ```ts
 restore(cp): void
@@ -13376,11 +13481,18 @@ artifact rather than as a live boxed node.
 
 [`EngineCheckpoint`](#enginecheckpoint)
 
+###### Deprecated
+
+Checkpoints are removed in a later release. To give names
+values for one computation, use `ce.withValues()`; to make declarations
+that are undone together, declare them in a scope pushed with
+`ce.pushScope()` and remove them with `ce.popScope()`.
+
 </MemberCard>
 
 <MemberCard>
 
-##### IComputeEngine.discard() {#discard}
+##### IComputeEngine.~~discard()~~ {#discard}
 
 ```ts
 discard(cp): void
@@ -13393,6 +13505,13 @@ OLDEST makes the state before the next-younger one unreachable.
 ####### cp
 
 [`EngineCheckpoint`](#enginecheckpoint)
+
+###### Deprecated
+
+Checkpoints are removed in a later release. To give names
+values for one computation, use `ce.withValues()`; to make declarations
+that are undone together, declare them in a scope pushed with
+`ce.pushScope()` and remove them with `ce.popScope()`.
 
 </MemberCard>
 
@@ -13879,13 +13998,13 @@ but uses the engine's symbol definitions for better parsing accuracy.
 `options.scope` RECEIVES the parse's writes: the whole parse runs with
 that scope as the current lexical scope, so name resolution (including
 the parser's symbol oracle) walks `scope → parents`, and every
-auto-declare and inference lands rooted there. Discarding the scope
-discards the writes. Use `ce.createScope()` to make one that can be read
+declaration and inference made while it runs lands rooted there. Boxing
+itself declares no name. Discarding the scope discards the writes. Use `ce.createScope()` to make one that can be read
 back.
 
 `options.speculative` leaves NO trace in the engine's type state: the
-parse runs inside a transient scope (auto-declares land there and are
-discarded with it), and every ambient symbol whose type is currently
+parse runs inside a transient scope (declarations and inferences land
+there and are discarded with it), and every ambient symbol whose type is currently
 inferred is shadowed in that scope with its current type — so a
 narrowing use in `latex` refines the discarded shadow instead of
 persistently narrowing the ambient symbol. Use it for derive-style
@@ -14971,6 +15090,46 @@ assume(predicate): AssumeResult
 ####### predicate
 
 `string` \| [`Expression`](#expression-5)
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.infer() {#infer}
+
+```ts
+infer(exprs): InferResult
+```
+
+**`Experimental`**
+
+Declare the names that `exprs` use, with the types that their uses
+require.
+
+Each name is declared, marked as inferred, in its home scope: the scope
+that a declaration of the name would go in when the expression that uses
+it was boxed. When the home scope already holds an inferred definition
+of the name, that definition is narrowed instead. The type is the meet of
+the types that the uses in `exprs` require, met with the type of that
+inferred definition. The order of `exprs` does not change the result.
+
+A name is not changed, and is reported in `skipped`, when the uses
+require types that have no common subtype (`x + 1` and `x(3)`), when
+they require no type, when the home scope holds a definition of the name
+that is not inferred, and when the home scope is not the current scope
+or one of its ancestors. Each expression then keeps the type that its
+own uses require.
+
+A library name used as a value (`N` in `N + 1`) is declared as a
+variable, which shadows the library definition in the home scope. A
+call head (`f` in `f(x)`) is declared with a function type.
+
+A checkpoint (`ce.checkpoint()`) records the declarations, as it records
+those of `ce.declare()`.
+
+####### exprs
+
+readonly [`Expression`](#expression-5)[]
 
 </MemberCard>
 
