@@ -894,6 +894,10 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `50e3e41a43ba6c1febb9b5f291a78d2e6bc28feb` | Fixes of the classes that the random tester found (a local has its declared type; nested quotients; refusals) |
 | `775bc003b8ae9fcb40a0766fd62e2b5b40163759` | The options `vars`, `functions`, `operators`, `imports`, `preamble` (options and bindings, slices 3 to 5) |
 | `595af0206767dcc4b416d5b24ec1a49ed7eab54c` | Nested blocks, blocks as operands, implicit locals, local functions, helpers declared `function` (options and bindings, slices 2 and 6) |
+| `d221dfaf6e34746686e2a82d32b1d055991ca73d` | A type written by `ce.infer()`, `ce.assume()` or `ce.assign()` is read as declared; a value assigned after boxing is read |
+| `950f70f962bbf39e14786091dca564835e5a4dc1` | List and tuple values ([collections](2026-11-11-structured-collections-and-lambdas.md), slice 1) |
+| `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | Chained comparisons, helper parameter types from a signature, `Factorial` and other scalar heads, complex `Power` with a non-literal exponent |
+| `3177128edc798982b7a349dbeade87a27c20d1d9` | Functions of lists; `Map`, `Filter`, `Count`, `Reduce`, `Scan`, `Apply` with a function literal or a library operator (collections, slices 2 and 3) |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -914,6 +918,8 @@ clean worktree):
 | `eac9ab939ef63e0914ba506454feb3d821c293ed` | 8,711 of 9,234 (94%) | 85,729 passed, 0 failed |
 | `775bc003b8ae9fcb40a0766fd62e2b5b40163759` | 8,907 of 9,427 (94.5%) | 85,906 passed, 0 failed |
 | `595af0206767dcc4b416d5b24ec1a49ed7eab54c` | 8,923 of 9,428 (94.6%) | 86,022 passed, 1 failed (CE-1197, the timeout under load) |
+| `950f70f962bbf39e14786091dca564835e5a4dc1` | 8,973 of 9,446 (95.0%) | 86,191 passed, 1 failed (CE-1197) |
+| `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | 8,961 of 9,433 (95.0%) | 86,639 passed, 0 failed |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -932,6 +938,8 @@ the existing compiler compiles, and those of them that the profile admits):
 | `eac9ab939ef63e0914ba506454feb3d821c293ed` | 17,057 of 29,322 (58%) | 8,338 of 20,094 (41%) |
 | `775bc003b8ae9fcb40a0766fd62e2b5b40163759` | 17,384 of 29,256 (59%) | 8,475 of 20,035 (42%) |
 | `595af0206767dcc4b416d5b24ec1a49ed7eab54c` | 17,758 of 29,450 (60%) | 8,828 of 20,225 (44%) |
+| `950f70f962bbf39e14786091dca564835e5a4dc1` | 18,130 of 29,684 (61%) | 9,171 of 20,462 (45%) |
+| `5906581bb5a63ffcf49a8266fce9c0e173f7d3ae` | 19,696 of 30,429 (65%) | 10,733 of 21,204 (51%) |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11
@@ -968,12 +976,14 @@ declines; they are not yet examined.
 
 ### The nightly run (2026-11-11)
 
-The nightly full run fails since `627ed80e1` (binding units on by default)
-on `test/compute-engine/nightly/js-parity-fuzz.test.ts` (9 of 171 cases): the
-existing compiler declines the untyped inputs of the test, because boxing
-writes no inferred type any more. The test passes at
-`6ac31a524af52fecc8744852886ebaba2fac18c8`. The failure belongs to the
-binding-units work and is not claimed; this workstream did not change it.
+Two failures of the nightly full run, both closed: `nightly/js-parity-fuzz.test.ts`
+failed since `627ed80e1` (binding units on by default: the existing compiler
+declines the untyped inputs of the test) and was fixed by the binding-units
+session in `f4fe063f7`; `js-profile-fuzz.test.ts` exceeded its 60 s setup
+limit in a full run on a loaded machine at `950f70f96` and has 300 s limits
+since `e4f3d8895fbdd4bdcde633b21ad9fc4d50c905ae`. Release 0.187.0
+(`292613616086f88e799dfd2ccfecd69cb408f887`) holds the work up to
+`950f70f962bbf39e14786091dca564835e5a4dc1`.
 
 ### The random differential tester
 
