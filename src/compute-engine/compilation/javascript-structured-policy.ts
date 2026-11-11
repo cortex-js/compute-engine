@@ -16,6 +16,7 @@ import type { Expression } from '../global-types.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
 import {
   elementOf,
+  isListType,
   isTupleType,
   listType,
   type AbortKind,
@@ -29,20 +30,22 @@ import {
 } from './structured-verify.js';
 
 /** The representation that holds a value of the type `type`, or
- *  `undefined` for a list or a tuple of booleans or of complex numbers. A
- *  tuple of reals or of integers is an array of numbers, as a list is: the
- *  existing emitter writes both `[a, b]`; a list of such tuples is an array
- *  of them. */
+ *  `undefined` for a list or a tuple of booleans or of complex numbers, at
+ *  any depth. A tuple of reals or of integers is an array of numbers, as a
+ *  list is: the existing emitter writes both `[a, b]`; a list of such tuples
+ *  is an array of them, and a list of lists an array of arrays at every
+ *  rank (`[[x, 1], [2, x]]`). */
 export function representationOfKind(
   type: ValueType
 ): ScalarRepresentation | undefined {
   const element = elementOf(type);
-  // A list of tuples (a list of points) is an array of arrays, as the
-  // existing emitter holds `[[1, 2], [x, 3]]`.
+  // A list of tuples (a list of points) and a list of lists are arrays of
+  // arrays, as the existing emitter holds `[[1, 2], [x, 3]]`.
   if (element !== undefined)
     return element === 'real' ||
       element === 'integer' ||
-      (isTupleType(element) && representationOfKind(element) === 'array')
+      ((isTupleType(element) || isListType(element)) &&
+        representationOfKind(element) === 'array')
       ? 'array'
       : undefined;
   if (isTupleType(type))
@@ -81,6 +84,13 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
       from: 'array',
       to: 'array',
       type: listType('real'),
+    },
+    // A list of rows of integers written to a local of a list of rows of
+    // reals: the same array of arrays.
+    'integer-rows-to-real-rows': {
+      from: 'array',
+      to: 'array',
+      type: listType(listType('real')),
     },
   },
   operations: {
@@ -139,7 +149,8 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'build': { results: ['array'], operands: ['number'] },
     // `_SYS.replaceAt(list, index, value)`, or `_SYS.replaceAtInPlace` when
     // the emitter updates the array in place, as the existing emitter
-    // writes them.
+    // writes them. The value is a number, or an array for a row of a list
+    // of lists.
     'replace-at': { results: ['array'], operands: ['array', 'number'] },
     // The test heads take real operands and have a real value.
     'trace': { results: ['number'], operands: ['number'] },

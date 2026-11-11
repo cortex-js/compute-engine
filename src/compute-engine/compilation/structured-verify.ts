@@ -31,6 +31,7 @@ import {
   type IRProgram,
   type IRRegion,
   type IRValue,
+  type ListType,
   type AbortKind,
   type BinaryFunctionName,
   type CollectionFunctionName,
@@ -780,10 +781,17 @@ function fitsType(type: ValueType, wider: ValueType): boolean {
 }
 
 /** Whether a value of the type `type` can be an element of a list: a real,
- *  an integer, or a tuple (a list of points). A boolean, a complex number
- *  and a list are not elements of a list of the representation. */
+ *  an integer, a tuple (a list of points), or a list whose elements can be
+ *  elements of a list (a row of a list of lists), at every depth. A boolean
+ *  and a complex number are not elements of a list of the representation,
+ *  at any depth. */
 function isElementType(type: ValueType): boolean {
-  return type === 'real' || type === 'integer' || isTupleType(type);
+  return (
+    type === 'real' ||
+    type === 'integer' ||
+    isTupleType(type) ||
+    (isListType(type) && isElementType(type.element))
+  );
 }
 
 /** Whether `type` is a list or a tuple type: a value of several elements. */
@@ -1654,10 +1662,13 @@ function verifyCollection(
       count(operands.length === 2);
       if (isTupleType(operands[0].type))
         fail(`the function of lists ${fn} reads a list, not a tuple`);
-      // A list of numbers or of tuples: the result has its elements.
+      // A list of numbers, of tuples or of lists: the result has its
+      // elements.
       const tuple = elementOf(operands[0].type);
       const element =
-        tuple !== undefined && isTupleType(tuple) ? tuple : listOperand(0);
+        tuple !== undefined && (isTupleType(tuple) || isListType(tuple))
+          ? tuple
+          : listOperand(0);
       if (operands[1].type !== 'integer')
         fail(
           `the count of the function of lists ${fn} has the type ${operands[1].type}`
@@ -1680,6 +1691,25 @@ function verifyCollection(
             `the function of lists ${fn} reads lists of other elements than ${tuple}`
           );
         result = listType(tuple);
+        break;
+      }
+      // `reverse` and `join` of lists of lists: the rows of the operands,
+      // whose types merge (a row of integers is a valid row of reals).
+      if (fn !== 'sort' && tuple !== undefined && isListType(tuple)) {
+        let row: ValueType = tuple;
+        for (const o of operands) {
+          const element = elementOf(o.type);
+          const merged: ValueType | undefined =
+            element !== undefined && isListType(element)
+              ? mergedType(row, element)
+              : undefined;
+          if (merged === undefined)
+            return fail(
+              `the function of lists ${fn} reads lists of other elements than ${tuple}`
+            );
+          row = merged;
+        }
+        result = listType(row as ListType);
         break;
       }
       const elements = operands.map((_, i) => listOperand(i));

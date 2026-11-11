@@ -662,6 +662,12 @@ class Emitter {
   private readonly elementLabels = new Map<number, string>();
   /** The `replace-at` operations that write in place (`inPlaceUpdates()`). */
   private readonly inPlace: ReadonlySet<IROperation>;
+  /** The values that can be an absent row of a list of lists, by their ids:
+   *  the result of an `at` with a list result (`undefined` for an index out
+   *  of range). A `length` of one has the guard of the existing emitter;
+   *  the admission admits no other `length` of an absent row
+   *  (`refuseAbsentRowUses()` in `javascript-fragment-target.ts`). */
+  private readonly rowReads = new Set<number>();
   /** The variables of the carried values of each loop whose body is being
    *  written, the innermost last: an `exit` assigns those of the last. */
   private readonly loops: (readonly string[])[] = [];
@@ -1226,7 +1232,11 @@ class Emitter {
         }
         // An element of a list of tuples: `_SYS.atPoint(L, i, n)`, a tuple of
         // `n` `NaN` for an index out of range, as the existing emitter reads
-        // a list of points.
+        // a list of points. A row of a list of lists: the read of the
+        // existing emitter, `_SYS.at` with `undefined` for an index out of
+        // range, where `_SYS.at` gives `NaN`. An element of a row (also of an
+        // absent row: `_SYS.at` of a value that is not an array is `NaN`) is
+        // a number. Every other element fails.
         {
           const element = elementOf(op.operands[0].type);
           if (element !== undefined && isTupleType(element)) {
@@ -1236,6 +1246,16 @@ class Emitter {
               atom(String(element.elements.length)),
             ]);
           }
+          if (element !== undefined && isListType(element)) {
+            this.runtime.add('at');
+            this.rowReads.add(op.result.id);
+            return {
+              text: `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${call('_SYS.at', operands).text})`,
+              precedence: CALL,
+            };
+          }
+          if (element !== 'real' && element !== 'integer')
+            return fail(`an at of a list of the type ${op.operands[0].type}`);
           this.runtime.add('atNumeric');
           return call('_SYS.atNumeric', [
             ...operands,
@@ -1254,6 +1274,13 @@ class Emitter {
             precedence: CALL,
           };
         }
+        // The length of a row that can be absent: the guard of the existing
+        // emitter, `NaN` for `undefined`.
+        if (this.rowReads.has(op.operands[0].id))
+          return {
+            text: `((_r) => Number.isNaN(_r ?? NaN) ? NaN : _r.length)(${operand(operands[0], CONDITIONAL)})`,
+            precedence: CALL,
+          };
         return {
           text: `${operand(operands[0], CALL)}.length`,
           precedence: CALL,

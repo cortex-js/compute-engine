@@ -132,6 +132,7 @@ import {
   type IRState,
   type IRValue,
   type CollectionFunctionName,
+  type ListType,
   type ScalarKind,
   type TupleType,
   type ValueType,
@@ -751,6 +752,14 @@ export function powerForm(
   return undefined;
 }
 
+/** The shape of a fragment type that `valueType()` reads: a kind, the size
+ *  of a point, and the element of a list, at every depth. */
+type StructuredTypeShape = {
+  readonly kind: string;
+  readonly size?: number;
+  readonly element?: StructuredTypeShape;
+};
+
 function scalarKind(type: { readonly kind: string }): ScalarKind {
   if (
     type.kind === 'real' ||
@@ -763,11 +772,12 @@ function scalarKind(type: { readonly kind: string }): ScalarKind {
 }
 
 /** The type of a value: a scalar type, a list of reals, of integers or of
- *  tuples of reals, whatever its length, or a tuple (a fragment point) of
- *  reals. */
+ *  tuples of reals, whatever its length, a list of such lists at every
+ *  depth (a list of lists), or a tuple (a fragment point) of reals. Every
+ *  other element fails, at every depth. */
 export function valueType(type: {
   readonly kind: string;
-  readonly element?: { readonly kind: string; readonly size?: number };
+  readonly element?: StructuredTypeShape;
   readonly size?: number;
 }): ValueType {
   if (type.kind === 'point') {
@@ -780,6 +790,9 @@ export function valueType(type: {
   // A list of points is a list of tuples of reals.
   if (type.element?.kind === 'point')
     return listType(valueType(type.element) as TupleType);
+  // A list of lists: the element type, checked at every depth.
+  if (type.element?.kind === 'list')
+    return listType(valueType(type.element) as ListType);
   const element =
     type.element === undefined ? undefined : scalarKind(type.element);
   if (element !== 'real' && element !== 'integer')
@@ -1856,6 +1869,69 @@ class Lowering {
         this.resultOf(facts)
       );
 
+    // `At(M, i, j)` of a list of lists (`atRule()`): one `at` per index, the
+    // row `i`, then its element `j`, as `At(At(M, i), j)`.
+    if (operator === 'At' && node.nops > 2) {
+      const [base, ...indexes] = this.operands(node, facts, scope, operations);
+      let value = base;
+      indexes.forEach((index, i) => {
+        const result =
+          i === indexes.length - 1
+            ? this.resultOf(facts)
+            : this.newValue(
+                elementOf(value.type) ??
+                  fail(`${nodeText(node)} reads no list of lists`),
+                'array'
+              );
+        operations.push({
+          kind: 'at',
+          result,
+          operands: [value, index],
+          effect,
+          origin: node,
+        });
+        value = result;
+      });
+      return value;
+    }
+
+    // `ReplaceAt(M, i, j, x)` of a list of lists (`nestedReplaceAt()`): the
+    // row `i` with its element `j` replaced, written as the row `i` of `M`:
+    // `replace-at(M, i, replace-at(at(M, i), j, x))`, which copies the outer
+    // array and the row `i`, as `_SYS.replaceAtPath(M, i, j, x)` does.
+    if (operator === 'ReplaceAt' && node.nops === 4) {
+      const [list, i, j, x] = this.operands(node, facts, scope, operations);
+      const result = this.resultOf(facts);
+      const resultRow = elementOf(result.type);
+      const row = elementOf(list.type);
+      if (resultRow === undefined || row === undefined || !isListType(row))
+        return fail(`${nodeText(node)} writes no row of a list of lists`);
+      const read = this.newValue(row, 'array');
+      operations.push({
+        kind: 'at',
+        result: read,
+        operands: [list, i],
+        effect,
+        origin: node,
+      });
+      const written = this.newValue(resultRow, 'array');
+      operations.push({
+        kind: 'replace-at',
+        result: written,
+        operands: [read, j, x],
+        effect,
+        origin: node,
+      });
+      operations.push({
+        kind: 'replace-at',
+        result,
+        operands: [list, i, written],
+        effect,
+        origin: node,
+      });
+      return result;
+    }
+
     const kind = Object.hasOwn(OPERATIONS, operator)
       ? OPERATIONS[operator]
       : undefined;
@@ -2135,9 +2211,10 @@ class Lowering {
     const element = isTupleType(type)
       ? type.elements[0]
       : (elementOf(type) ?? fail(`${nodeText(origin)} reads no list`));
+    // A tuple of a list of tuples and a row of a list of lists are arrays.
     const result = this.newValue(
       element,
-      isTupleType(element) ? 'array' : 'number'
+      isTupleType(element) || isListType(element) ? 'array' : 'number'
     );
     operations.push({
       kind: 'at',
@@ -4050,7 +4127,8 @@ class Lowering {
    * conversion reads the value as that type. An integer written to a real
    * local and a list of integers written to a list of reals are the same
    * JavaScript value, as in the existing emitter (`let t = 1`): an identity
-   * conversion (`integer-to-real`, `integer-list-to-real-list`) gives the
+   * conversion (`integer-to-real`, `integer-list-to-real-list`,
+   * `integer-rows-to-real-rows`) gives the
    * value the type of the local, with no code. The admission and the pass
    * refuse every other write of a value of another type
    * (`checkLocalWrites()`, `structuredLocalType()`).
@@ -4075,7 +4153,10 @@ class Lowering {
         ? 'integer-to-real'
         : value.type === listType('integer') && type === listType('real')
           ? 'integer-list-to-real-list'
-          : undefined;
+          : value.type === listType(listType('integer')) &&
+              type === listType(listType('real'))
+            ? 'integer-rows-to-real-rows'
+            : undefined;
     if (conversion === undefined)
       return fail(
         `a value of the type ${value.type} is written to the local ${name} of the type ${type}`

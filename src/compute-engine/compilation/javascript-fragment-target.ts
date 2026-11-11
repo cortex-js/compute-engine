@@ -98,6 +98,7 @@ import {
   type FragmentElementType,
   type FragmentListType,
   type FragmentValueFacts,
+  type FragmentValueType,
   type FragmentDefinition,
   type FragmentRule,
   type FragmentFunction,
@@ -2823,7 +2824,7 @@ function foldOrExtremumRule(
  *  the structured route refuses one (`withoutListOperands()`). The rules of
  *  `ELEMENTWISE_HEADS` read a list operand element-wise
  *  (`elementwiseRule()`). */
-const LIST_OPERAND_HEADS = [
+export const LIST_OPERAND_HEADS = [
   'If',
   'Loop',
   'At',
@@ -2845,6 +2846,98 @@ const LIST_OPERAND_HEADS = [
   ...Object.keys(COLLECTION_HEADS),
   ...Object.keys(FUNCTION_OPERAND_HEADS),
 ];
+
+/**
+ * The heads of `LIST_OPERAND_HEADS` whose rule reads a list of lists (an
+ * operand or a result whose type is a list of lists) on the structured
+ * route: the reads and the copies of slice 1 of
+ * `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`. Every
+ * other rule of `LIST_OPERAND_HEADS` refuses one (`withoutNestedOperands()`),
+ * so that no rule written for a list of numbers admits a list of lists by
+ * accident; each slice adds its heads here. `Count` reads a list of lists
+ * only with no predicate (`Count(M)`, the number of rows).
+ */
+export const NESTED_OPERAND_HEADS: ReadonlySet<string> = new Set([
+  'If',
+  'At',
+  'Length',
+  'List',
+  'Comprehension',
+  'ReplaceAt',
+  'Typed',
+  'First',
+  'Last',
+  'Count',
+  'Rest',
+  'Take',
+  'Drop',
+  'Reverse',
+  'Join',
+  'ListJoin',
+  'RotateLeft',
+  'RotateRight',
+]);
+
+/**
+ * The rule `rule` of `head`, a head of `LIST_OPERAND_HEADS` that is not in
+ * `NESTED_OPERAND_HEADS` (or `Count` with a predicate), with a refusal of a
+ * list of lists: after the rule, the result of the node and each operand
+ * that it typed (also an operand of its `Element` or `Limits` clauses, and
+ * one typed in the scope that the node opens) must not have the type of a
+ * list of lists. The rule of `withoutListOperands()` refuses every list for
+ * the heads outside `LIST_OPERAND_HEADS`.
+ */
+function withoutNestedOperands(
+  head: string,
+  rule: FragmentRule<ScalarRepresentation>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const facts =
+        'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      if (head === 'Count' && isFunction(node) && node.nops === 1)
+        return facts;
+      const inner = scope.inner.get(node);
+      const nestedType = (operand: Expression) => {
+        const f = scope.facts.get(operand) ?? inner?.facts.get(operand);
+        return f !== undefined && 'type' in f && isNestedListType(f.type)
+          ? f.type
+          : undefined;
+      };
+      const operands = opsOfNode(node).flatMap((op) =>
+        isFunction(op, 'Element') || isFunction(op, 'Limits')
+          ? [op, ...op.ops]
+          : [op]
+      );
+      const nested = operands.find((op) => nestedType(op) !== undefined);
+      if (nested !== undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `${head} with the operand ${nodeText(nested)} of the type ` +
+            `\`${fragmentTypeToString(nestedType(nested)!)}\`, a list of lists, is not ` +
+            `in the structured route, which reads a list of lists with At, Length, ` +
+            `First, Last, Count, Take, Drop, Rest, Reverse, Join, the rotations, ` +
+            `ReplaceAt and a list literal or a comprehension of rows`
+        );
+      if ('type' in facts && isNestedListType(facts.type))
+        return w.refuse(
+          node,
+          'signature',
+          `${head} whose value has the type \`${fragmentTypeToString(facts.type)}\`, ` +
+            `a list of lists, is not in the structured route`
+        );
+      return facts;
+    },
+  };
+}
+
+/** The operands of `node`, or none. */
+function opsOfNode(node: Expression): readonly Expression[] {
+  return isFunction(node) ? node.ops : [];
+}
 
 /**
  * The type of a local on the structured route (`FragmentDefinition.localType`):
@@ -2964,7 +3057,37 @@ function declaredLocalType(
         ? { kind: 'list', element: { kind: 'real' } }
         : undefined;
   }
-  return tupleListLocalType(declared, mode);
+  return (
+    tupleListLocalType(declared, mode) ?? nestedListLocalType(declared, mode)
+  );
+}
+
+/** The list type of a local declared with a list of rows of reals or of
+ *  integers (`list<list<real>>`, `matrix`, `matrix<2x2>`, and in the `strict`
+ *  mode `list<list<number>>`: `structuredNestedListType()`), or `undefined`
+ *  for another declared type. A local of a higher rank has no type: a write
+ *  of rows of integers to it would need a conversion that the route has for
+ *  rows of reals only (`integer-rows-to-real-rows`). */
+function nestedListLocalType(
+  declared: string | undefined,
+  mode: 'strict' | 'complex'
+): FragmentListType | undefined {
+  if (declared === undefined || !/^(list<list<|matrix\b)/.test(declared))
+    return undefined;
+  let type: Type;
+  try {
+    type = parseType(declared);
+  } catch {
+    return undefined;
+  }
+  const list = structuredNestedListType(type, mode);
+  return list !== undefined &&
+    !('refusal' in list) &&
+    list.element.kind === 'list' &&
+    (list.element.element.kind === 'real' ||
+      list.element.element.kind === 'integer')
+    ? list
+    : undefined;
 }
 
 /** The list type of a local declared with a list of tuples
@@ -2998,7 +3121,10 @@ function tupleListLocalType(
  * existing emitter writes `[]` for each, and the local holds a list of
  * tuples.
  */
-const EMPTY_TUPLE_LISTS = new WeakMap<Expression, FragmentElementType>();
+const EMPTY_TUPLE_LISTS = new WeakMap<
+  Expression,
+  FragmentListType['element']
+>();
 
 /** Record in `EMPTY_TUPLE_LISTS` the empty list literals that `body`
  *  writes to a local declared with a list of tuples. A name is declared
@@ -3008,7 +3134,7 @@ function markEmptyTupleLists(
   body: Expression,
   mode: 'strict' | 'complex'
 ): void {
-  const declared = new Map<string, FragmentElementType>();
+  const declared = new Map<string, FragmentListType['element']>();
   const isEmpty = (node: Expression | undefined) =>
     isFunction(node, 'List') && node.nops === 0;
   // A node object reached twice is visited once: a tree can share its
@@ -3265,6 +3391,8 @@ function structuredListType(
     const point = structuredTupleType(type.elements, mode);
     if (point !== undefined) return { kind: 'list', element: point };
   }
+  const nested = structuredNestedListType(type, mode);
+  if (nested !== undefined) return nested;
   // Another list type (`typeof type === 'object'`, of the kind `list`):
   // a string, a tuple or a set keeps the message of a binding with no type.
   if (typeof type === 'object' && type.kind === 'list')
@@ -3275,6 +3403,89 @@ function structuredListType(
         `(a JavaScript array of numbers)`,
     };
   return undefined;
+}
+
+/**
+ * The fragment type of a list of lists of the engine type `type` on the
+ * structured route (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`,
+ * section 2): a list whose element is the fragment type of a row, to the
+ * rank that the type states. A `matrix`, a `matrix<m×n>` and a
+ * `tensor<U^(a×b×c)>` have the rank of their dimensions and the elements
+ * of their cells (`number` cells are real in the `strict` mode, as a flat
+ * `list<number>` is); a `list<T>` whose element `T` is a list type
+ * (`list<list<real>>`, `list<vector<2>>`, `list<matrix<2x2>>`,
+ * `list<list<tuple<real, real>>>`) is a list of the type of `T`
+ * (`structuredListType()`). The type holds the rank only, not the lengths:
+ * rows of a `list<list<real>>` can have different lengths, and the code
+ * reads the length of each array, as the existing emitter does. Each is a
+ * JavaScript array of arrays.
+ *
+ * A refusal, with its message, for a tensor whose rank the type does not
+ * state (`tensor`, `tensor<real>`: R3 of `docs/COMPILATION-MODEL.md`), for
+ * cells that are not real (`matrix<complex>`; `number` cells in the
+ * `complex` mode or with no mode), and for every list of lists in the
+ * `complex` mode, where the existing compiler reads the cells on the complex
+ * lane. `undefined` for a type that is not a list of lists.
+ */
+function structuredNestedListType(
+  type: Type,
+  mode?: 'strict' | 'complex'
+): FragmentListType | { refusal: string } | undefined {
+  if (typeof type !== 'object' || type.kind !== 'list') return undefined;
+  const dimensions = type.dimensions;
+  const text = typeToString(type);
+  if (dimensions === null)
+    return {
+      refusal:
+        `the type ${text}, a tensor whose rank the type does not state, and the ` +
+        `structured route admits a list of lists only of a declared rank ` +
+        `(matrix, matrix<m×n>, list<list<real>>)`,
+    };
+  const rows =
+    dimensions === undefined || dimensions.length === 1
+      ? type.elements
+      : undefined;
+  if (
+    (dimensions === undefined || dimensions.length < 2) &&
+    !(typeof rows === 'object' && rows.kind === 'list')
+  )
+    return undefined;
+  if (mode === 'complex')
+    return {
+      refusal:
+        `the type ${text}, a list of lists, which is not in the structured route ` +
+        `in the \`complex\` mode: the existing compiler reads its cells on the ` +
+        `complex lane`,
+    };
+  if (rows !== undefined) {
+    const row = structuredListType(rows, mode);
+    if (row === undefined || 'refusal' in row)
+      return {
+        refusal:
+          `the type ${text}, and the structured route admits a list of lists ` +
+          `only of rows of reals, of integers or of tuples of reals, of a ` +
+          `declared rank`,
+      };
+    return { kind: 'list', element: row };
+  }
+  // A rank of 2 or more from the dimensions, and the type of a cell.
+  const cell = type.elements;
+  const kind = isSubtype(cell, 'integer')
+    ? 'integer'
+    : isSubtype(cell, 'real') ||
+        (mode === 'strict' && declaredNumberKind(cell, 'strict')?.kind === 'real')
+      ? 'real'
+      : undefined;
+  if (kind === undefined)
+    return {
+      refusal:
+        `the type ${text}, and the structured route admits a matrix or a tensor ` +
+        `only of real or integer cells (number cells in the \`strict\` mode)`,
+    };
+  let list: FragmentListType = { kind: 'list', element: { kind } };
+  for (let level = 1; level < dimensions!.length; level++)
+    list = { kind: 'list', element: list };
+  return list;
 }
 
 /**
@@ -3343,18 +3554,73 @@ function structuredParameterType(
 
 /** How the structured route holds a value of the type `type`: the
  *  representation of a scalar, and `array` for a list of reals, of integers
- *  or of tuples of reals (points), and for a tuple of reals, as the existing
- *  emitter holds each. */
-function structuredRepresentation(type: {
-  readonly kind: string;
-  readonly element?: { readonly kind: string };
-}): ScalarRepresentation | undefined {
+ *  or of tuples of reals (points), for a list of such lists at every depth
+ *  (an array of arrays), and for a tuple of reals, as the existing emitter
+ *  holds each. */
+function structuredRepresentation(
+  type: StructuredTypeShape
+): ScalarRepresentation | undefined {
   if (type.kind === 'point') return 'array';
   if (type.kind !== 'list') return representation(type);
-  const element = type.element?.kind;
-  return element === 'real' || element === 'integer' || element === 'point'
+  const element = type.element;
+  if (element?.kind === 'list')
+    return structuredRepresentation(element) === 'array' ? 'array' : undefined;
+  const kind = element?.kind;
+  return kind === 'real' || kind === 'integer' || kind === 'point'
     ? 'array'
     : undefined;
+}
+
+/** The shape of a fragment type that `structuredRepresentation()` reads: a
+ *  kind, and the element of a list, at every depth. */
+type StructuredTypeShape = {
+  readonly kind: string;
+  readonly element?: StructuredTypeShape;
+};
+
+/** Whether `type` is a list of lists (a fragment list type whose element is
+ *  a list), of any rank. */
+function isNestedListType(type: { readonly kind: string }): boolean {
+  return (
+    type.kind === 'list' &&
+    (type as FragmentListType).element.kind === 'list'
+  );
+}
+
+/** The type of a row that holds a row of the type `a` and a row of the type
+ *  `b` (two rows of a list of lists): the same type, or the type that reads
+ *  the other one with no conversion (`passesStructuredList()`: rows of
+ *  integers beside rows of reals are rows of reals), or `undefined`. */
+function joinedRows(
+  a: FragmentListType,
+  b: FragmentListType
+): FragmentListType | undefined {
+  if (fragmentTypeToString(a) === fragmentTypeToString(b)) return a;
+  if (passesStructuredList(a, b)) return b;
+  if (passesStructuredList(b, a)) return a;
+  return undefined;
+}
+
+/** Whether a list of the type `argument` is read as a list of the type
+ *  `parameter` with no conversion: a list of integers as a list of reals,
+ *  both one JavaScript array of numbers, and rows of integers as rows of
+ *  reals (rank 2). The lowering has a conversion for these two ranks only
+ *  (`toLocal()`: `integer-list-to-real-list`, `integer-rows-to-real-rows`),
+ *  so a list of a higher rank is read only as a list of its own type. */
+function passesStructuredList(
+  argument: FragmentListType,
+  parameter: FragmentListType
+): boolean {
+  const a = argument.element;
+  const p = parameter.element;
+  if (a.kind === 'list' && p.kind === 'list')
+    return (
+      fragmentTypeToString(a) === fragmentTypeToString(p) ||
+      (a.element.kind !== 'list' &&
+        p.element.kind !== 'list' &&
+        passesStructuredList(a, p))
+    );
+  return a.kind === 'integer' && p.kind === 'real';
 }
 
 /** The definition of the structured route: the existing definition, with a
@@ -3370,6 +3636,7 @@ const structuredDefinition: Pick<
   | 'loopBoundFromFact'
   | 'passesListArgument'
   | 'listLocals'
+  | 'nestedLists'
 > = {
   typeOfSymbol(node) {
     const scalar = definition.typeOfSymbol(node);
@@ -3386,6 +3653,8 @@ const structuredDefinition: Pick<
       ? undefined
       : structuredRepresentation(type),
   listLocals: true,
+  // A list of lists, read by the rules of `NESTED_OPERAND_HEADS` only.
+  nestedLists: true,
   representationOfValue: structuredRepresentation,
   // A bound computed from the length of a list with integer arithmetic,
   // whose fact is an integer (`integerFromListLength()`, with the names of
@@ -3394,9 +3663,9 @@ const structuredDefinition: Pick<
     isInteger(bound) && integerFromListLength(bound, isInteger),
   // A list of integers and a list of reals are one JavaScript array of
   // numbers: the existing route passes the array to the helper, and the
-  // interpreter reads the integers as reals.
-  passesListArgument: (argument, parameter) =>
-    argument.element.kind === 'integer' && parameter.element.kind === 'real',
+  // interpreter reads the integers as reals; so are the rows of a list of
+  // lists.
+  passesListArgument: passesStructuredList,
   bindingLimit: (type, binding) =>
     type.kind === 'list'
       ? `The ${binding.role} \`${isSymbol(binding.symbol) ? binding.symbol.symbol : nodeText(binding.symbol)}\` ` +
@@ -3419,12 +3688,22 @@ const structuredDefinition: Pick<
  * unspecified in compiled code. The helper also throws when the element is
  * an array, as on the existing route.
  *
+ * A list of lists (`nestedLists`) is read by row: `At(M, i)` is the row
+ * `i`, a list, which the lowering writes as the existing emitter writes the
+ * read of a row, `undefined` for an index out of range; `At(M, i, j)` reads
+ * the row `i`, then its element `j` (one index per level, the rank of `M`
+ * at least the number of indexes), as `At(At(M, i), j)` does. A row read is
+ * a value that can be absent: the admission admits it only where the
+ * existing emitter gives the same value for an absent row
+ * (`refuseAbsentRowUses()`).
+ *
  * Refused: an index with a real fact (the existing emitter reads a
  * fraction as out of range, which the structured route does not copy: it
  * reads an integer index only; round it with `Floor`), a base that is not
- * a list input or parameter. The admission refuses, before this rule, more
- * than one index, a `Range` index (a slice) and a string index
- * (`structuredListRefusal()`).
+ * a list input or parameter, more than one index of a list that is not a
+ * list of lists at each level. The admission refuses, before this rule,
+ * more than one index of a base that is not a list of lists, a `Range`
+ * index (a slice) and a string index (`structuredListRefusal()`).
  */
 function atRule(
   node: Expression,
@@ -3432,13 +3711,70 @@ function atRule(
   context: FragmentContext<ScalarRepresentation>,
   w: FragmentWalker<ScalarRepresentation>
 ): FragmentFacts<ScalarRepresentation> {
-  if (!isFunction(node) || node.nops !== 2)
+  if (!isFunction(node) || node.nops < 2)
     return w.refuse(
       node,
       'signature',
-      'At with other than one index is not in the structured route'
+      'At with no index is not in the structured route'
     );
-  const [base, index] = operandFacts(node, scope, context, w);
+  const [base, ...indexes] = operandFacts(node, scope, context, w);
+  // An element of a row whose engine type is not a number (`At([[]], k,
+  // -1)`, of the type `missing`: the rows hold no element): the existing
+  // emitter reads `undefined` for an absent row there, where the route reads
+  // `NaN`.
+  const rowRead = (n: Expression) =>
+    isFunction(n) &&
+    ['At', 'First', 'Last'].includes(n.operator) &&
+    isNestedListType(w.value(n.ops[0], scope, context).type);
+  if (
+    (isNestedListType(base.type) || rowRead(node.op1)) &&
+    !isSubtype(node.type.type, 'number') &&
+    !isSubtype(node.type.type, 'list<any>') &&
+    !isSubtype(node.type.type, 'tuple')
+  )
+    return w.refuse(
+      node,
+      'signature',
+      `At of ${rowRead(node.op1) ? 'the row ' : ''}${nodeText(node.op1)} of the type ` +
+        `\`${node.op1.type.toString()}\`, whose element has the type ` +
+        `${node.type.toString()}, is not in the structured route: the existing ` +
+        `emitter reads undefined for an absent row there`
+    );
+  for (const index of indexes)
+    if (index.type.kind !== 'integer')
+      return w.refuse(
+        node,
+        'signature',
+        `At with an index of the type \`${fragmentTypeToString(index.type)}\` is ` +
+          `not in the structured route, which reads an index of the type integer`
+      );
+  // A list of lists: one level per index, a row (a list) for each index
+  // but the last, which reads an element of the last row read.
+  if (isNestedListType(base.type) && base.representation === 'array') {
+    let type: FragmentValueType | FragmentListType = base.type;
+    for (const _ of indexes) {
+      if (type.kind !== 'list')
+        return w.refuse(
+          node,
+          'signature',
+          `At with ${indexes.length} indexes of the type \`${fragmentTypeToString(base.type)}\` ` +
+            `is not in the structured route, which reads one index per level of a list of lists`
+        );
+      type = type.element;
+    }
+    return w.valueFacts(node, type, [
+      w.convert(base, base.type)!,
+      ...indexes.map((index) => w.convert(index, index.type)!),
+    ]);
+  }
+  if (indexes.length !== 1)
+    return w.refuse(
+      node,
+      'signature',
+      `At with ${indexes.length} indexes is not in the structured route, which reads ` +
+        `one index of a list that is not a list of lists`
+    );
+  const index = indexes[0];
   // An element of a list of tuples is a tuple (a point).
   const point = listElementType(base);
   const element = point?.kind === 'point' ? point : collectionElement(base);
@@ -3449,13 +3785,6 @@ function atRule(
       `At in the structured route reads a list of reals, integers or tuples or a ` +
         `tuple of reals, and its first operand has the type ` +
         `\`${fragmentTypeToString(base.type)}\``
-    );
-  if (index.type.kind !== 'integer')
-    return w.refuse(
-      node,
-      'signature',
-      `At with an index of the type \`${fragmentTypeToString(index.type)}\` is ` +
-        `not in the structured route, which reads an index of the type integer`
     );
   return w.valueFacts(
     node,
@@ -3485,9 +3814,11 @@ function lengthRule(
       'Length with other than one operand is not in the structured route'
     );
   const [base] = operandFacts(node, scope, context, w);
+  // The number of rows of a list of lists.
   if (
     collectionElement(base) === undefined &&
-    listElementType(base) === undefined
+    listElementType(base) === undefined &&
+    !(isNestedListType(base.type) && base.representation === 'array')
   )
     return w.refuse(
       node,
@@ -3564,9 +3895,10 @@ function comprehensionRefusal(node: Expression): string | undefined {
  * scope of the comprehension; the body has a real or an integer fact. The
  * result is a list of integers when the body is an integer, otherwise a
  * list of reals; both are a JavaScript array of numbers, as the existing
- * emitter makes it. Refused: a bound with a real fact, a body that is a
- * list (a list of lists), a complex or a boolean body. The admission
- * refuses another form before this rule (`comprehensionRefusal()`).
+ * emitter makes it. A body that is a tuple or a list makes a list of
+ * tuples or a list of lists. Refused: a bound with a real fact, a complex
+ * or a boolean body. The admission refuses another form before this rule
+ * (`comprehensionRefusal()`).
  */
 function comprehensionRule(
   node: Expression,
@@ -3645,6 +3977,11 @@ function comprehensionRule(
   // A comprehension of tuples makes a list of points, as the existing
   // emitter pushes each array (`result.push([j, 2 * j])`).
   if (body.type.kind === 'point')
+    return w.valueFacts(node, { kind: 'list', element: body.type });
+  // A comprehension of rows makes a list of lists, as the existing emitter
+  // pushes each array (`result.push([k, 2 * k])`), also a row read that is
+  // absent (`refuseAbsentRowUses()`).
+  if (body.type.kind === 'list' && body.representation === 'array')
     return w.valueFacts(node, { kind: 'list', element: body.type });
   if (kind !== 'real' && kind !== 'integer')
     return w.refuse(
@@ -4111,6 +4448,9 @@ function impureNodes(node: Expression): Expression[] {
  * "Caveats of compiled code"). Refused: an index with a real fact (the
  * interpreter refuses a non-integer index; round it with `Floor`), an
  * element that is complex, boolean or a list, a list of another type.
+ *
+ * Of a list of lists `M` (`nestedReplaceAt()`): `ReplaceAt(M, i, r)` writes
+ * the row `r`, and `ReplaceAt(M, i, j, x)` the element `j` of the row `i`.
  */
 function replaceAtRule(
   node: Expression,
@@ -4118,6 +4458,11 @@ function replaceAtRule(
   context: FragmentContext<ScalarRepresentation>,
   w: FragmentWalker<ScalarRepresentation>
 ): FragmentFacts<ScalarRepresentation> {
+  if (isFunction(node) && node.nops >= 3) {
+    const facts = operandFacts(node, scope, context, w);
+    if (isNestedListType(facts[0].type) && facts[0].representation === 'array')
+      return nestedReplaceAt(node, facts, w);
+  }
   if (!isFunction(node) || node.nops !== 3)
     return w.refuse(
       node,
@@ -4161,6 +4506,104 @@ function replaceAtRule(
     w.convert(index, index.type)!,
     w.convert(value, value.type)!,
   ]);
+}
+
+/**
+ * `ReplaceAt(M, i, r)` and `ReplaceAt(M, i, j, x)` of a list of lists `M`
+ * on the structured route (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`,
+ * section 4): a new list, equal to `M` but for the row `i`, which is the
+ * row `r` (a list whose type reads as the type of a row of `M`), or for the
+ * element `j` of the row `i`, which is `x` (a value of the type of an
+ * element of a row: a real or an integer, or a row of a list of rank 3).
+ * The indexes have integer facts. The result has the rows of `M`, and a row
+ * of reals where a row of integers gets a real value. The lowering writes
+ * the second form as two `replace-at`, `replace-at(M, i, replace-at(at(M, i),
+ * j, x))`, which copies the outer array and the row `i`, as
+ * `_SYS.replaceAtPath(M, i, j, x)` of the existing emitter does; an index
+ * out of range throws on both. Refused: more than two indexes, a value of
+ * another type, a tuple element.
+ */
+function nestedReplaceAt(
+  node: Expression & { ops: readonly Expression[] },
+  facts: readonly FragmentValueFacts<ScalarRepresentation>[],
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const list = facts[0];
+  const indexes = facts.slice(1, -1);
+  const value = facts[facts.length - 1];
+  const refuse = (message: string) =>
+    w.refuse(node, 'signature', `ReplaceAt ${message}`);
+  if (indexes.length > 2)
+    return refuse(
+      `with ${indexes.length} indexes is not in the structured route, which writes a row or an element of a row`
+    );
+  // The existing compiler writes an element of a row only when the engine
+  // type of the list is a list of lists at each level
+  // (`assertWrittenLevelsAreLists()` in `javascript-target.ts`): not a union
+  // (`list<list<real>> | list<vector<2>>`, a ragged literal).
+  const engine = node.ops[0].type.type;
+  if (
+    indexes.length === 2 &&
+    !(
+      typeof engine === 'object' &&
+      engine.kind === 'list' &&
+      ((engine.dimensions?.length ?? 0) >= 2 ||
+        (typeof engine.elements === 'object' && engine.elements.kind === 'list'))
+    )
+  )
+    return refuse(
+      `of ${nodeText(node.ops[0])} of the type ${node.ops[0].type.toString()} with two ` +
+        `indexes is not in the structured route: the existing compiler declines a ` +
+        `write of an element of a row when the type does not settle a list at each level`
+    );
+  for (const index of indexes)
+    if (index.type.kind !== 'integer')
+      return refuse(
+        `with an index of the type \`${fragmentTypeToString(index.type)}\` is ` +
+          `not in the structured route, which reads an index of the type integer`
+      );
+  /** The type of the list `type` with a value of the type `v` at the depth
+   *  `depth`, or `undefined` when `v` does not fit there. */
+  const written = (
+    type: FragmentListType,
+    depth: number,
+    v: FragmentValueType | FragmentListType
+  ): FragmentListType | undefined => {
+    const slot = type.element;
+    if (depth > 1) {
+      if (slot.kind !== 'list') return undefined;
+      const inner = written(slot, depth - 1, v);
+      return inner === undefined ? undefined : { kind: 'list', element: inner };
+    }
+    if (slot.kind === 'list')
+      return v.kind === 'list' && value.representation === 'array'
+        ? (() => {
+            const row = joinedRows(slot, v);
+            return row === undefined ? undefined : { kind: 'list', element: row };
+          })()
+        : undefined;
+    if (slot.kind !== 'real' && slot.kind !== 'integer') return undefined;
+    if (v.kind !== 'real' && v.kind !== 'integer') return undefined;
+    return {
+      kind: 'list',
+      element: {
+        kind: slot.kind === 'integer' && v.kind === 'integer' ? 'integer' : 'real',
+      },
+    };
+  };
+  const result = written(list.type as FragmentListType, indexes.length, value.type);
+  if (result === undefined)
+    return refuse(
+      `of ${nodeText(node.ops[0])} of the type \`${fragmentTypeToString(list.type)}\` ` +
+        `with a value of the type \`${fragmentTypeToString(value.type)}\` is not in ` +
+        `the structured route, which writes a row of a list of lists, or a real or ` +
+        `an integer element of a row`
+    );
+  return w.valueFacts(
+    node,
+    result,
+    facts.map((f) => w.convert(f, f.type)!)
+  );
 }
 
 //
@@ -4230,6 +4673,33 @@ function listLiteralRule(
       facts.map((f) => w.convert(f, f.type)!)
     );
   }
+  // A list of lists: each element a list, of one rank; the rows can have
+  // different lengths (`[[x], [2, x]]`, which the engine types
+  // `list<vector<1> | vector<2>>`), and a row of integers is read as a row
+  // of reals beside a row of reals, as the existing emitter writes the same
+  // array literal of arrays.
+  if (first?.kind === 'list') {
+    let row: FragmentListType | undefined = first;
+    for (const f of facts)
+      row =
+        row === undefined ||
+        f.type.kind !== 'list' ||
+        f.representation !== 'array'
+          ? undefined
+          : joinedRows(row, f.type);
+    if (row === undefined)
+      return w.refuse(
+        node,
+        'signature',
+        `a list literal of lists of different element types or of lists and ` +
+          `other values is not in the structured route`
+      );
+    return w.valueFacts(
+      node,
+      { kind: 'list', element: row },
+      facts.map((f) => w.convert(f, f.type)!)
+    );
+  }
   for (const f of facts) {
     const refusal = elementRefusal('List', f);
     if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
@@ -4290,6 +4760,18 @@ function listElementType(
     element.kind === 'point'
     ? element
     : undefined;
+}
+
+/** The type of a row of a list of lists of the facts `facts` on the
+ *  structured route (a list of rank 2 or more), or `undefined` for another
+ *  value. Only the rules of `NESTED_OPERAND_HEADS` read it. */
+function rowsOf(
+  facts: FragmentValueFacts<ScalarRepresentation>
+): FragmentListType | undefined {
+  if (facts.representation !== 'array' || facts.type.kind !== 'list')
+    return undefined;
+  const element = facts.type.element;
+  return element.kind === 'list' ? element : undefined;
 }
 
 /** The kind of the elements of a list or a tuple of the facts `facts` on
@@ -4449,12 +4931,12 @@ function collectionRule(
    *  point (a list of tuples, whose elements a slice, a rotation or a join
    *  keeps as they are: the inner arrays are shared, and no operation
    *  writes a tuple). */
-  const listElementAt = (i: number): FragmentElementType => {
-    const element = listElementType(facts[i]);
+  const listElementAt = (i: number): FragmentListType['element'] => {
+    const element = listElementType(facts[i]) ?? rowsOf(facts[i]);
     if (element === undefined)
       refuse(
         `of ${describe(i)} is not in the structured route, which reads a list ` +
-          `of reals, of integers or of tuples`
+          `of reals, of integers, of tuples or of lists`
       );
     return element!;
   };
@@ -4536,6 +5018,30 @@ function collectionRule(
       // Lists of tuples of one size join to a list of tuples; a list of
       // tuples beside a list of numbers (also the empty literal) is refused
       // with that cause.
+      // Lists of lists join to a list of lists whose rows read the rows of
+      // each operand (`joinedRows()`); a list of lists beside a list of
+      // numbers is refused.
+      const rowsAt = facts.findIndex((f) => rowsOf(f) !== undefined);
+      if (rowsAt >= 0) {
+        let row: FragmentListType | undefined = rowsOf(facts[rowsAt]);
+        facts.forEach((f, i) => {
+          const other = rowsOf(f);
+          row =
+            row === undefined || other === undefined
+              ? undefined
+              : joinedRows(row, other);
+          if (row === undefined)
+            refuse(
+              `of ${describe(rowsAt)} and ${describe(i)} is not in the structured route, ` +
+                `which joins lists of one element type`
+            );
+        });
+        return w.valueFacts(
+          node,
+          { kind: 'list', element: row! },
+          conversions
+        );
+      }
       const tupleAt = facts.findIndex(
         (f) => listElementType(f)?.kind === 'point'
       );
@@ -4585,16 +5091,22 @@ function collectionRule(
             `undefined for an empty list`
         );
       // The first or last tuple of a list of tuples, `_SYS.atPoint(L, 1,
-      // n)` and `_SYS.atPoint(L, -1, n)`.
-      const point = listElementType(facts[0]);
-      if (point?.kind === 'point')
+      // n)` and `_SYS.atPoint(L, -1, n)`; the first or last row of a list
+      // of lists, a row read (`atRule()`).
+      const point = listElementType(facts[0]) ?? rowsOf(facts[0]);
+      if (point?.kind === 'point' || point?.kind === 'list')
         return w.valueFacts(node, point, conversions);
       return w.valueFacts(node, { kind: elementAt(0, true) }, conversions);
     }
     case 'Count':
       arity(1);
-      // The length of a list of tuples, too.
-      if (listElementType(facts[0])?.kind !== 'point') elementAt(0, true);
+      // The length of a list of tuples, and the number of rows of a list
+      // of lists, too.
+      if (
+        listElementType(facts[0])?.kind !== 'point' &&
+        rowsOf(facts[0]) === undefined
+      )
+        elementAt(0, true);
       return w.valueFacts(node, { kind: 'integer' }, conversions);
     case 'Range': {
       if (node.nops < 1 || node.nops > 3)
@@ -5549,13 +6061,30 @@ function structuredListRefusal(node: Expression): string | undefined {
   const message = comprehensionRefusal(node);
   if (message !== undefined) return message;
   if (node.operator !== 'At') return undefined;
-  if (node.nops !== 2)
-    return `At with ${node.nops - 1} indexes is not in the structured route, which reads one index`;
-  if (isFunction(node.op2, 'Range'))
-    return 'At with a Range index (a slice) is not in the structured route, which reads one integer index';
-  if (isString(node.op2))
-    return 'At with a string index is not in the structured route, which reads one integer index';
+  // Several indexes read a list of lists, one level per index (`atRule()`).
+  if (node.nops < 2)
+    return 'At with no index is not in the structured route, which reads one index';
+  if (node.nops > 2 && !isNestedEngineList(node.op1.type.type))
+    return `At with ${node.nops - 1} indexes is not in the structured route, which reads one index of a list that is not a list of lists`;
+  for (const index of node.ops.slice(1)) {
+    if (isFunction(index, 'Range'))
+      return 'At with a Range index (a slice) is not in the structured route, which reads one integer index';
+    if (isString(index))
+      return 'At with a string index is not in the structured route, which reads one integer index';
+  }
   return undefined;
+}
+
+/** Whether the engine type `type` can be a list of lists: a list whose
+ *  elements are lists, or a matrix or a tensor of two dimensions or more
+ *  (the rule of `At` reads the facts: `atRule()`). */
+function isNestedEngineList(type: Type): boolean {
+  return (
+    typeof type === 'object' &&
+    type.kind === 'list' &&
+    ((type.dimensions?.length ?? 0) >= 2 ||
+      isSubtype(type, 'list<list<any>>'))
+  );
 }
 
 /**
@@ -6360,11 +6889,15 @@ function structuredAdmission(
   // helper call and the branches of an `If` only. The rules of `Loop` and
   // `Comprehension` read no list operand: a body that reads one is typed by
   // the rule of its own head.
+  // A list of lists is an operand of the heads of `NESTED_OPERAND_HEADS`
+  // only (`withoutNestedOperands()`).
   for (const [name, rule] of Object.entries(rules))
     if (ELEMENTWISE_HEADS.includes(name))
-      rules[name] = elementwiseRule(name, rule);
+      rules[name] = withoutNestedOperands(name, elementwiseRule(name, rule));
     else if (!LIST_OPERAND_HEADS.includes(name))
       rules[name] = withoutListOperands(name, rule);
+    else if (!NESTED_OPERAND_HEADS.has(name) || name === 'Count')
+      rules[name] = withoutNestedOperands(name, rule);
   return {
     structured: true,
     definition: {
@@ -9839,8 +10372,12 @@ function admitFunctionBody(
         .concat(admission.structured ? ['list<real>', 'list<integer>'] : [])
         .concat(
           admission.structured &&
-            tupleListLocalType(declared, named.structured?.mode ?? 'strict') !==
-              undefined
+            (tupleListLocalType(declared, named.structured?.mode ?? 'strict') !==
+              undefined ||
+              nestedListLocalType(
+                declared,
+                named.structured?.mode ?? 'strict'
+              ) !== undefined)
             ? [declared]
             : []
         )
@@ -9855,8 +10392,24 @@ function admitFunctionBody(
       names.has(local) ||
       local === 'True' ||
       local === 'False'
-    )
+    ) {
+      // A list of lists of another rank or cell type than the local types
+      // of `nestedListLocalType()` names its cause.
+      if (
+        admission.structured &&
+        declared !== undefined &&
+        /^(list<list<|tensor\b|matrix\b)/.test(declared) &&
+        nestedListLocalType(declared, named.structured?.mode ?? 'strict') ===
+          undefined
+      )
+        throw new Error(
+          `JS scalar fragment: the local ${local} declared ${declared} is not ` +
+            `in the structured route, which admits a local of a list of lists ` +
+            `only of rows of reals or of integers (rank 2: list<list<real>>, ` +
+            `list<list<integer>>, matrix)`
+        );
       throw new Error('JS scalar fragment: unsupported local declaration');
+    }
     return {
       local,
       declared,
@@ -11751,11 +12304,15 @@ function annotateStructured(
         ).map(([head, rule]) => [head, withoutListOperands(head, rule)])
       ),
       // The heads with a function operand read the mode, and their list
-      // operands (`functionOperandRule()`).
+      // operands (`functionOperandRule()`); none reads a list of lists, but
+      // `Count(M)` with no predicate (`withoutNestedOperands()`).
       ...Object.fromEntries(
         Object.keys(FUNCTION_OPERAND_HEADS).map((head) => [
           head,
-          functionOperandRule(registry.mode, registry.hosts),
+          withoutNestedOperands(
+            head,
+            functionOperandRule(registry.mode, registry.hosts)
+          ),
         ])
       ),
       // `Typed` reads the mode for a `number` ascription (`typedRule()`).
@@ -11916,6 +12473,13 @@ function annotateStructured(
   };
   collect(annotation.scope);
   for (const fn of annotation.functions.values()) collect(fn.scope);
+  refuseNestedListsInMode(scopes, registry.mode);
+  refuseCapturedListsWithRows(scopes, registry);
+  refuseAbsentRowUses(
+    annotation.root,
+    [...registry.helpers.values()].map((helper) => helper.body),
+    scopes
+  );
   for (const call of calls) {
     const all = scopes.flatMap((scope) => {
       const facts = scope.facts.get(call);
@@ -11932,6 +12496,202 @@ function annotateStructured(
       throw argumentRefusal(call, registry, scopes);
   }
   return annotation;
+}
+
+/**
+ * Refuse, in the `complex` mode, a node of one of `scopes` whose fact is a
+ * list of lists: the existing compiler reads the cells of a matrix on the
+ * complex lane there (`_SYS.cplx(_SYS.complexDet(M))`, `_SYS.cmul(M, N)`),
+ * and a free symbol is typed with no mode (`typeOfSymbol`). The `strict`
+ * mode reads them as numbers.
+ */
+function refuseNestedListsInMode(
+  scopes: readonly FragmentScope<ScalarRepresentation>[],
+  mode: 'strict' | 'complex'
+): void {
+  if (mode !== 'complex') return;
+  for (const scope of scopes)
+    for (const [node, facts] of scope.facts)
+      if ('type' in facts && isNestedListType(facts.type)) {
+        const e = new Error(
+          `JS scalar fragment: ${nodeText(node)} has the type ` +
+            `${fragmentTypeToString(facts.type)}, a list of lists, which is not in ` +
+            `the structured route in the \`complex\` mode: the existing compiler ` +
+            `reads its cells on the complex lane`
+        );
+        noteRefusedNode(e, { node });
+        throw e;
+      }
+}
+
+/**
+ * Refuse a program that reads a captured list (a constant of the program,
+ * `IRConstant`, one array that every call shares) and has a node whose fact
+ * is a list of lists. A row of a list of lists is placed as it is
+ * (`[CL, CL]`, `ReplaceAt(R, 1, CL)`, a comprehension of `CL`), and the copy
+ * of a result that is not unique (`rootYieldsUnique()`) is shallow, so a
+ * caller that writes a row of the result would write the constant. This is
+ * the simple version: it refuses also a program whose rows never hold the
+ * constant.
+ */
+function refuseCapturedListsWithRows(
+  scopes: readonly FragmentScope<ScalarRepresentation>[],
+  registry: StructuredRegistry
+): void {
+  const list = [...registry.captures.values()].find(
+    (capture) => capture.value === undefined
+  );
+  if (list === undefined) return;
+  for (const scope of scopes)
+    for (const [node, facts] of scope.facts)
+      if ('type' in facts && isNestedListType(facts.type)) {
+        const e = new Error(
+          `JS scalar fragment: the captured list ${list.name} is read by a ` +
+            `program with the list of lists ${nodeText(node)}, which is not in ` +
+            `the structured route: a row would share the array of the capture`
+        );
+        noteRefusedNode(e, { node });
+        throw e;
+      }
+}
+
+/**
+ * Refuse, on the structured route, a use of a row read of a list of lists
+ * that can be absent (`At(M, i)` with fewer indexes than the rank of `M`,
+ * `First(M)`, `Last(M)`, and an `If`, a `Block` or a `Typed` whose value can
+ * be one), except where the existing emitter gives the value of the route
+ * for an absent row. The existing emitter writes a row read as
+ * `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined :
+ * _v)(_SYS.at(M, i))`, `undefined` for an index out of range, as the route
+ * does (`at` in `javascript-structured-emit.ts`); its other reads of an
+ * absent value differ by operator, or test the shape at run time
+ * (`Sum(At(M, 2))` is `((_c) => Array.isArray(_c) ? … : _c)(R)`, and a
+ * `map` of it throws). Admitted: the base of an `At` (an element of an
+ * absent row is `NaN` on both, `_SYS.atNumeric` of a value that is not an
+ * array), the operand of `Length` (the guard of the existing emitter,
+ * `NaN` for an absent row), both for a row read itself and not for an
+ * `If` of row reads, an element of a list literal and the body of a
+ * comprehension (the row is placed as it is, `undefined` included), a
+ * branch of an `If`, the value of a `Block` and of a `Typed` (whose own use
+ * is checked), the list of `ReplaceAt(R, j, x)` (an absent row throws on
+ * both), the row value of `ReplaceAt(M, i, r)` (placed as it is), and the
+ * value of the program. Refused: every other operand, a
+ * local, an argument and the value of a helper body. A row whose index is
+ * in range by the type (a literal index within `m` of a `matrix<m×n>`) is
+ * also refused: slice 2 of the design note admits it.
+ */
+function refuseAbsentRowUses(
+  root: Expression,
+  helperBodies: readonly Expression[],
+  scopes: readonly FragmentScope<ScalarRepresentation>[]
+): void {
+  const typeOf = (node: Expression) => {
+    for (const scope of scopes) {
+      const facts = scope.facts.get(node);
+      if (facts !== undefined && 'type' in facts) return facts.type;
+    }
+    return undefined;
+  };
+  const isNested = (node: Expression) => {
+    const type = typeOf(node);
+    return type !== undefined && isNestedListType(type);
+  };
+  const memo = new Map<Expression, boolean>();
+  const absent = (node: Expression): boolean => {
+    if (!isFunction(node)) return false;
+    const known = memo.get(node);
+    if (known !== undefined) return known;
+    memo.set(node, false);
+    let result = false;
+    switch (node.operator) {
+      case 'At':
+        result = isNested(node.op1) && typeOf(node)?.kind === 'list';
+        break;
+      case 'First':
+      case 'Last':
+        result = node.nops === 1 && isNested(node.op1);
+        break;
+      case 'If':
+        result = node.ops.slice(1).some(absent);
+        break;
+      case 'Block':
+        result = node.nops > 0 && absent(node.ops[node.nops - 1]);
+        break;
+      case 'Typed':
+        result = node.nops > 0 && absent(node.op1);
+        break;
+    }
+    memo.set(node, result);
+    return result;
+  };
+  /** A row read itself, not an `If`, a `Block` or a `Typed` of one: the
+   *  existing emitter writes its guard of `Length` and of `At` for a row
+   *  read only (`Length(If(c, At(M, 1), At(M, 2)))` is `(…).length`
+   *  there, which throws for an absent row). */
+  const isRead = (op: Expression) =>
+    isFunction(op) &&
+    (op.operator === 'At' || op.operator === 'First' || op.operator === 'Last');
+  const allowed = (
+    parent: Expression & { ops: readonly Expression[] },
+    i: number
+  ) => {
+    switch (parent.operator) {
+      case 'At':
+        return i === 0 && isRead(parent.ops[0]);
+      case 'Length':
+        return isRead(parent.ops[0]);
+      case 'Typed':
+      case 'Comprehension':
+        return i === 0;
+      // The list of `ReplaceAt(R, j, x)` (an absent row throws on both),
+      // and a row written as a row (`ReplaceAt(M, 1, At(M, 2))`, a swap):
+      // the row is placed as it is, `undefined` included, as an element of
+      // a list literal is.
+      case 'ReplaceAt':
+        return (
+          parent.ops.length === 3 &&
+          (i === 0 || (i === 2 && isNested(parent.ops[0])))
+        );
+      case 'List':
+        return true;
+      case 'If':
+        return i > 0;
+      case 'Block':
+        return i === parent.ops.length - 1;
+    }
+    return false;
+  };
+  const seen = new Set<Expression>();
+  const visit = (node: Expression): void => {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    node.ops.forEach((op, i) => {
+      if (absent(op) && !allowed(node, i)) {
+        const e = new Error(
+          `JS scalar fragment: the row read ${nodeText(op)}, which is undefined ` +
+            `for an index out of range, is not in the structured route as an operand ` +
+            `of ${node.operator}: the route reads such a row with At and Length, ` +
+            `places it in a list, or gives it as the value of the program`
+        );
+        noteRefusedNode(e, { node: op });
+        throw e;
+      }
+      visit(op);
+    });
+  };
+  visit(root);
+  for (const body of helperBodies) {
+    if (absent(body)) {
+      const e = new Error(
+        `JS scalar fragment: the value of the helper body ${nodeText(body)} is a ` +
+          `row read, which is undefined for an index out of range, and is not in ` +
+          `the structured route as the value of a helper`
+      );
+      noteRefusedNode(e, { node: body });
+      throw e;
+    }
+    visit(body);
+  }
 }
 
 /**

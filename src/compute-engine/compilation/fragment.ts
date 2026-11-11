@@ -61,10 +61,12 @@ export type FragmentValueType =
 export type FragmentElementType =
   { kind: 'real' } | { kind: 'integer' } | { kind: 'point'; size: number };
 
-/** A list. `count` is absent when it is known only at run time. */
+/** A list. `count` is absent when it is known only at run time. The element
+ *  is a list (a list of lists, to the depth that the type states) only in a
+ *  definition that sets `nestedLists`. */
 export type FragmentListType = {
   kind: 'list';
-  element: FragmentElementType;
+  element: FragmentElementType | FragmentListType;
   count?: number;
 };
 
@@ -614,6 +616,12 @@ export type FragmentDefinition<R> = {
    *  `passesListArgument()` accepts the pair, also for the two branches of
    *  an `If`. Absent: a local is a scalar, a complex number or a point. */
   readonly listLocals?: boolean;
+  /** Whether a list can hold lists (`FragmentListType` with a list element,
+   *  a list of lists to the depth that the type states): the definition
+   *  types such a value only in the rules that read one. Absent: the pass
+   *  refuses a value and a binding of such a type, whatever rule makes
+   *  it. */
+  readonly nestedLists?: boolean;
 };
 
 //
@@ -710,6 +718,12 @@ function sameType(a: FragmentType, b: FragmentType): boolean {
     return a.count === l.count && sameType(a.element, l.element);
   }
   return true;
+}
+
+/** Whether `t` is a list whose elements are lists (a list of lists), which
+ *  only a definition that sets `nestedLists` makes. */
+function isNestedList(t: FragmentType): boolean {
+  return t.kind === 'list' && t.element.kind === 'list';
 }
 
 function isScalarNumeric(t: FragmentType): boolean {
@@ -1076,6 +1090,14 @@ function makeWalker<R>(
     type: FragmentValueType | FragmentListType,
     conversions?: readonly FragmentConversion<R>[]
   ): FragmentValueFacts<R> => {
+    if (isNestedList(type) && definition.nestedLists !== true)
+      return refuse(
+        node,
+        'signature',
+        `The value of \`${nodeText(node)}\` has the type ` +
+          `\`${fragmentTypeToString(type)}\`, a list of lists, which is not in ` +
+          `the ${fragment} fragment`
+      );
     const representation = definition.representationOfValue(type);
     if (representation === undefined)
       return refuse(
@@ -1219,6 +1241,14 @@ function makeWalker<R>(
     role: FragmentBindingRole,
     declared?: string
   ): FragmentValueFacts<R> => {
+    if (isNestedList(type) && definition.nestedLists !== true)
+      return refuse(
+        node,
+        'signature',
+        `The ${role} \`${name}\` has the type \`${fragmentTypeToString(type)}\`, ` +
+          `a list of lists, which is not in the ${fragment} fragment`,
+        name
+      );
     const representation = definition.representationOfBinding(type, {
       role,
       symbol: node,
@@ -3011,10 +3041,12 @@ export function walkAt<R>(
   if (!('representation' in base))
     return w.refuse(node, 'signature', `The base of \`At\` has no value`);
   const t = base.type;
+  // A list of lists (a definition with `nestedLists`) has no element of a
+  // value type: its rule reads it (`At` of the structured route).
   const element: FragmentValueType | undefined =
     t.kind === 'point'
       ? { kind: 'real' }
-      : t.kind === 'list'
+      : t.kind === 'list' && t.element.kind !== 'list'
         ? t.element
         : undefined;
   if (element === undefined)
@@ -3182,7 +3214,10 @@ export function walkElement<R>(
   const t = base.type;
   const n =
     t.kind === 'point' ? t.size : t.kind === 'list' ? t.count : undefined;
-  if (t.kind !== 'point' && t.kind !== 'list')
+  if (
+    (t.kind !== 'point' && t.kind !== 'list') ||
+    (t.kind === 'list' && t.element.kind === 'list')
+  )
     return w.refuse(
       node,
       'signature',
@@ -3231,7 +3266,7 @@ export function walkElement<R>(
         `${n} element(s)`
     );
   const element: FragmentValueType =
-    t.kind === 'point' ? { kind: 'real' } : t.element;
+    t.kind === 'point' ? { kind: 'real' } : (t.element as FragmentElementType);
   return w.valueFacts(node, element, conversions);
 }
 

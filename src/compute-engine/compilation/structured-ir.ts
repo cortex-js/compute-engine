@@ -62,17 +62,20 @@ export type IRState = string;
 /** The semantic type of a scalar value. */
 export type ScalarKind = 'real' | 'integer' | 'boolean' | 'complex';
 
-/** A list of elements of one type: a scalar kind, or a tuple type (a list
- *  of points). The length is not part of the type: two lists of the same
- *  element type and different lengths have one type, and the elements of a
- *  list of tuples all have the length of the tuple type. A list is a value:
- *  no operation changes a list. A list type is an interned object
- *  (`listType()`): two list types of one element type are the same object,
- *  so `===` compares them, as it compares two scalar kinds. Its text
- *  (`toString()`) is `list<real>`, `list<tuple<real, real>>`. */
+/** A list of elements of one type: a scalar kind, a tuple type (a list of
+ *  points), or a list type (a list of lists, nested to the depth that the
+ *  type states: `list<list<real>>` has rank 2). The length is not part of
+ *  the type, at any depth: two lists of the same element type and different
+ *  lengths have one type, the rows of a list of lists can have different
+ *  lengths, and the elements of a list of tuples all have the length of the
+ *  tuple type. A list is a value: no operation changes a list. A list type
+ *  is an interned object (`listType()`): two list types of one element type
+ *  are the same object, so `===` compares them, as it compares two scalar
+ *  kinds. Its text (`toString()`) is `list<real>`,
+ *  `list<tuple<real, real>>`, `list<list<integer>>`. */
 export type ListType = {
   readonly kind: 'list';
-  readonly element: ScalarKind | TupleType;
+  readonly element: ScalarKind | TupleType | ListType;
   toString(): string;
 };
 
@@ -89,12 +92,14 @@ export type TupleType = {
 /** The semantic type of a value: a scalar, a list or a tuple. */
 export type ValueType = ScalarKind | ListType | TupleType;
 
-const LIST_TYPES = new Map<ScalarKind | TupleType, ListType>();
+const LIST_TYPES = new Map<ScalarKind | TupleType | ListType, ListType>();
 const TUPLE_TYPES = new Map<string, TupleType>();
 
 /** The list type of elements of the type `element` (a scalar kind, or an
- *  interned tuple type), interned. */
-export function listType(element: ScalarKind | TupleType): ListType {
+ *  interned tuple or list type), interned. */
+export function listType(
+  element: ScalarKind | TupleType | ListType
+): ListType {
   let type = LIST_TYPES.get(element);
   if (type === undefined) {
     const text = `list<${String(element)}>`;
@@ -129,9 +134,12 @@ export function isTupleType(type: ValueType): type is TupleType {
   return typeof type === 'object' && type.kind === 'tuple';
 }
 
-/** The type of the elements of `type` (a scalar kind, or a tuple type for
- *  a list of tuples), or `undefined` when `type` is not a list type. */
-export function elementOf(type: ValueType): ScalarKind | TupleType | undefined {
+/** The type of the elements of `type` (a scalar kind, a tuple type for a
+ *  list of tuples, a list type for a list of lists), or `undefined` when
+ *  `type` is not a list type. */
+export function elementOf(
+  type: ValueType
+): ScalarKind | TupleType | ListType | undefined {
   return isListType(type) ? type.element : undefined;
 }
 

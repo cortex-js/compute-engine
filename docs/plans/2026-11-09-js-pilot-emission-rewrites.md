@@ -511,6 +511,27 @@ the name of the type.
 | `ParallelLoop` over a `Range` (`lowerParallelHeads()` writes `Loop(body, Element(k, ParallelDomain(Range(…))))`) | `{ const s = _SYS.parallelPassesBegin(); let p = 0; try { <counted loop whose body starts with if (s !== undefined) _SYS.parallelPassesFrame(s, ++p);> } finally { _SYS.parallelPassesEnd(s); } }` (`emitElementLoops()`, `compile-loops.ts`); `notePoolLoopDomain()` records the loop for the worker pool (`parallelLoops`, `parallelCode`, `runAsync()`) | Declined. A sequential `loop` gives the same values with no draw, but the begin of the passes consumes an index of an enclosing `WithRandomSeed` frame (also one of the interpreter that calls an implicit compilation), and the result would have no `parallelLoops` record and no asynchronous copy |
 | `If(c, a, b)`, `Which(c, a, …)` with a condition whose type is `true` or `false` | `const claim = booleanClaim(args[0]); if (claim !== undefined) return claim ? arm(args[1], 1) : arm(args[2], 2);` (`compile-conditionals.ts`): the test and the other branch are not emitted | Declined (unchanged): the admission, the pass and the lowering would each need the selection |
 
+### Lists of lists (slice 1 of the nested lists)
+
+The design is `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`;
+the result is its section "Result of slice 1".
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| An input, a parameter, a local or a helper result `list<list<real>>`, `list<list<integer>>`, `matrix`, `matrix<m×n>` (`number` cells in the `strict` mode), `list<list<tuple<real, real>>>`, rank 3 | `_.M`, the array of arrays | `IRInput` of a `list<list<…>>` core type (the rank only), representation `array` at every rank; a `tensor` of no stated rank, a union of ranks, complex cells: declined |
+| `[[x, 1], [2]]`, `[[1], [2, 3]]` (a ragged literal, `list<vector<1> \| vector<2>>`) | `[[_.x, 1], [2]]` | A `list` of `list` values, `list<list<real>>`; a literal of rows of different element types or of rows and numbers declined |
+| `At(M, i)`, a row | `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(_SYS.at(M, i))`: `undefined` out of range | `at` with a list result, the same text (`javascript-structured-emit.ts`); never unique for `inPlaceUpdates()`. Used only as the base of an `At`, the operand of `Length`, an element of a list literal, the body of a comprehension, the list of `ReplaceAt(R, j, x)`, the row of `ReplaceAt(M, i, r)` (a swap of two rows shares the rows of the input), a branch of an `If`, the value of a `Block`, of a `Typed` and of the program (`refuseAbsentRowUses()`); every other use declined |
+| `At(M, i, j)`, `At(At(M, i), j)` | `((_tv1) => (Number.isNaN((_tv1) ?? Number.NaN) ? Number.NaN : _SYS.atNumeric(_tv1, j, "real")))(row)` | Two `at`: `_SYS.atNumeric(row, j, "real")`, `NaN` for an absent row (`_SYS.at` answers `NaN` for a value that is not an array). An element whose engine type is not a number, a list or a tuple (`At([[]], k, -1)`, of the type `missing`: the existing code gives `undefined`) declined |
+| `Length(At(M, i))` | `((_tv1) => (Number.isNaN((_tv1) ?? Number.NaN) ? Number.NaN : (_tv1).length))(row)` | `length` with the guard `((_r) => Number.isNaN(_r ?? NaN) ? NaN : _r.length)(row)` for a row read; `Length(If(c, At(M, 1), At(M, 2)))` declined (the existing code writes `.length` and throws for an absent row) |
+| `First(M)`, `Last(M)`, `Count(M)`, `Take`, `Drop`, `Rest`, `Reverse`, `RotateLeft`, `RotateRight`, `Join`, `ListJoin` of rows | `_SYS.at(M, 1)` with the row wrapper, `.slice(…)`, `[...(M), ...(N)]`, `_SYS.rotl` | The same text: a new outer array that holds the rows of its operand |
+| `[[j, 2j] for j in 1..n]`, `[At(M, j) for j in 1..2]` | `result.push([j, 2 * j])` | A `loop` that carries the list of rows; a row read is placed as it is |
+| `ReplaceAt(M, i, row)` | `_SYS.replaceAt(M, i, row)` | `replace-at` with a list value; the outer array copied, or written in place when unique |
+| `ReplaceAt(M, i, j, x)` | `_SYS.replaceAtPath(M, i, j, x)`, after `assertWrittenLevelsAreLists()` | `replace-at(M, i, replace-at(at(M, i), j, x))`: row `i` copied, the outer slot in place when `M` is unique; a type that does not settle a list at each level (`list<vector<2> \| vector<integer^1>>`) declined, as the existing compiler declines it; more than 2 indexes declined |
+| `Multiply(M, M)`, `Power(M, 2)` of a `list<list<…>>`, a `matrix` or a `tensor` | `(_SYS.matrixProductShape(M, N) ?? (_SYS.bcast(…)))`, `_SYS.mul(M, N)` | Declined (a user decision, 2026-11-11: the remedy is a more precise declaration, slice 4) |
+| Element-wise arithmetic, folds, `Map`, `Filter`, `Reduce`, `Scan`, `Sort`, `Dot`, `Norm`, `Mean` of rows; `Determinant`, `Transpose`, … | `_SYS.bcast`, `reduce`, `_SYS.det`, … | Declined (slices 2 and 3): `withoutNestedOperands()` refuses a list of lists for every head of `LIST_OPERAND_HEADS` outside `NESTED_OPERAND_HEADS` |
+| A captured list read by a program that has a list of lists | `[_val_CL, _val_CL]`: the hoisted array as a row of the result | Declined: the copy of a result is shallow (`rootYieldsUnique()`), so a row would be the array of the constant. A captured list of lists stays declined (`unsupported binding`) |
+| The `complex` and `bigint` modes | `_SYS.cplx` reads of the cells; `bigint` lists | Declined |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a

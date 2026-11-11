@@ -1186,6 +1186,119 @@ describe('the verifier: lists and tuples', () => {
     ).toThrow(/the operation at of a list<tuple<real, real>> has a result of the type real, not tuple<real, real>|is used with another type/);
   });
 
+  // Slice 1 of docs/plans/2026-11-11-structured-nested-lists-and-matrices.md:
+  // the element types of lists of lists are checked at every depth.
+  const M: [string, string] = ['M', 'list<list<real>>'];
+  const MI: [string, string] = ['MI', 'list<list<integer>>'];
+  const R3: [string, string] = ['R3', 'list<list<list<real>>>'];
+  test.each([
+    [
+      'a row read whose result is a number',
+      fn(['Length', ['At', 'M', 'n']], M, N),
+      'at',
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: 'real', representation: 'number' } }),
+      /the operation at of a list<list<real>> has a result of the type real, not list<real>|is used with another type/,
+    ],
+    [
+      'a row read of rank 3 whose result has rank 1',
+      fn(['Length', ['At', 'R3', 'n']], R3, N),
+      'at',
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType('real') } }),
+      /the operation at of a list<list<list<real>>> has a result of the type list<real>, not list<list<real>>|is used with another type/,
+    ],
+    [
+      'a row of reals typed as a list of rows',
+      fn(['List', ['List', 'x'], ['List', 1]], X),
+      'list',
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType(listType('integer')) } }),
+      /the element 1 of the operation list has the type real, and its result the type list<list<integer>>/,
+    ],
+    [
+      'a list of lists of rows of reals typed as rows of integers (depth 3)',
+      fn(['List', 'M', 'M'], M),
+      'list',
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType(listType(listType('integer'))) } }),
+      /the element 1 of the operation list has the type list<list<real>>, and its result the type list<list<list<integer>>>/,
+    ],
+    [
+      'a list of lists with a number element',
+      fn(['List', 'M', 'M'], M),
+      'list',
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: 'real', representation: 'number' }] }),
+      /the element 2 of the operation list has the type real, and its result the type list<list<list<real>>>|is used with another type/,
+    ],
+    [
+      'a list of lists of booleans at depth 3',
+      fn(['List', ['List', ['List', 'x']]], X),
+      'list',
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType(listType(listType('boolean'))) } }),
+      /the operation list of a|the element 1 of the operation list has the type list<list<real>>, and its result the type list<list<list<boolean>>>|which the target does not hold/,
+    ],
+    [
+      'a replace-at of a row of reals into rows of integers with a result of rows of integers',
+      fn(['ReplaceAt', 'MI', 'n', ['List', 'x']], MI, N, X),
+      'replace-at',
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType(listType('integer')) } }),
+      /the operation replace-at writes a list<real> element into a list<list<integer>> and has a result of the type list<list<integer>>/,
+    ],
+    [
+      'a replace-at of a number into rows',
+      fn(['ReplaceAt', 'M', 'n', ['List', 'x']], M, N, X),
+      'replace-at',
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], op.operands[1], { ...op.operands[2], type: 'real', representation: 'number' }] }),
+      /the operation replace-at writes a real element into a list<list<real>>|is used with another type/,
+    ],
+  ] as [string, MathJsonExpression, IROperation['kind'], (op: IROperation) => IROperation, RegExp][])(
+    'lists of lists: %s',
+    (_name, json, kind, change, message) => {
+      expect(changed(json, kind, change)).toThrow(message);
+    }
+  );
+
+  test.each([
+    [
+      'a take of rows whose result is a list of reals',
+      fn(['Take', 'M', 'n'], M, N),
+      (op: IROperation) => ({ ...op, result: { ...op.result!, type: listType('real') } }),
+      /the function of lists take has a result of the type list<real>, not list<list<real>>/,
+    ],
+    [
+      'a join of rows and a list of numbers',
+      fn(['Join', 'M', 'M'], M),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: listType('real') }] }),
+      /reads lists of other elements than list<real>|is used with another type/,
+    ],
+    [
+      'a join of rows of rank 2 and of rank 3',
+      fn(['Join', 'M', 'M'], M),
+      (op: IROperation) => ({ ...op, operands: [op.operands[0], { ...op.operands[1], type: listType(listType(listType('real'))) }] }),
+      /reads lists of other elements than list<real>|is used with another type/,
+    ],
+    [
+      'a sort of rows',
+      fn(['Reverse', 'M'], M),
+      (op: IROperation) => ({ ...op, fn: 'sort' }),
+      /the operand 1 of the function of lists sort has the type list<list<real>>/,
+    ],
+    [
+      'a norm of rows',
+      fn(['Reverse', 'M'], M),
+      (op: IROperation) => ({ ...op, fn: 'norm', result: { ...op.result!, type: 'real', representation: 'number' } }),
+      /the operand 1 of the function of lists norm has the type list<list<real>>|is used with another type/,
+    ],
+  ] as [string, MathJsonExpression, (op: IROperation) => IROperation, RegExp][])(
+    'lists of lists: %s',
+    (_name, json, change, message) => {
+      expect(changed(json, 'collection', change)).toThrow(message);
+    }
+  );
+
+  test('lists of lists: an add of a row operand', () => {
+    expect(
+      changed(fn(['Length', ['At', 'M', 'n']], M, N), 'length', (op) => ({ ...op, kind: 'add' }) as IROperation)
+    ).toThrow(/the operation add has a list operand or a list result|has 1 operands, fewer than 2/);
+  });
+
   test('a target with no functions of lists refuses one', () => {
     const preparation = prepare(fn(['Mean', 'L'], L));
     const program = lowerStructuredFragment(preparation);

@@ -429,7 +429,6 @@ describe('every rule that reads a list declines a list of tuples it does not rea
     ['Reduce', ['Reduce', 'LP', 'Add', 0], /Reduce of .*LP.* of the type `list<point<2>>` is not in the profile/],
     ['Scan', ['Scan', 'LP', 'Add'], /Scan of .*LP.* of the type `list<point<2>>` is not in the profile/],
     ['Dot', ['Dot', 'LP', 'LP'], /Dot of the type list<real> is not in the profile/],
-    ['a comprehension whose body is a list of tuples', ['Comprehension', 'LP', ['Element', 'j', ['Range', 1, 2]]], /Comprehension whose body is a list \(a list of lists\) is not in the profile/],
     ['an If whose branches are a list of tuples and a list of reals', ['If', 'c', 'LP', 'L'], /The branches of `If` have the types `list<point<2>>` and `list<real>`/],
     ['Join of a list of reals and a list of tuples', ['Join', 'L', 'LP'], /Join of .*LP.* of the type `list<point<2>>` and L of the type `list<real>` is not in the profile, which joins lists of one element type/],
     ['Join of the empty list and a list of tuples', ['Join', ['List'], 'LP'], /Join of .*LP.* of the type `list<point<2>>` and \[\] of the type `list<integer>` is not in the profile, which joins lists of one element type/],

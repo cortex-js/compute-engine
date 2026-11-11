@@ -367,3 +367,106 @@ the remedy is documented with an example.
 count nested forms only); whether `[[]]` is a valid `matrix` value; why the
 `list<list<tuple>>` witnesses of `ce-712-2-review-round2` would decline next
 (their helper has an `unknown` parameter); counts over the whole suite.
+
+## Result of slice 1
+
+**Admitted** (the `strict` mode): inputs, parameters, locals, helper
+parameters and helper results of the types `list<list<real>>`,
+`list<list<integer>>`, `list<list<number>>`, `matrix`, `matrix<m×n>`,
+`list<list<tuple<real, real>>>` and rank 3; literals of rows, ragged too
+(`list<list<real>>`); row reads, `At(M, i, j)`, a chained `At`, `Length` of
+each level; `First`, `Last`, `Count`, `Rest`, `Take`, `Drop`, `Reverse`,
+`RotateLeft`, `RotateRight`, `Join`, `ListJoin` of rows; comprehensions of
+rows (nested ones too); `ReplaceAt` of a row and of an element of a row;
+an `If` of nested values. The core type holds the rank only
+(`ListType.element` is a `ListType` at each level); the annotation has the
+recursive element with the flag `nestedLists`, which only the JavaScript
+structured definition sets (`fragment.ts`: `valueFacts`, `bind`, `walkAt`
+and `walkElement` refuse a nested type without it; the GLSL tests pass
+unchanged). The default refusal is `withoutNestedOperands()` on every rule
+of `LIST_OPERAND_HEADS`, with `NESTED_OPERAND_HEADS` the heads above; the
+table test is in `compile-javascript-structured-nested.test.ts`.
+
+**Where the implementation differs from this note.**
+
+- A row read is used only as the base of an `At`, the operand of `Length`
+  (a direct read, not an `If` of reads: the existing emitter writes
+  `.length` with no guard there, and throws for an absent row), an element
+  of a list literal, the body of a comprehension, the list of
+  `ReplaceAt(R, j, x)`, the row of `ReplaceAt(M, i, r)` (a swap of two
+  rows, `ReplaceAt(ReplaceAt(M, 1, M[2]), 2, M[1])`, whose result shares the
+  rows of `M`; an update of an element of a swapped row copies that row), a
+  branch of an `If`, the value of a `Block` or a `Typed`, and the value of
+  the program (`refuseAbsentRowUses()`). A local,
+  an argument and the value of a helper body decline.
+- `ReplaceAt` with two indexes is in this slice (section 8 put it in
+  slice 2). It declines, as the existing compiler does, when the engine type
+  does not settle a list at each level (`list<vector<2> | vector<integer^1>>`,
+  `assertWrittenLevelsAreLists()`); more than two indexes decline.
+- An `At` of rows whose element has an engine type that is not a number, a
+  list or a tuple (`At([[]], k, -1)`, `At([[1, 1, -1]], 2)`: the type
+  `missing`) declines: the existing emitter gives `undefined` where the
+  route gives `NaN`, or declines.
+- A program that reads a captured list (a constant of the program) and has
+  a node of a nested type declines: a row is placed as it is, and the copy
+  of a result that is not unique (`rootYieldsUnique()`) is shallow, so
+  `[CL, CL]` would give the caller the array of the constant. The existing
+  compiler gives `[_val_CL, _val_CL]`, the hoisted array itself (the class of
+  CE-1222). A captured list of lists is not a constant and declines
+  (`unsupported binding`).
+- `Matrix(…)` and `Which` of nested values are not in this slice.
+- The conversion of a list of rows of integers to rows of reals
+  (`integer-rows-to-real-rows`) covers rank 2. A list of integers of rank 3
+  is not read as a list of reals anywhere (`passesStructuredList()`): a
+  second write of a local, an argument and the branches of an `If` decline
+  with a message that names both types, and a local declared with rank 3
+  declines with a message that names the rank-2 types it admits.
+
+**A known cost.** A loop that updates one element of a row copies the row
+on every pass, and the outer array too when the local starts from an input:
+`let S = M; for k in 1..n { S = replaceAt(S, 1, 1, S[1][1] + k) }` is
+`_tv2 = _SYS.replaceAt(_tv2, 1, _SYS.replaceAt(row, 1, …))` in the loop,
+where the existing compiler copies once before the loop
+(`_SYS.ownedCopyLevels(_.M, 2)`) and then writes in place
+(`_SYS.replaceAtPathInPlace`). The values are the same. A copy-before-loop
+rule of the in-place analysis, for flat and nested lists, is a separate
+task.
+
+**Measures** (the witness replay and the shadow measure at `5d5060724`,
+before and after the slice, with the last three declines above not yet
+added: they can only lower the counts after; the census and the fuzz runs
+on `5fc85eda6` with the slice).
+
+- Witness replay, 239 test files that mention a matrix, a tensor,
+  `list<list`, `Determinant`, `Transpose` or a nested literal with a
+  compilation: 6,672 compilations that the existing compiler compiles; the
+  profile admits 2,194 before and 2,259 after. Of the 737 that declined
+  before with a nested cause, 51 are admitted after, 381 still decline with
+  a nested cause (the most frequent: a `tensor` input 114, an argument of
+  a list of lists to a scalar parameter 21, `Product` of rows 17, `Multiply`
+  of a list of lists 14 + 14 + 8, `Sum` of rows 11) and 305 decline with
+  another cause (the most frequent: a parameter typed `any` 66, a
+  `list<number>` input in the `complex` mode 29, a `list<unknown>` input 24,
+  `Norm` with 2 operands 17, row reads as operands of `Filter`, `Reduce`,
+  `Map`, `Scan`, `Count` 6 + 4 + 4 + 4 + 3).
+  The 2 failures (`call-head-lexical-binding.test.ts`) are the same before
+  and after.
+- Shadow measure (`CE_JS_PROFILE_SHADOW=1`, 100 files: the 67 files with a
+  witness, then others of the list): of 3,848 compilations that the
+  existing compiler compiles, the profile admits 641 before and 706 after;
+  2 failures before and after.
+- Prelude census: 29 of 40 functions before and after (fish-swarm and
+  turing-patterns left out). No prelude function reads a list of lists;
+  the 11 that decline do so on a `Loop` over `ParallelDomain` or over a
+  helper result, a `Block` with `Rgb`, `Rgb`, a parameter typed `real`
+  read as a list (`apollonian-gasket`: `tangent`, `seen`, `admitted`), a
+  missing explicit initialized local (`fourth`), a non-integer `Loop`
+  bound (`koch`), an `If` condition that is not boolean (`play`), and a
+  `Floor` of an exact constant (`galtoncounts`).
+- `scripts/js-profile-fuzz.ts` with the nested generators (`genRows()`,
+  `genRowReal()`; the inputs `R`, `MA`, `M2` and the parameters `RP`, `MP`):
+  seeds 201 and 202 (10,000 programs each), 203 (`--random`, 5,000) and
+  204 (`--host`, 5,000): 0 failures, 0 differences of value or of shape
+  between the profile and the existing compiler. The disagreements with
+  the interpreter are scalar (`Fract(π·10^30)`, CE-1221; `Mod` and `Floor`
+  near an integer, the class of CE-1203), none of a list of lists.

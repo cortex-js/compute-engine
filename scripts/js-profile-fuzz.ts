@@ -56,6 +56,15 @@
  * local after a list local that reads it, and a list or a tuple as the
  * value of a program or a body. A list or a tuple value is compared
  * element by element, with its length and the shape of each element.
+ * Lists of lists (`genRows()`, `genRowReal()`): the inputs
+ * `R: list<list<real>>`, `MA: matrix` and `M2: matrix<2x2>`, the parameters
+ * `RP` and `MP`, nested literals (ragged ones too), comprehensions of rows,
+ * row reads and their elements (`At(M, i)`, `At(M, i, j)`, an `At` of an
+ * `At`), `Length` of each level, `ReplaceAt` of a row and of an element of
+ * a row, a row read as the row of a `ReplaceAt` (a swap of two rows),
+ * `Take`, `Drop`, `Rest`, `Reverse`, the rotations, `Join`,
+ * `ListJoin`, a block local of rows updated in a loop, and a list of lists
+ * as the value of a program.
  *
  * A difference is reported only for inputs in the type of each input; a
  * difference that occurs only for inputs outside their type (`±Infinity`
@@ -264,6 +273,9 @@ type InputKind =
   | 'numvec'
   | 'tuple'
   | 'tuplelist'
+  | 'rows'
+  | 'matrix'
+  | 'matrix22'
   | 'boolean'
   | 'inferred';
 
@@ -287,6 +299,10 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   VN: 'numvec',
   P: 'tuple',
   LQ: 'tuplelist',
+  // Lists of lists: rows of any lengths, a matrix, a matrix<2x2>.
+  R: 'rows',
+  MA: 'matrix',
+  M2: 'matrix22',
   B: 'boolean',
   // The names that `HOST_OPTIONS` maps to another entry of the vars object
   // (`--host`).
@@ -305,12 +321,17 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
   ['NV', 'numlist', 'list<number>'],
   ['T', 'tuple', 'tuple<real, real>'],
   ['TL', 'tuplelist', 'list<tuple<real, real>>'],
+  ['RP', 'rows', 'list<list<real>>'],
+  ['MP', 'matrix22', 'matrix<2x2>'],
   ['c', 'boolean', 'boolean'],
   // Parameters with the names of the captured `cr` and `CL`
   // (`closedNodes()`): the body reads the argument, not the capture.
   ['cr', 'real', 'real'],
   ['CL', 'list', 'list<real>'],
 ];
+
+/** The kinds of the inputs and parameters that are lists of lists. */
+const ROW_KINDS: ReadonlySet<InputKind> = new Set(['rows', 'matrix', 'matrix22']);
 
 const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   real: 'real',
@@ -327,6 +348,9 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   numvec: 'vector<3>',
   tuple: 'tuple<real, real>',
   tuplelist: 'list<tuple<real, real>>',
+  rows: 'list<list<real>>',
+  matrix: 'matrix',
+  matrix22: 'matrix<2x2>',
   boolean: 'boolean',
   inferred: 'real, written by ce.infer()',
 };
@@ -336,7 +360,8 @@ export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
   'L: list<real>; I: list<integer>; LN: list<number>; VN: vector<3>; ' +
   'P: tuple<real, real>; ' +
-  'LQ: list<tuple<real, real>>; B: boolean; ' +
+  'LQ: list<tuple<real, real>>; R: list<list<real>>; MA: matrix; ' +
+  'M2: matrix<2x2>; B: boolean; ' +
   'u: no declared type; xn: number; ' +
   'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
   'Mod(xi, 2); h: real, assigned 2.5; ' +
@@ -892,6 +917,30 @@ const TUPLE_LISTS_IN: number[][][] = [
   [[1e300, 5e-324], [-1, 0.5]],
 ];
 const TUPLE_LISTS_EDGE: number[][][] = [[[NaN, 1], [2, Infinity]]];
+// Lists of lists: rows of different lengths, an empty list and an empty row
+// for `list<list<real>>`; rectangular values of one row or more for a
+// `matrix`, of 2×2 for a `matrix<2x2>`. A ragged or an empty value of a
+// matrix is outside its type.
+const ROWS_IN: number[][][] = [
+  [],
+  [[]],
+  [[1, 2], [3]],
+  [[-0, 1e300], [5e-324], [1 / 3, 2, -7]],
+  [[0.5, -2.5]],
+];
+const ROWS_EDGE: number[][][] = [[[NaN]], [[Infinity, 1], []]];
+const MATRICES_IN: number[][][] = [
+  [[1, 2], [3, 4]],
+  [[-0, 0.5, 1e300], [7, -2, 5e-324]],
+  [[2]],
+];
+const MATRICES_EDGE: number[][][] = [[], [[1], [2, 3]], [[NaN, 1]]];
+const MATRICES22_IN: number[][][] = [
+  [[1, 2], [3, 4]],
+  [[-0, 0.5], [7, -2]],
+  [[1e300, -1e300], [5e-324, 1 / 3]],
+];
+const MATRICES22_EDGE: number[][][] = [[[NaN, 1], [2, 3]], [[1, 2]]];
 
 /** The values of an input of the kind `kind` in the mode `mode`: those in
  *  its type first, then those outside it. */
@@ -927,6 +976,12 @@ function gridOf(kind: InputKind, mode: Mode): Value[] {
       return [...TUPLES_IN, ...TUPLES_EDGE];
     case 'tuplelist':
       return [...TUPLE_LISTS_IN, ...TUPLE_LISTS_EDGE];
+    case 'rows':
+      return [...ROWS_IN, ...ROWS_EDGE];
+    case 'matrix':
+      return [...MATRICES_IN, ...MATRICES_EDGE];
+    case 'matrix22':
+      return [...MATRICES22_IN, ...MATRICES22_EDGE];
     case 'boolean':
       return [true, false];
   }
@@ -986,6 +1041,24 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
             t.every((x) => Number.isFinite(x))
         )
       );
+    case 'rows':
+    case 'matrix':
+    case 'matrix22': {
+      if (
+        !Array.isArray(v) ||
+        !v.every((row) => Array.isArray(row) && row.every((x) => Number.isFinite(x)))
+      )
+        return false;
+      const rows = v as number[][];
+      if (kind === 'rows') return true;
+      const width = rows[0]?.length ?? 0;
+      return (
+        rows.length > 0 &&
+        width > 0 &&
+        rows.every((row) => row.length === width) &&
+        (kind === 'matrix' || (rows.length === 2 && width === 2))
+      );
+    }
     case 'boolean':
       return typeof v === 'boolean';
   }
@@ -1029,6 +1102,8 @@ interface GenContext {
   readonly tuples?: readonly string[];
   /** The names of lists of tuples of two reals. */
   readonly tupleLists?: readonly string[];
+  /** The names of lists of lists of reals (rows, matrices). */
+  readonly rowLists?: readonly string[];
   /** Whether to generate draws (`--random`). */
   readonly random?: boolean;
   /** Whether to generate reads and calls of the host (`--host`). */
@@ -1415,6 +1490,7 @@ function genCalculus(ctx: GenContext, depth: number): Json {
  */
 function genCollectionReal(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
+  if (rng() < 0.15) return genRowReal(ctx, depth);
   if (rng() < 0.45) return genFunctionOfListsReal(ctx, depth);
   if ((ctx.tupleLists?.length ?? 0) > 0 && rng() < 0.2) {
     const d = Math.min(depth + 1, ctx.maxDepth);
@@ -1455,6 +1531,9 @@ function genList(ctx: GenContext, depth: number): Json {
     return ['List', ...Array.from({ length: intBetween(rng, 0, 3) }, sub)];
   }
   if (rng() < 0.35) return genFunctionOfListsList(ctx, depth);
+  // A row read of a list of lists, which most operators of a list decline
+  // (it is `undefined` for an index out of range).
+  if (rng() < 0.04) return ['At', genRows(ctx, d), genIndex(ctx)];
   const r = rng();
   const list = () => genList(ctx, d);
   if (r < 0.15)
@@ -1741,6 +1820,83 @@ function genTupleList(ctx: GenContext, depth: number): Json {
   return ['Map', ['Function', ['Tuple', ['At', `t${depth}`, 2], ['At', `t${depth}`, 1]], `t${depth}`], list()];
 }
 
+/**
+ * A list of lists of reals (slice 1 of
+ * `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`): a name
+ * of rows (`R`, `MA`, `M2`, `RP`, `MP`), a literal of rows (of different
+ * lengths, empty rows), a comprehension of rows, `ReplaceAt` of a row or of
+ * an element of a row (an index out of range throws on both compilers),
+ * `Take`, `Drop`, `Rest`, `Reverse`, a rotation or a join of rows, an `If`
+ * of two, or a literal that holds a row read (`undefined` for an index out
+ * of range on both compilers).
+ */
+function genRows(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const names = ctx.rowLists ?? [];
+  const row = (): Json => [
+    'List',
+    ...Array.from({ length: intBetween(rng, 0, 3) }, () => genReal(ctx, d)),
+  ];
+  if (depth >= ctx.maxDepth || rng() < 0.35) {
+    if (names.length > 0 && rng() < 0.75) return pick(rng, names);
+    return ['List', ...Array.from({ length: intBetween(rng, 0, 3) }, row)];
+  }
+  const rows = () => genRows(ctx, d);
+  const r = rng();
+  if (r < 0.15) {
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['j', 30]] };
+    return [
+      'Comprehension',
+      rng() < 0.3
+        ? ['Comprehension', genReal({ ...inner, symbols: [...inner.symbols, ['jj', 30]] }, d), ['Element', 'jj', ['Range', 1, 'j']]]
+        : ['List', ...Array.from({ length: intBetween(rng, 1, 3) }, () => genReal(inner, d))],
+      ['Element', 'j', ['Range', pick(rng, [1, 1, 0]), intBetween(rng, 0, 4)]],
+    ];
+  }
+  if (r < 0.24) return ['ReplaceAt', rows(), genIndex(ctx), row()];
+  // A row read as the row value: a swap of two rows of one list (a name,
+  // so that both reads see the same rows).
+  if (r < 0.3) {
+    const m = names.length > 0 && rng() < 0.8 ? pick(rng, names) : rows();
+    const i = genIndex(ctx);
+    const j = genIndex(ctx);
+    return rng() < 0.6
+      ? ['ReplaceAt', ['ReplaceAt', m, i, ['At', m, j]], j, ['At', m, i]]
+      : ['ReplaceAt', m, i, ['At', m, j]];
+  }
+  if (r < 0.45)
+    return ['ReplaceAt', rows(), genIndex(ctx), genIndex(ctx), genReal(ctx, d)];
+  if (r < 0.55)
+    return [
+      pick(rng, ['Take', 'Drop']),
+      rows(),
+      ctx.integers.length > 0 && rng() < 0.3
+        ? pick(rng, ctx.integers)
+        : pick(rng, COUNTS),
+    ];
+  if (r < 0.62) return [pick(rng, ['Rest', 'Reverse']), rows()];
+  if (r < 0.7)
+    return [pick(rng, ['RotateLeft', 'RotateRight']), rows(), pick(rng, COUNTS)];
+  if (r < 0.8) return [pick(rng, ['Join', 'ListJoin']), rows(), rows()];
+  if (r < 0.9) return ['If', genCondition(ctx, d), rows(), rows()];
+  return ['List', ['At', rows(), genIndex(ctx)], row()];
+}
+
+/** A real that reads a list of lists: an element (`At` with two indexes,
+ *  or of a row read), the number of rows, or the length of a row read. */
+function genRowReal(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const rows = genRows(ctx, Math.min(depth + 1, ctx.maxDepth));
+  const r = rng();
+  if (r < 0.3) return ['At', rows, genIndex(ctx), genIndex(ctx)];
+  if (r < 0.5) return ['At', ['At', rows, genIndex(ctx)], genIndex(ctx)];
+  if (r < 0.65) return ['Length', rows];
+  if (r < 0.8) return ['Length', ['At', rows, genIndex(ctx)]];
+  if (r < 0.9) return ['Count', rows];
+  return ['Length', [pick(rng, ['First', 'Last']), rows]];
+}
+
 /** A tuple of two reals: a tuple name, a tuple literal, or a call of the
  *  helper whose result is a tuple. */
 function genTuple(ctx: GenContext, depth: number): Json {
@@ -1959,6 +2115,7 @@ const EXPRESSION_CONTEXT: ContextBase = {
   lists: ['L', 'I', 'LN', 'VN', 'CL'],
   tuples: ['P'],
   tupleLists: ['LQ'],
+  rowLists: ['R', 'MA', 'M2'],
 };
 
 /** The statements of a block: one or two real locals, maybe a list local
@@ -2134,7 +2291,30 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
     );
     tupleLocal = true;
   }
-  if (tupleLocal && rng() < 0.6) statements.push('Q');
+  // A local declared a list of lists, from rows, whose elements a loop over
+  // its rows writes (`S = replaceAt(S, k, j, v)`, in place when the rows are
+  // the program's own).
+  let rowsLocal = false;
+  if (rng() < 0.08) {
+    const c = ctx(locals, 2);
+    statements.push(['Declare', 'S', "'list<list<real>>'", genRows(c, 1)]);
+    if (rng() < 0.7)
+      statements.push([
+        'Loop',
+        [
+          'Assign',
+          'S',
+          rng() < 0.5
+            ? ['ReplaceAt', 'S', 'kk', pick(rng, [1, -1]), genReal(ctx([...locals, ['kk', 20]], 2), 0)]
+            : ['ReplaceAt', 'S', 'kk', ['List', genReal(ctx([...locals, ['kk', 20]], 2), 0)]],
+        ],
+        ['Element', 'kk', ['Range', 1, rng() < 0.5 ? ['Length', 'S'] : intBetween(rng, 1, 2)]],
+      ]);
+    rowsLocal = true;
+  }
+  if (rowsLocal && rng() < 0.6)
+    statements.push(rng() < 0.5 ? 'S' : ['At', 'S', pick(rng, [1, -1, 2]), 1]);
+  else if (tupleLocal && rng() < 0.6) statements.push('Q');
   else if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
   else if (rng() < 0.12)
     statements.push(
@@ -2229,6 +2409,7 @@ function genFunction(
       kind !== 'numlist' &&
       kind !== 'tuple' &&
       kind !== 'tuplelist' &&
+      !ROW_KINDS.has(kind) &&
       kind !== 'boolean'
     )
       symbols.push([name, 20]);
@@ -2245,6 +2426,7 @@ function genFunction(
         lists: names.filter((n) => n === 'V' || n === 'W' || n === 'NV'),
         tuples: names.includes('T') ? ['T'] : [],
         tupleLists: names.includes('TL') ? ['TL'] : [],
+        rowLists: names.filter((n) => n === 'RP' || n === 'MP'),
         random,
         host,
       })
@@ -2306,7 +2488,9 @@ export function generateProgram(
             ? genTuple(ctx, 0)
             : value < 0.1
               ? genTupleList(ctx, 0)
-              : genReal(ctx, 0);
+              : value < 0.13
+                ? genRows(ctx, 0)
+                : genReal(ctx, 0);
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
     }
     if (nodeCount(json) <= options.size)
@@ -2636,12 +2820,15 @@ function pointInType(
 function boxValue(ce: ComputeEngine, v: Value, name?: string): Expression {
   if (typeof v === 'boolean') return v ? ce.True : ce.False;
   if (typeof v === 'number') return ce.number(v);
+  // A list of lists holds rows, which are lists; a list of tuples holds
+  // tuples.
+  const rows = name !== undefined && ['R', 'MA', 'M2', 'RP', 'MP'].includes(name);
   if (Array.isArray(v))
     return ce.function(
       name === 'P' || name === 'T' ? 'Tuple' : 'List',
       v.map((x) =>
         Array.isArray(x)
-          ? ce.function('Tuple', x.map((e) => ce.number(e)))
+          ? ce.function(rows ? 'List' : 'Tuple', x.map((e) => ce.number(e)))
           : ce.number(x)
       )
     );

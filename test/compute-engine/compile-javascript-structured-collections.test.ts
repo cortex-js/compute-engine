@@ -325,7 +325,7 @@ describe('declines that stay', () => {
     [
       'a list of lists',
       fn(['List', ['List', 'x'], 1], X),
-      /a list literal whose element is a list \(a list of lists\) is not in the profile/,
+      /a list literal of lists of different element types or of lists and other values is not in the profile/,
     ],
     [
       'a list of booleans',

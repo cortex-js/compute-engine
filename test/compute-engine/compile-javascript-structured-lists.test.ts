@@ -533,10 +533,12 @@ describe('refusals', () => {
     ['At with a Range index', body([L, I], ['Add', ['At', 'L', ['Range', 1, 2]], 0]), /At with a Range index \(a slice\) is not in the structured route/],
     ['At of a number', body([L, I], ['At', 'i', 1]), /invalid bound expression/],
     ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list of reals, integers or tuples or a tuple of reals, and its operand has the type `integer`/],
-    ['a list of lists', body([typed('L', 'list<list<real>>'), I], ['At', ['At', 'L', 'i'], 1]), /the parameter L has the type list<list<real>>, and the structured route admits a list only of the type list<real> or list<integer>/],
+    // A list of lists and a matrix of real cells are in the route since
+    // slice 1 of the nested lists (compile-javascript-structured-nested.test.ts).
+    ['a list of lists of complex numbers', body([typed('L', 'list<list<complex>>'), I], ['At', ['At', 'L', 'i'], 1]), /the parameter L has the type list<list<complex>>, and the structured route admits a list of lists only of rows of reals, of integers or of tuples of reals/],
     // The body reads the parameter: a parameter that the body never reads is
     // admitted whatever its type (compile-javascript-structured-captures.test.ts).
-    ['a matrix', body([typed('L', 'matrix<real>'), I], ['Add', ['Length', 'L'], 'i']), /the parameter L has the type matrix<real>/],
+    ['a tensor of no declared rank', body([typed('L', 'tensor'), I], ['Add', ['Length', 'L'], 'i']), /the parameter L has the type tensor, a tensor whose rank the type does not state/],
     // A type that is not a list type keeps the message of a parameter that
     // the route has no type for.
     ['a named tuple parameter', body([typed('T', 'tuple<x: real, y: real>'), I], ['At', 'T', 'i']), /the parameter T of the function has the type tuple<x: real, y: real>, which is not in the structured route: a parameter is a number, a boolean, a list of reals or of integers, or a tuple of reals/],
@@ -557,7 +559,6 @@ describe('refusals', () => {
     ['Comprehension over a list', body([L], ['At', ['Comprehension', 'x', ['Element', 'x', 'L']], 1]), /Comprehension over Element\(x, L\) is not in the structured route, which admits a comprehension over Element\(j, Range\(a, b\)\) only, and not over a list/],
     ['Comprehension with a guard that draws', body([L], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 3], ['Less', ['Random'], 0.5]]], 1]), /Comprehension with a guard whose guard or body has the node Random\(\), which is not pure, is not in the structured route/],
     ['Comprehension with two generators', body([L], ['At', ['Comprehension', ['Add', 'j', 'm'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'm', ['Range', 1, 3]]], 1]), /Comprehension with other than one generator is not in the structured route/],
-    ['Comprehension of lists (nested lists)', body([L], ['At', ['At', ['Comprehension', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 2]]], ['Element', 'm', ['Range', 1, 3]]], 1], 1]), /Comprehension whose body is a list \(a list of lists\) is not in the structured route/],
     ['Comprehension of booleans', body([L], ['At', ['Comprehension', ['Less', 'j', 2], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `boolean` is not in the structured route/],
     ['Comprehension of complex numbers', body([L], ['At', ['Comprehension', ['Add', 'j', 'ImaginaryUnit'], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `complex` is not in the structured route/],
     ['Comprehension with a real bound', body([L, typed('x', 'real')], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 'x']]], 1]), /The bound `x` of `Comprehension` does not have an integer fact/],
@@ -567,7 +568,7 @@ describe('refusals', () => {
     ['ReplaceAt of a number', body([L, I], ['At', ['ReplaceAt', 'i', 1, 2], 1]), /invalid bound expression/],
     ['Typed that is not the value of the body', body([L, I], ['Add', ['Typed', 'i', "'integer'"], 1]), /Typed is in the structured route only around the value of a function body/],
     ['Typed with another type than its value', fn([L, I], declare('t', 'real', 0), ['Typed', 't', "'integer'"]), /Typed with the ascribed type `integer` and a value of the type `real` is not in the structured route/],
-    ['a list literal of lists', body([L, I], ['At', ['At', ['List', ['List', 1], ['List', 2]], 'i'], 1]), /a list literal whose element is a list \(a list of lists\) is not in the structured route/],
+    ['a list literal of a list and a number', body([L, I], ['At', ['At', ['List', ['List', 1], 2], 'i'], 1]), /a list literal of lists of different element types or of lists and other values is not in the structured route/],
     ['a tuple of booleans', body([L, I], ['At', ['Tuple', ['Less', 't', 1], 1], 1]), /a tuple with an element of the type `boolean` is not in the structured route/],
     ['arithmetic on a list and a complex number', body([L, typed('z', 'complex')], ['At', ['Add', 'L', 'z'], 1]), /Add of a list and the operand z of the type `complex` is not in the structured route/],
     ['a product of two lists', body([L, typed('M', 'list<real>')], ['Multiply', 'L', 'M']), /Multiply of the lists L and M, whose lengths are not equal by construction, is not in the structured route/],

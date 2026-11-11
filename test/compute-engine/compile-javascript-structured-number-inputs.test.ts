@@ -505,7 +505,7 @@ describe('declines that stay', () => {
       'a matrix',
       fn(['Add', 'M', 1], ['M', 'matrix']),
       {},
-      /the parameter M has the type matrix/,
+      /Add with the list operand M of the type `list<list<real>>` is not in the profile/,
     ],
     [
       'a list of complex numbers',

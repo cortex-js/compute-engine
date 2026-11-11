@@ -11,6 +11,31 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles lists of lists.** In the `strict`
+  mode, a value of the type `list<list<real>>`, `list<list<integer>>`,
+  `matrix` or `matrix<m×n>` (rows of different lengths too) can be an input,
+  a parameter, a local or a result, with the values of the existing
+  compiler: literals of rows, comprehensions of rows, `At(M, i)` (a row,
+  `undefined` out of range), `At(M, i, j)` (`NaN` out of range), `Length` of
+  each level, `First`, `Last`, `Take`, `Drop`, `Rest`, `Reverse`, `Join`, the
+  rotations and `ReplaceAt` of a row or of an element. The inputs are never
+  written.
+
+  ```js
+  ce.declare('M', 'list<list<real>>');
+  ce.declare('x', 'real');
+  const f = compile(ce.box(['ReplaceAt', 'M', 1, 2, 'x']), {
+    profile: 'numeric-kernel',
+  });
+  f.run({ M: [[1, 2], [3]], x: 9 }); // ➔ [[1, 9], [3]]
+  ```
+
+  Arithmetic, folds, functions of lists and matrix functions of lists of
+  lists, a `tensor`, complex cells and the `complex` and `bigint` modes still
+  decline. So do a product and a power of lists of lists (`M·M`): with
+  `list<list<real>>` the value decides whether the product is a matrix
+  product; declare a matrix as `matrix`.
+
 - **The `numeric-kernel` profile compiles captured lists, folded constants
   and unread parameters.** Four forms that declined with `outside-profile`
   now compile, with the values of the existing compiler:
