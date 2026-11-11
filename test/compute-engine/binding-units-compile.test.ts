@@ -60,6 +60,27 @@ describe('BINDING UNITS: THE TYPE OF A COMPILED INPUT', () => {
     expect(r.success).toBe(false);
   });
 
+  test('the variable of an indefinite integral does not type the input of its name', () => {
+    const ce = engine();
+    const r = compile(
+      ce.box([
+        'Add',
+        ['If', ['Less', 2, 3], 0, 'x'],
+        ['Integrate', ['Power', 'x', 2], ['Limits', 'x', 'Nothing', 'Nothing']],
+      ])
+    );
+    expect(r.success).toBe(false);
+    expect(r.unsupported).toContain('x');
+  });
+
+  test('the variable of a D does not type the input of its name', () => {
+    const ce = engine();
+    ce.declare('g', 'list<real>');
+    const r = compile(ce.box(['D', ['Power', 'g', 2], 'g']));
+    expect(r.success).toBe(true);
+    expect((r.run as Run)({ g: [1, 2] })).toEqual([2, 4]);
+  });
+
   test('an input that no unit types still declines', () => {
     const ce = engine();
     ce.assign('b', ce.box(['List', 'c', 1]));

@@ -141,6 +141,16 @@ export function analyzeReferences(
   // The `Assign` whose target the walk visits now, when the target is a
   // name or a `Tuple` of names.
   let writing: Expression | undefined;
+  // The names of the variables of the indefinite integrals and of the `D`
+  // nodes met so far. The walk reports such a variable free (the code reads
+  // the input of that name), but its occurrences in the integral or the
+  // `D` are the variable of the binder: their type is not a requirement on
+  // the input. An occurrence of
+  // such a name is not recorded for the type of the input
+  // (`noteTypedOccurrence()`), in the integral or after it: the input then
+  // has the type of its first occurrence in `expr`, as without the flag
+  // `_bindingUnits`.
+  const binderInputNames = new Set<string>();
   const addFree = (e: Expression & { symbol: string }): void => {
     // The placeholder `_` of a destructuring target (`(a, _) ≔ v`) is not
     // a name: the statement writes nothing there, and the code does not
@@ -148,7 +158,11 @@ export function analyzeReferences(
     if (writing !== undefined && e.symbol === '_') return;
     free.add(e.symbol);
     if (occurrences === undefined) return;
-    if (engine._bindingUnits && !assignTargets.has(e))
+    if (
+      engine._bindingUnits &&
+      !assignTargets.has(e) &&
+      !binderInputNames.has(e.symbol)
+    )
       noteTypedOccurrence(occurrences, e);
     if (indirectDepth !== 0) return;
     const recorded = occurrences.get(e.symbol);
@@ -916,6 +930,8 @@ export function analyzeReferences(
       // of the automatic outer definition.
       for (const variable of ops.slice(1)) {
         if (!isSymbol(variable) || bound.has(variable.symbol)) continue;
+        // The occurrences in the `D` are its variable (`binderInputNames`).
+        binderInputNames.add(variable.symbol);
         const def = engine.lookupDefinition(variable.symbol);
         if (!isValueDef(def) || def.value.inferredType) continue;
         const outer = engine.symbol(variable.symbol);
@@ -983,6 +999,7 @@ export function analyzeReferences(
               engine.lookupDefinition(variable.symbol) !== undefined
                 ? engine.symbol(variable.symbol)
                 : undefined;
+            binderInputNames.add(variable.symbol);
             addFree(isSymbol(outer) ? outer : variable);
           }
           continue;
