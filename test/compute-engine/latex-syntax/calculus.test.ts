@@ -1684,4 +1684,15 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
     expect(ce.box(['Derivative', 'f', 1, 0]).latex).toBe('f^{(1, 0)}');
     expect(ce.box(['Derivative', 'f', 2, 1]).latex).toBe('f^{(2, 1)}');
   });
+
+  test('a symbolic or multi-index Derivative order round-trips', () => {
+    expect(ce.box(['Derivative', 'f', 'k']).latex).toBe('f^{(k)}');
+    expect(ce.parse('f^{(0,1)}').json).toEqual(['Derivative', 'f', 0, 1]);
+    for (const j of [
+      ['Derivative', 'f', 'k'],
+      ['Derivative', 'f', 0, 1],
+      ['Derivative', 'f', 2],
+    ] as const)
+      expect(ce.parse(ce.box(j).latex).json).toEqual(j);
+  });
 });

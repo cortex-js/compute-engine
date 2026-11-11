@@ -37,6 +37,17 @@
   // ➔ { ok: true, pure: true, shippable: true }
   ```
 
+### Resolved Issues
+
+- **`Transpose` with axes and `Derivative` with a symbolic or multi-index
+  order serialize to LaTeX that parses back to the same expression.**
+  `["Transpose", "a", 2, 1]` was written `a^T`, which reads back as
+  `["Transpose", "a"]`; it is now `\operatorname{Transpose}(a, 2, 1)`, and
+  only the one-argument form is written `a^T`. `["Derivative", "f", "k"]` was
+  written `f^{\prime}`, which reads back as a first derivative; it is now
+  `f^{(k)}`. `f^{(0,1)}` now parses as `["Derivative", "f", 0, 1]` rather than
+  an `incompatible-type` error.
+
 ## 0.186.0 _2026-11-10_
 
 ### Breaking Changes

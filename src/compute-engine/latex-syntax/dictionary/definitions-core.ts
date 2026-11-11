@@ -4250,7 +4250,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       if (!parser.match('<}>')) return null;
 
-      return ['Derivative', lhs, expr] as MathJsonExpression;
+      // A multi-index, `f^{(0,1)}`, lists the orders, one per argument.
+      let orders = [expr] as MathJsonExpression[];
+      if (
+        operator(expr) === 'Delimiter' &&
+        operator(operand(expr, 1)) === 'Sequence'
+      )
+        orders = operands(operand(expr, 1)!) as MathJsonExpression[];
+      else if (operator(expr) === 'Tuple')
+        orders = operands(expr) as MathJsonExpression[];
+
+      return ['Derivative', lhs, ...orders] as MathJsonExpression;
     },
   },
 
@@ -4332,8 +4342,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           ')}'
         );
 
-      // Univariate: ordinary Lagrange prime notation.
-      const degree = machineValue(orders[0]) ?? 1;
+      // Univariate: ordinary Lagrange prime notation. Only a literal order is
+      // a prime count; a symbolic one, `f^{(k)}`, would read back as `f'`.
+      const degree = orders.length === 0 ? 1 : machineValue(orders[0]);
+      if (degree === null)
+        return base + '^{(' + serializer.serialize(orders[0]) + ')}';
       if (degree === 1) return base + '^{\\prime}';
       if (degree === 2) return base + '^{\\doubleprime}';
       if (degree === 3) return base + '^{\\tripleprime}';

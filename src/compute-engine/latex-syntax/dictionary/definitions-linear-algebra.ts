@@ -4,6 +4,7 @@ import {
   operands,
   operand,
   operator,
+  nops,
 } from '../../../math-json/utils.js';
 import {
   LatexDictionary,
@@ -290,6 +291,11 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     name: 'Transpose',
     kind: 'postfix',
     latexTrigger: ['^', 'T'],
+    // `^T` reads back as the one-argument form only; the axes form is a call.
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      nops(expr) === 1
+        ? joinLatex([serializer.wrap(operand(expr, 1), 10000), '^T'])
+        : '\\operatorname{Transpose}' + serializer.wrapArguments(expr),
   },
 
   {

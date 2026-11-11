@@ -360,3 +360,20 @@ describe('Kernel/Dimension/Degree/Hom LaTeX', () => {
     expect(result.latex).toMatchInlineSnapshot(`\\hom(V, W)`);
   });
 });
+
+describe('Transpose serialization round trip', () => {
+  it('should write only the one-argument form as ^T', () => {
+    expect(ce.expr(['Transpose', 'a']).latex).toBe('a^T');
+    expect(ce.expr(['Transpose', 'a', 2, 1]).latex).toBe(
+      '\\operatorname{Transpose}(a, 2, 1)'
+    );
+  });
+
+  it('should parse back to the same expression', () => {
+    for (const j of [
+      ['Transpose', 'a'],
+      ['Transpose', 'a', 2, 1],
+    ] as const)
+      expect(ce.parse(ce.expr(j).latex).json).toEqual(j);
+  });
+});
