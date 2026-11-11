@@ -346,3 +346,130 @@ whose other branch is an error stays unevaluated).
 - The measure ran on the 13 files whose compilations use the mode, not the
   18 of the census.
 - `JavaScriptBody.mode` in `javascript-target.ts` admits `'bigint'`.
+
+## Result of slices 3 to 5
+
+Implemented 2026-11-11 on `4c0828dff`, with the options C1 to C5 as for
+slices 1 and 2. Files: `javascript-structured-bigint.ts` (the lowering),
+`javascript-structured-policy.ts` (`JAVASCRIPT_BIGINT_POLICY`: the
+representation `bigint-array`, the list operations and their abort kinds),
+`javascript-structured-emit.ts`, `structured-ir.ts` and
+`structured-verify.ts` (a `range` with a step), and
+`javascript-fragment-target.ts` (the user functions in `symbolDeps`); tests
+in `compile-javascript-structured-bigint2.test.ts` (94) and the updated
+declines of `compile-javascript-structured-bigint.test.ts`; the tester
+generates the forms of the three slices.
+
+**Admitted.**
+
+- Slice 3: `Sum` and `Product` with one or more `Limits`: one ascending
+  `loop` per index, the first outermost, with one carried value (the
+  accumulator; an inner loop starts from the accumulator of the loop around
+  it). No iteration budget, no unrolling, no bound check, as the existing
+  emitter writes it. The upper bound is lowered before the lower one, the
+  order of `const upper = hi; for (let i = lo; …)`. The emitter writes
+  `for (let k = from; k <= to; k++)` with a `bigint` counter.
+- Slice 4: a call of a user function is a call of one function of the
+  program per literal that the lane analysis analyzed (a specialization to
+  the argument types is its own literal, and its own function, named
+  `f_2`, …), each lowered at its first call, after the functions that it
+  calls. An argument that the lane analysis lowers under a parent is an
+  integer promise (`exact`), and a function declared `-> integer` is an
+  integer promise for its body, as in the existing emitter. The functions
+  have no catch: a pole in one ends the call at the one catch of the entry.
+- Slice 5: a list of integers is an array of `bigint` values
+  (`bigint-array`): an input `list<integer>` (read as the host gives it,
+  not lifted; the entry check converts a `number` cell), `List`, a constant
+  list, `Range` with one, two or three operands, `At`, `First`, `Last`,
+  `Length`, `Count`, `Take`, `Drop`, `ReplaceAt`, and a list result. A
+  `Function` literal at the root is its body, with its parameters as the
+  inputs; the closure lifts its integer parameters and has the catch, as
+  the existing emitter writes it. An optional parameter with a default is
+  filled by the assembly, as on the other routes.
+
+**Representation of an index, a count and a length.** A `bigint`, as every
+integer of the mode: `at`, `take`, `drop` and `replace-at` read a `bigint`
+operand, and the helper converts it (`bindex()`, `bcount()` in
+`bigint-runtime.ts`), as the existing emitter passes the `bigint`. `length`
+is `_SYS.toBigint(L.length)`.
+
+**Abort kinds** (`bigintAborts()`): `at` is `no-value` (`_SYS.bat` throws a
+`NonFiniteValue` of `NaN` for an index out of range); `replace-at` and the
+`collection` operation `range` are `error` (a `RangeError` for a position
+out of range, and past 2^32 − 1 elements); `take`, `drop`, `length` and
+`list` have none. A `loop` has no abort of its own; its region holds the
+aborts of its body.
+
+**Where the implementation differs from the note.**
+
+- A region that binds names (a loop body, the body of a function) is a
+  barrier of the memo of the lowering (C3): a node lowered outside it is
+  lowered again inside it. The same node object can read another binding
+  of a name there (`k!` in an outer and an inner sum over `k`), and the
+  existing emitter shares no node in a loop body either.
+- The in-place analysis (`inPlaceUpdates()`) is not applied in the mode:
+  the runtime has no `bigint` form of `replaceAtInPlace`, and the existing
+  emitter copies (`_SYS.breplaceAt`). The emitter takes the empty set for a
+  program of the mode, so no value is held back by `mutatesInPlace()`. The
+  call does not change an input array (tested).
+- `Range` with a step: the core `range` admits an optional third operand
+  (the step, as the interpreter's `Range(a, b, s)`); the emitter of the
+  double policy refuses three operands, and no lowering of that policy
+  makes one.
+- A user function whose body reads an input declines: a function of the
+  program reads no input (the verifier), where the existing emitter reads
+  the lifted local in its arrow. No witness reads one.
+- A nested list declines (the input `xs: list<list<integer>>` of one
+  witness, `Length(xs)`): the policy holds only a flat list. The note
+  counted this witness as admitted.
+- `symbolDeps` holds each user function that the code calls and each
+  symbol whose value a constant folds (with the names of that value and of
+  a called body), at the top level and in a function, as in the other
+  modes. The existing compiler records none in the mode (an issue).
+- `Map`, `Reduce` and `Fold` decline with "X with a function operand is
+  not in the profile in the mode bigint", also with a user function as the
+  operand.
+
+**The witnesses.** The log of the mode (a Jest setup file that wraps
+`JavaScriptTarget.prototype.compile`, over the 20 test files that name the
+mode, `compile-javascript-structured-bigint.test.ts` excluded, as before
+these slices): 510 compilations, 471 compiled
+by the existing compiler, 158 distinct programs. Replayed with the profile
+(each with its declared types and its user functions): 460 of the 471
+compilations admitted (150 distinct programs), 0 programs with a
+difference at the grid of their inputs; 11 declined: 9 `Map`/`Reduce` with
+a lambda, the recursive `fact`, the nested list. The estimate of §6 was
+461 admitted.
+
+**The measure.** The shadow measure on the 21 test files that name the
+mode (`CE_JS_PROFILE_SHADOW=1`), before and after (one test of
+`compile-javascript-profile.test.ts` fails under the measure on both: it
+asserts that no compilation runs with the profile):
+
+| | baseline | admitted | declined | failed | declined with a reason of the mode |
+| --- | --- | --- | --- | --- | --- |
+| before (`4c0828dff`) | 1137 | 896 | 241 | 0 | 110 |
+| after | 1135 | 990 | 145 | 0 | 14 |
+
+The 14 after: `Map` 8 and `Reduce` 2 with a function operand, the
+recursive function 1, the nested list 1, the options `vars` and
+`operators` 1 each. The baseline differs by 2 because two tests of
+`compile-javascript-structured-bigint.test.ts` moved to the new file.
+
+**The tester.** `--bigint --seed 151,152,153 --count 10000`, one process
+per seed: 30,000 programs, 26,878 compiled by both, 3,009 declined by
+both, 0 declined by one only, 0 failures; 1,612,680 points compared, 0
+differences of a `bigint`, a `boolean`, a list element or an error class,
+0 differences of two numbers, 0 changed input arrays; 75,203 points
+compared with `evaluate()`, 0 disagreements, 45 points where the
+interpreter has no exact value (the class of CE-1212: after `subs()`, an
+error in a part that does not run, the other branch of a conditional or
+the term of an empty sum, leaves the expression unevaluated). Of 3,000
+programs of seed 151, 348 hold a sum, 361 a call, 757 a list and 272 are
+a `Function` literal. The default run `--seed 101 --count 10000`: 0
+differences between the profile and the existing compiler, 0 failures.
+
+**Not determined.** The interpreter refuses a bound of `Sum` past
+2^53 − 1 (an `out-of-range` error), where both compilers give the exact
+sum (`Sum(k, k = n..n + 3)` at `n = 2^53 − 1`): the tests compare those
+points with the existing compiler only.

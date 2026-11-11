@@ -7514,6 +7514,12 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       noteRefusedNode(refusal, { node: lowered.node });
       throw refusal;
     }
+    // The compiled code holds the code of each user function that it calls
+    // and the value of each symbol that a constant folds, so the result
+    // depends on each such definition, as on the other routes
+    // (`CompileTarget.symbolDeps`).
+    for (const name of lowered.dependencies)
+      prepared.target.symbolDeps?.add(name);
     BIGINT_PROGRAMS.set(prepared.target, lowered);
     return prepared;
   }

@@ -253,13 +253,21 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
 };
 
 /** The kinds of abort of the operation `op` itself on the `bigint` policy
- *  (`JAVASCRIPT_BIGINT_POLICY.aborts`): a pole is the abort `no-value`, a
- *  helper above the size limit of the mode (10^6 decimal digits,
- *  `bigint-runtime.ts`) and an `exact` quotient with a remainder throw a
- *  `RangeError`, the abort `error`. */
+ *  (`JAVASCRIPT_BIGINT_POLICY.aborts`): a pole, and an index of `at` out of
+ *  range, is the abort `no-value`; a helper above the size limit of the
+ *  mode (10^6 decimal digits, `bigint-runtime.ts`), an `exact` quotient
+ *  with a remainder, a `replace-at` at a position out of range and a
+ *  `range` of more than 2^32 - 1 elements throw a `RangeError`, the abort
+ *  `error`. A `loop` has no abort of its own. */
 function bigintAborts(op: IROperation): readonly AbortKind[] | undefined {
   const both: readonly AbortKind[] = ['error', 'no-value'];
-  if (op.kind === 'mod' || op.kind === 'no-value') return ['no-value'];
+  // `_SYS.bat` at an index out of range: a pole carrying `NaN`.
+  if (op.kind === 'mod' || op.kind === 'no-value' || op.kind === 'at')
+    return ['no-value'];
+  // `_SYS.breplaceAt` at an index out of range, and `_SYS.brange` of more
+  // than 2^32 - 1 elements, throw a `RangeError`.
+  if (op.kind === 'replace-at') return ['error'];
+  if (op.kind === 'collection') return op.fn === 'range' ? ['error'] : undefined;
   if (op.kind !== 'integer') return undefined;
   switch (op.fn) {
     // `_SYS.bremainder`, `_SYS.bisqrt` at a zero divisor or a negative
@@ -299,14 +307,23 @@ function bigintAborts(op: IROperation): readonly AbortKind[] | undefined {
  *
  * A pole aborts with `no-value` (`bigintAborts()`): the helper throws a
  * `_SYS.NonFiniteValue`, which one catch at the entry turns into the
- * `number` of the call, `NaN` or `Infinity` (`noValueResult`). No list is
- * held yet: the lists of the mode are not on the structured route.
+ * `number` of the call, `NaN` or `Infinity` (`noValueResult`). A list of
+ * integers is a JavaScript array of `bigint` values (`bigint-array`), as the
+ * existing emitter holds a `list<integer>` input and the list that it makes;
+ * an index, a count and a length are `bigint` values, which the helpers of
+ * the runtime convert (`_SYS.bat`, `_SYS.btake`, …). No other list is held.
  */
 export const JAVASCRIPT_BIGINT_POLICY: RepresentationPolicy = {
   name: 'JS-bigint',
-  representations: new Set(['bigint', 'boolean']),
+  representations: new Set(['bigint', 'boolean', 'bigint-array']),
   representationOf: (type) =>
-    type === 'integer' ? 'bigint' : type === 'boolean' ? 'boolean' : undefined,
+    type === 'integer'
+      ? 'bigint'
+      : type === 'boolean'
+        ? 'boolean'
+        : elementOf(type) === 'integer'
+          ? 'bigint-array'
+          : undefined,
   // An integer literal is a JavaScript `bigint` (`123n`), never a number.
   literalAdmits: (representation, value) =>
     typeof value === 'bigint'
@@ -330,17 +347,36 @@ export const JAVASCRIPT_BIGINT_POLICY: RepresentationPolicy = {
     'and': { results: ['boolean'], operands: ['boolean'] },
     'or': { results: ['boolean'], operands: ['boolean'] },
     'not': { results: ['boolean'], operands: ['boolean'] },
+    // `_SYS.bat(list, i)`, `_SYS.toBigint(list.length)`, the array literal
+    // `[a, b, …]` and `_SYS.breplaceAt(list, i, v)`, as the existing emitter
+    // writes `At`, `Length`, `List` and `ReplaceAt`.
+    'at': { results: ['bigint'], operands: ['bigint-array', 'bigint'] },
+    'length': { results: ['bigint'], operands: ['bigint-array'] },
+    'list': { results: ['bigint-array'], operands: ['bigint'] },
+    'replace-at': {
+      results: ['bigint-array'],
+      operands: ['bigint-array', 'bigint'],
+    },
+    'collection': {
+      results: ['bigint-array'],
+      operands: ['bigint-array', 'bigint'],
+    },
   },
   // `_SYS.babs` and `_SYS.bsign`.
   functions: {
     abs: { results: ['bigint'], operands: ['bigint'] },
     sign: { results: ['bigint'], operands: ['bigint'] },
   },
-  // No list is held in the mode: no `collection` (no function of lists),
-  // and none of `list`, `tuple`, `at`, `length`, `get`, `build`, `append`
-  // and `replace-at` in `operations`; the heads that make them decline at
-  // the lowering (`javascript-structured-bigint.ts`).
-  collections: {},
+  // `_SYS.btake(list, c)`, `_SYS.bdrop(list, c)` and `_SYS.brange(a, b)`,
+  // as the existing emitter writes `Take`, `Drop` and `Range`. A tuple, a
+  // `build`, an `append` and the other functions of lists are not in the
+  // mode: the heads that make them decline at the lowering
+  // (`javascript-structured-bigint.ts`).
+  collections: {
+    take: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'] },
+    drop: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'] },
+    range: { results: ['bigint-array'], operands: ['bigint'] },
+  },
   // The helpers of `bigint-runtime.ts` that the existing emitter calls for
   // the same heads (`javascript-structured-emit.ts`, `BIGINT_CODE`).
   integers: {

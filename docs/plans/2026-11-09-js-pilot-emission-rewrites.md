@@ -381,6 +381,30 @@ the parentheses of the precedence of the operators, which gives the same
 | `If`, `Which`, `Boole` | `((_tv1 < 0n) ? 0n : _SYS.bfactorial(_tv1))`; `(((_tv1 < 3n) && (0n < _tv2)) ? 1n : 0n)` | `if`: `_tv1 < 0n ? 0n : _SYS.bfactorial(_tv1)`, `_tv1 < 3n && 0n < _tv2 ? 1n : 0n` |
 | Two operations that can abort | `(_SYS.bfactorial(_tv1) < _SYS.bfactorial(_tv2))`: the left one first | `const _tv2 = _SYS.bfactorial(_tv1); return _tv2 < _SYS.bfactorial(_tv3);`: the order of the existing emitter, so the same abort ends the call |
 
+Slices 3 to 5 (`Sum`, `Product`, user functions, lists, a `Function`
+literal at the root), read at `4c0828dff` (2026-11-11) with `L` declared
+`list<integer>`; the tests are
+`test/compute-engine/compile-javascript-structured-bigint2.test.ts`.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `Sum(k!, k = 0..n)`, `Product(k, k = 1..n)` | `(() => { let _tv1 = 0n; { const _tv4 = _tv2; for (let _tv3 = 0n; _tv3 <= _tv4; _tv3++) { _tv1 += _SYS.bfactorial(_tv3); } } return _tv1; })()`: a `bigint` counter, the upper bound read once before the lower one, no pass when it is less than the lower one, no iteration budget, no unrolling, no bound check, and `*=` from `1n` for a product | One ascending `loop` with one carried value: `const _tv2 = _tv1; let _tv3 = 0n; for (let _tv4 = 0n; _tv4 <= _tv2; _tv4++) { _tv3 = _tv3 + _SYS.bfactorial(_tv4); }`. The bounds are lowered upper first, so the same abort ends the call (`Sum(k, k = (n − 10)!..Typed(m/2))` at an odd `m` throws the `RangeError` on both) |
+| `Sum(i·j, i = 1..n, j = i..m)` | One `for` per `Limits`, the first outermost, the inner bounds read in each pass of the outer loop, one accumulator: `{ const _tv7 = _tv5; for (let _tv6 = _tv3; _tv6 <= _tv7; _tv6++) { _tv1 += (_tv3 * _tv6); } }` | One `loop` per `Limits`; the inner loop starts from the accumulator of the outer one and its result is the next value: `let _tv7 = _tv3; for (…) { _tv7 = _tv7 + _tv4 * _tv8; } _tv3 = _tv7;` |
+| A node in a loop body | No node of a loop body, a callback or a definition is shared (`shared()`: `scopes` is not empty) | A region that binds names (a loop body, the body of a function) shares no value of a region around it: `n! + Sum(n!, k = 1..m)` computes `n!` in each pass, and the same node object `k!` in an outer and an inner body is two values |
+| `f(n)` with `f(x) := x!`; `half(n)` with `half: (integer) -> integer := x/2` | One local arrow per analyzed literal, in an arrow called at once inside the wrapper: `(() => { const _tv1 = (_tv2) => _SYS.bfactorial(_tv2); return _tv1(_tv3); })()`; `(_tv2) => _SYS.bexactDiv(1n * _tv2, 2n)`; an argument at a parameter declared an integer is an integer promise; no catch in the arrow | One function of the program per analyzed literal (`function _tv1(_tv2) { return _SYS.bfactorial(_tv2); }` in the preamble), called in the wrapper: `return _tv1(_tv3);`. A pole in it ends the call at the one catch of the entry, as there. A specialization (another literal) is another function |
+| `h(n)` with `h(x) := 2·f(x)` | `const _tv1 = (_tv2) => (2n * _tv3(_tv2)); const _tv3 = (_tv4) => _SYS.bfactorial(_tv4);` | `function _tv1(_tv3) { return _SYS.bfactorial(_tv3); } function _tv2(_tv4) { return 2n * _tv1(_tv4); }`: the callee first |
+| `fact(x) := If(x ≤ 1, 1, x·fact(x − 1))` | A recursive arrow | Declined: the route refuses recursion in every mode |
+| A helper that reads an input (`r(x) := x + m`) | The arrow reads the lifted local of `m` | Declined: a function of the program reads no input |
+| `L` (`list<integer>`) | `_.L` at each read, not lifted; the entry check converts a `number` cell | The same read (`IRInput` of the representation `bigint-array`, not lifted) |
+| `At(L, n)`, `First(L)`, `Last(L)` | `_SYS.bat(_.L, _tv1)`, `_SYS.bat(_.L, 1n)`, `_SYS.bat(_.L, -1n)`: a pole carrying `NaN` for an index out of range | `at` with a `bigint` index, abort `no-value`: the same calls |
+| `Length(L)`, `Count(L)` | `_SYS.toBigint(_.L.length)` | `length` with a `bigint` result: the same text |
+| `Take(L, n)`, `Drop(L, n)` | `_SYS.btake(_.L, _tv1)`, `_SYS.bdrop(_.L, _tv1)`: a count past the length clipped | The `collection` operations `take`, `drop` with a `bigint` count: the same calls |
+| `ReplaceAt(L, i, v)` | `_SYS.breplaceAt(_.L, 1n, _tv1)`: a copy, a `RangeError` for a position out of range; the position and the value are integer promises | `replace-at`, abort `error`: the same call. The mode has no update in place (the runtime has no `bigint` form of `replaceAtInPlace`), so the emitter ignores `inPlaceUpdates()` in the mode; the input array is not changed |
+| `List(n, m)`, a constant list | `[_tv1, _tv2]`; `[1n, 1180591620717411303424n]` | `list` of `bigint` values: the same array literal. A cell that is a list (a nested list) is declined |
+| `Range(n)`, `Range(n, m)`, `Range(n, m, 2)` | `_SYS.brange(1n, _tv1)`, `_SYS.brange(_tv1, _tv2)`, `_SYS.brange(_tv1, _tv2, 2n)`: a `RangeError` past 2^32 − 1 elements | The `collection` operation `range` of two or three `bigint` operands, abort `error`: the same calls |
+| `Map`, `Reduce`, `Fold` | `L.map((_tv1) => …)`, `L.reduce(…)` of an arrow of the callback | Declined: the profile holds no function value in the mode |
+| `Function(At(xs, i) + Length(xs), xs: list<integer>, i: integer)` | `(xs, i) => (() => { const _tv1 = typeof i === 'number' ? _SYS.toBigint(i) : i; try { return (_SYS.bat(xs, _tv1) + _SYS.toBigint(xs.length)); } catch (…) { … } })()`: each call lifts its integer parameters and has the catch | The body of the literal with its parameters as the inputs, in the same wrapper: `(xs, i) => { return (() => { const _tv1 = …; try { return _SYS.bat(xs, _tv1) + _SYS.toBigint(xs.length); } catch (…) { … } })(); }` |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a

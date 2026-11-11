@@ -12,22 +12,35 @@
  * `Ceil`, `Round`, `Truncate` and `Typed(…, integer)` of an integer, a
  * quotient, a square root, a product with a rational factor or a power with
  * an integer exponent, `Boole`, `If`, `Which`, the comparisons (also with a
- * rational constant), `And`, `Or`, `Not` and `IsPrime`. The inputs are `n`
- * and `m` (declared `integer`) and `k0`; the literals are small integers,
- * powers of 2 past `2^53` and `2^64` (folded exactly), and constants whose
- * value is a pole (`Factorial(-1)`, `Mod(5, 0)`).
+ * rational constant), `And`, `Or`, `Not` and `IsPrime`; and, of slices 3
+ * to 5, `Sum` and `Product` (nested, with bounds that are small integers or
+ * remainders of the inputs, and the index of an enclosing sum), the calls of
+ * the user functions of the engine (`hsq`, whose signature is inferred,
+ * `hhalf` and `hquo`, declared `-> integer`, `hfac`, which has a pole, and
+ * `hcall`, which calls two of them), the lists of integers (`L`, `List`,
+ * `Range` with small bounds, `Take`, `Drop`, `ReplaceAt`) and their reads
+ * (`At`, `First`, `Last`, `Length`, `Count`), a list as the result, and a
+ * `Function` literal at the root, of one parameter `x`. The inputs are `n`
+ * and `m` (declared `integer`), `k0` and `L` (declared `list<integer>`); the
+ * literals are small integers, powers of 2 past `2^53` and `2^64` (folded
+ * exactly), and constants whose value is a pole (`Factorial(-1)`,
+ * `Mod(5, 0)`).
  *
  * Each program is compiled with `profile: 'numeric-kernel', mode: 'bigint'`
  * and with the existing compiler (`mode: 'bigint', cse: false,
  * constantFold: false`), and run on a grid of inputs: each integer given as
  * a `bigint` (past `2^53` and past `2^64`, negative, zero) and, for some
- * points, as a `number` (the entry converts it). The outcome of a run is a
- * `bigint`, a `boolean`, a `number` (a pole: `NaN` or `Infinity`) or the
- * class of a thrown error. A difference is:
+ * points, as a `number` (the entry converts it), and `L` as an array of
+ * `bigint` values, or of `number` values at the same points. A program with
+ * a loop or a range runs at small integers only. The outcome of a run is a
+ * `bigint`, a `boolean`, a list of `bigint` values, a `number` (a pole:
+ * `NaN` or `Infinity`) or the class of a thrown error. A difference is:
  *
  * - a `bigint` or a `boolean` that is not the same (`===`) on both, or on
- *   one side only;
- * - a thrown error of another class, or on one side only.
+ *   one side only; a list whose length or one of whose elements is not the
+ *   same;
+ * - a thrown error of another class, or on one side only;
+ * - a call that changes the array of `L`.
  *
  * Two `number` results that are not the same number (`NaN` and `Infinity`)
  * are counted apart: the contract of the mode does not fix the number of a
@@ -42,6 +55,7 @@
 import { ComputeEngine } from '../src/compute-engine';
 import { compile } from '../src/compile';
 import {
+  isFunction,
   isNumber,
   isSymbol,
 } from '../src/compute-engine/boxed-expression/type-guards';
@@ -80,13 +94,32 @@ const pick = <T>(rng: Rng, items: readonly T[]): T =>
   items[Math.floor(rng() * items.length)];
 
 /** The declarations of the engine of the run. */
-export const BIGINT_DECLARATIONS = 'n: integer, m: integer, k0: integer<0..>';
+export const BIGINT_DECLARATIONS =
+  'n: integer, m: integer, k0: integer<0..>, x: integer, L: list<integer>; ' +
+  'hsq(p) := p·p + 1, hhalf: (integer) -> integer := p/2, ' +
+  'hquo: (integer, integer) -> integer := p/q, hfac(p) := (p - 2)!, ' +
+  'hcall(p) := hsq(p) + hfac(p)';
 
 function makeBigintEngine(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('n', 'integer');
   ce.declare('m', 'integer');
   ce.declare('k0', 'integer<0..>');
+  ce.declare('x', 'integer');
+  ce.declare('L', 'list<integer>');
+  // The user functions: a signature that is inferred (`hsq`, `hfac`,
+  // `hcall`), and declared `-> integer` (`hhalf`, `hquo`: an exact
+  // quotient, which throws for a remainder).
+  ce.assign('hsq', ce.box(['Function', ['Add', ['Multiply', 'p', 'p'], 1], 'p']));
+  ce.declare('hhalf', '(integer) -> integer');
+  ce.assign('hhalf', ce.box(['Function', ['Divide', 'p', 2], 'p']));
+  ce.declare('hquo', '(integer, integer) -> integer');
+  ce.assign('hquo', ce.box(['Function', ['Divide', 'p', 'q'], 'p', 'q']));
+  ce.assign('hfac', ce.box(['Function', ['Factorial', ['Subtract', 'p', 2]], 'p']));
+  ce.assign(
+    'hcall',
+    ce.box(['Function', ['Add', ['hsq', 'p'], ['hfac', 'p']], 'p'])
+  );
   return ce;
 }
 
@@ -113,15 +146,59 @@ const RATIONALS: readonly BigintJson[] = [
   ['Rational', 1, 2],
 ];
 
+/** The indices of the sums around the expression being generated, the
+ *  innermost last. */
+let BOUND: string[] = [];
+
 function genLeaf(rng: Rng): BigintJson {
-  return choose<BigintJson | 'literal'>(rng, [
-    ['n', 4],
-    ['m', 3],
-    ['k0', 2],
+  const kind = choose<'input' | 'literal' | 'index'>(rng, [
+    ['input', 9],
     ['literal', 3],
-  ]) === 'literal'
-    ? choose(rng, LITERALS)
-    : (pick(rng, ['n', 'n', 'm', 'k0']) as string);
+    ['index', BOUND.length > 0 ? 6 : 0],
+  ]);
+  if (kind === 'literal') return choose(rng, LITERALS);
+  if (kind === 'index') return pick(rng, BOUND);
+  return pick(rng, ['n', 'n', 'm', 'k0']) as string;
+}
+
+/** A bound of a sum or of a range: a small integer, a remainder of an
+ *  input, or an index of an enclosing sum. */
+function genBound(rng: Rng): BigintJson {
+  return choose<() => BigintJson>(rng, [
+    [() => pick<BigintJson>(rng, [0, 1, 2, 3, 5, -2]), 4],
+    [() => ['Mod', pick(rng, ['n', 'm', 'k0']), pick(rng, [3, 5, 7])], 3],
+    [() => ['Subtract', ['Mod', pick(rng, ['n', 'm']), 6], 2], 1],
+    [() => (BOUND.length > 0 ? pick(rng, BOUND) : 4), 2],
+  ])();
+}
+
+/** A list of integers of depth at most `depth`. */
+function genList(rng: Rng, depth: number): BigintJson {
+  const sub = () => genInteger(rng, depth - 1);
+  const list = () => genList(rng, depth - 1);
+  if (depth <= 0) return 'L';
+  return choose<() => BigintJson>(rng, [
+    [() => 'L', 4],
+    [() => (rng() < 0.5 ? ['List', sub(), sub()] : ['List', sub(), sub(), sub()]), 2],
+    [() => ['Range', genBound(rng), genBound(rng)], 2],
+    [() => ['Range', genBound(rng), genBound(rng), pick<BigintJson>(rng, [2, -1, 3])], 1],
+    [() => ['Range', genBound(rng)], 1],
+    [() => ['Take', list(), sub()], 2],
+    [() => ['Drop', list(), sub()], 2],
+    [() => ['ReplaceAt', list(), pick<BigintJson>(rng, [1, -1, 2, ['Mod', 'n', 3]]), sub()], 2],
+  ])();
+}
+
+/** A read of a list: an integer. */
+function genListRead(rng: Rng, depth: number): BigintJson {
+  const list = genList(rng, depth - 1);
+  return choose<() => BigintJson>(rng, [
+    [() => ['At', list, pick<BigintJson>(rng, [1, 2, -1, 0, 'n', ['Mod', 'm', 4]])], 4],
+    [() => ['First', list], 1],
+    [() => ['Last', list], 1],
+    [() => ['Length', list], 2],
+    [() => ['Count', list], 1],
+  ])();
 }
 
 type IntegerHead =
@@ -147,7 +224,10 @@ type IntegerHead =
   | 'Typed'
   | 'Boole'
   | 'If'
-  | 'Which';
+  | 'Which'
+  | 'Sum'
+  | 'Call'
+  | 'ListRead';
 
 const INTEGER_HEADS: readonly (readonly [IntegerHead, number])[] = [
   ['Add', 6],
@@ -173,6 +253,9 @@ const INTEGER_HEADS: readonly (readonly [IntegerHead, number])[] = [
   ['Boole', 1],
   ['If', 3],
   ['Which', 1],
+  ['Sum', 2],
+  ['Call', 2],
+  ['ListRead', 3],
 ];
 
 /** An integer expression of depth at most `depth`. */
@@ -247,6 +330,36 @@ function genInteger(rng: Rng, depth: number): BigintJson {
         'True',
         sub(),
       ];
+    case 'Sum': {
+      // One or two indices; the body sees every index, the bounds of the
+      // second one the first one.
+      const indices = BOUND.length === 0 ? ['k', 'j'] : ['j2', 'k2'];
+      const head = rng() < 0.75 ? 'Sum' : 'Product';
+      const outer = indices[0];
+      const limits: BigintJson[] = [['Limits', outer, genBound(rng), genBound(rng)]];
+      const saved = BOUND;
+      BOUND = [...BOUND, outer];
+      try {
+        if (rng() < 0.3) {
+          limits.push(['Limits', indices[1], genBound(rng), genBound(rng)]);
+          BOUND = [...BOUND, indices[1]];
+        }
+        // A body of depth at most 2: each pass runs it.
+        return [head, genInteger(rng, Math.min(depth - 1, 2)), ...limits];
+      } finally {
+        BOUND = saved;
+      }
+    }
+    case 'Call':
+      return choose<() => BigintJson>(rng, [
+        [() => ['hsq', sub()], 2],
+        [() => ['hhalf', sub()], 1],
+        [() => ['hquo', sub(), sub()], 1],
+        [() => ['hfac', sub()], 1],
+        [() => ['hcall', sub()], 1],
+      ])();
+    case 'ListRead':
+      return genListRead(rng, depth);
   }
 }
 
@@ -299,9 +412,31 @@ function genCondition(rng: Rng, depth: number): BigintJson {
   ])();
 }
 
-/** A program: an integer, or a boolean one time in six. */
+/** A program: an integer, a boolean one time in six, a list one time in
+ *  ten, and a `Function` literal of one integer parameter `x` one time in
+ *  twelve, whose body reads `x` in place of the inputs. */
 export function generateBigintProgram(rng: Rng, depth: number): BigintJson {
-  return rng() < 1 / 6 ? genCondition(rng, depth) : genInteger(rng, depth);
+  BOUND = [];
+  const r = rng();
+  if (r < 1 / 6) return genCondition(rng, depth);
+  if (r < 1 / 6 + 1 / 10) return genList(rng, depth);
+  if (r < 1 / 6 + 1 / 10 + 1 / 12)
+    return [
+      'Function',
+      parameterBody(genInteger(rng, depth)),
+      ['Typed', 'x', "'integer'"],
+    ];
+  return genInteger(rng, depth);
+}
+
+/** `json` with each input read as the parameter `x` (`k0` as `Abs(x)`, `L`
+ *  as a list literal): the body of a `Function` literal at the root. */
+function parameterBody(json: BigintJson): BigintJson {
+  if (json === 'n' || json === 'm') return 'x';
+  if (json === 'k0') return ['Abs', 'x'];
+  if (json === 'L') return ['List', 'x', 2, -3];
+  if (!Array.isArray(json)) return json;
+  return json.map((x, i) => (i === 0 ? x : parameterBody(x)));
 }
 
 function nodeCount(json: BigintJson): number {
@@ -314,7 +449,7 @@ function nodeCount(json: BigintJson): number {
 // Runs
 //
 
-type Inputs = Record<string, bigint | number>;
+type Inputs = Record<string, bigint | number | readonly (bigint | number)[]>;
 
 /** The integers of the grid, as `bigint` values. */
 const INTEGERS: readonly bigint[] = [
@@ -336,16 +471,31 @@ const INTEGERS: readonly bigint[] = [
   -(2n ** 64n) - 7n,
 ];
 
-/** The inputs of the grid: every pair of `INTEGERS` for `n` and `m`, with
- *  `k0` from its non-negative values; one point in four gives its integers
- *  as `number` values where they are safe integers. */
-function gridOf(rng: Rng, points: number): Inputs[] {
-  const nonNegative = INTEGERS.filter((v) => v >= 0n);
+/** The integers of the grid of a program with a loop or a range: a bound
+ *  past `2^53` would run for ever. */
+const SMALL_INTEGERS: readonly bigint[] = [0n, 1n, -1n, 2n, 3n, -3n, 7n, -7n];
+
+/** The lists of the grid. */
+const LISTS: readonly (readonly bigint[])[] = [
+  [],
+  [5n],
+  [1n, -2n, 3n],
+  [2n ** 64n + 1n, 0n, -5n, 2n ** 53n + 1n],
+];
+
+/** The inputs of the grid: every pair of `INTEGERS` (or `SMALL_INTEGERS`
+ *  with `small`) for `n` and `m`, with `k0` from its non-negative values,
+ *  `x` the value of `n`, and `L` from `LISTS`; one point in four gives its
+ *  integers as `number` values where they are safe integers. */
+function gridOf(rng: Rng, points: number, small = false): Inputs[] {
+  const integers = small ? SMALL_INTEGERS : INTEGERS;
+  const nonNegative = integers.filter((v) => v >= 0n);
   const all: Inputs[] = [];
-  for (const n of INTEGERS)
-    for (const m of INTEGERS) {
+  for (const n of integers)
+    for (const m of integers) {
       const k0 = nonNegative[(all.length * 7) % nonNegative.length];
-      all.push({ n, m, k0 });
+      const L = LISTS[(all.length * 3) % LISTS.length];
+      all.push({ n, m, k0, x: n, L });
     }
   // Sample `points` of them, then give some as numbers.
   const sampled =
@@ -353,8 +503,14 @@ function gridOf(rng: Rng, points: number): Inputs[] {
       ? all
       : Array.from({ length: points }, () => pick(rng, all));
   // The entry check of the mode admits a `number` that is a safe integer.
-  const asNumber = (v: bigint | number): bigint | number =>
-    typeof v === 'bigint' && Number.isSafeInteger(Number(v)) ? Number(v) : v;
+  const asNumber = (
+    v: bigint | number | readonly (bigint | number)[]
+  ): bigint | number | readonly (bigint | number)[] =>
+    Array.isArray(v)
+      ? v.map((c) => asNumber(c) as bigint | number)
+      : typeof v === 'bigint' && Number.isSafeInteger(Number(v))
+        ? Number(v)
+        : (v as bigint | number);
   return sampled.map((p, i) =>
     i % 4 === 3
       ? Object.fromEntries(Object.entries(p).map(([k, v]) => [k, asNumber(v)]))
@@ -364,31 +520,53 @@ function gridOf(rng: Rng, points: number): Inputs[] {
 
 type Outcome =
   | { readonly kind: 'bigint' | 'boolean' | 'number'; readonly value: unknown }
+  | { readonly kind: 'list'; readonly value: readonly unknown[] }
   | { readonly kind: 'throw'; readonly error: string };
 
+/** The outcome of `run` at `inputs`; a call that changes the array of an
+ *  input is an outcome of its own. */
 function runOutcome(run: (inputs: Inputs) => unknown, inputs: Inputs): Outcome {
+  const arrays = Object.values(inputs).filter((v) => Array.isArray(v));
+  const before = arrays.map((a) => [...(a as unknown[])]);
+  const changed = () =>
+    arrays.some(
+      (a, i) =>
+        a.length !== before[i].length ||
+        (a as unknown[]).some((c, j) => c !== before[i][j])
+    );
+  let outcome: Outcome;
   try {
     const value = run(inputs);
     const kind = typeof value;
-    if (kind === 'bigint' || kind === 'boolean' || kind === 'number')
-      return { kind, value };
-    return { kind: 'throw', error: `a value of the type ${kind}` };
+    outcome = Array.isArray(value)
+      ? { kind: 'list', value: [...value] }
+      : kind === 'bigint' || kind === 'boolean' || kind === 'number'
+        ? { kind, value }
+        : { kind: 'throw', error: `a value of the type ${kind}` };
   } catch (e) {
-    return {
+    outcome = {
       kind: 'throw',
       error: (e as { constructor?: { name?: string } })?.constructor?.name ?? 'Error',
     };
   }
+  return changed() ? { kind: 'throw', error: 'a change of an input array' } : outcome;
 }
 
 /** `different` for a difference of the contract, `number` for two numbers
- *  that are not the same, `same` otherwise. */
+ *  that are not the same, `same` otherwise. Two lists are the same when
+ *  they have the same length and each element is the same (`===`). */
 function compareOutcomes(a: Outcome, b: Outcome): 'same' | 'number' | 'different' {
   if (a.kind === 'throw' || b.kind === 'throw')
     return a.kind === b.kind && a.error === b.error ? 'same' : 'different';
   if (a.kind !== b.kind) return 'different';
   if (a.kind === 'number')
     return Object.is(a.value, b.value) ? 'same' : 'number';
+  if (a.kind === 'list') {
+    const x = b.value as readonly unknown[];
+    return a.value.length === x.length && a.value.every((c, i) => c === x[i])
+      ? 'same'
+      : 'different';
+  }
   return a.value === b.value ? 'same' : 'different';
 }
 
@@ -409,8 +587,13 @@ function compileBigint(expr: Expression, profile: boolean): Compiled {
             fallback: false,
           } as const)
     );
-    const run = result.run as unknown as (i: Inputs) => unknown;
-    if (!result.success || typeof run !== 'function')
+    const runner = result.run as unknown as (...args: unknown[]) => unknown;
+    // A `Function` literal at the root is called with `x`.
+    const run =
+      result.calling === 'lambda'
+        ? (i: Inputs) => runner(i.x)
+        : (runner as (i: Inputs) => unknown);
+    if (!result.success || typeof runner !== 'function')
       return {
         ok: false,
         code: result.diagnostic?.code ?? 'no-run',
@@ -427,23 +610,48 @@ function compileBigint(expr: Expression, profile: boolean): Compiled {
   }
 }
 
+/** The substitution of `inputs` in the program `expr`: the body of a
+ *  `Function` literal at the root, with the value of `x`. */
+function substituted(
+  ce: ComputeEngine,
+  expr: Expression,
+  inputs: Inputs
+): Expression {
+  const subs = Object.fromEntries(
+    Object.entries(inputs).map(([k, v]) => [
+      k,
+      Array.isArray(v)
+        ? ce.function('List', v.map((c) => ce.number(BigInt(c))))
+        : ce.number(BigInt(v as bigint)),
+    ])
+  );
+  return (isFunction(expr, 'Function') ? expr.op1 : expr).subs(subs);
+}
+
+/** The exact value of `value`: a `bigint`, a `boolean`, a list of `bigint`
+ *  values, or `undefined` when it has no such value. */
+function exactValue(value: Expression): bigint | boolean | bigint[] | undefined {
+  if (isSymbol(value, 'True')) return true;
+  if (isSymbol(value, 'False')) return false;
+  if (!isNumber(value) && value.isFiniteCollection === true) {
+    const cells = [...value.each()].map(exactValue);
+    return cells.every((c) => typeof c === 'bigint') ? (cells as bigint[]) : undefined;
+  }
+  if (!isNumber(value)) return undefined;
+  const r = exactRational(value);
+  return r !== undefined && r.q === 1n ? r.p : undefined;
+}
+
 /** The exact value of `expr` at `inputs` by the interpreter: a `bigint`, a
- *  `boolean`, or `undefined` when it has no such value. */
+ *  `boolean`, a list of `bigint` values, or `undefined` when it has no such
+ *  value. */
 function interpret(
   ce: ComputeEngine,
   expr: Expression,
   inputs: Inputs
-): bigint | boolean | undefined {
+): bigint | boolean | bigint[] | undefined {
   try {
-    const subs = Object.fromEntries(
-      Object.entries(inputs).map(([k, v]) => [k, ce.number(BigInt(v))])
-    );
-    const value = expr.subs(subs).evaluate();
-    if (isSymbol(value, 'True')) return true;
-    if (isSymbol(value, 'False')) return false;
-    if (!isNumber(value)) return undefined;
-    const r = exactRational(value);
-    return r !== undefined && r.q === 1n ? r.p : undefined;
+    return exactValue(substituted(ce, expr, inputs).evaluate());
   } catch {
     return undefined;
   }
@@ -456,10 +664,7 @@ function interpretedText(
   inputs: Inputs
 ): string {
   try {
-    const subs = Object.fromEntries(
-      Object.entries(inputs).map(([k, v]) => [k, ce.number(BigInt(v))])
-    );
-    return expr.subs(subs).evaluate().toString().slice(0, 200);
+    return substituted(ce, expr, inputs).evaluate().toString().slice(0, 200);
   } catch (e) {
     return `throws ${(e as Error).constructor.name}`;
   }
@@ -488,7 +693,7 @@ export interface BigintFinding {
   readonly existingCode?: string;
   readonly profile?: Outcome;
   readonly existing?: Outcome;
-  readonly interpreter?: bigint | boolean;
+  readonly interpreter?: bigint | boolean | bigint[];
   readonly message?: string;
 }
 
@@ -535,7 +740,7 @@ type Witness = {
   readonly existingCode?: string;
   readonly profile?: Outcome;
   readonly existing?: Outcome;
-  readonly interpreter?: bigint | boolean;
+  readonly interpreter?: bigint | boolean | bigint[];
   readonly message?: string;
 };
 
@@ -706,7 +911,11 @@ async function runQuietly(
       let json = generateBigintProgram(rng, options.depth);
       while (nodeCount(json) > options.size)
         json = generateBigintProgram(rng, options.depth);
-      const grid = gridOf(rng, options.points);
+      const grid = gridOf(
+        rng,
+        options.points,
+        /"(Sum|Product|Range)"/.test(JSON.stringify(json))
+      );
       programs += 1;
       const id = `${seed}:${index}`;
       let expr: Expression;
@@ -758,7 +967,7 @@ async function runQuietly(
         if (
           c === 'same' &&
           interpreted < options.interp &&
-          (a.kind === 'bigint' || a.kind === 'boolean') &&
+          (a.kind === 'bigint' || a.kind === 'boolean' || a.kind === 'list') &&
           String(a.value).length < 2000
         ) {
           interpreted += 1;
@@ -775,7 +984,10 @@ async function runQuietly(
           }
           else {
             interpreterPoints.compared += 1;
-            if (exact !== a.value)
+            const expected: Outcome = Array.isArray(exact)
+              ? { kind: 'list', value: exact }
+              : { kind: a.kind as 'bigint' | 'boolean', value: exact };
+            if (compareOutcomes(a, expected) !== 'same')
               record('interpreter', id, json, () => ({
                 class: 'interpreter',
                 input,
@@ -810,6 +1022,8 @@ async function runQuietly(
 function formatOutcome(o: Outcome | undefined): string {
   if (o === undefined) return '';
   if (o.kind === 'throw') return `throws ${o.error}`;
+  if (o.kind === 'list')
+    return `[${o.value.map((c) => `${String(c)}n`).join(', ')}]`;
   return o.kind === 'bigint' ? `${String(o.value)}n` : String(o.value);
 }
 
@@ -817,7 +1031,10 @@ const formatInputs = (inputs: Inputs | undefined): string =>
   inputs === undefined
     ? ''
     : Object.entries(inputs)
-        .map(([k, v]) => `${k} = ${typeof v === 'bigint' ? `${v}n` : String(v)}`)
+        .map(
+          ([k, v]) =>
+            `${k} = ${Array.isArray(v) ? `[${v.map(String).join(', ')}]` : typeof v === 'bigint' ? `${v}n` : String(v)}`
+        )
         .join(', ');
 
 const TITLES: Readonly<Record<BigintFinding['class'], string>> = {
@@ -879,7 +1096,9 @@ export function printBigintResult(result: BigintFuzzResult, quiet: boolean): str
       if (f.profile !== undefined) lines.push(`  profile value:  ${formatOutcome(f.profile)}`);
       if (f.existing !== undefined) lines.push(`  existing value: ${formatOutcome(f.existing)}`);
       if (f.interpreter !== undefined)
-        lines.push(`  interpreter:    ${typeof f.interpreter === 'bigint' ? `${f.interpreter}n` : String(f.interpreter)}`);
+        lines.push(
+          `  interpreter:    ${typeof f.interpreter === 'bigint' ? `${f.interpreter}n` : Array.isArray(f.interpreter) ? `[${f.interpreter.join(', ')}]` : String(f.interpreter)}`
+        );
       if (f.message !== undefined) lines.push(`  message:   ${f.message.slice(0, 200)}`);
     }
   }

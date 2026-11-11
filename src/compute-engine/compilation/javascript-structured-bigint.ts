@@ -12,12 +12,34 @@
  * the shape under an integer-forcing parent, the constant of a comparison)
  * and follows the bigint emitter of the existing compiler
  * (`compile-bigint-emit.ts`) head by head, so the two give the same
- * integers. A node that the structured route does not lower yet (a `Sum`, a
- * list, a call of a user function, a `Function` literal at the root)
- * throws a `StructuredBigintRefusal`, which the profile declines.
+ * integers. A node that the structured route does not lower (a `Map`, a
+ * `Reduce` or a `Fold`, whose function operand the profile does not hold in
+ * the mode; a recursive user function; a user function whose body reads an
+ * input of the program, or whose parameters are not distinct names, one per
+ * argument; a nested list) throws a `StructuredBigintRefusal`, which the
+ * profile declines.
  *
  * - An integer input is read once, at the entry, and a `number` that the
- *   host gives is converted there (`IRInput.lifted`).
+ *   host gives is converted there (`IRInput.lifted`). A `list<integer>`
+ *   input is read as the host gives it, an array of `bigint` values, as the
+ *   existing emitter reads it: the entry check converts a `number` cell.
+ *   The parameters of a `Function` literal at the root are the inputs.
+ * - `Sum` and `Product` are one `loop` per index, the first index
+ *   outermost, from the lower to the upper bound by 1 and no pass when the
+ *   upper bound is less than the lower one (`ascending`), with one carried
+ *   value, the accumulator: no iteration budget, no unrolling, and no
+ *   bound check, as the existing emitter writes a `for` statement with a
+ *   `bigint` counter. The upper bound is evaluated before the lower one, as
+ *   that emitter evaluates them.
+ * - A call of a user function is a call of one function of the program
+ *   per literal that the lane analysis analyzed (a function specialized to
+ *   the types of the arguments is its own literal), as the existing emitter
+ *   writes one local arrow function per literal. A recursive function is
+ *   refused.
+ * - A list of integers is an array of `bigint` values (`bigint-array`):
+ *   `List`, `Range`, `At`, `First`, `Last`, `Length`, `Count`, `Take`,
+ *   `Drop` and `ReplaceAt` are the operations of the policy, each the
+ *   helper that the existing emitter calls.
  * - A constant subtree is a literal of the exact value of `evaluate()`, as
  *   the lane analysis folds it, also with `constantFold: false`; a constant
  *   whose value is a pole is an `IRNoValue`, which aborts where it is
@@ -33,16 +55,23 @@
  *   operands of the operation, so a reuse that its first lowering
  *   dominates aborts exactly when the first did (choice C3 of the design).
  *   A node under an integer-forcing parent is shared only under the same
- *   parent: `Floor(n/2) + Ceil(n/2)` lowers two quotients.
+ *   parent: `Floor(n/2) + Ceil(n/2)` lowers two quotients. A region that
+ *   binds names (the body of a loop or of a function) shares no value of a
+ *   region around it: the same node object can read another binding of a
+ *   name there.
  *
  * Every operation is `pure`; an abort is not an effect.
  */
 import type { Expression, FunctionInterface } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { parseType } from '../../common/type/parse.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { functionLiteralBoundNames } from '../boxed-expression/function-literal.js';
 import {
   exactRational,
   type BigintForcingParent,
@@ -50,14 +79,19 @@ import {
   type BigintLaneRecord,
 } from './compile-bigint-lane.js';
 import { nodeText } from './fragment.js';
+import { userFunctionLiteral } from './compile-assignment-checks.js';
+import { isUserDefinedFunction } from './compile-statements.js';
 import { JAVASCRIPT_BIGINT_POLICY } from './javascript-structured-policy.js';
 import {
   STRUCTURED_OPERATION_LIMIT,
   StructuredLimitError,
 } from './javascript-structured-lower.js';
 import {
+  listType,
   operationCanAbort,
   regionsOf,
+  type CollectionFunctionName,
+  type IRFunction,
   type IRInput,
   type IntegerFunctionName,
   type IntegerRounding,
@@ -65,6 +99,7 @@ import {
   type IRProgram,
   type IRRegion,
   type IRValue,
+  type ListType,
 } from './structured-ir.js';
 
 /** A node that the structured route does not lower in the mode `bigint`:
@@ -79,23 +114,37 @@ export class StructuredBigintRefusal extends Error {
   }
 }
 
-/** The program of `root`, whose lane analysis is `analysis`, and the nodes
- *  that an operation can come from (the nodes of the analysis). Throws a
+/** The program of `root`, whose lane analysis is `analysis`, the nodes
+ *  that an operation can come from (the nodes of the analysis), and the
+ *  names whose definitions the code holds (`CompileTarget.symbolDeps`): each
+ *  user function that the program calls, and each symbol with a value, or
+ *  user function, that a constant subtree folded from `evaluate()` reads.
+ *  Throws a
  *  `StructuredBigintRefusal` for a node that the route does not lower, and
  *  a `StructuredLimitError` past `STRUCTURED_OPERATION_LIMIT` values. */
 export function lowerBigintProgram(
   root: Expression,
   analysis: BigintLaneAnalysis
-): { program: IRProgram; preparedNodes: ReadonlySet<Expression> } {
+): {
+  program: IRProgram;
+  preparedNodes: ReadonlySet<Expression>;
+  dependencies: ReadonlySet<string>;
+} {
   if (analysis.root !== root)
     throw new Error(
       'JS structured bigint lowering: the analysis is not the analysis of the root'
     );
+  const lowering = new BigintLowering(analysis);
   return {
-    program: new BigintLowering(analysis).program(root),
+    program: lowering.program(root),
     preparedNodes: new Set(analysis.records.keys()),
+    dependencies: lowering.dependencies,
   };
 }
+
+/** The type of a list of integers in the mode: a flat list. */
+const INTEGER_LIST: ListType = listType('integer');
+const LIST_OF_INTEGERS: Type = parseType('list<integer>');
 
 /** The rounding of each integer-forcing parent (`BigintForcingParent`). */
 const ROUNDING: Readonly<Record<BigintForcingParent, IntegerRounding>> = {
@@ -118,29 +167,16 @@ const INTEGER_HEADS: Readonly<Record<string, IntegerFunctionName>> = {
   Fibonacci: 'fibonacci',
 };
 
-/** The heads of the lane that a later slice of the design lowers. */
-const LATER_HEADS: ReadonlySet<string> = new Set([
-  'Sum',
-  'Product',
-  'Reduce',
-  'Fold',
-  'Range',
-  'List',
-  'Map',
-  'Length',
-  'Count',
-  'At',
-  'First',
-  'Last',
-  'Take',
-  'Drop',
-  'ReplaceAt',
-  'Function',
-]);
+/** The heads of the lane whose function operand (a callback literal or a
+ *  user function) the profile does not hold in the mode. */
+const CALLBACK_HEADS: ReadonlySet<string> = new Set(['Map', 'Reduce', 'Fold']);
 
 /** The key of the value of a node in a region: its value, or its value
  *  under an integer-forcing parent. */
 type ValueKey = BigintForcingParent | 'value';
+
+/** The types of the values of the mode. */
+type BigintType = 'integer' | 'boolean' | ListType;
 
 /** The fields of an operation of one result that `BigintLowering.push()`
  *  does not fill. */
@@ -159,28 +195,45 @@ class BigintLowering {
   private readonly inputs: IRInput[] = [];
   private readonly inputIndex = new Map<string, number>();
   /** The regions open at this point, the innermost last, each with the
-   *  values of the function nodes lowered in it, by node and key. */
+   *  values of the function nodes lowered in it, by node and key. A region
+   *  that binds names (`barrier`) ends the search of `shared()`. */
   private readonly regions: {
     readonly operations: IROperation[];
     readonly values: Map<Expression, Map<ValueKey, IRValue>>;
+    readonly barrier?: true;
   }[] = [];
+  /** The values of the names that the enclosing constructs bind (a loop
+   *  index, a parameter of a user function), the innermost last. */
+  private scopes: ReadonlyMap<string, IRValue>[] = [];
+  /** The functions of the program, each after the functions that it calls. */
+  private readonly functions: IRFunction[] = [];
+  /** The index of the function of each literal that a call lowered. */
+  private readonly functionIndex = new Map<Expression, number>();
+  /** The literals whose function is being lowered: a call of one of them is
+   *  a recursive call. */
+  private readonly inProgress = new Set<Expression>();
+  /** The names whose definitions the code holds: each user function that
+   *  the program calls, and each name that a folded constant reads
+   *  (`recordFolded()`). */
+  readonly dependencies = new Set<string>();
 
   constructor(private readonly analysis: BigintLaneAnalysis) {}
 
   program(root: Expression): IRProgram {
-    if (isFunction(root, 'Function'))
-      this.refuse(
-        root,
-        'a Function literal at the root is not in the profile in the mode bigint'
-      );
+    // The body of a `Function` literal at the root: its parameters are the
+    // inputs (`analyzeRoot()` of the lane analysis), and the closure that
+    // the host receives has the wrapper of the entry.
+    const body = isFunction(root, 'Function') ? root.ops[0] : root;
     const operations: IROperation[] = [];
-    const value = this.inRegion(operations, () => this.value(root));
+    const value = this.inRegion(operations, () => this.value(body));
     const region = this.region(operations, root, value);
-    const noValue = [region].some(function holds(r: IRRegion): boolean {
-      return r.operations.some(
-        (op) => op.aborts?.includes('no-value') || regionsOf(op).some(holds)
-      );
-    });
+    const noValue = [region, ...this.functions.map((fn) => fn.body)].some(
+      function holds(r: IRRegion): boolean {
+        return r.operations.some(
+          (op) => op.aborts?.includes('no-value') || regionsOf(op).some(holds)
+        );
+      }
+    );
     return {
       owner: this.owner,
       revision: this.revision,
@@ -190,7 +243,7 @@ class BigintLowering {
         ? { noValueResult: JAVASCRIPT_BIGINT_POLICY.noValueResult }
         : {}),
       captures: [],
-      functions: [],
+      functions: this.functions,
       root: region,
     };
   }
@@ -208,7 +261,7 @@ class BigintLowering {
     return record;
   }
 
-  private newValue(type: 'integer' | 'boolean'): IRValue {
+  private newValue(type: BigintType): IRValue {
     if (this.nextId >= STRUCTURED_OPERATION_LIMIT)
       throw new StructuredLimitError();
     return {
@@ -229,7 +282,7 @@ class BigintLowering {
    *  abort kinds that the policy states for it, and return its result. */
   private push(
     fields: OperationFields,
-    type: 'integer' | 'boolean',
+    type: BigintType,
     origin: Expression
   ): IRValue {
     const result = this.newValue(type);
@@ -272,11 +325,13 @@ class BigintLowering {
     );
   }
 
-  /** End `operations` with the yield of `value` and summarize it. */
+  /** End `operations` with the yield of `value` and summarize it; the
+   *  region has the parameters `parameters`, when there are any. */
   private region(
     operations: IROperation[],
     origin: Expression,
-    value: IRValue
+    value: IRValue,
+    parameters?: readonly IRValue[]
   ): IRRegion {
     operations.push({
       kind: 'yield',
@@ -285,16 +340,25 @@ class BigintLowering {
       origin,
     });
     return {
+      ...(parameters === undefined ? {} : { parameters }),
       operations,
       effect: 'pure',
-      ...(operations.some((op) => operationCanAbort(op, []))
+      ...(operations.some((op) => operationCanAbort(op, this.functions))
         ? { canAbort: true as const }
         : {}),
     };
   }
 
-  private inRegion<T>(operations: IROperation[], step: () => T): T {
-    this.regions.push({ operations, values: new Map() });
+  private inRegion<T>(
+    operations: IROperation[],
+    step: () => T,
+    barrier = false
+  ): T {
+    this.regions.push({
+      operations,
+      values: new Map(),
+      ...(barrier ? { barrier: true as const } : {}),
+    });
     try {
       return step();
     } finally {
@@ -309,10 +373,36 @@ class BigintLowering {
     return this.region(operations, origin, value);
   }
 
+  /** A region with the parameters `parameters` (none for the body of a
+   *  function, whose parameters are `IRFunction.parameters`) that binds the
+   *  names of `names` to their values and yields the value that `step`
+   *  lowers in it. The region shares no value of the regions around it
+   *  (`shared()`). With `fresh`, no name of an enclosing construct is
+   *  visible in it: the body of a user function is lexically outside the
+   *  call. */
+  private binding(
+    origin: Expression,
+    parameters: readonly IRValue[] | undefined,
+    names: ReadonlyMap<string, IRValue>,
+    step: () => IRValue,
+    fresh = false
+  ): IRRegion {
+    const saved = this.scopes;
+    this.scopes = [...(fresh ? [] : saved), names];
+    try {
+      const operations: IROperation[] = [];
+      const value = this.inRegion(operations, step, true);
+      return this.region(operations, origin, value, parameters);
+    } finally {
+      this.scopes = saved;
+    }
+  }
+
   /**
    * The value of a function node under the key `key`: the value of its
-   * first lowering in the current region or a region around it, or a new
-   * lowering, remembered in the current region.
+   * first lowering in the current region or a region around it, up to the
+   * innermost region that binds names, or a new lowering, remembered in the
+   * current region.
    */
   private shared(
     node: Expression,
@@ -323,6 +413,7 @@ class BigintLowering {
     for (let i = this.regions.length - 1; i >= 0; i--) {
       const known = this.regions[i].values.get(node)?.get(key);
       if (known !== undefined) return known;
+      if (this.regions[i].barrier === true) break;
     }
     const value = lower();
     const values = this.regions[this.regions.length - 1].values;
@@ -371,35 +462,105 @@ class BigintLowering {
       : this.value(node);
   }
 
+  /** A name that an enclosing construct binds (`lowering` `bigint` of the
+   *  lane analysis), or an input: an integer, lifted at the entry, or a flat
+   *  list of integers, read as the host gives it. */
   private symbol(
     node: Expression & { symbol: string },
     record: BigintLaneRecord
   ): IRValue {
-    if (record.lowering !== 'input' || record.input !== 'integer')
+    const name = node.symbol;
+    if (record.lowering !== 'input') {
+      for (let i = this.scopes.length - 1; i >= 0; i--) {
+        const value = this.scopes[i].get(name);
+        if (value !== undefined) return value;
+      }
       return this.refuse(
         node,
-        record.input === 'integer-list'
-          ? `the list input ${node.symbol} is not in the profile in the mode bigint`
-          : `the local ${node.symbol} is not in the profile in the mode bigint`
+        `the local ${name} is not in the profile in the mode bigint`
       );
-    const name = node.symbol;
+    }
+    const list = record.input === 'integer-list';
+    // A nested list is not held in the mode.
+    if (
+      list &&
+      (record.type === 'never' || !isSubtype(record.type, LIST_OF_INTEGERS))
+    )
+      return this.refuse(
+        node,
+        `the input ${name} has the type ${String(node.type)}, and the profile holds only a list of integers in the mode bigint`
+      );
+    if (!list && record.input !== 'integer')
+      return this.refuse(
+        node,
+        `the input ${name} is not in the profile in the mode bigint`
+      );
+    if (this.inFunction())
+      return this.refuse(
+        node,
+        `the body of a user function reads the input ${name}, which a function of the profile does not read in the mode bigint`
+      );
     let index = this.inputIndex.get(name);
     if (index === undefined) {
       index = this.inputs.length;
-      this.inputs.push({
-        name,
-        type: 'integer',
-        representation: 'bigint',
-        lifted: true,
-      });
+      this.inputs.push(
+        list
+          ? { name, type: INTEGER_LIST, representation: 'bigint-array' }
+          : { name, type: 'integer', representation: 'bigint', lifted: true }
+      );
       this.inputIndex.set(name, index);
     }
-    return this.push({ kind: 'input', input: index, operands: [] }, 'integer', node);
+    return this.push(
+      { kind: 'input', input: index, operands: [] },
+      list ? INTEGER_LIST : 'integer',
+      node
+    );
+  }
+
+  /**
+   * Record in `dependencies` each name of the constant subtree `node` whose
+   * definition its folded value holds: a symbol with a value (and the names
+   * of that value), and the head of a call of a user function (and the names
+   * of its body), as the existing route records a folded symbol
+   * (`tryFoldKnownSymbol()` in `compile-folded-values.ts`). A constant of the
+   * engine (`Pi`) is not one: its value does not change.
+   */
+  private recordFolded(node: Expression): void {
+    const engine = node.engine;
+    const visit = (e: Expression): void => {
+      if (isSymbol(e)) {
+        const name = e.symbol;
+        if (e.isConstant || this.dependencies.has(name)) return;
+        const value = engine._getSymbolValue(name);
+        if (value === undefined) return;
+        this.dependencies.add(name);
+        visit(value);
+        return;
+      }
+      if (!isFunction(e)) return;
+      const head = e.operator;
+      if (
+        !this.dependencies.has(head) &&
+        isUserDefinedFunction(engine, head)
+      ) {
+        this.dependencies.add(head);
+        const literal = userFunctionLiteral(engine, head);
+        if (literal !== undefined) visit(literal.ops[0]);
+      }
+      for (const op of e.ops) visit(op);
+    };
+    visit(node);
+  }
+
+  /** Whether the current region is in the body of a user function. */
+  private inFunction(): boolean {
+    return this.inProgress.size > 0;
   }
 
   /** A constant subtree, from the exact value of `evaluate()`, or the
    *  abort of a constant pole (`folded()` in `compile-bigint-emit.ts`). */
   private folded(node: Expression, record: BigintLaneRecord): IRValue {
+    this.recordFolded(node);
     if (record.pole !== undefined)
       return this.push(
         {
@@ -415,6 +576,33 @@ class BigintLowering {
     const value = isNumber(node) ? node : node.evaluate();
     if (isSymbol(value, 'True')) return this.literal(true, node);
     if (isSymbol(value, 'False')) return this.literal(false, node);
+    // A constant list: the `list` of its literal elements, as the existing
+    // emitter writes the array literal of the value (`literalCode()` in
+    // `compile-bigint-emit.ts`).
+    if (record.value === 'bigint-list') {
+      const cells = isFunction(value, 'List')
+        ? value.ops
+        : value.isFiniteCollection === true
+          ? [...value.each()]
+          : undefined;
+      const integers = cells?.map((cell) => {
+        const r = isNumber(cell) ? exactRational(cell) : undefined;
+        return r !== undefined && r.q === 1n ? r.p : undefined;
+      });
+      if (integers === undefined || integers.some((v) => v === undefined))
+        return this.refuse(
+          node,
+          `the constant ${nodeText(node)} has no value that is a list of exact integers: the interpreter gives ${nodeText(value)}`
+        );
+      return this.push(
+        {
+          kind: 'list',
+          operands: integers.map((v) => this.literal(v!, node)),
+        },
+        INTEGER_LIST,
+        node
+      );
+    }
     const r = isNumber(value) ? exactRational(value) : undefined;
     if (r === undefined || r.q !== 1n)
       return this.refuse(
@@ -430,15 +618,11 @@ class BigintLowering {
   ): IRValue {
     const head = node.operator;
     if (head === 'Block') return this.value(node.op1);
-    if (record.userCall !== undefined)
+    if (record.userCall !== undefined) return this.userCall(node, record);
+    if (CALLBACK_HEADS.has(head))
       return this.refuse(
         node,
-        `a call of the user function ${record.userCall.name} is not in the profile in the mode bigint`
-      );
-    if (LATER_HEADS.has(head))
-      return this.refuse(
-        node,
-        `${head} is not in the profile in the mode bigint`
+        `${head} with a function operand is not in the profile in the mode bigint`
       );
     const ops = node.ops;
     const values = () => ops.map((op) => this.value(op));
@@ -533,6 +717,79 @@ class BigintLowering {
           () => this.literal(1n, node),
           () => this.literal(0n, node),
           'integer'
+        );
+      }
+      case 'Sum':
+      case 'Product':
+        return this.loop(node);
+      case 'List':
+        // `[a, b, …]`: a cell that is a list is a nested list.
+        return this.push(
+          {
+            kind: 'list',
+            operands: ops.map((op) => {
+              if (this.record(op).value !== 'bigint')
+                this.refuse(
+                  op,
+                  `the list ${nodeText(node)} has a cell that is not an integer, and the profile holds only a list of integers in the mode bigint`
+                );
+              return this.value(op);
+            }),
+          },
+          INTEGER_LIST,
+          node
+        );
+      case 'Range':
+        // `_SYS.brange(lo, hi)` and `_SYS.brange(lo, hi, step)`; `Range(hi)`
+        // starts at 1.
+        return this.collection(
+          'range',
+          ops.length === 1
+            ? [this.literal(1n, node), this.value(ops[0])]
+            : values(),
+          node
+        );
+      case 'Length':
+      case 'Count':
+        // `_SYS.toBigint(L.length)`.
+        return this.push(
+          { kind: 'length', operands: [this.value(node.op1)] },
+          'integer',
+          node
+        );
+      case 'At':
+      case 'First':
+      case 'Last': {
+        // `_SYS.bat(L, i)`, with `i` `1n` for `First` and `-1n` for `Last`.
+        const list = this.value(node.op1);
+        const index =
+          head === 'At'
+            ? this.value(node.op2)
+            : this.literal(head === 'First' ? 1n : -1n, node);
+        return this.push(
+          { kind: 'at', operands: [list, index] },
+          'integer',
+          node
+        );
+      }
+      case 'Take':
+      case 'Drop':
+        // `_SYS.btake(L, c)`, `_SYS.bdrop(L, c)`.
+        return this.collection(
+          head === 'Take' ? 'take' : 'drop',
+          [this.value(node.op1), this.value(node.op2)],
+          node
+        );
+      case 'ReplaceAt': {
+        // `_SYS.breplaceAt(L, i, v)`: the position and the value are at
+        // parameters declared an integer, integer promises.
+        const list = this.value(node.op1);
+        const index = this.argument(node.op2);
+        const element = this.argument(node.op3);
+        return this.push(
+          { kind: 'replace-at', operands: [list, index, element] },
+          INTEGER_LIST,
+          node
         );
       }
     }
@@ -682,6 +939,162 @@ class BigintLowering {
       'boolean',
       node
     );
+  }
+
+  /** A function of lists of the policy (`take`, `drop`, `range`), whose
+   *  result is a list of integers. */
+  private collection(
+    fn: CollectionFunctionName,
+    operands: readonly IRValue[],
+    node: Expression
+  ): IRValue {
+    return this.push(
+      { kind: 'collection', fn, operands },
+      INTEGER_LIST,
+      node
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Loops and user functions (`loop()` and `userCall()` in
+  // `compile-bigint-emit.ts`)
+  // -------------------------------------------------------------------------
+
+  /**
+   * `Sum(body, Limits(i, lo, hi), …)` and `Product(…)`: one `loop` per
+   * `Limits`, the first one outermost, each from `lo` to `hi` by 1 with no
+   * pass when `hi < lo` (`ascending`), and one carried value, the
+   * accumulator, `0` for a sum and `1` for a product. The bounds of each
+   * `Limits` are evaluated once per run of its loop, `hi` before `lo`, as
+   * the existing emitter writes `const upper = hi; for (let i = lo; …)`;
+   * the inner loops start with the value of the accumulator of the loop
+   * around them, as the existing emitter adds every term to one variable.
+   * A limit whose index is not a name has an index that no name binds.
+   */
+  private loop(node: Expression & FunctionInterface): IRValue {
+    const [body, ...limits] = node.ops;
+    const product = node.operator === 'Product';
+    const nest = (i: number, carried: IRValue): IRValue => {
+      if (i === limits.length)
+        return this.push(
+          {
+            kind: product ? 'multiply' : 'add',
+            operands: [carried, this.value(body)],
+          },
+          'integer',
+          node
+        );
+      const limit = limits[i] as Expression & FunctionInterface;
+      const hi = this.value(limit.ops[2]);
+      const lo = this.value(limit.ops[1]);
+      const index = this.newValue('integer');
+      const accumulator = this.newValue('integer');
+      const names = new Map<string, IRValue>();
+      if (isSymbol(limit.op1)) names.set(limit.op1.symbol, index);
+      const region = this.binding(node, [index, accumulator], names, () =>
+        nest(i + 1, accumulator)
+      );
+      const result = this.newValue('integer');
+      this.operations.push({
+        kind: 'loop',
+        results: [result],
+        operands: [lo, hi, carried],
+        body: region,
+        ascending: true,
+        effect: 'pure',
+        origin: node,
+      });
+      return result;
+    };
+    return nest(0, this.literal(product ? 1n : 0n, node));
+  }
+
+  /**
+   * A call of a user function: a call of the function of the program of
+   * the literal that the lane analysis analyzed for it. An argument at a
+   * parameter declared an integer is an integer promise for a
+   * parent-lowered argument, as for a library head. A function declared
+   * `-> integer` is an integer promise for its body. A call of a function
+   * whose body is being lowered (a recursive call) is refused, as the
+   * structured route refuses recursion in every mode.
+   */
+  private userCall(
+    node: Expression & FunctionInterface,
+    record: BigintLaneRecord
+  ): IRValue {
+    const call = record.userCall!;
+    const literal = call.literal;
+    if (
+      this.inProgress.has(literal) ||
+      !this.analysis.records.has(literal.ops[0])
+    )
+      return this.refuse(
+        node,
+        `the recursive function ${call.name} is not in the profile`
+      );
+    const index = this.helper(call.name, literal, call.resultPromise);
+    return this.push(
+      {
+        kind: 'call',
+        function: index,
+        operands: node.ops.map((arg) => this.argument(arg)),
+      },
+      'integer',
+      node
+    );
+  }
+
+  /** The index of the function of the program of the user function `name`
+   *  whose body the lane analysis analyzed in `literal`: its body is
+   *  lowered at the first call, after the functions that it calls. */
+  private helper(
+    name: string,
+    literal: Expression & FunctionInterface,
+    resultPromise: boolean
+  ): number {
+    const known = this.functionIndex.get(literal);
+    if (known !== undefined) return known;
+    const names = functionLiteralBoundNames(literal.ops.slice(1));
+    if (
+      names.length !== literal.nops - 1 ||
+      new Set(names).size !== names.length
+    )
+      return this.refuse(
+        literal,
+        `the parameters of the user function ${name} are not names, one per argument`
+      );
+    const parameters = names.map(() => this.newValue('integer'));
+    this.inProgress.add(literal);
+    let body: IRRegion;
+    try {
+      body = this.binding(
+        literal,
+        undefined,
+        new Map(names.map((p, i) => [p, parameters[i]])),
+        () =>
+          resultPromise
+            ? this.forced(literal.ops[0], 'promise')
+            : this.value(literal.ops[0]),
+        true
+      );
+    } finally {
+      this.inProgress.delete(literal);
+    }
+    const index = this.functions.length;
+    // A function specialized to other argument types has a name of its own.
+    const taken = new Set(this.functions.map((fn) => fn.name));
+    let unique = name;
+    for (let k = 2; taken.has(unique); k++) unique = `${name}_${k}`;
+    this.functions.push({
+      name: unique,
+      parameters,
+      result: { type: 'integer', representation: 'bigint' },
+      body,
+      origin: literal,
+    });
+    this.functionIndex.set(literal, index);
+    this.dependencies.add(name);
+    return index;
   }
 
   // -------------------------------------------------------------------------

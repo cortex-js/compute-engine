@@ -113,7 +113,14 @@
  *   `no-value` is the throw of a `_SYS.NonFiniteValue`. The code of the
  *   program is in the wrapper of the entry of that emitter
  *   (`entryWrapper()`): each lifted input read once into a local, and one
- *   catch of the `NonFiniteValue` of a pole.
+ *   catch of the `NonFiniteValue` of a pole; a helper has no catch of its
+ *   own, so a pole in it ends the call, as in that emitter. A list of
+ *   integers is an array of `bigint` values: `at` is `_SYS.bat(list, i)`,
+ *   `length` is `_SYS.toBigint(list.length)`, `replace-at` is
+ *   `_SYS.breplaceAt(list, i, v)`, which copies (the mode has no update in
+ *   place), and `take`, `drop` and `range` are `_SYS.btake`, `_SYS.bdrop`
+ *   and `_SYS.brange`. A loop with a `bigint` index is
+ *   `for (let k = from; k <= to; k++)`, the `for` statement of that emitter.
  * - A list and a tuple are a JavaScript array of numbers. `list` and
  *   `tuple` are the array literal `[a, b, …]`, and `get` of the position
  *   `i` is `t[i - 1]`, as the existing emitter writes a list literal, a
@@ -636,7 +643,10 @@ class Emitter {
     private readonly options: StructuredEmitOptions
   ) {
     this.uses = usesOf(program);
-    this.inPlace = inPlaceUpdates(program);
+    // The runtime of the mode `bigint` has no update in place: a
+    // `replace-at` copies, as `_SYS.breplaceAt` of the existing emitter does.
+    this.inPlace =
+      program.numericPolicy === 'bigint' ? new Set() : inPlaceUpdates(program);
   }
 
   /**
@@ -1149,6 +1159,12 @@ class Emitter {
         return call(`_SYS.${code.complex}`, operands);
       }
       case 'at':
+        // `_SYS.bat(list, i)` of an array of `bigint` values: a pole carrying
+        // `NaN` for an index out of range.
+        if (op.result.representation === 'bigint') {
+          this.runtime.add('bat');
+          return call('_SYS.bat', operands);
+        }
         if (isTupleType(op.operands[0].type)) {
           this.runtime.add('at');
           return call('_SYS.at', operands);
@@ -1164,6 +1180,13 @@ class Emitter {
           ),
         ]);
       case 'length':
+        if (op.result.representation === 'bigint') {
+          this.runtime.add('toBigint');
+          return {
+            text: `_SYS.toBigint(${operand(operands[0], CALL)}.length)`,
+            precedence: CALL,
+          };
+        }
         return {
           text: `${operand(operands[0], CALL)}.length`,
           precedence: CALL,
@@ -1192,7 +1215,12 @@ class Emitter {
         );
       }
       case 'replace-at': {
-        const helper = this.inPlace.has(op) ? 'replaceAtInPlace' : 'replaceAt';
+        const helper =
+          op.result.representation === 'bigint-array'
+            ? 'breplaceAt'
+            : this.inPlace.has(op)
+              ? 'replaceAtInPlace'
+              : 'replaceAt';
         this.runtime.add(helper);
         return call(`_SYS.${helper}`, operands);
       }
@@ -1421,6 +1449,21 @@ class Emitter {
       text: `${operand(operands[0], CALL)}.${text}`,
       precedence: CALL,
     });
+    // An array of `bigint` values: the helpers of `bigint-runtime.ts` that
+    // the existing emitter calls (`_SYS.btake`, `_SYS.bdrop`,
+    // `_SYS.brange`), with a `bigint` count or bound.
+    if (op.result.representation === 'bigint-array') {
+      const helper =
+        op.fn === 'take'
+          ? 'btake'
+          : op.fn === 'drop'
+            ? 'bdrop'
+            : op.fn === 'range'
+              ? 'brange'
+              : fail(`the function of lists ${op.fn} of bigint values`);
+      this.runtime.add(helper);
+      return call(`_SYS.${helper}`, operands);
+    }
     switch (op.fn) {
       case 'norm':
       case 'mean':
@@ -1460,6 +1503,8 @@ class Emitter {
           `[${operands.map((o) => `...${operand(o, CALL)}`).join(', ')}]`
         );
       case 'range':
+        if (operands.length !== 2)
+          return fail('a range of numbers with a step');
         this.runtime.add('range');
         return {
           text:
@@ -1569,8 +1614,22 @@ class Emitter {
       this.plain.add(p.id);
     });
     const k = this.bind(index);
-    const range = this.rangeHeader(k, from, to, op.ascending === true);
-    const body: string[] = [range.index];
+    // A `bigint` index is the counter of the `for` statement, as the bigint
+    // emitter of the existing compiler writes a `Sum` (`loop()` in
+    // `compile-bigint-emit.ts`): `for (let k = from; k <= to; k++)`, no pass
+    // when `to` is less than `from`. The lowering of the mode writes only
+    // ascending loops.
+    if (index.representation === 'bigint' && op.ascending !== true)
+      return fail('a loop with a bigint index that is not ascending');
+    const range =
+      index.representation === 'bigint'
+        ? {
+            before: [],
+            header: `for (let ${k} = ${operand(from, CONDITIONAL)}; ${k} <= ${operand(to, RELATIONAL + 1)}; ${k}++)`,
+            index: undefined,
+          }
+        : this.rangeHeader(k, from, to, op.ascending === true);
+    const body: string[] = range.index === undefined ? [] : [range.index];
     if (op.iterationBudget !== undefined)
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);
     this.loops.push(names);

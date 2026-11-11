@@ -26,9 +26,32 @@
   q.run({ n: 5n, m: 0n });            // ➔ Infinity
   ```
 
-  `Sum`, `Product`, calls of user functions, lists, a `Function` literal and
-  the options `vars`, `functions`, `operators`, `imports` and `preamble`
-  still decline with `outside-profile` in the mode.
+  It also compiles `Sum` and `Product`, calls of user functions, the lists
+  of integers (`list<integer>` inputs, `List`, `Range`, `At`, `First`,
+  `Last`, `Length`, `Count`, `Take`, `Drop`, `ReplaceAt`, and a list
+  result) and a `Function` literal at the root. Each element of a list
+  result is the element of the mode without the profile, an index of `At`
+  out of range gives `NaN`, and the call does not change an input list.
+
+  ```js
+  ce.declare('L', 'list<integer>');
+  const s = compile(ce.box(['Sum', ['Factorial', 'k'], ['Limits', 'k', 0, 'n']]), {
+    profile: 'numeric-kernel',
+    mode: 'bigint',
+  });
+  s.run({ n: 25 }); // ➔ 16158688114800553828940314n
+  const a = compile(ce.box(['Add', ['At', 'L', 'n'], ['Length', 'L']]), {
+    profile: 'numeric-kernel',
+    mode: 'bigint',
+  });
+  a.run({ L: [2n ** 64n, 5n], n: 1 }); // ➔ 18446744073709551618n
+  a.run({ L: [1n], n: 3 });            // ➔ NaN
+  ```
+
+  `Map`, `Reduce` and `Fold` (a function operand), a recursive user
+  function, a user function that reads an input, a nested list and the
+  options `vars`, `functions`, `operators`, `imports` and `preamble` still
+  decline with `outside-profile` in the mode.
 
 ## 0.187.0 _2026-11-11_
 

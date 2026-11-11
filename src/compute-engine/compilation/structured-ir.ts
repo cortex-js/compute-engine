@@ -526,6 +526,8 @@ export type IRNoValue = OperationBase & {
  *   beyond the length from the end) gives the absent value of the target
  *   for the element type: every other operation applied to that value is
  *   unspecified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+ *   A policy whose integer is exact holds no absent integer: the operation
+ *   has no value there, and aborts with `no-value` (`AbortKind`).
  * - `length`: the operand is a list or a tuple; the result is the number of
  *   its elements, an integer.
  */
@@ -638,8 +640,11 @@ export type IRReplaceAt = OperationBase & {
  * - `range`: two integers `a` and `b`, the list of the integers from `a`
  *   to `b`, in steps of 1, or of -1 when `b < a`, as the interpreter's
  *   `Range(a, b)` (`Range(1, 0)` is `[1, 0]`); its first element is `a`
- *   itself (`-0` for `a = -0`). A range of more than 2^32 - 1 elements has
- *   no value: compiled code throws, as the existing emitter does.
+ *   itself (`-0` for `a = -0`). With a third integer operand `s`, the
+ *   step: the integers `a`, `a + s`, … that do not pass `b`, none for
+ *   `s = 0` or for a step whose sign is not the sign of `b - a`, as the
+ *   interpreter's `Range(a, b, s)`. A range of more than 2^32 - 1 elements
+ *   has no value: compiled code throws, as the existing emitter does.
  *
  * A list result has the elements of its operands: it is a list of integers
  * only when every list operand is one.

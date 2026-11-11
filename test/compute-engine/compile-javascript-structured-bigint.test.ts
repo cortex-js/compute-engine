@@ -17,7 +17,9 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // The compile mode `bigint` on the structured route (the `numeric-kernel`
 // profile), slices 1 and 2 of
 // docs/plans/2026-11-11-structured-bigint-mode.md: the policy `JS-bigint`,
-// the scalar core and the integer-forcing parents.
+// the scalar core and the integer-forcing parents. Slices 3 to 5 (`Sum`,
+// `Product`, user functions, lists, a `Function` literal at the root) are
+// in compile-javascript-structured-bigint2.test.ts.
 //
 // The contract (a user decision): for each admitted program, a `bigint` or
 // a `boolean` result is the result of the existing compiler in the mode
@@ -620,18 +622,6 @@ describe('what stays declined', () => {
       "Could not compile with the profile 'numeric-kernel': the constant Fibonacci(1000000000) has no exact integer or boolean value: the interpreter gives Fibonacci(1000000000)",
     ],
     [
-      'a Sum (slice 3)',
-      ['Sum', ['Factorial', 'k'], ['Limits', 'k', 0, 'n']],
-      {},
-      "Could not compile with the profile 'numeric-kernel': Sum is not in the profile in the mode bigint",
-    ],
-    [
-      'a Function literal at the root (slice 5)',
-      ['Function', ['Factorial', 'k'], ['Typed', 'k', "'integer'"]],
-      {},
-      "Could not compile with the profile 'numeric-kernel': a Function literal at the root is not in the profile in the mode bigint",
-    ],
-    [
       'a quotient outside an integer-forcing parent',
       ['Divide', 'n', 2],
       {},
@@ -659,41 +649,22 @@ describe('what stays declined', () => {
     const diagnostic = decline(json, options);
     expect([diagnostic.code, diagnostic.message]).toEqual(['outside-profile', message]);
   });
-
-  test('a list input (slice 5) and a call of a user function (slice 4)', () => {
-    const ce = engine();
-    ce.declare('L', 'list<integer>');
-    ce.parse('f(x) := x!').evaluate();
-    for (const [json, message] of [
-      [['At', 'L', 1], 'At is not in the profile in the mode bigint'],
-      [['f', 'n'], 'a call of the user function f is not in the profile in the mode bigint'],
-    ] as const) {
-      expect(() => compile(ce.box(json as Json), PROFILE)).toThrow(message);
-      // The existing compiler compiles both.
-      expect(compile(ce.box(json as Json), EXISTING).success).toBe(true);
-    }
-  });
 });
 
 describe('the functions of lists and the function operands (collections, slices 2 and 3)', () => {
-  // The mode holds no list on the route (`JAVASCRIPT_BIGINT_POLICY` has no
-  // `collection` and no list operation): each head declines with a message
-  // of the mode, also where the existing compiler compiles it.
+  // The mode holds a list of integers (slice 5), but no function value: a
+  // head with a function operand declines with a message of the mode, also
+  // where the existing compiler compiles it.
   test.each<[string, Json, string]>([
     [
       'Map of a list literal',
       ['Map', ['Function', ['Multiply', 2, 'k'], 'k'], ['List', 'n', 'm']],
-      "Could not compile with the profile 'numeric-kernel': Map is not in the profile in the mode bigint",
+      "Could not compile with the profile 'numeric-kernel': Map with a function operand is not in the profile in the mode bigint",
     ],
     [
       'Sort (not on the integer lane)',
       ['At', ['Sort', ['List', 'm', 'n']], 1],
       "Could not compile with the profile 'numeric-kernel' in the mode 'bigint': `Sort([m,n])` (type `list<integer>`) is not on the integer lane: `Sort` is not on the list of heads of the bigint mode (CE-715.3).",
-    ],
-    [
-      'Range as a value',
-      ['Range', 1, 'n'],
-      "Could not compile with the profile 'numeric-kernel': Range is not in the profile in the mode bigint",
     ],
   ])('%s declines', (_, json, message) => {
     const diagnostic = decline(json);
@@ -705,7 +676,7 @@ describe('the functions of lists and the function operands (collections, slices 
     ce.declare('L', 'list<integer>');
     const json: Json = ['Map', ['Function', ['Multiply', 2, 'k'], 'k'], 'L'];
     expect(() => compile(ce.box(json), PROFILE)).toThrow(
-      'Map is not in the profile in the mode bigint'
+      'Map with a function operand is not in the profile in the mode bigint'
     );
     expect(compile(ce.box(json), EXISTING).success).toBe(true);
   });

@@ -1604,7 +1604,8 @@ function verifyCollection(
       break;
     }
     case 'range':
-      count(operands.length === 2);
+      // The bounds, and an optional step.
+      count(operands.length === 2 || operands.length === 3);
       if (operands.some((o) => o.type !== 'integer'))
         fail('the bounds of the function of lists range are not integers');
       result = listType('integer');
