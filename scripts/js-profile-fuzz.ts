@@ -1,0 +1,2153 @@
+/**
+ * A random differential tester of the `numeric-kernel` profile of the
+ * JavaScript compiler (the structured route).
+ *
+ * It generates random programs with a seeded generator, compiles each one
+ * with `profile: 'numeric-kernel', fallback: false` and with the existing
+ * compiler (`cse: false, constantFold: false, fallback: false`), in the
+ * `strict` and the `complex` modes, and compares the values on a grid of
+ * inputs with `Object.is` (both parts of a complex value), and the shape
+ * of the value that each emitted code makes before `run()` turns
+ * `{re, im: 0}` into a number (the `rawCall` of an expression runner; for
+ * a `Function` literal, its source from `toString()` evaluated again with
+ * its `SYS` helpers). The contract of
+ * the profile is that the doubles are the same for every program it admits
+ * (docs/COMPILATION-MODEL.md, "The `numeric-kernel` profile of the
+ * JavaScript target"). On a few ordinary inputs it also compares the
+ * profile with the interpreter, within a relative tolerance and the caveats
+ * of compiled code.
+ *
+ * Each program is boxed with `ce.box()`, so it is canonical. The vocabulary
+ * is the one of the tables of the profile (docs/COMPILATION-MODEL.md and
+ * docs/plans/2026-11-09-js-pilot-emission-rewrites.md): arithmetic, the
+ * functions, comparisons and `And`, `Or`, `Not`, `If`, `Which`, `Sum` and
+ * `Product` (bounds that are literals, captured numbers or clamped inputs),
+ * `At` and `Length` of a list, `Comprehension` over a range, `ReplaceAt`,
+ * literals (integers, floats, exact rationals, `Pi`, `ExponentialE`,
+ * `ImaginaryUnit`, `Complex(1, 2)`, `i·x`), captured numbers with and
+ * without a declared type, boolean inputs and parameters, calls of user
+ * functions with declared and inferred signatures (`HELPERS`), a `Block`
+ * at the root and `Function` literals with typed parameters, with a body
+ * of locals (a list local made by a `Comprehension`), writes, `If`
+ * statements and a `Loop` over a range with a `Break`.
+ *
+ * A difference is reported only for inputs in the type of each input; a
+ * difference that occurs only for inputs outside their type (`±Infinity`
+ * or `NaN` for `real`, a negative value for `real<0..>`) is counted apart,
+ * because the value of compiled code is unspecified there (the caveats of
+ * compiled code). A difference of the shape that the codes make, with the
+ * same value after `run()`, is its own class. Each difference is shrunk (a subtree replaced by one of
+ * its operands, a symbol or a literal while the difference stays, at the
+ * input that showed it or at another input of the grid) and the minimal
+ * programs are deduplicated by their shape: the canonical form with each
+ * symbol, number and constant replaced by `_`, and the parameters of a
+ * `Function` left out. A program whose canonical form has the shape of a
+ * program shrunk before is counted with that finding, not shrunk again.
+ *
+ * The comparison with the interpreter reports a value of the profile that
+ * differs from a finite value of the interpreter. Where the interpreter has
+ * no finite number (an error, `Missing`, `ComplexInfinity`) and compiled
+ * code has one, the point is counted and not reported: compiled code
+ * carries the pole of a quotient on as `±Infinity` (`erf(1/k)` is `1` at
+ * `k = 0`).
+ *
+ * Usage, as run:
+ *
+ *   timeout -k 30 600 npx tsx scripts/js-profile-fuzz.ts --seed 1 --count 2000
+ *   timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
+ *     --seed 11,12,13,14,15 --count 10000 --json <file>
+ *   timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
+ *     --seed 21,22,23,24,25 --count 10000 --json <file>
+ *
+ * Options:
+ *   --seed <n[,n…]>      The seeds (default 1). The same seed gives the same
+ *                        programs, inputs and report.
+ *   --count <n>          Programs per seed (default 500).
+ *   --depth <n>          The largest depth of an expression (default 4).
+ *   --size <n>           The largest number of nodes of a program
+ *                        (default 40); a larger program is drawn again.
+ *   --points <n>         The largest number of input points per program and
+ *                        mode (default 300); a larger grid is sampled.
+ *   --interp <n>         Ordinary inputs per program compared with the
+ *                        interpreter (default 3; 0 turns the comparison off).
+ *   --shrink <n>         The largest number of compilations of one shrink
+ *                        (default 300).
+ *   --modes <m[,m]>      `strict`, `complex` or both (default both).
+ *   --json <file>        Also write the whole result as JSON.
+ *   --quiet              Print the counts only, not the programs.
+ *
+ * Synchronous code has no time limit, so each loop and sum of a generated
+ * program has a small literal or clamped range; run the script under
+ * `timeout`.
+ *
+ * The output: the counts of each class (both compilers decline, the profile
+ * declines only, the existing compiler declines only, a failure of the
+ * profile that is not a decline, both compile), the 30 most frequent
+ * decline messages of the profile (names and numbers replaced), then each
+ * distinct differing shape with its minimal program, declarations, mode,
+ * input, both codes and both values; the programs that the existing
+ * compiler declines and the profile admits, by shape; the out-of-type
+ * differences by shape; the disagreements with the interpreter by shape.
+ * Progress goes to stderr, a line per 500 programs.
+ *
+ * Not generated yet: helpers with random bodies (the five of `HELPERS` are
+ * fixed), a helper that calls another, `Loop` bounds that are not
+ * literals or `m`, `Continue`, a `Break` outside the last statement of a
+ * branch, more than two real locals, nested `Function` literals, a
+ * boolean result, `Random()` (outside the profile).
+ */
+
+import { writeFileSync } from 'node:fs';
+import { parseArgs } from 'node:util';
+import { ComputeEngine } from '../src/compute-engine';
+import { compile } from '../src/compile';
+import { isNumber } from '../src/compute-engine/boxed-expression/type-guards';
+import type { Expression } from '../src/compute-engine/global-types';
+import type { MathJsonExpression } from '../src/math-json/types';
+
+//
+// Seeded random numbers
+//
+
+export type Rng = () => number;
+
+/** The mulberry32 generator: a number in [0, 1) at each call. */
+export function makeRng(seed: number): Rng {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A seed for the program `index` of the run of `seed`. */
+function mixSeed(seed: number, index: number, salt: number): number {
+  let h = (seed * 0x9e3779b1) ^ (index * 0x85ebca77) ^ (salt * 0xc2b2ae3d);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function choose<T>(rng: Rng, items: readonly (readonly [T, number])[]): T {
+  let total = 0;
+  for (const [, w] of items) total += w;
+  let r = rng() * total;
+  for (const [item, w] of items) {
+    r -= w;
+    if (r < 0) return item;
+  }
+  return items[items.length - 1][0];
+}
+
+const pick = <T>(rng: Rng, items: readonly T[]): T =>
+  items[Math.floor(rng() * items.length)];
+
+const intBetween = (rng: Rng, lo: number, hi: number): number =>
+  lo + Math.floor(rng() * (hi - lo + 1));
+
+//
+// Inputs
+//
+
+export type Json = number | string | Json[];
+type Complex = { re: number; im: number };
+export type Value = number | boolean | Complex | number[];
+export type Inputs = Record<string, Value>;
+type Mode = 'strict' | 'complex';
+
+/** The kind of an input, which gives its grid and its type. */
+type InputKind =
+  | 'real'
+  | 'integer'
+  | 'nonneg'
+  | 'unit'
+  | 'complex'
+  | 'undeclared'
+  | 'list'
+  | 'boolean';
+
+/** The free inputs of an expression program and their kinds. */
+const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
+  x: 'real',
+  y: 'real',
+  k: 'integer',
+  p: 'nonneg',
+  q: 'unit',
+  z: 'complex',
+  u: 'undeclared',
+  L: 'list',
+  B: 'boolean',
+};
+
+/** The parameters of a `Function` program: name, kind, type string. */
+const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
+  ['a', 'real', 'real'],
+  ['b', 'real', 'real'],
+  ['n', 'integer', 'integer'],
+  ['V', 'list', 'list<real>'],
+  ['c', 'boolean', 'boolean'],
+];
+
+const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
+  real: 'real',
+  integer: 'integer',
+  nonneg: 'real<0..>',
+  unit: 'real<-1..1>',
+  complex: 'complex',
+  undeclared: '(no declared type)',
+  list: 'list<real>',
+  boolean: 'boolean',
+};
+
+/** The declarations of the engine, as the report prints them. */
+export const DECLARATIONS =
+  'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
+  'L: list<real>; B: boolean; u: no declared type; h: real, assigned 2.5; ' +
+  'm: integer, assigned 3; w: assigned 3 and g: assigned 0.75, with no ' +
+  'declared type; the helpers of `HELPERS`, assigned in the scope of ' +
+  'each program';
+
+/** An engine with the declarations of every program. */
+export function makeEngine(): ComputeEngine {
+  const ce = new ComputeEngine();
+  for (const [name, kind] of Object.entries(GLOBAL_INPUTS))
+    if (kind !== 'undeclared') ce.declare(name, TYPE_OF_KIND[kind]);
+  ce.declare('h', 'real');
+  ce.assign('h', 2.5);
+  ce.declare('m', 'integer');
+  ce.assign('m', 3);
+  ce.assign('w', 3);
+  ce.assign('g', 0.75);
+  return ce;
+}
+
+/**
+ * The user functions that a program can call: a name, its declared
+ * signature (absent: the engine infers it from the definition), the
+ * definition, and the kinds of its arguments. Each is assigned in the scope
+ * of the program, so the inference of one program does not reach another.
+ */
+const HELPERS: readonly {
+  readonly name: string;
+  readonly signature?: string;
+  readonly definition: Json;
+  readonly arguments: readonly ('real' | 'integer' | 'boolean')[];
+}[] = [
+  {
+    name: 'fd',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['Add', ['Multiply', 2, 'v'], ['Divide', 1, ['Add', 'v', 3]]],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fi',
+    definition: [
+      'Function',
+      ['Add', ['Multiply', 'v', 'v'], ['Multiply', 0.1, 'v']],
+      'v',
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fs',
+    signature: '(real, integer) -> real',
+    definition: [
+      'Function',
+      [
+        'Block',
+        ['Declare', 's', "'real'", 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', ['Divide', 'v', 'j']]],
+          ['Element', 'j', ['Range', 1, 3]],
+        ],
+        ['If', ['Less', 's', 0], ['Assign', 's', ['Negate', 's']]],
+        ['Add', 's', 'e'],
+      ],
+      ['Typed', 'v', "'real'"],
+      ['Typed', 'e', "'integer'"],
+    ],
+    arguments: ['real', 'integer'],
+  },
+  {
+    name: 'ft',
+    definition: [
+      'Function',
+      [
+        'Block',
+        ['Declare', 't', "'real'", 'v'],
+        ['If', ['Less', 'v', 1], ['Assign', 't', ['Multiply', 't', 0.1]]],
+        ['Multiply', 't', ['Divide', 3, 'v']],
+      ],
+      'v',
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fb',
+    signature: '(real, boolean) -> real',
+    definition: [
+      'Function',
+      ['If', 'd', 'v', ['Negate', 'v']],
+      ['Typed', 'v', "'real'"],
+      ['Typed', 'd', "'boolean'"],
+    ],
+    arguments: ['real', 'boolean'],
+  },
+];
+
+/** Assigns the helpers of `HELPERS` in the current scope of `ce`. */
+function defineHelpers(ce: ComputeEngine): void {
+  for (const helper of HELPERS) {
+    if (helper.signature !== undefined)
+      ce.declare(helper.name, helper.signature);
+    ce.assign(helper.name, ce.expr(helper.definition as MathJsonExpression));
+  }
+}
+
+const REAL_IN = [
+  3,
+  0.4641588833612779,
+  1 / 3,
+  0.1,
+  7,
+  0,
+  -0,
+  1,
+  -1,
+  -2.5,
+  0.5,
+  1e155,
+  -1e155,
+  1e300,
+  -1e300,
+  1e-160,
+  5e-324,
+  -5e-324,
+];
+const NON_FINITE = [Infinity, -Infinity, NaN];
+const INTEGERS = [0, 1, -1, 2, 3, -3, 7, 10, 2 ** 53, -(2 ** 53)];
+const NONNEG_IN = [
+  0,
+  -0,
+  3,
+  0.4641588833612779,
+  1 / 3,
+  0.1,
+  7,
+  1,
+  0.5,
+  1e155,
+  1e300,
+  1e-160,
+  5e-324,
+];
+const UNIT_IN = [
+  0,
+  -0,
+  1,
+  -1,
+  0.5,
+  -0.5,
+  1 / 3,
+  0.1,
+  0.4641588833612779,
+  1e-160,
+  5e-324,
+];
+const PARTS = [0, -0, 1, -1, 0.5, 3, 1 / 3, 1e300, 1e-160];
+const COMPLEX_IN: Complex[] = PARTS.flatMap((re) =>
+  PARTS.map((im) => ({ re, im }))
+);
+const COMPLEX_EDGE: Complex[] = [
+  { re: Infinity, im: 1 },
+  { re: 1, im: -Infinity },
+  { re: NaN, im: 0 },
+  { re: -Infinity, im: -Infinity },
+];
+const LISTS_IN: number[][] = [
+  [],
+  [3],
+  [0.1, 1 / 3, 7],
+  [-0, 1e300, 5e-324, -1],
+  [2.5, -2.5, 0.4641588833612779, 1e-160],
+];
+const LISTS_EDGE: number[][] = [[NaN, Infinity]];
+
+/** The values of an input of the kind `kind` in the mode `mode`: those in
+ *  its type first, then those outside it. */
+function gridOf(kind: InputKind, mode: Mode): Value[] {
+  switch (kind) {
+    case 'real':
+      return [...REAL_IN, ...NON_FINITE];
+    case 'integer':
+      return INTEGERS;
+    case 'nonneg':
+      return [...NONNEG_IN, Infinity, NaN, -1];
+    case 'unit':
+      return [...UNIT_IN, 2, NaN];
+    case 'complex':
+      return [...COMPLEX_IN, ...COMPLEX_EDGE];
+    case 'undeclared':
+      return mode === 'strict'
+        ? [...REAL_IN, ...NON_FINITE]
+        : [...REAL_IN, ...COMPLEX_IN, ...NON_FINITE, ...COMPLEX_EDGE];
+    case 'list':
+      return [...LISTS_IN, ...LISTS_EDGE];
+    case 'boolean':
+      return [true, false];
+  }
+}
+
+const isComplex = (v: unknown): v is Complex =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) && 're' in v;
+
+/** Whether `v` is a value of the type of an input of the kind `kind`. */
+function inType(kind: InputKind, v: Value, mode: Mode): boolean {
+  switch (kind) {
+    case 'real':
+      return typeof v === 'number' && Number.isFinite(v);
+    case 'integer':
+      return typeof v === 'number' && Number.isInteger(v);
+    case 'nonneg':
+      return typeof v === 'number' && Number.isFinite(v) && v >= 0;
+    case 'unit':
+      return typeof v === 'number' && v >= -1 && v <= 1;
+    case 'complex':
+      return isComplex(v) && Number.isFinite(v.re) && Number.isFinite(v.im);
+    case 'undeclared':
+      if (typeof v === 'number') return Number.isFinite(v);
+      return (
+        mode === 'complex' &&
+        isComplex(v) &&
+        Number.isFinite(v.re) &&
+        Number.isFinite(v.im)
+      );
+    case 'list':
+      return Array.isArray(v) && v.every((x) => Number.isFinite(x));
+    case 'boolean':
+      return typeof v === 'boolean';
+  }
+}
+
+/** A number that the interpreter and compiled code both hold with no
+ *  overflow, underflow or sign of zero to tell apart. Zero is left out: it
+ *  is the pole of most quotients and logarithms, where the interpreter has
+ *  no number. */
+const ordinaryNumber = (v: number): boolean =>
+  Number.isFinite(v) && Math.abs(v) >= 1e-6 && Math.abs(v) <= 1e6;
+
+function ordinary(v: Value): boolean {
+  if (typeof v === 'boolean') return true;
+  if (typeof v === 'number') return ordinaryNumber(v);
+  if (Array.isArray(v)) return v.every(ordinaryNumber);
+  return ordinaryNumber(v.re) && ordinaryNumber(v.im);
+}
+
+//
+// Generation
+//
+
+/** What the generator reads: the symbols of a leaf and their weights. */
+interface GenContext {
+  readonly rng: Rng;
+  readonly maxDepth: number;
+  readonly symbols: readonly (readonly [Json, number])[];
+  /** The integer names for a clamped bound and an index. */
+  readonly integers: readonly string[];
+  /** The real names that a clamped bound can floor. */
+  readonly reals: readonly string[];
+  /** The boolean names that a condition can read. */
+  readonly booleans: readonly string[];
+  /** The list names. */
+  readonly lists: readonly string[];
+}
+
+const LITERALS: readonly (readonly [Json, number])[] = [
+  [0, 3],
+  [1, 6],
+  [2, 6],
+  [3, 4],
+  [-1, 4],
+  [-2, 2],
+  [4, 2],
+  [10, 2],
+  [0.1, 4],
+  [0.5, 4],
+  [1.5, 3],
+  [2.5, 2],
+  [-0.25, 2],
+  [0.3, 2],
+  [3.7, 1],
+  [1e-3, 1],
+  [['Rational', 1, 3], 3],
+  [['Rational', 2, 3], 2],
+  [['Rational', -5, 7], 2],
+  [['Rational', 3, 2], 2],
+  [['Rational', 1, 10], 1],
+  ['Pi', 3],
+  ['ExponentialE', 2],
+  ['ImaginaryUnit', 1],
+  [['Complex', 1, 2], 1],
+  [['Complex', 0.5, -1], 1],
+];
+
+function genIndex(ctx: GenContext): Json {
+  const { rng } = ctx;
+  return ctx.integers.length > 0 && rng() < 0.3
+    ? pick(rng, ctx.integers)
+    : pick(rng, [1, 2, 3, -1]);
+}
+
+function genLeaf(ctx: GenContext): Json {
+  const { rng } = ctx;
+  if (rng() < 0.55) {
+    if (ctx.lists.length > 0 && rng() < 0.08) {
+      const list = pick(rng, ctx.lists);
+      if (rng() < 0.25) return ['Length', list];
+      return ['At', list, genIndex(ctx)];
+    }
+    return choose(rng, ctx.symbols);
+  }
+  return choose(rng, LITERALS);
+}
+
+const UNARY = [
+  'Sin',
+  'Cos',
+  'Tan',
+  'Exp',
+  'Ln',
+  'Log',
+  'Arctan',
+  'Tanh',
+  'Sinh',
+  'Cosh',
+  'Arcsin',
+  'Arccos',
+  'Arsinh',
+  'Arcosh',
+  'Artanh',
+  'Sign',
+  'Erf',
+  'Erfc',
+  'Gamma',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Digamma',
+  'Haversine',
+  'Conjugate',
+  'Abs',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Sqrt',
+];
+
+const EXPONENTS: readonly (readonly [Json | 'gen', number])[] = [
+  [2, 8],
+  [3, 5],
+  [4, 3],
+  [5, 2],
+  [6, 1],
+  [-1, 4],
+  [-2, 4],
+  [-3, 2],
+  [0.5, 2],
+  [1.5, 3],
+  [1.1, 2],
+  [1.6, 2],
+  [-0.95, 1],
+  [['Rational', 5, 2], 2],
+  [['Rational', 1, 3], 1],
+  [['Rational', 8, 5], 1],
+  [['Rational', 2, 3], 1],
+  [10, 1],
+  ['gen', 5],
+];
+
+type Head =
+  | 'Add'
+  | 'Multiply'
+  | 'Divide'
+  | 'Negate'
+  | 'Subtract'
+  | 'Power'
+  | 'Root'
+  | 'Unary'
+  | 'MinMax'
+  | 'Mod'
+  | 'Arctan2'
+  | 'LogBase'
+  | 'If'
+  | 'Which'
+  | 'BigOp'
+  | 'Call'
+  | 'ImaginaryTimes'
+  | 'Comprehension';
+
+const HEADS: readonly (readonly [Head, number])[] = [
+  ['Add', 16],
+  ['Multiply', 16],
+  ['Divide', 12],
+  ['Negate', 4],
+  ['Subtract', 5],
+  ['Power', 10],
+  ['Root', 2],
+  ['Unary', 14],
+  ['MinMax', 3],
+  ['Mod', 2],
+  ['Arctan2', 1],
+  ['LogBase', 1],
+  ['If', 3],
+  ['Which', 2],
+  ['BigOp', 3],
+  ['Call', 5],
+  ['ImaginaryTimes', 1],
+  ['Comprehension', 1],
+];
+
+function genReal(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const leaf = depth === 0 ? 0.05 : 0.2 + (0.6 * depth) / ctx.maxDepth;
+  if (depth >= ctx.maxDepth || rng() < leaf) return genLeaf(ctx);
+  const d = depth + 1;
+  const sub = () => genReal(ctx, d);
+  switch (choose(rng, HEADS)) {
+    case 'Add':
+      return ['Add', ...Array.from({ length: intBetween(rng, 2, 3) }, sub)];
+    case 'Multiply':
+      return [
+        'Multiply',
+        ...Array.from({ length: intBetween(rng, 2, 3) }, sub),
+      ];
+    case 'Divide':
+      return ['Divide', sub(), sub()];
+    case 'Negate':
+      return ['Negate', sub()];
+    case 'Subtract':
+      return ['Subtract', sub(), sub()];
+    case 'Power': {
+      const e = choose(rng, EXPONENTS);
+      if (e !== 'gen') return ['Power', sub(), e];
+      const exponent =
+        rng() < 0.5
+          ? choose(rng, ctx.symbols)
+          : rng() < 0.5 && ctx.integers.length > 0
+            ? pick(rng, ctx.integers)
+            : sub();
+      return ['Power', sub(), exponent];
+    }
+    case 'Root':
+      return [
+        'Root',
+        sub(),
+        pick(rng, [3, 3, 4, 2, ...ctx.integers] as Json[]),
+      ];
+    case 'Unary':
+      return [pick(rng, UNARY), sub()];
+    case 'MinMax':
+      return [
+        pick(rng, ['Min', 'Max']),
+        ...Array.from({ length: intBetween(rng, 2, 3) }, sub),
+      ];
+    case 'Mod':
+      return ['Mod', sub(), rng() < 0.6 ? pick(rng, [2, 3, 1, 0.5]) : sub()];
+    case 'Arctan2':
+      return ['Arctan2', sub(), sub()];
+    case 'LogBase':
+      return [
+        'Log',
+        sub(),
+        rng() < 0.6 ? pick(rng, [2, 10, 3]) : choose(rng, ctx.symbols),
+      ];
+    case 'If':
+      return ['If', genCondition(ctx, d), sub(), sub()];
+    case 'Which': {
+      const clauses: Json[] = [genCondition(ctx, d), sub()];
+      if (rng() < 0.5) clauses.push(genCondition(ctx, d), sub());
+      if (rng() < 0.6) clauses.push('True', sub());
+      return ['Which', ...clauses];
+    }
+    case 'BigOp':
+      return genBigOp(ctx, d);
+    case 'Call': {
+      const helper = pick(rng, HELPERS);
+      return [
+        helper.name,
+        ...helper.arguments.map((kind): Json =>
+          kind === 'real'
+            ? sub()
+            : kind === 'boolean'
+              ? genCondition(ctx, d)
+              : ctx.integers.length > 0 && rng() < 0.6
+                ? pick(rng, ctx.integers)
+                : pick(rng, [0, 1, 2, -3])
+        ),
+      ];
+    }
+    case 'ImaginaryTimes':
+      return ['Multiply', 'ImaginaryUnit', sub()];
+    case 'Comprehension':
+      return ['At', genComprehension(ctx, d), genIndex(ctx)];
+  }
+}
+
+/** A `Comprehension` of a real body over `Range(1, n)`, `n` from 1 to 4. */
+function genComprehension(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['j', 30]] };
+  return [
+    'Comprehension',
+    genReal(inner, Math.min(depth + 1, ctx.maxDepth)),
+    ['Element', 'j', ['Range', 1, intBetween(rng, 1, 4)]],
+  ];
+}
+
+/** A bound of a `Sum` or a `Product`: a literal, a captured number, or an
+ *  input clamped so that the range has at most a few terms. */
+function genBound(ctx: GenContext, upper: boolean): Json {
+  const { rng } = ctx;
+  const r = rng();
+  if (upper) {
+    if (r < 0.45) return intBetween(rng, 0, 5);
+    if (r < 0.6) return pick(rng, ['m', 'w', 'h']);
+    if (r < 0.8 && ctx.integers.length > 0)
+      return ['Min', pick(rng, ctx.integers), 4];
+    if (ctx.reals.length > 0)
+      return ['Min', ['Floor', pick(rng, ctx.reals)], 4];
+    return 'm';
+  }
+  if (r < 0.75) return pick(rng, [0, 1, 1, 2]);
+  if (r < 0.85) return 'g';
+  if (ctx.integers.length > 0) return ['Max', pick(rng, ctx.integers), -2];
+  return 1;
+}
+
+/** A `Sum` or a `Product` over a small range. */
+function genBigOp(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const index = 'j';
+  const inner: GenContext = {
+    ...ctx,
+    symbols: [...ctx.symbols, [index, 30]],
+  };
+  const body = genReal(inner, Math.min(depth + 1, ctx.maxDepth));
+  return [
+    rng() < 0.7 ? 'Sum' : 'Product',
+    body,
+    ['Limits', index, genBound(ctx, false), genBound(ctx, true)],
+  ];
+}
+
+const COMPARISONS = [
+  'Less',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+];
+
+function genCondition(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = depth + 1;
+  if (ctx.booleans.length > 0 && rng() < 0.15) return pick(rng, ctx.booleans);
+  if (depth < ctx.maxDepth && rng() < 0.25) {
+    const r = rng();
+    if (r < 0.4) return ['And', genCondition(ctx, d), genCondition(ctx, d)];
+    if (r < 0.8) return ['Or', genCondition(ctx, d), genCondition(ctx, d)];
+    return ['Not', genCondition(ctx, d)];
+  }
+  return [pick(rng, COMPARISONS), genReal(ctx, d), genReal(ctx, d)];
+}
+
+/** A program: an expression of the free inputs, a `Block` of them, or a
+ *  `Function` literal. */
+export interface Program {
+  readonly id: string;
+  readonly json: Json;
+  /** For a `Function` literal, the names of its parameters in order. */
+  readonly parameters?: readonly string[];
+}
+
+const EXPRESSION_SYMBOLS: readonly (readonly [Json, number])[] = [
+  ['x', 25],
+  ['y', 15],
+  ['k', 10],
+  ['p', 8],
+  ['q', 4],
+  ['u', 10],
+  ['z', 4],
+  ['h', 4],
+  ['m', 2],
+  ['w', 2],
+  ['g', 2],
+];
+
+type ContextBase = Omit<GenContext, 'rng' | 'maxDepth'>;
+
+const EXPRESSION_CONTEXT: ContextBase = {
+  symbols: EXPRESSION_SYMBOLS,
+  integers: ['k'],
+  reals: ['x', 'y'],
+  booleans: ['B'],
+  lists: ['L'],
+};
+
+/** The statements of a block: one or two real locals, maybe a list local
+ *  made by a `Comprehension`, writes (`ReplaceAt` for the list), `If`
+ *  statements and a `Loop` with a `Break`, then the value. */
+function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
+  const ctx = (
+    extra: [Json, number][],
+    depth: number,
+    lists: readonly string[] = []
+  ): GenContext => ({
+    ...base,
+    rng,
+    maxDepth: Math.max(1, maxDepth - depth),
+    symbols: [...base.symbols, ...extra],
+    lists: [...base.lists, ...lists],
+  });
+  const locals: [Json, number][] = [['t', 25]];
+  const listLocals: string[] = [];
+  const statements: Json[] = [
+    ['Declare', 't', "'real'", genReal(ctx([], 1), 0)],
+  ];
+  if (rng() < 0.4) {
+    statements.push(['Declare', 's', "'real'", genReal(ctx(locals, 1), 0)]);
+    locals.push(['s', 15]);
+  }
+  if (rng() < 0.2) {
+    statements.push([
+      'Declare',
+      'R',
+      "'list<real>'",
+      genComprehension(ctx(locals, 2), 0),
+    ]);
+    listLocals.push('R');
+  }
+  const target = () => (locals.length > 1 && rng() < 0.3 ? 's' : 't');
+  const count = intBetween(rng, 0, 2);
+  for (let i = 0; i < count; i++) {
+    const r = rng();
+    const c = (depth: number, extra = locals) => ctx(extra, depth, listLocals);
+    if (listLocals.length > 0 && r < 0.15) {
+      statements.push([
+        'Assign',
+        'R',
+        ['ReplaceAt', 'R', pick(rng, [1, 2, -1]), genReal(c(2), 0)],
+      ]);
+    } else if (r < 0.4) {
+      statements.push(['Assign', target(), genReal(c(1), 0)]);
+    } else if (r < 0.7) {
+      const branch: Json[] = [
+        'If',
+        genCondition(c(2), 0),
+        ['Assign', target(), genReal(c(2), 0)],
+      ];
+      if (rng() < 0.5) branch.push(['Assign', target(), genReal(c(2), 0)]);
+      statements.push(branch);
+    } else {
+      const inLoop: [Json, number][] = [...locals, ['r', 20]];
+      const body: Json[] = [
+        'Block',
+        ['Assign', target(), genReal(c(2, inLoop), 0)],
+      ];
+      if (rng() < 0.6)
+        body.push([
+          'If',
+          genCondition(c(2, inLoop), 0),
+          ['Block', ['Assign', target(), genReal(c(2, inLoop), 0)], ['Break']],
+        ]);
+      const upper: Json = rng() < 0.8 ? intBetween(rng, 0, 4) : 'm';
+      statements.push([
+        'Loop',
+        body,
+        ['Element', 'r', ['Range', pick(rng, [1, 1, 0]), upper]],
+      ]);
+    }
+  }
+  if (listLocals.length > 0 && rng() < 0.3) statements.push('R');
+  else statements.push(genReal(ctx(locals, 1, listLocals), 0));
+  return statements;
+}
+
+function genFunction(rng: Rng, maxDepth: number): Json[] {
+  const parameters = PARAMETERS.filter(([name]) => name === 'a' || rng() < 0.4);
+  const names = parameters.map(([name]) => name);
+  const symbols: [Json, number][] = [
+    ['h', 3],
+    ['m', 2],
+    ['w', 1],
+    ['g', 1],
+  ];
+  for (const [name, kind] of parameters)
+    if (kind !== 'list' && kind !== 'boolean') symbols.push([name, 20]);
+  return [
+    'Function',
+    [
+      'Block',
+      ...genStatements(rng, maxDepth, {
+        symbols,
+        integers: names.includes('n') ? ['n'] : [],
+        reals: ['a'],
+        booleans: names.includes('c') ? ['c'] : [],
+        lists: names.includes('V') ? ['V'] : [],
+      }),
+    ],
+    ...parameters.map(([name, , type]): Json => ['Typed', name, `'${type}'`]),
+  ];
+}
+
+export function nodeCount(json: Json): number {
+  if (!Array.isArray(json)) return 1;
+  let n = 1;
+  for (let i = 1; i < json.length; i++) n += nodeCount(json[i]);
+  return n;
+}
+
+/** The program `index` of the run of `seed`: an expression (70%), a
+ *  `Function` literal (20%) or a `Block` at the root (10%). */
+export function generateProgram(
+  seed: number,
+  index: number,
+  options: { depth: number; size: number }
+): Program {
+  const rng = makeRng(mixSeed(seed, index, 1));
+  for (;;) {
+    let json: Json;
+    let parameters: string[] | undefined;
+    const r = rng();
+    if (r < 0.2) {
+      const fn = genFunction(rng, options.depth);
+      json = fn;
+      parameters = fn.slice(2).map((p) => (p as Json[])[1] as string);
+    } else if (r < 0.3) {
+      json = [
+        'Block',
+        ...genStatements(rng, options.depth, EXPRESSION_CONTEXT),
+      ];
+    } else {
+      json = genReal(
+        { rng, maxDepth: options.depth, ...EXPRESSION_CONTEXT },
+        0
+      );
+      if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
+    }
+    if (nodeCount(json) <= options.size)
+      return { id: `${seed}:${index}`, json, parameters };
+  }
+}
+
+//
+// Compilation and runs
+//
+
+type Outcome =
+  | {
+      readonly kind: 'value';
+      readonly value: unknown;
+      /** The shape of the value as the emitted code makes it, before
+       *  `run()` turns `{re, im: 0}` into a number (`valueShape()`), or
+       *  `undefined` when the raw value is not available. */
+      readonly raw: string | undefined;
+    }
+  | { readonly kind: 'throw'; readonly message: string };
+
+type Compiled =
+  | { readonly ok: true; readonly code: string; readonly run: Runner }
+  | {
+      readonly ok: false;
+      readonly decline: boolean;
+      readonly code: string;
+      readonly message: string;
+    };
+
+type Runner = (inputs: Inputs) => Outcome;
+
+const PROFILE_PREFIX = /^Could not compile with the profile 'numeric-kernel': /;
+
+/** The shape of a value: `number`, `boolean`, `complex` (an object with
+ *  `re` and `im`, also with `im` 0), `list`, or its `typeof`. */
+export function valueShape(v: unknown): string {
+  if (Array.isArray(v)) return 'list';
+  if (isComplex(v)) return 'complex';
+  return typeof v;
+}
+
+/**
+ * The function that gives the value of compiled code as the emitted code
+ * makes it, with no normalization of the result. For an expression, the
+ * `rawCall` of the runner (the body applied to a vars object, with no entry
+ * check). For a `Function` literal, the runner gives its own source
+ * (`toString()`, with its definitions) and its helpers (`SYS`): the source
+ * is evaluated again with those helpers.
+ */
+function rawRunner(
+  run: unknown,
+  parameters: readonly string[] | undefined
+): ((args: unknown[]) => unknown) | undefined {
+  const r = run as {
+    rawCall?: (vars: unknown) => unknown;
+    SYS?: unknown;
+    toString(): string;
+  };
+  try {
+    if (parameters === undefined)
+      return typeof r.rawCall === 'function'
+        ? (args) => r.rawCall!(args[0])
+        : undefined;
+    if (r.SYS === undefined) return undefined;
+    const fn = new Function('_SYS', `return (${r.toString()});`)(r.SYS) as (
+      ...a: unknown[]
+    ) => unknown;
+    return (args) => fn(...args);
+  } catch {
+    return undefined;
+  }
+}
+
+function compileWith(
+  expr: Expression,
+  mode: Mode,
+  profile: boolean,
+  parameters: readonly string[] | undefined
+): Compiled {
+  try {
+    const result = profile
+      ? compile(expr, { profile: 'numeric-kernel', fallback: false, mode })
+      : compile(expr, {
+          cse: false,
+          constantFold: false,
+          fallback: false,
+          mode,
+        });
+    const run = result.run as unknown as (...args: unknown[]) => unknown;
+    if (!result.success || typeof run !== 'function')
+      return {
+        ok: false,
+        decline: true,
+        code: result.diagnostic?.code ?? 'no-run',
+        message: result.diagnostic?.message ?? 'no run function',
+      };
+    const raw = rawRunner(run, parameters);
+    const copy = (v: Value): unknown => (Array.isArray(v) ? [...v] : v);
+    const argumentsOf = (inputs: Inputs): unknown[] =>
+      parameters === undefined
+        ? [
+            Object.fromEntries(
+              Object.entries(inputs).map(([k, v]) => [k, copy(v)])
+            ),
+          ]
+        : parameters.map((name) => copy(inputs[name]));
+    return {
+      ok: true,
+      code: result.code,
+      run: (inputs) => {
+        let value: unknown;
+        try {
+          value = run(...argumentsOf(inputs));
+        } catch (error) {
+          return { kind: 'throw', message: String(error) };
+        }
+        let shape: string | undefined;
+        try {
+          shape =
+            raw === undefined
+              ? undefined
+              : valueShape(raw(argumentsOf(inputs)));
+        } catch {
+          shape = undefined;
+        }
+        return { kind: 'value', value, raw: shape };
+      },
+    };
+  } catch (error) {
+    const e = error as {
+      name?: string;
+      message?: string;
+      diagnostic?: { code?: string };
+    };
+    const code = e.diagnostic?.code ?? e.name ?? 'Error';
+    // A failure of the profile is an error that is not a decline: a
+    // `compile-error` (a phase of the structured compiler failed) or an
+    // exception of another kind.
+    const decline =
+      e.name === 'CompileDeclineError' ? code !== 'compile-error' : !profile;
+    return {
+      ok: false,
+      decline,
+      code,
+      message: String(e.message ?? error).replace(PROFILE_PREFIX, ''),
+    };
+  }
+}
+
+/** The same value: the same shape, and `Object.is` for each number. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (typeof a === 'number' && typeof b === 'number') return Object.is(a, b);
+  if (Array.isArray(a) && Array.isArray(b))
+    return a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+  if (isComplex(a) && isComplex(b))
+    return Object.is(a.re, b.re) && Object.is(a.im, b.im);
+  return a === b;
+}
+
+function sameOutcome(a: Outcome, b: Outcome): boolean {
+  if (a.kind === 'throw' || b.kind === 'throw') return a.kind === b.kind;
+  return sameValue(a.value, b.value);
+}
+
+/** Whether two outcomes differ in the shape that the emitted code makes (a
+ *  number on one side, `{re, im: 0}` on the other), which `run()` hides. */
+function differentRawShape(a: Outcome, b: Outcome): boolean {
+  return (
+    a.kind === 'value' &&
+    b.kind === 'value' &&
+    a.raw !== undefined &&
+    b.raw !== undefined &&
+    a.raw !== b.raw
+  );
+}
+
+/** The inputs of `program`: its parameters, or the free inputs that its
+ *  canonical form reads. */
+function inputsOf(program: Program, expr: Expression): [string, InputKind][] {
+  if (program.parameters !== undefined)
+    return program.parameters.map((name) => [
+      name,
+      PARAMETERS.find(([n]) => n === name)![1],
+    ]);
+  const found = new Set<string>();
+  const walk = (j: unknown) => {
+    if (typeof j === 'string') {
+      if (j in GLOBAL_INPUTS) found.add(j);
+    } else if (Array.isArray(j)) for (const x of j) walk(x);
+  };
+  walk(expr.json);
+  return Object.keys(GLOBAL_INPUTS)
+    .filter((name) => found.has(name))
+    .map((name) => [name, GLOBAL_INPUTS[name]]);
+}
+
+/** The points of the grid of `inputs`, sampled to at most `max`. */
+function gridPoints(
+  inputs: readonly [string, InputKind][],
+  mode: Mode,
+  max: number,
+  rng: Rng
+): Inputs[] {
+  const axes = inputs.map(
+    ([name, kind]) => [name, gridOf(kind, mode)] as const
+  );
+  let total = 1;
+  for (const [, values] of axes) total *= values.length;
+  if (total <= max) {
+    let result: Inputs[] = [{}];
+    for (const [name, values] of axes)
+      result = result.flatMap((point) =>
+        values.map((v) => ({ ...point, [name]: v }))
+      );
+    return result;
+  }
+  return Array.from({ length: max }, () =>
+    Object.fromEntries(axes.map(([name, values]) => [name, pick(rng, values)]))
+  );
+}
+
+function pointInType(
+  inputs: readonly [string, InputKind][],
+  point: Inputs,
+  mode: Mode
+): boolean {
+  return inputs.every(([name, kind]) => inType(kind, point[name], mode));
+}
+
+//
+// The interpreter
+//
+
+function boxValue(ce: ComputeEngine, v: Value): Expression {
+  if (typeof v === 'boolean') return v ? ce.True : ce.False;
+  if (typeof v === 'number') return ce.number(v);
+  if (Array.isArray(v))
+    return ce.function(
+      'List',
+      v.map((x) => ce.number(x))
+    );
+  return ce.expr(['Complex', v.re, v.im]);
+}
+
+/** The value of `program` by the interpreter: `{re, im}`, or the MathJSON
+ *  of the result as text when it is not a number. */
+function interpret(
+  ce: ComputeEngine,
+  program: Program,
+  expr: Expression,
+  point: Inputs
+): Complex | string {
+  let value: Expression;
+  if (program.parameters !== undefined)
+    value = ce
+      .function('Apply', [
+        expr,
+        ...program.parameters.map((name) => boxValue(ce, point[name])),
+      ])
+      .evaluate();
+  else
+    value = expr
+      .subs(
+        Object.fromEntries(
+          Object.entries(point).map(([k, v]) => [k, boxValue(ce, v)])
+        )
+      )
+      .evaluate();
+  const n = value.N();
+  if (!isNumber(n)) return JSON.stringify(value.json).slice(0, 200);
+  return { re: n.re, im: n.im };
+}
+
+function asComplex(v: unknown): Complex | undefined {
+  if (typeof v === 'number') return { re: v, im: 0 };
+  if (isComplex(v)) return v;
+  return undefined;
+}
+
+const TOLERANCE = 1e-7;
+
+/**
+ * How the compiled value `value` compares with the interpreter's
+ * `expected`:
+ *
+ * - `agree`: within `TOLERANCE` relative; or compiled `NaN`, `±Infinity` or
+ *   `undefined` where the interpreter has no finite number; or, in the
+ *   `strict` mode, `NaN` where the interpreter's value is not real.
+ * - `no-number`: the interpreter has no finite number (an error, `Missing`,
+ *   an unevaluated form, `ComplexInfinity`, `NaN`) and compiled code has a
+ *   finite value. This is the pole of a quotient that compiled code carries
+ *   on as `±Infinity` (`erf(1/k)` at `k = 0` is `1`): counted, not
+ *   reported.
+ * - `disagree`: any other case.
+ */
+function compareWithInterpreter(
+  value: unknown,
+  expected: Complex | string,
+  mode: Mode
+): 'agree' | 'no-number' | 'disagree' {
+  const v = asComplex(value);
+  const finite = (c: Complex) => Number.isFinite(c.re) && Number.isFinite(c.im);
+  if (typeof expected === 'string' || !finite(expected))
+    return v === undefined || !finite(v) ? 'agree' : 'no-number';
+  if (v === undefined || !finite(v))
+    return v === undefined ||
+      Number.isNaN(v.re) ||
+      Number.isNaN(v.im) ||
+      (mode === 'strict' && expected.im !== 0)
+      ? 'agree'
+      : 'disagree';
+  const near = (a: number, b: number) =>
+    Math.abs(a - b) <= TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b));
+  return near(v.re, expected.re) && near(v.im, expected.im)
+    ? 'agree'
+    : 'disagree';
+}
+
+//
+// Shapes and messages
+//
+
+/** The canonical form with each symbol, number and constant replaced by
+ *  `_`; `True`, `False` and type strings stay. */
+export function shapeOf(json: unknown): string {
+  if (typeof json === 'number') return '_';
+  if (typeof json === 'string') {
+    if (json === 'True' || json === 'False') return json;
+    if (json.startsWith("'")) return json;
+    return '_';
+  }
+  if (Array.isArray(json)) {
+    const [head, ...rest] = json;
+    if (head === 'Rational' || head === 'Complex') return '_';
+    // The parameters of a `Function` are left out: a shrink keeps them all.
+    if (head === 'Function') return `Function(${shapeOf(rest[0])})`;
+    return `${String(head)}(${rest.map(shapeOf).join(', ')})`;
+  }
+  if (typeof json === 'object' && json !== null) {
+    if ('num' in json) return '_';
+    if ('sym' in json) return shapeOf((json as { sym: string }).sym);
+    if ('fn' in json) return shapeOf((json as { fn: unknown[] }).fn);
+  }
+  return '?';
+}
+
+/** A decline message with its names, quoted text and numbers replaced. */
+export function normalizeMessage(message: string): string {
+  return message
+    .replace(/`[^`]*`/g, '`…`')
+    .replace(/"[^"]*"/g, '"…"')
+    .replace(/'[^']*'/g, "'…'")
+    .replace(/\b-?\d+(\.\d+)?(e[-+]?\d+)?\b/g, 'N')
+    .slice(0, 160);
+}
+
+//
+// The run
+//
+
+export interface FuzzOptions {
+  readonly seeds: readonly number[];
+  readonly count: number;
+  readonly depth: number;
+  readonly size: number;
+  readonly points: number;
+  readonly interp: number;
+  readonly shrink: number;
+  readonly modes: readonly Mode[];
+}
+
+export const DEFAULT_OPTIONS: FuzzOptions = {
+  seeds: [1],
+  count: 500,
+  depth: 4,
+  size: 40,
+  points: 300,
+  interp: 3,
+  shrink: 300,
+  modes: ['strict', 'complex'],
+};
+
+/** A minimal program of a class, with what reproduces it. */
+export interface Finding {
+  readonly class:
+    | 'difference'
+    | 'shape'
+    | 'out-of-type'
+    | 'existing-declines'
+    | 'profile-failure'
+    | 'interpreter';
+  readonly shape: string;
+  /** How many programs of the run reduce to this shape. */
+  count: number;
+  readonly id: string;
+  readonly mode: Mode;
+  /** The original program and the minimal one, as written. */
+  readonly original: Json;
+  readonly minimal: Json;
+  /** The canonical form of the minimal program. */
+  readonly canonical: unknown;
+  readonly parameters?: readonly string[];
+  readonly input?: Inputs;
+  readonly profileCode?: string;
+  readonly existingCode?: string;
+  readonly profileValue?: unknown;
+  readonly existingValue?: unknown;
+  /** The shapes that the emitted codes make, before `run()` (a shape
+   *  difference). */
+  readonly profileShape?: string;
+  readonly existingShape?: string;
+  readonly interpreterValue?: unknown;
+  readonly message?: string;
+  /** Whether the minimal program shows the same class in a new engine. */
+  readonly freshEngine: boolean;
+}
+
+export interface FuzzResult {
+  readonly options: FuzzOptions;
+  readonly programs: number;
+  readonly invalid: number;
+  /** Per program and mode. */
+  readonly classes: Record<string, number>;
+  readonly points: { inType: number; outOfType: number };
+  readonly interpreterPoints: {
+    compared: number;
+    skipped: number;
+    noNumber: number;
+  };
+  readonly declines: { message: string; count: number; example: string }[];
+  readonly existingDeclineMessages: {
+    message: string;
+    count: number;
+  }[];
+  readonly findings: Finding[];
+}
+
+/** The predicate of a shrink: whether a program still shows the class. */
+type Predicate = (ce: ComputeEngine, program: Program) => Witness | undefined;
+
+/** What a predicate found, for the report. */
+interface Witness {
+  readonly expr: Expression;
+  readonly input?: Inputs;
+  readonly profileCode?: string;
+  readonly existingCode?: string;
+  readonly profileValue?: unknown;
+  readonly existingValue?: unknown;
+  readonly profileShape?: string;
+  readonly existingShape?: string;
+  readonly interpreterValue?: unknown;
+  readonly message?: string;
+}
+
+/** Runs `f` in a new scope of `ce`, so that a name with no declared type
+ *  that the program auto-declares does not outlive it. */
+function scoped<T>(ce: ComputeEngine, f: () => T): T {
+  ce.pushScope();
+  try {
+    return f();
+  } finally {
+    ce.popScope();
+  }
+}
+
+function boxProgram(
+  ce: ComputeEngine,
+  program: Program
+): Expression | undefined {
+  try {
+    defineHelpers(ce);
+    const expr = ce.box(program.json as MathJsonExpression);
+    return expr.isValid ? expr : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The point of a shrink: the point of the witness, with a value for each
+ *  name that a replacement can introduce. */
+const DEFAULT_POINT: Inputs = {
+  x: 3,
+  y: 0.1,
+  k: 2,
+  p: 0.5,
+  q: 0.5,
+  z: { re: 1, im: 0.5 },
+  u: 1 / 3,
+  L: [0.1, 1 / 3, 7],
+  a: 3,
+  b: 0.1,
+  n: 2,
+  V: [0.1, 1 / 3, 7],
+  B: true,
+  c: true,
+};
+
+/** The number of points of the grid that a shrink step tries after the
+ *  point of the witness: a smaller program can differ at another point. */
+const SHRINK_POINTS = 80;
+
+/** The predicate of a difference of values (`'value'`) or of the shape
+ *  that the emitted codes make with the same value (`'shape'`). */
+function differencePredicate(
+  mode: Mode,
+  point: Inputs,
+  kind: 'value' | 'shape'
+): Predicate {
+  return (ce, program) => {
+    const expr = boxProgram(ce, program);
+    if (expr === undefined) return undefined;
+    const inputs = inputsOf(program, expr);
+    const p = compileWith(expr, mode, true, program.parameters);
+    if (!p.ok) return undefined;
+    const e = compileWith(expr, mode, false, program.parameters);
+    if (!e.ok) return undefined;
+    const tried = [
+      point,
+      ...gridPoints(inputs, mode, SHRINK_POINTS, makeRng(7)).map((q) => ({
+        ...DEFAULT_POINT,
+        ...q,
+      })),
+    ];
+    for (const q of tried) {
+      if (!pointInType(inputs, q, mode)) continue;
+      const a = p.run(q);
+      const b = e.run(q);
+      const same = sameOutcome(a, b);
+      if (kind === 'value' ? same : !same || !differentRawShape(a, b)) continue;
+      return {
+        expr,
+        input: Object.fromEntries(inputs.map(([n]) => [n, q[n]])),
+        profileCode: p.code,
+        existingCode: e.code,
+        profileValue: a.kind === 'value' ? a.value : `throws ${a.message}`,
+        existingValue: b.kind === 'value' ? b.value : `throws ${b.message}`,
+        profileShape: a.kind === 'value' ? a.raw : undefined,
+        existingShape: b.kind === 'value' ? b.raw : undefined,
+      };
+    }
+    return undefined;
+  };
+}
+
+function existingDeclinesPredicate(mode: Mode): Predicate {
+  return (ce, program) => {
+    const expr = boxProgram(ce, program);
+    if (expr === undefined) return undefined;
+    const p = compileWith(expr, mode, true, program.parameters);
+    if (!p.ok) return undefined;
+    const e = compileWith(expr, mode, false, program.parameters);
+    if (e.ok) return undefined;
+    return { expr, profileCode: p.code, message: e.message };
+  };
+}
+
+function profileFailurePredicate(mode: Mode, code: string): Predicate {
+  return (ce, program) => {
+    const expr = boxProgram(ce, program);
+    if (expr === undefined) return undefined;
+    const p = compileWith(expr, mode, true, program.parameters);
+    if (p.ok || p.decline || p.code !== code) return undefined;
+    return { expr, message: `${p.code}: ${p.message}` };
+  };
+}
+
+function interpreterPredicate(mode: Mode, point: Inputs): Predicate {
+  return (ce, program) => {
+    const expr = boxProgram(ce, program);
+    if (expr === undefined) return undefined;
+    const inputs = inputsOf(program, expr);
+    if (!pointInType(inputs, point, mode)) return undefined;
+    const p = compileWith(expr, mode, true, program.parameters);
+    if (!p.ok) return undefined;
+    const a = p.run(point);
+    if (a.kind !== 'value') return undefined;
+    let expected: Complex | string;
+    try {
+      expected = interpret(ce, program, expr, point);
+    } catch {
+      return undefined;
+    }
+    if (compareWithInterpreter(a.value, expected, mode) !== 'disagree')
+      return undefined;
+    return {
+      expr,
+      input: Object.fromEntries(inputs.map(([n]) => [n, point[n]])),
+      profileCode: p.code,
+      profileValue: a.value,
+      interpreterValue: expected,
+    };
+  };
+}
+
+/** The paths of the nodes that a shrink may replace: not a head, not a
+ *  quoted string, not a parameter of a `Function`. */
+function shrinkPaths(json: Json, path: number[] = [], out: number[][] = []) {
+  out.push(path);
+  if (!Array.isArray(json)) return out;
+  const head = json[0];
+  const end = head === 'Function' ? 2 : json.length;
+  for (let i = 1; i < end; i++) {
+    const child = json[i];
+    if (typeof child === 'string' && child.startsWith("'")) continue;
+    if (head === 'Limits' || head === 'Element') {
+      if (i === 1) continue;
+    }
+    shrinkPaths(child, [...path, i], out);
+  }
+  return out;
+}
+
+function atPath(json: Json, path: readonly number[]): Json {
+  let node = json;
+  for (const i of path) node = (node as Json[])[i];
+  return node;
+}
+
+function replaceAt(json: Json, path: readonly number[], value: Json): Json {
+  if (path.length === 0) return value;
+  const copy = [...(json as Json[])];
+  copy[path[0]] = replaceAt(copy[path[0]], path.slice(1), value);
+  return copy;
+}
+
+const VARIADIC = new Set([
+  'Add',
+  'Multiply',
+  'Min',
+  'Max',
+  'And',
+  'Or',
+  'Block',
+]);
+
+/** The replacements of a node, smaller ones first. */
+function candidates(node: Json, symbol: string): Json[] {
+  const result: Json[] = [];
+  if (Array.isArray(node)) {
+    const head = node[0];
+    if (
+      head !== 'Limits' &&
+      head !== 'Element' &&
+      head !== 'Range' &&
+      head !== 'Typed'
+    )
+      for (const op of node.slice(1))
+        if (!(typeof op === 'string' && op.startsWith("'"))) result.push(op);
+    if (typeof head === 'string' && VARIADIC.has(head) && node.length > 3)
+      for (let i = 1; i < node.length; i++)
+        result.push([...node.slice(0, i), ...node.slice(i + 1)]);
+    result.push(symbol, 1, 2, 0.5);
+  } else if (typeof node === 'string' && node !== symbol) {
+    result.push(symbol, 1);
+  } else if (typeof node === 'number' && node !== 1) {
+    result.push(1);
+  }
+  return result;
+}
+
+/** The smallest program found from `program` for which `predicate` holds.
+ *  Each step replaces one node by a smaller candidate, root first. */
+function shrink(
+  ce: ComputeEngine,
+  program: Program,
+  predicate: Predicate,
+  budget: number
+): { program: Program; witness: Witness } | undefined {
+  let calls = 0;
+  const test = (p: Program) => {
+    calls += 1;
+    try {
+      return scoped(ce, () => predicate(ce, p));
+    } catch {
+      return undefined;
+    }
+  };
+  let witness = test(program);
+  if (witness === undefined) return undefined;
+  let current = program;
+  const symbol = program.parameters?.[0] ?? 'x';
+  let improved = true;
+  while (improved && calls < budget) {
+    improved = false;
+    const root = current.parameters !== undefined ? [1] : [];
+    const base =
+      current.parameters !== undefined
+        ? atPath(current.json, [1])
+        : current.json;
+    for (const sub of shrinkPaths(base)) {
+      const path = [...root, ...sub];
+      const node = atPath(current.json, path);
+      const size = nodeCount(current.json);
+      for (const candidate of candidates(node, symbol)) {
+        const json = replaceAt(current.json, path, candidate);
+        if (
+          nodeCount(json) >= size &&
+          !(
+            nodeCount(json) === size &&
+            typeof node === 'string' &&
+            typeof candidate === 'number'
+          )
+        )
+          continue;
+        if (calls >= budget) break;
+        const next: Program = { ...current, json };
+        const w = test(next);
+        if (w !== undefined) {
+          current = next;
+          witness = w;
+          improved = true;
+          break;
+        }
+      }
+      if (improved || calls >= budget) break;
+    }
+  }
+  return { program: current, witness };
+}
+
+/**
+ * Runs the tester and returns its result. `log` receives a line of progress
+ * per 500 programs.
+ */
+export async function runFuzz(
+  options: FuzzOptions,
+  log: (line: string) => void = () => {}
+): Promise<FuzzResult> {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    return await runFuzzQuietly(options, log);
+  } finally {
+    console.warn = warn;
+  }
+}
+
+/**
+ * The number of programs compiled on one engine, and between two returns
+ * to the event loop. The engine makes `WeakRef`s, and a `WeakRef` keeps its
+ * target alive until the end of the synchronous job that made it, so a run
+ * that never returns to the event loop keeps every engine and every boxed
+ * expression: 50,000 programs in one job exhausted a heap of 4 GB.
+ */
+const ENGINE_PROGRAMS = 200;
+
+async function runFuzzQuietly(
+  options: FuzzOptions,
+  log: (line: string) => void
+): Promise<FuzzResult> {
+  // A new engine every `ENGINE_PROGRAMS` programs, after a return to the
+  // event loop (see `ENGINE_PROGRAMS`).
+  let ce = makeEngine();
+  const classes: Record<string, number> = {
+    'both compile': 0,
+    'both decline': 0,
+    'profile declines only': 0,
+    'existing declines only': 0,
+    'profile failure': 0,
+  };
+  const points = { inType: 0, outOfType: 0 };
+  const interpreterPoints = { compared: 0, skipped: 0, noNumber: 0 };
+  const declines = new Map<string, { count: number; example: string }>();
+  const existingMessages = new Map<string, number>();
+  const findings = new Map<string, Finding>();
+  let programs = 0;
+  let invalid = 0;
+
+  const record = (
+    cls: Finding['class'],
+    program: Program,
+    mode: Mode,
+    predicate: Predicate,
+    shapeHint: string
+  ) => {
+    // A shape seen before is counted with no shrink: its first minimal
+    // program stands for it. The hint is the shape of the original program.
+    const hintKey = `${cls}|hint|${shapeHint}`;
+    const known = findings.get(hintKey);
+    if (known !== undefined) {
+      known.count += 1;
+      return;
+    }
+    const shrunk = shrink(ce, program, predicate, options.shrink);
+    if (shrunk === undefined) return;
+    const shape = shapeOf(shrunk.witness.expr.json);
+    const key = `${cls}|${shape}`;
+    const existing = findings.get(key);
+    if (existing !== undefined) {
+      existing.count += 1;
+      findings.set(hintKey, existing);
+      return;
+    }
+    const fresh = makeEngine();
+    const freshEngine =
+      scoped(fresh, () => predicate(fresh, shrunk.program)) !== undefined;
+    const w = shrunk.witness;
+    const finding: Finding = {
+      class: cls,
+      shape,
+      count: 1,
+      id: program.id,
+      mode,
+      original: program.json,
+      minimal: shrunk.program.json,
+      canonical: w.expr.json,
+      parameters: program.parameters,
+      input: w.input,
+      profileCode: w.profileCode,
+      existingCode: w.existingCode,
+      profileValue: w.profileValue,
+      existingValue: w.existingValue,
+      profileShape: w.profileShape,
+      existingShape: w.existingShape,
+      interpreterValue: w.interpreterValue,
+      message: w.message,
+      freshEngine,
+    };
+    findings.set(key, finding);
+    findings.set(hintKey, finding);
+  };
+
+  for (const seed of options.seeds) {
+    for (let index = 0; index < options.count; index++) {
+      if (programs > 0 && programs % ENGINE_PROGRAMS === 0) {
+        await new Promise((resolve) => setImmediate(resolve));
+        ce = makeEngine();
+      }
+      const program = generateProgram(seed, index, options);
+      programs += 1;
+      if (programs % 500 === 0)
+        log(
+          `${programs} programs, ${new Set(findings.values()).size} findings`
+        );
+      const deferred: (() => void)[] = [];
+      scoped(ce, () => {
+        const expr = boxProgram(ce, program);
+        if (expr === undefined) {
+          invalid += 1;
+          return;
+        }
+        const shapeHint = shapeOf(expr.json);
+        const inputs = inputsOf(program, expr);
+        let profileAdmits: Mode | undefined;
+        for (const mode of options.modes) {
+          const p = compileWith(expr, mode, true, program.parameters);
+          const e = compileWith(expr, mode, false, program.parameters);
+          if (!p.ok && !p.decline) {
+            classes['profile failure'] += 1;
+            const code = p.code;
+            deferred.push(() =>
+              record(
+                'profile-failure',
+                program,
+                mode,
+                profileFailurePredicate(mode, code),
+                shapeHint
+              )
+            );
+            continue;
+          }
+          if (!p.ok) {
+            const message = normalizeMessage(p.message);
+            const entry = declines.get(message);
+            if (entry === undefined)
+              declines.set(message, {
+                count: 1,
+                example: expr.toString().slice(0, 120),
+              });
+            else entry.count += 1;
+            classes[e.ok ? 'profile declines only' : 'both decline'] += 1;
+            continue;
+          }
+          profileAdmits ??= mode;
+          if (!e.ok) {
+            classes['existing declines only'] += 1;
+            const message = normalizeMessage(e.message);
+            existingMessages.set(
+              message,
+              (existingMessages.get(message) ?? 0) + 1
+            );
+            deferred.push(() =>
+              record(
+                'existing-declines',
+                program,
+                mode,
+                existingDeclinesPredicate(mode),
+                shapeHint
+              )
+            );
+            continue;
+          }
+          classes['both compile'] += 1;
+          const rng = makeRng(mixSeed(seed, index, 2));
+          let inTypeDifference: Inputs | undefined;
+          let outOfTypeDifference: Inputs | undefined;
+          let shapeDifference: Inputs | undefined;
+          for (const point of gridPoints(inputs, mode, options.points, rng)) {
+            const isIn = pointInType(inputs, point, mode);
+            if (isIn) points.inType += 1;
+            else points.outOfType += 1;
+            if (isIn && inTypeDifference !== undefined) continue;
+            if (
+              !isIn &&
+              (outOfTypeDifference !== undefined ||
+                inTypeDifference !== undefined)
+            )
+              continue;
+            const a = p.run(point);
+            const b = e.run(point);
+            if (sameOutcome(a, b)) {
+              if (
+                isIn &&
+                shapeDifference === undefined &&
+                differentRawShape(a, b)
+              )
+                shapeDifference = point;
+              continue;
+            }
+            if (isIn) inTypeDifference = point;
+            else outOfTypeDifference = point;
+          }
+          if (inTypeDifference !== undefined) {
+            const point = { ...DEFAULT_POINT, ...inTypeDifference };
+            deferred.push(() =>
+              record(
+                'difference',
+                program,
+                mode,
+                differencePredicate(mode, point, 'value'),
+                shapeHint
+              )
+            );
+          } else if (shapeDifference !== undefined) {
+            const point = { ...DEFAULT_POINT, ...shapeDifference };
+            deferred.push(() =>
+              record(
+                'shape',
+                program,
+                mode,
+                differencePredicate(mode, point, 'shape'),
+                shapeHint
+              )
+            );
+          } else if (outOfTypeDifference !== undefined) {
+            // Not a difference under the caveats: counted by the shape of
+            // the program, not shrunk.
+            const key = `out-of-type|${shapeHint}`;
+            const known = findings.get(key);
+            if (known !== undefined) known.count += 1;
+            else {
+              const a = p.run(outOfTypeDifference);
+              const b = e.run(outOfTypeDifference);
+              findings.set(key, {
+                class: 'out-of-type',
+                shape: shapeHint,
+                count: 1,
+                id: program.id,
+                mode,
+                original: program.json,
+                minimal: program.json,
+                canonical: expr.json,
+                parameters: program.parameters,
+                input: outOfTypeDifference,
+                profileCode: p.code,
+                existingCode: e.code,
+                profileValue:
+                  a.kind === 'value' ? a.value : `throws ${a.message}`,
+                existingValue:
+                  b.kind === 'value' ? b.value : `throws ${b.message}`,
+                freshEngine: true,
+              });
+            }
+          }
+          if (options.interp > 0 && profileAdmits === mode) {
+            const ordinaryPoints = gridPoints(
+              inputs,
+              mode,
+              options.points,
+              rng
+            ).filter(
+              (point) =>
+                pointInType(inputs, point, mode) &&
+                Object.values(point).every(ordinary)
+            );
+            const step = Math.max(
+              1,
+              Math.floor(ordinaryPoints.length / options.interp)
+            );
+            for (
+              let i = 0, n = 0;
+              i < ordinaryPoints.length && n < options.interp;
+              i += step, n++
+            ) {
+              const point = ordinaryPoints[i];
+              const a = p.run(point);
+              if (a.kind !== 'value') continue;
+              let expected: Complex | string;
+              try {
+                expected = interpret(ce, program, expr, point);
+              } catch {
+                interpreterPoints.skipped += 1;
+                continue;
+              }
+              interpreterPoints.compared += 1;
+              const verdict = compareWithInterpreter(a.value, expected, mode);
+              if (verdict === 'no-number') interpreterPoints.noNumber += 1;
+              if (verdict !== 'disagree') continue;
+              const shrinkPoint = { ...DEFAULT_POINT, ...point };
+              deferred.push(() =>
+                record(
+                  'interpreter',
+                  program,
+                  mode,
+                  interpreterPredicate(mode, shrinkPoint),
+                  shapeHint
+                )
+              );
+              break;
+            }
+          }
+        }
+      });
+      for (const f of deferred) f();
+    }
+  }
+
+  const sorted = (m: Map<string, number>) =>
+    [...m.entries()]
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+      .map(([message, count]) => ({ message, count }));
+
+  return {
+    options,
+    programs,
+    invalid,
+    classes,
+    points,
+    interpreterPoints,
+    declines: [...declines.entries()]
+      .sort((a, b) => b[1].count - a[1].count || (a[0] < b[0] ? -1 : 1))
+      .map(([message, { count, example }]) => ({ message, count, example })),
+    existingDeclineMessages: sorted(existingMessages),
+    findings: [...new Set(findings.values())].sort((a, b) =>
+      a.class === b.class ? b.count - a.count : a.class < b.class ? -1 : 1
+    ),
+  };
+}
+
+//
+// Output
+//
+
+/** A value as text: `-0`, `NaN` and the infinities spelled out. */
+export function formatValue(v: unknown): string {
+  if (typeof v === 'number') return Object.is(v, -0) ? '-0' : String(v);
+  if (Array.isArray(v)) return `[${v.map(formatValue).join(', ')}]`;
+  if (isComplex(v))
+    return `{re: ${formatValue(v.re)}, im: ${formatValue(v.im)}}`;
+  if (typeof v === 'object' && v !== null)
+    return `{${Object.entries(v)
+      .map(([k, x]) => `${k}: ${formatValue(x)}`)
+      .join(', ')}}`;
+  return String(v);
+}
+
+function jsonReplacer(_key: string, v: unknown): unknown {
+  if (typeof v === 'number' && (!Number.isFinite(v) || Object.is(v, -0)))
+    return formatValue(v);
+  return v;
+}
+
+export function writeJson(file: string, result: FuzzResult): void {
+  writeFileSync(file, JSON.stringify(result, jsonReplacer, 2) + '\n');
+}
+
+const TITLES: Readonly<Record<Finding['class'], string>> = {
+  'difference':
+    'Differences between the profile and the existing compiler (inputs in type)',
+  'shape':
+    'Differences of the shape the emitted codes make, with the same value after run() (inputs in type)',
+  'profile-failure': 'Failures of the profile that are not declines',
+  'existing-declines':
+    'Programs that the existing compiler declines and the profile admits',
+  'interpreter':
+    'Disagreements of the profile with the interpreter (ordinary inputs)',
+  'out-of-type':
+    'Differences at inputs outside their type only (not differences under the caveats)',
+};
+
+export function printResult(result: FuzzResult, quiet: boolean): string {
+  const lines: string[] = [];
+  const o = result.options;
+  lines.push(
+    `seeds ${o.seeds.join(',')}; ${result.programs} programs (${result.invalid} not valid after boxing); ` +
+      `depth ${o.depth}, size ${o.size}, points ${o.points}, modes ${o.modes.join(',')}`
+  );
+  lines.push(`declarations: ${DECLARATIONS}`);
+  lines.push('');
+  lines.push('Classes (program and mode):');
+  for (const [name, n] of Object.entries(result.classes))
+    lines.push(`  ${name}: ${n}`);
+  lines.push(
+    `Points compared: ${result.points.inType} in type, ${result.points.outOfType} outside the type`
+  );
+  lines.push(
+    `Interpreter: ${result.interpreterPoints.compared} points compared, ${result.interpreterPoints.skipped} skipped (the interpreter threw), ` +
+      `${result.interpreterPoints.noNumber} where the interpreter has no finite number and compiled code has one (a pole: not reported)`
+  );
+  const byClass = (c: Finding['class']) =>
+    result.findings.filter((f) => f.class === c);
+  for (const c of Object.keys(TITLES) as Finding['class'][]) {
+    const list = byClass(c);
+    lines.push(
+      `  ${TITLES[c]}: ${list.length} shapes, ${list.reduce((s, f) => s + f.count, 0)} programs`
+    );
+  }
+  lines.push('');
+  lines.push('Declines of the profile, most frequent first:');
+  for (const d of result.declines.slice(0, 30))
+    lines.push(
+      `  ${String(d.count).padStart(6)}  ${d.message}    e.g. ${d.example}`
+    );
+  if (quiet) return lines.join('\n');
+  for (const c of Object.keys(TITLES) as Finding['class'][]) {
+    const list = byClass(c);
+    if (list.length === 0) continue;
+    lines.push('');
+    lines.push(`## ${TITLES[c]}`);
+    for (const f of list) {
+      lines.push('');
+      lines.push(
+        `- shape ${f.shape}  (${f.count} programs; first ${f.id}, mode ${f.mode}${f.freshEngine ? '' : '; NOT reproduced in a new engine'})`
+      );
+      lines.push(`  minimal:   ${JSON.stringify(f.minimal)}`);
+      lines.push(`  canonical: ${JSON.stringify(f.canonical)}`);
+      if (f.input !== undefined)
+        lines.push(`  input:     ${formatValue(f.input)}`);
+      if (f.profileCode !== undefined)
+        lines.push(`  profile:   ${f.profileCode.replace(/\s*\n\s*/g, ' ')}`);
+      if (f.existingCode !== undefined)
+        lines.push(`  existing:  ${f.existingCode.replace(/\s*\n\s*/g, ' ')}`);
+      if (f.profileValue !== undefined)
+        lines.push(`  profile value:  ${formatValue(f.profileValue)}`);
+      if (f.existingValue !== undefined)
+        lines.push(`  existing value: ${formatValue(f.existingValue)}`);
+      if (f.profileShape !== undefined || f.existingShape !== undefined)
+        lines.push(
+          `  shape of the code: profile ${f.profileShape}, existing ${f.existingShape}`
+        );
+      if (f.interpreterValue !== undefined)
+        lines.push(`  interpreter:    ${formatValue(f.interpreterValue)}`);
+      if (f.message !== undefined)
+        lines.push(`  message:   ${f.message.slice(0, 200)}`);
+      if (c === 'interpreter' && JUMP_HEADS.test(f.shape))
+        lines.push(
+          '  note:      reads a discontinuous operator: the precision caveat of compiled code can apply'
+        );
+    }
+  }
+  return lines.join('\n');
+}
+
+/** The heads whose value jumps: a rounding of a double next to a jump can
+ *  differ from the exact value. */
+const JUMP_HEADS =
+  /\b(Mod|Floor|Ceil|Round|Sign|Less|LessEqual|Greater|GreaterEqual|Equal|NotEqual)\(/;
+
+async function main(): Promise<void> {
+  const { values } = parseArgs({
+    options: {
+      seed: { type: 'string', default: '1' },
+      count: { type: 'string' },
+      depth: { type: 'string' },
+      size: { type: 'string' },
+      points: { type: 'string' },
+      interp: { type: 'string' },
+      shrink: { type: 'string' },
+      modes: { type: 'string' },
+      json: { type: 'string' },
+      quiet: { type: 'boolean', default: false },
+    },
+  });
+  const int = (s: string | undefined, d: number) =>
+    s === undefined ? d : Number.parseInt(s, 10);
+  const options: FuzzOptions = {
+    seeds: values.seed!.split(',').map((s) => Number.parseInt(s, 10)),
+    count: int(values.count, DEFAULT_OPTIONS.count),
+    depth: int(values.depth, DEFAULT_OPTIONS.depth),
+    size: int(values.size, DEFAULT_OPTIONS.size),
+    points: int(values.points, DEFAULT_OPTIONS.points),
+    interp: int(values.interp, DEFAULT_OPTIONS.interp),
+    shrink: int(values.shrink, DEFAULT_OPTIONS.shrink),
+    modes:
+      values.modes === undefined
+        ? DEFAULT_OPTIONS.modes
+        : (values.modes.split(',') as Mode[]),
+  };
+  const result = await runFuzz(options, (line) =>
+    process.stderr.write(line + '\n')
+  );
+  process.stdout.write(printResult(result, values.quiet!) + '\n');
+  if (values.json !== undefined) writeJson(values.json, result);
+}
+
+if (/js-profile-fuzz\.ts$/.test(process.argv[1] ?? '')) void main();

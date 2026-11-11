@@ -289,3 +289,56 @@ a free name with no numeric type 179, `Sum` 169, an input whose list type
 is not `list<real>` or `list<integer>` (tensor, `list<number>`, matrix, …)
 317 over seven messages, `Integrate` 107, parameters with no declared type
 105.
+
+## Random differential tester
+
+`scripts/js-profile-fuzz.ts` generates random programs from a seed, boxes
+each one with `ce.box()` (canonical), and compiles it in the `strict` and
+`complex` modes twice: with `profile: 'numeric-kernel', fallback: false`,
+and with the existing compiler with `cse: false, constantFold: false,
+fallback: false`. When both compile, it runs both on a grid of inputs (at
+most 300 points per program and mode) and compares the results with
+`Object.is`, both parts of a complex value, and the shape (a number or
+`{re, im}`, a throw). `run()` turns `{re, im: 0}` into a number, so the
+tester also reads the value that each emitted code makes before that
+step (the `rawCall` of an expression runner; for a `Function` literal its
+source from `toString()`, evaluated again with its `SYS` helpers): a
+difference of that shape with the same value after `run()` is its own
+class. A difference at an input outside its type (`±∞` or
+`NaN` for `real`, a negative number for `real<0..>`) is counted apart,
+because compiled code is unspecified there. On three ordinary inputs per
+program (finite, in type, magnitude from 1e-6 to 1e6) it also compares the
+profile with the interpreter within 1e-7 relative; a point where the
+interpreter has no finite number and compiled code has one is counted, not
+reported. Each finding is shrunk while it stays, and deduplicated by the
+shape of its canonical form (each leaf written `_`). The vocabulary, the
+grids and what is not generated yet are in the header of the script.
+`test/compute-engine/js-profile-fuzz.test.ts` runs 3 seeds of 150 programs
+and lists the known classes in an allow-list with their references.
+
+The commands, as run on `6ebc2b1574cd75487533e999288fe7339ea71228`
+(50,000 programs each):
+
+```sh
+timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
+  --seed 11,12,13,14,15 --count 10000 --json <file>
+timeout -k 30 1500 npx tsx scripts/js-profile-fuzz.ts \
+  --seed 21,22,23,24,25 --count 10000 --json <file>
+```
+
+How to read the output. The first block counts each program and mode by
+class: both compile, both decline, the profile declines only, the
+existing compiler declines only, a failure of the profile that is not a
+decline (a `compile-error`). Then the number of shapes and programs per
+finding class, and the 30 most frequent decline messages of the profile
+with names and numbers replaced. Then one entry per shape: the minimal
+program as written and in canonical form, the mode, the input, both codes
+and both values (or the message). The sections, in order of value:
+differences between the two compilers at inputs in type (a break of the
+contract of the profile); differences of the shape that the codes make;
+failures of the profile; programs that the
+existing compiler declines and the profile admits (check that the value
+is right); disagreements with the interpreter (mostly the precision
+caveat next to a jump or a pole; an entry with a discontinuous operator
+says so); differences at inputs outside their type only (not differences
+under the caveats).
