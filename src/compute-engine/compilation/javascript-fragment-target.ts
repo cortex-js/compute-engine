@@ -22,6 +22,7 @@ import {
   isNonRealNumber,
 } from '../../common/type/utils.js';
 import { withoutNaNMember } from './compile-real-analysis.js';
+import { realPowerBranchTerms } from '../numerics/real-power.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
   JavaScriptTarget,
@@ -1038,6 +1039,38 @@ function structuredFunctionRule(
  *   `31.622776601683793` folded and `31.622776601683796` as a product), and
  *   no rule of the language makes `Math.pow(b, 2)` equal to `b * b`: both
  *   forms decline a literal base.
+ * - An exponent that is not a number literal (`s^(d/2)`): the handler
+ *   writes `_SYS.pow(b, e)` (the power of the interpreter for a real base
+ *   and a real exponent, the function `pow`) when both operands are real
+ *   and the node is not on the complex lane. In the `strict` mode the node
+ *   is on the complex lane when the type of the node, without its
+ *   infinities and `NaN`, is one of numbers that are not real
+ *   (`resultIsComplexValued()`); in the `complex` mode also when that type
+ *   is not real, as the `number` of `x^y` (the handler writes `_SYS.cpow`
+ *   there, `resultIsWideUnderComplexDiscipline()`). The rule declines
+ *   these, a complex operand, a base that is a symbol named
+ *   `ExponentialE`, and an exponent with no unknown (every symbol in it
+ *   has a value: a constant, an assigned symbol, also a local or a
+ *   parameter that has one in its scope). The compiler replaces some of
+ *   these by their value (`knownExponentPower()`: an exponent that reads
+ *   an assigned symbol and has a value that is not an integer) and then
+ *   writes the code of a literal exponent; the rule declines all of them,
+ *   which is wider. A number literal base is admitted: with an
+ *   exponent that is not a literal, the handler does not fold it.
+ * - A float literal exponent that is not an integer (`ln(u)^1.6`): for a
+ *   real base that the engine does not prove non-negative, the handler
+ *   reads the exponent as the interpreter does (`negativeBaseFloatPower()`,
+ *   with `realPowerBranchTerms()`), and when its recovered denominator `q`
+ *   is odd writes the real root, `Math.pow(Math.abs(b), e)`, negated for a
+ *   negative base when the recovered numerator is odd. This comes before
+ *   the complex promotion, in both modes, and the parent reads the node as
+ *   real (`isComplexValued()`). The route writes `abs-pow` (an even
+ *   numerator) or `signed-pow` (an odd one). It declines: a base that the
+ *   engine proves non-negative (`Math.pow(b, e)`), an exponent with an even
+ *   or no recovered denominator (`Math.pow`, or `_SYS.cpow` in the
+ *   `complex` mode), the exponent `2/3` (`_SYS.pow2(Math.cbrt(b))`,
+ *   `realRadicalPower()`), a complex base, and a finite number literal base
+ *   (folded, as above). An exact exponent (`8/5`) has no form.
  *
  * The rule records the form of each node that it admits
  * (`StructuredForm`); the lowering reads that record.
@@ -1055,7 +1088,8 @@ function structuredPowerRule(
           node,
           'signature',
           'Power is in the structured route only with the literal exponent 2 ' +
-            'or 1.5, or with the base ExponentialE'
+            'or 1.5, a float literal exponent that is not an integer, an ' +
+            'exponent that is not a number literal, or with the base ExponentialE'
         );
       const realType = isSubtype(finitePartOfType(node.type.type), 'real');
       if (form === 'exp') {
@@ -1088,12 +1122,42 @@ function structuredPowerRule(
         ]);
       }
       const [base, exponent] = operandFacts(node, scope, context, w);
-      if (base.type.kind === 'boolean')
+      if (base.type.kind === 'boolean' || exponent.type.kind === 'boolean')
         return w.refuse(
           node,
           'signature',
           'Power with a boolean operand is not in the structured route'
         );
+      if (form === 'variable') {
+        const type = finitePartOfType(node.type.type);
+        const refusal =
+          base.type.kind === 'complex' || exponent.type.kind === 'complex'
+            ? `Power with a complex operand and an exponent that is not a ` +
+              `number literal is not in the structured route`
+            : isSymbol(node.op1, 'ExponentialE')
+              ? `Power of a symbol ExponentialE that a scope declares is not ` +
+                `in the structured route`
+              : node.op2.unknowns.length === 0
+                ? `the exponent ${node.op2.toString()} of Power has no ` +
+                  `unknown (each symbol in it has a value), and is not in ` +
+                  `the structured route: the existing compiler can replace ` +
+                  `such an exponent by its value (knownExponentPower())`
+                : mode === 'strict' && isNonRealNumber(type)
+                  ? `the power ${node.toString()} has the type ` +
+                    `${node.type.toString()}, which is not real: the existing ` +
+                    `emitter writes the complex power`
+                  : mode === 'complex' && !isSubtype(type, 'real')
+                    ? `the power ${node.toString()} has the type ` +
+                      `${node.type.toString()}, which is not real, in the ` +
+                      `complex mode: the existing emitter writes the complex power`
+                    : undefined;
+        if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
+        forms.set(node, 'pow');
+        return w.valueFacts(node, { kind: 'real' }, [
+          w.convert(base, { kind: 'real' })!,
+          w.convert(exponent, { kind: 'real' })!,
+        ]);
+      }
       const literal = node.op1;
       if (isNumber(literal) && literal.im === 0 && Number.isFinite(literal.re))
         return w.refuse(
@@ -1103,6 +1167,32 @@ function structuredPowerRule(
             `structured route: the existing emitter folds it to the literal ` +
             `Math.pow(b, e), which can differ from the product it writes`
         );
+      if (form === 'float') {
+        const value = isNumber(node.op2) ? node.op2.re : NaN;
+        const terms = realPowerBranchTerms(undefined, value);
+        const refusal =
+          base.type.kind === 'complex'
+            ? `Power with a float exponent and a complex base is not in the ` +
+              `structured route`
+            : node.op1.isNonNegative === true
+              ? `Power of ${node.op1.toString()}, which the engine proves ` +
+                `non-negative, with the float exponent ${value} is not in the ` +
+                `structured route: the existing emitter writes Math.pow`
+              : terms === undefined || terms[1] % 2 === 0
+                ? `Power with the float exponent ${value}, which the ` +
+                  `interpreter does not read as a rational with an odd ` +
+                  `denominator, is not in the structured route`
+                : value === 2 / 3
+                  ? `Power with the exponent 2/3 is not in the structured ` +
+                    `route: the existing emitter writes the square of the cube root`
+                  : undefined;
+        if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
+        forms.set(node, terms![0] % 2 !== 0 ? 'signed-pow' : 'abs-pow');
+        return w.valueFacts(node, { kind: 'real' }, [
+          w.convert(base, { kind: 'real' })!,
+          w.convert(exponent, { kind: 'real' })!,
+        ]);
+      }
       if (form === 'square') {
         // The existing emitter reads through a square root under an even
         // power (`realRadicalPower()` in `javascript-target.ts`): for a

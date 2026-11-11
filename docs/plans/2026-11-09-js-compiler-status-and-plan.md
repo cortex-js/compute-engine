@@ -675,6 +675,17 @@ function body. `flips`, `hasmove`, `choosecell` and `channel` compile: 18 of
 a block with statements as the value of an `If`; `legal` and `stones`, a
 comprehension with a guard; `score`, the call of `stones`.
 
+**`Power` for `M` and `J` (2026-11-10).** Three operations, `pow`, `abs-pow`
+and `signed-pow`, each for one branch of the existing `Power` handler; the
+table of branches is in
+[the emission rewrites](2026-11-09-js-pilot-emission-rewrites.md). `M` and
+`J` compile in the `strict` mode: 20 of 35 prelude functions. The 15 others:
+tuples and the program-like functions of `apollonian-gasket` (7), a guarded
+comprehension (`legal`, `stones`, `score`), `play`, `c`, `shade` (`Rgb`),
+`step` (a parallel loop), `life` (`RotateLeft`). The user chose on
+2026-11-10 to move a consumer next and not to add tuples
+([proposal](2026-11-10-js-profile-first-consumer.md)).
+
 ### Step 8 — Add optimizations only with measured justification
 
 Once stable value/region/effect contracts exist, consider pure-operation CSE

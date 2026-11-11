@@ -106,12 +106,34 @@ row of the route:
 | `closedExactJump()` (`compile-folding.ts`) | Folds a node of `JUMP_FUNCTIONS` with no unknowns (every symbol a constant or a captured binding) with its exact value, also with `constantFold: false`. | A `Less`, `LessEqual`, `Equal`, `Mod` or `Floor` with no unknowns is refused (`closedJumpRefusal()`); the other heads of the route are not in `JUMP_FUNCTIONS` (`Min`, `Max`, `Abs` are not; `Sign` is not in the route). |
 | `Mod` | `((a) % (b))` when both operands are non-negative integers and the divisor is the literal 1, or both are literals or of types in `integer<0..2^53 - 1>`; `((a - Math.floor(a)) % 1)` or `_SYS.fract(a)` for another operand with the divisor 1; `_SYS.floorMod(a, b)` otherwise. | `_SYS.floorMod` for the third case; the first two are refused. The `Mod` nodes of the heat and traffic preludes have an unbounded `integer` dividend and stay in the third case. |
 
-The forms of `Power` that the census also needs and the route declines:
-`ln(…)^1.6` (`julia-set`, the real-root convention of a float exponent with
-an odd recovered denominator: `realPowerExponent()` and
-`negativeBaseFloatPower()` write `Math.pow(Math.abs(v), 1.6)` with the sign
-rule) and `s^(d/2)` (`multibrot`, a variable exponent: `_SYS.pow(s, e)` in
-the `strict` mode). Both functions also need `Break`.
+The two other forms of `Power` that the census needs are admitted since
+2026-11-10: `ln(…)^1.6` (`julia-set`) and `s^(d/2)` (`multibrot`). The
+branches of the `Power` handler of the existing emitter
+(`javascript-target.ts`), in its order, and what the route does:
+
+| Branch of the existing handler | Emission | Structured route |
+| --- | --- | --- |
+| Before the handler, `knownExponentPower()`: an exponent that reads an assigned symbol, with a value that is not an integer | the exponent replaced by its value | Declined, and wider: every exponent with no unknown. |
+| A complex base, an integer literal exponent 2 to 8 | a chain of squares and products | 2 admitted (`square`); 3 to 8 declined. |
+| A complex exponent, the base `ExponentialE` | `_SYS.cexppi`, `_SYS.cexp` | An exponent that is a name: admitted (`exp`); others declined. |
+| Another complex base or exponent | `_SYS.cpow` | Declined. |
+| Two finite literals | folded | Declined. |
+| `realPowerExponent()`: the value `2/3` | `_SYS.pow2(Math.cbrt(b))` | Declined. |
+| A float literal exponent, not an integer; a base not proved non-negative; recovered `p/q` with `q` odd, `p` even | `Math.pow(Math.abs(v), e)` | Admitted: `abs-pow` (`J`). |
+| The same with `p` odd | `(v < 0 ? -Math.pow(…) : Math.pow(…))` | Admitted: `signed-pow`. |
+| An exact rational exponent with an odd denominator (`8/5`) | as the two rows above | Declined. |
+| A node on the complex lane (`resultIsComplexValued()`, `promotesToComplexLane()`, `resultIsWideUnderComplexDiscipline()`) | `_SYS.cpow` | Declined: in the `complex` mode `x^y` has the type `number`, so `M` declines there. |
+| `realRadicalPower()`: 1.5 with a base proved non-negative; 2.5; a `Sqrt` base | `(b * Math.sqrt(b))`, `_SYS.pow3h`, `_SYS.pow5h` | 1.5 admitted; the others declined. |
+| The exponent 2 | `(b * b)`, `_SYS.pow2` | Admitted (`square`). |
+| The base `ExponentialE`, a real exponent | `Math.exp(e)` | Admitted (`exp`). |
+| An integer exponent 3 to 5; −2; 0.5; −0.5; 1/3 with a base proved non-negative | `_SYS.pow3` …, `(1 / b / b)`, `Math.sqrt`, `Math.cbrt` | Declined. |
+| An exponent that is not a finite literal, both operands real, not on the complex lane | `_SYS.pow(b, e)` | Admitted: `pow` (`M`), when the exponent has an unknown. |
+| Another constant exponent | `Math.pow(b, e)` | Declined. |
+
+In the `complex` mode the route admits a loop that sums `x^1.4` into a local
+of a function with the result type `real`; the existing compiler throws for
+it (its analysis puts the local on the complex lane), so that program has no
+existing code to compare with. Its values are the interpreter's.
 
 ### Places that the pilot vocabulary does not reach
 

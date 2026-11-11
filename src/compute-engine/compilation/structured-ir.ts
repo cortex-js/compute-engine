@@ -157,11 +157,29 @@ export type UnaryFunctionName = 'exp' | 'ln' | 'sin' | 'cos' | 'tanh' | 'abs';
 
 /**
  * The functions of two operands that the representation names, by an
- * identifier that names no target. `atan2(y, x)` is the angle of the point
- * `(x, y)` from the positive first axis, in `[-π, π]`: two real operands, a
- * real result.
+ * identifier that names no target. Each has two real operands and a real
+ * result:
+ *
+ * - `atan2(y, x)` is the angle of the point `(x, y)` from the positive first
+ *   axis, in `[-π, π]`.
+ * - `pow(b, e)` is the power `b^e` with the convention of the interpreter
+ *   for a real base and a real exponent: `0^0` is not a number; a negative
+ *   base with an exponent that is not an integer has the real root when the
+ *   interpreter reads the exponent as a rational `p/q` with an odd `q`
+ *   (`|b|^e`, negative when `p` is odd: `(-8)^(1/3)` is `-2`), and is not a
+ *   number for another exponent; every other pair has the power of the
+ *   real numbers (`(-2)^3` is `-8`, `0^(-1)` is infinity).
+ * - `abs-pow(b, e)` is `|b|^e`, the power of the absolute value of `b`, with
+ *   `|b|^0 = 1` also for `b = 0`.
+ * - `signed-pow(b, e)` is `|b|^e` when `b` is not negative, and `-(|b|^e)`
+ *   when `b < 0`: `-0` gives `0^e`.
+ *
+ * `abs-pow` and `signed-pow` are the real-root convention of the
+ * interpreter for a constant exponent `e = p/q` with an odd `q` (`p` even
+ * and `p` odd), decided when the program is made: the rule of the target
+ * chooses one of them from the exponent.
  */
-export type BinaryFunctionName = 'atan2';
+export type BinaryFunctionName = 'atan2' | 'pow' | 'abs-pow' | 'signed-pow';
 
 /**
  * An application of a function of one operand (`unary`) or two operands

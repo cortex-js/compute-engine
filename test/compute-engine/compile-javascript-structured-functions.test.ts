@@ -22,7 +22,9 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // JavaScript fragment target that the preludes of Tycho's showcases need
 // (docs/plans/2026-11-09-js-compiler-status-and-plan.md, "Prelude census
 // (2026-11-10)"): `Exp` (the canonical `Power(ExponentialE, x)`), `Sin`,
-// `Cos`, `Tanh`, `Abs`, `Arctan2`, `Ln`, and `Power` with the exponent 1.5.
+// `Cos`, `Tanh`, `Abs`, `Arctan2`, `Ln`, and `Power` with the exponent 1.5,
+// with an exponent that is not a number literal, and with a float literal
+// exponent of an odd recovered denominator.
 //
 // Each program is compiled on the structured route and compared with the
 // interpreter, and with the ordinary JavaScript compiler as a second check,
@@ -180,6 +182,18 @@ const SPECIAL = [-Infinity, -1e6, -2.5, -0.5, 0, 0.5, 1, 3, 1e6, Infinity, NaN];
 const over = (name: string, values: readonly Value[], extra: Inputs = {}) =>
   values.map((v) => ({ [name]: v, ...extra }));
 
+/** The inputs of `x^y`: a negative base (an odd and an even recovered
+ *  denominator of the exponent), `-0`, `0`, a base between 0 and 1, large
+ *  values, the exponent 0, negative and fractional exponents. No input is
+ *  `NaN`: the type `real` does not admit it, and the value of compiled code
+ *  is unspecified there (`NaN^0` is `1` in compiled code). */
+const POWER_PAIRS: Inputs[] = [-8, -2, -0, 0, 0.5, 3, 1e6].flatMap((x) =>
+  [0, -1, 0.5, 1 / 3, 2.5, -1.6, 1e-3, 300].map((y) => ({ x, y }))
+);
+
+/** The bases of a float literal exponent. */
+const FLOAT_BASES = [-1e300, -8, -2.5, -0.5, -0, 0, 0.5, 1, 3, 1e300];
+
 /** The programs of the total functions: every operand of the route. */
 const TOTAL_PROGRAMS: Program[] = [
   {
@@ -289,6 +303,69 @@ const TOTAL_PROGRAMS: Program[] = [
     name: 'Abs(x)^1.5',
     json: ['Power', ['Abs', 'x'], 1.5],
     inputs: over('x', [-4, 0, 9]),
+  },
+  // An exponent that is not a number literal: `_SYS.pow(b, e)`, the power
+  // of the interpreter for a real base and a real exponent. The node is on
+  // the complex lane in the `complex` mode when its type is not real
+  // (`DECLINED`).
+  { name: 'x^y', json: ['Power', 'x', 'y'], inputs: POWER_PAIRS },
+  {
+    name: 'x^(y/2)',
+    json: ['Power', 'x', ['Divide', 'y', 2]],
+    inputs: over('x', [-8, -0, 0, 0.25, 3], { y: 3 }),
+  },
+  {
+    name: 'p^y',
+    json: ['Power', 'p', 'y'],
+    inputs: POWER_PAIRS.filter(({ x }) => !((x as number) < 0)).map(
+      ({ x, y }) => ({ p: x, y })
+    ),
+  },
+  {
+    name: 'x^k',
+    json: ['Power', 'x', 'k'],
+    inputs: [-2.5, -0, 0, 0.5, 3, 1e200].flatMap((x) =>
+      over('k', [-3, -1, 0, 2, 3], { x })
+    ),
+  },
+  {
+    name: '2^y',
+    json: ['Power', 2, 'y'],
+    inputs: over('y', [-1074, -1, -0.5, 0, 0.5, 3, 1024]),
+  },
+  {
+    name: '(-2)^y',
+    json: ['Power', -2, 'y'],
+    inputs: over('y', [-1, 0, 1 / 3, 0.5, 3, 0.2]),
+  },
+  // A float literal exponent, not an integer, with an odd recovered
+  // denominator: the real root of a negative base, `|x|^e` (`abs-pow`, an
+  // even numerator: 1.6 is 8/5) or with the sign of the base (`signed-pow`,
+  // an odd one: 1.4 is 7/5, 0.2 is 1/5), in both modes.
+  { name: 'x^1.6', json: ['Power', 'x', 1.6], inputs: over('x', FLOAT_BASES) },
+  { name: 'x^1.4', json: ['Power', 'x', 1.4], inputs: over('x', FLOAT_BASES) },
+  {
+    name: 'x^-1.6',
+    json: ['Power', 'x', -1.6],
+    inputs: over('x', FLOAT_BASES),
+  },
+  { name: 'x^0.2', json: ['Power', 'x', 0.2], inputs: over('x', FLOAT_BASES) },
+  // The float `1/3`: the sign rule, not `Math.cbrt` (the handler reaches the
+  // real root first).
+  {
+    name: 'x^(1/3 as a float)',
+    json: ['Power', 'x', 1 / 3],
+    inputs: over('x', FLOAT_BASES),
+  },
+  {
+    name: 'x^1.6 + 1',
+    json: ['Add', ['Power', 'x', 1.6], 1],
+    inputs: over('x', [-2, 0, 3]),
+  },
+  {
+    name: 'Ln(x)^1.6',
+    json: ['Power', ['Ln', 'x'], 1.6],
+    inputs: over('x', [0.25, 1, 3, 1e6]),
   },
 ];
 
@@ -461,6 +538,19 @@ const DECLINED = new Map<string, RegExp>([
   ['Sin(z) (complex)', /Sin of a complex operand in the complex mode/],
   ['Cos(z) (complex)', /Cos of a complex operand in the complex mode/],
   ['Tanh(z) (complex)', /Tanh of a complex operand in the complex mode/],
+  // In the `complex` mode, a power with an exponent that is not a literal
+  // and a type that is not real is complex (`_SYS.cpow`).
+  [
+    'x^y (complex)',
+    /the power x\^y has the type number, which is not real, in the complex mode/,
+  ],
+  ['x^(y/2) (complex)', /the power .* has the type number, which is not real/],
+  ['(-2)^y (complex)', /the power .* has the type number, which is not real/],
+  // `Ln(x)` is complex in the `complex` mode.
+  [
+    'Ln(x)^1.6 (complex)',
+    /Power with a float exponent and a complex base is not in the structured route/,
+  ],
   // The value of `Ln(x)` is complex in the `complex` mode; `Max` has no
   // complex operand.
   [
@@ -528,6 +618,15 @@ const notANumber = (v: unknown) =>
       (Number.isNaN((v as { re: number }).re) ||
         Number.isNaN((v as { im: number }).im));
 
+/** `v` is the value of `ComplexInfinity` (two infinite parts): the
+ *  interpreter gives it for `0^e` with `e < 0`, where compiled code gives
+ *  `±Infinity` (the caveats of compiled code). */
+const complexInfinity = (v: unknown) =>
+  typeof v === 'object' &&
+  v !== null &&
+  Math.abs((v as { re: number }).re) === Infinity &&
+  Math.abs((v as { im: number }).im) === Infinity;
+
 function make(ce: ComputeEngine, program: Program): Expression {
   return ce.expr(program.json);
 }
@@ -553,6 +652,7 @@ function checkProgram(program: Program, mode: Mode) {
       close(value, expected) ||
       (notANumber(value) && notANumber(expected)) ||
       (mode === 'strict' && Number.isNaN(value) && nonReal(expected)) ||
+      (complexInfinity(expected) && Math.abs(value as number) === Infinity) ||
       (exception !== undefined && close(value, exception));
     expect([inputs, value, expected, agrees]).toEqual([
       inputs,
@@ -780,19 +880,106 @@ describe('refusals', () => {
       'x^3',
       ['Power', 'x', 3],
       'strict',
-      /Power is in the structured route only with the literal exponent 2 or 1\.5, or with the base ExponentialE/,
+      /Power is in the structured route only with the literal exponent 2 or 1\.5, a float literal exponent that is not an integer, an exponent that is not a number literal, or with the base ExponentialE/,
     ],
+    // The branches of `Power` in the existing emitter that the route
+    // declines, one row each.
+    // An integer literal exponent other than 2: `1`, the operand, the
+    // reciprocal, `_SYS.pow3` to `_SYS.pow5`, `Math.pow`.
+    // (`x^0` and `x^-1` do not reach `Power`: their canonical forms are `1`
+    // and `1/x`.)
+    ['x^5', ['Power', 'x', 5], 'strict', /only with the literal exponent 2/],
+    ['x^-2', ['Power', 'x', -2], 'strict', /only with the literal exponent 2/],
+    // The float `0.5` has the even recovered denominator 2: `Math.sqrt`.
     [
-      'x^1.6',
-      ['Power', 'x', 1.6],
+      'x^0.5',
+      ['Power', 'x', 0.5],
       'strict',
-      /only with the literal exponent 2 or 1\.5/,
+      /the float exponent 0\.5, which the interpreter does not read as a rational with an odd denominator/,
+    ],
+    // An exact rational exponent (`realPowerExponent()` reads its terms).
+    [
+      'x^(8/5)',
+      ['Power', 'x', ['Rational', 8, 5]],
+      'strict',
+      /only with the literal exponent 2/,
+    ],
+    // A float exponent with an even recovered denominator: `Math.pow` in the
+    // `strict` mode, `_SYS.cpow` in the `complex` mode.
+    [
+      'x^0.3',
+      ['Power', 'x', 0.3],
+      'strict',
+      /Power with the float exponent 0\.3, which the interpreter does not read as a rational with an odd denominator/,
     ],
     [
-      'x^y',
+      'x^0.3, complex mode',
+      ['Power', 'x', 0.3],
+      'complex',
+      /the float exponent 0\.3, which the interpreter does not read as a rational with an odd denominator/,
+    ],
+    // `realRadicalPower()`: `_SYS.pow2(Math.cbrt(x))`.
+    [
+      'x^(2/3) as a float',
+      ['Power', 'x', 2 / 3],
+      'strict',
+      /Power with the exponent 2\/3 is not in the structured route/,
+    ],
+    // A base that the engine proves non-negative: `Math.pow(p, 1.6)`.
+    [
+      'p^1.6',
+      ['Power', 'p', 1.6],
+      'strict',
+      /Power of p, which the engine proves non-negative, with the float exponent 1\.6/,
+    ],
+    [
+      'z^1.6',
+      ['Power', 'z', 1.6],
+      'strict',
+      /Power with a float exponent and a complex base/,
+    ],
+    // Two finite literals fold to `Math.pow(b, e)`.
+    [
+      'Power of a literal, exponent 1.6',
+      ['Add', 'x', ['Power', 2.5, 1.6]],
+      'strict',
+      /Power of the number literal 2\.5 is not in the structured route: the existing emitter folds it/,
+    ],
+    // A complex base or exponent: `_SYS.cpow`.
+    [
+      'z^y',
+      ['Power', 'z', 'y'],
+      'strict',
+      /Power with a complex operand and an exponent that is not a number literal/,
+    ],
+    [
+      'x^(i·y)',
+      ['Power', 'x', ['Multiply', 'ImaginaryUnit', 'y']],
+      'strict',
+      /a product with a complex operand|Power with a complex operand/,
+    ],
+    // An exponent with no unknown. The rule declines each one; the existing
+    // compiler replaces only an exponent that reads an assigned symbol and
+    // has a value that is not an integer (`knownExponentPower()`), so for
+    // these two rows it writes `_SYS.pow`.
+    [
+      'x^offset',
+      ['Power', 'x', 'offset'],
+      'strict',
+      /the exponent "?offset"? of Power has no unknown/,
+    ],
+    [
+      'x^Pi',
+      ['Power', 'x', 'Pi'],
+      'strict',
+      /the exponent pi of Power has no unknown/,
+    ],
+    // The `complex` mode, a node whose type is not real: `_SYS.cpow`.
+    [
+      'x^y, complex mode',
       ['Power', 'x', 'y'],
-      'strict',
-      /only with the literal exponent 2 or 1\.5/,
+      'complex',
+      /the power x\^y has the type number, which is not real, in the complex mode: the existing emitter writes the complex power/,
     ],
     [
       'Abs of a complex sum',
@@ -1028,6 +1215,27 @@ describe('the representation', () => {
       'unary sin pure',
       'unary tanh pure',
     ]);
+  });
+
+  test('Power with an exponent that is not a literal, and with a float literal exponent: the functions pow, abs-pow and signed-pow', () => {
+    const ce = engine();
+    const expr = ce.expr([
+      'Add',
+      ['Power', 'x', 'y'],
+      ['Power', 'x', 1.6],
+      ['Power', 'x', 1.4],
+    ]);
+    const program = lowerStructuredFragment(
+      structured().prepareStructured(expr, { ...OPTIONS, mode: 'strict' })
+    );
+    const functions = allOperations(program.root)
+      .filter((op) => op.kind === 'binary')
+      .map((op) => `${(op as { fn: string }).fn} ${op.effect}`)
+      .sort();
+    expect(functions).toEqual(['abs-pow pure', 'pow pure', 'signed-pow pure']);
+    // The base of `signed-pow` is read twice: it is bound once.
+    const result = structured().compile(ce.expr(['Power', ['Add', 'x', 1], 1.4]), OPTIONS);
+    expect(result.code.match(/_\.x/g)).toHaveLength(1);
   });
 
   test('Power(b, 1.5) is the product of the base and its square root, the base evaluated once', () => {
@@ -1468,6 +1676,17 @@ const BRANCH_ROWS: BranchRow[] = [
   ['p^1.5', ['Power', 'p', 1.5]],
   ['Abs(x)^1.5', ['Power', ['Abs', 'x'], 1.5]],
   ['m^1.5', ['Power', 'm', 1.5]],
+  ['x^y', ['Power', 'x', 'y'], { complex: /has the type number, which is not real/ }],
+  ['p^y', ['Power', 'p', 'y']],
+  ['q^x', ['Power', 'q', 'x']],
+  ['x^k', ['Power', 'x', 'k']],
+  ['m^k', ['Power', 'm', 'k']],
+  ['2.5^x', ['Power', 2.5, 'x']],
+  ['x^1.6', ['Power', 'x', 1.6]],
+  ['x^1.4', ['Power', 'x', 1.4]],
+  ['k^1.4', ['Power', 'k', 1.4]],
+  ['Abs(x)^1.4', ['Power', ['Abs', 'x'], 1.4], /which the engine proves non-negative/],
+  ['x^1.6 + z', ['Add', ['Power', 'x', 1.6], 'z']],
   ['Exp(x)', ['Exp', 'x']],
   ['Exp(k)', ['Exp', 'k']],
   ['Exp(-p)', ['Exp', ['Negate', 'p']]],

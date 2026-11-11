@@ -1938,7 +1938,7 @@ nothing changes.
 
 | Admitted | Examples |
 | --- | --- |
-| Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` with the exponent 2, 1.5 (a base proved non-negative) or the base `e` |
+| Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` with the exponent 2, 1.5 (a base proved non-negative), the base `e`, a real exponent that is not a literal (`s^(d/2)`, a real result), or a float literal exponent with an odd recovered denominator and a base not proved non-negative (`u^1.6`) |
 | Functions | `Sqrt`, `Ln`, `Exp`, `Sin`, `Cos`, `Tanh`, `Abs`, `Arctan2`, `Min`, `Max`, `Floor`, `Mod` |
 | Conditions | `If`, `Less`, `LessEqual`, `Equal`, `NotEqual` (real and integer operands), `And`, `Or`, `Not` |
 | Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot) |

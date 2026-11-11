@@ -101,13 +101,25 @@ export type StructuredInput = IRInput;
  * (`javascript-fragment-target.ts`), recorded during the annotation:
  *
  * - `square`, `exp`, `three-halves`: the forms of `powerForm()`.
+ * - `pow`, `abs-pow`, `signed-pow`: `Power` written as the function of two
+ *   operands of that name (`BinaryFunctionName`): `pow` for an exponent
+ *   that is not a number literal (the form `variable` of `powerForm()`),
+ *   `abs-pow` and `signed-pow` for a float literal exponent (the form
+ *   `float`), which the rule of `Power` chooses from the exponent.
  * - `abs`: `Abs` written as the function `abs`.
  * - `abs-identity`: `Abs` of a real operand that the existing emitter proves
  *   non-negative, written as the operand itself, as that emitter writes it
  *   (`identityPassthrough()`): `-0` stays `-0`.
  */
 export type StructuredForm =
-  'square' | 'exp' | 'three-halves' | 'abs' | 'abs-identity';
+  | 'square'
+  | 'exp'
+  | 'three-halves'
+  | 'pow'
+  | 'abs-pow'
+  | 'signed-pow'
+  | 'abs'
+  | 'abs-identity';
 
 /**
  * A binding of the engine that the program reads and does not bind, with
@@ -274,19 +286,31 @@ const FUNCTIONS: Readonly<
  * - `three-halves`: the literal exponent `1.5` or `3/2`, the product of the
  *   base and its square root, the base evaluated once. The rule of `Power`
  *   admits it only for a base that it proves non-negative.
+ * - `variable`: an exponent that is not a number literal, the function
+ *   `pow` of the base and the exponent.
+ * - `float`: a real number literal exponent that is not exact, finite and
+ *   not an integer (`1.6`, not `8/5`), the function `abs-pow` or
+ *   `signed-pow` of the base and the exponent.
  *
  * The rule of `Power` (`javascript-fragment-target.ts`) and the lowering
  * read the form from this function, so they agree.
  */
 export function powerForm(
   node: Expression
-): 'square' | 'exp' | 'three-halves' | undefined {
+): 'square' | 'exp' | 'three-halves' | 'variable' | 'float' | undefined {
   if (!isFunction(node, 'Power') || node.nops !== 2) return undefined;
   const [base, exponent] = node.ops;
   if (isSymbol(base, 'ExponentialE') && !isShadowedSymbol(base)) return 'exp';
-  if (!isNumber(exponent) || exponent.im !== 0) return undefined;
+  if (!isNumber(exponent)) return 'variable';
+  if (exponent.im !== 0) return undefined;
   if (exponent.re === 2) return 'square';
   if (exponent.re === 1.5) return 'three-halves';
+  if (
+    !exponent.isExact &&
+    Number.isFinite(exponent.re) &&
+    !Number.isInteger(exponent.re)
+  )
+    return 'float';
   return undefined;
 }
 
@@ -658,6 +682,21 @@ class Lowering {
           fn: 'exp',
           result,
           operands: [exponent],
+          effect,
+          origin: node,
+        });
+        return result;
+      }
+      // A function of the base and the exponent, both converted by the
+      // facts of the rule.
+      if (form === 'pow' || form === 'abs-pow' || form === 'signed-pow') {
+        const operands = this.operands(node, facts, scope, operations);
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'binary',
+          fn: form,
+          result,
+          operands,
           effect,
           origin: node,
         });

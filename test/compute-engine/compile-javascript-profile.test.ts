@@ -191,6 +191,60 @@ function choosecell(B: list<integer>, rank: integer) -> integer {
 }
 `;
 
+/** Tycho's `M` of the Multibrot showcase and `J` of the Julia-set
+ *  showcase, copied from `~/dev/tycho/src/graph-paper/onboarding/template-data.js`
+ *  (as in compile-javascript-structured-break.test.ts): `s^(d/2)`, a `Power`
+ *  with an exponent that is not a literal, and `ln(…)^1.6`, a float literal
+ *  exponent with an odd recovered denominator. */
+const FRACTAL_PRELUDE = `
+function M(p: real, q: real, d: real) -> real {
+  let a = p
+  let b = q
+  let n = 1
+  let s = 0.0
+  let t = 0.0
+  let w = 0.0
+  let r = 0.0
+  for k in 1..128 {
+    s = a^2 + b^2
+    if s > 4096 { break }
+    n = n + 1
+    w = if s > 0 { d * arctan2(b, a) } else { 0.0 }
+    r = s^(d/2)
+    t = r * cos(w) + p
+    b = r * sin(w) + q
+    a = t
+  }
+  s = a^2 + b^2
+  if s <= 4096 { 1 } else { min(1, (n + 1 - ln(ln(s) / ln(4096)) / ln(d)) / 128) }
+}
+function J(p: real, q: real, u: real, v: real) -> real {
+  const cr = 0.7885 * u
+  const ci = 0.7885 * v
+  let a = p
+  let b = q
+  let n = 0
+  let s = 0.0
+  let t = 0.0
+  let d = 1.0
+  for k in 1..256 {
+    s = a^2 + b^2
+    if s > 65536 { break }
+    n = n + 1
+    t = a^2 - b^2 + cr
+    b = 2*a*b + ci
+    a = t
+    d = min(d, abs(a), abs(b))
+  }
+  s = a^2 + b^2
+  if s <= 65536 {
+    -2 + min(1, ln(max(d, 0.0001) / 0.0001) / ln(300))
+  } else {
+    0.18 * ln(max(n + 1 - ln(ln(s) / ln(65536)) / ln(2), 3.7) / 3.7)^1.6
+  }
+}
+`;
+
 /** An engine with machine numbers that has executed `source`. */
 function engineWith(source: string): ComputeEngine {
   const ce = new ComputeEngine();
@@ -434,6 +488,7 @@ const PRELUDES: [string, string, string[]][] = [
   ],
   ['other', OTHER_PRELUDE, ['jitter', 'firstover', 'pair', 'tone', 'nonzero']],
   ['othello', OTHELLO_PRELUDE, ['ray', 'flips', 'hasmove', 'choosecell']],
+  ['fractal', FRACTAL_PRELUDE, ['M', 'J']],
 ];
 
 /** What `compile()` gives with `fallback: false`: the result, or the

@@ -725,15 +725,15 @@ function verifySignature(
         fail(`the function ${op.fn} has a boolean operand or result`);
       // The rule of each identifier (`UnaryFunctionName`,
       // `BinaryFunctionName`): `abs` has a real result, an integer only for
-      // an integer operand; `atan2` has real operands and a real result;
-      // every other function has a complex result for a complex operand and
-      // a real one for a real or an integer operand.
+      // an integer operand; each function of two operands has real operands
+      // and a real result; every other function has a complex result for a
+      // complex operand and a real one for a real or an integer operand.
       const expected: readonly ValueType[] =
         op.fn === 'abs'
           ? types[0] === 'integer'
             ? ['integer', 'real']
             : ['real']
-          : op.fn === 'atan2'
+          : op.kind === 'binary'
             ? types.includes('complex')
               ? []
               : ['real']

@@ -96,6 +96,11 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     tanh: { results: ['number', 'complex'], operands: 'same' },
     abs: { results: ['number'], operands: ['number', 'complex'] },
     atan2: { results: ['number'], operands: ['number'] },
+    // `_SYS.pow(b, e)`, and `Math.pow(Math.abs(b), e)` with the sign rule of
+    // `signed-pow`, as the existing emitter writes `Power`.
+    pow: { results: ['number'], operands: ['number'] },
+    'abs-pow': { results: ['number'], operands: ['number'] },
+    'signed-pow': { results: ['number'], operands: ['number'] },
   },
 };
 

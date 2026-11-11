@@ -158,7 +158,7 @@ import { inPlaceUpdates, mutatesInPlace } from './structured-in-place.js';
  */
 const FUNCTION_CODE: Readonly<
   Record<
-    UnaryFunctionName | BinaryFunctionName,
+    UnaryFunctionName | Exclude<BinaryFunctionName, PowerFunctionName>,
     { readonly real: string; readonly complex?: string }
   >
 > = {
@@ -170,6 +170,13 @@ const FUNCTION_CODE: Readonly<
   abs: { real: 'Math.abs', complex: 'cabs' },
   atan2: { real: 'Math.atan2' },
 };
+
+/** The powers of two numbers (`BinaryFunctionName`), which the emitter
+ *  writes as the `Power` handler of the existing emitter writes them. */
+type PowerFunctionName = 'pow' | 'abs-pow' | 'signed-pow';
+
+const isPowerFunction = (fn: string): fn is PowerFunctionName =>
+  fn === 'pow' || fn === 'abs-pow' || fn === 'signed-pow';
 
 /** The names that the assembly of the result gives to the emitter. */
 export type StructuredEmitNames = {
@@ -316,7 +323,8 @@ function usesOf(program: IRProgram): Map<number, Use> {
             : 1
           : op.kind === 'multiply' && complex
             ? 4
-            : (op.kind === 'loop' || op.kind === 'build') && i <= 1
+            : ((op.kind === 'loop' || op.kind === 'build') && i <= 1) ||
+                (op.kind === 'binary' && op.fn === 'signed-pow')
               ? 2
               : 1;
       for (const [i, value] of op.operands.entries()) {
@@ -661,7 +669,24 @@ class Emitter {
         return call('_SYS.csqrt', operands);
       case 'unary':
       case 'binary': {
-        const code = FUNCTION_CODE[op.fn];
+        const fn = op.fn;
+        if (isPowerFunction(fn)) {
+          // `Power` in `javascript-target.ts`: `_SYS.pow(b, e)` for an
+          // exponent that is not a literal, and the real root of a float
+          // literal exponent, `Math.pow(Math.abs(b), e)`, negated for a
+          // negative `b` when the recovered numerator is odd. The base of
+          // `signed-pow` is read twice, and is bound to a name (`usesOf()`).
+          if (fn === 'pow') {
+            this.runtime.add('pow');
+            return call('_SYS.pow', operands);
+          }
+          const [b, e] = operands.map((o) => operand(o, CONDITIONAL));
+          const magnitude = `Math.pow(Math.abs(${b}), ${e})`;
+          return fn === 'abs-pow'
+            ? { text: magnitude, precedence: CALL }
+            : atom(`(${b} < 0 ? -${magnitude} : ${magnitude})`);
+        }
+        const code = FUNCTION_CODE[fn];
         if (!op.operands.some((v) => v.representation === 'complex'))
           return call(code.real, operands);
         if (code.complex === undefined)

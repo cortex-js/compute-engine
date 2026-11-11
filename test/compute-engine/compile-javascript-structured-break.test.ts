@@ -592,12 +592,9 @@ function B(p: real, q: real) -> real {
 }
 `;
 
-/** Tycho's `M` of the Multibrot showcase (template-data.js), with one line
- *  replaced: the route declines `r = s^(d/2)` (a `Power` with an exponent
- *  that is not a literal), so the line is `r = s`, the value of `s^(d/2)`
- *  for `d = 2`. The forms `exp(d/2 * ln(s))`, with `abs(s)`, `s + 1` or
- *  `sqrt(s)` in the logarithm, are declined too: the engine does not type
- *  their exponential `real`. */
+/** Tycho's `M` of the Multibrot showcase, copied from
+ *  `~/dev/tycho/src/graph-paper/onboarding/template-data.js`: `r = s^(d/2)`
+ *  is a `Power` with an exponent that is not a literal (`_SYS.pow`). */
 const M_PRELUDE = `
 function M(p: real, q: real, d: real) -> real {
   let a = p
@@ -612,13 +609,45 @@ function M(p: real, q: real, d: real) -> real {
     if s > 4096 { break }
     n = n + 1
     w = if s > 0 { d * arctan2(b, a) } else { 0.0 }
-    r = s
+    r = s^(d/2)
     t = r * cos(w) + p
     b = r * sin(w) + q
     a = t
   }
   s = a^2 + b^2
   if s <= 4096 { 1 } else { min(1, (n + 1 - ln(ln(s) / ln(4096)) / ln(d)) / 128) }
+}
+`;
+
+/** Tycho's `J` of the Julia-set showcase (template-data.js):
+ *  `ln(…)^1.6` is a `Power` with a float literal exponent whose recovered
+ *  denominator is odd (8/5), and a base whose sign the engine does not
+ *  prove (`Math.pow(Math.abs(v), 1.6)`). */
+const J_PRELUDE = `
+function J(p: real, q: real, u: real, v: real) -> real {
+  const cr = 0.7885 * u
+  const ci = 0.7885 * v
+  let a = p
+  let b = q
+  let n = 0
+  let s = 0.0
+  let t = 0.0
+  let d = 1.0
+  for k in 1..256 {
+    s = a^2 + b^2
+    if s > 65536 { break }
+    n = n + 1
+    t = a^2 - b^2 + cr
+    b = 2*a*b + ci
+    a = t
+    d = min(d, abs(a), abs(b))
+  }
+  s = a^2 + b^2
+  if s <= 65536 {
+    -2 + min(1, ln(max(d, 0.0001) / 0.0001) / ln(300))
+  } else {
+    0.18 * ln(max(n + 1 - ln(ln(s) / ln(65536)) / ln(2), 3.7) / 3.7)^1.6
+  }
 }
 `;
 
@@ -785,15 +814,49 @@ describe('the witnesses', () => {
     expect([result.pure, result.shippable]).toEqual([true, true]);
   });
 
-  test("M's loop", () => {
+  test('M: inside the set, escaping at the first pass, at middle passes, at a late pass', () => {
     agreeEpsil(M_PRELUDE, 'M', [
-      [0, 0, 3],
-      [3, 0, 3],
-      [70, 0, 2],
-      [0.3, 0.5, 3],
-      [-0.6, 0.2, 5.5],
-      [0.2, 0.9, 2],
+      [0, 0, 3], // inside the set: never escapes, s = 0 at each pass
+      [0.3, 0.5, 3], // inside the set
+      [-1, 0, 2], // inside the set
+      [70, 0, 2], // s is above 4096 at the first pass
+      [3, 0, 3], // the third pass
+      [1.5, 0.2, 7.3], // the third pass, a power that is not an integer
+      [-1.2, 0.3, 2.5], // the fifth pass
+      [-0.6, 0.2, 5.5], // the eighth pass
+      [-0.75, 0.1, 2], // the 36th pass
+      [-0.1, 0.65, 2], // the 77th pass
     ]);
+  });
+
+  test('J: inside the set, escaping at the first pass, at middle passes, at a late pass', () => {
+    // `(u, v)` on the unit circle at the angle of the showcase variable.
+    const c = (t: number) => [Math.cos(t), Math.sin(t)];
+    const [u1, v1] = c(1.75);
+    const [u2, v2] = c(2.4);
+    agreeEpsil(J_PRELUDE, 'J', [
+      [0, 0, u1, v1], // inside the set (the trap branch)
+      [0.1, 0.1, u1, v1], // inside the set
+      [300, 0, u2, v2], // s is above 65536 at the first pass
+      [1.2, 0.4, 1, 0.5], // the fifth pass
+      [0, 0, u2, v2], // the 16th pass
+      [0.3, 0.2, u2, v2], // the 61st pass
+      [-0.4, 0.3, u2, v2], // the 88th pass
+    ]);
+  });
+
+  test('M and J compile on the profile, pure and shippable', () => {
+    for (const [source, name] of [
+      [M_PRELUDE, 'M'],
+      [J_PRELUDE, 'J'],
+    ]) {
+      const result = compile(literal(engineWith(source), name), {
+        profile: 'numeric-kernel',
+        fallback: false,
+      } as never) as CompilationResult<'javascript'> & { pure?: boolean; shippable?: boolean };
+      expect([name, result.success]).toEqual([name, true]);
+      expect([name, result.pure, result.shippable]).toEqual([name, true, true]);
+    }
   });
 
   test('ray: an edge exits at the first pass, a disc of the player at a middle pass, the last pass, never', () => {
