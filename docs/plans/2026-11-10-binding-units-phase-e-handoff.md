@@ -213,6 +213,46 @@ and BC-RULE7 (1).
    of the model (`docs/plans/2026-11-09-binding-units-model.md`).
 5. Tell Tycho (session `tycho-desk`) what changes for it, with the release.
 
+## 5a. Package C: result (2026-11-10, session compute-engine-18)
+
+Commits `16ec6d0ef11280eb53dbc53d48f03afcc6303e70` and the follow-up that
+adds this section. The rules that package C added are in the spec, marked
+"package C" (rules 1, 2, 3, 7 and 9).
+
+Fixed: DEF-FREE-CALL-TYPE (16), DEF-ENUM-FREENAME (2), DEF-FREE-HEAD-D (7),
+DEF-LISTREC-SELFREF (4), DEF-TELESCOPE, DEF-RSOLVE-NOTCANON,
+DEF-LIB-AUTODECL, the `lazy-view-scope` test, and 12 UNCLASSIFIED tests
+(`ce-139` 2, `ce-623`, `derivative-closed-form-cache`, `fact-store-phase2`
+"a value refuted through another symbol contradicts", `functions`,
+`script-order`, `simplify-tycho-audit`, `tycho-row-426` 2, `map-fusion`,
+`lazy-view-scope`).
+
+Left, with the package that takes each:
+
+| Tests | Package | Cause |
+|---|---|---|
+| DEF-MATRIX-REPAIR, 16 of 17 (`matrix-operator-typing` 8, `tycho-321` 7, `tycho-item-336` 1) | D | The repair works (`isValid` passes). Each test then reads `ce.box(name).type` or `ce.expr(name).type` (a new unit), `lookupDefinition(name).value._typeProvenance`, or expects inference events: read the occurrence in the result, or call `ce.infer()`. |
+| DEF-RECURSION, 2 (`ce-604`, `recursive-lazy-callback`) | A | A re-entrant type computation of the same nodes (`wildcardRecursiveSignature`, `resultMayBeNothing`): the type cell that is in flight is not served, through `objectDepsValid` and `UnitReadToken._version`. The `type` getter nests 395 deep with the flag on and 9 with it off. Not fixed. |
+| `compile-glsl-fragment` 3 ("an argument that is caller code …") | A | `canCompile()` types `v` only while it inlines the callee, and the fragment check reads the occurrence before that write (flag off: the definition was narrowed). Same family as DEF-TARGET-NO-OP. |
+| `compile-references` 2 | A | DEF-ADMIT-OCC: `x` is read only through the assigned value `H`. |
+| `evaluate-at-compile-derivative` 1 | user | Decision 4: `subs({x: ce.symbol('y')})` outside an operation. |
+| `append-variadic` 2, `compile-block-locals-rules` 1 | B | DEF-DECLUNKNOWN-TYPE: a name declared `unknown` reads the requirement of its unit. |
+| `call-identity-is-same-and-match` 1 | B | DEF-FREE-HOME-SCOPE: the `x` boxed in a pushed scope has another home scope. |
+| `call-follows-function-reassignment` 2, `function-declaration-hoisting` 1, `generic-function-sugar` 1 | B | Epsil static check (the DEF-EPSIL-PIN family); check again after package B's commits. |
+| `solve-domain` 1 | B or D | Not reproduced in a new engine (the file uses a shared engine); probably DEF-FREE-HOME-SCOPE. |
+| `compile-integrate-starting-panels`, `compile-interval-sub`, `ellipsis-product-coefficient`, `latex-syntax/logic`, `juxtaposition-application`, 1 each | D | BC1: the same expression in a new engine gives the same result with the flag off. Declare the inputs, or use a new engine. |
+| `undeclare` 1 | D | BC-LOOKUP: the test asserts that boxing `f(2)` declares `f`. |
+| `compile-javascript-profile-undeclared` "an earlier use can make a Power form decline" | D | Added after the triage; it fails with the flag on before package C too. It is about an earlier use (BC1). |
+
+Flag on, full suite, at `c976f546` plus the first package C commit (without
+package A): 82,431 passed, 580 failed in 198 files. Three tests were not in
+the triage: the `compile-javascript-profile-undeclared` test above;
+`find-fit-pool` "a separable global fit on this thread stops within a row
+of an abort" (a time limit: it passes alone); and
+`placeholder-signature-refinement`, a regression of the first commit that
+the follow-up fixes. The suite was not run again after the follow-up or
+after package A.
+
 ## 6. Prompts
 
 Package A:

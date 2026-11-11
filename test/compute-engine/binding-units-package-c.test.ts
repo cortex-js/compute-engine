@@ -114,6 +114,17 @@ describe('BINDING UNITS: a free name of the body of a function literal', () => {
   });
 });
 
+describe('BINDING UNITS: a free name of a body reads its name', () => {
+  test('the type of a stored literal follows a later assignment of its free name', () => {
+    const ce = engine();
+    ce.declare('f', '(unknown) -> unknown');
+    ce.assign('f', ce.parse('(x) \\mapsto 1 + a x'));
+    ce.assign('a', ce.parse('[1,2,3]'));
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> vector<3>');
+    expect(ce.box(['f', 2]).evaluate().toString()).toBe('[3,5,7]');
+  });
+});
+
 describe('BINDING UNITS: an operator lent to a call head', () => {
   test('a variable named like a library operator keeps its type in simplify()', () => {
     const ce = engine();

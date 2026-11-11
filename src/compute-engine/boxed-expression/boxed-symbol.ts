@@ -137,6 +137,7 @@ import {
   bindingInContext,
   freeNameBindingInContext,
   freeNameBindingAndScope,
+  isBodyFreeName,
   sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
@@ -1154,7 +1155,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // body of `(a: real) ↦ …` is not the parameter, and the `i` of the
       // closed form of `∫₀¹ i·x dx`, declared in a scope that was popped,
       // is not the constant `i`.
-      this._ownDefinitionOnChain(v)
+      // A free name of the body of a function literal has no binding of
+      // its own outside the body: it reads its name, as a free name does
+      // (`markBodyFreeName()`). With `f := x ↦ 1 + a x`, the type of `f`
+      // follows a later assignment of `a`.
+      (this._ownDefinitionOnChain(v) || isBodyFreeName(v))
     ) {
       if (isOperatorDef(resolved)) return resolved.operator.signature;
       return this._typeOfDefinitionInUnit(resolved.value, this._unitEntry(v));

@@ -665,6 +665,11 @@ export function markBodyFreeName(def: object): void {
   BODY_FREE_NAMES.add(def);
 }
 
+/** True when `def` stands for a free name of a body (`markBodyFreeName()`). */
+export function isBodyFreeName(def: object): boolean {
+  return BODY_FREE_NAMES.has(def);
+}
+
 /**
  * The definition that an occurrence of the free name `name` reads in the
  * current context, or `undefined` when there is none (`binding-unit.ts`).
