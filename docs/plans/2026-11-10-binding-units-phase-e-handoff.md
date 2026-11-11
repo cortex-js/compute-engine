@@ -418,6 +418,13 @@ and passes alone.
   `ce.withValues()` (already checked on 0.185.1).
 - A parse no longer depends on the expressions parsed before it: `x(3)`
   after `x + 1` is the call `["x", 3]`.
+- Symbolic work on expressions whose symbols are not declared is slower
+  (parse and simplify about 1.3 times, CE-1210). With the symbols declared
+  the time is the same within 5 to 9%: declare the symbols of expressions
+  that are processed in a loop.
+- A decision from `ce.lookupDefinition(name)` about a name that was only
+  boxed (the list axis `X` of `implicitAxisScalarInputs`) reads the type on
+  the occurrence in the expression instead.
 - To compare with the old behavior during validation: `CE_BINDING_UNITS=0`
   in the environment, or `ce._bindingUnits = false` right after the engine
   is made.
