@@ -565,7 +565,9 @@ describe('canCompile() and compile() agree', () => {
     expect(compiled + declined).toBe(2 * EXPRESSIONS.length);
     expect(EXPRESSIONS.length).toBeGreaterThanOrEqual(60);
     expect(compiled).toBeGreaterThanOrEqual(60);
-    expect(declined).toBeGreaterThanOrEqual(35);
+    // `Sum(j, j = 1..5)` and `A ↦ Sum over A` compile since `Sum` is in the
+    // profile.
+    expect(declined).toBeGreaterThanOrEqual(33);
   });
 
   test.each(PRELUDES)(

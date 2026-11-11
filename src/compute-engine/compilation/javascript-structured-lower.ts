@@ -57,6 +57,13 @@
  * of a helper and of the program; a list of integers and a list of reals
  * merge to a list of reals, as an integer and a real merge to a real. The
  * admission keeps a list out of every arithmetic operand.
+ *
+ * A `Which`, and an `If` with no else branch used as a value, is a chain of
+ * `if` operations (`selection()`). A `Sum` or a `Product` over `Limits`
+ * clauses is the code of the existing emitter in operations of the
+ * representation (`aggregate()`): a literal, the terms with no loop, or a
+ * `loop` whose one carried value is the accumulator, in a guard of `if`
+ * operations when a bound is not constant.
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
@@ -93,6 +100,8 @@ import {
 } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
+import { unrollFits, unrolledTermSize } from './unroll-budget.js';
+import { UNROLL_LIMIT } from './javascript-target.js';
 
 export type StructuredInput = IRInput;
 
@@ -684,6 +693,12 @@ class Lowering {
     if (operator === 'Comprehension')
       return this.build(node, facts, scope, operations, effect);
 
+    if (operator === 'Which' || (operator === 'If' && node.nops === 2))
+      return this.selection(node, facts, scope, operations, effect);
+
+    if (operator === 'Sum' || operator === 'Product')
+      return this.aggregate(node, facts, scope, operations);
+
     if (operator === 'If') {
       if (node.nops !== 3) fail('an If needs a condition and two branches');
       const [condition, a, b] = node.ops;
@@ -1261,6 +1276,429 @@ class Lowering {
       );
     });
     return product!;
+  }
+
+  /** A number literal of the type `type` at the end of `operations`. */
+  private numberLiteral(
+    value: number,
+    type: 'real' | 'integer',
+    origin: Expression,
+    operations: IROperation[]
+  ): IRValue {
+    const result = this.newValue(type, 'number');
+    operations.push({
+      kind: 'literal',
+      value,
+      result,
+      operands: [],
+      effect: 'pure',
+      origin,
+    });
+    return result;
+  }
+
+  /**
+   * An `if` of one result at the end of `operations`: the value of
+   * `then` when `test` holds, else the value of `otherwise`, each lowered
+   * in its own region. The result has the type of both values, or `real`
+   * for an integer and a real one.
+   */
+  private conditional(
+    test: IRValue,
+    then: (operations: IROperation[]) => IRValue,
+    otherwise: (operations: IROperation[]) => IRValue,
+    origin: Expression,
+    operations: IROperation[],
+    effect: EffectFact = 'pure'
+  ): IRValue {
+    const thenOperations: IROperation[] = [];
+    const a = then(thenOperations);
+    const thenRegion = this.region(thenOperations, origin, a);
+    const elseOperations: IROperation[] = [];
+    const b = otherwise(elseOperations);
+    const elseRegion = this.region(elseOperations, origin, b);
+    if (a.representation !== b.representation)
+      fail(`the two values of a conditional ${origin.toString()} have different representations`);
+    const result = this.newValue(
+      widerType(a.type, b.type) ??
+        fail(`the two values of a conditional ${origin.toString()} have no common type`),
+      a.representation as ScalarRepresentation
+    );
+    operations.push({
+      kind: 'if',
+      results: [result],
+      operands: [test],
+      then: thenRegion,
+      else: elseRegion,
+      effect: joinEffects(effect, thenRegion.effect, elseRegion.effect),
+      origin,
+    });
+    return result;
+  }
+
+  /**
+   * `Which(c1, v1, …, cn, vn)`, and `If(c, v)` used as a value, which the
+   * rule of `Which` checked (`selectionRule()` in
+   * `javascript-fragment-target.ts`): an `if` per clause, nested in the
+   * else branch of the one before, as the existing emitter writes a chain of
+   * conditional expressions (`compileExprWhich()` in
+   * `compile-conditionals.ts`). The first condition is evaluated where the
+   * node is, each later one only when the conditions before it are false. A
+   * last condition `True` is the default clause: its value has no test.
+   * With no default clause, the value when no condition holds is the literal
+   * `NaN`, of the type of the node, as the existing emitter writes it for a
+   * numeric result (`noBranchValue()`): the absent value of a number.
+   */
+  private selection(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const ops = node.ops;
+    const type = valueType(facts.type);
+    if (type !== 'real' && type !== 'integer')
+      return fail(`the value of ${node.toString()} is not a number`);
+    const operand = (i: number, into: IROperation[]): IRValue =>
+      this.convert(
+        this.value(ops[i], scope, into),
+        facts.conversions?.[i],
+        node,
+        into
+      );
+    const clause = (i: number, into: IROperation[]): IRValue => {
+      if (i >= ops.length) return this.numberLiteral(NaN, type, node, into);
+      if (isSymbol(ops[i], 'True')) return operand(i + 1, into);
+      const test = operand(i, into);
+      return this.conditional(
+        test,
+        (inner) => operand(i + 1, inner),
+        (inner) => clause(i + 2, inner),
+        node,
+        into,
+        effect
+      );
+    };
+    return clause(0, operations);
+  }
+
+  /**
+   * `Sum(body, Limits(k, a, b), …)` and `Product(…)`, which the rule of the
+   * aggregate checked (`aggregateRule()` in
+   * `javascript-fragment-target.ts`), lowered as the existing emitter writes
+   * them (`emitSumProduct()` in `javascript-target.ts`). The first clause is
+   * the outermost; the term of a clause is the aggregate of the clauses
+   * after it, and the body for the last one. The indexes are bound in the
+   * scope of the aggregate. For each clause, in the order of the existing
+   * emitter:
+   *
+   * - A bound is constant when it is a number literal or a captured binding
+   *   (`bigOpBoundConstant()`): its value is the floor of that number, and
+   *   the bound has no operation. Every other bound is evaluated once, before
+   *   the terms, the lower bound first, and floored (`compileBound()`).
+   * - Both bounds constant and, with an iteration budget, `b - a` less than
+   *   the budget: no term for `a > b` (the literal `0` of a sum, `1` of a
+   *   product); the terms in order, each with the index a literal, joined by
+   *   one `add` or `multiply`, when the clause fits the size limit of the
+   *   unrolled form (`unrollFits()` with `UNROLL_LIMIT` terms); a single term
+   *   is the term itself. So `Σ_{k=1}^{3} t_k` is `(t_1 + t_2) + t_3`, not
+   *   `((0 + t_1) + t_2) + t_3`, which differs for terms of `-0`.
+   * - Both bounds constant and `b - a` not less than the budget: the literal
+   *   `NaN`, the value of the guard of the loop of the existing emitter.
+   * - Otherwise a `loop` with one carried value, the accumulator, whose
+   *   initial value is `0` or `1` and whose next value is the accumulator
+   *   plus (times) the term: the order of the operations of the loop of the
+   *   existing emitter, `acc += term` from the lower bound up. The loop has
+   *   no iteration budget, and so cannot abort: the existing emitter counts
+   *   no pass of an aggregate. When a bound is not constant, the loop is in
+   *   two `if` operations, the guard of the existing emitter: the value is
+   *   `NaN` when a bound that is not constant is not a safe integer (with a
+   *   budget: a finite number that is not a safe integer), or, with a
+   *   budget, when `b - a` is not less than the budget; else the value of
+   *   the loop when `a <= b`, and `0` or `1` otherwise (the `loop` of the
+   *   representation visits a range in steps of -1 when `b < a`, where the
+   *   aggregate has no term). The value of a bound is an integer, `±∞` or
+   *   `NaN` after the floor, so each test is the one of the existing emitter
+   *   with the operations of the representation: `Number.isSafeInteger(b)`
+   *   is `|b| <= 2^53 - 1`, `Number.isFinite(b)` is `|b| < ∞`.
+   *
+   * The early exit of the existing emitter on a `NaN` accumulator gives the
+   * same value: `NaN` absorbs both operations, and it skips a term only when
+   * the term has no effect.
+   *
+   * The operations that the lowering adds (the sum, the guard) are `pure`.
+   * The effect fact of the node is not read: it joins the effects of the
+   * body and of the bounds (`shallowApplicationEffects()`), which their own
+   * operations carry, and the `loop` and the `if` operations join the
+   * effects of their regions.
+   */
+  private aggregate(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const inner = scope.inner.get(node);
+    if (inner === undefined)
+      return fail(`no scope for the aggregate ${node.toString()}`);
+    const clauses = node.ops.slice(1).map((clause) =>
+      isFunction(clause, 'Limits') && clause.nops === 3 && isSymbol(clause.op1)
+        ? { index: clause.op1.symbol, lower: clause.op2, upper: clause.op3 }
+        : fail(`no lowering for the index set ${clause.toString()}`)
+    );
+    const body = node.ops[0];
+    const sum = node.operator === 'Sum';
+    const type = valueType(facts.type);
+    if (type !== 'real' && type !== 'integer')
+      return fail(`the body of ${node.toString()} is not a number`);
+    const representation = facts.representation;
+    const budget = this.prep.iterationBudget;
+    const bodyConversion = facts.conversions?.[2 * clauses.length];
+
+    // The value of a constant bound, floored, or `undefined`.
+    const constant = (bound: Expression): number | undefined => {
+      const value = isNumber(bound)
+        ? bound.re
+        : isSymbol(bound)
+          ? this.prep.captures.find((c) => c.symbols.has(bound))?.value
+          : undefined;
+      return value === undefined ? undefined : Math.floor(value);
+    };
+    const bindIndex = (name: string, value: IRValue) => {
+      const values = new Map(this.bound.get(inner) ?? []);
+      values.set(name, value);
+      this.bound.set(inner, values);
+    };
+    const push = (
+      kind: 'add' | 'negate' | 'multiply' | 'less' | 'less-equal' | 'not',
+      operands: IRValue[],
+      type: ValueType,
+      into: IROperation[]
+    ): IRValue => {
+      const result = this.newValue(
+        type,
+        type === 'boolean' ? 'boolean' : 'number'
+      );
+      into.push({ kind, result, operands, effect: 'pure', origin: node });
+      return result;
+    };
+    const abs = (v: IRValue, into: IROperation[]): IRValue => {
+      const result = this.newValue('integer', 'number');
+      into.push({
+        kind: 'unary',
+        fn: 'abs',
+        result,
+        operands: [v],
+        effect: 'pure',
+        origin: node,
+      });
+      return result;
+    };
+    const literal = (value: number, into: IROperation[]) =>
+      this.numberLiteral(
+        value,
+        Number.isInteger(value) ? 'integer' : 'real',
+        node,
+        into
+      );
+
+    const clause = (i: number, out: IROperation[]): IRValue => {
+      const { index, lower, upper } = clauses[i];
+      const term = (k: IRValue, into: IROperation[]): IRValue => {
+        bindIndex(index, k);
+        return i + 1 < clauses.length
+          ? clause(i + 1, into)
+          : this.convert(
+              this.value(body, inner, into),
+              bodyConversion,
+              node,
+              into
+            );
+      };
+      const identity = (into: IROperation[]) =>
+        this.numberLiteral(sum ? 0 : 1, type, node, into);
+      const lo = constant(lower);
+      const hi = constant(upper);
+      const constantBounds = lo !== undefined && hi !== undefined;
+      const withinBudget =
+        budget === undefined || (constantBounds && hi - lo < budget);
+      if (constantBounds && withinBudget) {
+        if (lo > hi) return identity(out);
+        const rest = node.ops.slice(i + 2);
+        if (
+          unrollFits(hi - lo + 1, unrolledTermSize(body, rest), UNROLL_LIMIT)
+        ) {
+          const terms: IRValue[] = [];
+          for (let k = lo; k <= hi; k++) terms.push(term(literal(k, out), out));
+          if (terms.length === 1) return terms[0];
+          return push(
+            sum ? 'add' : 'multiply',
+            terms,
+            terms
+              .map((t) => t.type)
+              .reduce(
+                (a, b) =>
+                  widerType(a, b) ??
+                  fail(`the terms of ${node.toString()} have no common type`)
+              ),
+            out
+          );
+        }
+      }
+      if (constantBounds && !withinBudget)
+        return this.numberLiteral(NaN, type, node, out);
+
+      // The bounds, evaluated once, the lower one first, and floored.
+      const bound = (b: Expression, value: number | undefined): IRValue => {
+        if (value !== undefined) return literal(value, out);
+        const v = this.value(b, inner, out);
+        const result = this.newValue('integer', 'number');
+        out.push({
+          kind: 'floor',
+          result,
+          operands: [v],
+          effect: 'pure',
+          origin: b,
+        });
+        return result;
+      };
+      const from = bound(lower, lo);
+      const to = bound(upper, hi);
+
+      const loop = (into: IROperation[]): IRValue => {
+        const indexValue = this.newValue('integer', 'number');
+        const accumulator = this.newValue(type, representation);
+        const bodyOperations: IROperation[] = [];
+        const t = term(indexValue, bodyOperations);
+        if (widerType(type, t.type) !== type)
+          fail(`a term of ${node.toString()} has the type ${t.type}`);
+        const next = push(
+          sum ? 'add' : 'multiply',
+          [accumulator, t],
+          type,
+          bodyOperations
+        );
+        const region: IRRegion = {
+          ...this.region(bodyOperations, node, next),
+          parameters: [indexValue, accumulator],
+        };
+        const initial = this.numberLiteral(sum ? 0 : 1, 'integer', node, into);
+        const result = this.newValue(type, representation);
+        into.push({
+          kind: 'loop',
+          results: [result],
+          operands: [from, to, initial],
+          body: region,
+          effect: region.effect,
+          origin: node,
+        });
+        return result;
+      };
+      if (constantBounds) return loop(out);
+
+      // The guard: `NaN` when a bound that is not constant is not a safe
+      // integer, or when the range is over the budget.
+      const MAX = Number.MAX_SAFE_INTEGER;
+      const checks: ((into: IROperation[]) => IRValue)[] = [];
+      const unsafe = (v: IRValue) => (into: IROperation[]) => {
+        const magnitude = abs(v, into);
+        if (budget === undefined)
+          return push(
+            'not',
+            [
+              push(
+                'less-equal',
+                [magnitude, literal(MAX, into)],
+                'boolean',
+                into
+              ),
+            ],
+            'boolean',
+            into
+          );
+        const finiteOperations: IROperation[] = [];
+        const finite = push(
+          'less',
+          [magnitude, this.numberLiteral(Infinity, 'real', node, finiteOperations)],
+          'boolean',
+          finiteOperations
+        );
+        const result = this.newValue('boolean', 'boolean');
+        into.push({
+          kind: 'and',
+          result,
+          operands: [
+            push('less', [literal(MAX, into), magnitude], 'boolean', into),
+          ],
+          rest: [this.region(finiteOperations, node, finite)],
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      };
+      if (hi === undefined) checks.push(unsafe(to));
+      if (lo === undefined) checks.push(unsafe(from));
+      if (budget !== undefined)
+        checks.push((into) =>
+          push(
+            'not',
+            [
+              push(
+                'less',
+                [
+                  push(
+                    'add',
+                    [to, push('negate', [from], 'integer', into)],
+                    'integer',
+                    into
+                  ),
+                  literal(budget, into),
+                ],
+                'boolean',
+                into
+              ),
+            ],
+            'boolean',
+            into
+          )
+        );
+      const first = checks[0](out);
+      let invalid = first;
+      if (checks.length > 1) {
+        invalid = this.newValue('boolean', 'boolean');
+        out.push({
+          kind: 'or',
+          result: invalid,
+          operands: [first],
+          rest: checks.slice(1).map((check) => {
+            const checkOperations: IROperation[] = [];
+            return this.region(
+              checkOperations,
+              node,
+              check(checkOperations)
+            );
+          }),
+          effect: 'pure',
+          origin: node,
+        });
+      }
+      return this.conditional(
+        invalid,
+        (into) => this.numberLiteral(NaN, type, node, into),
+        (into) =>
+          this.conditional(
+            push('less-equal', [from, to], 'boolean', into),
+            loop,
+            identity,
+            node,
+            into
+          ),
+        node,
+        out
+      );
+    };
+    return clause(0, operations);
   }
 
   /**

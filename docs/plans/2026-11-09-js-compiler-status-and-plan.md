@@ -864,6 +864,89 @@ probe programs against the existing compiler, and a Codex review; the route
 tests, the core suite and the type check before each commit; the full suite
 with the switch off and on for a change that the consumers reach.
 
+## Progress after the state above (2026-11-10 and 2026-11-11, second session)
+
+The user's instruction for this session (2026-11-11): work without
+check-ins toward the point where the existing JavaScript compiler can be
+retired and replaced by the structured one. Each design choice below took
+the recommended option and can be reversed. No default changed: the switch
+and the shadow measure are off, and no consumer has the profile by default.
+
+### What was added
+
+| Commit | Change |
+| --- | --- |
+| `c7adda0252d93f959847dcc1b52b19833b6a2ca7` | `Power` with the integer exponents 3 to 5 and −2, `Math.pow` for another constant exponent (`real-pow`), `Root` with the degree 3 or a degree that is not a literal |
+| `5f5acea425bb8347bf401aa476b7fc23c0a94991` | `Tan`, `Cot`, `Sec`, `Csc`, `Sinh`, `Cosh`, `Arctan`, `Arsinh`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh`, `Gamma`, `Erf`, `Erfc`, `Digamma`, `Sign`, `Ceil`, `Round`, `Conjugate`, `Haversine`, `Log`; `Sin`, `Cos`, `Tan` of `π·u` |
+| `4422cd7bf64eca17935bd7655e6a5f0a972a3199` | A call of a user function with no declared signature, by the rule of the root; the body of a helper is rewritten for `ce.angularUnit` (it was compiled in radians) |
+| `07a20e284a8282d60f158840c7cb69f3262d571f` | The shadow measure (`CE_JS_PROFILE_SHADOW=1`, [description](2026-11-10-js-profile-first-consumer.md)) |
+| `29ee7c0f7aa216b3c5bf05b125393ef6b4a5828c` | Complex arithmetic ([design and result](2026-11-10-structured-complex-arithmetic.md)) |
+
+Each source change had a Claude review with probe programs and a Codex
+review, except the shadow measure (Codex, and a reading of its hook).
+`LogGamma` stays declined: the existing compiler has no JavaScript code for
+it either.
+
+### The two numbers
+
+Engine compilations admitted (`CE_JS_PROFILE=numeric-kernel`, full suite in a
+clean worktree):
+
+| Commit | Admitted | Tests |
+| --- | --- | --- |
+| `04c9bd783279d05a2d60eb13a1f281a06731ebf8` (start) | 4,621 of 6,203 (74%) | 82,947 passed, 1 timeout (CE-1197) |
+| `5f5acea425bb8347bf401aa476b7fc23c0a94991` | 5,335 of 6,199 (86%) | 83,326 passed, 1 timeout (CE-1197) |
+| `4422cd7bf64eca17935bd7655e6a5f0a972a3199` | 5,375 of 6,192 (87%) | 83,353 passed, 0 failed |
+
+The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
+on the timeout of CE-1197, which does not depend on the switch. The prelude
+census was not run again: none of these changes is in the list of what blocks
+the 15 prelude functions.
+
+### The gap to retirement: every JavaScript compilation of the suite
+
+The shadow measure at `07a20e284a8282d60f158840c7cb69f3262d571f` (before the
+complex arithmetic), full suite: of 22,739 JavaScript compilations that the
+existing compiler compiles, the profile admits 8,465 (37%); of the 16,539
+that are not the engine's own (`public`), 3,070 (19%). One test fails with
+the measure on, as expected: it asserts that the default route never calls
+the profile. The declines by cause, most frequent first:
+
+| Count | Cause | State |
+| --- | --- | --- |
+| 1,429 | `Power` or `Root` with a negative number literal base | in progress |
+| 837 | a `Block` at the root | in progress |
+| 729 + 123 | `Sum`, `Product` | in progress |
+| 572 + 64 | `Random`, `WithRandomSeed` | needs effect facts on the operation (objective 3) |
+| 560 | a free name with no numeric type | |
+| 469 | `mode: 'bigint'` | needs a design |
+| 394 + 101 | parameters with no declared type or of another kind | in progress |
+| 326 + 202 | a helper whose declared result is not a number or a list of numbers; a helper declared `function` | |
+| 323 + 160 | a list literal; a tuple | `program` profile |
+| 313 + 118 | the options `vars`, `functions` | |
+| 272 + 264 + 207 | `Map`, `Reduce`, `Apply` | lambdas: `program` profile |
+| 235 | `Which` | in progress |
+| 208 | `Integrate` | the existing compiler calls the interpreter's quadrature |
+| about 500 | list inputs of another type (`list<number>`, tensor, matrix, nested) | |
+| about 450 | linear algebra and colours (`Norm`, `Dot`, `Determinant`, `ColorToString`, `GamutMap`, `AsRgb`) | |
+
+In 17 compilations the profile admits a program that the existing compiler
+declines; they are not yet examined.
+
+### What blocks retirement beyond coverage
+
+- **Shared subexpressions (CE-1198).** The route walks an expression as a
+  tree: a subexpression that is shared at each of 40 levels does not finish.
+  The existing compiler binds it once (CSE). The route needs a lowering that
+  gives one value to a pure node reached twice in the same region.
+- **Options the profile ignores or refuses**: `cse`, `constantFold`
+  (results can differ in the last place from the default options of the
+  existing compiler), `mode: 'bigint'`, `vars`, `functions`, `operators`,
+  `imports`, `preamble`, `broadcast`.
+- **The other targets** (`interval-js`, GLSL, WGSL, Python) use the existing
+  compiler's shared code; retiring the JavaScript emitter does not remove
+  that code.
+
 ## Where each remaining item of the original proposal is done
 
 The [original proposal](2026-11-08-javascript-fragment-migration.md) asks for

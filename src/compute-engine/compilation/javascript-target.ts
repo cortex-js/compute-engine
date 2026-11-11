@@ -13106,7 +13106,7 @@ function kindCodeIsShippable(
  * Maximum number of terms to unroll in a Sum/Product.
  * Beyond this threshold a loop is emitted instead.
  */
-const UNROLL_LIMIT = 100;
+export const UNROLL_LIMIT = 100;
 
 /**
  * Term count from which an unrolled Sum/Product is emitted as a sequence of

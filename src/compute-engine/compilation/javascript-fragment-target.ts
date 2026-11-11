@@ -28,6 +28,7 @@ import { realPowerBranchTerms } from '../numerics/real-power.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
   JavaScriptTarget,
+  isNonFiniteBound,
   type JavaScriptBodyEmitter,
 } from './javascript-target.js';
 import { BaseCompiler } from './base-compiler.js';
@@ -59,7 +60,9 @@ import {
   walkAssign,
   walkBreak,
   walkCountedLoop,
+  walkAggregate,
   fragmentTypeToString,
+  type FragmentConversion,
   type FragmentDeclaredInput,
   type FragmentListType,
   type FragmentValueFacts,
@@ -2022,8 +2025,23 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   ),
   Add: withRealFromRealOperands(withListLengthIntegers(structuredAddRule)),
   Negate: withRealFromRealOperands(withListLengthIntegers(negateRule)),
-  // The rule of the pass: the value of an `If` can be a list.
-  If: { walk: walkIf },
+  // The rule of the pass: the value of an `If` can be a list. An `If` with
+  // no else branch used as a value is a `Which` of one clause.
+  If: {
+    walk: (node, scope, context, w) =>
+      isFunction(node) && node.nops === 2 && context.place !== 'statement'
+        ? selectionRule(node, scope, context, w)
+        : walkIf(node, scope, context, w),
+  },
+  Which: {
+    walk: (node, scope, context, w) => selectionRule(node, scope, context, w),
+  },
+  Sum: {
+    walk: (node, scope, context, w) => aggregateRule(node, scope, context, w),
+  },
+  Product: {
+    walk: (node, scope, context, w) => aggregateRule(node, scope, context, w),
+  },
   Multiply: withRealFromRealOperands(withListLengthIntegers(multiplyRule)),
   Less: comparisonRule('Less'),
   LessEqual: comparisonRule('LessEqual'),
@@ -2071,6 +2089,10 @@ const LIST_OPERAND_HEADS = [
   'Comprehension',
   'ReplaceAt',
   'Typed',
+  // The rule of an aggregate reads its index sets (`Limits`), which are not
+  // values, and refuses a body that is a list.
+  'Sum',
+  'Product',
 ];
 
 /**
@@ -2604,10 +2626,272 @@ function comprehensionRule(
 }
 
 /**
+ * The message of the refusal of a `Sum` or a `Product` that is not of the
+ * form of the structured route, or `undefined`: the structured route admits
+ * `Sum(body, Limits(k, a, b), …)` with one or more clauses `Limits` of the
+ * library, each with a symbol index, and indexes of distinct names. The
+ * existing emitter reads only such clauses (`extractLimits()` in
+ * `javascript-target.ts`); a sum of a collection (`Sum(L)`, no index set)
+ * folds the elements of the collection, which the structured route does not
+ * have.
+ */
+function aggregateRefusal(node: Expression): string | undefined {
+  if (
+    !isFunction(node) ||
+    (node.operator !== 'Sum' && node.operator !== 'Product') ||
+    !isLibraryOperator(node, node.operator)
+  )
+    return undefined;
+  const head = node.operator;
+  if (node.nops < 2)
+    return (
+      `${head} of a collection (with no index set) is not in the structured ` +
+      `route, which admits ${head}(body, Limits(k, a, b))`
+    );
+  const names = new Set<string>();
+  for (const clause of node.ops.slice(1)) {
+    if (
+      !isFunction(clause, 'Limits') ||
+      !isLibraryOperator(clause, 'Limits') ||
+      clause.nops !== 3 ||
+      !isSymbol(clause.op1)
+    )
+      return (
+        `${head} over ${clause.toString()} is not in the structured route, ` +
+        `which admits an index set Limits(k, a, b)`
+      );
+    if (names.has(clause.op1.symbol))
+      return `${head} with two indexes named ${clause.op1.symbol} is not in the structured route`;
+    names.add(clause.op1.symbol);
+  }
+  return undefined;
+}
+
+/**
+ * The refusal of the bound `bound` of a `Sum` or a `Product` on the
+ * structured route, or `undefined`. The existing emitter reads a bound in one
+ * of two ways (`emitSumProduct()` in `javascript-target.ts`): a bound with a
+ * value at compile time (`bigOpBoundConstant()`: a number literal, or a
+ * captured binding, whose value the structured route reads as its
+ * snapshot) is the floor of that value; every other bound is code, floored
+ * at run time. Refused, each with its own message:
+ *
+ * - a bound that is not a finite number (`isNonFiniteBound()`: `+∞`, a
+ *   `NaN`, a type `infinity` or `nan`): the existing compiler refuses it
+ *   without an iteration budget, and the structured route refuses it in
+ *   every case;
+ * - a number literal or a captured value whose floor is not a safe integer
+ *   (`assertSafeBigOpBounds()`);
+ * - a bound that holds a call that is not `pure` (`effectFact()`): the
+ *   interpreter does not evaluate a big operator over a bound with an
+ *   effect, and the existing compiler refuses such a bound;
+ * - a bound that reads no input, parameter, local or index and is not a
+ *   number literal or a captured name (`N - 1` with `N` captured), whose
+ *   numeric value does not floor to a safe integer: the existing compiler
+ *   folds such a bound only to check its range (`bigOpBoundValue()`), and
+ *   declines it there. Another such bound is code on both routes (the
+ *   capture reads its snapshot, then the floor and the run-time guard:
+ *   `Math.floor(5 + -1)`), so it is admitted. The value is read with
+ *   `N()`, not with the fold of the existing compiler: the two can differ
+ *   only for a value at the limit of the safe integers.
+ */
+function aggregateBoundRefusal(
+  head: string,
+  bound: Expression,
+  snapshotOf: SnapshotOf
+): string | undefined {
+  const name = `The bound \`${bound.toString()}\` of \`${head}\``;
+  if (isNonFiniteBound(bound)) return `${name} is not a finite number`;
+  const value = isNumber(bound)
+    ? bound.im === 0
+      ? bound.re
+      : NaN
+    : isSymbol(bound)
+      ? snapshotOf(bound)
+      : undefined;
+  if (value !== undefined) {
+    if (!Number.isFinite(value)) return `${name} is not a finite number`;
+    if (!Number.isSafeInteger(Math.floor(value)))
+      return `${name} is not a safe integer: the existing compiler declines it as out-of-range`;
+    return undefined;
+  }
+  const impure = (e: Expression): boolean =>
+    isFunction(e) && (effectFact(e) !== 'pure' || e.ops.some(impure));
+  if (impure(bound))
+    return `${name} has a call that is not pure: the interpreter does not evaluate a big operator over such a bound`;
+  if (isFunction(bound) && bound.unknowns.length === 0) {
+    const folded = bound.N();
+    const v = isNumber(folded) && folded.im === 0 ? folded.re : NaN;
+    if (Number.isFinite(v) && !Number.isSafeInteger(Math.floor(v)))
+      return `${name} is not a safe integer: the existing compiler declines it as out-of-range`;
+  }
+  return undefined;
+}
+
+/**
+ * Check, at the admission of the structured route, the bound `bound` of the
+ * index of `node`: `check` checks it as a value; when `node` is a `Sum` or
+ * a `Product`, the bound is refused first when it is not finite, and after
+ * the check (which records a captured binding) for the other refusals of
+ * `aggregateBoundRefusal()`.
+ */
+function checkAggregateBound(
+  node: Expression,
+  bound: Expression,
+  registry: StructuredRegistry | undefined,
+  check: (bound: Expression) => void
+): void {
+  const head = isFunction(node) ? node.operator : '';
+  const aggregate = head === 'Sum' || head === 'Product';
+  if (aggregate && isNonFiniteBound(bound))
+    throw new Error(
+      `JS scalar fragment: ${aggregateBoundRefusal(head, bound, () => undefined)}`
+    );
+  check(bound);
+  if (!aggregate) return;
+  const refusal = aggregateBoundRefusal(
+    head,
+    bound,
+    registry === undefined ? () => undefined : snapshotReader(registry)
+  );
+  if (refusal !== undefined) throw new Error(`JS scalar fragment: ${refusal}`);
+}
+
+/** The name of the index of `node` in a message: `comprehension`, or the
+ *  head (`Sum`, `Product`). */
+function indexLabel(node: Expression): string {
+  return isFunction(node, 'Comprehension')
+    ? 'comprehension'
+    : isFunction(node)
+      ? node.operator
+      : 'comprehension';
+}
+
+/**
+ * `Sum(body, Limits(k, a, b), …)` and `Product(…)` on the structured route,
+ * by the rule of the pass (`walkAggregate()`): each index is an integer in
+ * the scope of the aggregate, the bounds of a clause are typed with the
+ * indexes of the clauses before it, and the body with every index. A bound
+ * has an integer or a real fact: the lowering floors it, as the existing
+ * emitter does (`compileBound()` in `javascript-target.ts`). The body has a
+ * real or an integer fact, and the aggregate has the fact of the body.
+ * Refused: another form (`aggregateRefusal()`), a complex, boolean or list
+ * body. The lowering writes the code of the existing emitter
+ * (`aggregate()` in `javascript-structured-lower.ts`).
+ */
+function aggregateRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const refusal = aggregateRefusal(node);
+  if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
+  const facts = walkAggregate(node, scope, context, w);
+  if (!('representation' in facts)) return facts;
+  const kind = facts.type.kind;
+  if (kind !== 'real' && kind !== 'integer')
+    return w.refuse(
+      node,
+      'signature',
+      `${node.operator} whose body has the type \`${fragmentTypeToString(facts.type)}\` ` +
+        `is not in the structured route, which adds or multiplies reals or integers`
+    );
+  return facts;
+}
+
+/**
+ * The refusal of a `Which` or of an `If` with no else branch, on the
+ * structured route, before its operands are read, or `undefined`. The
+ * existing emitter writes both as a chain of conditional expressions
+ * (`compileExprWhich()` in `compile-conditionals.ts`, which also writes
+ * `If(c, v)` used as a value): it drops a clause whose condition is the
+ * symbol `False` and every clause after a condition `True`, and it has no
+ * representation of `Nothing` as a value. So refused: a condition `True`
+ * that is not the last one, a condition `False`, a value `Nothing`, and a
+ * `Which` with an odd number of operands.
+ */
+function selectionRefusal(node: Expression): string | undefined {
+  if (!isFunction(node)) return undefined;
+  if (node.operator !== 'Which' && !(node.operator === 'If' && node.nops === 2))
+    return undefined;
+  const head = node.operator;
+  const ops = node.ops;
+  if (ops.length < 2 || ops.length % 2 !== 0)
+    return `${head} with ${ops.length} operands is not in the structured route, which admits condition and value pairs`;
+  for (let i = 0; i < ops.length; i += 2) {
+    if (isSymbol(ops[i], 'True') && i !== ops.length - 2)
+      return `${head} with the condition True before its last clause is not in the structured route: the existing compiler drops the clauses after it`;
+    if (isSymbol(ops[i], 'False'))
+      return `${head} with the condition False is not in the structured route: the existing compiler drops that clause`;
+    if (isSymbol(ops[i + 1], 'Nothing'))
+      return `${head} with the value Nothing is not in the structured route: compiled code has no representation of Nothing as a value`;
+  }
+  return undefined;
+}
+
+/**
+ * `Which(c1, v1, …, cn, vn)`, and `If(c, v)` used as a value (an `If` with
+ * no else branch, which the existing emitter writes as `Which(c, v)`), on
+ * the structured route. Each condition has a boolean fact, and the last one
+ * can be the symbol `True` (a default clause). Each value has a real or an
+ * integer fact. The result is an integer when every value is, otherwise a
+ * real. The lowering writes nested conditional expressions, as the existing
+ * emitter does: the conditions are evaluated in order, and only until one
+ * holds. When none holds (a `Which` with no default clause), the value is
+ * `NaN`, the absent value of a number (`noBranchValue()` in
+ * `compile-absence.ts`), where the interpreter gives `Missing`
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). Refused: the
+ * forms of `selectionRefusal()`, a complex, boolean or list value.
+ */
+function selectionRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const refusal = selectionRefusal(node);
+  if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
+  const ops = isFunction(node) ? node.ops : [];
+  const head = isFunction(node) ? node.operator : 'Which';
+  const conversions: FragmentConversion<ScalarRepresentation>[] = [];
+  let integer = true;
+  for (let i = 0; i < ops.length; i += 2) {
+    const condition = w.value(ops[i], scope, context);
+    if (condition.type.kind !== 'boolean')
+      return w.refuse(
+        node,
+        'signature',
+        `A condition of ${head} has the type \`${fragmentTypeToString(condition.type)}\`, not boolean`
+      );
+    const value = w.value(ops[i + 1], scope, context);
+    const kind = value.type.kind;
+    if (kind !== 'real' && kind !== 'integer')
+      return w.refuse(
+        node,
+        'signature',
+        `${head} with a value of the type \`${fragmentTypeToString(value.type)}\` is ` +
+          `not in the structured route, which admits real and integer values`
+      );
+    if (kind !== 'integer') integer = false;
+    conversions.push(
+      w.convert(condition, condition.type)!,
+      w.convert(value, value.type)!
+    );
+  }
+  return w.valueFacts(
+    node,
+    { kind: integer ? 'integer' : 'real' },
+    conversions
+  );
+}
+
+/**
  * The operands that the admission of the structured route checks for a
  * value `node` that holds other values, or `undefined` for every other
- * node: `outer`, checked where `node` is; `inner`, checked with the name
- * `index` bound.
+ * node: `outer`, checked where `node` is; then, for each index of
+ * `indexes` in order, its `bounds`, checked with the indexes before it
+ * bound, and the index bound; then `inner`, checked with every index bound.
  *
  * - `Typed(value, T)`: `value`. It is admitted only as the value of a
  *   function body (`bodyValue`), where `executeEpsil()` writes it; anywhere
@@ -2616,6 +2900,9 @@ function comprehensionRule(
  *   branch of an `If` so): `value`.
  * - `Comprehension(body, Element(j, Range(a, b)))`: `a` and `b`, then
  *   `body` with `j` bound. `refuseListHead()` refused another form.
+ * - `Sum(body, Limits(k, a, b), …)` and `Product(…)`: the bounds of each
+ *   clause, each index, then `body`. Another form throws
+ *   (`aggregateRefusal()`).
  *
  * Each head is the operator of the library: a user function of one of
  * these names is a helper call.
@@ -2627,11 +2914,30 @@ function structuredValueParts(
   | {
       outer: readonly Expression[];
       inner: readonly Expression[];
-      index?: string;
+      indexes?: readonly {
+        readonly index: string;
+        readonly bounds: readonly Expression[];
+      }[];
     }
   | undefined {
   if (!isFunction(node) || !isLibraryOperator(node, node.operator))
     return undefined;
+  if (node.operator === 'Sum' || node.operator === 'Product') {
+    const refusal = aggregateRefusal(node);
+    if (refusal !== undefined)
+      throw new Error(`JS scalar fragment: ${refusal}`);
+    return {
+      outer: [],
+      indexes: node.ops.slice(1).map((clause) => {
+        const limits = clause as Expression & { ops: readonly Expression[] };
+        return {
+          index: (limits.ops[0] as Expression & { symbol: string }).symbol,
+          bounds: [limits.ops[1], limits.ops[2]],
+        };
+      }),
+      inner: [node.op1],
+    };
+  }
   if (node.operator === 'Typed') {
     if (!bodyValue)
       throw new Error(
@@ -2644,9 +2950,9 @@ function structuredValueParts(
   const parts = comprehensionParts(node);
   if (parts !== undefined)
     return {
-      outer: [parts.from, parts.to],
+      outer: [],
+      indexes: [{ index: parts.index, bounds: [parts.from, parts.to] }],
       inner: [parts.body],
-      index: parts.index,
     };
   return undefined;
 }
@@ -3643,17 +3949,21 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       const parts = structured ? structuredValueParts(node, false) : undefined;
       if (parts !== undefined) {
         for (const operand of parts.outer) check(operand);
-        if (parts.index !== undefined) {
-          if (indexes.has(parts.index))
-            throw new Error(
-              `JS scalar fragment: the comprehension index ${parts.index} has the name of another index`
-            );
-          indexes.add(parts.index);
-        }
+        const added: string[] = [];
         try {
+          for (const { index, bounds } of parts.indexes ?? []) {
+            for (const bound of bounds)
+              checkAggregateBound(node, bound, registry, check);
+            if (indexes.has(index))
+              throw new Error(
+                `JS scalar fragment: the ${indexLabel(node)} index ${index} has the name of another index`
+              );
+            indexes.add(index);
+            added.push(index);
+          }
           for (const operand of parts.inner) check(operand);
         } finally {
-          if (parts.index !== undefined) indexes.delete(parts.index);
+          for (const index of added) indexes.delete(index);
         }
         return;
       }
@@ -3711,12 +4021,17 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         throw new Error(
           `JS scalar fragment: unsupported head ${node.operator}`
         );
+      // The structured route also admits `If(c, v)` used as a value, as a
+      // `Which` of one clause (`selectionRule()`).
       if (
-        (node.operator === 'If' && node.nops !== 3) ||
+        (node.operator === 'If' &&
+          node.nops !== 3 &&
+          !(structured && node.nops === 2)) ||
         ((node.operator === 'Sqrt' || node.operator === 'Negate') &&
           node.nops !== 1)
       )
         throw new Error('JS scalar fragment: unsupported arity');
+      if (structured) refuseSelection(node);
       checkCondition(node);
       if (node.operator === 'Sqrt') readsSqrt = true;
       for (const operand of admittedOperands(node)) check(operand);
@@ -3770,11 +4085,33 @@ function checkCondition(
     readonly mode?: 'strict' | 'complex';
   }
 ): void {
+  // The conditions of a `Which` (the structured route), but a last `True`,
+  // have the rule of the condition of an `If`.
+  if (isFunction(node, 'Which') && isLibraryOperator(node, 'Which')) {
+    node.ops.forEach((op, i) => {
+      if (i % 2 === 0 && !isSymbol(op, 'True'))
+        checkConditionOf('Which', op, helper);
+    });
+    return;
+  }
   if (!isFunction(node, 'If') || node.nops < 2 || node.nops > 3) return;
-  const type = node.op1.type.type;
+  checkConditionOf('If', node.op1, helper);
+}
+
+/** The rule of `checkCondition()` for the condition `condition` of an `If`
+ *  or of a `Which`. */
+function checkConditionOf(
+  head: 'If' | 'Which',
+  condition: Expression,
+  helper?: {
+    readonly name: string;
+    readonly defaulted?: ReadonlySet<string>;
+    readonly mode?: 'strict' | 'complex';
+  }
+): void {
+  const type = condition.type.type;
   // In the body of a helper, the refusal names the helper, as a refusal of
   // the pass does, and a parameter that took the default kind of the mode.
-  const condition = node.op1;
   const defaulted =
     helper?.mode !== undefined &&
     isSymbol(condition) &&
@@ -3792,12 +4129,23 @@ function checkCondition(
     typeof type.value === 'boolean'
   )
     throw new Error(
-      `JS scalar fragment: the condition of If has the constant type ${type.value}${suffix}`
+      `JS scalar fragment: the condition of ${head} has the constant type ${type.value}${suffix}`
     );
   if (!isSubtype(type, 'boolean'))
     throw new Error(
-      `JS scalar fragment: the condition of If does not have the type boolean${defaulted}${suffix}`
+      `JS scalar fragment: the condition of ${head} does not have the type boolean${defaulted}${suffix}`
     );
+}
+
+/** Throw the refusal of a `Which` or of an `If(c, v)` used as a value
+ *  (`selectionRefusal()`) on the structured route, before its operands are
+ *  checked: a value `Nothing` would otherwise be read as a name. */
+function refuseSelection(node: Expression): void {
+  const message =
+    isFunction(node) && isLibraryOperator(node, node.operator)
+      ? selectionRefusal(node)
+      : undefined;
+  if (message !== undefined) throw new Error(`JS scalar fragment: ${message}`);
 }
 
 /**
@@ -4231,17 +4579,21 @@ function admitFunctionBody(
       }
       if (nested !== undefined) {
         for (const operand of nested.outer) checkValue(operand);
-        if (nested.index !== undefined) {
-          if (names.has(nested.index) || locals.has(nested.index))
-            throw new Error(
-              `JS scalar fragment: the comprehension index ${nested.index} has the name of a parameter, a local or another index`
-            );
-          names.add(nested.index);
-        }
+        const added: string[] = [];
         try {
+          for (const { index, bounds } of nested.indexes ?? []) {
+            for (const bound of bounds)
+              checkAggregateBound(node, bound, registry, checkValue);
+            if (names.has(index) || locals.has(index))
+              throw new Error(
+                `JS scalar fragment: the ${indexLabel(node)} index ${index} has the name of a parameter, a local or another index`
+              );
+            names.add(index);
+            added.push(index);
+          }
           for (const operand of nested.inner) checkValue(operand);
         } finally {
-          if (nested.index !== undefined) names.delete(nested.index);
+          for (const index of added) names.delete(index);
         }
         return;
       }
@@ -4285,11 +4637,16 @@ function admitFunctionBody(
       !admission.heads.has(node.operator) ||
       !isAdmittedOperator(node, admission) ||
       (node.operator === 'Negate' && node.nops !== 1) ||
-      (node.operator === 'If' && node.nops !== 3)
+      // The structured route also admits `If(c, v)` used as a value, as a
+      // `Which` of one clause (`selectionRule()`).
+      (node.operator === 'If' &&
+        node.nops !== 3 &&
+        !(admission.structured && node.nops === 2))
     )
       throw new Error(
         `JS scalar fragment: unsupported ${isRoot ? 'bound head' : 'helper body'} ${node.operator}`
       );
+    if (admission.structured) refuseSelection(node);
     checkCondition(node, conditionContext);
     for (const operand of admittedOperands(node)) checkValue(operand);
   };

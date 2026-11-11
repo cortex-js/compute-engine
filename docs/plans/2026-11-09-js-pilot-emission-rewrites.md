@@ -169,6 +169,43 @@ in both modes.
 | `Abs`, `Arcosh`, `Artanh` of a complex operand that is not a name | `Math.hypot` of the parts that `tryGetJSComplexParts()` reads, or `_SYS.cabs`; `_SYS.cacosh`, `_SYS.catanh` | Declined (unchanged): `Abs` writes other code; `Arcosh` and `Artanh` have no compilation of the engine that needs another operand. |
 | `liftWideResult()`, the `complex` mode | A function node of a wide numeric type that the compiler reads as complex is wrapped in `_SYS.cplx()`, unless its head propagates complexness or is `Sqrt`, `Ln`, `Log` or `Power`: `sin(t)` is `_SYS.cplx(_SYS.csin(_SYS.cplx(t)))` | A complex helper returns an `{re, im}` object, and `_SYS.cplx()` returns an object as it is: no operation for the wrapper (`_SYS.csin(_SYS.cplx(_.t))`). A real call that the compiler wraps (`Cot(x)` with `x: real`) stays declined. |
 
+The handlers of `Which` (`compileExprWhich()` in `compile-conditionals.ts`,
+which also writes `If(c, v)` used as a value: `compileExpr()` in
+`compiler-core.ts`) and of `Sum` and `Product` (`compileSumProduct()` and
+`emitSumProduct()` in `javascript-target.ts`), read from the source at
+`4422cd7bf` (2026-11-10), in their order, and what the route does. The
+witnesses are the declines of the engine's own compilations under the switch
+(the integrands of piecewise functions, the limit probes of
+`Σ_{k=1}^{n} 1/k`, the `Map` of a function with a sum); the tests are
+`test/compute-engine/compile-javascript-structured-sum-which.test.ts`.
+
+| Branch of the existing handler | Emission | Structured route |
+| --- | --- | --- |
+| `Which` with an odd number of operands | throws | Declined. |
+| `target.selection`: a condition that can be a collection | the element-wise selection helper | Not reached: each condition has the type `boolean` (`checkCondition()`) and a boolean fact. |
+| A condition whose type is `false` (`booleanClaim()`), or the symbol `False` | the clause is dropped | Declined: a function node of such a type (`refuseBooleanClaim()`), and the symbol `False` (`selectionRefusal()`). |
+| The condition `True`, or of the type `true` | the value, with no test; the clauses after it are dropped | The symbol `True` as the last condition: the default clause, the same code. Before the last clause, and a function node of the type `true`: declined. |
+| Mixed real and complex values (`branchComplexCoercion()`) | every value and the no-match value converted | Declined: a complex value, and a boolean or a list value. |
+| Another clause | `((c) ? (v) : rest)`, the first condition before its value | An `if` per clause, nested in the else branch of the one before (`selection()` in the lowering): the same order of the tests. |
+| No clause holds (`noBranchValue()`) | `NaN` for a numeric result; `undefined` for a result that is provably not a number; `{ re: NaN, im: NaN }` for complex values | The literal `NaN`, of the type of the node (an integer `Which` keeps its integer fact: `NaN` is the absent value, as for `At`). The interpreter gives `Missing`: a caveat of compiled code. |
+| A value `Nothing` | throws ("no representation of `Nothing` as a value") | Declined. |
+| `Sum`, `Product` with no index set (`Sum(L)`, `.total`) | the fold of the elements of a collection | Declined (`aggregateRefusal()`). |
+| An index set that is not `Limits` (`Element(k, L)`) | throws (`extractLimits()`) | Declined. |
+| An element-wise body (`isElementwiseBigOpBody()`), a complex body (`isComplexValuedUnderIndices()`) | the `_SYS.bcast` fold; the accumulation per component | Declined: the body has a real or an integer fact. |
+| A bound with an effect, or with a value that does not floor to a safe integer (`assertSafeBigOpBounds()`, which folds the bound also with `constantFold: false`) | throws | Declined: a call that is not `pure` in a bound; a literal, a captured value, or a bound that reads only captured values and constants (`B - 1`), whose value (`N()` for the last) does not floor to a safe integer. A bound of captured values that does is code on both routes (`Math.floor(5 + -1)` for `N - 1`): admitted. |
+| A bound that is not finite (`isNonFiniteBound()`): `+∞`, `NaN`, a type `infinity` or `nan` | throws without a budget; with a budget, the loop and its guard, `NaN` | Declined, with or without a budget. |
+| The value of a bound at compile time (`bigOpBoundConstant()`: `expr.re`) | a number literal or a name with a value (a capture, `Pi`) is a constant, floored; every other bound is code | The same split: a number literal or a captured name is a constant, its snapshot floored; every other bound is lowered and floored (`floor`). A local is code on both routes (`let m = 4` and `Math.floor(m)`). |
+| Both constant, in the budget (or no budget), `a > b` | the literal `0` or `1` | The same literal. |
+| Both constant, in the budget, at most `UNROLL_LIMIT` (100) terms and `unrollFits()` | the terms with the index a literal, `t_a + t_{a+1} + …` from the first term (4 terms or more: statements with an exit on `NaN`, the same values) | One `add` or `multiply` of the terms, each with the index a literal; one term is the term. `Σ` of `-0` terms is `-0`, as there. |
+| Both constant, `b - a` not less than the budget | the loop, whose guard always gives `NaN` | The literal `NaN`. |
+| Another range | `let acc = 0; …; while (k <= upper) { acc += term; … }`, with a guard before the loop when a bound is not constant: `!Number.isSafeInteger(b)` without a budget, `Number.isFinite(b) && !Number.isSafeInteger(b)` with one, and `!(upper - lower < budget)` with a budget | A `loop` with the accumulator as its one carried value, initial value `0` or `1`, next value `acc + term`; no iteration budget on the loop (the existing emitter counts no pass of an aggregate), so it cannot abort. With a bound that is not constant, the guard as two `if` operations: `NaN` when the tests above fail (written `|b| <= 2^53 - 1` and `|b| < ∞` of the floored bound, the same answers for an integer, `±∞` and `NaN`), else the loop when `a <= b`, else `0` or `1`. |
+| The exit on a `NaN` accumulator (`isEmissionSkippable()`), the hoisting of index-free subexpressions (`hoistLoopInvariants()`) | fewer evaluations | Not written: the same values (`NaN` absorbs `+` and `*`; an exit or a hoist only skips or shares evaluations of terms with no effect). |
+| More than one clause | nested sums, the first clause outermost; a later bound can read an earlier index | The same nesting; the bound of an inner clause that reads an outer index is not constant on both routes. |
+
+The analysis of execution reports the loop of a sum as no candidate for
+parallel iterations (`carried scalar`): a floating-point sum depends on the
+order of its additions.
+
 In the `complex` mode the route admits a loop that sums `x^1.4` into a local
 of a function with the result type `real`; the existing compiler throws for
 it (its analysis puts the local on the complex lane), so that program has no
