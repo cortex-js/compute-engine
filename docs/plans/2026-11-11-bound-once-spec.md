@@ -1,9 +1,11 @@
 # Binding units: an expression is bound once
 
-Status: the direction is approved by the user on 2026-11-11 ("I'm on board
-with the spec"), and so is the delivery rule of section 7. The decisions D1
-to D4 of section 8 wait for the measurements M1 to M3. No code is written.
-Not yet reviewed with `/review-spec`.
+Status: APPROVED by the user on 2026-11-11, after the measurements of
+section 9: the rule (D1), a popped scope keeps its definitions (D2), the
+compile options in the same change (D3), the order and the delivery rule
+of section 7 (D4), and the binder case of section 4. Step 1 of section 7
+is being implemented. A measure of the time on a quiet machine is still
+owed (M3).
 
 Model: `docs/plans/2026-11-09-binding-units-model.md`. This spec replaces
 rules 3 and 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md` and
@@ -98,6 +100,13 @@ across a pop. Its alternative is in section 8, D2.
   of: bind the expression inside (`rebind`), substitute the variable, or
   declare nothing and pass the type to the operation. No site keeps a
   fallback to the current scope. The list by function is measurement M1.
+- **A binder and an operand boxed outside** (approved 2026-11-11).
+  `ce.function('Sum', [body, …])` with a `body` that was boxed outside: the
+  binder boxes its body again in its own scope, so the occurrences of its
+  variable in the body are bound to it, and the other names of the body
+  keep their home scope. This is what rule 2 of the slice 1 spec says a
+  binder does ("a binder that boxes its body again"). An operand of a
+  function that is not a binder is not boxed again.
 - **A stored value.** The value of a definition is an expression, so it
   reads the scope it was boxed in. "Evaluate with these values for a
   moment" is `ce.withValues()`, which writes on the existing definitions.
