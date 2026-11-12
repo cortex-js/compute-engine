@@ -5,7 +5,6 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { freshSymbol } from './series.js';
 import { exactComplexParts, integerExponent } from './contour.js';
 import { realPathDivergence } from './contour-integrate.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -139,7 +138,7 @@ export function definiteIntegralByResidues(
     (lo.isSame(0) && hi.isSame(ce.Pi)) || (hi.isSame(0) && lo.isSame(ce.Pi));
   if (!halfLine && !period && !halfPeriod) return undefined;
 
-  const v = freshSymbol(integrand, variable);
+  const v = ce.temporaryName('s', integrand, variable);
   ce.pushScope();
   try {
     ce.declare(v, 'complex');

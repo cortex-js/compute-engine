@@ -591,7 +591,7 @@ function unaryTaylor(
   // underscore would collide with the `_` hole convention in the
   // differentiation machinery, so it must be avoided.
   b0 = foldZeroCoeff(ce, b0);
-  const v = freshSymbol(b0, op);
+  const v = ce.temporaryName('s', b0, op);
   const reduceHyp = HYPERBOLIC.has(op);
   let g: Expression = ce.function(op, [ce.symbol(v)]).canonical;
   const coeffs: Coeffs = [];
@@ -2097,17 +2097,6 @@ function taylorCoeffs(
   return expandViaSeeds(f, x, x0, ce, W) ?? expandByDerivative(f, x, x0, ce, W);
 }
 
-/** A fresh symbol name not equal to `avoid` and not occurring free in `f`.
- * `t` is not a candidate: it is the name of the parameter of a family of
- * roots, which is not given to a name that the engine made a symbol of
- * (`freshParameters()`, `boxed-expression/diophantine.ts`). */
-export function freshSymbol(f: Expression, avoid: string): string {
-  for (const name of ['s', 'u', 'w', 'q', 'z', 'tau', 'xi']) {
-    if (name !== avoid && !f.has(name)) return name;
-  }
-  return '_seriesT';
-}
-
 /**
  * A limit resolver with the shape of `symbolicLimit` (symbolic/limit.ts).
  * `computeSeries` receives it as a parameter instead of importing it — the
@@ -2280,7 +2269,7 @@ function seriesAtInfinity(
   ce: ComputeEngine,
   resolveLimit?: LimitResolver
 ): Expression | undefined {
-  const s = freshSymbol(f, x);
+  const s = ce.temporaryName('s', f, x);
   // g(s) = f(1/s); simplify to expose rational cancellations (e.g.
   // (x+1)/x → 1 + s). Safe here (top-level verb, not a simplification rule).
   const g = f

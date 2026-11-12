@@ -208,6 +208,7 @@ import type {
   EffectHandlers,
 } from './types-effects.js';
 import { isValidSymbol } from '../math-json/symbols.js';
+import { temporaryName as temporaryNameImpl } from './temporary-name.js';
 
 import { getFunctionProperties } from './function-properties/index.js';
 import { contourIntegrate as contourIntegrateImpl } from './symbolic/contour-integrate.js';
@@ -3309,6 +3310,24 @@ export class ComputeEngine implements IComputeEngine {
    */
   suggestOperatorName(name: string): string | undefined {
     return suggestOperatorNameImpl(this, name);
+  }
+
+  /**
+   * Return a name for a temporary symbol: `<hint>_tmp<n>`, with `n` the
+   * smallest integer from 1 for which the name has no definition from the
+   * current scope and does not occur in `avoid` (boxed expressions, single
+   * names, sets of names). Keeps no state and declares nothing. See
+   * `IComputeEngine.temporaryName()` for the rules.
+   *
+   * ```ts
+   * ce.temporaryName('t'); // → 't_tmp1'
+   * ```
+   */
+  temporaryName(
+    hint: string,
+    ...avoid: (Expression | string | ReadonlySet<string>)[]
+  ): string {
+    return temporaryNameImpl(this, hint, avoid);
   }
 
   /**

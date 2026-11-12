@@ -4,7 +4,6 @@ import {
   appendDistinctRoot,
   characteristicPolynomial,
   collectSymbols,
-  freshSymbolName,
   integrationConstants,
   numericMagnitude,
   rootMultiplicity,
@@ -320,7 +319,7 @@ export function rSolve(
   )
     return undefined;
 
-  const rootVariable = freshSymbolName('rsolveroot', collectSymbols(equation));
+  const rootVariable = ce.temporaryName('rsolveroot', equation);
   const polynomial = characteristicPolynomial(
     normalized.coefficients,
     rootVariable,

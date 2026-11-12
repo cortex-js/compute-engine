@@ -13830,8 +13830,9 @@ function emitIterateStream(
   let complex: boolean;
   ce.pushScope();
   try {
-    ce.declare('_ce_iterate_accumulator', accType);
-    const acc = ce.function('List', [ce.symbol('_ce_iterate_accumulator')]);
+    const accumulator = ce.temporaryName('accumulator', fn);
+    ce.declare(accumulator, accType);
+    const acc = ce.function('List', [ce.symbol(accumulator)]);
     const probe = indexed
       ? ce.function('Map', [fn, ce.function('List', [ce.One]), acc])
       : ce.function('Map', [fn, acc]);

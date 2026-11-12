@@ -22,7 +22,7 @@ import {
   checkDeadline,
   throwIfCallerCancellation,
 } from '../../common/interruptible.js';
-import { freshSymbol, laurentData } from './series.js';
+import { laurentData } from './series.js';
 import { differentiate } from './derivative.js';
 import { polynomialExponentialSingularity } from './essential-residue.js';
 import {
@@ -611,7 +611,7 @@ function contourIntegrateUnbounded(
 
   // Use a fresh complex variable so assigned values and real-only declarations
   // on the caller's variable cannot hide poles or filter complex roots.
-  const v = freshSymbol(original, variable);
+  const v = ce.temporaryName('s', original, variable);
   ce.pushScope();
   try {
     ce.declare(v, 'complex');
@@ -997,7 +997,7 @@ function realLineIntegral(
       ...report,
       reason: 'The integrand must be a valid, pure expression.',
     };
-  const v = freshSymbol(original, variable);
+  const v = ce.temporaryName('s', original, variable);
   ce.pushScope();
   try {
     ce.declare(v, 'complex');

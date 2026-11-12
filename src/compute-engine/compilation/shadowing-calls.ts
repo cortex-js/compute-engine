@@ -247,26 +247,24 @@ export function withShadowingCallsRenamed<T>(
   const taken = new Set<string>();
   const originalNames = new Map<string, string>();
   const depsBefore = new Set(options.symbolDeps ?? []);
-  // The search for a private name is bounded: a caller's `operators`
-  // function can answer for every name. When no name is free, nothing is
-  // renamed, and the compiler takes its own route for the expression (it
-  // declines a call of a user function with a library name).
-  const isFree = (candidate: string): boolean =>
-    !taken.has(candidate) &&
-    !usedNames.has(candidate) &&
-    !isCallerName(candidate) &&
-    ce.lookupDefinition(candidate) === undefined;
-  const privateNameFor = (name: string): string | undefined => {
-    for (const suffix of ['User', 'Copy'])
-      for (let k = 1; k <= 64; k++) {
-        const candidate = `${name}${suffix}${k === 1 ? '' : k}`;
-        if (isFree(candidate)) return candidate;
-      }
+  // A private name is a temporary name (`ce.temporaryName()`): it is not a
+  // name that `expr`, the bodies it reaches or the caller use, not a name
+  // given earlier, and has no definition. The search is bounded: a caller's
+  // `operators` function can answer for every name. A name that it answers
+  // for is added to `taken`, and a next name is asked for. When no name is
+  // free, nothing is renamed, and the compiler takes its own route for the
+  // expression (it declines a call of a user function with a library name).
+  const temporaryNameFor = (name: string): string | undefined => {
+    for (let k = 1; k <= 64; k++) {
+      const candidate = ce.temporaryName(name, usedNames, taken);
+      if (!isCallerName(candidate)) return candidate;
+      taken.add(candidate);
+    }
     return undefined;
   };
   for (const fn of renamed) {
     const candidate =
-      !fn.shadows && !taken.has(fn.name) ? fn.name : privateNameFor(fn.name);
+      !fn.shadows && !taken.has(fn.name) ? fn.name : temporaryNameFor(fn.name);
     if (candidate === undefined) return compile(expr);
     taken.add(candidate);
     fn.privateName = candidate;

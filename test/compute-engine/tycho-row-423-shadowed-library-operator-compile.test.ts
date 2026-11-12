@@ -571,15 +571,15 @@ describe('the rename of the shadowing calls', () => {
     expect(withCallerFunction.result.run({ x: 1 })).toBe(102);
     const r = compile(expr, {
       to: 'javascript',
-      functions: { GammaUser: '((t) => t * 1000)' },
+      functions: { Gamma_tmp1: '((t) => t * 1000)' },
     } as any) as any;
     expect(r.run({ x: 1 })).toBe(102);
 
     const ce2 = engine();
-    ce2.declare('GammaUser', 'real');
-    const expr2 = ce2.box(['Add', ['Gamma', 'x'], 'GammaUser']);
+    ce2.declare('Gamma_tmp1', 'real');
+    const expr2 = ce2.box(['Add', ['Gamma', 'x'], 'Gamma_tmp1']);
     const { result } = compiled(expr2, 'javascript');
-    expect(result.run({ x: 1, GammaUser: 5 })).toBe(106);
+    expect(result.run({ x: 1, Gamma_tmp1: 5 })).toBe(106);
   });
 
   test('the dependencies name the user function, not its copy', () => {
@@ -628,7 +628,7 @@ describe('the rename of the shadowing calls', () => {
       const claimed = compile(expr, {
         to: 'javascript',
         operators: (op: string) =>
-          op === 'GammaUser' ? ['CLAIMED', 20] : undefined,
+          op === 'Gamma_tmp1' ? ['CLAIMED', 20] : undefined,
       } as any) as any;
       expect(claimed.success).toBe(true);
       expect(claimed.code).not.toContain('CLAIMED');
@@ -665,7 +665,7 @@ describe('the rename of the shadowing calls', () => {
     expect(result.success).toBe(true);
     expect(versions()).toEqual(before);
     expect(engineState.contextStack.length).toBe(depth);
-    expect(ce.lookupDefinition('GammaUser')).toBeUndefined();
+    expect(ce.lookupDefinition('Gamma_tmp1')).toBeUndefined();
     // The compiled code holds the definition it was compiled with, as for
     // a user function with any other name.
     ce.assign('Gamma', ce.parse('x\\mapsto x+5'));
@@ -728,23 +728,86 @@ describe('the rename of the shadowing calls', () => {
       const greedy = compile(expr, {
         to: 'javascript',
         operators: (op: string) =>
-          op.startsWith('GammaUser') || op.startsWith('GammaCopy')
-            ? ['G', 20]
-            : undefined,
+          op.startsWith('Gamma_tmp') ? ['G', 20] : undefined,
       } as any) as any;
       expect(greedy.success).toBe(false);
       expect(greedy.run({ x: 1 })).toBe(102);
-      // When only the first suffix is taken, the second one is used.
+      // When only the first names are taken, the next one is used.
       const partial = compile(expr, {
         to: 'javascript',
         operators: (op: string) =>
-          op.startsWith('GammaUser') ? ['G', 20] : undefined,
+          op === 'Gamma_tmp1' || op === 'Gamma_tmp2' ? ['G', 20] : undefined,
       } as any) as any;
       expect(partial.success).toBe(true);
+      expect(partial.code).toBe('_fn_Gamma_tmp3(_.x) + 1');
       expect(partial.run({ x: 1 })).toBe(102);
     } finally {
       warn.mockRestore();
     }
+  });
+
+  test('the private name is a temporary name', () => {
+    // `ce.temporaryName()`: `<name>_tmp<n>`, with the smallest free `n`.
+    const ce = engine();
+    const { result } = compiled(
+      ce.box(['Add', ['Gamma', 'x'], 1]),
+      'javascript'
+    );
+    expect(result.code).toBe('_fn_Gamma_tmp1(_.x) + 1');
+    expect(result.preamble).toBe('const _fn_Gamma_tmp1 = (x) => x + 100;\n');
+    expect(result.run({ x: 1 })).toBe(102);
+  });
+
+  test('two user functions of one name from two scopes get two private names', () => {
+    const ce = engine();
+    const outer = ce.box(['Gamma', 'x']);
+    ce.pushScope();
+    try {
+      ce.declare('Gamma', 'function');
+      ce.assign('Gamma', ce.parse('x\\mapsto x+10'));
+      const inner = ce.box(['Gamma', 'x']);
+      const { result } = compiled(
+        ce.function('Add', [outer, inner]),
+        'javascript'
+      );
+      expect(result.success).toBe(true);
+      expect(result.code).toBe('_fn_Gamma_tmp2(_.x) + _fn_Gamma_tmp1(_.x)');
+      expect(result.preamble).toBe(
+        'const _fn_Gamma_tmp2 = (x) => x + 10;\nconst _fn_Gamma_tmp1 = (x) => x + 100;\n'
+      );
+      expect(result.run({ x: 1 })).toBe(112);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('a body that holds Gamma_tmp1 gives Gamma_tmp2', () => {
+    // `H` names its parameter `Gamma_tmp1`, which no lookup finds: the
+    // private name avoids the names of the bodies that the expression
+    // reaches.
+    const ce = engine();
+    ce.assign(
+      'H',
+      ce.box(['Function', ['Add', ['Gamma', 'Gamma_tmp1'], 1], 'Gamma_tmp1'])
+    );
+    const { result } = compiled(ce.box(['H', 'x']), 'javascript');
+    expect(result.success).toBe(true);
+    expect(result.preamble).toBe(
+      'const _fn_Gamma_tmp2 = (x) => x + 100;\nconst _fn_H = (Gamma_tmp1) => _fn_Gamma_tmp2(Gamma_tmp1) + 1;\n'
+    );
+    expect(result.run({ x: 1 })).toBe(102);
+  });
+
+  test('a name that a callback `operators` answers for is not given', () => {
+    const ce = engine();
+    const r = compile(ce.box(['Add', ['Gamma', 'x'], 1]), {
+      to: 'javascript',
+      operators: (op: string) =>
+        op === 'Gamma_tmp1' ? ['CLAIMED', 20] : undefined,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_fn_Gamma_tmp2(_.x) + 1');
+    expect(r.run({ x: 1 })).toBe(102);
   });
 
   test('an expression with no shadowing call leaves the cache versions', () => {
@@ -783,7 +846,7 @@ describe('the rename of the shadowing calls', () => {
     const { result, warnings } = compiled(ce.box(['Gamma', 'x']), 'glsl');
     expect(result.success).toBe(false);
     expect(warnings.join('\n')).toContain('The function `Gamma` calls itself');
-    expect(warnings.join('\n')).not.toContain('GammaUser');
+    expect(warnings.join('\n')).not.toContain('Gamma_tmp1');
   });
 
   test('a structural expression keeps its form', () => {
@@ -791,6 +854,8 @@ describe('the rename of the shadowing calls', () => {
     // canonicalized to a `Root` when its parent is rebuilt.
     const lowered = (name: string): string => {
       const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.declare('y', 'real');
       ce.declare(name, 'function');
       ce.assign(name, ce.parse('x\\mapsto x+100'));
       const expr = ce.function(
@@ -805,7 +870,7 @@ describe('the rename of the shadowing calls', () => {
       );
       return compiled(expr, 'javascript').result.code;
     };
-    expect(lowered('Gamma').replace('_fn_GammaUser', '_fn_G')).toBe(
+    expect(lowered('Gamma').replace(/_fn_Gamma_tmp1/g, '_fn_G')).toBe(
       lowered('G')
     );
   });

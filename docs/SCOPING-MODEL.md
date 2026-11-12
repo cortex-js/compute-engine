@@ -605,3 +605,24 @@ Such an escape does not retain its call frame. Disposed definitions keep their
 values, but a later symbol evaluation can trigger the dead-binding debug check;
 a name lookup alone does not run that check. Host escapes are therefore not
 evidence that the managed reachability walk retained a frame.
+
+## Temporary names
+
+`ce.temporaryName(hint, ...avoid)` returns `<hint>_tmp<n>`, with `n` the
+smallest integer from 1 for which the name has no definition from the
+current scope and does not occur in `avoid`. A temporary is an ordinary
+symbol: the caller declares it in a scope it pushes, or uses it as a
+parameter or a binder index, and its definition ends with that scope. The
+form `<name>_tmp<n>` is reserved for this method; the engine does not
+enforce it.
+
+### Known limitations
+
+- (crafted) A user expression that writes a reserved name (`t_{tmp1}` parses
+  to `t_tmp1`) while a temporary of that name is declared in a scope that the
+  expression reads gets that temporary.
+- (crafted) A temporary held in a stored value, or in an expression boxed in
+  a scope that the current scope does not see, is not seen by
+  `ce.temporaryName()` when the caller does not pass it in `avoid`: after a
+  pop of the scope that declared `s_tmp1`, the next call gives `s_tmp1`
+  again, and an expression that holds both reads them as one name.

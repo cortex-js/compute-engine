@@ -24,7 +24,7 @@ import type {
 } from '../global-types.js';
 
 import { isEntireIn, symbolicLimit } from './limit.js';
-import { laurentData, freshSymbol } from './series.js';
+import { laurentData } from './series.js';
 import { differentiate } from './derivative.js';
 import { expandAll } from '../boxed-expression/expand.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
@@ -68,7 +68,7 @@ export function residue(
     // point spellings name the same Riemann-sphere point, and the
     // substitution reuses this function at 0, where the Laurent kernel and
     // the probing paths apply unchanged.
-    const s = freshSymbol(body, varName);
+    const s = ce.temporaryName('s', body, varName);
     const sSym = ce.symbol(s);
     const g = body.subs({
       [varName]: ce.function('Divide', [ce.One, sSym]),

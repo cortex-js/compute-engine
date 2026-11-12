@@ -3100,6 +3100,51 @@ export interface IComputeEngine {
   suggestOperatorName(name: string): string | undefined;
 
   /**
+   * Return a name for a temporary symbol: `<hint>_tmp<n>`, with `n` the
+   * smallest integer from 1 such that the name
+   * - has no definition that `ce.lookupDefinition()` finds from the current
+   *   scope, and
+   * - is not a name of `avoid`, and does not occur in an expression of
+   *   `avoid`, as a symbol (free or bound) or as the operator of a call.
+   *
+   * Each item of `avoid` is a boxed expression, a string (one name, not text
+   * to search) or a set of names. An array throws: an array of strings is
+   * also a MathJSON call, so box it or pass the set of its names. An
+   * expression is walked as it is written, each shared subtree once; the
+   * walk does not enter the values or the bodies of the names it reads.
+   *
+   * Pass in `avoid` every expression that the name will be put in or
+   * combined with, the bodies and stored values that the computation reads,
+   * and the names returned by earlier calls that are not declared yet: two
+   * calls in a row with the same hint return the same name otherwise. A name
+   * that an expression uses with no definition is not seen by the lookup.
+   *
+   * The hint is cleaned: the `_` at its start and at its end are removed and
+   * each `__` becomes `_`; `tmp` is used if nothing is left. A hint that is
+   * not a valid symbol name, or for which `<hint>_tmp1` is not one (an
+   * emoji), throws.
+   *
+   * The function keeps no state and declares nothing: the same call in the
+   * same state returns the same name. The caller declares the name if it
+   * needs a definition, and the definition ends with its scope.
+   *
+   * A name that ends with `_tmp` and a positive integer is reserved for this
+   * function. The engine does not enforce it. A host can remove
+   * `/_tmp[1-9]\d*$/` from the name to get the hint.
+   *
+   * ```ts
+   * ce.temporaryName('t');                                // → 't_tmp1'
+   * ce.temporaryName('t', ce.box(['Add', 't_tmp1', 'x'])); // → 't_tmp2'
+   * ce.temporaryName('s', new Set(['s_tmp1']));           // → 's_tmp2'
+   * ce.temporaryName('_x');                               // → 'x_tmp1'
+   * ```
+   */
+  temporaryName(
+    hint: string,
+    ...avoid: (Expression | string | ReadonlySet<string>)[]
+  ): string;
+
+  /**
    * Return the known analytic properties of an operator — poles, zeros, branch
    * points/cuts, residues, holomorphic/meromorphic domains — drawn from the
    * Fungrim-derived metadata store, or `undefined` if none are recorded.

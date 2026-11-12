@@ -19,8 +19,29 @@
   `CE_BINDING_UNITS=0` and `ce._bindingUnits = false` have no effect. A host
   that set either one declares its names, or calls `ce.infer()` on the
   expressions that use them.
+- **The helper of a user function that shadows a library operator has a new
+  name in compiled code.** A document that defines `Gamma` compiles a call of
+  it as a call of a private copy: the copy was named `GammaUser` (emitted as
+  `_fn_GammaUser`), and is now named by `ce.temporaryName()`, `Gamma_tmp1`
+  (emitted as `_fn_Gamma_tmp1`). The values are the same. A host that
+  compares emitted code, or that reads the helper name, sees the new name.
 
 ### New Features
+
+- **`ce.temporaryName(hint, ...avoid)` gives a name for a temporary symbol.**
+  It returns `<hint>_tmp<n>`, with `n` the smallest integer from 1 for which
+  the name has no definition from the current scope and does not occur in
+  `avoid`: boxed expressions (each symbol, free or bound, and each operator
+  name), single names, and sets of names. It keeps no state and declares
+  nothing, so the same call in the same state gives the same name. A name
+  that ends with `_tmp` and a positive integer is reserved for this method.
+  The series, residue and contour-integration code, the solvers of `DSolve`
+  and `RSolve`, and the compiler use it for their own auxiliary names.
+
+  ```js
+  ce.temporaryName('t'); // ➔ "t_tmp1"
+  ce.temporaryName('t', ce.box(['Add', 't_tmp1', 'x'])); // ➔ "t_tmp2"
+  ```
 
 - **The `numeric-kernel` profile compiles user functions that read the
   inputs of the program.** A user function whose body reads a name that is

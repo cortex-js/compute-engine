@@ -23,7 +23,6 @@ import {
   appendDistinctRoot,
   characteristicPolynomial,
   collectSymbols,
-  freshSymbolName,
   integrationConstants,
   rootMultiplicity,
   solutionRecord,
@@ -1331,7 +1330,7 @@ function solveHigherOrderHomogeneousConstantCoefficient(
   )
     return undefined;
 
-  const rootVariable = freshSymbolName('dsolveroot', collectSymbols(equation));
+  const rootVariable = ce.temporaryName('dsolveroot', equation);
   const polynomial = characteristicPolynomial(
     collected.coefficients,
     rootVariable,
@@ -1802,10 +1801,7 @@ function solveSeparableFirstOrder(
   if (!separated) return undefined;
 
   const ce = equation.engine;
-  const ySymbolName = freshSymbolName(
-    `${dependentName}_value`,
-    collectSymbols(equation)
-  );
+  const ySymbolName = ce.temporaryName('dsolvey', equation);
   const y = ce.symbol(ySymbolName);
   const yPart = replaceDependentCall(
     separated.yPart,
@@ -1847,8 +1843,7 @@ function solveHomogeneousFirstOrder(
   if (!rhsInfo || rhsInfo.order !== 1) return undefined;
 
   const ce = equation.engine;
-  const usedSymbols = collectSymbols(equation);
-  const ratioName = freshSymbolName('dsolvev', usedSymbols);
+  const ratioName = ce.temporaryName('dsolvev', equation);
   const x = ce.symbol(independentName);
   const v = ce.symbol(ratioName);
   const substituted = replaceDependentCall(
@@ -2296,8 +2291,7 @@ function solveExactFirstOrder(
   )
     return undefined;
 
-  const usedSymbols = collectSymbols(equation);
-  const ySymbolName = freshSymbolName(`${dependentName}_value`, usedSymbols);
+  const ySymbolName = ce.temporaryName('dsolvey', equation);
   const x = ce.symbol(independentName);
   const y = ce.symbol(ySymbolName);
   const mTerm = collected.rest
@@ -2389,7 +2383,7 @@ function solveClairautFirstOrder(
   if (!hasDependentOrDerivative(rest, dependentName, independentName))
     return undefined;
 
-  const pName = freshSymbolName('dsolvep', collectSymbols(equation));
+  const pName = ce.temporaryName('dsolvep', equation);
   const p = ce.symbol(pName);
   const restInP = replaceDerivativeOfDependent(
     rest,
@@ -2765,12 +2759,9 @@ function polynomialParticularSolution(
     zeroRootMultiplicity += 1;
   if (zeroRootMultiplicity > order) return undefined;
 
-  const usedSymbols = collectSymbols(equation);
-  const coefficientNames = Array.from({ length: rhsDegree + 1 }, (_, i) => {
-    const name = freshSymbolName(`dsolvep_${i}`, usedSymbols);
-    usedSymbols.add(name);
-    return name;
-  });
+  const coefficientNames = Array.from({ length: rhsDegree + 1 }, (_, i) =>
+    ce.temporaryName(`dsolvep_${i}`, equation)
+  );
   const x = ce.symbol(independentName);
   const terms = coefficientNames.map((name, i) =>
     ce
@@ -2891,8 +2882,7 @@ function exponentialParticularSolution(
   if (!split) return undefined;
 
   const order = Math.max(...collected.coefficients.keys());
-  const usedSymbols = collectSymbols(equation);
-  const coefficientName = freshSymbolName('dsolvea', usedSymbols);
+  const coefficientName = ce.temporaryName('dsolvea', equation);
   const x = ce.symbol(independentName);
   const base = split.coefficient
     .mul(ce.symbol(coefficientName))
@@ -3024,10 +3014,8 @@ function sinusoidalParticularSolution(
   if (!split) return undefined;
 
   const order = Math.max(...collected.coefficients.keys());
-  const usedSymbols = collectSymbols(equation);
-  const sinName = freshSymbolName('dsolvesin', usedSymbols);
-  usedSymbols.add(sinName);
-  const cosName = freshSymbolName('dsolvecos', usedSymbols);
+  const sinName = ce.temporaryName('dsolvesin', equation);
+  const cosName = ce.temporaryName('dsolvecos', equation, sinName);
   const x = ce.symbol(independentName);
   const base = ce
     .symbol(sinName)
