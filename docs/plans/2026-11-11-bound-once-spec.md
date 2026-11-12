@@ -680,3 +680,26 @@ what they declared when they fail; Tycho is told (two of its tests inject
 a failure of a restore through the internal `_restoreCheckpointSnapshot()`).
 It comes after D8 and the activations in the same worktree, as a task of
 its own. Until then the one test of CE-586 stays failing.
+
+After the migration of the tests (`d8-test-migration.md` in the evidence
+folder), the user decided three of the programs that the rules left open
+(2026-11-12):
+
+- **A read before a top-level `let` in Epsil** (`let a = q + 1; let q = 2;
+  a`): an error, `read-before-declaration`, as in a block.
+- **A function that writes a name declared by a later top-level `let`**:
+  valid when that is not complicated to build (the name is a local of the
+  top-level block for the whole program; a call before the `let` has run is
+  the read-before-declaration error); otherwise an error.
+- **An assignment in a value operand to a name that is not declared**
+  (`Sum(Assign(s, s + i), …)`): an error, the existing
+  `assignment-in-operand`.
+- **The type of a local declared with a function literal** is open: the
+  user asked for Tycho's view first (asked on 2026-11-12).
+
+**State of the code.** The worktree `/tmp/wt-compute-engine-ad-step1` was
+lost in a kernel panic on 2026-11-12 and rebuilt: the state after step 1 of
+the activations from the patch in the evidence folder (detached commit
+`d1126e8344246d37576e65b7ad1d027843b1bbe8`), then D8 by replaying the
+agent's transcript (`1a690356ea2fe525f51f5233d82f504c9a8662a5`). The
+objects of these commits are in the main repository.
