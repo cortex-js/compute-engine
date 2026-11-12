@@ -158,8 +158,9 @@ describe('regularized incomplete gamma/beta kernels', () => {
     test('domain errors → NaN', () => {
       expect(betaRegularized(0.5, 0, 3)).toBeNaN();
       expect(betaRegularized(0.5, 2, -1)).toBeNaN();
-      expect(betaRegularized(-0.1, 2, 3)).toBeNaN();
-      expect(betaRegularized(1.1, 2, 3)).toBeNaN();
+      // outside [0, 1] the value is real only for an integer b (or a)
+      expect(betaRegularized(-0.1, 2.5, 3)).toBeNaN();
+      expect(betaRegularized(1.1, 2, 2.5)).toBeNaN();
       expect(betaRegularized(NaN, 2, 3)).toBeNaN();
     });
 
@@ -385,7 +386,7 @@ describe('regularized incomplete gamma/beta kernels', () => {
         expect(bigBetaRegularized(ce, B('0.5'), B('0'), B('3')).isNaN()).toBe(
           true
         );
-        expect(bigBetaRegularized(ce, B('1.5'), B('2'), B('3')).isNaN()).toBe(
+        expect(bigBetaRegularized(ce, B('1.5'), B('2'), B('2.5')).isNaN()).toBe(
           true
         );
       });

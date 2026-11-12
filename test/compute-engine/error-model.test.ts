@@ -1689,7 +1689,11 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Beta', POS, -1], isNaNv);
     both(['Beta', NEG, ['Rational', 1, 2]], isIndet);
     bothAsPos(['Beta', ANON, 2]);
-    both(['Beta', ['Complex', 1, 2], 2], symbolic('Beta'));
+    // A complex operand stays symbolic under evaluate() and has the value
+    // Γ(a)Γ(b)/Γ(a + b) under N().
+    const complexBeta = ce2.box(['Beta', ['Complex', 1, 2], 2]);
+    expect(symbolic('Beta')(complexBeta.evaluate())).toBe(true);
+    expect(complexBeta.N().operator).not.toBe('Beta');
 
     // LambertW: `W₀(+∞) = +∞` folds under evaluate() (it folded only under
     // N()); `W₀(−∞)` follows Ln(−∞): it tends to `∞ + iπ`, which is `+∞`

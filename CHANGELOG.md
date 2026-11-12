@@ -1,3 +1,31 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`BetaRegularized(x, a, b)` has its real value for an `x` outside `[0, 1]`
+  where there is one,** as `N(BetaRegularized(2, 2, 3))` is `8` (#NNN,
+  contributed by [enumeratio](https://github.com/enumeratio)). It stayed
+  unevaluated. For positive integers `a` and `b` the function is the
+  polynomial `Σ_{j=a}^{a+b-1} C(a+b-1, j) xʲ (1-x)^(a+b-1-j)` (DLMF §8.17(ii)),
+  summed exactly from the digits of `x` for any real `x`
+  (`I_3(2, 3)` is `81`, `I_{-1/2}(2, 2)` is `1`); for `x > 1`, a real `a > 0`
+  and an integer `b` up to 30 it is the finite sum `B_x(a, b)/B(a, b)`, with
+  working digits added for its cancellation (`I_2(5/2, 3)` is
+  `16.26345596729059…`). Matches mpmath to within one digit of the precision
+  asked at 30, 50 and 100 digits over 73 points. A non-integer `b` past
+  `x = 1` (a complex value) and a degree past 200 stay unevaluated.
+  `evaluate()` of an exact operand is unchanged.
+
+- **`Beta(a, b)` at a complex operand is `Γ(a)Γ(b)/Γ(a+b)`,** as
+  `N(Beta(1+i, 2))` is `0.1 - 0.3i` (#NNN, contributed by
+  [enumeratio](https://github.com/enumeratio)). It stayed `Beta(1+i, 2)`. The
+  value is `exp(lnΓ(a) + lnΓ(b) - lnΓ(a+b))` with the continuation of `lnΓ`,
+  exactly `0` where `a + b` is a non-positive integer, and `~oo` at a
+  non-positive integer `a` or `b` against a complex partner, as at a real one.
+  Measured against mpmath at 36 points with `|Im|` up to 60, the relative
+  error is at most 6.8e-14. A complex result is a double at every precision,
+  as for the other special functions.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

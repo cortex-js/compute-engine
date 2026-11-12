@@ -137,3 +137,32 @@ export function logGammaPrincipal(z: Complex): Complex {
   const im = l.im - 2 * Math.PI * Math.ceil(l.im / (2 * Math.PI) - 0.5);
   return new Complex(l.re, im);
 }
+
+function isNonPositiveIntegerValue(z: Complex): boolean {
+  return z.im === 0 && z.re <= 0 && Number.isInteger(z.re);
+}
+
+/**
+ * B(a, b) = Γ(a)Γ(b)/Γ(a + b) = exp(lnΓ(a) + lnΓ(b) − lnΓ(a + b)) for complex
+ * a and b. The continuation of lnΓ is used, so no branch of the logarithm
+ * enters the sum, and the exponential has no jump to compensate. Where a + b
+ * is a non-positive integer and neither a nor b is, B is exactly 0. NaN at
+ * the poles (a or b a non-positive integer), where the call stays symbolic.
+ */
+export function betaComplex(a: Complex, b: Complex): Complex {
+  if (
+    !Number.isFinite(a.re) ||
+    !Number.isFinite(a.im) ||
+    !Number.isFinite(b.re) ||
+    !Number.isFinite(b.im)
+  )
+    return C_NAN;
+  if (isNonPositiveIntegerValue(a) || isNonPositiveIntegerValue(b))
+    return C_NAN;
+  const sum = a.add(b);
+  if (isNonPositiveIntegerValue(sum)) return new Complex(0, 0);
+  return logGammaComplex(a)
+    .add(logGammaComplex(b))
+    .sub(logGammaComplex(sum))
+    .exp();
+}

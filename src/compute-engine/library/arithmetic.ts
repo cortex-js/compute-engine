@@ -106,6 +106,7 @@ import {
 } from '../numerics/numeric-complex.js';
 import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
 import {
+  betaComplex,
   logGammaComplex,
   logGammaPrincipal,
   logGammaComplexImError,
@@ -9194,7 +9195,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // points are `betaValueAtInfinity`'s. `NaN` propagates (explicit: the
       // carrier is not a subtype of `complex`). No `canonical` handler, so
       // a proven off-carrier operand is rejected at boxing. A non-real
-      // finite operand stays symbolic — no complex kernel.
+      // finite operand stays symbolic under `evaluate()` and has the value
+      // Γ(a)Γ(b)/Γ(a + b) under `.N()` (`betaComplex`).
       signature: '(complex | infinity, complex | infinity) -> number',
       examples: ['[Beta(2, 3), N(Beta(1/2, 1/2))]'],
       nanBehavior: 'propagate',
@@ -9247,8 +9249,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if ((ai !== null && ai <= 0) || (bi !== null && bi <= 0))
             return engine.ComplexInfinity;
         }
+        // A non-positive integer a (or b) against a complex partner: Γ(a) is
+        // a pole and Γ(a + b) is finite, so B(a, b) is the pole `~oo`.
+        if (
+          isNumber(a) &&
+          isNumber(b) &&
+          (a.isComplex || b.isComplex) &&
+          [a, b].some(
+            (x) => !x.isComplex && x.isInteger === true && x.re <= 0
+          )
+        )
+          return engine.ComplexInfinity;
         return shouldNumericize(numericApproximation, a, b)
-          ? apply2(a, b, beta, (a, b) => bigBeta(engine, a, b))
+          ? apply2(
+              a,
+              b,
+              beta,
+              (a, b) => bigBeta(engine, a, b),
+              (a, b) =>
+                betaComplex(a, typeof b === 'number' ? engine.complex(b, 0) : b)
+            )
           : undefined;
       }),
     },
