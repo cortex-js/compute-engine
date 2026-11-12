@@ -291,6 +291,90 @@ function broadcastElementOperand(
 }
 
 /**
+ * The largest index of a Fibonacci or Bell polynomial that is expanded: the
+ * polynomial has up to `n` terms with coefficients of about `n` digits, so a
+ * larger index stays unevaluated.
+ */
+const MAX_POLYNOMIAL_INDEX = 1000;
+
+/** The polynomial `Σ coefficients[i] · x^powers[i]` (zero terms omitted). */
+function polynomialSum(
+  x: Expression,
+  terms: ReadonlyArray<readonly [bigint, number]>
+): Expression {
+  const ce = x.engine;
+  return ce
+    .function(
+      'Add',
+      terms
+        .filter(([c]) => c !== 0n)
+        .map(([c, e]) =>
+          e === 0
+            ? ce.number(c)
+            : ce.function('Multiply', [
+                ce.number(c),
+                e === 1 ? x : ce.function('Power', [x, ce.number(e)]),
+              ])
+        )
+    )
+    .evaluate();
+}
+
+/**
+ * The Fibonacci polynomial `F_n(x) = Σ_k C(n-1-k, k) x^(n-1-2k)`, which
+ * satisfies `F_n = x F_{n-1} + F_{n-2}` with `F_0 = 0` and `F_1 = 1`, and
+ * `F_{-n}(x) = (-1)^(n+1) F_n(x)`. `Fibonacci(10, x)` is
+ * `x^9 + 8x^7 + 21x^5 + 20x^3 + 5x`; at `x = 1` it is the Fibonacci number.
+ */
+function fibonacciPolynomial(
+  index: bigint,
+  x: Expression,
+  ce: Expression['engine']
+): Expression | undefined {
+  const n = index < 0n ? -index : index;
+  if (n > BigInt(MAX_POLYNOMIAL_INDEX)) return undefined;
+  const m = Number(n);
+  if (m === 0) return ce.Zero;
+  const terms: [bigint, number][] = [];
+  for (let k = 0; 2 * k <= m - 1; k++) {
+    const c = binomialBigint(BigInt(m - 1 - k), BigInt(k), ce._deadline);
+    if (c === undefined) return undefined;
+    terms.push([c, m - 1 - 2 * k]);
+  }
+  // F_{-n}(x) = (-1)^(n+1) F_n(x).
+  const sign = index < 0n && m % 2 === 0 ? -1n : 1n;
+  return polynomialSum(
+    x,
+    terms.map(([c, e]) => [sign * c, e])
+  );
+}
+
+/**
+ * The Bell (Touchard) polynomial `B_n(x) = Σ_k S(n, k) x^k`, with the Stirling
+ * numbers of the second kind `S(n, k)`; `BellNumber(n, 1)` is the Bell number.
+ */
+function bellPolynomial(
+  n: number,
+  x: Expression,
+  ce: Expression['engine']
+): Expression | undefined {
+  if (n > MAX_POLYNOMIAL_INDEX) return undefined;
+  // Row n of S(i, j) = j S(i-1, j) + S(i-1, j-1).
+  let row: bigint[] = [1n];
+  for (let i = 1; i <= n; i++) {
+    checkDeadline(ce._deadlineFrame);
+    const next: bigint[] = new Array(i + 1).fill(0n);
+    for (let j = 1; j <= i; j++)
+      next[j] = BigInt(j) * (row[j] ?? 0n) + (row[j - 1] ?? 0n);
+    row = next;
+  }
+  return polynomialSum(
+    x,
+    row.map((c, k) => [c, k] as const)
+  );
+}
+
+/**
  * Shared evaluate logic for `Binomial` and `Choose` — the two names must
  * agree everywhere both are defined, so both handlers delegate here.
  *
@@ -383,6 +467,20 @@ function evaluateBinomial(
   // kernel — the Γ-ratio overflows to garbage there.
   const pole = binomialPoleValue(nExpr, kExpr, ce);
   if (pole !== undefined) return pole;
+
+  // A symbolic `n` with `k` equal to `n` or to `n - 1`, decided by value:
+  // `Binomial(n, n) = 1` and `Binomial(n, n - 1) = n`. Both hold on every
+  // route, so they are answered before the numeric kernel too.
+  if (
+    !isNumber(nExpr) &&
+    !isNumber(kExpr) &&
+    nExpr.isFinite !== false &&
+    isMergeable(nExpr)
+  ) {
+    const gap = ce.function('Subtract', [nExpr, kExpr]).evaluate();
+    if (gap.is(0)) return ce.One;
+    if (gap.is(1)) return nExpr;
+  }
 
   // Inexact (float) operands numericize even under plain evaluate(); exact
   // non-integer operands (rationals, radicals, π, ...) only numericize
@@ -663,11 +761,19 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Fibonacci: {
       description: 'Compute the nth Fibonacci number.',
       wikidata: 'Q47577',
-      signature: '(integer) -> integer',
+      signature: '(integer, number?) -> number',
+      // An integer without the polynomial argument.
+      type: ([, x], context) =>
+        BoxedType.forResult(
+          x === undefined ? 'integer' : 'number',
+          context.engine._typeResolver
+        ),
       broadcastable: true,
-      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n, x], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
+        // `Fibonacci(n, x)` is the Fibonacci polynomial.
+        if (x !== undefined) return fibonacciPolynomial(k, x, ce);
 
         // Compute F(|k|); negative indices use the reflection formula below.
         const m = k < 0n ? -k : k;
@@ -1155,14 +1261,22 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the Bell number B(n), the number of partitions of a set of n elements.',
       wikidata: 'Q816063',
-      signature: '(integer) -> integer',
+      signature: '(integer, number?) -> number',
+      // An integer without the polynomial argument.
+      type: ([, x], context) =>
+        BoxedType.forResult(
+          x === undefined ? 'integer' : 'number',
+          context.engine._typeResolver
+        ),
       broadcastable: true,
-      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n, x], { engine: ce }) => {
         // Bell numbers count set partitions, defined only for non-negative
         // integers; stay symbolic rather than rounding the argument.
         if (n.isInteger !== true) return undefined;
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
+        // `BellNumber(n, x)` is the Bell (Touchard) polynomial.
+        if (x !== undefined) return bellPolynomial(k, x, ce);
 
         // B(n) grows faster than exponentially (ln B(n) ≈ n·ln(n) −
         // n·ln(ln(n)) − n, de Bruijn): for huge n (e.g. BellNumber(20000)

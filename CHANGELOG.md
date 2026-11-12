@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`ExtendedGCD`, `Fibonacci`, `BellNumber` and `Binomial` accept the operands
+  Wolfram gives them.** `ExtendedGCD(12, 18, 27)` was an `unexpected-argument`
+  error (now `(3, 4, -4, 1)`: `g` and one Bézout coefficient per operand, so
+  that `12·4 + 18·(-4) + 27·1 = 3`; the two-operand form is unchanged),
+  `Fibonacci(10, x)` and `BellNumber(4, x)` were errors (now the Fibonacci
+  polynomial `x^9 + 8x^7 + 21x^5 + 20x^3 + 5x` and the Bell polynomial
+  `x^4 + 6x^3 + 7x^2 + x`; at `x = 1` they are the Fibonacci and Bell numbers,
+  and an index past 1000 stays unevaluated), and `Binomial(n, n - 1)` and
+  `Binomial(n, n)` for a symbolic `n` were left unevaluated (now `n` and `1`,
+  also under `.N()`). The JavaScript target declines `Fibonacci(n, x)`
+  instead of emitting `fibonacci(n)` and dropping `x`.
+  (#544, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

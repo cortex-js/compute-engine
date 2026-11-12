@@ -435,3 +435,102 @@ describe('Binomial of a large negative non-integer n', () => {
     ).toBe(Infinity);
   });
 });
+
+describe('Binomial(n, n) and Binomial(n, n - 1) for a symbolic n', () => {
+  const cases: [unknown, string][] = [
+    [['Binomial', 'n', 'n'], '1'],
+    [['Binomial', 'n', ['Subtract', 'n', 1]], 'n'],
+    [['Binomial', ['Add', 'n', 1], 'n'], 'n + 1'],
+    [['Binomial', ['Multiply', 2, 'x'], ['Subtract', ['Multiply', 2, 'x'], 1]], '2x'],
+  ];
+  for (const [expr, expected] of cases)
+    for (const mode of ['evaluate', 'N'] as const)
+      test(`${JSON.stringify(expr)} = ${expected} (${mode})`, () => {
+        expect(ce.box(expr as any)[mode]().toString()).toBe(expected);
+      });
+
+  test('the parse route', () => {
+    expect(ce.parse('\\binom{n}{n-1}').evaluate().toString()).toBe('n');
+    expect(ce.parse('\\binom{n}{n}').evaluate().toString()).toBe('1');
+  });
+
+  test('other gaps stay unevaluated and numeric operands are unchanged', () => {
+    expect(ce.box(['Binomial', 'n', ['Subtract', 'n', 2]]).evaluate().operator).toBe('Binomial');
+    expect(ce.box(['Binomial', 'n', 'm']).evaluate().operator).toBe('Binomial');
+    expect(ce.box(['Binomial', 5, 4]).evaluate().toString()).toBe('5');
+  });
+
+  test('the compiled code agrees at a numeric n', () => {
+    const run = ce
+      ._getCompilationTarget('javascript')
+      .compile(ce.box(['Binomial', 'n', ['Subtract', 'n', 1]])).run!;
+    expect(run({ n: 7 })).toBe(7);
+  });
+});
+
+describe('Fibonacci and BellNumber with a polynomial argument', () => {
+  const cases: [unknown, string][] = [
+    [['Fibonacci', 10, 'x'], 'x^9 + 8x^7 + 21x^5 + 20x^3 + 5x'],
+    [['Fibonacci', 5, 'x'], 'x^4 + 3x^2 + 1'],
+    [['Fibonacci', 1, 'x'], '1'],
+    [['Fibonacci', 0, 'x'], '0'],
+    [['Fibonacci', -5, 'x'], 'x^4 + 3x^2 + 1'],
+    [['Fibonacci', -6, 'x'], '-x^5 - 4x^3 - 3x'],
+    [['Fibonacci', 5, 2], '29'],
+    [['Fibonacci', 10, 1], '55'],
+    [['Fibonacci', 5, ['Rational', 1, 2]], '29/16'],
+    [['BellNumber', 4, 'x'], 'x^4 + 6x^3 + 7x^2 + x'],
+    [['BellNumber', 0, 'x'], '1'],
+    [['BellNumber', 3, 2], '22'],
+    [['BellNumber', 5, 1], '52'],
+  ];
+  for (const [expr, expected] of cases)
+    test(`${JSON.stringify(expr)} = ${expected} (evaluate)`, () => {
+      expect(ce.box(expr as any).evaluate().toString()).toBe(expected);
+    });
+
+  test('`.N()` evaluates a numeric argument and keeps a symbolic one', () => {
+    expect(ce.box(['Fibonacci', 5, 2]).N().re).toBe(29);
+    expect(ce.box(['Fibonacci', 5, 0.5]).N().re).toBeCloseTo(29 / 16, 12);
+    expect(ce.box(['BellNumber', 3, 2]).N().re).toBe(22);
+    expect(ce.box(['Fibonacci', 5, 'x']).N().toString()).toBe('x^4 + 3x^2 + 1');
+  });
+
+  test('F_n(x) satisfies F_n = x F_(n-1) + F_(n-2)', () => {
+    for (let n = 2; n <= 12; n++) {
+      const f = (k: number) => ce.box(['Fibonacci', k, 'x']).evaluate();
+      const recurrence = ce
+        .box(['Expand', ['Add', ['Multiply', 'x', f(n - 1).json], f(n - 2).json]])
+        .evaluate();
+      expect(f(n).isSame(recurrence)).toBe(true);
+    }
+  });
+
+  test('the parse route', () => {
+    expect(
+      ce.parse('\\operatorname{Fibonacci}(5, x)').evaluate().toString()
+    ).toBe('x^4 + 3x^2 + 1');
+    expect(
+      ce.parse('\\operatorname{BellNumber}(3, x)').evaluate().toString()
+    ).toBe('x^3 + 3x^2 + x');
+  });
+
+  test('a huge index and a symbolic index stay unevaluated', () => {
+    expect(ce.box(['Fibonacci', 5000, 'x']).evaluate().operator).toBe('Fibonacci');
+    expect(ce.box(['BellNumber', 5000, 'x']).evaluate().operator).toBe('BellNumber');
+    expect(ce.box(['Fibonacci', 'k', 'x']).evaluate().operator).toBe('Fibonacci');
+  });
+
+  test('the one-operand forms are unchanged', () => {
+    expect(ce.box(['Fibonacci', 10]).evaluate().toString()).toBe('55');
+    expect(ce.box(['Fibonacci', -10]).evaluate().toString()).toBe('-55');
+    expect(ce.box(['BellNumber', 5]).evaluate().toString()).toBe('52');
+    expect(ce.box(['Fibonacci', 10]).type.toString()).toBe('integer');
+  });
+
+  test('the compiled code declines the polynomial form instead of dropping x', () => {
+    const target = ce._getCompilationTarget('javascript');
+    expect(() => target.compile(ce.box(['Fibonacci', 5, 'x']))).toThrow(/no lowering/);
+    expect(target.compile(ce.box(['Fibonacci', 'n'])).run!({ n: 10 })).toBe(55);
+  });
+});
