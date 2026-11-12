@@ -1,8 +1,8 @@
 # One route for an Epsil program: the `Program` operator
 
-Status: DRAFT for the user's approval. The direction is approved
-(2026-11-12: a program is one expression, with a `Program` operator distinct
-from `Block`); the choices P1 to P11 below are not. No code.
+Status: APPROVED by the user on 2026-11-12 (the direction and the choices
+P1 to P11, with the three amendments marked "User, 2026-11-12" below). No
+code yet.
 
 Evidence: `~/dev/compute-engine-recovery/epsil-routes-investigation.md`
 (ten routes, their users, the probed differences, the sizes). It is outside
@@ -59,7 +59,14 @@ handler of a block minus the scope. A host may build one by hand. `Block`
 loses every test of "is this block a program" (`isProgramBlock`,
 `runsAsProgram`, the table of later declarations).
 
-**P2. All statements are boxed once, before the first runs.** This is what
+**P2. All statements are boxed once, before the first runs, in a canonical
+order.** User, 2026-11-12: hoisting and reordering of the statements is
+acceptable when it makes the implementation simpler. The canonical form of
+a `Program` therefore holds its statements in this order: the `type` and
+`protocol` statements, then the `function` statements (with a paired `let
+g: sig` next to its function), then every other statement in the order of
+the text. The early install of functions and the table of later
+declarations are replaced by this sort; P3, P4 and P6 follow from it. This is what
 makes a compiled program and a run program the same expression. Consequence:
 `let a = h(1); let h = (x) => x + 1; a` is `read-before-declaration` (it was
 `2` on the runner). A `type` statement registers its type when it is boxed,
@@ -107,7 +114,14 @@ assignment; the value is `1`. Nothing is thrown to the host.
 
 **P9. A program that ends with the name of a function gives the name**
 (`f`), because the definition stays in the scope. The step that replaces it
-by the literal stays for a `Block`, whose definitions end with it.
+by the literal stays for a `Block`, whose definitions end with it. User,
+2026-11-12: approved; a `Program` with no value (`Nothing` in every case)
+is also acceptable. Kept: the value of the last statement, because the
+REPL, the notebook cell and the 290 test files read it and it costs
+nothing; if the implementation shows that the value complicates a route
+(the compiled program, the reordering of P2), the program gives `Nothing`
+and `executeEpsil()` reports the value of the last statement of the text
+from the per-statement hook.
 
 **P10. The routes after the change.** `executeEpsil()` and
 `executeEpsilAsync()` parse, resolve library names, box the `Program`, and
@@ -121,7 +135,16 @@ between statements) are those of `executeEpsil()` today.
 
 **P11. The static check** boxes the `Program` in a scope that is thrown
 away. Whether its copy of the effects of evaluation (about 450 lines) then
-goes is measured during the work, not promised here.
+goes is measured during the work, not promised here. User, 2026-11-12: this
+is an opportunity to drop the save and restore of engine state. Aim: the
+static check needs no undo. Today it is one of the two callers of
+`ce._withRolledBackInference()` and it also puts back the type and protocol
+registries; the checkpoint API is already gone (bound-once D9). The undo
+can go when a check writes nothing that outlives it: the declarations go
+in the thrown-away scope, the narrowing writes on definitions are removed
+(the leftovers list, item 5, a decision that is pending), and a `type` or
+`protocol` statement of a checked program is registered in that scope or
+not at all. The work reports what still needs an undo, with the program.
 
 ## 4. What it deletes
 
