@@ -214,8 +214,11 @@ run). The compiled run with per-name typed results was sent to session
 compute-engine-ef for its opinion; it is not decided.
 
 **The compiled run: the opinion of session compute-engine-ef
-(2026-11-12; it had not read this spec or Tycho's file).** Not decided by
-the user.
+(2026-11-12; it had not read this spec or Tycho's file).** APPROVED as work
+by the user on 2026-11-12: a runner in CE, above `compile()`, with a spec
+of its own written after this change is measured. Order of the three
+pieces: this change; the sites query with the reads and writes of each
+statement; the runner. The runner is the step that is delivered to Tycho.
 
 - It is a RUNNER above `compile()`, in CE (a separate entry, for example
   `ce.runProgram()` with an asynchronous form), not an option of
