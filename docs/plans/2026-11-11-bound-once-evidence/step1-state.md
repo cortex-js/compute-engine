@@ -454,3 +454,101 @@ h(1) }; b(3)` reads `d` = 6 inside the call of `h`, and the value of the
 block is then evaluated again in the frame of `b`, outside the loop, where
 `d` has no value: `d + 1`. The comprehension needs the same renewal in
 `ComprehensionIndexFrame.captureAndRestore()`.
+
+## Steps A to C of the remaining work (2026-11-12)
+
+Commits `a59e282f1` to the commit that holds this section (detached, on
+`3f4152e06`). Step D (the lazy view) is not started: see the end.
+
+### A. The type of a function statement
+
+A function statement of a block or a body declares its local with the
+signature that its literal writes (`writtenSignatureOf()`,
+`control-structures.ts`): an unannotated parameter is `unknown`, an absent
+result type is `unknown`, nothing is read from the body. A statement that
+writes no type, or has a destructuring parameter, declares `function` (a
+signature `(unknown) -> unknown` made a call with a list map element-wise,
+which the brief excluded). `ce-1163-run-async` "a function of a block that is
+also called as an operand": `-> integer` added to `g` (the call was `unknown`
+and the compilation declined).
+
+### B. One activation per iteration, function values keep their activation
+
+- `renewIterationActivation()` (`ambient-chain.ts`): before an index write
+  (`assignLoopIndex()`) and before the restores (`saveLoopIndexes()`,
+  `ComprehensionIndexFrame.captureAndRestore()`), the top activation that
+  holds the index is replaced by a new one (same template, same parent, a
+  copy of the values).
+- `captureNestedLocals()` keeps the live activation of the scope the literal
+  is written in (`KEPT_ACTIVATIONS`); a function value whose body scope has
+  such a parent evaluates to itself (`keepsActivation()`, in
+  `captureAtCreation()`), and the end of a call does not rebuild it
+  (`captureClosures()`). The snapshot loop of `captureNestedLocals()` is gone.
+- The `bind` substitution: each held argument, as the caller boxed it, is
+  substituted into the body (`invokeWithBoundVariables()`).
+- Probe item (5) was not needed: `n ↦ Block(Declare(c, 5n), DefineFunction(h,
+  k ↦ c + k), Loop(Assign(g, x ↦ h(x)), i ∈ 1..2))` applied to 1, then
+  `g(10)` is 15 on both routes and with the debug check.
+
+### C. The static read
+
+- `_contextBinding()` returns the occurrence's own definition when it is
+  activated; `bindingInContext()` walks for the own definition of a
+  parameter, binder variable or block local (`readsActivationHalf()`) and
+  answers `undefined` when the chain does not hold it.
+- Deleted (`binders.ts`): `callerBinding`, `sweptCallerBinding`,
+  `sweptHomeBinding`, `sweptHomeOf`, `markSweptBinding`, `homeInChain`,
+  `ownBindingInChain`, `readsNoOtherBinding`, `isOutsideBindingOfBlockLocal`,
+  `isOutsideBindingOfBinderVariable`, the binder clause of
+  `isForeignBinderBinding`; `_sweptHome`/`_sweptRecord`.
+- Deleted (`function-utils.ts`): the re-parenting of the body scope in both
+  call paths, `hideBodyScopeParams`, `restoreBodyScopeParams` and their
+  records, the reinstated parameters of `canonicalFunctionLiteral`,
+  `rerootOnCreatingFrame`, `recordCallFrameRun`, the defining scope of
+  `appliedBodyScopes`. A call frame is registered as an activation of the
+  body scope (`registerCallFrame()`), which `liveScopeOf()` finds. The
+  static view counts an applied body scope (`noteBodyScopeApplied()`), with
+  no hidden bindings.
+- Kept: `liveScopeOf` in `definingScopeOf()` (a literal held unevaluated in
+  a lazy collection finds the frame or activation of its defining scope),
+  `capturedRunOf` and `TEMPLATES_WITH_BLOCK_RUNS` for the copies that
+  `closeOverBlockRun()` makes (a lazy `Map` that leaves a block, read under
+  `numericApproximation`: `async-block-lazy-closure`), `snapshotNestedScope`
+  (lazy views, `closeOverBlockRun`).
+- The end-of-call substitution of the parameters skips a function value
+  whose activation does not reach the frame of the call
+  (`recordNodesOfOtherCalls()`).
+
+### Tests moved (class b)
+
+- `derivative-literal-parameter-shadow` (3): the sign of a body node of
+  `(n: real) ↦ Sqrt(n + 1)` read outside a call is unknown, also with a
+  global `n = 2` (was `positive`): a parameter outside its activation has no
+  value. One renamed: "a read of the sign of a body node of another literal".
+- `ce-689` "the static view diverges while an awaited application is
+  suspended": the walk from the body scope reads no value outside the view
+  either (was `4`): the body scope is not re-parented. It still fails on its
+  last expectation (see below).
+
+### Open
+
+- (c) `function-declaration-hoisting` "a recursive multi-clause definition"
+  (block route): `fact(0) = 1` writes the type `0` for its parameter, so the
+  call `fact(5)` before the clauses is `incompatible-type` and hides
+  `read-before-declaration`.
+- (c) `function-body-local-assignment` "stated effects that do not cover the
+  body": `function g(k) pure { t = k + 1; t }` in a program: the compiled
+  route declines for the outer write before the effects check.
+- (rule) `tycho-item-332-untyped-program-compile` (2): the helpers of the
+  untyped program are `function` locals, a call is `unknown`, and
+  `let (rx, ry) = csqrt(…)` declines with `fallback: false`.
+- `ce-689` last expectation: a read of a parameter in a call frame records a
+  read by name (`noteParameterReadByName()` in `storedValue`), so the view
+  stays counted as different after the application ends.
+- CE-1251: still 500 (the held `t*k` reads the local `t` of the body).
+- Step D not started. Removing the substitution into a stored lazy list
+  (`bindReadVariablesOfLazyCollection()` in `listedAssignedValue()`) makes 12
+  tests of `assignment-stores-lazy-collection` read the variable when the
+  element is computed (`first(big)` is 11 after `k = 10`), one of them a
+  self-reference (`xs = filter(xs, …)` stays unevaluated), and leaves
+  `comprehension-index-function` "Epsil" at `Apply((a) => a + 1, 2)`.
