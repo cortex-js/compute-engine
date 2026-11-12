@@ -550,12 +550,6 @@ describe('declines that stay', () => {
       {},
       /Dot of V is not in the profile/,
     ],
-    [
-      'At with a slice',
-      fn(['Sum', ['At', 'L', ['Range', 'a', 'b']]], ['L', 'vector<5>'], ['a', 'integer'], ['b', 'integer']),
-      {},
-      /At with a Range index \(a slice\) is not in the profile/,
-    ],
   ];
   test.each(declines)('%s', (_name, json, mode, message) => {
     expect(() => profile(json, mode)).toThrow(message);

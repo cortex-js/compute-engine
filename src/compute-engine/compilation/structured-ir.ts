@@ -705,6 +705,12 @@ export type IRBuild = OperationBase & {
   /** No element when `to` is less than `from`; absent: the steps of
    *  `Range(from, to)`. */
   readonly ascending?: true;
+  /** The bound `to` is a count that the program computes (`Tabulate(f,
+   *  n)`), not the length of a list: a target that holds a list in an array
+   *  of a largest length tests the count before the first element, as for a
+   *  build that is not `ascending` (a JavaScript array holds at most 2^32 - 1
+   *  elements: the code throws for more, and evaluates no element). */
+  readonly counted?: true;
 };
 
 export type IRReplaceAt = OperationBase & {
@@ -749,6 +755,8 @@ export type IRCopy = OperationBase & {
  * - `take`, `drop`: a list and an integer count `n`. `take` gives the first
  *   `n` elements, or the last `-n` for a negative `n`; `drop` gives the list
  *   without them. A count beyond the length takes, or drops, every element.
+ *   A real count is rounded to the nearest integer, a half up (`2.5` is 3,
+ *   `-2.5` is -2), as the interpreter rounds it.
  *   A count that is not a number has no value: the interpreter keeps the
  *   expression unevaluated, and the result is the absent value of the
  *   target (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
@@ -810,8 +818,48 @@ export type IRCopy = OperationBase & {
  * have no value: the operation then carries `absent`, and the value is the
  * absent value of the target in place of the list (`IRCollection.absent`).
  *
+ * The functions of flat lists of numbers (the census of declines,
+ * `docs/plans/2026-11-11-js-profile-decline-census.md`, row 3):
+ *
+ * - `population-variance`, `standard-deviation`,
+ *   `population-standard-deviation`, `skewness`, `kurtosis`, `mode`,
+ *   `interquartile-range`: one list or tuple; the statistic of the elements
+ *   of the interpreter's head of that name, a real (not a number for an
+ *   empty list or for an element that is not a number).
+ * - `covariance`, `correlation`: two lists; the sample covariance and the
+ *   correlation coefficient of the pairs of elements, a real.
+ * - `ordering`: one list; the positions 1 to n of its elements in the order
+ *   of `sort` (a stable order: two equal elements keep the order of their
+ *   positions, `-0` equals `0`), a list of integers.
+ * - `index-of`: a list and a number `x`; the first position whose element
+ *   is `x` (`-0` is `0`, and a `NaN` is a `NaN`), or 0 for none, an integer.
+ * - `contains`: a list and a number; whether an element is that number, by
+ *   the rule of `index-of`, a boolean.
+ * - `unique`: one list; its elements without the later repetitions of each
+ *   value (by the rule of `index-of`), in order; `0` and `-0` are one value,
+ *   written `0`.
+ * - `repeat`: a number and an integer count `n`; the list of `n` copies of
+ *   the number, empty for `n` less than 1.
+ * - `linspace`: two finite numbers `a` and `b` and an integer count `n`; the
+ *   list of `n` numbers from `a` to `b` in equal steps (`[a]` for `n = 1`,
+ *   empty for `n` less than 1), a list of reals.
+ * - `slice`: a list and two numbers `a` and `b` (integers or reals, rounded
+ *   to the nearest integer, a half up); the elements from the position `a`
+ *   to the position `b`, both included, a negative position counted from the
+ *   end, each position clamped to the list (empty when `a` is after `b` or
+ *   after the end).
+ * - `at-real`: a list of numbers and a real index; the element at the
+ *   index when the index is an integer position of the list (as `at`), and
+ *   the absent value of the element otherwise (a fraction, not a number, an
+ *   infinity, 0, out of range).
+ * - `gather`: a list of numbers and a list of indexes (integers or reals);
+ *   the list of the elements of `at-real` at each index, in the order of the
+ *   indexes.
+ *
  * A list result has the elements of its operands: it is a list of integers
- * only when every list operand is one.
+ * only when every list operand is one. The list results of `ordering`,
+ * `unique`, `repeat`, `linspace`, `slice` and `gather` are new arrays of
+ * numbers (`new`).
  */
 export type CollectionFunctionName =
   | 'norm'
@@ -836,7 +884,25 @@ export type CollectionFunctionName =
   | 'matrix-multiply'
   | 'matrix-product'
   | 'diagonal'
-  | 'flatten';
+  | 'flatten'
+  | 'population-variance'
+  | 'standard-deviation'
+  | 'population-standard-deviation'
+  | 'skewness'
+  | 'kurtosis'
+  | 'mode'
+  | 'interquartile-range'
+  | 'covariance'
+  | 'correlation'
+  | 'ordering'
+  | 'index-of'
+  | 'contains'
+  | 'unique'
+  | 'repeat'
+  | 'linspace'
+  | 'slice'
+  | 'at-real'
+  | 'gather';
 
 /**
  * An application of a function of lists that `fn` names

@@ -11,6 +11,35 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles the functions of flat lists of
+  numbers and the index operands that are not one integer.** These forms
+  declined with `outside-profile` and now compile, with the values of the
+  existing compiler: `Ordering`, `Unique`, `IndexOf`, `Contains`, `Second`,
+  `Third`, `Most`, `IsEmpty`, `Append(L, x)`, `Repeat(x, n)` with an integer
+  count, `Linspace` with finite literal bounds, `Slice`, the statistics
+  `PopulationVariance`, `StandardDeviation`, `PopulationStandardDeviation`,
+  `Skewness`, `Kurtosis`, `Mode`, `InterquartileRange`, `Covariance` and
+  `Correlation`; `CountIf`, `Any`, `All`, `Find`, `IndexWhere`, `Position`,
+  `TakeWhile` and `DropWhile` with a predicate literal (each stops at the
+  element that decides, as the existing compiler does), and `Tabulate(f, n)`
+  of one dimension; `At(L, x)` with a real index (`NaN` for a fraction),
+  `At(L, I)` and `At(L, Range(a, b))` (a gather, `NaN` at an index out of
+  range), and `Take` and `Drop` with a real count (rounded). A list of tuples
+  or of lists still declines for most of these heads, and so do `Repeat`
+  with a real count, `Linspace` with a bound that is not a finite literal,
+  `Quartiles`, `Element(x, L)`, `DeleteAt`, `Insert`, `Partition`, `Chunk`
+  and `Zip`.
+
+  ```js
+  ce.declare('L', 'list<real>');
+  ce.declare('a', 'integer');
+  ce.declare('b', 'integer');
+  const f = compile(ce.box(['Sum', ['At', 'L', ['Range', 'a', 'b']]]), {
+    profile: 'numeric-kernel',
+  });
+  f.run({ L: [1, 2, 3, 4], a: 2, b: 3 }); // ➔ 5
+  ```
+
 - **The `numeric-kernel` profile compiles the special functions and the
   number-theory heads of real operands.** These heads declined with
   `outside-profile` ("unsupported head") and now compile, with the values of

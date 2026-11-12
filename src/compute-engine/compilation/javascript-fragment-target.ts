@@ -3541,6 +3541,10 @@ export const NESTED_OPERAND_HEADS: ReadonlySet<string> = new Set([
   'Typed',
   'First',
   'Last',
+  'Second',
+  'Third',
+  'Most',
+  'IsEmpty',
   'Count',
   'Rest',
   'Take',
@@ -4390,13 +4394,18 @@ const structuredDefinition: Pick<
  * existing emitter gives the same value for an absent row
  * (`refuseAbsentRowUses()`).
  *
- * Refused: an index with a real fact (the existing emitter reads a
- * fraction as out of range, which the structured route does not copy: it
- * reads an integer index only; round it with `Floor`), a base that is not
- * a list input or parameter, more than one index of a list that is not a
- * list of lists at each level. The admission refuses, before this rule,
- * more than one index of a base that is not a list of lists, a `Range`
- * index (a slice) and a string index (`structuredListRefusal()`).
+ * A list of numbers is also read at an index with a real fact and at a
+ * list of indexes (a list literal, a `Range`, a list: a gather), with the
+ * call of the existing emitter, `_SYS.atNumeric(L, i, "real")`: `NaN` for an
+ * index that is not an integer position, and for a list of indexes a new
+ * list with `NaN` at each index out of range (`at-real` and `gather`).
+ *
+ * Refused: an index with a real fact or a list of indexes for a base that
+ * is not a list of numbers, a base that is not a list input or parameter,
+ * more than one index of a list that is not a list of lists at each level.
+ * The admission refuses, before this rule, more than one index of a base
+ * that is not a list of lists, a `Range` index beside another index and a
+ * string index (`structuredListRefusal()`).
  */
 function atRule(
   node: Expression,
@@ -4411,13 +4420,36 @@ function atRule(
       'At with no index is not in the structured route'
     );
   const [base, ...indexes] = operandFacts(node, scope, context, w);
+  // A list of numbers read at a real index, or at a list of indexes (a
+  // list literal, a `Range`, a list name: a gather): the read of the
+  // existing emitter, `_SYS.atNumeric(L, i, "real")`, which gives `NaN` for
+  // an index that is not an integer position, and a new list for a list of
+  // indexes (`NaN` at each index out of range).
+  if (indexes.length === 1 && indexes[0].type.kind !== 'integer') {
+    const index = indexes[0];
+    const element =
+      base.type.kind === 'list' ? collectionElement(base) : undefined;
+    const indexElement =
+      index.type.kind === 'list' ? collectionElement(index) : undefined;
+    if (
+      element !== undefined &&
+      (index.type.kind === 'real' || indexElement !== undefined)
+    )
+      return w.valueFacts(
+        node,
+        index.type.kind === 'real'
+          ? { kind: element }
+          : { kind: 'list', element: { kind: element } },
+        [w.convert(base, base.type)!, w.convert(index, index.type)!]
+      );
+  }
   // An element of a row whose engine type is not a number (`At([[]], k,
   // -1)`, of the type `missing`: the rows hold no element): the existing
   // emitter reads `undefined` for an absent row there, where the route reads
   // `NaN`.
   const rowRead = (n: Expression) =>
     isFunction(n) &&
-    ['At', 'First', 'Last'].includes(n.operator) &&
+    ['At', 'First', 'Last', 'Second', 'Third'].includes(n.operator) &&
     isNestedListType(w.value(n.ops[0], scope, context).type);
   if (
     (isNestedListType(base.type) || rowRead(node.op1)) &&
@@ -5887,6 +5919,26 @@ function matrixFunctionRule(
  *   literal step 0, which the existing compiler declines.
  * - The matrix functions, `Norm` of a list of lists or with an order, and
  *   `Dot` of a list of lists: `matrixFunctionRule()`.
+ * - The statistics of `STATISTICS_HEADS` of a list or a tuple, and
+ *   `Covariance(L, M)`, `Correlation(L, M)` of two lists: a real, the
+ *   runtime helper of the head (`_SYS.populationVariance(L)`).
+ * - `Ordering(L)`: the positions in sorted order, a list of integers;
+ *   `Unique(L)`: the first of each value, `[...new Set(L)]`; `IndexOf(L, x)`
+ *   and `Contains(L, x)` of a list of numbers and a number: an integer
+ *   (`_SYS.idxt`, 0 for none) and a boolean (`L.includes(x)`). Refused: a
+ *   list of tuples or of lists, `Ordering(L, f)`.
+ * - `Repeat(x, n)` of a number and an integer count, `Linspace(a, b, n)` and
+ *   `Linspace(a, b)` (50 elements) of finite number literals and an integer
+ *   count, `Slice(L, a, b)` of a list of numbers and two numbers: a new
+ *   list, the text of the existing emitter. Refused: a real count of
+ *   `Repeat` (the existing code throws for a fraction), a bound of
+ *   `Linspace` that is not a finite literal (the existing code gives the
+ *   number `NaN` for a bound that is not finite, another shape).
+ * - `Second(L)`, `Third(L)` as `First`; `Most(L)`, the list without its last
+ *   element; `IsEmpty(L)`, a boolean; `Append(L, x)` of a list of numbers
+ *   and a number, a list of integers when both are.
+ * - `Take(L, x)` and `Drop(L, x)` also read a real count, which the
+ *   existing emitter rounds (`Math.round`).
  */
 function collectionRule(
   node: Expression,
@@ -5917,7 +5969,9 @@ function collectionRule(
     if (matrix !== undefined) return matrix;
   }
   if (
-    ['Norm', 'Mean', 'Median', 'Variance', 'Dot'].includes(head) &&
+    ['Norm', 'Mean', 'Median', 'Variance', 'Dot', ...STATISTICS_HEADS].includes(
+      head
+    ) &&
     !isSubtype(node.type.type, 'number')
   )
     return refuse(
@@ -5945,6 +5999,15 @@ function collectionRule(
         `with ${describe(i)} is not in the structured route, which reads an integer there`
       );
   };
+  /** The operand `i` is a real or an integer. */
+  const numberAt = (i: number) => {
+    if (facts[i].type.kind !== 'real' && facts[i].type.kind !== 'integer')
+      refuse(
+        `with ${describe(i)} is not in the structured route, which reads a real or an integer there`
+      );
+  };
+  /** The element kind of the list (not a tuple) of numbers `i`. */
+  const numbersAt = (i: number) => elementAt(i, false);
   /** The element type of the list operand `i`: a real, an integer, or a
    *  point (a list of tuples, whose elements a slice, a rotation or a join
    *  keeps as they are: the inner arrays are shared, and no operation
@@ -5999,8 +6062,122 @@ function collectionRule(
     case 'Drop': {
       arity(2);
       const element = listElementAt(0);
-      integerAt(1);
+      // A real count is rounded (`Math.round`), as the existing emitter
+      // and the interpreter round it.
+      numberAt(1);
       return w.valueFacts(node, { kind: 'list', element }, conversions);
+    }
+    case 'PopulationVariance':
+    case 'StandardDeviation':
+    case 'PopulationStandardDeviation':
+    case 'Skewness':
+    case 'Kurtosis':
+    case 'Mode':
+    case 'InterquartileRange':
+      arity(1);
+      elementAt(0, true);
+      return w.valueFacts(node, { kind: 'real' }, conversions);
+    case 'Covariance':
+    case 'Correlation':
+      arity(2);
+      numbersAt(0);
+      numbersAt(1);
+      return w.valueFacts(node, { kind: 'real' }, conversions);
+    case 'Ordering':
+      arity(1);
+      numbersAt(0);
+      return w.valueFacts(
+        node,
+        { kind: 'list', element: { kind: 'integer' } },
+        conversions
+      );
+    case 'Unique':
+      arity(1);
+      return w.valueFacts(
+        node,
+        { kind: 'list', element: { kind: numbersAt(0) } },
+        conversions
+      );
+    case 'IndexOf':
+    case 'Contains':
+      arity(2);
+      numbersAt(0);
+      numberAt(1);
+      return w.valueFacts(
+        node,
+        { kind: head === 'Contains' ? 'boolean' : 'integer' },
+        conversions
+      );
+    case 'Repeat':
+      arity(2);
+      numberAt(0);
+      // The existing code throws for a count that is not an integer.
+      integerAt(1);
+      return w.valueFacts(
+        node,
+        { kind: 'list', element: { kind: facts[0].type.kind as 'real' } },
+        conversions
+      );
+    case 'Linspace': {
+      if (node.nops !== 2 && node.nops !== 3)
+        refuse(
+          `with ${node.nops} operands is not in the structured route, which reads two bounds and a count`
+        );
+      // The existing code gives the number NaN, not a list, for a bound
+      // that is not finite: only finite number literals are bounds here.
+      if (
+        node.ops
+          .slice(0, 2)
+          .some(
+            (b) => !isNumber(b) || b.im !== 0 || !Number.isFinite(b.re)
+          )
+      )
+        refuse(
+          'with a bound that is not a finite number literal is not in the structured route: ' +
+            'the existing code gives the number NaN, not a list, for a bound that is not finite'
+        );
+      if (node.nops === 3) integerAt(2);
+      return w.valueFacts(
+        node,
+        { kind: 'list', element: { kind: 'real' } },
+        conversions
+      );
+    }
+    case 'Slice':
+      arity(3);
+      numberAt(1);
+      numberAt(2);
+      return w.valueFacts(
+        node,
+        { kind: 'list', element: { kind: numbersAt(0) } },
+        conversions
+      );
+    case 'Most': {
+      arity(1);
+      const element = listElementAt(0);
+      return w.valueFacts(node, { kind: 'list', element }, conversions);
+    }
+    case 'IsEmpty':
+      arity(1);
+      listElementAt(0);
+      return w.valueFacts(node, { kind: 'boolean' }, conversions);
+    case 'Append': {
+      arity(2);
+      const element = numbersAt(0);
+      numberAt(1);
+      return w.valueFacts(
+        node,
+        {
+          kind: 'list',
+          element: {
+            kind:
+              element === 'integer' && facts[1].type.kind === 'integer'
+                ? 'integer'
+                : 'real',
+          },
+        },
+        conversions
+      );
     }
     case 'RotateLeft':
     case 'RotateRight': {
@@ -6092,15 +6269,17 @@ function collectionRule(
       );
     }
     case 'First':
-    case 'Last': {
+    case 'Last':
+    case 'Second':
+    case 'Third': {
       arity(1);
-      // `First` of a list whose element type does not decide the value of
-      // a read past the end (`never`, the type of the elements of `[]`):
-      // the existing emitter writes `_SYS.nth(L, 0)`, `undefined` for an
-      // empty list, where the route reads `NaN` (`compileNthElement()` in
-      // `javascript-target.ts`).
+      // `First`, `Second` or `Third` of a list whose element type does not
+      // decide the value of a read past the end (`never`, the type of the
+      // elements of `[]`): the existing emitter writes `_SYS.nth(L, i)`,
+      // `undefined` for an empty list, where the route reads `NaN`
+      // (`compileNthElement()` in `javascript-target.ts`).
       if (
-        head === 'First' &&
+        head !== 'Last' &&
         indexElementType(node.ops[0].type.type) === 'never'
       )
         refuse(
@@ -6171,6 +6350,20 @@ function collectionRule(
   }
   return refuse('is not a function of lists of the structured route');
 }
+
+/** The statistics of one list or tuple of numbers, and of two lists
+ *  (`collectionRule()`), each the runtime helper of its head. */
+const STATISTICS_HEADS = [
+  'PopulationVariance',
+  'StandardDeviation',
+  'PopulationStandardDeviation',
+  'Skewness',
+  'Kurtosis',
+  'Mode',
+  'InterquartileRange',
+  'Covariance',
+  'Correlation',
+];
 
 /**
  * The heads with a function operand on the structured route in the compile
@@ -6307,11 +6500,16 @@ function functionOperandRule(
         // The list is the other operand of `Map` (its second) and the first
         // of `Filter`, `Count`, `Reduce` and `Scan`.
         const list =
-          head === 'Apply' ? undefined : node.ops[position.fn === 0 ? 1 : 0];
-        const element =
-          list === undefined
+          head === 'Apply' || head === 'Tabulate'
             ? undefined
-            : (indexElementType(list.type.type) ?? undefined);
+            : node.ops[position.fn === 0 ? 1 : 0];
+        // `Tabulate` applies its function to the integers from 1.
+        const element: Type | undefined =
+          head === 'Tabulate'
+            ? 'integer'
+            : list === undefined
+              ? undefined
+              : (indexElementType(list.type.type) ?? undefined);
         const argumentTypes: (Type | undefined)[] =
           head === 'Apply'
             ? node.ops.slice(1).map((op) => op.type.type)
@@ -6606,19 +6804,63 @@ function functionOperandRule(
           return w.valueFacts(node, list(kind), conversions);
         }
         case 'Filter':
-        case 'Count': {
+        case 'Count':
+        case 'CountIf':
+        case 'Any':
+        case 'All':
+        case 'Find':
+        case 'IndexWhere':
+        case 'Position':
+        case 'TakeWhile':
+        case 'DropWhile': {
           if (node.nops !== 2) refuse('with other than a list and a predicate');
           if (lambda === undefined)
             refuse(
               'with an operator as its predicate is not in the structured route, which admits a function literal'
             );
-          const { facts, element } = elementTypeOf(node.op1, false);
+          // `Find` of a list of tuples gives `NaN` for no match in the
+          // existing code, not a tuple: a list of numbers only.
+          const { facts, element } =
+            head === 'Find'
+              ? (() => {
+                  const scalar = elementOf(node.op1, false);
+                  return {
+                    facts: scalar.facts,
+                    element: { kind: scalar.element } as FragmentElementType,
+                  };
+                })()
+              : elementTypeOf(node.op1, false);
           predicate(body([element], true));
-          return w.valueFacts(
-            node,
-            head === 'Filter' ? { kind: 'list', element } : { kind: 'integer' },
-            [w.convert(facts, facts.type)!]
-          );
+          const type: FragmentValueType | FragmentListType =
+            head === 'Filter' || head === 'TakeWhile' || head === 'DropWhile'
+              ? { kind: 'list', element }
+              : head === 'Position'
+                ? { kind: 'list', element: { kind: 'integer' } }
+                : head === 'Any' || head === 'All'
+                  ? { kind: 'boolean' }
+                  : head === 'Find'
+                    ? { kind: 'real' }
+                    : { kind: 'integer' };
+          return w.valueFacts(node, type, [w.convert(facts, facts.type)!]);
+        }
+        case 'Tabulate': {
+          if (node.nops !== 2)
+            refuse(
+              'with other than one count is not in the structured route, which tabulates one dimension'
+            );
+          if (lambda === undefined)
+            refuse(
+              'with an operator is not in the structured route, which admits a function literal'
+            );
+          const count = value(node.op2);
+          if (count.type.kind !== 'integer')
+            refuse(
+              `with ${nodeText(node.op2)} of the type \`${fragmentTypeToString(count.type)}\` is not in the ` +
+                `structured route, which reads an integer count`
+            );
+          return w.valueFacts(node, list(numeric(body(['integer']))), [
+            w.convert(count, count.type)!,
+          ]);
         }
         case 'Reduce':
         case 'Scan': {
@@ -7391,7 +7633,9 @@ function structuredListRefusal(node: Expression): string | undefined {
   if (node.nops > 2 && !isNestedEngineList(node.op1.type.type))
     return `At with ${node.nops - 1} indexes is not in the structured route, which reads one index of a list that is not a list of lists`;
   for (const index of node.ops.slice(1)) {
-    if (isFunction(index, 'Range'))
+    // A `Range` index of a list that is not a list of lists is a gather
+    // (`atRule()`).
+    if (isFunction(index, 'Range') && node.nops > 2)
       return 'At with a Range index (a slice) is not in the structured route, which reads one integer index';
     if (isString(index))
       return 'At with a string index is not in the structured route, which reads one integer index';
@@ -7935,7 +8179,7 @@ function refuseUnsettledCollection(
     Object.hasOwn(FUNCTION_OPERAND_HEADS, head) &&
     !(head === 'Count' && node.nops === 1)
   ) {
-    if (head === 'Apply') return;
+    if (head === 'Apply' || head === 'Tabulate') return;
     operands = head === 'Map' ? node.ops.slice(1) : [node.op1];
   } else if (Object.hasOwn(COLLECTION_HEADS, head) && head !== 'Range')
     operands =
@@ -14240,8 +14484,8 @@ function refuseCapturedListsWithRows(
 /**
  * Refuse, on the structured route, a use of a row read of a list of lists
  * that can be absent (`At(M, i)` with fewer indexes than the rank of `M`,
- * `First(M)`, `Last(M)`, and an `If`, a `Block` or a `Typed` whose value can
- * be one), except where the existing emitter gives the value of the route
+ * `First(M)`, `Last(M)`, `Second(M)`, `Third(M)`, and an `If`, a `Block`
+ * or a `Typed` whose value can be one), except where the existing emitter gives the value of the route
  * for an absent row. The existing emitter writes a row read as
  * `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined :
  * _v)(_SYS.at(M, i))`, `undefined` for an index out of range, as the route
@@ -14289,8 +14533,11 @@ function refuseAbsentRowUses(
       case 'At':
         result = isNested(node.op1) && typeOf(node)?.kind === 'list';
         break;
+      // `Second` and `Third` read a row as `First` and `Last` do.
       case 'First':
       case 'Last':
+      case 'Second':
+      case 'Third':
         result = node.nops === 1 && isNested(node.op1);
         break;
       case 'If':
@@ -14312,7 +14559,7 @@ function refuseAbsentRowUses(
    *  there, which throws for an absent row). */
   const isRead = (op: Expression) =>
     isFunction(op) &&
-    (op.operator === 'At' || op.operator === 'First' || op.operator === 'Last');
+    ['At', 'First', 'Last', 'Second', 'Third'].includes(op.operator);
   const allowed = (
     parent: Expression & { ops: readonly Expression[] },
     i: number

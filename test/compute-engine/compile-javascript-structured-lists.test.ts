@@ -528,9 +528,7 @@ describe('refusals', () => {
     fn(parameters, declare('t', 'real', 0), value);
   const refusals: [string, MathJsonExpression, RegExp][] = [
     ['At with two indexes', body([L, I], ['At', 'L', 'i', 'i']), /At with 2 indexes is not in the structured route, which reads one index/],
-    ['At with a real index', body([L, typed('x', 'real')], ['At', 'L', 'x']), /At with an index of the type `real` is not in the structured route, which reads an index of the type integer/],
     ['At with a string index', body([L, I], ['At', 'L', "'a'"]), /At with a string index is not in the structured route/],
-    ['At with a Range index', body([L, I], ['Add', ['At', 'L', ['Range', 1, 2]], 0]), /At with a Range index \(a slice\) is not in the structured route/],
     ['At of a number', body([L, I], ['At', 'i', 1]), /invalid bound expression/],
     ['Length of a number', body([L, I], ['Length', 'i']), /Length in the structured route reads a list of reals, integers or tuples or a tuple of reals, and its operand has the type `integer`/],
     // A list of lists and a matrix of real cells are in the route since
@@ -549,7 +547,6 @@ describe('refusals', () => {
     ['indexed_collection<real>', body([typed('L', 'indexed_collection<real>'), I], ['Add', ['Length', 'L'], 'i']), /the parameter L of the function has the type indexed_collection<real>, which is not in the structured route/],
     // `First`, `Last`, `Rest` and the other functions of lists are in the
     // route since slice 2 (compile-javascript-structured-collections2.test.ts).
-    ['Take with a real count', body([L, typed('x', 'real')], ['At', ['Take', 'L', 'x'], 1]), /Take with x of the type `real` is not in the structured route, which reads an integer there/],
     // A numeric order is in the route since slice 3 of the nested lists
     // (compile-javascript-structured-nested2.test.ts); a named one is not.
     ['Norm with a named order', body([L], ['Norm', 'L', "'Frobenius'"]), /unsupported (bound )?head String/],

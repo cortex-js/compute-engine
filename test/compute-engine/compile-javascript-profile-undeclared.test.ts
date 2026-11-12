@@ -538,9 +538,11 @@ describe('a symbol with a value and no declared type', () => {
     expect(result.code).toBe('2.5 + _.x');
     expect(result.defaultedSymbols).toEqual(['x']);
     ce.declare('L', 'list<real>');
-    expect(profile(ce.expr(['At', 'L', 'b']), 'strict')).toEqual({
-      message: expect.stringMatching(/At with an index of the type `real`/),
-    });
+    // A real index reads `NaN` for a fraction, as the existing compiler
+    // reads it (`at-real`).
+    const read = compile(ce.expr(['At', 'L', 'b']), { ...PROFILE, fallback: false } as never) as CompilationResult<'javascript'>;
+    expect(read.code).toBe('_SYS.atNumeric(_.L, 2.5, "real")');
+    expect((read.run as unknown as (v: object) => number)({ L: [10, 20, 30] })).toBeNaN();
   });
 
   test('a complex value and a string value decline', () => {

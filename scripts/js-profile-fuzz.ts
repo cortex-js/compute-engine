@@ -1852,7 +1852,8 @@ function genFunctionOfListsReal(ctx: GenContext, depth: number): Json {
         ? FUNCTION_OPERAND_HELPERS[1].name
         : genLambda(ctx, depth, [`e${depth}`], true),
     ];
-  if (r < 0.88) return ['At', genFunctionOfListsList(ctx, depth), genIndex(ctx)];
+  if (r < 0.8) return ['At', genFunctionOfListsList(ctx, depth), genIndex(ctx)];
+  if (r < 0.88) return genFlatListReal(ctx, depth);
   const n = intBetween(rng, 1, 2);
   return [
     'Apply',
@@ -1863,6 +1864,73 @@ function genFunctionOfListsReal(ctx: GenContext, depth: number): Json {
     ),
     ...Array.from({ length: n }, () => genReal(ctx, d)),
   ];
+}
+
+/** The real indexes and counts of `At`, `Take` and `Drop` (row 3 of the
+ *  decline census): fractions, halves of both signs, `0`, out of range. */
+const REAL_INDEXES: readonly Json[] = [1.5, -1.5, 2.5, -2.5, 0.4, 0, 2, 9];
+
+/**
+ * A real computed by a function of flat lists of row 3 of the decline
+ * census (`docs/plans/2026-11-11-js-profile-decline-census.md`): the
+ * statistics, `IndexOf`, `Second`, `Third`, `Find`, `IndexWhere`, `CountIf`
+ * with a predicate literal, `At` with a real index, a fold of a gather.
+ */
+function genFlatListReal(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const list = () => genList(ctx, d);
+  const predicate = () => genLambda(ctx, depth, [`e${depth}`], true);
+  const r = rng();
+  if (r < 0.25)
+    return [
+      pick(rng, [
+        'PopulationVariance', 'StandardDeviation', 'PopulationStandardDeviation',
+        'Skewness', 'Kurtosis', 'Mode', 'InterquartileRange', 'Second', 'Third',
+      ]),
+      list(),
+    ];
+  if (r < 0.32) {
+    const l = list();
+    return [pick(rng, ['Covariance', 'Correlation']), l, rng() < 0.5 ? l : ['Reverse', l]];
+  }
+  if (r < 0.42) return ['IndexOf', list(), rng() < 0.5 ? pick(rng, [0, -0, 1, 2]) : genReal(ctx, d)];
+  if (r < 0.62) return [pick(rng, ['Find', 'IndexWhere', 'CountIf']), list(), predicate()];
+  if (r < 0.8)
+    return ['At', list(), rng() < 0.5 || ctx.reals.length === 0 ? pick(rng, REAL_INDEXES) : pick(rng, ctx.reals)];
+  return [
+    pick(rng, ['Sum', 'Product', 'Max', 'Min', 'Mean', 'Length']),
+    ['At', list(), rng() < 0.5 ? ['Range', pick(rng, [1, 2, -1]), pick(rng, [1, 3, -2])] : ['List', genIndex(ctx), genIndex(ctx)]],
+  ];
+}
+
+/**
+ * A list computed by a function of flat lists of row 3 of the decline
+ * census: `Ordering`, `Unique`, `Most`, `Append`, `Repeat`, `Linspace`,
+ * `Slice`, `Position`, `TakeWhile`, `DropWhile`, `Tabulate`, a gather, and
+ * `Take` and `Drop` of a real count.
+ */
+function genFlatListList(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const list = () => genList(ctx, d);
+  const count = (): Json =>
+    ctx.integers.length > 0 && rng() < 0.3
+      ? ['Min', pick(rng, ctx.integers), 4]
+      : pick(rng, [0, 1, 3, -1]);
+  const r = rng();
+  if (r < 0.15) return [pick(rng, ['Ordering', 'Unique', 'Most']), list()];
+  if (r < 0.22) return ['Append', list(), genReal(ctx, d)];
+  if (r < 0.3) return ['Repeat', genReal(ctx, d), count()];
+  if (r < 0.36) return ['Linspace', pick(rng, [0, -1, 0.5]), pick(rng, [1, 3, -2]), count()];
+  if (r < 0.46)
+    return ['Slice', list(), pick<Json>(rng, [1, 2, -1, 0, 1.5]), pick<Json>(rng, [1, 3, -1, 9, 2.5])];
+  if (r < 0.66)
+    return [pick(rng, ['Position', 'TakeWhile', 'DropWhile']), list(), genLambda(ctx, depth, [`e${depth}`], true)];
+  if (r < 0.74) return ['Tabulate', genLambda(ctx, depth, [`e${depth}`]), count()];
+  if (r < 0.86)
+    return ['At', list(), rng() < 0.5 ? ['Range', pick(rng, [1, 2, -1]), pick(rng, [1, 3, -2])] : ['List', genIndex(ctx), genIndex(ctx)]];
+  return [pick(rng, ['Take', 'Drop']), list(), rng() < 0.5 || ctx.reals.length === 0 ? pick(rng, REAL_INDEXES) : pick(rng, ctx.reals)];
 }
 
 /**
@@ -1884,6 +1952,7 @@ function genFunctionOfListsList(ctx: GenContext, depth: number): Json {
         ? pick(rng, ctx.integers)
         : pick(rng, COUNTS),
     ];
+  if (r < 0.2) return genFlatListList(ctx, depth);
   if (r < 0.25) return [pick(rng, ['Rest', 'Reverse', 'Sort']), list()];
   if (r < 0.32) return ['Join', list(), list()];
   if (r < 0.36) {
@@ -2304,6 +2373,16 @@ function genCondition(ctx: GenContext, depth: number): Json {
     if (r < 0.4) return ['And', genCondition(ctx, d), genCondition(ctx, d)];
     if (r < 0.8) return ['Or', genCondition(ctx, d), genCondition(ctx, d)];
     return ['Not', genCondition(ctx, d)];
+  }
+  // A test of a list (row 3 of the decline census): `Any`, `All` with a
+  // predicate literal, `Contains`, `IsEmpty`.
+  if (depth < ctx.maxDepth && rng() < 0.06) {
+    const list = genList(ctx, d);
+    const r = rng();
+    if (r < 0.5)
+      return [pick(rng, ['Any', 'All']), list, genLambda(ctx, depth, [`e${depth}`], true)];
+    if (r < 0.8) return ['Contains', list, rng() < 0.5 ? pick(rng, [0, -0, 1, 2]) : genReal(ctx, d)];
+    return ['IsEmpty', list];
   }
   // A comparison with a closed operand: a pole, an infinity, a capture.
   if (rng() < 0.08) {

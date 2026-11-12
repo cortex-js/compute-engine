@@ -1414,8 +1414,10 @@ class Emitter {
         // The existing emitter tests the count of a comprehension over a
         // range before its loop (`_SYS.rangeCount()`): no array holds more
         // than 2^32 - 1 elements. An ascending build runs over the elements
-        // of a list, which has fewer.
-        if (op.ascending !== true)
+        // of a list, which has fewer, but for a count (`counted`): the
+        // existing emitter's `Array.from({ length: n })` of `Tabulate` throws
+        // there before it calls the function.
+        if (op.ascending !== true || op.counted === true)
           range.before.push(
             `if (${range.last} > 4294967294) ` +
               `throw new RangeError('Invalid array length');`
@@ -1677,6 +1679,87 @@ class Emitter {
       case 'variance':
         this.runtime.add(op.fn);
         return call(`_SYS.${op.fn}`, operands);
+      // The statistics: the runtime helper of the head, as the existing
+      // emitter calls it (`_SYS.populationVariance(L)`).
+      case 'population-variance':
+      case 'standard-deviation':
+      case 'population-standard-deviation':
+      case 'skewness':
+      case 'kurtosis':
+      case 'mode':
+      case 'interquartile-range':
+      case 'covariance':
+      case 'correlation': {
+        const helper = op.fn.replace(/-([a-z])/g, (_, c: string) =>
+          c.toUpperCase()
+        );
+        this.runtime.add(helper);
+        return call(`_SYS.${helper}`, operands);
+      }
+      // The texts of the existing emitter for `Ordering(L)` (a stable sort
+      // of the positions with the comparator of `sort`), `Unique(L)`,
+      // `IndexOf(L, x)`, `Contains(L, x)`, `Repeat(x, n)`, `Linspace(a, b,
+      // n)` and `Slice(L, a, b)`.
+      case 'ordering':
+        return {
+          text:
+            `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))` +
+            `(${operand(operands[0], CONDITIONAL)}, (_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0))`,
+          precedence: CALL,
+        };
+      case 'unique':
+        return atom(`[...new Set(${operand(operands[0], CONDITIONAL)})]`);
+      case 'index-of':
+        this.runtime.add('idxt');
+        return call('_SYS.idxt', operands);
+      case 'contains':
+        return method(`includes(${operand(operands[1], CONDITIONAL)})`);
+      case 'repeat':
+        return {
+          text:
+            `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; ` +
+            `return Array.from({ length: _n }, () => _v); })` +
+            `(${operand(operands[0], CONDITIONAL)}, ${operand(operands[1], CONDITIONAL)})`,
+          precedence: CALL,
+        };
+      case 'linspace':
+        return {
+          text:
+            `((_s, _e, _c) => { _c = Math.floor(_c); if (!Number.isFinite(_c)) _c = 50; _c = Math.max(0, _c); ` +
+            `if (_c > 0 ? !(Number.isFinite(_s) && Number.isFinite(_e)) : Number.isNaN(_s) || Number.isNaN(_e)) return NaN; ` +
+            `if (_c === 1) return [_s]; ` +
+            `const _sp = _e - _s, _st = _sp / (_c - 1), _g = Number.isInteger(_st) && Number.isInteger(_s) && Math.abs(_sp) <= Number.MAX_SAFE_INTEGER; ` +
+            `return Array.from({ length: _c }, (_, _i) => _g ? _s + _i * _st : _s + (_sp * _i) / (_c - 1)); })` +
+            `(${operands.map((o) => operand(o, CONDITIONAL)).join(', ')})`,
+          precedence: CALL,
+        };
+      case 'slice':
+        return {
+          text:
+            `((_l, _s, _e) => { _s = Math.round(_s); if (!Number.isFinite(_s)) _s = 1; ` +
+            `_e = Math.round(_e); if (!Number.isFinite(_e)) _e = _l.length; ` +
+            `if (_s < 1) _s = _l.length + 1 + _s; if (_s < 1) _s = 1; if (_s > _l.length) return []; ` +
+            `if (_e < 1) _e = _l.length + 1 + _e; if (_e < 1) _e = 1; if (_e > _l.length) _e = _l.length; ` +
+            `return _l.slice(_s - 1, _e); })` +
+            `(${operands.map((o) => operand(o, CONDITIONAL)).join(', ')})`,
+          precedence: CALL,
+        };
+      // A read at a real index, and a gather: the read of the existing
+      // emitter, `_SYS.atNumeric(L, i, "real")`, whose index can be a
+      // fraction (`NaN`) or a list of indexes (a new list).
+      case 'at-real':
+      case 'gather': {
+        const element = elementOf(op.operands[0].type);
+        this.runtime.add('atNumeric');
+        return call('_SYS.atNumeric', [
+          ...operands,
+          atom(
+            JSON.stringify(
+              this.elementLabels.get(op.operands[0].id) ?? element
+            )
+          ),
+        ]);
+      }
       case 'dot':
       case 'matrix-multiply':
         this.runtime.add('matmul');

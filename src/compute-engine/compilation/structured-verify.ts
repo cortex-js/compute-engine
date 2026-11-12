@@ -1867,7 +1867,15 @@ function numericCells(
  * count, `range` two integers, or two numbers and a step; `reverse` and `sort` one
  * list of numbers, `join` two or more, and each has a list result whose
  * element holds the elements of its list operands (a list of integers only
- * when every list operand is one). The operation is `pure`, and the policy
+ * when every list operand is one). The statistics read one list or tuple
+ * (`covariance` and `correlation` two lists) and have a real result;
+ * `ordering` reads a list and gives a list of integers, `unique` a list of
+ * its elements; `index-of` and `contains` read a list and a number and give
+ * an integer and a boolean; `repeat` reads a number and an integer count,
+ * `linspace` two numbers and an integer count; `slice` reads a list and two
+ * numbers; `at-real` a list and a number, and gives an element; `gather` a
+ * list and a list of indexes, and gives a list of its elements; `take` and
+ * `drop` also read a real count. The operation is `pure`, and the policy
  * of the target lists the identifier and its representations.
  */
 function verifyCollection(
@@ -1905,8 +1913,94 @@ function verifyCollection(
       );
     return cell.kind;
   };
+  /** The operand `i` is a real or an integer. */
+  const numberOperand = (i: number) => {
+    if (operands[i].type !== 'real' && operands[i].type !== 'integer')
+      fail(
+        `the operand ${i + 1} of the function of lists ${fn} has the type ${operands[i].type}, not a number`
+      );
+  };
+  /** The operand `i` is a list of numbers, not a tuple. */
+  const flatList = (i: number) => {
+    if (isTupleType(operands[i].type))
+      fail(`the function of lists ${fn} reads a list, not a tuple`);
+    return listOperand(i);
+  };
   let result: ValueType;
   switch (fn) {
+    case 'population-variance':
+    case 'standard-deviation':
+    case 'population-standard-deviation':
+    case 'skewness':
+    case 'kurtosis':
+    case 'mode':
+    case 'interquartile-range':
+      count(operands.length === 1);
+      listOperand(0, true);
+      result = 'real';
+      break;
+    case 'covariance':
+    case 'correlation':
+      count(operands.length === 2);
+      flatList(0);
+      flatList(1);
+      result = 'real';
+      break;
+    case 'ordering':
+      count(operands.length === 1);
+      flatList(0);
+      result = listType('integer');
+      break;
+    case 'unique':
+      count(operands.length === 1);
+      result = listType(flatList(0));
+      break;
+    case 'index-of':
+    case 'contains':
+      count(operands.length === 2);
+      flatList(0);
+      numberOperand(1);
+      result = fn === 'contains' ? 'boolean' : 'integer';
+      break;
+    case 'repeat':
+      count(operands.length === 2);
+      numberOperand(0);
+      if (operands[1].type !== 'integer')
+        fail(
+          `the count of the function of lists repeat has the type ${operands[1].type}`
+        );
+      result = listType(operands[0].type === 'integer' ? 'integer' : 'real');
+      break;
+    case 'linspace':
+      count(operands.length === 3);
+      numberOperand(0);
+      numberOperand(1);
+      if (operands[2].type !== 'integer')
+        fail(
+          `the count of the function of lists linspace has the type ${operands[2].type}`
+        );
+      result = listType('real');
+      break;
+    case 'slice':
+      count(operands.length === 3);
+      numberOperand(1);
+      numberOperand(2);
+      result = listType(flatList(0));
+      break;
+    case 'at-real':
+      count(operands.length === 2);
+      numberOperand(1);
+      result = flatList(0);
+      break;
+    case 'gather': {
+      count(operands.length === 2);
+      const element = flatList(0);
+      listOperand(1);
+      if (isTupleType(operands[1].type))
+        fail('the indexes of the function of lists gather are a tuple');
+      result = listType(element);
+      break;
+    }
     case 'norm':
       // A list or a tuple of numbers, or a list of lists of numbers of any
       // rank, and an order.
@@ -2011,7 +2105,16 @@ function verifyCollection(
         tuple !== undefined && (isTupleType(tuple) || isListType(tuple))
           ? tuple
           : listOperand(0);
-      if (operands[1].type !== 'integer')
+      // A real count of `take` and `drop` is rounded; a shift is an
+      // integer.
+      if (
+        operands[1].type !== 'integer' &&
+        !(
+          (fn === 'take' || fn === 'drop') &&
+          operands[1].type === 'real' &&
+          op.result.representation !== 'bigint-array'
+        )
+      )
         fail(
           `the count of the function of lists ${fn} has the type ${operands[1].type}`
         );

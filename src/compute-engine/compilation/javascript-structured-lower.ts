@@ -642,6 +642,30 @@ export const COLLECTION_HEADS: Readonly<
   MatrixMultiply: 'matrix-multiply',
   Diagonal: 'diagonal',
   Flatten: 'flatten',
+  // `Second` and `Third` are `at` of 2 and 3, `IsEmpty` a test of the
+  // `length`, `Most` the `drop` of -1, `Append` the `join` of a list of one
+  // element (lowered as `append`).
+  Second: 'at',
+  Third: 'at',
+  IsEmpty: 'length',
+  Most: 'drop',
+  Append: 'join',
+  PopulationVariance: 'population-variance',
+  StandardDeviation: 'standard-deviation',
+  PopulationStandardDeviation: 'population-standard-deviation',
+  Skewness: 'skewness',
+  Kurtosis: 'kurtosis',
+  Mode: 'mode',
+  InterquartileRange: 'interquartile-range',
+  Covariance: 'covariance',
+  Correlation: 'correlation',
+  Ordering: 'ordering',
+  IndexOf: 'index-of',
+  Contains: 'contains',
+  Unique: 'unique',
+  Repeat: 'repeat',
+  Linspace: 'linspace',
+  Slice: 'slice',
 };
 
 /** The rank of the engine type `type` when it states one: the number of
@@ -863,6 +887,15 @@ export const FUNCTION_OPERAND_HEADS: Readonly<
   Reduce: { fn: 1, arity: 2 },
   Scan: { fn: 1, arity: 2 },
   Apply: { fn: 0 },
+  CountIf: { fn: 1, arity: 1 },
+  Any: { fn: 1, arity: 1 },
+  All: { fn: 1, arity: 1 },
+  Find: { fn: 1, arity: 1 },
+  IndexWhere: { fn: 1, arity: 1 },
+  Position: { fn: 1, arity: 1 },
+  TakeWhile: { fn: 1, arity: 1 },
+  DropWhile: { fn: 1, arity: 1 },
+  Tabulate: { fn: 0, arity: 1 },
 };
 
 /** The function literal that the admission made for the function operand
@@ -2315,6 +2348,36 @@ class Lowering {
       return value;
     }
 
+    // `At(L, x)` of a list of numbers with a real index, and `At(L, I)` with
+    // a list of indexes (a list literal, a `Range`, a list name): a read at a
+    // real index (`at-real`) and a gather (`gather`), as the existing emitter
+    // writes both, `_SYS.atNumeric(L, i, "real")` (`atRule()`).
+    if (operator === 'At' && node.nops === 2) {
+      const operands = this.operands(node, facts, scope, operations);
+      const fn =
+        operands[1].type === 'real'
+          ? 'at-real'
+          : isListType(operands[1].type)
+            ? 'gather'
+            : undefined;
+      if (fn !== undefined) {
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'collection',
+          fn,
+          ...collectionResultArray(JAVASCRIPT_POLICY, fn),
+          result,
+          operands,
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      }
+      const result = this.resultOf(facts);
+      operations.push({ kind: 'at', result, operands, effect, origin: node });
+      return result;
+    }
+
     // `ReplaceAt(M, i, j, x)` of a list of lists (`nestedReplaceAt()`): the
     // row `i` with its element `j` replaced, written as the row `i` of `M`:
     // `replace-at(M, i, replace-at(at(M, i), j, x))`, which copies the outer
@@ -3074,11 +3137,74 @@ class Lowering {
       case 'Reverse':
       case 'Sort':
       case 'Join':
-      case 'ListJoin': {
+      case 'ListJoin':
+      case 'PopulationVariance':
+      case 'StandardDeviation':
+      case 'PopulationStandardDeviation':
+      case 'Skewness':
+      case 'Kurtosis':
+      case 'Mode':
+      case 'InterquartileRange':
+      case 'Covariance':
+      case 'Correlation':
+      case 'Ordering':
+      case 'IndexOf':
+      case 'Contains':
+      case 'Unique':
+      case 'Repeat':
+      case 'Slice': {
         const fn = COLLECTION_HEADS[operator];
         if (fn === 'at' || fn === 'length')
           return fail(`no function of lists for ${operator}`);
         return push(fn, operands);
+      }
+      // `Linspace(a, b)` has 50 elements, as the existing emitter writes it.
+      case 'Linspace':
+        return push(
+          'linspace',
+          operands.length === 3
+            ? operands
+            : [...operands, this.numberLiteral(50, 'integer', node, operations)]
+        );
+      // `Most(L)` drops the last element: `L.slice(0, -1)`.
+      case 'Most':
+        return push('drop', [
+          operands[0],
+          this.numberLiteral(-1, 'integer', node, operations),
+        ]);
+      // `Append(L, x)`: a new list, or `L` with `x` pushed when `L` is
+      // unique (`inPlaceUpdates()`).
+      case 'Append': {
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'append',
+          result,
+          operands,
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      }
+      // `IsEmpty(L)`: the length is 0, `(L.length === 0)`.
+      case 'IsEmpty': {
+        const length = this.newValue('integer', 'number');
+        operations.push({
+          kind: 'length',
+          result: length,
+          operands: [operands[0]],
+          effect: 'pure',
+          origin: node,
+        });
+        const zero = this.numberLiteral(0, 'integer', node, operations);
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'equal',
+          result,
+          operands: [length, zero],
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
       }
       case 'Rest':
         return push('drop', [
@@ -3142,10 +3268,12 @@ class Lowering {
       }
       case 'First':
       case 'Last':
+      case 'Second':
+      case 'Third':
         return this.element(
           operands[0],
           this.numberLiteral(
-            operator === 'First' ? 1 : -1,
+            { First: 1, Last: -1, Second: 2, Third: 3 }[operator],
             'integer',
             node,
             operations
@@ -3295,6 +3423,38 @@ class Lowering {
 
     if (operator === 'Apply') return apply(values, operations);
 
+    // `Tabulate(f, n)`: a `build` from 1 to `n` (`ascending`, so none for
+    // `n` less than 1) whose body is `f` of the index, as the existing
+    // emitter calls `_f(_i + 1)` for each `_i` below `Math.max(0, n)`.
+    // The count is not a length (`counted`): for more than 2^32 - 1
+    // elements the code throws a `RangeError` before it calls `f`, as
+    // `Array.from({ length: n })` does.
+    if (operator === 'Tabulate') {
+      const index = this.newValue('integer', 'number');
+      const body: IROperation[] = [];
+      const element = this.inRegion(body, () => apply([index], body));
+      const region: IRRegion = {
+        ...this.region(body, node, element),
+        parameters: [index],
+      };
+      const result = this.resultOf(facts);
+      operations.push({
+        kind: 'build',
+        result,
+        operands: [
+          this.numberLiteral(1, 'integer', node, operations),
+          values[0],
+        ],
+        body: region,
+        effect: region.effect,
+        ...touchesField(region.touches),
+        ascending: true,
+        counted: true,
+        origin: node,
+      });
+      return result;
+    }
+
     const list = values[0];
     const type = valueType(facts.type);
     const [one, length] = this.elementRange(list, node, operations);
@@ -3318,7 +3478,8 @@ class Lowering {
       step: (
         element: IRValue,
         current: readonly IRValue[],
-        into: IROperation[]
+        into: IROperation[],
+        index: IRValue
       ) => readonly IRValue[],
       into: IROperation[]
     ): IRValue[] => {
@@ -3328,7 +3489,7 @@ class Lowering {
       );
       const body: IROperation[] = [];
       const next = this.inRegion(body, () =>
-        step(this.element(list, index, node, body), parameters, body)
+        step(this.element(list, index, node, body), parameters, body, index)
       );
       const region: IRRegion = {
         ...this.region(body, node, [...next]),
@@ -3414,18 +3575,23 @@ class Lowering {
         return result;
       }
       case 'Filter':
-      case 'Count': {
-        const filter = operator === 'Filter';
+      case 'Count':
+      case 'CountIf':
+      case 'Position': {
+        const filter = operator === 'Filter' || operator === 'Position';
         const start = filter
           ? empty(type, operations)
           : literal(0, 'integer', operations);
         const [result] = pass(
           one,
           [{ initial: start, type }],
-          (element, [current], into) => [
+          (element, [current], into, index) => [
             this.conditional(
               apply([element], into),
               (inner) => {
+                // `Position` appends the index of the element.
+                if (operator === 'Position')
+                  return append(current, index, inner);
                 if (filter) return append(current, element, inner);
                 const sum = this.newValue('integer', 'number');
                 inner.push({
@@ -3444,6 +3610,152 @@ class Lowering {
           ],
           operations
         );
+        return result;
+      }
+      case 'Any':
+      case 'All':
+      case 'Find':
+      case 'IndexWhere':
+      case 'TakeWhile':
+      case 'DropWhile': {
+        // A pass that ends at the first element that decides the value, as
+        // `some`, `every`, `find` and `findIndex` of the existing emitter
+        // stop there: a `loop` from 1 to the length that carries the value
+        // for no such element, with an `if` on the predicate whose branch
+        // ends the loop with an `exit` of the value at that element. The
+        // predicate is applied to the same elements, in the same order.
+        const stopsWhen = operator !== 'All' && !operator.endsWith('While');
+        const literalOf = (value: number | boolean, into: IROperation[]) => {
+          if (typeof value === 'number')
+            return literal(value, Number.isNaN(value) ? 'real' : 'integer', into);
+          const result = this.newValue('boolean', 'boolean');
+          into.push({
+            kind: 'literal',
+            value,
+            result,
+            operands: [],
+            effect: 'pure',
+            origin: node,
+          });
+          return result;
+        };
+        // The value for no such element, and at the element `element` of
+        // the index `index`.
+        const none = (into: IROperation[]): IRValue =>
+          operator === 'Any'
+            ? literalOf(false, into)
+            : operator === 'All'
+              ? literalOf(true, into)
+              : operator === 'Find'
+                ? literalOf(NaN, into)
+                : operator === 'IndexWhere'
+                  ? literalOf(0, into)
+                  : length;
+        const found = (
+          element: IRValue,
+          index: IRValue,
+          into: IROperation[]
+        ): IRValue => {
+          if (operator === 'Any') return literalOf(true, into);
+          if (operator === 'All') return literalOf(false, into);
+          if (operator === 'Find') {
+            if (element.type !== 'integer') return element;
+            // An integer element, carried with the real `NaN`.
+            const real = this.newValue('real', 'number');
+            into.push({
+              kind: 'convert',
+              conversion: 'integer-to-real',
+              result: real,
+              operands: [element],
+              effect: 'pure',
+              origin: node,
+            });
+            return real;
+          }
+          if (operator === 'IndexWhere') return index;
+          // The count of the elements before the element: `index + -1`.
+          const count = this.newValue('integer', 'number');
+          into.push({
+            kind: 'add',
+            result: count,
+            operands: [index, literal(-1, 'integer', into)],
+            effect: 'pure',
+            origin: node,
+          });
+          return count;
+        };
+        const initial = none(operations);
+        // The carried value has the type of the value: a boolean, the
+        // element (a real for `Find`, which can be `NaN`), or an integer.
+        const carriedType: ValueType =
+          operator === 'Any' || operator === 'All'
+            ? 'boolean'
+            : operator === 'Find'
+              ? 'real'
+              : 'integer';
+        const representation: ScalarRepresentation =
+          carriedType === 'boolean' ? 'boolean' : 'number';
+        const index = this.newValue('integer', 'number');
+        const current = this.newValue(carriedType, representation);
+        const body: IROperation[] = [];
+        this.inRegion(body, () => {
+          const element = this.element(list, index, node, body);
+          const test = apply([element], body);
+          const exit: IROperation[] = [];
+          const value = this.inRegion(exit, () =>
+            found(element, index, exit)
+          );
+          exit.push({
+            kind: 'exit',
+            operands: [value],
+            effect: 'pure',
+            origin: node,
+          });
+          const closed = this.closedRegion(exit);
+          const open = this.region([], node, []);
+          body.push({
+            kind: 'if',
+            results: [],
+            operands: [test],
+            then: stopsWhen ? closed : open,
+            else: stopsWhen ? open : closed,
+            effect: joinEffects(closed.effect, open.effect),
+            ...touchesField(closed.touches, open.touches),
+            origin: node,
+          });
+        });
+        const region: IRRegion = {
+          ...this.region(body, node, current),
+          parameters: [index, current],
+        };
+        const searched = this.newValue(carriedType, representation);
+        operations.push({
+          kind: 'loop',
+          results: [searched],
+          operands: [one, length, initial],
+          body: region,
+          effect: region.effect,
+          ...touchesField(region.touches),
+          ascending: true,
+          origin: node,
+        });
+        if (operator !== 'TakeWhile' && operator !== 'DropWhile')
+          return searched;
+        // The elements before the first one where the predicate is false,
+        // and the others: `L.slice(0, i)` and `L.slice(i)`, new arrays.
+        const result = this.resultOf(facts);
+        operations.push({
+          kind: 'collection',
+          fn: operator === 'TakeWhile' ? 'take' : 'drop',
+          ...collectionResultArray(
+            JAVASCRIPT_POLICY,
+            operator === 'TakeWhile' ? 'take' : 'drop'
+          ),
+          result,
+          operands: [list, searched],
+          effect: 'pure',
+          origin: node,
+        });
         return result;
       }
       case 'Reduce':
@@ -5719,6 +6031,10 @@ function canThrow(
         op.fn === 'real-lcm')) ||
     op.kind === 'replace-at' ||
     throwingMatrixFunction(op) ||
+    // A list of a count that the program computes: more than 2^32 - 1
+    // elements throw (`Tabulate`, `Repeat`, `Linspace`).
+    (op.kind === 'build' && op.counted === true) ||
+    (op.kind === 'collection' && (op.fn === 'repeat' || op.fn === 'linspace')) ||
     (host && op.kind === 'host') ||
     op.kind === 'routine' ||
     (op.kind === 'call' && bodyThrows(op.function)) ||

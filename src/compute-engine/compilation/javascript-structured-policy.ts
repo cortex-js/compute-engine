@@ -178,7 +178,7 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // A runtime helper of arrays, or a method of the array, as the existing
     // emitter writes the head (`collections`, below).
     'collection': {
-      results: ['number', 'array'],
+      results: ['number', 'array', 'boolean'],
       operands: ['array', 'number'],
     },
   },
@@ -237,6 +237,38 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'matrix-product': { results: ['array'], operands: ['array'], resultArray: 'new' },
     'diagonal': { results: ['array'], operands: ['array'], resultArray: 'new' },
     'flatten': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    // The statistics: `_SYS.populationVariance(L)`, …,
+    // `_SYS.covariance(L, M)`, a number.
+    'population-variance': { results: ['number'], operands: ['array'] },
+    'standard-deviation': { results: ['number'], operands: ['array'] },
+    'population-standard-deviation': { results: ['number'], operands: ['array'] },
+    'skewness': { results: ['number'], operands: ['array'] },
+    'kurtosis': { results: ['number'], operands: ['array'] },
+    'mode': { results: ['number'], operands: ['array'] },
+    'interquartile-range': { results: ['number'], operands: ['array'] },
+    'covariance': { results: ['number'], operands: ['array'] },
+    'correlation': { results: ['number'], operands: ['array'] },
+    // `_SYS.idxt(L, x)`, a number, and `L.includes(x)`, a boolean.
+    'index-of': { results: ['number'], operands: ['array', 'number'] },
+    'contains': { results: ['boolean'], operands: ['array', 'number'] },
+    // The texts of the existing emitter for `Ordering(L)`, `Unique(L)`,
+    // `Repeat`, `Linspace` and `Slice`, and `_SYS.atNumeric(L, I, label)`
+    // of a list of indexes. Each reads, or makes, a flat list of numbers
+    // only, and each gives a new array of numbers for every input
+    // (`resultArray`, `new`): `Array.from(…)` sorted in place
+    // (`ordering`), `[...new Set(L)]`, `[]` or `Array.from(…)` (`repeat`),
+    // `[_s]` or `Array.from(…)` (`linspace`, whose bounds are finite
+    // literals, so never the number `NaN`), `[]` or `_l.slice(…)`
+    // (`slice`), and the new list `picked` of `_SYS.at` (`gather`; its
+    // indexes are numbers, never a boolean mask). `at-real` gives a
+    // number.
+    'ordering': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'unique': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'repeat': { results: ['array'], operands: ['number'], resultArray: 'new' },
+    'linspace': { results: ['array'], operands: ['number'], resultArray: 'new' },
+    'slice': { results: ['array'], operands: ['array', 'number'], resultArray: 'new' },
+    'at-real': { results: ['number'], operands: ['array', 'number'] },
+    'gather': { results: ['array'], operands: ['array'], resultArray: 'new' },
   },
   // The emitter writes each function as the existing emitter writes it for
   // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):

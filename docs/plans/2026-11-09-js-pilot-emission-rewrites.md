@@ -599,6 +599,40 @@ existing code is from probes with `cse: false, constantFold: false`, the
 | `A·B` of two `matrix`, `matrix<2x2>·vector<2>`, `vector<2>·matrix<2x2>` | `_SYS.mul(_.A, _.B)` (`compileMatrixProduct()`); `M·v + w` is `((_tv3) => [(_tv3[0] + _.w[0]), (_tv3[1] + _.w[1])])(_SYS.mul(_.A, _.v))` | `matrix-product`, `_SYS.mul(A, B)`, absent unless the inner dimensions are stated and agree; `M·v + w` a `build` over two lists whose types state one length (`vector<2>`) |
 | `M·M` of a `list<list<real>>`, `x·A·B`, `A·M` | `(_SYS.matrixProductShape(_.M, _.M) ?? (_SYS.bcast(…)))`; `_SYS.mul(_.x, _.A, _.B)` | Declined: the existing code chooses the product at run time (the remedy is a `matrix` declaration, a user decision of 2026-11-11); a product of more than two factors declined |
 
+### Functions of flat lists, predicates and index operands (row 3 of the decline census)
+
+The census is `docs/plans/2026-11-11-js-profile-decline-census.md`, section 4,
+row 3. Each existing text below is from a probe with `cse: false,
+constantFold: false` (`L`, `M` of the type `list<real>`, `I` of the type
+`list<integer>`, `x`, `y` real, `n`, `k` integer).
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `Ordering(L)` | `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(_.L, (_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0))`: a stable sort of the positions, a `NaN` after every number, `-0` and `0` tied | `collection` `ordering`, the same text; a new array of integers. `Ordering(L, f)` declined |
+| `IndexOf(L, x)` | `_SYS.idxt(_.L, _.x)`: the first position whose element is `x` (`===`, and a `NaN` matches a `NaN`), `0` for none; `-0` matches `0` | `collection` `index-of`, the same call. A list of tuples or of lists declined |
+| `Contains(L, x)` | `(_.L).includes(_.x)` (SameValueZero: a `NaN` matches a `NaN`, `-0` matches `0`) | `collection` `contains`, a boolean, the same method. A list of tuples (the existing compiler declines), of lists, `Element(x, L)` declined |
+| `Unique(L)` | `[...new Set(_.L)]`: the first of each value in order, one `NaN`, `0` and `-0` are one value, written `0` | `collection` `unique`, the same text; a new array |
+| `PopulationVariance`, `StandardDeviation`, `PopulationStandardDeviation`, `Skewness`, `Kurtosis`, `Mode`, `InterquartileRange` of a list or a tuple; `Covariance(L, M)`, `Correlation(L, M)` | `_SYS.populationVariance(_.L)`, …, `_SYS.covariance(_.L, _.M)`: `NaN` for an empty list and for a `NaN` element | `collection` of the same name, the same call; a real. An engine type that admits a list declined, as for `Mean`. `Quartiles` (a tuple of named fields) declined |
+| `Second(L)`, `Third(L)` | `(_.L[1] ?? NaN)`, `(_.P[2] ?? NaN)`; a list of tuples `_SYS.atPoint(_.LP, 2, 2)`; a list of lists `_.M[1]` (`undefined` out of range) | `at` of the literal `2` or `3`, as `First`: the same numbers, a tuple of `NaN` and `undefined` out of range |
+| `Most(L)` | `(_.L).slice(0, -1)` | `drop` of the literal `-1`, the same text |
+| `IsEmpty(L)` | `((_.L).length === 0)` | `length` and an `equal` to `0` |
+| `Append(L, x)` | `[...(_.L), _.x]` | `append`: `[...L, x]`, or a `push` where the list is unique (`inPlaceUpdates()`); a list of integers and a real give a list of reals. `Append` of more than one element declined |
+| `Repeat(x, n)` with an integer count | `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(_.x, _.n)` | `collection` `repeat`, the same text; a new array. A real count declined: the existing code throws for a fraction (`Repeat: the count is not an integer at run time`) |
+| `Linspace(a, b, n)`, `Linspace(a, b)` | `((_s, _e, _c) => { _c = Math.floor(_c); if (!Number.isFinite(_c)) _c = 50; …; if (_c > 0 ? !(Number.isFinite(_s) && Number.isFinite(_e)) : …) return NaN; if (_c === 1) return [_s]; … })(0, 1, _.n)`; `50` for no count | `collection` `linspace`, the same text, with the literal `50` for no count, only for bounds that are finite number literals: the existing code gives the number `NaN`, not a list, for a bound that is not finite, a value of another shape |
+| `Slice(L, a, b)` | `((_l, _s, _e) => { _s = Math.round(_s); …; return _l.slice(_s - 1, _e); })(_.L, _.n, _.k)`: rounded bounds, negative from the end, clamped | `collection` `slice`, the same text, integer or real bounds; a new array |
+| `At(L, x)` with a real index | `_SYS.atNumeric(_.L, _.x, "real")`: `NaN` for a fraction, `NaN` and an infinity | `collection` `at-real`, the same call |
+| `At(L, I)`, `At(L, [1, k])`, `At(L, Range(a, b))`, `At(L, Range(a, b, s))` (a gather) | `_SYS.atNumeric(_.L, _.I, "real")`, the list index made first (`_SYS.range(…)` for a `Range`): a new list of the elements, `NaN` at a position out of range | `collection` `gather` of the list and the index list (`range` for a `Range`), the same call; a new array |
+| `Sum`, `Product`, `Max`, `Min`, `Mean`, `Length` of a gather | a fused loop: `let _tv2 = 0; for (…) { _tv2 += _SYS.atNumeric(_tv1, _tv4 + _tv6 * _tv3, "real"); if (_tv2 !== _tv2) return NaN; }` (`/ _tv7` for `Mean`; the count for `Length`) | the fold (or `mean`, `length`) of the gather: the same additions in the same order, `NaN` where the fused loop stops at a `NaN` (a `NaN` stays `NaN` in a sum, a product, `Math.max`, `Math.min`) |
+| `Take(L, x)`, `Drop(L, x)` with a real count | `((_a, _n) => Number.isNaN(_n) ? undefined : _n < 0 ? _a.slice(_n) : _a.slice(0, _n))(_.L, Math.round(_.x))`; a literal `2.5` is `slice(0, 3)` | `take`, `drop` with a real count: the text of a count that is not an integer literal, `Math.round` of the count (a literal `2.5` gives `3`, `-2.5` gives `-2`, as the existing literal) |
+| `CountIf(L, p)` | `((_f) => (_.L).filter((_x) => _f(_x)).length)(…)` | as `Count(L, p)`: a `loop` that adds 1 where `p` holds; `p` once per element in order |
+| `Any(L, p)`, `All(L, p)` | `((_f) => (_.L).some((_x) => _f(_x)))(…)`, `.every(…)`: stops at the first element that decides | a `loop` that carries the answer from `false` (`true`) and ends with an `exit` at the first element where `p` is true (false): `p` is applied to the same elements, in the same order |
+| `Find(L, p)` | `((_f) => ((_.L).find((_x) => _f(_x)) ?? NaN))(…)` | a `loop` from `NaN` that exits with the element; a list of tuples declined (the existing code gives `NaN`, not a tuple of `NaN`) |
+| `IndexWhere(L, p)` | `((_f) => (_.L).findIndex((_x) => _f(_x)) + 1)(…)` | a `loop` from `0` that exits with the index |
+| `Position(L, p)` | `((_f) => (_.L).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(…)` | as `Filter`, with the index appended |
+| `TakeWhile(L, p)`, `DropWhile(L, p)` | `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(…)`; `[]` and `_l.slice(_i)` for `DropWhile` | a `loop` from the length that exits with the index before the first element where `p` is false, then `take` (`drop`) of that count: `p` on the same elements; a new array |
+| `Tabulate(f, n)` of one dimension with an integer count | `((_f, _n) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => _f(_i + 1)))(…, _.n)` | a `build` from 1 to `n` (`ascending`), the body of `f` at each index. A real count, two dimensions declined |
+| A predicate or a function of these heads that calls the host, draws, or is an operator | — | declined, as for `Filter` (`refuseLazyFunctionOperands()`); an operator declined |
+
 ## What step 1 implements from this list
 
 1. Three refusals at admission, each with its own message and a test: a
