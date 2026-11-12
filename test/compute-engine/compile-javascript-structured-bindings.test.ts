@@ -537,7 +537,7 @@ describe('a captured list of lists', () => {
     ['a list of a list of a row', ['List', ['List', ['At', 'rows', 1]]]],
     ['a comprehension of the list of lists', ['Comprehension', 'rows', ['Element', 'j', ['Range', 1, 2]]]],
     ['the list of lists with an input', ['List', 'rows', 'M']],
-    ['a local and its update', ['Block', ['Assign', 'T', 'rows'], ['Assign', 'U', ['ReplaceAt', 'T', 1, 1, 'x']], ['List', 'T', 'U']]],
+    ['a local and its update', ['Block', ['Declare', 'T', "'unknown'", 'rows'], ['Declare', 'U', "'unknown'", ['ReplaceAt', 'T', 1, 1, 'x']], ['List', 'T', 'U']]],
     ['a call of a helper that returns the list of lists', ['List', ['hc']]],
     ['a list of one list of lists', ['List', 'rows']],
     ['a value of rank 4', ['List', ['List', 'rows']]],

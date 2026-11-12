@@ -690,13 +690,13 @@ describe('lists and tuples in blocks and local functions', () => {
   const blocks: [string, MathJsonExpression, readonly Mode[]][] = [
     [
       'a first write of a list (an implicit local), read with At',
-      fn(['Block', ['Assign', 'R', ['List', 'x', 2]], ['At', 'R', 2]], X),
+      fn(['Block', ['Declare', 'R', "'unknown'", ['List', 'x', 2]], ['At', 'R', 2]], X),
       MODES,
     ],
     [
       'a first write of a list, updated with ReplaceAt and returned',
       fn(
-        ['Block', ['Assign', 'R', ['List', 'x', 2]], ['Assign', 'R', ['ReplaceAt', 'R', 1, 7]], 'R'],
+        ['Block', ['Declare', 'R', "'unknown'", ['List', 'x', 2]], ['Assign', 'R', ['ReplaceAt', 'R', 1, 7]], 'R'],
         X
       ),
       MODES,
@@ -706,7 +706,7 @@ describe('lists and tuples in blocks and local functions', () => {
       fn(
         [
           'Block',
-          ['Assign', 'R', ['Comprehension', 'k', ['Element', 'k', ['Range', 1, 9], ['Less', 'x', 'k']]]],
+          ['Declare', 'R', "'unknown'", ['Comprehension', 'k', ['Element', 'k', ['Range', 1, 9], ['Less', 'x', 'k']]]],
           ['Length', 'R'],
         ],
         X

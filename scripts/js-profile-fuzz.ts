@@ -39,8 +39,8 @@
  * holds 0, 1 or -1 in a complex sum or product), writes, `If`
  * statements and a `Loop` over a range with a `Break`; a `Block` in a
  * `Block`, block statements, a block of declarations as an operand
- * (`ValueBlock`), locals declared `unknown` or `number`, a first write to a name that
- * no `Declare` declares (`t`), local functions (`lf`, declared `function`,
+ * (`ValueBlock`), locals declared `unknown` or `number` (`t` is sometimes declared
+ * `unknown`), local functions (`lf`, declared `function`,
  * `unknown`, with a `let` or with `DefineFunction`, which read the names of
  * the body or not), and a helper declared `function` (`fq`). Collections
  * (`genCollectionReal()`, `genList()`, `genTuple()`): list literals of
@@ -2921,11 +2921,12 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
       ...carried.statements,
       carried.value,
     ];
-  // The first local, declared, or by a first write (`t ≔ …`, a local of the
-  // block that no `Declare` declares).
+  // The first local, always declared: with a type from `declareLocal()`, or
+  // with the type `unknown` (the form of `t ≔ …`; a first write to a name
+  // that no `Declare` declares is an error).
   const statements: Json[] = [
     rng() < 0.12
-      ? ['Assign', 't', genReal(ctx([], 1), 0)]
+      ? ['Declare', 't', "'unknown'", genReal(ctx([], 1), 0)]
       : declareLocal(rng, 't', ctx([], 1)),
   ];
   if (rng() < 0.4) {

@@ -85,7 +85,7 @@ const SHAPES: Shape[] = [
     label: 'Block(deep := Beta^d(x); 1 + deep)',
     level: fn('Beta'),
     root: (ce, t) =>
-      ce.box(['Block', ['Assign', 'deep', t], ['Add', 1, 'deep']] as never),
+      ce.box(['Block', ['Declare', 'deep', "'unknown'", t], ['Add', 1, 'deep']] as never),
     declines: /Beta\(x, x\)/,
   },
   { label: 'Add(t, t)', level: raw('Add') },
@@ -188,7 +188,7 @@ const SHAPES: Shape[] = [
     label: 'Block(deep := Sin^d(x); 1 + deep)',
     level: sinCos,
     root: (ce, t) =>
-      ce.box(['Block', ['Assign', 'deep', t], ['Add', 1, 'deep']] as never),
+      ce.box(['Block', ['Declare', 'deep', "'unknown'", t], ['Add', 1, 'deep']] as never),
   },
   {
     label: 'a let and the tower',
@@ -640,7 +640,7 @@ cases.push([
   'the same, in a root Block',
   [
     'Block',
-    ['Assign', 'p', N1],
+    ['Declare', 'p', "'unknown'", N1],
     ['Add', 'p', ['Sum', N1, ['Limits', 'k', 1, 3]]],
   ],
   N1,
@@ -675,9 +675,9 @@ cases.push([
   'a node before and after a local that it reads is declared',
   [
     'Block',
-    ['Assign', 'p', ['Arctan2', 'u', 'x']],
+    ['Declare', 'p', "'unknown'", ['Arctan2', 'u', 'x']],
     ['Declare', 'q', 'real', 2],
-    ['Assign', 'r', ['Add', 'q', ['Arctan2', 'u', 'x']]],
+    ['Declare', 'r', "'unknown'", ['Add', 'q', ['Arctan2', 'u', 'x']]],
     ['Add', 'p', 'r'],
   ],
   ['Arctan2', 'u', 'x'],

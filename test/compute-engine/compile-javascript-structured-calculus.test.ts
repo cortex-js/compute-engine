@@ -394,8 +394,9 @@ describe('STRUCTURED CALCULUS: the result', () => {
       const expr = ce.box([
         'Block',
         [
-          'Assign',
+          'Declare',
           'f',
+          "'unknown'",
           ['Function', Int(Pow('s', 2), 0, 'u', 's'), 'u'],
         ],
         ['Divide', 1, ['f', 'x']],

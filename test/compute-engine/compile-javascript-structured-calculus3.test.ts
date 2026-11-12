@@ -445,11 +445,11 @@ describe('STRUCTURED CALCULUS 3: review fixes', () => {
     // `pv := -1/a` has the type `infinity | nan | real`: at `a = 0` the
     // existing code takes the limit at `+∞`, π/2, where the interpreter
     // gives -π/2.
-    const witness = ce.box(['Block', ['Assign', 'pv', ['Negate', ['Divide', 1, 'a']]], limit('pv')]);
+    const witness = ce.box(['Block', ['Declare', 'pv', "'unknown'", ['Negate', ['Divide', 1, 'a']]], limit('pv')]);
     expect(run(compile(witness, EXISTING), { a: 0 })).toBe(Math.PI / 2);
     expect(() => compile(witness, PROFILE)).toThrow('which can be infinite');
     // `pv := 2a` has the type `real`.
-    sameOnBoth(ce.box(['Block', ['Assign', 'pv', ['Multiply', 2, 'a']], limit('pv')]), [
+    sameOnBoth(ce.box(['Block', ['Declare', 'pv', "'unknown'", ['Multiply', 2, 'a']], limit('pv')]), [
       [{ a: -2.5 }],
       [{ a: 0 }],
       [{ a: 1.25 }],
@@ -528,7 +528,7 @@ describe('STRUCTURED CALCULUS 3: review fixes', () => {
     const D = (body: Json, v: string): Json => ['D', body, v];
     // In a block with statements, and in a root `Function`.
     sameOnBoth(
-      ce.box(['Block', ['Assign', 's', ['Multiply', 2, 'x']], ['Multiply', 's', D(Zeta('x'), 'x')]]),
+      ce.box(['Block', ['Declare', 's', "'unknown'", ['Multiply', 2, 'x']], ['Multiply', 's', D(Zeta('x'), 'x')]]),
       [[{ x: 0.7 }], [{ x: 2.5 }]]
     );
     sameOnBoth(ce.box(['Function', D(Zeta('u'), 'u'), 'u']), [[0.7], [2.5]]);

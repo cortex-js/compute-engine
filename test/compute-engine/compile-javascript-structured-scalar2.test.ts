@@ -895,7 +895,7 @@ describe('arithmetic of a call of a local function', () => {
   const DECLARATIONS_OF: [string, (body: MathJsonExpression) => MathJsonExpression][] = [
     ['declared unknown', (body) => ['Declare', 'lf', "'unknown'", ['Function', body, 'v']]],
     ['declared function', (body) => ['Declare', 'lf', "'function'", ['Function', body, 'v']]],
-    ['a let', (body) => ['Assign', 'lf', ['Function', body, 'v']]],
+    ['a let', (body) => ['Declare', 'lf', "'unknown'", ['Function', body, 'v']]],
   ];
   const program = (
     declare: (body: MathJsonExpression) => MathJsonExpression,

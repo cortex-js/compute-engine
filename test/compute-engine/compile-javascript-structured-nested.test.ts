@@ -593,7 +593,7 @@ describe('the declines of slice 1', () => {
     ['a row read of the type missing', ['Length', ['At', ['List', ['List']], 3]], /At of \[\[.*\]\] of the type `matrix<never\^\(1x0\)>`, whose element has the type missing/],
     // A list of integers of rank 3 is not read as a list of reals: the
     // lowering converts ranks 1 and 2 only.
-    ['a rank-3 list of integers written to a local of reals', ['Block', ['Assign', 'S', 'R3'], ['Assign', 'S', 'I3'], 'S'], /`Assign` writes a value of the type `list<list<list<integer>>>` to the local `S` of the type `list<list<list<real>>>`/],
+    ['a rank-3 list of integers written to a local of reals', ['Block', ['Declare', 'S', "'unknown'", 'R3'], ['Assign', 'S', 'I3'], 'S'], /`Assign` writes a value of the type `list<list<list<integer>>>` to the local `S` of the type `list<list<list<real>>>`/],
     ['a rank-3 list of integers as an argument of reals', ['h3', 'I3'], /The argument `.*I3.*` of `h3` has the type `list<list<list<integer>>>`, and the parameter `a` has the type `list<list<list<real>>>`/],
     ['rank-3 branches of integers and reals', ['If', 'c', 'R3', 'I3'], /The branches of `If` have the types `list<list<list<real>>>` and `list<list<list<integer>>>`/],
     ['a local declared with rank 3', ['Block', ['Declare', 'S', "'list<list<list<real>>>'", 'R3'], 'S'], /the local S declared list<list<list<real>>> is not in the profile, which admits a local of a list of lists only of rows of reals or of integers \(rank 2/],

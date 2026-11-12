@@ -478,7 +478,7 @@ describe('a local function', () => {
       [
         'Block',
         declare('g', 'function', fn(['Add', 't', 'a'], 't')),
-        ['Assign', 'a', ['Multiply', 2, 'x']],
+        ['Declare', 'a', "'unknown'", ['Multiply', 2, 'x']],
         ['g', 3],
       ],
       /the local function g reads a, a local of the block declared after it/,
@@ -690,7 +690,7 @@ describe('another angular unit than radians', () => {
 
   test.each([
     ['a local declared real', ['Add', ['Block', declare('a', 'real', ['Sin', 'x']), ['Multiply', 'a', 'a']], 1]],
-    ['an implicit local', ['Block', ['Assign', 'a', ['Sin', 'x']], ['Multiply', 'a', 'a']]],
+    ['an implicit local', ['Block', ['Declare', 'a', "'unknown'", ['Sin', 'x']], ['Multiply', 'a', 'a']]],
     [
       'a call of a local function in a trigonometric operand',
       ['Block', declare('g', 'function', fn(['Add', 't', 1], 't')), ['Sin', ['g', 'x']]],
@@ -711,19 +711,19 @@ describe('another angular unit than radians', () => {
 
 describe('a local function, other forms', () => {
   test('a first write of a function literal is a local function', () => {
-    const code = check(['Block', ['Assign', 'g', fn(['Add', 't', 1], 't')], ['Add', ['g', 'x'], 1]], INPUTS, ['strict']);
+    const code = check(['Block', ['Declare', 'g', "'unknown'", fn(['Add', 't', 1], 't')], ['Add', ['g', 'x'], 1]], INPUTS, ['strict']);
     expect(code).toBe('_tv1(_.x) + 1');
   });
 
   test.each([
     [
       'a write to a local function',
-      ['Block', ['Assign', 'g', fn(['Add', 't', 1], 't')], ['Assign', 'g', 3], ['g', 'x']],
+      ['Block', ['Declare', 'g', "'unknown'", fn(['Add', 't', 1], 't')], ['Assign', 'g', 3], ['g', 'x']],
       /./,
     ],
     [
       'a second write of a function literal',
-      ['Block', ['Assign', 'g', fn(['Add', 't', 1], 't')], ['Assign', 'g', fn(['Add', 't', 2], 't')], ['g', 'x']],
+      ['Block', ['Declare', 'g', "'unknown'", fn(['Add', 't', 1], 't')], ['Assign', 'g', fn(['Add', 't', 2], 't')], ['g', 'x']],
       /./,
     ],
     [

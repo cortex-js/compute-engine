@@ -276,7 +276,7 @@ const PROGRAMS: Program[] = [
     name: 'an integrand that reads a local of a block',
     json: [
       'Block',
-      ['Assign', 'c', Pow('x', 2)],
+      ['Declare', 'c', "'unknown'", Pow('x', 2)],
       Int(F('t', 'c'), 0, 1),
     ],
   },
