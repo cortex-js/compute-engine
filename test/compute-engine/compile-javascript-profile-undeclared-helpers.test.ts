@@ -321,13 +321,15 @@ describe('the arguments of another kind decline', () => {
     );
   });
 
-  test('a list argument', () => {
+  // A list of reals at a real parameter is mapped since slice 3 of
+  // docs/plans/2026-11-12-structured-broadcast-over-lists.md.
+  test('a list argument is mapped', () => {
     const ce = new ComputeEngine();
     ce.parse('f(x) := x^2 + 1').evaluate();
     ce.declare('L', 'list<real>');
     const expr = ce.expr(['f', 'L']);
     const got = profile(expr);
-    expect('message' in got && got.message).toMatch(/The argument `L` of `f` has the type `list<real>`/);
+    expect('message' in got).toBe(false);
     expectAgreement(expr, 'strict');
   });
 

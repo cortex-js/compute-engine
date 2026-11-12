@@ -1840,6 +1840,24 @@ function genCollectionReal(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
   if (rng() < 0.15) return genRowReal(ctx, depth);
   if (rng() < 0.45) return genFunctionOfListsReal(ctx, depth);
+  // Slice 5 of the broadcast note: `Max` or `Min` of a list and reals,
+  // `Equal` or `NotEqual` of two lists as a condition.
+  if (rng() < 0.06) {
+    const d = Math.min(depth + 1, ctx.maxDepth);
+    const l = genList(ctx, d);
+    if (rng() < 0.6)
+      return [
+        pick(rng, ['Max', 'Min']),
+        ...(rng() < 0.5 ? [l, genReal(ctx, d)] : [genReal(ctx, d), l]),
+        ...(rng() < 0.3 ? [genList(ctx, d)] : []),
+      ];
+    return [
+      'If',
+      [pick(rng, ['Equal', 'NotEqual']), l, rng() < 0.5 ? l : genList(ctx, d)],
+      genReal(ctx, d),
+      genReal(ctx, d),
+    ];
+  }
   // A list of booleans, a comparison of a list, read by `Length` and by
   // `At` in a condition (slice 2 of the broadcast note).
   if (rng() < 0.06) {
@@ -1968,7 +1986,39 @@ function genBroadcastList(ctx: GenContext, depth: number): Json {
   const sub = () => genReal(ctx, d);
   const list = () => genList(ctx, d);
   const r = rng();
-  if (r < 0.3) return [pick(rng, BROADCAST_UNARY), list()];
+  // Slices 3 and 4 of the broadcast note: a helper of real or integer
+  // parameters applied to each element of a list (one list, the list twice,
+  // the list and reals), and a `Sum` or a `Product` of a list body over a
+  // literal range (sometimes empty: a decline).
+  if (r < 0.12) {
+    const helper = pick(
+      rng,
+      HELPERS.filter((h) => h.arguments.every((k) => k !== 'boolean'))
+    );
+    const l = list();
+    const at = Math.floor(rng() * helper.arguments.length);
+    return [
+      helper.name,
+      ...helper.arguments.map((kind, i): Json =>
+        i === at || rng() < 0.2 ? l : kind === 'real' ? sub() : pick(rng, [0, 1, 2, -3])
+      ),
+    ];
+  }
+  if (r < 0.2) {
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['k', 30]] };
+    const l = genList(ctx, d);
+    const term: Json =
+      rng() < 0.4
+        ? ['Multiply', l, 'k']
+        : rng() < 0.6
+          ? ['Add', l, 'k']
+          : rng() < 0.7
+            ? l
+            : ['Add', l, genReal(inner, d)];
+    const [a, b] = pick(rng, [[1, 3], [0, 2], [1, 1], [-1, 2], [3, 1]] as [number, number][]);
+    return [pick(rng, ['Sum', 'Sum', 'Product']), term, ['Limits', 'k', a, b]];
+  }
+  if (r < 0.35) return [pick(rng, BROADCAST_UNARY), list()];
   if (r < 0.6) {
     const head = pick(rng, BROADCAST_BINARY);
     const l = list();

@@ -741,8 +741,36 @@ same doubles, the operands evaluated once, in order, before the `build`.
 | `Floor(L + 1/3)` | the double `0.3333333333333333` in the closure | Declined, as the scalar rule declines an inexact constant beside a jump |
 | `Sech(L)`, `Csch(L)`, `Fract(L)`, `KroneckerDelta(L)` | `1 / Math.cosh(e)`, …; `KroneckerDelta(L)` is not broadcast (`(L === 0 ? 1 : 0)`) | Declined |
 | `L + M`, `Hypot(L, M)`, `If(L > M, L, M)` of lists of unstated lengths | the scalar `NaN` for different lengths; the selection returns `M` whole for a condition that is that `NaN` (an issue of the existing compiler) | Declined (a user decision, 2026-11-11): the remedy is a stated width, `list<real^3>` or `vector<3>` |
-| `Equal(L, M)`, `Max(L, x)`, `L < 1 < 2` | one boolean of the whole lists; a fold; one closure of the chain | Declined (slice 5) |
+| `L < 1 < 2` | one closure of the chain | Declined (`Equal(L, M)` and `Max(L, x)`: the next section) |
 | Any head in the `complex` mode | the complex code of the head per element | Declined |
+
+### User functions of lists, list-bodied aggregates, extrema and equality of lists (slices 3 to 5 of the broadcast note)
+
+The design is slices 3 to 5 of
+[2026-11-12-structured-broadcast-over-lists.md](2026-11-12-structured-broadcast-over-lists.md)
+(its section 11 has the result); the tests are
+`test/compute-engine/compile-javascript-structured-broadcast2.test.ts`.
+Each existing text is from a probe at `60e81ebee` with `cse: false,
+constantFold: false`, `L`, `M` of the type `list<real>`, `V` of the type
+`vector<3>`, `x` real, `f: (real) -> real` with `f := t ↦ t^3`, in the
+`strict` mode (`compile-user-calls.ts` and `mapWith()` in
+`javascript-runtime.ts`; `emitSumProduct()` in `javascript-target.ts`; the
+extremum closure; `eqTensor()`).
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `f(L)`, `g(L, x)`, `g(x, L)`, `g(L, L)` | `_SYS.mapFn(_fn_f, [1], _.L)`, `_SYS.mapFn(_fn_g, [1, 0], _.L, _.x)`, `_SYS.mapFn(_fn_g, [1, 1], _.L, _.L)`: every argument a JavaScript argument, evaluated once, in order; then `f` once per element in index order (`mapWith()`), not at all for `[]`; two lists of different lengths give the scalar `NaN` | The arguments once, in order, then a `build` from 1 to the length of the first list argument whose body reads each list argument at the index and calls the helper once with the cells and the scalar arguments (`elementCall()`): `_tv5.push(_tv1(_SYS.atNumeric(_tv3, _tv6, "real")))`. One function per helper, the one that a scalar call uses: `At(f(L), 1) + f(x)` calls `_tv1` at both sites, as the existing code calls `_fn_f`. A helper with an inferred signature (`f := t ↦ t^3`, no declaration), a local function (`let h = ((s) => s + 1); return _SYS.mapFn(h, [1], _.L)`) and `Apply(f, L)` are the same |
+| `f(A)` of `A: list<list<real>>`, `g(A, x)` | `_SYS.mapFn(_fn_f, [2], _.A)`, `_SYS.mapFn(_fn_g, [2, 0], _.A, _.x)`: the rows, then their numbers | One `build` per level: the rows, then a `build` over each row. A list of lists beside another list argument declines (the lengths of the rows are not known to be equal) |
+| `li(L)` with `li := t ↦ [t, 1]`, `lc(L)` whose value is a captured list | `_SYS.mapFn(_fn_li, [1], _.L)`: a list of the arrays that the helper returns (one array for each row of `lc`) | The same `build`, whose rows are the values of the helper |
+| `g(L, M)` of two lists of unstated lengths, `ki(L)` with `ki: (integer) -> integer`, `bo(L)` with a boolean value | `NaN` for different lengths; `_SYS.mapFn(_fn_ki, [1], _.L)`; a list of booleans | Declined: a stated width is the remedy for `g(L, M)`; an integer parameter does not take a real element; the value of a helper applied to each element is a real, an integer or a list of them |
+| `R([1, 2], φ)` with `R(V, t) := [Σ V·[cos t, -sin t], Σ V·[sin t, cos t]]` declared `function` (`V: collection<any> \| value`) | declined: the interpreter binds the list whole | Declined: a function is mapped only when `userFunctionParamsAreScalar()` holds |
+| `f(C)` with `C = [√k for k in 1..n]` (`list<complex>`) | declined (`Lane mismatch at user-function parameter`) | Declined (`refuseComplexElementLanes()`) |
+| `Sum(L·i, i, 1, 3)`, `Product(L + i, i, 1, 3)` | `let _tv3 = null; … while (i <= _upper) { const _tv4 = _SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _.L, i); _tv3 = _tv3 === null ? (_tv4 === undefined \|\| _tv4 !== _tv4 ? _tv4 : _tv4.slice()) : _SYS.bcast((_a, _b) => _a + _b, _tv3, _tv4); if (_tv3 !== _tv3) return NaN; i++; } return _tv3 === null ? 0 : _tv3;`: a loop for literal bounds too; the first term copied, each later one added element by element; the test of `NaN` reads the accumulator, an array, so it never stops the loop when the terms have one length: `[1, -0, NaN]` gives `[6, -0, NaN]` | The first term at the lower bound, then an ascending `loop` that carries the list from the next index to the upper bound, whose body adds (multiplies) the term with a `build`: the same doubles (`-0` stays), every term evaluated, a throw (`Mod(L, i)` beyond ±(2^53 − 1)) at the same term. Several clauses: the inner aggregate is the term of the outer one, as the existing code nests its loops |
+| `Sum(V·i, i, 1, 0)`, `Product(V + i, i, 3, 1)` of a stated width | `[0, 0, 0]`, `[1, 1, 1]` | The list literal of the width |
+| `Sum(L·i, i, 1, n)`, `Sum(V·i, i, 1, n)`, `Sum(L·i, i, 3, 1)`, `Sum(Range(1, i), i, 1, 3)` | `const _upper = Math.floor(_.n); if (!Number.isSafeInteger(_upper)) return NaN;` and `_tv3 === null ? 0 : _tv3`: the number `NaN` or `0` where the value is otherwise a list; `0` for the literal empty range; the scalar `NaN` for terms of different lengths | Declined, also for `n: integer<1..>` (a value of that type need not be a safe integer); the remedy is literal bounds, a stated width for an empty range, or `Sum` of the rows of a `Map` |
+| `Max(L, x)`, `Max(x, L)`, `Min(L, M, x)`, `Max(A, x)` | `((_p0, _p1) => { let _a = -Infinity; for (const _x of _p0) { _a = Math.max(_a, _x); } _a = Math.max(_a, _p1); return _a; })(_.L, _.x)`; a list of lists read as `_p0.flat(Infinity)`; `Max(L, M)` counts the elements: `return _n === 0 ? NaN : _a` | The operands once, in order, then one accumulator from `-Infinity` (`Infinity`) and a `loop` per list (a nested one for a list of lists) or one `max` (`min`) per scalar, in the order of the operands: `Math.max(_tv3, _SYS.atNumeric(_tv1, _tv4, "integer"))`. When every operand is a list, `NaN` when the sum of their lengths is 0. The value is a real (the accumulator starts at `-Infinity`) |
+| `Equal(L, M)`, `NotEqual(L, M)` | `_SYS.eq((_.L), (_.M))`, `_SYS.neq(…)` (`eqTensor()`): `false` for different lengths, else every pair `===` (`NaN` equals nothing, `0` equals `-0`); `[] = []` is `true` | The lengths compared, then (only when they are equal) a `loop` that carries a boolean, `and` of the `equal` of each pair; `not` for `NotEqual`. The loop does not stop at the first pair that differs, where `eqTensor()` does: the operations are pure, so the value is the same |
+| `Equal(A, A)` of lists of lists, `Equal(L, M, L)`, `Max(A, L)`, `Max(L, (x, 1))` | `_SYS.eq` of the nested arrays; a chain declined by the existing compiler; the fold | Declined |
 
 ### Statements and loops: several index sets, comprehensions, destructuring, `Return`, `Continue`, defaults
 

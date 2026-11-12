@@ -504,6 +504,154 @@ difference with the existing compiler, of no element-wise form
 code inverts on the complex lane: a line in the known limitations of
 `docs/COMPILATION-MODEL.md`).
 
+## 11. Result of slices 3 to 5
+
+Implemented on `2053dc1a4` (moved from `60e81ebee`). The tests are
+`test/compute-engine/compile-javascript-structured-broadcast2.test.ts`; the
+existing code of each form is in
+`docs/plans/2026-11-09-js-pilot-emission-rewrites.md`, "User functions of
+lists, list-bodied aggregates, extrema and equality of lists".
+
+**Slice 3 (user functions element-wise).** `FragmentDefinition` has a new
+optional member, `mapsListArguments` (`fragment.ts`): when a definition
+gives it, a call maps a list of reals or of integers of any length (or a
+list of lists of them) at a parameter whose type is a real or an integer,
+and the member answers whether the mapped lists have one length. A
+function is mapped only when the interpreter applies it to each element
+(`FragmentFunction.broadcasts`, which the structured route now gives from
+`userFunctionParamsAreScalar()`, and for a local function from
+`paramsAreScalar()` of its literal): `R(V, t) := [Σ V·[cos t, -sin t], …]`
+declared `function` has `V: collection<any> | value`, the interpreter binds
+`[1, 2]` whole, and the call still declines (a first version mapped it; the
+shadow measure found it). The GLSL
+definition does not give it, so its rule (`broadcasts`, lists of 2 to 4
+reals held as a `vecN`) is unchanged. The structured definition answers
+with `listsOfOneLength()`, and refuses two list arguments when one is a
+list of lists. The value of the call is the list of the values of the
+helper, of the rank of the list arguments; the value of the helper is a
+real, an integer, or a list of them (`li(t) := [t, 1]` gives a list of
+lists; a captured list as the value gives rows that are one array, as
+`_SYS.mapFn` gives them). The lowering (`elementCall()`) evaluates the
+arguments once, in order, then writes one `build` per level whose body
+reads the list arguments at the index and calls the helper once with the
+cells: the helper is called once per element in index order, never for
+`[]`, and a drawing helper draws in that order. A helper has one function
+in the program whatever its call sites: `At(f(L), 1) + f(x)` calls the
+same function at both, with a number parameter, as the existing code calls
+`_fn_f` from `_SYS.mapFn` and directly. No specialization by argument type
+was seen in the probes (`(unknown) -> real`, an inferred signature, a
+local function: each writes `_SYS.mapFn(_fn_f, …)` or
+`_SYS.mapFn(h, …)` with the helper of the scalar call); where the existing
+compiler would specialize, the differential tests and the random tester
+are the check. A mapped call has the length key of its list arguments
+(`lengthKey()`), so `f(L) + L` combines. A list argument on the complex lane
+and two list arguments whose key reads the host decline, as for the other
+element-wise forms (`isElementCall()` in `refuseComplexElementLanes()` and
+`refuseUnstableLengthKeys()`). Declined: two lists of unequal keys
+(`g(L, M)`: the remedy is a stated width), two lists of lists, a list of reals at an
+integer parameter, a tuple or a list of tuples (the point forms), a helper
+whose value is a boolean, the `complex` parameter of a `number` signature in
+the `complex` mode.
+
+**Slice 4 (`Sum` and `Product` of a list body).** `walkAggregate()` takes a
+flag that admits a list body; the JavaScript rule (`listAggregateFacts()`)
+admits it when every bound is a finite number literal, each range is not
+empty after the floor or the engine type of the body states its width, and
+the body's length key reads no index (or the width is stated). The
+lowering (`listAggregate()`) writes, per clause, the first term, then an
+ascending `loop` from the next index that carries the list and adds
+(multiplies) each term with a `build`; an empty range of a stated width is
+the list literal of zeros (ones). Open choice 3 (a list body that can
+throw): **verified and admitted**. The existing loop tests `_tv3 !== _tv3`
+after each term, where `_tv3` is the accumulator (`emitSumProduct()`): an
+array is never `NaN`, so the test fires only for the scalar `NaN` of
+`_SYS.bcast` of two lists of different lengths, which the rule excludes; a
+`NaN` element of a term stays in its position (`[1, -0, NaN]` gives
+`[6, -0, NaN]` for `Sum(L·i, i, 1, 3)`), every term is evaluated, and a
+throw (`Mod(L, i)`, a helper of `Mod`) happens at the same term. So the
+scalar rule (a term that can throw declines) does not apply to a list
+body. Declined: a bound that is not a number literal, also
+`n: integer<1..>`, where the note admitted it: the existing code tests
+`Number.isSafeInteger(Math.floor(n))` and gives the number `NaN` otherwise,
+and a value of the type `integer<1..>` need not be a safe integer, so the
+value would be a number where the route's is a list; with an iteration
+budget; a body that reads the host (each term reads it again).
+
+**Slice 5 (`Max`, `Min`, `Equal`, `NotEqual`).** `listExtremumRule()`
+admits several operands with lists of reals or of integers (a list of
+lists beside scalar operands, read row by row as `flat(Infinity)` reads
+it) and real or integer scalars; the lowering (`listExtremum()`) folds from
+`-Infinity` (`Infinity`) with one `max` (`min`) per element or scalar in
+the order of the operands, and gives `NaN` when every operand is a list and
+their lengths sum to 0. The value is a real (an integer fact with the
+initial `-Infinity` failed the verifier). `listEqualityFacts()` admits
+`Equal` and `NotEqual` of two lists of numbers (`strict` mode), one
+boolean: the lengths compared, then a loop of `and` over the pairs (no
+early exit: the operations are pure). Declined: a list of lists beside
+another list in `Max`, lists of lists and a tuple in `Equal`, and `Equal` in
+the `complex` mode (the element-wise rule of `Equal` refuses that mode
+before).
+
+**The modes.** Slices 3 to 5 are admitted in the `complex` mode too where
+the operands are real (a helper of real parameters, `Max(L, x)`, a list
+`Sum`), with the values of the existing compiler (every program of the
+tests is run in both modes: equal or declined).
+
+**The depth table.** `compile-javascript-structured-shared-depth.test.ts`
+has three new rows at depth 40: a helper applied to each element of a list
+tower, a `Sum` of a list tower, `Max` of a list tower. `Equal(t, L)` of a
+list tower is left out: the engine's type of the comparison takes a time
+that doubles every two levels (24 ms at depth 20), the cost the header of
+the file names for the comparisons of a list tower.
+
+**Measures** (`2053dc1a4` before, the change after). Witness logger (a Jest
+setup file that wraps `compile()` of `compilation/compile-expression`) on
+190 test files whose source holds a list and a compilation (the structured
+route's own tests left out), two runs of 95 (`-w 4`, under
+`timeout -k 30 900`); `compile-call-broadcast-result-operand.test.ts`
+fails under the logger in both runs (its first records are in). 3,618
+distinct programs that the existing compiler compiles; the profile admits
+1,512 before and 1,577 after, 0 admitted before and declined after. By the
+form of the decline before:
+
+| Form | Programs before | Admitted after | What the others decline on |
+| --- | --- | --- | --- |
+| A list argument at a scalar parameter | 119 | 36 | the next refusal, after the call: a row read that can be absent (`At(g(x), 1)` of a helper's list of lists, 48, of which 38 in `compile-list-element-unknown-arith` and 9 in `tycho-row-425`), another head of a list of lists (`Rest`, `Take`, a fold of rows, 16, `tycho-row-425`), a comparison of a list of lists (5); a point or a list of points at a scalar parameter (5); two lists of unequal keys (5); a `complex` parameter (3); a tuple of lists or a mixed list literal (3); a function with a point parameter beside the scalar one (2, `k((1, 2), [3, 4])`: the interpreter maps the list, but the route maps only when every parameter is scalar) |
+| A list body of `Sum`/`Product` | 56 | 14 | a bound that is not a literal (42: `Sum(L·i, i, 1, n)` of `ce-808` and `compile-sum-empty-vector`) |
+| `Max`/`Min` of a list and operands | 3 | 3 | |
+| `Equal`/`NotEqual` of two lists | 15 | 12 | a list and a tuple (3, `tycho-items-214-215`) |
+
+The shadow measure (`CE_JS_PROFILE_SHADOW=1`) on the same files: public
+compilations that the existing compiler compiles 3,022, of which the profile
+admits 813 (26.9 %) before and 884 (29.3 %) after; 2 failures in both (the
+internal error of the preparation in `call-head-lexical-binding.test.ts`,
+the same before and after: an issue text for the orchestrator); programs
+that the existing compiler declines and the profile admits, 13 before and
+13 after (the first version had a 14th, `R([1, 2], φ)` of CE-564.4, found
+with a logger of such programs on half of the files and now declined, see
+slice 3). The consumer measure (`CE_JS_PROFILE=numeric-kernel`,
+40 test files of `Map`, collections, limits and integrals): 3,268 attempts,
+3,214 admitted, 54 declined, 0 failed, before and after.
+
+The random tester (`scripts/js-profile-fuzz.ts`, `genBroadcastList()` and
+`genCollectionReal()`: helpers of `HELPERS` called with a list, list bodies
+of `Sum` and `Product` over literal ranges, `Max`/`Min` of lists and reals,
+`Equal` of lists as a condition), each run under `timeout -k 30 1500`:
+seeds 311 and 312 (10,000 programs each; 11,962 and 12,007 compilations
+that both compilers compile), 313 with `--random` (5,000; 6,042) and 314
+with `--host` (5,000; 5,190): 0 differences of value or shape at inputs in
+their type, 0 failures that are not declines. The differences at inputs
+outside their type (12, 13, 6 and 8 shapes) are `At` of an aggregate, of a
+`Map` or of `MatrixMultiply`, the kinds that the runs before this change
+report.
+
+**Where the implementation differs from the note.** Rule 4 admits literal
+bounds only (above). Rule 3 admits rank 2 for one list argument only, and a
+helper whose value is a list (a list of lists of the values). Rule 5 types
+the extremum as a real. The counts: the note estimated 48 to 112 (plus 28
+at rank 2) for slice 3, 22 to 34 for slice 4 and 19 to 28 for slice 5;
+this sample (another file set) admits 36, 14 and 15.
+
 ## Not determined
 
 - The 64 C programs in which the logger found no site (a function bound by

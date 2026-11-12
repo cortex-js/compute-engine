@@ -83,8 +83,10 @@ import {
 } from './compile-declarations.js';
 import {
   userFunctionLiteral,
+  userFunctionParamsAreScalar,
   userFunctionSignature,
 } from './compile-assignment-checks.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
 import { rangeSpecializedParameterTypes } from './compile-user-specialization.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -4443,6 +4445,7 @@ const structuredDefinition: Pick<
   | 'bindingLimit'
   | 'loopBoundFromFact'
   | 'passesListArgument'
+  | 'mapsListArguments'
   | 'listLocals'
   | 'literalTupleComponents'
   | 'nestedLists'
@@ -4478,6 +4481,16 @@ const structuredDefinition: Pick<
   // interpreter reads the integers as reals; so are the rows of a list of
   // lists.
   passesListArgument: passesStructuredList,
+  // A user function applied to each element of a list argument at a real
+  // or integer parameter (`_SYS.mapFn(_fn_f, [1], L)` of the existing
+  // emitter), for lists of lengths equal by construction or of one stated
+  // width (`listsOfOneLength()`). A list of lists is mapped at its numbers
+  // (`_SYS.mapFn(_fn_f, [2], A)`) only as the one list argument: the
+  // lengths of the rows of two of them are not known to be equal.
+  mapsListArguments: (lists, scope, context, w) =>
+    lists.length < 2 ||
+    (lists.every((l) => (numericCellsOf(w.value(l, scope, context))?.rank ?? 0) === 1) &&
+      listsOfOneLength(lists, scope, context, w)),
   bindingLimit: (type, binding) =>
     type.kind === 'list'
       ? `The ${binding.role} \`${isSymbol(binding.symbol) ? binding.symbol.symbol : nodeText(binding.symbol)}\` ` +
@@ -5208,9 +5221,10 @@ function aggregateRule(
   if (isFoldNode(node)) return foldRule(node, scope, context, w);
   const refusal = aggregateRefusal(node);
   if (refusal !== undefined) return w.refuse(node, 'signature', refusal);
-  const facts = walkAggregate(node, scope, context, w);
+  const facts = walkAggregate(node, scope, context, w, true);
   if (!('representation' in facts)) return facts;
   const kind = facts.type.kind;
+  if (kind === 'list') return listAggregateFacts(node, facts, scope, context, w);
   if (kind !== 'real' && kind !== 'integer')
     return w.refuse(
       node,
@@ -5218,6 +5232,102 @@ function aggregateRule(
       `${node.operator} whose body has the type \`${fragmentTypeToString(facts.type)}\` ` +
         `is not in the structured route, which adds or multiplies reals or integers`
     );
+  return facts;
+}
+
+/** The width that the engine type of `node` states for a list (`vector<3>`,
+ *  `list<real^3>`), or `undefined`. */
+function statedWidth(node: Expression): number | undefined {
+  const t = node.type.type;
+  return typeof t === 'object' &&
+    t.kind === 'list' &&
+    t.dimensions?.length === 1 &&
+    t.dimensions[0] >= 0
+    ? t.dimensions[0]
+    : undefined;
+}
+
+/**
+ * The facts `facts` of `Sum(body, Limits(k, a, b), …)` or `Product(…)`
+ * whose body is a list of reals or of integers, on the structured route
+ * (slice 4 of the design note
+ * `docs/plans/2026-11-12-structured-broadcast-over-lists.md`). The existing
+ * emitter writes a loop over each clause whose accumulator starts at
+ * `null`, takes a copy of the first term, then adds (multiplies) each later
+ * term element-wise (`_SYS.bcast((_a, _b) => _a + _b, acc, term)`), and
+ * gives the number `0` (`1`) for an empty range, or the list of `w` zeros
+ * (ones) when the type of the body states its width `w`. Its test of `NaN`
+ * after each term reads the accumulator, an array, which is never `NaN`
+ * when the terms have one length, so every term is evaluated: a term that
+ * can throw throws at the same term. The lowering is `listAggregate()` in
+ * `javascript-structured-lower.ts`.
+ *
+ * Admitted when every bound is a finite number literal, each range is not
+ * empty (`a ≤ b` after the floor) or the body states its width, and the
+ * length of the body is the same in every term: one `lengthKey()` that
+ * reads no index, or a stated width. Refused otherwise, with the cause: a
+ * bound that is not a literal (the existing compiler gives the number
+ * `NaN` where the bound is not a safe integer, and the number `0` for an
+ * empty range, where the value is a list), an empty range of a body of
+ * unstated width, a body whose length can change with the index.
+ */
+function listAggregateFacts(
+  node: Expression,
+  facts: FragmentValueFacts<ScalarRepresentation>,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  if (!isFunction(node)) return facts;
+  const head = node.operator;
+  const what = `${head} whose body ${nodeText(node.op1)} is a list`;
+  const refuse = (cause: string) =>
+    w.refuse(node, 'signature', `${what} is not in the structured route: ${cause}`);
+  if ((numericCellsOf(facts)?.rank ?? 0) !== 1)
+    return refuse('the body is not a list of reals or of integers');
+  const width = statedWidth(node.op1);
+  // `aggregateRefusal()` admitted clauses `Limits(k, a, b)` only.
+  const clauses = node.ops
+    .slice(1)
+    .map((c) => (isFunction(c) ? c.ops : []));
+  const indexes = new Set(
+    clauses.map(([k]) => (k !== undefined && isSymbol(k) ? k.symbol : ''))
+  );
+  for (const [j, [, lower, upper]] of clauses.entries()) {
+    const clause = node.ops[j + 1];
+    const literal = (b: Expression) =>
+      isNumber(b) && b.im === 0 && Number.isFinite(b.re);
+    if (!literal(lower) || !literal(upper))
+      return refuse(
+        `the bound ${nodeText(literal(lower) ? upper : lower)} is not a number ` +
+          `literal, and the existing compiler gives the number NaN where a bound ` +
+          `is not a safe integer and the number ${head === 'Sum' ? 0 : 1} for an ` +
+          `empty range, where the value of the profile is a list (write literal ` +
+          `bounds, or fold explicitly: ${head} of the rows of a Map)`
+      );
+    if (
+      width === undefined &&
+      Math.floor((lower as Expression & { re: number }).re) >
+        Math.floor((upper as Expression & { re: number }).re)
+    )
+      return refuse(
+        `the range of ${nodeText(clause)} is empty, and the existing compiler ` +
+          `gives the number ${head === 'Sum' ? 0 : 1} for it (declare the width ` +
+          `of the body: \`vector<3>\` or \`list<real^3>\`)`
+      );
+  }
+  if (width === undefined) {
+    const key = lengthKey(node.op1, scope.inner.get(node) ?? scope, context, w);
+    if (
+      key === undefined ||
+      key.split(' ').some((token) => indexes.has(token))
+    )
+      return refuse(
+        `the length of the body is not the same in every term by construction ` +
+          `(declare its width: \`vector<3>\` or \`list<real^3>\`): the existing ` +
+          `compiler gives NaN for two terms of different lengths`
+      );
+  }
   return facts;
 }
 
@@ -7329,6 +7439,23 @@ function lengthKey(
   w: FragmentWalker<ScalarRepresentation>
 ): string | undefined {
   if (isSymbol(node)) return `name ${node.symbol}`;
+  // A call of a helper applied to each element of its list arguments
+  // (`mapsListArguments`): the length of those lists, which its rule found
+  // equal.
+  const fn = isFunction(node)
+    ? w.definition.functionOf(node, scope)
+    : undefined;
+  if (fn !== undefined) {
+    const list = fn.arguments.find((argument, i) => {
+      const parameter = fn.parameterTypes[i];
+      return (
+        parameter !== undefined &&
+        parameter.kind !== 'list' &&
+        w.value(argument, scope, context).type.kind === 'list'
+      );
+    });
+    return list === undefined ? undefined : lengthKey(list, scope, context, w);
+  }
   if (!isFunction(node) || !isLibraryOperator(node, node.operator))
     return undefined;
   if (node.operator === 'List') return `literal ${node.nops}`;
@@ -7945,6 +8072,98 @@ function selectionBroadcastRule(
 }
 
 /**
+ * The rule `rule` of `Max` or `Min` (`head`), with a list among several
+ * operands (slice 5 of the design note
+ * `docs/plans/2026-11-12-structured-broadcast-over-lists.md`): one number,
+ * the extremum of every element of the lists and of every scalar operand,
+ * as the existing emitter writes it (`((_p0, _p1) => { let _a = -Infinity;
+ * for (const _x of _p0) { _a = Math.max(_a, _x); } _a = Math.max(_a, _p1);
+ * return _a; })(L, x)`): the operands evaluated once, in order, then a fold
+ * from `-Infinity` (`Infinity`) over the elements of each list and each
+ * scalar, in the order of the operands; when every operand is a list, `NaN`
+ * if they have no element (`_n === 0 ? NaN : _a`). The lowering is
+ * `listExtremum()` in `javascript-structured-lower.ts`, and the form
+ * `list-extremum`.
+ *
+ * Admitted: lists of reals or of integers (a list of lists is read row by
+ * row, as `_p0.flat(Infinity)` reads it, beside a scalar operand), and
+ * real or integer scalars. The value is a real: the accumulator starts at
+ * `-Infinity`, and the fold of lists only can be `NaN`. Refused: another
+ * operand (a tuple, a complex number, a list of booleans), with the
+ * cause.
+ */
+function listExtremumRule(
+  head: 'Max' | 'Min',
+  rule: FragmentRule<ScalarRepresentation>,
+  forms: Map<Expression, StructuredForm>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const fallback = () =>
+        'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      if (!isFunction(node) || node.nops < 2 || isFoldNode(node)) return fallback();
+      const facts = operandFacts(node, scope, context, w);
+      const list = facts.findIndex((f) => f.type.kind === 'list');
+      if (list < 0) return fallback();
+      const what = `${head} with the list operand ${nodeText(node.ops[list])}`;
+      const scalars = facts.filter((f) => f.type.kind !== 'list').length;
+      for (const [i, f] of facts.entries()) {
+        const cells = numericCellsOf(f);
+        const scalar = f.type.kind === 'real' || f.type.kind === 'integer';
+        if (scalar) continue;
+        if (cells === undefined || cells.rank > 2 || (cells.rank === 2 && scalars === 0))
+          return w.refuse(
+            node,
+            'signature',
+            `${what} and the operand ${nodeText(node.ops[i])} of the type ` +
+              `\`${fragmentTypeToString(f.type)}\` is not in the structured route, ` +
+              `which takes the extremum of the elements of lists of reals or of ` +
+              `integers and of real or integer operands` +
+              (cells?.rank === 2 ? ' (a list of lists beside another list declines)' : '')
+          );
+      }
+      forms.set(node, 'list-extremum');
+      return w.valueFacts(
+        node,
+        { kind: 'real' },
+        facts.map((f) => w.convert(f, f.type)!)
+      );
+    },
+  };
+}
+
+/**
+ * The facts of `Equal(A, B)` or `NotEqual(A, B)` of two lists of reals or
+ * of integers (`head`; slice 5 of the broadcast note): one boolean, as the
+ * interpreter and the existing emitter give it (`_SYS.eq(A, B)`,
+ * `eqTensor()` in `javascript-runtime.ts`): the lists have one length and
+ * each pair of elements is `===` (`NaN` equals nothing, `0` and `-0` are
+ * equal); `NotEqual` is its negation. No length need be equal by
+ * construction: two lists of different lengths are not equal. The lowering
+ * is `listEquality()` in `javascript-structured-lower.ts`, the form
+ * `list-equality`. `undefined` when the operands are not two such lists.
+ */
+function listEqualityFacts(
+  node: Expression & { ops: readonly Expression[] },
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>,
+  forms: Map<Expression, StructuredForm>
+): FragmentFacts<ScalarRepresentation> | undefined {
+  if (node.ops.length !== 2) return undefined;
+  const facts = operandFacts(node, scope, context, w);
+  if (!facts.every((f) => numericCellsOf(f)?.rank === 1)) return undefined;
+  forms.set(node, 'list-equality');
+  return w.valueFacts(
+    node,
+    { kind: 'boolean' },
+    facts.map((f) => w.convert(f, f.type)!)
+  );
+}
+
+/**
  * The rule `rule` of the scalar head `head`, with the element-wise form of
  * a list operand (the design note
  * `docs/plans/2026-11-12-structured-broadcast-over-lists.md`, slice 1): the
@@ -8030,7 +8249,8 @@ function broadcastRule(
             `compiler can take a matrix power of it`
         );
       // `Equal` and `NotEqual` of two lists compare the whole lists: one
-      // boolean (slice 5 of the design note).
+      // boolean (slice 5 of the design note, `listEqualityFacts()`). Another
+      // pair of lists or tuples declines.
       if (
         (head === 'Equal' || head === 'NotEqual') &&
         node.ops.filter((op) => {
@@ -8038,12 +8258,12 @@ function broadcastRule(
           return kind === 'list' || kind === 'point';
         }).length > 1
       )
-        return w.refuse(
+        return listEqualityFacts(node, scope, context, w, forms) ?? w.refuse(
           node,
           'signature',
-          `${what} and another list is not in the structured route: the ` +
-            `interpreter and the existing compiler compare the two lists whole, ` +
-            `and give one boolean`
+          `${what} and another list or tuple is not in the structured route, ` +
+            `which compares two lists of reals or of integers whole (one ` +
+            `boolean, as the interpreter and the existing compiler give it)`
         );
       const kind = broadcastKind(form);
       const facts = readsBooleans(form)
@@ -8897,7 +9117,8 @@ function refuseComplexElementLanes(
         (typeof form === 'object' && 'broadcast' in form) ||
         form === 'elementwise-selection' ||
         (ELEMENTWISE_HEADS.includes(node.operator) &&
-          facts.type.kind === 'list');
+          facts.type.kind === 'list') ||
+        isElementCall(node, scope, annotation);
       if (!elementwise) continue;
       for (const op of node.ops) {
         if (scope.facts.get(op)?.type.kind !== 'list') continue;
@@ -8955,6 +9176,26 @@ function withAnalysisMemo<T>(analyze: () => T): T {
   }
 }
 
+/** Whether `node`, typed in `scope`, is a call of a helper applied to each
+ *  element of a list argument (`mapsListArguments` of the structured
+ *  definition): an argument whose fact is a list at a parameter whose type
+ *  is not a list. */
+function isElementCall(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  annotation: FragmentAnnotation<ScalarRepresentation>
+): boolean {
+  if (!isFunction(node)) return false;
+  const type = annotation.functions.get(node.operator)?.type;
+  if (type?.kind !== 'function') return false;
+  return node.ops.some(
+    (op, i) =>
+      type.parameters[i] !== undefined &&
+      type.parameters[i].type.kind !== 'list' &&
+      scope.facts.get(op)?.type.kind === 'list'
+  );
+}
+
 /** The names of the free symbols that are reads of the host (a `vars`
  *  entry): each read of such a name can give another value. */
 function hostReadNames(registry: StructuredRegistry): ReadonlySet<string> {
@@ -8974,7 +9215,9 @@ function hostReadNames(registry: StructuredRegistry): ReadonlySet<string> {
  * host: the existing compiler gives `NaN` where the lengths differ). A key
  * reads a name of a list operand at any depth; a scalar operand evaluated
  * once does not matter, but the rule refuses any read of the host in a list
- * operand: a simple rule that declines more than it needs to.
+ * operand: a simple rule that declines more than it needs to. A `Sum` or a
+ * `Product` whose body is a list and reads the host is refused too: each
+ * term reads it again.
  */
 function refuseUnstableLengthKeys(
   annotation: FragmentAnnotation<ScalarRepresentation>,
@@ -8991,12 +9234,27 @@ function refuseUnstableLengthKeys(
   const visit = (scope: FragmentScope<ScalarRepresentation>) => {
     for (const [node, facts] of scope.facts) {
       if (!isFunction(node)) continue;
+      // A `Sum` or a `Product` of a list body (`listAggregateFacts()`)
+      // evaluates the body once per term: each term reads the host again.
+      if (
+        (node.operator === 'Sum' || node.operator === 'Product') &&
+        node.nops >= 2 &&
+        facts.type.kind === 'list' &&
+        readsHost(node.ops[0])
+      )
+        throw new Error(
+          `JS scalar fragment: ${node.operator} whose body ${nodeText(node.ops[0])} ` +
+            `is a list is not in the structured route: the body reads a value of ` +
+            `the host, which can change between two terms, so the terms do not ` +
+            `have one length by construction`
+        );
       const form = forms.get(node);
       const elementwise =
         (typeof form === 'object' && 'broadcast' in form) ||
         form === 'elementwise-selection' ||
         (ELEMENTWISE_HEADS.includes(node.operator) &&
-          facts.type.kind === 'list');
+          facts.type.kind === 'list') ||
+        isElementCall(node, scope, annotation);
       if (!elementwise) continue;
       const lists = node.ops.filter(
         (op) => scope.facts.get(op)?.type.kind === 'list'
@@ -16755,6 +17013,10 @@ function annotateStructured(
             ),
           ])
       ),
+      // `Max` and `Min` of several operands with a list among them: one
+      // fold over the elements and the scalars (`listExtremumRule()`).
+      Max: listExtremumRule('Max', base.rules.Max, registry.forms),
+      Min: listExtremumRule('Min', base.rules.Min, registry.forms),
       // The heads with a function operand read the mode, and their list
       // operands (`functionOperandRule()`); none reads a list of lists, but
       // `Count(M)` with no predicate (`withoutNestedOperands()`).
@@ -17832,6 +18094,10 @@ function resolveHelper(
       parameters,
       parameterTypes,
       parameterSymbols,
+      // The interpreter applies the function to each element of a list
+      // argument only when every parameter has a scalar type; otherwise a
+      // list binds its parameter whole (`mapsListArguments`).
+      broadcasts: userFunctionParamsAreScalar(call.engine, call.operator),
     },
   };
 }
@@ -17937,6 +18203,7 @@ function resolveLocalFunction(
         ...local.captures.map(() => undefined),
       ],
       parameterSymbols: [...parameterSymbols, ...local.captureArguments],
+      broadcasts: paramsAreScalar(literal.type.type),
     },
   };
 }

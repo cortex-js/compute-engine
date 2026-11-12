@@ -823,9 +823,9 @@ describe('slice 1: the declines that stay', () => {
       /not/,
     ],
     [
-      'Max of a list and a scalar (slice 5)',
-      fn(['Max', 'L', 'x'], L, X),
-      /Max with the list operand L/,
+      'Max of a list of lists and a list (slice 5 admits a list and a scalar)',
+      fn(['Max', 'A', 'L'], L, ['A', 'list<list<real>>']),
+      /a list of lists beside another list declines/,
     ],
   ];
   test.each(cases)('%s', (_name, json, message) => declines(json, message));
@@ -989,9 +989,9 @@ describe('slice 2: the declines that stay', () => {
       /Reverse of L < 0 of the type `list<boolean>` is not in the profile/,
     ],
     [
-      'Equal of two lists (slice 5)',
-      fn(['Equal', 'L', 'M'], L, M),
-      /compare the two lists whole/,
+      'Equal of two lists of lists (slice 5 admits two lists of numbers)',
+      fn(['Equal', 'A', 'A'], ['A', 'list<list<real>>']),
+      /compares two lists of reals or of integers whole/,
     ],
     [
       'a chain of comparisons',

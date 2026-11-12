@@ -437,6 +437,9 @@ describe('a helper whose literal has no annotation', () => {
     ['fr(20, x, xn) − 3', ['Add', ['fr', 20, 'x', 'xn'], -3], {}],
     ['x + fq(√(x − 1))', ['Add', 'x', ['fq', ['Sqrt', ['Add', 'x', -1]]]], {}],
     ['fl(L)', ['fl', 'L'], {}],
+    // The helper applied to each element of a list (slice 3 of
+    // docs/plans/2026-11-12-structured-broadcast-over-lists.md).
+    ['fq(L) + 1', ['Add', ['fq', 'L'], 1], {}],
     ['fn(LN)', ['fn', 'LN'], {}],
     ['2·fv(V)', ['Multiply', 2, ['fv', 'V']], {}],
     ['ft((x, 2))', ['ft', ['Tuple', 'x', 2]], {}],
@@ -465,10 +468,6 @@ describe('a helper whose literal has no annotation', () => {
   });
 
   const declines: [string, MathJsonExpression, object, RegExp][] = [
-    // The existing compiler compiles a copy of the helper for each
-    // argument type (`_fn_fq_list_real_`); the parameter of the profile is
-    // real.
-    ['fq(L) + 1', ['Add', ['fq', 'L'], 1], {}, /The argument `L` of `fq` has the type `list<real>`, and the parameter `t` has the type `real`/],
     // In the `complex` mode the parameter is complex, and a real argument
     // declines, as for a helper with an inferred signature.
     ['fu(x) in the complex mode', ['fu', 'x'], { mode: 'complex' }, /The argument `x` of `fu` has the type `real`, and the parameter `t` has no declared type: it is complex in the `complex` mode/],

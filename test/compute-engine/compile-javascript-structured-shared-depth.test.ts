@@ -31,7 +31,9 @@
  * depth), `If(t > 0, t, -t)` (its boxing), a tower in the body of a `Loop`
  * (the type of the `Loop`), a tower in the bound of a `Sum` (its `N()`), a
  * product tower next to a call of a local function (the type of the sum),
- * a comparison of a list tower (`t < 1`) and an element-wise `If` over
+ * a comparison of a list tower (`t < 1`, and `Equal(t, L)` of two lists, whose
+ * type the engine computes in a time that doubles every two levels) and an
+ * element-wise `If` over
  * one (the type of the comparison, `comparisonType()`), and a canonical
  * `Add(t, t)` or `Multiply(t, t)`, which the canonical form flattens into a
  * tree of `2^d` operands.
@@ -53,6 +55,8 @@ interface Shape {
   /** The leaf of the tower, as an expression, in place of `leaf`. */
   readonly seed?: (ce: ComputeEngine) => Expression;
   readonly declare?: Record<string, string>;
+  /** Run after the declarations, before the tower is made (a helper). */
+  readonly setup?: (ce: ComputeEngine) => void;
   readonly options?: Record<string, unknown>;
   readonly angularUnit?: 'deg';
   /** The profile declines the tower. */
@@ -413,6 +417,35 @@ const SHAPES: Shape[] = [
         ]),
       ]),
   },
+  // Slices 3 to 5 of the broadcast note: a helper applied to each element,
+  // a Sum whose body is a list, Max of a list tower (`Equal` of a list
+  // tower is a comparison: see the header).
+  {
+    label: 'hd(t) + t: a helper applied to each element',
+    level: (ce, t) => ce._fn('Add', [ce.function('hd', [t]), t]),
+    leaf: 'L',
+    declare: { L: 'list<real>', hd: '(real) -> real' },
+    setup: (ce) =>
+      ce.assign('hd', ce.box(['Function', ['Add', ['Sin', 's'], 1], 's'] as never)),
+  },
+  {
+    label: 'Sum(k t, k = 1..3) of a list tower',
+    level: raw('Add'),
+    leaf: 'L',
+    declare: { L: 'list<real>' },
+    root: (ce, t) =>
+      ce.function('Sum', [
+        ce.function('Multiply', [ce.symbol(k), t]),
+        ce.function('Limits', [ce.symbol(k), ce.number(1), ce.number(3)]),
+      ]),
+  },
+  {
+    label: 'Max(t, x) of a list tower',
+    level: raw('Add'),
+    leaf: 'L',
+    declare: { L: 'list<real>' },
+    root: (ce, t) => ce.function('Max', [t, ce.symbol('x')]),
+  },
   {
     label: 'Sqrt(t) + t of a matrix input',
     level: (ce, t) => ce._fn('Add', [ce.function('Sqrt', [t]), t]),
@@ -432,6 +465,7 @@ function tower(
   ce.declare('y', 'real');
   for (const [name, type] of Object.entries(shape.declare ?? {}))
     ce.declare(name, type);
+  shape.setup?.(ce);
   let t = shape.seed?.(ce) ?? ce.symbol(shape.leaf ?? 'x');
   for (let i = 0; i < depth; i++) t = shape.level(ce, t);
   return { root: shape.root?.(ce, t) ?? t, tower: t };

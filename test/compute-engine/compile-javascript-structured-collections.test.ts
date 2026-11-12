@@ -338,9 +338,11 @@ describe('declines that stay', () => {
       /Add of a list and the operand/,
     ],
     [
-      'Max of a list and a number',
-      fn(['Max', 'L', 'x'], L, X),
-      /Max with the list operand L is not in the profile/,
+      // `Max` of a list and a number is admitted since slice 5 of
+      // docs/plans/2026-11-12-structured-broadcast-over-lists.md.
+      'Max of a list and a tuple',
+      fn(['Max', 'L', ['Tuple', 'x', 1]], L, X),
+      /Max with the list operand L and the operand/,
     ],
     // Since slice 1 of docs/plans/2026-11-12-structured-broadcast-over-lists.md
     // a function of a list is admitted in the `strict` mode

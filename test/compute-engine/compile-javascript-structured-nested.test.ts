@@ -519,8 +519,10 @@ describe('every rule that reads a list declines a list of lists it does not read
     // An admitted program: a head of `NESTED_OPERAND_HEADS`, or a scalar head
     // applied to each number (`Mod`, since slice 1 of
     // docs/plans/2026-11-12-structured-broadcast-over-lists.md), with the
-    // value and the shape of the existing compiler at every depth.
-    expect([head, NESTED_OPERAND_HEADS.has(head) || head === 'Loop' || head === 'Sum' || head === 'Mod']).toEqual([head, true]);
+    // value and the shape of the existing compiler at every depth; `Min`
+    // of a list of lists and a real is one fold over the rows (slice 5 of
+    // that note).
+    expect([head, NESTED_OPERAND_HEADS.has(head) || head === 'Loop' || head === 'Sum' || head === 'Mod' || head === 'Min']).toEqual([head, true]);
     const existing = compile(expr, EXISTING) as CompilationResult<'javascript'>;
     for (const m of MATS)
       for (const i of [1, -1, 3]) {

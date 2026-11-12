@@ -59,6 +59,33 @@
   pairs.run({}); // ➔ [[1, 2], [1, 3], [2, 3]]
   ```
 
+- **The `numeric-kernel` profile compiles a user function applied to each
+  element of a list, sums of lists, and `Max`, `Min` and `Equal` with
+  lists.** These forms declined with `outside-profile` and now compile, with
+  the values of the existing compiler: a user function
+  with real or integer parameters (declared, inferred, a local function, or
+  through `Apply`) called with a list of reals or of integers (`f(L)`,
+  `g(L, x)`, `g(L, L)`, `f(A)` of a list of lists), whose value is the list
+  of its values, one call per element in order, also when the function's
+  value is a list; a `Sum` or a `Product` whose body is a list
+  (`Sum(L·k, k, 1, 3)`, `Sum([k, 2k], k, 1, 3)`) with number literal bounds
+  and a range that is not empty, or a body whose type states its width
+  (`Sum(V·k, k, 1, 0)` of `V: vector<3>` is `[0, 0, 0]`); `Max` and `Min` of
+  lists and numbers (one number); `Equal` and `NotEqual` of two lists of
+  numbers (one boolean). Still declined: two list arguments of lengths that
+  only the values decide (`g(L, M)`: declare one width), a list at an
+  integer parameter, a sum of a list body with a bound such as `n`
+  (`Sum(L·k, k, 1, n)`: the existing compiler gives a number, not a list, for
+  an empty range or a bound that is not a safe integer), and `Equal` of two
+  lists in the `complex` mode.
+
+  ```js
+  ce.declare('f', '(real) -> real');
+  ce.assign('f', ce.box(['Function', ['Add', ['Square', 't'], 1], 't']));
+  const u = compile(ce.box(['f', 'L']), { profile: 'numeric-kernel' });
+  u.run({ L: [1, 2, 3] }); // ➔ [2, 5, 10]
+  ```
+
 - **The `numeric-kernel` profile compiles the scalar functions of a list,
   the comparisons of a list and the selections on them.** In the `strict`
   mode these forms declined with `outside-profile` and now compile, with the

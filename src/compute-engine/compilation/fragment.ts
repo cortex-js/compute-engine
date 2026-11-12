@@ -471,7 +471,8 @@ export type FragmentFunction = {
    *  a list argument, because every parameter has a scalar type (the
    *  spec, decision 19). A call with a list of 2 to 4 reals at a scalar
    *  parameter is then the list of the values of the function at the
-   *  elements, which the emitter writes with an element-wise wrapper. */
+   *  elements, which the emitter writes with an element-wise wrapper; with
+   *  `FragmentDefinition.mapsListArguments`, a list of any length. */
   readonly broadcasts?: boolean;
   /** The symbol of each parameter in the function literal, when the
    *  literal has one. The pass binds the parameter with it, so that the
@@ -616,6 +617,21 @@ export type FragmentDefinition<R> = {
     argument: FragmentListType,
     parameter: FragmentListType
   ): boolean;
+  /** Present when a call applies the function to each element of a list
+   *  of reals or of integers, of any length, at a parameter whose type is
+   *  a real or an integer, when the interpreter applies the function to
+   *  each element (`FragmentFunction.broadcasts`; the JavaScript structured
+   *  route): the value of the call is the list of the values of the
+   *  function. The answer is
+   *  whether the lists `lists` of one call have one length, as the
+   *  definition proves it. Absent: such an argument is mapped only by the
+   *  rule of `FragmentFunction.broadcasts`. */
+  mapsListArguments?(
+    lists: readonly Expression[],
+    scope: FragmentScope<R>,
+    context: FragmentContext<R>,
+    walker: FragmentWalker<R>
+  ): boolean;
   /** Whether a local can hold a list: a `Declare` whose value is a list,
    *  and an `Assign` of a list to such a local. A list of the type
    *  `argument` is then read as a list of the type `parameter` when
@@ -739,6 +755,15 @@ function isNestedList(t: FragmentType): boolean {
 
 function isScalarNumeric(t: FragmentType): boolean {
   return t.kind === 'real' || t.kind === 'integer';
+}
+
+/** The rank of a list of reals or of integers (a list of lists of them at
+ *  every depth), or 0 for another type. */
+function numberListRank(t: FragmentType | FragmentElementType): number {
+  if (t.kind !== 'list') return 0;
+  if (isScalarNumeric(t.element)) return 1;
+  const inner = numberListRank(t.element);
+  return inner === 0 ? 0 : inner + 1;
 }
 
 /**
@@ -1908,21 +1933,31 @@ function makeWalker<R>(
     // call with a wrapper that calls the function on each component. A
     // point argument is not mapped: the interpreter maps a tuple only when
     // the signature of the function is declared.
-    const mapped = args.map(
-      (a) =>
-        fn.broadcasts === true &&
-        a.type.kind === 'list' &&
-        isScalarNumeric(a.type.element) &&
-        a.type.count !== undefined &&
-        a.type.count >= 2 &&
-        a.representation ===
-          definition.representationOfValue({
-            kind: 'point',
-            size: a.type.count,
-          })
+    // A definition with `mapsListArguments` maps a list of numbers of any
+    // length at a parameter of a real or an integer type, of a function
+    // that the interpreter applies to each element. A list of lists is
+    // mapped at its numbers (the rank of the list).
+    const mapsAll = definition.mapsListArguments !== undefined;
+    const mapped = args.map((a, i) =>
+      mapsAll
+        ? fn.broadcasts === true &&
+          numberListRank(a.type) > 0 &&
+          fn.parameterTypes[i] !== undefined &&
+          isScalarNumeric(fn.parameterTypes[i]!)
+        : fn.broadcasts === true &&
+          a.type.kind === 'list' &&
+          isScalarNumeric(a.type.element) &&
+          a.type.count !== undefined &&
+          a.type.count >= 2 &&
+          a.representation ===
+            definition.representationOfValue({
+              kind: 'point',
+              size: a.type.count,
+            })
     );
     const unmapped = args.findIndex(
       (a, i) =>
+        !mapsAll &&
         fn.broadcasts === true &&
         !mapped[i] &&
         a.type.kind === 'list' &&
@@ -1942,7 +1977,22 @@ function makeWalker<R>(
         mapped[i] && a.type.kind === 'list' ? [a.type.count] : []
       )
     );
-    if (widths.size > 1)
+    const mappedLists = fn.arguments.filter((_, i) => mapped[i]);
+    if (
+      mapsAll &&
+      !definition.mapsListArguments!(mappedLists, scope, context, walker)
+    )
+      return refuse(
+        node,
+        'signature',
+        `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
+          `element of the lists ` +
+          `${mappedLists.map((a) => `\`${nodeText(a)}\``).join(' and ')}, ` +
+          `whose lengths are not equal by construction (declare one width ` +
+          `for them: \`list<real^3>\` or \`vector<3>\`): the existing ` +
+          `compiler gives NaN for two lists of different lengths`
+      );
+    if (widths.size > 1 && !mapsAll)
       return refuse(
         node,
         'signature',
@@ -1951,7 +2001,8 @@ function makeWalker<R>(
       );
     const elementArgs = args.map((a, i) => {
       if (!mapped[i] || a.type.kind !== 'list') return a;
-      const element = a.type.element as FragmentValueType;
+      let element = a.type.element as FragmentValueType | FragmentListType;
+      while (mapsAll && element.kind === 'list') element = element.element;
       const representation = definition.representationOfValue(element);
       return representation === undefined
         ? a
@@ -2074,6 +2125,33 @@ function makeWalker<R>(
         `The call \`${nodeText(node)}\` has the type ` +
           `\`${node.type.toString()}\`, which admits more than one shape`
       );
+    // A call applied to each element of lists of any length
+    // (`mapsListArguments`): a list of the values of the function, which
+    // must be reals, integers or lists of them (a list of lists of the
+    // values).
+    if (mapsAll && mapped.some((m) => m)) {
+      if (!isScalarNumeric(result) && numberListRank(result) === 0)
+        return refuse(
+          node,
+          'signature',
+          `The call \`${nodeText(node)}\` applies \`${fn.name}\` to each ` +
+            `element of a list, and the value of \`${fn.name}\` has the ` +
+            `type \`${fragmentTypeToString(result)}\`, not a real, an ` +
+            `integer or a list of them`
+        );
+      // The rank of the value is the rank of the list arguments (the
+      // definition proved that they have one), over the value of the
+      // function.
+      let value = {
+        kind: 'list',
+        element: isScalarNumeric(result)
+          ? { kind: result.kind as 'real' | 'integer' }
+          : (result as FragmentListType),
+      } as FragmentListType;
+      const rank = Math.max(...args.map((a) => numberListRank(a.type)));
+      for (let k = 1; k < rank; k++) value = { kind: 'list', element: value };
+      return valueFacts(node, value, conversions);
+    }
     // A call applied to each element of lists of the length `n` is a list
     // of `n` reals. The wrapper builds a `vecN` of the values of the
     // function, so the function must have a real value. The wrapper passes
@@ -2325,12 +2403,15 @@ function indexBounds<R>(
 }
 
 /** `Sum` and `Product`: for each index in order, its bounds in a scope that
- * holds the indexes before it, then the index. Then the body. */
+ * holds the indexes before it, then the index. Then the body. With
+ * `listBody`, a body that is a list of reals or of integers is admitted
+ * too (the caller checks the rest of its rule). */
 export function walkAggregate<R>(
   node: Expression,
   scope: FragmentScope<R>,
   context: FragmentContext<R>,
-  w: FragmentWalker<R>
+  w: FragmentWalker<R>,
+  listBody = false
 ): FragmentFacts<R> {
   const ops = opsOf(node);
   if (ops.length < 2)
@@ -2371,7 +2452,13 @@ export function walkAggregate<R>(
   // leave.
   const body = w.value(ops[0], inner, { ...context, loop: undefined });
   const t = body.type;
-  if (!(isScalarNumeric(t) || t.kind === 'complex'))
+  if (
+    !(
+      isScalarNumeric(t) ||
+      t.kind === 'complex' ||
+      (listBody && numberListRank(t) === 1)
+    )
+  )
     return w.refuse(
       node,
       'signature',

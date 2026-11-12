@@ -107,6 +107,7 @@ import type {
   FragmentAnnotation,
   FragmentConversion,
   FragmentScope,
+  FragmentType,
   FragmentValueFacts,
 } from './fragment.js';
 import { nodeText } from './fragment.js';
@@ -221,12 +222,19 @@ export type StructuredInput = IRInput;
  *   lists of booleans (`selectionBroadcastRule()` in
  *   `javascript-fragment-target.ts`), one `build` over the positions
  *   (`selectionBuild()`).
+ * - `list-extremum`: `Max` or `Min` of several operands with a list among
+ *   them (`listExtremumRule()` in `javascript-fragment-target.ts`), one
+ *   fold over the elements and the scalars (`listExtremum()`).
+ * - `list-equality`: `Equal` or `NotEqual` of two lists
+ *   (`listEqualityFacts()`), one boolean (`listEquality()`).
  */
 export type StructuredForm =
   | { readonly folded: number | { readonly re: number; readonly im: number } }
   | { readonly selected: Expression }
   | { readonly broadcast: BroadcastForm }
   | 'elementwise-selection'
+  | 'list-extremum'
+  | 'list-equality'
   | RealCallForm
   | 'pi-multiple'
   | 'identity'
@@ -1957,6 +1965,10 @@ class Lowering {
       );
     if (selected === 'elementwise-selection')
       return this.selectionBuild(node, facts, scope, operations, effect);
+    if (selected === 'list-extremum')
+      return this.listExtremum(node, facts, scope, operations);
+    if (selected === 'list-equality')
+      return this.listEquality(node, facts, scope, operations);
 
     if (operator === 'Which' || (operator === 'If' && node.nops === 2))
       return this.selection(node, facts, scope, operations, effect);
@@ -2084,6 +2096,14 @@ class Lowering {
           )
         ),
       ];
+      // A list argument at a real or integer parameter: the helper applied
+      // to each element (`mapsListArguments` of the definition).
+      const signature = entry.type;
+      if (
+        signature.kind === 'function' &&
+        args.some((v, i) => this.mapsArgument(signature, v, i))
+      )
+        return this.elementCall(operator, node, args, facts, operations, effect);
       const index = this.helper(operator, args, facts, node);
       const result = this.resultOf(facts);
       const callEffect = joinEffects(effect, this.functions[index].body.effect);
@@ -3383,6 +3403,199 @@ class Lowering {
       return result;
     };
     return level(values, type, this.resultOf(facts), operations);
+  }
+
+  /**
+   * `Max` or `Min` of several operands with a list among them
+   * (`listExtremumRule()` in `javascript-fragment-target.ts`), as the
+   * existing emitter writes it: the operands evaluated once, in order, then
+   * one accumulator from `-Infinity` (`Infinity`) and, for each operand in
+   * order, a `loop` over the elements of a list (over the rows, then their
+   * elements, for a list of lists, as `_p0.flat(Infinity)` reads them) or
+   * one step with a scalar, each step `Math.max(acc, x)` (`Math.min`). When
+   * every operand is a list, the value is `NaN` if they have no element,
+   * as the existing closure counts them (`_n === 0 ? NaN : _a`).
+   */
+  private listExtremum(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const kind = node.operator === 'Max' ? 'max' : 'min';
+    const type = valueType(facts.type);
+    const values = this.operands(node, facts, scope, operations);
+    const step = (acc: IRValue, x: IRValue, into: IROperation[]): IRValue => {
+      const result = this.newValue(type, 'number');
+      into.push({ kind, result, operands: [acc, x], effect: 'pure', origin: node });
+      return result;
+    };
+    const fold = (list: IRValue, acc: IRValue, into: IROperation[]): IRValue => {
+      const [one, length] = this.elementRange(list, node, into);
+      const index = this.newValue('integer', 'number');
+      const accumulator = this.newValue(type, 'number');
+      const body: IROperation[] = [];
+      const next = this.inRegion(body, () => {
+        const x = this.element(list, index, node, body, true);
+        return isListType(x.type)
+          ? fold(x, accumulator, body)
+          : step(accumulator, x, body);
+      });
+      const region: IRRegion = {
+        ...this.region(body, node, next),
+        parameters: [index, accumulator],
+      };
+      const result = this.newValue(type, 'number');
+      into.push({
+        kind: 'loop',
+        results: [result],
+        operands: [one, length, acc],
+        body: region,
+        effect: region.effect,
+        ...touchesField(region.touches),
+        ascending: true,
+        origin: node,
+      });
+      return result;
+    };
+    let acc = this.numberLiteral(
+      kind === 'max' ? -Infinity : Infinity,
+      'real',
+      node,
+      operations
+    );
+    for (const v of values)
+      acc = isListType(v.type) ? fold(v, acc, operations) : step(acc, v, operations);
+    if (!values.every((v) => isListType(v.type))) return acc;
+    // Every operand a list (of one level, by the rule): `NaN` when the sum
+    // of their lengths is 0.
+    const lengths = values.map((v) => this.elementRange(v, node, operations)[1]);
+    let count = lengths[0];
+    if (lengths.length > 1) {
+      count = this.newValue('integer', 'number');
+      operations.push({
+        kind: 'add',
+        result: count,
+        operands: lengths,
+        effect: 'pure',
+        origin: node,
+      });
+    }
+    const empty = this.newValue('boolean', 'boolean');
+    operations.push({
+      kind: 'equal',
+      result: empty,
+      operands: [count, this.numberLiteral(0, 'integer', node, operations)],
+      effect: 'pure',
+      origin: node,
+    });
+    const folded = acc;
+    return this.conditional(
+      empty,
+      (into) => this.numberLiteral(NaN, 'real', node, into),
+      () => folded,
+      node,
+      operations
+    );
+  }
+
+  /**
+   * `Equal(A, B)` or `NotEqual(A, B)` of two lists of numbers
+   * (`listEqualityFacts()` in `javascript-fragment-target.ts`), the value of
+   * the existing emitter's `_SYS.eq(A, B)` (`eqTensor()`): the operands
+   * evaluated once, in order, then `true` when the lengths are equal and a
+   * `loop` over the elements finds every pair `===` (`NaN` equals nothing,
+   * `0` and `-0` are equal); the loop runs only when the lengths are equal,
+   * and reads no element out of range. `NotEqual` is the negation. Every
+   * operation is pure, so the loop does not stop at the first pair that
+   * differs, where `eqTensor()` does: the value is the same.
+   */
+  private listEquality(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const [a, b] = this.operands(node, facts, scope, operations);
+    const [one, length] = this.elementRange(a, node, operations);
+    const other = this.elementRange(b, node, operations)[1];
+    const sameLength = this.newValue('boolean', 'boolean');
+    operations.push({
+      kind: 'equal',
+      result: sameLength,
+      operands: [length, other],
+      effect: 'pure',
+      origin: node,
+    });
+    const pairs: IROperation[] = [];
+    const every = this.inRegion(pairs, () => {
+      const index = this.newValue('integer', 'number');
+      const accumulator = this.newValue('boolean', 'boolean');
+      const body: IROperation[] = [];
+      const equal = this.newValue('boolean', 'boolean');
+      body.push({
+        kind: 'equal',
+        result: equal,
+        operands: [
+          this.element(a, index, node, body, true),
+          this.element(b, index, node, body, true),
+        ],
+        effect: 'pure',
+        origin: node,
+      });
+      const next = this.newValue('boolean', 'boolean');
+      body.push({
+        kind: 'and',
+        result: next,
+        operands: [accumulator],
+        rest: [this.region([], node, equal)],
+        effect: 'pure',
+        origin: node,
+      });
+      const region: IRRegion = {
+        ...this.region(body, node, next),
+        parameters: [index, accumulator],
+      };
+      const result = this.newValue('boolean', 'boolean');
+      const initial = this.newValue('boolean', 'boolean');
+      pairs.push({
+        kind: 'literal',
+        result: initial,
+        value: true,
+        operands: [],
+        effect: 'pure',
+        origin: node,
+      });
+      pairs.push({
+        kind: 'loop',
+        results: [result],
+        operands: [one, length, initial],
+        body: region,
+        effect: 'pure',
+        ascending: true,
+        origin: node,
+      });
+      return result;
+    });
+    const equal = this.newValue('boolean', 'boolean');
+    operations.push({
+      kind: 'and',
+      result: equal,
+      operands: [sameLength],
+      rest: [this.region(pairs, node, every)],
+      effect: 'pure',
+      origin: node,
+    });
+    if (node.operator === 'Equal') return equal;
+    const result = this.resultOf(facts);
+    operations.push({
+      kind: 'not',
+      result,
+      operands: [equal],
+      effect: 'pure',
+      origin: node,
+    });
+    return result;
   }
 
   /**
@@ -5034,6 +5247,156 @@ class Lowering {
   }
 
   /**
+   * `Sum(body, Limits(k, a, b), …)` and `Product(…)` whose body is a list
+   * (`listAggregateFacts()` in `javascript-fragment-target.ts`: every bound
+   * a number literal, every range not empty or the width of the body
+   * stated, one length in every term), as the existing emitter writes it
+   * (`emitSumProduct()` in `javascript-target.ts`, with an accumulator
+   * that starts at `null`): for each clause, the outermost first, the term
+   * at the floor `a` of the lower bound, then one `loop` from `a + 1` to the
+   * floor `b` of the upper bound (`ascending`: no iteration when `b ≤ a`)
+   * that carries the list and adds (multiplies) each later term to it,
+   * element by element (`_SYS.bcast((_a, _b) => _a + _b, acc, term)`), in
+   * index order. So the first term is the value of the clause as it is, not
+   * `0 + t` (a `-0` stays), and every term is evaluated: the existing loop
+   * tests the accumulator for `NaN`, and an array is never `NaN`. A clause
+   * of an empty range is the list of `w` zeros (ones) of the stated width
+   * `w`, as the existing emitter writes it (`[0, 0, 0]`). The term of a
+   * clause is the aggregate of the clauses after it, and the body for the
+   * last one. With an iteration budget, the program declines: the
+   * existing emitter guards the loop of a list body differently.
+   */
+  private listAggregate(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    inner: FragmentScope<ScalarRepresentation>,
+    clauses: readonly { index: string; lower: Expression; upper: Expression }[],
+    operations: IROperation[]
+  ): IRValue {
+    if (this.prep.iterationBudget !== undefined)
+      throw new StructuredDeclineError(
+        `${node.operator} ${nodeText(node)}, whose body is a list, is not in ` +
+          `the profile with an iteration budget`
+      );
+    const body = node.ops[0];
+    const sum = node.operator === 'Sum';
+    const type = valueType(facts.type);
+    const element =
+      elementOf(type) ?? fail(`the body of ${nodeText(node)} is not a list`);
+    const bodyConversion = facts.conversions?.[2 * clauses.length];
+    const bound = (b: Expression): number =>
+      isNumber(b) ? Math.floor(b.re) : fail(`the bound ${nodeText(b)} is not a literal`);
+    const literal = (value: number, into: IROperation[]) =>
+      this.numberLiteral(value, 'integer', node, into);
+    const bindIndex = (name: string, value: IRValue) => {
+      const values = new Map(this.bound.get(inner) ?? []);
+      values.set(name, value);
+      this.bound.set(inner, values);
+      this.wrote(inner);
+      this.changed();
+    };
+    // `a + b` (`a · b`) of two lists of one length, element by element.
+    const combine = (a: IRValue, b: IRValue, into: IROperation[]): IRValue => {
+      const [one, length] = this.elementRange(a, node, into);
+      const index = this.newValue('integer', 'number');
+      const cells: IROperation[] = [];
+      const value = this.newValue(element, 'number');
+      cells.push({
+        kind: sum ? 'add' : 'multiply',
+        result: value,
+        operands: [
+          this.element(a, index, node, cells, true),
+          this.element(b, index, node, cells, true),
+        ],
+        effect: 'pure',
+        origin: node,
+      });
+      const region: IRRegion = {
+        ...this.region(cells, node, value),
+        parameters: [index],
+      };
+      const result = this.newValue(type, 'array');
+      into.push({
+        kind: 'build',
+        result,
+        operands: [one, length],
+        body: region,
+        effect: 'pure',
+        ascending: true,
+        origin: node,
+      });
+      return result;
+    };
+    const clause = (i: number, out: IROperation[]): IRValue => {
+      const { index, lower, upper } = clauses[i];
+      const term = (k: IRValue, into: IROperation[]): IRValue => {
+        bindIndex(index, k);
+        return i + 1 < clauses.length
+          ? clause(i + 1, into)
+          : this.convert(
+              this.value(body, inner, into),
+              bodyConversion,
+              node,
+              into
+            );
+      };
+      const lo = bound(lower);
+      const hi = bound(upper);
+      // An empty range: the list of the stated width (the rule admitted
+      // it), `[0, 0, 0]` or `[1, 1, 1]`.
+      if (lo > hi) {
+        const width =
+          (() => {
+            const t = body.type.type;
+            return typeof t === 'object' && t.kind === 'list'
+              ? t.dimensions?.[0]
+              : undefined;
+          })() ?? fail(`the body of ${nodeText(node)} has no stated width`);
+        const ones = Array.from({ length: width }, () =>
+          this.numberLiteral(sum ? 0 : 1, 'integer', node, out)
+        );
+        const result = this.newValue(type, 'array');
+        out.push({
+          kind: 'list',
+          result,
+          operands: ones,
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      }
+      const first = literal(lo, out);
+      this.aggregateIndexes.add(first.id);
+      const start = term(first, out);
+      if (hi === lo) return start;
+      const indexValue = this.newValue('integer', 'number');
+      this.aggregateIndexes.add(indexValue.id);
+      const accumulator = this.newValue(type, 'array');
+      const bodyOperations: IROperation[] = [];
+      const next = this.inRegion(bodyOperations, () =>
+        combine(accumulator, term(indexValue, bodyOperations), bodyOperations)
+      );
+      const region: IRRegion = {
+        ...this.region(bodyOperations, node, next),
+        parameters: [indexValue, accumulator],
+      };
+      const result = this.newValue(type, 'array');
+      out.push({
+        kind: 'loop',
+        results: [result],
+        operands: [literal(lo + 1, out), literal(hi, out), start],
+        body: region,
+        effect: region.effect,
+        ...touchesField(region.touches),
+        ascending: true,
+        origin: node,
+      });
+      return result;
+    };
+    return clause(0, operations);
+  }
+
+  /**
    * `Sum(body, Limits(k, a, b), …)` and `Product(…)`, which the rule of the
    * aggregate checked (`aggregateRule()` in
    * `javascript-fragment-target.ts`), lowered as the existing emitter writes
@@ -5120,6 +5483,8 @@ class Lowering {
     const body = node.ops[0];
     const sum = node.operator === 'Sum';
     const type = valueType(facts.type);
+    if (isListType(type))
+      return this.listAggregate(node, facts, inner, clauses, operations);
     if (type !== 'real' && type !== 'integer')
       return fail(`the body of ${nodeText(node)} is not a number`);
     const representation = facts.representation;
@@ -6806,6 +7171,113 @@ class Lowering {
     this.changed();
   }
 
+  /** Whether a call of the helper of the type `type` applies it to each
+   *  element of its argument `value` at the position `i`: a list at a
+   *  parameter that is not a list (`mapsListArguments` of the definition,
+   *  `javascript-fragment-target.ts`). A captured name, after the
+   *  parameters of the literal, is never one. */
+  private mapsArgument(
+    type: FragmentType & { kind: 'function' },
+    value: IRValue,
+    i: number
+  ): boolean {
+    const parameter = type.parameters[i]?.type;
+    return (
+      parameter !== undefined &&
+      parameter.kind !== 'list' &&
+      isListType(value.type)
+    );
+  }
+
+  /**
+   * A call of the helper `name` applied to each element of its list
+   * arguments at real or integer parameters, as the existing emitter
+   * writes it, `_SYS.mapFn(_fn_f, [1, 0], L, x)` (`mapWith()` in
+   * `javascript-runtime.ts`): the arguments `args` are evaluated once, in
+   * order (the caller did), then one `build` over the elements of the
+   * first list argument, from 1 to its length, whose body reads each list
+   * argument at the index and passes each other argument whole to one call
+   * of the helper. So the helper is called once per element, in the order
+   * of the elements, and not at all for an empty list. The rule admitted
+   * list arguments of lengths equal by construction. The helper is the one
+   * that a scalar call reaches: one function of the program, whose
+   * parameter is a number.
+   */
+  private elementCall(
+    name: string,
+    node: Expression & { ops: readonly Expression[] },
+    args: readonly IRValue[],
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const entry = this.prep.annotation.functions.get(name)!;
+    const type = entry.type as FragmentType & { kind: 'function' };
+    const index = this.helper(name, args, facts, node);
+    const fn = this.functions[index];
+    const callEffect = joinEffects(effect, fn.body.effect);
+    // One `build` per level of a list of lists (`mapWith()` maps the rows
+    // of a list of lists, then their numbers).
+    const level = (
+      values: readonly IRValue[],
+      ranks: readonly number[],
+      result: IRValue,
+      ops: IROperation[]
+    ): IRValue => {
+      const list = values.find((_, i) => ranks[i] > 0)!;
+      const [one, length] = this.elementRange(list, node, ops);
+      const position = this.newValue('integer', 'number');
+      const body: IROperation[] = [];
+      const value = this.inRegion(body, () => {
+        const cells = values.map((v, i) =>
+          ranks[i] > 0 ? this.element(v, position, node, body, true) : v
+        );
+        const inner = ranks.map((r) => (r > 0 ? r - 1 : 0));
+        if (inner.some((r) => r > 0)) {
+          const row = elementOf(result.type) ?? fail(`${nodeText(node)} is not a list`);
+          return level(cells, inner, this.newValue(row, 'array'), body);
+        }
+        const element = this.newValue(
+          fn.result.type,
+          fn.result.representation as ScalarRepresentation
+        );
+        body.push({
+          kind: 'call',
+          function: index,
+          result: element,
+          operands: cells,
+          effect: callEffect,
+          ...touchesField(this.states(node), fn.body.touches),
+          origin: node,
+        });
+        this.afterUnknown(callEffect);
+        return element;
+      });
+      const region: IRRegion = {
+        ...this.region(body, node, value),
+        parameters: [position],
+      };
+      ops.push({
+        kind: 'build',
+        result,
+        operands: [one, length],
+        body: region,
+        effect: joinEffects(effect, region.effect),
+        ...touchesField(this.states(node), region.touches),
+        ascending: true,
+        origin: node,
+      });
+      this.afterUnknown(region.effect);
+      return result;
+    };
+    return level(
+      args,
+      args.map((v, i) => (this.mapsArgument(type, v, i) ? rankOf(v.type) : 0)),
+      this.resultOf(facts),
+      operations
+    );
+  }
+
   /**
    * The index of the function of the helper `name`, lowered once, at its
    * first call, whatever the number of its calls. A call in its body of
@@ -6837,8 +7309,15 @@ class Lowering {
       entry.type.parameters.length !== args.length
     )
       fail(`a call of ${name} does not match its parameters`);
+    // A list argument of a call applied to each element (`elementCall()`)
+    // passes a number to the parameter.
     const parameters = entry.type.parameters.map((p, i) =>
-      this.newValue(valueType(p.type), conversions[i].representation)
+      this.newValue(
+        valueType(p.type),
+        conversions[i].type.kind === 'list' && p.type.kind !== 'list'
+          ? 'number'
+          : conversions[i].representation
+      )
     );
     const names = entry.type.parameters.map((p) => p.name);
     const operations: IROperation[] = [];
@@ -6874,9 +7353,14 @@ class Lowering {
       this.panels = panels;
     }
     this.lowering.delete(name);
+    // The value of a call applied to each element is a list of the values
+    // of the helper, each a number.
     const result = {
       type: valueType(entry.type.result),
-      representation: facts.representation,
+      representation:
+        facts.type.kind === 'list' && entry.type.result.kind !== 'list'
+          ? ('number' as const)
+          : facts.representation,
     };
     if (value.representation !== result.representation)
       fail(
