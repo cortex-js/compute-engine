@@ -35,7 +35,7 @@ Jest defaults to 12 local workers. Set a smaller limit for targeted runs:
 | Run           | Command                    |
 | ------------- | -------------------------- |
 | One test file | `npx jest -w 2 -- <path>`  |
-| Several files | `npx jest -w 4 -- <paths>` |
+| Several files | `npx jest -w 4 -- <paths>`, under the box lock |
 
 Jest discovers the root `jest.config.cjs` automatically. Confirm that the
 expected test files ran. In zsh, use `${=FILES}` to split a variable containing
@@ -61,10 +61,12 @@ On 2026-10-30 one change of 9 files ran the full suite three times, a
 383-file batch on each of four fix rounds, and lint and the Python tests in
 both trees; none of these runs found a defect.
 
-Take the box lock for full suites, aggregate CI, builds, corpus checks, and
-`npm run test:python`. Timing tests (`npm run test:perf`) also require the lock
-and run serially. Type checking and capped targeted tests do not need the lock.
-Worktrees share these CPU limits.
+Take the box lock for full suites, aggregate CI, builds, corpus checks,
+`npm run test:python`, and a targeted run of several test files. Timing tests
+(`npm run test:perf`) also require the lock and run serially. Type checking and
+a run of one test file do not need the lock. A Jest worker can hold about 3 GB,
+so the lock limits memory as well as CPU. Worktrees and sub-agents share these
+limits; a sub-agent takes the lock under `<session name>:<label>`.
 
 Exception: a local release (`npm run release`, or `npm publish`) takes no lock
 for its checks and builds (`scripts/release-checks.sh`, `npm run doc`, the
