@@ -88,48 +88,76 @@ the run's definition, the read to the static one. Step 2 needs the rule of
 step 6 first (a run writes the values of the static definitions of its
 block; it makes no definition of a local that the block binds statically).
 
-## D8 (decided 2026-11-11; NOT started in this worktree)
+## D8: built in part (2026-11-11)
 
-Spec: end of D8 in the main tree's `docs/plans/2026-11-11-bound-once-spec.md`.
-Survey: `d8-survey.md` here. The order of work after D8 is steps 2 and 3 of
-`activations-design.md`; the step-2 attempt is `step2-attempt.diff` in the
-session scratchpad (it failed only because runs made definitions).
+Spec: end of D8 in `docs/plans/2026-11-11-bound-once-spec.md`. Survey:
+`d8-survey.md`. The diff of the tree before D8 is `before-d8.patch` in the
+session scratchpad.
 
-Build plan (sites read, line numbers of this worktree):
+### Built
 
-1. `library/control-structures.ts` `canonicalBlock` (4699): hoist only
-   `Declare` targets (`staticDeclarations`, 4575; `hoistDeclared`, 4839).
-   Remove the hoist of first `Assign`s (`assignmentLocals`,
-   `recordAssignmentLocals(scope, …)` at 4935) and the
-   `first-assignment-in-branch` errors at 950, 1289, 4910 and in
-   `core.ts:8206`, `box.ts`, `compile-locals.ts`, `types-definitions.ts`.
-   New errors, one per situation: a `Declare` below a statement of a block
-   (replaces `first-assignment-in-branch`), and an `Assign` in a block or a
-   function body to a name with no definition in scope. Keep
-   `variable-redeclaration` and `read-before-declaration`. The initial value
-   of a `Declare` is canonicalized with the outer name (D8:
-   `Block(Declare(z, z + 1), z)` with global `z = 9` is 10).
-2. Runs: delete the calls at `control-structures.ts:4374-4375` (sync) and
-   `4479-4483` (async), and `sweepCanonicalizationBindings` (4108),
-   `isImplicitRunLocal`, `beginAsyncRun`/`endAsyncRun`,
-   `declareRunAssignmentLocals`; `function-utils.ts` `createBlockLocals`
-   (3767, called at 3473) and `declareAssignmentLocals` (3835, called at
-   10078, 11397 and `control-structures.ts:4338`); `assignment-locals.ts`;
-   `binders.ts` swept helpers (1072-1220) and `readsNoOtherBinding` (921);
-   `_assignmentEvidence` (6 files) and its `readsActivation()` kind;
-   `declared-local.ts` `recordCanonicalLocal`. The `Declare` handler
-   (`core.ts`) must write the value of the static definition (its record)
-   and make no definition.
-3. Host level: `ce.assign()` and an `Assign` evaluated outside any block keep
-   declaring in the current scope (`assignNamedValue`,
-   `engine-declarations.ts:4169`).
-4. Epsil: the program top level is a block for the rule; the static checks
-   and messages that name `first-assignment-in-branch`
-   (`static-diagnostics.ts` 182/191/4261, `execute-epsil.ts:2891`,
-   `error-explanations.ts`); docs `declarations.md`, `errors.md`,
-   `evaluation.md`; 27 docs programs and 1 corpus program get `let`
-   (`epsurvey.ts` in the scratchpad lists them when changed to print all).
-5. Tests: the 12 files named in `d8-survey.md` section 3 are rewritten to
-   D8; the mechanical rest (estimate under 200 files) gets
-   `['Declare', name, "'unknown'", value]` for the first `Assign`; the D8
-   table rows and the decided cases go in `bound-once.test.ts`.
+- Boxing: a block hoists only its `Declare` targets (and its `DefineFunction`
+  names). The hoist of a first `Assign`, the record of assignment locals,
+  `LATER_DECLARATIONS` and the later-declaration locals are deleted
+  (`canonicalBlock`, `library/control-structures.ts`).
+- Errors: `declaration-below-statement` (a `Declare` canonicalized in a
+  branch or a loop body, `isInBranch()`, checked by the `Declare` canonical
+  handler, `library/core.ts`) replaces `first-assignment-in-branch`;
+  `assignment-to-undeclared-variable` (an `Assign` or `AddTo` to a name that
+  no scope declares, in a block, a function body, a binder body, a branch or
+  a loop body, `isInBodyOrBranch()`; the `Assign` and `AddTo` canonical
+  handlers and the `Match` case check). Outside them an `Assign` declares as
+  before.
+- `assignment-locals.ts` deleted; what it held besides the assignment locals
+  (branch depth, function-body depth, free-symbol marks, paired function
+  names) is in `statement-position.ts`, with the new block depth
+  (`enterBody()`/`exitBody()`).
+- Readers of the assignment locals removed: `function-literal.ts`,
+  `invisible-operator.ts`, `boxed-symbol.ts`, `effects-inference.ts`
+  (`withBlockLocals`, `rawBlockAssignmentLocals`), `provisional-application.ts`
+  (`noteAssignmentLocal`), `function-utils.ts` (`declareAssignmentLocals`,
+  `copyAssignmentLocals` calls, `withKeptAssignmentLocals`; `blockLocals` is
+  the set of `Declare` targets, the per-statement index for a `Declare` in a
+  branch is gone), `control-structures.ts` (`declareRunAssignmentLocals`).
+- Compiler: `withImplicitLocalDeclares` (`compile-locals.ts`) and its four
+  callers, the assignment-local branch of `compile-references.ts` and of
+  `isBlockValueComplexValued` (`compile-complexness.ts`). NOT edited (another
+  session's file): `compilation/fragment.ts` `walkBlock` still collects
+  "implicit locals" (an `Assign` to a name that the block scope binds with no
+  `Declare`); D8 makes that branch unreachable.
+- Epsil: the top level of a program is a block for the rule
+  (`boxTopLevelStatement()`, `static-diagnostics.ts`); the later-declaration
+  machinery of `execute-epsil.ts` is deleted; codes and messages in
+  `static-diagnostics.ts`, `execute-epsil.ts`, `error-explanations.ts`;
+  `errors.md` regenerated (`scripts/build-error-docs.ts`); `declarations.md`,
+  `evaluation.md` and the snippets of `control-flow.md`, `operators.md`,
+  `literals.md`, `types.md`, `for-agents.md` say `let`; corpus
+  `exercism/grains.epsil`. `docs/ERROR-MODEL.md` table updated.
+- Tests: `bound-once.test.ts` has the D8 rows and decided cases (43 pass);
+  `ce-473` Epsil route uses `let y`.
+
+### Not done
+
+1. Runs (item 2 of the brief). Still in place: `sweepCanonicalizationBindings`,
+   `blockRunStates`, `callActivationKey`, `TOP_LEVEL_RUN`, `asyncRunLocals`,
+   `beginAsyncRun`/`endAsyncRun`/`isImplicitRunLocal`
+   (`control-structures.ts`); `createBlockLocals`, `STATEMENT_LIST_SCOPES`
+   (`function-utils.ts`); `initializeBlockLocal`, `BLOCK_REINSTALLS` and the
+   per-run `ce.declare()` of `declareOne` (`core.ts`); the swept helpers of
+   `binders.ts`, `recordCanonicalLocal` (`declared-local.ts`),
+   `_assignmentEvidence`. With D8 no run can make an implicit local, so the
+   parts of the sweep and of the asynchronous run record that keep implicit
+   locals are dead; the parts that remove the hoisted `Declare` bindings and
+   the per-run definitions of `Declare` are live. Their removal needs the
+   `Declare` handler to write the value of the static definition on each run
+   (upgrade in place also for a binding of a previous run), and the closures
+   that a run creates before its `Declare` (`captureNestedLocals`,
+   `for i in [1, 2] { fs = [...fs, () => k]; let k = i }`) to hold the
+   activation instead of the binding of the run: that is step 3/4 of
+   `activations-design.md`, so item 2 was not started.
+2. Test migration. Failing after the boxing change (counts of failure
+   headers in the logs, not exact): `test/epsil` 16 files (208 tests); the
+   files of `failing-files-*.txt` 21 files; the 12 files of `d8-survey.md`
+   section 3 (187 tests, not restated). Almost every failure is a program
+   that assigns a name it does not declare
+   (`assignment-to-undeclared-variable`). Files: see the report of this step.
