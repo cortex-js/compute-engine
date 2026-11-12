@@ -734,3 +734,98 @@ static: `error-propagation` (2), `match-dispatch` (2), `match-expression`
 clean. Timing (one worker, load 2.4 to 5.3): calculus 10.7/10.8/10.6 s
 against 10.9/10.7/10.6 s at main, simplify 2.0/2.0/2.0 against 2.2/2.1/2.0,
 integrate-symbolic-pole 17.4/17.7/17.7 against 19.2/17.6/17.4.
+
+## On main dc370ad14, with three fixes (2026-11-12)
+
+Worktree `/tmp/wt-compute-engine-06-land2`, detached on main `dc370ad14`:
+the change of `/tmp/wt-compute-engine-06-land` (`03a0d623f`) applied with
+`git apply --3way` (no conflict; `CHANGELOG.md`,
+`docs/COMPILATION-MODEL.md`, `src/compute-engine/index.ts` and
+`types-engine.ts` merged with the `ir` profile commit `7f6b2eeb6`), then the
+commits after it.
+
+### The type of a `let` with no declared type
+
+Decided when the block is boxed. A local that an `Assign` writes, at any
+depth of its block (a loop body, a nested function), has the widened type
+of its value: `widenLocalType()` (`library/core.ts`) with `tiers`. A
+scalar widens through `widenAssignedType()` (the table of a global
+`ce.assign()`), an element type loses only its literal cargo
+(`widenValueTypes()`), a list loses its length and dimensions, a character
+type is kept. A local that is never assigned, and a `const`, keep the type
+of the value: compiled code needs the width (`compile-constructed-vectors`,
+shaders). The canonical `Assign` marks the binding it writes
+(`markAssignedLocal()`, `declared-local.ts`, on the targets of the
+undeclared-assignment check); the `Declare` reads the mark again when the
+block's evidence session joins the types after the last statement.
+
+| Program | At main | Now |
+|---|---|---|
+| `let v = [1, 2, 3]` | `vector<integer^3>` | `vector<integer^3>` |
+| `let m = [[1, 2], [3, 4]]` | `matrix<integer^(2x2)>` | `matrix<integer^(2x2)>` |
+| `let c = [(2, 0.5, 0, 1)]` | `list<tuple<integer, real, integer, integer>^1>` | the same |
+| `let c = [(1, 2)]`, then `c = g(…)` in a loop (`g` untyped result) | `list<tuple<…>>` (evidence of the loop) | `list<tuple<…>>` (`list<…^1>` before this rule) |
+| `let v = [1, 2, 3]` and `function f() { v = [4] }` | | `vector<integer>` |
+
+No test moved for it. `absent-argument-annotated-parameter` "a value typed
+never" passes.
+
+### `Type` of a name
+
+`Type(x)` evaluated in a run, for a name with no declared type (an untyped
+parameter or local, a `match` capture: `hasInferredType()`), gives the
+type of the value it holds, widened by `inferTypeFromValue()`, as the
+per-run definition did at main; a declared name gives its declared type;
+another operand is unchanged. `f(x) = type(x); f(1)` is `integer`, the
+capture of types.md:683 `integer`, `let xs: list<integer> = []; type(xs)`
+`list<integer>`, `type(t.value)` `number`, `x ↦ Type(x)` given `Nothing`
+is `nothing`: the answers of main.
+
+### CE-329
+
+At main the test asserted that `Declare(xs, list<real> | set<real>, LS)`
+replaced in a loop compiles to the copying form with the check
+`_SYS.arr(xs, "ReplaceAt")`; the local was marked inferred whatever its
+`Declare`. Now a declared type is declared, and `admitsRuntimeCheckedArray()`
+declines a declared type that admits a set: the test expects the decline,
+and a second test with `Declare(xs, unknown, LU)` expects the checked copy.
+
+### Structured route
+
+The tests that assigned an undeclared name declare it with the `let` form;
+the three whose purpose was the implicit local expect the decline
+(`admits no statement Error`). The implicit-local branch of `walkBlock()`
+(`compilation/fragment.ts`) is deleted: instrumented on the structured,
+fragment and `ir-*` files, nothing reached it.
+
+### The wide set (2026-11-12, after the rulings)
+
+`test/epsil` and 985 files: 1,081 files, 49,024 tests, 24 failed.
+
+- Known (18): `annotated-parameter-undecided`, CE-445 (2), CE-543 (6),
+  `map-auto-compile` trip cap, `recursive-list-builder-compile` (2),
+  `scope` DECLARING, Tycho 332 (2), `lazy-argument-capture` mutual
+  recursion, the two (c) programs (`function-declaration-hoisting`,
+  `function-body-local-assignment`).
+- Structured route, for its owner (6):
+  - `structured-locals` "a branch that is a declaration": "admits no
+    statement Error in a branch of an If"; expected "admits no statement
+    Declare in a branch of an If".
+  - `structured-literals-block` "declines a call of a function that a later
+    statement defines" and "a Function whose body calls a function that a
+    later statement defines declines": "admits no statement Error";
+    expected "the call g(3) does not reach a local function g defined
+    before it in the body".
+  - `structured-blocks` "a first write in degrees, in the complex mode it
+    declines" (program now `Declare(t, unknown, x)`): compiles and gives
+    45 at x = 1, the interpreter's value (the existing compiler gives
+    `NaN`); expected the decline "the first write to t declares a local of
+    the block, and in the complex mode with the angular unit deg".
+  - `fragment-callback` "a root local named helper shadows the helper":
+    `isValid` is `false` (`Declare(helper, real, x); helper(x)` calls a
+    real local); expected `true`, then the throw "unsupported head helper".
+  - `fragment-bindings` "declines an unannotated broadcast scope from
+    cross-shape ambient shadowing": compiles, no throw (the local no longer
+    reads the global `total`); expected the throw "different prepared
+    policy".
+- New: none. No `ir-*` test fails.
