@@ -846,3 +846,39 @@ defect. It is built with the lazy view (the last activation step).
 background, not the reference: a different answer can be acceptable, and
 the current one can be wrong. A rule is judged by whether it can be
 explained and by the code it removes.
+
+### D15. Nothing is inferred for a parameter from the body (user decision 2026-11-12)
+
+The type of a parameter is the type it is annotated or declared with;
+without one it is `unknown`. No use in the body writes a type on the
+definition of a parameter (leftover 5, case (b), and leftover 6 of
+`docs/plans/2026-11-12-earlier-mechanism-leftovers.md`; case (a), an
+assignment that types a second name, is removed with the other
+leftovers). The user: "another case where the inference that was well
+intentioned ended up doing more bad than good."
+
+The rule for a call with a list argument (Tycho's two conditions,
+tycho-desk 2026-11-12):
+
+- a parameter declared as a collection takes the list whole;
+- a parameter declared as a scalar or a point maps the call over the
+  list;
+- an untyped or `unknown` parameter maps the call over the list;
+- the type of a CALL is still read from the body of the function with the
+  types of the arguments. This is not parameter inference and stays.
+
+Cost: a function that takes a list says so. `xs ↦ Length(xs)` called with
+`[1, 2, 3]` is mapped and gives errors; `(xs: list) ↦ Length(xs)` gives 3.
+The same holds for a local function (D11). Tycho declares the parameters
+that a body consumes whole from its own analysis.
+
+To check before it lands: that a bare `list` is accepted as a parameter
+type on the compiled routes Tycho uses (a spelling for any list, with no
+width); the wrong result type that the probe showed (`x ↦ x + 1` typed
+`(x: unknown) -> integer`: the result type of `Add` widens `unknown` with
+`integer` to `integer`), which is a defect of its own; Tycho's `othello`
+timing and codegen audit on a scratch build. What then has no writer (the
+journal of `inference-rollback.ts`, the `declare` event after a rollback,
+the undo of the Epsil static check) is deleted with it. Measurements:
+`~/dev/compute-engine-recovery/probe-infer-report.md`. It is landed by
+session compute-engine-42 with the other leftovers, after step 1.
