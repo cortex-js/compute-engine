@@ -74,6 +74,7 @@ import {
 import { userFunctionSignatureIsInferred } from './compile-callbacks.js';
 import { rangeSpecializedParameterTypes } from './compile-user-specialization.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { INVERSE_TRIG_OPERATORS } from '../symbolic/angular-unit.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
 import { jetDerivativeTarget } from './jet-derivative.js';
 import { storedDefinitions } from './compile-integrals.js';
@@ -92,6 +93,7 @@ import {
   walkCountedLoop,
   walkAggregate,
   fragmentTypeToString,
+  fragmentScopeBinds,
   hasShortText,
   nodeText,
   type FragmentConversion,
@@ -151,11 +153,14 @@ import {
   structuredPreparationOf,
   type StructuredCapture,
   type StructuredInput,
+  decidedBranch,
+  type RealCallForm,
   type StructuredForm,
   type StructuredIntegral,
   type StructuredPreparation,
 } from './javascript-structured-lower.js';
 import { initialPanelsForDimensions } from '../numerics/gauss-kronrod.js';
+import { complexContinuation } from './complex-continuation.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { staticCollectionWidth } from './compile-linear-algebra.js';
 import { linearAlgebraLane } from './compile-lanes.js';
@@ -744,11 +749,14 @@ function isSafeNonNegativeInteger(expr: Expression): boolean {
  * interpreter gives `0`, as on the existing route.
  */
 const floorFacts = realOperatorFacts('Floor', 1, () => 'integer');
-const floorRule = {
-  walk: (node, scope, context, w) => {
-    const constant = isFunction(node)
-      ? inexactJumpConstant(node.ops, scope)
-      : undefined;
+/** The rule of `Floor`. `inputs`: the parameters of the root function
+ *  (`inexactJumpConstant()`). */
+const floorRuleOf = (inputs: ReadonlySet<string>) =>
+  ({
+    walk: (node, scope, context, w) => {
+      const constant = isFunction(node)
+        ? inexactJumpConstant(node.ops, scope, inputs)
+        : undefined;
     if (constant !== undefined)
       return w.refuse(
         node,
@@ -758,9 +766,10 @@ const floorRule = {
           `existing compiler rewrites such a node or declines it ` +
           `(inexact-jump-operand)`
       );
-    return floorFacts.walk(node, scope, context, w);
-  },
-} satisfies FragmentRule<ScalarRepresentation>;
+      return floorFacts.walk(node, scope, context, w);
+    },
+  }) satisfies FragmentRule<ScalarRepresentation>;
+const floorRule = floorRuleOf(new Set());
 
 /**
  * A closed subtree of `operands` whose exact value no double holds, or
@@ -798,7 +807,12 @@ const floorRule = {
  * `Floor(t)` in the integrand of `∫ … dt`); so is the variable of a
  * `Limits` or an `Element` clause in the operand. A node that holds a
  * function literal (the integrand of an `Integrate`) or a bound name is
- * not a constant, and its operands are judged in turn.
+ * not a constant, and its operands are judged in turn. A parameter of the
+ * root function (`inputs`) is bound too: the existing compiler binds it
+ * (`lambdaTarget()`), where the root scope of the pass holds it with the
+ * captures. A closed condition (`2 < 3`) is not a number, and an `If` or a
+ * `Which` whose constant conditions select a branch is that branch
+ * (`decidedBranch()`).
  *
  * A node object reached on several paths (a DAG) is visited once: the
  * verdict of a function node does not depend on its parent, and is
@@ -807,10 +821,11 @@ const floorRule = {
  */
 function inexactJumpConstant(
   operands: readonly Expression[],
-  scope?: FragmentScope<ScalarRepresentation>
+  scope?: FragmentScope<ScalarRepresentation>,
+  inputs: ReadonlySet<string> = new Set()
 ): Expression | undefined {
   const unknowns: ReferencesMemo = new Map();
-  const bound = new Set<string>();
+  const bound = new Set<string>(inputs);
   for (let s = scope; s?.parent !== undefined; s = s.parent)
     for (const name of s.bindings.keys()) bound.add(name);
   const binds = new Map<Expression, boolean>();
@@ -865,6 +880,7 @@ function inexactJumpConstant(
       // `True` and `False` are not numbers: the rule of `Floor` refuses a
       // boolean operand.
       if (isSymbol(node, 'True') || isSymbol(node, 'False')) return undefined;
+      if (isSubtype(node.type.type, 'boolean')) return undefined;
       if (isSymbol(node) && safeInteger(resolvedValueDefinition(node)?.value))
         return undefined;
       return node;
@@ -874,7 +890,12 @@ function inexactJumpConstant(
     if (verdicts.has(node)) return verdicts.get(node);
     let found: Expression | undefined;
     const clause = node.operator === 'Limits' || node.operator === 'Element';
-    for (const op of clause ? node.ops.slice(1) : node.ops) {
+    const selected = decidedBranch(node, (name) => bound.has(name));
+    for (const op of selected !== undefined
+      ? [selected]
+      : clause
+        ? node.ops.slice(1)
+        : node.ops) {
       found = visit(op, node);
       if (found !== undefined) break;
     }
@@ -1662,7 +1683,8 @@ function complexOperandRefusal(
 function structuredScalarFunctionRule(
   head: string,
   mode: 'strict' | 'complex',
-  forms: Map<Expression, StructuredForm>
+  forms: Map<Expression, StructuredForm>,
+  inputs: ReadonlySet<string> = new Set()
 ) {
   const { lane, complex, jump, realRefusal } = SCALAR_FUNCTION_HEADS[head];
   return {
@@ -1674,7 +1696,7 @@ function structuredScalarFunctionRule(
           `${head} with other than one operand is not in the structured route`
         );
       if (jump === 'rounding') {
-        const constant = inexactJumpConstant(node.ops, scope);
+        const constant = inexactJumpConstant(node.ops, scope, inputs);
         if (constant !== undefined)
           return w.refuse(
             node,
@@ -1762,6 +1784,410 @@ function structuredScalarFunctionRule(
       return w.valueFacts(node, { kind: result }, [
         w.convert(facts, { kind: result })!,
       ]);
+    },
+  } satisfies FragmentRule<ScalarRepresentation>;
+}
+
+/**
+ * The heads of `realCallRule()`: the lowering of each number of operands
+ * (`RealCallForm`; `variadic`: of two operands or more), and:
+ *
+ * - `continuation`: a head of `COMPLEX_CONTINUATION_HEADS`, whose handler
+ *   writes the complex kernel of lifted operands (`continuationCall()` in
+ *   `javascript-target.ts`) in the `complex` mode when the value can be
+ *   complex (`continuesToComplex()`). The rule admits it in that mode only
+ *   when `complexContinuation()` proves the value real.
+ * - `result`: the kind of the result, `real` when absent; `operand` for
+ *   `Real` (the operand itself), `join` for `Clamp` (an integer when the
+ *   three operands are).
+ * - `operand`: `boolean` for `Boole`, whose operand is a condition; the
+ *   operands of every other head are reals or integers.
+ * - `domain`: the operands, by index, that must be provably non-negative
+ *   (`nonNegative`, `isNonNegative`) or positive (`positive`,
+ *   `isPositive`), where the existing kernel gives `NaN` or a wrong real
+ *   number outside that range (`why`): `CosIntegral(x)` for a negative `x`
+ *   is `Ci(|x|)`, where the value is `Ci(|x|) + iπ` (CE-1225);
+ *   `GammaRegularized(2, -0.5)`, `Gamma(1, -1)`, `AGM(-2.5, -1)` and
+ *   `Beta(-3, 2)` are `NaN`, where the interpreter has a finite value
+ *   (CE-1226, CE-1227).
+ */
+type RealCallEntry = {
+  readonly arities: Readonly<Record<number, RealCallForm | 'identity'>>;
+  readonly variadic?: RealCallForm;
+  readonly continuation?: true;
+  readonly result?: 'integer' | 'operand' | 'join';
+  readonly operand?: 'boolean';
+  readonly domain?: {
+    readonly nonNegative?: readonly number[];
+    readonly positive?: readonly number[];
+    readonly why: string;
+  };
+};
+
+/** The `domain` of the kernels that give `NaN` for a negative argument,
+ *  where the interpreter has a finite value for some of these arguments. */
+const NAN_BELOW_ZERO =
+  'the existing kernel gives NaN for a negative argument, where the ' +
+  'interpreter has a finite value for some of them';
+
+const REAL_CALL_HEADS: Readonly<Record<string, RealCallEntry>> = {
+  // Real-only heads mapped to one helper (`stringHelperIsRealOnly()`), or
+  // listed in `JS_REAL_ONLY_LOWERINGS` or `REAL_ONLY_BY_DEFINITION`.
+  Heaviside: { arities: { 1: { call: 'heaviside' } } },
+  GammaLn: { arities: { 1: { call: 'ln-gamma' } } },
+  Sinc: { arities: { 1: { call: 'sinc' } } },
+  Erfi: { arities: { 1: { call: 'erfi' } } },
+  ErfInv: { arities: { 1: { call: 'erf-inv' } } },
+  Trigamma: { arities: { 1: { call: 'trigamma' } } },
+  FresnelS: { arities: { 1: { call: 'fresnel-s' } } },
+  FresnelC: { arities: { 1: { call: 'fresnel-c' } } },
+  SinIntegral: { arities: { 1: { call: 'sin-integral' } } },
+  CosIntegral: {
+    arities: { 1: { call: 'cos-integral' } },
+    domain: {
+      nonNegative: [0],
+      why:
+        'the existing kernel gives Ci(|x|) for a negative x, where the ' +
+        'value is Ci(|x|) + iπ',
+    },
+  },
+  ExpIntegralEi: { arities: { 1: { call: 'exp-integral-ei' } } },
+  LogIntegral: { arities: { 1: { call: 'log-integral' } } },
+  DirichletEta: { arities: { 1: { call: 'dirichlet-eta' } } },
+  DirichletBeta: { arities: { 1: { call: 'dirichlet-beta' } } },
+  Zeta: { arities: { 1: { call: 'zeta' }, 2: { call: 'zeta-generalized' } } },
+  StieltjesGamma: {
+    arities: { 1: { call: 'stieltjes' }, 2: { call: 'stieltjes-generalized' } },
+  },
+  GammaRegularized: {
+    arities: { 2: { call: 'gamma-q' } },
+    domain: { nonNegative: [1], why: NAN_BELOW_ZERO },
+  },
+  Beta: {
+    arities: { 2: { call: 'beta' } },
+    domain: {
+      positive: [0, 1],
+      why:
+        'the existing kernel gives NaN at a non-positive integer, where ' +
+        'the value can be a finite limit',
+    },
+  },
+  Binomial: { arities: { 2: { call: 'real-binomial' } } },
+  Choose: { arities: { 2: { call: 'real-binomial' } } },
+  ClausenCl: { arities: { 2: { call: 'clausen' } } },
+  EllipticF: { arities: { 2: { call: 'elliptic-f' } } },
+  EllipticPi: { arities: { 2: { call: 'elliptic-pi' } } },
+  BesselJ: { arities: { 2: { call: 'bessel-j' } } },
+  BesselY: { arities: { 2: { call: 'bessel-y' } } },
+  BesselI: { arities: { 2: { call: 'bessel-i' } } },
+  BesselK: { arities: { 2: { call: 'bessel-k' } } },
+  // `_SYS.agm(1, x)` for one operand.
+  AGM: {
+    arities: { 1: { call: 'agm', before: 1 }, 2: { call: 'agm' } },
+    domain: { nonNegative: [0, 1], why: NAN_BELOW_ZERO },
+  },
+  PolyGamma: { arities: { 2: { call: 'polygamma' } } },
+  Remainder: { arities: { 2: { call: 'real-remainder' } } },
+  // `((_a) => _a.length ? _a.reduce((_x, _y) => _SYS.gcd(_x, _y)) : 0)([…])`.
+  GCD: { arities: {}, variadic: { fold: 'real-gcd' } },
+  LCM: { arities: {}, variadic: { fold: 'real-lcm' } },
+  // `_SYS.chop(x, tolerance)`, the tolerance of the engine
+  // (`realCallRule()`).
+  Chop: { arities: { 1: { call: 'chop' } } },
+  Clamp: { arities: { 3: 'clamp' }, result: 'join' },
+  KroneckerDelta: {
+    arities: { 1: 'kronecker-delta' },
+    variadic: 'kronecker-delta',
+    result: 'integer',
+  },
+  Boole: { arities: { 1: 'boole' }, result: 'integer', operand: 'boolean' },
+  Real: { arities: { 1: 'identity' }, result: 'operand' },
+  Imaginary: { arities: { 1: 'imaginary' }, result: 'integer' },
+  Argument: { arities: { 1: 'argument' } },
+  // The heads with a complex continuation.
+  HurwitzZeta: { arities: { 2: { call: 'hurwitz-zeta' } }, continuation: true },
+  PolyLog: { arities: { 2: { call: 'polylog' } }, continuation: true },
+  LambertW: {
+    arities: { 1: { call: 'lambert-w' }, 2: { call: 'lambert-w-branch' } },
+    continuation: true,
+  },
+  EllipticK: { arities: { 1: { call: 'elliptic-k' } }, continuation: true },
+  // The incomplete `EllipticE(φ, m)` is real-only; `complexContinuation()`
+  // answers `real` for it.
+  EllipticE: {
+    arities: { 1: { call: 'elliptic-e' }, 2: { call: 'elliptic-e-incomplete' } },
+    continuation: true,
+  },
+};
+
+/** The rule of `Gamma(s, z)`, the upper incomplete gamma: the head is also
+ *  a head of `SCALAR_FUNCTION_HEADS` for one operand. */
+const UPPER_GAMMA: RealCallEntry = {
+  arities: { 2: { call: 'gamma-upper' } },
+  continuation: true,
+  domain: { nonNegative: [1], why: NAN_BELOW_ZERO },
+};
+
+/** The rule of `Gamma`: `upper` for two operands, `gamma` otherwise. */
+function upperGammaRule(
+  gamma: ReturnType<typeof structuredScalarFunctionRule>,
+  upper: ReturnType<typeof realCallRule>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) =>
+      (isFunction(node) && node.nops === 2 ? upper : gamma).walk(
+        node,
+        scope,
+        context,
+        w
+      ),
+  };
+}
+
+/** The heads whose code can throw on JavaScript (`canThrow()` in
+ *  `javascript-structured-lower.ts`). */
+const THROWING_HEADS: ReadonlySet<string> = new Set([
+  'Mod',
+  'Remainder',
+  'GCD',
+  'LCM',
+  'ReplaceAt',
+]);
+
+/** Whether the code of `node` can throw: a node of `THROWING_HEADS`, or a
+ *  call that is not a library operator (a helper or a function of the
+ *  host). */
+function mayThrow(node: Expression): boolean {
+  const seen = new Set<Expression>();
+  const visit = (n: Expression): boolean => {
+    if (!isFunction(n) || seen.has(n)) return false;
+    seen.add(n);
+    if (THROWING_HEADS.has(n.operator) || !isLibraryOperator(n, n.operator))
+      return true;
+    return n.ops.some(visit);
+  };
+  return visit(node);
+}
+
+/** The numbers of operands of an entry of `REAL_CALL_HEADS`, in a message. */
+function realCallArities(entry: {
+  readonly arities: Readonly<Record<number, unknown>>;
+  readonly variadic?: unknown;
+}): string {
+  const counts = Object.keys(entry.arities).map(Number);
+  const variadic = entry.variadic !== undefined;
+  if (counts.length === 0) return 'two operands or more';
+  return (
+    counts.map((n) => `${n}`).join(' or ') +
+    (variadic ? ' operand or more' : counts.at(-1) === 1 ? ' operand' : ' operands')
+  );
+}
+
+/**
+ * The library heads that the existing emitter writes as calls of real
+ * kernels of their operands (`REAL_CALL_HEADS`), on the structured route,
+ * for the compile mode `mode`. The handler of each in the existing emitter
+ * (`javascript-target.ts`) writes, for real operands:
+ *
+ * - one runtime helper of the operands: a plain name (`Heaviside:
+ *   '_SYS.heaviside'`, `GammaRegularized: '_SYS.gammaQ'`), or a function of
+ *   the operands that calls one (`_SYS.polygamma(n, x)`, `_SYS.agm(1, x)`
+ *   for `AGM(x)`, `_SYS.chop(x, ${ce.tolerance})`, `_SYS.zeta(s)` and
+ *   `_SYS.zetaGeneralized(s, a)`, `_SYS.remainder(a, b)`), with no
+ *   parentheses that a parent needs: a call. A literal operand is not
+ *   folded, but a node of closed exact operands of a head of
+ *   `JUMP_FUNCTIONS` (`Heaviside`, `Remainder`, `Chop`) is its literal
+ *   (`closedJumpFold()`).
+ * - `GCD` and `LCM`: the `reduce` of `_SYS.gcd` or `_SYS.lcm` over the
+ *   array of the operands, which is the operand itself for one operand
+ *   (declined here). `_SYS.remainder`, `_SYS.gcd` and `_SYS.lcm` throw a
+ *   `RangeError` for an operand beyond the safe integers or infinite, on
+ *   both routes.
+ * - `KroneckerDelta`: `(x === 0 ? 1 : 0)`, or the test of each operand
+ *   against the first one with `===`; `Clamp`: `Math.min(Math.max(x, lo),
+ *   hi)`; `Boole`: `((c) ? 1 : 0)`; `Real`: the operand
+ *   (`identityPassthrough()`); `Imaginary`: `0`; `Argument`:
+ *   `Math.atan2(0, (x) + 0)`.
+ *
+ * Each of these heads is real-only on this target (`isRealOnlyLowering()`)
+ * or real by definition, so the existing compiler reads its value as real
+ * whatever the type of the node, and writes no `_SYS.cplx()` around it. A
+ * complex operand is declined: the existing compiler declines it in the
+ * `strict` mode, and guards it at run time in the `complex` mode
+ * (`realOperandGuard()`), or writes the complex code of `Real`,
+ * `Imaginary`, `Argument` and `KroneckerDelta`. A head with a complex
+ * continuation (`HurwitzZeta`, `PolyLog`, `LambertW`, `EllipticK`,
+ * `EllipticE`, `Gamma` of two operands) writes the complex kernel in the
+ * `complex` mode unless `complexContinuation()` proves the value real; the
+ * rule reads the same predicate on the same operands. A list operand is
+ * declined: the existing compiler broadcasts the head.
+ */
+function realCallRule(
+  head: string,
+  mode: 'strict' | 'complex',
+  forms: Map<Expression, StructuredForm>,
+  binds: PassBinds,
+  entry: RealCallEntry = REAL_CALL_HEADS[head]
+) {
+  return {
+    walk: (node, scope, context, w) => {
+      const nops = isFunction(node) ? node.nops : 0;
+      let form: RealCallForm | 'identity' | undefined = Object.hasOwn(
+        entry.arities,
+        nops
+      )
+        ? entry.arities[nops]
+        : nops >= 2
+          ? entry.variadic
+          : undefined;
+      if (!isFunction(node) || form === undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `${head} with ${nops} operand${nops === 1 ? '' : 's'} is not in the ` +
+            `structured route, which has ${realCallArities(entry)}`
+        );
+      const facts = operandFacts(node, scope, context, w);
+      const operandKind = entry.operand ?? 'number';
+      for (const f of facts) {
+        const kind = f.type.kind;
+        if (operandKind === 'boolean' ? kind !== 'boolean' : kind === 'boolean')
+          return w.refuse(
+            node,
+            'signature',
+            `${head} with an operand of the type \`${fragmentTypeToString(f.type)}\` ` +
+              `is not in the structured route`
+          );
+        if (kind === 'complex')
+          return w.refuse(
+            node,
+            'signature',
+            `${head} with a complex operand is not in the structured route: ` +
+              `the existing compiler declines it in the strict mode, and in ` +
+              `the complex mode it writes complex code or a guard of the operand`
+          );
+        if (operandKind !== 'boolean' && kind !== 'real' && kind !== 'integer')
+          return w.refuse(
+            node,
+            'signature',
+            `${head} with an operand of the type \`${fragmentTypeToString(f.type)}\` ` +
+              `is not in the structured route: the existing compiler ` +
+              `broadcasts the head over a list`
+          );
+      }
+      // A predicate of the engine about an operand that names a binding of
+      // the pass reads an engine symbol of the same name (`PassBinds`).
+      const bound = (operand: Expression): boolean =>
+        namesBound(operand, (name) => binds(name, scope));
+      const { domain } = entry;
+      if (domain !== undefined) {
+        const outside = node.ops.find(
+          (operand, i) =>
+            (domain.nonNegative?.includes(i) === true ||
+              domain.positive?.includes(i) === true) &&
+            (bound(operand) ||
+              (domain.positive?.includes(i) === true
+                ? operand.isPositive !== true
+                : operand.isNonNegative !== true))
+        );
+        if (outside !== undefined)
+          return w.refuse(
+            node,
+            'signature',
+            `${nodeText(node)} with the operand ${nodeText(outside)}, which ` +
+              `is not provably ${domain.positive?.includes(node.ops.indexOf(outside)) === true ? 'positive' : 'non-negative'}` +
+              `${bound(outside) ? ' (it names a parameter, a local or an index)' : ''}, ` +
+              `is not in the structured route: ${domain.why}`
+          );
+      }
+      // The existing compiler evaluates every operand of `KroneckerDelta`
+      // and of the fold of `GCD` and `LCM` before it compares or folds; the
+      // route compares the second operand before it evaluates the third,
+      // and folds the first two before it evaluates the third, so that a
+      // throw of a later operand comes after the throw of the fold, or
+      // does not come.
+      if (
+        (form === 'kronecker-delta' ||
+          (typeof form === 'object' && 'fold' in form)) &&
+        node.nops >= 3
+      ) {
+        const throwing = node.ops.slice(2).find(mayThrow);
+        if (throwing !== undefined)
+          return w.refuse(
+            node,
+            'signature',
+            `${nodeText(node)} with the operand ${nodeText(throwing)}, which ` +
+              `can throw, after the second is not in the structured route: ` +
+              `the existing compiler evaluates every operand first`
+          );
+      }
+      if (
+        entry.continuation === true &&
+        mode === 'complex' &&
+        node.ops.some(bound)
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `${nodeText(node)} names a parameter, a local or an index, and in ` +
+            `the complex mode the existing compiler decides from the types ` +
+            `of the engine whether it writes the complex kernel of ${head}`
+        );
+      if (
+        entry.continuation === true &&
+        mode === 'complex' &&
+        complexContinuation(head, node.ops) !== 'real'
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `${nodeText(node)} can have a complex value, and in the complex mode ` +
+            `the existing emitter writes the complex kernel of ${head}`
+        );
+      // `Chop` has the type of its operand: the existing compiler reads a
+      // node of the type `number` as complex in the complex mode and writes
+      // `_SYS.cplx(_SYS.chop(…))`.
+      if (
+        head === 'Chop' &&
+        mode === 'complex' &&
+        (bound(node.op1) ||
+          !isSubtype(finitePartOfType(node.type.type), 'real'))
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `${nodeText(node)} has the type ${node.type.toString()}, which the ` +
+            `existing compiler reads as a complex value in the complex mode`
+        );
+      // The tolerance of the engine, a number literal of the code.
+      if (head === 'Chop')
+        form = { call: 'chop', after: node.engine.tolerance ?? 1e-10 };
+      forms.set(node, form);
+      if (form === 'identity')
+        return w.valueFacts(node, facts[0].type, [
+          w.convert(facts[0], facts[0].type)!,
+        ]);
+      const result: 'real' | 'integer' =
+        entry.result === 'integer'
+          ? 'integer'
+          : entry.result === 'join' &&
+              facts.every((f) => f.type.kind === 'integer')
+            ? 'integer'
+            : 'real';
+      return w.valueFacts(
+        node,
+        { kind: result },
+        facts.map((f) =>
+          w.convert(
+            f,
+            operandKind === 'boolean' ||
+              form === 'kronecker-delta' ||
+              result === 'integer'
+              ? f.type
+              : { kind: 'real' }
+          )!
+        )
+      );
     },
   } satisfies FragmentRule<ScalarRepresentation>;
 }
@@ -2701,6 +3127,8 @@ function modeRules(
   mode: 'strict' | 'complex',
   snapshotOf: SnapshotOf,
   forms: Map<Expression, StructuredForm>,
+  binds: PassBinds,
+  inputs: ReadonlySet<string>,
   varsKeys?: ReadonlyMap<string, unknown>
 ): Record<string, FragmentRule<ScalarRepresentation>> {
   return {
@@ -2720,11 +3148,224 @@ function modeRules(
     ...Object.fromEntries(
       Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [
         head,
-        structuredScalarFunctionRule(head, mode, forms),
+        structuredScalarFunctionRule(head, mode, forms, inputs),
       ])
+    ),
+    ...Object.fromEntries(
+      Object.keys(REAL_CALL_HEADS).map((head) => [
+        head,
+        realCallRule(head, mode, forms, binds),
+      ])
+    ),
+    // `Gamma(s, z)` by the rule of the heads of real calls, `Gamma(x)` by
+    // the rule of `SCALAR_FUNCTION_HEADS`.
+    Gamma: upperGammaRule(
+      structuredScalarFunctionRule('Gamma', mode, forms, inputs),
+      realCallRule('Gamma', mode, forms, binds, UPPER_GAMMA)
     ),
   };
 }
+
+/**
+ * The rule `rule` of `If` or `Which`, but a node used as a value whose
+ * constant conditions select a branch (`decidedBranch()`) has the facts of
+ * that branch, and records it (the form `{ selected }`): the existing
+ * emitter writes that branch alone.
+ */
+function decidedSelectionRule(
+  rule: typeof ifRule | typeof whichRule,
+  forms: Map<Expression, StructuredForm>,
+  binds: PassBinds
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const decided =
+        context.place !== 'statement'
+          ? decidedBranch(node, (name) => binds(name, scope))
+          : undefined;
+      if (decided === undefined) return rule.walk(node, scope, context, w);
+      forms.set(node, { selected: decided });
+      return w.value(decided, scope, context);
+    },
+  };
+}
+
+/**
+ * Whether a scope of the pass binds the name `name` in `scope`: a
+ * parameter of the root function (an input of `compileFunction()`), or a
+ * parameter, a local or an index of a scope below the root. The engine
+ * answers a predicate of such a name (`isNonNegative`, its type, its value)
+ * from the definition of an engine symbol of the same name.
+ */
+type PassBinds = (
+  name: string,
+  scope: FragmentScope<ScalarRepresentation>
+) => boolean;
+
+/** Whether `node` names a name for which `bound` is true. */
+function namesBound(
+  node: Expression,
+  bound: (name: string) => boolean
+): boolean {
+  if (isSymbol(node)) return bound(node.symbol);
+  return isFunction(node) && (bound(node.operator) || node.symbols.some(bound));
+}
+
+/**
+ * The names that a form of `root` binds anywhere in it: the parameters of
+ * a `Function`, the names that a `Declare` or an `Assign` writes, and the
+ * index of a `Limits` or an `Element` clause. The admission has no scopes,
+ * and reads a name bound in another part of the tree as bound too.
+ */
+function namesBoundIn(root: Expression): ReadonlySet<string> {
+  const names = new Set<string>();
+  const seen = new Set<Expression>();
+  const nameOf = (node: Expression): string | undefined =>
+    isSymbol(node)
+      ? node.symbol
+      : isFunction(node) && node.nops > 0 && isSymbol(node.op1)
+        ? node.op1.symbol
+        : undefined;
+  const visit = (node: Expression): void => {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    const binders =
+      node.operator === 'Function'
+        ? node.ops.slice(1)
+        : ['Declare', 'Assign', 'Limits', 'Element'].includes(node.operator)
+          ? node.ops.slice(0, 1)
+          : [];
+    for (const binder of binders) {
+      const name = nameOf(binder);
+      if (name !== undefined) names.add(name);
+    }
+    node.ops.forEach(visit);
+  };
+  visit(root);
+  return names;
+}
+
+/** The refusals of an `If` or a `Which` whose constant conditions select a
+ *  branch, in the admission. `bound`: the names that a form binds. `root`:
+ *  `node` is the root of the program or the body of a function. */
+function refuseSelections(
+  node: Expression,
+  bound: (name: string) => boolean,
+  root: boolean
+): void {
+  // At the root, the selection has no parent to group it.
+  if (!root) refuseUngroupedSelection(node, bound);
+  refuseWideSelection(node, bound);
+  refuseComplexSelection(node, bound);
+  refuseOperandSelection(node, bound, root);
+}
+
+/**
+ * Refuse an `If` or a `Which` whose constant conditions select a branch,
+ * as an operand, unless that branch is a symbol with no value: the route
+ * writes the selected branch in the parent, which sees through it (a
+ * literal `0` that a complex sum drops, a haversine that the parent groups
+ * with no parentheses), where the existing compiler writes the selection
+ * as a computed operand in parentheses: `z + Which(2 < 3, 0, True, 1)` at
+ * `z = {re: -0, im: 1}` has the real part `-0` on the route and `0` there.
+ * At the root of the program or of a function body, the selection has no
+ * parent.
+ */
+function refuseOperandSelection(
+  node: Expression,
+  bound: (name: string) => boolean,
+  root: boolean
+): void {
+  if (root) return;
+  const selected = decidedBranch(node, bound);
+  if (selected === undefined) return;
+  if (
+    isSymbol(selected) &&
+    resolvedValueDefinition(selected)?.value === undefined
+  )
+    return;
+  throw new Error(
+    `JS scalar fragment: ${nodeText(node)} has conditions of a constant ` +
+      `type and selects ${nodeText(selected)} as an operand, which the ` +
+      `existing compiler writes as a computed operand in parentheses`
+  );
+}
+
+/**
+ * Refuse an `If` of three operands whose condition has a constant type and
+ * whose selected branch is not a symbol or a number: the existing compiler
+ * writes the code of that branch with no parentheses around it, so that
+ * `2 * If(2 < 3, x + 1, 0)` is `2 * _.x + 1` there (CE-1224).
+ */
+function refuseUngroupedSelection(
+  node: Expression,
+  bound: (name: string) => boolean
+): void {
+  if (!isFunction(node) || node.nops !== 3) return;
+  if (node.operator !== 'If' || !isLibraryOperator(node, 'If')) return;
+  const selected = decidedBranch(node, bound);
+  if (selected === undefined || isSymbol(selected) || isNumber(selected))
+    return;
+  throw new Error(
+    `JS scalar fragment: ${nodeText(node)} has a condition of a constant ` +
+      `type, and the existing compiler writes the branch ` +
+      `${nodeText(selected)} that it selects with no parentheses`
+  );
+}
+
+/**
+ * Refuse an `If` or a `Which` whose constant conditions select a branch
+ * when the type of the node is not a number type: a dead branch of another
+ * type (a name with no declared type) widens it, and the existing compiler
+ * writes the parent of the node from that type (`2/3 · (x + Which(1.5 ≤ 1,
+ * u, True, 0.5))` is a broadcast there), not from the selected branch.
+ */
+function refuseWideSelection(
+  node: Expression,
+  bound: (name: string) => boolean
+): void {
+  if (decidedBranch(node, bound) === undefined) return;
+  if (isSubtype(node.type.type, 'number')) return;
+  throw new Error(
+    `JS scalar fragment: ${nodeText(node)} has conditions of a constant ` +
+      `type and the type ${node.type.toString()}, which is not a number ` +
+      `type, and the existing compiler writes its parent from that type`
+  );
+}
+
+/**
+ * Refuse an `If` or a `Which` whose constant conditions select a branch
+ * that is a complex constant: the existing compiler reads the node as a
+ * computed complex value, and the route writes the literal in the parent,
+ * so that `x + Which(2 < 3, i, True, 0)` at `x = -0` is `{re: -0, im: 1}`
+ * on the route and `{re: 0, im: 1}` there.
+ */
+function refuseComplexSelection(
+  node: Expression,
+  bound: (name: string) => boolean
+): void {
+  const selected = decidedBranch(node, bound);
+  if (selected === undefined || selected.unknowns.length > 0) return;
+  if (isSubtype(selected.type.type, 'real')) return;
+  throw new Error(
+    `JS scalar fragment: ${nodeText(node)} has conditions of a constant ` +
+      `type and selects the complex constant ${nodeText(selected)}, which ` +
+      `the existing compiler reads as a computed complex value`
+  );
+}
+
+/** The rule of `If` of the pass: the value of an `If` can be a list. An
+ *  `If` with no else branch used as a value is a `Which` of one clause. */
+const ifRule = {
+  walk: (node, scope, context, w) =>
+    isFunction(node) && node.nops === 2 && context.place !== 'statement'
+      ? selectionRule(node, scope, context, w)
+      : walkIf(node, scope, context, w),
+} satisfies FragmentRule<ScalarRepresentation>;
+
+const whichRule = {
+  walk: (node, scope, context, w) => selectionRule(node, scope, context, w),
+} satisfies FragmentRule<ScalarRepresentation>;
 
 /** The entry of `structuredRules` for a head of `modeRules()`. */
 const withoutMode = (head: string): FragmentRule<ScalarRepresentation> => ({
@@ -2752,19 +3393,13 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   ...Object.fromEntries(
     Object.keys(SCALAR_FUNCTION_HEADS).map((head) => [head, withoutMode(head)])
   ),
+  ...Object.fromEntries(
+    Object.keys(REAL_CALL_HEADS).map((head) => [head, withoutMode(head)])
+  ),
   Add: withRealFromRealOperands(withListLengthIntegers(structuredAddRule)),
   Negate: withRealFromRealOperands(withListLengthIntegers(negateRule)),
-  // The rule of the pass: the value of an `If` can be a list. An `If` with
-  // no else branch used as a value is a `Which` of one clause.
-  If: {
-    walk: (node, scope, context, w) =>
-      isFunction(node) && node.nops === 2 && context.place !== 'statement'
-        ? selectionRule(node, scope, context, w)
-        : walkIf(node, scope, context, w),
-  },
-  Which: {
-    walk: (node, scope, context, w) => selectionRule(node, scope, context, w),
-  },
+  If: ifRule,
+  Which: whichRule,
   Sum: {
     walk: (node, scope, context, w) => aggregateRule(node, scope, context, w),
   },
@@ -6224,13 +6859,15 @@ function refuseHaversineGrouping(
 ): void {
   if (!admission.structured || !isFunction(node)) return;
   /** A haversine that the existing emitter writes with no parentheses, also
-   *  as the value of a block, and as the operand of a `Conjugate`, which
-   *  the lowering writes as its real operand (the form `identity`): the
+   *  as the value of a block, and as the operand of a `Conjugate` or of a
+   *  `Real`, which the lowering writes as its real operand (the form
+   *  `identity`; `identityPassthrough()` in the existing emitter): the
    *  emission of `x · Conjugate(Haversine(2y))` failed on the grouping. */
   const value = (op: Expression): Expression =>
     isFunction(op, 'Block') && op.nops > 0
       ? value(op.ops[op.nops - 1])
-      : isFunction(op, 'Conjugate') && op.nops === 1
+      : (isFunction(op, 'Conjugate') || isFunction(op, 'Real')) &&
+          op.nops === 1
         ? value(op.op1)
         : op;
   const bare = (op: Expression): boolean => {
@@ -6737,6 +7374,12 @@ function refuseUnsettledCollection(
  * first. A sum of a list literal of other elements is a sum of its elements
  * on both.
  *
+ * In an angular unit other than radians, an inverse trigonometric function
+ * is a product too: the existing compiler writes `Arcsin(0.5)` as
+ * `57.29577951308232 * Math.asin(0.5)`, so that `Product([p, Arcsin(0.5)])`
+ * is `_.p * 57.29577951308232 * Math.asin(0.5)` there, a product in
+ * another order.
+ *
  * In the body of a helper (`helperBody`), the existing compiler also writes
  * the element of an element-wise sum of a list literal and other operands
  * as one sum, in an order of its own: `([1, 2] + (x - 0.1))[2]` is
@@ -6747,6 +7390,23 @@ function refuseUnsettledCollection(
 function refuseSumOfNestedSums(expr: Expression, helperBody = false): void {
   // A node reached on several paths is visited once.
   const seen = new Set<Expression>();
+  /** Whether the existing emitter writes `element` as a chain of
+   *  `operation` (an inverse trigonometric function in degrees is a
+   *  product). */
+  const chains = (element: Expression, operation: string): boolean =>
+    isFunction(element, operation) ||
+    (operation === 'Multiply' &&
+      isFunction(element) &&
+      INVERSE_TRIG_OPERATORS.has(element.operator) &&
+      element.engine.angularUnit !== 'rad');
+  /** The head of the first element of a list operand of `node` that
+   *  `chains()` finds. */
+  const elementHead = (node: Expression): string => {
+    for (const list of isFunction(node) ? node.ops : [])
+      for (const op of isFunction(list, 'List') ? list.ops : [])
+        if (chains(op, node.operator)) return op.operator;
+    return node.operator;
+  };
   const visit = (node: Expression): void => {
     if (!isFunction(node) || seen.has(node)) return;
     seen.add(node);
@@ -6770,7 +7430,7 @@ function refuseSumOfNestedSums(expr: Expression, helperBody = false): void {
         (list) =>
           isFunction(list, 'List') &&
           (helperBody ||
-            list.ops.some((op) => isFunction(op, node.op1.operator)))
+            list.ops.some((op) => chains(op, node.op1.operator)))
       )
     )
       throw new Error(
@@ -6782,17 +7442,18 @@ function refuseSumOfNestedSums(expr: Expression, helperBody = false): void {
               `in an order of its own`
           : `JS scalar fragment: At of ${nodeText(node.op1)}, an element-wise ` +
               `${node.op1.operator} of a list literal with an element of the head ` +
-              `${node.op1.operator}, is not in the structured route: the existing emitter ` +
+              `${elementHead(node.op1)}, is not in the structured route: the existing emitter ` +
               `writes the operations of the element as one chain from left to right`
       );
     if (
       operation !== undefined &&
       isFunction(node.op1, 'List') &&
-      node.op1.ops.some((op) => isFunction(op, operation))
+      node.op1.ops.some((op) => chains(op, operation))
     )
       throw new Error(
         `JS scalar fragment: ${node.operator} of the list literal ${nodeText(node.op1)} with ` +
-          `an element of the head ${operation} is not in the structured route: the ` +
+          `an element of the head ${node.op1.ops.find((op) => chains(op, operation))!.operator} ` +
+          `is not in the structured route: the ` +
           `existing emitter writes the operations of the elements as one chain from ` +
           `left to right`
       );
@@ -9065,6 +9726,10 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     const indexes = new Set<string>();
     const check = (node: Expression): void =>
       atNode(node, () => checkNode(node));
+    // The names that a form of the expression binds (`decidedBranch()`).
+    let rootBound: ReadonlySet<string> | undefined;
+    const boundInRoot = (name: string): boolean =>
+      (rootBound ??= namesBoundIn(prepared.expr)).has(name);
     const checkNode = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
@@ -9081,6 +9746,15 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         );
         if (replacement !== node) return check(replacement);
       }
+      // An `If` or a `Which` whose constant conditions select a branch is
+      // that branch: the existing emitter writes no code for the conditions
+      // and the other branches (`decidedBranch()`).
+      if (structured)
+        refuseSelections(node, boundInRoot, node === prepared.expr);
+      const decided = structured
+        ? decidedBranch(node, boundInRoot)
+        : undefined;
+      if (decided !== undefined) return check(decided);
       refuseListHead(node, admission);
       refuseBooleanClaim(node, admission);
       refuseUndirectedInfinity(node, admission);
@@ -10560,6 +11234,12 @@ function admitFunctionBody(
         };
   const registry = named.structured;
   const isRoot = helper === undefined;
+  // The parameters, and the names that a form of the body binds
+  // (`decidedBranch()`).
+  let bodyBound: ReadonlySet<string> | undefined;
+  const boundInBody = (name: string): boolean =>
+    parameters.includes(name) ||
+    (bodyBound ??= namesBoundIn(body)).has(name);
   // The body of a helper is not in the tree of the root, which
   // `prepareFragment()` walks.
   if (admission.structured) refuseSumOfNestedSums(body, !isRoot);
@@ -10768,6 +11448,21 @@ function admitFunctionBody(
       );
       if (replacement !== node) return checkValue(replacement, bodyValue);
     }
+    // The branch that the constant conditions of an `If` or a `Which`
+    // select (`decidedBranch()`).
+    if (admission.structured)
+      refuseSelections(
+        node,
+        boundInBody,
+        node === body ||
+          (isFunction(body, 'Block') &&
+            body.nops > 0 &&
+            node === body.ops[body.nops - 1])
+      );
+    const decided = admission.structured
+      ? decidedBranch(node, boundInBody)
+      : undefined;
+    if (decided !== undefined) return checkValue(decided, bodyValue);
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     refuseUndirectedInfinity(node, admission);
@@ -12599,6 +13294,8 @@ function annotateStructured(
   };
   const { lengthDeclarations } = registry;
   const inputNames = new Set((inputs ?? []).map((input) => input.name));
+  const binds: PassBinds = (name, scope) =>
+    inputNames.has(name) || fragmentScopeBinds(scope, name);
   const definition: FragmentDefinition<ScalarRepresentation> = {
     ...base,
     // A helper body, as the body of the root function, has locals and
@@ -12607,12 +13304,21 @@ function annotateStructured(
       ...base.rules,
       Block: { walk: walkBlock },
       Assign: { walk: walkAssign },
+      // `If` and `Which` with constant conditions record the branch that
+      // they select (`decidedSelectionRule()`).
+      If: decidedSelectionRule(ifRule, registry.forms, binds),
+      Which: decidedSelectionRule(whichRule, registry.forms, binds),
+      // The parameters of the root function are bound in an operand of
+      // `Floor` (`inexactJumpConstant()`).
+      Floor: withoutListOperands('Floor', floorRuleOf(inputNames)),
       ...Object.fromEntries(
         Object.entries(
           modeRules(
             registry.mode,
             snapshotReader(registry),
             registry.forms,
+            binds,
+            inputNames,
             registry.hosts?.vars
           )
         ).map(([head, rule]) => [head, withoutListOperands(head, rule)])

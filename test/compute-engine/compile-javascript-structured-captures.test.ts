@@ -466,9 +466,9 @@ describe('a node that reads no input', () => {
     withList.declare('LQ', 'list<tuple<real, real>>');
     declines(['Mod', ['Length', 'LQ'], 1], /Mod of the integer Length\("LQ"\) and the literal divisor 1/, withList);
     declines(['Mod', ['Floor', 'x'], 1],/Mod of the integer Floor\(x\) and the literal divisor 1|Mod of the integer floor/);
-    // A condition whose type is a value: the existing compiler selects the
-    // branch.
-    declines(['If', ['Less', 2, 3], 'x', 0], /the condition of If has the constant type true/);
+    // A condition whose type is the value false before a condition that is
+    // not constant: the existing compiler drops its clause.
+    declines(['Which', ['Less', 3, 2], 'x', ['Less', 'x', 1], 2, 'True', 0], /the condition of Which has the constant type false/);
     // A rounding of an integer variable and an exact constant that no
     // double holds: the existing compiler rewrites the node.
     declines(['Floor', ['Add', 'k', ['Sqrt', 2]]], /Floor of an operand with the exact constant/);
@@ -519,12 +519,15 @@ describe('a bound name with the name of a symbol that has a value', () => {
 
   test('a parameter of the root function in a node that reads no other name', () => {
     // `Floor(t)`, `Floor(n)` with `t := 1/3`, `n := 5`: the existing compiler
-    // writes `Math.floor(t)` and `n`; the profile declines a rounding of a
-    // name with an exact value (`inexactJumpConstant()`, which reads the
-    // value of the symbol `t`), and never folds the node.
-    expectBound(['Function', ['Floor', 't'], 't'], [], /Floor of an operand with the exact constant t/);
-    expectBound(['Function', ['Floor', 'n'], ['Typed', 'n', "'integer'"]], [], /Floor of an operand with the exact constant n/);
-    expectBound(['Function', ['Add', ['Mod', 'x', 1], ['Floor', 't']], 'x', 't'], [], /Floor of an operand with the exact constant t/);
+    // writes `Math.floor(t)` and `n`, and so does the profile: a bound name
+    // is not an exact constant (`inexactJumpConstant()`), and the node is
+    // never folded.
+    expectBound(['Function', ['Floor', 't'], 't'], [[0.5], [-1.5], [2]]);
+    expectBound(['Function', ['Floor', 'n'], ['Typed', 'n', "'integer'"]], [[3], [-2]]);
+    expectBound(['Function', ['Add', ['Mod', 'x', 1], ['Floor', 't']], 'x', 't'], [[0.25, 1.5], [-0.5, -2.5]]);
+    // A bound name next to an exact constant that no double holds: the
+    // constant is refused.
+    expectBound(['Function', ['Floor', ['Add', 't', ['Sqrt', 2]]], ['Typed', 't', "'integer'"]], [], /Floor of an operand with the exact constant/);
     expectBound(['Function', ['Sign', 'n'], 'n'], [[-2], [0], [3.5]]);
     expectBound(['Function', ['Less', 'n', 't'], 'n', 't'], [[0.25, 0.5], [2, 1]]);
   });

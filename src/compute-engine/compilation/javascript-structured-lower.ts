@@ -91,6 +91,7 @@ import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
 import { declareValueOperand } from './compile-declarations.js';
 import { exactRationalDivisor } from './compiler-type-facts.js';
+import { booleanClaim } from './compile-conditions.js';
 import {
   isFunction,
   isNumber,
@@ -202,9 +203,17 @@ export type StructuredInput = IRInput;
  *   (`foldedLiteralPower()`, `foldedLiteralRoot()` in
  *   `javascript-fragment-target.ts`): the value is written as a literal, and
  *   the operands have no operation.
+ * - `{ selected }`: an `If` or a `Which` used as a value whose constant
+ *   conditions select the branch `selected` (`decidedBranch()`), written as
+ *   that branch: the conditions and the other branches have no operation.
+ * - `RealCallForm`: a library head that the existing emitter writes as
+ *   calls of real kernels (`realCallRule()` in
+ *   `javascript-fragment-target.ts`).
  */
 export type StructuredForm =
   | { readonly folded: number | { readonly re: number; readonly im: number } }
+  | { readonly selected: Expression }
+  | RealCallForm
   | 'pi-multiple'
   | 'identity'
   | 'conjugate'
@@ -228,6 +237,113 @@ export type StructuredForm =
   | 'abs-identity'
   | 'chain-swap'
   | 'mod-one';
+
+/**
+ * The lowering of a head of `realCallRule()` (`javascript-fragment-target.ts`),
+ * whose operands the rule admitted with real or integer facts, as the
+ * existing emitter writes it:
+ *
+ * - `{ call }`: the function `call` of the operands, with the number literal
+ *   `before` as a first operand and `after` as a last one when they are
+ *   given (`_SYS.agm(1, x)` for `AGM(x)`, `_SYS.chop(x, 1e-10)` for
+ *   `Chop(x)`).
+ * - `{ fold }`: the function `fold` of the first two operands, then of that
+ *   value and each next operand, as `reduce` computes it
+ *   (`((_a) => _a.reduce((_x, _y) => _SYS.gcd(_x, _y)))([a, b, c])`).
+ * - `kronecker-delta`: `1` when the operands are equal (`===`), or when the
+ *   one operand is `0`, else `0`: the conditional of the `equal` of the
+ *   operands, or of the chain of adjacent pairs for three operands or more.
+ * - `clamp`: `Math.min(Math.max(x, lo), hi)`, the operations `max` and
+ *   `min`.
+ * - `boole`: `1` when the boolean operand holds, else `0`.
+ * - `argument`: `Argument` of a real operand, `Math.atan2(0, x + 0)`: the
+ *   sum makes `-0` into `0`.
+ * - `imaginary`: `Imaginary` of a real operand, the integer literal `0`; the
+ *   operand has no operation.
+ */
+export type RealCallForm =
+  | {
+      readonly call: UnaryFunctionName | BinaryFunctionName;
+      readonly before?: number;
+      readonly after?: number;
+    }
+  | { readonly fold: BinaryFunctionName }
+  | 'kronecker-delta'
+  | 'clamp'
+  | 'boole'
+  | 'argument'
+  | 'imaginary';
+
+const REAL_CALL_FORMS: ReadonlySet<string> = new Set([
+  'kronecker-delta',
+  'clamp',
+  'boole',
+  'argument',
+  'imaginary',
+]);
+
+/**
+ * The branch of the library `If` or `Which` `node` that its constant
+ * conditions select, or `undefined`. A pure condition whose type is the
+ * value `true` or `false` (`booleanClaim()`) is decided at compile time: the
+ * existing emitter writes the branch that it selects, and no test, the
+ * condition and the other branches have no code (`liveSelectionArms()` in
+ * `compile-conditions.ts`). `If(c, a, b)` with such a condition is `a` or
+ * `b`; the symbol `True` has the type `boolean`, so `If(True, x, y)` keeps
+ * its test there, and here. A `Which` is its first value whose condition
+ * holds when each condition before it is `false`: a condition `true` or
+ * the symbol `True`, as the existing compiler reads a clause
+ * (`compileExprWhich()` and `liveSelectionArms()`); the symbol `False` is not
+ * decided.
+ * An `If(c, v)` whose condition is `false`, a `Which` whose clauses all
+ * have a `false` condition, and a `Which` with a condition that is not
+ * constant before the selected clause have no selected branch.
+ *
+ * A condition that names a parameter, a local or an index (`bound`) is not
+ * constant: the engine types such a name from the definition of an engine
+ * symbol of the same name, so that with `n := 5`, the condition `n < 3` of
+ * `Function(If(n < 3, 1, 2), n)` has the type `false`.
+ */
+export function decidedBranch(
+  node: Expression,
+  bound: (name: string) => boolean = () => false
+): Expression | undefined {
+  if (!isFunction(node)) return undefined;
+  const claimOf = (
+    condition: Expression,
+    clause: boolean
+  ): boolean | undefined =>
+    clause && isSymbol(condition, 'True')
+      ? true
+      : (isSymbol(condition) && bound(condition.symbol)) ||
+          (isFunction(condition) && condition.symbols.some(bound))
+        ? undefined
+        : booleanClaim(condition);
+  if (node.operator === 'If' && isLibraryOperator(node, 'If')) {
+    if (node.nops !== 2 && node.nops !== 3) return undefined;
+    const claim = claimOf(node.op1, false);
+    if (claim === undefined) return undefined;
+    return claim ? node.op2 : node.nops === 3 ? node.op3 : undefined;
+  }
+  if (node.operator !== 'Which' || !isLibraryOperator(node, 'Which'))
+    return undefined;
+  const ops = node.ops;
+  for (let i = 0; i + 1 < ops.length; i += 2) {
+    const claim = claimOf(ops[i], true);
+    if (claim === undefined) return undefined;
+    if (claim) return ops[i + 1];
+  }
+  return undefined;
+}
+
+/** Whether the form `form` is a `RealCallForm`. */
+export function isRealCallForm(
+  form: StructuredForm | undefined
+): form is RealCallForm {
+  if (form === undefined) return false;
+  if (typeof form === 'string') return REAL_CALL_FORMS.has(form);
+  return 'call' in form || 'fold' in form;
+}
 
 /**
  * A binding of the engine that the program reads and does not bind, with
@@ -1417,6 +1533,11 @@ class Lowering {
     if (Object.hasOwn(COLLECTION_HEADS, operator))
       return this.collection(node, facts, scope, operations);
 
+    // The branch that the constant conditions select (`decidedBranch()`).
+    const selected = this.prep.forms.get(node);
+    if (typeof selected === 'object' && 'selected' in selected)
+      return this.value(selected.selected, scope, operations);
+
     if (operator === 'Which' || (operator === 'If' && node.nops === 2))
       return this.selection(node, facts, scope, operations, effect);
 
@@ -1595,7 +1716,7 @@ class Lowering {
     // (the rule of `Power` types no base for this form).
     if (operator === 'Power') {
       const form = this.prep.forms.get(node);
-      if (typeof form === 'object')
+      if (typeof form === 'object' && 'folded' in form)
         return this.folded(node, form.folded, facts, effect, operations);
       if (form === 'exp') {
         const exponent = this.convert(
@@ -1742,7 +1863,7 @@ class Lowering {
     // and the degree.
     if (operator === 'Root') {
       const form = this.prep.forms.get(node);
-      if (typeof form === 'object')
+      if (typeof form === 'object' && 'folded' in form)
         return this.folded(node, form.folded, facts, effect, operations);
       if (form !== 'cbrt' && form !== 'root')
         return fail(`no recorded form for the root ${nodeText(node)}`);
@@ -1882,6 +2003,8 @@ class Lowering {
       });
       return result;
     }
+    if (isRealCallForm(special))
+      return this.realCall(node, special, facts, scope, operations, effect);
 
     const fn = Object.hasOwn(FUNCTIONS, operator)
       ? FUNCTIONS[operator]
@@ -3350,6 +3473,156 @@ class Lowering {
   }
 
   /**
+   * A head of `realCallRule()` in the form `form` (`RealCallForm`). The
+   * operands are evaluated once, in order, before the functions of the
+   * form, as the existing emitter evaluates the arguments of its call;
+   * `imaginary` evaluates none.
+   */
+  private realCall(
+    node: Expression & { ops: readonly Expression[] },
+    form: RealCallForm,
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    if (form === 'imaginary')
+      return this.numberLiteral(0, 'integer', node, operations);
+    const operands = this.operands(node, facts, scope, operations);
+    const apply = (
+      fn: UnaryFunctionName | BinaryFunctionName,
+      args: IRValue[],
+      result: IRValue = this.newValue('real', 'number')
+    ): IRValue => {
+      operations.push(
+        args.length === 1
+          ? {
+              kind: 'unary',
+              fn: fn as UnaryFunctionName,
+              result,
+              operands: args,
+              effect,
+              origin: node,
+            }
+          : {
+              kind: 'binary',
+              fn: fn as BinaryFunctionName,
+              result,
+              operands: args,
+              effect,
+              origin: node,
+            }
+      );
+      return result;
+    };
+    const literal = (value: number) =>
+      this.numberLiteral(value, 'integer', node, operations);
+    if (typeof form === 'object' && 'call' in form) {
+      const args = [
+        ...(form.before === undefined ? [] : [literal(form.before)]),
+        ...operands,
+        ...(form.after === undefined
+          ? []
+          : [this.numberLiteral(form.after, 'real', node, operations)]),
+      ];
+      return apply(form.call, args, this.resultOf(facts));
+    }
+    if (typeof form === 'object') {
+      let value = operands[0];
+      for (const operand of operands.slice(1))
+        value = apply(form.fold, [value, operand]);
+      return value;
+    }
+    const oneOrZero = (test: IRValue): IRValue =>
+      this.conditional(
+        test,
+        (inner) => this.numberLiteral(1, 'integer', node, inner),
+        (inner) => this.numberLiteral(0, 'integer', node, inner),
+        node,
+        operations,
+        effect
+      );
+    const equal = (a: IRValue, b: IRValue, into: IROperation[]): IRValue => {
+      const result = this.newValue('boolean', 'boolean');
+      into.push({
+        kind: 'equal',
+        result,
+        operands: [a, b],
+        effect,
+        origin: node,
+      });
+      return result;
+    };
+    switch (form) {
+      case 'boole':
+        return oneOrZero(operands[0]);
+      case 'kronecker-delta': {
+        // `(x === 0 ? 1 : 0)`, and `_v.every((_x) => _x === _v[0]) ? 1 : 0`
+        // over the values of the operands: each later operand is compared
+        // with the first, only while the comparisons before it hold.
+        if (operands.length === 1)
+          return oneOrZero(equal(operands[0], literal(0), operations));
+        const [first, ...rest] = operands;
+        const chain = (i: number, into: IROperation[]): IRValue => {
+          // The first operand first, as the existing compiler evaluates
+          // the operands in order (a later operand that can throw is
+          // refused by the rule, `realCallRule()`).
+          const test = equal(first, rest[i], into);
+          if (i === rest.length - 1)
+            return this.conditional(
+              test,
+              (inner) => this.numberLiteral(1, 'integer', node, inner),
+              (inner) => this.numberLiteral(0, 'integer', node, inner),
+              node,
+              into,
+              effect
+            );
+          return this.conditional(
+            test,
+            (inner) => chain(i + 1, inner),
+            (inner) => this.numberLiteral(0, 'integer', node, inner),
+            node,
+            into,
+            effect
+          );
+        };
+        return chain(0, operations);
+      }
+      case 'clamp': {
+        // `Math.min(Math.max(x, lo), hi)`.
+        const type = valueType(facts.type);
+        const extremum = (kind: 'min' | 'max', args: IRValue[]): IRValue => {
+          const result = this.newValue(type, 'number');
+          operations.push({
+            kind,
+            result,
+            operands: args,
+            effect,
+            origin: node,
+          });
+          return result;
+        };
+        return extremum('min', [
+          extremum('max', [operands[0], operands[1]]),
+          operands[2],
+        ]);
+      }
+      case 'argument': {
+        // `Math.atan2(0, (x) + 0)`.
+        const sum = this.newValue('real', 'number');
+        operations.push({
+          kind: 'add',
+          result: sum,
+          operands: [operands[0], literal(0)],
+          effect,
+          origin: node,
+        });
+        return apply('atan2', [literal(0), sum], this.resultOf(facts));
+      }
+    }
+  }
+
+  /**
    * `Which(c1, v1, …, cn, vn)`, and `If(c, v)` used as a value, which the
    * rule of `Which` checked (`selectionRule()` in
    * `javascript-fragment-target.ts`): an `if` per clause, nested in the
@@ -4330,7 +4603,10 @@ class Lowering {
    * (a value defined before the term, or computed in it by pure operations
    * from such values, inputs, captures and constants): then it throws in
    * the first term on both compilers, or never. `Mod(k, 3)`, `x·Mod(k, 2)`,
-   * `Mod(k, m)` with an input `m` are harmless; `Mod(1, j/k)` is not.
+   * `Mod(k, m)` with an input `m` are harmless; `Mod(1, j/k)` is not. The
+   * functions `real-remainder`, `real-gcd` and `real-lcm` read their
+   * operands with `integerOperand()` too, and are judged as a `mod`:
+   * `GCD(k, 6)` is harmless, `Remainder(1, j/m)` is not.
    */
   private termThrower(term: readonly IROperation[]): IROperation | undefined {
     const defined = new Map<number, IROperation>();
@@ -4376,7 +4652,13 @@ class Lowering {
       everyTerm: boolean
     ): IROperation | undefined => {
       for (const op of operations) {
-        if (op.kind === 'mod') {
+        if (
+          op.kind === 'mod' ||
+          (op.kind === 'binary' &&
+            (op.fn === 'real-remainder' ||
+              op.fn === 'real-gcd' ||
+              op.fn === 'real-lcm'))
+        ) {
           if (
             !op.operands.every((v) => safe(v) || (everyTerm && invariant(v)))
           )
@@ -4959,8 +5241,10 @@ class Lowering {
 /** Whether the code of `op`, or of an operation of a region that it
  *  evaluates, or of the body of a function that it calls, can throw on
  *  JavaScript: `mod` (`_SYS.floorMod` throws for an operand beyond the safe
- *  integer range) and `replace-at` (`_SYS.replaceAt` throws for an index
- *  out of range), `host`, a function of the host, which can throw and
+ *  integer range), the functions `real-remainder`, `real-gcd` and
+ *  `real-lcm` (`_SYS.remainder`, `_SYS.gcd`, `_SYS.lcm`, the same rule),
+ *  `replace-at` (`_SYS.replaceAt` throws for an index out of range),
+ *  `host`, a function of the host, which can throw and
  *  whose calls the host can count, also when it is declared pure, and
  *  `routine` (`_SYS.integrate` throws the timeout of a deadline). A throw
  *  is not an effect, so the lowering keeps such an operation where the
@@ -4974,6 +5258,10 @@ function canThrow(
 ): boolean {
   return (
     op.kind === 'mod' ||
+    (op.kind === 'binary' &&
+      (op.fn === 'real-remainder' ||
+        op.fn === 'real-gcd' ||
+        op.fn === 'real-lcm')) ||
     op.kind === 'replace-at' ||
     (host && op.kind === 'host') ||
     op.kind === 'routine' ||

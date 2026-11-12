@@ -489,8 +489,8 @@ describe('STRUCTURED CALCULUS: what quadrature declines', () => {
     ],
     [
       'an integrand with a head that the profile does not have',
-      Int(['LambertW', Pow('t', 4)], 0, 1),
-      'unsupported head LambertW',
+      Int(['BetaRegularized', Pow('t', 4), 2, 3], 0, 1),
+      'unsupported head BetaRegularized',
     ],
     [
       'an integrand that draws',

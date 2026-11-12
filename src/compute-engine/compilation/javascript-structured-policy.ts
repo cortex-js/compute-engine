@@ -277,6 +277,59 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'fract': { results: ['number'], operands: ['number'] },
     'mod-one': { results: ['number'], operands: ['number'] },
     'hypot': { results: ['number'], operands: ['number'] },
+    // The real-only special functions and the continuation heads of real
+    // operands: the real kernel that the existing emitter names for the head
+    // (`_SYS.gammaQ`, `_SYS.heaviside`, `_SYS.remainder`, …). The helpers of
+    // `real-remainder`, `real-gcd` and `real-lcm` throw a `RangeError` for
+    // an operand beyond the safe integers or infinite, as `mod` does.
+    ...Object.fromEntries(
+      (
+        [
+          'heaviside',
+          'ln-gamma',
+          'sinc',
+          'erfi',
+          'erf-inv',
+          'trigamma',
+          'fresnel-s',
+          'fresnel-c',
+          'sin-integral',
+          'cos-integral',
+          'exp-integral-ei',
+          'log-integral',
+          'dirichlet-eta',
+          'dirichlet-beta',
+          'zeta',
+          'stieltjes',
+          'lambert-w',
+          'elliptic-k',
+          'elliptic-e',
+          'gamma-q',
+          'gamma-upper',
+          'beta',
+          'real-binomial',
+          'clausen',
+          'elliptic-f',
+          'elliptic-e-incomplete',
+          'elliptic-pi',
+          'bessel-j',
+          'bessel-y',
+          'bessel-i',
+          'bessel-k',
+          'agm',
+          'polygamma',
+          'zeta-generalized',
+          'stieltjes-generalized',
+          'hurwitz-zeta',
+          'polylog',
+          'lambert-w-branch',
+          'real-remainder',
+          'real-gcd',
+          'real-lcm',
+          'chop',
+        ] as const
+      ).map((fn) => [fn, { results: ['number'], operands: ['number'] }])
+    ),
   },
   // `_SYS.integrate(f, lo, hi[, panels])`, as the existing emitter writes a
   // definite `Integrate` with no closed form (`compileIntegrate()` in

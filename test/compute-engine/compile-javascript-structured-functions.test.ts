@@ -1561,11 +1561,11 @@ const BRANCH_ROWS: BranchRow[] = [
     ['LessEqual', 0, ['Multiply', 'p', 'q', 'r']],
     /has the type true, and the existing compiler writes the literal true/,
   ],
-  // As the condition of an `If`, the refusal of `checkCondition()` comes first.
+  // As the condition of an `If`, it selects the branch `x`, which the
+  // existing emitter writes alone (`decidedBranch()`).
   [
     'If(0 <= p·q·r, x, y)',
     ['If', ['LessEqual', 0, ['Multiply', 'p', 'q', 'r']], 'x', 'y'],
-    /the condition of If has the constant type true/,
   ],
   ['Equal(k, 3)', ['Equal', 'k', 3]],
   // NotEqual: `!==`, as the existing emitter writes it, with the refusals

@@ -11,6 +11,55 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles the special functions and the
+  number-theory heads of real operands.** These heads declined with
+  `outside-profile` ("unsupported head") and now compile, with the values of
+  the existing compiler: `GammaRegularized`, `StieltjesGamma`, `PolyGamma`,
+  `Zeta`, `Beta`, `Binomial`, `Choose`, `GammaLn`, `Trigamma`, `Sinc`,
+  `Erfi`, `ErfInv`, `FresnelS`, `FresnelC`, `SinIntegral`, `CosIntegral`,
+  `ExpIntegralEi`, `LogIntegral`, `DirichletEta`, `DirichletBeta`,
+  `ClausenCl`, `EllipticF`, `BesselJ`, `BesselY`, `BesselI`, `BesselK`,
+  `AGM`, `Chop`, `Heaviside`, `Remainder`, `GCD`, `LCM`, `KroneckerDelta`,
+  `Clamp`, `Boole`, and `Real`, `Imaginary` and `Argument` of a real
+  operand. `HurwitzZeta`, `PolyLog`, `LambertW`, `EllipticK`, `EllipticE` and
+  `Gamma` of two operands compile too; in the `complex` mode only where the
+  value is proved real (`HurwitzZeta(k, y)` with `k` an integer), as the
+  existing compiler writes the complex kernel elsewhere. A complex operand
+  of these heads, the heads of three operands (`BetaRegularized`,
+  `LerchPhi`), and `CosIntegral` of an operand that can be negative (the
+  existing compiler gives the real part of a complex value there) still
+  decline, and so do `GammaRegularized(a, z)` and `Gamma(s, z)` with a `z`,
+  `AGM` with an operand, that is not provably non-negative, and `Beta` with
+  an operand that is not provably positive: the existing kernels give `NaN`
+  there, where the interpreter has a finite value for some arguments.
+
+  ```js
+  ce.declare('x', 'real<0..>');
+  ce.declare('k', 'integer');
+  const f = compile(ce.box(['Add', ['GammaRegularized', 3, 'x'], ['GCD', 'k', 6]]), {
+    profile: 'numeric-kernel',
+  });
+  f.code; // ➔ "_SYS.gcd(_.k, 6) + _SYS.gammaQ(3, _.x)"
+  ```
+
+- **The `numeric-kernel` profile compiles an `If` or a `Which` whose
+  conditions are constant.** A condition whose type is `true` or `false`
+  selects its branch, and the code is that branch alone, as the existing
+  compiler writes it: `If(2 < 3, x, Sqrt(x))` compiles to `_.x`. As an
+  operand, the selection compiles only when the branch is a symbol with no
+  value. An `If` of
+  three operands whose selected branch is not a symbol or a number still
+  declines: the existing compiler writes that branch with no parentheses
+  (`2 · If(2 < 3, x + 1, 0)` is `2 * _.x + 1` there). A selection whose
+  other branches widen its type beyond a number (a name with no declared
+  type) declines too.
+
+- **The `numeric-kernel` profile compiles a rounding function of a
+  parameter that has the name of a symbol with a value.** With
+  `ce.assign('t', 1/3)`, `Function(Floor(t), t)` compiles to
+  `(t) => { return Math.floor(t); }`, where it declined with "Floor of an
+  operand with the exact constant t".
+
 - **The `numeric-kernel` profile compiles lists of lists.** In the `strict`
   mode, a value of the type `list<list<real>>`, `list<list<integer>>`,
   `matrix` or `matrix<m×n>` (rows of different lengths too) can be an input,

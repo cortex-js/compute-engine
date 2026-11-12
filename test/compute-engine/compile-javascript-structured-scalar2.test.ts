@@ -674,7 +674,7 @@ describe('scalar heads that stay declined', () => {
     ['Hypot of a complex operand', ['Hypot', 'x', 'z'], /Hypot with a complex operand/],
     ['Factorial of a complex operand', ['Factorial', 'z'], /Factorial with a complex operand/],
     ['Truncate of a complex operand', ['Truncate', 'z'], /Truncate with a complex operand/],
-    ['GCD', ['GCD', 'k', 6], /unsupported head GCD/],
+    ['GCD of a complex operand', ['GCD', 'z', 6], /GCD with a complex operand/],
     // The existing emitter writes `2 * b - Math.floor(b)` for a parameter `b`.
     ['Fract of a name', ['Function', ['Multiply', 2, ['Fract', 'b']], ['Typed', 'b', "'real'"]], /Fract of the operand b is not in the profile/],
     ['Fract of a number literal', ['Add', 'x', ['Fract', 3]], /Fract reads no input|Fract of the operand 3/],

@@ -21,7 +21,8 @@
  * is the one of the tables of the profile (docs/COMPILATION-MODEL.md and
  * docs/plans/2026-11-09-js-pilot-emission-rewrites.md): arithmetic, the
  * functions (also `Factorial`, `Arccot`, `Coth`, `Truncate`, `Fract`,
- * `Hypot`, …), comparisons and chains of three or four operands (`Less`,
+ * `Hypot`, …, and the heads of real calls: `GammaRegularized`, `Heaviside`,
+ * `Remainder`, `GCD`, `KroneckerDelta`, `Clamp`, `Argument`, …), comparisons and chains of three or four operands (`Less`,
  * `LessEqual`, `Equal`, `NotEqual`), and `And`, `Or`, `Not`, `If`, `Which`, `Sum` and
  * `Product` (bounds that are literals, captured numbers or clamped inputs),
  * `At` and `Length` of a list, `Comprehension` over a range, `ReplaceAt`,
@@ -1310,7 +1311,8 @@ type Head =
   | 'Comprehension'
   | 'QuotientFactor'
   | 'ValueBlock'
-  | 'Collection';
+  | 'Collection'
+  | 'Special';
 
 const HEADS: readonly (readonly [Head, number])[] = [
   ['Add', 16],
@@ -1335,6 +1337,60 @@ const HEADS: readonly (readonly [Head, number])[] = [
   ['QuotientFactor', 3],
   ['ValueBlock', 2],
   ['Collection', 6],
+  ['Special', 4],
+];
+
+/** The heads of real calls (`REAL_CALL_HEADS` in
+ *  `javascript-fragment-target.ts`) and their numbers of operands: special
+ *  functions, number theory, `Real`, `Imaginary`, `Argument`, `Clamp`,
+ *  `KroneckerDelta`, `Boole` (a condition) and `Gamma` of two operands.
+ *  `order`: the first operand is a small literal, as the kernels of the
+ *  Bessel functions, of `Gamma(s, z)` and of `Zeta(s, a)` do not end for an
+ *  order of a magnitude near `2^53` or `1e300` (a known limitation of the
+ *  existing compiler, docs/COMPILATION-MODEL.md). */
+const SPECIAL: readonly (readonly [string, readonly number[], 'order'?])[] = [
+  ['Heaviside', [1]],
+  ['GammaLn', [1]],
+  ['Sinc', [1]],
+  ['Erfi', [1]],
+  ['ErfInv', [1]],
+  ['Trigamma', [1]],
+  ['FresnelS', [1]],
+  ['FresnelC', [1]],
+  ['SinIntegral', [1]],
+  ['CosIntegral', [1]],
+  ['ExpIntegralEi', [1]],
+  ['LogIntegral', [1]],
+  ['DirichletEta', [1]],
+  ['DirichletBeta', [1]],
+  ['Zeta', [1, 2], 'order'],
+  ['StieltjesGamma', [1, 2]],
+  ['LambertW', [1]],
+  ['EllipticK', [1]],
+  ['EllipticE', [1, 2]],
+  ['Chop', [1]],
+  ['Real', [1]],
+  ['Imaginary', [1]],
+  ['Argument', [1]],
+  ['KroneckerDelta', [1, 2, 3]],
+  ['GammaRegularized', [2]],
+  ['Gamma', [2], 'order'],
+  ['Beta', [2]],
+  ['Binomial', [2]],
+  ['ClausenCl', [2]],
+  ['EllipticF', [2]],
+  ['EllipticPi', [2]],
+  ['BesselJ', [2], 'order'],
+  ['BesselI', [2], 'order'],
+  ['AGM', [1, 2]],
+  ['PolyGamma', [2]],
+  ['HurwitzZeta', [2], 'order'],
+  ['PolyLog', [2]],
+  ['Remainder', [2]],
+  ['GCD', [2, 3]],
+  ['LCM', [2]],
+  ['Clamp', [3]],
+  ['Boole', [1]],
 ];
 
 /** The exact rationals of a quotient factor (`QuotientFactor`). */
@@ -1457,6 +1513,22 @@ function genReal(ctx: GenContext, depth: number): Json {
       return genValueBlock(ctx, d);
     case 'Collection':
       return genCollectionReal(ctx, d);
+    case 'Special': {
+      const [head, arities, order] = pick(rng, SPECIAL);
+      const n = pick(rng, arities as number[]);
+      if (head === 'Boole') return [head, genCondition(ctx, d)];
+      if (order === 'order' && n === 2)
+        return [head, pick<Json>(rng, [0, 1, 2, 3, -1, 0.5, 2.5]), sub()];
+      // An order or an integer operand: an integer literal or an integer
+      // input, at times.
+      const operand = (): Json =>
+        ctx.integers.length > 0 && rng() < 0.25
+          ? pick(rng, ctx.integers)
+          : rng() < 0.15
+            ? pick<Json>(rng, [0, 1, 2, -1, 3, 0.5])
+            : sub();
+      return [head, ...Array.from({ length: n }, operand)];
+    }
   }
 }
 

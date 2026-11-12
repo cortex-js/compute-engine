@@ -904,6 +904,10 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `52164aa7fdbfe853d332b34c0aabadde54424c01` | CE-1216, a fix of the existing compiler: the closed form of a derivative is written in parentheses |
 | `f56cd5f2908d403d9990aeb1171eee2a726b37b5` | Integrals and derivatives with a closed form ([numeric calculus](2026-11-11-structured-numeric-calculus.md), slice 1) |
 | `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | Names and list elements typed `number` read as reals in the default mode; helper parameter types from the signature |
+| `5fc85eda6867e8e607b4262ca22afb52619747d0` | Captured lists as program constants, folds of nodes that read no input, `Mod(x, 1)`, unread parameters |
+| `4e960b7d6303570be4889d82e7ecd32b7e051529` | Lists of lists ([nested lists and matrices](2026-11-11-structured-nested-lists-and-matrices.md), slice 1) |
+| `9c71e6bcb799b61e4be32ce9c2de28eb4d3277e5` | Integrals with no closed form: the `routine` operation (numeric calculus, slice 2); the rule for a `Sum` whose term can throw |
+| `4790e085732832cd9e528cc11f759b8f9e8db89d` | One copy before a loop, then updates in place; rows updated in place when a list owns its rows |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -929,6 +933,7 @@ clean worktree):
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | 8,955 of 9,426 (95.0%) | 86,995 passed, 2 failed (CE-1197; CE-1186, the formatter's stack overflow, which passed in the shadow run on the same content) |
 | `114403d0b44156730f1f943b12362d0c74f90fc8` | 8,958 of 9,430 (95.0%) | 87,201 passed, 1 failed (CE-1197) |
 | `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | 8,964 of 9,424 (95.1%) | 87,356 passed, 1 failed (a 2 s time limit of `dag-shared-walks.test.ts`, at 2.4 s on a loaded machine) |
+| `4790e085732832cd9e528cc11f759b8f9e8db89d` | 9,188 of 9,545 (96.3%) | 87,731 passed, 0 failed |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -952,6 +957,7 @@ the existing compiler compiles, and those of them that the profile admits):
 | `4c0828dff198102e1f8c737c346c63ce3959f325` | 20,959 of 31,049 (67.5%) | 11,989 of 21,817 (55%) |
 | `114403d0b44156730f1f943b12362d0c74f90fc8` | 21,438 of 31,283 (68.5%) | 12,464 of 22,046 (56.5%) |
 | `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | 22,035 of 31,522 (69.9%) | 13,059 of 22,291 (58.6%) |
+| `4790e085732832cd9e528cc11f759b8f9e8db89d` | 23,293 of 32,323 (72.1%) | 14,097 of 22,974 (61.4%) |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11

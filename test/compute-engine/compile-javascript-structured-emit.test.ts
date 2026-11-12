@@ -1280,7 +1280,7 @@ describe('the result agrees with the existing route', () => {
 //
 
 const INTENDED_DECLINES: [string, () => Expression, Record<string, unknown>, RegExp][] = [
-  ['a head outside the vocabulary', () => engine().expr(['Heaviside', 'x']), {}, /unsupported head Heaviside/],
+  ['a head outside the vocabulary', () => engine().expr(['BetaRegularized', 'x', 2, 3]), {}, /unsupported head BetaRegularized/],
   ['Power with the exponent 0.5', () => engine().expr(['Power', 'x', 0.5]), {}, /Power with the exponent 0\.5 is not in the structured route/],
   ['a list of a list and a number', () => engine().expr(['List', ['List', 'x'], 'y']), {}, /a list literal of lists of different element types or of lists and other values is not in the structured route/],
   [

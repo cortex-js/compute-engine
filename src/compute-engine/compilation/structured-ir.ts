@@ -323,6 +323,20 @@ export type IRArithmetic = OperationBase & {
  *   that is infinite or not a number: `x - floor(x)` rounds up to `1` for a
  *   tiny negative `x`, and the remainder gives `0` there. A real operand
  *   and a real result.
+ * - The special functions of a real operand with a real result, `NaN` where
+ *   the value of the interpreter is not real or where the kernel has no
+ *   value: `heaviside` (`0` for a negative operand, `1/2` at `0`, `1` for a
+ *   positive one), `ln-gamma` (`ln |Γ(x)|`), `sinc` (`sin(x)/x`, `1` at
+ *   `0`), `erfi` (the imaginary error function `-i·erf(i·x)`), `erf-inv`
+ *   (the inverse of `erf`), `trigamma` (the derivative of `digamma`),
+ *   `fresnel-s` and `fresnel-c` (the Fresnel integrals of `sin(π t²/2)` and
+ *   `cos(π t²/2)`), `sin-integral` and `cos-integral` (`Si`, `Ci`),
+ *   `exp-integral-ei` (`Ei`), `log-integral` (`li`), `dirichlet-eta` and
+ *   `dirichlet-beta` (η and β), `zeta` (the Riemann ζ), `stieltjes` (the
+ *   Stieltjes constant `γₙ` of the order `n`), `lambert-w` (the branch 0 of
+ *   W, `NaN` below `-1/e`), `elliptic-k` and `elliptic-e` (the complete
+ *   elliptic integrals `K(m)` and `E(m)` of the parameter `m`, `NaN` for
+ *   `m > 1`).
  *
  * Only `abs` has an integer result, and only for an integer operand.
  */
@@ -373,7 +387,26 @@ export type UnaryFunctionName =
   | 'factorial2'
   | 'trunc'
   | 'fract'
-  | 'mod-one';
+  | 'mod-one'
+  | 'heaviside'
+  | 'ln-gamma'
+  | 'sinc'
+  | 'erfi'
+  | 'erf-inv'
+  | 'trigamma'
+  | 'fresnel-s'
+  | 'fresnel-c'
+  | 'sin-integral'
+  | 'cos-integral'
+  | 'exp-integral-ei'
+  | 'log-integral'
+  | 'dirichlet-eta'
+  | 'dirichlet-beta'
+  | 'zeta'
+  | 'stieltjes'
+  | 'lambert-w'
+  | 'elliptic-k'
+  | 'elliptic-e';
 
 /**
  * The functions of two operands that the representation names, by an
@@ -416,6 +449,28 @@ export type UnaryFunctionName =
  *
  * - `hypot(a, b)` is `√(a² + b²)`, infinity when an operand is infinite
  *   (also with a `NaN` operand).
+ * - The special functions of two real operands with a real result, `NaN`
+ *   where the value of the interpreter is not real or where the kernel has
+ *   no value: `gamma-q(a, z)` (the regularized upper incomplete gamma
+ *   `Q(a, z)`), `gamma-upper(s, z)` (the upper incomplete gamma `Γ(s, z)`),
+ *   `beta(a, b)`, `real-binomial(n, k)` (the binomial coefficient of reals,
+ *   through Γ), `clausen(s, x)` (the Clausen function `Clₛ(x)`),
+ *   `elliptic-f(φ, m)` and `elliptic-e-incomplete(φ, m)` (the incomplete
+ *   elliptic integrals), `elliptic-pi(n, m)` (the complete elliptic
+ *   integral `Π(n | m)`), `bessel-j`, `bessel-y`, `bessel-i` and `bessel-k`
+ *   of the order and the argument, `agm(a, b)` (the arithmetic-geometric
+ *   mean), `polygamma(n, x)` (`ψ⁽ⁿ⁾(x)`), `zeta-generalized(s, a)` (the sum
+ *   of `|k + a|^(-s)` over `k ≥ 0`), `stieltjes-generalized(n, a)` (the
+ *   Stieltjes constant `γₙ(a)`), `hurwitz-zeta(s, a)`, `polylog(s, z)`
+ *   (`Liₛ(z)`) and `lambert-w-branch(x, k)` (the branch `k` of W).
+ * - `chop(x, t)` is `x`, or `0` when `|x|` is less than the tolerance `t`.
+ * - `real-remainder(a, b)` is `a - b·round(a/b)`, the quotient rounded to
+ *   the nearest integer with a tie toward `+∞`; `real-gcd(a, b)` and
+ *   `real-lcm(a, b)` are the greatest common divisor and the least common
+ *   multiple of two reals as the interpreter extends them to rationals
+ *   (`real-gcd(2.5, 6)` is `0.5`). The three have no value for an operand
+ *   that is infinite or beyond the integers that a double holds exactly: a
+ *   target may stop the evaluation there.
  *
  * `abs-pow` and `signed-pow` are the real-root convention of the
  * interpreter for a constant exponent `e = p/q` with an odd `q` (`p` even
@@ -430,7 +485,30 @@ export type BinaryFunctionName =
   | 'real-pow'
   | 'root'
   | 'complex'
-  | 'hypot';
+  | 'hypot'
+  | 'gamma-q'
+  | 'gamma-upper'
+  | 'beta'
+  | 'real-binomial'
+  | 'clausen'
+  | 'elliptic-f'
+  | 'elliptic-e-incomplete'
+  | 'elliptic-pi'
+  | 'bessel-j'
+  | 'bessel-y'
+  | 'bessel-i'
+  | 'bessel-k'
+  | 'agm'
+  | 'polygamma'
+  | 'zeta-generalized'
+  | 'stieltjes-generalized'
+  | 'hurwitz-zeta'
+  | 'polylog'
+  | 'lambert-w-branch'
+  | 'real-remainder'
+  | 'real-gcd'
+  | 'real-lcm'
+  | 'chop';
 
 /**
  * An application of a function of one operand (`unary`) or two operands

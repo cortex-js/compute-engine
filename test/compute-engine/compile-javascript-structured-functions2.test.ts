@@ -791,12 +791,14 @@ describe('refusals', () => {
       /Tan of an operand that reads Pi is in the structured route only as Multiply\(Pi, u\)/,
     ],
     // The second operand of `Gamma` is the upper incomplete gamma, a
-    // complex continuation; `Ceil` and `Round` with a step.
+    // complex continuation: in the complex mode, the existing emitter writes
+    // its complex kernel where the value can be complex; `Ceil` and `Round`
+    // with a step.
     [
-      'Gamma of two operands',
+      'Gamma of two operands with a second operand that can be negative, in the complex mode',
       ['Gamma', 'x', 'y'],
-      'strict',
-      /Gamma with other than one operand is not in the structured route/,
+      'complex',
+      /Gamma\(x, y\) with the operand y, which is not provably non-negative, is not in the structured route: the existing kernel gives NaN for a negative argument/,
     ],
     [
       'Round with a step',
