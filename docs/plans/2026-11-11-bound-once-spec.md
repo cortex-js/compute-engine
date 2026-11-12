@@ -165,18 +165,20 @@ options. The compile options are the smallest change of the engine.
    closes CE-1210 and removes the compile seam in Tycho.
 2. Stored function bodies as units with stamps (model slice 2), which rule
    3 needs for a body that reads a name defined later.
-3. A fresh symbol (approved by the user on 2026-11-11, as its own short
-   spec): a symbol with an identity that no parse produces, compared by
-   identity, with a deterministic spelling when it is serialized or emitted
-   in compiled code (numbered for each expression or compilation, not for
-   the process). It is for a temporary that must be named at the top level.
-   Most temporaries need no name once binding is lexical: a parameter, a
-   binder variable, a block local and a macro cannot collide. It replaces
-   the collision loops of the engine (`freshSymbol()` in
-   `symbolic/series.ts`, the parameters of a periodic `Solve` family, the
-   renaming of a block local at an application, `_ce_iterate_accumulator`)
-   and of Tycho (seven generators; its list of 2026-11-11). It comes before
-   or with the macro kind.
+3. A temporary name (user decision 2026-11-12, which replaces the "fresh
+   symbol with an identity that no parse produces" approved on
+   2026-11-11): a temporary is an ordinary symbol whose name has a
+   reserved form, given by one stateless function,
+   `ce.temporaryName(hint, ...avoid)` (`t_tmp1`). No symbol kind, no
+   private table, no change of the resolution by name or of `ce.rebind()`.
+   The draft is `docs/plans/2026-11-12-fresh-symbol-spec.md` (session
+   compute-engine-42; not approved yet). The parameters of a periodic
+   `Solve` family are a separate draft,
+   `docs/plans/2026-11-12-arbitrary-constants-spec.md` (library operators
+   `ArbitraryConstant(k)` and `ArbitraryInteger(k)`). Most temporaries need
+   no name once binding is lexical: a parameter, a binder variable, a block
+   local and a macro cannot collide. It comes before or with the macro
+   kind.
 4. The macro kind (model slice 4).
 5. The batch (model slice 3).
 
