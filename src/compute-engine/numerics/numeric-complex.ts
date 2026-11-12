@@ -3335,6 +3335,9 @@ export function zetaGeneralizedComplexWithError(
   a: Complex
 ): { value: Complex; error: number } | undefined {
   if (s.isNaN() || a.isNaN()) return { value: C_NAN, error: 0 };
+  // At s = 0 every term is 1 and the omitted one counts: 1/2 − a for every a.
+  if (s.re === 0 && s.im === 0 && a.isFinite())
+    return { value: new Complex(0.5 - a.re, -a.im), error: 0 };
   if (-a.re > HURWITZ_MAX_PASSED_TERMS) {
     // For an even integer s, ((k + a)²)^(−s/2) is (k + a)^(−s), so the sum
     // is ζ(s, a), which the Hurwitz kernel computes far left of the axis

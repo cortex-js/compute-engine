@@ -6434,6 +6434,19 @@ function evaluateGeneralizedZeta(
   const sInt = asSmallInteger(s);
   if (sInt === 1) return engine.ComplexInfinity;
 
+  // At s = 0 every term is 1 and the omitted one counts: 1/2 − a for every
+  // base point, as `HurwitzZeta(0, a)`. No correction for the omission, which
+  // would make `Zeta(0, 0)` −1/2 and `Zeta(0, −1)` 1/2.
+  if (
+    sInt === 0 &&
+    !(isNumber(s) && s.isComplex) &&
+    isNumber(a) &&
+    isFiniteNumberLiteral(a)
+  ) {
+    const value = engine.number([1, 2]).sub(a);
+    return numericApproximation ? value.N() : value;
+  }
+
   // A symbolic `a` gets the Bernoulli polynomial of `evaluateHurwitzZeta`
   // only when `a` is known to be positive: for a negative `a` the terms with
   // k + a < 0 are |k + a|^(−s) here, so at a = −5/2 Zeta(−1, a) is 109/24,
@@ -8944,7 +8957,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Converges for Re(s) > 1, analytically continued elsewhere
     Zeta: {
       description:
-        "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
+        "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
       wikidata: 'Q187235',
       complexity: 8500,
       broadcastable: true,

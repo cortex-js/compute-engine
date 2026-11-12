@@ -314,8 +314,9 @@ float _gpu_polygamma(float n, float x) {
  *   with a > 16 and s < −21 are up to 1.7e−5 off (the pow of the
  *   passed-over terms has an argument near 100).
  * - `_gpu_zeta_generalized(s, a)` is Wolfram's `Zeta[s, a]`: the terms with
- *   k + a < 0 are |k + a|^(−s), the (k + a) = 0 term is dropped, so it is
- *   real for every real s and a and its only pole is s = 1.
+ *   k + a < 0 are |k + a|^(−s), the (k + a) = 0 term is dropped (but not at
+ *   s = 0, where the value is 1/2 − a), so it is real for every real s and a
+ *   and its only pole is s = 1.
  *
  * Both base-point walks cost one term per unit of |a|, so a < −10⁶ answers
  * NaN instead of looping for that long. For a > 0, `_gpu_zeta_shifted`
@@ -638,6 +639,7 @@ float _gpu_hurwitz_zeta(float s, float a) {
 
 float _gpu_zeta_generalized(float s, float a) {
   if (s == 1.0) return _gpu_inf(); // pole, every base point a
+  if (s == 0.0) return 0.5 - a; // every term is 1, the omitted one included
   if (a > 0.0) return _gpu_hurwitz_zeta(s, a);
   if (a == 0.0) return _gpu_zeta(s);
   if (a < -1.0e6) return _gpu_nan();

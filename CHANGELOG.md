@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Zeta(0, a)` is `1/2 - a` for every `a`.** The two-argument `Zeta` omits
+  the term `n + a = 0`, but at `s = 0` every term is 1 and Wolfram keeps the
+  count: `Zeta(0, 0)` was `-1/2` (now `1/2`), `Zeta(0, -1)` was `1/2` (now
+  `3/2`) and `Zeta(0, -2)` was `3/2` (now `5/2`), a nonpositive integer `a`
+  coming out 1 too small. The compiled `Zeta` agrees. The omission stays for
+  `s != 0`: `Zeta(2, -1)` is `1 + ζ(2)`. (#524, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
