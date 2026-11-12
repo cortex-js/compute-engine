@@ -252,5 +252,40 @@ What remains, 110 failures:
   `ce-597-unknowns-library-letter-operand` 4;
   `ce-535-531-binder-declaration-cache` 4; ten files with 1 or 2.
 
-Not done: the engine function behind each of these 21 files, the deletions
-of section 5, M3.
+### M1, second part (2026-11-11): the value shield
+
+The second engine site is the value shield (`withValueShield()`,
+`boxed-expression/utils.ts`, called at 15 places of `library/calculus.ts`
+and by `HoldValues`; and the same arrangement in `simplifyValueBlind()`,
+`simplify.ts`). To make a name read as a pure symbol, it pushed a scope,
+made it a scratch scope, declared a valueless shadow of each name, marked
+each shadow as a shield, ran the work under a cache key of its own, popped
+the scope, and bound the result again away from the dead shadows
+(`rebindEscaping()`). In the prototype it is a list of names whose value is
+hidden for the extent of the call, which the value read tests: 12 lines in
+place of 137 in the two functions. The marks of a shield
+(`markShieldDeclaration()`, `isShield()`, six tests in `binders.ts`) and
+the scratch scope of a shield then have no user; they are not deleted in
+the prototype.
+
+With it, of the 48 files that still failed: 87 failures in 39 files (51 in
+25 files that push a scope in the test; 36 in 14 files that do not). The
+full suite was not run again after this change.
+
+The 36, by mechanism:
+
+- An operand boxed outside and placed under a binder with `ce.function()`
+  reads the outer value (`ce-535-531-binder-declaration-cache` 4,
+  `hold-values` 3). The rule says an operand keeps its home scope; whether
+  a binder binds an operand that was boxed outside is a case for section 4.
+- A free name captured by a function literal, and its type after an
+  assignment (`ce-473-captured-free-symbol` 6); the renaming of a block
+  local at an application (`issue-489-curried-function-capture` 4).
+- A library letter read as a variable and assigned later
+  (`ce-597-unknowns-library-letter-operand` 4).
+- `tycho-325-integrate-list-limit-broadcast` 7: its helper declares values
+  in a scope.
+- Eight files with one failure each.
+
+Not done: the full suite on the prototype with the shield change, the
+deletions of section 5, M3 (running).
