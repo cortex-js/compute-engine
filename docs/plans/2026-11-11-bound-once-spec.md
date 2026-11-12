@@ -694,8 +694,17 @@ folder), the user decided three of the programs that the rules left open
 - **An assignment in a value operand to a name that is not declared**
   (`Sum(Assign(s, s + i), …)`): an error, the existing
   `assignment-in-operand`.
-- **The type of a local declared with a function literal** is open: the
-  user asked for Tycho's view first (asked on 2026-11-12).
+- **The type of a local declared with a function literal** (user decision
+  2026-11-12, after Tycho's answer): the local is typed exactly as a global
+  that is assigned the same literal. The parameters are typed as written,
+  an untyped one stays `unknown`, and the type of a call comes from the
+  body at the call, as for a global: a stored result type never makes
+  `f([1, 2, 3])` a scalar. To check when it is built: the test that
+  requires `unknown` for such a local (`ce-772`) must pass; if it does
+  not, the local is `unknown`. Tycho makes almost no function locals (its
+  prelude runner installs each function as a definition of the engine);
+  its one exposure is the static check of a prelude, to be run on a
+  scratch build.
 
 **State of the code.** The worktree `/tmp/wt-compute-engine-ad-step1` was
 lost in a kernel panic on 2026-11-12 and rebuilt: the state after step 1 of
