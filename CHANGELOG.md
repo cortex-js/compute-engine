@@ -1,3 +1,18 @@
+## Unreleased
+
+### Resolved Issues
+
+- **`DedekindEta` carries the precision asked for at a complex τ** (#ISSUE3,
+  contributed by [enumeratio](https://github.com/enumeratio)).
+  `N(DedekindEta(0.3 + i), 40)` was a double's 16 digits and now has 40. τ is
+  moved into the fundamental domain with `η(τ+1) = e^{iπ/12}η(τ)` (the shift
+  kept as an exact count mod 24, so a real part of 10²⁰ is exact) and
+  `η(−1/τ) = √(−iτ)η(τ)`, then Euler's pentagonal sum is summed to a tail
+  bound. Measured against mpmath at 30, 50 and 100 digits, the error relative
+  to |η| is at most half a unit of the last digit. For `Im τ < 10⁻³` the call
+  stays unevaluated at these precisions instead of returning a double's
+  digits as more.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
