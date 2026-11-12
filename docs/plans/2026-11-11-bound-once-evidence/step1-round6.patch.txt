@@ -87,15 +87,73 @@ index 4d99f00d1..b0bddd725 100644
   * The environments that the type of a free name of `exprs` can read, each
   * with its counter: a key for a cache shared between expressions whose
 diff --git a/src/compute-engine/boxed-expression/ambient-chain.ts b/src/compute-engine/boxed-expression/ambient-chain.ts
-index ea48c4672..cccc9ae44 100644
+index ea48c4672..3dc905369 100644
 --- a/src/compute-engine/boxed-expression/ambient-chain.ts
 +++ b/src/compute-engine/boxed-expression/ambient-chain.ts
-@@ -64,63 +64,3 @@ export function chainContains(
-     if (s === scope || scopeTemplates.get(s) === scope) return true;
-   return false;
+@@ -10,9 +10,58 @@ const scopeTemplates = new WeakMap<Scope, Scope>();
+ // answers it without a walk of the stack.
+ const activatedTemplates = new WeakSet<Scope>();
+ 
+-export function registerScopeActivation(scope: Scope, template: Scope): void {
++// The values of an activation: for each static definition of its template,
++// its value in this evaluation of the node.
++const activationValues = new WeakMap<Scope, Map<object, unknown>>();
++
++// The static definitions of the scopes that have had an activation: their
++// value is read and written in an activation (`activationRecordOf()`).
++const activatedDefinitions = new WeakSet<object>();
++
++/**
++ * Record that `scope` is an activation of `template`. `values` holds the
++ * value of each static definition of `template` in this evaluation.
++ */
++export function registerScopeActivation(
++  scope: Scope,
++  template: Scope,
++  values?: Map<object, unknown>
++): void {
+   scopeTemplates.set(scope, template);
+   activatedTemplates.add(template);
++  if (values === undefined) return;
++  activationValues.set(scope, values);
++  for (const def of values.keys()) activatedDefinitions.add(def);
++}
++
++/** True when the chain of parents of `scope` holds an activation. */
++export function holdsActivation(scope: Scope | null | undefined): boolean {
++  for (let s = scope; s != null; s = s.parent)
++    if (activationValues.has(s)) return true;
++  return false;
++}
++
++/** True when the value of the static definition `def` is held by the
++ * activations of its scope. */
++export function isActivatedDefinition(def: object): boolean {
++  return activatedDefinitions.has(def);
++}
++
++/**
++ * The values of the first activation on the links from `from` (the parents
++ * of the scopes) that holds the static definition `def`, or `undefined`
++ * when there is none: the definition is read outside any evaluation of its
++ * node, and it has no value.
++ */
++export function activationRecordOf(
++  def: object,
++  from: Scope | null | undefined
++): Map<object, unknown> | undefined {
++  for (let s = from; s != null; s = s.parent) {
++    const values = activationValues.get(s);
++    if (values?.has(def)) return values;
++  }
++  return undefined;
  }
--
--/**
+ 
+ export function scopeActivationTemplate(scope: Scope): Scope | undefined {
+@@ -66,61 +115,30 @@ export function chainContains(
+ }
+ 
+ /**
 - * The scope a node's local scope is chained onto while the node evaluates
 - * in the ambient scope `ambient`, or `undefined` when the local scope keeps
 - * its own parent link.
@@ -113,10 +171,17 @@ index ea48c4672..cccc9ae44 100644
 - * re-entrant evaluation). A call frame is NOT chained: a stored function
 - * value is a closure and evaluates in its own environment
 - * (`docs/SCOPING-MODEL.md`).
-- */
++ * An activation of `scope` for one evaluation of the node that holds it:
++ * the bindings of `scope` (the static definitions) and the value of each of
++ * its value definitions in this evaluation, which starts with its value
++ * outside any activation. Its parent is `parent`, the activation in which
++ * the node is evaluated (the current lexical scope).
+  */
 -export function ambientChainParent(
 -  ambient: Scope | null | undefined,
--  scope: Scope
++export function scopeActivation(
++  parent: Scope | null | undefined,
+   scope: Scope
 -): Scope | undefined {
 -  if (
 -    ambient != null &&
@@ -152,8 +217,24 @@ index ea48c4672..cccc9ae44 100644
 -    return fn();
 -  } finally {
 -    scope.parent = saved;
--  }
--}
++): Scope {
++  const result: Scope = {
++    ...scope,
++    parent: parent ?? scope.parent,
++    bindings: new Map(scope.bindings),
++  };
++  const values = new Map<object, unknown>();
++  for (const binding of scope.bindings.values()) {
++    if (!('value' in binding)) continue;
++    const def = binding.value as unknown as {
++      isConstant: boolean;
++      _staticValue(): unknown;
++    };
++    if (!def.isConstant) values.set(def, def._staticValue());
+   }
++  registerScopeActivation(result, scope, values);
++  return result;
+ }
 diff --git a/src/compute-engine/boxed-expression/binders.ts b/src/compute-engine/boxed-expression/binders.ts
 index 672178550..6e46e7a23 100644
 --- a/src/compute-engine/boxed-expression/binders.ts
@@ -507,19 +588,23 @@ index 672178550..6e46e7a23 100644
        value: own,
      } satisfies TaggedValueDefinition);
 diff --git a/src/compute-engine/boxed-expression/boxed-function.ts b/src/compute-engine/boxed-expression/boxed-function.ts
-index bdc158795..c29b789e4 100644
+index bdc158795..ab6a6a437 100644
 --- a/src/compute-engine/boxed-expression/boxed-function.ts
 +++ b/src/compute-engine/boxed-expression/boxed-function.ts
-@@ -58,7 +58,7 @@ import {
+@@ -57,11 +57,7 @@ import {
+   hasAsyncOnlyApplication,
  } from './async-only-descendants.js';
  import { callbackSlots } from './callback-slots.js';
- import {
+-import {
 -  ambientChainParent,
-+  liveScopeOf,
-   registerScopeActivation,
-   scopeActivationTemplate,
- } from './ambient-chain.js';
-@@ -10500,11 +10500,17 @@ export class BoxedFunction
+-  registerScopeActivation,
+-  scopeActivationTemplate,
+-} from './ambient-chain.js';
++import { scopeActivation } from './ambient-chain.js';
+ import type { PrecisionWindow } from '../types-kernel-evaluation.js';
+ import {
+   bindsWholeAtInferredPointParameter,
+@@ -10500,11 +10496,12 @@ export class BoxedFunction
        //
        const isScoped = this._localScope !== undefined;
  
@@ -528,34 +613,29 @@ index bdc158795..c29b789e4 100644
 -          ambient: true,
 -        });
 -      }
-+      // A node whose parent scope is evaluated in an activation (a node of
-+      // the body of an asynchronous `Sum` or `Block`) is evaluated in an
-+      // activation of its own scope, whose parent is that activation: it
-+      // reads and writes the names of the enclosing node in the run in
-+      // progress.
++      // Each evaluation of a scoped node is made in an activation of its
++      // scope (`scopeActivation()`).
 +      if (isScoped)
 +        this.engine._pushEvalContext(
-+          inActivatedParent(this.engine, this._localScope!)
-+            ? asyncScopeActivation(this.engine, this._localScope!)
-+            : this._localScope!
++          scopeActivation(this.engine.context?.lexicalScope, this._localScope!)
 +        );
  
        //
        // 6/ Call the `evaluate` handler
-@@ -24547,19 +24553,24 @@ function capturedPrecisionWindow(
+@@ -12044,7 +12041,7 @@ export class BoxedFunction
+           effects,
+           () =>
+             engine._pushEvalContext(
+-              asyncScopeActivation(engine, this._localScope!),
++              scopeActivation(engine.context?.lexicalScope, this._localScope!),
+               undefined
+             ),
+           contextStack,
+@@ -24547,37 +24544,6 @@ function capturedPrecisionWindow(
    return { working, requested };
  }
  
-+/** True when the parent of `scope` has an activation on the context stack
-+ * (`liveScopeOf()`). */
-+function inActivatedParent(ce: ComputeEngine, scope: Scope): boolean {
-+  const parent = scope.parent;
-+  return (
-+    parent != null && liveScopeOf(ce._evalContextStack, parent) !== parent
-+  );
-+}
-+
- function asyncScopeActivation(ce: ComputeEngine, scope: Scope): Scope {
+-function asyncScopeActivation(ce: ComputeEngine, scope: Scope): Scope {
 -  const ambient = ambientChainParent(ce.context?.lexicalScope, scope);
 -  let parent = ambient ?? scope.parent;
 -  // An ambient descendant can carry intervening locals. Only look for the
@@ -568,17 +648,27 @@ index bdc158795..c29b789e4 100644
 -        parent = active;
 -        break;
 -      }
-+  // The parent is the activation of the parent scope in progress, if any
-+  // (a nested scoped node evaluated asynchronously).
-+  let parent = scope.parent;
-+  for (let i = ce._evalContextStack.length - 1; i >= 0; i--) {
-+    const active = ce._evalContextStack[i].lexicalScope;
-+    if (scopeActivationTemplate(active) === scope.parent) {
-+      parent = active;
-+      break;
-     }
-   }
-   const result: Scope = { ...scope, parent, bindings: new Map() };
+-    }
+-  }
+-  const result: Scope = { ...scope, parent, bindings: new Map() };
+-  for (const [name, binding] of scope.bindings) {
+-    if (isValueDef(binding)) {
+-      const value = binding.value as BoxedValueDefinition & {
+-        _cloneForActivation(): BoxedValueDefinition;
+-      };
+-      result.bindings.set(name, {
+-        ...binding,
+-        value: value._cloneForActivation(),
+-      });
+-    } else result.bindings.set(name, binding);
+-  }
+-  registerScopeActivation(result, scope);
+-  return result;
+-}
+-
+ /**
+  * `present`, with the present type of each operand at a position that
+  * strips `missing` (`strips`) that is an access proved to find nothing
 diff --git a/src/compute-engine/boxed-expression/boxed-symbol.ts b/src/compute-engine/boxed-expression/boxed-symbol.ts
 index beca9ca0b..4a1bf321e 100644
 --- a/src/compute-engine/boxed-expression/boxed-symbol.ts
@@ -872,15 +962,19 @@ index beca9ca0b..4a1bf321e 100644
        this.engine,
        this._id,
 diff --git a/src/compute-engine/boxed-expression/boxed-value-definition.ts b/src/compute-engine/boxed-expression/boxed-value-definition.ts
-index 3f76ad03c..cc1c52e7b 100644
+index 3f76ad03c..4c3bc8248 100644
 --- a/src/compute-engine/boxed-expression/boxed-value-definition.ts
 +++ b/src/compute-engine/boxed-expression/boxed-value-definition.ts
-@@ -1,3 +1,4 @@
+@@ -1,3 +1,8 @@
++import {
++  activationRecordOf,
++  isActivatedDefinition,
++} from './ambient-chain.js';
 +import { valueIsHidden } from './hidden-values.js';
  import type {
    Expression,
    ExpressionInput,
-@@ -460,15 +461,6 @@ export class _BoxedValueDefinition
+@@ -460,15 +465,6 @@ export class _BoxedValueDefinition
    _sweptHome: Scope | undefined = undefined;
    _sweptRecord: BoxedDefinition | undefined = undefined;
  
@@ -896,7 +990,27 @@ index 3f76ad03c..cc1c52e7b 100644
    // True when this binding was created to shadow a standard-library operator
    // used as a bare value (`N + 1`, `S / D`). This provenance belongs to the
    // binding itself; replacing the definition naturally discards the marker.
-@@ -853,6 +845,8 @@ export class _BoxedValueDefinition
+@@ -809,6 +805,19 @@ export class _BoxedValueDefinition
+       this._engine._atTransientConfiguration
+     )
+       return this._regeneratedValue();
++    // The value of a definition of a scope that has activations is held by
++    // the activation of the evaluation in progress (`activationRecordOf()`).
++    if (isActivatedDefinition(this))
++      return activationRecordOf(this, this._engine.context?.lexicalScope)?.get(
++        this
++      ) as Expression | undefined;
++    if (this._value === null) this._value = this._regeneratedValue();
++    return this._value;
++  }
++
++  /** The value of this definition outside any activation: the value that
++   * an activation of its scope starts with. */
++  _staticValue(): Expression | undefined {
+     if (this._value === null) this._value = this._regeneratedValue();
+     return this._value;
+   }
+@@ -853,6 +862,8 @@ export class _BoxedValueDefinition
    }
  
    get value(): Expression | undefined {
@@ -905,7 +1019,34 @@ index 3f76ad03c..cc1c52e7b 100644
      return this._effectiveValue();
    }
  
-@@ -1059,7 +1053,6 @@ export class _BoxedValueDefinition
+@@ -865,14 +876,23 @@ export class _BoxedValueDefinition
+     // would cold the element memo's per-dependency entries). Object
+     // identity ONLY: structural equality (`.isSame`) is syntactic, not
+     // binding-identity, and must not suppress (design §4's predicate table).
+-    if (v !== undefined && v === this._value) return;
++    // The value of a definition of a scope that has activations is written
++    // in the activation of the evaluation in progress, when there is one.
++    const record = isActivatedDefinition(this)
++      ? activationRecordOf(this, this._engine.context?.lexicalScope)
++      : undefined;
++    const prev =
++      record !== undefined
++        ? (record.get(this) as Expression | undefined)
++        : this._value;
++    if (v !== undefined && v === prev) return;
+     // Checkpoint journal (funnel 1): the WHOLE coupled tuple, not just
+     // `_value` — a value write also moves `_isSelfReferential`, and the type
+     // setter next door moves `_value` — recorded once per window, after the
+     // no-op guard above so a suppressed write journals nothing.
+     journalDefinitionRecord(this._engine, this, 'value-write');
+-    const prev = this._value;
+-    this._value = v;
++    if (record !== undefined) record.set(this, v);
++    else this._value = v;
+     // The type of a definition that holds a function literal is inferred
+     // from the literal now: record the types of the bindings that its body
+     // reads from outside it, so that a call after one of them changed type
+@@ -1059,7 +1079,6 @@ export class _BoxedValueDefinition
        _scopeActivationOf: this._scopeActivationOf,
        _sweptHome: this._sweptHome,
        _sweptRecord: this._sweptRecord,
@@ -913,7 +1054,7 @@ index 3f76ad03c..cc1c52e7b 100644
        _isDevolvedShadow: this._isDevolvedShadow,
        // A definition disposed inside a checkpoint window comes back alive on
        // restore, like every other field of the record: the record object is
-@@ -1133,7 +1126,6 @@ export class _BoxedValueDefinition
+@@ -1133,7 +1152,6 @@ export class _BoxedValueDefinition
        BoxedValueDefinition | undefined;
      this._sweptHome = s._sweptHome as Scope | undefined;
      this._sweptRecord = s._sweptRecord as BoxedDefinition | undefined;
@@ -997,10 +1138,18 @@ index ed73b334b..48ffaf383 100644
     * committed. Neither engine version moves for an ordinary scope change. */
    let suspendedScopeChange = false;
 diff --git a/src/compute-engine/boxed-expression/lazy-view-context.ts b/src/compute-engine/boxed-expression/lazy-view-context.ts
-index 5fd015270..9544656cd 100644
+index 5fd015270..447d3f63b 100644
 --- a/src/compute-engine/boxed-expression/lazy-view-context.ts
 +++ b/src/compute-engine/boxed-expression/lazy-view-context.ts
-@@ -241,8 +241,9 @@ function snapshotScopes(
+@@ -22,6 +22,7 @@ import type {
+   Scope,
+ } from '../global-types.js';
+ import { isDictionary, isFunction, isSymbol } from './type-guards.js';
++import { holdsActivation } from './ambient-chain.js';
+ 
+ /** One frame of the engine's evaluation-context stack. */
+ type EvalContext = IComputeEngine['_evalContextStack'][number];
+@@ -241,8 +242,9 @@ function snapshotScopes(
    to: Scope
  ): NonNullable<LazyViewRecord['nested']>[number][] | undefined {
    const scopes: NonNullable<LazyViewRecord['nested']>[number][] = [];
@@ -1012,7 +1161,7 @@ index 5fd015270..9544656cd 100644
      const entries: LazyViewScopeEntry[] = [];
      const versions: (number | undefined)[] = [];
      for (const [name, binding] of scope.bindings) {
-@@ -253,7 +254,7 @@ function snapshotScopes(
+@@ -253,7 +255,7 @@ function snapshotScopes(
      scopes.push({ scope, entries, versions });
      scope = scope.parent;
    }
@@ -1021,7 +1170,32 @@ index 5fd015270..9544656cd 100644
  }
  
  /** A record whose frame is the context `stack[frameIndex]` and whose
-@@ -752,14 +753,11 @@ function buildContexts(
+@@ -321,7 +323,23 @@ export function recordLazyViewContext(
+     shareLazyViewRecord(source, result);
+     return;
+   }
+-  const record = newRecord(stack, false);
++  let record = newRecord(stack, false);
++  // A view made outside every call, in the activation of a scoped node (a
++  // block, a loop), is read in that activation: it records the stack of its
++  // creation.
++  if (record === null && stack.length > 0) {
++    const top = stack[stack.length - 1];
++    if (holdsActivation(top.lexicalScope)) {
++      recordSerial += 1;
++      record = {
++        contexts: stack.slice(),
++        top,
++        nested: undefined,
++        frames: [],
++        built: undefined,
++      };
++    }
++  }
+   setRecord(result, record);
+   if (record === null && stack.length > 0)
+     CREATED_ON.set(result, stack[stack.length - 1]);
+@@ -752,14 +770,11 @@ function buildContexts(
      const { scope, entries } = record.nested[i];
      parent = copyNested!(ce, scope, parent, entries);
    }
@@ -1672,7 +1846,7 @@ index 1d69ca49c..5960f9529 100644
  
    /**
 diff --git a/src/compute-engine/engine-scope.ts b/src/compute-engine/engine-scope.ts
-index d4af91e80..e9af630c6 100644
+index d4af91e80..4bb901080 100644
 --- a/src/compute-engine/engine-scope.ts
 +++ b/src/compute-engine/engine-scope.ts
 @@ -20,18 +20,10 @@ import {
@@ -1812,7 +1986,7 @@ index d4af91e80..e9af630c6 100644
    // A checkpoint standing on this frame has no world left to restore once
    // the frame's bindings are disposed below — retire it, folding its journal
    // window downward so older checkpoints still unwind this scope's writes
-@@ -260,6 +201,7 @@ function discardEvalContext(
+@@ -260,31 +201,20 @@ function discardEvalContext(
    // definition is treated as dead by the assumptions (`assume.ts`) and by
    // the caches keyed on its `_writeVersion`.
    const keepsTombstone =
@@ -1820,15 +1994,155 @@ index d4af91e80..e9af630c6 100644
      ce._debugBindings &&
      !isDormantPop() &&
      context !== undefined &&
-@@ -296,7 +238,7 @@ function discardEvalContext(
+     !retained &&
+     !isRetainedNodeScope(context.lexicalScope) &&
+     !ce._evalContextStack.some((c) => c.lexicalScope === context.lexicalScope);
+-  // The pop of an activation (the copy of a local scope that an asynchronous
+-  // evaluation pushes) tombstones the definitions of the scope that it
+-  // copies, when no live context holds them: the symbols of the body are
+-  // bound to those definitions, and the evaluation that read them through
+-  // the copy has ended. They are not disposed here: the activation used its
+-  // own. Another asynchronous evaluation of the same node can still be
+-  // suspended on its own copy of the stack. Its reads are not reported: the
+-  // check reads the definition that the context of the read finds, the one
+-  // of its own activation (`assertLiveRead`, `binders.ts`).
++  // The pop of an activation neither disposes nor tombstones the static
++  // definitions of its scope: they outlive the evaluation, and only their
++  // values of this evaluation, held by the activation, end with it.
+   const template =
+-    ce._debugBindings && context !== undefined
++    context !== undefined
+       ? scopeActivationTemplate(context.lexicalScope)
+       : undefined;
+-  if (template !== undefined && keepsTombstone) {
+-    for (const binding of template.bindings.values()) {
+-      if (isValueDef(binding) && holderCount(binding.value) === 0)
+-        tombstoneBinding(binding.value, context!.name ?? '<unnamed>');
+-    }
+-  }
+   // The definitions that this frame counted (`countHolders`). A retained
+   // frame keeps its count: its definitions stay alive.
+   const counted = retained ? undefined : context?._countedDefs;
+@@ -295,8 +225,13 @@ function discardEvalContext(
+       noteFrameUncounted(context);
      }
    }
-   for (const binding of context?.lexicalScope.bindings.values() ?? []) {
+-  for (const binding of context?.lexicalScope.bindings.values() ?? []) {
 -    if (retained) {
++  for (const [name, binding] of context?.lexicalScope.bindings ?? []) {
++    if (template !== undefined && template.bindings.get(name) === binding) {
++      if (isValueDef(binding) && counted?.delete(binding.value))
++        decrementHolders(ce, binding.value);
++      continue;
++    }
 +    if (retained || keepDefinitions) {
        if (isValueDef(binding))
          (
            binding.value as { _releaseConfigurationChange?: () => boolean }
+diff --git a/src/compute-engine/function-utils.ts b/src/compute-engine/function-utils.ts
+index 55cb54cf3..918bef497 100644
+--- a/src/compute-engine/function-utils.ts
++++ b/src/compute-engine/function-utils.ts
+@@ -113,7 +113,9 @@ import {
+   tuplePatternNames,
+ } from './boxed-expression/tuple-pattern.js';
+ import {
++  isActivatedDefinition,
+   liveScopeOf,
++  registerScopeActivation,
+   scopeActivationTemplate,
+ } from './boxed-expression/ambient-chain.js';
+ import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
+@@ -4558,10 +4560,17 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
+     // block. So in `do { let f = (a) ↦ a + 1; [f(x) for x in [1, 2]] }` the
+     // call `f(x)` read a binding that has no value, and the cells were
+     // `f(1)` and `f(2)`. `f(x)` becomes `Apply(a ↦ a + 1, x)`.
++    //
++    // A lazy operator that binds names (a comprehension) is read after the
++    // block, outside its activation: a symbol of its operands that it does
++    // not bind and that reads a local of the block is replaced with its
++    // value, as in any other lazy collection.
+     if (boundVariableNames(e).length > 0) {
++      const lazy = inLazy || e.isLazyCollection;
+       const result = rewriteWithBinders(
+         e,
+-        (s) => s,
++        (s, shadowed) =>
++          lazy && shadowed?.has(s.symbol) !== true ? (localValue(s) ?? s) : s,
+         undefined,
+         false,
+         undefined,
+@@ -7784,6 +7793,9 @@ function renameBoundVariables(
+     const def = newScope.bindings.get(id);
+     if (parameters.has(name) && def !== undefined && 'value' in def)
+       markFunctionLiteralParameter(ce, def.value);
++    // The renamed local of a block is a local of the block too.
++    if (old?._blockLocal === true && def !== undefined && 'value' in def)
++      def.value._blockLocal = true;
+     // `ce.declare` of a value definition (a `type`) makes a value binding,
+     // so the symbol exists. Without it the binder could not be renamed, and
+     // the substitution into the original binder would capture the value.
+@@ -8176,10 +8188,14 @@ function rerootScopes(
+   if (hit !== undefined) return hit;
+   if (isFunction(expr, 'Function')) {
+     const own = expr.op1?.localScope;
++    // A closure value whose body chains to the locals it captured is not
++    // below the renamed binder (see `from` above), and is kept.
+     if (
+       own !== undefined &&
+       (appliedBodyScopes.has(own) ||
+-        (own.parent != null && CLOSURE_LOCALS_SCOPES.has(own.parent)))
++        (own.parent != null &&
++          CLOSURE_LOCALS_SCOPES.has(own.parent) &&
++          from === undefined))
+     )
+       throw new UnavoidableCapture();
+   }
+@@ -9250,8 +9266,11 @@ export function captureNestedLocals(
+   // activation, the closure read the index in the activation after the sum,
+   // and with `Sum(Block(Assign(g, x ↦ x + i), i), Limits(i, 1, 3))` the call
+   // `g(1)` gave `1 + i` with `evaluateAsync()` and `4` with `evaluate()`.
++  // A scope is in use when the evaluation in progress is in an activation
++  // of it, or when it is itself such an activation.
+   const isInUse = (s: Scope): boolean => {
+     if ((liveNestedScopes.get(s) ?? 0) > 0) return true;
++    if (liveScopeOf(ce._evalContextStack, s) !== s) return true;
+     const template = scopeActivationTemplate(s);
+     return template !== undefined && (liveNestedScopes.get(template) ?? 0) > 0;
+   };
+@@ -9316,6 +9335,10 @@ function snapshotNestedScope(
+   recorded?: ReadonlyArray<LazyViewScopeEntry>
+ ): Scope {
+   const captured: Scope = { parent, bindings: new Map() };
++  // The values that the static definitions kept by the copy have now: the
++  // copy is an activation of the scope of `source` that holds them
++  // (`registerScopeActivation()`).
++  const values = new Map<object, unknown>();
+   const entries: Iterable<readonly [string, BoxedDefinition, unknown?]> =
+     recorded ?? source.bindings;
+   for (const [name, binding, valueThen] of entries) {
+@@ -9345,6 +9368,8 @@ function snapshotNestedScope(
+         true
+     )
+       continue;
++    if (recorded === undefined && isActivatedDefinition(binding.value))
++      values.set(binding.value, value);
+     captured.bindings.set(
+       name,
+       recorded === undefined
+@@ -9352,6 +9377,12 @@ function snapshotNestedScope(
+         : { ...binding, value: cloneDefinitionWithValue(binding.value, value) }
+     );
+   }
++  if (values.size > 0)
++    registerScopeActivation(
++      captured,
++      scopeActivationTemplate(source) ?? source,
++      values
++    );
+   CLOSURE_LOCALS_SCOPES.add(captured);
+   // A call in the closure keeps the binding of its callee by lexical
+   // identity (`callableBindingInContext`, `binders.ts`). When an
 diff --git a/src/compute-engine/index.ts b/src/compute-engine/index.ts
 index dd3d9e186..a856a6bec 100755
 --- a/src/compute-engine/index.ts
@@ -1914,82 +2228,56 @@ index d152d1f17..7433f919f 100644
     * Replay the journal in reverse order.
     *
 diff --git a/src/compute-engine/library/control-structures.ts b/src/compute-engine/library/control-structures.ts
-index 8f79b5c3b..f66cf59f2 100644
+index 8f79b5c3b..4bd9ee49a 100644
 --- a/src/compute-engine/library/control-structures.ts
 +++ b/src/compute-engine/library/control-structures.ts
-@@ -7064,7 +7064,7 @@ function* comprehensionStream(
+@@ -1,3 +1,4 @@
++import { scopeActivation } from '../boxed-expression/ambient-chain.js';
+ import {
+   markCallableHome,
+   markSweptBinding,
+@@ -7064,7 +7065,8 @@ function* comprehensionStream(
        // gave `[1, 4, 9]`. The comprehension's own scope is passed because it
        // has left the ambient chain by this point.
        let subs: Record<string, Expression> | undefined;
 -      if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
-+      if (scope) ce._pushEvalContext(scope);
++      if (scope)
++        ce._pushEvalContext(scopeActivation(ce.context.lexicalScope, scope));
        frame.install();
        // The scopes nested in the comprehension (an inner `Block` of the body,
        // a `Sum` in it) are shared by every walk of this comprehension, like
-@@ -7195,7 +7195,7 @@ function comprehensionEnumeratedCount(
+@@ -7195,7 +7197,8 @@ function comprehensionEnumeratedCount(
      scope,
      comprehensionIndexNames(elements)
    );
 -  if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
-+  if (scope) ce._pushEvalContext(scope);
++  if (scope)
++    ce._pushEvalContext(scopeActivation(ce.context.lexicalScope, scope));
    frame.install();
    try {
      let n = 0;
-@@ -7265,8 +7265,7 @@ function scanIndependentClauses(expr: Expression):
-   const ce = expr.engine;
+@@ -7266,7 +7269,9 @@ function scanIndependentClauses(expr: Expression):
    const clauses = expr.ops.slice(1);
    const scoped = expr.isScoped && expr.localScope !== undefined;
--  if (scoped)
+   if (scoped)
 -    ce._pushEvalContext(expr.localScope!, undefined, { ambient: true });
-+  if (scoped) ce._pushEvalContext(expr.localScope!);
++    ce._pushEvalContext(
++      scopeActivation(ce.context.lexicalScope, expr.localScope!)
++    );
    try {
      let empty = false;
      let unknown = false;
-@@ -7545,8 +7544,7 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
-   if (clauses.length === 0) return undefined;
+@@ -7546,7 +7551,9 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
    const ce = expr.engine;
    const scoped = expr.isScoped && expr.localScope !== undefined;
--  if (scoped)
+   if (scoped)
 -    ce._pushEvalContext(expr.localScope!, undefined, { ambient: true });
-+  if (scoped) ce._pushEvalContext(expr.localScope!);
++    ce._pushEvalContext(
++      scopeActivation(ce.context.lexicalScope, expr.localScope!)
++    );
    let walk = false;
    let infinite = false;
    let unknown = false;
-diff --git a/src/compute-engine/library/utils.ts b/src/compute-engine/library/utils.ts
-index a5bf492bd..289553d21 100755
---- a/src/compute-engine/library/utils.ts
-+++ b/src/compute-engine/library/utils.ts
-@@ -7,6 +7,7 @@ import type {
-   Scope,
- } from '../global-types.js';
- import type { EffectHandlers } from '../types-effects.js';
-+import type { MathJsonExpression } from '../../math-json/types.js';
- import { runWithEvaluationEffects } from '../effects-registry.js';
- 
- import {
-@@ -398,14 +399,15 @@ export function nestDependentLimits(
-     order.push(next);
-     placed.add(names[next]);
-   }
--  // The nested operators are built from the boxed operands, not from their
--  // JSON: a round trip through `.json` would drop the callable bindings a
--  // body captured (`f(k)` could then resolve a later declaration of `f`) and
--  // turn an embedded object into a snapshot of it.
--  let nested: Expression = body;
-+  // The nested operators are boxed from the raw form of the body and of the
-+  // clauses: an operand that is already boxed keeps its meaning, so a body
-+  // boxed in the scope of this operator would not denote the index of a new
-+  // nested operator. Boxed from the raw form, each nested operator binds its
-+  // index in the body and in the bounds of the clauses inside it.
-+  let nested: MathJsonExpression = body.json;
-   for (let i = order.length - 1; i >= 0; i--)
--    nested = ce.function(kind, [nested, clauses[order[i]]]);
--  return nested;
-+    nested = [kind, nested, clauses[order[i]].json];
-+  return ce.box(nested);
- }
- 
- /**
 diff --git a/src/compute-engine/scope-chaining.ts b/src/compute-engine/scope-chaining.ts
 deleted file mode 100644
 index 38370710e..000000000
@@ -2589,23 +2877,25 @@ index ba7b0807f..6056e0a8a 100644
        ce.popScope();
      }
 diff --git a/test/compute-engine/ce-535-531-binder-declaration-cache.test.ts b/test/compute-engine/ce-535-531-binder-declaration-cache.test.ts
-index 6ee78f03e..6d75e3063 100644
+index 6ee78f03e..194e9e89b 100644
 --- a/test/compute-engine/ce-535-531-binder-declaration-cache.test.ts
 +++ b/test/compute-engine/ce-535-531-binder-declaration-cache.test.ts
-@@ -266,8 +266,10 @@ describe('CE-535: an operand boxed before the scope of a binder', () => {
+@@ -266,8 +266,12 @@ describe('CE-535: an operand boxed before the scope of a binder', () => {
        ce3.function('MyBinder535', [outer, ce3.symbol('x')]);
      else if (route === 'ce.box') ce3.box(['MyBinder535', ['Add', 'x', 1], 'x']);
      else ce3.parse('\\operatorname{MyBinder535}(x+1, x)');
 -    // Inside the binder, `x` has no value.
 -    expect(seen).toEqual(['undefined']);
 +    // Inside the binder, `x` has no value. An operand boxed before the
-+    // binder keeps its meaning (D5 of
-+    // `docs/plans/2026-11-11-bound-once-spec.md`): its `x` is the outer one.
++    // binder is bound to the binder's `x` after the handler runs (the
++    // post-phase of the binder hook, D5 of
++    // `docs/plans/2026-11-11-bound-once-spec.md`): the handler reads the
++    // outer `x`.
 +    expect(seen).toEqual([route === 'ce.function' ? 'positive' : 'undefined']);
      // Outside, `x` is 3 again.
      expect(outer.sgn).toBe('positive');
      expect(ce3.box(['Add', 'x', 1]).sgn).toBe('positive');
-@@ -347,8 +349,9 @@ describe('CE-543: a partial application', () => {
+@@ -347,8 +351,9 @@ describe('CE-543: a partial application', () => {
  
  // A binder whose operand is a symbol whose stored value is an expression:
  // `a := x + 1` with `x := 3`. The sign of `a` is the sign of its stored value,
@@ -2617,7 +2907,7 @@ index 6ee78f03e..6d75e3063 100644
  describe('CE-535: an operand symbol whose value is an expression', () => {
    test.each([true, false])('sign of `a` read before the binder: %s', (warm) => {
      const ce5 = new ComputeEngine();
-@@ -368,8 +371,8 @@ describe('CE-535: an operand symbol whose value is an expression', () => {
+@@ -368,8 +373,8 @@ describe('CE-535: an operand symbol whose value is an expression', () => {
      ce5.assign('a', ce5.box(['Add', 'x', 1], { form: 'raw' }));
      if (warm) expect(ce5.symbol('a').sgn).toBe('positive');
      ce5.box(['MyBinder535b', 'a', 'x']);
@@ -2772,31 +3062,6 @@ index 6576cca50..63ef8c8c9 100644
      expect(def.value?.disposed).toBe(true);
    });
  
-diff --git a/test/compute-engine/compile-shared-binder-body.test.ts b/test/compute-engine/compile-shared-binder-body.test.ts
-index 36c52c4f7..28fa70c8f 100644
---- a/test/compute-engine/compile-shared-binder-body.test.ts
-+++ b/test/compute-engine/compile-shared-binder-body.test.ts
-@@ -58,13 +58,17 @@ describe('COMPILE a big operator over a shared or large body', () => {
-   }, 60_000);
- 
-   it('gives the value of evaluate() for a shared body', () => {
-+    // The shared body itself, with `x` an input: a function literal made
-+    // with `ce.function()` around the boxed body would not bind its `x`
-+    // (D5 of `docs/plans/2026-11-11-bound-once-spec.md`).
-     const ce = new ComputeEngine();
--    defineH(ce, 6);
-     ce.declare('x', 'real');
--    const result = compileJs(ce.box(['H', 'x']));
-+    const body = sharedBody(ce, 6);
-+    const result = compileJs(body);
-     expect(result.success).toBe(true);
-     for (const x of [0.5, 1, -0.75]) {
--      const expected = ce.box(['H', x]).N().re;
-+      ce.assign('x', x);
-+      const expected = body.N().re;
-       const actual = result.run!({ x } as never) as number;
-       expect(Math.abs(actual - expected)).toBeLessThanOrEqual(
-         1e-12 * Math.abs(expected)
 diff --git a/test/compute-engine/comprehension-memo.test.ts b/test/compute-engine/comprehension-memo.test.ts
 index c988583a5..c7b3dc138 100644
 --- a/test/compute-engine/comprehension-memo.test.ts
@@ -2840,7 +3105,7 @@ index c988583a5..c7b3dc138 100644
  
    it('is invalidated by a transitive dependency (helper body)', () => {
 diff --git a/test/compute-engine/debug-bindings-shared-definition-pop.test.ts b/test/compute-engine/debug-bindings-shared-definition-pop.test.ts
-index 636577047..8ab56aef7 100644
+index 636577047..dbe187235 100644
 --- a/test/compute-engine/debug-bindings-shared-definition-pop.test.ts
 +++ b/test/compute-engine/debug-bindings-shared-definition-pop.test.ts
 @@ -96,6 +96,9 @@ function detachedScope(ce: ComputeEngine) {
@@ -2949,6 +3214,105 @@ index 636577047..8ab56aef7 100644
        });
        // `inScope` pops its context without disposing anything, so the pop
        // inside it disposes the definition.
+@@ -314,7 +317,11 @@ describe('A pop leaves a definition that another live context holds', () => {
+   }
+ });
+ 
+-describe('The pop of an asynchronous Sum puts the tombstones back', () => {
++// The index of a `Sum` is a static definition; its value belongs to one
++// evaluation of the sum (an activation). Read after the sum, it has no
++// value, and the pop of the activation does not tombstone it (D6 of
++// `docs/plans/2026-11-11-bound-once-spec.md`).
++describe('An index read after its Sum has no value', () => {
+   /** A `Sum` and the symbol `k` of its body. */
+   function sumAndIndex(ce: ComputeEngine) {
+     const e = ce.box(['Sum', ['Multiply', 'k', 2], ['Limits', 'k', 1, 3]]);
+@@ -322,18 +329,18 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+     return { e, k };
+   }
+ 
+-  test('a read of the index after evaluate() is reported', () => {
++  test('a read of the index after evaluate()', () => {
+     const ce = engine();
+     const { e, k } = sumAndIndex(ce);
+     expect(e.evaluate().toString()).toBe('12');
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+-  test('a read of the index after evaluateAsync() is reported', async () => {
++  test('a read of the index after evaluateAsync()', async () => {
+     const ce = engine();
+     const { e, k } = sumAndIndex(ce);
+     expect((await e.evaluateAsync()).toString()).toBe('12');
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+   test('evaluate(), then evaluateAsync(), then evaluate()', async () => {
+@@ -342,7 +349,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+     expect(e.evaluate().toString()).toBe('12');
+     expect((await e.evaluateAsync()).toString()).toBe('12');
+     expect(e.evaluate().toString()).toBe('12');
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+   test('two asynchronous evaluations at the same time, then evaluate()', async () => {
+@@ -351,7 +358,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+     const [a, b] = await Promise.all([e.evaluateAsync(), e.evaluateAsync()]);
+     expect([a.toString(), b.toString()]).toEqual(['12', '12']);
+     expect(e.evaluate().toString()).toBe('12');
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+   test('a Sum with a Block body, evaluated, then evaluated asynchronously', async () => {
+@@ -383,14 +390,14 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+     // The synchronous evaluation ends while the asynchronous one is
+     // suspended: a read of the index after it is reported.
+     e.evaluate();
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+     // The suspended evaluation reads its own index: no report.
+     release();
+     expect((await pending).toString()).toBe('6');
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+-  test('an asynchronous evaluation that never ends does not turn the check off', () => {
++  test('an asynchronous evaluation that never ends', () => {
+     const ce = engine();
+     ce.declare('never', {
+       signature: '(integer) -> integer',
+@@ -400,7 +407,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+     const k = e.op1.ops!.find((x) => x.symbol === 'k')!;
+     void e.evaluateAsync();
+     e.evaluate();
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+   test('a nested Sum evaluated asynchronously, twice at the same time', async () => {
+@@ -417,7 +424,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+ });
+ 
+ describe('The debug check and overlapping asynchronous evaluations', () => {
+-  test('evaluate(), then a pending evaluateAsync(): a dead read is reported', () => {
++  test('evaluate(), then a pending evaluateAsync(): the index has no value', () => {
+     const ce = engine();
+     ce.declare('never', {
+       signature: '(integer) -> integer',
+@@ -427,7 +434,7 @@ describe('The debug check and overlapping asynchronous evaluations', () => {
+     const k = e.op1.ops!.find((x) => x.symbol === 'k')!;
+     e.evaluate();
+     void e.evaluateAsync();
+-    expect(() => k.evaluate()).toThrow(/discarded scope/);
++    expect(k.evaluate().toString()).toBe('k');
+   });
+ 
+   test('two overlapping evaluateAsync() of a node that reads a constant', async () => {
 diff --git a/test/compute-engine/derivative-literal-parameter-shadow.test.ts b/test/compute-engine/derivative-literal-parameter-shadow.test.ts
 index 59bf440ea..923eb3b63 100644
 --- a/test/compute-engine/derivative-literal-parameter-shadow.test.ts
@@ -3031,6 +3395,44 @@ index cfdcf3b61..75e3b2aa1 100644
  
      // Re-asserting the enclosing scope's bound is NOT redundant here: the
      // inherited record is about the OTHER definition, and this one has no
+diff --git a/test/compute-engine/issue-489-curried-function-capture.test.ts b/test/compute-engine/issue-489-curried-function-capture.test.ts
+index 80d3f6443..d3f81d78b 100644
+--- a/test/compute-engine/issue-489-curried-function-capture.test.ts
++++ b/test/compute-engine/issue-489-curried-function-capture.test.ts
+@@ -738,12 +738,12 @@ describe('a nested literal below a renamed binder', () => {
+     ).toEqual(['Add', ['Multiply', 3, 'j'], 6]);
+   });
+ 
+-  test('a closure that captured the locals of a branch declines', () => {
++  test('a closure that captured the locals of a branch keeps them', () => {
+     // `mk(1)` is a closure made in a branch of `If` in the body of `mk`: the
+     // parent of its body scope holds the local `k` it captured. Applying
+-    // h ↦ (y ↦ (x ↦ [y^x, h])) to it and then to x renames x, and the body
+-    // scope of the closure cannot be copied onto the renamed literal without
+-    // losing the captured `k`: the application stays unevaluated.
++    // h ↦ (y ↦ (x ↦ [y^x, h])) to it and then to x renames x. The closure
++    // is a value that is not below the renamed binder: it is kept as it is,
++    // with its captured `k` (D6 of `docs/plans/2026-11-11-bound-once-spec.md`).
+     const engine = new ComputeEngine();
+     const mk = [
+       'Function',
+@@ -772,7 +772,15 @@ describe('a nested literal below a renamed binder', () => {
+           .box(['Apply', ['Apply', H, closure], 'x'] as any)
+           .evaluate())
+     ).not.toThrow();
+-    expect((result as { operator: string }).operator).toBe('Apply');
++    const value = engine
++      .function('Apply', [result as Expression, engine.number(2)])
++      .evaluate();
++    expect(value.json).toEqual([
++      'List',
++      ['Power', 'x', 2],
++      ['Function', ['Block', 'k']],
++    ]);
++    expect(engine.function('Apply', [value.ops![1]]).evaluate().json).toBe(10);
+   });
+ 
+   test('in a curried application', () => {
 diff --git a/test/compute-engine/lambda-capture.test.ts b/test/compute-engine/lambda-capture.test.ts
 index 8981e4af0..e4fe02597 100644
 --- a/test/compute-engine/lambda-capture.test.ts
@@ -3274,13 +3676,14 @@ index f1751170d..0963e9d9f 100644
          ] as any);
          expect(mixed.toString()).toBe(boxed.toString());
 diff --git a/test/compute-engine/scratch-scope-chained-parent.test.ts b/test/compute-engine/scratch-scope-chained-parent.test.ts
-index f357aef23..5017196d5 100644
+index f357aef23..3c0bead1a 100644
 --- a/test/compute-engine/scratch-scope-chained-parent.test.ts
 +++ b/test/compute-engine/scratch-scope-chained-parent.test.ts
-@@ -8,20 +8,16 @@ import type { StateEvent } from '../../src/compute-engine/engine-configuration-l
+@@ -7,21 +7,16 @@ import type { StateEvent } from '../../src/compute-engine/engine-configuration-l
+ // registers while it runs: a declaration into it, or into a scope created
  // under it, advances no engine-wide cache version, because the pop that ends
  // the computation discards the binding. `scratchRootOf` decides "created
- // under" by walking the parent links. A persistent local scope (the local
+-// under" by walking the parent links. A persistent local scope (the local
 -// scope of a block, a sum, a comprehension) is chained onto the ambient
 -// scope while the node evaluates: its parent link is re-pointed for the life
 -// of the frame (`pushEvalContext`, `engine-scope.ts`). A block boxed outside
@@ -3289,11 +3692,11 @@ index f357aef23..5017196d5 100644
 -// scratch, although the block's scope and the binding outlive the
 -// computation. The walk now follows the link the scope had before it was
 -// chained (`chainedScopeOf`, `scope-chaining.ts`).
-+// scope of a block, a sum, a comprehension) keeps the parent link it was
-+// created with when the node evaluates, so a block boxed outside the scratch
-+// scope and evaluated inside it is not under the scratch scope, and a
-+// `Declare` the block runs is not scratch: the block's scope and the binding
-+// outlive the computation.
++// under" by walking the parent links. An evaluation of a block runs in an
++// activation of its scope, linked to the scope it is evaluated in (D6 of
++// `docs/plans/2026-11-11-bound-once-spec.md`): a `Declare` that the run
++// makes is a declaration of the run, which ends with it, and under a scratch
++// scope it is scratch. The static scope of the block keeps its binding.
  //
  // The two value shields (`simplifyValueBlind` in `simplify.ts`,
 -// `withValueShield` in `utils.ts`) register their scope only while their
@@ -3306,7 +3709,27 @@ index f357aef23..5017196d5 100644
  
  function trapDeclares(ce: ComputeEngine): StateEvent[] {
    const events: StateEvent[] = [];
-@@ -85,7 +81,7 @@ describe('a declaration into a scope chained onto a scratch scope', () => {
+@@ -45,7 +40,7 @@ const BLOCK = [
+ ];
+ 
+ describe('a declaration into a scope chained onto a scratch scope', () => {
+-  test('is not a scratch declaration', () => {
++  test('made by a run of a block evaluated in the scratch scope is scratch', () => {
+     const ce = new ComputeEngine();
+     const block = ce.box(BLOCK);
+     const events = trapDeclares(ce);
+@@ -55,8 +50,8 @@ describe('a declaration into a scope chained onto a scratch scope', () => {
+     ce.popScope();
+     expect(result.json).toBe(4);
+     expect(events).toHaveLength(1);
+-    expect(events[0].kind === 'declare' && events[0].scratch).toBeUndefined();
+-    // The binding outlives the scratch computation.
++    expect(events[0].kind === 'declare' && events[0].scratch).toBe(true);
++    // The static binding of the block outlives the scratch computation.
+     expect((block as any).localScope.bindings.has('t')).toBe(true);
+   });
+ 
+@@ -85,7 +80,7 @@ describe('a declaration into a scope chained onto a scratch scope', () => {
    });
  });
  
@@ -3315,7 +3738,7 @@ index f357aef23..5017196d5 100644
    test('a block run inside the shield keeps its declaration (not scratch)', () => {
      const ce = new ComputeEngine();
      ce.assign('x', 5);
-@@ -101,13 +97,13 @@ describe('a value shield registers its scope for its shadow declarations only',
+@@ -101,13 +96,13 @@ describe('a value shield registers its scope for its shadow declarations only',
      const declaresOfT = events.filter(
        (e) => e.kind === 'declare' && e.scratch === true
      );
@@ -3334,7 +3757,7 @@ index f357aef23..5017196d5 100644
      const ce = new ComputeEngine();
      ce.assign('x', 5);
      ce.assign('y', 1);
-@@ -115,20 +111,17 @@ describe('a value shield registers its scope for its shadow declarations only',
+@@ -115,20 +110,17 @@ describe('a value shield registers its scope for its shadow declarations only',
      const events = trapDeclares(ce);
      const signs = withValueShield(ce, ['x'], () => {
        const before = e.sgn;
