@@ -201,8 +201,8 @@ Decisions:
 ### M2, first part (2026-11-11): the answers, with nothing deleted
 
 A prototype at `eed70f79a` changes four places of `boxed-symbol.ts`
-(`docs/plans/2026-11-11-bound-once-evidence/prototype-four-sites-and-fallback.patch.txt`,
-which also holds the change of M1 below;
+(`docs/plans/2026-11-11-bound-once-evidence/prototype.patch.txt`, which
+also holds the changes of M1 below; its new file is `hidden-values.ts.txt`;
 about 30 lines): a free name resolves from its home scope for its type and
 for its value, and a symbol with a definition reads that definition unless
 it is a parameter, the variable of a binder or the local of a block. It
@@ -287,5 +287,34 @@ The 36, by mechanism:
   in a scope.
 - Eight files with one failure each.
 
-Not done: the full suite on the prototype with the shield change, the
-deletions of section 5, M3 (running).
+The full suite with the shield change: 97 failures in 46 files (it broke
+tests in five files that passed before: `calculus`,
+`caller-local-argument-binding`, `ce-1102-…`, `ce-616-…`, `ce-827-…`; not
+examined).
+
+### M2, second part (2026-11-11): lines
+
+The prototype so far is +59 and −202 lines in 5 files, with one new file
+of 28 lines. It also drops the recorded read of a resolution for a free
+name (11 lines become 4). It does not delete the code that lost its users.
+What then has no user, or only the users that the rule removes, by a count
+of references in the prototype: `noteResolutionRead()`, `ResolutionToken`
+and its registry, `homeScopeKey()`, `_ownDefinitionOnChain()`; for the
+shield, `markShieldDeclaration()` (12 references in 4 files), `isShield()`
+(8), `binderHidesAssignedValue()`. What the value read of a parameter, a
+binder variable and a block local still needs is not measured:
+`binders.ts` has 2,256 lines, `static-typing-view.ts` 325,
+`scratch-scopes.ts` 111, and `rebindEscaping()` and `withScratchScope()`
+have other callers (20 and 17 references).
+
+### M3 (2026-11-11): not conclusive
+
+The machine was loaded during both attempts (load 9 to 15 under the box
+lock, then 29), so these are indications only. Production builds, three
+pairs, Tycho's `othello` instrument (median of 15 rounds): base 914, 875,
+723 ms; prototype 648, 787, 650 ms. The loop of undeclared symbols shows
+no clear difference on the builds (the recorded reads were still there),
+and about 5% on the source after the recorded read of the resolution was
+dropped (minimum of 11 runs: 922 to 967 ms against 885 to 908 ms). The
+cost of `ce.rebind()` is not measured. A measure on a quiet machine, by
+Tycho's method, is still owed.
