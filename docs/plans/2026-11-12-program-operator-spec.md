@@ -173,6 +173,37 @@ runner (146 references outside `src/epsil`).
   (`src/epsil/docs/declarations.md`) is replaced by the three differences
   of section 2.
 
+- The form is always `Program(…)`: a program of one statement is
+  `Program(s)`, an empty program is `Program()` (today the parser gives the
+  bare statement and `Nothing`). Tycho tests for `Block` on a parse result
+  in `prelude-runner.ts` (`topStatementsOf`), `cortex-analysis.ts`
+  (`topLevelStatements`) and `ce-notebook-evaluator.ts`
+  (`collectFunctionDefines`).
+
+**Tycho's answer (tycho-desk, 2026-11-12, Tycho `26f158866`, rough spans).**
+A plain run of a `Program` deletes about 200 of the 2,836 lines of the
+prelude runner (the order of the run, the forward-read rule, the kinds of
+statement, the first-assignment rewrite): by the delivery rule it is not
+worth a release for Tycho alone. Two additions would be, and neither is
+part of this spec:
+
+- a query that gives, for a parsed program, each symbol site with its
+  role (read, call, assign, declare, parameter), its source range and the
+  binding it resolves to. Tycho rebuilds the engine's scoping by hand for
+  its admission rules (about 600 lines, with special cases for `D`,
+  `Limit`, `NIntegrate`, `Match`), and that copy breaks when a shape
+  changes;
+- a compiled run of a `Program` that returns every top-level value with a
+  static type, falls back to the interpreter for one statement that
+  declines and continues compiled, with `runAsync()`, the iteration budget
+  and the time of each statement (about 800 lines).
+
+Tycho also needs: both a synchronous and an asynchronous form; all the
+diagnostics of a failing statement with source ranges; and one clear
+diagnostic, not a cascade, for a statement that reads a name whose
+statement failed. Its forward-read rule also refuses a read THROUGH a call
+(`issues/CE-1007.md`); this spec catches the direct read only.
+
 ## 6. Order and acceptance
 
 After step 1 of the bound-once spec is on main. First a measurement: the
