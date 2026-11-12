@@ -2,6 +2,7 @@
   "version": "0.187.1",
   "scripts": {
     "doc": "bash ./scripts/doc.sh",
+    "brb": "node scripts/issues-ui.mjs --open",
     "build": "bash ./scripts/build.sh",
     "clean": "bash ./scripts/clean.sh",
     "coverage": "bash ./scripts/test.sh coverage",
