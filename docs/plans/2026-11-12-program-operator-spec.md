@@ -258,6 +258,42 @@ What that opinion asks of THIS spec, taken as requirements:
   inside a statement. Operations that are not pure keep the order of the
   program; the order of pure ones is not specified.
 
+**Inputs for the runner's design note (CE-1255.3).** User decisions of
+2026-11-12 as reported by tycho-desk through compute-engine-ef (recorded in
+Tycho's `docs/COMPUTE_ENGINE_CHECKLIST.md` and `ROADMAP.md`); to be
+confirmed with the user when the note is written. The owner of the note is
+not decided.
+
+1. The engine chooses between compiled code and the interpreter, statement
+   by statement, behind an execution option. Modes: interpret (exact
+   values, as today) and compile (each statement that compiles runs
+   compiled; numbers are floating point: `const t = 1/3` gives the float);
+   a "compile only" value that fails on a decline may stay for tests. No
+   analysis of the kind of a value.
+2. In the compile mode the only fallback is a statement the compiler
+   declines: it runs on the interpreter and the next statement is compiled
+   again. Every numeric result is floating point in that mode, also the
+   results of a statement that ran on the interpreter (`N()` before the
+   binding).
+3. The route of a statement depends only on the program and its types, not
+   on load, timing or workers. So exceeding the iteration budget is an
+   error, not a fallback (opinion of compute-engine-ef).
+4. First version: every top-level value with its type; a report per
+   statement (route, reason of a decline, time, loops that ran on the pool,
+   warnings such as the seeded-draw one); an iteration budget for compiled
+   code and the time limit for interpreted code; a synchronous and an
+   asynchronous form; the naming leaves room for single expressions later.
+5. Tycho: the plot prelude always runs compiled; the notebook gets an
+   option per cell, default interpreted; the cells of a section share a
+   scope, so the values of earlier cells are inputs of a later cell's
+   program; stepping in the debugger uses the interpreter.
+
+Opinions of compute-engine-ef for the note: a statement that reads a
+symbolic value (a free name) runs interpreted; keep JavaScript values
+between consecutive compiled statements and box them lazily (Tycho pays
+the conversion twice on lists of several hundred thousand elements); the
+value contract is section 2 of `2026-11-12-js-route-course-correction.md`.
+
 ## 6. Order and acceptance
 
 After step 1 of the bound-once spec is on main. First a measurement: the
