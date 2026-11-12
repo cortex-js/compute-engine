@@ -1,0 +1,65 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`IR slice: GLSL text Round adds no 0.5 before floor 1`] = `
+"float _round(float x) {
+  float a = abs(x);
+  float r = floor(a);
+  if (a - r >= 0.5) r += 1.0;
+  return x < 0.0 ? -r : r;
+}
+float f(float in0_x) {
+  return _round(in0_x);
+}"
+`;
+
+exports[`IR slice: GLSL text a conditional joins two locals, one result each 1`] = `
+"float f(float in0_y, float in1_x) {
+  float v6;
+  float v7;
+  if ((in1_x < 0.0)) {
+    v6 = 1.0;
+    v7 = in0_y;
+  } else {
+    v6 = 0.0;
+    v7 = 5.0;
+  }
+  return (v6 + v7);
+}"
+`;
+
+exports[`IR slice: GLSL text a loop counts with an int, each bound evaluated once 1`] = `
+"float f(float in0_y, float in1_x) {
+  float v9 = 0.0;
+  int v4_hi = int(clamp(floor(in0_y), -1073741824.0, 1073741824.0));
+  for (int v4_i = int(clamp(1.0, -1073741824.0, 1073741824.0)); v4_i <= v4_hi; v4_i++) {
+    float v4 = float(v4_i);
+    v9 = (v9 + (v4 * in1_x));
+  }
+  return v9;
+}"
+`;
+
+exports[`IR slice: GLSL text an element-wise operation is one per element 1`] = `
+"float[3] f(float in0_x, float in1_L[3]) {
+  return float[3]((in0_x + sin(in1_L[int(0.0)])), (in0_x + sin(in1_L[int(1.0)])), (in0_x + sin(in1_L[int(2.0)])));
+}"
+`;
+
+exports[`IR slice: GLSL text an integer Mod computes on ints 1`] = `
+"float _imod(float a, float b) {
+  if (b == 0.0) return uintBitsToFloat(0x7fc00000u);
+  int ia = int(a), ib = int(b);
+  int r = ia - ib * (ia / ib);
+  if (r != 0 && (r < 0) != (ib < 0)) r += ib;
+  return float(r);
+}
+float f(float in0_n, float in1_m) {
+  return _imod(in0_n, in1_m);
+}"
+`;
+
+exports[`IR slice: GLSL text parameter names are ASCII, with no __ 1`] = `
+"float f(float in0_n, float in1_x) {
+  return (in0_n + in1_x);
+}"
+`;

@@ -1,0 +1,638 @@
+file,start,end,lines,category,confidence,name,reason,lines_A,lines_B,lines_C,lines_D,lines_E
+javascript-fragment-target.ts,1,201,201,E,high,"import","imports; scale with the code",0,0,0,0,201
+javascript-fragment-target.ts,202,222,21,A,high,"addRule","real/complex rule of Add",21,0,0,0,0
+javascript-fragment-target.ts,223,248,26,B,high,"structuredAddRule","keeps a -0 imaginary part as the existing Add text does",0,26,0,0,0
+javascript-fragment-target.ts,249,264,16,A,high,"negateRule","lane rule",16,0,0,0,0
+javascript-fragment-target.ts,265,283,19,B,high,"sqrtRule","existing-route Sqrt via BaseCompiler.isComplexValued",0,19,0,0,0
+javascript-fragment-target.ts,284,304,21,A,medium,"definition","fragment definition of the existing pilot route",21,0,0,0,0
+javascript-fragment-target.ts,305,311,7,A,medium,"representation","representation of a type",7,0,0,0,0
+javascript-fragment-target.ts,312,337,26,B,medium,"hasNoUnknown","decides when the existing compiler would fold",0,26,0,0,0
+javascript-fragment-target.ts,338,349,12,A,high,"operandFacts","facts of operands",12,0,0,0,0
+javascript-fragment-target.ts,350,428,79,B,high,"closedJumpFold","reproduces the existing exact fold of jump functions with constantFold:false",0,79,0,0,0
+javascript-fragment-target.ts,429,445,17,B,high,"jumpFoldLiteral","reads back the literal the existing compiler folds",0,17,0,0,0
+javascript-fragment-target.ts,446,509,64,A50B50,high,"multiplyRule","Multiply lanes; division by q mirrors multiplyByRational of the existing emitter",32,32,0,0,0
+javascript-fragment-target.ts,510,565,56,B,high,"isClosedPole","mirrors constantPoleOrdering() of the existing compiler",0,56,0,0,0
+javascript-fragment-target.ts,566,581,16,B,high,"boundBelowRoot","mirrors isNameBoundByCompilation()",0,16,0,0,0
+javascript-fragment-target.ts,582,653,72,A70B30,high,"comparisonRule","comparison typing; pole and fold cases mirror",50,22,0,0,0
+javascript-fragment-target.ts,654,696,43,A,high,"realOperatorFacts","facts of real operators",43,0,0,0,0
+javascript-fragment-target.ts,697,701,5,A,high,"integerWhenAll","integer result rule",5,0,0,0,0
+javascript-fragment-target.ts,702,733,32,A40B60,high,"modFacts","Mod facts; refuses two branches of the existing emitter",13,19,0,0,0
+javascript-fragment-target.ts,734,771,38,A40B60,high,"modRule","reads BaseCompiler.isIntegerValued to pick the emitter case",15,23,0,0,0
+javascript-fragment-target.ts,772,776,5,B,high,"SAFE_NON_NEGATIVE_INTEGER_TYPE","copy of a predicate of javascript-target.ts",0,5,0,0,0
+javascript-fragment-target.ts,777,791,15,B,high,"isSafeNonNegativeInteger","copy of a predicate of javascript-target.ts",0,15,0,0,0
+javascript-fragment-target.ts,792,799,8,A,high,"floorFacts","Floor facts",8,0,0,0,0
+javascript-fragment-target.ts,800,819,20,A50B50,high,"floorRuleOf","Floor rule plus the inexact-constant refusal",10,10,0,0,0
+javascript-fragment-target.ts,820,820,1,A,high,"floorRule","alias",1,0,0,0,0
+javascript-fragment-target.ts,821,958,138,B70C30,high,"inexactJumpConstant","mirrors jumpShiftRewrite(); the residual difference is target precision (caveat)",0,97,41,0,0
+javascript-fragment-target.ts,959,974,16,A,high,"realDivideRule","Divide lanes",16,0,0,0,0
+javascript-fragment-target.ts,975,994,20,A,high,"divideRule","Divide rule",20,0,0,0,0
+javascript-fragment-target.ts,995,1083,89,A,high,"loopRule","Loop typing",89,0,0,0,0
+javascript-fragment-target.ts,1084,1113,30,A,high,"extremumRule","Min/Max typing",30,0,0,0,0
+javascript-fragment-target.ts,1114,1144,31,A,high,"logicalRule","And/Or typing",31,0,0,0,0
+javascript-fragment-target.ts,1145,1147,3,A,high,"Sign","type",3,0,0,0,0
+javascript-fragment-target.ts,1148,1151,4,A,high,"SnapshotOf","type",4,0,0,0,0
+javascript-fragment-target.ts,1152,1202,51,A60B40,medium,"signOf","sign proof for radical lanes; mirrors assumedRealNonNegative()",31,20,0,0,0
+javascript-fragment-target.ts,1203,1291,89,A60B40,medium,"signOfNode","sign proof for radical lanes",53,36,0,0,0
+javascript-fragment-target.ts,1292,1363,72,A40B60,high,"structuredRadicalRule","gives what isComplexValued() gives or declines",29,43,0,0,0
+javascript-fragment-target.ts,1364,1401,38,A40B60,high,"radicalLane","refuses where the engine and signOf disagree",15,23,0,0,0
+javascript-fragment-target.ts,1402,1481,80,A40B60,high,"structuredLogRule","Log lane by the existing promotesToComplexLane rule",32,48,0,0,0
+javascript-fragment-target.ts,1482,1498,17,B,high,"readsAsPiMultiple","mirrors piMultiple() reach",0,17,0,0,0
+javascript-fragment-target.ts,1499,1548,50,B,high,"piMultipleFacts","sinpi/cospi as the existing emitter (precision only)",0,50,0,0,0
+javascript-fragment-target.ts,1549,1568,20,B,high,"ScalarFunctionLane","how the existing emitter decides a lane",0,20,0,0,0
+javascript-fragment-target.ts,1569,1591,23,B,high,"ComplexOperands","which complex operands the existing handlers accept",0,23,0,0,0
+javascript-fragment-target.ts,1592,1627,36,B,high,"FRACT_OPERAND_HEADS","heads whose code on the existing route is never a name (grouping)",0,36,0,0,0
+javascript-fragment-target.ts,1628,1704,77,A60B40,medium,"SCALAR_FUNCTION_HEADS","table of heads with lane/complex flags",46,31,0,0,0
+javascript-fragment-target.ts,1705,1737,33,B,high,"complexOperandRefusal","refusal per ComplexOperands",0,33,0,0,0
+javascript-fragment-target.ts,1738,1886,149,A50B50,high,"structuredScalarFunctionRule","functions of one operand, in the order of the existing handler",74,75,0,0,0
+javascript-fragment-target.ts,1887,1922,36,A70B30,medium,"RealCallEntry","table entry type",25,11,0,0,0
+javascript-fragment-target.ts,1923,1928,6,C,high,"NAN_BELOW_ZERO","kernel NaN where interpreter finite",0,0,6,0,0
+javascript-fragment-target.ts,1929,2018,90,A80B20,medium,"REAL_CALL_HEADS","table of real kernels",72,18,0,0,0
+javascript-fragment-target.ts,2019,2026,8,A,high,"UPPER_GAMMA","rule",8,0,0,0,0
+javascript-fragment-target.ts,2027,2042,16,A,high,"upperGammaRule","rule",16,0,0,0,0
+javascript-fragment-target.ts,2043,2052,10,B,medium,"THROWING_HEADS","canThrow table used to decline the existing early exit",0,10,0,0,0
+javascript-fragment-target.ts,2053,2067,15,B,medium,"mayThrow","same",0,15,0,0,0
+javascript-fragment-target.ts,2068,2081,14,E,high,"realCallArities","message text",0,0,0,0,14
+javascript-fragment-target.ts,2082,2290,209,A40B60,high,"realCallRule","10 existing-compiler clauses (KroneckerDelta order, Chop lane, continuation)",84,125,0,0,0
+javascript-fragment-target.ts,2291,2424,134,A50B50,high,"structuredFunctionRule","Sin/Cos/...; declines where the existing handler writes other code",67,67,0,0,0
+javascript-fragment-target.ts,2425,2731,307,A30B70,high,"structuredPowerRule","Power forms chosen branch by branch as the existing Power handler",92,215,0,0,0
+javascript-fragment-target.ts,2732,2735,4,B,high,"printedDouble","String(v) round trip as the existing emitter",0,4,0,0,0
+javascript-fragment-target.ts,2736,2755,20,B,high,"foldsToComplex","resultIsComplexValued() of a folded literal",0,20,0,0,0
+javascript-fragment-target.ts,2756,2812,57,B,high,"foldedLiteral","literal folds of the existing emitter with constantFold:false",0,57,0,0,0
+javascript-fragment-target.ts,2813,2861,49,B,high,"foldedLiteralPower","same, Power",0,49,0,0,0
+javascript-fragment-target.ts,2862,2914,53,B,high,"foldedLiteralRoot","same, Root",0,53,0,0,0
+javascript-fragment-target.ts,2915,3094,180,A30B70,high,"constantPowerForm","Power form in the order of the existing branches",54,126,0,0,0
+javascript-fragment-target.ts,3095,3195,101,A40B60,high,"structuredRootRule","Root as the existing handler",40,61,0,0,0
+javascript-fragment-target.ts,3196,3217,22,A,high,"admittedOperands","operands to check",22,0,0,0,0
+javascript-fragment-target.ts,3218,3264,47,A,high,"modeRules","rule table by mode",47,0,0,0,0
+javascript-fragment-target.ts,3265,3288,24,B,high,"decidedSelectionRule","selected branch as the existing emitter writes it",0,24,0,0,0
+javascript-fragment-target.ts,3289,3300,12,D,medium,"PassBinds","binding question the pass answers again",0,0,0,12,0
+javascript-fragment-target.ts,3301,3309,9,D,medium,"namesBound","admission has no scopes",0,0,0,9,0
+javascript-fragment-target.ts,3310,3343,34,D,high,"namesBoundIn","admission has no scopes; reads every binder in the tree",0,0,0,34,0
+javascript-fragment-target.ts,3344,3358,15,B,high,"refuseSelections","dispatch of the selection refusals",0,15,0,0,0
+javascript-fragment-target.ts,3359,3389,31,B,high,"refuseOperandSelection","-0 difference vs existing parentheses",0,31,0,0,0
+javascript-fragment-target.ts,3390,3411,22,B,high,"refuseUngroupedSelection","mirrors existing bug CE-1224 (missing parentheses)",0,22,0,0,0
+javascript-fragment-target.ts,3412,3431,20,B,high,"refuseWideSelection","existing writes the parent from the dead-branch type",0,20,0,0,0
+javascript-fragment-target.ts,3432,3452,21,B,high,"refuseComplexSelection","-0 difference vs existing",0,21,0,0,0
+javascript-fragment-target.ts,3453,3461,9,A,high,"ifRule","If rule",9,0,0,0,0
+javascript-fragment-target.ts,3462,3465,4,A,high,"whichRule","Which rule",4,0,0,0,0
+javascript-fragment-target.ts,3466,3474,9,A,high,"withoutMode","table glue",9,0,0,0,0
+javascript-fragment-target.ts,3475,3578,104,A,high,"structuredRules","rule table",104,0,0,0,0
+javascript-fragment-target.ts,3579,3582,4,A,high,"ELEMENTWISE_HEADS","table",4,0,0,0,0
+javascript-fragment-target.ts,3583,3600,18,A,high,"foldOrExtremumRule","shape dispatch",18,0,0,0,0
+javascript-fragment-target.ts,3601,3627,27,A,high,"LIST_OPERAND_HEADS","shape table",27,0,0,0,0
+javascript-fragment-target.ts,3628,3681,54,A,high,"NESTED_OPERAND_HEADS","shape table",54,0,0,0,0
+javascript-fragment-target.ts,3682,3737,56,A,high,"withoutNestedOperands","refuses an unsettled nested shape",56,0,0,0,0
+javascript-fragment-target.ts,3738,3742,5,A,high,"opsOfNode","util",5,0,0,0,0
+javascript-fragment-target.ts,3743,3819,77,A50B50,high,"structuredLocalType","local types; conversions limited to those with the existing value",38,39,0,0,0
+javascript-fragment-target.ts,3820,3822,3,A,high,"DeclaredLocalType","type",3,0,0,0,0
+javascript-fragment-target.ts,3823,3865,43,A50B50,high,"declaredLocalType","complex local in complex mode refused for existing shape",21,22,0,0,0
+javascript-fragment-target.ts,3866,3893,28,A,high,"nestedListLocalType","local list type",28,0,0,0,0
+javascript-fragment-target.ts,3894,3916,23,A,high,"tupleListLocalType","local list type",23,0,0,0,0
+javascript-fragment-target.ts,3917,3929,13,A,high,"EMPTY_TUPLE_LISTS","typing of []",13,0,0,0,0
+javascript-fragment-target.ts,3930,3964,35,A,high,"markEmptyTupleLists","typing of []",35,0,0,0,0
+javascript-fragment-target.ts,3965,3989,25,A,high,"structuredListLocalType","local list type",25,0,0,0,0
+javascript-fragment-target.ts,3990,4061,72,A,medium,"integerFromListLength","settles integer facts the engine types loosely",72,0,0,0,0
+javascript-fragment-target.ts,4062,4092,31,A,medium,"withListLengthIntegers","same",31,0,0,0,0
+javascript-fragment-target.ts,4093,4124,32,A,medium,"withRealFromRealOperands","same",32,0,0,0,0
+javascript-fragment-target.ts,4125,4208,84,A90B10,high,"structuredListType","list types",76,8,0,0,0
+javascript-fragment-target.ts,4209,4291,83,A90B10,high,"structuredNestedListType","nested list types",75,8,0,0,0
+javascript-fragment-target.ts,4292,4327,36,A,high,"structuredTupleType","tuple types",36,0,0,0,0
+javascript-fragment-target.ts,4328,4335,8,A,high,"isAdmittedList","shape",8,0,0,0,0
+javascript-fragment-target.ts,4336,4355,20,A,high,"structuredParameterType","shape",20,0,0,0,0
+javascript-fragment-target.ts,4356,4382,27,A,high,"structuredRepresentation","representation",27,0,0,0,0
+javascript-fragment-target.ts,4383,4389,7,A,high,"StructuredTypeShape","type",7,0,0,0,0
+javascript-fragment-target.ts,4390,4398,9,A,high,"isNestedListType","shape",9,0,0,0,0
+javascript-fragment-target.ts,4399,4412,14,A,high,"joinedRows","shape join",14,0,0,0,0
+javascript-fragment-target.ts,4413,4434,22,A,high,"passesStructuredList","conversion rule",22,0,0,0,0
+javascript-fragment-target.ts,4435,4500,66,A,high,"structuredDefinition","definition for the pass",66,0,0,0,0
+javascript-fragment-target.ts,4501,4672,172,A,medium,"atRule","At typing",172,0,0,0,0
+javascript-fragment-target.ts,4673,4710,38,A,high,"lengthRule","Length typing",38,0,0,0,0
+javascript-fragment-target.ts,4711,4746,36,A,high,"comprehensionParts","form",36,0,0,0,0
+javascript-fragment-target.ts,4747,4762,16,E,high,"comprehensionRefusal","message",0,0,0,0,16
+javascript-fragment-target.ts,4763,4771,9,A,high,"ComprehensionClause","type",9,0,0,0,0
+javascript-fragment-target.ts,4772,4866,95,A80C20,high,"comprehensionClauses","generators; purity because the interpreter is lazy",76,0,19,0,0
+javascript-fragment-target.ts,4867,4935,69,A,high,"generalComprehensionRule","typing",69,0,0,0,0
+javascript-fragment-target.ts,4936,5051,116,A80C20,high,"comprehensionRule","typing; purity of a lazy body",93,0,23,0,0
+javascript-fragment-target.ts,5052,5095,44,A,high,"aggregateRefusal","form",44,0,0,0,0
+javascript-fragment-target.ts,5096,5162,67,A40B60,high,"aggregateBoundRefusal","bounds read as the existing emitSumProduct",27,40,0,0,0
+javascript-fragment-target.ts,5163,5191,29,A,high,"checkAggregateBound","glue",29,0,0,0,0
+javascript-fragment-target.ts,5192,5201,10,E,high,"indexLabel","message",0,0,0,0,10
+javascript-fragment-target.ts,5202,5236,35,A,high,"aggregateRule","Sum/Product typing",35,0,0,0,0
+javascript-fragment-target.ts,5237,5248,12,A,high,"statedWidth","shape",12,0,0,0,0
+javascript-fragment-target.ts,5249,5332,84,A50B50,high,"listAggregateFacts","list-body Sum as the existing null accumulator",42,42,0,0,0
+javascript-fragment-target.ts,5333,5362,30,A30B70,high,"selectionRefusal","True/False clause drops mirror; Nothing value is a real decline",9,21,0,0,0
+javascript-fragment-target.ts,5363,5418,56,A,high,"selectionRule","Which typing",56,0,0,0,0
+javascript-fragment-target.ts,5419,5575,157,D,medium,"structuredValueParts","admission re-derives nested scopes the pass walks",0,0,0,157,0
+javascript-fragment-target.ts,5576,5612,37,A,medium,"userFunctionOperand","user function as lambda",37,0,0,0,0
+javascript-fragment-target.ts,5613,5628,16,A,high,"userFunctionLiteralOf","binding read",16,0,0,0,0
+javascript-fragment-target.ts,5629,5643,15,C,high,"impureNodes","lazy-view purity",0,0,15,0,0
+javascript-fragment-target.ts,5644,5716,73,A,high,"replaceAtRule","ReplaceAt typing",73,0,0,0,0
+javascript-fragment-target.ts,5717,5814,98,A80B20,high,"nestedReplaceAt","nested ReplaceAt",78,20,0,0,0
+javascript-fragment-target.ts,5815,5841,27,A,medium,"elementRefusal","element shape",27,0,0,0,0
+javascript-fragment-target.ts,5842,5922,81,A,high,"listLiteralRule","List typing",81,0,0,0,0
+javascript-fragment-target.ts,5923,5954,32,A,high,"tupleRule","Tuple typing",32,0,0,0,0
+javascript-fragment-target.ts,5955,5967,13,A,high,"isBooleanList","shape",13,0,0,0,0
+javascript-fragment-target.ts,5968,5983,16,A,high,"listElementType","shape",16,0,0,0,0
+javascript-fragment-target.ts,5984,5995,12,A,high,"rowsOf","shape",12,0,0,0,0
+javascript-fragment-target.ts,5996,6007,12,A,high,"collectionElement","shape",12,0,0,0,0
+javascript-fragment-target.ts,6008,6047,40,A,high,"foldRule","fold typing",40,0,0,0,0
+javascript-fragment-target.ts,6048,6068,21,A,high,"MATRIX_HEADS","table",21,0,0,0,0
+javascript-fragment-target.ts,6069,6087,19,A,high,"numericCellsOf","shape",19,0,0,0,0
+javascript-fragment-target.ts,6088,6098,11,A,high,"numericListType","shape",11,0,0,0,0
+javascript-fragment-target.ts,6099,6111,13,A,high,"isEngineMatrix","shape",13,0,0,0,0
+javascript-fragment-target.ts,6112,6350,239,A70B30,medium,"matrixFunctionRule","matrix typing; bcast-parent and lane refusals mirror",167,72,0,0,0
+javascript-fragment-target.ts,6351,6833,483,A70B30,medium,"collectionRule","list functions; several refusals state existing behaviour",338,145,0,0,0
+javascript-fragment-target.ts,6834,6847,14,A,high,"STATISTICS_HEADS","table",14,0,0,0,0
+javascript-fragment-target.ts,6848,7408,561,A60B30C10,medium,"functionOperandRule","Map/Filter/Reduce typing; 12 existing-compiler refusals",337,168,56,0,0
+javascript-fragment-target.ts,7409,7419,11,A,high,"isFoldNode","shape",11,0,0,0,0
+javascript-fragment-target.ts,7420,7486,67,C,high,"lengthKey","equal lengths by construction (else interpreter error); a run-time length check that throws would do",0,0,67,0,0
+javascript-fragment-target.ts,7487,7631,145,A80B20,high,"elementwiseRule","element-wise typing",116,29,0,0,0
+javascript-fragment-target.ts,7632,7644,13,A,high,"isBroadcastHead","table",13,0,0,0,0
+javascript-fragment-target.ts,7645,7668,24,A,high,"BROADCAST_OPERATIONS","table",24,0,0,0,0
+javascript-fragment-target.ts,7669,7671,3,A,high,"BROADCAST_CONNECTIVES","table",3,0,0,0,0
+javascript-fragment-target.ts,7672,7686,15,B,high,"COMPLEX_CELL_HEADS","bcast closure applies the real function",0,15,0,0,0
+javascript-fragment-target.ts,7687,7700,14,A,high,"ANGULAR_HEADS","table",14,0,0,0,0
+javascript-fragment-target.ts,7701,7831,131,A60B40,high,"broadcastForm","element code as the bcast closure",79,52,0,0,0
+javascript-fragment-target.ts,7832,7843,12,A,high,"broadcastKind","shape",12,0,0,0,0
+javascript-fragment-target.ts,7844,7854,11,A,high,"readsBooleans","shape",11,0,0,0,0
+javascript-fragment-target.ts,7855,7900,46,A80C20,high,"connectiveFacts","boolean lists",37,0,9,0,0
+javascript-fragment-target.ts,7901,7925,25,C,high,"listsOfOneLength","equal lengths",0,0,25,0,0
+javascript-fragment-target.ts,7926,7940,15,A,high,"LIBRARY_CONSTANTS","table",15,0,0,0,0
+javascript-fragment-target.ts,7941,7954,14,A,high,"shadowedConstant","name resolution",14,0,0,0,0
+javascript-fragment-target.ts,7955,8072,118,A70B30,high,"selectionBroadcastRule","element-wise selection",83,35,0,0,0
+javascript-fragment-target.ts,8073,8135,63,A,high,"listExtremumRule","Max/Min of lists",63,0,0,0,0
+javascript-fragment-target.ts,8136,8164,29,A,high,"listEqualityFacts","Equal of lists",29,0,0,0,0
+javascript-fragment-target.ts,8165,8276,112,A70B30,high,"broadcastRule","broadcast typing",78,34,0,0,0
+javascript-fragment-target.ts,8277,8411,135,A70B30,high,"nestedElementwise","nested element-wise",94,41,0,0,0
+javascript-fragment-target.ts,8412,8460,49,C,high,"nestedLengthKeys","equal lengths",0,0,49,0,0
+javascript-fragment-target.ts,8461,8507,47,A80C20,high,"withFoldOfRows","Sum of rows",38,0,9,0,0
+javascript-fragment-target.ts,8508,8520,13,A,high,"undeclaredNames","names",13,0,0,0,0
+javascript-fragment-target.ts,8521,8536,16,A,high,"notRule","Not",16,0,0,0,0
+javascript-fragment-target.ts,8537,8562,26,A70B30,high,"randomRule","Random; same doubles as the existing arithmetic",18,8,0,0,0
+javascript-fragment-target.ts,8563,8673,111,A40B60,high,"seededRule","WithRandomSeed lane per isComplexValued()",44,67,0,0,0
+javascript-fragment-target.ts,8674,8749,76,A,high,"typedRule","Typed",76,0,0,0,0
+javascript-fragment-target.ts,8750,8782,33,A,high,"withoutListOperands","refuses list operand",33,0,0,0,0
+javascript-fragment-target.ts,8783,8813,31,E,high,"structuredListRefusal","message",0,0,0,0,31
+javascript-fragment-target.ts,8814,8825,12,A,high,"isNestedEngineList","shape",12,0,0,0,0
+javascript-fragment-target.ts,8826,8851,26,B,high,"refuseUndirectedInfinity","existing writes Infinity for every ComplexInfinity",0,26,0,0,0
+javascript-fragment-target.ts,8852,8876,25,B,high,"refuseBooleanClaim","existing writes the literal of a type true/false",0,25,0,0,0
+javascript-fragment-target.ts,8877,8983,107,B,high,"refuseHaversineGrouping","mirrors existing bug CE-1196 (missing parentheses)",0,107,0,0,0
+javascript-fragment-target.ts,8984,9004,21,B,high,"refuseHaversineLocal","same",0,21,0,0,0
+javascript-fragment-target.ts,9005,9032,28,B,high,"refuseWideRead","existing wraps in _SYS.cplx",0,28,0,0,0
+javascript-fragment-target.ts,9033,9093,61,B,high,"refuseComplexListQuotients","existing reads element with complex tag",0,61,0,0,0
+javascript-fragment-target.ts,9094,9146,53,B,high,"refuseComplexElementLanes","asks operandElementLane() of the existing compiler",0,53,0,0,0
+javascript-fragment-target.ts,9147,9177,31,B,high,"withAnalysisMemo","memo so the existing analyses can be asked at depth 0",0,31,0,0,0
+javascript-fragment-target.ts,9178,9197,20,A,high,"isElementCall","shape",20,0,0,0,0
+javascript-fragment-target.ts,9198,9207,10,C,medium,"hostReadNames","host reads in length keys",0,0,10,0,0
+javascript-fragment-target.ts,9208,9277,70,C,high,"refuseUnstableLengthKeys","host read can change a length",0,0,70,0,0
+javascript-fragment-target.ts,9278,9337,60,B,high,"isWideRealInStrict","what the existing compiler reads as real",0,60,0,0,0
+javascript-fragment-target.ts,9338,9362,25,B,medium,"refuseStrictWideReads","same",0,25,0,0,0
+javascript-fragment-target.ts,9363,9444,82,A,high,"refuseBooleanListUses","shape refusal",82,0,0,0,0
+javascript-fragment-target.ts,9445,9522,78,B,high,"refuseLocalFunctionArithmetic","existing reads unknown call as possible list",0,78,0,0,0
+javascript-fragment-target.ts,9523,9592,70,B,high,"refuseUnsettledFold","existing wraps fold in _SYS.cplx",0,70,0,0,0
+javascript-fragment-target.ts,9593,9699,107,B,high,"refuseUnsettledCollection","existing reads list on complex lane",0,107,0,0,0
+javascript-fragment-target.ts,9700,9798,99,B,high,"refuseSumOfNestedSums","existing flattens Sum of a list literal into one chain (addition order)",0,99,0,0,0
+javascript-fragment-target.ts,9799,9858,60,A50B50,high,"refuseMixedOperand","list|real has no settled shape (R rule); reasons cite existing bcast",30,30,0,0,0
+javascript-fragment-target.ts,9859,9873,15,B,high,"MIXED_SCALAR_HEADS","scalar code on the existing compiler",0,15,0,0,0
+javascript-fragment-target.ts,9874,9885,12,A,high,"readsCollection","shape",12,0,0,0,0
+javascript-fragment-target.ts,9886,9897,12,A,high,"mayHoldList","shape",12,0,0,0,0
+javascript-fragment-target.ts,9898,9905,8,E,high,"refuseListHead","glue",0,0,0,0,8
+javascript-fragment-target.ts,9906,9919,14,E,high,"Admission","two admissions (legacy existing route + structured)",0,0,0,0,14
+javascript-fragment-target.ts,9920,9926,7,E,high,"EXISTING_ADMISSION","legacy existing fragment route, tests only",0,0,0,0,7
+javascript-fragment-target.ts,9927,9966,40,A,high,"structuredAdmission","admitted heads",40,0,0,0,0
+javascript-fragment-target.ts,9967,9976,10,A,high,"isAdmittedOperator","heads",10,0,0,0,0
+javascript-fragment-target.ts,9977,9994,18,A,high,"effectFact","effects",18,0,0,0,0
+javascript-fragment-target.ts,9995,10015,21,A,high,"effectFacts","effects",21,0,0,0,0
+javascript-fragment-target.ts,10016,10066,51,A,high,"stateFacts","effects",51,0,0,0,0
+javascript-fragment-target.ts,10067,10100,34,C,high,"refuseLazyDraws","interpreter comprehension is lazy: draw order",0,0,34,0,0
+javascript-fragment-target.ts,10101,10225,125,C,high,"refuseLazyFunctionOperands","lazy Map/Filter: count/order of body evaluations",0,0,125,0,0
+javascript-fragment-target.ts,10226,10354,129,B,high,"refuseHoistedDraws","existing hoists complex operands ahead: draw order",0,129,0,0,0
+javascript-fragment-target.ts,10355,10412,58,B,high,"refusePureHostInAggregates","existing early NaN exit calls a pure host fewer times",0,58,0,0,0
+javascript-fragment-target.ts,10413,10564,152,A30B70,high,"chainForms","comparison-chain evaluation order of the existing emitter",46,106,0,0,0
+javascript-fragment-target.ts,10565,10611,47,B50C50,high,"drawReaders","helper for draw refusals",0,23,24,0,0
+javascript-fragment-target.ts,10612,10619,8,E,high,"RefusedNode","diagnostics",0,0,0,0,8
+javascript-fragment-target.ts,10620,10629,10,E,high,"refusedNodes","diagnostics",0,0,0,0,10
+javascript-fragment-target.ts,10630,10636,7,E,high,"noteRefusedNode","diagnostics",0,0,0,0,7
+javascript-fragment-target.ts,10637,10647,11,E,high,"atNode","diagnostics",0,0,0,0,11
+javascript-fragment-target.ts,10648,10650,3,E,high,"FRAGMENT_PREFIX","diagnostics",0,0,0,0,3
+javascript-fragment-target.ts,10651,10654,4,E,high,"INVARIANT_PREFIX","diagnostics",0,0,0,0,4
+javascript-fragment-target.ts,10655,10663,9,E,high,"isCancellation","diagnostics",0,0,0,0,9
+javascript-fragment-target.ts,10664,10676,13,E,high,"profileInternalError","diagnostics",0,0,0,0,13
+javascript-fragment-target.ts,10677,10701,25,B50E50,high,"publicReason","strips the existing-compiler clauses from messages",0,12,0,0,13
+javascript-fragment-target.ts,10702,10756,55,E,high,"profileDecline","diagnostics",0,0,0,0,55
+javascript-fragment-target.ts,10757,10783,27,E,high,"profileOptionDecline","options",0,0,0,0,27
+javascript-fragment-target.ts,10784,10802,19,B,medium,"bigintOptionRefusal","existing lane analysis reads host entries as doubles",0,19,0,0,0
+javascript-fragment-target.ts,10803,10821,19,E,high,"bigintLaneProfileDecline","diagnostics",0,0,0,0,19
+javascript-fragment-target.ts,10822,10832,11,A,high,"BIGINT_PROGRAMS","bigint glue",11,0,0,0,0
+javascript-fragment-target.ts,10833,10863,31,A80B20,high,"VarsEntry","host vars",25,6,0,0,0
+javascript-fragment-target.ts,10864,10867,4,A,high,"isInputEntry","host",4,0,0,0,0
+javascript-fragment-target.ts,10868,10876,9,A,high,"HostHead","host",9,0,0,0,0
+javascript-fragment-target.ts,10877,10895,19,A,high,"StructuredHosts","host",19,0,0,0,0
+javascript-fragment-target.ts,10896,10899,4,A,high,"PLAIN_REFERENCE","host",4,0,0,0,0
+javascript-fragment-target.ts,10900,10926,27,A,high,"sourceLayoutRefusal","host source spliced as text",27,0,0,0,0
+javascript-fragment-target.ts,10927,10931,5,A,high,"VARS_INPUT_SOURCE","host",5,0,0,0,0
+javascript-fragment-target.ts,10932,10971,40,A,high,"SOURCE_KEYWORDS","host",40,0,0,0,0
+javascript-fragment-target.ts,10972,11029,58,A,high,"isOperandSource","host",58,0,0,0,0
+javascript-fragment-target.ts,11030,11040,11,A,high,"isLibraryName","host",11,0,0,0,0
+javascript-fragment-target.ts,11041,11166,126,A60B40,high,"structuredHosts","host options; library-name refusal mirrors existing rewrites",76,50,0,0,0
+javascript-fragment-target.ts,11167,11220,54,A50B50,high,"varsEntryOf","vars; complex-mode read and typing by value mirror",27,27,0,0,0
+javascript-fragment-target.ts,11221,11257,37,A,high,"admitHostRead","host read",37,0,0,0,0
+javascript-fragment-target.ts,11258,11315,58,A60B40,high,"hostHeadOf","host call; complex-mode refusal mirrors hoisting",35,23,0,0,0
+javascript-fragment-target.ts,11316,11327,12,B,high,"isGivenOption","empty object as on the existing route",0,12,0,0,0
+javascript-fragment-target.ts,11328,11475,148,A80B20,high,"recordStructured","records preparation; calls refuseHoistedDraws",118,30,0,0,0
+javascript-fragment-target.ts,11476,11494,19,A80B20,high,"STRUCTURED_SOURCES","host sources; varsObjectRefs recording mirror",15,4,0,0,0
+javascript-fragment-target.ts,11495,11518,24,A,high,"hostBindings","host",24,0,0,0,0
+javascript-fragment-target.ts,11519,11530,12,E,high,"ScalarFragmentRoute","route switch",0,0,0,0,12
+javascript-fragment-target.ts,11531,11539,9,E,high,"StructuredPhase","phase timing",0,0,0,0,9
+javascript-fragment-target.ts,11540,11556,17,E,high,"StructuredRouteHooks","test hooks",0,0,0,0,17
+javascript-fragment-target.ts,11557,11656,100,A50E50,high,"class head, compile()","entry, options, phase timing",50,0,0,0,50
+javascript-fragment-target.ts,11657,11716,60,A,high,"compileInProfile","profile result facts",60,0,0,0,0
+javascript-fragment-target.ts,11717,11992,276,A70E30,high,"compileOnRoute..prepareBigint","body emitter glue, bigint, phases",193,0,0,0,83
+javascript-fragment-target.ts,11993,12107,115,A60B20E20,high,"prepareFragment (options, registry, root dispatch)","cse/constantFold refusal, refuseSumOfNestedSums, memo resets",69,23,0,0,23
+javascript-fragment-target.ts,12108,12373,266,D60B25A15,high,"prepareFragment checkNode","expression admission walk; a third walk beside checkValueNode and the pass",40,67,0,159,0
+javascript-fragment-target.ts,12374,12422,49,A,high,"prepareFragment tail","annotation and records",49,0,0,0,0
+javascript-fragment-target.ts,12423,12450,28,A50B50,high,"checkCondition","constant-type condition decided by the existing emitter",14,14,0,0,0
+javascript-fragment-target.ts,12451,12491,41,A50B50,high,"checkConditionOf","same",20,21,0,0,0
+javascript-fragment-target.ts,12492,12502,11,B,high,"refuseSelection","selectionRefusal glue",0,11,0,0,0
+javascript-fragment-target.ts,12503,12511,9,B,high,"structuredCompilations","memo lifetime of existing analyses",0,9,0,0,0
+javascript-fragment-target.ts,12512,12518,7,B,high,"isOutermostStructuredCompilation","same",0,7,0,0,0
+javascript-fragment-target.ts,12519,12536,18,B,high,"withStructuredCompilation","empties memos as the existing compiler",0,18,0,0,0
+javascript-fragment-target.ts,12537,12550,14,B,high,"resetCompilationState","same",0,14,0,0,0
+javascript-fragment-target.ts,12551,12554,4,A,high,"CALCULUS_HEADS","closed forms",4,0,0,0,0
+javascript-fragment-target.ts,12555,12572,18,B,high,"CLOSED_FORM_SEARCH_STEPS","step pool shared with the existing searches",0,18,0,0,0
+javascript-fragment-target.ts,12573,12577,5,A,high,"DERIVATIVE_APPLICATIONS","closed forms",5,0,0,0,0
+javascript-fragment-target.ts,12578,12591,14,A,high,"isCalculusNode","closed forms",14,0,0,0,0
+javascript-fragment-target.ts,12592,12674,83,A50B50,high,"closedFormReplacement","closed form found by the existing functions; (0) term refusals mirror",41,42,0,0,0
+javascript-fragment-target.ts,12675,12733,59,A,medium,"complexPartOf","lane",59,0,0,0,0
+javascript-fragment-target.ts,12734,12878,145,A50B50,high,"findClosedForm","closed forms; declines as the existing compiler",72,73,0,0,0
+javascript-fragment-target.ts,12879,12889,11,A,high,"recordRoutine","registry",11,0,0,0,0
+javascript-fragment-target.ts,12890,13040,151,A60B40,high,"numericDerivative","stencil call as the existing emitter; declines mirror",91,60,0,0,0
+javascript-fragment-target.ts,13041,13120,80,A60C40,high,"numericLimit","limit at infinity differs from interpreter: real guard",48,0,32,0,0
+javascript-fragment-target.ts,13121,13154,34,C,high,"limitPointRefusal","same",0,0,34,0,0
+javascript-fragment-target.ts,13155,13218,64,A,high,"routineRule","typing",64,0,0,0,0
+javascript-fragment-target.ts,13219,13224,6,A,high,"INTEGRAL_PARTS","memo",6,0,0,0,0
+javascript-fragment-target.ts,13225,13277,53,A,high,"integralParts","parts",53,0,0,0,0
+javascript-fragment-target.ts,13278,13366,89,A50B50,high,"quadratureIntegral","log-space and monte-carlo refusals mirror",44,45,0,0,0
+javascript-fragment-target.ts,13367,13397,31,A,high,"closedFormRule","typing",31,0,0,0,0
+javascript-fragment-target.ts,13398,13454,57,A,high,"integralRule","typing",57,0,0,0,0
+javascript-fragment-target.ts,13455,13493,39,A,high,"calculusDependencies","symbol deps",39,0,0,0,0
+javascript-fragment-target.ts,13494,13551,58,B,high,"withOutermostCompilerState","installs existing compiler state for isComplexValued",0,58,0,0,0
+javascript-fragment-target.ts,13552,13560,9,A,high,"scalarType","type",9,0,0,0,0
+javascript-fragment-target.ts,13561,13612,52,A,medium,"parameterRefusal","parameter types",52,0,0,0,0
+javascript-fragment-target.ts,13613,13756,144,A70D30,medium,"attachBoundFunction","root Function admission",101,0,0,43,0
+javascript-fragment-target.ts,13757,13987,231,A50B20D30,medium,"attachRootBlock","root block admission; free symbols as inputs",116,46,0,69,0
+javascript-fragment-target.ts,13988,14072,85,A50D50,medium,"checkLocalWrites","representation of writes, decided again by the pass",42,0,0,43,0
+javascript-fragment-target.ts,14073,14078,6,E,high,"ADMISSION_WORK","test counter",0,0,0,0,6
+javascript-fragment-target.ts,14079,15679,1601,A20B20D50E10,medium,"admitFunctionBody","statement/value admission walk with its own scopes (read first 800 lines)",320,320,0,801,160
+javascript-fragment-target.ts,15680,15712,33,D,high,"boundNames","binder scan of the admission",0,0,0,33,0
+javascript-fragment-target.ts,15713,15716,4,D,medium,"StatementSlot","admission",0,0,0,4,0
+javascript-fragment-target.ts,15717,15745,29,D,medium,"nonTailReturns","admission",0,0,0,29,0
+javascript-fragment-target.ts,15746,15760,15,D,medium,"symbolsOnce","admission",0,0,0,15,0
+javascript-fragment-target.ts,15761,15769,9,A,high,"isReturnNode","form",9,0,0,0,0
+javascript-fragment-target.ts,15770,15790,21,D,medium,"isTailOf","admission",0,0,0,21,0
+javascript-fragment-target.ts,15791,15802,12,D,medium,"tuplePatternNames","admission",0,0,0,12,0
+javascript-fragment-target.ts,15803,15834,32,A,high,"loopClauseKind","form",32,0,0,0,0
+javascript-fragment-target.ts,15835,15848,14,D,medium,"breaksLoop","admission",0,0,0,14,0
+javascript-fragment-target.ts,15849,15867,19,D,high,"implicitLocal","the pass reads the same rule (walkBlock)",0,0,0,19,0
+javascript-fragment-target.ts,15868,15910,43,A,medium,"localFunctionStatement","form",43,0,0,0,0
+javascript-fragment-target.ts,15911,15930,20,D,medium,"holdsValueBlock","admission",0,0,0,20,0
+javascript-fragment-target.ts,15931,15945,15,D,medium,"namesIn","admission",0,0,0,15,0
+javascript-fragment-target.ts,15946,15961,16,B,high,"elementLabel","third argument of _SYS.atNumeric as the existing emitter spells it",0,16,0,0,0
+javascript-fragment-target.ts,15962,16002,41,A,high,"structuredInput","inputs",41,0,0,0,0
+javascript-fragment-target.ts,16003,16025,23,A,medium,"ResolvedHelper","registry",23,0,0,0,0
+javascript-fragment-target.ts,16026,16032,7,A,medium,"CaptureEntry","registry",7,0,0,0,0
+javascript-fragment-target.ts,16033,16114,82,A80B20,medium,"StructuredRegistry","registry; folds/storedCaptures fields",66,16,0,0,0
+javascript-fragment-target.ts,16115,16146,32,A,medium,"LocalFunction","registry",32,0,0,0,0
+javascript-fragment-target.ts,16147,16155,9,A,medium,"NamedCalls","registry",9,0,0,0,0
+javascript-fragment-target.ts,16156,16189,34,A,medium,"structuredRegistry","registry",34,0,0,0,0
+javascript-fragment-target.ts,16190,16228,39,A,high,"hasNoDeclaredType","default kind of undeclared names",39,0,0,0,0
+javascript-fragment-target.ts,16229,16237,9,A,high,"defaultKind","default kind",9,0,0,0,0
+javascript-fragment-target.ts,16238,16241,4,A,high,"REAL_WITH_NON_FINITE_TYPE","type",4,0,0,0,0
+javascript-fragment-target.ts,16242,16276,35,A80B20,high,"declaredNumberKind","number kind; lifted mirrors liftWideReference",28,7,0,0,0
+javascript-fragment-target.ts,16277,16296,20,A,high,"defaultedParameterKind","default kind",20,0,0,0,0
+javascript-fragment-target.ts,16297,16398,102,A70B30,medium,"numericSnapshot","captured numbers",71,31,0,0,0
+javascript-fragment-target.ts,16399,16402,4,A,high,"LIST_OF_REALS_TYPE","type",4,0,0,0,0
+javascript-fragment-target.ts,16403,16406,4,A,high,"LIST_OF_LISTS_OF_REALS_TYPE","type",4,0,0,0,0
+javascript-fragment-target.ts,16407,16435,29,A,high,"isCapturedList","captures",29,0,0,0,0
+javascript-fragment-target.ts,16436,16535,100,A60B40,medium,"storedSnapshot","captured complex/expression values; lanes mirror",60,40,0,0,0
+javascript-fragment-target.ts,16536,16554,19,A50B50,medium,"frameValue","frame value as tryFoldKnownSymbol",9,10,0,0,0
+javascript-fragment-target.ts,16555,16639,85,A50B50,medium,"recordCapture","captures; stored-expression placement mirrors _val_ order",42,43,0,0,0
+javascript-fragment-target.ts,16640,16678,39,B,high,"admitHelperInput","input read inside the helper at the time it runs, as the existing compiler",0,39,0,0,0
+javascript-fragment-target.ts,16679,16709,31,B,high,"recordStoredRead","stored value once per call as _val_lv",0,31,0,0,0
+javascript-fragment-target.ts,16710,16739,30,B,medium,"aliasChainEnd","alias read at each read as the existing compiler",0,30,0,0,0
+javascript-fragment-target.ts,16740,16764,25,B,medium,"addStoredCapture","stored value passed as parameter",0,25,0,0,0
+javascript-fragment-target.ts,16765,16780,16,E,high,"unionCause","message",0,0,0,0,16
+javascript-fragment-target.ts,16781,16814,34,B50E50,high,"heldValueCause","message citing existing behaviour",0,17,0,0,17
+javascript-fragment-target.ts,16815,16832,18,B,high,"scopedNameCause","existing reads the engine value",0,18,0,0,0
+javascript-fragment-target.ts,16833,16856,24,B,high,"liftedByDeclaration","asks BaseCompiler.isComplexValued whether the existing compiler lifts",0,24,0,0,0
+javascript-fragment-target.ts,16857,16889,33,A,medium,"hostNameOf","host names in stored values",33,0,0,0,0
+javascript-fragment-target.ts,16890,16899,10,A,high,"snapshotReader","sign of snapshot",10,0,0,0,0
+javascript-fragment-target.ts,16900,17013,114,A70B30,medium,"collectStructuredHelper","helper resolution; assertCapturedCallableBindings",80,34,0,0,0
+javascript-fragment-target.ts,17014,17063,50,B,high,"refuseListWidthArgument","existing reads parameter by its stated width",0,50,0,0,0
+javascript-fragment-target.ts,17064,17099,36,B,high,"refuseRangeSpecialization","existing compiles a range-specialized copy",0,36,0,0,0
+javascript-fragment-target.ts,17100,17123,24,A,medium,"collectHelper","glue",24,0,0,0,0
+javascript-fragment-target.ts,17124,17189,66,A,medium,"annotateCalls","typing of calls",66,0,0,0,0
+javascript-fragment-target.ts,17190,17499,310,A70B30,medium,"annotateStructured","run of the pass; fold handling mirrors",217,93,0,0,0
+javascript-fragment-target.ts,17500,17525,26,B,high,"refuseNestedListsInMode","existing reads matrix cells on complex lane",0,26,0,0,0
+javascript-fragment-target.ts,17526,17680,155,B,high,"refuseAbsentRowUses","absent-row reads: unspecified under the caveats, refused to match existing",0,155,0,0,0
+javascript-fragment-target.ts,17681,17701,21,B,high,"ROW_READING_HEADS","same",0,21,0,0,0
+javascript-fragment-target.ts,17702,17734,33,B,high,"refuseRowsOfPlacedReads","same",0,33,0,0,0
+javascript-fragment-target.ts,17735,17752,18,B,high,"ABSENT_MATRIX_READERS","same",0,18,0,0,0
+javascript-fragment-target.ts,17753,17841,89,B,high,"refuseAbsentMatrixUses","same",0,89,0,0,0
+javascript-fragment-target.ts,17842,17887,46,A,medium,"argumentRefusal","argument conversions",46,0,0,0,0
+javascript-fragment-target.ts,17888,17919,32,B,medium,"refuseClosedComplex","guards a fold of the existing compiler",0,32,0,0,0
+javascript-fragment-target.ts,17920,17939,20,A,medium,"helperBinding","binding read",20,0,0,0,0
+javascript-fragment-target.ts,17940,17961,22,B,medium,"withLocalFunctions","for assertCapturedCallableBindings of the existing compiler",0,22,0,0,0
+javascript-fragment-target.ts,17962,18393,432,A60B40,medium,"resolveHelper","helper body admission; 10 existing-compiler clauses",259,173,0,0,0
+javascript-fragment-target.ts,18394,18427,34,B,high,"storedParameters","stored expression computed once per call",0,34,0,0,0
+javascript-fragment-target.ts,18428,18449,22,B,high,"refuseBoundStoredNames","same",0,22,0,0,0
+javascript-fragment-target.ts,18450,18555,106,A,medium,"resolveLocalFunction","local function as helper",106,0,0,0,0
+javascript-structured-lower.ts,1,161,161,E,high,"import","module header and imports",0,0,0,0,161
+javascript-structured-lower.ts,162,163,2,A,high,"StructuredInput","type",2,0,0,0,0
+javascript-structured-lower.ts,164,261,98,A40B60,high,"StructuredForm","forms that encode existing emitter branches",39,59,0,0,0
+javascript-structured-lower.ts,262,297,36,A,high,"RealCallForm","forms",36,0,0,0,0
+javascript-structured-lower.ts,298,338,41,A80B20,high,"BroadcastForm","element code as the bcast closure",33,8,0,0,0
+javascript-structured-lower.ts,339,346,8,A,high,"REAL_CALL_FORMS","table",8,0,0,0,0
+javascript-structured-lower.ts,347,400,54,B,high,"decidedBranch","liveSelectionArms() of the existing emitter",0,54,0,0,0
+javascript-structured-lower.ts,401,409,9,A,high,"isRealCallForm","util",9,0,0,0,0
+javascript-structured-lower.ts,410,441,32,A70B30,high,"StructuredCapture","captures; once-per-call stored values",22,10,0,0,0
+javascript-structured-lower.ts,442,475,34,A,high,"StructuredIntegral","type",34,0,0,0,0
+javascript-structured-lower.ts,476,497,22,A,high,"StructuredNumericRoutine","type",22,0,0,0,0
+javascript-structured-lower.ts,498,578,81,A80B20,high,"StructuredPreparation","preparation; folds field",65,16,0,0,0
+javascript-structured-lower.ts,579,583,5,A,high,"PREPARATIONS","glue",5,0,0,0,0
+javascript-structured-lower.ts,584,591,8,A,high,"recordStructuredPreparation","glue",8,0,0,0,0
+javascript-structured-lower.ts,592,603,12,A,high,"structuredPreparationOf","glue",12,0,0,0,0
+javascript-structured-lower.ts,604,607,4,A,high,"fail","invariant",4,0,0,0,0
+javascript-structured-lower.ts,608,655,48,A,high,"OPERATIONS","table",48,0,0,0,0
+javascript-structured-lower.ts,656,711,56,A,high,"FUNCTIONS","table",56,0,0,0,0
+javascript-structured-lower.ts,712,772,61,A,high,"COLLECTION_HEADS","table",61,0,0,0,0
+javascript-structured-lower.ts,773,786,14,A,high,"engineRank","shape",14,0,0,0,0
+javascript-structured-lower.ts,787,803,17,A,high,"engineDimensions","shape",17,0,0,0,0
+javascript-structured-lower.ts,804,830,27,A,medium,"hasRows","shape",27,0,0,0,0
+javascript-structured-lower.ts,831,944,114,B,medium,"matrixResultCanBeAbsent","absent matrix results: unspecified under the caveats",0,114,0,0,0
+javascript-structured-lower.ts,945,959,15,B,medium,"MATRIX_FUNCTIONS","same",0,15,0,0,0
+javascript-structured-lower.ts,960,966,7,A,high,"rankOf","shape",7,0,0,0,0
+javascript-structured-lower.ts,967,979,13,B,medium,"MATRIX_RESULT_HEADS","same",0,13,0,0,0
+javascript-structured-lower.ts,980,1002,23,A,high,"FUNCTION_OPERAND_HEADS","table",23,0,0,0,0
+javascript-structured-lower.ts,1003,1008,6,A,high,"USER_FUNCTION_OPERANDS","table",6,0,0,0,0
+javascript-structured-lower.ts,1009,1009,1,A,high,"USER_FUNCTION_CALLS","table",1,0,0,0,0
+javascript-structured-lower.ts,1010,1029,20,A,high,"recordUserFunctionOperand","glue",20,0,0,0,0
+javascript-structured-lower.ts,1030,1043,14,A,high,"functionOperandOf","glue",14,0,0,0,0
+javascript-structured-lower.ts,1044,1051,8,A,high,"userFunctionOperandSymbol","glue",8,0,0,0,0
+javascript-structured-lower.ts,1052,1126,75,A,high,"functionOperandParts","lambda parts",75,0,0,0,0
+javascript-structured-lower.ts,1127,1177,51,A80B20,high,"MAPPED_OPERATORS","mapped operators; complex-mode flags mirror",41,10,0,0,0
+javascript-structured-lower.ts,1178,1185,8,A,high,"FOLD_OPERATORS","table",8,0,0,0,0
+javascript-structured-lower.ts,1186,1193,8,B,high,"PI_MULTIPLE_FUNCTIONS","sinpi (precision only)",0,8,0,0,0
+javascript-structured-lower.ts,1194,1214,21,B,high,"piMultipleFactor","same",0,21,0,0,0
+javascript-structured-lower.ts,1215,1274,60,A50B50,high,"powerForm","Power forms",30,30,0,0,0
+javascript-structured-lower.ts,1275,1282,8,A,high,"StructuredTypeShape","type",8,0,0,0,0
+javascript-structured-lower.ts,1283,1293,11,A,high,"scalarKind","type",11,0,0,0,0
+javascript-structured-lower.ts,1294,1325,32,A,high,"valueType","type",32,0,0,0,0
+javascript-structured-lower.ts,1326,1334,9,A,high,"lowerStructuredFragment","entry",9,0,0,0,0
+javascript-structured-lower.ts,1335,1346,12,E,high,"STRUCTURED_OPERATION_LIMIT","limit",0,0,0,0,12
+javascript-structured-lower.ts,1347,1357,11,E,high,"StructuredLimitError","error",0,0,0,0,11
+javascript-structured-lower.ts,1358,1367,10,E,high,"StructuredDeclineError","error",0,0,0,0,10
+javascript-structured-lower.ts,1368,1385,18,A,high,"lowerStructuredProgram","entry",18,0,0,0,0
+javascript-structured-lower.ts,1386,1398,13,A,high,"preparedNodesOf","verify input",13,0,0,0,0
+javascript-structured-lower.ts,1399,1400,2,A,high,"class Lowering head","class header",2,0,0,0,0
+javascript-structured-lower.ts,1401,1401,1,A,medium,"Lowering.owner","lowering of a head, a region or a scope",1,0,0,0,0
+javascript-structured-lower.ts,1402,1402,1,A,medium,"Lowering.revision","lowering of a head, a region or a scope",1,0,0,0,0
+javascript-structured-lower.ts,1403,1403,1,A,medium,"Lowering.nextId","lowering of a head, a region or a scope",1,0,0,0,0
+javascript-structured-lower.ts,1404,1404,1,A,medium,"Lowering.functions","lowering of a head, a region or a scope",1,0,0,0,0
+javascript-structured-lower.ts,1405,1405,1,A,medium,"Lowering.functionIndex","lowering of a head, a region or a scope",1,0,0,0,0
+javascript-structured-lower.ts,1406,1407,2,A,medium,"Lowering.lowering","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1408,1408,1,A,medium,"Lowering.captures","lowering of a head, a region or a scope",1,0,0,0,0
+javascript-structured-lower.ts,1409,1410,2,A,medium,"Lowering.captureIndex","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1411,1412,2,A,medium,"Lowering.constants","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1413,1414,2,A,medium,"Lowering.constantIndex","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1415,1424,10,A,medium,"Lowering.loops","lowering of a head, a region or a scope",10,0,0,0,0
+javascript-structured-lower.ts,1425,1428,4,A,medium,"Lowering.loopBody","lowering of a head, a region or a scope",4,0,0,0,0
+javascript-structured-lower.ts,1429,1433,5,A,medium,"Lowering.bound","lowering of a head, a region or a scope",5,0,0,0,0
+javascript-structured-lower.ts,1434,1437,4,A,medium,"Lowering.epoch","lowering of a head, a region or a scope",4,0,0,0,0
+javascript-structured-lower.ts,1438,1439,2,A,medium,"Lowering.epochs","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1440,1445,6,A,medium,"Lowering.scopes","lowering of a head, a region or a scope",6,0,0,0,0
+javascript-structured-lower.ts,1446,1459,14,A,medium,"Lowering.regions","lowering of a head, a region or a scope",14,0,0,0,0
+javascript-structured-lower.ts,1460,1466,7,A,medium,"Lowering.capturedNames","lowering of a head, a region or a scope",7,0,0,0,0
+javascript-structured-lower.ts,1467,1468,2,A,medium,"Lowering.names","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1469,1471,3,A,medium,"Lowering.localValues","lowering of a head, a region or a scope",3,0,0,0,0
+javascript-structured-lower.ts,1472,1475,4,A,medium,"Lowering.panels","lowering of a head, a region or a scope",4,0,0,0,0
+javascript-structured-lower.ts,1476,1477,2,A,medium,"Lowering.Constructor","lowering of a head, a region or a scope",2,0,0,0,0
+javascript-structured-lower.ts,1478,1501,24,A,medium,"Lowering.program","lowering of a head, a region or a scope",24,0,0,0,0
+javascript-structured-lower.ts,1502,1513,12,A,medium,"Lowering.newValue","lowering of a head, a region or a scope",12,0,0,0,0
+javascript-structured-lower.ts,1514,1517,4,A,medium,"Lowering.resultOf","lowering of a head, a region or a scope",4,0,0,0,0
+javascript-structured-lower.ts,1518,1561,44,B,high,"Lowering.folded","folded literal of the existing emitter",0,44,0,0,0
+javascript-structured-lower.ts,1562,1573,12,A,medium,"Lowering.region","lowering of a head, a region or a scope",12,0,0,0,0
+javascript-structured-lower.ts,1574,1595,22,A,medium,"Lowering.closedRegion","lowering of a head, a region or a scope",22,0,0,0,0
+javascript-structured-lower.ts,1596,1606,11,A,medium,"Lowering.inRegion","lowering of a head, a region or a scope",11,0,0,0,0
+javascript-structured-lower.ts,1607,1611,5,A,medium,"Lowering.changed","lowering of a head, a region or a scope",5,0,0,0,0
+javascript-structured-lower.ts,1612,1626,15,A,medium,"Lowering.afterUnknown","lowering of a head, a region or a scope",15,0,0,0,0
+javascript-structured-lower.ts,1627,1648,22,A,medium,"Lowering.wrote","lowering of a head, a region or a scope",22,0,0,0,0
+javascript-structured-lower.ts,1649,1683,35,A,medium,"Lowering.inScope","lowering of a head, a region or a scope",35,0,0,0,0
+javascript-structured-lower.ts,1684,1689,6,A,medium,"Lowering.namesOf","lowering of a head, a region or a scope",6,0,0,0,0
+javascript-structured-lower.ts,1690,1695,6,A,medium,"Lowering.nameSourceMap","lowering of a head, a region or a scope",6,0,0,0,0
+javascript-structured-lower.ts,1696,1710,15,A,medium,"Lowering.nameSources","lowering of a head, a region or a scope",15,0,0,0,0
+javascript-structured-lower.ts,1711,1720,10,A,medium,"Lowering.facts","lowering of a head, a region or a scope",10,0,0,0,0
+javascript-structured-lower.ts,1721,1727,7,A,medium,"Lowering.effect","lowering of a head, a region or a scope",7,0,0,0,0
+javascript-structured-lower.ts,1728,1732,5,A,medium,"Lowering.states","lowering of a head, a region or a scope",5,0,0,0,0
+javascript-structured-lower.ts,1733,1768,36,A,medium,"Lowering.convert","lowering of a head, a region or a scope",36,0,0,0,0
+javascript-structured-lower.ts,1769,1785,17,A,medium,"Lowering.operands","lowering of a head, a region or a scope",17,0,0,0,0
+javascript-structured-lower.ts,1786,1837,52,A,medium,"Lowering.value","lowering of a head, a region or a scope",52,0,0,0,0
+javascript-structured-lower.ts,1838,2605,768,A80B20,medium,"Lowering.lower","dispatch of every head",614,154,0,0,0
+javascript-structured-lower.ts,2606,2674,69,A50B50,high,"Lowering.chain","comparison chain order",34,35,0,0,0
+javascript-structured-lower.ts,2675,2760,86,A,medium,"Lowering.build","lowering of a head, a region or a scope",86,0,0,0,0
+javascript-structured-lower.ts,2761,2848,88,A80B20,medium,"Lowering.guardedBuild","guarded comprehension",70,18,0,0,0
+javascript-structured-lower.ts,2849,2980,132,A80B20,medium,"Lowering.nestedBuild","general comprehension",106,26,0,0,0
+javascript-structured-lower.ts,2981,2999,19,A,medium,"Lowering.elementRange","lowering of a head, a region or a scope",19,0,0,0,0
+javascript-structured-lower.ts,3000,3033,34,A,medium,"Lowering.element","lowering of a head, a region or a scope",34,0,0,0,0
+javascript-structured-lower.ts,3034,3163,130,A90B10,medium,"Lowering.fold","fold",117,13,0,0,0
+javascript-structured-lower.ts,3164,3269,106,A,medium,"Lowering.foldRows","lowering of a head, a region or a scope",106,0,0,0,0
+javascript-structured-lower.ts,3270,3406,137,A85B15,medium,"Lowering.elementwise","element-wise",116,21,0,0,0
+javascript-structured-lower.ts,3407,3500,94,A80B20,medium,"Lowering.listExtremum","Max of lists",75,19,0,0,0
+javascript-structured-lower.ts,3501,3599,99,A80B20,medium,"Lowering.listEquality","Equal of lists",79,20,0,0,0
+javascript-structured-lower.ts,3600,3703,104,A70B30,medium,"Lowering.selectionBuild","element-wise selection; arm evaluation order",73,31,0,0,0
+javascript-structured-lower.ts,3704,3792,89,A,medium,"Lowering.broadcastElement","lowering of a head, a region or a scope",89,0,0,0,0
+javascript-structured-lower.ts,3793,4039,247,A85B15,medium,"Lowering.collection","list functions",210,37,0,0,0
+javascript-structured-lower.ts,4040,4556,517,A80B20,medium,"Lowering.functionOperand","Map/Filter/Reduce",414,103,0,0,0
+javascript-structured-lower.ts,4557,4629,73,A60B40,high,"Lowering.draw","same doubles as existing arithmetic around a draw",44,29,0,0,0
+javascript-structured-lower.ts,4630,4681,52,A,medium,"Lowering.seeded","lowering of a head, a region or a scope",52,0,0,0,0
+javascript-structured-lower.ts,4682,4801,120,A60B40,medium,"Lowering.integral","quadrature as the existing call, panel count",72,48,0,0,0
+javascript-structured-lower.ts,4802,4870,69,A80B20,medium,"Lowering.numericRoutine","nd/limit",55,14,0,0,0
+javascript-structured-lower.ts,4871,4987,117,A50B50,high,"Lowering.complexProduct","complex product text of the existing emitter",58,59,0,0,0
+javascript-structured-lower.ts,4988,5006,19,A,medium,"Lowering.numberLiteral","lowering of a head, a region or a scope",19,0,0,0,0
+javascript-structured-lower.ts,5007,5050,44,A,medium,"Lowering.conditional","lowering of a head, a region or a scope",44,0,0,0,0
+javascript-structured-lower.ts,5051,5200,150,A70B30,medium,"Lowering.realCall","real kernels",105,45,0,0,0
+javascript-structured-lower.ts,5201,5247,47,A,medium,"Lowering.selection","lowering of a head, a region or a scope",47,0,0,0,0
+javascript-structured-lower.ts,5248,5397,150,A50B50,high,"Lowering.listAggregate","list-body Sum as the existing accumulator",75,75,0,0,0
+javascript-structured-lower.ts,5398,5769,372,A30B70,high,"Lowering.aggregate","Sum/Product: unroll limits, NaN early exit, budget guards of emitSumProduct",112,260,0,0,0
+javascript-structured-lower.ts,5770,5838,69,B,high,"Lowering.multiplyByRational","a / q of the existing emitter",0,69,0,0,0
+javascript-structured-lower.ts,5839,5978,140,A40B60,high,"Lowering.realProduct","factor grouping of the existing emitter",56,84,0,0,0
+javascript-structured-lower.ts,5979,6031,53,A,medium,"Lowering.read","lowering of a head, a region or a scope",53,0,0,0,0
+javascript-structured-lower.ts,6032,6040,9,A,medium,"Lowering.hostIndex","lowering of a head, a region or a scope",9,0,0,0,0
+javascript-structured-lower.ts,6041,6098,58,A70B30,medium,"Lowering.captureRead","capture read",41,17,0,0,0
+javascript-structured-lower.ts,6099,6119,21,B,medium,"Lowering.aliasEnd","alias chain",0,21,0,0,0
+javascript-structured-lower.ts,6120,6123,4,B,medium,"Lowering.storedValues","stored values",0,4,0,0,0
+javascript-structured-lower.ts,6124,6126,3,B,medium,"Lowering.storedEnd","stored values",0,3,0,0,0
+javascript-structured-lower.ts,6127,6128,2,B,medium,"Lowering.storing","stored values",0,2,0,0,0
+javascript-structured-lower.ts,6129,6220,92,B,high,"Lowering.storedRead","stored value computed where the existing compiler computes it",0,92,0,0,0
+javascript-structured-lower.ts,6221,6276,56,A70B30,medium,"Lowering.capturedList","captured list as a constant",39,17,0,0,0
+javascript-structured-lower.ts,6277,6308,32,A,medium,"Lowering.block","lowering of a head, a region or a scope",32,0,0,0,0
+javascript-structured-lower.ts,6309,6347,39,A,medium,"Lowering.statements","lowering of a head, a region or a scope",39,0,0,0,0
+javascript-structured-lower.ts,6348,6477,130,A,medium,"Lowering.statement","lowering of a head, a region or a scope",130,0,0,0,0
+javascript-structured-lower.ts,6478,6539,62,A80B20,medium,"Lowering.destructure","destructuring",50,12,0,0,0
+javascript-structured-lower.ts,6540,6543,4,A50B50,high,"Lowering.throwingBodies","throw query",2,2,0,0,0
+javascript-structured-lower.ts,6544,6557,14,A50B50,high,"Lowering.canThrow","throw query",7,7,0,0,0
+javascript-structured-lower.ts,6558,6561,4,B,high,"Lowering.aggregateIndexes","termThrower support",0,4,0,0,0
+javascript-structured-lower.ts,6562,6665,104,B,high,"Lowering.termThrower","declines where the existing early exit is observable",0,104,0,0,0
+javascript-structured-lower.ts,6666,6669,4,B,high,"Lowering.throwingBodiesNoHost","same",0,4,0,0,0
+javascript-structured-lower.ts,6670,6688,19,B,high,"Lowering.canThrowNoHost","same",0,19,0,0,0
+javascript-structured-lower.ts,6689,6742,54,A90B10,medium,"Lowering.toLocal","local conversions",49,5,0,0,0
+javascript-structured-lower.ts,6743,6920,178,A80B20,medium,"Lowering.ifStatement","If statement; keeps throwing ops where existing evaluates",142,36,0,0,0
+javascript-structured-lower.ts,6921,7191,271,A80B20,medium,"Lowering.loopStatement","Loop; count check",217,54,0,0,0
+javascript-structured-lower.ts,7192,7201,10,A,medium,"Lowering.snapshot","lowering of a head, a region or a scope",10,0,0,0,0
+javascript-structured-lower.ts,7202,7215,14,A,medium,"Lowering.restore","lowering of a head, a region or a scope",14,0,0,0,0
+javascript-structured-lower.ts,7216,7233,18,A,medium,"Lowering.mapsArgument","lowering of a head, a region or a scope",18,0,0,0,0
+javascript-structured-lower.ts,7234,7322,89,A,medium,"Lowering.elementCall","lowering of a head, a region or a scope",89,0,0,0,0
+javascript-structured-lower.ts,7323,7440,118,A,medium,"Lowering.helper","lowering of a head, a region or a scope",118,0,0,0,0
+javascript-structured-lower.ts,7441,7441,1,A,high,"class Lowering end","closing brace",1,0,0,0,0
+javascript-structured-lower.ts,7442,7540,99,A40B60,high,"OPERATION_THROWS","throw tables; used mostly for the early-exit mirror",40,59,0,0,0
+javascript-structured-lower.ts,7541,7608,68,A40B60,high,"COLLECTION_THROWS","same",27,41,0,0,0
+javascript-structured-lower.ts,7609,7716,108,A40B60,high,"FUNCTION_THROWS","same",43,65,0,0,0
+javascript-structured-lower.ts,7717,7721,5,B,high,"FITTING_COUNTS","count test of the existing compileCountedRange",0,5,0,0,0
+javascript-structured-lower.ts,7722,7735,14,B,high,"countFits","same",0,14,0,0,0
+javascript-structured-lower.ts,7736,7754,19,A40B60,high,"throwsItself","throw query",8,11,0,0,0
+javascript-structured-lower.ts,7755,7763,9,B,high,"throwingMatrixFunction","termThrower helper",0,9,0,0,0
+javascript-structured-lower.ts,7764,7784,21,A40B60,high,"canThrow","throw query",8,13,0,0,0
+javascript-structured-lower.ts,7785,7800,16,B,high,"unitRationalFactor","a / d text of the existing emitter",0,16,0,0,0
+javascript-structured-lower.ts,7801,7812,12,A,high,"widerType","type join",12,0,0,0,0
+javascript-structured-lower.ts,7813,7823,11,A,high,"collectOrigins","verify input",11,0,0,0,0
+javascript-structured-lower.ts,7824,7837,14,A,high,"bindingScope","scope",14,0,0,0,0
+javascript-structured-lower.ts,7838,7854,17,B,high,"testsRangeCount","whether the existing emitter tests a range count",0,17,0,0,0
+javascript-structured-lower.ts,7855,7863,9,A,high,"patternNames","names",9,0,0,0,0
+javascript-structured-lower.ts,7864,7873,10,A,high,"endsInContinue","form",10,0,0,0,0
+javascript-structured-lower.ts,7874,7891,18,A,high,"assignedNames","names",18,0,0,0,0
+javascript-structured-lower.ts,7892,7953,62,A,high,"exposedReads","liveness",62,0,0,0,0
+javascript-structured-lower.ts,7954,8046,93,A50B50,high,"randomDomainOf","Random domains computing the same doubles",46,47,0,0,0
+javascript-structured-lower.ts,8047,8058,12,A,high,"literalSeedOf","seed",12,0,0,0,0
+javascript-structured-lower.ts,8059,8087,29,A,high,"namesIn","names",29,0,0,0,0
+fragment.ts,1,45,45,E,high,"import","diagnostics, memo or imports",0,0,0,0,45
+fragment.ts,46,58,13,A,high,"FragmentValueType","target-neutral typing pass, shared with GLSL",13,0,0,0,0
+fragment.ts,59,68,10,A,high,"FragmentElementType","target-neutral typing pass, shared with GLSL",10,0,0,0,0
+fragment.ts,69,77,9,A,high,"FragmentListType","target-neutral typing pass, shared with GLSL",9,0,0,0,0
+fragment.ts,78,97,20,A,high,"FragmentType","target-neutral typing pass, shared with GLSL",20,0,0,0,0
+fragment.ts,98,112,15,A,high,"FragmentConversion","target-neutral typing pass, shared with GLSL",15,0,0,0,0
+fragment.ts,113,121,9,A,high,"FragmentValueFacts","target-neutral typing pass, shared with GLSL",9,0,0,0,0
+fragment.ts,122,131,10,A,high,"FragmentFacts","target-neutral typing pass, shared with GLSL",10,0,0,0,0
+fragment.ts,132,134,3,A,high,"FragmentBindingRole","target-neutral typing pass, shared with GLSL",3,0,0,0,0
+fragment.ts,135,152,18,A,high,"FragmentScope","target-neutral typing pass, shared with GLSL",18,0,0,0,0
+fragment.ts,153,156,4,E,high,"NODE_TEXT_MAX_PATHS","diagnostics, memo or imports",0,0,0,0,4
+fragment.ts,157,182,26,E,high,"hasShortText","diagnostics, memo or imports",0,0,0,0,26
+fragment.ts,183,189,7,E,high,"nodeText","diagnostics, memo or imports",0,0,0,0,7
+fragment.ts,190,204,15,E,high,"FragmentRefusalReason","diagnostics, memo or imports",0,0,0,0,15
+fragment.ts,205,218,14,E,high,"FragmentRefusal","diagnostics, memo or imports",0,0,0,0,14
+fragment.ts,219,237,19,A,high,"FragmentAnnotation","target-neutral typing pass, shared with GLSL",19,0,0,0,0
+fragment.ts,238,274,37,A,high,"FragmentPattern","target-neutral typing pass, shared with GLSL",37,0,0,0,0
+fragment.ts,275,286,12,A,high,"FragmentResultPattern","target-neutral typing pass, shared with GLSL",12,0,0,0,0
+fragment.ts,287,319,33,A,high,"FragmentSignature","target-neutral typing pass, shared with GLSL",33,0,0,0,0
+fragment.ts,320,322,3,A,high,"FragmentPlace","target-neutral typing pass, shared with GLSL",3,0,0,0,0
+fragment.ts,323,336,14,A,high,"FragmentContext","target-neutral typing pass, shared with GLSL",14,0,0,0,0
+fragment.ts,337,428,92,A,high,"FragmentWalker","target-neutral typing pass, shared with GLSL",92,0,0,0,0
+fragment.ts,429,445,17,A,high,"FragmentRule","target-neutral typing pass, shared with GLSL",17,0,0,0,0
+fragment.ts,446,497,52,A,high,"FragmentFunction","target-neutral typing pass, shared with GLSL",52,0,0,0,0
+fragment.ts,498,657,160,A,high,"FragmentDefinition","target-neutral typing pass, shared with GLSL",160,0,0,0,0
+fragment.ts,658,676,19,A,high,"FragmentDeclaredInput","target-neutral typing pass, shared with GLSL",19,0,0,0,0
+fragment.ts,677,683,7,A,high,"FragmentPassOptions","target-neutral typing pass, shared with GLSL",7,0,0,0,0
+fragment.ts,684,688,5,A,high,"RefusalSignal","target-neutral typing pass, shared with GLSL",5,0,0,0,0
+fragment.ts,689,708,20,A,high,"PassState","target-neutral typing pass, shared with GLSL",20,0,0,0,0
+fragment.ts,709,713,5,A,high,"opsOf","target-neutral typing pass, shared with GLSL",5,0,0,0,0
+fragment.ts,714,723,10,A,high,"newScope","target-neutral typing pass, shared with GLSL",10,0,0,0,0
+fragment.ts,724,729,6,A,high,"isValueFacts","target-neutral typing pass, shared with GLSL",6,0,0,0,0
+fragment.ts,730,743,14,A,high,"fragmentTypeToString","target-neutral typing pass, shared with GLSL",14,0,0,0,0
+fragment.ts,744,753,10,A,high,"sameType","target-neutral typing pass, shared with GLSL",10,0,0,0,0
+fragment.ts,754,759,6,A,high,"isNestedList","target-neutral typing pass, shared with GLSL",6,0,0,0,0
+fragment.ts,760,763,4,A,high,"isScalarNumeric","target-neutral typing pass, shared with GLSL",4,0,0,0,0
+fragment.ts,764,772,9,A,high,"numberListRank","target-neutral typing pass, shared with GLSL",9,0,0,0,0
+fragment.ts,773,814,42,A,medium,"typeFragment","target-neutral typing pass, shared with GLSL",42,0,0,0,0
+fragment.ts,815,827,13,A,high,"fragmentFactsOf","target-neutral typing pass, shared with GLSL",13,0,0,0,0
+fragment.ts,828,852,25,A,high,"FragmentTargetFields","target-neutral typing pass, shared with GLSL",25,0,0,0,0
+fragment.ts,853,870,18,A,high,"fragmentFactsUnder","target-neutral typing pass, shared with GLSL",18,0,0,0,0
+fragment.ts,871,894,24,A,high,"FragmentLoweringContract","target-neutral typing pass, shared with GLSL",24,0,0,0,0
+fragment.ts,895,902,8,E,high,"LOWERED_NODES","diagnostics, memo or imports",0,0,0,0,8
+fragment.ts,903,911,9,A,high,"isPartOf","target-neutral typing pass, shared with GLSL",9,0,0,0,0
+fragment.ts,912,920,9,A,high,"typedUnder","target-neutral typing pass, shared with GLSL",9,0,0,0,0
+fragment.ts,921,938,18,A,high,"fragmentNodeIsTyped","target-neutral typing pass, shared with GLSL",18,0,0,0,0
+fragment.ts,939,1035,97,A,high,"fragmentReplaceOperands","target-neutral typing pass, shared with GLSL",97,0,0,0,0
+fragment.ts,1036,1039,4,E,high,"CONFLICTING_FACTS","diagnostics, memo or imports",0,0,0,0,4
+fragment.ts,1040,1048,9,E,high,"FACTS_UNDER_SCOPE","diagnostics, memo or imports",0,0,0,0,9
+fragment.ts,1049,1080,32,E,high,"factsUnderScope","diagnostics, memo or imports",0,0,0,0,32
+fragment.ts,1081,1095,15,A,high,"fragmentScopeBinds","target-neutral typing pass, shared with GLSL",15,0,0,0,0
+fragment.ts,1096,2281,1186,A,medium,"makeWalker","typing pass: scopes, signatures, calls (shared with GLSL; skimmed)",1186,0,0,0,0
+fragment.ts,2282,2344,63,A,high,"indexOf","target-neutral typing pass, shared with GLSL",63,0,0,0,0
+fragment.ts,2345,2411,67,A,high,"indexBounds","target-neutral typing pass, shared with GLSL",67,0,0,0,0
+fragment.ts,2412,2482,71,A,medium,"walkAggregate","target-neutral typing pass, shared with GLSL",71,0,0,0,0
+fragment.ts,2483,2573,91,A,medium,"walkLoop","target-neutral typing pass, shared with GLSL",91,0,0,0,0
+fragment.ts,2574,2600,27,A,medium,"walkBreak","target-neutral typing pass, shared with GLSL",27,0,0,0,0
+fragment.ts,2601,2609,9,A,high,"localType","target-neutral typing pass, shared with GLSL",9,0,0,0,0
+fragment.ts,2610,2619,10,A,high,"declaredNames","target-neutral typing pass, shared with GLSL",10,0,0,0,0
+fragment.ts,2620,2639,20,A,high,"isDestructurableValue","target-neutral typing pass, shared with GLSL",20,0,0,0,0
+fragment.ts,2640,2652,13,A,high,"nonLiteralTupleValue","target-neutral typing pass, shared with GLSL",13,0,0,0,0
+fragment.ts,2653,2662,10,A,high,"componentTypes","target-neutral typing pass, shared with GLSL",10,0,0,0,0
+fragment.ts,2663,2817,155,A,medium,"walkDeclare","target-neutral typing pass, shared with GLSL",155,0,0,0,0
+fragment.ts,2818,2935,118,A,medium,"walkBlock","target-neutral typing pass, shared with GLSL",118,0,0,0,0
+fragment.ts,2936,3046,111,A,medium,"walkIf","target-neutral typing pass, shared with GLSL",111,0,0,0,0
+fragment.ts,3047,3118,72,A,medium,"walkWhich","target-neutral typing pass, shared with GLSL",72,0,0,0,0
+fragment.ts,3119,3140,22,A,high,"constantCondition","target-neutral typing pass, shared with GLSL",22,0,0,0,0
+fragment.ts,3141,3147,7,A,high,"constantInteger","target-neutral typing pass, shared with GLSL",7,0,0,0,0
+fragment.ts,3148,3238,91,A,medium,"walkAt","target-neutral typing pass, shared with GLSL",91,0,0,0,0
+fragment.ts,3239,3251,13,A,medium,"walkRange","target-neutral typing pass, shared with GLSL",13,0,0,0,0
+fragment.ts,3252,3284,33,A,medium,"walkPoint","target-neutral typing pass, shared with GLSL",33,0,0,0,0
+fragment.ts,3285,3322,38,A,medium,"walkList","target-neutral typing pass, shared with GLSL",38,0,0,0,0
+fragment.ts,3323,3395,73,A,medium,"walkElement","target-neutral typing pass, shared with GLSL",73,0,0,0,0
+fragment.ts,3396,3440,45,A,medium,"walkTyped","target-neutral typing pass, shared with GLSL",45,0,0,0,0
+fragment.ts,3441,3470,30,A,high,"loweredAddTo","target-neutral typing pass, shared with GLSL",30,0,0,0,0
+fragment.ts,3471,3477,7,A,high,"ENFORCED_LOCALS","target-neutral typing pass, shared with GLSL",7,0,0,0,0
+fragment.ts,3478,3491,14,A,high,"tupleComponentType","target-neutral typing pass, shared with GLSL",14,0,0,0,0
+fragment.ts,3492,3656,165,A,medium,"walkAssign","target-neutral typing pass, shared with GLSL",165,0,0,0,0
+fragment.ts,3657,3669,13,A,high,"isInside","target-neutral typing pass, shared with GLSL",13,0,0,0,0
+fragment.ts,3670,3684,15,A,medium,"walkDeclareOutsideBlock","target-neutral typing pass, shared with GLSL",15,0,0,0,0
+fragment.ts,3685,3686,2,A,medium,"walkCountedLoop","target-neutral typing pass, shared with GLSL",2,0,0,0,0
+fragment.ts,3687,3687,1,A,medium,"walkParallelLoop","target-neutral typing pass, shared with GLSL",1,0,0,0,0
+fragment.ts,3688,3704,17,E,high,"CanCompileResult","diagnostics, memo or imports",0,0,0,0,17
+fragment.ts,3705,3719,15,E,high,"fragmentRefusalDiagnostic","diagnostics, memo or imports",0,0,0,0,15
+fragment.ts,3720,3738,19,E,high,"fragmentErrorDiagnostic","diagnostics, memo or imports",0,0,0,0,19
+javascript-structured-emit.ts,1,235,235,E,high,"import","module header and imports",0,0,0,0,235
+javascript-structured-emit.ts,236,249,14,A,medium,"MATRIX_HELPERS","emission tables and helpers",14,0,0,0,0
+javascript-structured-emit.ts,250,275,26,A,medium,"BIGINT_CODE","emission tables and helpers",26,0,0,0,0
+javascript-structured-emit.ts,276,284,9,A,medium,"BIGINT_DIVISION","emission tables and helpers",9,0,0,0,0
+javascript-structured-emit.ts,285,292,8,A,medium,"BIGINT_SQRT","emission tables and helpers",8,0,0,0,0
+javascript-structured-emit.ts,293,413,121,A,medium,"FUNCTION_CODE","emission tables and helpers",121,0,0,0,0
+javascript-structured-emit.ts,414,441,28,A,medium,"REAL_TEMPLATES","emission tables and helpers",28,0,0,0,0
+javascript-structured-emit.ts,442,449,8,A,medium,"TemplateFunctionName","emission tables and helpers",8,0,0,0,0
+javascript-structured-emit.ts,450,455,6,A,medium,"PowerFunctionName","emission tables and helpers",6,0,0,0,0
+javascript-structured-emit.ts,456,463,8,A,medium,"isPowerFunction","emission tables and helpers",8,0,0,0,0
+javascript-structured-emit.ts,464,471,8,A,medium,"StructuredEmitNames","emission tables and helpers",8,0,0,0,0
+javascript-structured-emit.ts,472,492,21,A,medium,"StructuredEmitOptions","emission tables and helpers",21,0,0,0,0
+javascript-structured-emit.ts,493,514,22,A,medium,"StructuredEmission","emission tables and helpers",22,0,0,0,0
+javascript-structured-emit.ts,515,518,4,A,medium,"fail","emission tables and helpers",4,0,0,0,0
+javascript-structured-emit.ts,519,525,7,A,medium,"CONDITIONAL","emission tables and helpers",7,0,0,0,0
+javascript-structured-emit.ts,526,526,1,A,medium,"OR","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,527,527,1,A,medium,"AND","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,528,528,1,A,medium,"EQUALITY","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,529,529,1,A,medium,"RELATIONAL","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,530,530,1,A,medium,"ADDITIVE","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,531,531,1,A,medium,"MULTIPLICATIVE","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,532,532,1,A,medium,"UNARY","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,533,533,1,A,medium,"CALL","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,534,534,1,A,medium,"ATOM","emission tables and helpers",1,0,0,0,0
+javascript-structured-emit.ts,535,544,10,A,medium,"Source","emission tables and helpers",10,0,0,0,0
+javascript-structured-emit.ts,545,546,2,A,medium,"atom","emission tables and helpers",2,0,0,0,0
+javascript-structured-emit.ts,547,554,8,A,medium,"operand","emission tables and helpers",8,0,0,0,0
+javascript-structured-emit.ts,555,569,15,A,medium,"leftAssociative","emission tables and helpers",15,0,0,0,0
+javascript-structured-emit.ts,570,584,15,A,medium,"numberSource","emission tables and helpers",15,0,0,0,0
+javascript-structured-emit.ts,585,592,8,A,medium,"bigintSource","emission tables and helpers",8,0,0,0,0
+javascript-structured-emit.ts,593,641,49,A,medium,"emitStructuredProgram","emission tables and helpers",49,0,0,0,0
+javascript-structured-emit.ts,642,650,9,A,medium,"singleResult","emission tables and helpers",9,0,0,0,0
+javascript-structured-emit.ts,651,654,4,A,medium,"Use","emission tables and helpers",4,0,0,0,0
+javascript-structured-emit.ts,655,704,50,A,medium,"usesOf","emission tables and helpers",50,0,0,0,0
+javascript-structured-emit.ts,705,2157,1453,A85B15,medium,"Emitter","emits IR; about 15% chooses the text of the existing emitter (-0 parts, guarded quotient, count tests, bare haversine)",1235,218,0,0,0
+javascript-structured-emit.ts,2158,2160,3,A,medium,"REGION_STATES_ABORT","emission tables and helpers",3,0,0,0,0
+javascript-structured-emit.ts,2161,2186,26,A,medium,"statesAbort","emission tables and helpers",26,0,0,0,0
