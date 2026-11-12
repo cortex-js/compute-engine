@@ -296,12 +296,16 @@ export type RepresentationPolicy = {
  *
  * For a `routine` (`IRRoutine`): the policy lists its name
  * (`RepresentationPolicy.routines`; a target with no routines refuses it);
- * it has two real or integer operands of the representations of its rule, a
- * body with one `real` parameter of the representation of the rule that
- * yields one real or integer value, a `real` result, and `initialPanels`
- * absent or a positive integer; its effect is the effect of the rule joined
- * with the effect of the body, its states the union of the states of both,
- * and its abort kinds those of the rule; no `exit` in its body leaves it.
+ * it has the real or integer operands of its name (two bounds for
+ * `integrate` and `integrate-sampled`, a point and an optional direction
+ * for `limit`, a point for `derivative`) of the representations of its
+ * rule, a body (and an `alternative`, only on the two integrals) with one
+ * `real` parameter of the representation of the rule that yields one real
+ * or integer value, a `real` result, `initialPanels` only on `integrate`
+ * and a positive integer there, and `order` exactly on `derivative`, a
+ * positive integer; its effect is the effect of the rule joined with the
+ * effect of its regions, its states the union of the states of all, and
+ * its abort kinds those of the rule; no `exit` in its regions leaves it.
  *
  * For a host operation (`IRHostCall`): it names a binding of
  * `IRProgram.hosts`; a read has no operand; the operands and the result have
@@ -882,11 +886,15 @@ function verifyStates(
     // The rule is checked by `verifySignature()`, which runs first.
     const rule = routineRule(op, policy);
     if (rule === undefined) return;
-    const effect = joinEffects(rule.effect, op.body.effect);
-    const states = unionStates(rule.touches, op.body.touches);
+    const regions = regionsOf(op);
+    const effect = regions.reduce<EffectFact>(
+      (e, r) => joinEffects(e, r.effect),
+      rule.effect
+    );
+    const states = unionStates(rule.touches, ...regions.map((r) => r.touches));
     if (op.effect !== effect || !sameStates(touches, states))
       fail(
-        `a routine ${op.fn} has the effect ${op.effect} and the states ${statesText(touches)}, and the target states ${effect} and ${statesText(states)} for it and its body`
+        `a routine ${op.fn} has the effect ${op.effect} and the states ${statesText(touches)}, and the target states ${effect} and ${statesText(states)} for it and its ${regions.length > 1 ? 'regions' : 'body'}`
       );
     return;
   }
@@ -1743,54 +1751,88 @@ function verifySignature(
       const rule =
         routineRule(op, policy) ??
         fail(`the target has no routine ${String(op.fn)}`);
-      arity(2);
+      // The operands of each routine (`RoutineName`), by name.
+      const names: readonly string[] =
+        op.fn === 'integrate' || op.fn === 'integrate-sampled'
+          ? ['lower bound', 'upper bound']
+          : op.fn === 'limit'
+            ? ['point', 'direction']
+            : ['point'];
+      if (op.fn === 'limit') {
+        if (op.operands.length !== 1 && op.operands.length !== 2)
+          fail(
+            `the operation routine limit has ${op.operands.length} operands, not one or two`
+          );
+      } else arity(names.length);
       operandsIn(
         rule.operands === 'same' ? [op.result.representation] : rule.operands
       );
       op.operands.forEach((operand, i) => {
         if (operand.type !== 'real' && operand.type !== 'integer')
           fail(
-            `the ${i === 0 ? 'lower' : 'upper'} bound of a routine ${op.fn} has the type ${operand.type}`
+            `the ${names[i]} of a routine ${op.fn} has the type ${operand.type}`
           );
       });
-      const parameters = op.body.parameters ?? [];
-      if (parameters.length !== 1)
-        fail(
-          `the body of a routine ${op.fn} has ${parameters.length} parameters, not one`
-        );
-      if (
-        parameters[0].type !== 'real' ||
-        parameters[0].representation !== rule.parameter
-      )
-        fail(
-          `the parameter of a routine ${op.fn} has the type ${parameters[0].type} and the representation ${parameters[0].representation}`
-        );
+      // The body, and the alternative of an integral.
+      const regions: [string, IRRegion][] = [['body', op.body]];
+      if (op.alternative !== undefined) {
+        if (op.fn !== 'integrate' && op.fn !== 'integrate-sampled')
+          fail(`a routine ${op.fn} has an alternative`);
+        regions.push(['alternative', op.alternative]);
+      }
+      for (const [what, region] of regions) {
+        const parameters = region.parameters ?? [];
+        if (parameters.length !== 1)
+          fail(
+            `the ${what} of a routine ${op.fn} has ${parameters.length} parameters, not one`
+          );
+        if (
+          parameters[0].type !== 'real' ||
+          parameters[0].representation !== rule.parameter
+        )
+          fail(
+            `the parameter of the ${what} of a routine ${op.fn} has the type ${parameters[0].type} and the representation ${parameters[0].representation}`
+          );
+        const yielded = yieldedValues(region);
+        if (yielded.length !== 1)
+          fail(
+            `the ${what} of a routine ${op.fn} yields ${yielded.length} values, not one`
+          );
+        const value = yielded[0];
+        if (
+          !fitsType(value.type, 'real') ||
+          !rule.results.includes(value.representation)
+        )
+          fail(
+            `the ${what} of a routine ${op.fn} yields a ${value.type} value, not a real`
+          );
+      }
       resultIn(rule.results);
       if (op.result.type !== 'real')
         fail(
           `a routine ${op.fn} has a result of the type ${op.result.type}, not real`
         );
-      const yielded = yieldedValues(op.body);
-      if (yielded.length !== 1)
-        fail(
-          `the body of a routine ${op.fn} yields ${yielded.length} values, not one`
-        );
-      const value = yielded[0];
-      if (
-        !fitsType(value.type, 'real') ||
-        !rule.results.includes(value.representation)
-      )
-        fail(
-          `the body of a routine ${op.fn} yields a ${value.type} value, not a real`
-        );
       const panels = op.initialPanels;
-      if (
-        panels !== undefined &&
-        !(typeof panels === 'number' && Number.isInteger(panels) && panels > 0)
-      )
-        fail(
-          `a routine ${op.fn} starts from ${String(panels)} panels, not a positive integer`
-        );
+      if (panels !== undefined) {
+        if (op.fn !== 'integrate')
+          fail(`a routine ${op.fn} states a number of panels`);
+        if (
+          !(typeof panels === 'number' && Number.isInteger(panels) && panels > 0)
+        )
+          fail(
+            `a routine ${op.fn} starts from ${String(panels)} panels, not a positive integer`
+          );
+      }
+      const order = op.order;
+      if (op.fn === 'derivative') {
+        if (
+          !(typeof order === 'number' && Number.isInteger(order) && order > 0)
+        )
+          fail(
+            `a routine derivative has the order ${String(order)}, not a positive integer`
+          );
+      } else if (order !== undefined)
+        fail(`a routine ${op.fn} has an order`);
       return;
     }
     case 'host': {

@@ -471,17 +471,8 @@ describe('STRUCTURED CALCULUS: an integral that does not converge, a deadline', 
 describe('STRUCTURED CALCULUS: what quadrature declines', () => {
   const ce = engine();
   const cases: [string, Json, string, object?][] = [
-    [
-      'the Monte Carlo estimator (quadrature: monte-carlo)',
-      Int(F(), 0, 1),
-      "the option quadrature is 'monte-carlo'",
-      { quadrature: 'monte-carlo' },
-    ],
-    [
-      'an integrand that the existing compiler computes again in log space',
-      Int(['Multiply', Pow('t', 100), ['Exp', ['Negate', Pow('t', 2)]]], 0, 1),
-      'is computed again in log space',
-    ],
+    // The Monte Carlo estimator and the log-space alternative are admitted
+    // since slice 3 (`compile-javascript-structured-calculus3.test.ts`).
     [
       'a bound that reads the variable of its clause',
       Int(F('x'), 0, 'x', 'x'),

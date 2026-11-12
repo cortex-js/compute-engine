@@ -195,10 +195,9 @@
   g.run({ x: 1 }); // ➔ 1.0806046117362795
   ```
 
-  A derivative with no closed form (`ND(t ↦ t³, x)`, which the compiler
-  without the profile differentiates numerically), an integrand that
-  draws, the `complex` mode, `NIntegrate` and `Limit` still decline with
-  `outside-profile`.
+  An integrand that draws, the `complex` mode and `NIntegrate` still
+  decline with `outside-profile`; a derivative with no closed form and
+  `Limit` compile numerically (below).
 
 - **The `numeric-kernel` profile of `compile()` integrates numerically a
   definite integral that has no closed form.** Such an integral declined
@@ -219,15 +218,55 @@
   f.run({ a: 1 }); // ➔ 1.0894294132248226
   ```
 
-  Still declined: an integrand that the compiler without the profile
-  computes again in log space where its value is not finite
-  (`∫₀¹ t¹⁰⁰ e^{-t²} dt`), the option `quadrature: 'monte-carlo'`, a bound
+  Still declined: a bound
   that reads the variable of its own clause (`∫₀ˣ √(1 + x⁴) dx`), an
   integrand that reads or calls a function of the host, a `Sum` or a
   `Product` whose terms hold such an integral (below), and an indefinite
   integral with no closed form. A rounding of such an integral
   (`⌊∫₀ᵃ √(1 + t⁴) dt⌋`) compiles, and so does a rounding of the variable
   in the integrand when the variable also has a value of its own.
+
+- **The `numeric-kernel` profile computes derivatives and limits
+  numerically, integrals in log space, and the Monte Carlo estimator.**
+  These declined with `outside-profile`; in the `strict` mode each one now
+  writes the call of the compiler without the profile (with
+  `constantFold: false`), with the body as a function of its variable,
+  evaluated at the same points, in the same order:
+
+  - a derivative with no closed form, `D(body, v)` of one symbol,
+    `ND(f, x)` and `Apply(Derivative(f, n), x)` of a function literal of one
+    parameter or of a user function whose result is a number: the stencil
+    `_SYS.nd`;
+  - `Limit(f, x)` and `Limit(f, x, d)` of a function literal: `_SYS.limit`,
+    with no symbolic attempt, so a constant limit gives the value of the
+    extrapolation (`1.0000000000000002` for `sin t / t` at 0, where the
+    compiler without the profile folds it to `1` by default);
+  - an integrand that the compiler without the profile computes again in
+    log space where its value is not finite (`∫₀ᵃ t^b e^{-t} dt`): the same
+    second function and `_SYS.finiteOr`;
+  - the option `quadrature: 'monte-carlo'`: `_SYS.integrateMC`, which draws
+    from the entropy source of the engine as before.
+
+  ```js
+  ce.declare('x', 'real');
+  const d = compile(ce.box(['D', ['Zeta', 'x'], 'x']), { profile: 'numeric-kernel' });
+  d.run({ x: 0.7 }); // ➔ -11.035491244462525
+  const l = compile(
+    ce.box(['Limit', ['Function', ['Divide', ['Sin', 't'], 't'], 't'], 0]),
+    { profile: 'numeric-kernel' }
+  );
+  l.run({}); // ➔ 1.0000000000000002
+  ```
+
+  A derivative or a limit of a pure body reports `pure: true`. Still
+  declined: a derivative of a function whose value is a point or a list, of
+  several variables, or that the compiler without the profile computes with
+  Taylor jets; a limit of a function that is not a literal, at `-∞` with no
+  direction or at an infinity from the other side (the compiler without the
+  profile then gives the limit at the other infinity) or at a point whose
+  type admits an infinity (`real | signed_infinity`, `number`), or in a
+  `Sum` or a `Product` (it can throw the timeout of a deadline); a body
+  that draws or reads the host; the `complex` mode.
 
 - **The `numeric-kernel` profile declines a `Sum` or a `Product` whose
   terms can throw.** The compiler without the profile stops a sum or a

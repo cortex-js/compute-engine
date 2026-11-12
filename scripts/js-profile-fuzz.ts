@@ -171,10 +171,15 @@
  *                        (`genQuadrature()`: an expression of the program
  *                        in `t`, infinite and reversed bounds, two clauses,
  *                        an integral in an integrand), `D` of one in a name,
- *                        and `Apply` of the `Derivative` of a literal. The
+ *                        and `Apply` of the `Derivative` of a literal; a
+ *                        derivative with no closed form
+ *                        (`genNumericDerivative()`), a `Limit`
+ *                        (`genLimit()`) and an integrand in log space
+ *                        (`genLogSpaceIntegral()`). The
  *                        profile admits a node with a closed form as that
- *                        closed form, and one with none as the routine
- *                        `integrate` (`_SYS.integrate`). Without the option,
+ *                        closed form, and one with none as a routine
+ *                        (`_SYS.integrate`, `_SYS.nd`, `_SYS.limit`, with
+ *                        `_SYS.finiteOr`). Without the option,
  *                        the programs are those of the same seed before the
  *                        option was added.
  *   --deg                Each engine has the angular unit `deg`: the
@@ -1645,17 +1650,118 @@ function genCalculus(ctx: GenContext, depth: number): Json {
   const bound = (): Json =>
     rng() < 0.4 ? pick<Json>(rng, [0, 1, -1, 2]) : genLeaf(ctx);
   const r = rng();
-  if (r < 0.25)
+  if (r < 0.2)
     return ['Integrate', integrand(), ['Limits', 't', bound(), bound()]];
-  if (r < 0.5) return genQuadrature(ctx, depth);
-  if (r < 0.75)
+  if (r < 0.4) return genQuadrature(ctx, depth);
+  if (r < 0.55)
     return [
       'Apply',
       ['Derivative', ['Function', integrand(), 't'], pick(rng, [1, 1, 2])],
       genReal(ctx, depth),
     ];
-  const name = choose(rng, ctx.symbols);
-  return ['D', pick(rng, INTEGRANDS)(name), name];
+  if (r < 0.65) {
+    const name = choose(rng, ctx.symbols);
+    return ['D', pick(rng, INTEGRANDS)(name), name];
+  }
+  if (r < 0.77) return genNumericDerivative(ctx, depth);
+  if (r < 0.89) return genLimit(ctx, depth);
+  return genLogSpaceIntegral(ctx, depth);
+}
+
+/** Functions with no derivative rule, as functions of their variable
+ *  (`genNumericDerivative()`): `ζ` away from its pole at 1. */
+const NO_DERIVATIVE: readonly ((v: Json) => Json)[] = [
+  (v) => ['Zeta', ['Add', 2, ['Power', v, 2]]],
+  (v) => ['Multiply', v, ['Zeta', ['Add', 3, ['Sin', v]]]],
+];
+
+/**
+ * A derivative with no closed form (`--calculus`), which the existing
+ * compiler computes with the stencil `_SYS.nd` and the profile with the
+ * routine `derivative`: `D` of a function with no derivative rule of a
+ * name of the program, at times times an expression of the program in the
+ * name; `ND` of such a literal in `t` at an expression; or `Apply` of its
+ * `Derivative` of order 1 or 2. The stencil samples about 20 points.
+ */
+function genNumericDerivative(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const body = (v: string): Json => {
+    const base = pick(rng, NO_DERIVATIVE)(v);
+    if (rng() < 0.6) return base;
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, [v, 40]] };
+    return [rng() < 0.5 ? 'Add' : 'Multiply', base, genReal(inner, d)];
+  };
+  const r = rng();
+  if (r < 0.35) {
+    const name = choose(rng, ctx.symbols);
+    return ['D', body(name), name];
+  }
+  if (r < 0.7)
+    return ['ND', ['Function', body('t'), 't'], genReal(ctx, d)];
+  return [
+    'Apply',
+    ['Derivative', ['Function', body('t'), 't'], pick(rng, [1, 2])],
+    genReal(ctx, d),
+  ];
+}
+
+/**
+ * A `Limit` (`--calculus`), which the existing compiler with
+ * `constantFold: false` computes with `_SYS.limit` and the profile with
+ * the routine `limit`: a removable singularity at a point, a ratio at
+ * `±∞`, or an expression of the program in `t`, at a literal, an
+ * expression or `±∞`, at times from one side or both. The extrapolation
+ * samples a bounded number of points, also when it does not converge.
+ */
+function genLimit(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['t', 40]] };
+  const r = rng();
+  const body: Json =
+    r < 0.3
+      ? ['Divide', ['Sin', ['Multiply', genLeaf(ctx), 't']], 't']
+      : r < 0.5
+        ? ['Divide', ['Add', ['Exp', 't'], -1], 't']
+        : r < 0.65
+          ? ['Divide', ['Add', genLeaf(ctx), 't'], ['Add', 1, ['Abs', 't']]]
+          : genReal(inner, d);
+  const point: Json =
+    rng() < 0.4
+      ? pick<Json>(rng, [0, 1, 'PositiveInfinity', 'NegativeInfinity'])
+      : genReal(ctx, d);
+  const node: Json[] = ['Limit', ['Function', body, 't'], point];
+  if (rng() < 0.3) node.push(pick(rng, [-1, 0, 1]));
+  return node;
+}
+
+/**
+ * An integral whose integrand the existing compiler computes again in log
+ * space where its value is not finite (`--calculus`; `logSpaceProduct()`):
+ * `t^p · e^{-c t}` with a positive exponent (a literal or `2 + arctan² of
+ * a leaf`), from 0 to a positive bound, so that it converges.
+ */
+function genLogSpaceIntegral(ctx: GenContext, _depth: number): Json {
+  const { rng } = ctx;
+  const exponent: Json =
+    rng() < 0.5
+      ? pick<Json>(rng, [3, 2.5, 60, 100])
+      : ['Add', 2, ['Power', ['Arctan', genLeaf(ctx)], 2]];
+  const rate: Json = pick<Json>(rng, [1, 2, 0.5]);
+  const upper: Json =
+    rng() < 0.5
+      ? pick<Json>(rng, [1, 2, 5])
+      : ['Add', 1, ['Power', ['Arctan', genLeaf(ctx)], 2]];
+  return [
+    'Integrate',
+    [
+      'Multiply',
+      ['Power', 't', exponent],
+      ['Exp', ['Negate', ['Multiply', rate, 't']]],
+    ],
+    ['Limits', 't', 0, upper],
+  ];
 }
 
 /**

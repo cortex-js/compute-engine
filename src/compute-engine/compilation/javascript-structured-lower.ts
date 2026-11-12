@@ -123,6 +123,7 @@ import {
   operationCanAbort,
   reachesHost,
   regionsOf,
+  runsRoutine,
   definedValues,
   touchesField,
   type EffectFact,
@@ -397,6 +398,35 @@ export type StructuredIntegral = {
    *  `compileIntegrate()` measures it. An integral in the body or in a bound
    *  of another one has the count of the outermost one. */
   readonly panels: number;
+  /** The integrand in log space (`logSpaceProduct()`), an expression in
+   *  the same variables: the `alternative` of the innermost clause, as
+   *  the existing emitter writes `_SYS.finiteOr`. */
+  readonly alternative?: Expression;
+  /** The option `quadrature: 'monte-carlo'`: each clause is the routine
+   *  `integrate-sampled` (`_SYS.integrateMC`), with no panel count. */
+  readonly sampled?: boolean;
+};
+
+/**
+ * A derivative or a limit with no closed form, which the existing compiler
+ * computes numerically (`numericDerivative()` and `numericLimit()` in
+ * `javascript-fragment-target.ts`): the routine `fn` of the body as a
+ * function of the variable `name`, at the operands. The annotation types
+ * the operands in the scope of the node, then binds the variable, a real,
+ * in the scope of the routine and types the body there.
+ */
+export type StructuredNumericRoutine = {
+  readonly fn: 'derivative' | 'limit';
+  /** The name of the variable. */
+  readonly name: string;
+  /** A symbol node of the variable, which the annotation binds. */
+  readonly variable: Expression;
+  /** The body, an expression in the variable. */
+  readonly body: Expression;
+  /** The point, then the direction of a limit when it has one. */
+  readonly operands: readonly Expression[];
+  /** The order of a derivative. */
+  readonly order?: number;
 };
 
 /** The facts that the preparation of the structured route records, and
@@ -464,6 +494,10 @@ export type StructuredPreparation = {
   /** Each definite `Integrate` node of the program with no closed form,
    *  which the existing compiler integrates numerically (`integral()`). */
   readonly integrals?: ReadonlyMap<Expression, StructuredIntegral>;
+  /** Each `D`, `ND`, `Apply` of a `Derivative` and `Limit` node of the
+   *  program with no closed form, which the existing compiler computes
+   *  numerically (`numericRoutine()`). */
+  readonly routines?: ReadonlyMap<Expression, StructuredNumericRoutine>;
   readonly numericPolicy: 'strict' | 'complex';
   /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
    *  recorded on each `loop`. */
@@ -1569,12 +1603,28 @@ class Lowering {
   /** The names of the symbols of `node`, read or written (`namesIn()`),
    *  once per node object. */
   private namesOf(node: Expression): ReadonlySet<string> {
-    return namesIn(
-      node,
-      this.names,
-      this.capturedNames,
-      this.prep.closedForms
-    );
+    return namesIn(node, this.names, this.capturedNames, this.nameSources());
+  }
+
+  /** The expression whose names stand for the names of a node: the closed
+   *  form of a calculus node, and for a derivative or a limit computed
+   *  numerically a list of its operands and its body (which can be the
+   *  body of a user function, not an operand of the node). */
+  private nameSourceMap: ReadonlyMap<Expression, Expression> | undefined;
+  private nameSources(): ReadonlyMap<Expression, Expression> | undefined {
+    const routines = this.prep.routines;
+    if (routines === undefined || routines.size === 0)
+      return this.prep.closedForms;
+    if (this.nameSourceMap === undefined) {
+      const map = new Map(this.prep.closedForms ?? []);
+      for (const [node, routine] of routines)
+        map.set(
+          node,
+          node.engine._fn('List', [...routine.operands, routine.body])
+        );
+      this.nameSourceMap = map;
+    }
+    return this.nameSourceMap;
   }
 
   private facts(
@@ -1684,13 +1734,17 @@ class Lowering {
     const value = this.lower(node, scope, operations);
     if (epoch !== this.epoch) return value;
     // A host operation is never shared, also a pure one: the host can count
-    // its calls (`IRHostCall`).
+    // its calls (`IRHostCall`). Neither is a routine, also a pure `limit` or
+    // `derivative`, nor a value whose operations run one (in a region or in
+    // the body of a called function): each occurrence runs its body, as
+    // the existing code does (`IRRoutine`).
     for (let i = start; i < operations.length; i++) {
       const op = operations[i];
       if (
         op.effect !== 'pure' ||
         operationCanAbort(op, this.functions) ||
-        reachesHost(op, this.functions)
+        reachesHost(op, this.functions) ||
+        runsRoutine(op, this.functions)
       )
         return value;
     }
@@ -1752,6 +1806,13 @@ class Lowering {
     // integers) for a real (a list of reals), which is a valid value of the
     // result of the function as it is.
     if (operator === 'Typed') return this.value(node.ops[0], scope, operations);
+
+    // A derivative or a limit with no closed form (`numericRoutine()`).
+    const routine = this.prep.routines?.get(node);
+    if (routine !== undefined)
+      return this.inScope(scope.inner.get(node), () =>
+        this.numericRoutine(node, routine, facts, scope, operations)
+      );
 
     if (operator === 'Comprehension')
       return this.inScope(scope.inner.get(node), () =>
@@ -3971,12 +4032,13 @@ class Lowering {
     const inner = scope.inner.get(node);
     if (inner === undefined)
       return fail(`no scope for the integral ${nodeText(node)}`);
-    const rule = JAVASCRIPT_POLICY.routines?.integrate;
-    if (rule === undefined) return fail('the target has no routine integrate');
+    const fn = integral.sampled === true ? 'integrate-sampled' : 'integrate';
+    const rule = JAVASCRIPT_POLICY.routines?.[fn];
+    if (rule === undefined) return fail(`the target has no routine ${fn}`);
     const outermost = this.panels === undefined;
     const panels = this.panels ?? integral.panels;
     if (outermost) this.panels = panels;
-    const { clauses, body } = integral;
+    const { clauses, body, alternative } = integral;
     // The conversion of each bound, then of the body (`integralRule()` in
     // `javascript-fragment-target.ts`).
     const conversion = (i: number) => facts.conversions?.[i];
@@ -4011,17 +4073,48 @@ class Lowering {
         ),
         parameters: [parameter],
       };
+      // The integrand in log space, on the innermost clause: a region of
+      // its own parameter, which the routine binds to the abscissa of the
+      // body, with the variables of the clauses before it bound as in the
+      // body.
+      let second: IRRegion | undefined;
+      if (alternative !== undefined && d + 1 === clauses.length) {
+        const own = this.newValue('real', 'number');
+        const alternativeOperations: IROperation[] = [];
+        const alternativeValue = this.inRegion(alternativeOperations, () => {
+          const values = new Map(this.bound.get(inner) ?? []);
+          values.set(name, own);
+          this.bound.set(inner, values);
+          this.wrote(inner);
+          this.changed();
+          return this.convert(
+            this.value(alternative, inner, alternativeOperations),
+            conversion(2 * clauses.length + 1),
+            node,
+            alternativeOperations
+          );
+        });
+        second = {
+          ...this.region(alternativeOperations, alternative, alternativeValue),
+          parameters: [own],
+        };
+      }
+      const regions = second === undefined ? [region] : [region, second];
       const result =
         d === 0 ? this.resultOf(facts) : this.newValue('real', 'number');
       out.push({
         kind: 'routine',
-        fn: 'integrate',
+        fn,
         result,
         operands: [lo, hi],
         body: region,
-        initialPanels: panels,
-        effect: joinEffects(rule.effect, region.effect),
-        ...touchesField(rule.touches, region.touches),
+        ...(second === undefined ? {} : { alternative: second }),
+        ...(fn === 'integrate' ? { initialPanels: panels } : {}),
+        effect: regions.reduce<EffectFact>(
+          (e, r) => joinEffects(e, r.effect),
+          rule.effect
+        ),
+        ...touchesField(rule.touches, ...regions.map((r) => r.touches)),
         ...(rule.aborts !== undefined ? { aborts: rule.aborts } : {}),
         origin: node,
       });
@@ -4032,6 +4125,75 @@ class Lowering {
     } finally {
       if (outermost) this.panels = undefined;
     }
+  }
+
+  /**
+   * A derivative or a limit with no closed form (`StructuredNumericRoutine`),
+   * as the existing emitter writes it (`compileNumericDerivativeFallback()`
+   * in `library/calculus.ts`, the `Limit` handler of `javascript-target.ts`):
+   * one `routine` `derivative` or `limit`. The operands (the point, then the
+   * direction of a limit) are evaluated where the node is, in its scope;
+   * the body binds the variable to its parameter and starts a new epoch
+   * (`changed()`), so every operation of the body runs at each point that
+   * the routine samples, as with `cse: false`.
+   */
+  private numericRoutine(
+    node: Expression,
+    routine: StructuredNumericRoutine,
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const inner = scope.inner.get(node);
+    if (inner === undefined)
+      return fail(`no scope for the routine ${nodeText(node)}`);
+    const rule = JAVASCRIPT_POLICY.routines?.[routine.fn];
+    if (rule === undefined)
+      return fail(`the target has no routine ${routine.fn}`);
+    // The conversion of each operand, then of the body (`routineRule()` in
+    // `javascript-fragment-target.ts`).
+    const conversion = (i: number) => facts.conversions?.[i];
+    const operands = routine.operands.map((operand, i) =>
+      this.convert(
+        this.value(operand, scope, operations),
+        conversion(i),
+        node,
+        operations
+      )
+    );
+    const parameter = this.newValue('real', 'number');
+    const bodyOperations: IROperation[] = [];
+    const value = this.inRegion(bodyOperations, () => {
+      const values = new Map(this.bound.get(inner) ?? []);
+      values.set(routine.name, parameter);
+      this.bound.set(inner, values);
+      this.wrote(inner);
+      this.changed();
+      return this.convert(
+        this.value(routine.body, inner, bodyOperations),
+        conversion(routine.operands.length),
+        node,
+        bodyOperations
+      );
+    });
+    const region: IRRegion = {
+      ...this.region(bodyOperations, routine.body, value),
+      parameters: [parameter],
+    };
+    const result = this.resultOf(facts);
+    operations.push({
+      kind: 'routine',
+      fn: routine.fn,
+      result,
+      operands,
+      body: region,
+      ...(routine.order !== undefined ? { order: routine.order } : {}),
+      effect: joinEffects(rule.effect, region.effect),
+      ...touchesField(rule.touches, region.touches),
+      ...(rule.aborts !== undefined ? { aborts: rule.aborts } : {}),
+      origin: node,
+    });
+    return result;
   }
 
   /**
@@ -4459,7 +4621,9 @@ class Lowering {
    * not refused. `NaN` absorbs
    * both operations, so the value is the same when a later term has no
    * effect and cannot throw. A term that can throw where an earlier term is
-   * `NaN` (`termThrower()`: a `routine`, a `replace-at`, a call of a
+   * `NaN` (`termThrower()`: a `routine` but a `derivative`, whose
+   * `_SYS.nd` does not throw and whose body is judged as the term is, a
+   * `replace-at`, a call of a
    * function whose body can throw, a `mod` but one whose operands are safe
    * integers or the same in every term; a read or a call of the host is
    * left out, as the admission orders and counts those) declines
@@ -5420,7 +5584,8 @@ class Lowering {
           if (this.canThrowNoHost(op)) return op;
           continue;
         }
-        if (op.kind === 'routine') return op;
+        // `_SYS.nd` does not throw: a derivative is judged by its body.
+        if (op.kind === 'routine' && op.fn !== 'derivative') return op;
         for (const region of regionsOf(op)) {
           const found = visit(region.operations, false);
           if (found !== undefined) return found;
@@ -5762,7 +5927,7 @@ class Lowering {
       body,
       this.names,
       this.capturedNames,
-      this.prep.closedForms
+      this.nameSources()
     );
     const carried = candidates.filter(
       ({ name }) => liveOut.has(name) || exposed.has(name)
@@ -6012,7 +6177,9 @@ function throwingMatrixFunction(op: IROperation): boolean {
  *  `replace-at` (`_SYS.replaceAt` throws for an index out of range),
  *  `host`, a function of the host, which can throw and
  *  whose calls the host can count, also when it is declared pure, and
- *  `routine` (`_SYS.integrate` throws the timeout of a deadline), and
+ *  a `routine` but `derivative` (`_SYS.integrate`, `_SYS.integrateMC` and
+ *  `_SYS.limit` throw the timeout of a deadline; `_SYS.nd` does not
+ *  throw), and
  *  `inverse` and `matrix-power` (`throwingMatrixFunction()`). A throw
  *  is not an effect, so the lowering keeps such an operation where the
  *  existing emitter evaluates it (`ifStatement()`).
@@ -6036,7 +6203,7 @@ function canThrow(
     (op.kind === 'build' && op.counted === true) ||
     (op.kind === 'collection' && (op.fn === 'repeat' || op.fn === 'linspace')) ||
     (host && op.kind === 'host') ||
-    op.kind === 'routine' ||
+    (op.kind === 'routine' && op.fn !== 'derivative') ||
     (op.kind === 'call' && bodyThrows(op.function)) ||
     regionsOf(op).some((region) =>
       region.operations.some((inner) => canThrow(inner, bodyThrows, host))

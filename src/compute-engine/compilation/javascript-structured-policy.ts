@@ -410,6 +410,14 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   // panels is the starting count of a single integral
   // (`initialPanelsForDimensions(1)`): the emitter writes no fourth argument
   // for it.
+  //
+  // `_SYS.integrateMC(f, lo, hi)`, the estimator of `quadrature:
+  // 'monte-carlo'`, draws 10^7 points from the same live entropy source and
+  // joins the same count of integrals in progress and budget: the facts of
+  // `integrate`. `_SYS.limit(f, x[, dir])` (the Richardson extrapolation of
+  // `limit()` in `numerics/numeric.ts`) keeps no state and throws only the
+  // timeout of an ambient deadline. `_SYS.nd(f, order, 'scalar')(x)` (the
+  // stencil `centeredDiffHigherOrder()`) keeps no state and does not throw.
   routines: {
     integrate: {
       results: ['number'],
@@ -419,6 +427,27 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
       touches: ['entropy', 'quadrature'],
       aborts: ['error'],
       defaultPanels: initialPanelsForDimensions(1),
+    },
+    'integrate-sampled': {
+      results: ['number'],
+      operands: ['number'],
+      parameter: 'number',
+      effect: 'effectful',
+      touches: ['entropy', 'quadrature'],
+      aborts: ['error'],
+    },
+    limit: {
+      results: ['number'],
+      operands: ['number'],
+      parameter: 'number',
+      effect: 'pure',
+      aborts: ['error'],
+    },
+    derivative: {
+      results: ['number'],
+      operands: ['number'],
+      parameter: 'number',
+      effect: 'pure',
     },
   },
 };

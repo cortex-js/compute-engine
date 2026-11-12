@@ -1606,8 +1606,109 @@ describe('the verifier: routines', () => {
     );
   });
 
+  test('a routine that the policy does not list', () => {
+    const policy: RepresentationPolicy = {
+      ...JAVASCRIPT_POLICY,
+      routines: { integrate: JAVASCRIPT_POLICY.routines!.integrate },
+    };
+    expect(verify(madeRoutine((op) => ({ ...op, fn: 'limit', operands: [op.operands[0]], initialPanels: undefined, effect: 'pure', touches: undefined })), policy)).toThrow(
+      /the target has no routine limit/
+    );
+  });
+
+  // Slices 3 and 4: `integrate-sampled`, `limit`, `derivative`, and the
+  // alternative of an integral.
+  const asRoutine = (op: Op) => op as Extract<Op, { kind: 'routine' }>;
+  /** The routine of `madeRoutine()` as a pure `fn` of the point `x`. */
+  const pureRoutine =
+    (fn: 'limit' | 'derivative', extra: object = {}) =>
+    (op: Op): Op => {
+      const { initialPanels: _panels, touches: _touches, ...rest } = asRoutine(op);
+      return {
+        ...rest,
+        fn,
+        operands: [op.operands[1]],
+        effect: 'pure',
+        ...(fn === 'limit' ? { aborts: ['error'] } : { aborts: undefined }),
+        ...(fn === 'derivative' ? { order: 2 } : {}),
+        ...extra,
+      } as Op;
+    };
+  /** The routine of `madeRoutine()` with an alternative of its own
+   *  parameter that yields that parameter. */
+  const withAlternative = (op: Op, m: Made): Op => {
+    const s = m.value('real');
+    return {
+      ...op,
+      alternative: { ...m.region([m.yieldOf(s)]), parameters: [s] },
+    };
+  };
+
   test.each([
-    ['a routine that the policy does not list', (op: Op) => ({ ...op, fn: 'limit' }), /the target has no routine limit/],
+    ['a limit', pureRoutine('limit')],
+    ['a limit with a direction', (op: Op) => ({ ...pureRoutine('limit')(op), operands: [op.operands[1], op.operands[0]] })],
+    ['a derivative', pureRoutine('derivative')],
+    [
+      'a sampled integral',
+      (op: Op) => {
+        const { initialPanels: _panels, ...rest } = asRoutine(op);
+        return { ...rest, fn: 'integrate-sampled' } as Op;
+      },
+    ],
+    ['an integral with an alternative', withAlternative],
+  ] as [string, (op: Op, m: Made) => Op][])('control: %s verifies', (_name, change) => {
+    expect(verify(madeRoutine(change))).not.toThrow();
+  });
+
+  test.each([
+    ['a limit of three operands', (op: Op) => ({ ...pureRoutine('limit')(op), operands: [op.operands[1], op.operands[1], op.operands[1]] }), /the operation routine limit has 3 operands, not one or two/],
+    ['a derivative of two operands', (op: Op) => ({ ...pureRoutine('derivative')(op), operands: [op.operands[1], op.operands[1]] }), /the operation routine has 2 operands, not 1/],
+    ['a derivative with no order', pureRoutine('derivative', { order: undefined }), /a routine derivative has the order undefined, not a positive integer/],
+    ['a derivative of the order 0', pureRoutine('derivative', { order: 0 }), /a routine derivative has the order 0, not a positive integer/],
+    ['a limit with an order', pureRoutine('limit', { order: 1 }), /a routine limit has an order/],
+    ['a limit with panels', pureRoutine('limit', { initialPanels: 4 }), /a routine limit states a number of panels/],
+    ['a derivative that aborts', pureRoutine('derivative', { aborts: ['error'] }), /the operation routine has the abort kinds error, and the target states none/],
+    ['an effectful derivative', pureRoutine('derivative', { effect: 'effectful', touches: ['quadrature'] }), /a routine derivative has the effect effectful and the states quadrature, and the target states pure and none/],
+    ['a limit with no abort kind', pureRoutine('limit', { aborts: undefined }), /the operation routine has the abort kinds none, and the target states error/],
+    [
+      'a sampled integral with panels',
+      (op: Op) => ({ ...op, fn: 'integrate-sampled' }),
+      /a routine integrate-sampled states a number of panels/,
+    ],
+    [
+      'a derivative with an alternative',
+      (op: Op, m: Made) => withAlternative(pureRoutine('derivative')(op), m),
+      /a routine derivative has an alternative/,
+    ],
+    [
+      'an alternative with no parameter',
+      (op: Op, m: Made) => {
+        const with2 = asRoutine(withAlternative(op, m));
+        const { parameters: _parameters, ...alternative } = with2.alternative!;
+        return { ...with2, alternative };
+      },
+      /the alternative of a routine integrate has 0 parameters, not one|has no definition/,
+    ],
+    [
+      'an alternative that draws, and a routine that omits its state',
+      (op: Op, m: Made) => {
+        const d = m.value('real');
+        const s = m.value('real');
+        return {
+          ...op,
+          alternative: {
+            ...m.region([{ kind: 'draw', result: d, operands: [], effect: 'effectful', touches: ['random'], origin: m.origin }, m.yieldOf(d)], 'effectful'),
+            parameters: [s],
+          },
+        };
+      },
+      /a routine integrate has the effect effectful and the states entropy, quadrature, and the target states effectful and entropy, quadrature, random for it and its regions/,
+    ],
+  ] as [string, (op: Op, m: Made) => Op, RegExp][])('%s', (_name, change, message) => {
+    expect(verify(madeRoutine(change))).toThrow(message);
+  });
+
+  test.each([
     ['one operand', (op: Op) => ({ ...op, operands: [op.operands[0]] }), /the operation routine has 1 operands, not 2/],
     [
       'a boolean bound',
@@ -1646,7 +1747,7 @@ describe('the verifier: routines', () => {
           body: { ...routine.body, parameters: [t], operations: [{ ...routine.body.operations[0], operands: [t] }] },
         };
       },
-      /the parameter of a routine integrate has the type integer/,
+      /the parameter of the body of a routine integrate has the type integer/,
     ],
     [
       'a body that yields two values',

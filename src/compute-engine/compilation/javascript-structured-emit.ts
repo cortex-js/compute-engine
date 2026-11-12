@@ -212,6 +212,7 @@ import {
   isTupleType,
   reachesHost,
   regionsOf,
+  runsRoutine,
   yieldedValues,
   type IRExit,
   type IRFunction,
@@ -827,14 +828,17 @@ class Emitter {
   ): Source[] | undefined {
     const operations = region.operations;
     // `impure[k]`: the number of operations before position `k` that are
-    // not `pure`, that write an array in place (`mutatesInPlace()`), or that
-    // run code of the host (`reachesHost()`): a value is not moved across
-    // them.
+    // not `pure`, that write an array in place (`mutatesInPlace()`), that
+    // run code of the host (`reachesHost()`), or that run a routine, also
+    // through a region or a called function (`runsRoutine()`: a pure
+    // `limit` or `derivative` runs its body where the program runs it,
+    // `IRRoutine`): a value is not moved across them.
     const impure = [0];
     for (const op of operations)
       impure.push(
         impure[impure.length - 1] +
           (op.effect === 'pure' &&
+          !runsRoutine(op, this.program.functions) &&
           !mutatesInPlace(op, this.inPlace) &&
           !reachesHost(op, this.program.functions)
             ? 0
@@ -960,7 +964,8 @@ class Emitter {
 
   /**
    * True when the value `result` of `op`, at the position `index` of
-   * `region`, is written at its use: `op` is pure and runs no code of the
+   * `region`, is written at its use: `op` is pure, runs no routine
+   * (`runsRoutine()`), and runs no code of the
    * host (`reachesHost()`: the host can count its calls and their order), its
    * value has one use, in `region`, and every operation between the two is
    * pure; and, when the code of `op` can abort (`aborts.here`), the code of
@@ -974,7 +979,11 @@ class Emitter {
     impure: readonly number[],
     aborts: { readonly here: boolean; readonly before: readonly number[] }
   ): boolean {
-    if (op.effect !== 'pure' || reachesHost(op, this.program.functions))
+    if (
+      op.effect !== 'pure' ||
+      runsRoutine(op, this.program.functions) ||
+      reachesHost(op, this.program.functions)
+    )
       return false;
     const use = this.uses.get(result.id);
     if (use === undefined || use.count !== 1 || use.region !== region)
@@ -1583,25 +1592,70 @@ class Emitter {
         // its call to a `const` at its position. The panels are written when
         // they are not the default of the policy, as the existing emitter
         // writes them.
+        //
+        // `integrate-sampled` is `_SYS.integrateMC(f, lo, hi)`, `limit`
+        // `_SYS.limit(f, x[, dir])` and `derivative`
+        // `_SYS.nd(f, order, 'scalar')(x)`, as the existing emitter writes
+        // them (`compileIntegrate()`, the `Limit` handler,
+        // `compileNumericDerivativeFallback()` in `library/calculus.ts`).
+        // An integral with an alternative is the closure of the
+        // alternative, bound to a `const` before the call, and the body
+        // `(t) => { …; return _SYS.finiteOr(value, alternative, t); }`: the
+        // existing emitter binds the alternative once per call of the
+        // integral too (`((_tv1) => _SYS.integrate(…))((t) => …)`).
         const rule = JAVASCRIPT_POLICY.routines?.[op.fn];
-        if (op.fn !== 'integrate' || rule === undefined)
+        if (rule === undefined)
           return fail(`no emission for the routine ${String(op.fn)}`);
-        const [parameter] = op.body.parameters ?? [];
-        if (parameter === undefined)
-          return fail('a routine whose body has no parameter');
-        const name = this.bind(parameter);
-        const body: string[] = [];
-        const [value] = this.openRegion(op.body, body, readsInputs);
-        const closure = `(${name}) => { ${[...body, `return ${value.text};`].join(' ')} }`;
-        const panels =
-          op.initialPanels === undefined ||
-          op.initialPanels === rule.defaultPanels
-            ? ''
-            : `, ${op.initialPanels}`;
-        return {
-          text: `_SYS.integrate(${closure}, ${operand(operands[0], CONDITIONAL)}, ${operand(operands[1], CONDITIONAL)}${panels})`,
-          precedence: CALL,
+        const closureOf = (region: IRRegion, wrap?: string) => {
+          const [parameter] = region.parameters ?? [];
+          if (parameter === undefined)
+            return fail('a routine whose body has no parameter');
+          const name = this.bind(parameter);
+          const body: string[] = [];
+          const [value] = this.openRegion(region, body, readsInputs);
+          const result =
+            wrap === undefined
+              ? value.text
+              : `_SYS.finiteOr(${operand(value, CONDITIONAL)}, ${wrap}, ${name})`;
+          return `(${name}) => { ${[...body, `return ${result};`].join(' ')} }`;
         };
+        let alternative: string | undefined;
+        if (op.alternative !== undefined) {
+          alternative = this.names.fresh();
+          out.push(`const ${alternative} = ${closureOf(op.alternative)};`);
+        }
+        const closure = closureOf(op.body, alternative);
+        const args = operands.map((a) => operand(a, CONDITIONAL));
+        switch (op.fn) {
+          case 'integrate': {
+            const panels =
+              op.initialPanels === undefined ||
+              op.initialPanels === rule.defaultPanels
+                ? ''
+                : `, ${op.initialPanels}`;
+            return {
+              text: `_SYS.integrate(${closure}, ${args[0]}, ${args[1]}${panels})`,
+              precedence: CALL,
+            };
+          }
+          case 'integrate-sampled':
+            return {
+              text: `_SYS.integrateMC(${closure}, ${args[0]}, ${args[1]})`,
+              precedence: CALL,
+            };
+          case 'limit':
+            return {
+              text: `_SYS.limit(${[closure, ...args].join(', ')})`,
+              precedence: CALL,
+            };
+          case 'derivative':
+            return {
+              text: `_SYS.nd(${closure}, ${op.order}, 'scalar')(${args[0]})`,
+              precedence: CALL,
+            };
+          default:
+            return fail('no emission for a routine');
+        }
       }
       case 'trace': {
         const trace = this.options.trace;

@@ -244,8 +244,10 @@ describe('STRUCTURED CALCULUS: declines', () => {
       'is not pure',
     ],
     [
-      'ND at an input: the numerical derivative',
-      ['ND', ['Function', Pow('t', 3), 't'], 'x'],
+      // With no closed form, a point-valued ND is the vector stencil
+      // (`_SYS.nd`, slice 4 admits the scalar one).
+      'ND of a point at an input: the vector stencil',
+      ['ND', ['Function', ['Tuple', ['Zeta', 't'], 't'], 't'], 'x'],
       'has no closed form',
     ],
     [
@@ -340,18 +342,19 @@ describe('STRUCTURED CALCULUS: the shared step pool of the closed-form searches'
     expect(result.code).not.toContain('_SYS.integrate');
   });
 
-  test('a search that runs out of steps: quadrature on one, a decline on the other', () => {
+  test('a search that runs out of steps: quadrature on both, with the alternative in log space', () => {
     // `t eᵗ cos t` spends 9 steps of a search; with 5, no closed form, and
     // the existing compiler writes the log-space alternative of the
-    // integrand, which the route does not have (slice 3).
+    // integrand, which the route writes too since slice 3.
     const latex = '\\int_0^a t e^{t} \\cos t dt';
     setAntiderivativeAttemptBudgetForTesting(5);
-    expect(compile(engine().parse(latex), EXISTING).code).toContain(
-      '_SYS.integrate'
-    );
-    expect(() => compile(engine().parse(latex), PROFILE)).toThrow(
-      /has no closed form .* is computed again in log space/
-    );
+    const short = engine();
+    const quadrature = compile(short.parse(latex), EXISTING);
+    expect(quadrature.code).toContain('_SYS.finiteOr');
+    const routine = compile(short.parse(latex), PROFILE);
+    expect(routine.code).toContain('_SYS.finiteOr');
+    for (const vars of POINTS)
+      expect(Object.is(run(routine, vars), run(quadrature, vars))).toBe(true);
     setAntiderivativeAttemptBudgetForTesting();
     const ce = engine();
     const existing = compile(ce.parse(latex), EXISTING);

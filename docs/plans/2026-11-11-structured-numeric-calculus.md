@@ -603,3 +603,185 @@ decline).
   a `compile-error` for `x·Conjugate(Haversine(1))` (no calculus;
   `5fc85eda6` folds that node, and `x·Conjugate(Haversine(2y))` still
   fails: an issue).
+
+## 11. Result of slices 3 and 4
+
+Implemented on `0eb9d4778988822bcb042e08dc984d460923e8c5`, then moved
+onto `edf0c42631a479230ffbb04bcd33d745725ceeed` (the matrix functions). The
+parts in the order of the brief: (a) `derivative`, (b) `limit`, (c) the
+log-space region, (d) `integrate-sampled`.
+
+**The operation.** `RoutineName` has `integrate-sampled`, `limit` and
+`derivative`; `IRRoutine` has `order` (a `derivative`) and `alternative`
+(a second region of one parameter, on the two integrals). `regionsOf()`
+returns the body and the alternative, so the verifier, the in-place
+analysis (`withRegions()`, rule 2) and `analyzeExecution()` read both. The
+policy gives the facts: `integrate-sampled` those of `integrate` (no
+`defaultPanels`), `limit` `pure` with the abort `error`, `derivative`
+`pure` with no abort. The verifier checks the operands of each name (two
+bounds; a point and an optional direction; a point), the body and the
+alternative (one `real` parameter, one real yield), the alternative only
+on the two integrals, `initialPanels` only on `integrate`, `order` exactly
+on `derivative` and a positive integer, and the effect, the states and the
+aborts of the rule joined with every region. The emitter writes
+`_SYS.integrateMC(f, lo, hi)`, `_SYS.limit(f, x[, d])` and
+`_SYS.nd(f, n, 'scalar')(x)`; an alternative is a `const` closure before
+the call, and the body returns `_SYS.finiteOr(v, alt, t)`.
+
+**A pure routine runs where the program runs it.** A `limit` or a
+`derivative` is pure, but the emitter neither writes it at its use nor
+moves a value across it (`region()` counts every routine as an ordered
+operation), and the memo never shares it (its body starts a new epoch, as
+in slice 2). So the body runs as often, and in the order, that the
+existing code runs it; the tests compare the recorded points.
+
+**The admission.** `Limit` is a calculus head (`CALCULUS_HEADS`):
+`numericLimit()` records a `Limit(f, x[, d])` of a `Function` literal of
+one parameter. `numericDerivative()` is called where slice 1 declined for
+"no closed form": the rules of `compileNumericDerivativeFallback()` (the
+node pure, evaluated in a scope of its own; `D` of one symbol, `ND(f, x)`,
+`Apply(Derivative(f, n), x)` of one argument, order `⌊N(n)⌋ ≥ 1`), the
+literal resolved by `resolveDerivativeFunctionLiteral()` (moved from
+`library/calculus.ts` to `derivative-function-literal.ts`, which both
+import), the result type a number (the `'scalar'`
+stencil), the literal rewritten for the angular unit. `routineRule()`
+types the operands in the scope of the node, binds the variable in the
+scope of the routine and types the body there; the lowering
+(`numericRoutine()`) does the same, so `D(ζ(x), x)` reads the input `x` as
+the point and the parameter in the body. `structuredValueParts()`, the
+capture walk of local functions and the name walk of the lowering read a
+routine's operands and body (the body can be the body of a user
+function, not an operand of the node).
+
+**What is admitted** (strict mode; `compile-javascript-structured-calculus3.test.ts`,
+49 tests, with the doubles (`Object.is`), the recorded points of
+`centeredDiffHigherOrder()`, `limit()`, `adaptiveQuadrature()` and
+`monteCarloEstimate()` in order, the interpreter where it gives a real
+number, `canCompile`, `pure`, `shippable` and `symbolDeps`; the verifier
+cases in `compile-javascript-structured-ir.test.ts`):
+
+- (a) `D` of a function with no derivative rule (`ζ`), with constants,
+  inputs and an operand of the program; `ND` of a literal or of a user
+  function; `Apply(Derivative(f, n), x)` of order 2 and 3; a derivative of
+  a derivative, in a branch, in a root `Function`, of a body that reads a
+  matrix element, in degrees; a variable named like an input, an assigned
+  symbol or the parameter of a helper. A derivative in a `Sum` or a
+  `Product` is admitted: `_SYS.nd` does not throw and its body is judged as
+  the term (`termThrower()`); the value is that of the existing compiler
+  also when an earlier term is `NaN` (test), and the stencil then runs for
+  the later terms on the route only, which no value shows.
+- (b) `Limit` at an input, an expression, a constant, `+∞`, `-∞` from
+  below; from below and from both sides; nested; as operands of `Max`; a
+  body that reads a matrix element. No symbolic attempt (choice 10): a
+  constant limit is the extrapolation (`1.0000000000000002`), as with
+  `constantFold: false`.
+- (c) an integrand with a log-space form when the existing compiler
+  writes one (`logSpaceProduct()`, the integrand pure, `logSpaceOpaque()`
+  false, exported from `javascript-target.ts`): one clause, two clauses
+  (the alternative on the inner one), an exponent that reads an input or a
+  matrix element.
+- (d) `quadrature: 'monte-carlo'`, also with an alternative: the same 10⁷
+  points from a seeded entropy source.
+
+**What stays declined, and why.** A derivative of a function whose value
+is a point, a list or of a type that says nothing (the vector stencil, or
+the probe at the point); of several variables, of a multi-index
+`Derivative`, of a local function, of a literal whose parameter is not a
+plain name; an impure node; jets
+(choice 9). A limit of a function that is not a literal; at `+∞` from below
+or at `-∞` with no direction or from above (`_SYS.limit` computes the limit
+at the infinity of the sign of the direction: `Limit(arctan, -∞)` is `π/2`
+there and `-π/2` on the interpreter; CE-1231), or at a point whose
+type admits an infinity (`a: real | signed_infinity`, `w: number`,
+`1/a`, a local `p := -1/a`, a helper parameter with no declared type; a
+point of the type `real` or `integer`, a finite literal, or a free input
+with no declared type and no value is admitted: a name that the pass
+binds has no default type, `limitPointRefusal()`); in a `Sum` or a
+`Product` (it can throw the timeout of a deadline); a body that draws,
+reads the host or holds a `Loop`. Every routine in the `complex` mode. A
+log-space integral whose closed-form search spends more than 10,000 steps
+(`∫₀^∞ t¹⁰⁰ e^{-t} dt`: 5 of the remaining witnesses; slice 1's cap).
+
+**Where the implementation differs from the note.**
+
+- `integrate-sampled` can have the alternative too: the existing compiler
+  writes `_SYS.finiteOr` inside `_SYS.integrateMC`.
+- The note expected no state for `limit` and `derivative` and the memo's
+  rule to keep them apart; a pure routine is also kept in its place by the
+  emitter (above), which the note did not name.
+- A derivative in an aggregate is admitted (the note's aggregate rule
+  judges a routine as a thrower; `_SYS.nd` cannot throw).
+- The decline of an infinite point whose sign is not the direction's, and
+  of a point whose type admits an infinity, is a rule the note did not
+  have; the random tester and the review found the difference.
+- The variable of a derivative or a limit can have the name of a name
+  around it (an input, a parameter, a local, a loop index): the body is a
+  closure of its own parameter, and the point is typed and lowered where
+  the node is, with the outer binding. The admission's rule for an index
+  with the name of another one does not apply to a routine.
+- The review found and the change fixes: the memo of the lowering shared
+  a pure derivative used twice as one node (`inScope()` restores the epoch
+  that the body changed); a value that runs a routine, in a region or a
+  called function, is never shared now (`runsRoutine()`). The rules of
+  `Power`, `Exp` and `Root` read an exponent with no unknown through the
+  engine, so a routine variable named like an assigned symbol declined;
+  a name bound in the scope counts as an unknown (`hasNoUnknown()`), as
+  `isNameBoundByCompilation()` does for the existing compiler. The parts
+  of a routine and the alternative of an integral are read from the
+  registry of the compilation, not from module-level maps.
+  `resolveDerivativeFunctionLiteral()` moved from `library/calculus.ts` to
+  `derivative-function-literal.ts`, which the library and the route
+  import.
+- The second review found and the change fixes: the default real type of
+  a limit point with no declared type also admitted a local (`p := -1/a`
+  has the type `infinity | nan | real`); it now applies only to a free
+  input. The emitter recognized only a routine operation itself, so a
+  pure helper call whose body runs a routine was written at its use, after
+  a branch that runs one (`h(x) / If(y > 0, D(ζ(y), y), 1)` sampled the
+  branch first); `runsRoutine()` of `structured-ir.ts` (a routine, in a
+  region or in a called function, safe for a call cycle) is now read by
+  the memo of the lowering and by both order checks of the emitter.
+- No hoisting, no draws in a body, no host: as recommended.
+
+**Measures** (on `0eb9d4778`, before and after, `-w 4`; before the decline
+of an infinite point, which only declines more):
+
+- Witness replay (the 121 test files of slice 2, the new test file
+  excluded): of 263 distinct programs, 166 admitted before, 202 after; 36
+  newly admitted, none lost. Value differences after: four, none new: three
+  integrals that take the Monte Carlo path on the live entropy source (the
+  witness log compares two calls with different streams; `quadrature:
+  'monte-carlo'`, a `Which` integrand that does not converge, `tycho-row-422`),
+  and `D(g², g)` with `g: list<real>` given a number (slice 1). The 61 that
+  stay declined: jets 7, more than 10,000 search steps 6 (5 log space), a
+  host read in the integrand 4, a point- or list-valued derivative 4,
+  `EvaluateAt` 3, `NIntegrate` 3, an indefinite `Integrate` of `Nothing`
+  clauses 3, the `complex` mode 2, a complex `Apply` 4, other forms 25.
+- Shadow measure: the profile admits 7,347 of 8,686 baseline compilations
+  (7,255 before); public compilations 2,158 of 3,418 (2,070), engine
+  integrands 505 of 543 (501). The same two tests fail with the measure on
+  as before (`compile-javascript-profile`, `compile-integrate-timeout-record`).
+- Consumers (`integrate*`, `nintegrate*`, `limit*`, `find-fit*`, `solve*`,
+  `plot*`, 43 files) with the switch: 1,897 tests pass with and without it,
+  before and after; the engine's compilations admitted: 5,329 of 5,432
+  before and after.
+- The random tester: `--calculus` also writes derivatives with no closed
+  form (`genNumericDerivative()`: `ζ(2 + v²)`, `v·ζ(3 + sin v)`), limits
+  (`genLimit()`) and log-space integrands (`genLogSpaceIntegral()`: an
+  exponent that is positive and a bound in `[1, 5]`, so that each converges).
+  On `0eb9d4778` (before the infinite-point decline), seeds 251 and 252
+  (5,000 programs, `--calculus`) and 253 (10,000): no profile failure; no
+  difference from the existing compiler but one in seed 253, the nested-sum
+  grouping of CE-1203. Disagreements with the interpreter that both
+  compilers share: `Limit(t/|t|, -∞)` (CE-1231), and
+  `sin(3t)/t` at `±∞`, `6.3e-7` against `0` (the tolerance of the
+  extrapolation).
+- On `edf0c4263` with the change (and the decline of an infinite point):
+  the witness replay admits 202 of 263 (the same programs); the shadow
+  measure 7,405 of 8,691 baseline compilations, public 2,216 of 3,423,
+  engine integrands 505 of 543; the consumers 1,897 tests with and
+  without the switch, 5,329 of 5,432 admitted; seeds 251, 252 (5,000,
+  `--calculus`) and 253 (10,000): no profile failure; seed 253 has the
+  CE-1203 difference, seed 251 one difference that has no calculus node,
+  `Map(r ↦ Norm(r), M2)` (`[√5, 5]` on the profile, `[[1, 2], [3, 4]]` on
+  the existing compiler), from the matrix functions of `edf0c4263`.

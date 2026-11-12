@@ -1050,10 +1050,17 @@ function withRegions(
     }
     case 'loop':
     case 'build':
-    case 'seeded':
-    case 'routine': {
+    case 'seeded': {
       const body = f(op.body);
       return body === op.body ? op : { ...op, body };
+    }
+    case 'routine': {
+      const body = f(op.body);
+      const alternative =
+        op.alternative === undefined ? undefined : f(op.alternative);
+      return body === op.body && alternative === op.alternative
+        ? op
+        : { ...op, body, ...(alternative === undefined ? {} : { alternative }) };
     }
     case 'and':
     case 'or': {

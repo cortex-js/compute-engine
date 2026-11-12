@@ -450,7 +450,7 @@ constantFold: false`; the tests are
 | `∫₀ᵃ √(1 + t⁴) dt` | No closed form: `_SYS.integrate((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, _.a)` | Declined in slice 1; the routine `integrate` since slice 2 (next table) |
 | `∫₀¹ (t + Random()) dt` | `closedFormIntegral()` evaluates the integral at compile time, with its draw: `(1.0442009924764881)` | Declined: the integral is not pure |
 | `D(x³ + x, x)`, `1 / D(x³ + x, x)` | `compileDerivative()`: the closed form in parentheses (since CE-1216; it had none before, `1 / 3 * (_.x * _.x) + 1`): `(3 * (_.x * _.x) + 1)`, `1 / (3 * (_.x * _.x) + 1)` | The closed form (`derivativeClosedForm()`), lowered as one value, as for `Integrate` |
-| `ND(t ↦ t³, 1.5)`, `ND(t ↦ t³, x)` | `6.750000000000016`; `_SYS.nd(((t) => _SYS.pow3(t)), 1, 'scalar')(_.x)` | The number; declined (the stencil is slice 4) |
+| `ND(t ↦ t³, 1.5)`, `ND(t ↦ t³, x)` | `6.750000000000016`; `_SYS.nd(((t) => _SYS.pow3(t)), 1, 'scalar')(_.x)` | The number; the routine `derivative` since slice 4 (table "Derivatives, limits and integrals computed numerically") |
 | `g'(x)` with `g(t) := t³ + sin t` | `(((x) => 3 * (x * x) + Math.cos(x)))(_.x)`: the call of the literal of `derivativeClosedForm('Derivative', …)` | `Apply` of that literal to the arguments, written inline as an `Apply` of a literal: `3 * (_tv1 * _tv1) + Math.cos(_tv1)` with `_tv1 = _.x` |
 | `f⁗(x)` of a large literal | Taylor jets (`jetDerivativeTarget()`) | Declined |
 | `Derivative(Sin)` | `((x) => Math.cos(x))` | Declined: a function value |
@@ -482,12 +482,39 @@ in `javascript-structured-lower.ts`) and the emitter as
 | An integral in a branch of `If`, a `Loop` body, `Map`, `Apply`, `Max` | Inline in the branch, the loop, the arrow of `map`, `Math.max(_SYS.integrate(…), _SYS.integrate(…))` | The `routine` in the region of the branch, of the `Loop` or of the `build`; the two operands of `Max` in order. The same doubles (tests) |
 | The variable has the name of an input, `∫₀ˣ F(x) dx` | `_SYS.integrate((x) => (Math.sqrt(_SYS.pow4(x) + 1)), 0, _.x)`: the bound reads the input | Declined: a bound that reads the variable of its own clause or of a later one (`quadratureIntegral()`); the route types each bound in the scope of the variables before it |
 | An integrand that the target does not lower, `∫₀¹ W(t⁴) dt` | `_SYS.integrate((t) => (_SYS.lambertW(_SYS.pow4(t))), 0, 1)`; a head with no lowering declines the program | Declined by the admission of the head (`unsupported head LambertW`) |
-| A product that overflows against itself, `∫₀^∞ t¹⁰⁰ e^{-t} dt` | The log-space alternative (`logSpaceProduct()`, also with `cse: false`): `((_tv1) => _SYS.integrate((t) => (_SYS.finiteOr(Math.pow(t, 100) * Math.exp(-t), _tv1, t)), 0, Infinity))((t) => (Math.exp(-t + 100 * Math.log(Math.abs(t))) * Math.pow(Math.sign(t), 100)))` | Declined (slice 3): every integrand for which `logSpaceProduct()` gives a form (the test: `∫₀¹ t¹⁰⁰ e^{-t²} dt`; `∫₀^∞ t¹⁰⁰ e^{-t} dt` declines before, on the cap of the closed-form search), also one that the existing compiler does not rewrite (a node mapped by the host, or impure, which declines on its own) |
-| `quadrature: 'monte-carlo'` | `_SYS.integrateMC((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, 1)` | Declined (slice 3) when the integral has no closed form; a closed form is admitted as before |
+| A product that overflows against itself, `∫₀^∞ t¹⁰⁰ e^{-t} dt` | The log-space alternative (`logSpaceProduct()`, also with `cse: false`): `((_tv1) => _SYS.integrate((t) => (_SYS.finiteOr(Math.pow(t, 100) * Math.exp(-t), _tv1, t)), 0, Infinity))((t) => (Math.exp(-t + 100 * Math.log(Math.abs(t))) * Math.pow(Math.sign(t), 100)))` | Declined in slice 2; the alternative of the routine since slice 3 (next table) |
+| `quadrature: 'monte-carlo'` | `_SYS.integrateMC((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, 1)` | Declined in slice 2; the routine `integrate-sampled` since slice 3 (next table); a closed form is admitted as before |
 | An integrand that draws, reads or calls the host, or calls a helper whose body does | The draw or the call at each sample; a draw makes the integral impure, and the search for a closed form evaluates it at compile time | Declined (`refuseLazyFunctionOperands()`, and "is not pure" before the search) |
 | `complex` mode | `_SYS.cplx(_SYS.integrate((t) => ((() => { … _SYS.csqrt(…) … })()), 0, 1))` | Declined, as in slice 1 |
 | `∫₀¹ sin(1/t)/t dt`, which does not converge | The outermost integral samples 10⁷ points from the entropy source of the engine (`ce.effects.entropy`): a different value at each call with the default source | The same call; with a deterministic `entropy` handler, the same samples and the same double (test) |
 | An ambient deadline (`withAmbientDeadline()`) that has expired | `adaptiveQuadrature()` throws a timeout `CancellationError` at its first panel | The same error (test) |
+
+### Derivatives, limits and integrals computed numerically
+
+Slices 3 and 4 of `docs/plans/2026-11-11-structured-numeric-calculus.md`,
+read at `0eb9d4778` (2026-11-11) with `x`, `a`, `b`, `k` declared `real`,
+`cse: false, constantFold: false` (scratchpad probe `calc34/p1.ts`). The
+tests are `test/compute-engine/compile-javascript-structured-calculus3.test.ts`.
+Each routine is bound to a `const` at its position, also a pure one: no
+value is moved across it, so its body runs where and as often as the
+existing code runs it.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `D(ζ(x), x)`, `D(k·ζ(x), x)` (no closed form) | `compileNumericDerivativeFallback()`: the body as a function of the variable, at the variable read where the node is: `_SYS.nd(((x) => _SYS.zeta(x)), 1, 'scalar')(_.x)`, `_SYS.nd(((x) => _.k * _SYS.zeta(x)), 1, 'scalar')(_.x)` | The routine `derivative` of order 1: `_SYS.nd((_tv1) => { return _SYS.zeta(_tv1); }, 1, 'scalar')(_.x)`. The point is typed and lowered in the scope of the node, the body with the variable bound in the scope of the routine |
+| `ND(t ↦ sin t³, x)`, `ND(z, a)` of a user function | `_SYS.nd(((t) => Math.sin(_SYS.pow3(t))), 1, 'scalar')(_.x)`: the literal, or the literal of the user function (`resolveDerivativeFunctionLiteral()`), inline | The same call, the body of the literal (the same function, moved to `derivative-function-literal.ts`) |
+| `Apply(Derivative(t ↦ ζ(t), 2), x)` | `(_SYS.nd(((t) => _SYS.zeta(t)), 2, 'scalar'))(_.x)` | `_SYS.nd((_tv1) => { return _SYS.zeta(_tv1); }, 2, 'scalar')(_.x)`, the order `⌊N(n)⌋` |
+| A derivative in degrees | The literal rewritten for the angular unit (`rewriteAngularUnit()`) | The same rewrite of the literal |
+| A function whose value is a point or a list, or whose result type says nothing | `_SYS.nd(f, n, 'vector')`, or `_SYS.nd(f, n)`, which probes `f` at the point once | Declined |
+| A derivative of several variables or of a multi-index `Derivative` with no closed form; an impure node | Declined | Declined |
+| A derivative in a written-out `Sum` of 4 terms or more | The terms, with the exit at the first `NaN` term | Admitted: `_SYS.nd` does not throw and its body is judged as the term (`termThrower()`); the value is the same (test), the stencil runs for the later terms on the route only |
+| `lim_{t→a} sin(kt)/t`, `Limit(f, a, -1)`, `Limit(f, ∞)` | With `constantFold: false`, no symbolic attempt: `_SYS.limit(((t) => Math.sin(_.k * t) / t), _.a)`, `…, _.a, -1)`, `…, Infinity)` | The routine `limit` with the point and the direction as operands: `_SYS.limit((_tv1) => { return Math.sin(_.k * _tv1) / _tv1; }, _.a, -1)` |
+| A nested limit | `_SYS.limit(((t) => t + _SYS.limit(((s) => Math.sin(s * t) / s), 0)), _.a)` | A `routine` in the body of the other: `_SYS.limit((_tv1) => { const _tv3 = _SYS.limit((_tv2) => { return Math.sin(_tv2 * _tv1) / _tv2; }, 0); return _tv1 + _tv3; }, _.a)` |
+| A constant limit with default options | Folded by the symbolic attempt (`(1)`) | The routine (no symbolic `Limit`, choice 10 of the note): the doubles of the existing compiler with `constantFold: false` (`1.0000000000000002` for `sin t / t` at 0) |
+| `Limit(g, a)` of a user function; a limit in a written-out `Sum` | `_SYS.limit(_fn_g, _.a)`; the terms with the exit | Declined (`_SYS.limit` throws the timeout of a deadline) |
+| `∫₀ᵃ t^{b+3} e^{-t} dt` (log space) | `((_tv1) => _SYS.integrate((t) => (_SYS.finiteOr(Math.exp(-t) * _SYS.pow(t, _.b + 3), _tv1, t)), 0, _.a))((t) => (Math.exp(-t + (_.b + 3) * Math.log(Math.abs(t))) * _SYS.pow(Math.sign(t), _.b + 3)))`: the alternative built once per call of the innermost integral | The `alternative` region of the innermost `routine`, bound to a `const` before the call: `const _tv1 = (_tv2) => { …; return Math.exp(…) * _SYS.pow(Math.sign(_tv2), _tv3); }; const _tv5 = _SYS.integrate((_tv4) => { return _SYS.finiteOr(Math.exp(-_tv4) * _SYS.pow(_tv4, _.b + 3), _tv1, _tv4); }, 0, _.a);` |
+| A log-space integrand with a node mapped by the caller (`logSpaceOpaque()`) | The integrand as it is | No alternative, as there (the route refuses a host in an integrand anyway) |
+| `quadrature: 'monte-carlo'` | `_SYS.integrateMC((t) => (…), 0, 1)` at each level, no panels; with an alternative `((_tv1) => _SYS.integrateMC((t) => (_SYS.finiteOr(…, _tv1, t)), …))(…)` | The routine `integrate-sampled`: the same call, with the alternative as for `integrate`; the same 10⁷ points from a seeded entropy source (test) |
 
 ### Values of the type `number` in the `strict` mode
 

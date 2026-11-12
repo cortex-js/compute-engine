@@ -19005,7 +19005,7 @@ function compileIntegrate(
  * `vars` entry (`isStringVar`), or the target has no harvest options to tell
  * (then nothing is known, and the rewrite is not used).
  */
-function logSpaceOpaque(
+export function logSpaceOpaque(
   expr: Expression,
   target: CompileTarget<Expression>
 ): boolean {

@@ -1158,19 +1158,44 @@ export type IRSeeded = OperationBase & {
  *   a number when the routine finds no value (a divergent integral with no
  *   sign, an integrand with no real value on a part of the interval). With
  *   `initialPanels`, the routine starts from that number of equal panels.
+ * - `integrate-sampled`: the operands and the result of `integrate`; the
+ *   routine estimates the integral from the values of the body at points
+ *   that it draws from a random source of the runtime.
+ * - `limit`: one or two real operands, the point and the direction. The
+ *   result approximates the limit of the body at the point (which can be
+ *   infinite), from above for a direction 1 or absent, from below for -1,
+ *   and from both sides for 0, or is not a number when the routine finds
+ *   no value.
+ * - `derivative`: one real operand, the point. The result approximates the
+ *   derivative of the order `order` of the body at the point, or is not a
+ *   number.
+ *
+ * With an `alternative` region (`integrate`, `integrate-sampled`), a value
+ * of the body that is not a number or is infinite is replaced, at the same
+ * point, by the value of the alternative when that is finite, or when the
+ * first is not a number and the alternative's is.
  */
-export type RoutineName = 'integrate';
+export type RoutineName =
+  | 'integrate'
+  | 'integrate-sampled'
+  | 'limit'
+  | 'derivative';
 
 /**
  * An application of a numeric routine that `fn` names (`RoutineName`) to
- * the body region: the structured form of a definite integral. The
+ * the body region: the structured form of a definite integral, of a limit
+ * and of a derivative computed numerically. The
  * operands are evaluated once, in order, before the routine runs. The body
+ * (and the `alternative`, when there is one)
  * is an open region with one parameter, a `real`, that yields one real or
  * integer value; it runs zero or more times, each time with the parameter
  * bound to a number that the routine chooses, in an order that the routine
  * chooses. The body reads its parameter and the values of the regions
  * around it, which no operation changes while the routine runs. No `exit`
- * leaves the body.
+ * leaves the body. A `pure` routine (the policy states it) whose body is
+ * pure is still run where the program runs it, once per occurrence: a pass
+ * neither shares two occurrences nor moves one, so the body runs the number
+ * of times, and in the order, that the program states.
  *
  * The policy of the target states the facts of each routine
  * (`RepresentationPolicy.routines`): the operation has the effect of the
@@ -1188,6 +1213,13 @@ export type IRRoutine = OperationBase & {
   /** The number of equal panels from which `integrate` starts: a positive
    *  integer. Absent: the default of the target. */
   readonly initialPanels?: number;
+  /** The order of a `derivative`: a positive integer. */
+  readonly order?: number;
+  /** The second body of an `integrate` or an `integrate-sampled`: an open
+   *  region with one `real` parameter that yields one real value, run at a
+   *  point where the value of the body is not a number or is infinite
+   *  (`RoutineName`). */
+  readonly alternative?: IRRegion;
 };
 
 /**
@@ -1538,6 +1570,33 @@ export function reachesHost(
   return regions.some((region) => regionReachesHost(region, functions));
 }
 
+/**
+ * Whether `op` runs a routine (`IRRoutine`): it is one, a region of it
+ * holds an operation that runs one, or it calls a function whose body
+ * does. A pure `limit` or `derivative` evaluates its body at its own
+ * points where the program runs it, so such an operation is neither shared
+ * nor moved (the memo of the lowering, the order of the emitter).
+ * `visiting` holds the functions that the walk has entered: a call cycle
+ * (the verifier accepts one) reads a function once, and the answer comes
+ * from the other operations.
+ */
+export function runsRoutine(
+  op: IROperation,
+  functions: readonly IRFunction[],
+  visiting: Set<number> = new Set()
+): boolean {
+  if (op.kind === 'routine') return true;
+  const regions: IRRegion[] = [...regionsOf(op)];
+  if (op.kind === 'call' && !visiting.has(op.function)) {
+    visiting.add(op.function);
+    const body = functions[op.function]?.body;
+    if (body !== undefined) regions.push(body);
+  }
+  return regions.some((region) =>
+    region.operations.some((inner) => runsRoutine(inner, functions, visiting))
+  );
+}
+
 /** The regions that `regionReachesHost()` is answering, with their depth. */
 const REGIONS_IN_PROGRESS = new Map<IRRegion, number>();
 /** The least depth of a region in progress that the current walk read. */
@@ -1585,10 +1644,13 @@ export function regionsOf(op: IROperation): readonly IRRegion[] {
   if (
     op.kind === 'loop' ||
     op.kind === 'build' ||
-    op.kind === 'seeded' ||
-    op.kind === 'routine'
+    op.kind === 'seeded'
   )
     return [op.body];
+  if (op.kind === 'routine')
+    return op.alternative === undefined
+      ? [op.body]
+      : [op.body, op.alternative];
   if (op.kind === 'and' || op.kind === 'or') return op.rest;
   return [];
 }

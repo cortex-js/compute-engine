@@ -21,9 +21,12 @@ import { typeToString } from '../../common/type/serialize.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   finitePartOfType,
+  functionResult,
   indexElementType,
   isNonRealNumber,
+  isPointElementType,
 } from '../../common/type/utils.js';
+import { resolveDerivativeFunctionLiteral } from '../derivative-function-literal.js';
 import {
   assumedRealNonNegative,
   fixedLogBase,
@@ -43,6 +46,7 @@ import {
   integrateDepth,
   isIndexedCollectionOperand,
   isNonFiniteBound,
+  logSpaceOpaque,
   type JavaScriptBody,
   type JavaScriptBodyEmitter,
   type JavaScriptBodyNames,
@@ -162,6 +166,7 @@ import {
   type RealCallForm,
   type StructuredForm,
   type StructuredIntegral,
+  type StructuredNumericRoutine,
   type StructuredPreparation,
 } from './javascript-structured-lower.js';
 import { initialPanelsForDimensions } from '../numerics/gauss-kronrod.js';
@@ -302,6 +307,23 @@ function representation(type: {
 // existing emitter of the fragment does not have their rules, so the
 // existing route refuses them as before ("unsupported head").
 //
+
+/**
+ * Whether `expr` has no unknown in `scope`: every symbol in it is a
+ * constant or has a value, and none is a name that a form binds in `scope`
+ * (a parameter, a local, an index, the variable of an integral, a
+ * derivative or a limit). The existing compiler reads a bound name as a
+ * variable also when the engine has a value for it
+ * (`isNameBoundByCompilation()` in `knownExponentPower()`); `unknowns`
+ * leaves out such a name when its symbol is the global one (the variable
+ * of `D` and of a rewritten literal).
+ */
+function hasNoUnknown<R>(expr: Expression, scope: FragmentScope<R>): boolean {
+  return (
+    expr.unknowns.length === 0 &&
+    !expr.symbols.some((name) => fragmentScopeBinds(scope, name))
+  );
+}
 
 /** The facts of the operands of `node`, in order. */
 function operandFacts(
@@ -2451,7 +2473,7 @@ function structuredPowerRule(
               ? `the exponential of the number literal ${nodeText(node.op2)} ` +
                 `is not in the structured route: the existing emitter writes ` +
                 `other code for it`
-              : node.op2.unknowns.length === 0
+              : hasNoUnknown(node.op2, scope)
                 ? `the exponential of ${nodeText(node.op2)}, which reads no ` +
                   `input, parameter or local, is not in the structured route: ` +
                   `the existing compiler replaces such an exponent by its value ` +
@@ -2498,7 +2520,7 @@ function structuredPowerRule(
               `Power of a symbol ExponentialE that a scope declares is not ` +
                 `in the structured route`
             );
-          if (node.op2.unknowns.length === 0)
+          if (hasNoUnknown(node.op2, scope))
             return w.refuse(
               node,
               'signature',
@@ -2516,7 +2538,7 @@ function structuredPowerRule(
         const refusal = isSymbol(node.op1, 'ExponentialE')
           ? `Power of a symbol ExponentialE that a scope declares is not ` +
             `in the structured route`
-          : node.op2.unknowns.length === 0
+          : hasNoUnknown(node.op2, scope)
             ? `the exponent ${nodeText(node.op2)} of Power has no ` +
               `unknown (each symbol in it has a value), and is not in ` +
               `the structured route: the existing compiler can replace ` +
@@ -3079,7 +3101,7 @@ function structuredRootRule(
           ? `Root with the degree ${nodeText(node.op2)} is not in the ` +
             `structured route, which has the degree 3 and a degree that is ` +
             `not a number literal`
-          : !literal && node.op2.unknowns.length === 0
+          : !literal && hasNoUnknown(node.op2, scope)
             ? `the degree ${nodeText(node.op2)} of Root has no unknown ` +
               `(each symbol in it has a value), and is not in the ` +
               `structured route`
@@ -5012,7 +5034,8 @@ function selectionRule(
  */
 function structuredValueParts(
   node: Expression,
-  bodyValue: boolean
+  bodyValue: boolean,
+  registry?: StructuredRegistry
 ):
   | {
       outer: readonly Expression[];
@@ -5046,14 +5069,29 @@ function structuredValueParts(
   // only when it has no closed form (`closedFormReplacement()`).
   const integral =
     node.operator === 'Integrate' ? integralParts(node) : undefined;
-  if (integral !== undefined)
+  if (integral !== undefined) {
+    const alternative = registry?.integrals.get(node)?.alternative;
     return {
       outer: [],
       indexes: integral.clauses.map((c) => ({
         index: c.name,
         bounds: [c.lower, c.upper],
       })),
-      inner: [integral.body],
+      inner:
+        alternative === undefined
+          ? [integral.body]
+          : [integral.body, alternative],
+    };
+  }
+  // A derivative or a limit that the route computes numerically
+  // (`registry.routines`): its operands where it is, then its body with its
+  // variable bound.
+  const routine = registry?.routines.get(node);
+  if (routine !== undefined)
+    return {
+      outer: routine.operands,
+      indexes: [{ index: routine.name, bounds: [] }],
+      inner: [routine.body],
     };
   if (node.operator === 'Typed') {
     if (!bodyValue)
@@ -8671,7 +8709,8 @@ function refuseLazyFunctionOperands(
   annotation: FragmentAnnotation<ScalarRepresentation>,
   helpers: ReadonlyMap<string, ResolvedHelper>,
   hosts: StructuredHosts | undefined,
-  integrals?: ReadonlyMap<Expression, StructuredIntegral>
+  integrals?: ReadonlyMap<Expression, StructuredIntegral>,
+  routines?: ReadonlyMap<Expression, StructuredNumericRoutine>
 ): void {
   const { isDraw } = drawReaders(helpers);
   const isHost = (node: Expression): boolean =>
@@ -8715,6 +8754,7 @@ function refuseLazyFunctionOperands(
       if (integral !== undefined) {
         const found = [
           integral.body,
+          ...(integral.alternative === undefined ? [] : [integral.alternative]),
           ...integral.clauses.slice(1).flatMap((c) => [c.lower, c.upper]),
         ]
           .map((e) => impureNodes(e).at(0) ?? blocker(e))
@@ -8726,6 +8766,23 @@ function refuseLazyFunctionOperands(
               `host or can abort, is not in the structured route: the ` +
               `compiled code evaluates the integrand at the points of its ` +
               `quadrature, and the interpreter at the points of its own`
+          );
+        continue;
+      }
+      // The body of a derivative or a limit that the route computes
+      // numerically (`numericDerivative()`, `numericLimit()`): the routine
+      // evaluates it at points that it chooses.
+      const routine = routines?.get(node);
+      if (routine !== undefined) {
+        const found = impureNodes(routine.body).at(0) ?? blocker(routine.body);
+        if (found !== undefined && found !== null)
+          throw new Error(
+            `JS scalar fragment: ${nodeText(node)} has the node ` +
+              `${nodeText(found)}, which is not pure, draws, runs code of the ` +
+              `host or can abort, is not in the structured route: the ` +
+              `compiled code evaluates the body at the points of its ` +
+              `numerical ${routine.fn}, and the interpreter at the points of ` +
+              `its own`
           );
         continue;
       }
@@ -9866,7 +9923,8 @@ function recordStructured(
     prepared.annotation,
     registry.helpers,
     hosts,
-    registry.integrals
+    registry.integrals,
+    registry.routines
   );
   refuseHoistedDraws(prepared.annotation, registry.helpers, hosts);
   refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
@@ -9930,6 +9988,7 @@ function recordStructured(
       ? {}
       : { closedForms: registry.closedForms }),
     ...(registry.integrals.size === 0 ? {} : { integrals: registry.integrals }),
+    ...(registry.routines.size === 0 ? {} : { routines: registry.routines }),
     numericPolicy: registry.mode,
     iterationBudget: target.iterationBudget,
     ...(hosts === undefined || hosts.bindings.size === 0
@@ -10676,7 +10735,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       }
       // A block of one value and a comprehension, on the structured route
       // (`structuredValueParts()`); `Typed` is not the value of a body here.
-      const parts = structured ? structuredValueParts(node, false) : undefined;
+      const parts = structured
+        ? structuredValueParts(node, false, registry)
+        : undefined;
       if (parts !== undefined) {
         for (const operand of parts.outer) check(operand);
         const added: string[] = [];
@@ -10684,6 +10745,16 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           for (const { index, bounds } of parts.indexes ?? []) {
             for (const bound of bounds)
               checkAggregateBound(node, bound, registry, check);
+            // The variable of a derivative or a limit computed numerically
+            // shadows a name around it: the body is a closure of its own
+            // parameter, and the point is read where the node is.
+            if (registry?.routines.has(node) === true) {
+              if (!indexes.has(index)) {
+                indexes.add(index);
+                added.push(index);
+              }
+              continue;
+            }
             if (indexes.has(index))
               throw new Error(
                 `JS scalar fragment: the ${indexLabel(node)} index ${index} has the name of another index`
@@ -10978,7 +11049,7 @@ function resetCompilationState(): void {
 
 /** The heads of the nodes that the existing compiler replaces by a closed
  *  form before it writes code (`closedFormReplacement()`). */
-const CALCULUS_HEADS = ['Integrate', 'D', 'ND', 'Derivative'];
+const CALCULUS_HEADS = ['Integrate', 'D', 'ND', 'Derivative', 'Limit'];
 
 /**
  * The most steps of the shared pool of the compilation
@@ -11063,7 +11134,9 @@ function closedFormReplacement(
   // (`quadratureIntegral()`).
   let replacement =
     registry.closedForms.get(node) ??
-    (registry.integrals.has(node) ? node : undefined);
+    (registry.integrals.has(node) || registry.routines.has(node)
+      ? node
+      : undefined);
   if (replacement === undefined) {
     replacement = findClosedForm(node, registry, target);
     if (replacement !== node) {
@@ -11154,6 +11227,9 @@ function findClosedForm(
   target: CompileTarget<Expression>
 ): Expression {
   const text = nodeText(node);
+  // A limit has no symbolic attempt with `constantFold: false` (the
+  // `Limit` handler of `javascript-target.ts`): the routine `limit`.
+  if (node.operator === 'Limit') return numericLimit(node, registry);
   // A variable whose binding around the node can hold a list: the existing
   // compiler declines an `Integrate`, and a `D` whose closed form reads
   // the variable from a binding other than the global of its name
@@ -11227,6 +11303,10 @@ function findClosedForm(
       multivariate && BaseCompiler.appliedDerivativeTooLarge(node.ops)
         ? undefined
         : derivativeClosedForm('Derivative', callee.ops);
+    // No closed form: the existing compiler writes the call of the
+    // numerical derivative `_SYS.nd(f, n)` of a function of one argument.
+    if (literal === undefined && !multivariate)
+      return numericDerivative(node, registry);
     if (!isFunction(literal, 'Function'))
       throw new Error(
         `JS scalar fragment: ${text}: ` +
@@ -11274,13 +11354,7 @@ function findClosedForm(
         `JS scalar fragment: the variable ${name} of the derivative ${text} ` +
           `can hold a list: the existing compiler declines it`
       );
-  if (closed === undefined)
-    throw new Error(
-      `JS scalar fragment: the derivative ${text} has no closed form that ` +
-        `the engine finds at compile time: the existing compiler writes the ` +
-        `numerical derivative \`_SYS.nd\` or declines, and the structured ` +
-        `route has no numerical derivative`
-    );
+  if (closed === undefined) return numericDerivative(node, registry);
   if (isFunction(closed, 'Function'))
     throw new Error(
       `JS scalar fragment: the derivative ${text} is the function ` +
@@ -11288,6 +11362,346 @@ function findClosedForm(
         `value`
     );
   return closed;
+}
+
+/** Record `routine` for `node` in `registry`: the node is computed
+ *  numerically, and is its own replacement. */
+function recordRoutine(
+  node: Expression,
+  routine: StructuredNumericRoutine,
+  registry: StructuredRegistry
+): Expression {
+  registry.routines.set(node, routine);
+  return node;
+}
+
+/**
+ * The derivative `node` (`D`, `ND`, or `Apply` of a `Derivative` of one
+ * argument), which has no closed form that the engine finds, as the route
+ * computes it numerically: the node itself, recorded with its parts in
+ * `registry.routines` (`recordRoutine()`), or a refusal. The existing
+ * compiler writes the stencil `_SYS.nd(f, order, 'scalar')(x)` with `f` the
+ * body as a function of the variable
+ * (`compileNumericDerivativeFallback()` in `library/calculus.ts`), and the
+ * route writes the same call (`numericRoutine()` in
+ * `javascript-structured-lower.ts`):
+ *
+ * - `D(body, v)` of one symbol `v`: the body as a function of `v`, at the
+ *   value of `v` where the node is;
+ * - `ND(f, x)`: the literal of `f` (`resolveDerivativeFunctionLiteral()`) at `x`,
+ *   order 1;
+ * - `Apply(Derivative(f, n), x)`: the literal of `f` at `x`, of the order
+ *   `⌊N(n)⌋` (1 when `n` is absent).
+ *
+ * The literal is rewritten for the angular unit of the engine
+ * (`rewriteAngularUnit()`), as the existing compiler rewrites it. Refused,
+ * each with its own message: a node that is not pure (the existing compiler
+ * declines it, `compileDerivative()`); a `D` of several variables, of a
+ * variable that is not a symbol, an `ND` or a `Derivative` of other
+ * operands, an operand that is not a literal of one parameter (or names a
+ * local function), a parameter that is not a plain name, and an order
+ * below 1; a function whose result type is not a number (the existing
+ * compiler writes the vector stencil, or probes the function once at the
+ * point, `derivativeValueShape()`).
+ */
+function numericDerivative(
+  node: Expression & { ops: readonly Expression[] },
+  registry: StructuredRegistry
+): Expression {
+  const text = nodeText(node);
+  const prefix = `JS scalar fragment: the derivative ${text} has no closed form that the engine finds at compile time`;
+  const ce = node.engine;
+  const applied = node.operator === 'Apply';
+  const operator = applied ? 'Derivative' : node.operator;
+  const args = applied
+    ? (node.ops[0] as Expression & { ops: readonly Expression[] }).ops
+    : node.ops;
+  // The existing compiler evaluates the node in a scope of its own, and
+  // declines an impure node before the numerical derivative
+  // (`compileDerivative()`).
+  ce.pushScope();
+  let pure: boolean;
+  try {
+    pure = ce.function(operator, args as Expression[]).isPure;
+  } finally {
+    ce.popScope();
+  }
+  if (!pure)
+    throw new Error(
+      `${prefix}, and it is not pure: the existing compiler declines it`
+    );
+  let literal: (Expression & { ops: readonly Expression[] }) | undefined;
+  let order = 1;
+  let point: Expression;
+  if (operator === 'D') {
+    if (args.length !== 2 || !isSymbol(args[1]))
+      throw new Error(
+        `${prefix}, and it is not a derivative in one symbol: the existing ` +
+          `compiler differentiates numerically a function of one variable only`
+      );
+    const fn = ce.function('Function', [args[0], args[1]]);
+    literal = isFunction(fn, 'Function') ? fn : undefined;
+    point = args[1];
+  } else {
+    if (
+      isSymbol(args[0]) &&
+      registry.localFunctionNames.has(args[0].symbol)
+    )
+      throw new Error(
+        `${prefix}, and its function is the local function ` +
+          `${args[0].symbol}: the structured route differentiates ` +
+          `numerically a function literal or a user function of the engine`
+      );
+    // The same function as the numeric derivative of the library.
+    literal = resolveDerivativeFunctionLiteral(args[0]) as
+      | (Expression & { ops: readonly Expression[] })
+      | undefined;
+    if (operator === 'Derivative') {
+      if (args.length > 2 || node.ops.length !== 2)
+        throw new Error(
+          `${prefix}, and it is a derivative of several arguments: the ` +
+            `existing compiler has no numerical derivative of such a function`
+        );
+      order = args[1] === undefined ? 1 : Math.floor(args[1].N().re);
+      point = node.ops[1];
+    } else {
+      if (args.length !== 2)
+        throw new Error(
+          `${prefix}, and ND has ${args.length} operands: the existing ` +
+            `compiler differentiates numerically ND(f, x) only`
+        );
+      point = args[1];
+    }
+  }
+  if (literal === undefined)
+    throw new Error(
+      `${prefix}, and its function is not a pure literal of one parameter: ` +
+        `the existing compiler has no numerical derivative of it`
+    );
+  if (!Number.isFinite(order) || order < 1)
+    throw new Error(
+      `${prefix}, and its order is not an integer of at least 1: the ` +
+        `existing compiler has no numerical derivative of it`
+    );
+  // `_SYS.nd` runs the scalar stencil when the result type of the literal
+  // is a number (`derivativeValueShape()` in `library/calculus.ts`): the
+  // vector stencil of a point or a list, and the probe of the function at
+  // the point for a type that says nothing, are not on the route.
+  const result = functionResult(literal.type.type);
+  const scalar =
+    result !== undefined &&
+    result !== 'any' &&
+    result !== 'unknown' &&
+    !isPointElementType(result) &&
+    !isSubtype(result, 'list<number>') &&
+    isSubtype(result, 'number');
+  if (!scalar)
+    throw new Error(
+      `${prefix}, and the result of its function has the type ` +
+        `${result === undefined ? 'unknown' : typeToString(result)}: the ` +
+        `existing compiler differentiates it with the vector stencil of ` +
+        `\`_SYS.nd\`, or probes the function at the point, which the ` +
+        `structured route does not have`
+    );
+  const rewritten = rewriteAngularUnit(literal);
+  const parameter = isFunction(rewritten, 'Function')
+    ? rewritten.ops[1]
+    : undefined;
+  if (parameter === undefined || !isSymbol(parameter))
+    throw new Error(
+      `${prefix}, and the parameter of its function is not a plain name: ` +
+        `the structured route binds the variable of a derivative as a real`
+    );
+  return recordRoutine(
+    node,
+    {
+      fn: 'derivative',
+      name: parameter.symbol,
+      variable: parameter,
+      body: (rewritten as Expression & { ops: readonly Expression[] }).ops[0],
+      operands: [point],
+      order,
+    },
+    registry
+  );
+}
+
+/**
+ * The limit `node`, `Limit(f, x)` or `Limit(f, x, d)`, as the route
+ * computes it: the node itself, recorded with its parts in
+ * `registry.routines` (`recordRoutine()`), or a refusal. The existing
+ * compiler with `constantFold: false` makes no symbolic attempt and writes
+ * `_SYS.limit(f, x[, d])` (the `Limit` handler of `javascript-target.ts`),
+ * and the route writes the same call (`numericRoutine()` in
+ * `javascript-structured-lower.ts`). Refused: a function that is not a
+ * `Function` literal of one parameter that is a plain name; a point `±∞`
+ * whose sign is not the sign of the direction (1 when there is none),
+ * where `_SYS.limit` gives the limit at the other infinity.
+ */
+function numericLimit(
+  node: Expression & { ops: readonly Expression[] },
+  registry: StructuredRegistry
+): Expression {
+  const [f, x, direction] = node.ops;
+  const literal =
+    f !== undefined &&
+    isFunction(f, 'Function') &&
+    f.ops.length === 2 &&
+    isSymbol(f.ops[1])
+      ? f
+      : undefined;
+  if (
+    literal === undefined ||
+    x === undefined ||
+    node.ops.length > 3 ||
+    !isSymbol(literal.ops[1])
+  )
+    throw new Error(
+      `JS scalar fragment: the limit ${nodeText(node)} is not the limit of ` +
+        `a function literal of one parameter at a point: the structured ` +
+        `route computes such a limit only`
+    );
+  // `_SYS.limit` reads an infinite point as the infinity of the sign of the
+  // direction (1 when there is none), and the interpreter as the infinity
+  // of the point: `Limit(arctan, -∞)` is π/2 on the existing compiler and
+  // -π/2 on the interpreter. Only the two cases where they agree are on
+  // the route.
+  const sign = isSymbol(x, 'PositiveInfinity')
+    ? 1
+    : isSymbol(x, 'NegativeInfinity')
+      ? -1
+      : isNumber(x) && x.im === 0 && !Number.isFinite(x.re) && !Number.isNaN(x.re)
+        ? Math.sign(x.re)
+        : 0;
+  if (sign !== 0) {
+    const agrees =
+      direction === undefined
+        ? sign === 1
+        : isNumber(direction) && direction.im === 0 && direction.re === sign;
+    if (!agrees)
+      throw new Error(
+        `JS scalar fragment: the limit ${nodeText(node)} is at an infinity ` +
+          `with ${direction === undefined ? 'no direction' : `the direction ${nodeText(direction)}`}: ` +
+          `the existing compiler computes the limit at the infinity of the ` +
+          `sign of the direction (\`_SYS.limit\`), and the interpreter at ` +
+          `the infinity of the point`
+      );
+  } else if (isNumber(x) && !(x.im === 0 && Number.isFinite(x.re)))
+    throw new Error(
+      `JS scalar fragment: the limit ${nodeText(node)} is at the point ` +
+        `${nodeText(x)}, which is not a finite real number`
+    );
+  // A point that is not a number literal is checked where its scope is
+  // known (`limitPointRefusal()`, from `routineRule()`).
+  return recordRoutine(
+    node,
+    {
+      fn: 'limit',
+      name: literal.ops[1].symbol,
+      variable: literal.ops[1],
+      body: literal.ops[0],
+      operands: direction === undefined ? [x] : [x, direction],
+    },
+    registry
+  );
+}
+
+/**
+ * Why the point `x` of the limit `node`, which is not a number literal,
+ * is refused in `scope`, or `undefined`. `_SYS.limit` can take the other
+ * infinity at a point that is infinite at run time (`a: real |
+ * signed_infinity` at `-∞`), so the point must be finite by its static
+ * type (`real` and `integer` have no infinity; `2a` with `a: real`, a
+ * local `p := 2a`), or be a free input of the program with no declared
+ * type and no value (the default kind of the mode, a real). A name that
+ * the pass binds (a local, a parameter, an index) has no such default: a
+ * local `p := -1/a` has the type `infinity | nan | real`, and a parameter
+ * with no declared type has the type `unknown`.
+ */
+function limitPointRefusal<R>(
+  node: Expression,
+  x: Expression,
+  scope: FragmentScope<R>
+): string | undefined {
+  if (isSubtype(x.type.type, 'real')) return undefined;
+  if (
+    isSymbol(x) &&
+    !fragmentScopeBinds(scope, x.symbol) &&
+    hasNoDeclaredType(x) &&
+    x.engine._getSymbolValue(x.symbol) === undefined
+  )
+    return undefined;
+  return (
+    `the limit ${nodeText(node)} is at the point ${nodeText(x)} of the ` +
+    `type ${x.type.toString()}, which can be infinite or not a number: ` +
+    `the existing compiler computes the limit at an infinite point at the ` +
+    `infinity of the sign of the direction (\`_SYS.limit\`), and the ` +
+    `interpreter at the infinity of the point`
+  );
+}
+
+/**
+ * A derivative or a limit with no closed form (`numericDerivative()`,
+ * `numericLimit()`) on the structured route, in the scope of the node:
+ * each operand (the point, then the direction of a limit) with a real or
+ * an integer fact, typed where the node is; then the variable, a real,
+ * bound in the scope of the node; then the body, with a real or an
+ * integer fact. The result is a real. The conversions are those of the
+ * operands, then of the body. The lowering writes the code of the existing
+ * emitter (`numericRoutine()` in `javascript-structured-lower.ts`).
+ */
+function routineRule(
+  node: Expression,
+  routine: StructuredNumericRoutine,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const conversions: FragmentConversion<ScalarRepresentation>[] = [];
+  const what = routine.fn === 'limit' ? 'the limit' : 'the derivative';
+  const point = routine.operands[0];
+  if (
+    routine.fn === 'limit' &&
+    !isNumber(point) &&
+    !isSymbol(point, 'PositiveInfinity') &&
+    !isSymbol(point, 'NegativeInfinity')
+  ) {
+    const refusal = limitPointRefusal(node, point, scope);
+    if (refusal !== undefined) w.refuse(node, 'signature', refusal);
+  }
+  const number = (
+    value: Expression,
+    role: string,
+    facts: FragmentValueFacts<ScalarRepresentation>
+  ) => {
+    const kind = facts.type.kind;
+    if (kind !== 'real' && kind !== 'integer')
+      w.refuse(
+        node,
+        'signature',
+        `${what} ${nodeText(node)} has ${role} ${nodeText(value)} of the ` +
+          `type \`${fragmentTypeToString(facts.type)}\`: the structured ` +
+          `route computes ${what} of a real function at a real point`
+      );
+    conversions.push(w.convert(facts, facts.type)!);
+  };
+  routine.operands.forEach((operand, i) =>
+    number(
+      operand,
+      i === 0 ? 'the point' : 'the direction',
+      w.value(operand, scope, context)
+    )
+  );
+  const inner = w.open(node, scope);
+  w.bind(routine.variable, inner, routine.name, { kind: 'real' }, 'index');
+  // The body is an expression, not a loop: a `Break` in it has no loop to
+  // leave.
+  number(
+    routine.body,
+    'the body',
+    w.value(routine.body, inner, { ...context, loop: undefined })
+  );
+  return w.valueFacts(node, { kind: 'real' }, conversions);
 }
 
 /** The parts of a definite integral (`integralParts()`), once per node. */
@@ -11380,12 +11794,6 @@ function quadratureIntegral(
 ): Expression {
   const text = nodeText(node);
   const prefix = `JS scalar fragment: the integral ${text} has no closed form that the engine finds at compile time`;
-  if (target.quadrature === 'monte-carlo')
-    throw new Error(
-      `${prefix}, and the option quadrature is 'monte-carlo': the existing ` +
-        `compiler integrates it with the Monte Carlo estimator ` +
-        `(\`_SYS.integrateMC\`), which the structured route does not have`
-    );
   const parts = integralParts(node);
   if (parts === undefined)
     throw new Error(
@@ -11414,17 +11822,32 @@ function quadratureIntegral(
           `of the clauses before it`
       );
   });
-  if (logSpaceProduct(parts.body, names) !== undefined)
-    throw new Error(
-      `${prefix}, and its integrand is a product that is computed again in ` +
-        `log space where its value is not finite (\`_SYS.finiteOr\` of the ` +
-        `existing compiler), which the structured route does not have`
-    );
+  // The integrand in log space, where the existing compiler writes it
+  // (`compileIntegrate()`): a pure integrand, and no node of it or of its
+  // log-space form mapped by the caller (`logSpaceOpaque()`). The route has
+  // no other host in an integrand (`refuseLazyFunctionOperands()`).
+  const logSpace = logSpaceProduct(parts.body, names);
+  let alternative: Expression | undefined;
+  if (logSpace !== undefined && isTransitivelyPure(parts.body)) {
+    if (target.cse?.harvestOptions === undefined)
+      throw new Error(
+        `${prefix}, and its integrand has a form in log space, which the ` +
+          `existing compiler writes only when it knows the names that the ` +
+          `caller maps`
+      );
+    if (
+      !logSpaceOpaque(parts.body, target) &&
+      !logSpaceOpaque(logSpace, target)
+    )
+      alternative = logSpace;
+  }
   registry.integrals.set(node, {
     ...parts,
     panels: initialPanelsForDimensions(
       parts.clauses.length + Math.max(0, ...node.ops.map(integrateDepth))
     ),
+    ...(alternative === undefined ? {} : { alternative }),
+    ...(target.quadrature === 'monte-carlo' ? { sampled: true } : {}),
   });
   return node;
 }
@@ -11444,6 +11867,9 @@ function closedFormRule(
       const integral = registry.integrals.get(node);
       if (integral !== undefined)
         return integralRule(node, integral, scope, context, w);
+      const routine = registry.routines.get(node);
+      if (routine !== undefined)
+        return routineRule(node, routine, scope, context, w);
       if (rule === undefined)
         return w.refuse(
           node,
@@ -11504,6 +11930,13 @@ function integralRule(
     'the integrand',
     w.value(integral.body, inner, { ...context, loop: undefined })
   );
+  // The integrand in log space, with the same variables bound.
+  if (integral.alternative !== undefined)
+    number(
+      integral.alternative,
+      'the integrand in log space',
+      w.value(integral.alternative, inner, { ...context, loop: undefined })
+    );
   return w.valueFacts(node, { kind: 'real' }, conversions);
 }
 
@@ -11897,7 +12330,7 @@ function attachRootBlock(
     // admission gives its refusal.
     let parts: ReturnType<typeof structuredValueParts>;
     try {
-      parts = structuredValueParts(node, false);
+      parts = structuredValueParts(node, false, registry);
     } catch {
       parts = undefined;
     }
@@ -12392,7 +12825,7 @@ function admitFunctionBody(
       if (node.nops === 1) return checkValue(node.op1, bodyValue);
     }
     if (admission.structured && isFunction(node)) {
-      const nested = structuredValueParts(node, bodyValue);
+      const nested = structuredValueParts(node, bodyValue, registry);
       // The value of the body of a helper `f(…) -> T` is `Typed(value, T)`:
       // `T` must be the declared result of the helper.
       if (
@@ -12426,6 +12859,15 @@ function admitFunctionBody(
             for (const bound of bounds) {
               indexPositions.add(bound);
               checkAggregateBound(node, bound, registry, checkValue);
+            }
+            // The variable of a derivative or a limit computed numerically
+            // shadows a name around it (the check of the root, above).
+            if (registry?.routines.has(node) === true) {
+              if (!names.has(index)) {
+                names.add(index);
+                added.push(index);
+              }
+              continue;
             }
             if (names.has(index) || locals.has(index))
               throw new Error(
@@ -13129,6 +13571,20 @@ function admitFunctionBody(
           false
         );
         if (replacement !== node) return visit(replacement);
+        // A derivative or a limit computed numerically reads its operands
+        // where it is, and its body with its variable bound.
+        const routine = registry.routines.get(node);
+        if (routine !== undefined) {
+          for (const op of routine.operands) visit(op);
+          const added = !bound.has(routine.name);
+          if (added) bound.add(routine.name);
+          try {
+            visit(routine.body);
+          } finally {
+            if (added) bound.delete(routine.name);
+          }
+          return;
+        }
         const variables = (registry.integrals.get(node)?.clauses ?? [])
           .map((c) => c.name)
           .filter((n) => !bound.has(n));
@@ -13548,6 +14004,10 @@ type StructuredRegistry = {
   /** Each definite `Integrate` node of the program with no closed form,
    *  which the route integrates numerically (`quadratureIntegral()`). */
   readonly integrals: Map<Expression, StructuredIntegral>;
+  /** Each derivative and limit of the program with no closed form, which
+   *  the route computes numerically (`numericDerivative()`,
+   *  `numericLimit()`). */
+  readonly routines: Map<Expression, StructuredNumericRoutine>;
 };
 
 /**
@@ -13619,6 +14079,7 @@ function structuredRegistry(
     closedForms: new Map(),
     closedFormSearch: { spent: 0 },
     integrals: new Map(),
+    routines: new Map(),
   };
 }
 
