@@ -5,7 +5,11 @@ section 9: the rule (D1), a popped scope keeps its definitions (D2), the
 compile options in the same change (D3), the order and the delivery rule
 of section 7 (D4), and the binder case of section 4. Step 1 of section 7
 is being implemented. A measure of the time on a quiet machine is still
-owed (M3).
+owed (M3). The spec was reviewed on 2026-11-11
+(`2026-11-11-bound-once-evidence/spec-review-2026-11-11.md`, 18 findings);
+section 10 answers them and wins over the earlier sections where they
+differ. Its choices C1 to C8 are the author's, for the user to confirm or
+reverse.
 
 Model: `docs/plans/2026-11-09-binding-units-model.md`. This spec replaces
 rules 3 and 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md` and
@@ -82,7 +86,7 @@ the two reads do not walk the scopes the same way.
 | 5 | `e = parse('x+1')`; then `x: integer = 2` in the same scope; `e.type`, `e.evaluate()` | `integer`, `3` | the same |
 | 6 | `e = parse('x < 2')`; push; `x: real`; `compile(e)` | compiles | declines (`x` has no type); `compile(e, { inputs: { x: 'real' } })` compiles, with no scope |
 | 7 | `a = 2`; `f := x ↦ a·x`; push; `a = 10`; `f(3)` | `6` | `6` |
-| 8 | `e = parse('\\pi + 1')`; push; `Pi: integer = 3` (a library constant can be declared only in a nested scope); `e.type`, `e.evaluate()` | `integer`, `1 + Module(Pi)`: the type reads the pushed `Pi`, the value does not | `real`, `π + 1` |
+| 8 | `e = parse('\\pi + 1')`; push; `Pi: integer = 3` (a library constant can be declared only in a nested scope); `e.type`, `e.evaluate()` | `integer`, `π + 1` (printed `1 + Module(Pi)` in that scope): the type reads the pushed `Pi`, the value does not | `real`, `π + 1`, printed the same way |
 | 9 | push; `x: integer = 5`; `e = parse('x+1')`; pop; `e.type`, `e.evaluate()` | `integer`, `x + 1`: the type and the value disagree | `integer`, `6`: the popped scope keeps its `x` (rule 5) |
 
 Row 9 is the largest change of meaning for a host that keeps expressions
@@ -327,3 +331,183 @@ and about 5% on the source after the recorded read of the resolution was
 dropped (minimum of 11 runs: 922 to 967 ms against 885 to 908 ms). The
 cost of `ce.rebind()` is not measured. A measure on a quiet machine, by
 Tycho's method, is still owed.
+
+## 10. After the review (2026-11-11)
+
+Numbers in parentheses are the findings of the review file.
+
+### C1. The one exception to rule 1: activations (1, 2, 15)
+
+Rule 1 is about which DEFINITION a name means. A parameter, the variable of
+a binder and the local of a block mean their declaration in the scope of
+the literal, the binder or the block, by rule 1 like any name. Their VALUE
+is another matter: it belongs to one call or one run. It is read in the
+activation of that scope that the evaluation in progress is in, or, for a
+function value that left its call, in the activation that it kept
+(`retainCallFrameOfResult()`, `retainScope()`). This lookup
+(`bindingInContext()` for these three kinds: `callerBinding()`, the swept
+home, `activationBindingOf()`) stays as it is in step 1, and so do the keys
+of the type cache for a call frame. Recursion and closures work as today;
+`issue-489` and `ce-473` are acceptance tests.
+
+So section 5, second bullet, is reduced: step 1 removes from the value read
+only what accepts a plain declaration of another scope than the home chain.
+What the activation lookup can lose is measured in the result of step 1,
+not promised. A simpler activation lookup (a stack of activations for each
+scope, read directly) is a later step, with stored bodies.
+
+Alternative: replace the lookup now. Not chosen: it is a second mechanism
+in one change.
+
+### C2. Rule 2 applies to every occurrence (9)
+
+An occurrence that had a definition at boxing is not pinned to it. It keeps
+its home scope, and resolves again from it when the counter of its name
+moved: an occurrence boxed in a child scope, which read the definition of
+an ancestor, reads a declaration made later in that child. The prototype
+pins it; the implementation does not. The head of a call follows the same
+rule: "Callable resolution" of `docs/SCOPING-MODEL.md` (an existing call
+keeps its selected binding) is replaced. Example for the tests: `x: real`
+at the top; push; `e = parse('x+1')`; `ce.declare('x', 'integer')` in the
+pushed scope; `e.type` is `integer`.
+
+### C3. The home chain is fixed (8)
+
+The parents of a home scope, as rule 1 walks them, are those of the boxing.
+The chaining of the scope of a binder or a block onto the ambient scope at
+evaluation (`ambient-chain.ts`, `scope-chaining.ts`, the ruling of
+2026-09-15 in `docs/SCOPING-MODEL.md`: "a directly evaluated expression
+reads the environment it is evaluated in") is reversed by rule 1 and is
+removed, with the memo path that resolves through it
+(`withAmbientChain`). `Sum(n·k, k, 1, 3)` boxed at the top reads the `n` of
+the top.
+
+The recorded read of a resolution is dropped only for a kind of occurrence
+for which this holds: the resolution from the home chain changes only at a
+declaration, and a declaration moves `typeVersion`. That is a free name
+and a symbol with a plain definition, once the ambient chaining is gone.
+For a parameter, a binder variable and a block local the keys of today
+stay (C1).
+
+### C4. Temporary values and hidden values are one stated mechanism (3, 4, 14)
+
+For the extent of a call, a definition can have a temporary value, or have
+its value hidden. Both are a record on the evaluation context, keyed by the
+definition (for a name with no definition: by home scope and name), that
+the value read tests. Neither declares anything, pushes a scope or moves
+the type version.
+
+- `ce.withValues(values, fn)` resolves each name from the current scope, as
+  today, and gives the definition found a temporary value; a name with no
+  definition gets one keyed on the current scope. A value outside the
+  declared type is refused, as today.
+- The interpreted fallback of `compile()` and the other engine sites use an
+  internal form that takes the expression: each name is resolved as the
+  expression resolves it (rule 1), and the temporary value can be of
+  another type than the declared one, as the shadow of the old fallback
+  allowed.
+- Hidden values (the value shield): the value only, not the type; of every
+  occurrence that resolves to the named definitions, parameters, binder
+  variables and block locals excepted; under the cache key that a shield
+  has today (`ce._withValueShieldKey()`), which stays.
+- Both are captured with the evaluation context of an asynchronous
+  evaluation and installed for each synchronous segment, as an operation
+  environment is (rule 8 of the slice 1 spec). A hide inside a
+  `withValues`, or the reverse: the innermost record of a definition wins.
+- Removed with this: the scratch scope of a shield, its shadow
+  declarations and their marks (`markShieldDeclaration()`, `isShield()`),
+  and `rebindEscaping()` at the two shield sites.
+
+Alternative for `withValues`: keep writing on the definitions, as today.
+Not chosen: it moves the type version at each call of a fallback, and a
+declared name of the wrong scope is written.
+
+### C5. A popped scope (5)
+
+`popScope()` keeps releasing what a definition subscribed to (a popped
+definition is not rounded again at a change of precision), and stops
+marking the definitions as dead: a read of one by an expression boxed in
+the scope is valid, and the debug check of dead bindings
+(`ce._debugBindings`, `assertLiveRead()`) no longer fires for it. The same
+holds for `InspectableScope.dispose()`. The marks that keep a call frame
+for a function value (C1) stay.
+
+### C6. The compile options (6)
+
+Step 1 delivers two options; the third waits.
+
+```ts
+inputs?: Readonly<Record<string, TypeString>>;
+symbolic?: readonly string[];
+```
+
+- A name in `inputs` is an input of the compilation with the given type.
+  Its stored value, if any, is not folded. The given type replaces its
+  declared type, its inferred type and the requirement of its unit, for
+  this compilation only, in the expression and in the stored bodies and
+  values that the compilation reads. It does not apply to an occurrence
+  that a binder of the expression binds. The rules of
+  `docs/COMPILATION-MODEL.md` for an input apply to the given type:
+  `unknown` and `any` are refused, a union is a dispatch.
+- A name in `symbolic` is an input with the type it has (declared, or
+  given in `inputs`); with no type it is refused as an untyped input. It is
+  `inputs` with the current type of the name.
+- The constant fold and the interpreted fallback read the given types and
+  treat the named values as absent.
+- How the engine does it is not part of the contract: it may bind the
+  expression again in a scope of its own, as `compiler-core.ts` does for a
+  declared union.
+- `byReference` (lists passed by reference, the width of a sampler) is not
+  in step 1: its relation to the existing options `storage` and `vars`,
+  and what it promises about aliasing and writes in place, need a section
+  written with Tycho.
+
+### C7. Binders, comparisons, stored bodies, serialization (10, 11, 13, 16)
+
+- **Binders.** The heads whose operands have a `bound` or `clause` role
+  (`docs/SCOPING-MODEL.md`, "Binders"), `Function` and `Block` included.
+  When `ce.function()` makes one from a boxed body, it boxes the body again
+  in its scope: every free occurrence of its variables is bound to it,
+  whatever it resolved to before, and an inner binder of the same variable
+  is not entered. `subs()` and `replace()` box nothing again, except
+  through a binder they build this way.
+- **`sameBinding()`**, `readBinding()`, the getters of a free name and the
+  collection protocol (rules 5 and 7 of the slice 1 spec) use the
+  resolution of rules 1 and 2. Two occurrences of one name with different
+  home scopes that resolve to different definitions are different symbols:
+  `x - x` is `0` only when both resolve to the same definition, or both to
+  none in the same home scope.
+- **A stored function body in step 1.** Rule 2 already gives it a
+  definition made later for a name it reads. What it does not give is a
+  reading fixed at boxing (a head read as a variable, `N` as a variable).
+  The registry of waiting definitions and its repair stay in step 1, with
+  their lookup from the home scope of the body; slice 2 replaces them.
+- **Serialization** (`.json`, `.latex`, `toString()`) is not a read of a
+  type or a value. It keeps qualifying a library name against the current
+  scope, as today (row 8).
+
+### C8. Acceptance of step 1 (7, 12, 17)
+
+1. A test for each row of section 3 and for the examples of C2 and C3,
+   written with the API calls, with the "Proposed" result.
+2. M1 complete: each place of the engine that pushes a scope, in a table
+   in the evidence folder, with what it declares, its remedy (bind inside,
+   substitute, a temporary value, or an entry in the environment of the
+   operation, which is what "pass the type" means), and a test that shows
+   which definition is read.
+3. Every test that the change makes fail is sorted: it tests the old rule
+   (rewritten with `rebind`, `withValues` or the compile options, listed by
+   file in the result), or it is an engine site (fixed). None is left.
+4. The full suite and the nightly suites pass; lint, `check:docs`,
+   `check:deps`.
+5. The result paragraph lists the code removed, with line counts, against
+   section 5 as reduced by C1.
+6. Time, on a quiet machine by Tycho's method: its `othello` instrument and
+   its codegen audit sum within 10% of 0.187.1 with `CE_BINDING_UNITS=0`
+   (473 to 493 ms; 40.5 to 42.0 s); the loop of undeclared symbols and
+   `integration-rules.test.ts` are reported, with no threshold in step 1
+   (their cost is the recorded reads of the unit environments, which rule 1
+   does not remove).
+7. Tycho's codegen audit on a scratch build: the records that change are
+   listed and explained by the rule (Tycho does not adopt step 1: section
+   7).
