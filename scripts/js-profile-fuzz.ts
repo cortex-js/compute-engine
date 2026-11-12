@@ -691,6 +691,52 @@ const HELPERS: readonly {
     ],
     arguments: ['real'],
   },
+  // A parameter with a default value: a call that leaves it out (the
+  // engine completes it), and one that gives it.
+  {
+    name: 'fdf',
+    definition: [
+      'Function',
+      ['Add', ['Multiply', 'v', 'ka'], ['Multiply', 0.5, 'ka', 'ka']],
+      ['Typed', 'v', "'real'"],
+      ['Optional', ['Typed', 'ka', "'real'"], 2],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'fdu',
+    definition: [
+      'Function',
+      ['Subtract', 'v', ['Multiply', 'ka', 'ka']],
+      'v',
+      ['Optional', 'ka', -0.5],
+    ],
+    arguments: ['real', 'real'],
+  },
+  // A loop with a `Continue` and a destructuring write in a helper body.
+  {
+    name: 'fcw',
+    definition: [
+      'Function',
+      [
+        'Block',
+        ['Declare', 'a', "'real'", 'v'],
+        ['Declare', 'b', "'real'", 1],
+        [
+          'Loop',
+          [
+            'Block',
+            ['If', ['Equal', ['Mod', 'j', 2], 0], ['Continue']],
+            ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', ['Add', 'a', ['Multiply', 0.5, 'b']]]],
+          ],
+          ['Element', 'j', ['Range', 1, 4]],
+        ],
+        ['Subtract', 'a', 'b'],
+      ],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
 ];
 
 /** The helpers whose body draws, called by a program of `--random`. */
@@ -2524,6 +2570,30 @@ function genQuotientFactor(ctx: GenContext, depth: number): Json {
 function genComprehension(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
   const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['j', 30]] };
+  const r = rng();
+  // Two generators, the second over a range that can read the first index,
+  // with a filter that reads both; or one generator over a list (a literal
+  // or a list name), with a filter.
+  if (r < 0.2) {
+    const both: GenContext = { ...inner, symbols: [...inner.symbols, ['i2', 30]] };
+    const second: Json = ['Element', 'i2', ['Range', pick<Json>(rng, [1, 'j']), intBetween(rng, 1, 3)]];
+    if (rng() < 0.5) (second as Json[]).push(genCondition(both, ctx.maxDepth));
+    return [
+      'Comprehension',
+      genReal(both, Math.min(depth + 1, ctx.maxDepth)),
+      ['Element', 'j', ['Range', 1, intBetween(rng, 1, 3)]],
+      second,
+    ];
+  }
+  if (r < 0.3) {
+    const source: Json =
+      ctx.lists.length > 0 && rng() < 0.6
+        ? pick(rng, ctx.lists)
+        : ['List', ...Array.from({ length: intBetween(rng, 0, 3) }, () => pick(rng, [0.5, -2, 3, -0]))];
+    const clause: Json[] = ['Element', 'j', source];
+    if (rng() < 0.4) clause.push(genCondition(inner, ctx.maxDepth));
+    return ['Comprehension', genReal(inner, Math.min(depth + 1, ctx.maxDepth)), clause];
+  }
   return [
     'Comprehension',
     genReal(inner, Math.min(depth + 1, ctx.maxDepth)),
@@ -2859,7 +2929,16 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
       : declareLocal(rng, 't', ctx([], 1)),
   ];
   if (rng() < 0.4) {
-    statements.push(declareLocal(rng, 's', ctx(locals, 1)));
+    // Sometimes a destructuring declaration of `s` and `s2`.
+    statements.push(
+      rng() < 0.15
+        ? [
+            'Declare',
+            ['Tuple', 's', 's2'],
+            ['Dictionary', ['KeyValuePair', "'value'", ['Tuple', genReal(ctx(locals, 1), 0), genReal(ctx(locals, 1), 0)]]],
+          ]
+        : declareLocal(rng, 's', ctx(locals, 1))
+    );
     locals.push(['s', 15]);
   }
   if (rng() < 0.2) {
@@ -2927,7 +3006,12 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
         ['ReplaceAt', 'R', pick(rng, [1, 2, -1]), genReal(c(2), 0)],
       ]);
     } else if (r < 0.3) {
-      statements.push(['Assign', target(), genReal(c(1), 0)]);
+      // Sometimes a destructuring write of both locals, which reads them.
+      statements.push(
+        locals.length > 1 && rng() < 0.3
+          ? ['Assign', ['Tuple', 't', 's'], ['Tuple', genReal(c(1), 0), genReal(c(1), 0)]]
+          : ['Assign', target(), genReal(c(1), 0)]
+      );
     } else if (r < 0.4) {
       // A block statement, with a local of its own.
       statements.push(
@@ -2962,6 +3046,37 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
         ['Assign', target(), genReal(c(2, [...locals, ...element]), 0)],
         ['Element', 'cv', over],
       ]);
+    } else if (r < 0.88) {
+      // A loop over two index sets, the second can read the first index; a
+      // loop with no index set, which a counter ends with a `Break`; a
+      // `Continue` at the start of the body.
+      const shape = rng();
+      const inLoop: [Json, number][] = [...locals, ['r', 20], ['r2', 20]];
+      const body: Json[] = ['Block'];
+      if (rng() < 0.4)
+        body.push(['If', genCondition(c(2, inLoop), 0), ['Continue']]);
+      body.push(['Assign', target(), genReal(c(2, inLoop), 0)]);
+      if (shape < 0.6)
+        statements.push([
+          'Loop',
+          body,
+          ['Element', 'r', ['Range', pick(rng, [1, 0]), intBetween(rng, 0, 3)]],
+          ['Element', 'r2', ['Range', pick<Json>(rng, [1, 'r']), rng() < 0.8 ? intBetween(rng, 0, 3) : 'm']],
+        ]);
+      else
+        statements.push(
+          ['Declare', 'r', "'integer'", 0],
+          ['Declare', 'r2', "'integer'", 1],
+          [
+            'Loop',
+            [
+              'Block',
+              ['Assign', 'r', ['Add', 'r', 1]],
+              ['If', ['Less', rng() < 0.8 ? intBetween(rng, 0, 4) : 'm', 'r'], ['Break']],
+              ...body.slice(1),
+            ],
+          ]
+        );
     } else {
       const inLoop: [Json, number][] = [...locals, ['r', 20]];
       const body: Json[] = [

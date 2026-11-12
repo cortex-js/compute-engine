@@ -470,9 +470,12 @@ describe('refusals', () => {
       /invalid bound expression/,
     ],
     [
-      'a loop',
-      fn(declare('t', 'real', 'w'), ['Loop', ['Assign', 't', ['Add', 't', 1]]], 't'),
-      /the structured route admits a Loop only with one index set/,
+      // A loop with no index set is admitted since
+      // compile-javascript-structured-statements.test.ts; one with a guard
+      // is not.
+      'a loop with a guard',
+      fn(declare('t', 'real', 'w'), ['Loop', ['Assign', 't', ['Add', 't', 1]], ['Element', 'k', ['Range', 1, 3], ['Less', 'k', 2]]], 't'),
+      /the structured route admits a Loop only over Element\(k, Range\(a, b\)\) or the elements of a list, with no guard/,
     ],
     [
       'a Return in a branch',

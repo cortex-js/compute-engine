@@ -1083,6 +1083,19 @@ export type IRLoop = Omit<OperationBase, 'result'> & {
   readonly iterationBudget?: number;
   /** No iteration when `to` is less than `from` (`IRBuild.ascending`). */
   readonly ascending?: true;
+  /** A loop with no end, `Loop(body)` of the language: it runs until an
+   *  `exit`, until the iteration budget aborts the call, or for ever. The
+   *  operands `from` and `to` are still there and are not read, and no
+   *  operation reads the index. It may not terminate: like an abort, it
+   *  makes its region `canAbort` (`operationCanAbort()`), so that no
+   *  transformation removes it, moves it or runs it more times. */
+  readonly unbounded?: true;
+  /** Before the first iteration, a range of more than 2^32 − 1 integers
+   *  throws, as the existing emitter's loop over a `Range` clause of a
+   *  `Loop` or a `Comprehension` does where it writes that test
+   *  (`compileCountedRange()`). The index has the representation `number`
+   *  (the verifier checks it). */
+  readonly checksCount?: true;
 };
 
 /**
@@ -1548,7 +1561,7 @@ export function definedValues(op: IROperation): readonly IRValue[] {
 
 /** Whether the evaluation of `op` can abort: an operation with an abort
  *  kind of its own (`OperationBase.aborts`), a `loop` with an iteration
- *  budget, a `seeded` whose seed is not a literal (an invalid seed throws),
+ *  budget, a `loop` with no end (it may not terminate), a `seeded` whose seed is not a literal (an invalid seed throws),
  *  an operation whose region can abort, or a call of a function whose body
  *  can abort (`IRLoop`). `functions`: the functions of the program. */
 export function operationCanAbort(
@@ -1557,6 +1570,9 @@ export function operationCanAbort(
 ): boolean {
   if (op.aborts !== undefined) return true;
   if (op.kind === 'loop' && op.iterationBudget !== undefined) return true;
+  // A loop with no end may not terminate: a call that never returns, which
+  // a transformation must not remove, move or run more times, as an abort.
+  if (op.kind === 'loop' && op.unbounded === true) return true;
   if (op.kind === 'seeded' && op.operands.length > 0) return true;
   if (op.kind === 'call' && functions[op.function]?.body.canAbort === true)
     return true;

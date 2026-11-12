@@ -622,6 +622,11 @@ export type FragmentDefinition<R> = {
    *  `passesListArgument()` accepts the pair, also for the two branches of
    *  an `If`. Absent: a local is a scalar, a complex number or a point. */
   readonly listLocals?: boolean;
+  /** Whether each name of a destructuring write of a literal tuple
+   *  (`(a, b) ≔ (b, a + b)`) receives the facts of its operand, as a
+   *  write of that operand to the name. Absent: each name receives a real
+   *  component of the point. */
+  readonly literalTupleComponents?: boolean;
   /** Whether a list can hold lists (`FragmentListType` with a list element,
    *  a list of lists to the depth that the type states): the definition
    *  types such a value only in the rules that read one. Absent: the pass
@@ -2678,7 +2683,25 @@ function walkDeclare<R>(
       'signature',
       nonLiteralTupleValue('declaration', value)
     );
-  const components = componentTypes(facts, names.length);
+  // The type of a local of each operand of a literal tuple, by the rule of
+  // a local of one name, when the definition reads them
+  // (`FragmentDefinition.literalTupleComponents`).
+  const components =
+    w.definition.literalTupleComponents === true &&
+    isFunction(value, 'Tuple') &&
+    value.nops === names.length
+      ? value.ops.map((op, i) => {
+          const name = (names[i] as Expression & { symbol: string }).symbol;
+          const t = w.value(op, scope, context).type;
+          return (w.definition.localType?.({
+            name,
+            declaration: statement,
+            value: t,
+            declared: undefined,
+            inferred: inferred?.(name),
+          }) ?? localType(t)) as FragmentValueType;
+        })
+      : componentTypes(facts, names.length);
   if (components === undefined)
     return void w.refuse(
       statement,
@@ -3418,8 +3441,20 @@ export function walkAssign<R>(
       'signature',
       nonLiteralTupleValue('assignment', ops[1])
     );
+  // The facts of each operand of a literal tuple, when the definition reads
+  // them (`FragmentDefinition.literalTupleComponents`).
+  const operandFacts =
+    targets.length > 1 &&
+    w.definition.literalTupleComponents === true &&
+    isFunction(ops[1], 'Tuple') &&
+    ops[1].nops === targets.length
+      ? ops[1].ops.map((op) => w.value(op, scope, context))
+      : undefined;
   const types =
-    targets.length === 1 ? [value.type] : componentTypes(value, targets.length);
+    targets.length === 1
+      ? [value.type]
+      : (operandFacts?.map((f) => f.type) ??
+        componentTypes(value, targets.length));
   if (types === undefined)
     return w.refuse(
       node,
@@ -3491,7 +3526,9 @@ export function walkAssign<R>(
     const facts =
       targets.length === 1
         ? value
-        : ({
+        : operandFacts !== undefined
+          ? operandFacts[i]
+          : ({
             type: from,
             representation: value.representation,
           } as FragmentValueFacts<R>);

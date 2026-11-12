@@ -2035,14 +2035,27 @@ class Emitter {
     // ascending loops.
     if (index.representation === 'bigint' && op.ascending !== true)
       return fail('a loop with a bigint index that is not ascending');
-    const range =
-      index.representation === 'bigint'
+    // A loop with no end is `while (true)`, as the existing emitter writes
+    // `Loop(body)` (`compileForLoop()` in `compile-loops.ts`): no operation
+    // reads its index (the verifier).
+    const range = op.unbounded === true
+      ? { before: [], header: 'while (true)', index: undefined }
+      : index.representation === 'bigint'
         ? {
             before: [],
             header: `for (let ${k} = ${operand(from, CONDITIONAL)}; ${k} <= ${operand(to, RELATIONAL + 1)}; ${k}++)`,
             index: undefined,
           }
         : this.rangeHeader(k, from, to, op.ascending === true);
+    // The test of the existing emitter's loop over a `Range` clause
+    // (`compileCountedRange()`), before the first pass.
+    if (op.checksCount === true && !('last' in range))
+      fail('a loop that tests its count has no last index');
+    if (op.checksCount === true && 'last' in range)
+      range.before.push(
+        `if (${range.last} > 4294967294) ` +
+          `throw new RangeError('Invalid array length');`
+      );
     const body: string[] = range.index === undefined ? [] : [range.index];
     if (op.iterationBudget !== undefined)
       body.push(`_SYS.countLoopPass(${Math.floor(op.iterationBudget)});`);

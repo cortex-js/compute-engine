@@ -390,7 +390,9 @@ describe('the declines of slices 4 and 5', () => {
     ['Map of a tuple to tuples', ['Map', lambda(['Tuple', 't', 1], 't'), 'P'], /Map of a tuple with a function whose value is a tuple is not in the profile/],
     ['a list of tuples of complex elements', ['At', 'LC', 1], /LC/],
     ['ReplaceAt of a list of tuples', ['ReplaceAt', 'LP', 1, 'P'], /ReplaceAt in the profile writes into a list of reals or integers, and its first operand has the type `list<point<2>>`/],
-    ['a Loop over a list that is not a name', ['Function', ['Block', ['Declare', 's', "'real'", 0], ['Loop', ['Assign', 's', 'c'], ['Element', 'c', ['Take', 'L', 2]]], 's'], typed('L', 'list<real>')], /the profile admits a Loop only over Element\(k, Range\(a, b\)\), with no step and no guard, or over a list that a name holds/],
+    // A Loop over a list that is not a name is admitted since
+    // compile-javascript-structured-statements.test.ts.
+    ['a Loop over a string', ['Function', ['Block', ['Declare', 's', "'real'", 0], ['Loop', ['Assign', 's', 1], ['Element', 'c', "'ab'"]], 's'], typed('L', 'list<real>')], /the profile admits a Loop only over Element\(k, Range\(a, b\)\) or the elements of a list/],
   ];
   test.each(declines)('%s declines', (_name, json, message, mode = 'strict') => {
     expect(() => compile(ce.box(json), { ...PROFILE, mode } as never)).toThrow(message);

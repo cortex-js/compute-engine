@@ -145,6 +145,26 @@ const SHAPES: Shape[] = [
       ]),
   },
   {
+    // A comprehension with two generators, the second over a range that
+    // reads the first index, with a filter (nested loops on the route).
+    label: 'Comprehension(t, p in 1..2, q in 1..p if q > 0)',
+    level: fn('Arctan2'),
+    seed: (ce) => ce.box(['Multiply', 'p', 'q', 'x']),
+    root: (ce, t) =>
+      ce.function('Comprehension', [
+        t,
+        ce.function('Element', [
+          ce.symbol('p'),
+          ce.function('Range', [ce.number(1), ce.number(2)]),
+        ]),
+        ce.function('Element', [
+          ce.symbol('q'),
+          ce.function('Range', [ce.number(1), ce.symbol('p')]),
+          ce.function('Greater', [ce.symbol('q'), ce.number(0)]),
+        ]),
+      ]),
+  },
+  {
     label: '[t, t]',
     level: raw('Add'),
     root: (ce, t) => ce.function('List', [t, t]),

@@ -651,6 +651,12 @@ function judgeLoop(
     reason: blocker(op, fn, reason),
   });
 
+  // A loop with no end has no count of passes to split, and may not end.
+  if (loop.unbounded === true)
+    return fail(
+      loop,
+      'the loop has no index set: it runs until an exit, and may not terminate'
+    );
   // An `exit` ends the loop at a pass that the earlier passes decide.
   const [exit] = exitsOf(loop);
   if (exit !== undefined)

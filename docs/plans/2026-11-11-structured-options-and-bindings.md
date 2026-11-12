@@ -1107,3 +1107,210 @@ the existing compiler makes for the same choice:
 Not compared: a definition that a checkpoint restore marked `_rewound`
 (the existing compiler does not fold it; the route reads the ambient
 binding and its value, `storedSnapshot()`).
+
+## Result of the statement and loop forms
+
+On `984f3e66014c1b44c03948ff097781550c6562fd`, the statement and loop
+forms that the existing compiler compiles and the profile declined, in five
+parts. The existing code of each form is in
+`2026-11-09-js-pilot-emission-rewrites.md`, "Statements and loops: several
+index sets, comprehensions, destructuring, `Return`, `Continue`, defaults".
+Tests: `compile-javascript-structured-statements.test.ts` (a differential
+against the existing compiler with `cse: false, constantFold: false` and
+the interpreter, the inputs unchanged, the order of host calls, the
+iteration budget, and each decline that stays).
+
+**(a) Loops and comprehensions over several index sets.** Admitted:
+
+- a `Loop` over several index sets, nested with the first one outermost
+  (`loopStatement()` with a clause number); a later range reads the
+  earlier indexes. Each range is tested against 2^32 − 1 elements before
+  its first pass (`IRLoop.checksCount`), as `compileCountedRange()` does;
+- a `Loop` with no index set: `IRLoop.unbounded`, written `while (true)`.
+  The verifier checks that no operation reads its index;
+- a `Loop` over a list value or a range with a step (the range is made as
+  a list first);
+- a `Comprehension` with several generators, filters, a list or a stepped
+  range: `nestedBuild()`, one carried list per loop level, a filter as an
+  `if`, no budget count (the existing emitter writes none).
+
+Declined: a `Break` in a loop over several index sets (the existing
+compiler declines it); a `Loop` clause with a guard; a comprehension whose
+filter or source reads a later index; a comprehension whose body, filter
+or later source is not pure (the interpreter's comprehension is a lazy
+view); a comprehension whose type is not a list (`list | missing` over
+`[]`, which the existing compiler reads with `_SYS.atWithValueMarker`).
+
+**(b) Locals.** Admitted: a destructuring declaration
+`Declare((a, b), {value: v})` (or the type `unknown`) of a literal tuple
+or of the tuple value of a user function, in the `strict` mode
+(`checkDestructuring()`, `destructure()`). Each name of a literal tuple
+receives the facts of its operand
+(`FragmentDefinition.literalTupleComponents`, absent for GLSL). Declined:
+a declared type on the pattern; a tuple input (the interpreter rejects
+it); the `complex` mode (the check of the writes of that mode reads one
+name); `Declare(g, signature)` before `DefineFunction(g, …)` (8 witnesses);
+a declaration with no value; the `constant` flag (4 operands); a nested
+pattern; locals of the types `any`, `number` in the `complex` mode,
+`Numbers`, `color`.
+
+**(c) Statements.** Admitted:
+
+- the destructuring write `(a, b) ≔ v`: every component in order before
+  any name is written; the carried names of a loop include each name of
+  the pattern (`assignedNames()`, `exposedReads()`);
+- `Return(v)` in tail position of a body or of the expression (its value);
+- `Continue` at the end of a branch of an `If` that is a statement of the
+  loop body: the statements after the `If` are lowered in the other branch
+  (`statements()` with the body flag, `ifStatement()` with `rest`).
+
+Declined:
+
+- a `Return` before the end of a body: the IR has no exit from a function,
+  4 witnesses;
+- a `Continue` in a nested `If` or block;
+- a write to a parameter (20 witnesses after, with the reserved names
+  `_SYS` and `Math`): the root `Function` reads its parameters as inputs;
+- `ParallelLoop`, which stays declined (19).
+
+**(d) Optional and default parameters.** A helper with a parameter with a
+default value is admitted: the engine completes each call when it boxes
+it, and the existing compiler passes every argument (`_fn_hd(_.x, 2)`). A
+call with fewer arguments declines. Declined: a default on a parameter of
+the root `Function` (11 witnesses). The existing compiler writes
+`(x, k) => { if (k === undefined) k = 2; … }` through
+`lambdaDefaultFill()`, which compiles the default with the target of the
+root `Function`. The fragment route reserves that target for the body
+(`assertEmitter()` in `javascript-fragment-facts.ts`, outside the files of
+this task). A default on a parameter of a local function is declined too
+(5 witnesses).
+
+**(e) Helper captures: not done, declined (62 witnesses).** A helper that
+reads an input of the program (`g1(t) := t + y`, `const _fn_g1 = (t) =>
+t + _.y;`) or a value that is an expression (`c := 3x + 1`) needs a new
+mechanism. The IR body of a helper reads only its parameters (the emitter
+fails "the body of a helper reads an input"), so each such input would be
+an extra parameter. It would be passed at each call, also through each
+helper that calls the helper, and it would need its own typing in the pass.
+That is a design of its own, larger than the other four parts together.
+
+**Measures.**
+
+- Witnesses (94 files, a logger of the profile's declines): admitted
+  2,282 → 2,400, declines 2,218 → 2,071.
+- By the census classes:
+
+  | Class | Before | After |
+  | --- | --- | --- |
+  | `loop-several` | 53 | 0 |
+  | `compr-several` | 17 | 0 |
+  | `compr-over` | 35 | 5 (strings, a set, a tuple pattern) |
+  | `loop-form` | 102 | 14 (tuple patterns of an index, a guard) |
+  | `local-explicit` | 57 | 28 |
+  | `stmt` | 87 | 56 (`ParallelLoop` 19, `Match` 9, `Nothing` 8) |
+  | `helper-optional` | 56 | 17 (root and local defaults) |
+  | `return` | 13 | 5 |
+  | `helper-capture` | 59 | 62 (part (e), a few programs moved from other declines) |
+
+  The 55 `ParallelDomain` loops of `loop-form` now decline with that head.
+- Shadow measure on the same files: admitted 2,273 of 4,484 (50.7%) →
+  2,391 of 4,455 (53.7%), 0 failures. Both runs stop at the 900 s timeout
+  after every file has written its stats, so the baselines differ by 29
+  compilations.
+- Tycho prelude census (fish-swarm and turing-patterns left out): 29 of 40
+  before and after. The causes of `apollonian-gasket`'s `fourth` and
+  `fill` moved to the next decline: a loop over a tuple pattern
+  `Element((zx, zy), …)`.
+
+The random tester adds loops over two index sets, loops with no index
+set, `Continue`, comprehensions with two generators and a filter or over
+a list, destructuring declarations and writes, and the helpers `fdf` and
+`fdu` (defaults) and `fcw` (a `Continue` and a destructuring write). Most
+statement forms appear only at `--size 100`. The two value differences of
+seeds 284 and 285 are older than this change and outside its forms
+(the gather `At(At(M2, k), Range(1, 3))`, which now declines, and the
+known-limitations line of a branch that the existing compiler selects
+without the lift of a name with no declared type).
+
+The engine's consumers (`CE_JS_PROFILE=numeric-kernel`, 45 files of
+integrals, limits, fits and `Map`), with the switch off and on: 1,029
+tests pass both times; 0 failures of the profile. Random tester on the final
+code: seeds 281 and 282 (10,000 each), 283 (5,000, `--random`), 284
+(5,000, `--host`), 285 (5,000, `--size 100`). There are no failures of the
+profile and no differences in emitted shape. There are two differences from
+the existing compiler, the two older lines above. One difference in an
+earlier run of seed 282 came from this change: `At(Comprehension(3, j ∈ []
+if x = −1), 1)`, which gave `NaN` where the existing compiler gives
+`undefined`. It now declines.
+
+**After review.** Four corrections:
+
+1. A loop with no index set may not terminate. `operationCanAbort()` gives
+   it the abort fact, so the region that holds it is `canAbort` and the
+   dead-statement removal of `ifStatement()` keeps it. The verifier checks
+   the fact as it checks the other abort facts. `analyzeExecution()` judges
+   such a loop no candidate ("the loop has no index set: it runs until an
+   exit, and may not terminate"). An unused bounded loop with a pure body
+   is still removed: it ends, and time is not an effect (the existing
+   compiler keeps its code).
+2. In a loop over several index sets, a local that the body writes and
+   that the source of a later index set reads is carried by each
+   enclosing loop. With `limit := 2`, the body `s := s + j; limit := 1`
+   over `i ∈ 1..2, j ∈ 1..limit` gives 4, as the existing compiler does.
+   Comprehensions have pure bodies, so no local changes there.
+3. `IRLoop.checksCount` is set where `compileCountedRange()` writes its
+   test (`testsRangeCount()`): every `Range` clause of a `Loop` or a
+   `Comprehension` whose bounds are not number literals, or whose literal
+   count is above 2^32 − 1, except the single ascending range of literal
+   bounds of a `Loop` (the counted `for`). The known-limitations line of the
+   single loop is removed. Four pinned strings change, and one test now
+   expects the `If` to be kept because the count test can throw. No value
+   changes. `Sum` and `Product` write no such test on either compiler (a
+   safe-integer guard), and the single-generator comprehension build
+   already had it.
+4. The emitter fails on `checksCount` with no last index, and the verifier
+   rejects `checksCount` on an index that is not a `number`. The `bigint`
+   mode declines blocks of statements on both compilers, so no such loop is
+   lowered there.
+
+The gather of a row read (`At(At(M2, k), Range(1, 3))`, `At(First(R), L)`)
+now declines: the existing compiler reads `undefined` for a gather of an
+absent row. A real index of a row read gives `NaN` on both and stays
+admitted. Its known-limitations line is removed.
+
+**On `eca1a53ca353095480b9270c3039666fdd3102fc`** (the broadcast change and the linear admission):
+
+- The throw table `OPERATION_THROWS` has `loop: 'count'`, and
+  `throwsItself()` answers `checksCount` for a loop. A loop that tests its
+  count throws a `RangeError` above 2^32 − 1 passes. A loop with no end is
+  an abort (`operationCanAbort()`), not a throw. The new operations have no
+  other kinds.
+- A comprehension with several generators, a filter, a list source or a
+  stepped range has no length key: `comprehensionParts()` reads only one
+  range generator.
+- As an arm of an element-wise selection, a comprehension with two
+  generators declines: it can throw. As the arm of a scalar `Which` and as
+  a `Sum` term, it compiles with the values of the existing compiler.
+- The new walks visit each node once: `breaksLoop()`, `isTailOf()`, and
+  the reads of a later index in `comprehensionClauses()` (`symbolsOnce()`).
+- A shared tower of depth 40 in a comprehension with two generators
+  compiles in milliseconds; it is a row of the depth-40 table of
+  `compile-javascript-structured-shared-depth.test.ts`. In the body of a
+  `Loop` the cost is in the engine: `loopBodyYieldsValue()`, the type of
+  the `Loop`, walks the body once per path. It costs about 10 s at depth 28,
+  for one index set as for two. That shape is left out of the table, as
+  its header says, and the test of the two-index loop is skipped
+  (CE-1240).
+- The memo of `checkValue()` (`valueContext()`: names, locals, loop
+  indexes, `bodyValue`) holds the context that the new checks of a value
+  read. The indexes of a loop over several index sets are in `indices` and
+  `names`, and the place of a `Return` is a fact of the node (`tails`).
+  `Continue`, `Break` and the destructuring names are checked by
+  `checkStructuredStatement()`, which is not memoised.
+- The place of a `Return` is not a fact of its node: one node object can
+  be in tail position on one path and an operand on another
+  (`If(0 < x, r, r + 1)` with one `r`). The admission refuses a `Return`
+  that some path reaches out of tail position (`nonTailReturns()`, each
+  node at most once in each of the two places). A node that holds a
+  `Return` is checked at each path, as a statement block is
+  (`holdsStatementBlock()`).

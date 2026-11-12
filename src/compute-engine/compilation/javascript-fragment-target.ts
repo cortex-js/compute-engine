@@ -1003,26 +1003,52 @@ const divideRule = {
 const loopRule = {
   walk: (node, scope, context, w) => {
     const spec = isFunction(node) && node.nops === 2 ? node.op2 : undefined;
-    // A loop over the elements of a list (`for c in all`).
+    // A loop with no index set, with several, or over the elements of a
+    // list (`for c in all`): one scope binds every index. The source of the
+    // first index set is typed where the loop is, the source of each later
+    // one in that scope, with the indexes before it bound.
     if (
       isFunction(node) &&
-      isFunction(spec, 'Element') &&
-      spec.nops === 2 &&
-      isSymbol(spec.op1) &&
-      !isFunction(spec.op2, 'Range')
+      (node.nops !== 2 || loopClauseKind(node.op2) === 'list')
     ) {
-      const list = w.value(spec.op2, scope, context);
-      const element = listElementType(list);
-      if (element === undefined)
-        return w.refuse(
-          node,
-          'signature',
-          `Loop over \`${nodeText(spec.op2)}\` of the type ` +
-            `\`${fragmentTypeToString(list.type)}\` is not in the structured route, ` +
-            `which visits the elements of a list of reals, of integers or of tuples`
-        );
       const inner = w.open(node, scope);
-      w.bind(spec.op1, inner, spec.op1.symbol, element, 'index');
+      for (const [i, clause] of node.ops.slice(1).entries()) {
+        const at = i === 0 ? scope : inner;
+        const kind = loopClauseKind(clause);
+        const c = clause as Expression & {
+          op1: Expression & { symbol: string };
+          op2: Expression & { ops: readonly Expression[] };
+        };
+        if (kind === 'range') {
+          for (const bound of c.op2.ops)
+            if (w.value(bound, at, context).type.kind !== 'integer')
+              return w.refuse(
+                node,
+                'signature',
+                `The bound \`${nodeText(bound)}\` of \`Loop\` does not have an integer ` +
+                  `fact: the structured route reads a bound as an integer`
+              );
+          w.bind(c.op1, inner, c.op1.symbol, { kind: 'integer' }, 'index');
+          continue;
+        }
+        if (kind === undefined)
+          return w.refuse(
+            node,
+            'signature',
+            `Loop over \`${nodeText(clause)}\` is not in the structured route`
+          );
+        const list = w.value(c.op2, at, context);
+        const element = listElementType(list);
+        if (element === undefined)
+          return w.refuse(
+            node,
+            'signature',
+            `Loop over \`${nodeText(c.op2)}\` of the type ` +
+              `\`${fragmentTypeToString(list.type)}\` is not in the structured route, ` +
+              `which visits the elements of a list of reals, of integers or of tuples`
+          );
+        w.bind(c.op1, inner, c.op1.symbol, element, 'index');
+      }
       w.type(node.op1, inner, {
         place: 'statement',
         fn: context.fn,
@@ -3489,6 +3515,9 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   // A `Break` with no value in a counted loop; its place in the loop is the
   // rule of the admission (`checkStructuredStatement()`).
   Break: { walk: walkBreak },
+  // A `Continue` with no value has the rule of a `Break`; its place is the
+  // rule of the admission (`checkStructuredStatement()`).
+  Continue: { walk: walkBreak },
   And: logicalRule('And'),
   Or: logicalRule('Or'),
   Min: foldOrExtremumRule('Min'),
@@ -3514,6 +3543,16 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
     walk: (node, scope, context, w) => notRule.walk(node, scope, context, w),
   },
   Typed: withoutMode('Typed'),
+  // `Return(v)` where the admission admits it, in tail position of a
+  // function body: the value `v`.
+  Return: {
+    walk: (node, scope, context, w) => {
+      if (!isFunction(node) || node.nops !== 1)
+        return w.refuse(node, 'signature', 'Return is in the structured route only as Return(value)');
+      const value = w.value(node.op1, scope, context);
+      return w.valueFacts(node, value.type, [w.convert(value, value.type)!]);
+    },
+  },
   Random: {
     walk: (node, scope, context, w) => randomRule.walk(node, scope, context, w),
   },
@@ -4405,6 +4444,7 @@ const structuredDefinition: Pick<
   | 'loopBoundFromFact'
   | 'passesListArgument'
   | 'listLocals'
+  | 'literalTupleComponents'
   | 'nestedLists'
 > = {
   typeOfSymbol(node) {
@@ -4422,6 +4462,9 @@ const structuredDefinition: Pick<
       ? undefined
       : structuredRepresentation(type),
   listLocals: true,
+  // A destructuring write of a literal tuple writes each operand to its
+  // name, as the existing emitter does (`_tv1 = b; a = _tv1`).
+  literalTupleComponents: true,
   // A list of lists, read by the rules of `NESTED_OPERAND_HEADS` only.
   nestedLists: true,
   representationOfValue: structuredRepresentation,
@@ -4499,6 +4542,23 @@ function atRule(
   // indexes (`NaN` at each index out of range).
   if (indexes.length === 1 && indexes[0].type.kind !== 'integer') {
     const index = indexes[0];
+    // A row read can be absent (an index out of range): the existing
+    // emitter reads `undefined` for a gather of an absent row
+    // (`At(At(M, k), Range(1, 3))`), where `_SYS.atNumeric` gives `NaN`. A
+    // real index gives `NaN` on both.
+    if (
+      index.type.kind === 'list' &&
+      isFunction(node.op1) &&
+      ['At', 'First', 'Last', 'Second', 'Third'].includes(node.op1.operator) &&
+      isNestedListType(w.value(node.op1.ops[0], scope, context).type)
+    )
+      return w.refuse(
+        node,
+        'signature',
+        `At of the row ${nodeText(node.op1)} at a list of indexes is not ` +
+          `in the structured route: the row can be absent, and the existing ` +
+          `emitter reads undefined for a gather of an absent row`
+      );
     const element =
       base.type.kind === 'list' ? collectionElement(base) : undefined;
     const indexElement =
@@ -4673,8 +4733,9 @@ function comprehensionParts(node: Expression):
 }
 
 /**
- * The message of the refusal of a `Comprehension` that is not of the form
- * of the structured route (`comprehensionParts()`), or `undefined`.
+ * The message of the refusal of a `Comprehension` that is of neither form
+ * of the structured route (`comprehensionParts()`, `comprehensionClauses()`),
+ * or `undefined`.
  */
 function comprehensionRefusal(node: Expression): string | undefined {
   if (
@@ -4682,13 +4743,182 @@ function comprehensionRefusal(node: Expression): string | undefined {
     comprehensionParts(node) !== undefined
   )
     return undefined;
-  if (node.nops !== 2)
-    return 'Comprehension with other than one generator is not in the structured route, which admits Comprehension(body, Element(j, Range(a, b)))';
-  const spec = node.op2;
-  return (
-    `Comprehension over ${nodeText(spec)} is not in the structured route, ` +
-    `which admits a comprehension over Element(j, Range(a, b)) only, and not over a list`
-  );
+  const clauses = comprehensionClauses(node);
+  if ('refusal' in clauses) return clauses.refusal;
+  return undefined;
+}
+
+/** One generator of a `Comprehension` (`comprehensionClauses()`). */
+type ComprehensionClause = {
+  readonly index: string;
+  readonly kind: 'range' | 'list';
+  /** The `Range(a, b)` or the list value. */
+  readonly source: Expression & { ops: readonly Expression[] };
+  readonly guard?: Expression;
+};
+
+/**
+ * The generators of `Comprehension(body, g_1, …, g_n)` of the general form
+ * of the structured route: one or more generators, each
+ * `Element(k, Range(a, b))` or `Element(c, V)` over a list value `V`
+ * (`loopClauseKind()`), with an optional filter, as the existing emitter
+ * writes them (`compileComprehension()`): nested loops, the first
+ * outermost, whose innermost body pushes the value of `body`; the source
+ * of a generator is evaluated in the loop of the generators before it,
+ * once per pass there, and its filter skips the passes where it is not
+ * `True`, with the inner loops. The interpreter's comprehension is a lazy
+ * view, so the body, each filter and each source but the first must be
+ * pure; a filter or a source reads no index of a later generator (the
+ * interpreter reads the name around the comprehension there), and the
+ * indexes have distinct names.
+ */
+function comprehensionClauses(
+  node: Expression & { ops: readonly Expression[] }
+): { clauses: readonly ComprehensionClause[] } | { refusal: string } {
+  const specs = node.ops.slice(1);
+  if (specs.length === 0)
+    return { refusal: 'Comprehension with no generator is not in the structured route' };
+  // A comprehension whose type is not a list (`list | missing` over the
+  // empty list literal): the existing compiler reads an element of it with
+  // `_SYS.atWithValueMarker`, `undefined` out of range, where a list of
+  // numbers gives `NaN`.
+  if (!isSubtype(node.type.type, 'list'))
+    return {
+      refusal:
+        `Comprehension of the type ${node.type.toString()}, which is not a ` +
+        `list, is not in the structured route`,
+    };
+  const clauses: ComprehensionClause[] = [];
+  for (const spec of specs) {
+    const kind = loopClauseKind(spec, true);
+    if (kind === undefined)
+      return {
+        refusal:
+          `Comprehension over ${nodeText(spec)} is not in the structured route, ` +
+          `which admits a comprehension over Element(j, Range(a, b)) or over ` +
+          `the elements of a list`,
+      };
+    const s = spec as Expression & {
+      ops: readonly Expression[];
+      op1: Expression & { symbol: string };
+      op2: Expression & { ops: readonly Expression[] };
+    };
+    clauses.push({
+      index: s.op1.symbol,
+      kind,
+      source: s.op2,
+      ...(s.ops.length === 3 ? { guard: s.ops[2] } : {}),
+    });
+  }
+  const indexes = clauses.map((c) => c.index);
+  const repeated = indexes.find((n, i) => indexes.indexOf(n) !== i);
+  if (repeated !== undefined)
+    return {
+      refusal: `Comprehension with two generators of the index ${repeated} is not in the structured route`,
+    };
+  for (const [i, c] of clauses.entries())
+    for (const [part, label] of [
+      [c.source, 'source'],
+      [c.guard, 'filter'],
+    ] as const) {
+      if (part === undefined) continue;
+      const read = symbolsOnce(part);
+      const later = indexes
+        .slice(part === c.guard ? i + 1 : i)
+        .find((n) => read.has(n));
+      if (later !== undefined)
+        return {
+          refusal:
+            `Comprehension whose ${label} ${nodeText(part)} reads the index ` +
+            `${later} of a later generator is not in the structured route`,
+        };
+    }
+  const parts = [
+    node.ops[0],
+    ...clauses.flatMap((c, i) => [
+      ...(i === 0 ? [] : [c.source]),
+      ...(c.guard === undefined ? [] : [c.guard]),
+    ]),
+  ];
+  const impure = parts.flatMap((part) => impureNodes(part)).at(0);
+  if (impure !== undefined)
+    return {
+      refusal:
+        `Comprehension of this form with the node ${nodeText(impure)}, which is ` +
+        `not pure, in its body, a filter or a source after the first, is not ` +
+        `in the structured route: the interpreter's comprehension is a lazy ` +
+        `view, and the route makes the list at once`,
+    };
+  return { clauses };
+}
+
+/**
+ * `Comprehension` of the general form (`comprehensionClauses()`): one scope
+ * binds the indexes; the source of the first generator is typed where the
+ * node is, the source of each later one in that scope with the indexes
+ * before it; a range has integer bounds and an integer index, a list
+ * value a list of numbers or tuples; a filter is a boolean. The result is
+ * a list of the type of the body, as `comprehensionRule()` makes it.
+ */
+function generalComprehensionRule(
+  node: Expression & { ops: readonly Expression[] },
+  clauses: readonly ComprehensionClause[],
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const inner = w.open(node, scope);
+  for (const [i, c] of clauses.entries()) {
+    const at = i === 0 ? scope : inner;
+    const spec = node.ops[i + 1] as Expression & { op1: Expression };
+    if (c.kind === 'range') {
+      for (const bound of c.source.ops)
+        if (w.value(bound, at, context).type.kind !== 'integer')
+          return w.refuse(
+            node,
+            'signature',
+            `The bound \`${nodeText(bound)}\` of \`Comprehension\` does not have an ` +
+              `integer fact: the structured route reads a bound as an integer`
+          );
+      w.bind(spec.op1, inner, c.index, { kind: 'integer' }, 'index');
+    } else {
+      const list = w.value(c.source, at, context);
+      const element = listElementType(list);
+      if (element === undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `Comprehension over \`${nodeText(c.source)}\` of the type ` +
+            `\`${fragmentTypeToString(list.type)}\` is not in the structured route, ` +
+            `which visits the elements of a list of reals, of integers or of tuples`
+        );
+      w.bind(spec.op1, inner, c.index, element, 'index');
+    }
+    if (c.guard !== undefined) {
+      const guard = w.value(c.guard, inner, { ...context, loop: undefined });
+      if (guard.type.kind !== 'boolean')
+        return w.refuse(
+          node,
+          'signature',
+          `The filter \`${nodeText(c.guard)}\` of \`Comprehension\` does not have ` +
+            `a boolean fact`
+        );
+    }
+  }
+  const body = w.value(node.ops[0], inner, { ...context, loop: undefined });
+  const kind = body.type.kind;
+  if (body.type.kind === 'point')
+    return w.valueFacts(node, { kind: 'list', element: body.type });
+  if (body.type.kind === 'list' && body.representation === 'array')
+    return w.valueFacts(node, { kind: 'list', element: body.type });
+  if (kind !== 'real' && kind !== 'integer')
+    return w.refuse(
+      node,
+      'signature',
+      `Comprehension whose body has the type \`${fragmentTypeToString(body.type)}\` is ` +
+        `not in the structured route, which makes a list of reals or of integers`
+    );
+  return w.valueFacts(node, { kind: 'list', element: { kind } });
 }
 
 /**
@@ -4713,6 +4943,12 @@ function comprehensionRule(
   w: FragmentWalker<ScalarRepresentation>
 ): FragmentFacts<ScalarRepresentation> {
   const parts = comprehensionParts(node);
+  // The general form: several generators, a list, a range with a step.
+  if (parts === undefined && isFunction(node, 'Comprehension')) {
+    const general = comprehensionClauses(node);
+    if ('clauses' in general)
+      return generalComprehensionRule(node, general.clauses, scope, context, w);
+  }
   if (parts === undefined || !isFunction(node))
     return w.refuse(
       node,
@@ -5174,6 +5410,25 @@ function structuredValueParts(
       indexes: [{ index: parts.index, bounds: [parts.from, parts.to] }],
       inner:
         parts.guard === undefined ? [parts.body] : [parts.guard, parts.body],
+    };
+  // The general form (`comprehensionClauses()`): the source of each
+  // generator with the indexes before it, then the filters and the body
+  // with every index; a filter reads no later index (refused there).
+  const general =
+    node.operator === 'Comprehension' ? comprehensionClauses(node) : undefined;
+  if (general !== undefined && 'clauses' in general)
+    return {
+      outer: [],
+      indexes: general.clauses.map((c) => ({
+        index: c.index,
+        bounds: c.kind === 'range' ? [...c.source.ops] : [c.source],
+      })),
+      inner: [
+        ...general.clauses.flatMap((c) =>
+          c.guard === undefined ? [] : [c.guard]
+        ),
+        node.op1,
+      ],
     };
   // A head with a function operand (`functionOperandRule()`): its other
   // operands, then the body of a function literal with its parameters
@@ -9474,6 +9729,7 @@ function isAdmittedOperator(node: Expression, admission: Admission): boolean {
  */
 function effectFact(node: Expression): EffectFact {
   if (!isFunction(node)) return 'pure';
+  if (isReturnNode(node)) return 'pure';
   const effects = shallowApplicationEffects(node);
   if (effects === 'any') return 'unknown';
   return isPureComputedEffects(effects) ? 'pure' : 'effectful';
@@ -9524,6 +9780,8 @@ function stateFacts(
     for (const node of scope.facts.keys()) {
       if (result.has(node) || !isFunction(node)) continue;
       if (hosts?.bindings.has(`call:${node.operator}`)) continue;
+      // `Return(v)` in tail position is its value (`isReturnNode()`).
+      if (isReturnNode(node)) continue;
       const effects = shallowApplicationEffects(node);
       if (isPureComputedEffects(effects)) continue;
       const test =
@@ -11597,9 +11855,30 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         storedBound = outerBound;
       }
     };
+    /** The `Return` nodes of the expression out of tail position
+     *  (`nonTailReturns()`), computed at the first `Return`. */
+    let rootNotTail: Set<Expression> | undefined;
     const checkNode = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
+      // `Return(v)` in tail position of the expression (the root, the value
+      // of a block of one value there, a branch of an `If` there) is its
+      // value `v`, as the existing emitter writes it (`_.y + 1` for
+      // `Return(y + 1)`).
+      if (structured && isReturnNode(node)) {
+        const ops = (node as Expression & { ops: readonly Expression[] }).ops;
+        if (
+          ops.length !== 1 ||
+          !isTailOf(prepared.expr, node) ||
+          (rootNotTail ??= nonTailReturns(prepared.expr)).has(node)
+        )
+          throw new Error(
+            `JS scalar fragment: the structured route admits a Return only in ` +
+              `tail position, where it is the value of the expression, and not ` +
+              `${nodeText(node)}`
+          );
+        return check(ops[0]);
+      }
       // A calculus node is the expression that replaces it
       // (`closedFormReplacement()`); a definite integral with no closed
       // form is checked as itself, its variables bound as indexes
@@ -13434,7 +13713,8 @@ function checkLocalWrites(
     }
     // A `Break` writes no local, and neither does the definition of a local
     // function (`LocalFunction`).
-    if (statement.operator === 'Break') return;
+    if (statement.operator === 'Break' || statement.operator === 'Continue')
+      return;
     if (localFunctionStatement(statement) !== undefined) return;
     if (!isSymbol(statement.op1)) return;
     const name = statement.op1.symbol;
@@ -13575,6 +13855,25 @@ function admitFunctionBody(
       : undefined;
   const statements = block?.ops.slice(0, -1) ?? [];
   const bodyValue = block?.ops[block.nops - 1] ?? body;
+  /** The nodes in tail position of the body, whose value is the value of
+   *  the function: the value of the body, the branches of an `If` and the
+   *  value of a `Block` in tail position, and the operand of a `Return`
+   *  there. */
+  const tails = new Set<Expression>();
+  const addTail = (n: Expression): void => {
+    if (tails.has(n)) return;
+    tails.add(n);
+    if (isFunction(n, 'If') && n.nops === 3) {
+      addTail(n.op2);
+      addTail(n.op3);
+    } else if (isFunction(n, 'Block') && n.nops > 0)
+      addTail(n.ops[n.nops - 1]);
+    else if (isFunction(n, 'Return') && n.nops === 1) addTail(n.op1);
+  };
+  if (!expressionRoot) addTail(bodyValue);
+  /** The `Return` nodes that the body reaches on a path that is not in
+   *  tail position: one node object can be in both places. */
+  const notTail = nonTailReturns(body);
   // The declared type of each local, by its name: `let` for a local of the
   // form `Declare(t, {value: …})`, which has the type of its value.
   const locals = new Map<string, string>();
@@ -13691,7 +13990,14 @@ function admitFunctionBody(
             `in the structured route, which holds a list of booleans only as ` +
             `a value (a condition, an operand of At or Length), not in a local`
         );
-      throw new Error('JS scalar fragment: unsupported local declaration');
+      throw new Error(
+        `JS scalar fragment: unsupported local declaration${
+          admission.structured && declared !== undefined
+            ? ` of ${local} with the type ${declared}, which is not a type ` +
+              `of a local of the structured route`
+            : ''
+        }`
+      );
     }
     return {
       local,
@@ -13750,6 +14056,9 @@ function admitFunctionBody(
   const indexPositions = new Set<Expression>();
   /** The index of each loop around the current statement. */
   const indices = new Set<string>();
+  /** The number of loops around the current statement, also of a loop with
+   *  no index set, where a `Break` is admitted. */
+  let loopDepth = 0;
   /** The function nodes that `checkValue()` reached, with the contexts
    *  (`valueContext()`) in which each was admitted: a node object reached
    *  again on another path, in a context in which it was admitted, is not
@@ -13772,15 +14081,19 @@ function admitFunctionBody(
    *  statements: its check reads and writes the facts of the writes
    *  (`checkWrite()`: `lengthWritten`, `notLength`, `writtenClasses`) and
    *  the declarations, which the context of `valueContext()` does not hold,
-   *  so `checkValue()` checks such a node at each path. Each node object is
-   *  visited once. */
+   *  so `checkValue()` checks such a node at each path; and a node that
+   *  holds a `Return`, whose admission depends on its place. Each node
+   *  object is visited once. */
   const statementBlocks = new Map<Expression, boolean>();
   const holdsStatementBlock = (node: Expression): boolean => {
     if (!isFunction(node)) return false;
     let holds = statementBlocks.get(node);
     if (holds === undefined) {
+      // A `Return` too: the check reads its place (`tails`), which the
+      // context does not hold.
       holds =
         (isFunction(node, 'Block') && node.nops > 1) ||
+        isReturnNode(node) ||
         node.ops.some(holdsStatementBlock);
       statementBlocks.set(node, holds);
     }
@@ -13829,6 +14142,24 @@ function admitFunctionBody(
       ? decidedBranch(node, boundInBody)
       : undefined;
     if (decided !== undefined) return checkValue(decided, bodyValue);
+    // `Return(v)` in tail position of the body (`tails`) is its value `v`,
+    // as the existing emitter writes it (`(x) => x + 1` for `Return(x +
+    // 1)`, a `return` in each branch of a tail `If`). Elsewhere it ends the
+    // function before its end, which the structured route does not write.
+    if (
+      admission.structured &&
+      isReturnNode(node)
+    ) {
+      const ops = (node as Expression & { ops: readonly Expression[] }).ops;
+      if (ops.length !== 1 || !tails.has(node) || notTail.has(node))
+        throw new Error(
+          `JS scalar fragment: the structured route admits a Return only in ` +
+            `tail position of a function body (its value, or a branch of an ` +
+            `If there), where it is the value of the function, and not ` +
+            `${nodeText(node)}`
+        );
+      return checkValue(ops[0], bodyValue);
+    }
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     refuseUndirectedInfinity(node, admission);
@@ -14221,15 +14552,25 @@ function admitFunctionBody(
    * an `If` whose two branches end in `Break`, and a loop body that always
    * ends in `Break`. A `Break` in a value is not a statement, and the value
    * check refuses it.
+   *
+   * `slot`: the position of this occurrence of the statement, passed down
+   * the walk (a node object can be in several positions): the body of a
+   * `Loop` (`loop-body`), a statement of that body when it is a `Block`
+   * (`loop-statement`), a branch of an `If` in one of these two positions
+   * (`branch`), the last statement of such a branch when it is a `Block`
+   * (`branch-end`). A `Continue` is admitted only as a `branch` or a
+   * `branch-end`, the positions that the lowering rewrites
+   * (`Lowering.ifStatement()`).
    */
   const checkStructuredStatement = (
     statement: Expression,
     place: 'top' | 'branch' | 'loop',
     inBlock: boolean,
-    owner?: Expression
+    owner?: Expression,
+    slot?: StatementSlot
   ): void =>
     atNode(statement, () =>
-      checkStructuredStatementNode(statement, place, inBlock, owner)
+      checkStructuredStatementNode(statement, place, inBlock, owner, slot)
     );
   /** `owner`: the block of which `statement` is a statement, where a first
    *  write to a name that the block binds declares the name
@@ -14238,7 +14579,8 @@ function admitFunctionBody(
     statement: Expression,
     place: 'top' | 'branch' | 'loop',
     inBlock: boolean,
-    owner?: Expression
+    owner?: Expression,
+    slot?: StatementSlot
   ): void => {
     const head = isFunction(statement)
       ? statement.operator
@@ -14248,6 +14590,16 @@ function admitFunctionBody(
       : undefined;
     if (localFunction !== undefined)
       return checkLocalFunction(statement, localFunction, place, owner);
+    // A destructuring declaration or write (`Declare((a, b), {value: v})`,
+    // `(a, b) ≔ v`), on the structured route.
+    const pattern =
+      admission.structured &&
+      (isFunction(statement, 'Declare') || isFunction(statement, 'Assign')) &&
+      isLibraryOperator(statement, statement.operator)
+        ? tuplePatternNames(statement.op1)
+        : undefined;
+    if (pattern !== undefined && (inBlock || statement.operator === 'Assign'))
+      return checkDestructuring(statement as Expression & { ops: readonly Expression[] }, pattern);
     if (isFunction(statement, 'Declare') && inBlock) {
       const declared = declareLocal(statement);
       declarations.push({ node: statement, name: declared.local });
@@ -14330,8 +14682,12 @@ function admitFunctionBody(
     ) {
       checkValue(statement.op1);
       checkCondition(statement, conditionContext);
+      const branchSlot =
+        slot === 'loop-body' || slot === 'loop-statement' ? 'branch' : undefined;
       for (const branch of statement.ops.slice(1))
-        nested(() => checkStructuredStatement(branch, 'branch', false));
+        nested(() =>
+          checkStructuredStatement(branch, 'branch', false, undefined, branchSlot)
+        );
       return;
     }
     // A block statement: also a statement of the body (`Block(Block(…))`,
@@ -14347,7 +14703,17 @@ function admitFunctionBody(
               'JS scalar fragment: the structured route admits no statement after a Break, ' +
                 'or after an If whose two branches end in Break'
             );
-          checkStructuredStatement(inner, place, true, statement);
+          checkStructuredStatement(
+            inner,
+            place,
+            true,
+            statement,
+            slot === 'loop-body'
+              ? 'loop-statement'
+              : slot === 'branch' && i === statement.nops - 1
+                ? 'branch-end'
+                : undefined
+          );
         });
       });
       return;
@@ -14359,9 +14725,30 @@ function admitFunctionBody(
       isLibraryOperator(statement, 'Break') &&
       statement.nops === 0 &&
       place === 'branch' &&
-      indices.size > 0
+      loopDepth > 0
     )
       return;
+    // A `Continue` that ends a branch of an `If` of the body of a loop: the
+    // statements of the body after the `If` run in the other branch, as the
+    // existing emitter's `continue` skips them.
+    if (
+      isFunction(statement, 'Continue') &&
+      isLibraryOperator(statement, 'Continue') &&
+      statement.nops === 0 &&
+      (slot === 'branch' || slot === 'branch-end')
+    )
+      return;
+    if (
+      admission.structured &&
+      isFunction(statement, 'Continue') &&
+      isLibraryOperator(statement, 'Continue')
+    )
+      throw new Error(
+        'JS scalar fragment: the structured route admits a Continue only as the ' +
+          'last statement of a branch of an If that is a statement of the body ' +
+          'of a Loop, where the statements of the body after the If run in the ' +
+          'other branch'
+      );
     if (isFunction(statement, 'Break') && place === 'loop')
       throw new Error(
         'JS scalar fragment: the structured route admits a Break only as the last ' +
@@ -14377,80 +14764,162 @@ function admitFunctionBody(
     );
   };
   /**
-   * A `Loop` statement: `Loop(body, Element(k, Range(a, b)))`, with bounds
-   * of the type `integer` and an index that names no parameter, local or
-   * other index. The interpreter evaluates the bounds once and visits each
-   * integer from `a` to `b`, in steps of -1 when `b` is less than `a`.
-   * `Loop(body, Element(c, L))` over a value `L` that is not a `Range` (a
-   * list, `for c in all`) visits each element of `L`, evaluated once; the
-   * rule of the pass (`loopRule`) admits a list of numbers or of tuples. A
-   * loop with no index set, with a step or a guard, or over another
-   * collection is refused.
+   * A destructuring declaration `Declare((a, b), {value: v})` (or with the
+   * type `unknown`), or a destructuring write `(a, b) ≔ v`, of the names
+   * `names`: the value is a literal tuple, or the call of a user function
+   * whose value is a tuple of reals (the rule of the pass,
+   * `isDestructurableValue()`). The existing emitter evaluates every
+   * component, in order, before it writes a name (`_tv1 = b; _tv2 = a + b;
+   * a = _tv1; b = _tv2`), and reads the components of a call with
+   * `_SYS.at` (`destructureViaTemp()`). A declaration declares each name as
+   * a `let` local of the type of its component; a write writes declared
+   * locals only (the existing compiler declines a write to another name).
+   */
+  const checkDestructuring = (
+    statement: Expression & { ops: readonly Expression[] },
+    pattern: readonly string[]
+  ): void => {
+    const declaration = statement.operator === 'Declare';
+    const value = declaration
+      ? declareValueOperand(statement.ops)
+      : statement.ops[1];
+    const type = declaration ? declareTypeOperand(statement.ops) : undefined;
+    if (
+      value === undefined ||
+      (declaration &&
+        type !== undefined &&
+        declaredTypeSource(type) !== 'unknown') ||
+      (declaration && statement.ops.length > 3)
+    )
+      throw new Error(
+        `JS scalar fragment: the destructuring declaration ${nodeText(statement)} ` +
+          `is not in the structured route, which admits a declaration with a ` +
+          `value and no type, or the type unknown`
+      );
+    if (new Set(pattern).size !== pattern.length)
+      throw new Error(
+        `JS scalar fragment: the destructuring ${declaration ? 'declaration' : 'write'} ` +
+          `has a name at more than one position`
+      );
+    // The check of the writes to a local of the `complex` mode
+    // (`checkLocalWrites()`) reads a write of one name.
+    if (named.structured?.mode === 'complex')
+      throw new Error(
+        `JS scalar fragment: the destructuring ${declaration ? 'declaration' : 'write'} ` +
+          `${nodeText(statement)} is not in the structured route in the complex mode`
+      );
+    checkValue(value);
+    const components = isFunction(value, 'Tuple') ? value.ops : undefined;
+    for (const [i, name] of pattern.entries()) {
+      if (declaration) {
+        if (
+          parameters.includes(name) ||
+          locals.has(name) ||
+          names.has(name) ||
+          name === 'True' ||
+          name === 'False'
+        )
+          throw new Error(
+            `JS scalar fragment: the local ${name} has the name of a parameter, ` +
+              `an input, an index or a local declared before it: the structured ` +
+              `route admits no redeclaration and no shadowing of a name`
+          );
+        declarations.push({ node: statement, name });
+        locals.set(name, 'let');
+        writtenClasses.delete(name);
+      } else {
+        if (indices.has(name))
+          throw new Error(
+            `JS scalar fragment: the structured route admits no write to the loop index ${name}`
+          );
+        if (!locals.has(name) || !names.has(name))
+          throw new Error(
+            `JS scalar fragment: only writes to a declared local are supported, ` +
+              `and ${name} is ` +
+              (parameters.includes(name)
+                ? 'a parameter'
+                : 'not a local declared before the write')
+          );
+      }
+      if (components !== undefined && components.length === pattern.length)
+        checkWrite(components[i], name);
+      else notLength.add(name);
+    }
+    if (declaration) for (const name of pattern) names.add(name);
+  };
+  /**
+   * A `Loop` statement over zero, one or more index sets
+   * (`loopClauseKind()`). Each index set is `Element(k, Range(a, b))`, with
+   * bounds of the type `integer`, or `Element(c, V)` over a list value `V`
+   * (a name, a list literal, a `Range` with a step, a function of lists):
+   * the interpreter evaluates the bounds or the list once, and visits each
+   * integer from `a` to `b`, in steps of -1 when `b` is less than `a`, or
+   * each element of `V`; the rule of the pass (`loopRule`) admits a list of
+   * numbers or of tuples. Each index names no parameter, local or other
+   * index. Several index sets are nested loops, the first outermost, and the
+   * bounds or the list of an index set read the indexes before it, as the
+   * existing emitter writes them (`compileElementLoops()`); a `Break` of the
+   * body then declines, as there (`assertBreakLeavesWholeLoop()`): it leaves
+   * the whole loop in the interpreter and the innermost loop in the code.
+   * With no index set, `Loop(body)` runs until a `Break`, or until the
+   * iteration budget stops it. A guard, or another collection, is refused.
    */
   const checkLoop = (
     loop: Expression & { ops: readonly Expression[] }
   ): void => {
-    const spec = loop.ops[1];
-    if (loop.ops.length !== 2)
+    const clauses = loop.ops.slice(1);
+    if (clauses.length > 1 && breaksLoop(loop.ops[0]))
       throw new Error(
-        'JS scalar fragment: the structured route admits a Loop only with one index set, ' +
-          'Element(k, Range(a, b))'
-      );
-    // `Element` and `Range` are the operators of the library: a user
-    // function of one of these names is not an index set.
-    const overList =
-      isFunction(spec, 'Element') &&
-      isLibraryOperator(spec, 'Element') &&
-      spec.nops === 2 &&
-      isSymbol(spec.op1) &&
-      !isFunction(spec.op2, 'Range') &&
-      isSymbol(spec.op2) &&
-      isSubtype(spec.op2.type.type, 'list');
-    if (
-      !overList &&
-      (!isFunction(spec, 'Element') ||
-        !isLibraryOperator(spec, 'Element') ||
-        spec.nops !== 2 ||
-        !isSymbol(spec.op1) ||
-        !isFunction(spec.op2, 'Range') ||
-        !isLibraryOperator(spec.op2, 'Range') ||
-        spec.op2.nops !== 2)
-    )
-      throw new Error(
-        `JS scalar fragment: the structured route admits a Loop only over ` +
-          `Element(k, Range(a, b)), with no step and no guard, or over a list ` +
-          `that a name holds, and not over ${nodeText(spec)}`
-      );
-    if (overList) checkValue(spec.op2);
-    else
-      for (const bound of (
-        spec.op2 as Expression & { ops: readonly Expression[] }
-      ).ops) {
-        indexPositions.add(bound);
-        checkValue(bound);
-        // A bound computed from the length of a list with integer arithmetic
-        // (`integerFromListLength()`), which the engine does not type
-        // `integer`: the rule that `loopBoundFromFact` reads in the pass, with
-        // the length locals as the integer names.
-        if (!fromLength(bound) && !isSubtype(bound.type.type, 'integer'))
-          throw new Error(
-            `JS scalar fragment: the bound ${nodeText(bound)} of a Loop does not have the type integer`
-          );
-      }
-    const index = spec.op1.symbol;
-    if (
-      names.has(index) ||
-      locals.has(index) ||
-      index === 'True' ||
-      index === 'False'
-    )
-      throw new Error(
-        `JS scalar fragment: the loop index ${index} has the name of a parameter, a local or another index`
+        'JS scalar fragment: the structured route admits no Break inside a Loop ' +
+          'over several index sets: it leaves the whole loop in the interpreter, ' +
+          'and the existing compiler declines it'
       );
     nested(() => {
-      names.add(index);
-      indices.add(index);
-      checkStructuredStatement(loop.ops[0], 'loop', false);
+      for (const spec of clauses) {
+        const kind = loopClauseKind(spec);
+        if (kind === undefined)
+          throw new Error(
+            `JS scalar fragment: the structured route admits a Loop only over ` +
+              `Element(k, Range(a, b)) or the elements of a list, with no ` +
+              `guard, and not over ${nodeText(spec)}`
+          );
+        const source = (spec as Expression & { op2: Expression }).op2;
+        if (kind === 'list') checkValue(source);
+        else
+          for (const bound of (
+            source as Expression & { ops: readonly Expression[] }
+          ).ops) {
+            indexPositions.add(bound);
+            checkValue(bound);
+            // A bound computed from the length of a list with integer
+            // arithmetic (`integerFromListLength()`), which the engine does
+            // not type `integer`: the rule that `loopBoundFromFact` reads in
+            // the pass, with the length locals as the integer names.
+            if (!fromLength(bound) && !isSubtype(bound.type.type, 'integer'))
+              throw new Error(
+                `JS scalar fragment: the bound ${nodeText(bound)} of a Loop does not have the type integer`
+              );
+          }
+        const index = (spec as Expression & { op1: Expression & { symbol: string } })
+          .op1.symbol;
+        if (
+          names.has(index) ||
+          locals.has(index) ||
+          index === 'True' ||
+          index === 'False'
+        )
+          throw new Error(
+            `JS scalar fragment: the loop index ${index} has the name of a parameter, a local or another index`
+          );
+        names.add(index);
+        indices.add(index);
+      }
+      loopDepth += 1;
+      try {
+        checkStructuredStatement(loop.ops[0], 'loop', false, undefined, 'loop-body');
+      } finally {
+        loopDepth -= 1;
+      }
     });
     if (exits(loop.ops[0]))
       throw new Error(
@@ -14858,12 +15327,13 @@ function boundNames(
   seen.add(statement);
   if (statement.operator === 'Declare' && isSymbol(statement.op1))
     names.push(statement.op1.symbol);
-  if (
-    statement.operator === 'Loop' &&
-    isFunction(statement.op2, 'Element') &&
-    isSymbol(statement.op2.op1)
-  )
-    names.push(statement.op2.op1.symbol);
+  // A destructuring declaration declares each name of its pattern.
+  if (statement.operator === 'Declare')
+    names.push(...(tuplePatternNames(statement.op1) ?? []));
+  if (statement.operator === 'Loop')
+    for (const spec of statement.ops.slice(1))
+      if (isFunction(spec, 'Element') && isSymbol(spec.op1))
+        names.push(spec.op1.symbol);
   if (statement.operator === 'Block')
     for (const s of statement.ops)
       if (
@@ -14874,6 +15344,142 @@ function boundNames(
         names.push(s.op1.symbol);
   for (const s of statement.ops) boundNames(s, names, seen);
   return names;
+}
+
+/** The position of an occurrence of a statement in the body of a `Loop`,
+ *  where a `Continue` is admitted (`checkStructuredStatement()`). */
+type StatementSlot = 'loop-body' | 'loop-statement' | 'branch' | 'branch-end';
+
+/**
+ * The `Return` nodes of `root` that a path from `root` reaches where it is
+ * not in tail position (`isTailOf()`): an operand, a condition, a statement
+ * of a block that is not its last. A node object can be reached on several
+ * paths; each node is visited at most once in each of the two places.
+ */
+function nonTailReturns(root: Expression): Set<Expression> {
+  const found = new Set<Expression>();
+  const seen = [new Set<Expression>(), new Set<Expression>()];
+  const visit = (n: Expression, tail: boolean): void => {
+    if (!isFunction(n)) return;
+    const s = seen[tail ? 1 : 0];
+    if (s.has(n)) return;
+    s.add(n);
+    const ret = isReturnNode(n);
+    if (ret && !tail) found.add(n);
+    n.ops.forEach((op, i) => {
+      const inTail =
+        tail &&
+        ((n.operator === 'If' && n.nops === 3 && i > 0) ||
+          (n.operator === 'Block' && i === n.nops - 1) ||
+          (ret && i === 0));
+      visit(op, inTail);
+    });
+  };
+  visit(root, true);
+  return found;
+}
+
+/** The names of the symbols of `node`, each node visited once (a node can
+ *  be an operand of several nodes). */
+function symbolsOnce(node: Expression): Set<string> {
+  const names = new Set<string>();
+  const seen = new Set<Expression>();
+  const visit = (n: Expression) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (isSymbol(n)) names.add(n.symbol);
+    else if (isFunction(n)) for (const op of n.ops) visit(op);
+  };
+  visit(node);
+  return names;
+}
+
+/** Whether `node` is `Return(…)`: `Return` has no definition in the
+ *  library, and a definition is a user function of the name. */
+function isReturnNode(node: Expression): boolean {
+  return (
+    isFunction(node, 'Return') &&
+    node.engine.lookupDefinition('Return') === undefined
+  );
+}
+
+/** Whether `node` is in tail position of `root`: `root` itself, a branch
+ *  of an `If` of three operands in tail position, the last operand of a
+ *  `Block` or the operand of a `Return` in tail position. */
+function isTailOf(
+  root: Expression,
+  node: Expression,
+  seen: Set<Expression> = new Set()
+): boolean {
+  if (root === node) return true;
+  // Each node once: both branches of an `If` can be one node.
+  if (seen.has(root)) return false;
+  seen.add(root);
+  if (isFunction(root, 'If') && root.nops === 3)
+    return isTailOf(root.op2, node, seen) || isTailOf(root.op3, node, seen);
+  if (isFunction(root, 'Block') && root.nops > 0)
+    return isTailOf(root.ops[root.nops - 1], node, seen);
+  if (isFunction(root) && isReturnNode(root) && root.nops === 1)
+    return isTailOf(root.op1, node, seen);
+  return false;
+}
+
+/** The names of the pattern `pattern` of a destructuring declaration or
+ *  write, a `Tuple` of two or more names, or `undefined`. */
+function tuplePatternNames(pattern: Expression): string[] | undefined {
+  if (
+    !isFunction(pattern, 'Tuple') ||
+    pattern.nops < 2 ||
+    !pattern.ops.every((p) => isSymbol(p))
+  )
+    return undefined;
+  return pattern.ops.map((p) => (p as Expression & { symbol: string }).symbol);
+}
+
+/**
+ * The kind of the index set `spec` of a `Loop` or of a `Comprehension` on
+ * the structured route, or `undefined` for another form: `range` for
+ * `Element(k, Range(a, b))`, a counted loop; `list` for `Element(c, V)`
+ * over a value `V` of a list type that is not such a range (a name, a list
+ * literal, a `Range` with a step, a function of lists), whose elements the
+ * loop visits. With `guard`, also `Element(k, …, guard)`. `Element` and
+ * `Range` are the operators of the library: a user function of one of
+ * these names is not an index set.
+ */
+function loopClauseKind(
+  spec: Expression,
+  guard = false
+): 'range' | 'list' | undefined {
+  if (
+    !isFunction(spec, 'Element') ||
+    !isLibraryOperator(spec, 'Element') ||
+    !(spec.nops === 2 || (guard && spec.nops === 3)) ||
+    !isSymbol(spec.op1)
+  )
+    return undefined;
+  if (
+    isFunction(spec.op2, 'Range') &&
+    isLibraryOperator(spec.op2, 'Range') &&
+    spec.op2.nops === 2
+  )
+    return 'range';
+  // A `ParallelDomain` is the domain of a parallel loop, not a list.
+  if (isFunction(spec.op2, 'ParallelDomain')) return undefined;
+  return isSubtype(spec.op2.type.type, 'list') ? 'list' : undefined;
+}
+
+/** Whether `body`, the body of a loop, holds a `Break` of that loop: one
+ *  that no nested `Loop` and no `Function` literal owns. */
+function breaksLoop(
+  body: Expression,
+  seen: Set<Expression> = new Set()
+): boolean {
+  // Each node once: a node can be an operand of several nodes.
+  if (!isFunction(body) || seen.has(body)) return false;
+  seen.add(body);
+  if (body.operator === 'Break') return true;
+  if (body.operator === 'Loop' || body.operator === 'Function') return false;
+  return body.ops.some((op) => breaksLoop(op, seen));
 }
 
 /**
@@ -15853,6 +16459,19 @@ function collectStructuredHelper(
       withLocalFunctions(target, registry)
     );
   }
+  // A helper with a parameter with a default value is called with every
+  // argument: the engine completes the call when it boxes it.
+  const helper = registry.helpers.get(name)!;
+  if (
+    isFunction(helper.literal) &&
+    helper.literal.ops.slice(1).some((p) => isFunction(p, 'Optional')) &&
+    node.nops !== helper.fragment.parameters.length
+  )
+    throw new Error(
+      `JS scalar fragment: the call ${nodeText(node)} leaves out a parameter ` +
+        `with a default value of the helper ${name}, which the structured ` +
+        `route does not fill`
+    );
   if (registry.mode === 'complex') refuseRangeSpecialization(node);
   refuseListWidthArgument(node);
   named.calls.add(node);
@@ -16911,10 +17530,20 @@ function resolveHelper(
         'types (it has a type parameter with no bound, or a type that is ' +
         'not a function signature)'
     );
-  if (signature?.optArgs?.length)
+  // On the structured route, a parameter with a default value is an
+  // ordinary parameter: the engine completes each call when it boxes it
+  // (`f(3)` is `f(3, 2)`), and the existing compiler passes every argument
+  // (`_fn_f(_.x, 2)`). A call that leaves it out declines
+  // (`collectStructuredHelper()`).
+  if (signature?.optArgs?.length && registry === undefined)
     throw new Error(
       `JS scalar fragment: the helper ${call.operator} has an optional parameter`
     );
+  /** The declared parameters of the signature, the optional ones last. */
+  const signatureArgs = [
+    ...(signature?.args ?? []),
+    ...(registry === undefined ? [] : (signature?.optArgs ?? [])),
+  ];
   if (signature?.variadicArg)
     throw new Error(
       `JS scalar fragment: the helper ${call.operator} has a variadic parameter`
@@ -16972,7 +17601,13 @@ function resolveHelper(
   /** For each parameter, whether it is declared `number` in the `complex`
    *  mode, where it is complex (`declaredNumberKind()`). */
   const wide: boolean[] = [];
-  for (const parameter of literal.ops.slice(1)) {
+  for (const literalParameter of literal.ops.slice(1)) {
+    // A parameter with a default value, `Optional(k, d)`, is the parameter
+    // `k` on the structured route (above).
+    const parameter =
+      registry !== undefined && isFunction(literalParameter, 'Optional')
+        ? literalParameter.op1
+        : literalParameter;
     const name = functionLiteralParameterName(parameter);
     const type = functionLiteralParameterType(parameter);
     // A parameter with no annotation whose type in the declared signature is
@@ -16985,7 +17620,7 @@ function resolveHelper(
       !inferred &&
       !functionTyped &&
       !isFunction(parameter) &&
-      signature?.args?.[parameters.length]?.type === 'unknown';
+      signatureArgs[parameters.length]?.type === 'unknown';
     const defaultType = inferred
       ? defaultedParameterKind(parameter, registry)
       : unknownInSignature
@@ -17010,7 +17645,7 @@ function resolveHelper(
       defaultType === undefined &&
       type === undefined &&
       !isFunction(parameter)
-        ? signature?.args?.[parameters.length]?.type
+        ? signatureArgs[parameters.length]?.type
         : undefined;
     if (
       signatureType !== undefined &&
@@ -17065,7 +17700,7 @@ function resolveHelper(
     // A helper declared `function`: the annotation is the declared type.
     const declared = functionTyped
       ? type
-      : signature!.args?.[parameters.length]?.type;
+      : signatureArgs[parameters.length]?.type;
     const declaredScalar = defaultType ?? typeOf(declared, name);
     defaulted.push(defaultType !== undefined);
     const effective = fromSignature ? signatureType : type;
@@ -17092,7 +17727,11 @@ function resolveHelper(
       scalar.kind === 'list' ? elementLabel(type) : undefined
     );
   }
-  if (!functionTyped && (signature!.args?.length ?? 0) !== parameters.length)
+  if (
+    !functionTyped &&
+    (registry === undefined ? (signature!.args?.length ?? 0) : signatureArgs.length) !==
+      parameters.length
+  )
     throw new Error('JS scalar fragment: helper signature arity differs');
   // The compiled code is in radians: on the structured route the body of
   // the helper is rewritten for the angular unit of the engine, as the

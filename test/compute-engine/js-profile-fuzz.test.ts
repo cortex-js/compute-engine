@@ -159,10 +159,43 @@ test('the generator writes the forms of slices 4 and 5', () => {
   };
   for (let i = 0; i < 3000; i++)
     visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: DEFAULT_OPTIONS.size }).json);
+  // A block of statements is larger than most programs of the default size:
+  // some programs of the size 100 (`--size 100`) too.
+  for (let i = 0; i < 1000; i++)
+    visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: 100 }).json);
   for (const form of [
     'Range with a step', 'RotateLeft', 'RotateRight', 'ListJoin', 'a list of tuples',
     'a user function of a fold', 'a user predicate', 'Map of a user function',
     'a loop over a list', 'a local list of tuples', 'Map to tuples',
+  ])
+    expect([form, forms.has(form)]).toEqual([form, true]);
+});
+
+test('the generator writes the statement and loop forms', () => {
+  // Loops over two index sets or none, `Continue`, comprehensions with two
+  // generators or over a list, destructuring declarations and writes, and
+  // helpers with a default value or a `Continue` (`fdf`, `fdu`, `fcw`).
+  const forms = new Set<string>();
+  const visit = (json: unknown): void => {
+    if (!Array.isArray(json)) return;
+    const [head, ...ops] = json;
+    if (head === 'Loop' && ops.length >= 3) forms.add('a loop over two index sets');
+    if (head === 'Loop' && ops.length === 1) forms.add('a loop with no index set');
+    if (head === 'Continue') forms.add('Continue');
+    if (head === 'Comprehension' && ops.length >= 3) forms.add('a comprehension with two generators');
+    if (head === 'Comprehension' && Array.isArray(ops[1]) && ops[1][0] === 'Element' && (typeof ops[1][2] === 'string' || (Array.isArray(ops[1][2]) && ops[1][2][0] === 'List')))
+      forms.add('a comprehension over a list');
+    if ((head === 'Assign' || head === 'Declare') && Array.isArray(ops[0]) && ops[0][0] === 'Tuple') forms.add('a destructuring');
+    if (head === 'fdf' || head === 'fdu') forms.add('a helper with a default value');
+    if (head === 'fcw') forms.add('a helper with a Continue');
+    json.forEach(visit);
+  };
+  for (let i = 0; i < 1000; i++)
+    visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: 100 }).json);
+  for (const form of [
+    'a loop over two index sets', 'a loop with no index set', 'Continue',
+    'a comprehension with two generators', 'a comprehension over a list',
+    'a destructuring', 'a helper with a default value', 'a helper with a Continue',
   ])
     expect([form, forms.has(form)]).toEqual([form, true]);
 });

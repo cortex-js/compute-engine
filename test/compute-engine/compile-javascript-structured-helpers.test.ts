@@ -564,13 +564,16 @@ function f(n: integer) -> integer { a(n) }
     expect(typeof profileOutcome(root)).toBe('object');
   });
 
-  test('a statement outside the admitted list: Continue', () => {
+  // A `Continue` that ends a branch of an `If` of the loop body is admitted
+  // (compile-javascript-structured-statements.test.ts); one in a nested `If`
+  // is not.
+  test('a statement outside the admitted list: a Continue in a nested If', () => {
     declines(
       `
 function g(x: real) -> real {
   let s = 0.0
   for k in 1..5 {
-    if k == 2 { continue }
+    if k > 1 { if k == 2 { continue } }
     s = s + x
   }
   s
@@ -578,7 +581,7 @@ function g(x: real) -> real {
 function f(x: real) -> real { g(x) }
 `,
       'f',
-      /the structured route admits no statement Continue in a branch of an If/
+      /the structured route admits a Continue only as the last statement of a branch of an If that is a statement of the body of a Loop/
     );
   });
 

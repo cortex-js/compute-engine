@@ -2307,6 +2307,25 @@ function verifyLoop(
     parameters[0].representation !== integer
   )
     fail(`the index of a loop has the type ${parameters[0].type}`);
+  // A loop that tests its count has an index of the representation
+  // `number`, whose range has a last index (`IRLoop.checksCount`).
+  if (op.checksCount === true && parameters[0].representation !== 'number')
+    fail('a loop that tests its count has an index that is not a number');
+  // A loop with no end has an index that no operation reads: the code of a
+  // target writes no index for it.
+  if (op.unbounded === true) {
+    if (op.ascending === true || op.checksCount === true)
+      fail('a loop with no end is also a loop over a range');
+    const index = parameters[0].id;
+    const reads = (operations: readonly IROperation[]): boolean =>
+      operations.some(
+        (o) =>
+          o.operands.some((v) => v.id === index) ||
+          regionsOf(o).some((r) => reads(r.operations))
+      );
+    if (reads(op.body.operations))
+      fail('the index of a loop with no end is read');
+  }
   const next = yieldedValues(op.body);
   op.results.forEach((result, i) => {
     const initial = op.operands[i + 2];

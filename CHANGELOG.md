@@ -11,6 +11,54 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles more statement and loop forms.**
+  These forms declined and now compile, with the values of the existing
+  compiler:
+  - a `Loop` over several index sets, nested with the first one outermost;
+  - a `Loop` with no index set, which a `Break` ends;
+  - a `Loop` over a list value (`Element(c, Reverse(L))`) or over a range
+    with a step;
+  - a `Comprehension` with several generators, with filters, over a list
+    value, or over a range with a step, when its body, its filters and
+    its later sources are pure;
+  - a destructuring declaration or write of a literal tuple, or of the
+    tuple value of a user function (`(a, b) ≔ (b, a + b)`), in the
+    `strict` mode;
+  - `Return(v)` in tail position;
+  - `Continue` at the end of a branch of an `If` of a loop body;
+  - a user function with a parameter that has a default value.
+
+  These forms still decline, each with its cause in the message:
+  - a `Break` in a loop over several index sets, which the existing
+    compiler also declines;
+  - a `Return` or a `Continue` elsewhere;
+  - a default value of a parameter of the root `Function`;
+  - a user function that reads an input of the program
+    (`unsupported helper capture`).
+
+  ```js
+  ce.declare('n', 'integer');
+  const fib = compile(
+    ce.box([
+      'Block',
+      ['Declare', 'a', "'real'", 0],
+      ['Declare', 'b', "'real'", 1],
+      ['Loop', ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', ['Add', 'a', 'b']]],
+        ['Element', 'k', ['Range', 1, 'n']]],
+      'a',
+    ]),
+    { profile: 'numeric-kernel' }
+  );
+  fib.run({ n: 10 }); // ➔ 55
+  const pairs = compile(
+    ce.box(['Comprehension', ['Tuple', 'i', 'j'],
+      ['Element', 'i', ['Range', 1, 3]],
+      ['Element', 'j', ['Range', 'i', 3], ['Less', 'i', 'j']]]),
+    { profile: 'numeric-kernel' }
+  );
+  pairs.run({}); // ➔ [[1, 2], [1, 3], [2, 3]]
+  ```
+
 - **The `numeric-kernel` profile compiles the scalar functions of a list,
   the comparisons of a list and the selections on them.** In the `strict`
   mode these forms declined with `outside-profile` and now compile, with the

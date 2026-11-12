@@ -224,7 +224,7 @@ describe('the pass of the exit', () => {
 
   test('the emitted code: the carried variable is assigned before the break', () => {
     expect(structured().compile(new ComputeEngine().expr(json), OPTIONS).code).toBe(
-      '(n, x) => { const _tv1 = n; let _tv2 = 0, _tv3 = 0; const _tv5 = _tv1 < 1 ? -1 : 1; const _tv6 = _tv5 * (_tv1 - 1); for (let _tv7 = 0; _tv7 <= _tv6; _tv7++) { const _tv4 = _tv5 < 0 ? 1 - _tv7 : 1 + _tv7; const _tv8 = _tv4 + _tv2; if (x < _tv8) { _tv2 = _tv8; break; } _tv3 = _tv3 + 1; _tv2 = _tv8; } return 1000 * _tv3 + _tv2; }'
+      '(n, x) => { const _tv1 = n; let _tv2 = 0, _tv3 = 0; const _tv5 = _tv1 < 1 ? -1 : 1; const _tv6 = _tv5 * (_tv1 - 1); if (_tv6 > 4294967294) throw new RangeError(\'Invalid array length\'); for (let _tv7 = 0; _tv7 <= _tv6; _tv7++) { const _tv4 = _tv5 < 0 ? 1 - _tv7 : 1 + _tv7; const _tv8 = _tv4 + _tv2; if (x < _tv8) { _tv2 = _tv8; break; } _tv3 = _tv3 + 1; _tv2 = _tv8; } return 1000 * _tv3 + _tv2; }'
     );
   });
 

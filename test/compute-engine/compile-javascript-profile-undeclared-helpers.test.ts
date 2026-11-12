@@ -389,11 +389,14 @@ describe('the other signatures keep their decline, each with its message', () =>
     );
   });
 
+  // A helper with a parameter with a default value compiles: the engine
+  // completes the call `g(x)` to `g(x, 1)` when it boxes it
+  // (compile-javascript-structured-statements.test.ts).
   test('a helper with an optional parameter', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.expr(['Function', ['Add', 't', 's'], 't', ['Optional', 's', 1]] as MathJsonExpression));
     const got = profile(ce.expr(root));
-    expect('message' in got && got.message).toMatch(/the helper g has an optional parameter/);
+    expect('message' in got).toBe(false);
   });
 
   test('a declared signature with an untyped parameter of the literal: the parameter has the type of the signature', () => {

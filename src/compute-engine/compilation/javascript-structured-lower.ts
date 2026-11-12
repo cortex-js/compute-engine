@@ -1414,6 +1414,10 @@ class Lowering {
     }[];
     readonly exits: (readonly IRValue[])[];
   }[] = [];
+  /** The body of the innermost loop whose body is being lowered: in its
+   *  statements, an `If` with a branch that ends in `Continue` holds the
+   *  statements after it (`statements()`). */
+  private loopBody: Expression | undefined;
   /** The value of each local and parameter, by the scope that binds it. */
   private readonly bound = new Map<
     FragmentScope<ScalarRepresentation>,
@@ -1876,6 +1880,8 @@ class Lowering {
     // integers) for a real (a list of reals), which is a valid value of the
     // result of the function as it is.
     if (operator === 'Typed') return this.value(node.ops[0], scope, operations);
+    // `Return(v)` in tail position of a function body (the admission).
+    if (operator === 'Return') return this.value(node.ops[0], scope, operations);
 
     // A derivative or a limit with no closed form (`numericRoutine()`).
     const routine = this.prep.routines?.get(node);
@@ -2663,6 +2669,17 @@ class Lowering {
   ): IRValue {
     const [body, spec] = node.ops;
     const inner = scope.inner.get(node);
+    // The general form: several generators, a list, a range with a step.
+    if (
+      inner !== undefined &&
+      !(
+        node.ops.length === 2 &&
+        isFunction(spec, 'Element') &&
+        isFunction(spec.op2, 'Range') &&
+        spec.op2.nops === 2
+      )
+    )
+      return this.nestedBuild(node, facts, scope, inner, operations, effect);
     if (
       inner === undefined ||
       node.ops.length !== 2 ||
@@ -2808,6 +2825,138 @@ class Lowering {
       origin: node,
     });
     return result;
+  }
+
+  /**
+   * `Comprehension(body, g_1, …, g_n)` of the general form, which the rule
+   * of `Comprehension` checked (`comprehensionClauses()` in
+   * `javascript-fragment-target.ts`): the code of the existing emitter
+   * (`compileComprehension()` and `compileElementLoops()` in
+   * `compile-loops.ts`), `const result = []; for (…) { for (…) { if (filter)
+   * result.push(body); } }`. One `loop` per generator, the first
+   * outermost, each carrying the list from the empty `list`: the source of
+   * a generator is evaluated in the body of the loop before it (where the
+   * node is, for the first), once per pass there; a range visits its
+   * integers in steps of 1, or of -1 when `b < a`, and tests its count
+   * before its first pass (`checksCount`), as `compileCountedRange()`
+   * does; a list is visited from its first element (`ascending`). A filter
+   * is an `if` whose first branch runs the loops of the later generators,
+   * or `append`s the body, and whose other branch yields the list as it
+   * is. No pass is counted against the iteration budget, as on the
+   * existing emitter. The indexes are bound in the one scope `inner`.
+   */
+  private nestedBuild(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    inner: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const type = valueType(facts.type);
+    if (!isListType(type))
+      return fail(`the comprehension ${nodeText(node)} does not make a list`);
+    const body = node.ops[0];
+    const specs = node.ops.slice(1) as (Expression & {
+      ops: readonly Expression[];
+    })[];
+    const empty = this.newValue(type, 'array');
+    operations.push({
+      kind: 'list',
+      result: empty,
+      operands: [],
+      effect: 'pure',
+      origin: node,
+    });
+    this.bound.set(inner, new Map());
+    this.wrote(inner);
+    this.changed();
+    // The loop of the generator `i`, at the end of `into`, evaluated in
+    // `at`, with the list `acc` before it: the list after it.
+    const level = (
+      i: number,
+      at: FragmentScope<ScalarRepresentation>,
+      into: IROperation[],
+      acc: IRValue
+    ): IRValue => {
+      const spec = specs[i];
+      const [binder, source, guard] = spec.ops;
+      if (!isSymbol(binder) || source === undefined)
+        return fail(`no lowering for the generator ${nodeText(spec)}`);
+      const range =
+        isFunction(source, 'Range') && source.nops === 2 ? source : undefined;
+      let from: IRValue;
+      let to: IRValue;
+      let list: IRValue | undefined;
+      if (range !== undefined) {
+        [from, to] = range.ops.map((b) => {
+          const value = this.value(b, at, into);
+          if (value.type !== 'integer')
+            fail(`the bound ${nodeText(b)} of a comprehension is not an integer`);
+          return value;
+        });
+      } else {
+        list = this.value(source, at, into);
+        [from, to] = this.elementRange(list, node, into);
+      }
+      const index = this.newValue('integer', 'number');
+      const carried = this.newValue(type, 'array');
+      const bodyOperations: IROperation[] = [];
+      const next = this.inRegion(bodyOperations, () => {
+        const indexes = new Map(this.bound.get(inner) ?? []);
+        indexes.set(
+          binder.symbol,
+          list === undefined
+            ? index
+            : this.element(list, index, node, bodyOperations)
+        );
+        this.bound.set(inner, indexes);
+        this.wrote(inner);
+        this.changed();
+        const rest = (ops: IROperation[]): IRValue => {
+          if (i + 1 < specs.length) return level(i + 1, inner, ops, carried);
+          const element = this.value(body, inner, ops);
+          const appended = this.newValue(type, 'array');
+          ops.push({
+            kind: 'append',
+            result: appended,
+            operands: [carried, element],
+            effect: 'pure',
+            origin: node,
+          });
+          return appended;
+        };
+        if (guard === undefined) return rest(bodyOperations);
+        return this.conditional(
+          this.value(guard, inner, bodyOperations),
+          rest,
+          () => carried,
+          node,
+          bodyOperations
+        );
+      });
+      const region: IRRegion = {
+        ...this.region(bodyOperations, body, next),
+        parameters: [index, carried],
+      };
+      const result = this.newValue(type, 'array');
+      into.push({
+        kind: 'loop',
+        results: [result],
+        operands: [from, to, acc],
+        body: region,
+        effect: joinEffects(i === 0 ? effect : 'pure', region.effect),
+        ...touchesField(i === 0 ? this.states(node) : undefined, region.touches),
+        ...(list === undefined
+          ? testsRangeCount(source, false)
+            ? { checksCount: true as const }
+            : {}
+          : { ascending: true as const }),
+        origin: node,
+      });
+      return result;
+    };
+    return level(0, scope, operations, empty);
   }
 
   /** The literal `1` and the `length` of `list` at the end of
@@ -5759,7 +5908,8 @@ class Lowering {
     statements: readonly Expression[],
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
-    liveOut: ReadonlySet<string>
+    liveOut: ReadonlySet<string>,
+    loopBody = false
   ): boolean {
     // The names that the code after the statement `i` can read: the names
     // in the statements after it, and `liveOut`. A name that a later
@@ -5772,10 +5922,19 @@ class Lowering {
       after = new Set([...after, ...this.namesOf(statements[i])]);
     }
     let closed = false;
-    statements.forEach((s, i) => {
+    for (const [i, s] of statements.entries()) {
       if (closed) fail('a statement follows a Break');
+      // In the body of a loop, an `If` with a branch that ends in
+      // `Continue`: the statements after it run in its other branches, as
+      // the existing emitter's `continue` skips them in that branch.
+      if (loopBody && isFunction(s, 'If') && (s.nops === 2 || s.nops === 3)) {
+        if (s.ops.slice(1).some(endsInContinue))
+          return this.ifStatement(s, scope, operations, liveOut, statements.slice(i + 1), true);
+        closed = this.ifStatement(s, scope, operations, live[i], undefined, true);
+        continue;
+      }
       closed = this.statement(s, scope, operations, live[i]);
-    });
+    }
     return closed;
   }
 
@@ -5810,6 +5969,15 @@ class Lowering {
       (isFunction(node, 'Assign') && isFunction(node.op2, 'Function'))
     )
       return false;
+    // A destructuring declaration or write: every component, in order,
+    // then each name (`destructure()`).
+    if (
+      (isFunction(node, 'Declare') || isFunction(node, 'Assign')) &&
+      isFunction(node.op1, 'Tuple')
+    ) {
+      this.destructure(node, scope, operations);
+      return false;
+    }
     if (
       isFunction(node, 'Declare') &&
       initializer !== undefined &&
@@ -5867,15 +6035,24 @@ class Lowering {
     }
     if (isFunction(node, 'If') && (node.nops === 2 || node.nops === 3))
       return this.ifStatement(node, scope, operations, liveOut);
-    if (isFunction(node, 'Loop') && node.nops === 2) {
+    if (isFunction(node, 'Loop')) {
       this.loopStatement(node, scope, operations, liveOut);
       return false;
     }
     if (isFunction(node, 'Block')) {
       const inner = scope.inner.get(node);
       if (inner === undefined) return fail('no scope for a block');
-      return this.statements(node.ops, inner, operations, liveOut);
+      const body = node === this.loopBody;
+      this.loopBody = undefined;
+      return this.statements(node.ops, inner, operations, liveOut, body);
     }
+    // A `Continue` is lowered only where it ends a branch of an `If` of the
+    // body of a loop (`ifStatement()` with `loopStatement`); anywhere else
+    // dropping it would skip nothing, so it is an error of the admission.
+    if (isFunction(node, 'Continue'))
+      return fail(
+        'a Continue that is not the last statement of a branch of an If of the body of a loop'
+      );
     if (isFunction(node, 'Break') && node.nops === 0) {
       const loop = this.loops[this.loops.length - 1];
       if (loop === undefined) return fail('a Break outside a loop');
@@ -5889,6 +6066,68 @@ class Lowering {
       return true;
     }
     return fail(`no lowering for the statement ${nodeText(node)}`);
+  }
+
+  /**
+   * A destructuring declaration `Declare((a, b), {value: v})` or write
+   * `(a, b) ≔ v`, which the admission and the pass checked: the value of
+   * each component, in order, before any name has its new value, as the
+   * existing emitter writes it (`_tv1 = b; _tv2 = a + b; a = _tv1; b =
+   * _tv2`). A literal tuple gives its operands; another value (a call of a
+   * user function) is evaluated once, and each component is a `get` of it,
+   * as the existing emitter reads it with `_SYS.at`.
+   */
+  private destructure(
+    node: Expression & { ops: readonly Expression[] },
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): void {
+    const pattern = node.ops[0] as Expression & { ops: readonly Expression[] };
+    const names = pattern.ops.map((p) =>
+      isSymbol(p) ? p.symbol : fail(`the pattern ${nodeText(pattern)} is not a tuple of names`)
+    );
+    const value =
+      node.operator === 'Declare' ? declareValueOperand(node.ops) : node.ops[1];
+    if (value === undefined)
+      return fail(`the destructuring ${nodeText(node)} has no value`);
+    let components: IRValue[];
+    if (isFunction(value, 'Tuple') && value.nops === names.length)
+      components = value.ops.map((op) => this.value(op, scope, operations));
+    else {
+      const tuple = this.value(value, scope, operations);
+      if (!isTupleType(tuple.type) || tuple.type.elements.length !== names.length)
+        return fail(`the value of ${nodeText(node)} is not a tuple of ${names.length} components`);
+      const elements = tuple.type.elements;
+      components = elements.map((element, i) => {
+        const result = this.newValue(element, 'number');
+        operations.push({
+          kind: 'get',
+          position: i + 1,
+          result,
+          operands: [tuple],
+          effect: 'pure',
+          origin: node,
+        });
+        return result;
+      });
+    }
+    names.forEach((name, i) => {
+      const binder =
+        node.operator === 'Declare' ? scope : bindingScope(scope, name);
+      const binding = binder?.bindings.get(name);
+      if (
+        binder === undefined ||
+        binder === this.prep.annotation.scope ||
+        binding === undefined ||
+        !('representation' in binding)
+      )
+        return fail(`the name ${name} is not a local`);
+      let locals = this.bound.get(binder);
+      if (locals === undefined) this.bound.set(binder, (locals = new Map()));
+      locals.set(name, this.toLocal(components[i], binding, name, node, operations));
+      this.wrote(binder);
+    });
+    this.changed();
   }
 
   /** Whether the body of each function of the program can throw
@@ -6109,7 +6348,9 @@ class Lowering {
     node: Expression & { ops: readonly Expression[] },
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
-    liveOut: ReadonlySet<string>
+    liveOut: ReadonlySet<string>,
+    rest?: readonly Expression[],
+    loopStatement = false
   ): boolean {
     // The operations of the condition, kept apart until the `If` is known
     // to be lowered. Their region is not open in the branches nor after the
@@ -6119,14 +6360,32 @@ class Lowering {
       this.value(node.ops[0], scope, condition)
     );
     const before = this.snapshot();
+    // With `rest`, a branch that does not end in `Continue` runs the
+    // statements `rest` after its own, in `scope` (`statements()`).
     const branch = (statement: Expression | undefined) => {
       this.restore(before);
       const inner: IROperation[] = [];
-      const closed =
-        statement !== undefined &&
-        this.inRegion(inner, () =>
-          this.statement(statement, scope, inner, liveOut)
-        );
+      const tail =
+        rest !== undefined && !(statement !== undefined && endsInContinue(statement))
+          ? rest
+          : [];
+      const closed = this.inRegion(inner, () => {
+        const live = new Set([...liveOut, ...tail.flatMap((s) => [...this.namesOf(s)])]);
+        // `loopStatement`: the `If` is a statement of the body of a loop, and
+        // a `Continue` that ends a branch is not lowered: the branch does not
+        // run `rest` (`tail` is empty).
+        if (loopStatement && statement !== undefined && endsInContinue(statement)) {
+          if (isFunction(statement, 'Block')) {
+            const blockScope = scope.inner.get(statement);
+            if (blockScope === undefined) return fail('no scope for a block');
+            return this.statements(statement.ops.slice(0, -1), blockScope, inner, live);
+          }
+          return false;
+        }
+        if (statement !== undefined && this.statement(statement, scope, inner, live))
+          return true;
+        return this.statements(tail, scope, inner, liveOut, true);
+      });
       return { operations: inner, values: this.snapshot(), closed };
     };
     const a = branch(node.ops[1]);
@@ -6285,24 +6544,39 @@ class Lowering {
     node: Expression & { ops: readonly Expression[] },
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
-    liveOut: ReadonlySet<string>
+    liveOut: ReadonlySet<string>,
+    clause = 0
   ): void {
-    const [body, spec] = node.ops;
-    const loopScope = scope.inner.get(node);
+    // A `Loop` with several index sets is a loop per index set, the first
+    // outermost: the loop of the index set `clause` has the loop of the
+    // next one as its body. One scope of the pass binds every index; the
+    // source of the index set `clause` is evaluated in the scope of the
+    // loop of the index set before it (`scope` for the first one). A `Loop`
+    // with no index set is a loop with no end (`IRLoop.unbounded`).
+    const body = node.ops[0];
+    const clauses = node.ops.slice(1);
+    const spec = clauses[clause];
+    const loopScope = clause === 0 ? scope.inner.get(node) : scope;
+    const unbounded = clauses.length === 0;
     const overList =
       isFunction(spec, 'Element') &&
       spec.nops === 2 &&
       isSymbol(spec.op1) &&
-      !isFunction(spec.op2, 'Range');
+      !(isFunction(spec.op2, 'Range') && spec.op2.nops === 2);
     if (
       loopScope === undefined ||
-      !isFunction(spec, 'Element') ||
-      spec.nops !== 2 ||
-      !isSymbol(spec.op1) ||
-      (!overList && (!isFunction(spec.op2, 'Range') || spec.op2.nops !== 2))
+      (!unbounded &&
+        (!isFunction(spec, 'Element') ||
+          spec.nops !== 2 ||
+          !isSymbol(spec.op1) ||
+          (!overList &&
+            (!isFunction(spec.op2, 'Range') || spec.op2.nops !== 2))))
     )
       return fail(`no lowering for the loop ${nodeText(node)}`);
-    const index = spec.op1.symbol;
+    const index = unbounded
+      ? undefined
+      : (spec as Expression & { op1: Expression & { symbol: string } }).op1
+          .symbol;
     const bound = (b: Expression) => {
       const value = this.value(b, scope, operations);
       if (value.type !== 'integer')
@@ -6311,10 +6585,17 @@ class Lowering {
     };
     // The list of a loop over a list, and its length; the bounds of a loop
     // over a range.
-    const list = overList ? this.value(spec.op2, scope, operations) : undefined;
+    const source = (spec as Expression & { op2: Expression } | undefined)?.op2;
+    const list =
+      overList && source !== undefined
+        ? this.value(source, scope, operations)
+        : undefined;
     let from: IRValue;
     let to: IRValue;
-    if (list !== undefined) {
+    if (unbounded) {
+      from = this.numberLiteral(1, 'integer', node, operations);
+      to = from;
+    } else if (list !== undefined) {
       from = this.numberLiteral(1, 'integer', node, operations);
       to = this.newValue('integer', 'number');
       operations.push({
@@ -6325,7 +6606,7 @@ class Lowering {
         origin: node,
       });
     } else {
-      const range = spec.op2 as Expression & {
+      const range = source as Expression & {
         op1: Expression;
         op2: Expression;
       };
@@ -6350,6 +6631,17 @@ class Lowering {
       this.capturedNames,
       this.nameSources()
     );
+    // The source of each later index set is evaluated at each pass of this
+    // loop, after the body of the pass before: a local that the body writes
+    // and that such a source reads is carried too.
+    for (const later of clauses.slice(clause + 1))
+      for (const name of namesIn(
+        later,
+        this.names,
+        this.capturedNames,
+        this.nameSources()
+      ))
+        exposed.add(name);
     const carried = candidates.filter(
       ({ name }) => liveOut.has(name) || exposed.has(name)
     );
@@ -6377,26 +6669,49 @@ class Lowering {
         this.bound.get(binder)!.set(name, parameters[i])
       );
       const inner: IROperation[] = [];
-      this.bound.set(
-        loopScope,
-        new Map([
-          [
-            index,
-            list === undefined
-              ? indexValue
-              : this.element(list, indexValue, node, inner),
-          ],
-        ])
+      // The indexes of the index sets before this one, then this index.
+      const indexes = new Map(
+        clause === 0 ? [] : (this.bound.get(loopScope) ?? [])
       );
+      if (index !== undefined)
+        indexes.set(
+          index,
+          list === undefined
+            ? indexValue
+            : this.element(list, indexValue, node, inner)
+        );
+      this.bound.set(loopScope, indexes);
       this.wrote(loopScope);
       this.changed();
       const context = { carried, exits: [] as (readonly IRValue[])[] };
       this.loops.push(context);
-      let closed: boolean;
+      let closed = false;
       try {
-        closed = this.inRegion(inner, () =>
-          this.statement(body, loopScope, inner, carriedNames)
-        );
+        if (clause + 1 < clauses.length)
+          this.inRegion(inner, () =>
+            this.loopStatement(
+              node,
+              loopScope,
+              inner,
+              carriedNames,
+              clause + 1
+            )
+          );
+        else {
+          const outerBody = this.loopBody;
+          this.loopBody = body;
+          try {
+            closed = this.inRegion(inner, () =>
+              // An `If` that is the whole body is a statement of the body,
+              // where a branch can end in `Continue`.
+              isFunction(body, 'If') && (body.nops === 2 || body.nops === 3)
+                ? this.ifStatement(body, loopScope, inner, carriedNames, undefined, true)
+                : this.statement(body, loopScope, inner, carriedNames)
+            );
+          } finally {
+            this.loopBody = outerBody;
+          }
+        }
       } finally {
         this.loops.pop();
       }
@@ -6453,6 +6768,14 @@ class Lowering {
         iterationBudget: this.prep.iterationBudget,
         // A loop over a list runs no iteration for an empty list.
         ...(list === undefined ? {} : { ascending: true as const }),
+        ...(unbounded ? { unbounded: true as const } : {}),
+        // A range tests its count where the existing emitter's loop over a
+        // `Range` clause does (`testsRangeCount()`).
+        ...(!unbounded &&
+        list === undefined &&
+        testsRangeCount(source!, clauses.length === 1)
+          ? { checksCount: true as const }
+          : {}),
         origin: node,
       });
       return;
@@ -6646,7 +6969,11 @@ export const OPERATION_THROWS: Readonly<
   'collection': false,
   'convert': false,
   'if': false,
-  'loop': false,
+  // The test of the count of a `Range` clause (`IRLoop.checksCount`), a
+  // `RangeError` for more than 2^32 - 1 passes, as the existing emitter's
+  // loop writes it. A loop with no end (`IRLoop.unbounded`) may not
+  // terminate: an abort (`operationCanAbort()`), not a throw.
+  'loop': 'count',
   'and': false,
   'or': false,
   // A call throws when the body of its function can throw (`canThrow()`).
@@ -6879,6 +7206,7 @@ function throwsItself(op: IROperation, host = true): boolean {
         ? FUNCTION_THROWS[op.fn]
         : OPERATION_THROWS[op.kind];
   if (fact !== 'count') return fact;
+  if (op.kind === 'loop') return op.checksCount === true;
   if (FITTING_COUNTS.has(op)) return false;
   return op.kind !== 'build' || op.ascending !== true || op.counted === true;
 }
@@ -6966,6 +7294,42 @@ function bindingScope(
   return undefined;
 }
 
+/**
+ * Whether the existing emitter tests the count of the range `range` of a
+ * `Loop` or a `Comprehension` clause before its first pass
+ * (`compileCountedRange()`: `if (count > 4294967295) throw new
+ * RangeError(…)`): not when its bounds are number literals with at most
+ * 2^32 − 1 elements, and not for the single ascending range of literal
+ * bounds of a `Loop` (`single`), which it writes as a counted `for`
+ * (`isLegacyCompatibleRange()`). Another source (a list) has no such test.
+ */
+function testsRangeCount(range: Expression, single: boolean): boolean {
+  if (!isFunction(range, 'Range') || range.nops !== 2) return false;
+  const [a, b] = range.ops;
+  if (!isNumber(a) || !isNumber(b)) return true;
+  if (single && a.re <= b.re) return false;
+  return Math.abs(b.re - a.re) + 1 > 4294967295;
+}
+
+/** The names that the target `target` of a `Declare` or an `Assign`
+ *  writes: a name, or each name of a destructuring pattern `Tuple(a, b)`. */
+function patternNames(target: Expression): string[] {
+  if (isSymbol(target)) return [target.symbol];
+  if (isFunction(target, 'Tuple'))
+    return target.ops.flatMap((p) => (isSymbol(p) ? [p.symbol] : []));
+  return [];
+}
+
+/** Whether the branch `branch` of an `If` ends in `Continue`: it is
+ *  `Continue`, or a `Block` whose last statement is. */
+function endsInContinue(branch: Expression): boolean {
+  const last =
+    isFunction(branch, 'Block') && branch.nops > 0
+      ? branch.ops[branch.nops - 1]
+      : branch;
+  return isFunction(last, 'Continue') && last.nops === 0;
+}
+
 /** The names that an `Assign` of `statement` writes, in a nested block,
  *  branch or loop too. */
 function assignedNames(
@@ -6975,6 +7339,9 @@ function assignedNames(
   if (!isFunction(statement)) return names;
   if (statement.operator === 'Assign' && isSymbol(statement.op1))
     names.add(statement.op1.symbol);
+  // A destructuring write writes each name of its pattern.
+  else if (statement.operator === 'Assign')
+    for (const name of patternNames(statement.op1)) names.add(name);
   else if (statement.operator === 'Block' || statement.operator === 'If')
     for (const s of statement.ops) assignedNames(s, names);
   else if (statement.operator === 'Loop') assignedNames(statement.op1, names);
@@ -7017,14 +7384,10 @@ function exposedReads(
         return node.ops.reduce((w, s) => visit(s, w), written);
       case 'Declare':
         reads(declareValueOperand(node.ops), written);
-        return isSymbol(node.op1)
-          ? new Set([...written, node.op1.symbol])
-          : written;
+        return new Set([...written, ...patternNames(node.op1)]);
       case 'Assign':
         reads(node.op2, written);
-        return isSymbol(node.op1)
-          ? new Set([...written, node.op1.symbol])
-          : written;
+        return new Set([...written, ...patternNames(node.op1)]);
       case 'If': {
         reads(node.op1, written);
         const a = visit(node.op2, new Set(written));
@@ -7032,8 +7395,9 @@ function exposedReads(
         return new Set([...a].filter((name) => b.has(name)));
       }
       case 'Loop': {
-        // The bounds, then the body, which can run no time.
-        if (node.nops === 2) reads(node.op2, written);
+        // The bounds of each index set, then the body, which can run no
+        // time.
+        for (const spec of node.ops.slice(1)) reads(spec, written);
         visit(node.op1, new Set(written));
         return written;
       }

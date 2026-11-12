@@ -618,7 +618,9 @@ describe('canCompile() and compile() agree', () => {
             ['Declare', 's', "'real'", 0],
             [
               'Loop',
-              ['If', ['Less', 'j', 3], ['Continue']],
+              // A `Continue` in a nested `If`: the profile admits one
+              // only in an `If` of the loop body.
+              ['If', ['Less', 'j', 3], ['If', ['Less', 'j', 2], ['Continue']]],
               ['Element', 'j', ['Range', 1, 'n']],
             ],
             's',

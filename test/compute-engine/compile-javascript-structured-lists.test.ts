@@ -555,9 +555,11 @@ describe('refusals', () => {
     // `ReplaceAt` (compile-javascript-structured-heat.test.ts; design:
     // docs/plans/2026-11-10-structured-ir-loops-and-lists.md); these forms
     // stay out.
-    ['Comprehension over a list', body([L], ['At', ['Comprehension', 'x', ['Element', 'x', 'L']], 1]), /Comprehension over Element\(x, L\) is not in the structured route, which admits a comprehension over Element\(j, Range\(a, b\)\) only, and not over a list/],
+    // A comprehension over a list and one with two generators are admitted
+    // since compile-javascript-structured-statements.test.ts.
+    ['Comprehension over a string', body([L], ['At', ['Comprehension', 'x', ['Element', 'x', "'abc'"]], 1]), /Comprehension over Element\(x, "abc"\) is not in the structured route/],
     ['Comprehension with a guard that draws', body([L], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 3], ['Less', ['Random'], 0.5]]], 1]), /Comprehension with a guard whose guard or body has the node Random\(\), which is not pure, is not in the structured route/],
-    ['Comprehension with two generators', body([L], ['At', ['Comprehension', ['Add', 'j', 'm'], ['Element', 'j', ['Range', 1, 3]], ['Element', 'm', ['Range', 1, 3]]], 1]), /Comprehension with other than one generator is not in the structured route/],
+    ['Comprehension with two generators and a filter that reads a later one', body([L], ['At', ['Comprehension', ['Add', 'j', 'm'], ['Element', 'j', ['Range', 1, 3], ['Less', 'j', 'm']], ['Element', 'm', ['Range', 1, 3]]], 1]), /reads the index m of a later generator/],
     ['Comprehension of booleans', body([L], ['At', ['Comprehension', ['Less', 'j', 2], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `boolean` is not in the structured route/],
     ['Comprehension of complex numbers', body([L], ['At', ['Comprehension', ['Add', 'j', 'ImaginaryUnit'], ['Element', 'j', ['Range', 1, 3]]], 1]), /Comprehension whose body has the type `complex` is not in the structured route/],
     ['Comprehension with a real bound', body([L, typed('x', 'real')], ['At', ['Comprehension', 'j', ['Element', 'j', ['Range', 1, 'x']]], 1]), /The bound `x` of `Comprehension` does not have an integer fact/],

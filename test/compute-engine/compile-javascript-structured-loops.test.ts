@@ -577,10 +577,12 @@ describe('a loop that can abort', () => {
     expect(program.root.canAbort).toBe(true);
   });
 
-  test('with no budget, the If is pruned', () => {
+  // The count test of the range can throw (`RangeError` above 2^32 − 1
+  // passes, as the existing compiler's test), so the If is kept.
+  test('with no budget, the If is kept: the count test of its range can throw', () => {
     const ce = engine();
     const result = structured().compile(ce.expr(json), OPTIONS);
-    expect(result.code).not.toContain('for (');
+    expect(result.code).toContain('for (');
     const program = lowerStructuredFragment(structured().prepareStructured(ce.expr(json), OPTIONS));
     expect(program.root.canAbort).toBeUndefined();
   });
@@ -813,13 +815,13 @@ describe('the emitted code', () => {
 
   test('a sum of squares', () => {
     expect(code(fixture('a sum of squares'))).toBe(
-      '(n) => { const _tv1 = n; let _tv2 = 0; const _tv4 = _tv1 < 1 ? -1 : 1; const _tv5 = _tv4 * (_tv1 - 1); for (let _tv6 = 0; _tv6 <= _tv5; _tv6++) { const _tv3 = _tv4 < 0 ? 1 - _tv6 : 1 + _tv6; _tv2 = _tv3 * _tv3 + _tv2; } return _tv2; }'
+      '(n) => { const _tv1 = n; let _tv2 = 0; const _tv4 = _tv1 < 1 ? -1 : 1; const _tv5 = _tv4 * (_tv1 - 1); if (_tv5 > 4294967294) throw new RangeError(\'Invalid array length\'); for (let _tv6 = 0; _tv6 <= _tv5; _tv6++) { const _tv3 = _tv4 < 0 ? 1 - _tv6 : 1 + _tv6; _tv2 = _tv3 * _tv3 + _tv2; } return _tv2; }'
     );
   });
 
   test('two carried values that depend on each other: the next values are read first', () => {
     expect(code(fixture('two carried values that depend on each other'))).toBe(
-      '(n) => { const _tv1 = n; let _tv2 = 0, _tv3 = 1; const _tv5 = _tv1 < 1 ? -1 : 1; const _tv6 = _tv5 * (_tv1 - 1); for (let _tv7 = 0; _tv7 <= _tv6; _tv7++) { const _tv4 = _tv5 < 0 ? 1 - _tv7 : 1 + _tv7; const _tv8 = _tv3; _tv3 = _tv3 + _tv3; _tv2 = _tv8; } return _tv2 + 1000 * _tv3; }'
+      '(n) => { const _tv1 = n; let _tv2 = 0, _tv3 = 1; const _tv5 = _tv1 < 1 ? -1 : 1; const _tv6 = _tv5 * (_tv1 - 1); if (_tv6 > 4294967294) throw new RangeError(\'Invalid array length\'); for (let _tv7 = 0; _tv7 <= _tv6; _tv7++) { const _tv4 = _tv5 < 0 ? 1 - _tv7 : 1 + _tv7; const _tv8 = _tv3; _tv3 = _tv3 + _tv3; _tv2 = _tv8; } return _tv2 + 1000 * _tv3; }'
     );
   });
 });
@@ -839,22 +841,14 @@ describe('refusals', () => {
       body(['Break']),
       /the structured route admits a Break only as the last statement of a branch of an If, not as a statement of the body of a Loop/,
     ],
-    ['a Continue', body(['Continue']), /the structured route admits no statement Continue in the body of a Loop/],
+    ['a Continue', body(['Continue']), /the structured route admits a Continue only as the last statement of a branch of an If that is a statement of the body of a Loop/],
     [
       'a Return in a branch of the body',
       body(['If', ['Less', 'k', 2], ['Return', 's']]),
       /the structured route admits no statement Return in a branch of an If/,
     ],
-    [
-      'a loop with a step',
-      fn(N, declare('s', 'real', 0), ['Loop', ['Assign', 's', 'k'], ['Element', 'k', ['Range', 1, 'n', 2]]], 's'),
-      /admits a Loop only over Element\(k, Range\(a, b\)\), with no step and no guard/,
-    ],
-    [
-      'a loop over a list',
-      fn(N, declare('s', 'real', 0), ['Loop', ['Assign', 's', 'k'], ['Element', 'k', ['List', 1, 2]]], 's'),
-      /admits a Loop only over Element\(k, Range\(a, b\)\)/,
-    ],
+    // A loop with a step and a loop over a list literal are admitted since
+    // the loops over a list value (compile-javascript-structured-statements.test.ts).
     [
       'a loop with a guard',
       fn(N, declare('s', 'real', 0), ['Loop', ['Assign', 's', 'k'], ['Element', 'k', ['Range', 1, 'n'], ['Less', 'k', 3]]], 's'),
@@ -973,7 +967,9 @@ describe('refusals', () => {
     ce.assign('Range', ce.expr(['Function', ['List', 'a', 'b'], typed('a', 'integer'), typed('b', 'integer')]));
     const json = fn(N, declare('s', 'real', 0), loop(['Assign', 's', ['Add', 's', 'k']], 'k', 1, 'n'), 's');
     expect(() => structured().prepareStructured(ce.expr(json), OPTIONS)).toThrow(
-      /admits a Loop only over Element\(k, Range\(a, b\)\), with no step and no guard, or over a list that a name holds, and not over Element\(k, Range\(1, n\)\)/
+      // The user function is a list value of the loop, and a call of a
+      // shadowed library head declines.
+      /unsupported bound head Range/
     );
   });
 
