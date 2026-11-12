@@ -828,3 +828,21 @@ function value keeps the activation that made it", with the reads
 unchanged; (3) the static read of a local, as a commit that deletes the
 corrections of the lookup by name; (4) the lazy view; then the deletion of
 what is unused.
+
+### D14. A stored lazy list is a closure (user decision 2026-11-12)
+
+A variable assigned a lazy list (a filter or a map of an endless range, a
+lazy comprehension) holds the list with the activation it was made in. It
+reads a local through that activation and a global when an element is
+computed, as a function value does. This reverses the decision of
+2026-09-30 (a stored collection keeps the variables it reads at the
+assignment): that rule aimed at making a lazy list and a materialized list
+agree, which the user no longer holds as a goal. To freeze the result, the
+program materializes the list at the time it chooses. The substitution of
+the read variables into a stored lazy list goes; CE-1245 is then not a
+defect. It is built with the lazy view (the last activation step).
+
+**The yardstick (user, 2026-11-12).** The interpreter's current answer is
+background, not the reference: a different answer can be acceptable, and
+the current one can be wrong. A rule is judged by whether it can be
+explained and by the code it removes.
