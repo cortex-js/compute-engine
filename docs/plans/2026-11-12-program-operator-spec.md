@@ -213,6 +213,48 @@ to; it reads the resolution the bound-once rule computes and needs no
 run). The compiled run with per-name typed results was sent to session
 compute-engine-ef for its opinion; it is not decided.
 
+**The compiled run: the opinion of session compute-engine-ef
+(2026-11-12; it had not read this spec or Tycho's file).** Not decided by
+the user.
+
+- It is a RUNNER above `compile()`, in CE (a separate entry, for example
+  `ce.runProgram()` with an asynchronous form), not an option of
+  `compile()` and not part of the compiler's middle. `compile()` of a
+  `Program` keeps the meaning of P10.
+- The runner walks the statements in the canonical order. Each value
+  statement is one compile unit: its inputs are the top-level names it
+  reads, its results the top-level names it defines or assigns. A
+  statement that declines, or whose result type has no compiled form, is
+  evaluated by the interpreter, and the run continues compiled. Values are
+  converted at the two boundaries from the static type of each name; that
+  conversion ("static type to boxing recipe") belongs in CE.
+- It is written against the public contract of `compile()`, so it uses the
+  existing compiler today (`runAsync()`, `parallel for`, `onLoop` exist
+  only there) and does not wait for the rebuilt middle.
+- Size: an estimate of 500 to 800 lines and tests. It depends on this
+  change and on step 1 of the bound-once spec (the `inputs` compile option,
+  one settled type per top-level name).
+- Its results are within the compile contract (section 2 of
+  `2026-11-12-js-route-course-correction.md`: agreement within 1e-12
+  relative, not the bits of an interpreted run).
+
+What that opinion asks of THIS spec, taken as requirements:
+
+- **The reads and writes of a statement.** For each statement of a boxed
+  `Program`, the engine gives the top-level names it reads and the names
+  it defines or assigns, so that neither a runner nor a host derives them.
+  This is the same resolution as the sites query; the two are specified
+  together.
+- **An assignment by statement k to a name that statement j defined** is a
+  write on that name: in a compiled statement it is a result that the
+  runner writes back.
+- **One settled static type per top-level name** after its defining
+  statement. A name whose type is not settled (`unknown`, a union of
+  shapes) is not an error: the statements that read it run interpreted.
+- **Statements run in order, one at a time**; concurrency exists only
+  inside a statement. Operations that are not pure keep the order of the
+  program; the order of pure ones is not specified.
+
 ## 6. Order and acceptance
 
 After step 1 of the bound-once spec is on main. First a measurement: the
