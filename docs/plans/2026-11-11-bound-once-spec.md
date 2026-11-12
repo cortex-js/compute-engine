@@ -516,3 +516,72 @@ symbolic?: readonly string[];
 7. Tycho's codegen audit on a scratch build: the records that change are
    listed and explained by the rule (Tycho does not adopt step 1: section
    7).
+
+## 11. After the first implementation (2026-11-11)
+
+A first implementation of sections 2 and 10 (the patch is
+`2026-11-11-bound-once-evidence/step1-round3.patch.txt`; 423 test files
+pass with it; source +732 and −898 lines) needed four narrow rules to pass,
+and its net removal fell at each round of fixes (389, 290, 166 lines). The
+user and the author read this as a sign that two choices of section 10
+were wrong. Three decisions of the user, 2026-11-11, replace them.
+
+### D5. A boxed operand is never captured (replaces the binder case of section 4 and of C7)
+
+A binder (`Function`, `Sum`, `Product`, `Integrate`, `Block`, every head
+with a `bound` or `clause` operand) binds its variables only in an operand
+that it boxes itself, from a raw form. An operand that is already boxed
+keeps the meaning it had. To capture, pass the raw form (`body.json`) or
+write the whole expression in one parse. With `x: real = 5`:
+
+| Program | 0.187.1 | With D5 |
+|---|---|---|
+| `Function(ce.parse('x^2'), x)` applied to 3 | 9 | 25 |
+| `Function(['Power', 'x', 2], x)` applied to 3 | 9 | 9 |
+| `Sum(ce.parse('k^2'), k = 1..3)` | 14 | `3k²` |
+| `Sum(['Power', 'k', 2], k = 1..3)` | 14 | 14 |
+| `Block(Declare(x, 7), ce.parse('x+1'))` | 8 | 6 |
+
+The code of the engine that builds a binder around boxed parts (the nested
+sums of dependent limits, the derivative of a function literal, …) builds
+it from the raw form. Rejected: "a binder always boxes its body again from
+its raw form": it makes every other name of the body read the scope of the
+binder, against rule 1, and it captured a parameter default.
+
+### D6. Activations (replaces C1)
+
+Every evaluation of a function literal, of a binder and of a block makes an
+activation: the values of its locals for that evaluation, with a link to
+the activation in which the literal, the binder or the block was itself
+evaluated. A parameter, a binder variable and a block local are read by
+following these links from the activation of the evaluation in progress. A
+function value keeps the link of the activation that made it. There is no
+search of the stack of evaluations in progress. The results of these
+programs are unchanged; they are the acceptance tests of D6:
+
+| Program | Result |
+|---|---|
+| `add(a) := x ↦ x + a`; `g := add(2)`; `h := add(10)`; `g(1)`, `h(1)` | 3, 11 |
+| `kk(a) := g(1)`; `kk(100)` | 3 |
+| `fact(5)`, recursive | 120 |
+| `Block(s = 0, Loop(Block(s = s + i), i in 1..4), s)`, also asynchronous and two at a time | 10 |
+
+It replaces the caller binding, the swept home, the marks that keep a call
+frame for a function value, and the two narrow rules of the first
+implementation (an activation for a nested scope only when its parent has
+one on the stack; a search of the stack for a parameter). It is part of
+step 1. Its design (what exists today, what the rule deletes) is written
+before its code.
+
+### D7. The two other narrow rules
+
+- The placeholder of a renamed call of a user function that shadows a
+  library operator (`shadowing-calls.ts`): the renamed call is bound
+  directly to the copy that holds the function, so nothing is read through
+  the current scope. The rewrite of the compiler does not replace this
+  file (session compute-engine-7a, 2026-11-11: three targets use it).
+- The declaration event after a rollback of an inference exists because
+  some inferences still write on definitions (the parts of the earlier
+  mechanism that the removal of the flag left). It goes when those writes
+  go; the list of those parts, with an example of each, is owed to the
+  user.
