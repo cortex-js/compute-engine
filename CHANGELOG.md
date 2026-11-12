@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`EllipticF(φ, m)`, `EllipticE(φ, m)` and `EllipticPi(n, φ, m)`,
+  and `EllipticPi(n, m)`, give `N()` at the precision asked for real operands,**
+  as `N(EllipticE(0.5, 0.3))` at 30 digits is `0.49399114472896842814806998796`
+  (#NNN, contributed by [enumeratio](https://github.com/enumeratio)). They
+  answered with the 16 digits of a double at every precision. They now sum
+  Carlson's `R_F`, `R_D` and `R_J` by the duplication theorem in `BigDecimal`
+  (DLMF 19.25.5, 19.25.9, 19.25.14, 19.36(i)), with the quasi-period
+  `φ + kπ` taken from the complete integrals, the distance to `π/2` and
+  `1 - m sin²φ` formed without cancellation, and the digits that a sum or a
+  subtraction loses measured and added in a second pass (up to 400, past which
+  the call stays unevaluated). Measured against mpmath at 30, 50 and 100
+  digits over 1165 points with a real value (`|φ|` from 1e-5 to 250, `m` to
+  `1 - 1e-20` and to 50, `n` to `1 - 1e-20`, `φ` at the double nearest `π/2`),
+  none was declined and at most 0.7 digit was lost. Exact operands are read to
+  extra digits under `N()`, as `EllipticE(φ, m)` already did. A value that is
+  not real keeps the double complex value of the complex kernel, and
+  `EllipticPi` where `1 - n sin²φ < 0` is the Cauchy principal value, as the
+  machine kernel gives it (#422), by DLMF 19.20.14.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
