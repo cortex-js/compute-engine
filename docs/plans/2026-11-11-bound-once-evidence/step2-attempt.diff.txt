@@ -1,0 +1,73 @@
+--- /private/tmp/claude-501/-Users-arno-dev-compute-engine/94dba59d-c9b3-4abd-9793-1362d64ab041/scratchpad/pre2/binders.ts	2026-11-11 21:51:09
++++ src/compute-engine/boxed-expression/binders.ts	2026-11-11 21:51:09
+@@ -642,6 +642,20 @@
+     (isBodyFreeName(own) &&
+       (own as { _assignmentEvidence?: boolean })._assignmentEvidence === true)
+   );
++}
++
++/**
++ * True when an occurrence bound to `def` reads `def` itself, the static
++ * definition: `def` is the variable of a binder or a local of a block. Its
++ * value is the one of the activation of its scope that the evaluation in
++ * progress is in (`activationRecordOf()`, `ambient-chain.ts`); with none, it
++ * has no value.
++ */
++export function readsOwnDefinition(def: BoxedDefinition): boolean {
++  if (!('value' in def)) return false;
++  const v = def.value;
++  if (isActivation(v) || isFunctionLiteralParameter(v)) return false;
++  return isBinderVariable(v) || isBlockLocalBinding(def);
+ }
+ 
+ /**
+--- /private/tmp/claude-501/-Users-arno-dev-compute-engine/94dba59d-c9b3-4abd-9793-1362d64ab041/scratchpad/pre2/boxed-symbol.ts	2026-11-11 21:51:09
++++ src/compute-engine/boxed-expression/boxed-symbol.ts	2026-11-11 21:51:09
+@@ -141,6 +141,7 @@
+   freeNameBindingAndScope,
+   homeChainBinding,
+   readsActivation,
++  readsOwnDefinition,
+   isBodyFreeName,
+   isBlockLocalBinding,
+   rebindBodyFreeNames,
+@@ -2075,6 +2076,7 @@
+     const def = this._def;
+     if (def !== undefined && !readsActivation(def))
+       return this._homeBinding(def);
++    if (def !== undefined && readsOwnDefinition(def)) return def;
+     return bindingInContext(
+       this.engine,
+       this._id,
+--- /private/tmp/claude-501/-Users-arno-dev-compute-engine/94dba59d-c9b3-4abd-9793-1362d64ab041/scratchpad/pre2/function-utils.ts	2026-11-11 21:51:09
++++ src/compute-engine/function-utils.ts	2026-11-11 22:01:58
+@@ -9351,6 +9351,20 @@
+       recorded !== undefined
+         ? (valueThen as Expression | undefined)
+         : binding.value.storedValue;
++    // A static definition of a scope that has activations keeps its
++    // identity: the copy holds its value (`registerScopeActivation()`).
++    if (isActivatedDefinition(binding.value)) {
++      if (
++        value !== undefined ||
++        isIndex ||
++        (binding as { _declaredByStatement?: boolean })._declaredByStatement ===
++          true
++      ) {
++        values.set(binding.value, value);
++        captured.bindings.set(name, binding);
++      }
++      continue;
++    }
+     if (isIndex && recorded === undefined) {
+       ce.declare(
+         name,
+@@ -9368,8 +9382,6 @@
+         true
+     )
+       continue;
+-    if (recorded === undefined && isActivatedDefinition(binding.value))
+-      values.set(binding.value, value);
+     captured.bindings.set(
+       name,
+       recorded === undefined
