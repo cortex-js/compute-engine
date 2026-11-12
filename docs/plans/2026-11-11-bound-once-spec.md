@@ -179,7 +179,13 @@ options. The compile options are the smallest change of the engine.
    no name once binding is lexical: a parameter, a binder variable, a block
    local and a macro cannot collide. It comes before or with the macro
    kind.
-4. The macro kind (model slice 4).
+4. The macro kind (model slice 4). Spec approved by the user on
+   2026-11-12: `docs/plans/2026-11-12-macro-kind-spec.md` (session
+   compute-engine-67). A macro is expanded in place where a name of the
+   input is boxed, with its raw body boxed in the scope of the occurrence.
+   Of this spec it assumes rules 1 and 4 of section 2, C3, D5 and D8. It
+   uses neither the activations (D6) nor step 2: a macro is declared
+   before its readers are boxed.
 5. The batch (model slice 3).
 
 Each is a spec of its own. Steps 4 and 5 can change places; the user
