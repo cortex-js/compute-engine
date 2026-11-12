@@ -371,6 +371,91 @@ compilations in the `limit*`, `find-fit*`, `nintegrate*`,
 `findFit`): their code binds a `const` where it repeated the subexpression;
 the tallies of those tests are unchanged.
 
+## Walks of later rules
+
+The rules, refusals and analyses added after the result above brought back
+walks that visit a node once per path. Measured on
+`881716b157129b29f2df132f455b40b351feb9bd`: the root
+`Block(deep := t_30, z := q(u), 1 + z)` with `t_k = Beta(t_(k-1), t_(k-1))`
+of `compile-call-broadcast-result-operand.test.ts` did not end under
+`CE_JS_PROFILE_SHADOW=1` (at depth 20 it took 2.5 s, three times as long per
+two levels), although the profile only declines it. The walks, all in
+`javascript-fragment-target.ts` but one:
+
+- the admission of a function body (`admitFunctionBody()`): `checkValue()`,
+  which runs every refusal of a value at each node; `scan()` of the local
+  functions; `boundNames()` and `namesIn()`; in a local function, `visit()`
+  of its reads and `collectCalls()`;
+- the free symbols of a root `Block` (`collect()` of `attachRootBlock()`);
+- the sign of an operand (`signOf()`), at each `Sqrt`, `Ln` and `Power`;
+- the complex part of a calculus node (`complexPartOf()`), and
+  `calculusDependencies()`;
+- the purity of an aggregate bound (`aggregateBoundRefusal()`), the reads of
+  a call of a local function (`refuseLocalFunctionArithmetic()`) and
+  `isClosedPole()`;
+- `judgeLoop()` (`structured-execution.ts`), which wrote the text of the
+  node of a loop with `String()`: now `nodeText()`;
+- `refuseComplexElementLanes()` (added with the broadcast over lists), which
+  asks the existing compiler's `operandElementLane()` of each list operand
+  of an element-wise node. That analysis and `isComplexValued()` remember
+  the answer of a function node only inside a compilation
+  (`CompilerState._compileDepth` above 0), and the route asks them at depth
+  0: a list tower `L_k = L_(k-1) + L_(k-1)` took 3.3 s at depth 18.
+  `withAnalysisMemo()` runs the walk at depth 1 with a fresh layer of both
+  memo stacks, dropped after it.
+
+The rule for a new walk: every walk over the subtree of a node is memoised
+per compilation (a `Set` or a `Map` keyed by the node object, made by the
+walk or held by the registry, never a module-level cache that outlives the
+compilation), or runs once bottom-up. A memo entry is valid only when
+everything that the walk reads or writes is in its key or cannot change
+during the compilation. A walk whose answer depends on its context keys the
+memo by that context: `checkValue()` by the names, the locals, the loop
+indexes and `bodyValue` (it writes the key only for a node reached a second
+time, so a tree with no sharing pays nothing), `collect()` and `visit()` by
+the names bound around the node, `complexPartOf()` by the set of bound
+names. A walk with state outside the key is not memoised there:
+`checkValue()` checks at each path a node that holds a block with
+statements, whose check reads and writes the facts of the writes
+(`lengthWritten`, `notLength`, `writtenClasses`) and the declarations; a
+tower of such blocks stays exponential. `signOf()` keeps its memo for one
+call only (one operand, one scope), so each radical walks the distinct
+nodes below it: quadratic in the distinct nodes. A message writes a node
+with `nodeText()`.
+
+`test/compute-engine/compile-javascript-structured-shared-depth.test.ts`
+guards it: 49 shapes (heads, a `Sum`, list literals and lists of lists, an
+element-wise form, a root `Block`, a `let`, an `If` statement, a value
+block, a comprehension, a helper, a local function, a `Map` lambda, a
+derivative, a matrix, the complex and `bigint` modes, degrees, and the
+element-wise forms over a list or a matrix: scalar heads, two list operands
+of one length key, a list of booleans, `At` and `Length` of a list tower, an
+element-wise `Which`, comprehensions of a stated range), each a tower
+of depth 40, compile or decline in less than 5 s (milliseconds on an idle
+machine), with at most `10 · nodes + 50` value checks of the admission
+(`ADMISSION_WORK`), and the value at depth 12 is the value of the existing
+compiler with its default options (`Object.is`). Its last section reaches
+one node object in two contexts (inside and outside a `Sum`, a lambda, a
+`Loop` or an `Integrate` that binds one of its names; before and after a
+local is declared; a local written a value of another kind between the
+uses; a local function and the root) and checks that the code, or the
+message of the decline, is the one of the walk with no memo.
+
+Not linear, and not in the route: the cost of these towers is in the engine,
+for both compilers. The `isFinite` and sign getters of a function expression
+are not cached (`issues/CE-1200.md`), so the type of the root of
+`Power(t, t)`, `Sqrt(t)·t`, the complex `Sin(t) + Cos(t)` or
+`Sin(t)/(t + x)`, which `inlinePointValuesAtRoot()` reads, is exponential in
+the depth. The type of a comparison of a list tower (`comparisonType()`,
+`descriptorMayHoldRestriction()`) is exponential too: `t < 1` and an
+element-wise `If(t > 0, t, -t)` over a list tower. `unknowns` of a tower in a `Function` literal, the boxing of
+`If(t > 0, t, -t)`, the type of a `Loop` whose body holds a tower
+(`loopBodyYieldsValue()`), `N()` of a tower in a `Sum` bound and the
+symbolic `Integrate` are exponential too. A canonical `Add(t, t)` or
+`Multiply(t, t)` is flattened by the canonical form into `2^d` operands: the
+tree itself is large. The `If` shape above stays exponential in the code,
+bounded by the operation limit.
+
 ## Defects seen, not filed
 
 - The existing compiler with its default options takes 1.9 s at depth 12 and

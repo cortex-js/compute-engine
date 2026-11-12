@@ -530,6 +530,9 @@ function isClosedPole(
   if (isNumber(operand))
     return operand.isInfinity === true && operand.isComplex;
   if (!isFunction(operand) && !isSymbol(operand)) return false;
+  // The answer of each function node object, so a shared subtree is
+  // walked once.
+  const closedNodes = new Map<Expression, boolean>();
   const closed = (node: Expression): boolean => {
     if (isNumber(node)) return true;
     if (isSymbol(node))
@@ -538,7 +541,14 @@ function isClosedPole(
         (node.isConstant ||
           node.engine._getSymbolValue(node.symbol) !== undefined)
       );
-    if (isFunction(node)) return node.ops.every(closed);
+    if (isFunction(node)) {
+      let known = closedNodes.get(node);
+      if (known === undefined) {
+        known = node.ops.every(closed);
+        closedNodes.set(node, known);
+      }
+      return known;
+    }
     return false;
   };
   if (!closed(operand) || !operand.isPure) return false;
@@ -1140,12 +1150,35 @@ type SnapshotOf = (symbol: Expression) => number | undefined;
  * the engine proves non-negative makes a real square root); otherwise only
  * to `node` (the `strict` mode, where only a negative operand changes the
  * result).
+ *
+ * `memo`: the sign of each function node object of one call, so a node
+ * reached on several paths is computed once. A call reads one operand in
+ * one scope, with one `snapshotOf`, `deep` and `head`; the memo is not kept
+ * across calls, so each radical of a shared subtree walks the distinct
+ * nodes below it once (quadratic in the distinct nodes, not exponential).
  */
 function signOf(
   node: Expression,
   snapshotOf: SnapshotOf,
   deep: boolean,
-  head = 'Sqrt'
+  head = 'Sqrt',
+  memo = new Map<Expression, Sign | { refusal: string }>()
+): Sign | { refusal: string } {
+  if (!isFunction(node)) return signOfNode(node, snapshotOf, deep, head, memo);
+  let sign = memo.get(node);
+  if (sign === undefined) {
+    sign = signOfNode(node, snapshotOf, deep, head, memo);
+    memo.set(node, sign);
+  }
+  return sign;
+}
+
+function signOfNode(
+  node: Expression,
+  snapshotOf: SnapshotOf,
+  deep: boolean,
+  head: string,
+  memo: Map<Expression, Sign | { refusal: string }>
 ): Sign | { refusal: string } {
   const refusal = (sign: string) => ({
     refusal:
@@ -1173,7 +1206,7 @@ function signOf(
       sign = 'negative';
   } else if (isFunction(node) && !isNonRealNumber(node.type.type)) {
     const signs = (): (Sign | { refusal: string })[] =>
-      node.ops.map((op) => signOf(op, snapshotOf, deep, head));
+      node.ops.map((op) => signOf(op, snapshotOf, deep, head, memo));
     const op = node.operator;
     // With no operand, the sign is unknown, as in `assumedRealNonNegative()`.
     if (
@@ -4860,8 +4893,14 @@ function aggregateBoundRefusal(
       return `${name} is not a safe integer: the existing compiler declines it as out-of-range`;
     return undefined;
   }
-  const impure = (e: Expression): boolean =>
-    isFunction(e) && (effectFact(e) !== 'pure' || e.ops.some(impure));
+  // Each node object once: a shared subtree is not walked once per path.
+  const pure = new Set<Expression>();
+  const impure = (e: Expression): boolean => {
+    if (!isFunction(e) || pure.has(e)) return false;
+    if (effectFact(e) !== 'pure' || e.ops.some(impure)) return true;
+    pure.add(e);
+    return false;
+  };
   if (impure(bound))
     return `${name} has a call that is not pure: the interpreter does not evaluate a big operator over such a bound`;
   if (isFunction(bound) && bound.unknowns.length === 0) {
@@ -8624,8 +8663,41 @@ function refuseComplexElementLanes(
     }
     for (const inner of scope.inner.values()) visit(inner);
   };
-  visit(annotation.scope);
-  for (const fn of annotation.functions.values()) visit(fn.scope);
+  withAnalysisMemo(() => {
+    visit(annotation.scope);
+    for (const fn of annotation.functions.values()) visit(fn.scope);
+  });
+}
+
+/**
+ * Run `analyze`, which asks the analyses of the existing compiler
+ * (`operandElementLane()`, `isComplexValued()`), with the memo that these
+ * analyses keep in a compilation: they remember the answer of each function
+ * node only when `CompilerState._compileDepth` is above 0, and the route
+ * asks them at depth 0, where a subtree reached on several paths is
+ * analyzed once per path (exponential in the depth of the sharing). The
+ * memo is a fresh layer of each stack, dropped after `analyze`: the engine
+ * values that the answers read do not change while it runs, and no answer
+ * outlives it. The depth is read by the entries of a compilation
+ * (`compileExpression()`), which these analyses do not call.
+ */
+function withAnalysisMemo<T>(analyze: () => T): T {
+  const complex = CompilerState._complexMemoStack;
+  const complexDepth = complex.length;
+  const lanes = CompilerState._elementLaneMemoStack;
+  const lanesDepth = lanes.length;
+  complex.push(new WeakMap());
+  lanes.push(new WeakMap());
+  CompilerState._compileDepth += 1;
+  try {
+    return analyze();
+  } finally {
+    CompilerState._compileDepth -= 1;
+    CompilerState._complexMemoStack = complex;
+    complex.length = complexDepth;
+    CompilerState._elementLaneMemoStack = lanes;
+    lanes.length = lanesDepth;
+  }
 }
 
 /** The names of the free symbols that are reads of the host (a `vars`
@@ -8888,8 +8960,18 @@ function refuseLocalFunctionArithmetic(
   if (localFunctions.size === 0) return;
   const isCall = (node: Expression): boolean =>
     isFunction(node) && localFunctions.has(node.operator);
-  const readsCall = (node: Expression): boolean =>
-    isCall(node) || (isFunction(node) && node.ops.some(readsCall));
+  // The answer of each node object, so a shared subtree is walked once.
+  const callReads = new Map<Expression, boolean>();
+  const readsCall = (node: Expression): boolean => {
+    if (isCall(node)) return true;
+    if (!isFunction(node)) return false;
+    let found = callReads.get(node);
+    if (found === undefined) {
+      found = node.ops.some(readsCall);
+      callReads.set(node, found);
+    }
+    return found;
+  };
   const visit = (scope: FragmentScope<ScalarRepresentation>) => {
     for (const [node, facts] of scope.facts) {
       if (
@@ -12022,7 +12104,10 @@ function closedFormReplacement(
  */
 function complexPartOf(
   expr: Expression,
-  bound: ReadonlySet<string> = new Set()
+  bound: ReadonlySet<string> = new Set(),
+  // The answer of each function node object under each set of bound names
+  // (`null`: none), so a shared subtree is walked once.
+  memo = new Map<Expression, Map<ReadonlySet<string>, Expression | null>>()
 ): Expression | undefined {
   if (isNumber(expr)) return expr.im !== 0 ? expr : undefined;
   if (isSymbol(expr))
@@ -12033,6 +12118,10 @@ function complexPartOf(
       ? expr
       : undefined;
   if (!isFunction(expr)) return undefined;
+  let byBound = memo.get(expr);
+  const known = byBound?.get(bound);
+  if (known !== undefined) return known ?? undefined;
+  if (byBound === undefined) memo.set(expr, (byBound = new Map()));
   let inner = bound;
   const binds = (names: readonly string[]) => {
     if (names.length > 0) inner = new Set([...inner, ...names]);
@@ -12053,9 +12142,13 @@ function complexPartOf(
         )
     );
   for (const op of expr.ops) {
-    const found = complexPartOf(op, inner);
-    if (found !== undefined) return found;
+    const found = complexPartOf(op, inner, memo);
+    if (found !== undefined) {
+      byBound.set(bound, found);
+      return found;
+    }
   }
+  byBound.set(bound, null);
   return undefined;
 }
 
@@ -12803,12 +12896,15 @@ function calculusDependencies(node: Expression): Set<string> {
     names.add(name);
     for (const definition of definitions) visit(definition);
   };
+  // Each node object once: a shared subtree is not walked once per path.
+  const seen = new Set<Expression>();
   const visit = (e: Expression): void => {
     if (isSymbol(e)) {
       if (!e.isConstant) reach(e.symbol);
       return;
     }
-    if (!isFunction(e)) return;
+    if (!isFunction(e) || seen.has(e)) return;
+    seen.add(e);
     if (isUserDefinedFunction(engine, e.operator)) reach(e.operator);
     for (const op of e.ops) visit(op);
   };
@@ -13112,7 +13208,18 @@ function attachRootBlock(
   const indexes = new Set<string>();
   /** The stored values whose names `collect()` read. */
   const values = new Set<Expression>();
+  /** The function nodes that `collect()` read, with the indexes around each
+   *  read: a node object reached again with the same indexes reads the same
+   *  names, so a shared subtree is read once, not once per path. */
+  const collected = new Map<Expression, Set<string>>();
   const collect = (node: Expression): void => {
+    if (isFunction(node)) {
+      const around = [...indexes].join('\u0001');
+      let seen = collected.get(node);
+      if (seen?.has(around)) return;
+      if (seen === undefined) collected.set(node, (seen = new Set()));
+      seen.add(around);
+    }
     if (isSymbol(node)) {
       const name = node.symbol;
       // The names of a captured expression (`storedSnapshot()`) are free
@@ -13375,6 +13482,12 @@ function checkLocalWrites(
   for (const statement of body.ops.slice(0, -1)) checkWrites(statement, scope);
 }
 
+/** The number of checks of a value node by the admission of a function
+ *  body (`checkValueNode()` of `admitFunctionBody()`), for the tests of the
+ *  work on a shared subtree: it is linear in the number of distinct nodes,
+ *  not in the number of paths. Exported for tests only. */
+export const ADMISSION_WORK = { values: 0 };
+
 /**
  * The admission of the body `body` of a function whose parameters are
  * `parameters`: the root `Function` of a compilation
@@ -13635,11 +13748,60 @@ function admitFunctionBody(
   /** The bounds of the loops, sums, products and comprehensions, and the
    *  indexes of `At` and `ReplaceAt`, of the body. */
   const indexPositions = new Set<Expression>();
+  /** The index of each loop around the current statement. */
+  const indices = new Set<string>();
+  /** The function nodes that `checkValue()` reached, with the contexts
+   *  (`valueContext()`) in which each was admitted: a node object reached
+   *  again on another path, in a context in which it was admitted, is not
+   *  checked again, so a shared subtree is checked once per context, not
+   *  once per path. `null`: reached once, with no context recorded (the
+   *  context is written only for a node reached again). */
+  const admittedValues = new Map<Expression, Set<string> | null>();
+  /** The context of a check: everything of the body that the check of a
+   *  value reads and that changes during the admission. */
+  const valueContext = (bodyValue: boolean): string =>
+    [
+      bodyValue ? '1' : '0',
+      [...names].join('\u0001'),
+      [...locals].map(([n, t]) => `${n}\u0003${t}`).join('\u0001'),
+      [...indices].join('\u0001'),
+    ].join('\u0002');
   /** `bodyValue`: `node` is the value of the body, where the structured
    *  route admits `Typed(value, T)` (`typedRule()`). */
-  const checkValue = (node: Expression, bodyValue = false): void =>
+  /** Whether `node` holds, at any depth, a block of the library with
+   *  statements: its check reads and writes the facts of the writes
+   *  (`checkWrite()`: `lengthWritten`, `notLength`, `writtenClasses`) and
+   *  the declarations, which the context of `valueContext()` does not hold,
+   *  so `checkValue()` checks such a node at each path. Each node object is
+   *  visited once. */
+  const statementBlocks = new Map<Expression, boolean>();
+  const holdsStatementBlock = (node: Expression): boolean => {
+    if (!isFunction(node)) return false;
+    let holds = statementBlocks.get(node);
+    if (holds === undefined) {
+      holds =
+        (isFunction(node, 'Block') && node.nops > 1) ||
+        node.ops.some(holdsStatementBlock);
+      statementBlocks.set(node, holds);
+    }
+    return holds;
+  };
+  const checkValue = (node: Expression, bodyValue = false): void => {
+    if (!isFunction(node) || holdsStatementBlock(node))
+      return atNode(node, () => checkValueNode(node, bodyValue));
+    const seen = admittedValues.get(node);
+    if (seen === undefined) {
+      admittedValues.set(node, null);
+      return atNode(node, () => checkValueNode(node, bodyValue));
+    }
+    const context = valueContext(bodyValue);
+    if (seen?.has(context)) return;
     atNode(node, () => checkValueNode(node, bodyValue));
+    if (seen === null) admittedValues.set(node, new Set([context]));
+    else seen.add(context);
+  };
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
+    ADMISSION_WORK.values += 1;
     // A calculus node is the expression that replaces it
     // (`closedFormReplacement()`); a definite integral with no closed form
     // is checked as itself (`structuredValueParts()`).
@@ -14011,8 +14173,6 @@ function admitFunctionBody(
   // The structured route: more declarations, writes to the declared locals,
   // `If` statements and counted loops (`checkStructuredStatement()`). Each
   // write makes a new value in the lowering.
-  /** The index of each loop around the current statement. */
-  const indices = new Set<string>();
   /** The block of the body and the blocks at the place of its value
    *  (`checkValueBlock()`), where a local function is admitted. */
   const bodyBlocks = new Set<Expression>();
@@ -14475,7 +14635,18 @@ function admitFunctionBody(
       captures.push(n);
       captureArguments.push(symbol);
     };
+    /** The function nodes that `visit()` read, with the names bound around
+     *  each read: a node object reached again with the same bound names
+     *  reads the same names, so a shared subtree is read once. */
+    const visited = new Map<Expression, Set<string>>();
     const visit = (node: Expression): void => {
+      if (isFunction(node)) {
+        const around = [...bound].join('\u0001');
+        let seen = visited.get(node);
+        if (seen?.has(around)) return;
+        if (seen === undefined) visited.set(node, (seen = new Set()));
+        seen.add(around);
+      }
       // A calculus node reads the names of the expression that replaces it
       // (`closedFormReplacement()`): the variable of an integral is not a
       // capture.
@@ -14591,8 +14762,11 @@ function admitFunctionBody(
     // of the name and a local function outside the body of the root, so a
     // call of the name in the block reaches this local function.
     const bindings = new Set<object>([binding]);
+    // Each node object once: a shared subtree is not walked once per path.
+    const callsSeen = new Set<Expression>();
     const collectCalls = (node: Expression): void => {
-      if (!isFunction(node)) return;
+      if (!isFunction(node) || callsSeen.has(node)) return;
+      callsSeen.add(node);
       if (node.operator === name) {
         const d = node.valueDefinition ?? node.operatorDefinition;
         if (d !== undefined) bindings.add(d);
@@ -14626,8 +14800,11 @@ function admitFunctionBody(
   // (`collectStructuredHelper()`), and the body of a helper has none.
   if (admission.structured && registry !== undefined) {
     const defined: string[] = [];
+    // Each node object once: a shared subtree is not scanned once per path.
+    const scanned = new Set<Expression>();
     const scan = (node: Expression): void => {
-      if (!isFunction(node)) return;
+      if (!isFunction(node) || scanned.has(node)) return;
+      scanned.add(node);
       const local = localFunctionStatement(node);
       if (local !== undefined) defined.push(local.name);
       for (const op of node.ops) scan(op);
@@ -14671,8 +14848,14 @@ function admitFunctionBody(
  *  index of each `Loop`, and each local of a block that a first write
  *  declares (`implicitLocal()`), in a nested block, branch or loop body
  *  too, and in a block used as a value at any depth. */
-function boundNames(statement: Expression, names: string[] = []): string[] {
-  if (!isFunction(statement)) return names;
+function boundNames(
+  statement: Expression,
+  names: string[] = [],
+  // Each node object once: a shared subtree is not walked once per path.
+  seen = new Set<Expression>()
+): string[] {
+  if (!isFunction(statement) || seen.has(statement)) return names;
+  seen.add(statement);
   if (statement.operator === 'Declare' && isSymbol(statement.op1))
     names.push(statement.op1.symbol);
   if (
@@ -14689,7 +14872,7 @@ function boundNames(statement: Expression, names: string[] = []): string[] {
         implicitLocal(statement, s.op1.symbol)
       )
         names.push(s.op1.symbol);
-  for (const s of statement.ops) boundNames(s, names);
+  for (const s of statement.ops) boundNames(s, names, seen);
   return names;
 }
 
@@ -14775,10 +14958,18 @@ function holdsValueBlock(expr: Expression): boolean {
   return visit(expr);
 }
 
-/** The names of the symbols that `node` reads or writes. */
-function namesIn(node: Expression, names = new Set<string>()): Set<string> {
+/** The names of the symbols that `node` reads or writes. Each node object
+ *  is visited once. */
+function namesIn(
+  node: Expression,
+  names = new Set<string>(),
+  seen = new Set<Expression>()
+): Set<string> {
   if (isSymbol(node)) names.add(node.symbol);
-  else if (isFunction(node)) for (const op of node.ops) namesIn(op, names);
+  else if (isFunction(node) && !seen.has(node)) {
+    seen.add(node);
+    for (const op of node.ops) namesIn(op, names, seen);
+  }
   return names;
 }
 

@@ -60,6 +60,7 @@ import {
   consumableLoopInitials,
   inPlaceUpdates,
 } from './structured-in-place.js';
+import { nodeText } from './fragment.js';
 
 /** An operation that makes a property fail. */
 export type ExecutionBlocker = {
@@ -682,7 +683,7 @@ function judgeLoop(
       const definer = definitionIn(loop.body, next[i].id);
       return fail(
         definer ?? loop,
-        `carried scalar ${String((definer ?? loop).origin)}`
+        `carried scalar ${nodeText((definer ?? loop).origin)}`
       );
     }
     // The values of the iteration that are the carried list or an update of

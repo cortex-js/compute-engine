@@ -383,6 +383,17 @@
 
 ### Resolved Issues
 
+- **A compilation with the `numeric-kernel` profile of a deeply shared tree
+  ends.** When one node object is an operand several times
+  (`t₁ = Beta(x, x)`, `t₂ = Beta(t₁, t₁)`, …), the admission of the profile
+  read each node once per path: a root `Block` that assigns such a tower of
+  depth 30 did not finish, also when it then declines. The reads of the free
+  symbols, of the bound names and of the values of a body, the sign of an
+  operand of `Sqrt`, `Ln` and `Power`, the complex part of a calculus node,
+  the reads of a local function and the reason of a loop now read each node
+  object once, and a tower of depth 40 compiles or declines in milliseconds.
+  The code and the values are the same as before.
+
 - **The `numeric-kernel` profile declines `x·Conjugate(Haversine(2y))`.**
   The compilation failed with an internal error (`compile-error`): the
   profile writes `Conjugate` of a real operand as the operand, and did not
