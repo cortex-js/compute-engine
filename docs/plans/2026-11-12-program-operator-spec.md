@@ -294,6 +294,27 @@ between consecutive compiled statements and box them lazily (Tycho pays
 the conversion twice on lists of several hundred thousand elements); the
 value contract is section 2 of `2026-11-12-js-route-course-correction.md`.
 
+**The iteration budget, for the runner's note** (compute-engine-ef,
+2026-11-12, from the report of its agent, which read
+`src/common/interruptible.ts` and `compilation/pool-loop.ts`; not re-read
+by either session):
+
+- One budget for a whole program is not possible today: the pass counter
+  is private to one compiled function and has no reader. It needs a reader
+  on the counter (a few lines) and a result field or a callback, so that
+  the runner subtracts what one statement used from the budget of the
+  next. The note states the budget as "passes that run, summed over the
+  statements of the program" and lists the reader as work.
+- A loop compiled with `iterationBudget` never runs on the worker pool:
+  `pool-loop.ts` runs it in order, with the reason `iteration-budget`. So
+  Tycho's two requirements for the prelude (a budget, and `parallel for`
+  on the pool) exclude each other today. To run on the pool with a budget,
+  each worker must return its pass total. The note decides this with the
+  user: a budget that the pool honours, or no budget for a statement that
+  runs on the pool (its limit is then the time limit).
+- The opt-in `ir` profile of `compile()` (main `7f6b2eeb6`) declines
+  `iterationBudget` when the program has a counted loop.
+
 ## 6. Order and acceptance
 
 After step 1 of the bound-once spec is on main. First a measurement: the
