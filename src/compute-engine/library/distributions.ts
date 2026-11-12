@@ -31,6 +31,7 @@ import {
   binomialQuantile,
   poissonQuantile,
 } from '../numerics/distributions.js';
+import { asRational, asSmallInteger } from '../boxed-expression/numerics.js';
 import { isWalkableFiniteCollection } from '../collection-utils.js';
 import type {
   Expression,
@@ -447,6 +448,61 @@ function betaRegularizedValueAtInfinity(
   return x.isSame(0) ? ce.Zero : ce.One;
 }
 
+/**
+ * The largest a + b for which `BetaRegularized(x, a, b)` at positive integers
+ * a and b is returned as an exact value; the sum has a + b − 1 terms whose
+ * binomial coefficients and powers of the numerator and denominator of x
+ * reach about (a + b) digits each.
+ */
+const BETA_REGULARIZED_EXACT_LIMIT = 64;
+
+/**
+ * I_x(a, b) = Σ_{j=a}^{a+b−1} C(a+b−1, j) xʲ (1 − x)^(a+b−1−j) (DLMF §8.17(ii))
+ * for positive integers a and b with a + b ≤ `BETA_REGULARIZED_EXACT_LIMIT`:
+ * an exact rational at an exact rational x in [0, 1], and, whatever x is, xᵃ at b = 1
+ * and 1 − (1 − x)ᵇ at a = 1.
+ */
+function betaRegularizedClosedForm(
+  ce: ComputeEngine,
+  x: Expression,
+  a: Expression,
+  b: Expression
+): Expression | undefined {
+  const na = asSmallInteger(a);
+  const nb = asSmallInteger(b);
+  if (na === null || nb === null || na < 1 || nb < 1) return undefined;
+  if (na + nb > BETA_REGULARIZED_EXACT_LIMIT) return undefined;
+  if (isNumber(a) && !a.isExact) return undefined;
+  if (isNumber(b) && !b.isExact) return undefined;
+  const rx = asRational(x);
+  if (rx !== undefined && isNumber(x) && x.isExact) {
+    const p = BigInt(rx[0]);
+    const q = BigInt(rx[1]);
+    // Outside [0, 1] the numeric kernels give NaN, so the call stays as is.
+    if (p < 0n || p > q) return undefined;
+    const n = na + nb - 1;
+    // Σ C(n, j) pʲ (q − p)^(n−j) / qⁿ
+    let binomial = 1n;
+    let numerator = 0n;
+    for (let j = 0; j <= n; j++) {
+      if (j >= na)
+        numerator += binomial * p ** BigInt(j) * (q - p) ** BigInt(n - j);
+      binomial = (binomial * BigInt(n - j)) / BigInt(j + 1);
+    }
+    return ce.number([numerator, q ** BigInt(n)]);
+  }
+  if (isNumber(x)) return undefined;
+  if (nb === 1) return ce.function('Power', [x, ce.number(na)]);
+  if (na === 1)
+    return ce.One.sub(
+      ce.function('Power', [
+        ce.function('Subtract', [ce.One, x]),
+        ce.number(nb),
+      ])
+    );
+  return undefined;
+}
+
 export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -665,6 +721,10 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         if (isProvablyPositiveFinite(a) && isProvablyPositiveFinite(b)) {
           if (isNumber(x) && x.isSame(0)) return ce.Zero;
           if (isNumber(x) && x.isSame(1)) return ce.One;
+        }
+        if (!numericApproximation) {
+          const closed = betaRegularizedClosedForm(ce, x, a, b);
+          if (closed !== undefined) return closed;
         }
         if (!isNumber(x) || !isNumber(a) || !isNumber(b)) return undefined;
         if (x.isComplex || a.isComplex || b.isComplex) return undefined;

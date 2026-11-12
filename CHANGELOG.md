@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`evaluate()` gives the closed form of `PolyLog`, `HurwitzZeta`, `Zeta`,
+  `LerchPhi`, the incomplete gamma and beta functions, the Airy functions at 0
+  and two hypergeometric reductions** (#533, contributed by
+  [enumeratio](https://github.com/enumeratio)). `PolyLog(3, 1/2)` was
+  unevaluated (now `7ζ(3)/8 - π² ln 2/12 + ln³2/6`), `PolyLog(2, 1/2)` is
+  `π²/12 - ln²2/2` and `PolyLog(2, 2)` is `π²/4 - iπ ln 2`;
+  `HurwitzZeta(s, 1/2)` is `(2^s - 1) ζ(s)` for any exact `s`, as it was for an
+  integer one (`HurwitzZeta(3/2, 1/2)`), and `HurwitzZeta(2, 1/4)` is `π² + 8G`;
+  `LerchPhi(1/2, 1, 1)` is `2 ln 2` and `LerchPhi(-1, 3, 1/2)` is `π³/4`;
+  `AiryAi(0)` is `1/(3^(2/3) Γ(2/3))`, with `AiryAiPrime`, `AiryBi` and
+  `AiryBiPrime`; `Gamma(3, 5)` is `37 e^-5`, `Gamma(2, x)` is `(x + 1) e^-x`
+  and `Gamma(1/2, z)` is `√π erfc(√z)`; `BetaRegularized(1/2, 2, 3)` is
+  `11/16`; `Hypergeometric1F1(a, a, z)` is `e^z` and
+  `Hypergeometric2F1(a, b, b, z)` is `(1 - z)^-a`. `.N()` of each agrees with
+  `.N()` of the call; a base of an incomplete gamma past order 32, or a sum of
+  beta parameters past 64, stays unevaluated.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

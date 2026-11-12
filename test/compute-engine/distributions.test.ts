@@ -440,9 +440,14 @@ describe('distribution operators', () => {
       expect(ev(['GammaRegularized', ['Rational', 5, 2], 10])).toBe(
         'GammaRegularized(5/2, 10)'
       );
+      // `I_x(a, b)` for positive integers a and b and a rational x is the
+      // exact finite sum of DLMF §8.17(ii).
       expect(ev(['BetaRegularized', ['Rational', 3, 10], 2, 3])).toBe(
-        'BetaRegularized(3/10, 2, 3)'
+        '3483/10000'
       );
+      expect(
+        ev(['BetaRegularized', ['Rational', 3, 10], ['Rational', 5, 2], 3])
+      ).toBe('BetaRegularized(3/10, 5/2, 3)');
     });
 
     test('inexact args numericize on the evaluate path', () => {

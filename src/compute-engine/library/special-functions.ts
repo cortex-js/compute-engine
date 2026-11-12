@@ -251,6 +251,21 @@ function agmValueAtInfinity(
   return ce.ComplexInfinity;
 }
 
+/** A literal integer ≤ 0, where a Pochhammer symbol or a hypergeometric parameter is degenerate. */
+function isNonPositiveIntegerLiteral(x: Expression): boolean {
+  return (
+    isNumber(x) &&
+    !x.isComplex &&
+    x.isInteger === true &&
+    x.isNonPositive === true
+  );
+}
+
+/** An operand that is an infinity (a hypergeometric parameter has no value there). */
+function isInfiniteOperand(x: Expression): boolean {
+  return infinitePoint(x) !== undefined;
+}
+
 export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
   {
     LogGamma: {
@@ -708,6 +723,32 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           return floatIfFloatOperand(ops, engine.One);
         const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
+        // ₂F₁(a, b; b; z) = (1 − z)⁻ᵃ and ₂F₁(a, b; a; z) = (1 − z)⁻ᵇ
+        // (DLMF 15.4.6), for a repeated parameter that is not a non-positive
+        // integer. A real z > 1 is on the cut of ₂F₁, whose side this
+        // principal power does not name, so it is left to the numeric kernel.
+        const cutZ = isNumber(z) && !z.isComplex && z.re > 1;
+        for (const [kept, repeated] of [
+          [0, 1],
+          [1, 0],
+        ] as const) {
+          if (
+            !cutZ &&
+            ops[repeated].isSame(ops[2]) &&
+            !isNonPositiveIntegerLiteral(ops[2]) &&
+            !isInfiniteOperand(ops[2]) &&
+            !isInfiniteOperand(ops[kept])
+          )
+            return floatIfFloatOperand(
+              ops,
+              engine
+                .function('Power', [
+                  engine.function('Subtract', [engine.One, z]),
+                  engine.function('Negate', [ops[kept]]),
+                ])
+                .evaluate({ numericApproximation })
+            );
+        }
         return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
               ops,
@@ -1082,6 +1123,17 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           return floatIfFloatOperand(ops, engine.One);
         const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
+        // ₁F₁(a; a; z) = eᶻ (DLMF 13.6.1), for an a that is not a
+        // non-positive integer (where the series has no value).
+        if (
+          ops[0].isSame(ops[1]) &&
+          !isNonPositiveIntegerLiteral(ops[0]) &&
+          !isInfiniteOperand(ops[0])
+        )
+          return floatIfFloatOperand(
+            ops,
+            engine.function('Exp', [z]).evaluate({ numericApproximation })
+          );
         return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
               ops,
@@ -1367,6 +1419,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
  *                                  Dirichlet eta identity)
  *   Li₋ₙ(z) = z·Σₖ A(n,k) zᵏ / (1 − z)ⁿ⁺¹   (2 ≤ n ≤ 12, a number z ≠ 1;
  *                                  A(n,k) are the Eulerian numbers)
+ *   Li₂(1/2), Li₃(1/2), Li₂(2)   (the closed forms below)
  */
 function polylogReduce(
   engine: IComputeEngine,
@@ -1421,6 +1474,32 @@ function polylogReduce(
       ]),
       engine.function('Zeta', [s]),
     ]);
+
+  // The classical values at 1/2 and 2 (DLMF §25.12): Landen's
+  // Li₂(1/2) = π²/12 − ln²2/2, Li₃(1/2) = 7ζ(3)/8 − π² ln 2/12 + ln³2/6,
+  // and Li₂(2) = π²/4 − iπ ln 2 (the value on the cut z > 1 that the numeric
+  // kernels give, Im < 0).
+  if (
+    (sInt === 2 || sInt === 3) &&
+    asRational(z) !== undefined &&
+    isNumber(z) &&
+    z.isExact &&
+    !shadowsLibraryName(engine, 'Pi')
+  ) {
+    const ln2 = engine.function('Ln', [engine.number(2)]);
+    const pi2 = engine.Pi.pow(2);
+    if (z.isSame(engine.number([1, 2]))) {
+      return sInt === 2
+        ? pi2.div(engine.number(12)).sub(ln2.pow(2).div(engine.number(2)))
+        : engine
+            .function('Zeta', [engine.number(3)])
+            .mul(engine.number([7, 8]))
+            .sub(pi2.mul(ln2).div(engine.number(12)))
+            .add(ln2.pow(3).div(engine.number(6)));
+    }
+    if (sInt === 2 && z.isSame(2))
+      return pi2.div(engine.number(4)).sub(engine.I.mul(engine.Pi).mul(ln2));
+  }
 
   // A negative integer order −n, 2 ≤ n ≤ EULERIAN_MAX_ORDER, and a number
   // z (z = 1 took the ζ point value above): the rational closed form

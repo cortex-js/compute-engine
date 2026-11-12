@@ -269,8 +269,8 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
     expect(Math.abs(v.im - -2.9253034918144)).toBeLessThan(1e-9);
   });
 
-  test('Γ(2, x) stays symbolic without numericApproximation', () => {
-    expect(ce.expr(['Gamma', 2, 'x']).evaluate().toString()).toBe('Gamma(2, x)');
+  test('Γ(2, x) is (x + 1) e^-x without numericApproximation', () => {
+    expect(ce.expr(['Gamma', 2, 'x']).evaluate().toString()).toBe('(x + 1) * e^(-x)');
   });
 
   test('1-argument Γ still works (Γ(5) = 24, Γ(0) = ~oo)', () => {

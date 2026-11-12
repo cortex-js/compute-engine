@@ -537,7 +537,7 @@ import {
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
-import { isShadowedSymbol } from '../library-shadowing.js';
+import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import {
   MeasuredWalk,
   failedWalkErrorSince,
@@ -5370,6 +5370,58 @@ function airyValueAtInfinity(
 }
 
 /**
+ * The largest order n for which Γ(n, z) is returned as the finite sum
+ * (n − 1)! e⁻ᶻ Σ_{k<n} zᵏ/k!; past it the call stays unevaluated.
+ */
+const GAMMA_UPPER_FINITE_SUM_LIMIT = 32;
+
+/**
+ * Γ(n, z) = (n − 1)! e⁻ᶻ Σ_{k<n} zᵏ/k! for a positive integer n (DLMF §8.4),
+ * and Γ(1/2, z) = √π erfc(√z), for any z, a symbolic one included.
+ */
+function incompleteGammaClosedForm(
+  engine: ComputeEngine,
+  s: Expression,
+  z: Expression
+): Expression | undefined {
+  if (!isNumber(s) || !s.isExact || s.isComplex) return undefined;
+  if (s.isSame(engine.number([1, 2]))) {
+    if (shadowsLibraryName(engine, 'Pi')) return undefined;
+    return engine
+      .function('Multiply', [
+        engine.function('Sqrt', [engine.Pi]),
+        engine.function('Erfc', [engine.function('Sqrt', [z])]),
+      ])
+      .evaluate();
+  }
+  const n = asSmallInteger(s);
+  if (n === null || n < 1 || n > GAMMA_UPPER_FINITE_SUM_LIMIT) return undefined;
+  // (n − 1)!/k! is an integer, so the sum has integer coefficients
+  const terms: Expression[] = [];
+  let coefficient = 1n;
+  for (let k = n - 1; k >= 0; k--) {
+    const power =
+      k === 0
+        ? undefined
+        : k === 1
+          ? z
+          : engine.function('Power', [z, engine.number(k)]);
+    terms.push(
+      power === undefined
+        ? engine.number(coefficient)
+        : engine.function('Multiply', [engine.number(coefficient), power])
+    );
+    coefficient *= BigInt(Math.max(k, 1));
+  }
+  return engine
+    .function('Multiply', [
+      engine.function('Exp', [engine.function('Negate', [z])]),
+      engine.function('Add', terms),
+    ])
+    .evaluate();
+}
+
+/**
  * The shared evaluate handler of the four Airy heads: the values at the
  * infinite points first (`airyValueAtInfinity`), then the real kernels for
  * a real argument and the complex kernels of `bessel-complex.ts` for a
@@ -5383,6 +5435,33 @@ function evaluateAiry(
 ): Expression | undefined {
   const special = airyValueAtInfinity(kind, x, ce);
   if (special !== undefined) return special;
+  // At an exact 0 (DLMF 9.2.3-4): Ai(0) = 3^(−2/3)/Γ(2/3),
+  // Ai′(0) = −3^(−1/3)/Γ(1/3), Bi(0) = 3^(−1/6)/Γ(2/3), Bi′(0) = 3^(1/6)/Γ(1/3).
+  if (!numericApproximation && isNumber(x) && x.isExact && x.isSame(0)) {
+    const [exponent, gammaArgument] = {
+      Ai: [
+        [-2, 3],
+        [2, 3],
+      ],
+      AiPrime: [
+        [-1, 3],
+        [1, 3],
+      ],
+      Bi: [
+        [-1, 6],
+        [2, 3],
+      ],
+      BiPrime: [
+        [1, 6],
+        [1, 3],
+      ],
+    }[kind] as [[number, number], [number, number]];
+    const value = ce
+      .number(3)
+      .pow(ce.number(exponent))
+      .div(ce.function('Gamma', [ce.number(gammaArgument)]));
+    return kind === 'AiPrime' ? value.neg() : value;
+  }
   if (!shouldNumericize(numericApproximation, x)) return undefined;
   if (isNumber(x) && x.isComplex) {
     const kernel =
@@ -6316,17 +6395,45 @@ function evaluateHurwitzZeta(
 
   const exactRoute = !shouldNumericize(numericApproximation, s, a);
 
-  // ζ(s, 1/2) = (2^s − 1)·ζ(s): exact at an integer s ≥ 2, where ζ(s) has
-  // the closed forms of the one-operand `Zeta` (ζ(2, 1/2) = π²/2).
-  if (exactRoute && sInt !== null && sInt >= 2 && sInt <= 100) {
-    const ra = asRational(a);
-    if (ra !== undefined && Number(ra[0]) === 1 && Number(ra[1]) === 2)
+  // ζ(s, 1/2) = (2^s − 1)·ζ(s) (DLMF §25.11): at an integer s ≥ 2 ζ(s) has
+  // the closed forms of the one-operand `Zeta` (ζ(2, 1/2) = π²/2), and at any
+  // other exact s, a symbolic one included, `Zeta(s)` is left as it is.
+  // ζ(2, 1/4) = π² + 8G and ζ(2, 3/4) = π² − 8G follow from
+  // ζ(s, 1/4) ± ζ(s, 3/4) and the Dirichlet β function (G is Catalan's
+  // constant).
+  const ra = exactRoute ? asRational(a) : undefined;
+  if (ra !== undefined && isNumber(a) && a.isExact) {
+    const [an, ad] = [BigInt(ra[0]), BigInt(ra[1])];
+    const sExact = !(isNumber(s) && !s.isExact);
+    if (
+      an === 1n &&
+      ad === 2n &&
+      sExact &&
+      (sInt === null || (sInt >= 2 && sInt <= 100))
+    )
       return engine
         .function('Multiply', [
-          engine.number(2n ** BigInt(sInt) - 1n),
+          sInt !== null
+            ? engine.number(2n ** BigInt(sInt) - 1n)
+            : engine.function('Subtract', [
+                engine.function('Power', [engine.number(2), s]),
+                engine.One,
+              ]),
           engine.function('Zeta', [s]),
         ])
         .evaluate();
+    if (
+      sInt === 2 &&
+      ad === 4n &&
+      (an === 1n || an === 3n) &&
+      !shadowsLibraryName(engine, 'Pi') &&
+      !shadowsLibraryName(engine, 'CatalanConstant')
+    ) {
+      const catalan = engine.symbol('CatalanConstant').mul(engine.number(8));
+      return an === 1n
+        ? engine.Pi.pow(2).add(catalan)
+        : engine.Pi.pow(2).sub(catalan);
+    }
   }
 
   // ζ(s,m), positive integer m: ζ(s) − Σ_{k=1}^{m-1} k^{-s}. Skipped for a
@@ -6681,6 +6788,27 @@ function evaluateLerchPhi(
           : (approx.bignumRe ?? approx.re)
       )
     );
+  }
+
+  // Φ(z, s, 1) = Li_s(z)/z for z ≠ 0 (DLMF §25.14, §25.12), where `PolyLog`
+  // has a closed form: Φ(1/2, 1, 1) = 2 ln 2.
+  if (!numeric && zNonZero && isNumber(a) && a.isSame(1)) {
+    const li = engine.function('PolyLog', [s, z]).evaluate();
+    if (li.operator !== 'PolyLog') return li.div(z).evaluate();
+  }
+  // Φ(−1, s, 1/2) = 2ˢ β(s) (DLMF §25.14), β the Dirichlet beta function.
+  if (
+    !numeric &&
+    isNumber(z) &&
+    z.isSame(-1) &&
+    isNumber(s) &&
+    s.isExact &&
+    isNumber(a) &&
+    a.isSame(engine.number([1, 2]))
+  ) {
+    const beta = engine.function('DirichletBeta', [s]).evaluate();
+    if (beta.operator !== 'DirichletBeta')
+      return engine.number(2).pow(s).mul(beta).evaluate();
   }
 
   // a a non-positive integer, Re(s) > 0, z ≠ 0: the (k+a) = 0 term
@@ -7064,6 +7192,10 @@ function evaluateGamma(
       return engine.function('Gamma', [s]).evaluate({
         numericApproximation,
       });
+    if (!shouldNumericize(numericApproximation, s, z)) {
+      const closed = incompleteGammaClosedForm(engine, s, z);
+      if (closed !== undefined) return closed;
+    }
     return shouldNumericize(numericApproximation, s, z)
       ? applyN(
           [s, z],

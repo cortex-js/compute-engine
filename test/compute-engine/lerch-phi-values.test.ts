@@ -478,7 +478,7 @@ describe('LerchPhi: exactness', () => {
   });
 
   test('an exact operand set stays symbolic under evaluate()', () => {
-    expect(phi(['Rational', 1, 2], 3, 1).evaluate().operator).toBe('LerchPhi');
+    expect(phi(['Rational', 1, 3], 3, 1).evaluate().operator).toBe('LerchPhi');
   });
 
   test('a negative integer order and exact operands give the exact value', () => {
