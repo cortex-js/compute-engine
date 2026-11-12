@@ -105,7 +105,7 @@ describe('A SPECIAL FUNCTION OF AN EXACT OPERAND UNDER N() IS CORRECTLY ROUNDED'
   });
 
   test('evaluate() keeps an exact operand symbolic', () => {
-    expect(ce.box(['Digamma', ['Rational', 1, 3]]).evaluate().operator).toBe(
+    expect(ce.box(['Digamma', ['Rational', 1, 5]]).evaluate().operator).toBe(
       'Digamma'
     );
   });

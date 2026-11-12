@@ -1,3 +1,23 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`evaluate()` gives the closed form of `Gamma`, `GammaLn`, `LogGamma`,
+  `Digamma`, `PolyGamma`, `Trigamma` and `Beta` at the exact arguments where
+  one is standard,** as `Gamma(5)` is `24` (#532, contributed by
+  [enumeratio](https://github.com/enumeratio)). `Gamma(1/2)` was unevaluated
+  (now `√π`), `Gamma(5/2)` is `3√π/4` and `Gamma(-1/2)` is `-2√π`;
+  `Digamma(5)` is `-γ + 25/12`, `Digamma(1/2)` is `-γ - 2 ln 2` and
+  `Digamma(1/4)` is `-γ - π/2 - 3 ln 2`, with the values at 1/3, 2/3 and 3/4
+  and the recurrence for any shift up to 1000; `PolyGamma(2, 3)` is
+  `9/4 - 2 ζ(3)`, `PolyGamma(1, 1/4)` is `π² + 8G` and `PolyGamma(4, 1/2)` is
+  `-24 · 31 ζ(5)`; `GammaLn(5)` is `ln 24`, `GammaLn(3/2)` is `ln(√π/2)`, and
+  `LogGamma(-3/2)` is `ln(4√π/3) - 2πi`; `Beta(3/2, 5/2)` is `π/16`. `.N()`
+  of each agrees with `.N()` of the call. The table sizes are capped
+  (half-integers to 200, the `PolyGamma` order to 40 and its shift to 64), and
+  past a cap the call stays unevaluated. `GammaLn` of a negative real keeps
+  its `ln|Γ(x)|` value.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

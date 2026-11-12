@@ -616,8 +616,8 @@ describe('BarnesG at a complex z where G is not a double', () => {
         'Factorial'
       );
     }
-    // Gamma of the same arguments has no closed form here either.
-    expect(engine.box(['Gamma', ['Rational', 7, 2]]).evaluate().operator).toBe(
+    // Gamma of a third has no closed form here either.
+    expect(engine.box(['Gamma', ['Rational', 1, 3]]).evaluate().operator).toBe(
       'Gamma'
     );
     // .N() and a float operand give the float; integers stay exact.
