@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`PowerMod` and `PowerModList` take a rational base and a list, and
+  `ChineseRemainder` takes an offset.** `PowerMod(1/2, 2, 7)` was an
+  `incompatible-type` error (now `2`: the base `p/q` is `p` times the inverse
+  of `q` modulo `m`, here `4² = 16 ≡ 2`; `PowerMod(3/4, -2, 7)` is `1`, and a
+  base whose denominator has no inverse stays unevaluated, as
+  `PowerMod(1/2, 2, 4)`). `PowerMod([2, 3], 2, 7)` and
+  `PowerModList([2, 3], 2, 7)` were errors and now thread over the list:
+  `[4, 2]` and `[[4], [2]]`, a scalar held fixed and lists of different lengths
+  left unevaluated. `ChineseRemainder([2, 3, 2], [3, 5, 7], 100)` is the
+  smallest solution that is at least `100`, `128` (it was an
+  `unexpected-argument` error). `.N()` keeps the exact base and exponent.
+  (#546, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

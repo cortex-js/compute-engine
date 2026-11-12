@@ -710,3 +710,74 @@ describe('Modular heads (#395): MultiplicativeOrder ignores the sign of n', () =
       'MultiplicativeOrder'
     ));
 });
+
+describe('PowerMod and PowerModList with a rational base, a list and an offset', () => {
+  const text = (x: { toString(): string }) => x.toString().replace(/, /g, ',');
+
+  // [expression, value, LaTeX parse route]
+  const cases: [unknown, string, string?][] = [
+    [['PowerMod', ['Rational', 1, 2], 2, 7], '2', '\\operatorname{PowerMod}(\\frac12, 2, 7)'],
+    [['PowerMod', ['Rational', 3, 4], 5, 11], '1'],
+    [['PowerMod', ['Rational', 3, 5], 3, 13], '5'],
+    [['PowerMod', ['Rational', 3, 4], -2, 7], '1'],
+    [['PowerMod', ['Rational', -1, 2], 3, 7], '6'],
+    [['PowerMod', ['Rational', 1, 2], ['Rational', 1, 2], 7], '2'],
+    [['PowerMod', ['Rational', 1, 2], 2, 1], '0'],
+    [['PowerModList', ['Rational', 1, 2], 2, 7], '[2]'],
+    [['PowerMod', ['List', 2, 3], 2, 7], '[4,2]', '\\operatorname{PowerMod}([2, 3], 2, 7)'],
+    [['PowerMod', 2, ['List', 2, 3], 7], '[4,1]'],
+    [['PowerMod', ['List', 2, 3], 2, ['List', 7, 11]], '[4,9]'],
+    [['PowerMod', ['List', ['Rational', 1, 2], 3], 2, 7], '[2,2]'],
+    [['PowerModList', ['List', 2, 3], 2, 7], '[[4],[2]]'],
+    [['PowerModList', ['List', 3, 1], ['Rational', 1, 2], 11], '[[5,6],[1,10]]'],
+    [['ChineseRemainder', ['List', 2, 3, 2], ['List', 3, 5, 7], 100], '128', '\\operatorname{ChineseRemainder}([2, 3, 2], [3, 5, 7], 100)'],
+    [['ChineseRemainder', ['List', 2, 3, 2], ['List', 3, 5, 7], 23], '23'],
+    [['ChineseRemainder', ['List', 2, 3, 2], ['List', 3, 5, 7], 24], '128'],
+    [['ChineseRemainder', ['List', 2, 3, 2], ['List', 3, 5, 7], -200], '-187'],
+    [['ChineseRemainder', ['List', 1, 2], ['List', 4, 6], 10], 'ChineseRemainder([1, 2], [4, 6], 10)'],
+  ];
+  for (const [expr, expected, latex] of cases) {
+    test(`${JSON.stringify(expr)} = ${expected} (evaluate)`, () => {
+      expect(text(ce.box(expr as any).evaluate())).toBe(text({ toString: () => expected }));
+    });
+    if (latex)
+      test(`${latex} = ${expected} (parse route)`, () => {
+        expect(text(ce.parse(latex).evaluate())).toBe(expected);
+      });
+  }
+
+  test('`.N()` keeps the exact rational base and exponent', () => {
+    expect(ce.box(['PowerMod', ['Rational', 1, 2], 2, 7]).N().toString()).toBe('2');
+    expect(ce.box(['PowerMod', 4, ['Rational', 1, 2], 7]).N().toString()).toBe('2');
+    expect(text(ce.box(['PowerMod', ['List', 2, 3], 2, 7]).N())).toBe('[4,2]');
+  });
+
+  test('a base without an inverse, lists of two lengths and an inconsistent system stay unevaluated', () => {
+    expect(ce.box(['PowerMod', ['Rational', 1, 2], 2, 4]).evaluate().operator).toBe('PowerMod');
+    expect(ce.box(['PowerModList', ['Rational', 1, 2], 2, 4]).evaluate().operator).toBe('PowerModList');
+    expect(ce.box(['PowerMod', ['List', 2, 3], 2, ['List', 7, 11, 13]]).evaluate().operator).toBe('PowerMod');
+  });
+
+  test('a big rational base is reduced exactly', () => {
+    const q = ce.box(['PowerMod', ['Rational', 1, ce.number(10n ** 30n + 57n)], 2, ce.number(10n ** 20n + 39n)]).evaluate();
+    const m = 10n ** 20n + 39n;
+    const inv = (a: bigint): bigint => {
+      let [r0, r1, s0, s1] = [a % m, m, 1n, 0n];
+      while (r1 !== 0n) {
+        const k = r0 / r1;
+        [r0, r1, s0, s1] = [r1, r0 - k * r1, s1, s0 - k * s1];
+      }
+      return ((s0 % m) + m) % m;
+    };
+    const base = inv(10n ** 30n + 57n);
+    expect(q.toString()).toBe(String((base * base) % m));
+  });
+
+  test('integer operands keep their results and types', () => {
+    expect(ce.box(['PowerMod', 2, 10, 1000]).evaluate().toString()).toBe('24');
+    expect(ce.box(['PowerMod', 2, 10, 1000]).type.toString()).toBe('integer');
+    expect(ce.box(['PowerMod', ['List', 2, 3], 2, 7]).type.toString()).toBe('list<integer>');
+    expect(text(ce.box(['PowerModList', 3, ['Rational', 1, 2], 11]).evaluate())).toBe('[5,6]');
+    expect(ce.box(['ChineseRemainder', ['List', 2, 3, 2], ['List', 3, 5, 7]]).evaluate().toString()).toBe('23');
+  });
+});
