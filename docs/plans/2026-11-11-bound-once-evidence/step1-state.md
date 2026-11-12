@@ -829,3 +829,40 @@ fragment and `ir-*` files, nothing reached it.
     reads the global `total`); expected the throw "different prepared
     policy".
 - New: none. No `ir-*` test fails.
+
+### After `7a28dda13`
+
+The six structured-route tests of the other session listed above pass at
+`7a28dda13` (its owner's decisions).
+
+### Review round (2026-11-12, commits `da0ffeb67` to `127cb3314`)
+
+- `ce.withValues()` restores the entry of the activation that holds the
+  value of a parameter or a local (`_checkpointSnapshot()`).
+- A constant destructuring `Declare` of a block makes every leaf constant,
+  nested patterns included; a typed constant (`Declare(f, type,
+  Dictionary(value, constant))`) is constant too, and its function value is
+  checked against the signature and written once.
+- A destructured local is widened only when that local is assigned.
+- The cycle guards of a symbol compute their activation key once.
+- An activated definition has no value outside its activations: an
+  activation starts its binder variables with no value (`_staticValue()` is
+  deleted) and a write with no activation changes nothing. No test needed
+  the start value. `saveLoopIndexes()` and the restore half of
+  `ComprehensionIndexFrame` are deleted: every caller runs in an activation
+  that is popped after the loop.
+- A `popScope()` that keeps its definitions uncounts them and disposes none.
+- A held argument of a hold function with a `bind` parameter inlines the
+  caller's frame locals (`heldArgumentValue()`).
+- The interpreter fallback of a compilation gives its inputs to the
+  definitions that the expression reads, also through the value of a symbol
+  or the body of a called function (`withBindingValuesFn()`).
+- A renamed shadowing call is boxed again in the scope of the copies
+  (`rebindToBindings(…, { calls: true })`).
+
+Known failures after the round: the 18 above. Changed by the round: the
+three structured-route tests "a shadowed function name declines"
+(`-functions`, `-functions2`) and "a shadowed Comprehension or ReplaceAt
+declines" (`-heat`) now compile the user function through its copy, and the
+value equals the interpreter's (`Abs(a) = a + 1`, `f(-5)` = `-4` on both);
+the tests expect a decline. Left to the owner of the route.
