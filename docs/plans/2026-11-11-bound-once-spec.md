@@ -165,10 +165,22 @@ options. The compile options are the smallest change of the engine.
    closes CE-1210 and removes the compile seam in Tycho.
 2. Stored function bodies as units with stamps (model slice 2), which rule
    3 needs for a body that reads a name defined later.
-3. The macro kind (model slice 4).
-4. The batch (model slice 3).
+3. A fresh symbol (approved by the user on 2026-11-11, as its own short
+   spec): a symbol with an identity that no parse produces, compared by
+   identity, with a deterministic spelling when it is serialized or emitted
+   in compiled code (numbered for each expression or compilation, not for
+   the process). It is for a temporary that must be named at the top level.
+   Most temporaries need no name once binding is lexical: a parameter, a
+   binder variable, a block local and a macro cannot collide. It replaces
+   the collision loops of the engine (`freshSymbol()` in
+   `symbolic/series.ts`, the parameters of a periodic `Solve` family, the
+   renaming of a block local at an application, `_ce_iterate_accumulator`)
+   and of Tycho (seven generators; its list of 2026-11-11). It comes before
+   or with the macro kind.
+4. The macro kind (model slice 4).
+5. The batch (model slice 3).
 
-Each is a spec of its own. Steps 3 and 4 can change places; the user
+Each is a spec of its own. Steps 4 and 5 can change places; the user
 decides (model decision 3).
 
 **Delivery to Tycho** (user decision 2026-11-11). A step is delivered to
@@ -391,10 +403,9 @@ stay (C1).
 
 ### C4. Temporary values and hidden values: `ce.withValues()`, nothing new (3, 4, 14)
 
-Revised on 2026-11-11 after the user's question ("is it worth introducing a
-mechanism for temporary values?"). The first answer to the review was a
-new record on the evaluation context. It is withdrawn: the engine already
-has the construct.
+Revised on 2026-11-11 and confirmed by the user the same day. The first
+answer to the review was a new record on the evaluation context. It is
+withdrawn: the engine already has the construct.
 
 `ce.withValues(values, fn)` writes each value on the definition of the
 name and puts back the earlier value and type when `fn` returns; the value
