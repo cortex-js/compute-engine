@@ -3328,7 +3328,10 @@ const CHECKED_CALLBACK_CONSUMERS: Readonly<
     argTypes: (ops) => [undefined, collectionElementTypeOf(ops[0])],
     sources: (ops) => [undefined, ops[0]],
   },
-  Tabulate: { callback: 0, argTypes: () => ['integer', 'integer'] },
+  Tabulate: {
+    callback: 0,
+    argTypes: (ops) => ops.slice(1).map((): Type => 'integer'),
+  },
 };
 
 /**

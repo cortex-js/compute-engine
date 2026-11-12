@@ -1,3 +1,23 @@
+## Unreleased
+
+### Resolved Issues
+
+- **`Tabulate` takes any number of dimensions, and `All` and `Any` report an
+  operand they do not take.** `Tabulate(Add, 2, 2, 2)` was boxed as
+  `Tabulate(Add, 2, 2)`, which dropped the third dimension; it is now a
+  `tensor<integer^(2x2x2)>` whose rows, elements and `Length` read as for
+  two dimensions, and `Table(f, 2, 2, 2)` follows. The JavaScript and Python
+  targets compile the same nesting. A dimension of 0 gives an empty list, as
+  Wolfram `Table` and `Array` do: `Tabulate(f, 0, 2)` is `[]` and
+  `Tabulate(f, 2, 0)` is `[[], []]` once materialized. `All(xs, p, 2)` and
+  `Any(xs, p, 2)` were boxed as `All(xs, p)`, losing the `2`; the extra
+  operand is now an `unexpected-argument` error, as for `PolyLog(1, 2, 1)`.
+  `Shape([[a(1), a(2)]])`, a list of applications of an unknown function,
+  was `()`, because the type of the list carries no dimensions when a cell
+  may itself be a list; the shape is now read from the nesting of the list,
+  `(1, 2)`, and a ragged list still has no shape. (#525, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

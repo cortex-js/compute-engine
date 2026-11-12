@@ -1165,6 +1165,7 @@ const COLLECTION_CASES: Array<{ name: string; expr: any; expected: any }> = (() 
     { name: 'scan_lambda', expr: ['Scan', ['List', 10, 2, 3], ['Function', ['Subtract', 'a', 'b'], 'a', 'b'], 0], expected: [-10, -12, -15] },
     { name: 'tabulate', expr: ['Tabulate', ['Function', ['Square', 'i'], 'i'], 5], expected: [1, 4, 9, 16, 25] },
     { name: 'tabulate_2d', expr: ['Tabulate', ['Function', ['Add', ['Multiply', 10, 'i'], 'j'], 'i', 'j'], 2, 3], expected: [[11, 12, 13], [21, 22, 23]] },
+    { name: 'tabulate_3d', expr: ['Tabulate', ['Function', ['Add', ['Multiply', 100, 'i'], ['Multiply', 10, 'j'], 'k'], 'i', 'j', 'k'], 2, 2, 2], expected: [[[111, 112], [121, 122]], [[211, 212], [221, 222]]] },
     { name: 'boole', expr: ['Boole', ['Greater', 3, 2]], expected: 1 },
     { name: 'kronecker', expr: ['KroneckerDelta', 4, 4], expected: 1 },
     { name: 'kronecker_ne', expr: ['KroneckerDelta', 4, 5], expected: 0 },

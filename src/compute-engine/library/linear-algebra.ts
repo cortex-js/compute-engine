@@ -234,6 +234,11 @@ function shapeOfOperand(
     const listed = listedLazyRows(ce, xs);
     if (listed === undefined) return undefined;
     if (listed !== xs) return shapeOfOperand(ce, listed, next);
+    // A cell that may itself be a list (an application of an unknown
+    // function: `[[a(1), a(2)]]`) keeps the type from carrying dimensions,
+    // but an unevaluated application is one cell, as in Wolfram.
+    const regular = regularListShape(xs);
+    if (regular !== undefined) return regular;
   }
   if (
     shape.length > 0 ||
@@ -298,6 +303,33 @@ function emptyAxisListShape(xs: Expression): number[] | undefined {
   const dims: number[] = [];
   let level: ReadonlyArray<Expression> = [xs];
   while (true) {
+    if (!level.every((x) => isFunction(x, 'List'))) return undefined;
+    const lists = level as ReadonlyArray<
+      Expression & { ops: ReadonlyArray<Expression> }
+    >;
+    const n = lists[0].ops.length;
+    if (lists.some((x) => x.ops.length !== n)) return undefined;
+    dims.push(n);
+    if (n === 0) return dims;
+    level = lists.flatMap((x) => x.ops);
+  }
+}
+
+/**
+ * The shape of an eager `List` value `xs` read from its structure, or
+ * `undefined` when it is ragged, mixes lists and other values at a level, or
+ * has a cell that is a collection other than a `List`.
+ *
+ * Each level must be all `List`s of one length, or none: the cells are the
+ * first level with no `List`, so `[[a(1), a(2)]]` has the shape `[1, 2]`.
+ */
+function regularListShape(xs: Expression): number[] | undefined {
+  const dims: number[] = [];
+  let level: ReadonlyArray<Expression> = [xs];
+  while (true) {
+    if (!level.some((x) => isFunction(x, 'List'))) {
+      return level.some((x) => x.isCollection === true) ? undefined : dims;
+    }
     if (!level.every((x) => isFunction(x, 'List'))) return undefined;
     const lists = level as ReadonlyArray<
       Expression & { ops: ReadonlyArray<Expression> }

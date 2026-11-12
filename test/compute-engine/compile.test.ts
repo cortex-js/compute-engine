@@ -2075,7 +2075,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     )!;
     // Dimensions and the lambda are IIFE parameters, evaluated once — an
     // impure dimension (e.g. Random) must not be re-evaluated per row.
-    expect(r.code).toMatch(/^\(\(_f, _n, _m\) =>/);
+    expect(r.code).toMatch(/^\(\(_f, _n1, _n2\) =>/);
   });
 
   it('Length compiles to array length (was: Unknown operator)', () => {
@@ -2343,6 +2343,34 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toEqual([
       [11, 12, 13],
       [21, 22, 23],
+    ]);
+  });
+
+  it('Tabulate compiles any number of dimensions', () => {
+    const e = mkEngine();
+    expect(
+      runJs(e, [
+        'Tabulate',
+        [
+          'Function',
+          ['Add', ['Multiply', 100, 'i'], ['Multiply', 10, 'j'], 'k'],
+          'i',
+          'j',
+          'k',
+        ],
+        2,
+        2,
+        3,
+      ])
+    ).toEqual([
+      [
+        [111, 112, 113],
+        [121, 122, 123],
+      ],
+      [
+        [211, 212, 213],
+        [221, 222, 223],
+      ],
     ]);
   });
 
