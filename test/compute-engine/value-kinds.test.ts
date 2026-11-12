@@ -417,11 +417,10 @@ describe('VALUE KINDS: the per-type agreement rule', () => {
   });
 });
 
-describe('VALUE KINDS: the generation counter and the checkpoint model', () => {
-  test('the generation moves on register, replace, remove and restore', () => {
+describe('VALUE KINDS: the generation counter', () => {
+  test('the generation moves on register, replace and remove', () => {
     const ce = gf8Engine();
     const g0 = kindGeneration(ce);
-    const cp = ce.checkpoint();
 
     ce.declare('GF8', {
       signature: '(integer) -> gf8',
@@ -441,55 +440,6 @@ describe('VALUE KINDS: the generation counter and the checkpoint model', () => {
     ce.declare('GF8', { arithmetic: undefined }, { extend: true });
     const g3 = kindGeneration(ce);
     expect(g3).toBeGreaterThan(g2);
-
-    ce.restore(cp);
-    expect(kindGeneration(ce)).toBeGreaterThan(g3);
-  });
-
-  test('a checkpoint taken before a registration restores to none', () => {
-    const ce = gf8Engine();
-    const cp = ce.checkpoint();
-    ce.declare('GF8', {
-      signature: '(integer) -> gf8',
-      arithmetic: gf8Arithmetic(),
-    });
-    const def = operatorDef(ce, 'GF8');
-    expect(kindTypesOf(ce).has('gf8')).toBe(true);
-    const before = kindGeneration(ce);
-
-    ce.restore(cp);
-    // `residue`, `measurement`, `enclosure` and `quantity` were registered
-    // by the library heads `ResidueClass`, `Measurement`, `Enclosure` and
-    // `Quantity` before the checkpoint.
-    expect([...kindTypesOf(ce)]).toEqual([
-      'residue',
-      'measurement',
-      'enclosure',
-      'quantity',
-    ]);
-    expect(kindTypeInfo(ce, 'gf8')).toBeUndefined();
-    expect(arithmeticOf(ce, def)).toBeUndefined();
-    expect(ce.lookupDefinition('GF8')).toBeUndefined();
-    expect(kindGeneration(ce)).toBeGreaterThan(before);
-    // The type itself was declared before the checkpoint and stays.
-    expect(ce.type('gf8').matches('value')).toBe(true);
-  });
-
-  test('a restore puts back the fields a later registration changed', () => {
-    const ce = gf8EngineWithHead();
-    const cp = ce.checkpoint();
-    const resultType = (): undefined => undefined;
-    ce.declare('GF8b', {
-      signature: '(integer) -> gf8',
-      arithmetic: { resultType },
-    });
-    expect(kindTypeInfo(ce, 'gf8')?.resultType).toBe(resultType);
-    expect(kindTypeInfo(ce, 'gf8')?.heads.size).toBe(2);
-
-    ce.restore(cp);
-    expect(kindTypeInfo(ce, 'gf8')?.resultType).toBeUndefined();
-    expect(kindTypeInfo(ce, 'gf8')?.heads.size).toBe(1);
-    expect(arithmeticOf(ce, operatorDef(ce, 'GF8'))).toBeDefined();
   });
 
   // A redeclaration inside an inference rollback frame is undone with the
@@ -726,14 +676,6 @@ describe('VALUE KINDS: recognition of a kind value', () => {
     // The type keeps its protection.
     expect(isKindType(ce, ce.type('gf8').type)).toBe(true);
     expect(holdsKindValue(ce.box(['Divide', 'r', 'r']))).toBe(true);
-    // A checkpoint restore puts the entry back.
-    const ce2 = gf8EngineWithHead();
-    const def2 = operatorDef(ce2, 'GF8');
-    const cp = ce2.checkpoint();
-    ce2.undeclare('GF8');
-    expect(arithmeticOf(ce2, def2)).toBeUndefined();
-    ce2.restore(cp);
-    expect(arithmeticOf(ce2, def2)).toBeDefined();
   });
 });
 

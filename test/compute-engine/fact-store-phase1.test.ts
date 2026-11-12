@@ -1,6 +1,6 @@
 /**
  * The assumption STORE: what `assume()` records and how the record survives a
- * scope, a `forget()` and a checkpoint restore.
+ * scope and a `forget()`.
  *
  * An assumption is a FACT about the current scope's state, so the store maps
  * a normalized fact expression to a list of frozen assertion records, each
@@ -161,40 +161,6 @@ describe('the assumed-value overlay', () => {
 
     ce.forget();
     expect(ce.context.assumedValues.size).toBe(0);
-  });
-});
-
-describe('checkpoint restore round-trips the store', () => {
-  test('records and overlay entries come back after a forget', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'real');
-    ce.assume(ce.parse('p > 3'));
-    ce.assume(ce.parse('q = 5'));
-
-    const cp = ce.checkpoint();
-    // Two facts — the inequality, and the equality, which is recorded
-    // alongside the overlay entry so that the tier it proves has somewhere to
-    // be read from.
-    expect(ce.context.assumptions.size).toBe(2);
-    expect(ce.context.assumedValues.size).toBe(1);
-
-    ce.forget();
-    expect(ce.context.assumptions.size).toBe(0);
-    expect(ce.context.assumedValues.size).toBe(0);
-
-    ce.restore(cp);
-    expect(ce.context.assumptions.size).toBe(2);
-    expect(ce.context.assumedValues.size).toBe(1);
-
-    // The restored record is the record — its subject reference survives,
-    // because the journal restores definition records in place rather than
-    // replacing them.
-    const [[, records]] = [...ce.context.assumptions.entries()];
-    expect(records[0].truth).toBe(true);
-    const def = ce.lookupDefinition('p');
-    expect(
-      def && 'value' in def ? records[0].subjects[0].def === def.value : false
-    ).toBe(true);
   });
 });
 

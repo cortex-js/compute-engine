@@ -157,9 +157,8 @@ function sameStatement(a: DeclarationOrigin, b: DeclarationOrigin): boolean {
  * (e.g. a type record's `def` is set): a stamp on an unfulfilled placeholder
  * would otherwise skip the registration that was about to fulfill it.
  *
- * Provenance: `docs/CHECKPOINT-MODEL.md`, finding
- * F2/R1 (~1.2 ms of `resettleTypeConformances` per `type` statement with zero
- * redefinition anywhere).
+ * The check saves about 1.2 ms of `resettleTypeConformances` per `type`
+ * statement with no redefinition.
  */
 export function isSameStatementReRegistration(
   existing: DeclarationOrigin | undefined,

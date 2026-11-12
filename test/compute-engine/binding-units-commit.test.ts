@@ -316,16 +316,6 @@ describe('RULE 11: ce.infer()', () => {
     ]);
     ce.popScope();
   });
-
-  test('a checkpoint records the declarations', () => {
-    const ce = engine();
-    const cp = ce.checkpoint();
-    const a = ce.parse('x + 1');
-    expect(summary(ce.infer([a])).declared).toEqual(['x: number @ 1']);
-    ce.restore(cp);
-    expect(ce.lookupDefinition('x')).toBeUndefined();
-    ce.discard(cp);
-  });
 });
 
 describe('RULE 12: ce.assume() declares the names it constrains', () => {
@@ -368,7 +358,7 @@ describe('RULE 12: ce.assume() declares the names it constrains', () => {
   });
 });
 
-describe('RULE 13: trials, rollback frames and checkpoints', () => {
+describe('RULE 13: trials and rollback frames', () => {
   test('the trials of the arms of an overloaded operator leave no requirement', () => {
     const declare = (ce: ComputeEngine) =>
       ce.declare('G', {
@@ -426,20 +416,16 @@ describe('RULE 13: trials, rollback frames and checkpoints', () => {
 
   test('the group-theory library checks its input before it declares anything', () => {
     const ce = engine();
-    const checkpoint = jest.spyOn(ce, 'checkpoint');
     ce.declareType('GroupDescriptor', 'integer', { alias: true });
     expect(() => loadGroupTheory(ce)).toThrow(
       'The type "GroupDescriptor" is already defined'
     );
-    expect(checkpoint).not.toHaveBeenCalled();
     expect(ce.lookupDefinition('GroupOrder')).toBeUndefined();
     expect(ce.lookupDefinition('Permutation')).toBeUndefined();
     expect(ce._typeRegistry['Permutation']).toBeUndefined();
-    // An engine with no conflict loads it, with no checkpoint.
+    // An engine with no conflict loads it.
     const fresh = engine();
-    const spy = jest.spyOn(fresh, 'checkpoint');
     expect(loadGroupTheory(fresh).operatorCount).toBeGreaterThan(0);
-    expect(spy).not.toHaveBeenCalled();
   });
 
   test('the group-theory library: a value of the name of a minted constructor', () => {
@@ -472,19 +458,6 @@ describe('RULE 13: trials, rollback frames and checkpoints', () => {
     expect(ce.lookupDefinition('GroupOrder')).toBeUndefined();
     // The load succeeds afterwards.
     expect(loadGroupTheory(ce).operatorCount).toBeGreaterThan(0);
-  });
-
-  test('a restore does not undo a requirement written after the checkpoint', () => {
-    // The limit of rule 13: a write in an environment is not journaled.
-    const ce = engine();
-    const a = ce.box(['Tuple', 'x']);
-    expect(a.op1.type.toString()).toBe('unknown');
-    const cp = ce.checkpoint();
-    ce.function('Add', [a.op1, 1]);
-    expect(a.op1.type.toString()).toBe('number');
-    ce.restore(cp);
-    expect(a.op1.type.toString()).toBe('number');
-    ce.discard(cp);
   });
 });
 

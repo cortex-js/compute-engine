@@ -208,7 +208,7 @@ describe('AN INFERRED TYPE DOES NOT REFUSE AN ASSIGNMENT', () => {
   });
 });
 
-describe('ROLLBACK AND CHECKPOINT', () => {
+describe('ROLLBACK', () => {
   test('a rollback frame leaves no requirement and no declaration', () => {
     const ce = engine();
     const a = ce.parse('x + 1');
@@ -221,18 +221,6 @@ describe('ROLLBACK AND CHECKPOINT', () => {
     expect(typeOf(a, 'x')).toBe('number');
     expect(ce.lookupDefinition('x')).toBeUndefined();
     expect(typeOf(ce.parse('2x'), 'x')).toBe('number');
-  });
-
-  test('a checkpoint restore leaves the requirements of the units', () => {
-    const ce = engine();
-    const a = ce.parse('x + 1');
-    const cp = ce.checkpoint();
-    ce.parse('x(3)');
-    expect(typeOf(a, 'x')).toBe('number');
-    ce.restore(cp);
-    expect(typeOf(a, 'x')).toBe('number');
-    expect(typeOf(ce.parse('\\cos(x)'), 'x')).toBe('number');
-    expect(ce.lookupDefinition('x')).toBeUndefined();
   });
 });
 

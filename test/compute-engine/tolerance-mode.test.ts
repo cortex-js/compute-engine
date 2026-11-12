@@ -9,7 +9,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 // - `'auto'` makes the tolerance follow the precision: 10^(-precision + 2),
 //   recomputed at each precision change. It used to be the same as the
 //   default.
-// - A checkpoint restore puts the mode back, not only the number.
 //
 // Each test builds its own engine: constructing an engine or setting its
 // precision writes the module-global `BigDecimal.precision`.
@@ -97,27 +96,5 @@ describe("tolerance 'auto'", () => {
     ce.tolerance = 1e-8;
     ce.precision = 40;
     expect(ce.tolerance).toBe(1e-8);
-  });
-});
-
-describe('checkpoint and restore', () => {
-  test('restores the auto mode, not only the number', () => {
-    const ce = new ComputeEngine({ tolerance: 'auto' });
-    const cp = ce.checkpoint();
-    ce.tolerance = 1e-5;
-    ce.restore(cp);
-    expect(ce.tolerance).toBe(1e-19);
-    ce.precision = 30;
-    expect(ce.tolerance).toBe(1e-28);
-  });
-
-  test('restores an explicit tolerance as explicit', () => {
-    const ce = new ComputeEngine();
-    ce.tolerance = 1e-10;
-    const cp = ce.checkpoint();
-    ce.tolerance = 'auto';
-    ce.restore(cp);
-    ce.precision = 40;
-    expect(ce.tolerance).toBe(1e-10);
   });
 });

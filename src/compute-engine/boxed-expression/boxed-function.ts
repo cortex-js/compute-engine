@@ -5103,24 +5103,6 @@ export class BoxedFunction
       return this.engine._withOperation(this, () =>
         evaluateInOperation.call(this, options)
       );
-    // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
-    // when a checkpoint is taken or restored — the snapshot would capture
-    // state the evaluation is still about to move, and a later restore would
-    // rewind to a point inside a half-finished one. Eval-context depth cannot
-    // see this: a plain `evaluate` handler pushes no scope, so an operator
-    // handler calling `ce.checkpoint()` looks exactly like the host calling it
-    // between cells. Counting is the only signal there is.
-    //
-    // Two integer ops and a `finally` per function-expression evaluation.
-    // A/B against the same tree with the bracket removed put a notebook-shaped
-    // workload inside the run-to-run noise and a deliberately
-    // evaluation-saturated loop at a low single-digit percentage; no benchmark
-    // harness for it is committed, so treat those as the reason the bracket
-    // was kept rather than as figures to regress against.
-    //
-    // The `finally` is correctness, not tidiness: an evaluation that throws
-    // must not strand the count, or the engine would refuse every subsequent
-    // checkpoint for the rest of its life.
     const engine = this.engine;
     // A pure eager source that a finiteness read evaluated during the
     // evaluations in progress has that value (`keptEagerSourceValue()`):
@@ -6513,14 +6495,6 @@ export class BoxedFunction
     // list of 20,000 points, against 4 ms on the synchronous route.
     if (this._isLiteralData(literalDataOptions(options)))
       return Promise.resolve(this);
-    // Checkpoint quiescence (`checkpoint.ts`): an async evaluation suspended
-    // at an `await` holds its eval context across the suspension and hands
-    // control back to the host, so — unlike a synchronous evaluation, which
-    // the host simply cannot interleave a call with — it is invisible to the
-    // eval-context depth check. Counting it is what lets `checkpoint()` and
-    // `restore()` refuse rather than rewind state an evaluation is still
-    // standing on. Decremented in a `finally` on the promise, so a rejection
-    // does not strand the count.
     // Host capabilities (`ce.effects`): an asynchronous evaluation captures
     // the registry when it starts and carries it in its options, which every
     // nested `evaluateAsync(options)` call receives. An engine field cannot

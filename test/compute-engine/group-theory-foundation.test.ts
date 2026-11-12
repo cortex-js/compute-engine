@@ -167,18 +167,13 @@ describe('checked CE permutation entry routes', () => {
   });
 });
 
-describe('installation, limits, and checkpoints', () => {
-  test('installation is opt-in and can be restored away and replayed', () => {
+describe('installation and limits', () => {
+  test('installation is opt-in', () => {
     const ce = new ComputeEngine();
     expect(ce.lookupDefinition('Permutation')).toBeUndefined();
-    const cp = ce.checkpoint();
     loadGroupTheory(ce);
     expect(ce.box(swap).type.toString()).toBe('Permutation');
-    ce.restore(cp);
-    expect(ce.lookupDefinition('Permutation')).toBeUndefined();
-    loadGroupTheory(ce);
     expect(ce.box(swap).evaluate().json).toEqual(swap);
-    ce.discard(cp);
   });
   test('failed installation does not leave a partial library', () => {
     const ce = new ComputeEngine();
@@ -188,17 +183,13 @@ describe('installation, limits, and checkpoints', () => {
     expect(ce.lookupDefinition('PermutationCompose')).toBeUndefined();
     ce.declareType('Permutation', 'integer', { mint: false });
   });
-  test('saved values restore, and configured limits are enforced on reload', () => {
+  test('configured limits are enforced', () => {
     const ce = engine(3);
     run(ce, 'let saved_permutation = Permutation([2,1])');
-    const cp = ce.checkpoint();
-    run(ce, 'saved_permutation = Permutation([1,3,2])');
-    ce.restore(cp);
     expect(run(ce, 'saved_permutation').json).toEqual(swap);
     expect(run(ce, 'PermutationAction(4)').operator).toBe('Error');
     expect(run(ce, 'Permutation([1,2,3,4])').operator).toBe('Error');
     const strict = engine(1);
     expect(strict.box(swap).operator).toBe('Error');
-    ce.discard(cp);
   });
 });

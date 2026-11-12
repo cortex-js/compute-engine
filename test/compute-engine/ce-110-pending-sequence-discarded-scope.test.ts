@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { _sequenceRegistrySnapshot } from '../../src/compute-engine/sequence';
+import { _pendingSequenceCount } from '../../src/compute-engine/sequence';
 
 /**
  * CE-110. Pending sequence definitions (a base case `F_0 := 5` with no
@@ -15,8 +15,7 @@ import { _sequenceRegistrySnapshot } from '../../src/compute-engine/sequence';
  */
 
 function pendingCount(ce: ComputeEngine): number {
-  const snapshot = _sequenceRegistrySnapshot(ce) as { pending?: unknown[] };
-  return snapshot.pending?.length ?? 0;
+  return _pendingSequenceCount(ce);
 }
 
 describe('CE-110: a base case assigned under a discarded scope', () => {

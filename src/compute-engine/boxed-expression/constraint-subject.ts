@@ -519,9 +519,9 @@ const EMPTY_ASSUMPTIONS: AssumptionStore = Object.freeze(
  * it derives its answer WITHOUT the facts: while `ce._factSuppressionDepth`
  * is above zero the accessor hands back an empty store and the consumer
  * answers as if nothing were assumed. Sites that COPY or SNAPSHOT the store
- * — a scope push, a checkpoint, the scope dump — are exempt and read
- * `ce.context.assumptions` by identity, since a scope pushed or a checkpoint
- * taken inside such a bracket must still carry the real facts.
+ * — a scope push, the scope dump — are exempt and read
+ * `ce.context.assumptions` by identity, since a scope pushed inside such a
+ * bracket must still carry the real facts.
  */
 export function contextAssumptions(ce: ComputeEngine): AssumptionStore {
   if (ce._factSuppressionDepth > 0) return EMPTY_ASSUMPTIONS;
@@ -831,7 +831,7 @@ type FactIndexCacheEntry = {
   /**
    * The map's own mutation counter at build time. Catches a `.set()` or
    * `.delete()` that changed the contents without advancing the engine's
-   * generation — a checkpoint restore refills a map in place, and internal
+   * generation — internal
    * storage of a normalized fact can replace one key's records.
    */
   version: number;

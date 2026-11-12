@@ -360,7 +360,7 @@ describe('declare extend: a collection operator', () => {
   });
 });
 
-describe('declare extend: scopes and checkpoints', () => {
+describe('declare extend: scopes', () => {
   test('an extension in a child scope shadows, and pop restores', () => {
     const ce = new ComputeEngine();
     const before = ce.lookupDefinition('SetMinus')!.operator!;
@@ -396,31 +396,6 @@ describe('declare extend: scopes and checkpoints', () => {
     ce.declare('n10', 'integer', { scope: ce.context.lexicalScope });
     expect(ce.box('n9').type.toString()).toBe('integer');
     expect(ce.box('n10').type.toString()).toBe('integer');
-  });
-
-  test('a checkpoint restore undoes an extension', () => {
-    const ce = new ComputeEngine();
-    ce.declare('Basis', { signature: '(any) -> any', description: 'first' });
-    const before = ce.lookupDefinition('Basis')!.operator!;
-    const cp = ce.checkpoint();
-    ce.declare('Basis', { description: 'second' }, { extend: true });
-    expect(ce.lookupDefinition('Basis')!.operator!.description).toBe('second');
-    ce.restore(cp);
-    expect(ce.lookupDefinition('Basis')!.operator).toBe(before);
-    expect(ce.lookupDefinition('Basis')!.operator!.description).toBe('first');
-  });
-
-  test('a checkpoint restore undoes an extension of a built-in', () => {
-    const ce = new ComputeEngine();
-    const cp = ce.checkpoint();
-    ce.declare(
-      'SetMinus',
-      { signature: '(value, value*) -> set' },
-      { extend: true }
-    );
-    expect(ce.box(['SetMinus', 5, 2]).isValid).toBe(true);
-    ce.restore(cp);
-    expect(ce.box(['SetMinus', 5, 2]).isValid).toBe(false);
   });
 });
 
@@ -578,8 +553,7 @@ describe('declare extend: a standard-library operator stays a library operator',
   test('the operand order follows the visible definition of Add and Multiply', () => {
     // `sortOperands()` looks up the definition only in an engine where a
     // non-commutative `Add` or `Multiply` was declared. The lookup must
-    // still find the visible definition after a scope is popped and after
-    // a checkpoint restore.
+    // still find the visible definition after a scope is popped.
     const ce = new ComputeEngine();
     const other = new ComputeEngine();
 
@@ -588,12 +562,6 @@ describe('declare extend: a standard-library operator stays a library operator',
     expect(ce.box(['Add', 'b', 'a']).json).toEqual(['Add', 'b', 'a']);
     ce.popScope();
     expect(ce.box(['Add', 'b', 'a']).json).toEqual(['Add', 'a', 'b']);
-    expect(ce.box(['Multiply', 'b', 'a']).json).toEqual(['Multiply', 'a', 'b']);
-
-    const cp = ce.checkpoint();
-    ce.declare('Multiply', { commutative: false }, { extend: true });
-    expect(ce.box(['Multiply', 'b', 'a']).json).toEqual(['Multiply', 'b', 'a']);
-    ce.restore(cp);
     expect(ce.box(['Multiply', 'b', 'a']).json).toEqual(['Multiply', 'a', 'b']);
 
     // Another engine is not changed.

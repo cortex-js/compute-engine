@@ -33,7 +33,6 @@ import {
 } from './type-guards.js';
 import { digest128, hashCode, markVolatileDigest } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
-import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
 /**
  * The largest value a counter may reach before it stops being able to
@@ -468,29 +467,6 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
         `Object version counter exhausted: too many stores to this "${this.typeName}" object`
       );
     }
-    // Checkpoint journal (design §5.3): the ONLY writer of `_slots` in the
-    // tree, so one hook covers every field store — including the compiled
-    // tier, which cannot reach a slot at all (`Assign(Field(…))` fails to
-    // compile). Placed after the identity no-op guard above, where the old
-    // value is already in hand, and before the store.
-    //
-    // The entry records PRESENCE alongside the value: this method can create
-    // a previously-absent slot, and `undefined` is ambiguous between "absent"
-    // and "present but undefined", so the undo needs an explicit delete for
-    // the absent case. `_version` is bumped on restore, never restored — the
-    // same monotone-counter rule as everywhere else.
-    //
-    // The OBJECT is the recorded owner, not its slot map: after replaying the
-    // slot undos a restore has to bump `_version` once per touched object, and
-    // there is no way back from a bare `Map` to the object that owns it.
-    journalCheckpointMapEntry(
-      this.engine,
-      this._slots,
-      name,
-      name,
-      'object-store',
-      this
-    );
     this._slots.set(name, value);
     this._version += 1;
     // A field store advances no engine-wide axis (per-object versions carry

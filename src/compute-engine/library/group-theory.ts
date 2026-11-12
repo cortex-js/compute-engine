@@ -52,11 +52,12 @@
 //    never part of a result value.
 //  - Loading twice with equal effective options (the options after the
 //    defaults are applied) returns the first report and changes nothing.
-//    Loading again with different effective options throws. If a checkpoint
-//    restore removed the definitions, the next call loads the library again.
-//  - All types and operators are declared inside one engine checkpoint. If a
-//    declaration fails, the checkpoint is restored, so a failed load leaves
-//    no partial library.
+//    Loading again with different effective options throws. If the
+//    definitions were removed, the next call loads the library again.
+//  - The definitions are checked before anything is declared, so loading is
+//    all or nothing. A declaration that still fails undoes the bindings it
+//    added and the type registry (see the comment before the registration
+//    below), so a failed load leaves no partial library.
 //
 // Validation happens once, when a MathJSON operand is read into a kernel
 // value. The kernel functions that receive these values only check resource
@@ -225,8 +226,8 @@ export interface GroupTheoryLoadReport {
 /**
  * The load state of each engine. `settings` is the JSON text of the
  * effective limits, used to compare a later load. `definitions` holds the
- * definition objects that were installed, used to detect that a checkpoint
- * restore removed them. A `WeakMap` lets a discarded engine be collected.
+ * definition objects that were installed, used to detect that the
+ * definitions were removed, for example by popping the scope or `undeclare`. A `WeakMap` lets a discarded engine be collected.
  */
 const loaded = new WeakMap<
   IComputeEngine,
@@ -296,7 +297,7 @@ export function loadGroupTheory(
     orbitLimits,
   });
   const previous = loaded.get(ce);
-  // Checkpoint restoration can remove a library after loading. Check definitions
+  // A library can be removed after loading. Check definitions
   // as well as the weak cache before claiming the engine is still configured.
   if (
     previous &&
@@ -1170,7 +1171,7 @@ export function loadGroupTheory(
       { mint: false },
     ],
   ];
-  // The registration is all or nothing, with no checkpoint (rule 13 of
+  // The registration is all or nothing (rule 13 of
   // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The definitions
   // are those of this module, so the input that a declaration below can
   // refuse is the set of names: the names of the definitions, checked above,

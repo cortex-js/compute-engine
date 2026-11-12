@@ -398,15 +398,8 @@ import {
 } from '../boxed-expression/boxed-character.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { splitByPattern, replaceByPattern } from './regexp.js';
-import {
-  journalCheckpointMapEntry,
-  journalCheckpointField,
-} from '../checkpoint-journal.js';
 import { noteScratchBinding, scratchRootOfBinding } from '../scratch-scopes.js';
-import {
-  journalDefinitionRecord,
-  widenAssignedType,
-} from '../boxed-expression/boxed-value-definition.js';
+import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import { isEngineSubscriptHandler } from '../boxed-expression/host-handler-changes.js';
@@ -807,7 +800,7 @@ function moduleBindingError(
  *
  * When `declared` was declared under a scratch scope, `local` is recorded as
  * a scratch binding too (`noteScratchBinding`), as the declaration recorded
- * `declared`. Every write is journaled for `checkpoint()`/`restore()`.
+ * `declared`.
  */
 function initializeBlockLocal(
   ce: ComputeEngine,
@@ -821,31 +814,11 @@ function initializeBlockLocal(
     operator?: BoxedOperatorDefinition;
     _uninitialized?: boolean;
   };
-  const before = { value: target.value, operator: target.operator };
-  ce._checkpointWindow?.record(
-    target,
-    'value',
-    () => {
-      delete target.value;
-      delete target.operator;
-      if (before.value !== undefined) target.value = before.value;
-      if (before.operator !== undefined) target.operator = before.operator;
-    },
-    'declare'
-  );
   delete target.value;
   delete target.operator;
   if (isValueDef(declared)) target.value = declared.value;
   else target.operator = declared.operator;
-  journalCheckpointField(
-    ce,
-    target,
-    '_uninitialized',
-    target._uninitialized,
-    'declare'
-  );
   target._uninitialized = false;
-  journalCheckpointMapEntry(ce, bindings, name, name, 'declare');
   bindings.set(name, local);
   const scratchRoot = scratchRootOfBinding(ce, declared);
   if (scratchRoot !== undefined) noteScratchBinding(scratchRoot, [local]);
@@ -4750,17 +4723,8 @@ type ClauseInstalledAhead = {
 
 /**
  * Set the list of the installs made ahead onto `record` to `installs`, or
- * remove `record` from `CLAUSE_INSTALLED_AHEAD` (`installs` undefined), and
- * journal the change for the active checkpoint window. The lists are never
- * changed in place, so the undo of the journal puts back the list that the
- * record had when the checkpoint was taken.
- *
- * The marker decides whether a `Declare` statement drops the binding, so a
- * restore must put it back as it was when the checkpoint was taken. If not, a
- * clause canonicalized after the checkpoint marks a function that was
- * defined before it: the restore gives the record its earlier definition back
- * but keeps the marker, and a later declaration then discards that restored
- * definition.
+ * remove `record` from `CLAUSE_INSTALLED_AHEAD` (`installs` undefined). The
+ * marker decides whether a `Declare` statement drops the binding.
  */
 function setClauseInstalledAhead(
   ce: ComputeEngine,
@@ -4769,10 +4733,6 @@ function setClauseInstalledAhead(
 ): void {
   const was = CLAUSE_INSTALLED_AHEAD.get(record);
   if (was === installs) return;
-  ce._checkpointWindow?.record(record, 'clause-installed-ahead', () => {
-    if (was !== undefined) CLAUSE_INSTALLED_AHEAD.set(record, was);
-    else CLAUSE_INSTALLED_AHEAD.delete(record);
-  });
   if (installs !== undefined) CLAUSE_INSTALLED_AHEAD.set(record, installs);
   else CLAUSE_INSTALLED_AHEAD.delete(record);
 }
@@ -4873,10 +4833,6 @@ function installsOfThisRun(
  * call in the body reads the clause installed ahead, without the declared
  * signature: in `function h(x) { let g: (integer) -> integer; function g(k)
  * { 2k }; g(x) }`, `h(1.5)` gives `3`, before and after this change.
- *
- * Not journaled for a checkpoint window: an entry is read only on a later
- * run of the block that recorded it, and that run installs the same clauses
- * when its `DefineFunction` statements run.
  */
 const BLOCK_REINSTALLS = new WeakMap<
   Scope,
@@ -14971,8 +14927,7 @@ function* declareSteps(
   // statement-redeclare path of `declareOne` below replaces it only
   // when the declaration succeeds: a declaration that then fails — a
   // destructuring shape mismatch, a declared-type mismatch — leaves the
-  // previous binding in place, as it did before. Both map writes are
-  // journaled for `checkpoint()`/`restore()`.
+  // previous binding in place, as it did before.
   const currentScopeBindings = ce.context.lexicalScope.bindings;
   type Binding = NonNullable<ReturnType<typeof currentScopeBindings.get>>;
   const hiddenStatementBindings: [string, Binding][] = [];
@@ -14984,13 +14939,6 @@ function* declareSteps(
         true
     )
       return;
-    journalCheckpointMapEntry(
-      ce,
-      currentScopeBindings,
-      symbolName,
-      symbolName,
-      'declare'
-    );
     currentScopeBindings.delete(symbolName);
     hiddenStatementBindings.push([symbolName, existing]);
   };
@@ -15015,13 +14963,6 @@ function* declareSteps(
       (hasValue ? assignedValue(ce, yield valueSource!) : undefined);
   } finally {
     for (const [symbolName, def] of hiddenStatementBindings) {
-      journalCheckpointMapEntry(
-        ce,
-        currentScopeBindings,
-        symbolName,
-        symbolName,
-        'declare'
-      );
       currentScopeBindings.set(symbolName, def);
     }
   }
@@ -15105,16 +15046,6 @@ function* declareSteps(
         : uninitialized !== undefined
           ? BLOCK_REINSTALLS.get(reinstallScopeKey(ce))?.get(symbolName)
           : undefined;
-      // Checkpoint journal (funnel 4): the statement-redeclare path
-      // drops the previous statement-scoped binding by direct map
-      // surgery.
-      journalCheckpointMapEntry(
-        ce,
-        currentScope.bindings,
-        symbolName,
-        symbolName,
-        'declare'
-      );
       currentScope.bindings.delete(symbolName);
       // The dropped binding holds a clause installed ahead, which an
       // expression boxed before this declaration holds by identity (a
@@ -15142,13 +15073,6 @@ function* declareSteps(
       // declared signature (`reinstallClausesAhead()`, at the end of
       // this function), and the `DefineFunction` statement installs it
       // again when it runs.
-      journalCheckpointMapEntry(
-        ce,
-        currentScope.bindings,
-        symbolName,
-        symbolName,
-        'declare'
-      );
       currentScope.bindings.delete(symbolName);
       // An expression canonicalized before this declaration ran holds
       // the dropped record by identity: the call `g(1.5)` of a later
@@ -15194,13 +15118,6 @@ function* declareSteps(
       isAutoDeclareHere &&
       !(isConstant && boundHasValue && isFunction(boundValue, 'Function'));
     if (isAutoDeclareHere && !upgradesInPlace) {
-      journalCheckpointMapEntry(
-        ce,
-        currentScope.bindings,
-        symbolName,
-        symbolName,
-        'declare'
-      );
       currentScope.bindings.delete(symbolName);
     }
 
@@ -15215,21 +15132,6 @@ function* declareSteps(
           `Symbol "${symbolName}"`,
           ce.type(type!).type
         );
-      // Checkpoint journal (funnel 5): this branch rewrites the record
-      // in place — `holdUntil`, `_isConstant` and, when the declaration
-      // is untyped, nothing that goes through a journaled setter. One
-      // whole-record snapshot covers every field it can touch.
-      journalDefinitionRecord(ce, existingValueDef.value, 'declare');
-      // `_declaredByStatement` lives on the BINDING record, not on
-      // either half, so it needs its own entry.
-      journalCheckpointField(
-        ce,
-        existingValueDef as { _declaredByStatement?: boolean },
-        '_declaredByStatement',
-        (existingValueDef as { _declaredByStatement?: boolean })
-          ._declaredByStatement,
-        'declare'
-      );
       // Upgrade the existing auto-declared binding in place.
       (
         existingValueDef as { _declaredByStatement?: boolean }
@@ -15342,13 +15244,6 @@ function* declareSteps(
               committed as { _declaredByStatement?: boolean }
             )._declaredByStatement = true;
         } else if (previousRun !== undefined) {
-          journalCheckpointMapEntry(
-            ce,
-            currentScope.bindings,
-            symbolName,
-            symbolName,
-            'declare'
-          );
           currentScope.bindings.set(symbolName, previousRun);
         }
         // As after a declaration that succeeds, the binding in the scope, if

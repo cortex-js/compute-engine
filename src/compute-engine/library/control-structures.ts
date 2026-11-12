@@ -183,7 +183,6 @@ import {
   bindIndexAuthoritatively,
   substituteBinderValues,
 } from './utils.js';
-import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
 import { recordCanonicalLocal } from '../boxed-expression/declared-local.js';
 import { noteScopeDeclaration } from '../scope-declaration-count.js';
@@ -4116,9 +4115,6 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
       if (!isValueless(def)) (def as Marks)._blockTemplate = true;
   }
   const remove = (name: string, def: BoxedDefinition): void => {
-    // Checkpoint journal (funnel 4): the sweep removes bindings by direct
-    // map surgery.
-    journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
     scope.bindings.delete(name);
     // An occurrence boxed in the block still holds the removed binding: an
     // argument of a call reads it in the scope of the block
@@ -4190,7 +4186,6 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
   if (restored !== undefined)
     for (const [name, def] of restored) {
       if (scope.bindings.has(name)) continue;
-      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
       scope.bindings.set(name, def);
       noteScopeDeclaration(scope);
     }
@@ -4285,9 +4280,6 @@ function beginAsyncRun(ce: ComputeEngine): AsyncRun | undefined {
   // with the ones of the last asynchronous run.
   const bindings = activation.bindings;
   const write = (name: string, def: BoxedDefinition | undefined): void => {
-    // Checkpoint journal (funnel 4): a direct write of the scope map, as in
-    // `sweepCanonicalizationBindings`.
-    journalCheckpointMapEntry(ce, bindings, name, name, 'declare');
     if (def === undefined) bindings.delete(name);
     else bindings.set(name, def);
     noteScopeDeclaration(activation);

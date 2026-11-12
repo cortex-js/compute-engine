@@ -22,12 +22,12 @@
  *   definition it was bound to.
  *
  * The registry has a generation counter, incremented by every registration,
- * replacement, removal and checkpoint restore. A cache of a recognition
+ * replacement and removal. A cache of a recognition
  * result stores the generation it was computed under.
  *
  * The registry also holds three per-engine gates for each kind type, which
  * let an engine that never uses a kind skip the walks that look for its
- * values. A gate only opens; it is not restored by a checkpoint (an open gate
+ * values. A gate only opens; it is not restored on a rollback (an open gate
  * costs a walk, never a wrong answer).
  *
  * The registry is stored on the engine (`IComputeEngine._kindRegistry`) and
@@ -514,7 +514,7 @@ export function isKindType(ce: ComputeEngine, t: Type): boolean {
  * kind arm take them (`hasKindArm()`, `withoutKindArms()`, …,
  * `common/type/utils.ts`): the kind primitives, and the kind types the
  * registry holds. A live view: it reads the registry on each query, so it
- * stays right after a registration or a checkpoint restore.
+ * stays right after a registration.
  *
  * The kind primitives are kind types in every engine, registered or not: a
  * primitive exists in the type language before any engine, and an engine
@@ -616,7 +616,7 @@ export function kindTypeHasHook(
 }
 
 /** The generation of the registry: it moves on every registration,
- * replacement, removal and checkpoint restore. */
+ * replacement and removal. */
 export function kindGeneration(ce: object): number {
   return registryOf(ce).generation;
 }
@@ -658,7 +658,7 @@ function gatedKindTypeAmong(ce: object, types: ReadonlyArray<string>): boolean {
 
 /** The kind types with a carrier and with a `resultType` hook of the
  * registry of `ce`, computed again when the generation moves (a
- * registration, a removal or a checkpoint restore). */
+ * registration or a removal). */
 function kindFlags(ce: object): KindFlags {
   const registry = registryOf(ce);
   let flags = KIND_FLAGS.get(registry);
@@ -810,7 +810,7 @@ export function engineHasKindDeclarations(
 }
 
 //
-// The checkpoint model
+// The rollback point
 //
 
 /**
@@ -819,9 +819,9 @@ export function engineHasKindDeclarations(
  * records are copied, because a registration changes them in place. The
  * gates are not captured: they only open, and an open gate is safe.
  *
- * Used by `takeCheckpoint()` (`checkpoint.ts`): a restore puts the registry
- * back together with the definitions it refers to, which the checkpoint
- * journal restores.
+ * Used by the rollback frame of an inference trial (`removeBinding` in
+ * `engine-declarations.ts`): a rollback puts the registry back together with
+ * the definitions it refers to.
  */
 export function kindRegistryRollbackPoint(ce: ComputeEngine): () => void {
   const registry = registryOf(ce);

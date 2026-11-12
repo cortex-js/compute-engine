@@ -43,7 +43,6 @@ import {
 } from '../../common/type/serialize.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
 import { isValueDef } from './definition-guards.js';
-import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
 /** The message of a declaration that uses a default in a nested position. */
 export const NESTED_DEFAULT_MESSAGE =
@@ -345,10 +344,6 @@ const CONSTANT_DECLARATIONS = new WeakMap<
  * Any other declaration of the name (a `let`) marks it `'variable'`, so
  * that the name is a variable for a later statement, whatever binding an
  * earlier run left.
- *
- * Each write is journaled for checkpoint restore
- * (`journalCheckpointMapEntry()`): a restore puts back the mark that the
- * name had when the checkpoint was taken, or removes it.
  */
 export function noteConstantDeclaration(
   ce: ComputeEngine,
@@ -362,7 +357,6 @@ export function noteConstantDeclaration(
     marks = new Map();
     CONSTANT_DECLARATIONS.set(scope, marks);
   }
-  journalCheckpointMapEntry(ce, marks, name, name);
   marks.set(
     name,
     isConstantDeclarationWithValue(attributes, initializer)
@@ -377,8 +371,7 @@ export function noteConstantDeclaration(
  * (`declareSteps()`) call it: the binding that the declaration makes then
  * decides whether the name is a constant default. So after a constant declaration that was canonicalized
  * and has not run, `ce.declare('W', 'integer')` makes `W` a variable
- * for a later default. The write is journaled for checkpoint restore, as
- * in `noteConstantDeclaration()`.
+ * for a later default.
  */
 export function forgetConstantDeclaration(
   ce: ComputeEngine,
@@ -387,7 +380,6 @@ export function forgetConstantDeclaration(
 ): void {
   const marks = CONSTANT_DECLARATIONS.get(scope);
   if (marks === undefined || !marks.has(name)) return;
-  journalCheckpointMapEntry(ce, marks, name, name);
   marks.delete(name);
 }
 
@@ -523,7 +515,7 @@ function checkParameterDefault(
 
 /** The boxed default operands of each definition, by the defaults they were
  * boxed from (see {@link defaultsKey}). A definition whose signature changes
- * and comes back (a checkpoint restore, a signature derived again from a
+ * and comes back (a signature derived again from a
  * skeleton) finds its operands again without boxing them a second time. */
 const BOXED_DEFAULTS = new WeakMap<
   object,

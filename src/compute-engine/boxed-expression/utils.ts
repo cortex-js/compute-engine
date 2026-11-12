@@ -1916,8 +1916,8 @@ export function updateDef(
   // depend on the precision, and the configuration tracker of the engine
   // holds each listener strongly. The superseded value half stops listening,
   // so that it is not kept in memory and notified for the engine's lifetime.
-  // A checkpoint restore and the rollback of an inference trial put the
-  // superseded half back in the record, so each of them also makes it listen
+  // The rollback of an inference trial puts the
+  // superseded half back in the record, so it also makes it listen
   // again: the undo is recorded after the undo of the swap below, and the
   // undo entries run newest first.
   const releasedValue =
@@ -1965,39 +1965,6 @@ export function updateDef(
       },
     });
     if (resubscribe !== undefined) rollbackFrame.record({ undo: resubscribe });
-  }
-
-  // Checkpoint journal (funnel 3, binding-half swaps): the same undo, on the
-  // window rather than the frame. Recorded on the RECORD object under a key
-  // of its own, so it is independent of the two halves' field snapshots
-  // (funnels 1/2/6, keyed on the half objects) — a window can hold both, and
-  // both are needed: the record's pointers and the halves' contents move
-  // separately. Disposal of an orphaned constructed half is NOT done here:
-  // the restore algorithm collects the constructed halves from the merged
-  // windows and disposes each exactly once, after every half restore has run
-  // (§6 step 5), because a half orphaned by this entry may be reinstated by
-  // an older entry in the same restore.
-  const window = ce._checkpointWindow;
-  if (window !== undefined) {
-    if (window.claim(def, 'binding-halves', 'redefine')) {
-      window.push(() => {
-        if (supersededValue !== undefined) mutableDef.value = supersededValue;
-        else delete mutableDef.value;
-        if (supersededOperator !== undefined)
-          mutableDef.operator = supersededOperator;
-        else delete mutableDef.operator;
-      });
-    }
-    // Noted unconditionally, outside the dedup: only the FIRST swap in a
-    // window is journaled, but EVERY half constructed after the window opened
-    // is orphaned by a restore through it and has to be disposed. A
-    // constructed OPERATOR half is not listed: it has no `dispose()` and holds
-    // no subscription to release, and the one place an orphaned one is held
-    // strongly — the forward-reference registry — is unwound by that
-    // registry's own journal entries.
-    if (constructedValueHalf !== undefined)
-      window.noteCreated(constructedValueHalf);
-    if (resubscribe !== undefined) window.recordDelta(resubscribe);
   }
 
   // The inferred signature of a self-recursive function literal is refined

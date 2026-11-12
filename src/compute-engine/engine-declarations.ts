@@ -126,7 +126,6 @@ import { substituteDeclaredBounds } from './boxed-expression/generic-instantiati
 
 import {
   _BoxedValueDefinition,
-  journalDefinitionRecord,
   prepareValueWhenBoxed,
   refineConstructorPlaceholder,
 } from './boxed-expression/boxed-value-definition.js';
@@ -209,7 +208,6 @@ import {
   restParameterIndex,
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
-import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
 import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
 import { hostCollectionSource } from './boxed-expression/shared-evaluation-memo.js';
@@ -621,14 +619,6 @@ export function declareSymbolValue(
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
 
-  // Checkpoint journal (funnel 4): the declare routes overwrite
-  // `scope.bindings[name]` unconditionally, and a FRESH declaration carries
-  // its value inside the constructed record, so no setter ever fires — this
-  // is the only hook that sees the very first assignment of a new name, the
-  // most common notebook write. The undo reinstates the previous binding
-  // OBJECT, or deletes the name when there was none: a name-only delete
-  // would destroy a binding this declare merely shadowed.
-  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
 
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
@@ -654,10 +644,6 @@ export function declareSymbolValue(
       previousBinding,
       boxedDef
     );
-  // The placeholder half is constructed here, so a restore through the
-  // current window orphans it and must dispose it (§6 step 5).
-  if (isValueDef(boxedDef))
-    ce._checkpointWindow?.noteCreated(boxedDef.value, scope);
   noteScratchDeclaration(ce, scope, boxedDef);
   // When the value or its type is refused (the value throws, or does not
   // match the declared type), put back the binding that the placeholder
@@ -838,8 +824,6 @@ export function declareSymbolOperator(
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
 
-  // Checkpoint journal (funnel 4) — see `declareSymbolValue` above.
-  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
 
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
@@ -862,9 +846,6 @@ export function declareSymbolOperator(
       previousBinding,
       boxedDef
     );
-  // The placeholder half is constructed here — see `declareSymbolValue`.
-  if (isValueDef(boxedDef))
-    ce._checkpointWindow?.noteCreated(boxedDef.value, scope);
   noteScratchDeclaration(ce, scope, boxedDef);
   // When the operator definition constructor refuses the definition (for
   // example a `canonical` handler with the `commutative` flag), put back the
@@ -1285,7 +1266,6 @@ export function declareType(
   // or not, it has no `def`) on the fulfilment path below; an unstamped
   // registration (the box route, a host `ce.declareType()`) never matches, so
   // those routes keep their replace semantics.
-  // Provenance: `docs/CHECKPOINT-MODEL.md` (R1).
   if (
     existing !== undefined &&
     existing.def !== undefined &&
@@ -3162,9 +3142,6 @@ function assertUndeclarable(
 function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   const binding = scope.bindings.get(name)!;
 
-  // Checkpoint journal (scope-map writes): a restore puts the record back in
-  // the scope. The rollback frame of an inference trial does the same.
-  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
   activeRollbackFrame(ce)?.record({
     undo: () => scope.bindings.set(name, binding),
   });
@@ -3185,9 +3162,8 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   // dispatch entry: its values boxed before this call have no hooks any
   // more. The kind TYPE stays a kind type, with its fields, so its values
   // and its symbols stay protected from the number rules
-  // (`unregisterKind()`, `value-kinds.ts`). A checkpoint restore puts the
-  // entry back with the rest of the registry; a rollback frame restores it
-  // here. The registry is captured only when the definition has an entry.
+  // (`unregisterKind()`, `value-kinds.ts`). A rollback frame restores the
+  // entry here. The registry is captured only when the definition has an entry.
   if (
     isOperatorDef(binding) &&
     arithmeticOf(ce, binding.operator) !== undefined
@@ -3222,15 +3198,13 @@ export function retireBindingRecord(
   // definition: a call `f(2)` stays unevaluated, and reads the definition
   // of `f` that the scope chain holds at the time it is evaluated, as a call
   // boxed after this one does. `updateDef` journals the exchange of the
-  // definition for checkpoints and rollback frames. When the removed
+  // definition for rollback frames. When the removed
   // definition is a constant, `updateDef` also makes it stop listening to
   // configuration changes.
   updateDef(ce, name, binding, { type: 'unknown', inferred: true }, scope);
   // A call of such an expression reads the definition of the name from this
   // scope and the scopes that enclose it, and not from an unrelated scope
-  // where it is evaluated (`callableBindingInContext`, `binders.ts`). A
-  // checkpoint restore puts the removed definition back in the record, and
-  // the mark stays on the empty definition, which is then discarded.
+  // where it is evaluated (`callableBindingInContext`, `binders.ts`).
   markRetiredBinding(binding, scope);
 
   // The name resolves to another binding, or to none, from this scope and
@@ -4224,9 +4198,7 @@ function assignNamedValue(
  * declaration of `a` in a new scope does not reach that body, because a call
  * resolves the names of a body in the scope where the function was defined,
  * not in the scope of the caller (`bindingInContext()`,
- * `boxed-expression/binders.ts`). A checkpoint gives the same result, but
- * `ce.checkpoint()` is refused during an evaluation, and this function is
- * not.
+ * `boxed-expression/binders.ts`).
  *
  * The definition objects are kept, because a boxed symbol holds its
  * definition by identity. When `fn` assigns a function to the name, the
@@ -4428,9 +4400,6 @@ function restoreWithValuesBindings(
       if (installed === def && def.disposed) continue;
       const valueBefore = def.storedValue;
       const armBefore = hasFunctionArm(def);
-      // A checkpoint taken while `fn` ran must be able to rewind this write
-      // too: the journal records the state of the definition before it.
-      journalDefinitionRecord(ce, def, 'value-write');
       def._restoreCheckpointSnapshot(snapshot);
       const armAfter = hasFunctionArm(def);
       if (installed !== def) {
@@ -4438,8 +4407,7 @@ function restoreWithValuesBindings(
         // the record holds an operator definition or another value
         // definition. Put the value definition back, after its copy is
         // written, so that the repair of the bodies that read the name
-        // (`updateDef()`) sees the restored type. `updateDef()` journals the
-        // swap for a checkpoint. The value definition needs no new
+        // (`updateDef()`) sees the restored type. The value definition needs no new
         // subscription to configuration changes: only a constant has one,
         // and a constant is refused above.
         const callableBefore =

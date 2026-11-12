@@ -403,28 +403,6 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
     }
   });
 
-  test('installation and results obey checkpoint lifetimes', () => {
-    const fresh = new ComputeEngine();
-    const before = fresh.checkpoint();
-    loadGroupTheory(fresh);
-    fresh.assign('saved_transversal', fresh.box(transversal).evaluate());
-    const after = fresh.checkpoint();
-    fresh.assign('saved_transversal', ['List']);
-    fresh.restore(after);
-    expect(fresh.symbol('saved_transversal').evaluate().json).toEqual(expected);
-    fresh.discard(after);
-    fresh.restore(before);
-    for (const name of [
-      'PermutationOrbit',
-      'PermutationOrbits',
-      'PermutationTransversal',
-    ])
-      expect(fresh.lookupDefinition(name)).toBeUndefined();
-    loadGroupTheory(fresh);
-    expect(fresh.box(orbit).evaluate().json).toEqual(['List', 1, 2, 3]);
-    fresh.discard(before);
-  });
-
   test('a new operation name conflict leaves the installer atomic', () => {
     const fresh = new ComputeEngine();
     fresh.declare('PermutationOrbit', 'integer');

@@ -183,7 +183,6 @@ describe('ce.withValues', () => {
   });
 
   test('a call during an evaluation binds the value', () => {
-    // `ce.checkpoint()` is refused here.
     const ce = new ComputeEngine();
     ce.declare('a', 'real');
     ce.parse('f(x) := x + a').evaluate();
@@ -195,28 +194,6 @@ describe('ce.withValues', () => {
     });
     expect(ce.box(['Probe']).evaluate().re).toBe(6);
     expect(call.evaluate().toString()).toBe('a + 2');
-  });
-
-  test('a checkpoint taken inside fn rewinds to the values of the call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    let cp: ReturnType<ComputeEngine['checkpoint']> | undefined;
-    ce.withValues({ a: 2 }, () => {
-      cp = ce.checkpoint('inside');
-    });
-    expect(ce.box('a').value).toBeUndefined();
-    ce.restore(cp!);
-    expect(ce.box('a').value?.re).toBe(2);
-  });
-
-  test('a call between a checkpoint and its restore is rewound', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    const cp = ce.checkpoint('before');
-    ce.withValues({ a: 2 }, () => ce.box('a').value?.re);
-    ce.assign('a', 7);
-    ce.restore(cp);
-    expect(ce.box('a').value).toBeUndefined();
   });
 
   test('no values runs fn', () => {
@@ -377,5 +354,83 @@ describe('ce.withValues', () => {
     }
     expect(thrown).toBe(fnError);
     expect(ce.box('a').value).toBeUndefined();
+  });
+});
+
+describe('the snapshot of a value definition', () => {
+  // `ce.withValues()` puts back the earlier state of a binding with the
+  // snapshot of its value definition (`_checkpointSnapshot()`). Adding a
+  // mutable field to the class requires extending the snapshot and a test.
+  // This test fails when a field is added without being captured: the failure
+  // names the field, so the fix is to add it to the snapshot or to the
+  // exclusion list below with a reason.
+
+  /** Not captured, each for a reason stated on `_checkpointSnapshot`. */
+  const VALUE_DEF_EXCLUSIONS = new Set([
+    'name', // identity
+    '_engine', // identity
+    '_writeVersion', // monotone counter: BUMPED by a restore, never restored
+    '_unsubscribeFromConfigurationChange', // live handle owned by dispose()
+    // A memo of the effective type, not state: it is keyed on the fact index
+    // it was computed from and on `_writeVersion`, so a restore that moves
+    // either one retires it, and a stale entry can never be served.
+    '_effectiveType',
+    // A memo of the signature derived from `_signatureSkeleton`, keyed on
+    // the skeleton and on the stored value's type object: a restore that
+    // moves either one makes it miss.
+    '_signatureMemo',
+    // A re-entrancy guard of `_deriveSignature`, true only during the call.
+    '_derivingSignature',
+    // The list hypothesis a recursive call reads while `_deriveSignature`
+    // verifies it, set only during that pass.
+    '_recursionResult',
+    // A memo of the skeleton `_wildcardRecursiveSignature` derives a
+    // signature from, keyed on the identity of the stored literal and on the
+    // engine versions: a restore that changes the stored value makes it
+    // miss.
+    '_wildcardSkeleton',
+    // A memo of the effects of a stored `Function` literal, keyed on the
+    // identity of the literal and on the conformance-registry version. The
+    // version is a counter that only increases, so a restore that changes
+    // the stored value or the registry makes the memo miss.
+    '_literalRegistryEffects',
+    // A memo of the live type of the stored value, keyed on the identity of
+    // the value, on the world version and on the write version of every
+    // definition the value reads.
+    '_liveTypeMemo',
+    // The number of live evaluation contexts whose scope holds the
+    // definition: it counts frames of the stack, which a restore does not
+    // change, so it is not a state of the record.
+    '_holders',
+  ]);
+
+  test('every mutable field of a value definition is in its snapshot', () => {
+    const ce = new ComputeEngine();
+    ce.assign('drift', ce.number(1));
+    const def = ce.lookupDefinition('drift') as { value: any };
+    const captured = new Set(
+      Object.keys(def.value._checkpointSnapshot() as object)
+    );
+    const missing = Object.getOwnPropertyNames(def.value).filter(
+      (f) => !captured.has(f) && !VALUE_DEF_EXCLUSIONS.has(f)
+    );
+    expect(missing).toEqual([]);
+  });
+
+  test('a value-definition snapshot round-trips every field it captures', () => {
+    const ce = new ComputeEngine();
+    ce.assign('rt', ce.number(1));
+    const half = (ce.lookupDefinition('rt') as { value: any }).value;
+    const before = half._checkpointSnapshot() as Record<string, unknown>;
+
+    // Move a representative field on each axis the tuple covers.
+    half.holdUntil = 'never';
+    half.inferredType = !half.inferredType;
+    half._isConstant = true;
+
+    half._restoreCheckpointSnapshot(before);
+    const after = half._checkpointSnapshot() as Record<string, unknown>;
+    for (const key of Object.keys(before))
+      expect([key, after[key]]).toEqual([key, before[key]]);
   });
 });

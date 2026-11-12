@@ -2384,8 +2384,8 @@ export interface KindRegistryState {
       name: string;
     }
   >;
-  /** Incremented by every registration, replacement, removal and checkpoint
-   * restore. A cache of a recognition result stores the generation it was
+  /** Incremented by every registration, replacement, and removal.
+   * A cache of a recognition result stores the generation it was
    * computed under. */
   generation: number;
   /** The kind types for which the engine has constructed a value. */
@@ -2535,21 +2535,6 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * recorded against it is about a value that no longer exists.
    * @internal */
   disposed: boolean;
-
-  /** True when a checkpoint restore disposed this definition because it was
-   * created in a rewound window, in a scope that is still on the engine's
-   * scope chain after the restore (a name the host declared, or a free
-   * symbol boxed for the first time). A symbol bound to such a definition
-   * resolves to no binding (`bindingInContext`), so it reads no value and
-   * counts as unknown: a later definition of the same name has another type
-   * and flags. A definition installed in a scope created in the window (a
-   * `Sum` index, a `Block` local) is not marked, because the expression that
-   * holds that scope reads it by name when it runs; nor is one that
-   * `popScope()` disposed. Never cleared: a definition created in a rewound
-   * window cannot be restored again, since the checkpoints taken in that
-   * window are invalidated.
-   * @internal */
-  _rewound?: true;
 
   /** Bumped on every semantic change to this definition (value write, type
    * change, disposal). Used to validate per-dependency caches.
@@ -2730,9 +2715,10 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _restoreTypeSlots(snapshot: unknown): void;
 
-  /** Snapshot EVERY mutable field of this record for the checkpoint journal
-   * (`checkpoint-journal.ts`), so that a restore can rewind a whole cell's
-   * worth of arbitrary program writes IN PLACE. Wider than
+  /** Snapshot EVERY mutable field of this record, so that a restore can put
+   * them back IN PLACE: `ce.withValues()` (`withValuesFn`,
+   * `engine-declarations.ts`) and the copy of a definition for an
+   * activation (`_cloneForActivation`). Wider than
    * {@link _typeSlotSnapshot}, which covers only the slots an inference
    * re-derivation moves. Opaque, for the same reason.
    * @internal */
@@ -4008,16 +3994,4 @@ export interface BoxedOperatorDefinition
    * @internal */
   _restoreRederivationSnapshot(snapshot: unknown): void;
 
-  /** Snapshot EVERY mutable field of this record for the checkpoint journal
-   * (`checkpoint-journal.ts`). Wider than {@link _rederivationSnapshot},
-   * which covers only what an `{ evaluate }`-only update can touch: a
-   * checkpoint has to rewind a full redefinition. Opaque, for the same
-   * reason.
-   * @internal */
-  _checkpointSnapshot(): unknown;
-
-  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim
-   * and identity-preserving.
-   * @internal */
-  _restoreCheckpointSnapshot(snapshot: unknown): void;
 }

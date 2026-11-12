@@ -55,7 +55,7 @@ function homeScopeOf(literal: Expression) {
  * (`ascribeDeclaredParameterTypes` in `engine-declarations.ts`). So this
  * result is computed when the signature is read, from the stored literal,
  * and never stored: it then follows a later change of a symbol the body
- * reads, and a checkpoint restore.
+ * reads.
  *
  * A parameter is stamped with the rules of `ascribeDeclaredParameterTypes`,
  * scalars included: a plain symbol parameter whose declared type is not

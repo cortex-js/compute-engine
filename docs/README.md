@@ -27,7 +27,6 @@ For agent workflow use [AGENTS.md](../AGENTS.md); for writing code use
 | File, answer, prioritize or pick an issue                                        | [`ISSUE_TRACKING.md`](./ISSUE_TRACKING.md)             |
 | Understand seeding, `Random` draws, and cross-target parity                      | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md)         |
 | Understand time budgets and cancellation                                         | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md)               |
-| Understand checkpoint/restore and notebook replay                                | [`CHECKPOINT-MODEL.md`](./CHECKPOINT-MODEL.md)         |
 | Understand broadcast length-mismatch policy (strict lifting vs shortest pairing) | [`BROADCAST-MODEL.md`](./BROADCAST-MODEL.md)           |
 | Understand effects and effect inference                                          | [`EFFECTS-MODEL.md`](./EFFECTS-MODEL.md)               |
 | Understand implemented type-system invariants                                    | [`TYPE-SYSTEM.md`](./TYPE-SYSTEM.md)                   |

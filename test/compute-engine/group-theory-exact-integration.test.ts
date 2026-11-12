@@ -169,17 +169,15 @@ let pc: GroupPcSequence=GroupPcgs(g)
     expect(boxed.operator).toBe('MatrixGroupOrder');
     expect(boxed.evaluate().isValid).toBe(false);
   });
-  test('library registration and restoration are atomic', () => {
+  test('library registration is atomic', () => {
     const ce = new ComputeEngine();
     ce.declare('GroupPcDepth', 'integer');
     expect(() => loadGroupTheory(ce)).toThrow('Already defined');
     expect(ce.lookupDefinition('Permutation')).toBeUndefined();
-    const other = new ComputeEngine(),
-      checkpoint = other.checkpoint();
+    expect(ce.lookupDefinition('MatrixGroup')).toBeUndefined();
+    const other = new ComputeEngine();
     loadGroupTheory(other);
     expect(other.lookupDefinition('MatrixGroup')).toBeDefined();
-    other.restore(checkpoint);
-    expect(other.lookupDefinition('MatrixGroup')).toBeUndefined();
   });
 });
 

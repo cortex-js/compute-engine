@@ -7,7 +7,7 @@
  * the public API.
  *
  * These tests are the "per-row" layer of the parity gate: they catch a
- * misclassified emission that the operation-level (checkpoint) layer could
+ * misclassified emission that an operation-level layer could
  * mask behind another event advancing the same counter in the same
  * operation.
  */

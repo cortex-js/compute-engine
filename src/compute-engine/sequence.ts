@@ -109,19 +109,18 @@ interface SequenceMetadata {
  * registered sequence is visible only while the definition that its name
  * resolves to from the current scope holds the handler of that sequence
  * (`visibleSequence()`). So a sequence stops being one when the scope that
- * declared it is popped, when `ce.undeclare()` removes it, or when a
- * checkpoint restore removes its declaration, and a sequence declared in an
- * enclosing scope is one in the scopes under it.
+ * declared it is popped, or when `ce.undeclare()` removes it, and a
+ * sequence declared in an enclosing scope is one in the scopes under it.
  *
  * The registry can hold more than one sequence with the same name: a
  * sequence `F` in the global scope and a sequence `F` in a child scope that
  * shadows it. Both stay registered, so `clearSequenceCache()` without a
- * name and a checkpoint reach the outer `F` while the inner `F` hides it,
+ * name reaches the outer `F` while the inner `F` hides it,
  * and after the child scope is popped.
  *
  * Each entry is a weak reference. The handler of a sequence keeps its
  * metadata in memory (`sequenceOfHandler`), so the metadata of a sequence
- * that no definition, checkpoint or expression can reach any more, such as
+ * that no definition or expression can reach any more, such as
  * one that a redefinition replaced, is reclaimed with its memos.
  */
 const sequenceRegistry = new WeakMap<
@@ -1547,7 +1546,7 @@ function pendingScopeOf(ce: ComputeEngine, name: string): Scope {
       // A function closure can reach, through its `parent` chain, a scope
       // whose evaluation context was already discarded. Nothing discards
       // that scope again, so a pending definition recorded under it stayed
-      // in the map and in every checkpoint snapshot. Its bindings are
+      // in the map. Its bindings are
       // disposed, so the definition goes to the current scope instead: it
       // is removed when the current scope is discarded. (CE-110)
       if (isDiscardedScope(ce, scope)) return current;
@@ -1634,9 +1633,7 @@ function deletePending(ce: ComputeEngine, scope: Scope, name: string): void {
  *
  * Return a function that puts the pending definition back, for the rollback
  * frame of an inference trial, or `undefined` when the binding has no
- * pending definition. A checkpoint restore puts it back without this
- * function: the pending definitions are captured whole when a checkpoint is
- * taken (`_sequenceRegistrySnapshot()`).
+ * pending definition.
  * @internal
  */
 export function _removePendingSequence(
@@ -1663,8 +1660,7 @@ export function _removePendingSequence(
  * context of the scope is discarded (`discardEvalContext()` in
  * `engine-scope.ts`), and the pending definitions belong to the bindings of
  * that scope, which are disposed. Without this call, the engine keeps the
- * pending definitions of every discarded scope, and a checkpoint captures
- * them.
+ * pending definitions of every discarded scope.
  * @internal
  */
 export function _discardPendingSequencesOfScope(
@@ -2008,137 +2004,18 @@ export function getSequenceInfo(
 }
 
 /**
- * List all defined sequences.
- */
-/**
- * Snapshot both sequence registries for a checkpoint — bounded state, taken
- * whole at checkpoint creation rather than journaled ("State coverage" in
- * `docs/CHECKPOINT-MODEL.md`).
- *
- * Sequences (`a_n := …`) bypass the binding model entirely into these
- * module-level `WeakMap`s, so the checkpoint journal never sees them and they
- * have to be captured whole. The capture is STRUCTURAL, not by reference: a
- * restore has to reinstate a sequence that was REPLACED during the window and
- * undo additions to a pre-existing PENDING one, not merely delete the names
- * the window created — and both the metadata records and their nested
- * base-case maps are mutated in place.
- *
- * Value memos are deliberately NOT captured: the restore clears them
- * wholesale (over-invalidation is a recompute).
- *
- * Bounded by design — sequence counts are small at a cell boundary.
+ * The number of pending sequence definitions that the engine keeps, in all
+ * scopes. **Test-only.**
  * @internal
  */
-export function _sequenceRegistrySnapshot(ce: ComputeEngine): unknown {
-  const registry = sequenceRegistry.get(ce);
-  const pending = pendingSequences.get(ce);
-  return {
-    registry:
-      registry === undefined
-        ? undefined
-        : registeredSequences(registry).map((meta) => ({
-            meta,
-            // The record is mutated in place (base cases and recurrences are
-            // added to an existing entry), so its fields ride along with it.
-            fields: { ...meta, base: new Map(meta.base) },
-          })),
-    pending:
-      pending === undefined
-        ? undefined
-        : [...pending.values()].flatMap((byName) =>
-            [...byName.entries()].map(([name, entry]) => ({
-              name,
-              entry,
-              fields: { ...entry, base: new Map(entry.base) },
-            }))
-          ),
-  };
+export function _pendingSequenceCount(ce: ComputeEngine): number {
+  let count = 0;
+  for (const byName of pendingSequences.get(ce)?.values() ?? [])
+    count += byName.size;
+  return count;
 }
 
-/**
- * Restore what {@link _sequenceRegistrySnapshot} captured, rewriting the
- * existing records in place and dropping the ones the window created. Every
- * value memo is cleared, whether or not its sequence moved.
- * @internal
- */
-export function _restoreSequenceRegistrySnapshot(
-  ce: ComputeEngine,
-  snapshot: unknown
-): void {
-  const s = snapshot as {
-    registry?: {
-      meta: SequenceMetadata;
-      fields: SequenceMetadata;
-    }[];
-    pending?: {
-      name: string;
-      entry: PendingSequence;
-      fields: PendingSequence;
-    }[];
-  };
-
-  const registry = sequenceRegistry.get(ce);
-  if (registry !== undefined) {
-    registry.clear();
-    for (const { meta, fields } of s.registry ?? []) {
-      // In place, so anything holding the metadata record keeps answering
-      // from it — the same identity rule the definition records follow.
-      Object.assign(meta, fields);
-      // `base` and `memo` are rebuilt rather than reassigned from `fields`
-      // for two different reasons, both about identity.
-      //
-      // `base` is COPIED out of the snapshot so a second restore of the same
-      // checkpoint does not hand the live record the snapshot's own map and
-      // then mutate it.
-      meta.base = new Map(fields.base);
-      // `memo` and `numericMemo` are cleared IN PLACE, never replaced.
-      // `createSequenceHandler` closes over the maps it created and reads
-      // and writes THOSE objects directly; the metadata merely holds the
-      // same references. Assigning a fresh map here would leave the handler
-      // consulting the old one, so every value memoized after the checkpoint
-      // would survive the rewind — the restore would look correct through
-      // `getSequenceInfo` and still serve stale terms. Cleared rather than
-      // restored: the stamp of the memos (`takeMemoStamp()`) records
-      // counters of the engine, and a restore puts back an earlier state
-      // through routes that this stamp was not designed for. A restore is
-      // rare and a cleared memo costs only a recompute, so the memos are
-      // not kept across it, even when their stamp is still valid. The set
-      // of declined terms is cleared for the same reason.
-      meta.memo?.clear();
-      meta.numericMemo?.clear();
-      meta.declined?.clear();
-      registry.add(new WeakRef(meta));
-    }
-  }
-
-  const pending = pendingSequences.get(ce);
-  if (pending !== undefined) {
-    // The pending definitions are put back in the scope that each one
-    // belongs to (`entry.scope`, restored with the other fields), and the
-    // ones created after the checkpoint are dropped.
-    pending.clear();
-    for (const { name, entry, fields } of s.pending ?? []) {
-      Object.assign(entry, fields);
-      entry.base = new Map(fields.base);
-      // Assigned unconditionally, OUTSIDE the `Object.assign` above: a
-      // pending sequence is created without a `recurrence` key at all
-      // (`getOrCreatePending`), and the recurrence is added in place later.
-      // `Object.assign` only overwrites keys the source HAS, so a snapshot
-      // taken before the recurrence arrived would leave a window-added one
-      // in place — and `getSequenceStatus` reads `pending.recurrence`
-      // directly, so the restored engine would report a recurrence a fresh
-      // replay never had.
-      entry.recurrence = fields.recurrence;
-      let byName = pending.get(entry.scope);
-      if (byName === undefined) {
-        byName = new Map();
-        pending.set(entry.scope, byName);
-      }
-      byName.set(name, entry);
-    }
-  }
-}
-
+/** List all defined sequences. */
 export function listSequences(ce: ComputeEngine): string[] {
   const registry = sequenceRegistry.get(ce);
   if (!registry) return [];

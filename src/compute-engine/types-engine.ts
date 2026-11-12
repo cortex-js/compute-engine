@@ -40,7 +40,6 @@ import type {
 } from './types-effects.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { InferenceRollbackFrame } from './inference-rollback.js';
-import type { CheckpointWindow } from './checkpoint-journal.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -563,21 +562,6 @@ export type OperatorDefinitionPatch = OperatorDefinition & {
   addSignature?: Type | TypeString;
 };
 
-/** A handle on a saved engine state, from {@link IComputeEngine.checkpoint}.
- * Deliberately opaque: `id` is for logging and `live` is the only state a
- * client can act on. Declared here rather than in `checkpoint.ts` because it
- * is part of the engine's public type surface — and because importing it from
- * the implementation would make this file depend on it, closing a cycle
- * through the sequence registry. */
-export interface EngineCheckpoint {
-  readonly id: number;
-  /** False once invalidated — by a restore to an EARLIER checkpoint, by
-   * `discard()`, or by popping a scope this checkpoint was taken inside
-   * (the pop disposes the scope's bindings, so there is no world left to
-   * restore). A dead checkpoint can never be restored again. */
-  readonly live: boolean;
-}
-
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
    *  `undefined` when no LatexSyntax was provided to the constructor and
@@ -695,12 +679,6 @@ export interface IComputeEngine {
    * @internal */
   readonly _kindRegistry: KindRegistryState;
 
-  /** Capture the kind registry's state; the returned thunk restores it and
-   * increments its generation. Used by the checkpoint model
-   * (`checkpoint.ts`), beside {@link _typeRegistryRollbackPoint}.
-   * @internal */
-  _kindRegistryRollbackPoint(): () => void;
-
   /** A monotone counter that advances on every mutation of the protocol /
    * conformance registry — a protocol declaration or re-declaration, a
    * conformance edge, an implementation block, and the static pre-pass's
@@ -737,70 +715,16 @@ export interface IComputeEngine {
    * @internal */
   _rollbackFrames: InferenceRollbackFrame[];
 
-  /** The ACTIVE checkpoint journal window (`checkpoint-journal.ts`), or
-   * `undefined` when no checkpoint is live — which is the whole of a session
-   * that never takes one, so every journaling hook is one field read.
-   *
-   * At most one window is active at a time: it opens when a checkpoint is
-   * taken and closes at the next checkpoint or at a restore/discard involving
-   * that checkpoint. While it is open, each definition-record field write,
-   * scope-binding write, object-slot store and unstamped-memo store records
-   * the state it replaced, once per (record, field) — enough to rewind the
-   * engine to the checkpoint IN PLACE, which is required because live boxed
-   * expressions capture definition-record identity.
-   *
-   * Distinct from {@link _rollbackFrames} on purpose: an inference frame's
-   * undo advances no invalidation counter, so the effect derivers refuse to
-   * stamp memos while one is open — a rule that would disable memo stamping
-   * for the whole of a checkpointed cell. A checkpoint restore DOES advance
-   * the counters, so it needs no such rule.
-   * @internal */
-  _checkpointWindow: CheckpointWindow | undefined;
-
-  /** The live checkpoints, oldest first (`checkpoint.ts`). A STACK, not a
-   * tree: restoring invalidates everything above the target, so there is one
-   * linear history, rewound and re-extended. The newest checkpoint's window
-   * is {@link _checkpointWindow}. Typed `unknown[]` here because the handle
-   * class lives in `checkpoint.ts`, which imports this file.
-   * @internal */
-  _checkpointStack: unknown[];
-
-  /** True once a restore threw during its mutation phase. The engine's state
-   * is then no longer covered by the checkpoint contract, so every later
-   * checkpoint call refuses — the client's signal to rebuild the engine and
-   * replay from the baseline rather than trust it.
-   * @internal */
-  _checkpointPoisoned: boolean;
-
-  /** Monotone id source for checkpoint handles. Never reused, so a stale
-   * handle cannot be mistaken for a live one in a log.
-   * @internal */
-  _nextCheckpointId: number;
-
-  /** Retire every checkpoint standing on `context` — the scope-pop side of
-   * the checkpoint stack-identity rule (`checkpoint.ts`). A popped frame's
-   * bindings are disposed with it, so a checkpoint that captured the frame
-   * has no world left to restore; its journal window folds into the
-   * next-older checkpoint so restoring PAST it stays sound. Callers gate on
-   * a non-empty `_checkpointStack`, so a session with no checkpoints pays
-   * one length read per pop.
-   * @internal */
-  _invalidateCheckpointsOnFrameDiscard(context: EvalContext): void;
-
   /** How many `evaluateAsync` calls are in flight, including ones suspended
    * at an `await`. A suspended async evaluation holds its eval context across
    * the suspension and hands control back to the host, so — unlike a
-   * synchronous one — it is NOT visible as eval-context stack depth. The
-   * checkpoint quiescence check refuses while this is nonzero.
+   * synchronous one — it is NOT visible as eval-context stack depth.
    * @internal */
   _inFlightAsyncEvaluations: number;
 
   /** How many function-expression evaluations are on the host call stack.
    * Nonzero means an evaluation is in progress, which no other engine signal
-   * reports: a plain `evaluate` handler pushes no eval context, so an
-   * operator handler that calls a checkpoint method is indistinguishable from
-   * the host calling it between cells. The checkpoint quiescence check
-   * refuses while this is nonzero.
+   * reports: a plain `evaluate` handler pushes no eval context.
    * @internal */
   _evaluationDepth: number;
 
@@ -938,82 +862,6 @@ export interface IComputeEngine {
       >
     | undefined;
 
-  /** Thunks that clear per-engine library-load idempotence markers, invoked
-   * by a checkpoint restore. Registered BY the loaders rather than imported
-   * by the checkpoint path, so taking a checkpoint does not pull the Fungrim
-   * and Rubi payloads into the bundle.
-   * @internal */
-  _checkpointResetHooks?: (() => void)[];
-
-  /**
-   * Take a checkpoint of the engine's state at a quiescent point — between
-   * statements, at any scope depth — so a later {@link restore} can rewind
-   * to it. Legal on a freshly constructed engine, which is how a client gets
-   * a `cp[0]` covering an edit of the first cell, and inside a host-pushed
-   * scope, which is how a notebook takes per-cell checkpoints within a pass.
-   * A checkpoint taken inside a scope dies when that scope pops. Throws a
-   * `CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
-   * {@link restore} additionally requires the same scope stack the
-   * checkpoint was taken on.
-   *
-   * @deprecated Checkpoints are removed in a later release. To give names
-   * values for one computation, use `ce.withValues()`; to make declarations
-   * that are undone together, declare them in a scope pushed with
-   * `ce.pushScope()` and remove them with `ce.popScope()`.
-   */
-  checkpoint(label?: string): EngineCheckpoint;
-
-  /**
-   * Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
-   * stays live and can be restored again.
-   *
-   * The definitions that existed when `cp` was taken are rewritten in place,
-   * and the version counters advance, so every expression that reads them,
-   * whether it was built before or during the rewound window, reads the
-   * restored state afterwards and its cached answers are computed again.
-   * The structure of an expression (`ops`, `json`, `digest`, `hash`) is not
-   * affected, with one exception: the fields of a mutable object are
-   * rewound in place, so the `json` and `digest` of that object, and of
-   * every expression that holds it, can change.
-   *
-   * The definitions CREATED during the window are removed from their scope
-   * and disposed. This includes a symbol that was declared or assigned for
-   * the first time there, and a free symbol that was boxed for the first
-   * time there (boxing declares it). An expression built during the window
-   * that names such a symbol keeps the disposed definition, and the symbol
-   * is inert: it reads no value and counts as unknown (`unknowns`, a
-   * compile reads it as an input), also after a later declaration or
-   * assignment of the same name, and its type is the one its record had
-   * before the declaration (usually `unknown`). The index of a `Sum` and the
-   * locals of a `Block` built during the window are not affected: they
-   * still take their values when the expression runs. Nor is a symbol
-   * declared in a scope that is not on the scope chain when `restore()`
-   * runs (a scope pushed and popped during the window): it still resolves
-   * by name, so it reads a later declaration of the same name in that scope
-   * with its old type (ROADMAP CE-590). `isSame` with the
-   * same expression built after the
-   * restore is false. Do not keep such an expression: build it again to
-   * read the new definition, and cache a cell output as a serialized
-   * artifact rather than as a live boxed node.
-   *
-   * @deprecated Checkpoints are removed in a later release. To give names
-   * values for one computation, use `ce.withValues()`; to make declarations
-   * that are undone together, declare them in a scope pushed with
-   * `ce.pushScope()` and remove them with `ce.popScope()`.
-   */
-  restore(cp: EngineCheckpoint): void;
-
-  /** Release `cp`'s restore capability. Restoring past a discarded INTERIOR
-   * checkpoint stays possible through any earlier live one; discarding the
-   * OLDEST makes the state before the next-younger one unreachable.
-   *
-   * @deprecated Checkpoints are removed in a later release. To give names
-   * values for one computation, use `ce.withValues()`; to make declarations
-   * that are undone together, declare them in a scope pushed with
-   * `ce.pushScope()` and remove them with `ce.popScope()`.
-   */
-  discard(cp: EngineCheckpoint): void;
-
   /**
    * Run `fn` with a rollback frame open and ALWAYS roll the frame back — on
    * normal return AND on throw (the body's error is rethrown after the
@@ -1144,12 +992,6 @@ export interface IComputeEngine {
    * at a limit the program itself did not have.
    * @internal */
   _liftDefaultIterationLimit(): void;
-
-  /** True once a host has assigned `iterationLimit`, even to its default
-   * value. Read and written by the checkpoint code so that a restore does not
-   * turn the default limit into an assigned one.
-   * @internal */
-  _iterationLimitIsExplicit: boolean;
 
   /** Assignment EVIDENCE the Epsil static pre-pass established, keyed by the
    * symbol's value-definition record. Set (and restored) only by
@@ -1393,7 +1235,7 @@ export interface IComputeEngine {
   /** For each name a library defined — standard or caller, at construction
    * or with `loadLibrary()` — the library name and the binding it
    * installed. `libraryOf()` answers the library name only while the name
-   * still resolves to that binding. Journaled for checkpoints.
+   * still resolves to that binding.
    * @internal */
   readonly _libraryProvenance: Map<
     string,
@@ -1402,8 +1244,7 @@ export interface IComputeEngine {
 
   /** The libraries loaded on this engine, by name, in load order: at
    * construction, then by `loadLibrary()`. A `requires` entry of a library
-   * given to `loadLibrary()` must name one of them. Journaled for
-   * checkpoints.
+   * given to `loadLibrary()` must name one of them.
    * @internal */
   readonly _loadedLibraries: Map<string, LibraryDefinition>;
 
@@ -1450,7 +1291,7 @@ export interface IComputeEngine {
   /** When > 0, the assumptions store reads as EMPTY to every consumer that
    * QUERIES it through `contextAssumptions()`, so a computation bracketed by
    * this depth answers as if no assumption were in force. Sites that COPY or
-   * SNAPSHOT the store (a scope push, a checkpoint) are exempt and keep
+   * SNAPSHOT the store (a scope push) are exempt and keep
    * reading `ce.context.assumptions` directly.
    * @internal */
   _factSuppressionDepth: number;
@@ -2045,10 +1886,6 @@ export interface IComputeEngine {
    * recomputed at each precision change. */
   set tolerance(v: number | 'auto');
   get tolerance(): number;
-
-  /** @internal `'auto'` when the tolerance follows the precision,
-   * `'explicit'` when it was set to a number. */
-  readonly _toleranceMode: 'auto' | 'explicit';
 
   /** @internal The tolerance as an exact big decimal. In `'auto'` mode above
    * 325 digits it holds the value that the float `tolerance` cannot
@@ -2948,9 +2785,6 @@ export interface IComputeEngine {
    * variable, which shadows the library definition in the home scope. A
    * call head (`f` in `f(x)`) is declared with a function type.
    *
-   * A checkpoint (`ce.checkpoint()`) records the declarations, as it records
-   * those of `ce.declare()`.
-   *
    * @experimental
    */
   infer(exprs: ReadonlyArray<Expression>): InferResult;
@@ -3003,8 +2837,7 @@ export interface IComputeEngine {
    * The answer is for the definition that the name has in the current
    * scope. A sequence declared in an enclosing scope is a sequence. A
    * sequence is no longer one after the scope that declared it is popped,
-   * after `undeclare()`, or after a checkpoint restore that removes its
-   * declaration.
+   * or after `undeclare()`.
    */
   isSequence(name: string): boolean;
 
@@ -3139,8 +2972,6 @@ export interface IComputeEngine {
    * Assumptions about the name are not removed: an assumption applies to
    * the name, and so to a new declaration of it. Use `forget()` to remove
    * them.
-   *
-   * A checkpoint taken before the call (`ce.checkpoint()`) undoes it.
    *
    * @throws if a name is not declared in the current scope. A name declared
    * only in an enclosing scope is not declared in the current scope. To

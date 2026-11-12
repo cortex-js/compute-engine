@@ -206,8 +206,8 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** @internal */
   _restoreTypeSlots(snapshot: unknown): void;
 
-  /** Opaque snapshot/restore of EVERY mutable field, for the checkpoint
-   * journal — mirror of the members documented in `types-definitions.ts`.
+  /** Opaque snapshot/restore of EVERY mutable field, for `ce.withValues()`
+   * — mirror of the members documented in `types-definitions.ts`.
    * @internal */
   _checkpointSnapshot(): unknown;
   /** @internal */
@@ -654,13 +654,6 @@ interface BoxedOperatorDefinition
   _rederivationSnapshot(): unknown;
   /** @internal */
   _restoreRederivationSnapshot(snapshot: unknown): void;
-
-  /** Opaque snapshot/restore of EVERY mutable field, for the checkpoint
-   * journal — mirror of the members documented in `types-definitions.ts`.
-   * @internal */
-  _checkpointSnapshot(): unknown;
-  /** @internal */
-  _restoreCheckpointSnapshot(snapshot: unknown): void;
 }
 
 type BoxedDefinition =

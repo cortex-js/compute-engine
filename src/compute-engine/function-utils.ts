@@ -241,11 +241,7 @@ import {
   stripNumericRanges,
 } from '../common/type/utils.js';
 import { kindTypeNames } from './boxed-expression/value-kinds.js';
-import { journalCheckpointMapEntry } from './checkpoint-journal.js';
-import {
-  _BoxedValueDefinition,
-  journalDefinitionRecord,
-} from './boxed-expression/boxed-value-definition.js';
+import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
 import {
   assignmentLocalsOf,
@@ -1405,18 +1401,6 @@ export function canonicalFunctionLiteralArguments(
       const shared = shadowedDefs.get(name);
       if (shared !== undefined) {
         clearForwardCallReference(shared);
-        // Checkpoint journal (funnel 4): a binding write outside the declare
-        // routes. The target is the literal's own block scope, which a
-        // restore normally discards along with the literal — journaled all
-        // the same, because a re-canonicalization of a literal that PREDATES
-        // the window writes into a scope the window must be able to rewind.
-        journalCheckpointMapEntry(
-          ce,
-          blockScope.bindings,
-          name,
-          name,
-          'declare'
-        );
         blockScope.bindings.set(name, shared);
       } else if (t !== undefined)
         ce.declare(name, { inferred: false, type: t }, blockScope);
@@ -1447,10 +1431,8 @@ export function canonicalFunctionLiteralArguments(
   // The hidden bindings of the parameters (see above) are in the body scope
   // while the occurrences and the operands are bound, and leave it again
   // even when binding them throws. The last application puts them back
-  // (`restoreBodyScopeParams`). The write is journaled for the reason given
-  // above for the shared binding.
+  // (`restoreBodyScopeParams`).
   for (const [name, binding] of reinstated) {
-    journalCheckpointMapEntry(ce, blockScope.bindings, name, name, 'declare');
     blockScope.bindings.set(name, binding);
   }
   // Record the binding of each parameter as a parameter binding
@@ -1658,7 +1640,7 @@ function installRebuiltLiteral(
  * replaces these handlers.
  *
  * This is an in-place change of a definition, as in `installRebuiltLiteral`:
- * it is recorded for an open rollback frame and for the checkpoint journal,
+ * it is recorded for an open rollback frame,
  * it advances the version of the definition, and it is reported as a repair
  * event, so that a memoized result of an application of `def` is not used.
  */
@@ -1673,7 +1655,6 @@ function holdDependentWithInvalidBody(
       undo: () => def._restoreRederivationSnapshot(snapshot),
     });
   }
-  journalDefinitionRecord(ce, def, 'redefine');
   def._writeVersion += 1;
   def.evaluate = () => undefined;
   def.evaluateAsync = undefined;
@@ -2636,8 +2617,7 @@ function sameParameterDefault(
  * (`RESOLVED_TYPE_OPERANDS`, `function-literal.ts`) while the name is still in
  * the type registry. Type names are not lexically scoped: the registry belongs
  * to the engine, and only a rollback of the registry removes a name (the Epsil
- * static pre-pass, a failed sum-type declaration, the restore of a
- * checkpoint). Do not move this serialization to a place that can run after
+ * static pre-pass, a failed sum-type declaration). Do not move this serialization to a place that can run after
  * such a rollback. */
 function desugarSignatureString(
   ce: ComputeEngine,
@@ -3789,17 +3769,13 @@ function createBlockLocals(
       // `ce.declare()`, so that it makes no `declare` state event: the
       // `Declare` statement makes the declaration, with its event, when it
       // runs, as it did before this binding existed. A binding with no value
-      // holds nothing that a cache could have read. The map write and the
-      // new definition half are journaled for `checkpoint()`/`restore()`, as
-      // `ce.declare()` does. The binding
+      // holds nothing that a cache could have read. The binding
       // changes what the name resolves to in this scope, so it is counted as
       // a declaration of the scope (`noteScopeDeclaration`).
-      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
       const half = new _BoxedValueDefinition(ce, name, {
         type: 'unknown',
         inferred: true,
       });
-      ce._checkpointWindow?.noteCreated(half);
       const local: BoxedDefinition & {
         _declaredByStatement?: boolean;
         _uninitialized?: boolean;
@@ -3839,15 +3815,12 @@ export function declareAssignmentLocals(
   if (names === undefined) return;
   for (const name of names) {
     if (run.bindings.has(name)) continue;
-    // Installed by direct map surgery, journaled for `checkpoint()` and
-    // counted as a declaration of the scope, as in `createBlockLocals`.
-    journalCheckpointMapEntry(ce, run.bindings, name, name, 'declare');
+    // Installed by direct map surgery and counted as a declaration of the scope, as in `createBlockLocals`.
     const half = new _BoxedValueDefinition(ce, name, {
       type: 'unknown',
       inferred: true,
     });
     half._blockLocal = true;
-    ce._checkpointWindow?.noteCreated(half);
     const local: BoxedDefinition = { value: half };
     markCallableHome(local, run);
     run.bindings.set(name, local);
@@ -9157,17 +9130,14 @@ export function exitNestedBodyScopes(
     const map = scope.bindings;
     // A binding that the inner application added (a runtime `Declare`, a
     // loop index declared on first use) is removed, and a binding it
-    // replaced is put back. The map writes are journaled like any other
-    // scope write, so that a checkpoint restore stays exact.
+    // replaced is put back.
     const names = new Set(entries.map(([name]) => name));
     for (const name of [...map.keys()]) {
       if (names.has(name)) continue;
-      journalCheckpointMapEntry(ce, map, name, name, undefined, scope);
       map.delete(name);
     }
     for (const [name, binding] of entries) {
       if (map.get(name) === binding) continue;
-      journalCheckpointMapEntry(ce, map, name, name, undefined, scope);
       map.set(name, binding);
     }
     ce._ephemeralWriteDepth += 1;

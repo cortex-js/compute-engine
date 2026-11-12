@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { expectTypeBetween } from '../utils';
-import { _sequenceRegistrySnapshot } from '../../src/compute-engine/sequence';
+import { _pendingSequenceCount } from '../../src/compute-engine/sequence';
 
 // Note: Use single-letter symbols because LaTeX parses multi-letter
 // sequences as products of individual letters (e.g., "abc" becomes a*b*c)
@@ -2121,19 +2121,6 @@ describe('SEQUENCE SCOPE: a sequence is a binding of the scope that declares it'
     expect(ce.isSequence('F')).toBe(true);
   });
 
-  test('a checkpoint restore removes a sequence declared after the checkpoint', () => {
-    const ce = new ComputeEngine();
-    ce.pushScope();
-    const cp = ce.checkpoint();
-    ce.declareSequence('F', fibonacci);
-    expect(ce.isSequence('F')).toBe(true);
-
-    ce.restore(cp);
-
-    expect(ce.isSequence('F')).toBe(false);
-    expect(ce.listSequences()).not.toContain('F');
-  });
-
   // The registry keeps both sequences `F`. The inner `F` is no longer
   // visible after its scope is popped, but the outer `F` is registered on
   // its own, so `clearSequenceCache()` without a name still reaches it.
@@ -2155,30 +2142,6 @@ describe('SEQUENCE SCOPE: a sequence is a binding of the scope that declares it'
     expect(ce.listSequences()).toEqual(['F']);
   });
 
-  // A restore clears the memo of every sequence that the checkpoint
-  // captured. The checkpoint is taken while the inner `F` hides the outer
-  // `F`, and it captures both.
-  test('a checkpoint restore reaches a sequence that is shadowed', () => {
-    const ce = new ComputeEngine();
-    ce.declareSequence('F', fibonacci);
-    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
-    expect(ce.getSequenceCache('F')?.size).toBeGreaterThan(0);
-
-    ce.pushScope();
-    ce.declareSequence('F', { base: { 0: 1 }, recurrence: 'F_{n-1} + 1' });
-    const cp = ce.checkpoint();
-    expect(ce.parse('F_{3}').evaluate().json).toBe(4);
-
-    ce.restore(cp);
-
-    expect(ce.getSequence('F')?.baseIndices).toEqual([0]);
-    expect(ce.getSequenceCache('F')?.size).toBe(0);
-    ce.popScope();
-
-    expect(ce.getSequence('F')?.baseIndices).toEqual([0, 1]);
-    expect(ce.getSequenceCache('F')?.size).toBe(0);
-    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
-  });
 });
 
 describe('SEQUENCE SCOPE: a pending definition belongs to one binding', () => {
@@ -2190,10 +2153,7 @@ describe('SEQUENCE SCOPE: a pending definition belongs to one binding', () => {
   /** The number of pending definitions that the engine keeps, in all
    * scopes. */
   function pendingCount(ce: ComputeEngine): number {
-    const snapshot = _sequenceRegistrySnapshot(ce) as {
-      pending?: unknown[];
-    };
-    return snapshot.pending?.length ?? 0;
+    return _pendingSequenceCount(ce);
   }
 
   test('a shadowing declaration completes with its own base cases only', () => {
@@ -2248,37 +2208,6 @@ describe('SEQUENCE SCOPE: a pending definition belongs to one binding', () => {
     const status = ce.getSequenceStatus('F');
     expect(status.status).toBe('complete');
     expect(status.baseIndices).toEqual([0]);
-    expect(ce.parse('F_3').evaluate().json).toBe(13);
-  });
-
-  test('a checkpoint restore puts back the pending definitions of both scopes', () => {
-    const ce = new ComputeEngine();
-    ce.parse('F_0 := 10').evaluate();
-    ce.pushScope();
-    ce.declare('F', 'unknown');
-    ce.parse('F_1 := 5').evaluate();
-    const cp = ce.checkpoint();
-
-    // Without the declaration of the child scope, `F_2 := 7` is a base case
-    // of the `F` of the enclosing scope.
-    ce.undeclare('F');
-    expect(ce.getSequenceStatus('F').baseIndices).toEqual([0]);
-    ce.parse('F_2 := 7').evaluate();
-    expect(ce.getSequenceStatus('F').baseIndices).toEqual([0, 2]);
-
-    ce.restore(cp);
-
-    let status = ce.getSequenceStatus('F');
-    expect(status.status).toBe('pending');
-    expect(status.baseIndices).toEqual([1]);
-    ce.parse('F_n := F_{n-1} + 1').evaluate();
-    expect(ce.parse('F_3').evaluate().json).toBe(7);
-    ce.popScope();
-
-    status = ce.getSequenceStatus('F');
-    expect(status.status).toBe('pending');
-    expect(status.baseIndices).toEqual([0]);
-    ce.parse('F_n := F_{n-1} + 1').evaluate();
     expect(ce.parse('F_3').evaluate().json).toBe(13);
   });
 

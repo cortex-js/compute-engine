@@ -185,18 +185,11 @@ describe('CE generator descriptors and bounded closure', () => {
       JSON.stringify(close(engine({ maxClosureStoredImages: 1 })).json)
     ).toContain('permutation-closure-storage-limit');
   });
-  test('JSON reload and checkpoint restore preserve generators and action', () => {
+  test('JSON reload preserves generators and action', () => {
     const fresh = engine();
     const loaded = fresh.box(JSON.parse(JSON.stringify(ce.box(G).json)));
     expect(close(fresh, loaded.json).operator).toBe('List');
     fresh.assign('saved_group', loaded);
-    const cp = fresh.checkpoint();
-    fresh.assign('saved_group', [
-      'PermutationGroup',
-      ['List'],
-      ['PermutationAction', 0],
-    ]);
-    fresh.restore(cp);
     expect(fresh.symbol('saved_group').evaluate().json).toEqual(G);
     expect(
       run(
@@ -204,22 +197,16 @@ describe('CE generator descriptors and bounded closure', () => {
         'count(GroupElements(saved_group, options: {maxElements -> 6, maxProducts -> 12}))'
       ).json
     ).toBe(6);
-    fresh.discard(cp);
   });
-  test('registration of the third nominal type is atomic and restores away', () => {
+  test('registration of the third nominal type is atomic', () => {
     const failed = new ComputeEngine();
     failed.declareType('PermutationGroup', 'integer', { mint: false });
     expect(() => loadGroupTheory(failed)).toThrow();
     expect(failed.lookupDefinition('Permutation')).toBeUndefined();
     expect(failed.lookupDefinition('GroupElements')).toBeUndefined();
-    const fresh = new ComputeEngine(),
-      cp = fresh.checkpoint();
-    loadGroupTheory(fresh);
-    fresh.restore(cp);
-    expect(fresh.lookupDefinition('PermutationGroup')).toBeUndefined();
+    const fresh = new ComputeEngine();
     loadGroupTheory(fresh);
     expect(close(fresh).operator).toBe('List');
-    fresh.discard(cp);
   });
   test('caller cancellation remains distinct from resource errors', () => {
     const fresh = engine();

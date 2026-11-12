@@ -408,7 +408,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
     fresh.assign('exponent', -1);
     expect(power.evaluate().json).toEqual(['Permutation', ['List', 3, 1, 2]]);
   });
-  test('stabilizer descriptors serialize and work after checkpoint restore', () => {
+  test('stabilizer descriptors serialize and work after a JSON reload', () => {
     const fresh = engine();
     const stabilizer = fresh
       .box([
@@ -420,9 +420,6 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
       .evaluate();
     const loaded = fresh.box(JSON.parse(JSON.stringify(stabilizer.json)));
     fresh.assign('savedH', loaded);
-    const cp = fresh.checkpoint();
-    fresh.assign('savedH', H);
-    fresh.restore(cp);
     expect(
       fresh
         .box([
@@ -442,19 +439,14 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
         ])
         .evaluate().json
     ).toBe('True');
-    fresh.discard(cp);
   });
-  test('new operations are removed on restore and name conflicts leave installation atomic', () => {
-    const fresh = new ComputeEngine(),
-      cp = fresh.checkpoint();
-    loadGroupTheory(fresh);
-    fresh.restore(cp);
-    expect(fresh.lookupDefinition('GroupOrder')).toBeUndefined();
-    expect(fresh.lookupDefinition('PermutationPower')).toBeUndefined();
-    fresh.discard(cp);
+  test('a name conflict leaves installation atomic', () => {
+    const fresh = new ComputeEngine();
     fresh.declare('GroupEqual', 'integer');
     expect(() => loadGroupTheory(fresh)).toThrow('Already defined');
     expect(fresh.lookupDefinition('Permutation')).toBeUndefined();
+    expect(fresh.lookupDefinition('GroupOrder')).toBeUndefined();
+    expect(fresh.lookupDefinition('PermutationPower')).toBeUndefined();
   });
   test('cancellation remains separate from bounded failure', () => {
     const fresh = engine(),

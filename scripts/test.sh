@@ -25,9 +25,6 @@ fi
 
 if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
     npx --no-install jest --coverage "${JEST_ARGS[@]}"
-    echo 'Running checkpoint bypass canary'
-    CE_CHECKPOINT_CANARY=1 npx --no-install jest \
-      --reporters summary "${JEST_ARGS[@]}" -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "test" ] || [ "$VARIANT" = "-test" ]; then
     # The jest cache stays ON for the full suite: the transform cache is
     # content-keyed (a changed file re-transpiles, an unchanged one does not),
@@ -35,14 +32,6 @@ elif [ "$VARIANT" = "test" ] || [ "$VARIANT" = "-test" ]; then
     # first — without it files are ordered by SIZE, and a small-but-slow file
     # scheduled last extends the whole run by its own duration.
     npx --no-install jest --reporters summary "${JEST_ARGS[@]}"
-    # The checkpoint journal's bypass canary (CE_CHECKPOINT_CANARY) is a
-    # module-load flag, so its assertions are inert in the run above. Re-run
-    # the one differential-harness file in a fresh process with the flag set:
-    # every state event a checkpoint window sees must be backed by a journal
-    # hook of the matching kind, or a write has bypassed the journal.
-    echo 'Running checkpoint bypass canary'
-    CE_CHECKPOINT_CANARY=1 npx --no-install jest \
-      --reporters summary "${JEST_ARGS[@]}" -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "snapshot" ]  || [ "$VARIANT" = "-snapshot" ]; then
     npx --no-install jest  --updateSnapshot "${JEST_ARGS[@]}"
 else

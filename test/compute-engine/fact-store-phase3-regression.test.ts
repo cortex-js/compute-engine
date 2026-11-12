@@ -262,7 +262,7 @@ describe('the fact store mutates only through a state event', () => {
     };
   }
 
-  test('every assume outcome, forget, and a checkpoint restore', () => {
+  test('every assume outcome and forget', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -304,15 +304,6 @@ describe('the fact store mutates only through a state event', () => {
     expect(silent).toEqual([]);
     // A run where nothing mutated would satisfy the check vacuously.
     expect(mutations).toBeGreaterThan(0);
-
-    // A checkpoint restore refills the maps in place, which the map `version`
-    // sees and the axis would not — so it emits an event of its own.
-    ce.assume(ce.box(['Greater', 'x', 3]));
-    const cp = ce.checkpoint();
-    ce.forget();
-    const restore = mutatingStep(ce, () => ce.restore(cp));
-    expect(restore.mutated).toBe(true);
-    expect(restore.eventful).toBe(true);
   });
 });
 

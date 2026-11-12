@@ -24,7 +24,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { capturedTypesWidened } from '../../src/compute-engine/boxed-expression/function-literal';
 
 const LITERAL = ['Function', ['List', ['Negate', 'x'], 'y'], 'x'] as const;
 
@@ -337,52 +336,6 @@ describe('CE-473 (c): THE COMPILED ROUTE WHATEVER THE TYPE OF THE DEFINITION', (
     ce.assign('y', ce.string('s'));
     expect(() => compile(ce.box(['g', 1]), { fallback: false })).toThrow(
       /the symbol 'y' that its body reads has the type `string`, but the body of 'g' was typed when 'y' had the type `[^`]+`/
-    );
-  });
-});
-
-describe('CE-473 (c): A CHECKPOINT RESTORES THE RECORDED CAPTURED TYPES', () => {
-  test('a list cell is recorded from the types when the definition is assigned', () => {
-    // `z` is a string when `g` is first assigned, and has no definition
-    // again after the restore. The second assignment records no type for
-    // `z`, so a string assigned to it later is the cell of the result, and
-    // the type of the call says so.
-    const ce = new ComputeEngine();
-    const literal = ce.box([
-      'Function',
-      ['List', ['Negate', 'x'], 'y', 'z'],
-      'x',
-    ]);
-    const cp = ce.checkpoint();
-    ce.assign('z', ce.string('s'));
-    ce.assign('g', literal);
-    ce.restore(cp);
-    ce.assign('g', literal);
-    ce.assign('y', 5);
-    expect(ce.lookupDefinition('z')).toBeUndefined();
-    ce.assign('z', ce.string('abc'));
-    const call = ce.box(['g', 3]);
-    expect(call.type.toString()).toBe('list<integer | string>');
-    expect(sound(call).json).toEqual(['List', -3, 5, "'abc'"]);
-  });
-
-  test('the types recorded for a definition come back with its value', () => {
-    const ce = new ComputeEngine();
-    ce.declare('w', 'string');
-    ce.declare('g', 'function');
-    ce.assign('g', ce.box(LITERAL as any));
-    // The list does not narrow `y`, but the type of `g` read it as a number
-    // cell, and the record keeps `number`.
-    expect(ce.box('y').type.toString()).toBe('unknown');
-    const def = (ce.lookupDefinition('g') as { value: object }).value;
-    const cp = ce.checkpoint();
-    ce.assign('g', ce.box(['Function', ['List', 'x', 'w'], 'x']));
-    ce.restore(cp);
-    // The restored value reads `y`: a change of the type of `y` is seen.
-    ce.assign('y', ce.string('s'));
-    expect(capturedTypesWidened(def)).toBe(true);
-    expect(() => compile(ce.box(['g', 1]), { fallback: false })).toThrow(
-      /Could not compile the function 'g'/
     );
   });
 });

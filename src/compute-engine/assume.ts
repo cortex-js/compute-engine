@@ -251,7 +251,7 @@ function rollbackTransaction(tx: AssumeTransaction): void {
  *
  * The definition is DISPOSED as well as unbound: an expression boxed while the
  * proposition was being applied still holds it by identity, and the flag is
- * what tells the fact index and a checkpoint restore that assertions about it
+ * what tells the fact index that assertions about it
  * are about a value that no longer exists.
  */
 function discardBinding(tx: AssumeTransaction, name: string): void {

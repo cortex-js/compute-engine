@@ -486,30 +486,6 @@ describe('the recording-time value shield', () => {
   });
 });
 
-describe('checkpoint and restore', () => {
-  test('restoring past an assumption leaves the type as it was', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const cp = ce.checkpoint();
-    ce.assume(ce.parse('x > 3'));
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
-    ce.restore(cp);
-    expect(ce.box('x').type.toString()).toBe('real');
-  });
-
-  test('restoring past an assumed value leaves a later assignment alone', () => {
-    const ce = new ComputeEngine();
-    const cp = ce.checkpoint();
-    ce.assume(ce.parse('x = 5'));
-    ce.restore(cp);
-    ce.assign('x', 7);
-    // The assigned value is STORED on the definition, so a no-argument
-    // forget() — which drops the whole overlay — cannot reach it.
-    ce.forget();
-    expect(ce.box('x').evaluate().json).toBe(7);
-  });
-});
-
 describe('the effective type heals', () => {
   test('reading the type, then forgetting, then reading again', () => {
     const ce = new ComputeEngine();

@@ -411,26 +411,6 @@ describe('undeclare: a sequence', () => {
     expect(json(ce.parse('F_{3}').evaluate())).toBe('"F_3"');
   });
 
-  test('a checkpoint restore puts the pending base case back', () => {
-    const ce = new ComputeEngine();
-    ce.pushScope();
-    ce.declare('F', 'unknown');
-    ce.parse('F_0 := 10').evaluate();
-    const cp = ce.checkpoint();
-
-    ce.undeclare('F');
-    expect(ce.getSequenceStatus('F').status).toBe('not-a-sequence');
-
-    ce.restore(cp);
-
-    const status = ce.getSequenceStatus('F');
-    expect(status.status).toBe('pending');
-    expect(status.baseIndices).toEqual([0]);
-    ce.parse('F_n := F_{n-1} + 1').evaluate();
-    expect(ce.isSequence('F')).toBe(true);
-    expect(ce.parse('F_{3}').evaluate().json).toBe(13);
-  });
-
   // The pending definitions are kept by name, but each one belongs to the
   // binding of the scope where it was made. Undeclaring a declaration of
   // `F` in a child scope does not remove the pending base case of the `F`
@@ -484,29 +464,6 @@ describe('undeclare: a constant', () => {
     expect(configurationListenerCount(ce)).toBe(before);
   });
 
-  test('after a checkpoint restore, the constant listens again', () => {
-    const ce = new ComputeEngine();
-    const precision = ce.precision;
-    ce.pushScope();
-    ce.declare('k', {
-      isConstant: true,
-      value: (engine) => engine.number(engine.precision),
-    });
-    expect(ce.parse('k').evaluate().json).toBe(precision);
-    const count = configurationListenerCount(ce);
-    const cp = ce.checkpoint();
-
-    ce.undeclare('k');
-    expect(configurationListenerCount(ce)).toBe(count - 1);
-
-    ce.restore(cp);
-    expect(configurationListenerCount(ce)).toBe(count);
-    expect(ce.parse('k').evaluate().json).toBe(precision);
-
-    ce.precision = precision + 10;
-    expect(ce.parse('k').evaluate().json).toBe(precision + 10);
-  });
-
   // A sequence definition for the name of a constant (`F_0 := …` then
   // `F_n := …`) is refused, with the error that `ce.assign()` gives. The
   // binding keeps its value definition, so the constant keeps listening and
@@ -534,47 +491,9 @@ describe('undeclare: a constant', () => {
     expect(ce.parse('F').evaluate().json).toBe(precision + 10);
   });
 
-  test('after a checkpoint restore, the constant still listens', () => {
-    const ce = new ComputeEngine();
-    const precision = ce.precision;
-    ce.pushScope();
-    ce.declare('F', {
-      isConstant: true,
-      value: (engine) => engine.number(engine.precision),
-    });
-    expect(ce.parse('F').evaluate().json).toBe(precision);
-    const count = configurationListenerCount(ce);
-    const cp = ce.checkpoint();
-
-    expect(() => ce.parse('F_0 := 1').evaluate()).toThrow(
-      'Cannot assign a value to the constant "F"'
-    );
-    expect(configurationListenerCount(ce)).toBe(count);
-
-    ce.restore(cp);
-    expect(configurationListenerCount(ce)).toBe(count);
-    expect(ce.parse('F').evaluate().json).toBe(precision);
-
-    ce.precision = precision + 10;
-    expect(ce.parse('F').evaluate().json).toBe(precision + 10);
-  });
 });
 
-describe('undeclare: checkpoints and assumptions', () => {
-  test('a checkpoint restore puts the binding back', () => {
-    const ce = twoClauseEngine();
-    const g = ce.expr(['f', 2]);
-    const cp = ce.checkpoint();
-
-    ce.undeclare('f');
-    expect(json(ce.expr(['f', 2]).evaluate())).toBe('["f",2]');
-
-    ce.restore(cp);
-    expect(json(ce.expr(['f', 2]).evaluate())).toBe('1');
-    expect(json(ce.expr(['f', "'a'"]).evaluate())).toBe('2');
-    expect(json(g.evaluate())).toBe('1');
-  });
-
+describe('undeclare: assumptions', () => {
   // Assumptions are found by the name of the symbol, as for a declaration
   // in a scope under the one that made the assumption: `undeclare()`
   // removes the binding, and `forget()` removes the assumptions.

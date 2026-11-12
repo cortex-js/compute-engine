@@ -183,12 +183,6 @@ export class EngineNumericConfiguration {
     return this._tolerance;
   }
 
-  /** `'auto'` when the tolerance follows the precision, `'explicit'` when
-   * it was set to a number. */
-  get toleranceMode(): 'auto' | 'explicit' {
-    return this._toleranceMode;
-  }
-
   /** Returns `true` when the (normalized) tolerance actually changed.
    *
    * `'auto'` sets the tolerance to `10^(-precision + 2)`, two digits short

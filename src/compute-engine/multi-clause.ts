@@ -75,7 +75,6 @@ import {
   reconcileFunctionLiteralReturn,
   validationSignatureOf,
 } from './engine-declarations.js';
-import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
 /**
  * Multi-clause function definitions — the engine half of the contract in
@@ -1470,14 +1469,6 @@ function installClauseList(
       effectRow,
       declared,
     };
-    // Checkpoint journal (funnel 5): a bare-field write on a half that may
-    // pre-date this install. Today `updateDef` constructs a fresh operator
-    // half for every plain-object definition, so the target is always
-    // window-created and a restore drops it wholesale — but that is an
-    // invariant of `updateDef`'s dispatch, not of this call, and an
-    // identity-preserving fast path there would silently turn this write into
-    // an unjournaled mutation of a pre-existing record.
-    journalDefinitionRecord(ce, installed.operator, 'redefine');
     // Lets the call-time broadcast arms treat this definition as user code
     // (see `_BoxedOperatorDefinition._isMultiClause`).
     (installed.operator as { _isMultiClause?: boolean })._isMultiClause = true;

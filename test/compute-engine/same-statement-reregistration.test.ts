@@ -1,6 +1,6 @@
 /**
- * SAME-STATEMENT RE-REGISTRATION IS A NO-OP — linear-posture R1,
- * `docs/CHECKPOINT-MODEL.md` (finding F2/R1).
+ * SAME-STATEMENT RE-REGISTRATION IS A NO-OP (`isSameStatementReRegistration()`,
+ * `declaration-origin.ts`).
  *
  * One Epsil `Declare*` statement registers its declarations two or three times
  * per batch: the static pre-pass canonicalizes it (and rolls its registrations

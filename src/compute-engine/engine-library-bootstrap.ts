@@ -1,13 +1,12 @@
 import type {
   BoxedDefinition,
-  EngineCheckpoint,
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
   PartialSymbolDefinition,
   SymbolDefinitions,
 } from './global-types.js';
+import type { Scope } from './types-evaluation.js';
 import { assertLibraryDefinitionContract } from './engine-extension-contracts.js';
-import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import {
   isOperatorDef,
   isReplaceableOperatorShell,
@@ -20,6 +19,7 @@ import { isFunction } from './boxed-expression/type-guards.js';
 import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
 import {
   deferKindValueGates,
+  kindRegistryRollbackPoint,
   kindTypesOfHeadName,
 } from './boxed-expression/value-kinds.js';
 
@@ -160,9 +160,6 @@ function installLibraryDefinitions(
  * loaded late behaves like the same definitions declared by the caller:
  * - an expression boxed before the call, with a head the library defines
  *   (`Sq(3)` that stayed `Sq(3)`), uses the new definition (`9`);
- * - the declarations are journaled, so `ce.restore()` of a checkpoint taken
- *   before the call removes them, and the provenance recorded here is
- *   journaled the same way;
  * - the code that tells built-in definitions from caller definitions by
  *   comparing with the system-scope binding (`systemScopeBinding()`,
  *   `shadowsLibraryName()`, the derivative of a user function) classifies
@@ -185,12 +182,13 @@ function installLibraryDefinitions(
  *
  * Nothing is installed when one of these checks fails. A definition that
  * `ce.declare()` itself rejects (for example an unknown key) throws when it
- * is reached. The declarations are made after an internal checkpoint, which
- * is restored before the error is thrown again: the definitions declared
- * before the failing one are removed, no provenance is recorded, and the
- * library is not recorded as loaded. The exception: while an evaluation, a
- * static pre-pass or a declaration batch is in progress, no checkpoint can be
- * taken, and the definitions declared before the failing one stay declared.
+ * is reached. Before the error is thrown again, the definitions declared
+ * before the failing one are removed (`undoLibraryDeclarations()`): each
+ * name gets back the binding it had before the call, or none, and the
+ * provenance it had; the type registry and the registry of value kinds are
+ * put back. The library is not recorded as loaded. A user function whose
+ * definition was rebuilt when an earlier name was declared keeps that
+ * rebuild, as after `ce.undeclare()` (CE-1247).
  */
 export function loadLibraryLate(
   engine: ComputeEngine,
@@ -259,58 +257,69 @@ export function loadLibraryLate(
       entries.push([name, def]);
     }
 
-  // A definition that `ce.declare()` rejects is found only when it is
-  // declared. To declare nothing in that case, the declarations are made
-  // after an internal checkpoint: on a failure, the checkpoint is restored,
-  // which removes the definitions declared before the failing one and their
-  // recorded provenance, and the error is thrown again. On success, the
-  // checkpoint is discarded: its journal is merged into the checkpoint the
-  // caller took before the call, if any, so `ce.restore()` of that
-  // checkpoint still removes the library.
-  //
-  // A checkpoint cannot be taken while an evaluation, a static pre-pass or a
-  // declaration batch is in progress. In that case the declarations are made
-  // without one, and a failure leaves the definitions declared before the
-  // failing one in place.
-  let cp: EngineCheckpoint | undefined;
-  try {
-    cp = engine.checkpoint(`loadLibrary:${libName}`);
-  } catch (error) {
-    if ((error as { code?: unknown }).code !== 'checkpoint-not-quiescent')
-      throw error;
-  }
 
+  // A definition that `ce.declare()` rejects is found only when it is
+  // declared. The binding and the provenance of each name are recorded
+  // before its declaration, and the type and kind registries before the
+  // first one (a definition can add a type record or register a value kind),
+  // so that a failure can put them back.
+  const before: DeclaredName[] = [];
+  const restoreTypes = engine._typeRegistryRollbackPoint();
+  const restoreKinds = kindRegistryRollbackPoint(engine);
   try {
     for (const [name, def] of entries) {
+      before.push({
+        name,
+        binding: globalScope.bindings.get(name),
+        provenance: engine._libraryProvenance.get(name),
+      });
       engine.declare(name, def, globalScope);
       const binding = globalScope.bindings.get(name);
       if (binding === undefined) continue;
-      journalCheckpointMapEntry(
-        engine,
-        engine._libraryProvenance,
-        name,
-        `library-provenance:${name}`,
-        'declare'
-      );
       engine._libraryProvenance.set(name, { library: libName, binding });
     }
-
-    journalCheckpointMapEntry(
-      engine,
-      engine._loadedLibraries,
-      libName,
-      `loaded-library:${libName}`,
-      'declare'
-    );
     engine._loadedLibraries.set(libName, library);
   } catch (error) {
-    if (cp !== undefined) {
-      engine.restore(cp);
-      engine.discard(cp);
-    }
+    undoLibraryDeclarations(engine, globalScope, before);
+    restoreKinds();
+    restoreTypes();
     throw error;
   }
-  if (cp !== undefined) engine.discard(cp);
+}
+
+/** A name of a library that `loadLibraryLate()` declares: the binding it
+ * had in the global scope before the declaration, and its provenance. */
+type DeclaredName = {
+  name: string;
+  binding: BoxedDefinition | undefined;
+  provenance: ReturnType<ComputeEngine['_libraryProvenance']['get']>;
+};
+
+/**
+ * Remove the declarations that `loadLibraryLate()` made before one failed,
+ * in the reverse order. The provenance of each name is put back first,
+ * because `ce.undeclare()` refuses a name that a library defines. A name
+ * whose binding is unchanged (the failing declaration put its binding back
+ * itself) is left alone. Otherwise the new binding is removed with
+ * `ce.undeclare()`, and the binding that the declaration replaced (a name
+ * the engine inferred from a use) is put back: `ce.declare()` replaces the
+ * binding record, so an expression boxed before the call holds that record.
+ */
+function undoLibraryDeclarations(
+  engine: ComputeEngine,
+  globalScope: Scope,
+  before: ReadonlyArray<DeclaredName>
+): void {
+  for (let i = before.length - 1; i >= 0; i--) {
+    const { name, binding, provenance } = before[i];
+    if (provenance === undefined) engine._libraryProvenance.delete(name);
+    else engine._libraryProvenance.set(name, provenance);
+    const current = globalScope.bindings.get(name);
+    if (current === binding) continue;
+    if (current !== undefined)
+      engine._inScope(globalScope, () => engine.undeclare(name));
+    if (binding !== undefined) globalScope.bindings.set(name, binding);
+  }
 }
 
 /** Can `ce.declare()` replace this binding? Only when there is none, or when

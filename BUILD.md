@@ -173,11 +173,11 @@ release requirements. Worker limits and box-lock rules still apply.
 | `npm run typecheck`                          | Run `types`, then check the CLI and compile-time API assertions.                                                  |
 | `npm run test:types`                         | Refresh declarations and compile the consumer declaration fixture.                                                |
 | `npm run check:deps`                         | Enforce the zero-circular-dependency policy with Madge. Separate from `typecheck`.                                |
-| `npm test`                                   | Run the normal runtime suite, then the checkpoint canary in a fresh process.                                      |
+| `npm test`                                   | Run the normal runtime suite.                                                                                     |
 | `npm test -- compute-engine/arithmetic -w 2` | Run a targeted suite using the historical path shorthand.                                                         |
 | `npm test -- --watchman=false`               | Forward Jest options to the normal full run and canary.                                                           |
 | `npm run snapshot`                           | Update snapshots; never update a snapshot marked `@fixme`.                                                        |
-| `npm run coverage`                           | Runtime coverage and checkpoint canary.                                                                           |
+| `npm run coverage`                           | Runtime coverage.                                                                                                 |
 | `npm run test:python`                        | Check Python dependencies and run suites with Python execution assertions.                                        |
 | `npm run test:glsl`                          | Compile the GLSL that the engine writes with the WebGL 2 compiler of a headless Chromium.                         |
 | `npm run test:nightly`                       | Run only the additional `CE_NIGHTLY`-gated suites; not the full nightly pipeline.                                 |

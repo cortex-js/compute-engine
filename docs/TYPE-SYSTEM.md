@@ -721,9 +721,7 @@ state into real evaluation.
 
 Within one Epsil batch, duplicate type/protocol/sum declarations and duplicate
 function clauses are checked as one compilation unit. Across batches the newer
-definition replaces the older one; clients that require notebook replay use
-checkpoint/restore (deprecated, `CHECKPOINT-MODEL.md`) rather than depending
-on partially updated historical state.
+definition replaces the older one.
 
 A constant is a property of the binding, not of the type. `isConstant` is
 stored on the value definition, next to its type, value and `holdUntil`
@@ -1220,11 +1218,7 @@ time of an ordinary evaluation, measured 2026-10-26). The `carrier` and
 `resultType` checks of the apply sites (`someKindAdmittedByCarrier()`,
 `someKindHasResultType()`) read the same gates, so the `'number'` kind
 `measurement` costs nothing in an engine that has made no measurement. A
-gate only opens: a checkpoint does not restore it, and an open gate costs a
-walk, never a wrong answer.
-
-The registry is part of the bounded state of a checkpoint
-(`CHECKPOINT-MODEL.md`).
+gate only opens, and an open gate costs a walk, never a wrong answer.
 
 ### Admission: where a kind value is accepted
 

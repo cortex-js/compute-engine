@@ -19,11 +19,7 @@
  * and lost it defensively; asserting on the key is what keeps them pinned
  * without a witness to write.
  *
- * Settled empirically as the exit criterion of stage C1 of the checkpoint
- * work — see "Generation keys and constant nodes" in
- * `docs/CHECKPOINT-MODEL.md`. A restore reaches the
- * same entries the same way, so leaving them unkeyed would have made
- * restore-then-replay serve pre-restore answers.
+ * The rule is in `ARCHITECTURE.md`, "Evaluation and rules".
  */
 
 import { ComputeEngine } from '../../src/compute-engine';

@@ -231,14 +231,6 @@ test('public loader is idempotent for effective settings and rejects changes', (
       .json
   ).toBe(2);
 });
-test('restoring a checkpoint allows a fresh load', () => {
-  const ce = new ComputeEngine(),
-    checkpoint = ce.checkpoint();
-  loadGroupTheory(ce);
-  ce.restore(checkpoint);
-  expect(loadGroupTheory(ce)).toEqual({ operatorCount: expect.any(Number) });
-  ce.discard(checkpoint);
-});
 test('malformed group members retain their original error', () => {
   const ce = engine();
   const malformed = ['Permutation', ['List', 1, 1]] as MJ;

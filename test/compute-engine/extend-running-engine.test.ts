@@ -363,27 +363,50 @@ describe('ce.loadLibrary()', () => {
     expect(ce.box(['Aa', 3]).evaluate().toString()).toBe('6');
   });
 
-  test('a rejected definition inside a caller checkpoint', () => {
+  test('a rejected definition during an evaluation: nothing is declared', () => {
+    // The loader undoes its own declarations also when it is called from an
+    // evaluation handler.
     const ce = new ComputeEngine();
-    const cp = ce.checkpoint();
-    expect(
-      errorOf(() =>
-        ce.loadLibrary({
-          name: 'lib',
-          definitions: {
-            Aa: { signature: '(number) -> number' },
-            Bb: { signature: '(number) -> number', bogus: 1 },
-          },
-        } as unknown as LibraryDefinition)
-      )
-    ).toBe(`Operator Definition "Bb": unexpected key "bogus"`);
+    let message: string | undefined;
+    ce.declare('LoadDuringEvaluation', {
+      signature: '() -> integer',
+      evaluate: () => {
+        message = errorOf(() =>
+          ce.loadLibrary({
+            name: 'lib',
+            definitions: {
+              Aa: { signature: '(number) -> number' },
+              Bb: { signature: '(number) -> number', bogus: 1 },
+            },
+          } as unknown as LibraryDefinition)
+        );
+        return ce.number(0);
+      },
+    });
+    expect(ce.box(['LoadDuringEvaluation']).evaluate().json).toBe(0);
+    expect(message).toBe(`Operator Definition "Bb": unexpected key "bogus"`);
     expect(ce.lookupDefinition('Aa')).toBeUndefined();
+    expect(ce.libraryOf('Aa')).toBeUndefined();
     ce.loadLibrary(RESIDUES);
     expect(ce.box(['Sq', 3]).evaluate().toString()).toBe('9');
-    // The caller checkpoint is still live and undoes the library
-    ce.restore(cp);
-    expect(ce.box(['Sq', 3]).evaluate().toString()).toBe('Sq(3)');
-    expect(ce.libraryOf('Sq')).toBeUndefined();
+  });
+
+  test('a rejected definition: a type that an earlier definition named is not registered', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.loadLibrary({
+        name: 'lib',
+        definitions: {
+          Hh: { type: 'type Later' },
+          Bb: { signature: '(number) -> number', bogus: 1 },
+        },
+      } as unknown as LibraryDefinition)
+    ).toThrow(`Operator Definition "Bb": unexpected key "bogus"`);
+    expect(ce.lookupDefinition('Hh')).toBeUndefined();
+    expect(
+      (ce as unknown as { _typeRegistry: Record<string, unknown> })
+        ._typeRegistry['Later']
+    ).toBeUndefined();
   });
 
   test('a standard library in requires', () => {
@@ -393,20 +416,6 @@ describe('ce.loadLibrary()', () => {
     ).toBe(
       `Library "z" requires the standard library "arithmetic", which is not loaded. A standard library cannot be loaded after the engine is constructed: select "arithmetic" with the "libraries" constructor option.`
     );
-  });
-
-  test('a checkpoint taken before the call undoes it', () => {
-    const ce = new ComputeEngine();
-    const cp = ce.checkpoint();
-    ce.loadLibrary(RESIDUES);
-    expect(ce.box(['Sq', 3]).evaluate().toString()).toBe('9');
-    ce.restore(cp);
-    expect(ce.box(['Sq', 3]).evaluate().toString()).toBe('Sq(3)');
-    expect(ce.libraryOf('Sq')).toBeUndefined();
-    // The library name is free again
-    ce.loadLibrary(RESIDUES);
-    expect(ce.box(['Sq', 3]).evaluate().toString()).toBe('9');
-    expect(ce.libraryOf('Sq')).toBe('residues');
   });
 
   test('with addEntries(), a library and its notation load together', () => {

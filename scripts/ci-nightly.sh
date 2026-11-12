@@ -34,7 +34,7 @@
 #      main tree's node_modules into it, and runs, in order: `npm run
 #      typecheck`, the declaration build that the declaration test reads
 #      (`dist/types/compute-engine.d.ts`), and `bash scripts/test.sh` (the
-#      declaration test, the whole jest suite and the checkpoint canary).
+#      declaration test and the whole jest suite).
 #      Then `scripts/compiler-growth.mjs` measures the two numbers of the
 #      compiler growth guard: the code lines of
 #      `src/compute-engine/compilation` and the compile depth limit (a

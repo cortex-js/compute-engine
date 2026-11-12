@@ -192,23 +192,6 @@ describe('a Return in the body of an operator that takes an expression', () => {
     );
   });
 
-  test('a checkpoint restore keeps the Return statement of a block', () => {
-    // The literal adopts the binding of `Return` from the scope of the
-    // canonical block `b` as its parameter. After the restore, `b` holds the
-    // statement again, so a `Sum` over it is invalid.
-    const engine = new ComputeEngine();
-    const b = engine.box(['Block', ['Return', 1]]);
-    const cp = engine.checkpoint();
-    engine.function('Function', [b, engine.symbol('Return', { canonical: false })]);
-    engine.restore(cp);
-    expect(
-      engine.function('Sum', [
-        b,
-        engine.box(['Limits', 'k', 1, 2], { form: 'raw' }),
-      ]).isValid
-    ).toBe(false);
-  });
-
   test('the parse route gives the same error', () => {
     expect(ce.parse('\\sum_{k=1}^{3} \\operatorname{Return}(k)').isValid).toBe(
       false

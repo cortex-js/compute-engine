@@ -13,7 +13,7 @@ import { storeAdmission } from './effects-inference.js';
  * a symbol tests its evaluated value against the declared type only when the
  * stored value is in this set, so the read of a value that fits its declared
  * type costs one lookup. The set holds the value expression, not the
- * definition: a checkpoint restore or a call frame that brings back a stored
+ * definition: a call frame that brings back a stored
  * value brings back its test too. When the same expression is also stored
  * into a symbol whose declared type it fits, the read of that symbol runs the
  * test too, and the test passes.

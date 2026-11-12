@@ -2,6 +2,17 @@
 
 ### Breaking Changes
 
+- **`ce.checkpoint()`, `ce.restore()` and `ce.discard()` are removed**, with
+  the type `EngineCheckpoint` and the class `CheckpointError`; they were
+  deprecated since 0.187.0. To give names values for one computation, use
+  `ce.withValues()`; to make declarations that are undone together, declare
+  them in a scope pushed with `ce.pushScope()` and remove them with
+  `ce.popScope()`. The internal `_restoreCheckpointSnapshot()` of an operator
+  definition is removed too, so a test that injected a failure of a restore
+  through it has nothing to call. `ce.loadLibrary()` no longer depends on a
+  checkpoint: when a declaration of the library fails, the declarations made
+  before it are removed, also during an evaluation, where before they stayed.
+  The environment variable `CE_CHECKPOINT_CANARY` has no effect.
 - **The environment variable `CE_BINDING_UNITS` and the internal field
   `ce._bindingUnits` are removed.** Boxing declares no name, as it does by
   default since 0.187.0, and no setting gives the earlier behavior:

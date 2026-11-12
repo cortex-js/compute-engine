@@ -993,17 +993,17 @@ protocols, conformances or same-signature clauses becomes an ERROR on the Epsil
 (`executeEpsil`) route only. The box route and the host API keep the current
 replace/throw semantics permanently: Tycho's recompute passes re-assert
 declarations through the box route every 300 ms and depend on idempotency. The
-notebook edit gesture uses the engine `checkpoint()`/`restore()` API, which is
-shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
-`checkpoint-in-scope.test.ts` and the differential harness).
+notebook edit gesture used the engine `checkpoint()`/`restore()` API, which is
+removed (decision D9 of `docs/plans/2026-11-11-bound-once-spec.md`).
 
 - **CE-311.1** The last stage: flip the Epsil route to strict and delete the
   superseded machinery (about 1,384 source lines, 1,891 test lines and 92 test
-  changes; §5 of the plan). Tycho's requirement is met: its notebook restores
-  the checkpoint before the first changed cell and replays the cells from there
-  since 2026-10-16 (Tycho `docs/COMPUTE_ENGINE.md`, section "Checkpoint /
-  Restore"). So this stage can start. Until it lands, both mechanisms exist
-  together.
+  changes; §5 of the plan). Tycho's requirement was met from 2026-10-16 by a
+  notebook that restored the checkpoint before the first changed cell and
+  replayed the cells from there (Tycho `docs/COMPUTE_ENGINE.md`, section
+  "Checkpoint / Restore"). The checkpoint API is removed since 2026-11-12:
+  how Tycho's notebook replays an edited cell is to be checked before this
+  stage starts. Until it lands, both mechanisms exist together.
 
 ## Performance
 

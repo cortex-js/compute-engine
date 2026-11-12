@@ -99,50 +99,8 @@ import { asLatexString, isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
-import type { CheckpointHookKind } from '../checkpoint-journal.js';
 import { noteSymbolValue } from './residue-class-value-hook.js';
 
-/**
- * Record this definition record's mutable state in the active checkpoint
- * journal window, once per window — the value-write, type-write and
- * bare-field definition funnels ("State coverage" in
- * `docs/CHECKPOINT-MODEL.md`; the mechanism is `checkpoint-journal.ts`).
- *
- * ONE key for the whole record rather than one per field: the snapshot is the
- * complete mutable field set, so a per-field key would take more snapshots to
- * cover the same state and restore it no more faithfully. `kind` therefore
- * only classifies the write for the bypass canary — it does not select what
- * is captured.
- *
- * A single field read when no checkpoint is live, which is every session that
- * never takes one; the snapshot itself is built only on the FIRST write to
- * this record in the window.
- *
- * Serves BOTH definition classes — the two snapshot tuples are different, but
- * the journaling protocol around them is not, and each half of a binding is
- * its own object, so the two never collide on a key.
- */
-export function journalDefinitionRecord(
-  ce: ComputeEngine,
-  def: {
-    _checkpointSnapshot(): unknown;
-    _restoreCheckpointSnapshot(snapshot: unknown): void;
-  },
-  kind: CheckpointHookKind
-): void {
-  const w = ce._checkpointWindow;
-  if (w === undefined) return;
-  if (!w.claim(def, CHECKPOINT_DEF_KEY, kind)) return;
-  const snapshot = def._checkpointSnapshot();
-  w.push(() => def._restoreCheckpointSnapshot(snapshot));
-}
-
-/** The single journal key under which a definition record's whole mutable
- * field set is recorded — see {@link journalDefinitionRecord}. Shared with the
- * operator-definition hook so that a record whose two halves are both written
- * in one window still takes one snapshot per HALF, keyed on the half object.
- */
-export const CHECKPOINT_DEF_KEY = 'definition-fields';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -338,8 +296,8 @@ export class _BoxedValueDefinition
    * `let out = acc; out = [...out, c]` left
    * `acc` untyped, and a call `f([1, 2])` broadcast over the list instead of
    * passing it whole (row 339 of the Tycho ledger,
-   * `tycho/docs/COMPUTE_ENGINE.md`). Set once, at the declaration; a
-   * checkpoint restores it with the binding. */
+   * `tycho/docs/COMPUTE_ENGINE.md`). Set once, at the declaration.
+   */
   _initializerAlias: Expression | undefined = undefined;
 
   /** True when an assignment to this binding recorded the type of its value
@@ -356,9 +314,8 @@ export class _BoxedValueDefinition
   _assignmentEvidence: boolean = false;
 
   /** Memo of the signature derived from `_signatureSkeleton`, keyed on the
-   * identities of the skeleton and of the stored value's type object. It is
-   * not state, so a checkpoint does not capture it: a restore that changes
-   * either key makes the memo miss. */
+   * identities of the skeleton and of the stored value's type object.
+   */
   private _signatureMemo:
     | {
         skeleton: Type;
@@ -435,8 +392,8 @@ export class _BoxedValueDefinition
 
   // The number of live evaluation contexts whose scope holds this definition
   // (`countHolders`, `engine-scope.ts`). The pop of a context disposes the
-  // definition only when no other live context holds it. Not part of the
-  // checkpoint snapshot: it counts frames, not a state of the record.
+  // definition only when no other live context holds it.
+  // It counts frames, not a state of the record.
   _holders = 0;
 
   // The STATIC binding this definition is a per-call activation of, when it is
@@ -866,11 +823,6 @@ export class _BoxedValueDefinition
     // identity ONLY: structural equality (`.isSame`) is syntactic, not
     // binding-identity, and must not suppress (design §4's predicate table).
     if (v !== undefined && v === this._value) return;
-    // Checkpoint journal (funnel 1): the WHOLE coupled tuple, not just
-    // `_value` — a value write also moves `_isSelfReferential`, and the type
-    // setter next door moves `_value` — recorded once per window, after the
-    // no-op guard above so a suppressed write journals nothing.
-    journalDefinitionRecord(this._engine, this, 'value-write');
     const prev = this._value;
     this._value = v;
     // The type of a definition that holds a function literal is inferred
@@ -1001,20 +953,13 @@ export class _BoxedValueDefinition
   }
 
   /**
-   * Snapshot EVERY mutable field of this record, for the checkpoint journal
-   * (`checkpoint-journal.ts`, and "State coverage" in
-   * `docs/CHECKPOINT-MODEL.md`). Deliberately
+   * Snapshot EVERY mutable field of this record. Deliberately
    * a different, wider tuple than {@link _typeSlotSnapshot}: that one covers
-   * the six slots an inference re-derivation can move, and a checkpoint has
-   * to rewind a whole cell's worth of arbitrary program writes.
+   * the six slots an inference re-derivation can move.
    *
    * **Review rule: adding a mutable field to this class means extending this
-   * snapshot and its restore.** The completeness of the tuple is what makes
-   * the restore observationally equivalent to a fresh engine, and a field
-   * left out is silently carried across a rewind. The drift guard is
-   * `test/compute-engine/checkpoint-journal.test.ts`, which compares this
-   * tuple's key set against the record's own property names and fails on any
-   * field that is neither captured nor listed there as deliberately excluded.
+   * snapshot and its restore.** A field left out is silently carried across
+   * a restore.
    *
    * Excluded, each for a stated reason: `name` and `_engine` are identity and
    * never move; `_writeVersion` is a monotone invalidation counter, which the
@@ -1061,9 +1006,6 @@ export class _BoxedValueDefinition
       _sweptRecord: this._sweptRecord,
       _isShield: this._isShield,
       _isDevolvedShadow: this._isDevolvedShadow,
-      // A definition disposed inside a checkpoint window comes back alive on
-      // restore, like every other field of the record: the record object is
-      // restored in place and live expressions still hold it by identity.
       disposed: this.disposed,
       holdUntil: this.holdUntil,
       eq: this.eq,
@@ -1602,8 +1544,8 @@ export class _BoxedValueDefinition
 
     // The index is rebuilt whenever the facts change (a new engine generation
     // or a mutation of the store), so keying on its identity is what heals
-    // this cache on `assume()`, `forget()`, a scope change and a checkpoint
-    // restore alike; `_writeVersion` covers a write to the declaration.
+    // this cache on `assume()`, `forget()`, a scope change
+    // alike; `_writeVersion` covers a write to the declaration.
     const cached = memoize ? this._effectiveType : undefined;
     if (
       cached !== undefined &&
@@ -1909,12 +1851,6 @@ export class _BoxedValueDefinition
         `The type of the constant "${this.name}" cannot be changed`
       );
 
-    // Checkpoint journal (funnel 2): the type setter is a hidden VALUE
-    // writer — a write to `unknown` below wipes `_defValue`/`_value` and
-    // reports no `value-write` event — so it journals the same coupled tuple
-    // the value setter does. Recorded after the constant guard, so a refused
-    // write leaves the window untouched.
-    journalDefinitionRecord(this._engine, this, 'type-write');
 
     this._type =
       t instanceof BoxedType ? t : new BoxedType(t, this._engine._typeResolver);
@@ -1957,9 +1893,6 @@ export class _BoxedValueDefinition
     // from an assigned value keeps standing after the assumptions change. The
     // DECISION that produced `t` belongs to the caller's own bracket.
     this._engine._withoutFacts(() => {
-      // Checkpoint journal (funnel 2): same coupled tuple as the setters
-      // above.
-      journalDefinitionRecord(this._engine, this, 'type-write');
       this._type = t;
       this._writeVersion += 1;
     });
@@ -1970,27 +1903,16 @@ export class _BoxedValueDefinition
     if (this.isConstant) this._value = null;
   }
 
-  /** Set by `dispose()` and never cleared except by a checkpoint restore.
+  /** Set by `dispose()`.
    *
    * An assumption is recorded against a DEFINITION, so a definition whose
    * scope is gone leaves assertions about a value that no longer exists.
-   * Three readers act on this flag: the fact index skips an assertion any of
+   * Among the readers of this flag: the fact index skips an assertion any of
    * whose subjects is disposed (`collectTypeContributions`,
-   * `boxed-expression/constraint-subject.ts`); a checkpoint restore drops
-   * those assertions and the assumed-value overlay entries keyed by a
-   * disposed definition (`restoreAssumptions`, `checkpoint.ts`); and the
+   * `boxed-expression/constraint-subject.ts`); and the
    * `assume()` transaction's consistency pass ignores a disposed definition
    * when it re-reads what the applied facts prove (`assume.ts`). */
   disposed = false;
-
-  /** See `BoxedValueDefinition._rewound`. Declared here, not added by the
-   * restore, so that every definition object has the same shape. */
-  _rewound: true | undefined = undefined;
-
-  /** The scope this definition was installed in, when it was constructed in
-   * an open checkpoint window by a site that knows it (`noteCreated`,
-   * `checkpoint-journal.ts`). Read only by a restore. */
-  _checkpointHome: object | undefined = undefined;
 
   dispose(): void {
     this.disposed = true;
@@ -2007,8 +1929,8 @@ export class _BoxedValueDefinition
    * replaced definition in memory for the engine's lifetime.
    *
    * Return `true` when a subscription was released. The caller then records
-   * an undo that calls {@link _resubscribeConfigurationChange}, because a
-   * checkpoint restore or an inference rollback can put this definition back
+   * an undo that calls {@link _resubscribeConfigurationChange}, because
+   * an inference rollback can put this definition back
    * in its binding.
    * @internal */
   _releaseConfigurationChange(): boolean {

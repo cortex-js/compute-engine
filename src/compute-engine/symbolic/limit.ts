@@ -37,7 +37,6 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 import {
   type UnitEnvironment,
   sameUnitEnvironmentStamp,
@@ -2786,10 +2785,6 @@ function compiledProbe(
     fn = null;
   }
   if (deps === undefined || !guard.allowsStore()) return fn;
-  // Checkpoint journal (funnel 7): the compiled probe closes over the
-  // definitions in force when it was built — a probe compiled during the
-  // window must not outlive a restore.
-  journalCheckpointMemoEntry(ce, probeCache, key, 'limit-probe');
   probeCache.set(key, {
     x,
     fn,

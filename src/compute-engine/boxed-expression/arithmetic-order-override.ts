@@ -11,10 +11,9 @@
  * visible definition.
  *
  * An engine is never removed from the set. When the scope of such a
- * definition is popped, or when a checkpoint restore puts back the earlier
- * definition, the lookup gives the correct definition again, so the set only
- * has to show that a lookup can be necessary. It does not have to follow the
- * scopes or the checkpoints.
+ * definition is popped, the lookup gives the correct definition again, so
+ * the set only has to show that a lookup can be necessary. It does not have
+ * to follow the scopes.
  *
  * This module has no imports, so that the operator definition and the
  * ordering code can both import it without a circular dependency.

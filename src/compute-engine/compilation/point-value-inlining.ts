@@ -182,8 +182,7 @@ function mentionsInlinablePoint(
  * into the code (`tryFoldKnownSymbol()` in `base-compiler.ts`). A later
  * assignment does not change the compiled code, so the value tells what the
  * code computes. The conditions are those of the base compiler: a `vars`
- * key is never folded, and a definition that a checkpoint restore marked
- * `_rewound` has no value.
+ * key is never folded.
  */
 function inlinedSymbolValue(
   e: Expression,
@@ -192,8 +191,6 @@ function inlinedSymbolValue(
   if (!isSymbol(e)) return undefined;
   const s = e.symbol;
   if (target.varsKeys?.has(s) === true || target.boundVars?.has(s) === true)
-    return undefined;
-  if ((e.valueDefinition as { _rewound?: true } | undefined)?._rewound)
     return undefined;
   // The value is read first: `target.var` has effects on some targets (it
   // records an input read from the vars object, or allocates a temporary),

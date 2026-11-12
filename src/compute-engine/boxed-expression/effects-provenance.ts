@@ -19,7 +19,6 @@ import { currentBoxingEpoch, recordTypeProvenance } from './type-provenance.js';
 
 import type { Expression, TypeProvenanceEntry } from '../global-types.js';
 import type { InferenceRollbackFrame } from '../inference-rollback.js';
-import type { CheckpointHost } from '../checkpoint-journal.js';
 
 /**
  * The site that STATED a definition half's current effects contract: the
@@ -87,7 +86,7 @@ export function recordEffectsTransition(
     _rollbackFrames: ReadonlyArray<InferenceRollbackFrame>;
     _inferenceTxDepth: number;
     _boxingEpoch: number;
-  } & CheckpointHost,
+  },
   target: { _typeProvenance: TypeProvenanceEntry[] | undefined },
   before: EffectsContractState,
   after: EffectsContractState,

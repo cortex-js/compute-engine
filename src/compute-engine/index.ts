@@ -81,7 +81,6 @@ import type {
   ProtocolImplementationInput,
   InferenceWriteEvent,
   InferenceCauseContext,
-  EngineCheckpoint,
   EvaluateOptions,
 } from './global-types.js';
 
@@ -118,14 +117,6 @@ import {
   InferenceRollbackFrame,
   activeRollbackFrame,
 } from './inference-rollback.js';
-import { CHECKPOINT_CANARY, CheckpointWindow } from './checkpoint-journal.js';
-import {
-  _EngineCheckpoint,
-  discardCheckpoint,
-  invalidateCheckpointsOnFrameDiscard,
-  restoreCheckpoint,
-  takeCheckpoint,
-} from './checkpoint.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 import {
   jsProfileSwitchDefault,
@@ -239,10 +230,7 @@ import {
   undeclare as undeclareImpl,
 } from './engine-declarations.js';
 import type { KindRegistryState } from './types-definitions.js';
-import {
-  createKindRegistry,
-  kindRegistryRollbackPoint,
-} from './boxed-expression/value-kinds.js';
+import { createKindRegistry } from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import { markLibraryCall } from './library-shadowing.js';
 import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
@@ -721,11 +709,6 @@ export class ComputeEngine implements IComputeEngine {
    * `boxed-expression/value-kinds.ts` only.
    * @internal */
   readonly _kindRegistry: KindRegistryState = createKindRegistry();
-
-  /** See `IComputeEngine._kindRegistryRollbackPoint`. @internal */
-  _kindRegistryRollbackPoint(): () => void {
-    return kindRegistryRollbackPoint(this);
-  }
 
   /** Backing store for {@link _conformanceVersion}. */
   private _conformanceVersionCounter = 0;
@@ -1327,7 +1310,7 @@ export class ComputeEngine implements IComputeEngine {
    * When > 0, the assumptions store answers as EMPTY to every consumer that
    * queries it through `contextAssumptions()`, so a computation bracketed by
    * this depth behaves as if no assumption were in force. Sites that COPY or
-   * SNAPSHOT the store (a scope push, a checkpoint) are exempt.
+   * SNAPSHOT the store (a scope push) are exempt.
    * @internal
    */
   get _factSuppressionDepth(): number {
@@ -1547,28 +1530,6 @@ export class ComputeEngine implements IComputeEngine {
     return this._configurationLifecycle.scratchCallableAdvances;
   }
 
-  /** See `IComputeEngine._checkpointWindow`.
-   * @internal */
-  _checkpointWindow: CheckpointWindow | undefined = undefined;
-
-  /** See `IComputeEngine._checkpointStack`.
-   * @internal */
-  _checkpointStack: _EngineCheckpoint[] = [];
-
-  /** See `IComputeEngine._checkpointPoisoned`.
-   * @internal */
-  _checkpointPoisoned = false;
-
-  /** See `IComputeEngine._nextCheckpointId`.
-   * @internal */
-  _nextCheckpointId = 1;
-
-  /** See `IComputeEngine._invalidateCheckpointsOnFrameDiscard`.
-   * @internal */
-  _invalidateCheckpointsOnFrameDiscard(context: EvalContext): void {
-    invalidateCheckpointsOnFrameDiscard(this, context);
-  }
-
   /** See `IComputeEngine._inFlightAsyncEvaluations`.
    * @internal */
   _inFlightAsyncEvaluations = 0;
@@ -1629,61 +1590,9 @@ export class ComputeEngine implements IComputeEngine {
       >
     | undefined = undefined;
 
-  /**
-   * Take a checkpoint of the engine's state at a quiescent cell boundary, so
-   * that a later {@link restore} can rewind to it — the notebook edit gesture
-   * "restore the checkpoint before cell k, replay cells k…n". Legal on a
-   * freshly constructed engine, which is how a client gets a `cp[0]` covering
-   * an edit of the first cell.
-   *
-   * Throws a `CheckpointError` (`checkpoint-not-quiescent`) if called while an
-   * evaluation, static pre-pass or declaration batch is in progress.
-   *
-   * @deprecated Checkpoints are removed in a later release. Use
-   * `ce.withValues()`, or `ce.pushScope()` and `ce.popScope()`.
-   */
-  checkpoint(label?: string): EngineCheckpoint {
-    return takeCheckpoint(this, label);
-  }
-
-  /**
-   * Rewind to `cp`, invalidating every checkpoint taken after it. `cp` itself
-   * stays live and can be restored again.
-   *
-   * Expressions built BEFORE `cp` remain valid — their definitions are
-   * rewritten in place back to their `cp` state. Expressions built during the
-   * rewound window are NOT: they may reference disposed definition halves, and
-   * evaluating, typing or serializing one is undefined behavior. Cache cell
-   * outputs as serialized artifacts, not as live boxed nodes.
-   *
-   * @deprecated Checkpoints are removed in a later release. Use
-   * `ce.withValues()`, or `ce.pushScope()` and `ce.popScope()`.
-   */
-  restore(cp: EngineCheckpoint): void {
-    restoreCheckpoint(this, cp);
-  }
-
-  /** Release `cp`'s restore capability. Restoring past a discarded INTERIOR
-   * checkpoint stays possible through any earlier live one; discarding the
-   * OLDEST live checkpoint makes the state before the next-younger one
-   * unreachable.
-   *
-   * @deprecated Checkpoints are removed in a later release. Use
-   * `ce.withValues()`, or `ce.pushScope()` and `ce.popScope()`.
-   */
-  discard(cp: EngineCheckpoint): void {
-    discardCheckpoint(this, cp);
-  }
-
   /** The state-event choke point — see `IComputeEngine._noteStateEvent`.
    * @internal */
   _noteStateEvent(event: StateEvent): void {
-    // Bypass canary (`CE_CHECKPOINT_CANARY`, off by default): tally the event
-    // against the active journal window, so the differential harness can find
-    // an event KIND the window saw with no journaling hook of that kind
-    // behind it. Counts are never compared — first-write dedup makes them
-    // incomparable by design.
-    if (CHECKPOINT_CANARY) this._checkpointWindow?.noteEvent(event.kind);
     this._configurationLifecycle.noteStateEvent(event);
   }
 
@@ -2641,14 +2550,6 @@ export class ComputeEngine implements IComputeEngine {
     this._setIterationLimit(0);
   }
 
-  /** See `IComputeEngine._iterationLimitIsExplicit`. @internal */
-  get _iterationLimitIsExplicit(): boolean {
-    return this._runtimeState.iterationLimitIsExplicit;
-  }
-  set _iterationLimitIsExplicit(explicit: boolean) {
-    this._runtimeState.iterationLimitIsExplicit = explicit;
-  }
-
   /** Signal `recursion-depth-exceeded` when the recursion depth for this
    * scope is exceeded.
    *
@@ -2748,11 +2649,6 @@ export class ComputeEngine implements IComputeEngine {
 
   get tolerance(): number {
     return this._numericConfiguration.tolerance;
-  }
-
-  /** @internal */
-  get _toleranceMode(): 'auto' | 'explicit' {
-    return this._numericConfiguration.toleranceMode;
   }
 
   /** @internal */
@@ -4000,14 +3896,8 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The library name is recorded: `ce.libraryOf('Sq')` returns it.
    *
-   * A checkpoint taken before the call (`ce.checkpoint()`) undoes it,
-   * definitions and recorded name included.
-   *
    * The library carries no LaTeX notation. To parse and serialize a notation
    * for its operators, add the entries with `ce.latexSyntax.addEntries()`.
-   * These entries are not recorded by checkpoints: `ce.restore()` does not
-   * remove them, because the `LatexSyntax` instance can be shared by several
-   * engines.
    *
    * @throws if the library is malformed; if it is one of the standard
    * libraries (select those with the `libraries` constructor option); if a
@@ -4275,10 +4165,6 @@ export class ComputeEngine implements IComputeEngine {
    * ce.parse('f(x) := x + a').evaluate();
    * ce.withValues({ a: 1 }, () => ce.parse('f(2)').evaluate()); // -> 3
    * ```
-   *
-   * Unlike `ce.checkpoint()` and `ce.restore()`, this method can be called
-   * during an evaluation, for example in the `evaluate` handler of an
-   * operator.
    *
    * A value is checked as `ce.assign()` checks it: a value that the declared
    * type of the symbol does not admit throws. The value `undefined` gives the

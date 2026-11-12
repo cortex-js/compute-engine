@@ -101,14 +101,11 @@ export function provableTopLevelKind(
  * list of numbers. An out-of-range index gives `NaN`, also a number.
  *
  * The fold happens under the conditions of the symbol emission in
- * `compile-inner.ts`, and this test asks for these of them:
+ * `compile-inner.ts`, and this test asks for this one of them:
  * - `isFree(name)` is true: the name is not a `vars` key of the compile (the
  *   host supplies that value at run time, and it can be a list of lists)
  *   and not a name that the code binds (a parameter, an index or a local
- *   that spells the same name reads its own value, not the held one);
- * - the definition that the node is bound to is not marked `_rewound` by a
- *   checkpoint restore (such a definition has no value, also when a later
- *   definition of the same name has one).
+ *   that spells the same name reads its own value, not the held one).
  *
  * One condition is not tested: the emission first asks the target's own
  * `var` hook, and a custom target whose hook resolves the name reads its own
@@ -128,8 +125,6 @@ export function isHeldNumericListRead(
   if (!isFunction(x, 'At') || x.nops !== 2) return false;
   const [base, index] = x.ops;
   if (!isSymbol(base) || !isFree(base.symbol)) return false;
-  if ((base.valueDefinition as { _rewound?: true } | undefined)?._rewound)
-    return false;
   if (!index.type.matches('number')) return false;
   const held = x.engine._getSymbolValue(base.symbol);
   if (!isFunction(held, 'List') || held.nops === 0) return false;
@@ -145,10 +140,8 @@ export function isHeldNumericListRead(
  * name is not a `vars` key of the compile (a value the host supplies at run
  * time) and not a name that the code binds (a parameter, an index or a
  * local). The symbol emission in `compile-inner.ts` folds a held value only
- * when these hold. It also skips a `_rewound` definition, which
- * `isHeldNumericListRead()` tests on the node, and a name that a custom
- * target's own `var` hook resolves, which is not tested here (see
- * `isHeldNumericListRead()`).
+ * when these hold. It also skips a name that a custom target's own `var`
+ * hook resolves, which is not tested here (see `isHeldNumericListRead()`).
  */
 export function isFoldableName(
   name: string,

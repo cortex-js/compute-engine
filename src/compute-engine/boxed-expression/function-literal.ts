@@ -23,7 +23,6 @@ import { isSubtype } from '../../common/type/subtype.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isFunction, isString, isSymbol, sym } from './type-guards.js';
 import { tuplePatternNames } from './tuple-pattern.js';
-import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 import { literalParameterDefault } from './parameter-defaults.js';
 
 /**
@@ -54,7 +53,7 @@ import { literalParameterDefault } from './parameter-defaults.js';
  * registration: the Epsil static pre-pass (`static-diagnostics.ts`), which
  * registers the `type` statements of a program and then discards them; a
  * sum-type declaration that fails after some of its variants registered
- * (`engine-declarations.ts`); and the restore of a checkpoint. A literal that
+ * (`engine-declarations.ts`). A literal that
  * was boxed while the name was registered can be read after such a rollback.
  * The parse then throws `Unknown type`, the annotation reads as absent with no
  * message, and the check of the argument types stops.
@@ -86,16 +85,6 @@ function parseTypeOperand(t: Expression | undefined): Type | undefined {
     // resolver-less (memo-cached) parse still carries the common case.
     try {
       const resolved = parseType(s, t.engine._typeResolver);
-      // Checkpoint journal (funnel 7): this memo carries no version stamp, so
-      // a node that predates the checkpoint but first resolved DURING the
-      // window would keep the window's resolution across a restore — the
-      // resolver reads the type registry, which the restore rewinds.
-      journalCheckpointMemoEntry(
-        t.engine,
-        RESOLVED_TYPE_OPERANDS,
-        t,
-        'resolved-type-operand'
-      );
       RESOLVED_TYPE_OPERANDS.set(t, resolved);
       return resolved;
     } catch {
@@ -341,25 +330,17 @@ export function functionLiteralParameterNames(param: Expression): string[] {
  *
  * A binding that existed before the literal can become a parameter binding
  * (the body was canonical before the literal was made, and its scope already
- * held the name). So a mark made while a checkpoint is open is journaled,
- * and a restore removes it, as it removes the binding from the scope.
+ * held the name).
  */
 const FUNCTION_LITERAL_PARAMETERS = new WeakMap<object, true>();
 
 /** Record `def` as the value definition of a function-literal parameter
- * (`FUNCTION_LITERAL_PARAMETERS`). `ce` is the engine of the literal: its
- * open checkpoint, if any, journals the mark. */
+ * (`FUNCTION_LITERAL_PARAMETERS`). `ce` is the engine of the literal. */
 export function markFunctionLiteralParameter(
   ce: Expression['engine'],
   def: object
 ): void {
   if (FUNCTION_LITERAL_PARAMETERS.has(def)) return;
-  journalCheckpointMemoEntry(
-    ce,
-    FUNCTION_LITERAL_PARAMETERS,
-    def,
-    'function-literal-parameter'
-  );
   FUNCTION_LITERAL_PARAMETERS.set(def, true);
 }
 
@@ -1076,9 +1057,6 @@ const DEFINITION_CAPTURED_TYPES = new WeakMap<
  * binding of the occurrence, or, for a copy that the body scope declared,
  * the outer binding of the name. A later change of one of these types is
  * what makes the inferred type of `def` outdated (`capturedTypesWidened()`).
- *
- * The record is journaled: a restore of a checkpoint brings back the record
- * that was in force (`journalCheckpointMemoEntry()`).
  */
 export function noteDefinitionCapturedTypes(
   def: object,
@@ -1123,12 +1101,6 @@ export function noteDefinitionCapturedTypes(
     bindings.push([binding, type, entry.name] as const);
   }
   if (bindings.length === 0 && !DEFINITION_CAPTURED_TYPES.has(def)) return;
-  journalCheckpointMemoEntry(
-    literal.engine,
-    DEFINITION_CAPTURED_TYPES,
-    def,
-    'definition-captured-types'
-  );
   if (bindings.length === 0) DEFINITION_CAPTURED_TYPES.delete(def);
   else DEFINITION_CAPTURED_TYPES.set(def, bindings);
 }

@@ -692,10 +692,9 @@ public API groups into:
   `compile()` export. The target registry is internal
   (`_registerCompilationTarget()`, `_getCompilationTarget()`,
   `_listCompilationTargets()`, `_unregisterCompilationTarget()`).
-- **Replay** (deprecated): `checkpoint()`, `restore()`, and `discard()`
-  provide linear, cell-boundary state rewind. The replacements are
-  `withValues()` and `pushScope()`/`popScope()`. See
-  [`docs/CHECKPOINT-MODEL.md`](./docs/CHECKPOINT-MODEL.md).
+- **Temporary state**: `withValues()` gives names values for one computation;
+  declarations made in a scope pushed with `pushScope()` are removed by
+  `popScope()`. There is no API that rewinds the engine to an earlier state.
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit` (default
   `'rad'`), `strict` (validation depth), `iterationLimit` (default 1024),
@@ -709,7 +708,7 @@ Internally these responsibilities are delegated to focused services
 (`engine-startup-coordinator.ts`, `engine-scope.ts`, `engine-declarations.ts`,
 `engine-assumptions.ts`, `engine-numeric-configuration.ts`,
 `engine-runtime-state.ts`, `engine-cache.ts`, `engine-compilation-targets.ts`,
-`checkpoint.ts`, `checkpoint-journal.ts`, `engine-extension-contracts.ts`, …).
+`engine-extension-contracts.ts`, …).
 
 **Scopes & assumptions.** Symbol and operator definitions live in lexical scopes
 with proper inheritance. Assumptions (e.g. "x > 0") are recorded per scope and
@@ -1396,6 +1395,11 @@ collection contracts. In particular:
 
 ### Evaluation and rules
 
+- A cache entry on a function expression keys on the engine generation also
+  when every operand is constant and the node is pure: a redefinition of the
+  operator in place changes the answer (`f(2)` after `f(x) = x + 1` is
+  redefined) while the operands stay constant. A memo with no version key is
+  invalidated by no change (`test/compute-engine/constant-node-cache-key.test.ts`).
 - A lazy handler must canonicalize the held operands it consumes. Binding with
   `op.canonical` does not substitute assigned symbol values. Box and parse input
   can contain unresolved syntax that direct function construction has resolved.

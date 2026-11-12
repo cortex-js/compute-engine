@@ -97,13 +97,6 @@ describe('the roundingTies setting', () => {
     expect(half.sgn).toBe('zero');
   });
 
-  test('a checkpoint restores the rule', () => {
-    const ce = new ComputeEngine();
-    const cp = ce.checkpoint();
-    ce.roundingTies = 'to-even';
-    ce.restore(cp);
-    expect(ce.roundingTies).toBe('away-from-zero');
-  });
 });
 
 describe.each(RULES)('Round with the tie rule %s', (rule) => {
