@@ -88,7 +88,7 @@ function interpret(ce: ComputeEngine, expr: Expression, input: Record<string, nu
     ? ce.function('Apply', [expr, ...input.map((v) => ce.number(v))]).evaluate()
     : ce
         .function('Apply', [
-          ce.function('Function', [expr, ...Object.keys(input).map((n) => ce.symbol(n))]),
+          ce.box(['Function', expr.json, ...Object.keys(input)]),
           ...Object.values(input).map((v) => ce.number(v)),
         ])
         .evaluate();

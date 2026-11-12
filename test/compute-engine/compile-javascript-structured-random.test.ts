@@ -85,7 +85,7 @@ function boxed(ce: ComputeEngine, vars: Vars): Record<string, Expression> {
 function interpret(ce: ComputeEngine, expr: Expression, vars: Vars): unknown {
   const values = boxed(ce, vars);
   const names = Object.keys(values);
-  const lambda = ce.function('Function', [expr, ...names.map((name) => ce.symbol(name))]);
+  const lambda = ce.box(['Function', expr.json, ...names]);
   return valueOf(ce.function('Apply', [lambda, ...names.map((name) => values[name])]).evaluate());
 }
 

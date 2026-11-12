@@ -118,7 +118,7 @@ function inlined(ce: ComputeEngine, json: MathJsonExpression, depth = 0): MathJs
 function interpret(ce: ComputeEngine, json: MathJsonExpression, input: Input): unknown {
   const value = ce
     .function('Apply', [
-      ce.function('Function', [ce.box(inlined(ce, json)), ...Object.keys(input).map((n) => ce.symbol(n))]),
+      ce.box(['Function', inlined(ce, json), ...Object.keys(input)]),
       ...Object.values(input).map((v) => ce.number(v)),
     ])
     .evaluate();
