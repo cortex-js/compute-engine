@@ -2,7 +2,7 @@
  * The slice compiler, GLSL ES 3.00 printer.
  *
  * - Every IR operation of the operator table has a spelling in both
- *   printers.
+ *   printers, except those that GLSL declines.
  * - Six snapshots, each guarding a rule (named at each).
  * - When a headless Chromium is installed for `playwright-core`, the
  *   shaders run in WebGL2 (SwiftShader): their `f32` values are compared
@@ -22,6 +22,7 @@ import {
 import { JS } from '../../src/compute-engine/compilation/ir/print-js';
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
 import { spellingOf } from '../../src/compute-engine/compilation/ir/print';
+import { REAL_FUNCTIONS } from '../../src/compute-engine/compilation/ir/operators';
 import {
   interpret,
   makeEngine,
@@ -44,12 +45,15 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw and a Range)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, and a function with no builtin defined on every real)', () => {
+    // prettier-ignore
+    const jsOnly = new Set(['draw', 'rangecount', 'at', 'log10', 'hypot', 'asin', 'acos',
+      'acosh', 'atanh', ...Object.keys(REAL_FUNCTIONS).filter((f) => f !== 'fract')]);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
-        expect(() => spellingOf(JS, op)).not.toThrow();
-        if (op !== 'draw' && op !== 'rangecount')
-          expect(() => spellingOf(GLSL, op)).not.toThrow();
+        expect(spellingOf(JS, op)).toBeDefined();
+        if (!jsOnly.has(op)) expect(spellingOf(GLSL, op)).toBeDefined();
+        else expect(spellingOf(GLSL, op)).toBeUndefined();
       }
   });
   test.each(PINNED)('%s', (_, json) => {

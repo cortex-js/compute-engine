@@ -76,7 +76,8 @@ export type IRFunction = {
   readonly paramNames: string[];
   readonly lengthOf: boolean[];
   /** The first `positional` parameters of the entry are passed by position
-   *  (the parameters of a root function literal); the others are inputs. */
+   *  (the parameters of a root function literal, with the length of a list
+   *  of run-time length before it); the others are inputs. */
   readonly positional?: number;
   /** The entry is a root function literal (also one of no parameter). */
   readonly literal?: boolean;
@@ -95,6 +96,12 @@ export const scalarType = (lane: Lane): IRType => ({ lane, shape: [] });
 
 export function entryOf(p: Program): IRFunction {
   return p.functions.find((f) => f.name === p.entry)!;
+}
+
+/** The argument that the positional parameter `k` of `f` reads: a length
+ *  parameter reads the list argument after it. */
+export function argumentIndex(f: IRFunction, k: number): number {
+  return f.lengthOf.slice(0, k).filter((l) => !l).length;
 }
 
 export function outsOf(i: Instr): V[] {

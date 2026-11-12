@@ -486,6 +486,13 @@ export const PROGRAMS: Json[] = [
   ['Block', ['Declare', 't', 'real', 'x'],
     ['If', ['Less', 'x', 1], ['Assign', 't', ['Add', 't', 1]], ['Assign', 't', ['Subtract', 't', 1]]],
     ['If', ['Less', 't', 1], ['Assign', 't', ['Multiply', 't', 10]]], 't'],
+  // A declared type as a string, `unknown` or absent (the lane of the
+  // value), a value in the attributes
+  ['Block', ['Declare', 't', "'real'", 0], ['Assign', 't', ['Add', 't', 'x']], 't'],
+  ['Block', ['Declare', 't', { dict: { value: 0 } }], ['Assign', 't', ['Add', 't', 'n']], ['Mod', 't', 4]],
+  ['Block', ['Declare', 't', "'unknown'", ['Multiply', 'x', 2]], ['Add', 't', 1]],
+  ['Block', ['Declare', 't', "'real'", { dict: { value: 2 } }], ['Multiply', 't', 'x']],
+  ['Block', ['Declare', 't', ['Dictionary', ['KeyValuePair', "'value'", ['Less', 'x', 0]]]], ['If', 't', 1, 2]],
   // Lists
   ['List', 'x', 'y', 1], ['Add', 'L', 1], ['Add', 'L', 'M'], ['Multiply', 2, 'L'], ['Sin', 'L'],
   ['Negate', 'L'], ['Floor', 'L'], ['Mod', 'I', 3], ['Power', 'L', 2], ['Less', 'L', 0],
@@ -512,6 +519,15 @@ export const PROGRAMS: Json[] = [
   ['Length', ['Filter', 'D', ['Function', ['Less', 'z', 'x'], 'z']]],
   ['Sum', ['Map', ['Function', ['Sum', ['Multiply', 'k', 'z'], ['Limits', 'k', 1, 3]], 'z'], 'D']],
   ['If', ['Less', 'x', 0], 'D', ['Map', ['Function', ['Negate', 'z'], 'z'], 'D']],
+  // The real functions (`REAL_FUNCTIONS` and the rows spelled with `Math`)
+  ['Root', 'x', 3], ['Root', 'y', 'm'], ['Root', 'x', 2.5], ['Erf', 'x'], ['Erfc', ['Multiply', 3, 'x']],
+  ['Arctan', 'x'], ['Arctan2', 'y', 'x'], ['Arcsin', ['Divide', 'x', 4]], ['Arccos', 'x'], ['Arccot', 'x'],
+  ['Arcsec', 'y'], ['Arccsc', 'y'], ['Haversine', 'x'], ['Coth', 'y'], ['Arsinh', 'x'], ['Arcosh', 'y'],
+  ['Artanh', ['Divide', 'x', 4]], ['Arcoth', 'y'], ['Arsech', 'x'], ['Arcsch', 'y'], ['Gamma', 'x'],
+  ['Gamma', 'n'], ['GammaLn', 'y'], ['Factorial', 'n'], ['Factorial', 'x'], ['Factorial2', 'n'],
+  ['Zeta', 'y'], ['Sign', 'x'], ['Truncate', 'x'], ['Fract', 'x'], ['Log', 'x'], ['Hypot', 'x', 'y'],
+  ['Add', ['Truncate', ['Multiply', 'x', 7]], 'n'], ['Mod', ['Truncate', ['Multiply', 'x', 7]], 3],
+  ['Multiply', ['Sign', 'y'], 'n'], ['Erf', 'L'], ['Gamma', 'D'], ['Arctan2', 'L', 'M'],
   // User functions
   ['f', 'x', 2], ['f', 'n', 'y'], ['g', 'x'], ['g', 'n'], ['h2', 'x'], ['Add', ['g', 'x'], ['g', 'y']],
   ['fact', ['Mod', 'n', 7]], ['fact', 0], ['Sum', ['g', 'k'], ['Limits', 'k', 1, 'n']],
@@ -539,7 +555,7 @@ export const DECLINES: Record<string, Json> = {
   'not a literal': ['Map', 'g', 'D'],
   'in a loop': ['Block', ['Declare', 't', 'real', 0], ['Sum', ['Block', ['Assign', 't', 'k'], 'k'], ['Limits', 'k', 1, 3]], 't'],
   'symbol with a value': ['Add', 'h', 1],
-  'Root': ['Root', 'x', 3],
+  'Sinh': ['Sinh', 'x'],
   'Equal of a list': ['If', ['Equal', 'L', 'M'], 1, 2],
   'canonical form': ['Add', 'p', 1],
   'two types': ['If', ['Less', 'x', 0], 'L', 1],

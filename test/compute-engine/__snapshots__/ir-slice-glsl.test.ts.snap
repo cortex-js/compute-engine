@@ -54,7 +54,8 @@ exports[`IR slice: GLSL text an integer Mod computes on ints 1`] = `
   return float(r);
 }
 float f(float in0_n, float in1_m) {
-  return _imod(in0_n, in1_m);
+  float v2 = _imod(in0_n, in1_m);
+  return v2;
 }"
 `;
 

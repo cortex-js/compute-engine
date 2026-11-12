@@ -25,6 +25,11 @@ import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { isNumber, isSymbol, isFunction } from './type-guards.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { isMachineTrigPole } from '../numerics/numeric.js';
+import {
+  arcothReal,
+  arcschReal,
+  arsechReal,
+} from '../numerics/inverse-hyperbolic.js';
 import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
 import {
   complexAcos,
@@ -1297,10 +1302,7 @@ export function evalTrig(
       // give NaN for |x| < 1, where `apply` then uses the complex kernel.
       return apply(
         op,
-        (x) => {
-          const r = 0.5 * Math.log1p(2 / (Math.abs(x) - 1));
-          return x < 0 ? -r : r;
-        },
+        arcothReal,
         (x) =>
           x.abs().gte(BigDecimal.TWO)
             ? BigDecimal.ONE.div(x).atanh()
@@ -1322,14 +1324,7 @@ export function evalTrig(
       // a relative error of about x².
       return apply(
         op,
-        (x) => {
-          if (x === 0) return Infinity;
-          if (Math.abs(x) < 1e-300) {
-            const r = Math.LN2 - Math.log(Math.abs(x));
-            return x < 0 ? -r : r;
-          }
-          return Math.asinh(1 / x);
-        },
+        arcschReal,
         (x) => BigDecimal.ONE.div(x).asinh(),
         complexAcsch
       );
@@ -1353,7 +1348,7 @@ export function evalTrig(
         // log1p(t) − ln x (two positive terms) and the big-decimal kernel
         // uses arsech x = artanh(t) for x ≥ 1/2. Outside (0, 1] both give
         // NaN, and `apply` then uses the complex kernel.
-        (x) => Math.log1p(Math.sqrt((1 - x) * (1 + x))) - Math.log(x),
+        arsechReal,
         (x) =>
           x.gte(BigDecimal.HALF) && x.lte(BigDecimal.ONE)
             ? BigDecimal.ONE.sub(x).mul(BigDecimal.ONE.add(x)).sqrt().atanh()

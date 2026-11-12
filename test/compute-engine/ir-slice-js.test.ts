@@ -21,6 +21,7 @@ import {
 } from '../../src/compute-engine/compilation/ir';
 import {
   JS,
+  javascriptRuntime,
   printJavaScript,
 } from '../../src/compute-engine/compilation/ir/print-js';
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
@@ -30,6 +31,7 @@ import {
 } from '../../src/compute-engine/compilation/ir/effects';
 import {
   CONSTANTS,
+  REAL_FUNCTIONS,
   REDUCTIONS,
 } from '../../src/compute-engine/compilation/ir/operators';
 import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
@@ -107,6 +109,214 @@ describe('IR slice: JavaScript against the interpreter', () => {
         ]).toEqual([json, true]);
     }
   });
+});
+
+describe('IR slice: the real functions at edge inputs', () => {
+  // Negative, zero, tiny, non-integer, poles and large values; each at a
+  // real input (`x`, `y`), with the passes off and on.
+  // prettier-ignore
+  const VALUES = [-1e300, -170.5, -12.5, -3, -2.5, -2, -1, -0.75, -0.5, -1e-20, -1e-300,
+    -1e-310, -0, 0, 1e-310, 1e-300, 1e-20, 0.25, 0.5, 0.9999999999999999, 1,
+    1.0000000009313226, 1.5, 2, 3, 7.3, 25, 171, 180.5, 1e300];
+  const SECOND = [-3, -2, -0.5, 0, 0.5, 1, 2, 2.2, 3, 1 / 3, 7];
+  // prettier-ignore
+  const UNARY = ['Erf', 'Erfc', 'Gamma', 'GammaLn', 'Factorial', 'Factorial2', 'Zeta',
+    'Arctan', 'Arcsin', 'Arccos', 'Arccot', 'Arcsec', 'Arccsc', 'Haversine', 'Coth',
+    'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch', 'Sign', 'Truncate',
+    'Fract', 'Log'];
+  // Values of the interpreter that are not the function's: CE-1256
+  // (`Root(x, n)` with a negative integer n given as a value is 0 at
+  // x = 0, 1.333e-100 at x = 1e300 and ±∞ at x = ±1e-300, n = -3); CE-1257 (`Zeta(s)` is -∞
+  // for a tiny negative s at the default precision); `Haversine(x)` is
+  // ½(1 − cos x), 0 for |x| < 1e-8 (the compiled sin²(x/2) is right).
+  const known = (head: string, a: number, b?: number) =>
+    (head === 'Root' &&
+      (Math.abs(a) <= 1e-300 || Math.abs(a) >= 1e300) &&
+      Number.isInteger(b) &&
+      b! < 0) ||
+    (head === 'Zeta' && a < 0 && a > -1e-20) ||
+    (head === 'Haversine' && Math.abs(a) < 1e-8 && a !== 0);
+  // Relative 1e-12, with an absolute floor of 1e-300 only (the oracle's
+  // floor of 1e-12 would hide a wrong tiny value, `Haversine(1e-20)`).
+  const close = (v: unknown, expected: ReturnType<typeof interpret>) =>
+    typeof v === 'number' &&
+    typeof expected === 'number' &&
+    Number.isFinite(v) &&
+    Number.isFinite(expected)
+      ? Math.abs(v - expected) <=
+        1e-12 * Math.max(Math.abs(v), Math.abs(expected)) + 1e-300
+      : agrees(v, expected);
+  // The interpreter at machine precision reads an input as the double; at
+  // the default precision, as its decimal (0.9999999999999999).
+  const machine = makeMachineEngine();
+  const check = (head: string, args: number[]) => {
+    if (known(head, args[0], args[1])) return;
+    const names = ['x', 'y'].slice(0, args.length);
+    const expr = ce.box([head, ...names] as never);
+    const point = Object.fromEntries(names.map((n, i) => [n, args[i]]));
+    const expected = interpret(
+      machine,
+      machine.box([head, ...names] as never),
+      point
+    );
+    for (const passes of [false, true]) {
+      const v = runSlice(expr, point, passes);
+      if (!close(v, expected))
+        throw new Error(
+          `${head}(${args.join(', ')}) passes=${passes}: ${String(v)}, interpreter ${JSON.stringify(expected)}`
+        );
+    }
+  };
+  test.each(UNARY)('%s', (head) => VALUES.forEach((a) => check(head, [a])));
+  test.each(['Root', 'Arctan2', 'Hypot'])('%s', (head) =>
+    VALUES.forEach((a) => SECOND.forEach((b) => check(head, [a, b])))
+  );
+  test('a closed call is the interpreter value, a pole an infinity', () => {
+    expect(js(['Gamma', 5]).run({})).toBe(24);
+    expect(js(['Gamma', -2]).run({})).toBe(Infinity);
+    expect(js(['Root', -8, 3]).run({})).toBe(-2);
+    expect(Number.isNaN(js(['Root', 'x', 2]).run({ x: -4 }))).toBe(true);
+  });
+  test('Truncate and Sign are integers; Truncate of 2^53 or more declines in Mod', () => {
+    expect(js(['Mod', ['Truncate', 'x'], 3]).program.types).toBeDefined();
+    expect(js(['Mod', ['Truncate', 'x'], 3]).run({ x: -7.5 })).toBe(2);
+    expect(
+      declineOf(() => js(['Mod', ['Add', ['Truncate', 'x'], 2 ** 60], 3])).cause
+    ).toMatch(/2\^53/);
+  });
+  test('Root of a zero index is NaN', () => {
+    expect(Number.isNaN(js(['Root', 'x', 'y']).run({ x: 0.5, y: 0 }))).toBe(
+      true
+    );
+    expect(
+      interpret(ce, ce.box(['Root', 'x', 'y'] as never), { x: 0.5, y: 0 })
+    ).toBe('none');
+  });
+  test('Sign and Fract of an integer of 2^53 or more decline', () => {
+    for (const json of [
+      [
+        'Sign',
+        ['Subtract', ['Multiply', 9007199254740993, 'n'], 9007199254740992],
+      ],
+      ['Fract', ['Add', ['Multiply', 9007199254740993, 'n'], 0.5]],
+    ])
+      expect(declineOf(() => js(json)).cause).toMatch(/2\^53/);
+  });
+  test('the runtime members of REAL_FUNCTIONS are not replaced by another member', () => {
+    const rt = javascriptRuntime(undefined) as Record<string, unknown>;
+    for (const [k, f] of Object.entries(REAL_FUNCTIONS))
+      expect([k, rt[k] === f]).toEqual([k, true]);
+  });
+  test('an inverse trigonometric function declines with degrees', () => {
+    const deg = makeEngine();
+    deg.angularUnit = 'deg';
+    expect(declineOf(() => js(['Arctan', 'x'], deg)).cause).toMatch(
+      /angularUnit/
+    );
+  });
+});
+
+describe('IR slice: Mod beyond the safe integer range', () => {
+  // The double is the rounding of the value that made it: its remainder is
+  // another number (docs/COMPILATION-MODEL.md, "Integer operations beyond
+  // the safe integer range").
+  test('throws a RangeError at run time', () => {
+    for (const [json, n] of [
+      [['Mod', ['Factorial', 'n'], 7], 23],
+      [['Mod', ['Factorial', 'n'], 7], 25],
+      [['Mod', ['Factorial', 'n'], 16777216], 25],
+      [['Mod', ['Power', 3, 'n'], 7], 40],
+      [['Mod', ['Multiply', 'n', 'n', 'n'], 7], 1000003],
+    ] as [unknown, number][]) {
+      const r = js(json);
+      expect(() => r.run({ n })).toThrow(
+        /Mod: .* is beyond the safe integer range/
+      );
+    }
+    expect(js(['Mod', ['Factorial', 'n'], 7]).run({ n: 6 })).toBe(6);
+    expect(Number.isNaN(js(['Mod', 'x', 3]).run({ x: NaN }))).toBe(true);
+  });
+  test('is not evaluated in an arm that is not taken', () =>
+    expect(
+      js([
+        'If',
+        ['Less', 'n', 1000],
+        ['Mod', ['Multiply', 'n', 'n', 'n'], 7],
+        0,
+      ]).run({
+        n: 1000003,
+      })
+    ).toBe(0));
+});
+
+describe('IR slice: a chain with a list', () => {
+  test('of three or more operands declines (no conditional on a list)', () => {
+    for (const json of [
+      ['Less', 'D', 0, 1],
+      ['Less', 'L', 0, 1],
+      ['Less', 0, 1, 'L'],
+    ])
+      expect(declineOf(() => js(json)).cause).toMatch(
+        /a chain of three or more operands with a list|arms of two types/
+      );
+    expect(js(['Less', 0, 'L']).run({ L: [1, -1, 0] })).toEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+});
+
+describe('IR slice: the forms of a declaration', () => {
+  test('a local with no type is a real (a later real write is valid)', () => {
+    const halves = [
+      'Sum',
+      [
+        'Block',
+        ['Declare', 't', ['Dictionary', ['KeyValuePair', "'value'", 'k']]],
+        ['Assign', 't', ['Divide', 't', 2]],
+        't',
+      ],
+      ['Limits', 'k', 1, 5],
+    ];
+    expect(js(halves).run({})).toBe(7.5);
+    expect(interpret(ce, ce.box(halves as never), {})).toBe(7.5);
+    const write = [
+      'Block',
+      ['Declare', 't', { dict: { value: 0 } }],
+      ['Assign', 't', 'x'],
+      't',
+    ];
+    expect(js(write).run({ x: -1.25 })).toBe(-1.25);
+    expect(interpret(ce, ce.box(write as never), { x: -1.25 })).toBe(-1.25);
+  });
+  test('an attribute other than the value, a list type, a function type decline', () => {
+    for (const [json, cause] of [
+      [
+        [
+          'Block',
+          ['Declare', 't', { dict: { value: 1, constant: true } }],
+          't',
+        ],
+        /attributes/,
+      ],
+      [
+        ['Block', ['Declare', 't', "'list<real>'", 'D'], ['At', 't', 1]],
+        /a local of type list<real>/,
+      ],
+      [
+        ['Block', ['Declare', 't', "'unknown'", 'D'], ['At', 't', 1]],
+        /a list where a scalar/,
+      ],
+    ] as [unknown, RegExp][])
+      expect(declineOf(() => js(json)).cause).toMatch(cause);
+  });
+  test('a declaration with no value is an error of the canonical form', () =>
+    expect(
+      declineOf(() =>
+        js(['Block', ['Declare', 't', "'real'"], ['Assign', 't', 1], 't'])
+      ).cause
+    ).toMatch(/error of the canonical form|no value/));
 });
 
 describe('IR slice: exact integers', () => {
@@ -1145,6 +1355,71 @@ describe('IR slice: a root function literal', () => {
       );
     }
   });
+  test('a list parameter of run-time length: empty, one element, several', () => {
+    // prettier-ignore
+    const cases: unknown[] = [
+      ['Function', ['Sum', 'L'], ['Typed', 'L', "'list<real>'"]],
+      ['Function', ['Max', 'L'], ['Typed', 'L', "'list<real>'"]],
+      ['Function', ['Add', ['Length', 'L'], 'a'], ['Typed', 'a', "'real'"], ['Typed', 'L', "'list<integer>'"]],
+      ['Function', ['Map', ['Function', ['Multiply', 'z', 'a'], 'z'], 'L'], ['Typed', 'L', "'vector'"], 'a'],
+      ['Function', ['Add', ['Sum', 'L'], ['Product', 'M']], ['Typed', 'L', "'list<real>'"], ['Typed', 'M', "'list<integer>'"]],
+      ['Function', ['At', 'L', -1], ['Typed', 'L', "'list<real>'"]],
+    ];
+    const lists = [[], [-2.5], [1.5, -2, 0, 1e300]];
+    for (const json of cases) {
+      const lit = ce.box(json as never);
+      const r = compileSlice(lit, { target: 'javascript' });
+      const params = (json as unknown[]).slice(2);
+      for (const l of lists) {
+        // A list of integers holds the integers of `l`, between -9 and 9.
+        const args = params.map((p) => {
+          const t = JSON.stringify(p);
+          if (!/list|vector/.test(t)) return 0.5;
+          return t.includes('integer')
+            ? l.map((x) => Math.trunc(Math.max(-9, Math.min(x, 9))))
+            : l;
+        });
+        const boxed = args.map((a) =>
+          Array.isArray(a)
+            ? ce.function(
+                'List',
+                a.map((x) => ce.number(x))
+              )
+            : ce.number(a)
+        );
+        const expected = interpret(
+          ce,
+          ce.function('Apply', [lit, ...boxed]),
+          {}
+        );
+        const v = r.run(...args);
+        if (!agrees(v, expected))
+          throw new Error(
+            `${JSON.stringify(json)} at ${JSON.stringify(args)}: ${JSON.stringify(v)}, interpreter ${JSON.stringify(expected)}`
+          );
+      }
+    }
+    // The input array is not changed, and a list result is a new array.
+    const input = [1, 2];
+    const map = compileSlice(ce.box(cases[3] as never), {
+      target: 'javascript',
+    });
+    expect(map.run(input, 3)).toEqual([3, 6]);
+    expect(input).toEqual([1, 2]);
+  });
+  test('GLSL declines a list parameter of run-time length, naming it', () =>
+    expect(
+      declineOf(() =>
+        compileSlice(
+          ce.box([
+            'Function',
+            ['Sum', 'L'],
+            ['Typed', 'L', "'list<real>'"],
+          ] as never),
+          { target: 'glsl' }
+        )
+      ).cause
+    ).toMatch(/the list L has a run-time length/));
 });
 
 describe('IR slice: runtime', () => {
@@ -1175,8 +1450,8 @@ describe('IR slice: runtime', () => {
     expect(g.head).toBe('Random');
   });
   test('a closed sub-expression of a head out of the slice is not evaluated', () => {
-    expect(declineOf(() => js(['Add', 'x', ['Zeta', 3]])).cause).toMatch(
-      /Zeta/
+    expect(declineOf(() => js(['Add', 'x', ['Sinh', 3]])).cause).toMatch(
+      /Sinh/
     );
   });
 });

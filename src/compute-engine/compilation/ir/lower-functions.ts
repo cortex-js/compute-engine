@@ -50,8 +50,9 @@ export function inputType(
   };
   const shape: (number | 'run-time')[] = [];
   while (typeof t === 'object' && t.kind === 'list') {
-    if (t.dimensions === undefined && shape.length === 0)
-      shape.push('run-time');
+    // A length of -1 is a stated rank of no stated length (`vector`).
+    const free = t.dimensions === undefined || t.dimensions?.join() === '-1';
+    if (free && shape.length === 0) shape.push('run-time');
     else if (!t.dimensions?.every((n) => Number.isInteger(n) && n > 0))
       return undefined;
     else shape.push(...t.dimensions);

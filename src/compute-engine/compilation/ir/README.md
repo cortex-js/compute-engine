@@ -36,9 +36,9 @@ The head decides first: a head bound to a user function (by its definition, not
 its name) is a call, also when it is named `At` or `Sin`; a library head is
 compiled only when `isLibraryOperator()` holds; anything else declines. Then a
 sub-expression that the slice would lower and that has no free name, no name
-bound by the walk, no effect and no loop is evaluated once with `N()` and
-becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Zeta(3)` is not
-folded, because `Zeta` is not in the slice. A throw of `N()` means "not folded":
+bound by the walk, no effectful operation and no loop is evaluated once with `N()` and
+becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Sinh(3)` is not
+folded, because `Sinh` is not in the slice. A throw of `N()` means "not folded":
 the node is lowered as written, except a `CancellationError`, which propagates.
 A row that depends on an engine setting declines when the setting is not the
 default.
@@ -79,13 +79,38 @@ real. An integer constant of 2^53 or more, or a value computed from one by `+`,
 `-`, `*`, `Abs`, `Max` or `Min`, declines where it reaches `Mod`, `Floor`,
 `Ceil`, `Round` or a comparison: the interpreter computes with it exactly, and
 a double does not hold it (`Mod(2^60 + n, 3)`). A closed node keeps the
-interpreter's value (`Mod(2^60 + 1, 3)` is 2).
+interpreter's value (`Mod(2^60 + 1, 3)` is 2). At run time, `Mod` (`_rt.mod`,
+`floorMod()`) throws a `RangeError` for an operand beyond ±(2^53 − 1) or
+infinite, as the existing compiler does (`docs/COMPILATION-MODEL.md`,
+"Integer operations beyond the safe integer range"): `Mod(n!, 7)` at n = 25 is
+0, and the remainder of the double is 6. So `Mod` is `may-fail`. GLSL has no
+error channel: there `mod()` of a value beyond 2^24 is the remainder of the
+float, unspecified.
+
+The real functions (`Erf`, `Gamma`, `Root`, the inverse trigonometric and
+hyperbolic functions, ...) are rows whose operation the JavaScript runtime calls
+by name from `REAL_FUNCTIONS` in `operators.ts`, which the fold of the row
+calls too. Each gives the interpreter's real value within the precision of a
+double (`Zeta` below about -171 is a known limitation,
+`docs/COMPILATION-MODEL.md`); a pole is ±∞ and a value
+that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). On GLSL a row has a
+spelling only where GLSL ES 3.00 has a builtin defined on every real (`atan`,
+`asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
 
 Inputs: a scalar with no declared type, or of type `unknown` or `number`, is a
 real (a deliberate difference from the existing compiler). An outer list of no
-stated length (`list<real>`, `list<list<real^2>>`) has a run-time length
-(JavaScript only). `any` and a list element of type `unknown` or `any` decline
-with the input's name.
+stated length (`list<real>`, `vector`, `list<list<real^2>>`) has a run-time
+length (JavaScript only), also as a parameter of a root function literal: the
+length is a positional parameter before the list, read from the argument.
+`any` and a list element of type `unknown` or `any` decline with the input's
+name.
+
+A `Declare` in a `Block` has a value, positional or in its attributes
+(`Declare(t, {value: 0})`; a declaration with no value is an error of the
+canonical form), and a type `real`, `integer` or `boolean`, as a string or a
+symbol; with the type `unknown`, or none, the local is a real (a boolean for a
+boolean value), as the interpreter admits a real write to `let t = 0`.
+Another attribute (`constant`) declines.
 
 ## Lists
 

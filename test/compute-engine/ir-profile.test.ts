@@ -115,21 +115,21 @@ describe('the option selects the IR compiler', () => {
 
 describe('a decline', () => {
   test('falls back to the interpreter with the diagnostic', () => {
-    const r = quiet(() => compile(box(['Zeta', 'x']), IR));
+    const r = quiet(() => compile(box(['Sinh', 'x']), IR));
     expect(r.success).toBe(false);
     expect(r.diagnostic).toMatchObject({
       code: 'outside-profile',
       kind: 'capability',
-      operator: 'Zeta',
-      value: 'Zeta(x)',
+      operator: 'Sinh',
+      value: 'Sinh(x)',
     });
-    expect(r.run!({ x: 3 })).toBeCloseTo(1.2020569031595942, 12);
+    expect(r.run!({ x: 3 })).toBeCloseTo(Math.sinh(3), 12);
   });
   test('with fallback: false is thrown', () => {
-    const o = outcome(box(['Zeta', 'x']));
+    const o = outcome(box(['Sinh', 'x']));
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toMatch(
-      /^Could not compile with the profile 'ir': Zeta\(x\)/
+      /^Could not compile with the profile 'ir': Sinh\(x\)/
     );
   });
 
@@ -207,6 +207,28 @@ describe('the result', () => {
     expect(r.calling).toBe('lambda');
     expect(r.freeSymbols).toEqual([]);
     expect((r.run as (a: number, b: number) => number)(3, 1)).toBe(10);
+  });
+  test('a root function literal with a list parameter of run-time length', () => {
+    const r = compile(
+      box([
+        'Function',
+        ['Add', ['Multiply', 'a', ['Sum', 'L']], 'b'],
+        'a',
+        ['Typed', 'L', "'list<real>'"],
+        'b',
+      ]),
+      IR
+    );
+    expect(r.calling).toBe('lambda');
+    const run = r.run as (a: number, l: unknown, b: number) => number;
+    expect(run(2, [1, 2.5], 1)).toBe(8);
+    expect(run(2, [], 1)).toBe(1);
+    expect(run(2, [4], 0)).toBe(8);
+    // The entry check names the list by its argument.
+    expect(() => run(2, 3, 1)).toThrow(/The input `L` is not an array/);
+    expect(() => run({ re: 1, im: 1 } as never, [1], 1)).toThrow(
+      /The input `a` is not a real/
+    );
   });
   test('a root function literal that reads a free name declines', () => {
     // The engine calls the code with the arguments only: `Solve` would read
@@ -384,7 +406,7 @@ describe('the switch of the engine', () => {
     // A decline: the existing compiler compiles it.
     const declined = implicitCompile(
       engine,
-      engine.box(['Function', ['Gamma', 'u'], 'u']),
+      engine.box(['Function', ['Sinh', 'u'], 'u']),
       'nd'
     );
     expect(declined?.success).toBe(true);

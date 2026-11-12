@@ -142,6 +142,9 @@ function classify(
   if (flags.complex && reaches()) return 'nan-from-complex';
   if (flags.pole && reaches()) return 'pole';
   const perturbed = instrumented(expr, point, undefined, true).value;
+  // The perturbation took a `Mod` operand past 2^53 - 1: at the edge of
+  // the range.
+  if (perturbed === 'thrown') return 'range';
   const expected = interpret(ce, expr, point);
   if (typeof value === 'boolean' && perturbed !== value) return 'conditioning';
   const gap = (a: unknown, b: unknown): number =>
@@ -238,20 +241,27 @@ function instrumented(
     syntax,
     OPERATORS
   );
-  flags.value = new Function(
-    '_rt',
-    '_flags',
-    '_replace',
-    '_perturb',
-    '_',
-    [...printed.helpers, ...printed.functions, ...printed.body].join('\n')
-  )(
-    javascriptRuntime(expr.engine as never),
-    flags,
-    replace,
-    perturb,
-    perturb ? perturbed(point, expr) : point
-  );
+  // A replaced or perturbed value can take a `Mod` operand past 2^53,
+  // where it throws: that run has no value.
+  try {
+    flags.value = new Function(
+      '_rt',
+      '_flags',
+      '_replace',
+      '_perturb',
+      '_',
+      [...printed.helpers, ...printed.functions, ...printed.body].join('\n')
+    )(
+      javascriptRuntime(expr.engine as never),
+      flags,
+      replace,
+      perturb,
+      perturb ? perturbed(point, expr) : point
+    );
+  } catch (e) {
+    if (!(e instanceof RangeError)) throw e;
+    flags.value = 'thrown';
+  }
   return flags;
 }
 
@@ -352,12 +362,20 @@ describe('IR slice: random programs against the interpreter', () => {
       for (const point of pointsFor(expr, [...POINTS.slice(0, 3), ...edges])) {
         const expected = interpret(ce, expr, point);
         // A throw (a loop or a list too long) agrees only with an
-        // interpreter that has no value.
+        // interpreter that has no value; a `Mod` of an operand beyond the
+        // safe integer range throws by contract (docs/COMPILATION-MODEL.md,
+        // "Integer operations beyond the safe integer range").
         const run = (passes: boolean) => {
           try {
             return runSlice(expr, point, passes);
           } catch (e) {
-            if (expected !== 'none' && expected !== 'engine-error')
+            if (
+              expected !== 'none' &&
+              expected !== 'engine-error' &&
+              !/^Mod: .* beyond the safe integer range/.test(
+                (e as Error).message
+              )
+            )
               unclassified.push({
                 program: JSON.stringify(json),
                 point: JSON.stringify(point),
@@ -369,7 +387,9 @@ describe('IR slice: random programs against the interpreter', () => {
         const before = JSON.stringify(point);
         const on = run(true);
         const off = run(false);
-        if (on === 'thrown') continue;
+        // An unused `Mod` that can throw is removed by the passes (it is
+        // `may-fail`): with them off, it can throw where they on give a value.
+        if (on === 'thrown' || off === 'thrown') continue;
         if (!sameBits(on, off)) bitDifferences.push(JSON.stringify(json));
         // A list result is not an input, nor holds one.
         const scribble = (v: unknown) =>

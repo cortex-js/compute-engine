@@ -6,11 +6,12 @@
  * hold) an input is a copy, so that the host cannot change the input
  * through it.
  *
- * A draw, a random frame, a power and the length of a `Range` call the
- * runtime `_rt`: the engine's own `makeRandomHelpers()` (over the engine's
- * frame slot, `ce._random()`), `realPow()` (the interpreter's real root of
- * a negative base) and `rangeCount()`, so these are the interpreter's by
- * construction. Each loop and build checks the engine's deadline every
+ * A draw, a random frame, a power, a `Mod`, the length of a `Range` and the
+ * functions of `REAL_FUNCTIONS` call the runtime `_rt`: the engine's own
+ * `makeRandomHelpers()` (over the engine's frame slot, `ce._random()`),
+ * `realPow()` (the interpreter's real root of a negative base),
+ * `floorMod()` (which throws beyond the safe integer range) and
+ * `rangeCount()`, so these are the interpreter's by construction. Each loop and build checks the engine's deadline every
  * 1024 iterations (`_rt.tick()`).
  *
  * The entry is `(_) => …` of an inputs object; for a root function literal
@@ -26,8 +27,13 @@ import {
   checkDeadlineEvery,
   makeLoopPassCounter,
 } from '../../../common/interruptible.js';
-import { entryOf, type Program } from './ir.js';
-import { realPow, type OperatorRow } from './operators.js';
+import { argumentIndex, entryOf, type Program } from './ir.js';
+import {
+  floorMod,
+  realPow,
+  REAL_FUNCTIONS,
+  type OperatorRow,
+} from './operators.js';
 import { printProgram, type Printed, type Syntax } from './print.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -56,7 +62,7 @@ export const JS: Syntax = Object.freeze({
     floor: 'Math.floor($0)',
     ceil: 'Math.ceil($0)',
     round: { text: '_round($0)', helpers: ['_round'] },
-    mod: { text: '_mod($0, $1)', helpers: ['_mod'] },
+    mod: '_rt.mod($0, $1)',
     max: 'Math.max($0, $1)',
     min: 'Math.min($0, $1)',
     lt: '($0 < $1)',
@@ -73,6 +79,23 @@ export const JS: Syntax = Object.freeze({
     draw: '_rt.drawNextRandomNumber()',
     rangecount: '_rt.rangeCount($0, $1, $2)',
     rangestep: '($1 >= $0 ? 1 : -1)',
+    trunc: 'Math.trunc($0)',
+    sign: 'Math.sign($0)',
+    log10: 'Math.log10($0)',
+    hypot: 'Math.hypot($0, $1)',
+    atan: 'Math.atan($0)',
+    asin: 'Math.asin($0)',
+    acos: 'Math.acos($0)',
+    asinh: 'Math.asinh($0)',
+    acosh: 'Math.acosh($0)',
+    atanh: 'Math.atanh($0)',
+    // The functions of `REAL_FUNCTIONS`, by name.
+    ...Object.fromEntries(
+      Object.keys(REAL_FUNCTIONS).map((f) => [
+        f,
+        `_rt.${f}(${REAL_FUNCTIONS[f as keyof typeof REAL_FUNCTIONS].length === 2 ? '$0, $1' : '$0'})`,
+      ])
+    ),
   },
   regions: {
     build: ({ outs: [out], args: [n], params: [k] }) => ({
@@ -107,7 +130,6 @@ export const JS: Syntax = Object.freeze({
   },
   helpers: {
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
-    _mod: 'const _mod = (a, b) => { const r = a % b; return r !== 0 && r < 0 !== b < 0 ? r + b : r; };',
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
   },
   constant: ({ value: x }) =>
@@ -188,7 +210,10 @@ export function javascriptRuntime(
     iterationLimit: () => ce?.iterationLimit ?? Infinity,
     deadline: () => ce?._deadlineFrame,
   });
+  // `REAL_FUNCTIONS` first: a member of the same name after it would
+  // replace it, which a test refuses.
   return {
+    ...REAL_FUNCTIONS,
     ...random,
     withRandomSeed: <T>(seed: unknown, body: () => T): T => {
       if (typeof seed !== 'number' || !Number.isFinite(seed))
@@ -199,6 +224,7 @@ export function javascriptRuntime(
     },
     rangeCount,
     pow: realPow,
+    mod: floorMod,
     tick:
       limit === undefined
         ? () => checkDeadlineEvery(ce?._deadlineFrame, 0x3ff)
@@ -218,7 +244,8 @@ export function printJavaScript(
   iterationBudget?: number
 ): JavaScriptResult {
   const printed = printProgram(p, syntax, rows);
-  const n = entryOf(p).positional ?? 0;
+  const entry = entryOf(p);
+  const n = argumentIndex(entry, entry.positional ?? 0);
   const params =
     n === 0
       ? '_'

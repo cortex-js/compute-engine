@@ -152,6 +152,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
     gives `0`.
   - `Arcsch(x)` at `x = 1e-309` gives `Infinity` (`Math.asinh(1 / x)`); the
     interpreter gives `712.19194091572`.
+- `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
+  `x = -171.5` gives `Infinity` (the machine kernel overflows below about
+  `-171`); the interpreter at the default precision gives `4.739e172`.
 - `javascript`: a list whose length is random, then another draw:
   `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
   applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives
@@ -2409,7 +2412,9 @@ or an option outside it declines with `outside-profile`, and `fallback`
 applies as for the `numeric-kernel` profile; an internal error is a
 `compile-error`. It reads an undeclared scalar input as a `real`, and it
 declines `iterationBudget` for a program with a counted loop (a `Sum`, a
-`Product` or a reduction of a list). Its
+`Product` or a reduction of a list). Its `Mod` throws a `RangeError` for an
+operand beyond the safe integer range, as "Integer operations beyond the safe
+integer range" says. Its
 code reads a runtime of its own and cannot be stored: the result has no
 `runtimeVersion`, and `shippable` is `false`.
 

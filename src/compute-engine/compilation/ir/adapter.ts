@@ -18,7 +18,13 @@ import { ALL_PASSES } from './passes.js';
 import { Decline } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
 import type { JavaScriptResult } from './print-js.js';
-import { entryOf, regionsOf, type Program, type Region } from './ir.js';
+import {
+  argumentIndex,
+  entryOf,
+  regionsOf,
+  type Program,
+  type Region,
+} from './ir.js';
 
 const PREFIX = "Could not compile with the profile 'ir'";
 
@@ -215,9 +221,10 @@ export function compileWithIrProfile(
   type Checked = readonly [string, number, 'array' | 'real'];
   const checked = entry.paramNames.flatMap((name, k): Checked[] => {
     const t = p.types[entry.body.params[k]];
+    const i = argumentIndex(entry, k);
     if (entry.lengthOf[k]) return [];
-    if (t.shape.length > 0) return [[name, k, 'array'] as const];
-    return t.lane === 'boolean' ? [] : [[name, k, 'real'] as const];
+    if (t.shape.length > 0) return [[name, i, 'array'] as const];
+    return t.lane === 'boolean' ? [] : [[name, i, 'real'] as const];
   });
   const check = (value: unknown, name: string, shape: 'array' | 'real') => {
     if (shape === 'array' && !Array.isArray(value))
@@ -240,7 +247,7 @@ export function compileWithIrProfile(
     ? (...args: unknown[]) => {
         if (checks)
           for (const [name, k, shape] of checked) check(args[k], name, shape);
-        return f(...args.slice(0, positional));
+        return f(...args.slice(0, argumentIndex(entry, positional)));
       }
     : (vars: Record<string, unknown> = {}) => {
         if (checks)

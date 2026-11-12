@@ -12,7 +12,8 @@
  *   `Or`), a reduction (`REDUCTIONS`) or a row of `operators.ts`. A name
  *   bound in the walk's frames is that value, also when it is the name of
  *   a library constant.
- * - A sub-expression whose heads are all rows (of no effect), constructs
+ * - A sub-expression whose heads are all rows that are not effectful
+ *   (`Mod` may fail, the interpreter does not), constructs
  *   and constants of the slice, with no free name, no name bound in the
  *   frames and no loop is evaluated once by the interpreter, and its value
  *   is a literal (exact rationals and exact constants are exact until then).
@@ -35,6 +36,7 @@
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import type { Expression } from '../../global-types.js';
 import {
+  isDictionary,
   isFunction,
   isNumber,
   isString,
@@ -105,7 +107,7 @@ const LOOPS = new Set(['Map', 'Filter', 'Reduce', 'Range']);
 
 /** What the memo and `closedValue()` read of a node: the names it reads
  *  and writes (outside it), whether it has a loop, whether every head
- *  is a pure row, a construct or a constant of the slice, and the number of
+ *  is a row that is not effectful, a construct or a constant of the slice, and the number of
  *  its nodes counted on every path (at most `CLOSED_SIZE`, plus one). */
 type Facts = {
   names: Set<string>;
@@ -129,6 +131,9 @@ const EXACT_OPS = new Set([
   'floor',
   'ceil',
   'round',
+  'trunc',
+  'sign',
+  'fract',
   'lt',
   'le',
   'gt',
@@ -237,7 +242,7 @@ export function lower(
         library &&
         (CONSTRUCTS.has(h) ||
           REDUCTIONS.has(h) ||
-          rowOfHead(rows, h)?.effect === 'pure'),
+          (rowOfHead(rows, h)?.effect ?? 'effectful') !== 'effectful'),
       size: 1,
     };
     if (h === 'Assign' && isSymbol(e.ops[0])) info.writes.add(e.ops[0].symbol);
@@ -461,6 +466,9 @@ export function lower(
       const pair = (i: number) => {
         const v = value(e.ops[i + 1])!;
         const p = apply(e, r, [prev, v]);
+        // A conditional on a list: `L < 0 < 1`.
+        if (e.nops > 2 && type(p).shape.length > 0)
+          decline(e, 'a chain of three or more operands with a list');
         prev = v;
         return p;
       };
@@ -564,8 +572,9 @@ export function lower(
     return input(e, name, e.type.type);
   };
 
-  /** The input `name` of the engine type `t`: a parameter of the entry. A
-   *  list of run-time length has its length as a parameter before it. */
+  /** The input `name` of the engine type `t`: a parameter of the entry (a
+   *  positional one: of a root function literal). A list of run-time length
+   *  has its length as a parameter before it. */
   const input = (
     e: Expression,
     name: string,
@@ -577,13 +586,13 @@ export function lower(
       decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
     const shape = ir.shape.map((n) => {
       if (n !== 'run-time') return n;
-      if (positional)
-        decline(e, `the parameter ${name}, a list of run-time length`);
       const length = b.param(name, scalarType('integer'), true);
       inputLengths.add(length);
+      if (positional) b.positional += 1;
       return { v: length };
     });
     const v = b.param(name, { lane: ir.lane, shape });
+    if (positional) b.positional += 1;
     frames[0].names.set(name, { v, role: positional ? 'index' : 'input' });
     return v;
   };
@@ -754,13 +763,38 @@ export function lower(
       let result: V | undefined;
       e.ops.forEach((s, i) => {
         if (isFunction(s, 'Declare')) {
-          const [name, declared, init] = s.ops;
-          if (s.nops !== 3 || !isSymbol(name) || !isSymbol(declared))
-            decline(s, 'a declaration with no type or no value');
-          const lane = declared.symbol;
-          if (lane !== 'real' && lane !== 'integer' && lane !== 'boolean')
-            decline(s, `a local of type ${lane}`);
-          result = local(s, scalar(init), lane);
+          // `Declare(t, type, value)`, `Declare(t, type, {value})` or
+          // `Declare(t, {value})`; a type `unknown`, or none, is the lane
+          // of the value. (A declaration with no value is an error of the
+          // canonical form.)
+          const [name, ...rest] = s.ops;
+          const last = rest[rest.length - 1];
+          const attributes = isDictionary(last) ? last : undefined;
+          const [declared, init] = attributes ? rest.slice(0, -1) : rest;
+          const value = init ?? attributes?.get('value');
+          if (
+            !isSymbol(name) ||
+            value === undefined ||
+            attributes?.keys.some((k) => k !== 'value') === true
+          )
+            decline(s, 'a declaration with no value, or with attributes');
+          const typeName = isString(declared)
+            ? declared.string
+            : isSymbol(declared)
+              ? declared.symbol
+              : 'unknown';
+          if (!['real', 'integer', 'boolean', 'unknown'].includes(typeName))
+            decline(s, `a local of type ${typeName}`);
+          const v = scalar(value);
+          // With no type, a number is a real: a later write of a real to
+          // `let t = 0` is valid.
+          const lane: Lane =
+            typeName !== 'unknown'
+              ? (typeName as Lane)
+              : type(v).lane === 'boolean'
+                ? 'boolean'
+                : 'real';
+          result = local(s, v, lane);
           frame.names.set(name.symbol, { v: result, lane, role: 'local' });
         } else result = value(s, want && i === e.nops - 1);
       });
@@ -802,7 +836,6 @@ export function lower(
 
   // A root function literal: its parameters, by position, come first.
   if (isFunction(root, 'Function') && isLibrary(root)) {
-    b.positional = root.nops - 1;
     b.literal = true;
     return b.program(() => {
       root.ops.slice(1).forEach((p) => {

@@ -1060,3 +1060,61 @@ these items. None is part of steps 1 to 4, except where the table says so.
 | Profile and requirements in the cache key and in the result | 7 |
 | Batch, worker-pool and asynchronous routes | 7, per consumer |
 | Allocations and bundle size | 7, per consumer |
+
+## Course correction and the IR pipeline (2026-11-12)
+
+The user withdrew the contract "equal the existing compiler" on 2026-11-12.
+The structured route (`numeric-kernel`, 40,541 lines) is frozen: no new
+admission rule. Its last measures, at
+`154153fe307c9084587b86fb0f9dc364c040cc8c`: engine compilations 96.4%, every
+JavaScript compile 77.7%, public compiles 69.9%. The contract that replaces
+it and the audit are in `docs/plans/2026-11-12-js-route-course-correction.md`
+(section 2 holds the user's decisions).
+
+The replacement is the pipeline of `src/compute-engine/compilation/ir/`
+(its `README.md` describes it): one operator table, one lowering walk that
+declines by default, an SSA representation, passes, and one statement
+printer with a syntax table per target (JavaScript and GLSL).
+
+| Commit | Content |
+| --- | --- |
+| `8913dae82c0098918132a6a16789945f8fc4269a` | the pipeline, not wired (3,959 lines) |
+| `7f6b2eeb6bb3a625c4eca09405b4741bdf63df1d` | `profile: 'ir'` in `compile()` through `ir/adapter.ts`; 4,403 lines |
+
+Measures at `7f6b2eeb6bb3a625c4eca09405b4741bdf63df1d` (`CE_JS_PROFILE=ir`
+and `CE_JS_PROFILE_SHADOW=ir`; the censuses are printed by
+`scripts/js-profile-stats.mjs`):
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 8,086 of 9,729 (83.1%) |
+| Every JavaScript compile | 12,107 of 38,225 (31.7%) |
+| Public `compile()` calls | 4,021 of 28,496 (14.1%) |
+
+No test fails in the shadow run and there is no internal error. With the
+profile switched on, 20 tests of the worker-pool route fail (`find-fit-pool`,
+`ce-424-425-findfit-async`, `ce-314-3-nested-pool`, `epsil/cli-workers`):
+the values are equal, and the code of the profile cannot be sent to a worker
+yet.
+
+Largest causes of a decline in the shadow run: `mode: 'complex'` 6,378; a
+declaration with no type or no value 1,094; `mode: 'bigint'` 1,027; a list
+parameter of run-time length 910; a symbol with a value 568; `Root` 407;
+`Erf` 368; `vars` 343; `Integrate` 333; a complex literal 326.
+
+Next work: coverage in the order of that list, each step with the three
+measures and the line count of the directory.
+
+First coverage batch (28 real-function rows, more `Declare` forms, list
+parameters of run-time length for a root function literal; an integer `Mod`
+beyond the safe range throws). Measured in the worktree on the same patch;
+4,579 lines:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 8,652 of 9,669 (89.5%) |
+| Every JavaScript compile | 14,302 of 38,225 (37.4%) |
+| Public `compile()` calls | 5,604 of 28,496 (19.7%) |
+
+After it, `mode: 'complex'` stays the largest cause of a decline (6,378),
+then a symbol with a value (650).

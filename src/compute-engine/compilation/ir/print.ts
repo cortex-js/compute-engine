@@ -12,6 +12,7 @@ import { effects, type Effects, type TraceEntry } from './effects.js';
 import { regionRow, rowOfOp, type OperatorRow } from './operators.js';
 import {
   argsOf,
+  argumentIndex,
   entryOf,
   outsOf,
   regionsOf,
@@ -208,7 +209,9 @@ export function printProgram(
   entry.body.params.forEach((v, k) => {
     const name = entry.paramNames[k];
     const input =
-      k < positional ? syntax.positional(name, k) : syntax.input(name, k);
+      k < positional
+        ? syntax.positional(name, argumentIndex(entry, k))
+        : syntax.input(name, k);
     names.set(v, entry.lengthOf[k] ? syntax.length(input) : input);
   });
   const type = (v: V): IRType => p.types[v];

@@ -83,6 +83,14 @@ export const GLSL: Syntax = Object.freeze({
     'not': '(!$0)',
     'elem': '$0[int($1)]',
     'rangestep': '($1 >= $0 ? 1.0 : -1.0)',
+    // Only the builtins defined on every real: `asin`, `acos`, `acosh`,
+    // `atanh` and `atan(y, x)` are undefined at some reals in GLSL ES 3.00,
+    // and their rows decline on this target.
+    'trunc': 'trunc($0)',
+    'sign': 'sign($0)',
+    'fract': 'fract($0)',
+    'atan': 'atan($0)',
+    'asinh': 'asinh($0)',
   },
   helpers: {
     _pow: [

@@ -26,6 +26,14 @@ import {
 } from './ir.js';
 import { rangeCount } from '../../numerics/range-count.js';
 import { negativeBaseRealPowFromRational } from '../../numerics/real-power.js';
+import { erf, erfc } from '../../numerics/error-functions.js';
+import { factorial, factorial2 } from '../../numerics/numeric.js';
+import { gamma, lnAbsGamma, zeta } from '../../numerics/special-functions.js';
+import {
+  arcothReal,
+  arcschReal,
+  arsechReal,
+} from '../../numerics/inverse-hyperbolic.js';
 
 export type Effect = 'pure' | 'may-fail' | 'effectful';
 
@@ -70,8 +78,18 @@ export type OperatorRow = {
 };
 
 /** The modulo of the interpreter: the sign of the divisor (`Mod(-7, 3)` is
- *  2). Exact for integers: `%` is exact in IEEE 754. */
+ *  2). Exact for integers: `%` is exact in IEEE 754. An operand beyond the
+ *  safe integer range, or infinite, throws a `RangeError`: the double is the
+ *  rounding of the value that made it, and its remainder is another number
+ *  (`Mod(25!, 7)` is 0, the remainder of the double 6;
+ *  docs/COMPILATION-MODEL.md, "Integer operations beyond the safe integer
+ *  range"). A NaN propagates. */
 export function floorMod(a: number, b: number): number {
+  for (const x of [a, b])
+    if (Math.abs(x) > Number.MAX_SAFE_INTEGER)
+      throw new RangeError(
+        `Mod: ${x} is beyond the safe integer range of compiled code`
+      );
   const r = a % b;
   return r !== 0 && r < 0 !== b < 0 ? r + b : r;
 }
@@ -107,6 +125,50 @@ export function realPow(a: number, b: number): number {
   return Math.pow(a, b);
 }
 
+/**
+ * The real functions that the JavaScript runtime `_rt` calls by the name
+ * of their IR operation, and that the fold of their row computes. Each one
+ * gives the interpreter's real value within the precision of a double (but
+ * see docs/COMPILATION-MODEL.md for `Zeta` below -171); a pole (`Gamma(-2)`, `Coth(0)`) is
+ * +∞ or -∞, and a value that is not real is NaN (the caveats of compiled
+ * code). `root(x, n)` of a negative `x` is the real root when `n` is an odd
+ * integer, or when `1/n` is a rational of odd denominator, as `realPow`.
+ */
+export const REAL_FUNCTIONS = Object.freeze({
+  root: (x: number, n: number): number => {
+    if (n === 0) return NaN;
+    if (x < 0 && Number.isInteger(n) && n % 2 !== 0)
+      return -Math.pow(-x, 1 / n);
+    return (
+      negativeBaseRealPowFromRational(x, undefined, 1 / n) ?? Math.pow(x, 1 / n)
+    );
+  },
+  erf: (x: number): number => erf(x),
+  erfc: (x: number): number => erfc(x),
+  gamma: (x: number): number =>
+    Number.isInteger(x) && x <= 0 ? Infinity : gamma(x),
+  gammaln: (x: number): number => lnAbsGamma(x),
+  factorial: (x: number): number =>
+    Number.isInteger(x) ? (x < 0 ? Infinity : factorial(x)) : gamma(x + 1),
+  factorial2: (x: number): number =>
+    Number.isInteger(x) && x < 0 && x % 2 === 0 ? Infinity : factorial2(x),
+  zeta: (x: number): number => zeta(x),
+  // The interpreter has no -0: `Arctan2(-0, -1)` is π.
+  atan2: (y: number, x: number): number => Math.atan2(y + 0, x + 0),
+  // The interpreter's `Arccot` is in (0, π).
+  acot: (x: number): number =>
+    x > 0 ? Math.atan(1 / x) : Math.PI / 2 - Math.atan(x),
+  asec: (x: number): number => Math.acos(1 / x),
+  acsc: (x: number): number => Math.asin(1 / x),
+  acoth: arcothReal,
+  asech: arsechReal,
+  acsch: arcschReal,
+  coth: (x: number): number => 1 / Math.tanh(x),
+  fract: (x: number): number => x - Math.floor(x),
+  hav: (x: number): number => Math.sin(x / 2) ** 2,
+});
+
+const F = REAL_FUNCTIONS;
 const R: Lane = 'real';
 const I: Lane = 'integer';
 const B: Lane = 'boolean';
@@ -174,7 +236,35 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Floor',        1,          [[[R], I, 'floor']],           { fold: Math.floor }),
   row('Ceil',         1,          [[[R], I, 'ceil']],            { fold: Math.ceil }),
   row('Round',        1,          [[[R], I, 'round']],           { fold: roundHalfAway, settings: ['roundingTies'] }),
-  row('Mod',          2,          arith('mod', 2),               { fold: floorMod }),
+  row('Mod',          2,          arith('mod', 2),               { fold: floorMod, effect: 'may-fail' }),
+  row('Truncate',     1,          [[[R], I, 'trunc']],           { fold: Math.trunc }),
+  row('Sign',         1,          [[[R], I, 'sign']],            { fold: Math.sign }),
+  row('Fract',        1,          [[[R], R, 'fract']],           { fold: F.fract }),
+  row('Log',          1,          [[[R], R, 'log10']],           { fold: Math.log10 }),
+  row('Hypot',        2,          [[[R, R], R, 'hypot']],        { fold: Math.hypot }),
+  row('Root',         2,          [[[R, R], R, 'root']],         { fold: F.root }),
+  row('Arctan',       1,          [[[R], R, 'atan']],            { fold: Math.atan, ...angle }),
+  row('Arctan2',      2,          [[[R, R], R, 'atan2']],        { fold: F.atan2, ...angle }),
+  row('Arcsin',       1,          [[[R], R, 'asin']],            { fold: Math.asin, ...angle }),
+  row('Arccos',       1,          [[[R], R, 'acos']],            { fold: Math.acos, ...angle }),
+  row('Arccot',       1,          [[[R], R, 'acot']],            { fold: F.acot, ...angle }),
+  row('Arcsec',       1,          [[[R], R, 'asec']],            { fold: F.asec, ...angle }),
+  row('Arccsc',       1,          [[[R], R, 'acsc']],            { fold: F.acsc, ...angle }),
+  row('Haversine',    1,          [[[R], R, 'hav']],             { fold: F.hav, ...angle }),
+  row('Coth',         1,          [[[R], R, 'coth']],            { fold: F.coth }),
+  row('Arsinh',       1,          [[[R], R, 'asinh']],           { fold: Math.asinh }),
+  row('Arcosh',       1,          [[[R], R, 'acosh']],           { fold: Math.acosh }),
+  row('Artanh',       1,          [[[R], R, 'atanh']],           { fold: Math.atanh }),
+  row('Arcoth',       1,          [[[R], R, 'acoth']],           { fold: F.acoth }),
+  row('Arsech',       1,          [[[R], R, 'asech']],           { fold: F.asech }),
+  row('Arcsch',       1,          [[[R], R, 'acsch']],           { fold: F.acsch }),
+  row('Erf',          1,          [[[R], R, 'erf']],             { fold: F.erf }),
+  row('Erfc',         1,          [[[R], R, 'erfc']],            { fold: F.erfc }),
+  row('Gamma',        1,          [[[R], R, 'gamma']],           { fold: F.gamma }),
+  row('GammaLn',      1,          [[[R], R, 'gammaln']],         { fold: F.gammaln }),
+  row('Factorial',    1,          [[[R], R, 'factorial']],       { fold: F.factorial }),
+  row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
+  row('Zeta',         1,          [[[R], R, 'zeta']],            { fold: F.zeta }),
   // `Max` of a list is its largest element: a reduction, not threaded.
   row('Max',          'variadic', arith('max', 1),               { fold: Math.max, ...list }),
   row('Min',          'variadic', arith('min', 1),               { fold: Math.min, ...list }),
