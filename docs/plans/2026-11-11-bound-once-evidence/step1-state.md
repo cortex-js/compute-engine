@@ -391,3 +391,66 @@ marks, the lazy-view records. The run of a `Declare` still writes
 `holdUntil` on the static definition. The fallback path of `declareSteps()`
 (a `Declare` whose binding is not in the current scope) still declares at
 run time.
+
+## A function local is a variable (D11, 2026-11-12)
+
+Commits `d1d33a580` and the next one. Source against `a3c0ddc6b`: the
+engine `.ts` files lose the function definition of a local; see the report of
+the step for the counts.
+
+### Built
+
+- A local that a `Declare` gives a function literal, or that a function
+  statement (`DefineFunction`) of a block or a body makes, is a value
+  definition (`_blockLocal`), type `function` when none is declared; the run
+  writes the function value in the activation (`declareSteps()`; the
+  `DefineFunction` handlers, `functionLocalOf()`, `library/core.ts`). A
+  `Declare` with a declared function type assigns its value as an `Assign`
+  does (`assignFn()`, which writes the activation and checks the signature).
+- A function statement of a block is a declaration (`localFunctionName()`,
+  `control-structures.ts`): a second one of the name, or a `Declare` of the
+  name, is `variable-redeclaration`; a call before it is
+  `read-before-declaration`. The paired signature (`let g: sig; function g`)
+  is valid only at the top level of an Epsil program.
+- Deleted: `defineFunctionLocal()`, `deriveFunctionLocalCallers()`,
+  `noteFunctionAssignment()` (back into `afterFunctionAssignment()`),
+  `functionLocalValue()`, the `_blockLocal` of an operator definition and
+  its `callee()`/`applicableValue()`, the operator branches of
+  `scopeActivation()`, `holdBodyLocals()`, `captureClosuresUncached()`,
+  `resolveEscapingLambda()`, `assignNamedValue()` and `declareSteps()`, the
+  clause installation for a signature in a block (`signatures`),
+  `withPairedFunctionNames` in a block, `functionDefinitionNames()`,
+  `blockClauseRedefinition()` (dead: a second clause in a block is a
+  redeclaration), the literal type of a `const` local (`markConstantLocal()`).
+- Docs: `control-flow.md` "Local functions", `declarations.md` rule 1, the
+  explanations of `declaration-without-value` and `function-redefinition`
+  (`errors.md` regenerated).
+
+### Open (not decided by the rules, or watched)
+
+- A local function called with a list whose literal parameter types are not
+  collections (`q = (a) => h(a)`, `h` a local) is mapped element-wise (the
+  rule of a function value held by a variable): `whole-collection-parameter`
+  "a chain of two helpers…" and the four "lifted function" tests fail.
+- A function statement with a written signature in a block is typed
+  `function`, so a call is `unknown` and compiled code declines:
+  `ce-1163-run-async` (2), `tycho-item-332` (2).
+- An unevaluated call of a local that leaves its call (`h(m) + 1` returned
+  by `w(m)`, `m` valueless): `annotated-parameter-undecided` "a local
+  annotated function resolves after the call returns" gives `1 + h(2)`.
+
+### Step 2 (per-iteration activations): attempted, not committed
+
+Patch `~/dev/compute-engine-recovery/step2-attempt-per-iteration.patch`
+(+65 lines, nothing deleted): an activation that a closure keeps is renewed
+before the next index write or restore (`renewIterationActivation()`, called
+in `assignLoopIndex()` and in the restore of `saveLoopIndexes()`); a closure
+made where its scope has a live activation keeps that activation instead of
+the snapshot of `captureNestedLocals()`, and is not rebuilt at the end of the
+call. The top-level loop programs give 4 and `[2, 3]`, but
+`closure-frame-retained` fails 26 tests (2 before): in a function body,
+`let b = (n) => do { let h = (x) => x; for d in [n, 2n] { h = (x => x + d) };
+h(1) }; b(3)` reads `d` = 6 inside the call of `h`, and the value of the
+block is then evaluated again in the frame of `b`, outside the loop, where
+`d` has no value: `d + 1`. The comprehension needs the same renewal in
+`ComprehensionIndexFrame.captureAndRestore()`.
