@@ -149,3 +149,38 @@ describe('TRIGONOMETRIC FUNCTIONS spellings of arccot', () => {
       expect(ce.parse(latex).json).toEqual(['Arccot', 'x']);
   });
 });
+
+describe('Arcsec serialization round trip', () => {
+  test('Arcsec is written so that it parses back as Arcsec', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Arcsec', 'x']).latex).toBe('\\operatorname{arcsec}(x)');
+    for (const canonical of [true, false])
+      expect(
+        new ComputeEngine().parse('\\operatorname{arcsec}(x)', { canonical })
+          .json
+      ).toEqual(['Arcsec', 'x']);
+  });
+
+  test('every inverse trigonometric head parses back from its own LaTeX', () => {
+    for (const h of [
+      'Arcsin',
+      'Arccos',
+      'Arctan',
+      'Arccot',
+      'Arcsec',
+      'Arccsc',
+      'Arsinh',
+      'Arcosh',
+      'Artanh',
+      'Arcoth',
+      'Arsech',
+      'Arcsch',
+    ])
+      for (const canonical of [true, false])
+        expect(
+          new ComputeEngine().parse(new ComputeEngine().box([h, 'x']).latex, {
+            canonical,
+          }).json
+        ).toEqual([h, 'x']);
+  });
+});

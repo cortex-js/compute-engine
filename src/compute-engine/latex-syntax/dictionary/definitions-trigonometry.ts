@@ -283,6 +283,10 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
     symbolTrigger: 'arcsec',
 
     parse: parseTrig('Arcsec'),
+    // `\mathrm{arcsec}(x)` is read as the arcsecond unit (or an unknown
+    // function), not as `Arcsec`.
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      `\\operatorname{arcsec}${serializer.wrapArguments(expr)}`,
   },
   {
     // Variant, non-standard command

@@ -860,7 +860,16 @@ function makeSerializeHandler(
               ? wrapComparisonOperand(serializer, val, prec)
               : ((isAnd ? serializeComparisonChain(serializer, val) : null) ??
                 serializer.wrap(val, prec + 1));
-            return i < n - 1 ? [arg, latex!] : [arg];
+            // `5!=5` reads as `5\ne5`: a space after a postfix `!` keeps the
+            // `=` apart (`5! =5` is `Equal(Factorial(5), 5)`).
+            return i < n - 1
+              ? [
+                  arg,
+                  arg.endsWith('!') && latex!.startsWith('=')
+                    ? ' ' + latex!
+                    : latex!,
+                ]
+              : [arg];
           })
         );
       };

@@ -47,6 +47,10 @@
   written `f^{\prime}`, which reads back as a first derivative; it is now
   `f^{(k)}`. `f^{(0,1)}` now parses as `["Derivative", "f", 0, 1]` rather than
   an `incompatible-type` error.
+  `Equal(Factorial(5), 5)` was written `5!=5`, which reads back as
+  `NotEqual(5, 5)`; it is now `5! =5`. `Arcsec(x)` was written
+  `\mathrm{arcsec}(x)`, which reads back as an unknown function (or, without
+  canonicalization, the arcsecond unit); it is now `\operatorname{arcsec}(x)`.
 
 ## 0.186.0 _2026-11-10_
 
