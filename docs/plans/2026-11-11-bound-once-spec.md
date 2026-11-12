@@ -749,6 +749,11 @@ lazy view holds its activation.
 
 ### D10. A function local: its definition at boxing, its value in the run (2026-11-12)
 
+**REVERSED by the user on 2026-11-12** (D11 below). The text is kept for the
+record of what was tried: it added 337 lines, left a wrong signature after
+a second assignment, and left a function statement of a block with no
+function value that could keep its activation.
+
 Two decisions met in `Block(Declare(q, unknown, a ↦ h(a)), Declare(h,
 unknown, t ↦ Count(t)), q([1, 2]))`: a local declared with a function
 literal is typed and behaves as a global assigned the same literal (which
@@ -785,3 +790,41 @@ main (`dc51affd4`, with the removal of the checkpoints) in a new worktree,
 `engine-scope.ts`, `function-utils.ts`, `control-structures.ts`,
 `core.ts`). The patch is kept outside `/tmp`
 (`~/dev/compute-engine-recovery/step1-all.patch`).
+
+### D11. A function local is a variable that holds a function (user decision 2026-11-12)
+
+A local of a block or of a function body that holds a function, whether it
+is declared with a function literal, assigned one, or made by a function
+statement (`DefineFunction`) in the block, is a variable: its definition is
+a value definition with the type of its `Declare` (`unknown` or `function`
+when none is given), and its value, in the activation of the run, is a
+function value that keeps the activation it was made in. No signature is
+derived for it, no caller is derived again, and its parameters get no
+"takes a list whole" mark; a call of it is typed from its declared type.
+This reverses "a local declared with a function literal is typed as a
+global assigned the same literal" (D8, last paragraph) and D10. A global
+is unchanged. The user's general direction, same day: lean towards the
+simpler implementation.
+
+### D12. One activation per iteration (user decision 2026-11-12)
+
+A binder that iterates (a loop, `Sum`, `Product`, a comprehension) makes
+one activation per iteration for its variable, linked to the same parent.
+A function value made in an iteration keeps that iteration's activation:
+`for d in [3, 6] { if d == 3 { h = (x => x + d) } }; h(1)` is 4. Measured
+in a probe (`activations-design.md`, section 6; patch
+`~/dev/compute-engine-recovery/probe-r3.patch`).
+
+### D13. The `bind` parameter of a hold function (user decision 2026-11-12)
+
+A call of a function with a `bind` parameter substitutes each held
+argument, as the caller boxed it (with its bindings, not its raw form),
+into the body; the binder of the body then binds the variable in that
+operand by D5. `mySum(k^2, k, 3)` is 14; `mySum(k*j, j, 3)` with `k = 5` is
+30.
+
+**Order of the remaining work of step 1.** (1) D11; (2) D12, D13 and "a
+function value keeps the activation that made it", with the reads
+unchanged; (3) the static read of a local, as a commit that deletes the
+corrections of the lookup by name; (4) the lazy view; then the deletion of
+what is unused.
