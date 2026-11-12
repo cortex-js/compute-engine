@@ -6056,10 +6056,18 @@ class Lowering {
     // alias is read, as the existing compiler writes it at each read
     // (`bindsFoldedValue()` binds applications only); another value is
     // computed once (`storedRead()`).
-    if (capture.expression === true)
-      return isSymbol(capture.stored)
-        ? this.value(capture.stored, this.prep.annotation.scope, operations)
-        : this.storedRead(capture);
+    if (capture.expression === true) {
+      if (!isSymbol(capture.stored)) return this.storedRead(capture);
+      // In the body of a helper, an alias of a captured expression
+      // (`sa := lv`, also through other aliases) reads the parameter of the
+      // expression that the helper receives (`storedParameters()` of the
+      // admission).
+      if (this.lowering.size > 0) {
+        const end = this.aliasEnd(capture);
+        if (end !== undefined) return this.read(end, scope, operations);
+      }
+      return this.value(capture.stored, this.prep.annotation.scope, operations);
+    }
     const snapshot = capture.complex ?? capture.value;
     if (snapshot === undefined) return this.capturedList(capture, operations);
     const facts = this.facts(node, scope);
@@ -6087,6 +6095,27 @@ class Lowering {
       origin: node,
     });
     return result;
+  }
+
+  /** The symbol of the captured expression at the end of the chain of
+   *  aliases that starts at `capture` (`sa := lv`, `sb := sa`), or
+   *  `undefined` when the chain ends at a name with no captured expression
+   *  (an input) or comes back to one of its names. */
+  private aliasEnd(
+    capture: StructuredCapture
+  ): (Expression & { symbol: string }) | undefined {
+    const seen = new Set<StructuredCapture>();
+    let current = capture;
+    while (current.expression === true && isSymbol(current.stored)) {
+      if (seen.has(current)) return undefined;
+      seen.add(current);
+      const stored = current.stored;
+      const next = this.prep.captures.find((c) => c.symbols.has(stored));
+      if (next === undefined) return undefined;
+      if (next.expression === true && !isSymbol(next.stored)) return stored;
+      current = next;
+    }
+    return undefined;
   }
 
   /** The value of each captured expression (`storedRead()`), by its
@@ -6118,14 +6147,16 @@ class Lowering {
    * root region.
    */
   private storedRead(capture: StructuredCapture): IRValue {
-    const known = this.storedValues.get(capture.binding);
-    if (known !== undefined) return known;
+    // Before the value that the root computed: that value is not in the
+    // region of a helper.
     if (this.lowering.size > 0 || this.regions.length === 0)
       throw new StructuredDeclineError(
         `the value of ${capture.name} (${nodeText(capture.stored)}) is read ` +
           `in the body of a helper, which the structured route does not ` +
           `compute it in`
       );
+    const known = this.storedValues.get(capture.binding);
+    if (known !== undefined) return known;
     // A value that another captured expression reads is lowered with it.
     const nested = this.storing;
     const operations: IROperation[] = nested
@@ -6168,6 +6199,18 @@ class Lowering {
             `before the body`
         );
     }
+    // The value is computed where the existing compiler computes
+    // `_val_lv`, before the body, also when it has one use: written at that
+    // use, its reads of the inputs would come after those of the operands
+    // before it.
+    const defining = operations.findIndex(
+      (op, i) => i >= start && 'result' in op && op.result?.id === value.id
+    );
+    if (defining >= 0)
+      operations[defining] = {
+        ...operations[defining],
+        atDefinition: true,
+      } as IROperation;
     if (!nested) {
       this.regions[0].operations.splice(this.storedEnd, 0, ...operations);
       this.storedEnd += operations.length;
@@ -7367,6 +7410,18 @@ class Lowering {
         `the body of ${name} does not have the representation of its result`
       );
     const labels = this.prep.helpers.get(name)!.parameterElementLabels;
+    const body = this.region(operations, entry.body, value);
+    // The inputs of the program that the body reads, as the root reads
+    // them: a name of the body that no scope of the helper binds
+    // (`IRFunction.inputs`).
+    const inputs = new Set<number>();
+    const visit = (region: IRRegion): void => {
+      for (const op of region.operations) {
+        if (op.kind === 'input') inputs.add(op.input);
+        for (const inner of regionsOf(op)) visit(inner);
+      }
+    };
+    visit(body);
     this.functions.push({
       name,
       parameters,
@@ -7374,7 +7429,10 @@ class Lowering {
         ? { parameterElementLabels: labels }
         : {}),
       result,
-      body: this.region(operations, entry.body, value),
+      body,
+      ...(inputs.size > 0
+        ? { inputs: [...inputs].sort((a, b) => a - b) }
+        : {}),
       origin: node,
     });
     this.functionIndex.set(name, this.functions.length - 1);

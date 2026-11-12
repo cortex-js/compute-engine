@@ -403,6 +403,17 @@ two levels), although the profile only declines it. The walks, all in
   0: a list tower `L_k = L_(k-1) + L_(k-1)` took 3.3 s at depth 18.
   `withAnalysisMemo()` runs the walk at depth 1 with a fresh layer of both
   memo stacks, dropped after it.
+- `liftedByDeclaration()` (added with the stored values that are
+  expressions), which asks `isComplexValued()` of a captured name and of
+  its value at depth 0, for each read of the name. Measured on
+  `d45c14e4649588aeffcd0dd0ce56cf6643fd24a3`: `H + 1` with `H` assigned
+  the tower `t_k = Sin(t) + Which(t > 0, t, True, 1)` over `2x`, `x` with
+  no type, took 119 ms at depth 16 and 3.8 s at depth 22 with the profile;
+  the test "a shared-node value is walked once per node, not once per
+  path" of `compile-references.test.ts` (depth 36) did not end under
+  `CE_JS_PROFILE_SHADOW=1`, and neither did the next test (`Clamp01` in
+  place of `Which`, which the profile declines after the capture). It now
+  runs under `withAnalysisMemo()`: 22 ms at depth 36.
 
 The rule for a new walk: every walk over the subtree of a node is memoised
 per compilation (a `Set` or a `Map` keyed by the node object, made by the
@@ -424,13 +435,14 @@ nodes below it: quadratic in the distinct nodes. A message writes a node
 with `nodeText()`.
 
 `test/compute-engine/compile-javascript-structured-shared-depth.test.ts`
-guards it: 49 shapes (heads, a `Sum`, list literals and lists of lists, an
+guards it: 54 shapes (heads, a `Sum`, list literals and lists of lists, an
 element-wise form, a root `Block`, a `let`, an `If` statement, a value
 block, a comprehension, a helper, a local function, a `Map` lambda, a
 derivative, a matrix, the complex and `bigint` modes, degrees, and the
 element-wise forms over a list or a matrix: scalar heads, two list operands
 of one length key, a list of booleans, `At` and `Length` of a list tower, an
-element-wise `Which`, comprehensions of a stated range), each a tower
+element-wise `Which`, comprehensions of a stated range, a stored value
+read at the root), each a tower
 of depth 40, compile or decline in less than 5 s (milliseconds on an idle
 machine), with at most `10 · nodes + 50` value checks of the admission
 (`ADMISSION_WORK`), and the value at depth 12 is the value of the existing

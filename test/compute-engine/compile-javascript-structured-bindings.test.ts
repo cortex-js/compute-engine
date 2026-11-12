@@ -280,7 +280,10 @@ describe('a value that is an expression of the inputs', () => {
     ce.angularUnit = 'deg';
     ce.assign('c', ce.box(['Sin', 'x']));
     const code = check(['Add', 'c', ['Cos', 'x']], { ce });
-    expect(code).toBe('Math.sin(0.017453292519943295 * _.x) + Math.cos(0.017453292519943295 * _.x)');
+    // The value is computed before the body (`atDefinition`), as `_val_c`.
+    expect(code).toBe(
+      '(() => { const _tv1 = Math.sin(0.017453292519943295 * _.x); return _tv1 + Math.cos(0.017453292519943295 * _.x); })()'
+    );
   });
 
   test('a new value is read by a new compilation; the code keeps the value it read', () => {
@@ -347,10 +350,11 @@ describe('a value that is an expression of the inputs', () => {
     declines(json, message, engine(), ['strict']);
   });
 
-  test('a read in the body of a helper declines', () => {
+  test('a read in the body of a helper is passed to the helper', () => {
+    // `compile-javascript-structured-helper-captures.test.ts` has the rule.
     const ce = engine();
     ce.assign('hf', ce.box(['Function', ['Add', 't', 'lv'], 't']));
-    declines(['hf', 'y'], /unsupported helper capture lv: its value x \+ 1 is an expression/, ce, ['strict']);
+    check(['hf', 'y'], { ce, modes: ['strict'], interpreter: false });
   });
 
   test('a value that reads a free name in a root Function declines', () => {

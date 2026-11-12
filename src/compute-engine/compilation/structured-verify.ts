@@ -598,14 +598,18 @@ export function verifyProgram(
     });
   };
 
-  // `inFunction`: the region is the body of a function or is nested in it.
-  // Such a region reads no input of the program. `count`: the number of
-  // values that the region yields. `exits`: what an `exit` of the region
-  // ends.
+  // `inFunction`: the region is the body of a function or is nested in it:
+  // the inputs that the function lists (`IRFunction.inputs`), with the
+  // inputs that its operations read, added as they are reached; `false`
+  // for the root. Such a region reads no other input of the program.
+  // `count`: the number of values that the region yields. `exits`: what an
+  // `exit` of the region ends.
   const verifyRegion = (
     region: IRRegion,
     outer: readonly Frame[],
-    inFunction: boolean,
+    inFunction:
+      | false
+      | { readonly listed: ReadonlySet<number>; readonly read: Set<number> },
     count: number,
     owner?: IROperation,
     exits: ExitScope = {}
@@ -624,8 +628,13 @@ export function verifyProgram(
     const states: (readonly IRState[] | undefined)[] = [];
     region.operations.forEach((op, index) => {
       const frames = [...outer, { region, index }];
-      if (inFunction && op.kind === 'input')
-        fail(`the body of a function reads the input ${op.input}`);
+      if (inFunction !== false && op.kind === 'input') {
+        if (!inFunction.listed.has(op.input))
+          fail(
+            `the body of a function reads the input ${op.input}, which the function does not list`
+          );
+        inFunction.read.add(op.input);
+      }
       if (!isEffect(op.effect))
         fail(`the operation ${op.kind} has no effect fact`);
       if (!preparedNodes.has(op.origin))
@@ -692,9 +701,28 @@ export function verifyProgram(
 
   /** Whether an operation of the program aborts with `no-value`. */
   let noValue = false;
-  // A function body sees its parameters and its own values only.
+  // A function body sees its parameters and its own values only, and reads
+  // exactly the inputs that the function lists.
   for (const fn of program.functions) {
-    verifyRegion(fn.body, [], true, 1);
+    const listed = fn.inputs ?? [];
+    listed.forEach((input, i) => {
+      if (
+        !Number.isInteger(input) ||
+        program.inputs[input] === undefined ||
+        (i > 0 && input <= listed[i - 1])
+      )
+        fail(
+          `the inputs of ${fn.name} are not inputs of the program in increasing order`
+        );
+    });
+    if (fn.inputs !== undefined && fn.inputs.length === 0)
+      fail(`the function ${fn.name} lists no input`);
+    const read = new Set<number>();
+    verifyRegion(fn.body, [], { listed: new Set(listed), read }, 1);
+    if (read.size !== listed.length)
+      fail(
+        `the function ${fn.name} lists an input that its body does not read`
+      );
     if (policy.representationOf(fn.result.type) !== fn.result.representation)
       fail(
         `the result of ${fn.name} has the type ${fn.result.type} and the representation ${fn.result.representation}`

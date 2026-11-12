@@ -912,6 +912,11 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `edf0c42631a479230ffbb04bcd33d745725ceeed` | Matrix functions, element-wise arithmetic and folds of lists of lists, products by type (nested lists and matrices, slices 2 to 4) |
 | `a17a2632cc7df307eebd7c5fcba5e747940506b8` | Library functions of flat lists: orderings, searches, statistics, gathers, real indexes and counts |
 | `99cee49c8926048d73e590a0274567b9290e8bcc` | Numeric derivatives, limits, the log-space form and sampled integrals (numeric calculus, slices 3 and 4) |
+| `984f3e66014c1b44c03948ff097781550c6562fd` | Stored values that are expressions, captured lists of lists, captured complex numbers |
+| `edca7ea41c820407343c8b1ee1fc41263bb35f8c` | Scalar heads applied to each element of a list, lists of booleans, `If`/`Which` with a list condition ([broadcast](2026-11-12-structured-broadcast-over-lists.md), slices 1 and 2) |
+| `eca1a53ca353095480b9270c3039666fdd3102fc` | The admission is linear in the distinct nodes of a shared tree |
+| `60e81ebee8e44d5770cac2f91b98fbbcc0a6e49b` | Loops over several index sets, comprehensions with several generators, tuple writes, `Return`, `Continue`, default parameters |
+| `d45c14e4649588aeffcd0dd0ce56cf6643fd24a3` | A user function applied to each element of a list, sums of lists, `Max`/`Min`/`Equal` with lists (broadcast, slices 3 to 5) |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -940,6 +945,7 @@ clean worktree):
 | `4790e085732832cd9e528cc11f759b8f9e8db89d` | 9,188 of 9,545 (96.3%) | 87,731 passed, 0 failed |
 | `edf0c42631a479230ffbb04bcd33d745725ceeed` | 9,202 of 9,552 (96.3%) | 89,402 passed, 0 failed |
 | `99cee49c8926048d73e590a0274567b9290e8bcc` | 9,366 of 9,719 (96.4%) | 89,648 passed, 0 failed |
+| `2053dc1a4c89badaff53fda9ba1a56c22a529222` | 9,368 of 9,720 (96.4%) | 90,651 passed, 0 failed |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -966,6 +972,7 @@ the existing compiler compiles, and those of them that the profile admits):
 | `4790e085732832cd9e528cc11f759b8f9e8db89d` | 23,293 of 32,323 (72.1%) | 14,097 of 22,974 (61.4%) |
 | `edf0c42631a479230ffbb04bcd33d745725ceeed` | 24,717 of 33,396 (74.0%) | 15,519 of 24,053 (64.5%) |
 | `99cee49c8926048d73e590a0274567b9290e8bcc` | 25,568 of 33,800 (75.6%) | 16,198 of 24,280 (66.7%) |
+| `2053dc1a4c89badaff53fda9ba1a56c22a529222` | 26,767 of 34,782 (77.0%), a lower bound: the run did not finish in 50 minutes | 17,395 of 25,262 (68.9%), same run |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11

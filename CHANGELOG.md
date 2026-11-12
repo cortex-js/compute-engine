@@ -11,6 +11,26 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles user functions that read the
+  inputs of the program.** A user function whose body reads a name that is
+  not one of its parameters declined (`unsupported helper capture`). It now
+  compiles when the name is an input of the program (`g(t) := t + x`): the
+  function reads the input where it runs, as the existing compiler does, so
+  a function of the host that changes the inputs object gives the same
+  value. It also compiles when the name has a value that is an expression
+  (`lv := x + 1`): the value is computed once per call and passed to the
+  function. Both hold also where the function is applied to each element of
+  a list (`g(L)`). Such a function still declines with a root `Function`
+  literal, and, for a value that is an expression, as a function operand
+  (`Map(h, L)`), in a local function, or under a binder of the name.
+
+  ```js
+  ce.declare('x', 'real');
+  ce.assign('g', ce.box(['Function', ['Add', 't', 'x'], 't']));
+  compile(ce.box(['g', 2]), { profile: 'numeric-kernel' }).run({ x: 1.5 });
+  // ➔ 3.5
+  ```
+
 - **The `numeric-kernel` profile compiles more statement and loop forms.**
   These forms declined and now compile, with the values of the existing
   compiler:
@@ -32,9 +52,7 @@
   - a `Break` in a loop over several index sets, which the existing
     compiler also declines;
   - a `Return` or a `Continue` elsewhere;
-  - a default value of a parameter of the root `Function`;
-  - a user function that reads an input of the program
-    (`unsupported helper capture`).
+  - a default value of a parameter of the root `Function`.
 
   ```js
   ce.declare('n', 'integer');
@@ -468,6 +486,14 @@
   the reads of a local function and the reason of a loop now read each node
   object once, and a tower of depth 40 compiles or declines in milliseconds.
   The code and the values are the same as before.
+
+- **A name whose value is a deeply shared tree compiles with the
+  `numeric-kernel` profile.** For `H + 1`, where `H` was assigned such a
+  tower over a name with no type, the test of whether the existing compiler
+  lifts the value of `H` to a complex number read the tower once per path:
+  at depth 36 the compilation did not finish. It now reads each node object
+  once, and compiles or declines in milliseconds. The code is the same as
+  before.
 
 - **The `numeric-kernel` profile declines `x·Conjugate(Haversine(2y))`.**
   The compilation failed with an internal error (`compile-error`): the

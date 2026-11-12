@@ -794,7 +794,34 @@ integer, `L: list<real>`).
 | `If(c, Continue)` as a statement of a loop body | `if (((_SYS.floorMod(k, 2)) === (0))) { continue }; s = k + s` | The statements of the body after the `If` are lowered in the branch that does not end in `Continue` (`statements()` with the body flag), and the values of the carried locals are merged at the end of the pass: `_tv2 = _SYS.floorMod(_tv3, 2) === 0 ? _tv2 : _tv3 + _tv2;`. A `Continue` in a nested `If` or a nested block declines (it would skip the statements of an enclosing block too) |
 | A helper `hd(t, k = 2)` called as `hd(x)` | the engine completes the call at boxing (`hd(x, 2)`): `_fn_hd(_.x, 2)` | An ordinary parameter: `_tv1(_.x, 2)`. A call with fewer arguments declines |
 | A root `Function` with a default, `(x, k = 2) => x·k` | `(x, k) => { if (k === undefined) k = 2; return k * x; }` (`lambdaDefaultFill()`) | Declined: the fill compiles the default with the target of the root `Function`, which the fragment route reserves for the body (`assertEmitter()` in `javascript-fragment-facts.ts`, outside the files of this task) |
-| A helper that reads an input, `g1(t) := t + y` | `const _fn_g1 = (t) => t + _.y;` | Declined (`unsupported helper capture y`): the IR body of a helper reads only its parameters, so each input would be an extra parameter, passed at each call and through each helper that calls it |
+| A helper that reads an input, `g1(t) := t + y` | `const _fn_g1 = (t) => t + _.y;` | Admitted since the helper captures: the section below |
+
+### Helpers that read the inputs of the program and captured expressions
+
+The existing code is from probes with `cse: false, constantFold: false`
+(`x`, `y` real, `xn` number, `L: list<real>`, `u` declared `unknown`;
+`g(t) := t + x`, `lv := x + 1`, `h(t) := t·lv`, `h3(t) := h(t) + lv`). The
+existing compiler writes each helper once per compilation, in the code that
+runs at each call, before the body; the body reads the inputs object `_`
+of that call. The profile writes its functions at the same place.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| A helper that reads an input, `g(y)` | `const _fn_g = (t) => t + _.x;` then `_fn_g(_.y)`: `_.x` is read in the body, at each call, when the call runs | The body reads the input (`IRFunction.inputs`): `function _tv1(_tv2) { return _tv2 + _.x; }` then `_tv1(_.y)`. The read happens at the same time, so a function of the host that writes `_.x` before the call gives the same value |
+| A list input, `t + At(L, 1)` | `(t) => t + _SYS.atNumeric(_.L, 1, "real")` | The same text |
+| A `number` input, `Sin(t + xn)`, `strict` mode | `(t) => Math.sin(t + _.xn)` | The same text. In the `complex` mode a helper with no declared signature declines as before (its parameter is complex); with `(real) -> number` the input is lifted at each read, as at the root |
+| A name declared `unknown`, `t·u` | `(t) => t * _.u` | The same text; `u` takes the default kind and is in `defaultedSymbols` |
+| A helper that calls a helper that reads an input | `const _fn_g = …; const _fn_h2 = (t) => _fn_g(t) + 1;` | `function _tv1(…) { return … + _.x; } function _tv3(…) { return _tv1(…) + 1; }`: nothing is passed |
+| A function operand, `Map(g, L)` | `((_f) => (_.L).map((_x) => _f(_x)))(_fn_g)` | A loop that calls `_tv1(_SYS.atNumeric(_tv3, _tv6, "real"))`; the body reads `_.x` |
+| In a lambda, `Map(u ↦ g(u), L)` | `… (((x = NaN) => _fn_g(x)))` | The loop of the row above |
+| In a loop, a `Sum`, an `If` arm | `s = s + _fn_g(i)`, `((_fn_g(1)) + (_fn_g(2)) + (_fn_g(3)))`, `((_.y < 0) ? (_fn_g(1)) : (_fn_g(2)))` | The same calls |
+| A call under a binder named like the input: `Block(Declare(x, real, 5), g(1))`, `Sum(g(x), x = 1..3)`, `Map(x ↦ g(x), L)` | `let x = 5; return _fn_g(1)` with `_fn_g` reading `_.x`; `_fn_g(1) + _fn_g(2) + _fn_g(3)` | The body reads the input `x`, also there: the function is written outside every binder. The interpreter reads the binding of the definition of `g` (a function literal is lexically scoped): the same value |
+| A root `Function` whose body calls `g` | throws `Could not compile a function literal whose body has unbound free symbol "x"` | Declined (`the root of the program is a Function literal, whose parameters are its only inputs`) |
+| A captured expression, `h(y)` and `h3(y)` | `const _val_lv = _.x + 1; const _fn_h = (t) => _val_lv * t; const _fn_h3 = (t) => _val_lv + _fn_h(t);` | The value once, at the start of the root region, passed as a parameter after those of the literal, through each helper that calls it: `function _tv1(_tv3, _tv4) { return _tv4 * _tv3; } function _tv2(_tv5, _tv6) { return _tv6 + _tv1(_tv5, _tv6); }` then `_tv2(_.y, _.x + 1)` |
+| A helper applied to each element of a list, `g(L)`, `h(L)` | `_SYS.mapFn(_fn_g, [1], _.L)`, `_SYS.mapFn(_fn_h, [1], _.L)` with `_val_lv` computed before the body | One loop that calls the function once per element (`mapsListArguments`): `_tv5.push(_tv1(_SYS.atNumeric(_tv3, _tv6, "real")))`; for `h`, `_tv1(…, _tv4)` with `const _tv4 = _.x + 1` before the loop. A function of the host called in the body that writes `_.x` changes the value of the next elements on both routes |
+| A captured expression in a function operand (`Map(h, L)`), in a local function that calls `h`, at a call under a binder named `lv`, in a helper with a parameter `lv` | `_val_lv` is read by name | Declined: the value is passed by its name at each call |
+| A captured list (`CL`) and a captured number in a helper | `const _val_CL = [1.5, 2.5];` (once per artifact), `((_val_CL)[(2) - 1] ?? NaN)` | Unchanged (admitted before): the constant `_tv1`, read in the function |
+| The last-call memo of a helper (`memoizeSharedDefinitions()`) | wraps a long helper called from two places in a memo keyed on the arguments and the inputs that it reads (`varsObjectReads()`) | No memo: the same values; the existing wrapper reads the inputs once more per call for its key |
 
 ## What step 1 implements from this list
 

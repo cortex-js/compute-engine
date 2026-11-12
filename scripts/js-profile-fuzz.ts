@@ -42,7 +42,9 @@
  * (`ValueBlock`), locals declared `unknown` or `number` (`t` is sometimes declared
  * `unknown`), local functions (`lf`, declared `function`,
  * `unknown`, with a `let` or with `DefineFunction`, which read the names of
- * the body or not), and a helper declared `function` (`fq`). Collections
+ * the body or not), a helper declared `function` (`fq`), and helpers that
+ * read the inputs and the captured expressions of the program (`hca`, `hcb`,
+ * `hcd`, `hce`, `hcf`). Collections
  * (`genCollectionReal()`, `genList()`, `genTuple()`): list literals of
  * numbers and of expressions, tuples, the inputs `I: list<integer>` and
  * `P: tuple<real, real>` and the parameters `W` and `T` of these types, the
@@ -215,7 +217,7 @@
  * Progress goes to stderr, a line per 500 programs.
  *
  * Not generated yet: helpers with random bodies (the helpers of `HELPERS`
- * are fixed), a helper that calls another, `Loop` bounds that are not
+ * are fixed), a helper that calls another (only `hcf`), `Loop` bounds that are not
  * literals or `m`, `Continue`, a `Break` outside the last statement of a
  * branch, more than two real locals, nested `Function` literals, a
  * boolean result, `RandomChoice`, `RandomSample`, `RandomShuffle`
@@ -712,6 +714,49 @@ const HELPERS: readonly {
       ['Optional', 'ka', -0.5],
     ],
     arguments: ['real', 'real'],
+  },
+  // Helpers that read the inputs of the program and captured expressions
+  // (helper captures): `hca` the inputs `x` and `y`, `hcb` (a declared
+  // signature) the name `u` with no declared type and `k`, `hcd` an element
+  // of the list input `L`, `hce` the captured expressions `lv` and `ev`,
+  // `hcf` a call of `hca` and of `hce`, and the input `k`.
+  {
+    name: 'hca',
+    definition: ['Function', ['Add', ['Multiply', 'v', 'x'], 'y'], 'v'],
+    arguments: ['real'],
+  },
+  {
+    name: 'hcb',
+    signature: '(real) -> real',
+    definition: [
+      'Function',
+      ['Add', ['Sin', 'v'], ['Multiply', 'u', 'k']],
+      ['Typed', 'v', "'real'"],
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'hcd',
+    definition: ['Function', ['Add', 'v', ['At', 'L', 1]], 'v'],
+    arguments: ['real'],
+  },
+  {
+    name: 'hce',
+    definition: [
+      'Function',
+      ['Add', 'v', ['Multiply', 2, 'lv'], 'ev'],
+      'v',
+    ],
+    arguments: ['real'],
+  },
+  {
+    name: 'hcf',
+    definition: [
+      'Function',
+      ['Add', ['hca', 'v'], ['hce', ['Multiply', 0.5, 'v']], 'k'],
+      'v',
+    ],
+    arguments: ['real'],
   },
   // A loop with a `Continue` and a destructuring write in a helper body.
   {

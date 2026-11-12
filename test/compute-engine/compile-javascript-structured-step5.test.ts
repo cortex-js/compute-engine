@@ -606,9 +606,10 @@ describe('captures', () => {
       ce.declare('lazy', 'real');
       ce.assign('lazy', ce.expr(['Add', 'x', 1]));
       install(ce, 'readsLazy', '(real) -> real', ['Add', 'u', 'lazy'], [typed('u', 'real')]);
-      expect(() => structured().compile(ce.expr(['readsLazy', 'x']), { ...OPTIONS, mode })).toThrow(
-        /unsupported helper capture lazy/
-      );
+      // The value is computed once, in the root, and passed to the helper
+      // (`docs/plans/2026-11-11-structured-options-and-bindings.md`, "Result
+      // of the helper captures").
+      expect(structured().compile(ce.expr(['readsLazy', 'x']), { ...OPTIONS, mode }).run!({ x: 3 })).toBe(7);
       ce.declare('w', 'complex');
       ce.declare('cplx', 'complex');
       ce.assign('cplx', 2);

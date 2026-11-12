@@ -188,6 +188,11 @@ type OperationBase = {
   /** The values that the operation reads, evaluated before it. */
   readonly operands: readonly IRValue[];
   readonly effect: EffectFact;
+  /** The value is computed at the position of the operation, also when it
+   *  has one use: a target does not move its evaluation, or the reads of
+   *  the inputs that it makes, to that use. Absent: the target may write
+   *  a pure value at its use. */
+  readonly atDefinition?: true;
   /** The states that the evaluation touches (`IRState`), sorted, with no
    *  duplicate; absent when there is none. An `effectful` operation with no
    *  region and no call names at least one; a `pure` operation, and an
@@ -1428,12 +1433,20 @@ export type IRConstant = {
 };
 
 /** A resolved helper, written once as a function of the program. A helper
- *  can call another helper; the body of a helper reads its parameters and
- *  the captures of the program, and no input. */
+ *  can call another helper; the body of a helper reads its parameters, the
+ *  captures of the program, and the inputs that `inputs` lists. */
 export type IRFunction = {
   readonly name: string;
   /** Defined at the entry of the body. */
   readonly parameters: readonly IRValue[];
+  /** The inputs of the program (indexes in `IRProgram.inputs`) that the
+   *  body reads, in increasing order, each once: an `input` operation of
+   *  the body, or of a region nested in it, reads one of them, and each of
+   *  them is read so. A read gives the value of the input when the read
+   *  runs, as a read of the root does; the inputs are the values of the
+   *  call of the program, so the function is still pure when no operation
+   *  of the program can change them. Absent when the body reads none. */
+  readonly inputs?: readonly number[];
   /** For each list parameter, the spelling of the element type that the
    *  helper declares (`IRInput.elementLabel`); `undefined` for another
    *  parameter. */

@@ -522,6 +522,11 @@ export type FragmentDefinition<R> = {
    *  the symbol as an input. The pass types the value in place of the
    *  symbol. */
   storedValue?(symbol: Expression): Expression | undefined;
+  /** Whether the compiler computes the stored value of the free symbol
+   *  `symbol` once, at the start of the program, outside every form, and
+   *  not where the symbol is read: the forms around the read do not bind
+   *  the names of the value. Absent: `false`. */
+  storedOutsideBinders?(symbol: Expression): boolean;
   /** How the target holds the value of a name, chosen once, where the name
    *  is bound, from its type, its role and its declaration. `undefined`
    *  when the target cannot hold it. */
@@ -1614,7 +1619,10 @@ function makeWalker<R>(
       // A name of the value, or of a value that it reads, that a form binds
       // where the symbol is read (an index, a local or a parameter) would
       // read the binder. The compiler refuses it (`foldCapturedName()`).
-      const captured = capturedName(stored, scope);
+      const captured =
+        definition.storedOutsideBinders?.(node) === true
+          ? undefined
+          : capturedName(stored, scope);
       if (captured !== undefined)
         return refuse(
           node,

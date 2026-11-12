@@ -10246,6 +10246,7 @@ function refuseLazyFunctionOperands(
 function refuseHoistedDraws(
   annotation: FragmentAnnotation<ScalarRepresentation>,
   helpers: ReadonlyMap<string, ResolvedHelper>,
+  captures: ReadonlyMap<object, CaptureEntry>,
   hosts?: StructuredHosts
 ): void {
   const readers = drawReaders(helpers);
@@ -10261,8 +10262,12 @@ function refuseHoistedDraws(
   const mutates =
     hosts !== undefined &&
     [...hosts.bindings.values()].some((binding) => !binding.pure);
+  // A captured alias (`sv := y`) is a read of the name at the end of its
+  // chain, where the alias is read (`aliasChainEnd()`).
   const readsRoot = (node: Expression): boolean =>
-    mutates && isSymbol(node) && annotation.scope.bindings.has(node.symbol);
+    mutates &&
+    isSymbol(node) &&
+    annotation.scope.bindings.has(aliasChainEnd(captures, node).node.symbol);
   /** Whether each node object, or the body of a helper that it calls, has a
    *  host operation. The calls of the helpers have no cycle
    *  (`collectStructuredHelper()` refuses recursion before this pass), so
@@ -10280,12 +10285,30 @@ function refuseHoistedDraws(
     hostMemo.set(node, result);
     return result;
   };
+  /** Whether each node object, or the body of a helper that it calls,
+   *  reads a name of the root scope (`readsRoot()`): the body of a helper
+   *  reads an input where it runs (`admitHelperInput()`). A name of the
+   *  body that a parameter binds counts too, which is conservative. */
+  const rootMemo = new Map<Expression, boolean>();
+  const hasRootRead = (node: Expression): boolean => {
+    const known = rootMemo.get(node);
+    if (known !== undefined) return known;
+    const result =
+      readsRoot(node) ||
+      (isFunction(node) &&
+        ((helpers.has(node.operator) &&
+          hasRootRead(helpers.get(node.operator)!.body)) ||
+          node.ops.some(hasRootRead)));
+    rootMemo.set(node, result);
+    return result;
+  };
   const isDraw = (node: Expression): boolean =>
     readers.isDraw(node) ||
     isHost(node) ||
     (isFunction(node) &&
       helpers.has(node.operator) &&
-      hasHost(helpers.get(node.operator)!.body));
+      (hasHost(helpers.get(node.operator)!.body) ||
+        (mutates && hasRootRead(helpers.get(node.operator)!.body))));
   const complex = new Set<Expression>();
   const visit = (scope: FragmentScope<ScalarRepresentation>) => {
     for (const [node, facts] of scope.facts)
@@ -11336,7 +11359,12 @@ function recordStructured(
     registry.integrals,
     registry.routines
   );
-  refuseHoistedDraws(prepared.annotation, registry.helpers, hosts);
+  refuseHoistedDraws(
+    prepared.annotation,
+    registry.helpers,
+    registry.captures,
+    hosts
+  );
   refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
   chainForms(prepared.annotation, registry.helpers, hosts, registry.forms);
   refuseStrictWideReads(prepared.annotation, registry.mode);
@@ -12343,7 +12371,22 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (node.operator === 'Sqrt') readsSqrt = true;
       for (const operand of admittedOperands(node)) check(operand);
     };
+    if (registry !== undefined) {
+      registry.helperInputs = [];
+      // A captured expression that the body of a helper reads is checked
+      // where the root computes it, as one that the root reads.
+      registry.rootStored = (stored) => checkStored(stored);
+    }
     check(prepared.expr);
+    // The inputs that the body of a helper reads (`admitHelperInput()`),
+    // each with the rule of a free symbol of the expression, read with no
+    // index around it (a node object that the root reached under an index
+    // of the same name is checked again).
+    for (const node of registry?.helperInputs ?? []) {
+      seen.delete(node);
+      check(node);
+    }
+    if (registry !== undefined) refuseBoundStoredNames(registry, boundInRoot);
     const annotate = () => annotateCalls(prepared.expr, definition, named);
     // The rule of `Sqrt` of the structured route reads no compiler state.
     const annotation =
@@ -13858,6 +13901,7 @@ function attachRootBlock(
   };
   collect(body);
   const named: NamedCalls = { calls: new Set(), structured: registry };
+  registry.helperInputs = [];
   admitFunctionBody(
     body,
     free.map((s) => s.symbol),
@@ -13876,7 +13920,14 @@ function attachRootBlock(
   /** The free symbols declared `number` in the `complex` mode
    *  (`declaredNumberKind()`). */
   const lifted = new Set<string>();
-  for (const node of free)
+  // The inputs that the body of a helper reads (`admitHelperInput()`) are
+  // free symbols too, also one whose name the block binds: the body of the
+  // helper reads the input.
+  refuseBoundStoredNames(registry, (name) => bound.has(name));
+  const helperOnly = (registry.helperInputs ?? []).filter(
+    (node) => !free.some((s) => s.symbol === node.symbol)
+  );
+  for (const node of [...free, ...helperOnly])
     atNode(node, () => {
       symbolTypes.set(node.symbol, node.type.type);
       // A `vars` entry: a read of the host, or an input whose reads are the
@@ -14371,6 +14422,52 @@ function admitFunctionBody(
     if (seen === null) admittedValues.set(node, new Set([context]));
     else seen.add(context);
   };
+  /** The check of the captured expression `stored` of the name `name`,
+   *  where the root computes it: the inputs of the program
+   *  (`storedInputs`) are its only names, and no parameter, local or index
+   *  of the body is. For a value that the body of a helper reads
+   *  (`forHelper`), a name of the value that is not a free symbol of the
+   *  root is an input that a helper reads (`admitHelperInput()`). */
+  const rootStoredCheck = (
+    stored: Expression,
+    name: string,
+    forHelper = false
+  ): void => {
+    // A name of the value that the body binds would read the binder; the
+    // existing compiler refuses it too (`foldCapturedName()`). A value
+    // that a helper reads is computed alone, at the start of the root,
+    // outside every binder, as the existing compiler computes `_val_lv`
+    // before the body: its names are the inputs.
+    const captured = forHelper
+      ? undefined
+      : stored.symbols.find(
+          (n) => bindings.has(n) && !storedInputs.includes(n)
+        );
+    if (captured !== undefined)
+      throw new Error(
+        `JS scalar fragment: ${foldCaptureRefusal(name, captured)}`
+      );
+    const outer = [...names];
+    const outerReader = storedReader;
+    names.clear();
+    for (const n of storedInputs) names.add(n);
+    if (forHelper) storedReader = `the value of ${name}`;
+    try {
+      checkValue(stored);
+    } finally {
+      names.clear();
+      for (const n of outer) names.add(n);
+      storedReader = outerReader;
+    }
+  };
+  /** The reader of the captured expression that the root checks for the
+   *  body of a helper (`rootStoredCheck()`), for a message. */
+  let storedReader: string | undefined;
+  // The root of a block (not of a `Function`, `helperInputs`) checks the
+  // captured expressions that the body of a helper reads.
+  if (isRoot && registry?.helperInputs !== undefined)
+    registry.rootStored = (stored, name) =>
+      rootStoredCheck(stored, name, true);
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
     ADMISSION_WORK.values += 1;
     // A calculus node is the expression that replaces it
@@ -14560,37 +14657,47 @@ function admitFunctionBody(
       // captured expression, in the root only, is checked where its names
       // are read: the inputs of the program (`storedInputs`) are its only
       // names there, and no parameter, local or index of the body is.
+      // In the body of a helper (not of a local function), a captured
+      // expression is checked where the root computes it
+      // (`StructuredRegistry.rootStored`), and passed to the helper
+      // (`storedParameters()`).
+      const helperStored =
+        !isRoot &&
+        registry?.rootStored !== undefined &&
+        !registry.localFunctions.has(helper.name)
+          ? registry.rootStored
+          : undefined;
       if (
         registry &&
         recordCapture(
           registry,
           node,
           isRoot
-            ? (stored) => {
-                // A name of the value that the body binds would read the
-                // binder; the existing compiler refuses it too
-                // (`foldCapturedName()`).
-                const captured = stored.symbols.find(
-                  (name) => bindings.has(name) && !storedInputs.includes(name)
-                );
-                if (captured !== undefined)
-                  throw new Error(
-                    `JS scalar fragment: ${foldCaptureRefusal(node.symbol, captured)}`
-                  );
-                const outer = [...names];
-                names.clear();
-                for (const name of storedInputs) names.add(name);
-                try {
-                  checkValue(stored);
-                } finally {
-                  names.clear();
-                  for (const name of outer) names.add(name);
-                }
-              }
-            : undefined
+            ? (stored) => rootStoredCheck(stored, node.symbol)
+            : helperStored === undefined
+              ? undefined
+              : (stored) => helperStored(stored, node.symbol)
         )
-      )
+      ) {
+        if (helperStored !== undefined) recordStoredRead(registry, node);
         return checkCollisions();
+      }
+      // A free name with no value in the body of a helper (not of a local
+      // function, whose free names are its captures), or in a captured
+      // expression that the body of a helper reads: an input of the
+      // program, read where the body reads it (`admitHelperInput()`).
+      const inputReader = isRoot
+        ? storedReader
+        : registry?.localFunctions.has(helper.name) === false
+          ? `the helper ${helper.name}`
+          : undefined;
+      if (
+        registry !== undefined &&
+        inputReader !== undefined &&
+        resolvedValueDefinition(node)?.value === undefined &&
+        frameValue(node) === undefined
+      )
+        return admitHelperInput(registry, node, inputReader);
       throw new Error(
         `JS scalar fragment: unsupported ${isRoot ? '' : 'helper '}capture ${node.symbol}${
           registry === undefined
@@ -15981,6 +16088,29 @@ type StructuredRegistry = {
    *  the route computes numerically (`numericDerivative()`,
    *  `numericLimit()`). */
   readonly routines: Map<Expression, StructuredNumericRoutine>;
+  /** The free names with no value that the body of a helper reads, the
+   *  first read of each name (`admitHelperInput()`): inputs of the program,
+   *  which the root admits as its own free symbols after its check. Absent
+   *  for a root `Function`, whose parameters are its only inputs. */
+  helperInputs?: (Expression & { symbol: string })[];
+  /** The admission of a captured expression where the root computes it
+   *  (`recordCapture()`), for a read in the body of a helper. Absent for a
+   *  root `Function`. */
+  rootStored?: (stored: Expression, name: string) => void;
+  /** For each helper, the names of the captured expressions that its body
+   *  reads, directly or through a helper that it calls, in the order of
+   *  their first read, with a symbol of each (`storedParameters()`). */
+  /** The reads of a captured expression, or of an alias of one, that the
+   *  root computes alone, at its start, and passes to a helper
+   *  (`recordStoredRead()`): the read in the body of the helper and the
+   *  symbol that each call passes. The pass does not check the names of
+   *  such a value against the forms around the read
+   *  (`FragmentDefinition.storedOutsideBinders`). */
+  readonly storedOnce: Set<Expression>;
+  readonly storedCaptures: Map<
+    string,
+    { readonly names: string[]; readonly symbols: Expression[] }
+  >;
 };
 
 /**
@@ -16053,6 +16183,8 @@ function structuredRegistry(
     closedFormSearch: { spent: 0 },
     integrals: new Map(),
     routines: new Map(),
+    storedCaptures: new Map(),
+    storedOnce: new Set(),
   };
 }
 
@@ -16507,6 +16639,131 @@ function recordCapture(
 }
 
 /**
+ * Admit the read `node`, in the body of a helper or in a captured
+ * expression that it reads (`reader` names it), of a free name with no
+ * value: an input of the program. The existing compiler writes the
+ * helper once per compilation, in the code of each call, and reads the
+ * input in its body where the body reads it (`const _fn_g = (t) => t +
+ * _.x;`), so a function of the host that changes the inputs object before
+ * the read changes the value, as on the route, whose function reads the
+ * input (`IRFunction.inputs`). The name is the input of the program, also
+ * where the call is under a binder of the same name (a local, an index, a
+ * parameter of a lambda): the body is written outside every binder of the
+ * root, as the existing compiler writes it (Tycho row 507). The root admits
+ * it as one of its free symbols, after its own check (`helperInputs`), so
+ * the input has the type, the kind and the label of a free symbol of the
+ * root.
+ *
+ * A name that the root reads too is one input, with one type: the type of
+ * a free symbol of the root (`hasNoDeclaredType()`, the default kind of the
+ * mode for a name with no declared type, also one that a scope of the
+ * definition of the helper binds). Refused: a root `Function`, whose
+ * parameters are its only inputs (the existing compiler declines a helper
+ * that reads another name there).
+ */
+function admitHelperInput(
+  registry: StructuredRegistry,
+  node: Expression & { symbol: string },
+  reader: string
+): void {
+  const inputs = registry.helperInputs;
+  if (inputs === undefined)
+    throw new Error(
+      `JS scalar fragment: unsupported helper capture ${node.symbol}: ` +
+        `${reader} reads ${node.symbol}, which is not a parameter of the ` +
+        `helper, and the root of the program is a Function literal, ` +
+        `whose parameters are its only inputs`
+    );
+  if (!inputs.some((s) => s.symbol === node.symbol)) inputs.push(node);
+}
+
+/**
+ * Record the read `node`, in the body of the helper whose body is being
+ * checked (the last of `StructuredRegistry.resolving`), of a captured
+ * expression (`recordCapture()`). The existing compiler computes such a
+ * value once per call, before the body (`const _val_lv = _.x + 1;`), and
+ * the helper reads it (`const _fn_h = (t) => _val_lv * t;`). The route
+ * computes it once, at the start of the root region (`storedRead()` in
+ * `javascript-structured-lower.ts`), and passes it to the helper as a
+ * parameter (`storedParameters()`): the same value at every call. A value
+ * that is a name (`sv := y`) is read at each read on both compilers: the
+ * helper reads that name where its body reads the alias (the check of the
+ * root admits an input `y` as one that a helper reads, `admitHelperInput()`).
+ */
+function recordStoredRead(
+  registry: StructuredRegistry,
+  node: Expression & { symbol: string }
+): void {
+  // An alias of a captured expression (`sa := lv`) reads that expression:
+  // the helper receives `lv`, and reads it where its body reads `sa`.
+  const { node: end, entry } = aliasChainEnd(registry.captures, node);
+  if (entry?.expression !== true || isSymbol(entry.stored)) return;
+  registry.storedOnce.add(node);
+  registry.storedOnce.add(end);
+  addStoredCapture(
+    registry,
+    registry.resolving[registry.resolving.length - 1],
+    end.symbol,
+    end
+  );
+}
+
+/**
+ * The end of the chain of captured aliases that starts at the read `node`
+ * (`sv := y`, `sa := lv`, `sb := sa`): the symbol of the chain that is not
+ * an alias, and its captured binding, or `undefined` when no binding is
+ * captured for it (an input of the program, `y`). A chain that comes back
+ * to one of its names ends there.
+ */
+function aliasChainEnd(
+  captures: ReadonlyMap<object, CaptureEntry>,
+  node: Expression & { symbol: string }
+): {
+  readonly node: Expression & { symbol: string };
+  readonly entry: CaptureEntry | undefined;
+} {
+  const seen = new Set<string>();
+  let current = node;
+  for (;;) {
+    const entry = [...captures.values()].find((c) => c.symbols.has(current));
+    if (
+      entry === undefined ||
+      entry.expression !== true ||
+      !isSymbol(entry.stored) ||
+      seen.has(current.symbol)
+    )
+      return { node: current, entry };
+    seen.add(current.symbol);
+    current = entry.stored;
+  }
+}
+
+/** Add the captured expression `name`, read by the symbol `symbol`, to the
+ *  names that the helper `helper` receives as parameters
+ *  (`StructuredRegistry.storedCaptures`). A local function receives none:
+ *  its captured names are the names of the block (`LocalFunction`). */
+function addStoredCapture(
+  registry: StructuredRegistry,
+  helper: string,
+  name: string,
+  symbol: Expression
+): void {
+  if (registry.localFunctions.has(helper))
+    throw new Error(
+      `JS scalar fragment: the local function ${helper} reads the value of ` +
+        `${name}, a captured expression, through a helper that it calls: the ` +
+        `structured route passes the value to a helper, and a local function ` +
+        `receives only the names of its block`
+    );
+  let entry = registry.storedCaptures.get(helper);
+  if (entry === undefined)
+    registry.storedCaptures.set(helper, (entry = { names: [], symbols: [] }));
+  if (entry.names.includes(name)) return;
+  entry.names.push(name);
+  entry.symbols.push(symbol);
+}
+
+/**
  * The cause, for the refusal of an input of the type `type`, when `type` is
  * a union of shapes (`list<real> | real`, `integer | vector<integer^2>`):
  * the existing compiler compiles one body per member, with one test of the
@@ -16582,16 +16839,19 @@ function scopedNameCause(node: Expression & { symbol: string }): string {
  * not (`z := x + 1`, `z := x / y` with `x`, `y` real). It then reads `Sqrt(z)`
  * as `2i` at `x = -5`, in the `strict` mode too; the route reads the value
  * on its own lane, so such a value declines. A name declared `number` is
- * complex-valued exactly when its value is, so it is never lifted.
+ * complex-valued exactly when its value is, so it is never lifted. The
+ * analysis runs with its memo (`withAnalysisMemo()`): a value that shares
+ * its subtrees is analyzed once per node, not once per path.
  */
 function liftedByDeclaration(
   node: Expression & { symbol: string },
   value: Expression
 ): boolean {
-  return (
-    BaseCompiler.isComplexValued(node) &&
-    !BaseCompiler.isComplexValued(value) &&
-    isSubtype(value.type.type, 'number')
+  return withAnalysisMemo(
+    () =>
+      BaseCompiler.isComplexValued(node) &&
+      !BaseCompiler.isComplexValued(value) &&
+      isSubtype(value.type.type, 'number')
   );
 }
 
@@ -16732,6 +16992,23 @@ function collectStructuredHelper(
     );
   if (registry.mode === 'complex') refuseRangeSpecialization(node);
   refuseListWidthArgument(node);
+  // The captured expressions that the helper receives as parameters
+  // (`storedParameters()`): a helper that calls it receives them too, to
+  // pass them on; a function operand is called with its arguments only.
+  const stored = registry.storedCaptures.get(name);
+  if (stored !== undefined) {
+    if (operand !== undefined)
+      throw new Error(
+        `JS scalar fragment: the function operand ${nodeText(operand)} reads ` +
+          `the value of ${stored.names.join(', ')}, a captured expression, ` +
+          `which the structured route passes to the helper ${name} at a call`
+      );
+    const caller = registry.resolving[registry.resolving.length - 1];
+    if (caller !== undefined)
+      stored.names.forEach((n, i) =>
+        addStoredCapture(registry, caller, n, stored.symbols[i])
+      );
+  }
   named.calls.add(node);
 }
 
@@ -17067,6 +17344,7 @@ function annotateStructured(
       capture.assertCurrent();
       return capture.stored;
     },
+    storedOutsideBinders: (node: Expression) => registry.storedOnce.has(node),
     // A node of closed exact operands that the existing compiler folds has
     // the type of its literal (`closedJumpFold()`). A node that names a
     // parameter of the root function is not folded: the existing compiler
@@ -18069,12 +18347,16 @@ function resolveHelper(
       defaulted: new Set(parameters.filter((_, i) => defaulted[i])),
     });
   else check(body, true);
+  const stored = registry
+    ? storedParameters(registry, call.operator, parameters, body)
+    : undefined;
   return {
     name: call.operator,
     literal,
     body,
     binding,
     capture,
+    ...(stored === undefined ? {} : { captureArguments: stored.symbols }),
     // With an inferred signature, the representation of the fact of the
     // body (`annotateStructured()`).
     resultRepresentation:
@@ -18084,22 +18366,86 @@ function resolveHelper(
             ? structuredRepresentation(result)
             : representation(result))!,
     declaredResult: result !== undefined,
-    defaulted,
-    wide,
-    parameterElementLabels,
+    // A parameter of a captured expression takes the type of its argument,
+    // the value where the call is.
+    defaulted: [...defaulted, ...(stored?.names.map(() => false) ?? [])],
+    wide: [...wide, ...(stored?.names.map(() => false) ?? [])],
+    parameterElementLabels: [
+      ...parameterElementLabels,
+      ...(stored?.names.map(() => undefined) ?? []),
+    ],
     fragment: {
       key: call.operator,
       name: call.operator,
       body,
-      parameters,
-      parameterTypes,
-      parameterSymbols,
+      parameters: [...parameters, ...(stored?.names ?? [])],
+      parameterTypes: [
+        ...parameterTypes,
+        ...(stored?.names.map(() => undefined) ?? []),
+      ],
+      parameterSymbols: [...parameterSymbols, ...(stored?.symbols ?? [])],
       // The interpreter applies the function to each element of a list
       // argument only when every parameter has a scalar type; otherwise a
       // list binds its parameter whole (`mapsListArguments`).
       broadcasts: userFunctionParamsAreScalar(call.engine, call.operator),
     },
   };
+}
+
+/**
+ * The captured expressions that the body of the helper `helper` reads,
+ * directly or through a helper that it calls
+ * (`StructuredRegistry.storedCaptures`), as parameters of the helper after
+ * those of its literal: the existing compiler computes each value once per
+ * call, before the body, and the route computes it once at the start of the
+ * root region and passes it at each call (`recordStoredRead()`). Each call
+ * passes a symbol of the name (`ResolvedHelper.captureArguments`), which
+ * reads the value where the call is: in the root, the captured value; in a
+ * helper, its own parameter of the name. So the name must be bound by no
+ * parameter or form of the body of a helper that receives it, and by no
+ * form of the root (`refuseBoundStoredNames()`). `undefined` when the body
+ * reads none.
+ */
+function storedParameters(
+  registry: StructuredRegistry,
+  helper: string,
+  parameters: readonly string[],
+  body: Expression
+): { readonly names: string[]; readonly symbols: Expression[] } | undefined {
+  const stored = registry.storedCaptures.get(helper);
+  if (stored === undefined) return undefined;
+  const bound = namesBoundIn(body);
+  const name = stored.names.find((n) => parameters.includes(n) || bound.has(n));
+  if (name !== undefined)
+    throw new Error(
+      `JS scalar fragment: the helper ${helper} reads the value of ${name}, ` +
+        `a captured expression, and a parameter or a local of the helper ` +
+        `has the name ${name}: the structured route passes the value to the ` +
+        `helper by its name`
+    );
+  return stored;
+}
+
+/**
+ * Refuse a program whose root binds the name of a captured expression that
+ * a helper receives as a parameter (`storedParameters()`): a call under that
+ * binder would pass the bound value. `boundInRoot` tells whether a form of
+ * the root binds a name.
+ */
+function refuseBoundStoredNames(
+  registry: StructuredRegistry,
+  boundInRoot: (name: string) => boolean
+): void {
+  for (const [helper, stored] of registry.storedCaptures) {
+    const name = stored.names.find(boundInRoot);
+    if (name !== undefined)
+      throw new Error(
+        `JS scalar fragment: the helper ${helper} reads the value of ` +
+          `${name}, a captured expression, and the program binds the name ` +
+          `${name}: the structured route passes the value to the helper by ` +
+          `its name`
+      );
+  }
 }
 
 /**

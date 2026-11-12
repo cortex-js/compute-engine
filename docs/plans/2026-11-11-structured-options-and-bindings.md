@@ -1314,3 +1314,128 @@ admitted. Its known-limitations line is removed.
   node at most once in each of the two places). A node that holds a
   `Return` is checked at each path, as a statement block is
   (`holdsStatementBlock()`).
+
+## Result of the helper captures
+
+On `d45c14e4649588aeffcd0dd0ce56cf6643fd24a3` (started on
+`60e81ebee8e44d5770cac2f91b98fbbcc0a6e49b`). A helper (a user function of
+the engine that the program calls) whose body reads a name that is not one
+of its parameters.
+
+**What the existing compiler writes** (probes; rows in
+`2026-11-09-js-pilot-emission-rewrites.md`, "Helpers that read the inputs
+of the program"). The helper is one definition per compilation, in the code
+of each call, before the body: `const _fn_g = (t) => t + _.x;`. It reads the
+input in its body, at each read, when the call runs: a function of the host
+that changes the inputs object before the call changes the value. A value
+that is an expression is computed once per call, before the body, and the
+helper reads that constant: `const _val_lv = _.x + 1; const _fn_h = (t) =>
+_val_lv * t;`. The body is written outside every binder of the root, so a
+call under a local, an index or a lambda parameter named `x` still reads
+`_.x` (Tycho row 507, `compile-references.test.ts`); the interpreter reads
+the same binding (a function literal is lexically scoped). With a root
+`Function` literal the existing compiler declines a helper that reads a
+name other than its parameters.
+
+**The rule chosen.** Two classes, two representations:
+
+- **An input** is read by the body of the helper itself (candidate (b) of
+  the brief): the operation `input` is admitted in the body of a function
+  of the program, and `IRFunction.inputs` lists the inputs that the body
+  reads (in increasing order, each read; the verifier checks both
+  directions). The JavaScript emitter writes the read as the root does
+  (`_.x`), in the definition, which is in the code of each call. The read
+  happens where the existing compiler reads it, so a function of the host
+  that changes the inputs object gives the same value on both routes, with
+  no decline for the options of the host. The input has the rule and the
+  type of a free symbol of the root: the root admits it after its own check
+  (`StructuredRegistry.helperInputs`, `admitHelperInput()`).
+- **A captured expression** (`lv := x + 1`) is computed once, at the start
+  of the root region, as when the root reads it (`storedRead()`), and passed
+  to the helper as a parameter after those of its literal (candidate (a)),
+  through each helper that calls it (`storedParameters()`,
+  `StructuredRegistry.storedCaptures`). The value is the same at every call,
+  as `_val_lv` is: no function of the host runs between the start of the
+  call and the computation on either route. An alias (`sv := y`) is read at
+  each read on both routes: it is an input that the helper reads, and every
+  check that asks whether a helper reads an input of the root follows the
+  chain of aliases (`aliasChainEnd()`; the refusal of a host call ordered
+  against a complex value, `refuseHoistedDraws()`). An alias of a captured
+  expression (`sa := lv`, also `sb := sa`) is a read of that expression: the
+  helper receives `lv` and reads that parameter where its body reads `sa`.
+  The value is computed alone, outside every binder, so a call under a
+  binder of a name that the value reads (`Sum(h(x), x = 1..3)` with
+  `lv := x + 1`) reads the input, as `_val_lv` does on the existing compiler
+  and as the interpreter does (`FragmentDefinition.storedOutsideBinders`).
+  A read of a captured expression in the body of a helper that the
+  admission did not pass to it declines in the lowering (`storedRead()`).
+  The operation that gives the value has the fact `atDefinition`
+  (`structured-ir.ts`): the emitter binds it where it is, at the start of
+  the root, also when it has one use, so the code reads `_.x` before the
+  other reads of the inputs object, as the existing compiler does for
+  `_val_lv` (in the root and for a helper).
+
+**Why not (a) for inputs.** A parameter is the value at the call, and the
+existing compiler reads the input in the body, after the arguments and
+after any function of the host that the body calls before the read
+(`g(t) := hm(t) + x`). The rule would need a decline of every program with a
+function of the host that is not pure (as for local functions), and the
+argument at each call must be a read of the input, not of the name at the
+call, which a binder there can hold. (b) has neither cost; its cost is the
+rule of the core that a function can read the inputs of the program, which
+is target-neutral (a GLSL function reads a uniform the same way).
+
+**Why not (b) for captured expressions.** The helper would compute the
+value at each call, in its body: another value when the host changed an
+input before the call, and more reads of the inputs than the existing
+compiler makes.
+
+**What stays declined.** A helper that reads a name other than its
+parameters when the root is a `Function` literal (its parameters are its only
+inputs, as on the existing compiler); a captured expression read through a
+function operand (`Map(h, L)`), through a local function, at a call under a
+binder of its name, or in a helper with a parameter or a local of its name
+(the value is passed by its name); a local function that reads an input of
+the root that is not a local of its block (`unsupported helper capture p`,
+as before); recursion; a captured value that is not pure (`Random()`) or not
+a number (`"abc"`).
+
+**A helper applied to each element of a list** (`mapsListArguments`, broadcast
+slices 3 to 5): `g(L)` is one loop that calls the helper once per element;
+the body reads the input at each call, and a captured expression is passed
+at each call, as computed once before the loop. The existing compiler writes
+`_SYS.mapFn(_fn_g, [1], _.L)`: the same reads in the same order, also with a
+function of the host in the body that writes the inputs object between two
+elements (tests in `compile-javascript-structured-helper-captures.test.ts`,
+"a capturing helper applied to each element of a list", with a list-bodied
+`Sum` and a helper whose value is a list).
+
+**Measures** (on `d45c14e4649588aeffcd0dd0ce56cf6643fd24a3`, before and
+after the change):
+
+- Witnesses: a Jest setup file that wraps `compile()` with the profile over
+  558 test files (batches of 100, `-w 4`; `compile-references.test.ts`
+  does not finish in a batch of 900 s and `performance.test.ts` logs no
+  compilation, both left out). Distinct declines and failures that name a
+  helper: 161 in 56 files before, 104 in 33 files after. Declines of a
+  capture: 63 before (an input of a scalar type 23, a captured expression
+  11, `list<real>` 9, `number` 7, no declared type 6, `list<integer>` 2,
+  `vector<real^2>`, `list<number>`, `list<tuple<real, real>>`, a string
+  value, a `Random()` value one each), 4 after (a captured expression under
+  a root `Function`, an input that a local function reads, the string and
+  the `Random()` values). Two programs now reach a later decline
+  (`unsupported helper body PointX`, 57 to 59). The two internal errors of
+  CE-1242 are unchanged.
+- Shadow measure (`CE_JS_PROFILE_SHADOW=1`, the same files): `public`
+  admitted 13,899 to 13,937 of 20,058 to 20,061 compilations, declined
+  6,157 to 6,122, failed 2 and 2 (CE-1242); every engine consumer
+  unchanged.
+- Consumers (`CE_JS_PROFILE=numeric-kernel`, 45 consumer test files): 1,244
+  tests pass with and without the switch; the engine consumers admit 1,547
+  of 1,597 compilations before and 1,543 of 1,593 after (50 declines each;
+  the number of attempts of `FindFit` changes from run to run); no
+  `unsupported helper body`.
+- Prelude census (the Epsil preludes of Tycho's showcases but fish-swarm
+  and turing-patterns, each function compiled as its `Function` literal):
+  29 of 40 before and after; no function of a prelude declined for a
+  capture (a prelude reads no document name).

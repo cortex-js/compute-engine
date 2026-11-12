@@ -61,6 +61,9 @@ interface Shape {
   readonly angularUnit?: 'deg';
   /** The profile declines the tower. */
   readonly declines?: RegExp;
+  /** The existing compiler declines the tower at depth 12 (the fold-size
+   *  limit of a stored value): no reference value. */
+  readonly noReference?: true;
 }
 
 const sinCos: Build = (ce, t) =>
@@ -251,6 +254,31 @@ const SHAPES: Shape[] = [
       ce.declare('h', 'function');
       ce.assign('h', ce.function('Function', [t, ce.symbol('x')]));
       return ce.box(['h', 'y'] as never);
+    },
+  },
+  // A helper whose body reads an input (`IRFunction.inputs`), called with
+  // the tower; a helper that reads a captured expression whose value is the
+  // tower (computed in the root, passed to the helper). A tower over an
+  // input in the body of a helper is left out: the engine assigns and
+  // boxes such a function literal in time exponential in the depth (1.7 s
+  // and 1.6 s at depth 24, CE-1240), before any compilation.
+  {
+    label: 'the argument of a helper that reads an input',
+    level: sinCos,
+    root: (ce, t) => {
+      ce.declare('ha', 'function');
+      ce.assign('ha', ce.box(['Function', ['Multiply', 's', 'x'], 's'] as never));
+      return ce.function('ha', [t]);
+    },
+  },
+  {
+    label: 'a captured expression that a helper reads',
+    level: sinCos,
+    root: (ce, t) => {
+      ce.assign('lt', t);
+      ce.declare('hl', 'function');
+      ce.assign('hl', ce.box(['Function', ['Multiply', 's', 'lt'], 's'] as never));
+      return ce.box(['hl', 'y'] as never);
     },
   },
   {
@@ -452,6 +480,30 @@ const SHAPES: Shape[] = [
     leaf: 'M',
     declare: { M: 'matrix<2x2>' },
   },
+  // A stored value over a name with no type, read at the root: the test of
+  // a value that the existing compiler lifts to the complex lane
+  // (`liftedByDeclaration()`) asks `isComplexValued()` of the value. The
+  // witness is `compile-references.test.ts`, "a shared-node value is walked
+  // once per node, not once per path", at depth 36.
+  {
+    label: 'H + 1, H := Sin(t) + Which(t > 0, t, True, 1) over u',
+    level: (ce, t) =>
+      ce.function('Add', [
+        ce.function('Sin', [t]),
+        ce.function('Which', [
+          ce.function('Greater', [t, ce.number(0)]),
+          t,
+          ce.symbol('True'),
+          ce.number(1),
+        ]),
+      ]),
+    leaf: 'u',
+    root: (ce, t) => {
+      ce.assign('H', t);
+      return ce.box(['Add', 'H', 1] as never);
+    },
+    noReference: true,
+  },
 ];
 
 /** The root of `shape` over a tower of `depth` levels, and the tower. */
@@ -574,7 +626,9 @@ describe('a tower of shared subtrees of depth 40 on the structured route', () =>
 
 describe('the value of a tower of depth 12 is the value of the existing compiler', () => {
   test.each(
-    SHAPES.filter((s) => s.declines === undefined).map(
+    SHAPES.filter(
+      (s) => s.declines === undefined && s.noReference === undefined
+    ).map(
       (s) => [s.label, s] as const
     )
   )('%s', (_label, shape) => {

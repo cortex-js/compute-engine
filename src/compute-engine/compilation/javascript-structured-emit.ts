@@ -494,7 +494,9 @@ export type StructuredEmitOptions = {
 /** The code of a program. */
 export type StructuredEmission = {
   /** One JavaScript function per helper, in the order of the program. Each
-   *  reads its parameters and the snapshots of captured bindings. */
+   *  reads its parameters, the snapshots of captured bindings and the
+   *  inputs that it lists (`IRFunction.inputs`), so the definitions are
+   *  written where the inputs are read. */
   readonly definitions: readonly string[];
   /** The statements of the root region, in order. */
   readonly statements: readonly string[];
@@ -742,6 +744,8 @@ class Emitter {
   /** The variables of the carried values of each loop whose body is being
    *  written, the innermost last: an `exit` assigns those of the last. */
   private readonly loops: (readonly string[])[] = [];
+  /** Whether the body of a function is being written (`definition()`). */
+  private inDefinition = false;
 
   constructor(
     private readonly program: IRProgram,
@@ -787,7 +791,17 @@ class Emitter {
     });
     const parameters = fn.parameters.map((p) => this.bind(p));
     const statements: string[] = [];
-    const [value] = this.openRegion(fn.body, statements, false);
+    // A function that lists inputs (`IRFunction.inputs`) reads them as the
+    // root does, by the source of `names.input`: the definitions are in the
+    // code of each call, where the object of the inputs is in scope, as the
+    // existing emitter writes `const _fn_g = (t) => t + _.x;`.
+    this.inDefinition = true;
+    let value: Source;
+    try {
+      [value] = this.openRegion(fn.body, statements, fn.inputs !== undefined);
+    } finally {
+      this.inDefinition = false;
+    }
     return `function ${name}(${parameters.join(', ')}) { ${[
       ...statements,
       `return ${value.text};`,
@@ -974,7 +988,8 @@ class Emitter {
 
   /**
    * True when the value `result` of `op`, at the position `index` of
-   * `region`, is written at its use: `op` is pure, runs no routine
+   * `region`, is written at its use: `op` is pure, is not computed at its
+   * position (`atDefinition`), runs no routine
    * (`runsRoutine()`), and runs no code of the
    * host (`reachesHost()`: the host can count its calls and their order), its
    * value has one use, in `region`, and every operation between the two is
@@ -991,6 +1006,7 @@ class Emitter {
   ): boolean {
     if (
       op.effect !== 'pure' ||
+      ('atDefinition' in op && op.atDefinition === true) ||
       runsRoutine(op, this.program.functions) ||
       reachesHost(op, this.program.functions)
     )
@@ -1103,6 +1119,10 @@ class Emitter {
         // (`entryWrapper()`), as the bigint emitter of the existing compiler
         // reads it.
         if (input.lifted && input.representation === 'bigint') {
+          // That local is declared in the wrapper of the entry, which the
+          // definitions of the functions do not see.
+          if (this.inDefinition)
+            fail('the body of a function reads a lifted bigint input');
           let id = this.lifted.get(input.name);
           if (id === undefined) {
             id = this.names.fresh();
