@@ -526,27 +526,35 @@ and its net removal fell at each round of fixes (389, 290, 166 lines). The
 user and the author read this as a sign that two choices of section 10
 were wrong. Three decisions of the user, 2026-11-11, replace them.
 
-### D5. A boxed operand is never captured (replaces the binder case of section 4 and of C7)
+### D5. A binder and a boxed operand: what the engine does today (replaces the binder case of section 4 and of C7)
 
-A binder (`Function`, `Sum`, `Product`, `Integrate`, `Block`, every head
-with a `bound` or `clause` operand) binds its variables only in an operand
-that it boxes itself, from a raw form. An operand that is already boxed
-keeps the meaning it had. To capture, pass the raw form (`body.json`) or
-write the whole expression in one parse. With `x: real = 5`:
+Revised 2026-11-11 (user: "as long as we have a rule we can explain, let's
+go with the one that is easiest to implement"). The first form of D5, "a
+boxed operand is never captured", is withdrawn: with it 267 tests failed in
+51 files, about 200 places of the engine build `D`, `Function`,
+`Integrate`, `Sum`, `Map` or `Block` around boxed parts, and the raw form
+that it told them to pass binds every other name of the body again in the
+current scope, against rule 1.
 
-| Program | 0.187.1 | With D5 |
+The rule is the one of the two mechanisms that exist (the post-phase of
+the binder hook, `bindBindingSites`, `boxed-expression/box.ts`, and the
+parameter repair of a function literal, `rebindParameters`,
+`function-utils.ts`), unchanged: a binder with a variable operand
+(`Function`, `Sum`, `Product`, `Integrate`, `D`, …) built around a boxed
+operand binds the occurrences of its variables in that operand. A `Block`
+does not: a statement boxed outside the block keeps its names, because the
+`Declare` of the block makes a new variable. With `x: real = 5`:
+
+| Program | 0.187.1 | With this rule |
 |---|---|---|
-| `Function(ce.parse('x^2'), x)` applied to 3 | 9 | 25 |
-| `Function(['Power', 'x', 2], x)` applied to 3 | 9 | 9 |
-| `Sum(ce.parse('k^2'), k = 1..3)` | 14 | `3k²` |
-| `Sum(['Power', 'k', 2], k = 1..3)` | 14 | 14 |
+| `Function(ce.parse('x^2'), x)` applied to 3 | 9 | 9 |
+| `Sum(ce.parse('k^2'), k = 1..3)` | 14 | 14 |
 | `Block(Declare(x, 7), ce.parse('x+1'))` | 8 | 6 |
 
-The code of the engine that builds a binder around boxed parts (the nested
-sums of dependent limits, the derivative of a function literal, …) builds
-it from the raw form. Rejected: "a binder always boxes its body again from
-its raw form": it makes every other name of the body read the scope of the
-binder, against rule 1, and it captured a parameter default.
+Nothing is added for it. Whether the two mechanisms match an occurrence by
+its spelling or by its definition is not examined; a capture of a variable
+of the same spelling from another scope, if a test shows one, is an issue
+file.
 
 ### D6. Activations (replaces C1)
 
@@ -570,8 +578,9 @@ It replaces the caller binding, the swept home, the marks that keep a call
 frame for a function value, and the two narrow rules of the first
 implementation (an activation for a nested scope only when its parent has
 one on the stack; a search of the stack for a parameter). It is part of
-step 1. Its design (what exists today, what the rule deletes) is written
-before its code.
+step 1. Its design is
+`2026-11-11-bound-once-evidence/activations-design.md` (six steps, about
+700 lines deleted by its estimate); the user approved it on 2026-11-11.
 
 ### D7. The two other narrow rules
 
