@@ -710,5 +710,11 @@ folder), the user decided three of the programs that the rules left open
 lost in a kernel panic on 2026-11-12 and rebuilt: the state after step 1 of
 the activations from the patch in the evidence folder (detached commit
 `d1126e8344246d37576e65b7ad1d027843b1bbe8`), then D8 by replaying the
-agent's transcript (`1a690356ea2fe525f51f5233d82f504c9a8662a5`). The
-objects of these commits are in the main repository.
+agent's transcript (`1a690356ea2fe525f51f5233d82f504c9a8662a5`), then the
+migration of the tests by replaying the transcripts of its 17 agents
+(`4085a4feafd2a53430a8690c167caeb765559579`). The full suite on that commit fails 68 tests in 25 files, which
+is exactly the set of the migration report: 38 in the seven files of the
+structured compiler and 30 others (the nine defects, the undecided
+programs, the three known cases). The objects of these commits are in the
+main repository; each accepted round is committed in the worktree from
+now on.
