@@ -1,7 +1,8 @@
 # Bound once, step 1: state of the worktree
 
-Worktree `/tmp/wt-compute-engine-ad-step1`, detached at 5eb1778b5. No commit,
-no stage. Spec: `docs/plans/2026-11-11-bound-once-spec.md` in the MAIN tree
+Worktree `/tmp/wt-compute-engine-06-main`, detached commits on main's
+`dc51affd4` (the work before 2026-11-12 is in `/tmp/wt-compute-engine-ad-step1`,
+last `52a0185e6`). The newest section is at the end. Spec: `docs/plans/2026-11-11-bound-once-spec.md` in the MAIN tree
 (sections 10 and 11 are the decisions; D5 final, D6, D7).
 
 ## Built (all in the working tree)
@@ -254,3 +255,139 @@ Step B (no `bindingInContext` corrections; delete `markActivation`,
 `_activationOf`, `staticBindingOf`, `callerBinding`, swept homes), step C
 (function values hold their activation; delete the re-parenting and
 `hideBodyScopeParams`), step D (lazy views), steps 4 and 6.
+
+## The change on main, and step A finished for function locals (2026-11-12)
+
+Worktree `/tmp/wt-compute-engine-06-main`. Commits: `4ffd2018c` (the accepted
+change applied on `dc51affd4`, the six conflicts with the removal of the
+checkpoints resolved), then `4947af72a`, `b90ca3d64`, `c1028d891`,
+`522900b6a`, `be37e5b50` and the commit that holds this section.
+
+### Built
+
+- A local that a `Declare` of a block gives a function literal, with no type
+  (or `unknown`) and no `constant` attribute, is a function definition at
+  boxing (`defineFunctionLocal()`, `library/core.ts`): `assignFn()` on the
+  hoisted binding, which becomes an operator definition marked `_blockLocal`
+  (`_BoxedOperatorDefinition._blockLocal`). The callers in the block are
+  derived again at boxing (`deriveFunctionLocalCallers()`,
+  `noteFunctionAssignment()`, `function-utils.ts`; the run-time
+  `afterFunctionAssignment()` keeps only `Assign`).
+- In a run: the activation of the block (`scopeActivation()`) and the frame
+  of a body (`holdBodyLocals()`) hold a slot for such an operator definition;
+  the `Declare` writes the function value there (`declareSteps()`); a call
+  applies the value it finds on the links (`callee()` in the evaluate
+  handler of `_update()`, `boxed-operator-definition.ts`; none found: the
+  call declines); the symbol evaluates to it (`functionLocalValue()`,
+  `ambient-chain.ts`, read in `BoxedSymbol.evaluate()` and in
+  `resolveEscapingLambda()`); an `Assign` of the local in a run writes the
+  activation (`assignNamedValue()`, `engine-declarations.ts`).
+- The declared type of a local is the type of its static definition from
+  the boxing (the hoist declares it `inferred: false`); the run no longer
+  writes it. A type that names `missing` is not hoisted (the run reports it).
+- A `constant` local is a constant from the boxing of its `Declare`
+  (`markConstantLocal()`), after the evidence of its initial value; a
+  constant whose value is a function literal stays a value definition with
+  the literal's type, as a global constant. The value setter writes a
+  constant local once in each activation.
+- A `Declare` with no value (a signature that a function statement of the
+  block defines) is the static definition of that function: the hoist does
+  not mark it `_blockLocal`, the `DefineFunction` canonical handler installs
+  the clause under the declared signature at boxing, and a run of the
+  `Declare` in a block or a body changes nothing.
+- A type computation (`static-typing-view.ts`) reads no value from the
+  activation of a call; a read outside it that takes a value from a call
+  frame records the divergence (`noteParameterReadByName()`).
+- A closure captured at the end of a call keeps the static locals of its
+  body (`captureClosuresUncached()`).
+
+### Tests changed (class b)
+
+- `block-declared-signature-clause`: "the call is checked against the
+  declared parameter type" and "a later call outside the declared signature
+  is still refused": the call `g(1.5)` between `let g: (integer) -> integer`
+  and `function g` is an error of the boxing (the block is invalid; was the
+  run-time error value); header comments state the rule.
+- `missing-result-only` "a local declared with a signature": `h(Missing)`
+  gives what `h(3)` gives, as for a global declared with the signature (was a
+  partial application).
+- `ce-772` "a function with a scalar body, called on a list": the call is
+  typed `vector<3>`, as for a global (was `unknown`); header comment.
+- `whole-collection-parameter` "a call to a helper that the body assigns":
+  first expectation `(xs: collection<any>) -> integer | signed_infinity`, as
+  for a global helper (was `(xs: collection<any> | value) -> unknown`);
+  comments of three "Limitations" tests.
+- `ce-1120` "a Declare statement whose parameter type no string has" (2): the
+  compilation declines on the invalid block (`g(t)` is an error of the
+  boxing) instead of the `Declare` reason.
+- `epsil/effects` "applying a pure let-bound lambda": `h` is `(n: unknown)
+  -> number` (was `-> unknown`): `sq` is typed as a global.
+
+### Open failures (wide run at `be37e5b50`: 404 files, 31 failures; 20 of them fail at `4ffd2018c` too)
+
+- (c) A function local declared with a literal and later assigned another
+  literal: the static definition keeps the signature derived from the
+  `Declare`, which is wrong for the second function (a global gets a new
+  definition at the `Assign`). `ce-772` "assigned another", the second and
+  later expectations of `whole-collection-parameter` "helper", its "an
+  assigned helper over a list", `compile-block-local-function` "Declare
+  followed by an Assign" and "REASSIGNED let-bound lambda" (not checked one
+  by one).
+- (c) `epsil/function-declaration-hoisting` "the declared signature does not
+  apply before its let runs": `let a = String(g(1.5)); let g: (integer) ->
+  integer; function g(k) {…}` — the block route now refuses `g(1.5)` at
+  boxing, the Epsil route gives `3`. D8 says the type of a local is its
+  `Declare`'s for the whole block, and that a read before the `Declare` is an
+  error; `g` is also defined by a function statement from the start.
+- (c) `scope.test` "a Declare statement before a definition in a Block":
+  `Block(DefineFunction(h, …), Declare(h, sig, literal), h(5))` threw
+  "already declared" at run; the rules do not say whether a function
+  statement and a `Declare` of one name are two declarations.
+- (reported, design) The type of a binder variable or parameter does not
+  follow the run's value: `epsil/documentation` `types.md:683` (`match t {
+  tree(v, cs) => type(v) }` gives `unknown`; the page documents the matched
+  value's own type), `ce-445` "the N operator over a lazy Map" (an `Assign`
+  of a real to a parameter typed `rational` from the source is refused
+  under `N(...)`), `ce-445` "a callback that reads a local … under N" (the
+  callback now reads the static local and takes the rebuild route: last
+  digit `…666` for `…667`).
+- (a, waits for step C or D) A function value or a lazy view made in a run
+  does not reach the activation: `block-local-function-numeric` "Map with the
+  name of the local" (2, the `.N()` wrapper `(_) => N(hLoc2(_))`),
+  `comprehension-index-function` "Epsil", `assignment-stores-lazy-collection`
+  (CE-1245), `closure-frame-retained` "dependent limit" (2),
+  `ce-535-531-binder-declaration-cache` CE-543 (6, the residual of a partial
+  application reads a parameter after its call; fails at `52a0185e6` too, not
+  recorded before), `lazy-view-scope` "reads its view at once",
+  `ce-689` "static view diverges while an awaited application is
+  suspended" (pins the re-parenting of the body scope; becomes (b) at step
+  C).
+- (a, not fixed) `closure-assigned-to-same-name` "a local declared in an
+  inner block does not capture …" (2): `Block(Declare(g, t ↦ 9), Assign(g,
+  f), g(0))` gives `g(0)`; the `Assign` writes the activation, the call does
+  not reach the evaluate handler of the local (cause not found).
+- (a, not fixed) `ce-689` "a literal that calls a block local function is
+  typed again inside the call": the literal's type is `any`-effected in the
+  second call and not in the first (a cache).
+- Not classified: `compile-admission` "a Comprehension whose … assigns a
+  parameter" (2: the lazy comprehension stored by `Declare(r, …)` is not
+  enumerated before `p + 0`), "a literal returned by a curried literal"
+  (`compile-error` for `unsettled-shape`), `random-compile` "Max of a call of
+  a block-local function declines" (the call is now typed from the
+  definition, so the compilation does not decline), `lazy-argument-capture`
+  "mutual recursion" (top-level clauses, NaN).
+- Known: `lambda-param-collection-inference` "held as a value" (CE-1244).
+- Not mine: `compile-javascript-structured-blocks` (17) and `-locals` (1):
+  first assignments of undeclared locals.
+
+### Left
+
+Steps B, C and D of `activations-design.md` are not started. Still in place:
+`bindingInContext()` and its corrections for parameters, binder variables
+and block locals (`callerBinding`, swept homes, `liveScopeOf` in
+`definingScopeOf()`), the re-parenting of the body scope and
+`hideBodyScopeParams()` in `invoke()`, `captureClosures()` and the retain
+marks, the lazy-view records. The run of a `Declare` still writes
+`holdUntil` on the static definition. The fallback path of `declareSteps()`
+(a `Declare` whose binding is not in the current scope) still declares at
+run time.
