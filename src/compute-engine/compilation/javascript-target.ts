@@ -4870,8 +4870,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (`compileJSEquality`): a bare `_SYS.chop(x)` fell back to the static
   // default (1e-10) and diverged from the interpreter's `Chop` at any
   // non-default `ce.tolerance`.
+  // An explicit second operand is the tolerance.
   Chop: (args, compile) =>
-    `_SYS.chop(${compile(args[0])}, ${args[0]?.engine?.tolerance ?? 1e-10})`,
+    `_SYS.chop(${compile(args[0])}, ${
+      args[1] ? compile(args[1]) : (args[0]?.engine?.tolerance ?? 1e-10)
+    })`,
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ccos', compile(args[0]));

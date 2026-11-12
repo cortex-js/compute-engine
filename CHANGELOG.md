@@ -1,3 +1,24 @@
+## Unreleased
+
+### Resolved Issues
+
+- **`Chop` takes a tolerance, and `Rationalize(x, 0)` is the exact value of a
+  float.** `Chop(0.004, 0.01)` was an `unexpected-argument` error; the second
+  operand is now the tolerance, as in Wolfram's `Chop[x, tol]`, and a real or
+  imaginary part whose magnitude is at most `tol` becomes 0
+  (`Chop(0.004, 0.01)` is `0`, `Chop(3 + 0.002i, 0.01)` is `3`,
+  `Chop([0.004, 0.5], 0.01)` is `[0, 0.5]`). Without it the engine's
+  `tolerance` applies, as before. The JavaScript and interval targets compile
+  the two-operand form, the interval target from a numeric constant and
+  declining a symbolic tolerance. `Chop` no longer declares itself
+  `associative`, which would have flattened `Chop(Chop(x, a), b)` into the
+  three-operand `Chop(x, a, b)`. `Rationalize(0.1, 0)` was `1/10`, the same
+  as `Rationalize(0.1)`; with a tolerance of exactly 0 a float now gives the
+  rational it denotes, `3602879701896397/36028797018963968`, as Wolfram's
+  `Rationalize[0.1, 0]` does. An exact rational operand is returned as it is,
+  and `Rationalize(x)` and every positive tolerance are unchanged.
+  (#540, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

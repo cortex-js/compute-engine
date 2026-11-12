@@ -1195,6 +1195,21 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect(aval.hi).toBeCloseTo(1e-5, 12);
   });
 
+  test('Chop(x, tol) bakes a constant tolerance', () => {
+    const fn = compile(ce.expr(['Chop', 0.004, 0.01]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBe(0);
+    expect(val.hi).toBe(0);
+    const kept = compile(ce.expr(['Chop', 0.5, 0.01]), { to: 'interval-js' });
+    expect(unwrapInterval(kept.run!()).lo).toBeCloseTo(0.5, 12);
+  });
+
+  test('Chop(x, tol) declines a symbolic tolerance', () => {
+    const fn = compile(ce.expr(['Chop', 0.5, 't']), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+  });
+
   test('Erf(1) ≈ 0.8427', () => {
     const expr = ce.expr(['Erf', 1]);
     const fn = compile(expr, { to: 'interval-js' });

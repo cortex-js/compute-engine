@@ -479,12 +479,17 @@ Rounds a number up to the next largest integer, or with a step to the least mult
 
 ### chop
 
-MathJSON `Chop` · `(T) -> T where T: number`
+MathJSON `Chop` · `(T, real<0..>?) -> T where T: number`
 
 Replace tiny numeric values with zero.
 
 ```epsil
 chop([1e-20, 0.5, 3 + 1e-15i])
+// ➔ [0,0.5,3]
+```
+
+```epsil
+chop([0.004, 0.5, 3 + 0.002i], 0.01)
 // ➔ [0,0.5,3]
 ```
 

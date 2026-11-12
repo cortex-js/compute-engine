@@ -430,6 +430,28 @@ export function reducedRationalFromDecimal(
   return null;
 }
 
+/**
+ * The exact value of a finite double as a reduced rational: a dyadic
+ * `m / 2^k`. `exactRationalOfDouble(0.1)` is
+ * `3602879701896397/36028797018963968`, the number the double `0.1` denotes,
+ * not the short decimal `1/10`.
+ */
+export function exactRationalOfDouble(x: number): Rational {
+  if (Number.isInteger(x))
+    return reducedRational([BigInt(x), BigInt(1)] as [bigint, bigint]);
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, x);
+  const hi = view.getUint32(0);
+  const lo = view.getUint32(4);
+  const biasedExponent = (hi >>> 20) & 0x7ff;
+  let mantissa = (BigInt(hi & 0xfffff) << BigInt(32)) | BigInt(lo);
+  // A subnormal has no implicit leading bit and the smallest exponent.
+  if (biasedExponent !== 0) mantissa |= BigInt(1) << BigInt(52);
+  const shift = BigInt(1075 - Math.max(biasedExponent, 1));
+  const n = hi >>> 31 ? -mantissa : mantissa;
+  return reducedRational([n, BigInt(1) << shift] as [bigint, bigint]);
+}
+
 /** Return a rational approximation of x */
 /**
  * Approximate `x` by a rational `[n, d]` via its continued-fraction

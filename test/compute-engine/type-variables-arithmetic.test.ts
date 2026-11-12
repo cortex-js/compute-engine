@@ -39,7 +39,7 @@ describe('TYPE VARIABLES / arithmetic — declared signatures', () => {
     const ce = engine();
     const sig = (op: string) =>
       ce.box(op).operatorDefinition!.signature.toString();
-    expect(sig('Chop')).toBe('(T) -> T where T: number');
+    expect(sig('Chop')).toBe('(T, real<0..>?) -> T where T: number');
     expect(sig('PlusMinus')).toBe(
       '(T, U) -> tuple<T, U> where T: value, U: value'
     );

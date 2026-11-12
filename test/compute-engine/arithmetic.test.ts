@@ -1007,6 +1007,27 @@ describe('RATIONALIZE', () => {
     // The classic π ≈ 22/7 within 1/100.
     expect(r(['Rationalize', 'Pi', ['Rational', 1, 100]])).toEqual('22/7');
   });
+  // A tolerance of exactly 0 asks for the number the double denotes
+  // (Mathematica: `Rationalize[0.1, 0]`), not the short decimal.
+  const zeroTolerance: [MathJsonExpression, string][] = [
+    [0.1, '3602879701896397/36028797018963968'],
+    [0.5, '1/2'],
+    [-0.375, '-3/8'],
+    [2, '2'],
+  ];
+  for (const [x, expected] of zeroTolerance)
+    test(`Rationalize(${x}, 0) = ${expected} (evaluate)`, () => {
+      expect(r(['Rationalize', x, 0])).toEqual(expected);
+    });
+  test('Rationalize(0.1, 0) is exact, and still 1/10 without a tolerance', () => {
+    const exact = ce.box(['Rationalize', 0.1, 0]).evaluate();
+    expect(exact.N().re).toBe(0.1);
+    expect(r(['Rationalize', 0.1])).toEqual('1/10');
+    expect(r(['Rationalize', 0.1, ['Rational', 1, 100]])).toEqual('1/10');
+  });
+  test('Rationalize(x, 0) leaves an exact rational as it is', () => {
+    expect(r(['Rationalize', ['Rational', 1, 3], 0])).toEqual('1/3');
+  });
   test('integers and free variables stay put', () => {
     expect(r(['Rationalize', 4])).toEqual('4');
     expect(r(['Rationalize', 'x'])).toEqual('Rationalize(x)');
@@ -3425,6 +3446,54 @@ describe('Chop preserves exact operands', () => {
   });
   it('numericizes an exact operand under N()', () => {
     expect(ce.expr(['Chop', ['Rational', 2, 3]]).N().re).toBeCloseTo(2 / 3, 12);
+  });
+});
+
+describe('Chop with a tolerance', () => {
+  const cases: [MathJsonExpression, string][] = [
+    [['Chop', 0.004, 0.01], '0'],
+    [['Chop', 0.5, 0.01], '0.5'],
+    [['Chop', 1e-5, 1e-3], '0'],
+    [['Chop', 0.01, 0.01], '0'], // a magnitude equal to the tolerance chops
+    [['Chop', -0.004, 0.01], '0'],
+    [['Chop', ['Rational', 1, 1000], 0.01], '0'],
+    [['Chop', ['Rational', 2, 3], 0.01], '2/3'],
+    [['Chop', ['List', 0.004, 0.5, -0.009], 0.01], '[0,0.5,0]'],
+    [['Chop', ['Complex', 0.002, 3], 0.01], '3i'],
+    [['Chop', ['Complex', 0.002, 0.004], 0.01], '0'],
+    [['Chop', 0.0001, 0], '0.0001'], // a zero tolerance chops only 0
+  ];
+  for (const [expr, expected] of cases)
+    test(`${JSON.stringify(expr)} = ${expected} (evaluate)`, () => {
+      expect(ce.expr(expr).evaluate().toString()).toBe(expected);
+    });
+  test('Chop(x, tol) numericizes under N() and chops', () => {
+    expect(ce.expr(['Chop', 0.004, 0.01]).N().toString()).toBe('0');
+    expect(ce.expr(['Chop', ['Rational', 2, 3], 0.01]).N().re).toBeCloseTo(
+      2 / 3,
+      12
+    );
+  });
+  test('a nested Chop is not flattened into its tolerance slot', () => {
+    expect(ce.expr(['Chop', ['Chop', 'x', 0.001], 0.01]).json).toEqual([
+      'Chop',
+      ['Chop', 'x', 0.001],
+      0.01,
+    ]);
+    expect(ce.expr(['Chop', ['Chop', 0.005, 0.001], 0.01]).evaluate().re).toBe(
+      0
+    );
+    expect(ce.expr(['Chop', ['Chop', 'x']]).json).toEqual(['Chop', 'x']);
+  });
+  test('a symbolic tolerance leaves the call unevaluated', () => {
+    expect(ce.expr(['Chop', 0.004, 't']).evaluate().operator).toBe('Chop');
+  });
+  test('the tolerance is a non-negative real', () => {
+    expect(ce.expr(['Chop', 0.004, -1]).isValid).toBe(false);
+  });
+  test('Chop(x) keeps the engine tolerance', () => {
+    expect(ce.expr(['Chop', 1e-15]).evaluate().toString()).toBe('0');
+    expect(ce.expr(['Chop', 1e-5]).evaluate().toString()).toBe('0.00001');
   });
 });
 

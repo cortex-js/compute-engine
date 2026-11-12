@@ -3711,8 +3711,20 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   LCM: (args, compile) => `_IA.lcm(${compile(args[0])}, ${compile(args[1])})`,
   // Tolerance baked at compile time from the engine, matching the
   // interpreter's `Chop` and the JS target (see `javascript-target.ts`).
-  Chop: (args, compile) =>
-    `_IA.chop(${compile(args[0])}, ${args[0]?.engine?.tolerance ?? 1e-10})`,
+  // An explicit tolerance is a scalar the kernel reads, so it is baked in
+  // from a numeric constant rather than compiled to an interval.
+  Chop: (args, compile) => {
+    let tolerance = args[0]?.engine?.tolerance ?? 1e-10;
+    if (args[1]) {
+      const t = args[1].N();
+      if (!isNumber(t) || t.isComplex || !Number.isFinite(t.re))
+        throw new Error(
+          'Could not compile `Chop`: the tolerance must be a numeric constant'
+        );
+      tolerance = t.re;
+    }
+    return `_IA.chop(${compile(args[0])}, ${tolerance})`;
+  },
   Erf: (args, compile) => `_IA.erf(${compile(args[0])})`,
   Erfc: (args, compile) => `_IA.erfc(${compile(args[0])})`,
   Exp2: (args, compile) => `_IA.exp2(${compile(args[0])})`,
