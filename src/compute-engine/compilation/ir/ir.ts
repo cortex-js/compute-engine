@@ -68,6 +68,9 @@ export type Instr =
 
 export type IRFunction = {
   readonly name: string;
+  /** The name of the user function this function compiles (absent for the
+   *  entry). */
+  readonly source?: string;
   /** The name of each parameter, for the host (the inputs of the entry). A
    *  `lengthOf` parameter is the length of the input of that name. */
   readonly paramNames: string[];
@@ -75,6 +78,8 @@ export type IRFunction = {
   /** The first `positional` parameters of the entry are passed by position
    *  (the parameters of a root function literal); the others are inputs. */
   readonly positional?: number;
+  /** The entry is a root function literal (also one of no parameter). */
+  readonly literal?: boolean;
   /** `params` are the parameters, `yields` the results. */
   readonly body: Region;
   readonly results: IRType[];
@@ -187,16 +192,18 @@ export function typeToString(t: IRType): string {
 
 /** The functions of `p` that are in a cycle of the call graph: one walk
  *  from each function, each function visited once per walk. */
-export function recursiveFunctions(p: Program): Set<string> {
+export function recursiveFunctions(
+  functions: readonly IRFunction[]
+): Set<string> {
   const callees = new Map<string, string[]>();
   const calls = (r: Region): string[] =>
     r.body.flatMap((i) => [
       ...(i.k === 'call' ? [i.fn] : []),
       ...regionsOf(i).flatMap(calls),
     ]);
-  for (const f of p.functions) callees.set(f.name, calls(f.body));
+  for (const f of functions) callees.set(f.name, calls(f.body));
   const cyclic = new Set<string>();
-  for (const f of p.functions) {
+  for (const f of functions) {
     const seen = new Set<string>();
     const pending = [...callees.get(f.name)!];
     while (pending.length > 0) {
@@ -231,6 +238,8 @@ export class Builder {
   effects = 0;
   /** The number of positional parameters of the entry. */
   positional = 0;
+  /** The entry is a root function literal. */
+  literal = false;
 
   constructor(
     private readonly pure: (op: string) => boolean,
@@ -263,6 +272,7 @@ export class Builder {
       paramNames: this.paramNames,
       lengthOf: this.lengthOf,
       positional: this.positional,
+      literal: this.literal,
       body,
       results,
     };

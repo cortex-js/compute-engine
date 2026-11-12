@@ -1617,7 +1617,7 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._jsProfileShadow`.
    * @internal
    */
-  _jsProfileShadow: boolean = jsProfileShadowDefault();
+  _jsProfileShadow: boolean | 'ir' = jsProfileShadowDefault();
 
   /** When true, a scope being discarded tombstones its value definitions and
    * the symbol resolution sites report a use of a dead binding with both

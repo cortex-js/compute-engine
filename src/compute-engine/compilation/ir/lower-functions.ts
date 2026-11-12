@@ -8,7 +8,9 @@
  * being lowered.
  */
 
+import { isForwardCallReference } from '../../boxed-expression/forward-call-reference.js';
 import type { Type } from '../../../common/type/types.js';
+import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import type { Expression } from '../../global-types.js';
 import { isFunction } from '../../boxed-expression/type-guards.js';
@@ -63,7 +65,7 @@ export function inputType(
 export function scalarOf(node: Expression, t: Type, what: string): IRType {
   const ir = inputType(t);
   if (ir === undefined || ir.shape.length > 0)
-    decline(node, `${what} is not a scalar (${String(t)})`);
+    decline(node, `${what} is not a scalar (${engineTypeToString(t)})`);
   return { lane: ir.lane, shape: [] };
 }
 
@@ -114,7 +116,12 @@ function signatureTypes(e: Fn, literal: Fn) {
 
 /** A user function: the IR function, its parameter types and its result
  *  type (absent while its body is lowered, when it is not declared). */
-type UserFunction = { name: string; params: IRType[]; result?: IRType };
+type UserFunction = {
+  name: string;
+  key: object;
+  params: IRType[];
+  result?: IRType;
+};
 
 export function functionLowering(cx: Lowering) {
   const { b, type } = cx;
@@ -130,6 +137,7 @@ export function functionLowering(cx: Lowering) {
     const { names, params, result } = signatureTypes(e, literal);
     const fn: UserFunction = {
       name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
+      key,
       params,
       result,
     };
@@ -138,6 +146,7 @@ export function functionLowering(cx: Lowering) {
     const values = params.map((t) => b.newValue(t));
     const ir: IRFunction = {
       name: fn.name,
+      source: e.operator,
       paramNames: names,
       lengthOf: names.map(() => false),
       body: { params: values, body: [], yields: [] },
@@ -208,8 +217,32 @@ export function functionLowering(cx: Lowering) {
 
   return {
     call,
-    /** Whether `e` is a recursive call of a function being lowered. */
-    recursive: (e: Fn) => pending.has(e.operator),
+    /** Whether `e`, which has no user binding of its own, is a recursive
+     *  call of a function being lowered: its head is bound to the
+     *  definition of that function, or to the placeholder of a call made
+     *  before the definition (`isForwardCallReference()`) whose name
+     *  resolves to it. A call bound to the library is not one; a call of
+     *  that name with another binding declines. */
+    recursive: (e: Fn): boolean => {
+      const fn = pending.get(e.operator);
+      if (fn === undefined || cx.isLibrary(e)) return false;
+      if (e.valueDefinition === fn.key || e.operatorDefinition === fn.key)
+        return true;
+      const resolved = cx.ce.lookupDefinition(e.operator);
+      if (
+        e.valueDefinition !== undefined &&
+        isForwardCallReference(e.valueDefinition) &&
+        resolved !== undefined &&
+        ('operator' in resolved
+          ? resolved.operator === fn.key
+          : resolved.value === fn.key)
+      )
+        return true;
+      decline(
+        e,
+        `a call of ${e.operator} whose binding is not the function ${e.operator} being compiled`
+      );
+    },
     /** The effect of the IR function `name`: effectful while it is not
      *  settled (a function being lowered). */
     effect: (name: string): Effect => settled.get(name) ?? 'effectful',

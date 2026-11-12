@@ -32,6 +32,7 @@
  * call.
  */
 
+import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import type { Expression } from '../../global-types.js';
 import {
   isFunction,
@@ -103,16 +104,49 @@ const CONSTRUCTS = new Set([
 const LOOPS = new Set(['Map', 'Filter', 'Reduce', 'Range']);
 
 /** What the memo and `closedValue()` read of a node: the names it reads
- *  and writes (outside it), whether it has a loop, and whether every head
- *  is a pure row, a construct or a constant of the slice. */
+ *  and writes (outside it), whether it has a loop, whether every head
+ *  is a pure row, a construct or a constant of the slice, and the number of
+ *  its nodes counted on every path (at most `CLOSED_SIZE`, plus one). */
 type Facts = {
   names: Set<string>;
   writes: Set<string>;
   loop: boolean;
   slice: boolean;
+  size: number;
 };
 
-export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
+/** The largest closed node, counted on every path, that the walk evaluates
+ *  with `N()`: the interpreter walks every path of a shared node, so a
+ *  closed tower of shared nodes would take a time exponential in its
+ *  depth. A larger node is lowered, and its parts are folded. */
+const CLOSED_SIZE = 10_000;
+
+/** The IR operations whose value changes when an integer of 2^53 or more
+ *  is rounded to a double (`Mod(2^60 + n, 3)`), and those through which
+ *  such an integer stays one. */
+const EXACT_OPS = new Set([
+  'mod',
+  'floor',
+  'ceil',
+  'round',
+  'lt',
+  'le',
+  'gt',
+  'ge',
+  'eq',
+  'ne',
+]);
+const INTEGER_OPS = new Set(['add', 'sub', 'neg', 'mul', 'abs', 'max', 'min']);
+
+/** `fold: false` (the `constantFold: false` option of the profile `ir`):
+ *  no closed sub-expression is evaluated with `N()`. */
+export type LowerOptions = { readonly fold?: boolean };
+
+export function lower(
+  root: Expression,
+  rows: readonly OperatorRow[],
+  options: LowerOptions = {}
+): Program {
   const ce = root.engine;
   const b = new Builder(
     (op) => rowOfOp(rows, op)?.row.effect === 'pure',
@@ -128,6 +162,14 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
   >();
   const known = new WeakMap<Expression, Facts>();
   const inputLengths = new Set<V>();
+  /** The values that are, or are computed exactly from, an integer
+   *  constant of 2^53 or more (`EXACT_OPS`). */
+  const large = new Set<V>();
+  const constantOf = (x: number, lane: 'integer' | 'real'): V => {
+    const v = b.constant(x, lane);
+    if (Number.isInteger(x) && Math.abs(x) >= 2 ** 53) large.add(v);
+    return v;
+  };
   const type = (v: V) => b.typeOf(v);
   const constant = (v: V) => {
     const c = b.constants.get(v);
@@ -169,9 +211,16 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
         writes: none,
         loop: false,
         slice: true,
+        size: 1,
       };
     if (!isFunction(e))
-      return { names: none, writes: none, loop: false, slice: isNumber(e) };
+      return {
+        names: none,
+        writes: none,
+        loop: false,
+        slice: isNumber(e),
+        size: 1,
+      };
     const f = known.get(e);
     if (f !== undefined) return f;
     const h = e.operator;
@@ -189,12 +238,14 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
         (CONSTRUCTS.has(h) ||
           REDUCTIONS.has(h) ||
           rowOfHead(rows, h)?.effect === 'pure'),
+      size: 1,
     };
     if (h === 'Assign' && isSymbol(e.ops[0])) info.writes.add(e.ops[0].symbol);
     for (const op of e.ops) {
       const t = facts(op);
       info.loop ||= t.loop;
       info.slice &&= t.slice;
+      info.size = Math.min(CLOSED_SIZE + 1, info.size + t.size);
       t.names.forEach((n) => info.names.add(n));
       t.writes.forEach((n) => info.writes.add(n));
     }
@@ -231,6 +282,13 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
             ? `${r.head} of a list`
             : `${r.head} of ${types.map(typeToString).join(', ')}`
         );
+      const base = signature[2].split('.')[0];
+      const fromLarge = operands.some((v) => large.has(v));
+      if (fromLarge && EXACT_OPS.has(base))
+        decline(
+          node,
+          'an integer of 2^53 or more, which the interpreter computes with exactly and a double does not hold'
+        );
       const t = resultType(signature, types, same);
       if (t === undefined)
         decline(
@@ -239,7 +297,9 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
             ? 'lists of run-time lengths that are not one length by construction (the same list, or a Map of it)'
             : 'lists of different lengths'
         );
-      return b.op(signature[2], operands, t);
+      const out = b.op(signature[2], operands, t);
+      if (fromLarge && INTEGER_OPS.has(base)) large.add(out);
+      return out;
     };
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
@@ -281,7 +341,7 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
   const node = (e: Expression, want: boolean): V | undefined => {
     if (isNumber(e)) {
       if (e.im !== 0) decline(e, 'a complex number');
-      return b.constant(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
+      return constantOf(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
     }
     if (isSymbol(e)) return symbol(e, want);
     if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
@@ -290,7 +350,9 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
     if (!isLibraryOperator(e as never, e.operator))
       decline(
         e,
-        `${e.operator} is not the library operator here (a user definition)`
+        e.operatorDefinition === undefined && e.valueDefinition === undefined
+          ? `${e.operator} is an unknown operator (no definition)`
+          : `${e.operator} is not the library operator here (a user definition)`
       );
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
@@ -442,7 +504,14 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
    *  cancellation, which propagates): the walk lowers it then. */
   const closedValue = (e: Fn): V | undefined => {
     const f = facts(e);
-    if (!f.slice || f.loop || e.unknowns.length > 0) return undefined;
+    if (
+      options.fold === false ||
+      !f.slice ||
+      f.loop ||
+      f.size > CLOSED_SIZE ||
+      e.unknowns.length > 0
+    )
+      return undefined;
     // A name bound in the walk (a parameter named `Pi`) is not the
     // library's; a name with a value declines where it is read.
     const valued = (s: string) =>
@@ -463,7 +532,7 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
     if (isSymbol(n, 'True') || isSymbol(n, 'False'))
       return b.constant(isSymbol(n, 'True'), 'boolean');
     if (!isNumber(n) || n.im !== 0) return undefined;
-    return b.constant(n.re, Number.isSafeInteger(n.re) ? 'integer' : 'real');
+    return constantOf(n.re, Number.isSafeInteger(n.re) ? 'integer' : 'real');
   };
 
   const symbol = (
@@ -504,7 +573,8 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
     positional = false
   ): V => {
     const ir = inputType(t);
-    if (ir === undefined) decline(e, `the input ${name} of type ${String(t)}`);
+    if (ir === undefined)
+      decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
     const shape = ir.shape.map((n) => {
       if (n !== 'run-time') return n;
       if (positional)
@@ -733,6 +803,7 @@ export function lower(root: Expression, rows: readonly OperatorRow[]): Program {
   // A root function literal: its parameters, by position, come first.
   if (isFunction(root, 'Function') && isLibrary(root)) {
     b.positional = root.nops - 1;
+    b.literal = true;
     return b.program(() => {
       root.ops.slice(1).forEach((p) => {
         const name = parameterName(p);

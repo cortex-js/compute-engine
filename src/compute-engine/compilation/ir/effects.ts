@@ -12,12 +12,16 @@
  *
  * The effect of an operation is its row's; of a region, the largest of its
  * row and its body; of a call, its callee's. The effects of the functions
- * are the least fixed point over the call graph from `pure` (each round
- * only raises an effect, so it ends, and a recursive function that does
- * nothing else is pure).
+ * are the least fixed point over the call graph from `pure`, and from
+ * `may-fail` for a function on a cycle of calls (each round only raises an
+ * effect, so it ends). A recursive function may not terminate, so it is at
+ * least `may-fail`, and so is its caller: a guarded recursive call is not
+ * evaluated before its guard.
  */
 
 import {
+  outsOf,
+  recursiveFunctions,
   regionsOf,
   type IRFunction,
   type Instr,
@@ -80,20 +84,24 @@ function regionEffect(
   );
 }
 
-/** The effect of each function of `functions`: the least fixed point.
- *  A function that is not in the list (`known` absent) is effectful. */
+/** The effect of each function of `functions`: the least fixed point, at
+ *  least `may-fail` for a recursive function. A function that is not in
+ *  the list (`known` absent) is effectful. */
 export function functionEffects(
   rows: readonly OperatorRow[],
   functions: readonly IRFunction[],
   known: ReadonlyMap<string, Effect> = new Map()
 ): Map<string, Effect> {
   const effects = new Map<string, Effect>(known);
-  for (const f of functions) effects.set(f.name, 'pure');
+  const cyclic = recursiveFunctions(functions);
+  const floor = (name: string): Effect =>
+    cyclic.has(name) ? 'may-fail' : 'pure';
+  for (const f of functions) effects.set(f.name, floor(f.name));
   const fn = (name: string) => effects.get(name) ?? 'effectful';
   for (let changed = true; changed;) {
     changed = false;
     for (const f of functions) {
-      const e = regionEffect(rows, f.body, fn);
+      const e = maxEffect(floor(f.name), regionEffect(rows, f.body, fn));
       if (e !== effects.get(f.name)) {
         effects.set(f.name, e);
         changed = true;
@@ -129,10 +137,16 @@ export function effects(p: Program, rows: readonly OperatorRow[]): Effects {
   };
 }
 
-export type TraceEntry = { region: number; name: string; args: V[] };
+export type TraceEntry = {
+  region: number;
+  name: string;
+  args: V[];
+  outs: V[];
+};
 
-/** The effectful instructions of `p` in order, each with its operands and
- *  the region that holds it (an id per region object, from `ids`). */
+/** The effectful instructions of `p` in order, each with its operands, its
+ *  results (two draws in one region differ by their results) and the
+ *  region that holds it (an id per region object, from `ids`). */
 export function effectTrace(
   p: Program,
   rows: readonly OperatorRow[],
@@ -151,7 +165,7 @@ export function effectTrace(
         (i.k === 'op' || i.k === 'call' || i.k === 'region')
       ) {
         const name = i.k === 'call' ? `call ${i.fn}` : i.op;
-        out.push({ region: id(r), name, args: i.args });
+        out.push({ region: id(r), name, args: i.args, outs: outsOf(i) });
       }
       regionsOf(i).forEach(walk);
     }
@@ -173,7 +187,8 @@ export function sameTrace(
       (x, k) =>
         x.region === after[k].region &&
         x.name === after[k].name &&
-        x.args.every((a, j) => resolve(a) === after[k].args[j])
+        x.args.every((a, j) => resolve(a) === after[k].args[j]) &&
+        x.outs.every((a, j) => resolve(a) === after[k].outs[j])
     )
   );
 }

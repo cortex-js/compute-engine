@@ -28,6 +28,12 @@
 
 ### New Features
 
+- **Experimental: the `ir` profile of the JavaScript target.**
+  `compile(expr, { profile: 'ir' })` compiles the expression with a new
+  compiler; it can change or be removed without notice. A program or an
+  option outside the profile declines with `outside-profile`, and `fallback`
+  applies as for any other decline; without the option, nothing changes.
+
 - **`ce.temporaryName(hint, ...avoid)` gives a name for a temporary symbol.**
   It returns `<hint>_tmp<n>`, with `n` the smallest integer from 1 for which
   the name has no definition from the current scope and does not occur in

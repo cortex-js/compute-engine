@@ -21,7 +21,12 @@ import { JS, printJavaScript, type JavaScriptResult } from './print-js.js';
 import { GLSL, printGlsl, type GlslResult } from './print-glsl.js';
 import { spellingOf, type Spelling, type Syntax } from './print.js';
 import { effects, effectTrace } from './effects.js';
-import { OPERATORS, rowOfOp, type OperatorRow } from './operators.js';
+import {
+  deepFreeze,
+  OPERATORS,
+  rowOfOp,
+  type OperatorRow,
+} from './operators.js';
 import {
   entryOf,
   lengthValues,
@@ -68,7 +73,7 @@ export type Profile = {
   readonly syntax: Syntax;
 };
 
-export const TARGETS: Readonly<Record<Target, Profile>> = Object.freeze({
+export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
   javascript: {
     lanes: ['real', 'integer', 'boolean'],
     rank: Infinity,
@@ -92,8 +97,13 @@ export const TARGETS: Readonly<Record<Target, Profile>> = Object.freeze({
 });
 
 /** What `profile` cannot hold or print in `p` (the head of the operator
- *  when there is one, and the cause), or `undefined`. */
-export type Refusal = { readonly head?: string; readonly cause: string };
+ *  when there is one, the text of the node of a region when it has one,
+ *  and the cause), or `undefined`. */
+export type Refusal = {
+  readonly head?: string;
+  readonly site?: string;
+  readonly cause: string;
+};
 
 export function admits(
   p: Program,
@@ -129,9 +139,12 @@ export function admits(
     }
     if (i.k === 'region') {
       if (i.op === 'seeded' && !profile.frames)
-        return { head: 'WithRandomSeed', cause: 'WithRandomSeed' };
+        return { head: 'WithRandomSeed', site: i.site, cause: 'WithRandomSeed' };
       if (profile.syntax.regions[i.op] === undefined)
-        return { cause: `the region ${i.op} (a Map, a Filter or a Range)` };
+        return {
+          site: i.site,
+          cause: `the region ${i.op} (a Map, a Filter or a Range)`,
+        };
     }
     for (const v of outsOf(i)) {
       const m = type(p.types[v], typeToString(p.types[v]));
@@ -158,9 +171,9 @@ export function admits(
     const m = region(f.body);
     if (m !== undefined) return m;
   }
-  if (!profile.recursion && recursiveFunctions(p).size > 0)
+  if (!profile.recursion && recursiveFunctions(p.functions).size > 0)
     return {
-      cause: `a recursive function (${[...recursiveFunctions(p)].join(', ')})`,
+      cause: `a recursive function (${[...recursiveFunctions(p.functions)].join(', ')})`,
     };
   return undefined;
 }
@@ -236,6 +249,9 @@ export type SliceOptions = {
    *  still runs for a target that needs it). */
   readonly passes?: PassOptions | false;
   readonly extend?: Extension;
+  /** `false`: the lowering evaluates no closed sub-expression with `N()`
+   *  (the `fold` pass is a separate switch of `passes`). */
+  readonly constantFold?: boolean;
   /** JavaScript: the passes of all the loops and builds of one call of
    *  `run()`, nested ones and those of user functions included; over it,
    *  `run()` throws a `CancellationError` with the cause
@@ -271,7 +287,7 @@ export function sliceProgram(
 ): Program & { warnings: Warning[] } {
   const profile = TARGETS[options.target];
   const { rows, syntax } = tables(options);
-  const p = lower(expr, rows);
+  const p = lower(expr, rows, { fold: options.constantFold });
   verify(p, rows);
   const warnings = seededWarnings(p, rows);
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
@@ -279,7 +295,7 @@ export function sliceProgram(
   const refused = admits(p, { ...profile, syntax }, rows);
   if (refused !== undefined)
     throw new Decline(
-      'program',
+      refused.site ?? refused.head ?? 'program',
       `${refused.cause} on ${options.target}`,
       refused.head
     );
@@ -289,15 +305,15 @@ export function sliceProgram(
 export function compileSlice(
   expr: Expression,
   options: SliceOptions & { target: 'javascript' }
-): JavaScriptResult & { warnings: Warning[] };
+): JavaScriptResult & { warnings: Warning[]; program: Program };
 export function compileSlice(
   expr: Expression,
   options: SliceOptions & { target: 'glsl' }
-): GlslResult & { warnings: Warning[] };
+): GlslResult & { warnings: Warning[]; program: Program };
 export function compileSlice(
   expr: Expression,
   options: SliceOptions
-): (JavaScriptResult | GlslResult) & { warnings: Warning[] } {
+): (JavaScriptResult | GlslResult) & { warnings: Warning[]; program: Program } {
   const p = sliceProgram(expr, options);
   const { rows, syntax } = tables(options);
   const printed =
@@ -317,11 +333,13 @@ export function compileSlice(
     order.length !== trace.length ||
     !order.every(
       (x, k) =>
-        x.name === trace[k].name && x.args.join() === trace[k].args.join()
+        x.name === trace[k].name &&
+        x.args.join() === trace[k].args.join() &&
+        x.outs.join() === trace[k].outs.join()
     )
   )
     throw new SliceInternalError(
       'slice printer: the order of the effectful instructions'
     );
-  return { ...printed, warnings: p.warnings };
+  return { ...printed, warnings: p.warnings, program: p };
 }

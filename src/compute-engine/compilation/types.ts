@@ -2730,8 +2730,19 @@ export interface CompilationOptions<Expr = unknown> {
    *
    * The result reports `profile`, `pure` and `shippable`
    * (`CompilationResult`). `canCompile()` answers for the profile.
+   *
+   * **Experimental, and may change or be removed without notice.** With
+   * `'ir'`, the expression is compiled by the IR compiler of
+   * `src/compute-engine/compilation/ir` ("Selecting the pipeline" in its
+   * `README.md`). It declines with `'outside-profile'` what it does not
+   * compile, and by name the options `functions`, `vars`, `operators`,
+   * `imports`, `preamble`, `broadcast: true`, `strictTypes: true` and a
+   * `mode` other than `'strict'`, and `iterationBudget` for a program with
+   * a counted loop (a `Sum`, a `Product` or a reduction of a list); an
+   * internal error is a `'compile-error'`. The result reports
+   * `profile: 'ir'` and `shippable: false`, and no `pure`.
    */
-  profile?: 'numeric-kernel';
+  profile?: 'numeric-kernel' | 'ir';
 }
 
 /**
@@ -3821,11 +3832,11 @@ export type CompilationResult<
   shippable?: boolean;
 
   /**
-   * **Experimental.** `'numeric-kernel'` on a successful compilation with
-   * the `profile` option (`CompilationOptions.profile`). Absent otherwise,
+   * **Experimental.** The value of the `profile` option on a successful
+   * compilation with it (`CompilationOptions.profile`). Absent otherwise,
    * also on a decline.
    */
-  profile?: 'numeric-kernel';
+  profile?: 'numeric-kernel' | 'ir';
 
   /**
    * **Experimental.** Present on a result with `profile`. Whether the

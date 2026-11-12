@@ -291,6 +291,7 @@ export function printProgram(
         order.push({
           name: i.k === 'call' ? `call ${i.fn}` : i.op,
           args: i.args,
+          outs: outsOf(i),
         });
       if (i.k === 'if') {
         i.outs.forEach((v) =>

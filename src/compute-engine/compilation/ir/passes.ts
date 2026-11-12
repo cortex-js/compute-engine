@@ -61,13 +61,13 @@ export type PassOptions = {
   dce?: boolean;
 };
 
-export const ALL_PASSES: PassOptions = {
+export const ALL_PASSES: PassOptions = Object.freeze({
   fold: true,
   hoist: true,
   strength: true,
   cse: true,
   dce: true,
-};
+});
 
 /** A pass: whether it changed the program, and how it renamed values. */
 type Pass = (
@@ -85,6 +85,7 @@ export function runPasses(
     const before = effectTrace(p, rows, ids).map((x) => ({
       ...x,
       args: [...x.args],
+      outs: [...x.outs],
     }));
     const { changed, resolve } = pass(p, rows);
     verify(p, rows);

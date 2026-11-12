@@ -24,6 +24,15 @@ import {
   printJavaScript,
 } from '../../src/compute-engine/compilation/ir/print-js';
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
+import {
+  effectTrace,
+  sameTrace,
+} from '../../src/compute-engine/compilation/ir/effects';
+import {
+  CONSTANTS,
+  REDUCTIONS,
+} from '../../src/compute-engine/compilation/ir/operators';
+import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
 import type { Program } from '../../src/compute-engine/compilation/ir/ir';
 import { foldSeed } from '../../src/compute-engine/numerics/random';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -1220,5 +1229,83 @@ describe('IR slice: the iteration budget', () => {
     const r = budget(['Map', ['Function', ['Sin', 'z'], 'z'], 'D'], 3);
     expect(() => r.run({ D: [1, 2, 3, 4] })).toThrow(/more than 3/);
     expect((r.run({ D: [1, 2, 3] }) as number[]).length).toBe(3);
+  });
+  test('the budget counts the passes that run: a shared Sum runs once', () => {
+    // The two operands of the List are one node: the lowering shares a
+    // `may-fail` value with the evaluation that dominates it.
+    const sum = ce.box(['Sum', 'k', ['Limits', 'k', 1, 3]] as never);
+    const r = compileSlice(ce.function('List', [sum, sum]), {
+      target: 'javascript',
+      iterationBudget: 3,
+    });
+    expect(r.run({})).toEqual([6, 6]);
+  });
+});
+
+describe('IR slice: the fixes of the review of 2026-11-12', () => {
+  test('a guarded recursive call is not evaluated before its guard', () => {
+    // `ev` and `od` call each other: at n = 1e6 the call overflows the
+    // stack, so it must not run when `n < 20` is false.
+    const r = js(['And', ['Less', 'n', 20], ['Greater', ['ev', 'n'], 0]]);
+    expect(r.run({ n: 1000000 })).toBe(false);
+    expect(r.run({ n: 4 })).toBe(true);
+  });
+  test('a call bound to the library in a user function of the same name is the library call', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    engine.declare('Sin', 'function');
+    engine.assign(
+      'Sin',
+      engine.box([
+        'Function',
+        ['Multiply', 2, ['Apply', ['Module', 'Sin'], 't']],
+        't',
+      ] as never)
+    );
+    const r = js(['Sin', 'x'], engine);
+    expect(r.run({ x: 2 })).toBeCloseTo(2 * Math.sin(2), 14);
+  });
+  test('the effect trace tells apart two draws of one region', () => {
+    const p = sliceProgram(
+      makeMachineEngine().box(['List', ['Random'], ['Random']] as never),
+      { target: 'javascript' }
+    );
+    const trace = effectTrace(p, OPERATORS, new Map());
+    expect(trace.length).toBe(2);
+    expect(sameTrace(trace, [trace[1], trace[0]])).toBe(false);
+  });
+  test('the tables are frozen deeply', () => {
+    expect(() =>
+      (REDUCTIONS as Map<string, never>).set('Mean', {} as never)
+    ).toThrow();
+    expect(() => (CONSTANTS as Map<string, number>).set('Pi', 3)).toThrow();
+    expect(Object.isFrozen(REDUCTIONS.get('Sum'))).toBe(true);
+    expect(Object.isFrozen(TARGETS.javascript.lanes)).toBe(true);
+    expect(Object.isFrozen(ALL_PASSES)).toBe(true);
+    expect(Object.isFrozen(OPERATORS[0].signatures)).toBe(true);
+    // A child of a container that was frozen before.
+    expect(Object.isFrozen(JS.ops.round)).toBe(true);
+  });
+  test('a closed tower of shared nodes of depth 40 is not evaluated on every path', () => {
+    // `N()` walks every path of a shared node: the walk evaluates only a
+    // closed node of at most 10,000 nodes counted on every path.
+    let e: Expression = ce.box(['Add', 2, ['Sqrt', 3]] as never);
+    for (let k = 0; k < 40; k++) e = ce._fn('Add', [e, e]);
+    const shared = compileSlice(e, { target: 'javascript' });
+    expect(shared.run({}) as number).toBeCloseTo(
+      2 ** 40 * (2 + Math.sqrt(3)),
+      0
+    );
+  });
+  test('a refusal of the target names the node of the region', () => {
+    const d = declineOf(() =>
+      sliceProgram(ce.box(['WithRandomSeed', 1, ['Random']] as never), {
+        target: 'glsl',
+      })
+    );
+    expect([d.node, d.head]).toEqual([
+      'WithRandomSeed(1, Random())',
+      'WithRandomSeed',
+    ]);
   });
 });

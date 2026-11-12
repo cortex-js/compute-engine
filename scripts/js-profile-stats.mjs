@@ -17,7 +17,10 @@
 // many of these the profile admitted, declined or failed on, and how many of
 // the compilations the existing compiler declined and the profile admitted;
 // then the declines and failures of all its consumers, grouped by the
-// normalized message, with one example of each.
+// normalized message, with one example of each, and the declines of the
+// existing compiler that the profile admitted, by message.
+// `CE_JS_PROFILE=ir` and `CE_JS_PROFILE_SHADOW=ir` measure the profile `ir`
+// in the same format.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +35,7 @@ const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
 const totals = new Map();
 const shadow = new Map();
 const shadowMessages = new Map();
+const admittedOverBaseline = new Map();
 for (const file of files) {
   const data = JSON.parse(readFileSync(join(dir, file), 'utf8'));
   for (const [name, s] of Object.entries(data.shadow ?? {})) {
@@ -50,6 +54,13 @@ for (const file of files) {
         })
       );
     for (const k of Object.keys(t)) t[k] += s[k] ?? 0;
+    for (const [message, n] of Object.entries(
+      s.baselineDeclinedAdmittedMessages ?? {}
+    ))
+      admittedOverBaseline.set(
+        message,
+        (admittedOverBaseline.get(message) ?? 0) + n
+      );
     for (const [kind, map] of [
       ['declined', s.declinedMessages],
       ['failed', s.failedMessages],
@@ -182,4 +193,17 @@ if (shadow.size > 0) {
     console.log(
       `  ${String(sum.otherMessages).padStart(6)}  (messages not kept)`
     );
+}
+if (admittedOverBaseline.size > 0) {
+  console.log(
+    `\nShadow measure: the declines of the existing compiler that the profile admitted, by message`
+  );
+  for (const [message, n] of [...admittedOverBaseline.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 40)) {
+    const line = message.replace(/\s+/g, ' ');
+    console.log(
+      `  ${String(n).padStart(6)}  ${line.length > 220 ? line.slice(0, 217) + '...' : line}`
+    );
+  }
 }

@@ -18,7 +18,7 @@
  * inputs object for the free names of the body.
  */
 
-import type { ComputeEngine } from '../../index.js';
+import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
 import { makeRandomHelpers } from '../javascript-runtime.js';
 import type { RandomSeedFrame } from '../../numerics/random.js';
 import { rangeCount } from '../../numerics/range-count.js';

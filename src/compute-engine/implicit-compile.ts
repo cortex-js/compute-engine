@@ -132,7 +132,7 @@ function profileApplies(
 }
 
 /**
- * The compilation of `expr` with the `numeric-kernel` profile, for
+ * The compilation of `expr` with the profile of the switch, for
  * `implicitCompile()` with the switch on, when `profileApplies()`, or
  * `undefined` when the profile does not give code; the existing compiler
  * then runs, with the options of the caller.
@@ -164,7 +164,7 @@ function tryProfile(
       ...options,
       ...(attemptDeps === undefined ? {} : { symbolDeps: attemptDeps }),
       ...(attemptRefs === undefined ? {} : { varsObjectRefs: attemptRefs }),
-      profile: 'numeric-kernel',
+      profile: ce._jsProfile?.profile ?? 'numeric-kernel',
       fallback: false,
       entryChecks: false,
     });

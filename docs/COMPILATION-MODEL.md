@@ -2399,6 +2399,20 @@ The decisions are in `docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md`;
 the rules of each admitted form, with the cases where the existing emitter
 writes other code, are in `docs/plans/2026-11-09-js-pilot-emission-rewrites.md`.
 
+### The `ir` profile of the JavaScript target
+
+**Experimental, and may change or be removed without notice.** With the
+option `profile: 'ir'`, `compile()` to `javascript` uses the IR compiler of
+`src/compute-engine/compilation/ir` (its `README.md` has the contracts and,
+under "Selecting the pipeline", the options it maps or declines). A program
+or an option outside it declines with `outside-profile`, and `fallback`
+applies as for the `numeric-kernel` profile; an internal error is a
+`compile-error`. It reads an undeclared scalar input as a `real`, and it
+declines `iterationBudget` for a program with a counted loop (a `Sum`, a
+`Product` or a reduction of a list). Its
+code reads a runtime of its own and cannot be stored: the result has no
+`runtimeVersion`, and `shippable` is `false`.
+
 ### Interval results
 
 The `run` of an `interval-js` compilation gives one shape for each kind of

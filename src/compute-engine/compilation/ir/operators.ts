@@ -130,6 +130,28 @@ function arith(op: string, n: number): Signature[] {
   ];
 }
 
+/** `x`, with every object and array it holds frozen (not functions),
+ *  also the children of a container that is already frozen. */
+export function deepFreeze<T>(x: T, seen = new Set<object>()): T {
+  if (typeof x === 'object' && x !== null && !seen.has(x)) {
+    seen.add(x);
+    Object.freeze(x);
+    for (const v of Object.values(x)) deepFreeze(v, seen);
+  }
+  return x;
+}
+
+/** A map whose entries cannot change: `set`, `delete` and `clear` throw,
+ *  and each value is frozen. */
+function frozenMap<K, T>(entries: [K, T][]): ReadonlyMap<K, T> {
+  const m = new Map(entries.map(([k, v]) => [k, deepFreeze(v)]));
+  const refuse = () => {
+    throw new TypeError('slice: a table of the compiler is frozen');
+  };
+  Object.assign(m, { set: refuse, delete: refuse, clear: refuse });
+  return Object.freeze(m);
+}
+
 const angle: Options = { settings: ['angularUnit'] };
 const list: Options = { threads: false };
 const part: Options = { threads: false, alias: 'operand' };
@@ -177,7 +199,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      3,          [[[I, I, I], I, 'rangecount']], { ...list, fold: rangeCount }),
   // The step of `Range(a, b)`: 1, or -1 when `b < a`.
   row(undefined,      2,          [[[I, I], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
-].map((r) => Object.freeze(r)));
+].map((r) => deepFreeze(r)));
 
 /**
  * The region instructions. `args` are the lanes of the operands, `params`
@@ -214,7 +236,7 @@ const listOf = (element: IRType, n: Length): IRType => ({
 
 const last = (_: number, ys: readonly V[]) => [ys[ys.length - 1]];
 
-export const REGION_ROWS: readonly RegionRow[] = Object.freeze([
+export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
   {
     op: 'build',
     effect: 'may-fail',
@@ -252,7 +274,7 @@ export const REGION_ROWS: readonly RegionRow[] = Object.freeze([
 export const REDUCTIONS: ReadonlyMap<
   string,
   { row: string; identity: number; indexed: boolean; empty?: number }
-> = new Map([
+> = frozenMap([
   ['Sum', { row: 'Add', identity: 0, indexed: true }],
   ['Product', { row: 'Multiply', identity: 1, indexed: true }],
   ['Max', { row: 'Max', identity: -Infinity, indexed: false, empty: NaN }],
@@ -260,7 +282,7 @@ export const REDUCTIONS: ReadonlyMap<
 ]);
 
 /** The constant symbols of the library. */
-export const CONSTANTS: ReadonlyMap<string, number> = new Map([
+export const CONSTANTS: ReadonlyMap<string, number> = frozenMap([
   ['Pi', Math.PI],
   ['ExponentialE', Math.E],
 ]);
@@ -269,10 +291,11 @@ export const CONSTANTS: ReadonlyMap<string, number> = new Map([
 export const SETTINGS: Record<
   Setting,
   (ce: { angularUnit: string; roundingTies: string }) => boolean
-> = {
-  angularUnit: (ce) => ce.angularUnit === 'rad',
-  roundingTies: (ce) => ce.roundingTies === 'away-from-zero',
-};
+> = Object.freeze({
+  angularUnit: (ce: { angularUnit: string }) => ce.angularUnit === 'rad',
+  roundingTies: (ce: { roundingTies: string }) =>
+    ce.roundingTies === 'away-from-zero',
+});
 
 export function rowOfHead(
   rows: readonly OperatorRow[],

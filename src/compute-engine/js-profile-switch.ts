@@ -6,7 +6,7 @@
  *
  * The engine reads its initial value at construction
  * (`jsProfileSwitchDefault()`): `CE_JS_PROFILE=numeric-kernel` turns it on,
- * and `CE_JS_PROFILE_CONSUMERS=<names>` (separated by commas) limits it to
+ * `CE_JS_PROFILE=ir` turns it on with the experimental profile `ir`, and `CE_JS_PROFILE_CONSUMERS=<names>` (separated by commas) limits it to
  * these consumers. A test can set `ce._jsProfile` on an engine.
  *
  * The counters are kept per engine and per consumer (`_jsProfileStats()`).
@@ -15,7 +15,8 @@
  * `<directory>/<pid>-<time>.json` after each attempt
  * (`statsAccumulator()`); `scripts/js-profile-stats.mjs` sums these files.
  *
- * The shadow measure (`ce._jsProfileShadow`, `CE_JS_PROFILE_SHADOW=1`) is a
+ * The shadow measure (`ce._jsProfileShadow`, `CE_JS_PROFILE_SHADOW=1`, or
+ * `CE_JS_PROFILE_SHADOW=ir` to measure the profile `ir`) is a
  * second internal setting, also off by default: each compilation for the
  * `javascript` target that asks for no profile also compiles the expression
  * with the profile, discards that result, and counts its outcome
@@ -32,7 +33,7 @@
 /** The value of the switch: `undefined` is off. With no `consumers`, every
  * consumer tries the profile. */
 export type JsProfileSwitch = {
-  readonly profile: 'numeric-kernel';
+  readonly profile: 'numeric-kernel' | 'ir';
   readonly consumers?: ReadonlySet<string>;
 };
 
@@ -58,10 +59,14 @@ export type JsProfileOutcome = 'admitted' | 'declined' | 'failed';
  * declined (a result with `success: false`, or an error), and
  * `baselineDeclinedAdmitted` those of them that the profile admitted. The
  * keys of the message tables are normalized (`normalizedMessage()`), and
- * `examples` holds the first message of each key as it was. */
+ * `examples` holds the first message of each key as it was.
+ * `baselineDeclinedAdmittedMessages` counts the compilations of
+ * `baselineDeclinedAdmitted` by the normalized message of the decline of
+ * the existing compiler. */
 export type JsProfileShadowStats = JsProfileConsumerStats & {
   baselineDeclined: number;
   baselineDeclinedAdmitted: number;
+  baselineDeclinedAdmittedMessages: Record<string, number>;
   examples: Record<string, string>;
 };
 
@@ -89,20 +94,24 @@ function currentProcess(): ProcessLike | undefined {
 /** The initial value of the switch of an engine, from the environment. */
 export function jsProfileSwitchDefault(): JsProfileSwitch | undefined {
   const env = currentProcess()?.env;
-  if (env?.CE_JS_PROFILE !== 'numeric-kernel') return undefined;
-  const names = (env.CE_JS_PROFILE_CONSUMERS ?? '')
+  const profile = env?.CE_JS_PROFILE;
+  if (profile !== 'numeric-kernel' && profile !== 'ir') return undefined;
+  const names = (env?.CE_JS_PROFILE_CONSUMERS ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   return names.length === 0
-    ? { profile: 'numeric-kernel' }
-    : { profile: 'numeric-kernel', consumers: new Set(names) };
+    ? { profile }
+    : { profile, consumers: new Set(names) };
 }
 
 /** The initial value of the shadow measure of an engine, from the
- * environment: on when `CE_JS_PROFILE_SHADOW` is `1`. */
-export function jsProfileShadowDefault(): boolean {
-  return currentProcess()?.env?.CE_JS_PROFILE_SHADOW === '1';
+ * environment: on (`true`, the profile `numeric-kernel`) when
+ * `CE_JS_PROFILE_SHADOW` is `1`, `'ir'` (the profile `ir`) when it is
+ * `ir`. */
+export function jsProfileShadowDefault(): boolean | 'ir' {
+  const value = currentProcess()?.env?.CE_JS_PROFILE_SHADOW;
+  return value === 'ir' ? 'ir' : value === '1';
 }
 
 /** The options objects that `implicitCompile()` passes to `ce._compile()`,
@@ -195,6 +204,10 @@ function emptyShadowStats(): JsProfileShadowStats {
     ...emptyStats(),
     baselineDeclined: 0,
     baselineDeclinedAdmitted: 0,
+    baselineDeclinedAdmittedMessages: Object.create(null) as Record<
+      string,
+      number
+    >,
     examples: Object.create(null) as Record<string, string>,
   };
 }
@@ -242,13 +255,20 @@ function addShadow(
   consumer: string,
   baselineSucceeded: boolean,
   outcome: JsProfileOutcome,
-  message: string | undefined
+  message: string | undefined,
+  baselineMessage: string | undefined
 ): void {
   let stats = table.get(consumer);
   if (stats === undefined) table.set(consumer, (stats = emptyShadowStats()));
   if (!baselineSucceeded) {
     stats.baselineDeclined += 1;
-    if (outcome === 'admitted') stats.baselineDeclinedAdmitted += 1;
+    if (outcome === 'admitted') {
+      stats.baselineDeclinedAdmitted += 1;
+      const key = normalizedMessage(baselineMessage ?? '(no message)');
+      const table = stats.baselineDeclinedAdmittedMessages;
+      if (key in table) table[key] += 1;
+      else if (Object.keys(table).length < MAX_SHADOW_MESSAGES) table[key] = 1;
+    }
     return;
   }
   const raw = message ?? '(no message)';
@@ -268,6 +288,13 @@ function snapshot<S extends JsProfileConsumerStats>(
       failedMessages: { ...s.failedMessages },
       ...('examples' in s
         ? { examples: { ...(s.examples as Record<string, string>) } }
+        : {}),
+      ...('baselineDeclinedAdmittedMessages' in s
+        ? {
+            baselineDeclinedAdmittedMessages: {
+              ...(s.baselineDeclinedAdmittedMessages as Record<string, number>),
+            },
+          }
         : {}),
     };
   return result;
@@ -344,21 +371,37 @@ export function recordJsProfileAttempt(
 }
 
 /** Count one compilation of the shadow measure by `consumer` on the engine
- * `ce`: `baselineSucceeded` tells whether the existing compiler gave code,
- * `outcome` and `message` give the outcome of the profile. */
+ * `ce`: `baselineSucceeded` tells whether the existing compiler gave code
+ * (and `baselineMessage` why not), `outcome` and `message` give the outcome
+ * of the profile. */
 export function recordJsProfileShadow(
   ce: object,
   consumer: string,
   baselineSucceeded: boolean,
   outcome: JsProfileOutcome,
-  message?: string
+  message?: string,
+  baselineMessage?: string
 ): void {
   let table = engineShadowStats.get(ce);
   if (table === undefined) engineShadowStats.set(ce, (table = new Map()));
-  addShadow(table, consumer, baselineSucceeded, outcome, message);
+  addShadow(
+    table,
+    consumer,
+    baselineSucceeded,
+    outcome,
+    message,
+    baselineMessage
+  );
   const file = statsAccumulator();
   if (file === null) return;
-  addShadow(file.shadow, consumer, baselineSucceeded, outcome, message);
+  addShadow(
+    file.shadow,
+    consumer,
+    baselineSucceeded,
+    outcome,
+    message,
+    baselineMessage
+  );
   writeStats(file);
 }
 

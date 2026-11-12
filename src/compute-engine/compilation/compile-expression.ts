@@ -33,6 +33,7 @@ import { withVarsValuesHidden } from './vars-inputs.js';
 import { fragmentErrorDiagnostic } from './fragment.js';
 import type { CanCompileResult } from './fragment.js';
 import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
+import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import {
   jsProfileShadowConsumer,
   recordJsProfileShadow,
@@ -65,8 +66,22 @@ export type CompileExpressionOptions<T extends string = string> = {
   constantFold?: boolean;
   storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
   strictTypes?: boolean;
-  profile?: 'numeric-kernel';
+  profile?: 'numeric-kernel' | 'ir';
 };
+
+/**
+ * Every option of `compile()` has a class in the profile `ir`
+ * (`IR_OPTIONS` in `ir/adapter.ts`), and the table names no other option: a
+ * new option fails this check until it is classified there.
+ */
+const IR_OPTIONS_CLASSIFIED: [keyof CompileExpressionOptions] extends [
+  keyof typeof IR_OPTIONS,
+]
+  ? [keyof typeof IR_OPTIONS] extends [keyof CompileExpressionOptions]
+    ? true
+    : false
+  : false = true;
+void IR_OPTIONS_CLASSIFIED;
 
 /**
  * Throw when the `profile` option is given with a target other than
@@ -78,14 +93,14 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
   if (options?.profile === undefined) return;
   if (options.target !== undefined)
     throw new Error(
-      'Invalid compilation option "profile": the profile "numeric-kernel" is ' +
+      `Invalid compilation option "profile": the profile "${options.profile}" is ` +
         'defined for the target "javascript" only, not for a direct target ' +
         '(the `target` option)'
     );
   const to = options.to ?? 'javascript';
   if (to !== 'javascript')
     throw new Error(
-      `Invalid compilation option "profile": the profile "numeric-kernel" is ` +
+      `Invalid compilation option "profile": the profile "${options.profile}" is ` +
         `defined for the target "javascript" only, not for "${to}"`
     );
 }
@@ -177,7 +192,7 @@ function shadowConsumerOf(
 /**
  * The compilation of `expr` with `options`, and then, for the shadow
  * measure, a compilation of `expr` with the same options and the profile
- * `numeric-kernel`, whose outcome is counted under `consumer`
+ * `numeric-kernel` (or `ir` when `ce._jsProfileShadow` is `'ir'`), whose outcome is counted under `consumer`
  * (`recordJsProfileShadow()`) and whose result is discarded. The result,
  * or the error, is that of the first compilation. A cancellation of the
  * first compilation is thrown with no second one.
@@ -201,10 +216,16 @@ function compileWithShadow<T extends string, R>(
     // a Content Security Policy that blocks dynamic code would report a
     // second violation.
     if (!isCancellationError(e) && !(e instanceof EvalError))
-      measureProfile(expr, options, consumer, false);
+      measureProfile(expr, options, consumer, false, (e as Error)?.message);
     throw e;
   }
-  measureProfile(expr, options, consumer, result.success === true);
+  measureProfile(
+    expr,
+    options,
+    consumer,
+    result.success === true,
+    result.error
+  );
   return result;
 }
 
@@ -214,7 +235,8 @@ function measureProfile(
   expr: Expression,
   options: CompileExpressionOptions | undefined,
   consumer: string,
-  baselineSucceeded: boolean
+  baselineSucceeded: boolean,
+  baselineMessage?: string
 ): void {
   const ce = expr.engine;
   // The profile lowers a node reached on several paths once where it can,
@@ -228,11 +250,18 @@ function measureProfile(
       ...(options?.varsObjectRefs === undefined
         ? {}
         : { varsObjectRefs: new Set() }),
-      profile: 'numeric-kernel',
+      profile: ce._jsProfileShadow === 'ir' ? 'ir' : 'numeric-kernel',
       fallback: false,
     });
     if (result.success === true)
-      recordJsProfileShadow(ce, consumer, baselineSucceeded, 'admitted');
+      recordJsProfileShadow(
+        ce,
+        consumer,
+        baselineSucceeded,
+        'admitted',
+        undefined,
+        baselineMessage
+      );
     else {
       const diagnostic = result.diagnostic;
       recordJsProfileShadow(
@@ -242,7 +271,8 @@ function measureProfile(
         diagnostic?.code === 'outside-profile' ? 'declined' : 'failed',
         diagnostic === undefined
           ? result.error
-          : profileMessage(diagnostic.code, diagnostic.message)
+          : profileMessage(diagnostic.code, diagnostic.message),
+        baselineMessage
       );
     }
   } catch (e) {
@@ -254,7 +284,8 @@ function measureProfile(
       isCompileDeclineError(e) && diagnostic.code === 'outside-profile'
         ? 'declined'
         : 'failed',
-      profileMessage(diagnostic.code, diagnostic.message)
+      profileMessage(diagnostic.code, diagnostic.message),
+      baselineMessage
     );
   } finally {
     shadowDepth -= 1;
@@ -571,6 +602,13 @@ function compileExpression<
     // The `numeric-kernel` profile compiles on the structured route of the
     // JavaScript target (`ScalarFragmentJavaScriptTarget`), with the
     // assembly of the JavaScript target.
+    // The profile `ir` (experimental) compiles with the IR compiler
+    // (`ir/adapter.ts`); a decline falls back in the catch below.
+    if (options?.profile === 'ir')
+      return compileWithIrProfile(expr, options) as unknown as CompilationResult<
+        T,
+        R
+      >;
     if (options?.profile === 'numeric-kernel')
       return strictTypesChecked(
         expr,
@@ -664,7 +702,9 @@ function compileExpression<
  * gives (`'outside-profile'` with the first node outside the profile, or
  * the code of another decline), or a `'compile-error'` with the message of
  * an invalid option. It runs the whole compilation, emission included, so
- * it costs as much as `compile()`.
+ * it costs as much as `compile()`. With `profile: 'ir'` (experimental too),
+ * it answers in the same way for that profile; its positive answer has
+ * `shippable: false` and no `pure`.
  *
  * It never throws: an invalid expression, an invalid option or an error of
  * the preparation of the tree gives `ok: false` with the message of the
