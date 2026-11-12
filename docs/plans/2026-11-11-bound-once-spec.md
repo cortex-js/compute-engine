@@ -678,8 +678,10 @@ the engine, which make a registration all-or-nothing
 (`engine-library-bootstrap.ts`, the group-theory registration), remove
 what they declared when they fail; Tycho is told (two of its tests inject
 a failure of a restore through the internal `_restoreCheckpointSnapshot()`).
-It comes after D8 and the activations in the same worktree, as a task of
-its own. Until then the one test of CE-586 stays failing.
+DONE on main by session compute-engine-d1: commit
+`22625acf6365e34a01ff3e4b58e393266f835311` (2026-11-12). The worktree of
+step 1 is rebuilt on it before it lands; the one test of CE-586 goes with
+the API.
 
 After the migration of the tests (`d8-test-migration.md` in the evidence
 folder), the user decided three of the programs that the rules left open
