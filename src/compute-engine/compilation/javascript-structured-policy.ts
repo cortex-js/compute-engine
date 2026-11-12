@@ -153,6 +153,9 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // writes them. The value is a number, or an array for a row of a list
     // of lists.
     'replace-at': { results: ['array'], operands: ['array', 'number'] },
+    // `list?.slice()`, or `list?.map((_r) => _r?.slice())` for two levels:
+    // the copies of `listCopy()` and `_SYS.ownedCopyLevels`.
+    'copy': { results: ['array'], operands: ['array'] },
     // The test heads take real operands and have a real value.
     'trace': { results: ['number'], operands: ['number'] },
     // `_SYS.drawNextRandomNumber()`, a number, as the existing emitter

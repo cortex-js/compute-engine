@@ -197,6 +197,33 @@ test('the generator writes the integrals of the routine integrate (--calculus)',
     expect([form, forms.has(form)]).toEqual([form, true]);
 });
 
+test('the generator writes loops that carry a list or a list of lists', () => {
+  // `genCarriedList()`: the patterns of `withOwnedCopies()` and of the rows
+  // of `inPlaceUpdates()` (structured-in-place.ts). Most of them are larger
+  // than the default size: the runs of the tester with `--size 100` reach
+  // them more often.
+  const forms = new Set<string>();
+  for (let i = 0; i < 2000; i++) {
+    const text = JSON.stringify(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: 100 }).json);
+    if (!text.includes('["Declare","A",')) continue;
+    forms.add(text.includes(`["Declare","A","'list<list<real>>'"`) ? 'a list of lists' : 'a list');
+    if (text.includes('["Declare","B","')) forms.add('an alias');
+    if (text.includes('["Break"]')) forms.add('a break');
+    if (text.includes('"k2"')) forms.add('an inner loop');
+    if (/\["Declare","A","'list<real>'","(L|CL|V)"\]/.test(text)) forms.add('an input');
+    if (/\["Declare","A","'list<list<real>>'","(R|MA|M2|RP|MP)"\]/.test(text)) forms.add('an input of rows');
+  }
+  expect([...forms].sort()).toEqual([
+    'a break',
+    'a list',
+    'a list of lists',
+    'an alias',
+    'an inner loop',
+    'an input',
+    'an input of rows',
+  ]);
+});
+
 test('no difference between the two compilers and no failure of the profile, but the known ones', () => {
   const unexplained = result.findings.filter(
     (f) =>

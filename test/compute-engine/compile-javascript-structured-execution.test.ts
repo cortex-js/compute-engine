@@ -414,9 +414,9 @@ function f(n: integer) -> list<real> {
     expect(conditions(range('2*3', '1+1'))).toEqual([]);
   });
 
-  test('a loop over an input list: a candidate whose initial list is not unique', () => {
-    // The sequential code copies `H` at the first update; a parallel run
-    // must copy it once before it writes.
+  test('a loop over an input list: a candidate whose initial list is a copy', () => {
+    // The lowering copies `H` once before the loop (`withOwnedCopies()`), so
+    // the initial list is unique: a parallel run writes that copy.
     const analysis = analyze(
       `function f(H: list<real>, n: integer) -> list<real> {
   let L = H
@@ -426,13 +426,14 @@ function f(n: integer) -> list<real> {
       'f'
     );
     expect(analysis.parallelLoops.map(summary)).toEqual([
-      { candidate: true, updates: [['L', 'k', false]], conditions: ['bounds-at-least-one'] },
+      { candidate: true, updates: [['L', 'k', true]], conditions: ['bounds-at-least-one'] },
     ]);
   });
 
-  test('an initial list that the body or later code reads is not unique', () => {
-    // The sequential code copies `L0` at the first update, because the body
-    // reads it, or because the code after the loop reads it.
+  test('an initial list that the body or later code reads: a copy', () => {
+    // `L0` is not unique, because the body reads it, or because the code
+    // after the loop reads it: the lowering copies it once before the loop
+    // (`withOwnedCopies()`), and the copy is unique.
     const readInBody = analyze(
       `function f(n: integer) -> list<real> {
   let L0 = [0 for j in 1..n]
@@ -453,7 +454,7 @@ function f(n: integer) -> list<real> {
     );
     for (const analysis of [readInBody, readAfter])
       expect(analysis.parallelLoops.map(summary)).toEqual([
-        { candidate: true, updates: [['L', 'k', false]], conditions: ['bounds-at-least-one'] },
+        { candidate: true, updates: [['L', 'k', true]], conditions: ['bounds-at-least-one'] },
       ]);
   });
 
@@ -623,9 +624,13 @@ function f(H: list<real>) -> list<real> { h(H) }`);
 
   test('host arrays: an update in place of an input, in a loop and in a branch, is followed', () => {
     // `inPlaceUpdates()` never selects these updates; the made set does, so
-    // that the alias analysis of the defensive check is exercised.
-    for (const statement of ['L = replaceAt(L, k, 0)', 'if k < 2 { L = replaceAt(L, k, 0) }']) {
-      const ce = engineWith(`function f(H: list<real>, n: integer) -> list<real> {
+    // that the alias analysis of the defensive check is exercised. The call
+    // `g(L)` reads the list in each pass, so no copy before the loop lets
+    // the update write in place, and the lowering puts none
+    // (`withOwnedCopies()`): the loop starts from the input.
+    for (const statement of ['L = replaceAt(L, k, g(L))', 'if k < 2 { L = replaceAt(L, k, g(L)) }']) {
+      const ce = engineWith(`function g(A: list<real>) -> real { A[1] }
+function f(H: list<real>, n: integer) -> list<real> {
   let L = H
   for k in 1..n { ${statement} }
   L

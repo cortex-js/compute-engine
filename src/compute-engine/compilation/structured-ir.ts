@@ -634,6 +634,26 @@ export type IRReplaceAt = OperationBase & {
 };
 
 /**
+ * A copy of a list: one operand, the list; the result has its type and its
+ * representation and the same elements. The result is a new array, and so
+ * is each of its rows when `levels` is 2 (a list of lists); the arrays
+ * below `levels` are the arrays of the operand. An absent row (the value of
+ * an `at` out of range, `IRListRead`) gives the absent value. `pure`: the
+ * operand is not changed.
+ *
+ * The lowering writes no copy. `withOwnedCopies()` (`structured-in-place.ts`)
+ * puts one before a loop whose carried list starts from a value that the
+ * program does not own (an input, a constant, a row read): the loop then
+ * updates the copy in place (`inPlaceUpdates()`), where each pass would
+ * copy the list.
+ */
+export type IRCopy = OperationBase & {
+  readonly kind: 'copy';
+  /** 1, or 2 for a list of lists. */
+  readonly levels: 1 | 2;
+};
+
+/**
  * The functions of lists that the representation names, by an identifier
  * that names no target (`IRCollection`). A list operand is a list of reals
  * or of integers; where a tuple is allowed, it is a tuple of reals or of
@@ -1035,6 +1055,7 @@ export type IROperation =
   | IRAppend
   | IRBuild
   | IRReplaceAt
+  | IRCopy
   | IRCollection
   | IRConvert
   | IRIf

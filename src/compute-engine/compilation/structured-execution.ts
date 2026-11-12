@@ -476,7 +476,10 @@ function onlyRandom(op: IROperation): boolean {
  * can be the same array (a value of an `if` or of a loop that one of them
  * flows into, the result of a loop that an `exit` hands one of them, the
  * result of a call of a function whose value can be its
- * parameter, the result of an update in place of such a value). A `build`
+ * parameter, the result of an update in place of such a value), and a row
+ * read of such a value or of a list that can hold one as a row (a `list`, a
+ * `build`, a conversion, a function of lists, an update or a copy of one
+ * level that has such an operand or element). A `build`
  * and a copying `replace-at` make a new array. The analysis is a may-alias
  * analysis, by ids of values: a fixed point over the functions and the root.
  * Exported for tests only.
@@ -486,24 +489,56 @@ export function hostArrays(
   inPlace: ReadonlySet<IROperation>
 ): Set<number> {
   const shared = new Set<number>();
-  /** For each function: whether its value can be an array of its caller. */
+  /** The lists that are not arrays of the host but can hold one as a row
+   *  (`[M[1], M[2]]`, `take(M, 1)`, a copy of one level of `M`). */
+  const rows = new Set<number>();
+  /** For each function: whether its value can be an array of its caller,
+   *  or hold one as a row. */
   const returnsShared: boolean[] = [];
+  const returnsRows: boolean[] = [];
   // A tuple is an array of the host too, although no operation writes one.
   const isList = (v: IRValue) => isListType(v.type) || isTupleType(v.type);
-  const body = (region: IRRegion): boolean => {
+  const member = (v: IRValue | undefined) =>
+    v !== undefined && (shared.has(v.id) || rows.has(v.id));
+  const body = (region: IRRegion): { shared: boolean; rows: boolean } => {
     let size = -1;
-    while (size !== shared.size) {
-      size = shared.size;
+    while (size !== shared.size + rows.size) {
+      size = shared.size + rows.size;
       const visit = (r: IRRegion) => {
         for (const op of r.operations) {
           for (const inner of regionsOf(op)) visit(inner);
           const add = (v: IRValue | undefined) => {
             if (v !== undefined && isList(v)) shared.add(v.id);
           };
+          const addRows = (v: IRValue | undefined) => {
+            if (v !== undefined && isListType(v.type) && !shared.has(v.id))
+              rows.add(v.id);
+          };
           // A constant is one array that every call of the code reads.
           if (op.kind === 'input' || op.kind === 'constant') add(op.result);
           if (op.kind === 'call' && returnsShared[op.function] === true)
             add(op.result);
+          if (op.kind === 'call' && returnsRows[op.function] === true)
+            addRows(op.result);
+          // A row of a list of the host, or of a list that holds one, is
+          // an array of the host.
+          if (op.kind === 'at' && member(op.operands[0])) add(op.result);
+          // A new outer array that can hold the rows of its operands, or
+          // a value of an operand as a row: a copy of one level, a list, a
+          // conversion, a function of lists (`take`, `reverse`, `join`),
+          // an update, an element of a build.
+          if (
+            ((op.kind === 'copy' && op.levels === 1) ||
+              op.kind === 'list' ||
+              op.kind === 'convert' ||
+              op.kind === 'collection' ||
+              op.kind === 'replace-at' ||
+              op.kind === 'append') &&
+            op.operands.some(member)
+          )
+            addRows(op.result);
+          if (op.kind === 'build' && member(yieldedValues(op.body)[0]))
+            addRows(op.result);
           if (
             (op.kind === 'replace-at' || op.kind === 'append') &&
             inPlace.has(op) &&
@@ -513,32 +548,43 @@ export function hostArrays(
           // A closed branch yields nothing (`yieldedValues()` is empty).
           if (op.kind === 'if')
             op.results.forEach((result, j) => {
-              if (
-                [op.then, op.else].some((b) => {
-                  const value = yieldedValues(b)[j];
-                  return value !== undefined && shared.has(value.id);
-                })
-              )
+              const values = [op.then, op.else].map(
+                (b) => yieldedValues(b)[j]
+              );
+              if (values.some((v) => v !== undefined && shared.has(v.id)))
                 add(result);
+              if (values.some((v) => v !== undefined && rows.has(v.id)))
+                addRows(result);
             });
           if (op.kind === 'loop') {
             const next = yieldedValues(op.body);
             const exits = exitsOf(op);
             op.results.forEach((result, i) => {
+              const parameter = op.body.parameters?.[i + 1];
               if (shared.has(op.operands[i + 2].id) || shared.has(next[i].id)) {
                 add(result);
-                add(op.body.parameters?.[i + 1]);
+                add(parameter);
+              }
+              if (rows.has(op.operands[i + 2].id) || rows.has(next[i].id)) {
+                addRows(result);
+                addRows(parameter);
               }
               // The operand of an `exit` flows into the result only.
               if (exits.some((exit) => shared.has(exit.operands[i].id)))
                 add(result);
+              if (exits.some((exit) => rows.has(exit.operands[i].id)))
+                addRows(result);
             });
           }
         }
       };
       visit(region);
     }
-    return shared.has(yieldedValues(region)[0]?.id);
+    const value = yieldedValues(region)[0];
+    return {
+      shared: value !== undefined && shared.has(value.id),
+      rows: value !== undefined && rows.has(value.id),
+    };
   };
   // The lowering gives a called function a lower index, but the verifier
   // does not require it: the functions and the root are analyzed again
@@ -548,14 +594,19 @@ export function hostArrays(
     for (const p of fn.parameters) if (isList(p)) shared.add(p.id);
   for (let changed = true; changed;) {
     changed = false;
-    const size = shared.size;
+    const size = shared.size + rows.size;
     program.functions.forEach((fn, i) => {
       const value = body(fn.body);
-      if (value !== (returnsShared[i] === true)) changed = true;
-      returnsShared[i] = value;
+      if (
+        value.shared !== (returnsShared[i] === true) ||
+        value.rows !== (returnsRows[i] === true)
+      )
+        changed = true;
+      returnsShared[i] = value.shared;
+      returnsRows[i] = value.rows;
     });
     body(program.root);
-    if (shared.size !== size) changed = true;
+    if (shared.size + rows.size !== size) changed = true;
   }
   return shared;
 }

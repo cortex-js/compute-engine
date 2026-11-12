@@ -68,6 +68,7 @@ export type PolicyOperationKind =
   | 'not'
   | 'build'
   | 'replace-at'
+  | 'copy'
   | 'list'
   | 'tuple'
   | 'get'
@@ -964,11 +965,11 @@ function verifySignature(
       );
   };
   // A list or a tuple is an operand only of `at`, `length`, `get`,
-  // `replace-at`, `append`, a function of lists, a call, a loop (as a
-  // carried value), a yield and a conversion of the representation of a
-  // list, and the result only of an input, a call, an `if`, a loop, a
-  // `build`, a `list`, a `tuple`, a `replace-at`, an `append`, a function of
-  // lists and such a conversion.
+  // `replace-at`, `append`, a `copy`, a function of lists, a call, a loop
+  // (as a carried value), a yield and a conversion of the representation of
+  // a list, and the result only of an input, a call, an `if`, a loop, a
+  // `build`, a `list`, a `tuple`, a `replace-at`, an `append`, a `copy`, a
+  // function of lists and such a conversion.
   if (
     ELEMENTWISE_KINDS.has(op.kind) &&
     (op.operands.some((operand) => isAggregate(operand.type)) ||
@@ -1506,6 +1507,32 @@ function verifySignature(
       resultIn(ruleOf('append').results);
       operandsIn(operandRule('append'));
       if (op.effect !== 'pure') fail('the operation append is not pure');
+      return;
+    }
+    case 'copy': {
+      arity(1);
+      const [list] = op.operands;
+      const element = elementOf(list.type);
+      if (element === undefined)
+        return fail(
+          `the operation copy reads a value of the type ${list.type}, not a list`
+        );
+      // The copy has the type and the representation of its operand; two
+      // levels are a list of lists.
+      if (
+        op.result.type !== list.type ||
+        op.result.representation !== list.representation
+      )
+        fail(
+          `the operation copy of a ${list.type} has a result of the type ${op.result.type}`
+        );
+      if (op.levels !== 1 && (op.levels !== 2 || !isListType(element)))
+        fail(
+          `the operation copy of a ${list.type} copies ${String(op.levels)} levels`
+        );
+      resultIn(ruleOf('copy').results);
+      operandsIn(operandRule('copy'));
+      if (op.effect !== 'pure') fail('the operation copy is not pure');
       return;
     }
     case 'collection':

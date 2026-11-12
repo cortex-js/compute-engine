@@ -623,7 +623,7 @@ describe('the representation of lists of lists', () => {
     expect(inPlaceUpdates(program).size).toBe(0);
   });
 
-  test('a row read is never written in place; the outer array of a local of the program is', () => {
+  test('a row of a local of the program that owns its rows is written in place, as its outer array', () => {
     const program = prepare(
       fn(['Block',
         ['Declare', 'S', "'list<list<real>>'", ['List', ['List', 0, 0], ['List', 0, 0]]],
@@ -633,9 +633,14 @@ describe('the representation of lists of lists', () => {
     const updates = [...inPlaceUpdates(program)];
     const all = allOperations(program.root).filter((op) => op.kind === 'replace-at');
     expect(all).toHaveLength(2);
-    // The update of the row (its operand is a row read) copies; the update
-    // of the outer array of the literal is in place.
-    expect(updates.map((op) => String(op.result!.type))).toEqual(['list<list<real>>']);
+    // The literal makes each row, so the update of the row (rules 4 to 6 of
+    // `inPlaceUpdates()`) and the update of the outer array are in place.
+    expect(updates.map((op) => String(op.result!.type))).toEqual(['list<real>', 'list<list<real>>']);
+  });
+
+  test('a row read of an input is never written in place', () => {
+    const program = prepare(fn(['ReplaceAt', 'M', 1, 2, 'x'], M, X));
+    expect(inPlaceUpdates(program).size).toBe(0);
   });
 
   test('a row placed in a list is not written in place later', () => {

@@ -422,15 +422,22 @@ table test is in `compile-javascript-structured-nested.test.ts`.
   with a message that names both types, and a local declared with rank 3
   declines with a message that names the rank-2 types it admits.
 
-**A known cost.** A loop that updates one element of a row copies the row
-on every pass, and the outer array too when the local starts from an input:
-`let S = M; for k in 1..n { S = replaceAt(S, 1, 1, S[1][1] + k) }` is
-`_tv2 = _SYS.replaceAt(_tv2, 1, _SYS.replaceAt(row, 1, …))` in the loop,
-where the existing compiler copies once before the loop
-(`_SYS.ownedCopyLevels(_.M, 2)`) and then writes in place
-(`_SYS.replaceAtPathInPlace`). The values are the same. A copy-before-loop
-rule of the in-place analysis, for flat and nested lists, is a separate
-task.
+**The cost of an update of a row in a loop** (since the copy before a loop,
+`docs/plans/2026-11-10-structured-ir-loops-and-lists.md`, "Result: the
+copy before a loop and the rows in place"). A loop that updates one element
+of a row writes the row and the outer array in place when the list owns its
+rows: `let S = M; for k in 1..n { S = replaceAt(S, 1, 1, S[1][1] + k) }` is
+`let _tv2 = M?.map((_r) => _r?.slice());` before the loop and
+`_tv2 = _SYS.replaceAtInPlace(_tv2, 1, _SYS.replaceAtInPlace(row, 1, …))`
+in it; a local made from a literal or a comprehension of new rows needs no
+copy. A loop in the body of another loop gets a copy of one level only, so
+it still copies the row on each pass, as does a pass that places a row of
+the list or of an input in the list (a row swap, `S = replaceAt(S, 2,
+S[1])`). The existing compiler copies once before the loop
+(`_SYS.ownedCopyLevels(_.M, 2)`, then `_SYS.replaceAtPathInPlace`) only when
+the pass reads no row of the local: for the loop above, which reads
+`S[1][1]`, it copies the outer array and the row on every pass
+(`_SYS.replaceAtPath`). The values are the same.
 
 **Measures** (the witness replay and the shadow measure at `5d5060724`,
 before and after the slice, with the last three declines above not yet

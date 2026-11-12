@@ -769,7 +769,9 @@ function f(c: boolean, n: integer) -> real {
     }
   });
 
-  test('the initial value of a loop-carried list read after the loop: a copy', () => {
+  test('the initial value of a loop-carried list read after the loop: one copy before the loop', () => {
+    // `withOwnedCopies()`: the loop starts from a copy of `L0`, which each
+    // pass updates in place.
     const result = check(
       `function f(n: integer) -> real {
   let L0 = [j for j in 1..n]
@@ -778,9 +780,10 @@ function f(c: boolean, n: integer) -> real {
   L0[1] + L[1]
 }`,
       [[3]],
-      false,
-      true
+      true,
+      false
     );
+    expect(result.code).toContain('?.slice()');
     expect(run(result, [3])).toBe(1.5);
   });
 

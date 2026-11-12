@@ -455,6 +455,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   which writes point values and some calls of user functions in place,
   while the raw route writes a tree that is prepared less, and its code is
   not checked again.
+- `javascript`, the `complex` mode, `u` with no declared type (crafted):
+  `u + Round(0)` at `u = -0` gives `-0` with the existing compiler, which
+  writes the sum without its term `Round(0)`. The `numeric-kernel` profile
+  and the interpreter give `0`.
 
 ## The worker pool and `parallel for`: `runAsync()`
 

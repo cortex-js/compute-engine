@@ -144,6 +144,7 @@ import {
   JAVASCRIPT_POLICY,
   verifyJavaScriptProgram,
 } from './javascript-structured-policy.js';
+import { withOwnedCopies } from './structured-in-place.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isLibraryOperator } from './builtin-callback.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
@@ -882,11 +883,13 @@ export class StructuredDeclineError extends Error {
 }
 
 /** Lower the program that `preparation` describes, without verifying it:
- *  the caller verifies it (`lowerStructuredFragment()` does both). */
+ *  the caller verifies it (`lowerStructuredFragment()` does both). A loop
+ *  that updates a list that the program does not own copies it once,
+ *  before its first pass (`withOwnedCopies()`). */
 export function lowerStructuredProgram(
   preparation: StructuredPreparation
 ): IRProgram {
-  return new Lowering(preparation).program();
+  return withOwnedCopies(new Lowering(preparation).program());
 }
 
 /** The nodes that the annotation of `preparation` types, in its root

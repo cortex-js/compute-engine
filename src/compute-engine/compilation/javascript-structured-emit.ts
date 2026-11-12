@@ -155,6 +155,9 @@
  *   range agree. A value is not moved to its use across an operation that
  *   writes in place (`mutatesInPlace()`), as across an effect: it can read
  *   the array before the write.
+ * - A `copy` is `list?.slice()`, or `list?.map((_r) => _r?.slice())` for two
+ *   levels: a new array, of the class of the operand, as the copy of
+ *   `_SYS.replaceAt` (`listCopy()`); an absent row stays `undefined`.
  * - `not` is `!x`.
  * - A `draw` is `_SYS.drawNextRandomNumber()`, as the existing emitter
  *   writes `Random()`. It is `effectful`, so it is a `const` at its
@@ -1324,6 +1327,18 @@ class Emitter {
               : 'replaceAt';
         this.runtime.add(helper);
         return call(`_SYS.${helper}`, operands);
+      }
+      // `slice()` copies an array as `_SYS.replaceAt` does (`listCopy()`); an
+      // absent row (`undefined`) stays absent.
+      case 'copy': {
+        const list = operand(operands[0], CALL);
+        return {
+          text:
+            op.levels === 1
+              ? `${list}?.slice()`
+              : `${list}?.map((_r) => _r?.slice())`,
+          precedence: CALL,
+        };
       }
       case 'collection':
         return this.collection(op, operands, call);

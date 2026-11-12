@@ -64,7 +64,18 @@
  * a row, a row read as the row of a `ReplaceAt` (a swap of two rows),
  * `Take`, `Drop`, `Rest`, `Reverse`, the rotations, `Join`,
  * `ListJoin`, a block local of rows updated in a loop, and a list of lists
- * as the value of a program.
+ * as the value of a program. Loops that carry a list or a list of lists
+ * (`genCarriedList()`): a local `A` from an input, a parameter, a captured
+ * list, a row read, a function of lists, a literal or a literal that
+ * repeats a row, updated in each pass, with an alias, a `Break`, an inner
+ * loop, a branch that writes the input, a call or a lambda that reads the
+ * list, a row swap and a row of an input written into `A`.
+ *
+ * Each call that gives a value is made again with the same inputs (the
+ * same value), and every input is compared at every depth with its value
+ * before the call (no write into an input). On the profile, the host then
+ * writes into every array of the value of a call, and the next call, with
+ * new inputs, must give the value again.
  *
  * A difference is reported only for inputs in the type of each input; a
  * difference that occurs only for inputs outside their type (`±Infinity`
@@ -2185,6 +2196,134 @@ const EXPRESSION_CONTEXT: ContextBase = {
   rowLists: ['R', 'MA', 'M2'],
 };
 
+/**
+ * The statements of a local list `A` (a list of reals, or of lists of reals)
+ * carried by a loop over `kk` that updates it, and a value that reads it,
+ * for one block in four: the patterns of `withOwnedCopies()` and of the
+ * rules of the rows of `inPlaceUpdates()` (structured-in-place.ts), with the
+ * patterns that must copy.
+ */
+function genCarriedList(
+  rng: Rng,
+  ctx: GenContext,
+  base: ContextBase
+): { statements: Json[]; value?: Json } {
+  if (rng() >= 0.25) return { statements: [] };
+  const rowNames = base.rowLists ?? [];
+  const nested = rowNames.length > 0 ? rng() < 0.5 : rng() < 0.25;
+  const type = nested ? "'list<list<real>>'" : "'list<real>'";
+  const inLoop: GenContext = {
+    ...ctx,
+    symbols: [...ctx.symbols, ['kk', 20]],
+    maxDepth: 1,
+  };
+  const small = (): Json => (rng() < 0.8 ? genLeaf(inLoop) : genReal(inLoop, 0));
+  const condition = (): Json =>
+    pick<Json>(rng, [['Less', 'kk', 2], ['Greater', 'kk', 1], ['Less', small(), 0.5]]);
+  const statements: Json[] = [];
+  // The initial value, which reads no name of the loop.
+  const leaf = (): Json => genLeaf({ ...ctx, maxDepth: 1 });
+  let initial: Json;
+  const r = rng();
+  if (nested) {
+    const input = rowNames.length > 0 ? pick(rng, rowNames) : undefined;
+    if (input !== undefined && r < 0.4) initial = input;
+    else if (r < 0.55) initial = ['List', ['List', leaf(), 1], ['List', 2, leaf()]];
+    else if (r < 0.7) {
+      // A literal or a comprehension that repeats one row.
+      statements.push(['Declare', 'r0', "'list<real>'", ['List', 1, leaf()]]);
+      initial =
+        rng() < 0.5
+          ? ['List', 'r0', 'r0']
+          : ['Comprehension', 'r0', ['Element', 'j', ['Range', 1, 2]]];
+    } else if (input !== undefined && r < 0.85)
+      initial = [pick(rng, ['Reverse', 'Rest']), input];
+    else if (input !== undefined) initial = ['Take', input, 2];
+    else
+      initial = [
+        'Comprehension',
+        ['List', 'j', leaf()],
+        ['Element', 'j', ['Range', 1, 3]],
+      ];
+  } else {
+    const lists = base.lists.filter((n) => n !== 'I' && n !== 'W');
+    if (lists.length > 0 && r < 0.5) initial = pick(rng, lists);
+    else if (rowNames.length > 0 && r < 0.6)
+      initial = ['At', pick(rng, rowNames), pick(rng, [1, -1])];
+    else if (lists.length > 0 && r < 0.7)
+      initial = [pick(rng, ['Reverse', 'Rest']), pick(rng, lists)];
+    else if (r < 0.85) initial = ['List', leaf(), 2, leaf()];
+    else
+      initial = ['Comprehension', ['Multiply', 'j', 0.5], ['Element', 'j', ['Range', 1, 4]]];
+  }
+  const first = typeof initial === 'string' ? initial : undefined;
+  statements.push(['Declare', 'A', type, initial]);
+  const alias = rng() < 0.15;
+  if (alias) statements.push(['Declare', 'B', type, 'A']);
+  // A row of `A` kept in a local before the loop and read after it.
+  const keptRow = nested && rng() < 0.15;
+  if (keptRow) statements.push(['Declare', 'r1', "'list<real>'", ['At', 'A', 1]]);
+  // The update of the body.
+  const index = (): Json => pick(rng, ['kk', 'kk', 1, -1]);
+  const update = (name: string): Json => {
+    if (!nested) {
+      const i = index();
+      return ['Assign', name, ['ReplaceAt', name, i, ['Add', ['At', name, i], small()]]];
+    }
+    const i = index();
+    const j = pick<Json>(rng, [1, -1]);
+    return ['Assign', name, ['ReplaceAt', name, i, j, ['Add', ['At', name, i, j], small()]]];
+  };
+  const body: Json[] = ['Block'];
+  const s = rng();
+  if (nested && s < 0.1)
+    // A swap of two rows, then an update of an element.
+    body.push(['Assign', 'A', ['ReplaceAt', ['ReplaceAt', 'A', 1, ['At', 'A', 2]], 2, ['At', 'A', 1]]]);
+  else if (nested && rowNames.length > 0 && s < 0.18)
+    // A row of an input written into `A`, then an update of an element.
+    body.push(['Assign', 'A', ['ReplaceAt', 'A', 1, ['At', pick(rng, rowNames), 1]]]);
+  else if (s < 0.26)
+    // A call or a lambda that reads `A` in the pass.
+    body.push([
+      'Assign',
+      't',
+      nested
+        ? ['Add', 't', ['Reduce', ['At', 'A', 1], 'fe', 0]]
+        : pick<Json>(rng, [['fm', 'A'], ['Reduce', 'A', 'fe', 0], ['Sum', ['Map', 'A', ['Function', ['Multiply', 'v', 2], 'v']]]]),
+    ]);
+  else if (s < 0.34 && first !== undefined)
+    // A branch that writes the initial value (an input) to `A`.
+    body.push(['If', condition(), ['Assign', 'A', first]]);
+  body.push(update('A'));
+  if (alias) body.push(update('B'));
+  const b = rng();
+  if (b < 0.12)
+    body.push(['If', condition(), ['Block', update('A'), ['Break']]]);
+  else if (b < 0.22)
+    body.push(['Loop', update('A'), ['Element', 'k2', ['Range', 1, 2]]]);
+  else if (b < 0.3) body.push(['If', condition(), update('A')]);
+  statements.push([
+    'Loop',
+    body,
+    ['Element', 'kk', ['Range', 1, pick<Json>(rng, [['Length', 'A'], 2, 3])]],
+  ]);
+  // The value: the list, an element, or an element with a read of the
+  // initial value, of the alias or of the kept row after the loop.
+  const element = (name: Json): Json => (nested ? ['At', name, 1, 1] : ['At', name, 1]);
+  const v = rng();
+  const value: Json =
+    keptRow && v < 0.5
+      ? ['Add', ['At', 'r1', 1], element('A')]
+      : alias && v < 0.6
+        ? ['Add', element('B'), element('A')]
+        : first !== undefined && v < 0.35
+          ? ['Add', element(first), element('A')]
+          : v < 0.8
+            ? 'A'
+            : element('A');
+  return { statements, value };
+}
+
 /** The statements of a block: one or two real locals, maybe a list local
  *  made by a `Comprehension`, writes (`ReplaceAt` for the list), `If`
  *  statements and a `Loop` with a `Break`, then the value. */
@@ -2203,6 +2342,21 @@ function genStatements(rng: Rng, maxDepth: number, base: ContextBase): Json[] {
   const locals: [Json, number][] = [['t', 25]];
   const listLocals: string[] = [];
   const localFunctions: string[] = [];
+  // A local list `A` carried by a loop that updates it, from a value that
+  // the program does not own (an input, a parameter, a captured list, a row
+  // read, a function of lists, a literal that repeats a row) or from a
+  // literal (`withOwnedCopies()` in structured-in-place.ts): an alias `B`
+  // updated too, a read of the initial value after the loop, a `Break`, a
+  // branch that writes an input to `A`, a call or a lambda that reads `A`,
+  // a row swap, a row of an input written into `A`, an inner loop. The
+  // block has one other statement, the declaration of `t`.
+  const carried = genCarriedList(rng, ctx(locals, 2), base);
+  if (carried.value !== undefined)
+    return [
+      ['Declare', 't', "'real'", 0.5],
+      ...carried.statements,
+      carried.value,
+    ];
   // The first local, declared, or by a first write (`t ≔ …`, a local of the
   // block that no `Declare` declares).
   const statements: Json[] = [
@@ -2759,6 +2913,19 @@ function compileWith(
           try {
             const again = run(...(args as unknown[]));
             if (!sameValue(again, value)) calls += ' second call differs';
+            // On the profile: the host writes into every array of the value
+            // of a third call, with new inputs, and a fourth call, with new
+            // inputs, gives the value again (no array of the value is an
+            // array that a later call reads: a constant, or a list that the
+            // code keeps). The existing compiler can give a captured list
+            // itself (CE-1222), so the check is not made there.
+            if (profile && Array.isArray(value)) {
+              const expected = structuredClone(value);
+              scribble(run(...argumentsOf(inputs)));
+              if (!sameValue(run(...argumentsOf(inputs)), expected))
+                calls += ' call after a write into the value differs';
+              value = expected;
+            }
           } catch {
             calls += ' second call throws';
           }
@@ -2796,6 +2963,17 @@ function compileWith(
       message: String(e.message ?? error).replace(PROFILE_PREFIX, ''),
     };
   }
+}
+
+/** Write into every array of `value`, at every depth, as a host that owns
+ *  the value can. */
+function scribble(value: unknown): void {
+  if (!Array.isArray(value)) return;
+  for (let k = 0; k < value.length; k++) {
+    scribble(value[k]);
+    if (!Array.isArray(value[k])) value[k] = 12345;
+  }
+  value.push(54321);
 }
 
 /** The same value: the same shape, and `Object.is` for each number. */

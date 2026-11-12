@@ -415,13 +415,22 @@ describe('the analyses across a call', () => {
     for (const name of ['set', 'through', 'both']) {
       const program = programOf(LISTS, name);
       const inPlace = inPlaceUpdates(program);
+      // The update of `set` copies its parameter. The loop of `fill` starts
+      // from a copy of its parameter (`withOwnedCopies()`), which every pass
+      // updates in place.
       for (const fn of program.functions)
         for (const op of operationsOf(fn.body))
-          if (op.kind === 'replace-at') expect([fn.name, inPlace.has(op)]).toEqual([fn.name, false]);
-      // The loop of `fill` starts from its parameter: the first pass copies.
-      for (const fn of program.functions.filter((f) => f.name === 'fill'))
-        for (const op of operationsOf(fn.body))
-          if (op.kind === 'loop') expect(consumableLoopInitials(program).get(op)).toEqual([false]);
+          if (op.kind === 'replace-at')
+            expect([fn.name, inPlace.has(op)]).toEqual([fn.name, fn.name === 'fill']);
+      for (const fn of program.functions.filter((f) => f.name === 'fill')) {
+        const operations = operationsOf(fn.body);
+        for (const op of operations)
+          if (op.kind === 'loop') {
+            expect(consumableLoopInitials(program).get(op)).toEqual([true]);
+            const copy = operations.find((o) => o.result?.id === op.operands[2].id);
+            expect([copy?.kind, copy?.operands[0].id]).toEqual(['copy', fn.parameters[0].id]);
+          }
+      }
     }
     const ce = engineWith(LISTS);
     const through = structured().compile(literal(ce, 'through'), OPTIONS);
