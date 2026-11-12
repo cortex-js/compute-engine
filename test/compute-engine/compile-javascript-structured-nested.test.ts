@@ -516,9 +516,11 @@ describe('every rule that reads a list declines a list of lists it does not read
       expect([head, (error as { diagnostic?: { code?: string } }).diagnostic?.code]).toEqual([head, 'outside-profile']);
       return;
     }
-    // An admitted program: a head of `NESTED_OPERAND_HEADS`, with the value
-    // and the shape of the existing compiler at every depth.
-    expect([head, NESTED_OPERAND_HEADS.has(head) || head === 'Loop' || head === 'Sum']).toEqual([head, true]);
+    // An admitted program: a head of `NESTED_OPERAND_HEADS`, or a scalar head
+    // applied to each number (`Mod`, since slice 1 of
+    // docs/plans/2026-11-12-structured-broadcast-over-lists.md), with the
+    // value and the shape of the existing compiler at every depth.
+    expect([head, NESTED_OPERAND_HEADS.has(head) || head === 'Loop' || head === 'Sum' || head === 'Mod']).toEqual([head, true]);
     const existing = compile(expr, EXISTING) as CompilationResult<'javascript'>;
     for (const m of MATS)
       for (const i of [1, -1, 3]) {

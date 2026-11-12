@@ -345,6 +345,165 @@ strings, `Missing`, function values, tuples of non-reals, lists of
 non-numbers, value kinds, records: 250. Stay declined with a
 declaration as the remedy: `broadcastable` and bare collection inputs, 75.
 
+## 10. Result of slices 1 and 2
+
+Implemented on `984f3e660` (moved from `99cee49c8`). The tests are
+`test/compute-engine/compile-javascript-structured-broadcast.test.ts`; the
+element code of each head is in
+`docs/plans/2026-11-09-js-pilot-emission-rewrites.md`, "Element-wise heads
+and selection".
+
+**Slice 1a and 1b.** `broadcastRule()` (`javascript-fragment-target.ts`)
+wraps the rule of each scalar head that the engine broadcasts
+(`broadcastable` in the operator definition), and records the element form
+(`BroadcastForm`) in `registry.forms`; the lowering writes the `build` of
+`elementwise()` with that element (`broadcastElement()`). Admitted in the
+`strict` mode, for a list or a list of lists and reals: the heads of
+`FUNCTIONS`, the real calls of `REAL_CALL_HEADS` that prove no domain,
+`Power`, `Root`, `Sqrt`, `Log` (`log10`, or `log-quotient` with a base),
+`Floor`, `Mod`, `Clamp`, `Chop`. Two lists need one length key
+(`lengthKey()`, `nestedLengthKeys()`), or types that state one width.
+Declined, each with its cause: the `complex` mode; the `COMPLEX_CELL_HEADS`
+(open choice 6); a head of `REAL_CALL_HEADS` with a `domain`, and
+`UPPER_GAMMA`; `Sech`, `Csch`, `Fract`, `KroneckerDelta`; a trigonometric
+head in another angular unit or of a multiple of π (the half-turn kernel);
+`Floor`, `Ceil`, `Round` of an inexact constant, `Round` with ties other
+than away from zero; `Power` whose base is a list of lists (the existing
+compiler can take a matrix power of it, `_SYS.matrixPowerShape()`).
+
+**Slice 2a.** A list of booleans is a value of the route: an element type of
+the verifier at depth 0 (`isElementType()`), an array of the policy
+(`representationOfKind()`), the type `{ kind: 'boolean' }` of
+`FragmentElementType`. `Less`, `LessEqual`, `Equal`, `NotEqual` of a list
+and reals (and of two lists of one length, but `Equal` and `NotEqual`, which
+compare whole lists), and `Not`, `And`, `Or` of lists of booleans and
+booleans, have a list of booleans as their value.
+
+| Place | A list of booleans |
+| --- | --- |
+| `At` with an integer index | admitted: `undefined` out of range, as the existing code reads it |
+| `Length` | admitted |
+| `Not`, `And`, `Or` | admitted |
+| The condition of an element-wise `If` or `Which` | admitted |
+| The value of the program, also through `Block` and `Typed` | admitted |
+| `Count`, `Any`, `All`, `Sum`, `Max`, `Reverse`, `Join`, … | declined (`refuseBooleanListUses()`, or the rule of the head) |
+| An input or a parameter (`list<boolean>`) | declined (`structuredListType()`) |
+| A local (`Declare(C, 'list<boolean>', …)`) | declined, with its cause |
+| An argument or the value of a helper | declined |
+| An arm of a selection, a scalar `If` included | declined |
+| A list literal of booleans, a captured list of booleans | declined (the literal rule) |
+
+**Slice 2b.** `selectionBroadcastRule()` admits `If(c, a, b)`, `If(c, a)`
+and `Which(c₁, a₁, …, [True, d])` whose every condition is a list of
+booleans, whose arms are reals, integers or lists of them, pure and unable
+to throw (`impureArmPart()`), and whose lists have one length key. The
+lowering (`selectionBuild()`) evaluates the conditions in clause order, then
+the arms, then one `build` over the first condition with the chain of `if`.
+Declined: an arm that draws, calls the host or a helper, or can throw; a
+tuple arm; a scalar condition beside a list condition; lists of unstated
+lengths (the mismatch defect of 1.1, filed as an issue).
+
+**After the review.** Four rules were added. An element-wise node whose
+list operand the existing compiler reads on the complex lane (its own test,
+`operandElementLane()`, asked of the prepared target) declines
+(`refuseComplexElementLanes()`): `Arctan(C)`, `Power(D, C)` and the older
+`1 / C`, with `C = [√k for k in 1..n]` of the engine type `list<complex>`;
+`[k² for k in 1..n]` (a `list<integer>`) is admitted. Two lists whose list
+operand reads a value of the host (a `vars` entry) decline
+(`refuseUnstableLengthKeys()`): a key from the text of a name or of the
+bounds of a comprehension is a proof only when each read gives one value.
+An element-wise function or selection that reads a name of
+`LIBRARY_CONSTANTS` that the program binds declines (`shadowedConstant()`):
+the element code reads `ExponentialE` as `Math.E`. The arms of a selection
+are checked after their lowering, with the lowering's analysis (`canThrow()`,
+`operationCanAbort()`, `reachesHost()` and the effect of each operation),
+in place of a list of heads: `Trace(Inverse(A))`, `MatrixPower`, `Repeat`,
+`Linspace`, `Remainder`, `GCD` and a helper whose body can throw decline.
+The conditions and the list arms in the `build` of a selection, and the
+lists of an element-wise `build`, are read directly (`B[i - 1]`, `inRange`
+of `at`): `If(L > 0, L)` read each condition with
+`((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(_SYS.at(_tv3, _tv10))`,
+and now with `_tv3[_tv10 - 1]`.
+
+**After the second review.** Two rules were added. A `Power` of a list
+whose exponent is an exact fraction of odd denominator declines
+(`realPowerExponent()`, as the scalar rule declines it): the existing
+compiler keeps the fraction in the closure (`closureFrames()`) and writes a
+real root of each element, `_SYS.pow2(Math.cbrt(e))` for `L^(2/3)` (`[4]`
+for `[8]`, where `_SYS.pow(e, 2/3)` gives `[3.9999999999999996]`). Every
+other literal operand of the probe (`L^k` for k in 2, 3, −1, 1/2, 1/3, 3/2,
+0.5, 2.5; `Root(L, k)` for k in 2, 3, 4; `2^L`, `(1/3)^L`, `e^L`;
+`Log(L, 2)`) gives the doubles of the existing compiler on a grid with 8,
+27, 0, −0, −8, 0.3, 1e15, ±∞ and `NaN`. The throw analysis of the lowering
+is a table with an entry for each operation, each function of lists and
+each function of one or two numbers (`OPERATION_THROWS`,
+`COLLECTION_THROWS`, `FUNCTION_THROWS`, checked against both JavaScript
+policies by a test); it adds the count of `Range` and of a comprehension
+over a `Range` (more than 2^32 − 1 elements throw), unless the bounds are
+literals whose count fits. `If(L < 0, Length(Range(1, n)), 0)` declines;
+the existing compiler gives `[0]` for `L = [1]`, `n = 2^32`. A probe of
+86 scalar heads that the profile compiles (99 head and arity pairs), on 20
+special values, found
+throws in `Mod`, `Remainder`, `GCD` and `LCM` only. New declines: in the
+route tests, `If(K < 5, K, 0)` with `K` a comprehension over `1..n`; in the
+shadow measure on the 219 files of the sample, one program (`L^(5/3)`):
+10,080 admitted before, 10,079 after, 0 failures. Random tester, seed 261,
+10,000 programs: the same classes as before, 0 differences.
+
+**Where the implementation differs from the note.** Section 3 counts list
+literals of booleans and `list<boolean>` inputs among the values the change
+serves: both still decline (a literal of booleans, an input of the type
+`list<boolean>`), and the witnesses that need them stay declined. A
+comprehension over one range with no guard has a length key of its own (the
+text of its bounds), so two such comprehensions combine. Section 2 counts
+every scalar head; `Sech`, `Csch`, `Fract`, the domain heads and the
+half-turn forms decline, because the scalar rule needs a fact that the
+elements of a list do not have. `Power` of a list of lists declines (the note
+admits lists of lists at every depth). Two program constants of one length
+combine (`CL + CM`): their types state the width.
+
+**Measures** (`984f3e660` before, the change after). Witness logger on the
+219 files of the sample: 582 distinct programs logged before, 452 after.
+Replayed in a new engine (325 of the 582: the others need a helper or a
+declaration of their test): 4 admitted before, 74 after, 0 failures. By the
+first refusal before the change (replayed, admitted before → after):
+
+| Form | Replayed | Admitted |
+| --- | --- | --- |
+| A scalar head of a list (`Sqrt(L)`, `L^2`, `Abs(Range(1, 3) - k)`) | 124 | 4 → 48 |
+| A comparison of a list (`L == 3`, `[1, 2, 3] < x`) | 41 | 0 → 18 |
+| The condition of an `If` that is not a boolean | 34 | 0 → 7 |
+| The condition of a `Which` that is not a boolean | 19 | 0 → 1 |
+| A tuple operand | 52 | 0 → 0 |
+| Arithmetic of lists of unequal keys or of tuples | 34 | 0 → 0 |
+| An argument of a user function (slice 3) | 13 | 0 → 0 |
+| Other | 8 | 0 → 0 |
+
+The declines that remain are the ones of section 6 and of the list above:
+the `complex` mode (`Less([4, 9, 16], x)` in the complex mode, 19 programs),
+`Power` of a list of lists (20), `list<boolean>` inputs (10), `Equal` of two
+lists, tuple operands, lists of unequal keys.
+
+The shadow measure (`CE_JS_PROFILE_SHADOW=1`) on 218 of the 219 files (the
+file `compile-call-broadcast-result-operand.test.ts` left out: the profile
+does not end on its deep shared subtree, an issue of the admission walk
+that this change does not touch): public compilations that the existing
+compiler compiles, 14,709 before and 14,683 after (the changed tests), of
+which the profile admits 10,028 (68.2 %) before and 10,080 (68.7 %) after,
+0 failures in both; the engine consumers do not change. The consumer
+measure (`CE_JS_PROFILE=numeric-kernel`, 40 files of `Map`, collections,
+limits and integrals): 740 attempts, 699 admitted, 41 declined, 0 failed,
+before and after: no engine consumer compiles an element-wise form in these
+files.
+
+The random tester (`scripts/js-profile-fuzz.ts`, `genBroadcastList()`):
+seeds 261 and 262 (10,000 programs each), 263 (`--random`, 5,000) and 264
+(`--host`, 5,000): no failure of the profile, no shape difference, and one
+difference with the existing compiler, of no element-wise form
+(`Inverse([[Log(x, 10), 1], [-0.25, 3]])` at `x < 0`, which the existing
+code inverts on the complex lane: a line in the known limitations of
+`docs/COMPILATION-MODEL.md`).
+
 ## Not determined
 
 - The 64 C programs in which the logger found no site (a function bound by

@@ -57,9 +57,15 @@ export type FragmentValueType =
   | { kind: 'point'; size: number }
   | { kind: 'color' };
 
-/** The type of an element of a list. */
+/** The type of an element of a list. A boolean element (a list of
+ *  booleans) is typed by the JavaScript structured route only
+ *  (`javascript-fragment-target.ts`); no rule of the GLSL fragment target
+ *  makes one. */
 export type FragmentElementType =
-  { kind: 'real' } | { kind: 'integer' } | { kind: 'point'; size: number };
+  | { kind: 'real' }
+  | { kind: 'integer' }
+  | { kind: 'boolean' }
+  | { kind: 'point'; size: number };
 
 /** A list. `count` is absent when it is known only at run time. The element
  *  is a list (a list of lists, to the depth that the type states) only in a

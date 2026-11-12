@@ -995,10 +995,16 @@ describe('lists of lists with the scalar heads and the decided selections', () =
   ] as const)('%s: the values of the existing compiler, or a decline', (_name, json) => {
     admittedMatches(json, [[[[1, 2], [3, 4]], [[5]]], [[[1, 2], [2, 4]], [[1, 2, 3]]], [[], [[2]]]]);
   });
+  // A scalar head of a list of lists is applied to each number since slice 1
+  // of docs/plans/2026-11-12-structured-broadcast-over-lists.md.
   test.each([
-    ['Heaviside(M)', fn(['Heaviside', 'M'], M), /Heaviside with the list operand M is not in the profile/],
+    ['Heaviside(M)', fn(['Heaviside', 'M'], M)],
+    ['Remainder(A, 2)', fn(['Remainder', 'A', 2], AM)],
+  ] as const)('%s: the values of the existing compiler', (_name, json) => {
+    expect(admittedMatches(json, [[[[1, -2], [0, 3.5]]], [[[-0, NaN], [Infinity, -1]]], [[]]])).toBe(true);
+  });
+  test.each([
     ['GCD(At(Z, 1), 2)', fn(['GCD', ['At', 'Z', 1], 2], Z), /GCD with the list operand At\(Z, 1\) is not in the profile/],
-    ['Remainder(A, 2)', fn(['Remainder', 'A', 2], AM), /Remainder with the list operand A is not in the profile/],
   ] as const)('%s declines with the refusal of a list operand', (_name, json, message) => {
     expect(() => compile(new ComputeEngine().expr(json), PROFILE as never)).toThrow(message);
   });

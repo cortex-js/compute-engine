@@ -632,6 +632,10 @@ export type IRNoValue = OperationBase & {
  */
 export type IRListRead = OperationBase & {
   readonly kind: 'at' | 'length';
+  /** On `at`: the index is in range by construction (the index of a
+   *  `build` over the length of the list, or of a list of that length), so
+   *  the read has no absent value. */
+  readonly inRange?: boolean;
 };
 
 /**

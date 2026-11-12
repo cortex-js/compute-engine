@@ -537,10 +537,13 @@ describe('declines that stay', () => {
       /Sum of .* is not in the profile: its type number is not real/,
     ],
     [
-      'an element-wise radical of a list',
-      fn(['Sqrt', 'L'], ['L', 'list<number>']),
+      // A real function of a list is admitted since slice 1 of
+      // docs/plans/2026-11-12-structured-broadcast-over-lists.md, but for the
+      // inverse functions whose scalar code is complex.
+      'an element-wise inverse sine of a list',
+      fn(['Arcsin', 'L'], ['L', 'list<number>']),
       {},
-      /Sqrt with the list operand L is not in the profile/,
+      /Arcsin with the list operand L is not in the profile/,
     ],
     // As for `list<real^3>`: the existing compiler writes the sum of the
     // products of a list whose width its type states.

@@ -342,15 +342,14 @@ describe('declines that stay', () => {
       fn(['Max', 'L', 'x'], L, X),
       /Max with the list operand L is not in the profile/,
     ],
+    // Since slice 1 of docs/plans/2026-11-12-structured-broadcast-over-lists.md
+    // a function of a list is admitted in the `strict` mode
+    // (compile-javascript-structured-broadcast.test.ts), but for the inverse
+    // functions whose scalar code is complex.
     [
-      'a power of a list (the existing closure writes _SYS.pow)',
-      fn(['Power', 'L', 2], L),
-      /Power with the list operand L is not in the profile/,
-    ],
-    [
-      'a function of a list',
-      fn(['Sin', 'L'], L),
-      /Sin with the list operand L is not in the profile/,
+      'a function of a list whose scalar code is complex',
+      fn(['Arccos', 'L'], L),
+      /Arccos with the list operand L is not in the profile/,
     ],
     [
       'a comprehension with a guard that draws',

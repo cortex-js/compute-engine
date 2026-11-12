@@ -214,10 +214,19 @@ export type StructuredInput = IRInput;
  * - `RealCallForm`: a library head that the existing emitter writes as
  *   calls of real kernels (`realCallRule()` in
  *   `javascript-fragment-target.ts`).
+ * - `{ broadcast }`: a scalar head applied to each element of its list
+ *   operands (`broadcastRule()` in `javascript-fragment-target.ts`), whose
+ *   element is the `BroadcastForm`.
+ * - `elementwise-selection`: an `If` or a `Which` whose conditions are
+ *   lists of booleans (`selectionBroadcastRule()` in
+ *   `javascript-fragment-target.ts`), one `build` over the positions
+ *   (`selectionBuild()`).
  */
 export type StructuredForm =
   | { readonly folded: number | { readonly re: number; readonly im: number } }
   | { readonly selected: Expression }
+  | { readonly broadcast: BroadcastForm }
+  | 'elementwise-selection'
   | RealCallForm
   | 'pi-multiple'
   | 'identity'
@@ -278,6 +287,47 @@ export type RealCallForm =
   | 'boole'
   | 'argument'
   | 'imaginary';
+
+/**
+ * The code of one element of a scalar head applied to each element of its
+ * list operands (`broadcastRule()` in `javascript-fragment-target.ts`): the
+ * code of the closure that the existing emitter passes to `_SYS.bcast`,
+ * which is the scalar code of the head with every operand an element
+ * parameter, never a literal (`L^3` is `_SYS.pow(e, 3)`, not `e*e*e`):
+ *
+ * - `{ operation }`: the operation of that kind of the operands
+ *   (`Math.sqrt(e)`, `Math.floor(e)`, `_SYS.floorMod(e, m)`, `((a) < (b))`,
+ *   `((a) <= (b))`, `x === s` and `x !== s` of `_SYS.eq` and `_SYS.neq`
+ *   with a number `s`, `!(e)`, `((a) && (b))`, `((a) || (b))`; the second
+ *   operand of `and` and `or` is a value read before the operation, as the
+ *   closure reads it).
+ * - `{ call }`: the function `call` of the operands, with the number
+ *   literal `after` as a last operand when it is given
+ *   (`_SYS.chop(e, 1e-10)`), as `RealCallForm` writes it.
+ * - `clamp`: `Math.min(Math.max(e, lo), hi)`.
+ * - `log-quotient`: `(Math.log(e) / Math.log(b))`, the quotient of the
+ *   logarithms of the two operands.
+ */
+export type BroadcastForm =
+  | {
+      readonly operation:
+        | 'sqrt'
+        | 'floor'
+        | 'mod'
+        | 'less'
+        | 'less-equal'
+        | 'equal'
+        | 'not-equal'
+        | 'not'
+        | 'and'
+        | 'or';
+    }
+  | {
+      readonly call: UnaryFunctionName | BinaryFunctionName;
+      readonly after?: number;
+    }
+  | 'clamp'
+  | 'log-quotient';
 
 const REAL_CALL_FORMS: ReadonlySet<string> = new Set([
   'kronecker-delta',
@@ -598,8 +648,10 @@ const OPERATIONS: Readonly<
 
 /** The functions of one or two operands, by the head of the library that
  *  applies them. `Exp(x)` has no head of its own: the canonical form
- *  writes it `Power(ExponentialE, x)` (`powerForm()`). */
-const FUNCTIONS: Readonly<
+ *  writes it `Power(ExponentialE, x)` (`powerForm()`). The rule of an
+ *  element-wise head reads it too (`broadcastRule()` in
+ *  `javascript-fragment-target.ts`). */
+export const FUNCTIONS: Readonly<
   Record<
     string,
     | { readonly kind: 'unary'; readonly fn: UnaryFunctionName }
@@ -1256,7 +1308,8 @@ export function valueType(type: {
     return listType(valueType(type.element) as ListType);
   const element =
     type.element === undefined ? undefined : scalarKind(type.element);
-  if (element !== 'real' && element !== 'integer')
+  // A list of booleans: the value of an element-wise comparison.
+  if (element !== 'real' && element !== 'integer' && element !== 'boolean')
     return fail(
       `the list type of elements ${type.element?.kind} is not in the structured route`
     );
@@ -1884,6 +1937,20 @@ class Lowering {
     const selected = this.prep.forms.get(node);
     if (typeof selected === 'object' && 'selected' in selected)
       return this.value(selected.selected, scope, operations);
+
+    // A scalar head applied to each element of its list operands
+    // (`broadcastRule()` in `javascript-fragment-target.ts`).
+    if (typeof selected === 'object' && 'broadcast' in selected)
+      return this.elementwise(
+        node,
+        facts,
+        scope,
+        operations,
+        effect,
+        selected.broadcast
+      );
+    if (selected === 'elementwise-selection')
+      return this.selectionBuild(node, facts, scope, operations, effect);
 
     if (operator === 'Which' || (operator === 'If' && node.nops === 2))
       return this.selection(node, facts, scope, operations, effect);
@@ -2650,6 +2717,8 @@ class Lowering {
       ...touchesField(this.states(node), region.touches),
       origin: node,
     });
+    if (countFits([spec.op2.op1, spec.op2.op2]))
+      FITTING_COUNTS.add(operations.at(-1)!);
     return result;
   }
 
@@ -2766,16 +2835,22 @@ class Lowering {
     list: IRValue,
     index: IRValue,
     origin: Expression,
-    operations: IROperation[]
+    operations: IROperation[],
+    inRange = false
   ): IRValue {
     const type = list.type;
     const element = isTupleType(type)
       ? type.elements[0]
       : (elementOf(type) ?? fail(`${nodeText(origin)} reads no list`));
-    // A tuple of a list of tuples and a row of a list of lists are arrays.
+    // A tuple of a list of tuples and a row of a list of lists are arrays;
+    // an element of a list of booleans is a boolean.
     const result = this.newValue(
       element,
-      isTupleType(element) || isListType(element) ? 'array' : 'number'
+      isTupleType(element) || isListType(element)
+        ? 'array'
+        : element === 'boolean'
+          ? 'boolean'
+          : 'number'
     );
     operations.push({
       kind: 'at',
@@ -2783,6 +2858,7 @@ class Lowering {
       operands: [list, index],
       effect: 'pure',
       origin,
+      ...(inRange ? { inRange } : {}),
     });
     return result;
   }
@@ -3034,13 +3110,18 @@ class Lowering {
    * `(_tv1 + _tv2)`, `(_tv1 * _tv2 * _tv3)` in the order of the operands,
    * `(-(_tv1))`, `((_tv1) / (_tv2))`. The rule admitted two list operands
    * only when their lengths are equal by construction.
+   *
+   * Another scalar head (`broadcastRule()`) has the same `build`, whose body
+   * applies the element form `form` to the elements and to the values of
+   * the scalar operands (`broadcastElement()`).
    */
   private elementwise(
     node: Expression & { ops: readonly Expression[] },
     facts: FragmentValueFacts<ScalarRepresentation>,
     scope: FragmentScope<ScalarRepresentation>,
     operations: IROperation[],
-    effect: EffectFact
+    effect: EffectFact,
+    form?: BroadcastForm
   ): IRValue {
     const operator = node.operator;
     const kind =
@@ -3051,11 +3132,27 @@ class Lowering {
           : operator === 'Negate'
             ? 'negate'
             : 'divide';
-    const values = this.operands(node, facts, scope, operations);
+    // `Exp(L)` is `Power(ExponentialE, L)`, whose base the preparation of
+    // the existing compiler keeps as the symbol: the closure of `_SYS.bcast`
+    // reads it as `Math.E`.
+    const values =
+      form !== undefined && isSymbol(node.ops[0], 'ExponentialE')
+        ? node.ops.map((operand, i) =>
+            i === 0
+              ? this.numberLiteral(Math.E, 'real', node, operations)
+              : this.convert(
+                  this.value(operand, scope, operations),
+                  facts.conversions?.[i],
+                  node,
+                  operations
+                )
+          )
+        : this.operands(node, facts, scope, operations);
     const type = valueType(facts.type);
     // A product of two lists, one a matrix (`nestedElementwise()`): the
     // matrix product, `_SYS.mul(A, B)`.
     if (
+      form === undefined &&
       operator === 'Multiply' &&
       values.length === 2 &&
       values.every((v) => isListType(v.type)) &&
@@ -3098,7 +3195,7 @@ class Lowering {
       const index = this.newValue('integer', 'number');
       const body: IROperation[] = [];
       const elements = operands.map((v) =>
-        isListType(v.type) ? this.element(v, index, node, body) : v
+        isListType(v.type) ? this.element(v, index, node, body, true) : v
       );
       let value: IRValue;
       if (isListType(element))
@@ -3108,6 +3205,8 @@ class Lowering {
           this.newValue(element, 'array'),
           body
         );
+      else if (form !== undefined)
+        value = this.broadcastElement(form, elements, element, node, body);
       else {
         value = this.newValue(element, 'number');
         body.push({
@@ -3135,6 +3234,199 @@ class Lowering {
       return result;
     };
     return level(values, type, this.resultOf(facts), operations);
+  }
+
+  /**
+   * An `If` or a `Which` whose conditions are lists of booleans
+   * (`selectionBroadcastRule()` in `javascript-fragment-target.ts`): the
+   * conditions in clause order, then the arms in clause order, each
+   * evaluated once, then one `build` over the positions of the first
+   * condition, from 1 to its length, whose body is the chain of `if` of
+   * the clauses: at each position, the element of the first condition that
+   * holds there selects its arm (the element of a list arm, or the value of
+   * a scalar arm); a last clause `True` (the third operand of `If`) is the
+   * default; with no default, `NaN`. The rule admitted lists of one
+   * length; an arm with an operation that is not pure or that can throw,
+   * abort or reach the host declines here.
+   */
+  private selectionBuild(
+    node: Expression & { ops: readonly Expression[] },
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const ops = node.ops;
+    // The clauses: a condition (absent for the default clause) and an arm.
+    const pairs: { condition?: number; arm: number }[] = [];
+    if (node.operator === 'If') {
+      pairs.push({ condition: 0, arm: 1 });
+      if (ops.length === 3) pairs.push({ arm: 2 });
+    } else
+      for (let i = 0; i + 1 < ops.length; i += 2)
+        pairs.push(
+          i === ops.length - 2 && isSymbol(ops[i], 'True')
+            ? { arm: i + 1 }
+            : { condition: i, arm: i + 1 }
+        );
+    const operand = (i: number): IRValue =>
+      this.convert(
+        this.value(ops[i], scope, operations),
+        facts.conversions?.[i],
+        node,
+        operations
+      );
+    const conditions = pairs.map((p) =>
+      p.condition === undefined ? undefined : operand(p.condition)
+    );
+    // Every arm is evaluated, where `selectWith()` evaluates an arm only
+    // when a position selects it: the two agree only for arms whose
+    // operations are pure and cannot throw, abort or reach the host.
+    const armsStart = operations.length;
+    const arms = pairs.map((p) => operand(p.arm));
+    for (let i = armsStart; i < operations.length; i++) {
+      const op = operations[i];
+      if (
+        op.effect !== 'pure' ||
+        this.canThrow(op) ||
+        operationCanAbort(op, this.functions) ||
+        reachesHost(op, this.functions)
+      )
+        throw new StructuredDeclineError(
+          `${node.operator} with the list condition ${nodeText(ops[0])} is not in ` +
+            `the profile: an arm has an operation that can draw, throw, abort or ` +
+            `reach the host (${nodeText(op.origin)}), and the profile evaluates ` +
+            `every arm, where the existing compiler evaluates an arm only where a ` +
+            `position selects it`
+        );
+    }
+    const [one, length] = this.elementRange(conditions[0]!, node, operations);
+    const index = this.newValue('integer', 'number');
+    const body: IROperation[] = [];
+    const armAt = (k: number, into: IROperation[]): IRValue =>
+      isListType(arms[k].type)
+        ? this.element(arms[k], index, node, into, true)
+        : arms[k];
+    const chain = (k: number, into: IROperation[]): IRValue => {
+      if (k === pairs.length)
+        return this.numberLiteral(NaN, 'real', node, into);
+      const condition = conditions[k];
+      if (condition === undefined) return armAt(k, into);
+      const test = this.element(condition, index, node, into, true);
+      return this.conditional(
+        test,
+        (inner) => armAt(k, inner),
+        (inner) => chain(k + 1, inner),
+        node,
+        into
+      );
+    };
+    const value = this.inRegion(body, () => chain(0, body));
+    const region: IRRegion = {
+      ...this.region(body, node, value),
+      parameters: [index],
+    };
+    const result = this.resultOf(facts);
+    operations.push({
+      kind: 'build',
+      result,
+      operands: [one, length],
+      body: region,
+      effect: joinEffects(effect, region.effect),
+      ...touchesField(this.states(node), region.touches),
+      ascending: true,
+      origin: node,
+    });
+    return result;
+  }
+
+  /**
+   * The element of an element-wise head (`BroadcastForm`) at the end of
+   * `operations`: the operation of the form applied to `operands`, the
+   * elements of the list operands and the values of the scalar operands,
+   * in the order of the operands, with a result of the type `type` (a
+   * real, or a boolean for a comparison). Each operation is `pure`.
+   */
+  private broadcastElement(
+    form: BroadcastForm,
+    operands: readonly IRValue[],
+    type: ValueType,
+    origin: Expression,
+    operations: IROperation[]
+  ): IRValue {
+    const push = (
+      op:
+        | { kind: 'unary'; fn: UnaryFunctionName }
+        | { kind: 'binary'; fn: BinaryFunctionName }
+        | {
+            kind:
+              | 'sqrt'
+              | 'floor'
+              | 'mod'
+              | 'less'
+              | 'less-equal'
+              | 'equal'
+              | 'not-equal'
+              | 'not'
+              | 'min'
+              | 'max'
+              | 'divide';
+          },
+      args: readonly IRValue[],
+      result: IRValue = this.newValue(
+        type,
+        type === 'boolean' ? 'boolean' : 'number'
+      )
+    ): IRValue => {
+      operations.push({
+        ...op,
+        result,
+        operands: args,
+        effect: 'pure',
+        origin,
+      } as IROperation);
+      return result;
+    };
+    const real = () => this.newValue('real', 'number');
+    if (form === 'clamp')
+      return push({ kind: 'min' }, [
+        push({ kind: 'max' }, [operands[0], operands[1]], real()),
+        operands[2],
+      ]);
+    if (form === 'log-quotient')
+      return push({ kind: 'divide' }, [
+        push({ kind: 'unary', fn: 'ln' }, [operands[0]], real()),
+        push({ kind: 'unary', fn: 'ln' }, [operands[1]], real()),
+      ]);
+    if ('operation' in form && (form.operation === 'and' || form.operation === 'or')) {
+      // `((a) && (b) && (c))`: each later operand is a value of the body,
+      // which its region yields.
+      const result = this.newValue('boolean', 'boolean');
+      operations.push({
+        kind: form.operation,
+        result,
+        operands: [operands[0]],
+        rest: operands.slice(1).map((v) => this.region([], origin, v)),
+        effect: 'pure',
+        origin,
+      });
+      return result;
+    }
+    if ('operation' in form)
+      return push(
+        { kind: form.operation as Exclude<typeof form.operation, 'and' | 'or'> },
+        operands
+      );
+    const args =
+      form.after === undefined
+        ? operands
+        : [...operands, this.numberLiteral(form.after, 'real', origin, operations)];
+    return push(
+      args.length === 1
+        ? { kind: 'unary', fn: form.call as UnaryFunctionName }
+        : { kind: 'binary', fn: form.call as BinaryFunctionName },
+      args
+    );
   }
 
   /**
@@ -3376,7 +3668,9 @@ class Lowering {
           operands.length === 1
             ? [this.numberLiteral(1, 'integer', node, operations), operands[0]]
             : operands;
-        return push('range', bounds);
+        const range = push('range', bounds);
+        if (countFits(node.ops)) FITTING_COUNTS.add(operations.at(-1)!);
+        return range;
       }
     }
     return fail(`no lowering for the function of lists ${nodeText(node)}`);
@@ -5709,8 +6003,10 @@ class Lowering {
           if (this.canThrowNoHost(op)) return op;
           continue;
         }
-        // `_SYS.nd` does not throw: a derivative is judged by its body.
-        if (op.kind === 'routine' && op.fn !== 'derivative') return op;
+        // An operation with regions is judged by its own code (a `build` of
+        // a count that the program computes, a `routine` but a
+        // `derivative`), then by the operations of its regions.
+        if (throwsItself(op, false)) return op;
         for (const region of regionsOf(op)) {
           const found = visit(region.operations, false);
           if (found !== undefined) return found;
@@ -6279,14 +6575,316 @@ class Lowering {
   }
 }
 
-/** Whether `op` is a matrix function whose runtime helper can throw:
- *  `_SYS.inv` and `_SYS.matpow` throw `expected-square-matrix` for a
- *  rectangular matrix that is not square (but `M^1`), through
- *  `nonSquareMatrixPower()` in `javascript-runtime.ts`. `_SYS.det`,
- *  `_SYS.trace`, `_SYS.rref`, `_SYS.transpose`, `_SYS.diagonal`,
- *  `_SYS.matmul`, `_SYS.mul` and `_SYS.norm` give `NaN` for an operand of
- *  another shape and do not throw for an operand that the admission lets
- *  them read (an absent row is never their operand). */
+/**
+ * Whether the code of an operation itself can throw on JavaScript for
+ * operands that hold values of their declared types (`canThrow()` adds the
+ * regions that it evaluates and the functions that it calls). A value
+ * outside its type (an array where the type is a number, which
+ * `_SYS.atNumeric` refuses) is unspecified, and a throw for lack of memory
+ * is not counted. The aborts that an operation states (`aborts`: the size
+ * limit and the poles of the `bigint` mode), the iteration budget of a
+ * `loop` and the seed of a `seeded` are aborts, which `operationCanAbort()`
+ * answers, not throws.
+ *
+ * - `false`: the code gives a value for every operand.
+ * - `true`: it can throw.
+ * - `count`: an array of a count that the program computes, which throws a
+ *   `RangeError` for more than 2^32 - 1 elements, unless the lowering knows
+ *   that the count fits (`FITTING_COUNTS`).
+ *
+ * `FUNCTION_THROWS` answers for a `unary` and a `binary`, and
+ * `COLLECTION_THROWS` for a `collection`.
+ */
+export const OPERATION_THROWS: Readonly<
+  Record<IROperation['kind'], boolean | 'count'>
+> = {
+  'literal': false,
+  'input': false,
+  'capture': false,
+  'constant': false,
+  'add': false,
+  'negate': false,
+  'not': false,
+  'multiply': false,
+  'less': false,
+  'less-equal': false,
+  'equal': false,
+  'not-equal': false,
+  'min': false,
+  'max': false,
+  'sqrt': false,
+  // `_SYS.floorMod` reads its operands with `integerOperand()`
+  // (`javascript-runtime.ts`), which throws for an operand beyond
+  // ±(2^53 − 1), the infinities included.
+  'mod': true,
+  'floor': false,
+  'divide': false,
+  'unary': false,
+  'binary': false,
+  // The `bigint` mode: a throw of its helpers is the abort `error` of the
+  // policy (`bigintAborts()` in `javascript-structured-policy.ts`).
+  'integer': false,
+  // The abort `no-value`.
+  'no-value': false,
+  // `_SYS.atNumeric`, `_SYS.at` and `_SYS.atPoint` give `NaN`, or a point
+  // of `NaN`, for an index out of range.
+  'at': false,
+  'length': false,
+  'list': false,
+  'tuple': false,
+  'get': false,
+  'append': false,
+  // The test of the count that the emitter writes (`build` in
+  // `javascript-structured-emit.ts`) for a build that is not `ascending`
+  // (a `Comprehension` over a `Range`) or that is `counted` (`Tabulate`).
+  // An `ascending` build that is not `counted` runs over the elements of a
+  // list, and has no test.
+  'build': 'count',
+  // `_SYS.replaceAt` throws for an index out of range (`listPosition()`).
+  'replace-at': true,
+  'copy': false,
+  'collection': false,
+  'convert': false,
+  'if': false,
+  'loop': false,
+  'and': false,
+  'or': false,
+  // A call throws when the body of its function can throw (`canThrow()`).
+  'call': false,
+  'trace': false,
+  // Outside a seeded frame, the live source throws `CapabilityDeniedError`
+  // when the host denies entropy (`createSysRuntime()`, `random: null`).
+  // That throw is not counted: a `draw` is `effectful`, so the lowering
+  // never removes it, moves it or evaluates it where the existing emitter
+  // does not.
+  'draw': false,
+  'seeded': false,
+  // `_SYS.integrate`, `_SYS.integrateMC` and `_SYS.limit` throw the
+  // timeout of a deadline; `_SYS.nd` (a `derivative`) does not throw
+  // (`throwsItself()`).
+  'routine': true,
+  // A function of the host can throw, and the host can count its calls,
+  // also when it is declared pure.
+  'host': true,
+  'yield': false,
+  'exit': false,
+};
+
+/**
+ * Whether the code of each function of lists (`IRCollection`) can throw for
+ * operands of their declared types, as in `OPERATION_THROWS`:
+ *
+ * - `inverse` and `matrix-power`: `_SYS.inv` and `_SYS.matpow` throw
+ *   `expected-square-matrix` for a rectangular matrix that is not square
+ *   (but `M^1`), through `nonSquareMatrixPower()` in `javascript-runtime.ts`.
+ * - `range`: `_SYS.range` (`materializeRange()`) throws a `RangeError` for
+ *   more than 2^32 - 1 elements.
+ * - `repeat` and `linspace`: `Array.from({ length: n })` throws a
+ *   `RangeError` for a count of more than 2^32 - 1.
+ * - Every other function gives a value. The statistics (`oneDatumOk()`, and
+ *   `covariance` and `correlation` of `numerics/statistics.ts`) give `NaN`
+ *   for an empty list or a `NaN` element. `_SYS.det`, `_SYS.trace`,
+ *   `_SYS.rref`, `_SYS.transpose`, `_SYS.diagonal`, `_SYS.matmul`,
+ *   `_SYS.mul` and `_SYS.norm` give `NaN` for an operand of another shape
+ *   and do not throw for an operand of rank 1 or 2 (an absent row is never
+ *   their operand). `_SYS.rotl`, `_SYS.rotr`, `_SYS.idxt`, `_SYS.atNumeric`
+ *   (`at-real`, `gather`) and the texts of `ordering`, `unique`,
+ *   `contains`, `slice`, `take`, `drop`, `reverse`, `sort`, `join` and
+ *   `flatten` give a value for every list of numbers or of rows.
+ */
+export const COLLECTION_THROWS: Readonly<
+  Record<CollectionFunctionName, boolean | 'count'>
+> = {
+  'norm': false,
+  'mean': false,
+  'median': false,
+  'variance': false,
+  'dot': false,
+  'take': false,
+  'drop': false,
+  'reverse': false,
+  'sort': false,
+  'join': false,
+  'range': 'count',
+  'rotate-left': false,
+  'rotate-right': false,
+  'determinant': false,
+  'trace': false,
+  'transpose': false,
+  'row-reduce': false,
+  'inverse': true,
+  'matrix-power': true,
+  'matrix-multiply': false,
+  'matrix-product': false,
+  'diagonal': false,
+  'flatten': false,
+  'population-variance': false,
+  'standard-deviation': false,
+  'population-standard-deviation': false,
+  'skewness': false,
+  'kurtosis': false,
+  'mode': false,
+  'interquartile-range': false,
+  'covariance': false,
+  'correlation': false,
+  'ordering': false,
+  'index-of': false,
+  'contains': false,
+  'unique': false,
+  'repeat': 'count',
+  'linspace': 'count',
+  'slice': false,
+  'at-real': false,
+  'gather': false,
+};
+
+/** Whether the code of each function of one or two operands
+ *  (`IRUnaryFunction`, `IRBinaryFunction`) can throw for a number, as in
+ *  `OPERATION_THROWS`. The code of every function marked `false` gives a
+ *  value for every number, `NaN` and the infinities included. */
+export const FUNCTION_THROWS: Readonly<
+  Record<UnaryFunctionName | BinaryFunctionName, boolean>
+> = {
+  'exp': false,
+  'ln': false,
+  'sin': false,
+  'cos': false,
+  'tanh': false,
+  'abs': false,
+  'cbrt': false,
+  'tan': false,
+  'cot': false,
+  'sec': false,
+  'csc': false,
+  'sinh': false,
+  'cosh': false,
+  'atan': false,
+  'asinh': false,
+  'gamma': false,
+  'sign': false,
+  'conjugate': false,
+  'asin': false,
+  'acos': false,
+  'acosh': false,
+  'atanh': false,
+  'log10': false,
+  'log2': false,
+  'erf': false,
+  'erfc': false,
+  'digamma': false,
+  'haversine': false,
+  'sinpi': false,
+  'cospi': false,
+  'tanpi': false,
+  'ceil': false,
+  'round-ties-away': false,
+  'acot': false,
+  'acsc': false,
+  'asec': false,
+  'acoth': false,
+  'asech': false,
+  'acsch': false,
+  'coth': false,
+  'sech': false,
+  'csch': false,
+  'factorial': false,
+  'factorial2': false,
+  'trunc': false,
+  'fract': false,
+  'mod-one': false,
+  'heaviside': false,
+  'ln-gamma': false,
+  'sinc': false,
+  'erfi': false,
+  'erf-inv': false,
+  'trigamma': false,
+  'fresnel-s': false,
+  'fresnel-c': false,
+  'sin-integral': false,
+  'cos-integral': false,
+  'exp-integral-ei': false,
+  'log-integral': false,
+  'dirichlet-eta': false,
+  'dirichlet-beta': false,
+  'zeta': false,
+  'stieltjes': false,
+  'lambert-w': false,
+  'elliptic-k': false,
+  'elliptic-e': false,
+  'atan2': false,
+  'pow': false,
+  'abs-pow': false,
+  'signed-pow': false,
+  'real-pow': false,
+  'root': false,
+  'complex': false,
+  'hypot': false,
+  'gamma-q': false,
+  'gamma-upper': false,
+  'beta': false,
+  'real-binomial': false,
+  'clausen': false,
+  'elliptic-f': false,
+  'elliptic-e-incomplete': false,
+  'elliptic-pi': false,
+  'bessel-j': false,
+  'bessel-y': false,
+  'bessel-i': false,
+  'bessel-k': false,
+  'agm': false,
+  'polygamma': false,
+  'zeta-generalized': false,
+  'stieltjes-generalized': false,
+  'hurwitz-zeta': false,
+  'polylog': false,
+  'lambert-w-branch': false,
+  // `_SYS.remainder`, `_SYS.gcd` and `_SYS.lcm` read their operands with
+  // `integerOperand()`, as `mod` does.
+  'real-remainder': true,
+  'real-gcd': true,
+  'real-lcm': true,
+  'chop': false,
+};
+
+/** The builds and the `range` functions of lists whose count the lowering
+ *  knows to be at most 2^32 - 1 (`countFits()`): a `Comprehension` over a
+ *  `Range` of literal bounds, and a `Range` of literal operands. */
+const FITTING_COUNTS = new WeakSet<IROperation>();
+
+/** Whether the count of the elements of `Range(...bounds)` is known to be
+ *  at most 2^32 - 1: every bound is a literal real number, and the count of
+ *  `rangeCount()`, the count of `_SYS.range` and of the interpreter, fits.
+ *  `bounds` is `[to]`, `[from, to]` or `[from, to, step]`. */
+function countFits(bounds: readonly Expression[]): boolean {
+  const values = bounds.map((b) =>
+    isNumber(b) && b.im === 0 && Number.isFinite(b.re) ? b.re : undefined
+  );
+  if (values.some((v) => v === undefined)) return false;
+  const [from, to, step] =
+    values.length === 1 ? [1, values[0]!] : (values as number[]);
+  return rangeCount(from, to, step ?? (to >= from ? 1 : -1)) <= 4294967295;
+}
+
+/** Whether the code of `op` itself, with no region and no called function,
+ *  can throw (`OPERATION_THROWS`, `COLLECTION_THROWS`,
+ *  `FUNCTION_THROWS`). With `host` false, a call or a read of the host
+ *  is left out. */
+function throwsItself(op: IROperation, host = true): boolean {
+  if (op.kind === 'host') return host;
+  if (op.kind === 'routine') return op.fn !== 'derivative';
+  const fact =
+    op.kind === 'collection'
+      ? COLLECTION_THROWS[op.fn]
+      : op.kind === 'unary' || op.kind === 'binary'
+        ? FUNCTION_THROWS[op.fn]
+        : OPERATION_THROWS[op.kind];
+  if (fact !== 'count') return fact;
+  if (FITTING_COUNTS.has(op)) return false;
+  return op.kind !== 'build' || op.ascending !== true || op.counted === true;
+}
+
+/** Whether `op` is a matrix function whose runtime helper can throw
+ *  (`COLLECTION_THROWS`): `inverse` and `matrix-power`. */
 function throwingMatrixFunction(op: IROperation): boolean {
   return (
     op.kind === 'collection' &&
@@ -6296,39 +6894,18 @@ function throwingMatrixFunction(op: IROperation): boolean {
 
 /** Whether the code of `op`, or of an operation of a region that it
  *  evaluates, or of the body of a function that it calls, can throw on
- *  JavaScript: `mod` (`_SYS.floorMod` throws for an operand beyond the safe
- *  integer range), the functions `real-remainder`, `real-gcd` and
- *  `real-lcm` (`_SYS.remainder`, `_SYS.gcd`, `_SYS.lcm`, the same rule),
- *  `replace-at` (`_SYS.replaceAt` throws for an index out of range),
- *  `host`, a function of the host, which can throw and
- *  whose calls the host can count, also when it is declared pure, and
- *  a `routine` but `derivative` (`_SYS.integrate`, `_SYS.integrateMC` and
- *  `_SYS.limit` throw the timeout of a deadline; `_SYS.nd` does not
- *  throw), and
- *  `inverse` and `matrix-power` (`throwingMatrixFunction()`). A throw
- *  is not an effect, so the lowering keeps such an operation where the
- *  existing emitter evaluates it (`ifStatement()`).
- *  `bodyThrows` answers for the function of index `i` of the program (a
- *  called function is lowered before its call). */
+ *  JavaScript (`throwsItself()`). With `host` false, a call or a read of
+ *  the host is left out. A throw is not an effect, so the lowering keeps
+ *  such an operation where the existing emitter evaluates it
+ *  (`ifStatement()`). `bodyThrows` answers for the function of index `i`
+ *  of the program (a called function is lowered before its call). */
 function canThrow(
   op: IROperation,
   bodyThrows: (i: number) => boolean,
   host = true
 ): boolean {
   return (
-    op.kind === 'mod' ||
-    (op.kind === 'binary' &&
-      (op.fn === 'real-remainder' ||
-        op.fn === 'real-gcd' ||
-        op.fn === 'real-lcm')) ||
-    op.kind === 'replace-at' ||
-    throwingMatrixFunction(op) ||
-    // A list of a count that the program computes: more than 2^32 - 1
-    // elements throw (`Tabulate`, `Repeat`, `Linspace`).
-    (op.kind === 'build' && op.counted === true) ||
-    (op.kind === 'collection' && (op.fn === 'repeat' || op.fn === 'linspace')) ||
-    (host && op.kind === 'host') ||
-    (op.kind === 'routine' && op.fn !== 'derivative') ||
+    throwsItself(op, host) ||
     (op.kind === 'call' && bodyThrows(op.function)) ||
     regionsOf(op).some((region) =>
       region.operations.some((inner) => canThrow(inner, bodyThrows, host))

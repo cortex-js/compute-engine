@@ -386,11 +386,15 @@ describe('the heads of real calls: the declines that stay', () => {
       if (!(json as unknown[]).includes('w') || mode === 'complex') expectDecline(json, mode, message);
   });
 
-  test('a list operand: the existing compiler broadcasts the head', () => {
+  // In the `strict` mode the head is applied to each element since slice 1
+  // of docs/plans/2026-11-12-structured-broadcast-over-lists.md
+  // (compile-javascript-structured-broadcast.test.ts); the `complex` mode
+  // declines it.
+  test('a list operand in the complex mode: the existing compiler broadcasts the head', () => {
     const ce = engine();
     ce.declare('L', 'list<real>');
-    const outcome = compileWith(ce.box(['Heaviside', 'L']), 'strict', true);
-    expect('message' in outcome && outcome.message).toMatch(/Heaviside with the list operand L is not in the profile/);
+    const outcome = compileWith(ce.box(['Heaviside', 'L']), 'complex', true);
+    expect('message' in outcome && outcome.message).toMatch(/Heaviside with the list operand L is not in the profile in the complex mode/);
   });
 });
 

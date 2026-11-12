@@ -33,11 +33,13 @@ import {
 } from './structured-verify.js';
 
 /** The representation that holds a value of the type `type`, or
- *  `undefined` for a list or a tuple of booleans or of complex numbers, at
- *  any depth. A tuple of reals or of integers is an array of numbers, as a
- *  list is: the existing emitter writes both `[a, b]`; a list of such tuples
- *  is an array of them, and a list of lists an array of arrays at every
- *  rank (`[[x, 1], [2, x]]`). */
+ *  `undefined` for a list or a tuple of complex numbers, at any depth, a
+ *  tuple of booleans and a list of lists of booleans. A tuple of reals or
+ *  of integers is an array of numbers, as a list is: the existing emitter
+ *  writes both `[a, b]`; a list of such tuples is an array of them, and a
+ *  list of lists an array of arrays at every rank (`[[x, 1], [2, x]]`). A
+ *  list of booleans is an array of JavaScript booleans, as the closure of
+ *  `_SYS.bcast` makes it for `L < 0` (`[true, false]`). */
 export function representationOfKind(
   type: ValueType
 ): ScalarRepresentation | undefined {
@@ -47,7 +49,9 @@ export function representationOfKind(
   if (element !== undefined)
     return element === 'real' ||
       element === 'integer' ||
+      element === 'boolean' ||
       ((isTupleType(element) || isListType(element)) &&
+        elementOf(element) !== 'boolean' &&
         representationOfKind(element) === 'array')
       ? 'array'
       : undefined;
@@ -132,13 +136,17 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // `_SYS.atNumeric(list, index, element type)` and `list.length`, as the
     // existing emitter writes them for a list input or parameter,
     // `_SYS.at(tuple, index)` for a tuple, and `_SYS.atPoint(list, index,
-    // size)` for a list of tuples, whose element is an array.
-    'at': { results: ['number', 'array'], operands: ['array', 'number'] },
+    // size)` for a list of tuples, whose element is an array; the
+    // element of a list of booleans is a boolean (`_SYS.at`, as for a row).
+    'at': {
+      results: ['number', 'array', 'boolean'],
+      operands: ['array', 'number'],
+    },
     'length': { results: ['number'], operands: ['array'] },
     // `[a, b, …]`, the array literal of the existing emitter for a list
     // literal and a tuple; `t[i]` for the element of a tuple at a literal
     // position.
-    'list': { results: ['array'], operands: ['number', 'array'] },
+    'list': { results: ['array'], operands: ['number', 'array', 'boolean'] },
     'tuple': { results: ['array'], operands: ['number'] },
     'get': { results: ['number'], operands: ['array'] },
     // `(r.push(x), r)` when the emitter writes the element into the array

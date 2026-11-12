@@ -972,16 +972,20 @@ function fitsType(type: ValueType, wider: ValueType): boolean {
 }
 
 /** Whether a value of the type `type` can be an element of a list: a real,
- *  an integer, a tuple (a list of points), or a list whose elements can be
- *  elements of a list (a row of a list of lists), at every depth. A boolean
- *  and a complex number are not elements of a list of the representation,
- *  at any depth. */
-function isElementType(type: ValueType): boolean {
+ *  an integer, a boolean (a list of booleans, of one level: the value of
+ *  an element-wise comparison), a tuple (a list of points), or a list whose
+ *  elements can be elements of a list (a row of a list of lists), at every
+ *  depth. A complex number is not an element of a list of the
+ *  representation, at any depth, and a boolean is not an element of a row
+ *  of a list of lists. Whether a target holds a list of booleans is a
+ *  question of its policy (`RepresentationPolicy.representationOf`). */
+function isElementType(type: ValueType, depth = 0): boolean {
   return (
     type === 'real' ||
     type === 'integer' ||
+    (type === 'boolean' && depth === 0) ||
     isTupleType(type) ||
-    (isListType(type) && isElementType(type.element))
+    (isListType(type) && isElementType(type.element, depth + 1))
   );
 }
 

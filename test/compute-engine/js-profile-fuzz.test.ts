@@ -197,6 +197,42 @@ test('the generator writes the integrals of the routine integrate (--calculus)',
     expect([form, forms.has(form)]).toEqual([form, true]);
 });
 
+test('the generator writes the element-wise heads and selections', () => {
+  // `genBroadcastList()`: slices 1 and 2 of
+  // docs/plans/2026-11-12-structured-broadcast-over-lists.md.
+  const forms = new Set<string>();
+  const isList = (json: unknown): boolean =>
+    ['L', 'I', 'LN', 'VN', 'CL', 'W', 'NV'].includes(json as string) ||
+    (Array.isArray(json) && (json[0] === 'List' || json[0] === 'Comprehension'));
+  const visit = (json: unknown): void => {
+    if (!Array.isArray(json)) return;
+    const [head, ...ops] = json;
+    if (['Sqrt', 'Ln', 'Exp', 'Sin', 'Gamma', 'Floor', 'Abs', 'Erf'].includes(head) && isList(ops[0]))
+      forms.add('a function of a list');
+    // A list operand, also inside an element-wise sum or function of a list.
+    const listValued = (op: unknown): boolean =>
+      isList(op) ||
+      (Array.isArray(op) &&
+        ['Add', 'Multiply', 'Negate', 'Divide', 'Subtract', 'Sqrt', 'Abs', 'Sin'].includes(op[0]) &&
+        op.slice(1).some(listValued));
+    if (['Power', 'Root', 'Log', 'Mod', 'Hypot', 'Arctan2', 'Remainder', 'Binomial'].includes(head) && ops.some(listValued))
+      forms.add('a function of two operands of a list');
+    if ((head === 'If' || head === 'Which') && Array.isArray(ops[0]) && ops[0].slice(1).some(isList))
+      forms.add('a selection with a list condition');
+    if (head === 'Length' && Array.isArray(ops[0]) && ['Less', 'GreaterEqual', 'Equal'].includes(ops[0][0]))
+      forms.add('a length of a list of booleans');
+    json.forEach(visit);
+  };
+  for (let i = 0; i < 4000; i++)
+    visit(generateProgram(7, i, { depth: DEFAULT_OPTIONS.depth, size: DEFAULT_OPTIONS.size }).json);
+  expect([...forms].sort()).toEqual([
+    'a function of a list',
+    'a function of two operands of a list',
+    'a length of a list of booleans',
+    'a selection with a list condition',
+  ]);
+});
+
 test('the generator writes loops that carry a list or a list of lists', () => {
   // `genCarriedList()`: the patterns of `withOwnedCopies()` and of the rows
   // of `inPlaceUpdates()` (structured-in-place.ts). Most of them are larger

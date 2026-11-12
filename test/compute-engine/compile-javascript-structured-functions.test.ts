@@ -1016,7 +1016,11 @@ describe('refusals', () => {
     ).toThrow(message);
   });
 
-  test('a list operand declines', () => {
+  // In the `strict` mode a scalar function of a list is admitted since
+  // slice 1 of docs/plans/2026-11-12-structured-broadcast-over-lists.md
+  // (compile-javascript-structured-broadcast.test.ts); the `complex` mode
+  // declines it.
+  test('a list operand declines in the complex mode', () => {
     const ce = engine();
     for (const [head, json] of [
       ['Exp', ['Exp', 'L']],
@@ -1037,7 +1041,9 @@ describe('refusals', () => {
           : new RegExp(
               `${head} with the list operand L is not in the structured route`
             );
-      expect(() => structured().compile(fn, OPTIONS)).toThrow(message);
+      expect(() =>
+        structured().compile(fn, { ...OPTIONS, mode: 'complex' })
+      ).toThrow(message);
     }
   });
 

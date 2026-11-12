@@ -30,6 +30,7 @@ import { resolveDerivativeFunctionLiteral } from '../derivative-function-literal
 import {
   assumedRealNonNegative,
   fixedLogBase,
+  realPowerExponent,
   withoutNaNMember,
 } from './compile-real-analysis.js';
 import {
@@ -70,6 +71,7 @@ import {
 } from '../boxed-expression/abstract-boxed-expression.js';
 import { CompilerState } from './compiler-state.js';
 import { realOnlyLoweringOf } from './compiler-core.js';
+import { core } from './compiler-core-hooks.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
@@ -168,6 +170,8 @@ import {
   type StructuredCapture,
   type StructuredInput,
   decidedBranch,
+  FUNCTIONS,
+  type BroadcastForm,
   type RealCallForm,
   type StructuredForm,
   type StructuredIntegral,
@@ -4287,10 +4291,18 @@ function structuredRepresentation(
   if (type.kind === 'point') return 'array';
   if (type.kind !== 'list') return representation(type);
   const element = type.element;
+  // A list of booleans is an array of JavaScript booleans, of one level
+  // (`isBooleanList()`): a row of booleans has no representation.
   if (element?.kind === 'list')
-    return structuredRepresentation(element) === 'array' ? 'array' : undefined;
+    return element.element?.kind !== 'boolean' &&
+      structuredRepresentation(element) === 'array'
+      ? 'array'
+      : undefined;
   const kind = element?.kind;
-  return kind === 'real' || kind === 'integer' || kind === 'point'
+  return kind === 'real' ||
+    kind === 'integer' ||
+    kind === 'point' ||
+    kind === 'boolean'
     ? 'array'
     : undefined;
 }
@@ -4527,6 +4539,14 @@ function atRule(
         `one index of a list that is not a list of lists`
     );
   const index = indexes[0];
+  // An element of a list of booleans (an element-wise comparison) is a
+  // boolean: the existing emitter reads it with `_SYS.at`, `undefined` for
+  // an index out of range.
+  if (isBooleanList(base))
+    return w.valueFacts(node, { kind: 'boolean' }, [
+      w.convert(base, base.type)!,
+      w.convert(index, index.type)!,
+    ]);
   // An element of a list of tuples is a tuple (a point).
   const point = listElementType(base);
   const element = point?.kind === 'point' ? point : collectionElement(base);
@@ -4570,6 +4590,7 @@ function lengthRule(
   if (
     collectionElement(base) === undefined &&
     listElementType(base) === undefined &&
+    !isBooleanList(base) &&
     !(isNestedListType(base.type) && base.representation === 'array')
   )
     return w.refuse(
@@ -5525,6 +5546,19 @@ function tupleRule(
     node,
     { kind: 'point', size: facts.length },
     facts.map((f) => w.convert(f, f.type)!)
+  );
+}
+
+/** Whether the facts `facts` are those of a list of booleans held as an
+ *  array (the value of an element-wise comparison or connective,
+ *  `broadcastRule()`). Only `At`, `Length`, the connectives and the
+ *  condition of an element-wise selection read one
+ *  (`refuseBooleanListUses()`). */
+function isBooleanList(facts: FragmentValueFacts<ScalarRepresentation>): boolean {
+  return (
+    facts.representation === 'array' &&
+    facts.type.kind === 'list' &&
+    facts.type.element.kind === 'boolean'
   );
 }
 
@@ -6986,8 +7020,13 @@ function isFoldNode(node: Expression): boolean {
  * no such key is known: a read of a name (two reads of one name in one
  * expression read one value), a list literal (its number of elements), an
  * element-wise result (the key of its list operands, which its rule found
- * equal), `ReplaceAt(L, …)`, `RotateLeft(L, k)` and `RotateRight(L, k)` (the
- * key of `L`).
+ * equal: a head of `ELEMENTWISE_HEADS`, or a head that the engine
+ * broadcasts, whose list value has the length of its list operands,
+ * `broadcastRule()`), `ReplaceAt(L, …)`, `RotateLeft(L, k)` and
+ * `RotateRight(L, k)` (the key of `L`), and a comprehension over
+ * `Element(j, Range(a, b))` with no guard whose bounds are number literals
+ * or names (the text of the bounds: two comprehensions over one range have
+ * one length).
  */
 function lengthKey(
   node: Expression,
@@ -6999,6 +7038,16 @@ function lengthKey(
   if (!isFunction(node) || !isLibraryOperator(node, node.operator))
     return undefined;
   if (node.operator === 'List') return `literal ${node.nops}`;
+  // A comprehension with a guard (`Element(j, Range(a, b), c)`) keeps the
+  // elements that the guard admits.
+  const parts =
+    node.operator === 'Comprehension' ? comprehensionParts(node) : undefined;
+  if (
+    parts !== undefined &&
+    parts.guard === undefined &&
+    [parts.from, parts.to].every((bound) => isNumber(bound) || isSymbol(bound))
+  )
+    return `range ${nodeText(parts.from)} ${nodeText(parts.to)}`;
   // A rotation has the length of its list.
   if (
     (node.operator === 'ReplaceAt' && node.nops === 3) ||
@@ -7006,7 +7055,7 @@ function lengthKey(
       node.nops >= 1)
   )
     return lengthKey(node.op1, scope, context, w);
-  if (ELEMENTWISE_HEADS.includes(node.operator)) {
+  if (ELEMENTWISE_HEADS.includes(node.operator) || isBroadcastHead(node)) {
     const list = node.ops.find(
       (op) => w.value(op, scope, context).type.kind === 'list'
     );
@@ -7036,11 +7085,17 @@ function lengthKey(
  * list operands whose lengths are not equal by construction (`lengthKey()`):
  * `_SYS.bcast` gives `NaN` for two lists of different lengths, a value of
  * another shape (the design note, open choice 5).
+ *
+ * `kindOf` gives the kind of the elements of the result from whether every
+ * element and every scalar operand is an integer (`broadcastRule()` gives
+ * its own: a real, an integer for `Floor`, a boolean for a comparison).
  */
 function elementwiseRule(
   head: string,
-  rule: FragmentRule<ScalarRepresentation>
-): FragmentRule<ScalarRepresentation> {
+  rule: FragmentRule<ScalarRepresentation>,
+  kindOf: (integer: boolean) => 'real' | 'integer' | 'boolean' = (integer) =>
+    integer && head !== 'Divide' ? 'integer' : 'real'
+): Extract<FragmentRule<ScalarRepresentation>, { walk: unknown }> {
   return {
     walk: (node, scope, context, w) => {
       const facts = operandFacts(node, scope, context, w);
@@ -7062,7 +7117,7 @@ function elementwiseRule(
       // Lists of lists: element-wise at every depth, with scalar operands
       // (`nestedElementwise()`).
       if (facts.some((f) => (numericCellsOf(f)?.rank ?? 0) >= 2))
-        return nestedElementwise(head, node, facts, scope, context, w);
+        return nestedElementwise(head, node, facts, scope, context, w, kindOf);
       for (const [i, f] of facts.entries()) {
         const kind = f.type.kind;
         if (kind === 'list') {
@@ -7135,22 +7190,573 @@ function elementwiseRule(
             node,
             'signature',
             `${head} of the lists ${lists.map((op) => nodeText(op)).join(' and ')}, whose ` +
-              `lengths are not equal by construction, is not in the structured route: ` +
+              `lengths are not equal by construction, is not in the structured route ` +
+              `(declare one width for them: \`list<real^3>\` or \`vector<3>\`): ` +
               `the existing compiler gives NaN for two lists of different lengths`
           );
       }
-      const integer =
-        head !== 'Divide' &&
-        facts.every(
-          (f) =>
-            f.type.kind === 'integer' ||
-            (f.type.kind === 'list' && f.type.element.kind === 'integer')
-        );
+      const integer = facts.every(
+        (f) =>
+          f.type.kind === 'integer' ||
+          (f.type.kind === 'list' && f.type.element.kind === 'integer')
+      );
       return w.valueFacts(
         node,
-        { kind: 'list', element: { kind: integer ? 'integer' : 'real' } },
+        { kind: 'list', element: { kind: kindOf(integer) } },
         facts.map((f) => w.convert(f, f.type)!)
       );
+    },
+  };
+}
+
+/** Whether `node` is a library operator that the engine broadcasts over a
+ *  list operand (`broadcastRule()`): a list value of such a node has the
+ *  length of its list operands. */
+function isBroadcastHead(node: Expression): boolean {
+  return (
+    isFunction(node) &&
+    !ELEMENTWISE_HEADS.includes(node.operator) &&
+    isLibraryOperator(node, node.operator) &&
+    (node.operatorDefinition as { broadcastable?: boolean } | undefined)
+      ?.broadcastable === true
+  );
+}
+
+/** The heads of `broadcastRule()` whose element is an operation of the
+ *  representation, with its number of operands. */
+const BROADCAST_OPERATIONS: Readonly<
+  Record<
+    string,
+    {
+      readonly operation: Extract<BroadcastForm, { operation: unknown }>['operation'];
+      readonly nops: number;
+    }
+  >
+> = {
+  Sqrt: { operation: 'sqrt', nops: 1 },
+  Floor: { operation: 'floor', nops: 1 },
+  Mod: { operation: 'mod', nops: 2 },
+  // Slice 2: the comparisons of a list and the connectives of lists of
+  // booleans, whose value is a list of booleans. A chain of comparisons
+  // (`L < 1 < 2`) is one closure of the existing emitter, and declines.
+  Less: { operation: 'less', nops: 2 },
+  LessEqual: { operation: 'less-equal', nops: 2 },
+  Equal: { operation: 'equal', nops: 2 },
+  NotEqual: { operation: 'not-equal', nops: 2 },
+  Not: { operation: 'not', nops: 1 },
+};
+
+/** The connectives of `broadcastRule()`, of two operands or more. */
+const BROADCAST_CONNECTIVES: ReadonlySet<string> = new Set(['And', 'Or']);
+
+/** The heads whose scalar code of a real operand is complex on the
+ *  structured route (`ScalarFunctionLane` `inverse`), where the closure of
+ *  `_SYS.bcast` applies the real function to each element (`Math.asin(e)`,
+ *  `NaN` off the real domain). */
+const COMPLEX_CELL_HEADS: ReadonlySet<string> = new Set([
+  'Arcsin',
+  'Arccos',
+  'Arcosh',
+  'Artanh',
+  'Arccsc',
+  'Arcsec',
+  'Arcoth',
+  'Arsech',
+]);
+
+/** The trigonometric heads whose operand or value an angular unit other
+ *  than radians scales. */
+const ANGULAR_HEADS: ReadonlySet<string> = new Set([
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Arctan',
+  'Arctan2',
+  'Arccot',
+]);
+
+/**
+ * The element form (`BroadcastForm`) of the scalar head `head` applied to
+ * each element of a list operand of `node`, as the existing emitter writes
+ * the closure of `_SYS.bcast` (`tryCompileBroadcast()` in
+ * `compile-broadcast.ts`): the scalar code of the head with each operand an
+ * element parameter, which is the scalar code of the structured route for
+ * operands that are not literals. Otherwise the cause of the refusal:
+ *
+ * - a head whose cell is not real (`COMPLEX_CELL_HEADS`): the closure is
+ *   the real function, the scalar code of the route the complex one (the
+ *   design note, open choice 6);
+ * - a head of `REAL_CALL_HEADS` with a `domain` (`Beta`, `AGM`,
+ *   `CosIntegral`, …): the route proves the domain of a scalar operand
+ *   from its type, and has no such proof for the elements of a list;
+ * - `Sin`, `Cos` and `Tan` of a multiple of `π`: the existing emitter
+ *   writes the half-turn kernel of the list (`_SYS.sinpi`);
+ * - a trigonometric head in another angular unit than radians;
+ * - `Floor`, `Ceil` and `Round` of an exact constant that no double holds
+ *   (`inexactJumpConstant()`), `Round` with ties other than away from
+ *   zero, as for a scalar operand;
+ * - every other head: `Sech`, `Csch` and `Fract` (whose scalar code the
+ *   route refuses), a function whose closure is not the scalar code of a
+ *   real call (`KroneckerDelta`, `Boole`), and the heads that are not
+ *   functions of real numbers.
+ */
+function broadcastForm(
+  head: string,
+  node: Expression & { ops: readonly Expression[] },
+  scope: FragmentScope<ScalarRepresentation>,
+  inputs: ReadonlySet<string>
+): BroadcastForm | { readonly refusal: string } {
+  const nops = node.ops.length;
+  const refuse = (refusal: string) => ({ refusal });
+  if (COMPLEX_CELL_HEADS.has(head))
+    return refuse(
+      `the scalar code of ${head} of a real operand is complex, where the ` +
+      `existing compiler applies the real function to each element`
+    );
+  if (ANGULAR_HEADS.has(head) && node.engine.angularUnit !== 'rad')
+    return refuse(`the angular unit is ${node.engine.angularUnit}, not radians`);
+  if (
+    (head === 'Sin' || head === 'Cos' || head === 'Tan') &&
+    readsAsPiMultiple(node.ops[0])
+  )
+    return refuse(
+      'the operand is a multiple of Pi, for which the existing emitter ' +
+      'writes the half-turn kernel of each element'
+    );
+  if (head === 'Floor' || head === 'Ceil' || head === 'Round') {
+    const constant = inexactJumpConstant(node.ops, scope, inputs);
+    if (constant !== undefined)
+      return refuse(
+        `the operand holds the exact constant ${nodeText(constant)}, which no ` +
+        `double holds exactly, and the route declines it beside a jump, as for ` +
+        `a scalar operand (inexact-jump-operand)`
+      );
+    if (head === 'Round' && node.engine.roundingTies !== 'away-from-zero')
+      return refuse(
+        `the rounding of ties is ${node.engine.roundingTies}, not away from zero`
+      );
+  }
+  const operation = Object.hasOwn(BROADCAST_OPERATIONS, head)
+    ? BROADCAST_OPERATIONS[head]
+    : undefined;
+  if (operation !== undefined)
+    return operation.nops === nops
+      ? { operation: operation.operation }
+      : refuse(`${head} with ${nops} operands is not element-wise`);
+  if (BROADCAST_CONNECTIVES.has(head))
+    return { operation: head === 'And' ? 'and' : 'or' };
+  if (head === 'Power' || head === 'Root') {
+    if (nops !== 2)
+      return refuse(`${head} with ${nops} operands is not element-wise`);
+    // An exact rational exponent of odd denominator (`L^(2/3)`, `L^(8/5)`):
+    // the existing compiler keeps the fraction in the closure
+    // (`closureFrames()`, `realPowerExponent()`) and writes a real root of
+    // each element (`_SYS.pow2(Math.cbrt(e))`, `Math.pow(Math.abs(e), 1.6)`),
+    // not `_SYS.pow(e, 0.666…)`.
+    if (head === 'Power' && realPowerExponent(node.ops) !== undefined)
+      return refuse(
+        `the exponent ${nodeText(node.ops[1])} is an exact fraction of odd ` +
+          `denominator, which the existing compiler applies to each element as ` +
+          `a real root`
+      );
+    return { call: head === 'Power' ? 'pow' : 'root' };
+  }
+  if (head === 'Log')
+    return nops === 1
+      ? { call: 'log10' }
+      : nops === 2
+        ? 'log-quotient'
+        : refuse(`Log with ${nops} operands is not element-wise`);
+  const entry =
+    head === 'Gamma' && nops === 2
+      ? UPPER_GAMMA
+      : Object.hasOwn(REAL_CALL_HEADS, head)
+        ? REAL_CALL_HEADS[head]
+        : undefined;
+  if (entry !== undefined) {
+    if (entry.domain !== undefined)
+      return refuse(
+        `the structured route proves the domain of the operands of ${head} ` +
+        `from their types, and has no such proof for the elements of a list ` +
+        `(${entry.domain.why})`
+      );
+    const form = Object.hasOwn(entry.arities, nops)
+      ? entry.arities[nops]
+      : undefined;
+    if (form === 'clamp') return 'clamp';
+    if (typeof form === 'object' && 'call' in form && form.before === undefined)
+      return head === 'Chop'
+        ? { call: 'chop', after: node.engine.tolerance ?? 1e-10 }
+        : { call: form.call };
+    return refuse(
+      `${head} with ${nops} operand${nops === 1 ? '' : 's'} is not element-wise`
+    );
+  }
+  const fn = Object.hasOwn(FUNCTIONS, head) ? FUNCTIONS[head] : undefined;
+  if (
+    fn !== undefined &&
+    head !== 'Sech' &&
+    head !== 'Csch' &&
+    head !== 'Fract' &&
+    nops === (fn.kind === 'unary' ? 1 : 2)
+  )
+    return { call: fn.fn };
+  return refuse(
+    `${head} is not a head that the structured route applies to each element of a list`
+  );
+}
+
+/** The kind of the elements of the list of an element-wise head of the
+ *  form `form`: an integer for `Floor`, whose value is an integer; a
+ *  boolean for a comparison and a connective; a real for every other form
+ *  of real operands. */
+function broadcastKind(form: BroadcastForm): 'real' | 'integer' | 'boolean' {
+  if (typeof form !== 'object' || !('operation' in form)) return 'real';
+  if (form.operation === 'floor') return 'integer';
+  return form.operation === 'sqrt' || form.operation === 'mod'
+    ? 'real'
+    : 'boolean';
+}
+
+/** Whether the element form `form` reads booleans (`Not`, `And`, `Or`). */
+function readsBooleans(form: BroadcastForm): boolean {
+  return (
+    typeof form === 'object' &&
+    'operation' in form &&
+    (form.operation === 'not' ||
+      form.operation === 'and' ||
+      form.operation === 'or')
+  );
+}
+
+/**
+ * The facts of `node`, a connective (`Not`, `And`, `Or`) of the head `head`
+ * with a list operand (`broadcastRule()`): every operand a list of
+ * booleans or a boolean, the lists of lengths equal by construction or of
+ * one stated width (`listsOfOneLength()`); the value is a list of booleans. The existing emitter
+ * writes `_SYS.bcast((_tv1, _tv2) => ((_tv1) && (_tv2)), B, C)`, which
+ * evaluates every operand, then applies the connective to the elements: no
+ * operand is skipped.
+ */
+function connectiveFacts(
+  head: string,
+  node: Expression & { ops: readonly Expression[] },
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const facts = operandFacts(node, scope, context, w);
+  for (const [i, f] of facts.entries()) {
+    const flatBooleans =
+      f.type.kind === 'list' && f.type.element.kind === 'boolean';
+    if (!flatBooleans && f.type.kind !== 'boolean')
+      return w.refuse(
+        node,
+        'signature',
+        `${head} of a list of booleans and the operand ${nodeText(node.ops[i])} of ` +
+          `the type \`${fragmentTypeToString(f.type)}\` is not in the structured route, ` +
+          `which applies a connective to lists of booleans and booleans`
+      );
+  }
+  const lists = node.ops.filter((_, i) => facts[i].type.kind === 'list');
+  if (!listsOfOneLength(lists, scope, context, w))
+    return w.refuse(
+      node,
+      'signature',
+      `${head} of the lists ${lists.map((op) => nodeText(op)).join(' and ')}, whose ` +
+        `lengths are not equal by construction, is not in the structured route ` +
+        `(declare one width for them: \`list<real^3>\` or \`vector<3>\`): ` +
+        `the existing compiler gives NaN for two lists of different lengths`
+    );
+  return w.valueFacts(
+    node,
+    { kind: 'list', element: { kind: 'boolean' } },
+    facts.map((f) => w.convert(f, f.type)!)
+  );
+}
+
+/** Whether the lists `lists`, typed in `scope`, have lengths equal by
+ *  construction (one `lengthKey()`), or engine types that state one width
+ *  (`vector<3>`, `list<real^3>`), as `elementwiseRule()` reads them. */
+function listsOfOneLength(
+  lists: readonly Expression[],
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): boolean {
+  if (lists.length < 2) return true;
+  const keys = lists.map((op) => lengthKey(op, scope, context, w));
+  if (keys.every((k) => k !== undefined) && new Set(keys).size === 1)
+    return true;
+  const widths = lists.map((op) => {
+    const t = op.type.type;
+    return typeof t === 'object' &&
+      t.kind === 'list' &&
+      t.dimensions?.length === 1 &&
+      t.dimensions[0] >= 0
+      ? t.dimensions[0]
+      : undefined;
+  });
+  return widths.every((n) => n !== undefined) && new Set(widths).size === 1;
+}
+
+/** The library constants whose spelling the element-wise forms read
+ *  (`Power(ExponentialE, L)` is `Math.E` in the element code, a last
+ *  clause `True` of `Which` is the default). */
+const LIBRARY_CONSTANTS: ReadonlySet<string> = new Set([
+  'ExponentialE',
+  'Pi',
+  'ImaginaryUnit',
+  'Infinity',
+  'NegativeInfinity',
+  'ComplexInfinity',
+  'NaN',
+  'True',
+  'False',
+]);
+
+/** A name of `LIBRARY_CONSTANTS` that `node` reads and that a scope of the
+ *  pass binds (`binds`: a parameter, a local, an index), or `undefined`:
+ *  the element-wise forms do not read such a name as the constant. */
+function shadowedConstant(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  binds: PassBinds
+): string | undefined {
+  if (!isFunction(node)) return undefined;
+  return node.symbols.find(
+    (name) => LIBRARY_CONSTANTS.has(name) && binds(name, scope)
+  );
+}
+
+/**
+ * The rule `rule` of `If` or `Which`, with the element-wise selection of a
+ * condition that is a list of booleans (slice 2 of the design note
+ * `docs/plans/2026-11-12-structured-broadcast-over-lists.md`, section 5):
+ * `If(c, a, b)`, the restriction `If(c, a)` and `Which(c1, a1, …, cn, an)`
+ * with an optional last clause `True`, as the existing emitter writes them,
+ * `_SYS.select(() => (c1), () => (a1), …)` (`selectWith()` in
+ * `javascript-runtime.ts`) and `_SYS.restrict(c, a, …, NaN)`: at each
+ * position the value of the first clause whose condition holds there, the
+ * element of a list arm or the value of a scalar arm, and `NaN` where no
+ * clause holds. The lowering evaluates the conditions in clause order, then
+ * the arms in clause order, then one `build` over the length of the first
+ * condition (`selectionBuild()` in `javascript-structured-lower.ts`), and
+ * records the form `elementwise-selection`.
+ *
+ * `selectWith()` evaluates an arm only when a position selects it, and the
+ * route evaluates every arm: the two agree only for an arm that cannot
+ * draw, call the host or throw, and the lowering refuses another arm
+ * (`selectionBuild()`, with the throw and effect analysis of the lowering;
+ * the design note, open choice 5).
+ *
+ * Refused also: the `complex` mode; a condition other than a final `True`
+ * that is not a list of booleans (`Which` with a scalar condition among
+ * list conditions: the existing code ends the walk at a scalar `true` at
+ * run time); an arm that is not a real, an integer or a flat list of them;
+ * a condition or a list arm whose length is not equal by construction to
+ * the length of the first condition (`listsOfOneLength()`).
+ */
+function selectionBroadcastRule(
+  head: 'If' | 'Which',
+  rule: FragmentRule<ScalarRepresentation>,
+  forms: Map<Expression, StructuredForm>,
+  mode: 'strict' | 'complex',
+  binds: PassBinds
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const fallback = () =>
+        'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      if (!isFunction(node) || !isLibraryOperator(node, head)) return fallback();
+      const ops = node.ops;
+      // The positions of the conditions; a last condition `True` of a
+      // `Which` is the default clause.
+      const conditions =
+        head === 'If'
+          ? [0]
+          : ops
+              .map((_, i) => i)
+              .filter(
+                (i) =>
+                  i % 2 === 0 &&
+                  i + 1 < ops.length &&
+                  !(i === ops.length - 2 && isSymbol(ops[i], 'True'))
+              );
+      const listCondition = conditions.find((i) =>
+        isBooleanList(w.value(ops[i], scope, context))
+      );
+      if (listCondition === undefined) return fallback();
+      const what = `${head} with the list condition ${nodeText(ops[listCondition])}`;
+      const refuse = (cause: string) =>
+        w.refuse(node, 'signature', `${what} is not in the structured route: ${cause}`);
+      if (mode === 'complex')
+        return refuse(
+          'in the complex mode the existing compiler selects on the complex lane'
+        );
+      const shadowed = shadowedConstant(node, scope, binds);
+      if (shadowed !== undefined)
+        return refuse(
+          `the program binds the name ${shadowed}, which the element-wise ` +
+            `selection reads as a library constant`
+        );
+      if (head === 'If' ? ops.length !== 2 && ops.length !== 3 : ops.length % 2 !== 0)
+        return refuse(`${head} with ${ops.length} operands is not an element-wise selection`);
+      for (const i of conditions)
+        if (!isBooleanList(w.value(ops[i], scope, context)))
+          return refuse(
+            `the condition ${nodeText(ops[i])} is not a list of booleans, and the ` +
+              `existing compiler decides a scalar condition at run time`
+          );
+      const arms = ops.map((_, i) => i).filter((i) => !(head === 'If' ? i === 0 : i % 2 === 0));
+      for (const i of arms) {
+        const f = w.value(ops[i], scope, context);
+        const scalar = f.type.kind === 'real' || f.type.kind === 'integer';
+        if (!scalar && (f.type.kind !== 'list' || collectionElement(f) === undefined))
+          return refuse(
+            `the arm ${nodeText(ops[i])} has the type \`${fragmentTypeToString(f.type)}\`, ` +
+              `and the element-wise selection reads arms that are reals, integers or ` +
+              `lists of them`
+          );
+      }
+      const lists = [
+        ...conditions.map((i) => ops[i]),
+        ...arms
+          .filter((i) => w.value(ops[i], scope, context).type.kind === 'list')
+          .map((i) => ops[i]),
+      ];
+      if (!listsOfOneLength(lists, scope, context, w))
+        return refuse(
+          `the lists ${lists.map((op) => nodeText(op)).join(' and ')} have lengths that ` +
+            `are not equal by construction (declare one width for them: ` +
+            `\`list<real^3>\` or \`vector<3>\`): the existing compiler gives NaN, or an ` +
+            `arm whole, for lists of different lengths`
+        );
+      forms.set(node, 'elementwise-selection');
+      return w.valueFacts(
+        node,
+        { kind: 'list', element: { kind: 'real' } },
+        ops.map((op) => {
+          const f = w.value(op, scope, context);
+          return w.convert(f, f.type)!;
+        })
+      );
+    },
+  };
+}
+
+/**
+ * The rule `rule` of the scalar head `head`, with the element-wise form of
+ * a list operand (the design note
+ * `docs/plans/2026-11-12-structured-broadcast-over-lists.md`, slice 1): the
+ * interpreter applies the head to each element (`√L` is a list), and the
+ * existing emitter writes `_SYS.bcast((_tv1) => Math.sqrt(_tv1), L)`, which
+ * evaluates each operand once, in order, then applies the closure to the
+ * elements and the scalar operands (`broadcastForm()`). The operands are
+ * checked as for `elementwiseRule()`: lists of reals or of integers (of
+ * one rank), real or integer scalar operands, two lists of lengths equal
+ * by construction or of one stated width. The lowering writes one `build`
+ * per head, over the length of the first list operand, whose body applies
+ * the element form (`elementwise()` in `javascript-structured-lower.ts`),
+ * and records the form (`{ broadcast }`).
+ *
+ * Refused: the causes of `broadcastForm()`, and the `complex` mode, where
+ * the existing compiler applies the complex code of the head to each
+ * element.
+ */
+function broadcastRule(
+  head: string,
+  rule: FragmentRule<ScalarRepresentation>,
+  forms: Map<Expression, StructuredForm>,
+  mode: 'strict' | 'complex',
+  inputs: ReadonlySet<string>,
+  binds: PassBinds
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      // A head that the engine does not broadcast keeps the refusal of
+      // `rule` (`withoutListOperands()`).
+      const aggregate =
+        isFunction(node) &&
+        isLibraryOperator(node, head) &&
+        (node.operatorDefinition as { broadcastable?: boolean } | undefined)
+          ?.broadcastable === true
+          ? node.ops.find((op) => {
+              const kind = w.value(op, scope, context).type.kind;
+              return kind === 'list' || kind === 'point';
+            })
+          : undefined;
+      if (aggregate === undefined || !isFunction(node))
+        return 'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      const what = `${head} with the ${w.value(aggregate, scope, context).type.kind === 'point' ? 'tuple' : 'list'} operand ${nodeText(aggregate)}`;
+      const form = broadcastForm(head, node, scope, inputs);
+      if (typeof form === 'object' && 'refusal' in form)
+        return w.refuse(
+          node,
+          'signature',
+          `${what} is not in the structured route: ${form.refusal}`
+        );
+      if (mode === 'complex')
+        return w.refuse(
+          node,
+          'signature',
+          `${what} is not in the structured route in the complex mode: the ` +
+            `existing compiler applies the complex code of the head to each element`
+        );
+      // The element code reads `ExponentialE` as `Math.E`: a parameter or a
+      // local of that name is not the constant.
+      const shadowed = shadowedConstant(node, scope, binds);
+      if (shadowed !== undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `${what} is not in the structured route: the program binds the name ` +
+            `${shadowed}, which the element code reads as a library constant`
+        );
+      // A power whose base is a list of lists: the existing compiler takes a
+      // matrix power of a square matrix (`_SYS.matrixPowerShape()` at run
+      // time, `_SYS.matpow` for a `matrix` and an integer exponent), and
+      // declines a `matrix` with an exponent that is not an integer.
+      if (
+        head === 'Power' &&
+        (numericCellsOf(w.value(node.ops[0], scope, context))?.rank ?? 0) >= 2
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `${what} is not in the structured route: the base ` +
+            `${nodeText(node.ops[0])} is a list of lists, and the existing ` +
+            `compiler can take a matrix power of it`
+        );
+      // `Equal` and `NotEqual` of two lists compare the whole lists: one
+      // boolean (slice 5 of the design note).
+      if (
+        (head === 'Equal' || head === 'NotEqual') &&
+        node.ops.filter((op) => {
+          const kind = w.value(op, scope, context).type.kind;
+          return kind === 'list' || kind === 'point';
+        }).length > 1
+      )
+        return w.refuse(
+          node,
+          'signature',
+          `${what} and another list is not in the structured route: the ` +
+            `interpreter and the existing compiler compare the two lists whole, ` +
+            `and give one boolean`
+        );
+      const kind = broadcastKind(form);
+      const facts = readsBooleans(form)
+        ? connectiveFacts(head, node, scope, context, w)
+        : elementwiseRule(head, rule, () => kind).walk(node, scope, context, w);
+      forms.set(node, { broadcast: form });
+      return facts;
     },
   };
 }
@@ -7184,7 +7790,8 @@ function nestedElementwise(
   facts: readonly FragmentValueFacts<ScalarRepresentation>[],
   scope: FragmentScope<ScalarRepresentation>,
   context: FragmentContext<ScalarRepresentation>,
-  w: FragmentWalker<ScalarRepresentation>
+  w: FragmentWalker<ScalarRepresentation>,
+  kindOf: (integer: boolean) => 'real' | 'integer' | 'boolean'
 ): FragmentFacts<ScalarRepresentation> {
   const refuse = (message: string) =>
     w.refuse(node, 'signature', `${head} ${message}`);
@@ -7272,14 +7879,19 @@ function nestedElementwise(
           `structured route: the existing compiler gives NaN for two lists of different lengths`
       );
   }
-  const integer =
-    head !== 'Divide' &&
-    facts.every((f, i) =>
-      f.type.kind === 'list' ? cells[i]!.kind === 'integer' : f.type.kind === 'integer'
+  const integer = facts.every((f, i) =>
+    f.type.kind === 'list' ? cells[i]!.kind === 'integer' : f.type.kind === 'integer'
+  );
+  const kind = kindOf(integer);
+  // A list of lists of booleans is not a value of the structured route.
+  if (kind === 'boolean')
+    return refuse(
+      `of the list of lists ${nodeText(node.ops[lists[0]])} is not in the structured ` +
+        `route, which compares the elements of a list of numbers only`
     );
   return w.valueFacts(
     node,
-    numericListType(integer ? 'integer' : 'real', rank),
+    numericListType(kind, rank),
     facts.map((f) => w.convert(f, f.type)!)
   );
 }
@@ -7317,7 +7929,7 @@ function nestedLengthKeys(
     keys.push(`dimensions ${type.dimensions.join('x')}`);
   if (
     isFunction(node) &&
-    ELEMENTWISE_HEADS.includes(node.operator) &&
+    (ELEMENTWISE_HEADS.includes(node.operator) || isBroadcastHead(node)) &&
     isLibraryOperator(node, node.operator)
   ) {
     const lists = node.ops.filter(
@@ -7967,6 +8579,119 @@ function refuseComplexListQuotients(
 }
 
 /**
+ * On the structured route, refuse an element-wise node whose list operand
+ * the existing compiler reads on the complex lane: an operand whose element
+ * lane (`operandElementLane()` of the existing compiler, `compile-lanes.ts`)
+ * is complex or mixed, so that `_SYS.bcast` applies the complex code of the
+ * head to each element (`Arctan(C)` with `C = [√k for k in 1..n]`, of the
+ * engine type `list<complex>`, is `_SYS.catan` of each element; `1 / C`
+ * divides on the complex lane). The element-wise nodes are those of
+ * `elementwiseRule()` (arithmetic of a list), of `broadcastRule()` and of
+ * `selectionBroadcastRule()` (`forms`). The lane is that of the existing
+ * compiler's own test, asked of the prepared target `target`.
+ */
+function refuseComplexElementLanes(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  forms: ReadonlyMap<Expression, StructuredForm>,
+  target: CompileTarget<Expression>
+): void {
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const [node, facts] of scope.facts) {
+      if (!isFunction(node)) continue;
+      const form = forms.get(node);
+      const elementwise =
+        (typeof form === 'object' && 'broadcast' in form) ||
+        form === 'elementwise-selection' ||
+        (ELEMENTWISE_HEADS.includes(node.operator) &&
+          facts.type.kind === 'list');
+      if (!elementwise) continue;
+      for (const op of node.ops) {
+        if (scope.facts.get(op)?.type.kind !== 'list') continue;
+        let lane: boolean | 'mixed' | undefined;
+        try {
+          lane = core.operandElementLane(op, op.engine, target);
+        } catch {
+          lane = undefined;
+        }
+        if (lane !== false)
+          throw new Error(
+            `JS scalar fragment: ${node.operator} of the list ${nodeText(op)} is not ` +
+              `in the structured route: its type ${op.type.toString()} is not real, ` +
+              `and the existing compiler applies the complex code of the head to ` +
+              `each element`
+          );
+      }
+    }
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+}
+
+/** The names of the free symbols that are reads of the host (a `vars`
+ *  entry): each read of such a name can give another value. */
+function hostReadNames(registry: StructuredRegistry): ReadonlySet<string> {
+  return new Set(
+    [...(registry.hosts?.bindings.values() ?? [])]
+      .filter((binding) => binding.form === 'read')
+      .map((binding) => binding.name)
+  );
+}
+
+/**
+ * On the structured route, refuse an element-wise node of two lists or more
+ * whose length key (`lengthKey()`, `nestedLengthKeys()`) reads a name that
+ * is a read of the host (`hostReads`, a `vars` entry): each read can give
+ * another value, so two lists of one key text can have different lengths
+ * (`Hypot([k for k in 1..n], [2k for k in 1..n])` with `n` read from the
+ * host: the existing compiler gives `NaN` where the lengths differ). A key
+ * reads a name of a list operand at any depth; a scalar operand evaluated
+ * once does not matter, but the rule refuses any read of the host in a list
+ * operand: a simple rule that declines more than it needs to.
+ */
+function refuseUnstableLengthKeys(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  forms: ReadonlyMap<Expression, StructuredForm>,
+  hostReads: ReadonlySet<string>
+): void {
+  if (hostReads.size === 0) return;
+  const readsHost = (e: Expression, seen = new Set<Expression>()): boolean => {
+    if (seen.has(e)) return false;
+    seen.add(e);
+    if (isSymbol(e)) return hostReads.has(e.symbol);
+    return isFunction(e) && e.ops.some((op) => readsHost(op, seen));
+  };
+  const visit = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const [node, facts] of scope.facts) {
+      if (!isFunction(node)) continue;
+      const form = forms.get(node);
+      const elementwise =
+        (typeof form === 'object' && 'broadcast' in form) ||
+        form === 'elementwise-selection' ||
+        (ELEMENTWISE_HEADS.includes(node.operator) &&
+          facts.type.kind === 'list');
+      if (!elementwise) continue;
+      const lists = node.ops.filter(
+        (op) => scope.facts.get(op)?.type.kind === 'list'
+      );
+      if (lists.length < 2) continue;
+      const host = lists.find((op) => readsHost(op));
+      if (host !== undefined)
+        throw new Error(
+          `JS scalar fragment: ${node.operator} of the lists ` +
+            `${lists.map((op) => nodeText(op)).join(' and ')} is not in the ` +
+            `structured route: the list ${nodeText(host)} reads a value of the ` +
+            `host, which can change between two reads, so the lengths are not ` +
+            `equal by construction`
+        );
+    }
+    for (const inner of scope.inner.values()) visit(inner);
+  };
+  visit(annotation.scope);
+  for (const fn of annotation.functions.values()) visit(fn.scope);
+}
+
+/**
  * Whether the node `node` of the engine type `number` (or a union of it with
  * `NaN` and infinities) is real in the `strict` mode as the existing compiler
  * reads it: its type is wide only because it reads names, elements or
@@ -8049,6 +8774,88 @@ function refuseStrictWideReads(
   };
   visit(annotation.scope);
   for (const fn of annotation.functions.values()) visit(fn.scope);
+}
+
+/**
+ * On the structured route, refuse every use of a list of booleans (the value
+ * of an element-wise comparison or connective, `broadcastRule()`) but the
+ * uses that slice 2 of the broadcast note admits: the list operand of `At`
+ * and of `Length`, an operand of an element-wise `Not`, `And` or `Or`, a
+ * condition of an element-wise `If` or `Which` (`selectionBroadcastRule()`),
+ * and the value of the program (the root, through a `Block` and a
+ * `Typed`). The default refuses, as `withoutNestedOperands()` does for a
+ * list of lists, so that no rule written for a list of numbers admits a
+ * list of booleans by accident: a local, a parameter or an argument of a
+ * helper, the value of a helper, an arm of a selection, an operand of
+ * another head. An input, a parameter and a local of the type
+ * `list<boolean>` are refused where the route types them
+ * (`structuredListType()`).
+ */
+function refuseBooleanListUses(
+  annotation: FragmentAnnotation<ScalarRepresentation>,
+  forms: ReadonlyMap<Expression, StructuredForm>
+): void {
+  const booleanLists = new Set<Expression>();
+  const collect = (scope: FragmentScope<ScalarRepresentation>) => {
+    for (const [node, facts] of scope.facts)
+      if ('representation' in facts && isBooleanList(facts))
+        booleanLists.add(node);
+    for (const inner of scope.inner.values()) collect(inner);
+  };
+  collect(annotation.scope);
+  for (const fn of annotation.functions.values()) collect(fn.scope);
+  if (booleanLists.size === 0) return;
+  /** Whether `parent` reads its operand at `index`, a list of booleans,
+   *  as the slice admits. */
+  const admits = (parent: Expression, index: number): boolean => {
+    if (!isFunction(parent)) return false;
+    const form = forms.get(parent);
+    switch (parent.operator) {
+      case 'At':
+      case 'Length':
+        return index === 0;
+      case 'Not':
+      case 'And':
+      case 'Or':
+        return typeof form === 'object' && 'broadcast' in form;
+      case 'If':
+        return form === 'elementwise-selection' && index === 0;
+      case 'Which':
+        return form === 'elementwise-selection' && index % 2 === 0;
+      default:
+        return false;
+    }
+  };
+  const seen = new Set<Expression>();
+  const visit = (node: Expression, value: boolean): void => {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    node.ops.forEach((op, i) => {
+      // The value of a `Block` is its last statement, of a `Typed` its
+      // operand.
+      const passes =
+        value &&
+        ((node.operator === 'Block' && i === node.ops.length - 1) ||
+          (node.operator === 'Typed' && i === 0));
+      if (booleanLists.has(op) && !passes && !admits(node, i))
+        throw new Error(
+          `JS scalar fragment: the list of booleans ${nodeText(op)} is an operand of ` +
+            `${node.operator}, which is not in the structured route: a list of booleans ` +
+            `is read by At, Length, an element-wise Not, And or Or and the condition of an ` +
+            `element-wise If or Which, and is the value of the program`
+        );
+      visit(op, passes);
+    });
+  };
+  visit(annotation.root, true);
+  for (const fn of annotation.functions.values()) {
+    if (booleanLists.has(fn.body))
+      throw new Error(
+        `JS scalar fragment: the list of booleans ${nodeText(fn.body)} is the value of a ` +
+          `helper, which is not in the structured route`
+      );
+    visit(fn.body, false);
+  }
 }
 
 /**
@@ -9935,6 +10742,9 @@ function recordStructured(
   refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
   chainForms(prepared.annotation, registry.helpers, hosts, registry.forms);
   refuseStrictWideReads(prepared.annotation, registry.mode);
+  refuseBooleanListUses(prepared.annotation, registry.forms);
+  refuseComplexElementLanes(prepared.annotation, registry.forms, registry.target);
+  refuseUnstableLengthKeys(prepared.annotation, registry.forms, hostReadNames(registry));
   refuseComplexListQuotients(prepared.annotation, registry.mode);
   refuseLocalFunctionArithmetic(
     prepared.annotation,
@@ -11010,7 +11820,9 @@ function checkConditionOf(
     throw new Error(
       `JS scalar fragment: the condition of ${head} has the constant type ${type.value}${suffix}`
     );
-  if (!isSubtype(type, 'boolean'))
+  // A flat list of booleans is the condition of an element-wise selection,
+  // whose rule reads it (`selectionBroadcastRule()`).
+  if (!isSubtype(type, 'boolean') && !isSubtype(type, 'list<boolean>'))
     throw new Error(
       `JS scalar fragment: the condition of ${head} does not have the type boolean${defaulted}${suffix}`
     );
@@ -12758,6 +13570,13 @@ function admitFunctionBody(
             `in the structured route, which admits a local of a list of lists ` +
             `only of rows of reals or of integers (rank 2: list<list<real>>, ` +
             `list<list<integer>>, matrix)`
+        );
+      // A list of booleans is a value of the route, never a local.
+      if (admission.structured && declared?.startsWith('list<boolean>'))
+        throw new Error(
+          `JS scalar fragment: the local ${local} declared ${declared} is not ` +
+            `in the structured route, which holds a list of booleans only as ` +
+            `a value (a condition, an operand of At or Length), not in a local`
         );
       throw new Error('JS scalar fragment: unsupported local declaration');
     }
@@ -15060,11 +15879,33 @@ function annotateStructured(
       Assign: { walk: walkAssign },
       // `If` and `Which` with constant conditions record the branch that
       // they select (`decidedSelectionRule()`).
-      If: decidedSelectionRule(ifRule, registry.forms, binds),
-      Which: decidedSelectionRule(whichRule, registry.forms, binds),
+      // A condition that is a list of booleans selects element-wise
+      // (`selectionBroadcastRule()`).
+      If: selectionBroadcastRule(
+        'If',
+        decidedSelectionRule(ifRule, registry.forms, binds),
+        registry.forms,
+        registry.mode,
+        binds
+      ),
+      Which: selectionBroadcastRule(
+        'Which',
+        decidedSelectionRule(whichRule, registry.forms, binds),
+        registry.forms,
+        registry.mode,
+        binds
+      ),
       // The parameters of the root function are bound in an operand of
-      // `Floor` (`inexactJumpConstant()`).
-      Floor: withoutListOperands('Floor', floorRuleOf(inputNames)),
+      // `Floor` (`inexactJumpConstant()`). A list operand of `Floor` and of
+      // a head of `modeRules()` is read element-wise (`broadcastRule()`).
+      Floor: broadcastRule(
+        'Floor',
+        withoutListOperands('Floor', floorRuleOf(inputNames)),
+        registry.forms,
+        registry.mode,
+        inputNames,
+        binds
+      ),
       ...Object.fromEntries(
         Object.entries(
           modeRules(
@@ -15075,7 +15916,34 @@ function annotateStructured(
             inputNames,
             registry.hosts?.vars
           )
-        ).map(([head, rule]) => [head, withoutListOperands(head, rule)])
+        ).map(([head, rule]) => [
+          head,
+          broadcastRule(
+            head,
+            withoutListOperands(head, rule),
+            registry.forms,
+            registry.mode,
+            inputNames,
+            binds
+          ),
+        ])
+      ),
+      // The comparisons and the connectives of lists, whose value is a list
+      // of booleans (slice 2 of the broadcast note).
+      ...Object.fromEntries(
+        ['Less', 'LessEqual', 'Equal', 'NotEqual', 'Not', 'And', 'Or']
+          .filter((head) => Object.hasOwn(base.rules, head))
+          .map((head) => [
+            head,
+            broadcastRule(
+              head,
+              base.rules[head],
+              registry.forms,
+              registry.mode,
+              inputNames,
+              binds
+            ),
+          ])
       ),
       // The heads with a function operand read the mode, and their list
       // operands (`functionOperandRule()`); none reads a list of lists, but

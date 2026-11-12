@@ -571,14 +571,18 @@ describe('refusals', () => {
     ['a tuple of booleans', body([L, I], ['At', ['Tuple', ['Less', 't', 1], 1], 1]), /a tuple with an element of the type `boolean` is not in the structured route/],
     ['arithmetic on a list and a complex number', body([L, typed('z', 'complex')], ['At', ['Add', 'L', 'z'], 1]), /Add of a list and the operand z of the type `complex` is not in the structured route/],
     ['a product of two lists', body([L, typed('M', 'list<real>')], ['Multiply', 'L', 'M']), /Multiply of the lists L and M, whose lengths are not equal by construction, is not in the structured route/],
-    ['a comparison of lists', body([L, typed('M', 'list<real>')], ['If', ['Equal', 'L', 'M'], 1, 0]), /Equal with the list operand L is not in the structured route/],
+    ['a comparison of lists', body([L, typed('M', 'list<real>')], ['If', ['Equal', 'L', 'M'], 1, 0]), /Equal with the list operand L and another list is not in the structured route/],
     ['a product of a tuple', body([typed('P', 'tuple<real, real>'), I], ['At', ['Multiply', 'P', 'i'], 1]), /Multiply with the tuple operand P is not in the structured route/],
-    ['Sqrt of a list', body([L], ['Add', ['Sqrt', 'L'], 0]), /Sqrt with the list operand L is not in the structured route/],
+    // A scalar function, a comparison and a connective of a list are
+    // admitted since slices 1 and 2 of
+    // docs/plans/2026-11-12-structured-broadcast-over-lists.md
+    // (compile-javascript-structured-broadcast.test.ts).
+    ['Arcsin of a list', body([L], ['Add', ['Arcsin', 'L'], 0]), /Arcsin with the list operand L is not in the structured route/],
     ['Min of a list and a number', body([L, typed('x', 'real')], ['Min', 'L', 'x']), /Min with the list operand L is not in the structured route/],
-    ['Less of a list and a number', body([L, typed('x', 'real')], ['Less', 'L', 'x']), /Less with the list operand L is not in the structured route/],
-    ['And with a list', body([L, typed('C', 'boolean')], ['And', 'C', 'L']), /And with the list operand L is not in the structured route/],
-    ['Or with a list', body([L, typed('C', 'boolean')], ['Or', 'C', 'L']), /Or with the list operand L is not in the structured route/],
-    ['Power of a list', body([L], ['Power', 'L', 2]), /Power with the list operand L is not in the structured route/],
+    ['Less of a list and a number in a chain', body([L, typed('x', 'real')], ['Less', 'L', 'x', 1]), /Less with the list operand L is not in the structured route/],
+    ['And with a list of numbers', body([L, typed('C', 'boolean')], ['And', 'C', 'L']), /And of a list of booleans and the operand L of the type `list<real>` is not in the structured route/],
+    ['Or with a list of numbers', body([L, typed('C', 'boolean')], ['Or', 'C', 'L']), /Or of a list of booleans and the operand L of the type `list<real>` is not in the structured route/],
+    ['Power of two lists of unstated lengths', body([L, typed('M', 'list<real>')], ['Power', 'L', 'M']), /Power of the lists L and M, whose lengths are not equal by construction, is not in the structured route/],
     ['a local declared list<complex>', fn([L, I], declare('M', 'list<complex>', 'L'), ['At', 'M', 'i']), /unsupported local declaration/],
   ];
   test.each(refusals)('%s', (_name, json, reason) => {
@@ -779,9 +783,12 @@ describe('the verifier, at and length', () => {
     const m = lowered();
     const read = m.ops.findIndex((op) => op.kind === 'input' && String(op.result!.type) === 'list<real>');
     const op = m.ops[read];
-    const changed = { ...op, result: { ...op.result!, type: listType('boolean') } } as IROperation;
+    // A list of booleans is held since slice 2 of
+    // docs/plans/2026-11-12-structured-broadcast-over-lists.md; a list of
+    // lists of booleans is not.
+    const changed = { ...op, result: { ...op.result!, type: listType(listType('boolean')) } } as IROperation;
     expect(() => verifyJavaScriptProgram(m.replace(read, changed), m.nodes)).toThrow(
-      /has the type list<boolean>, which the target does not hold/
+      /has the type list<list<boolean>>, which the target does not hold/
     );
   });
 });

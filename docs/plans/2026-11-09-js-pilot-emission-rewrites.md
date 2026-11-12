@@ -321,7 +321,7 @@ and the tests are
 | `L + 1`, `L · x`, `-L`, `x/L` | `_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), L, 1)`, the operands evaluated once before the closure, the closure applied element by element; `2L + 1` one fused closure; `L/3` is `Multiply(1/3, L)`, the double `0.3333333333333333` times each element | An ascending `build` over the length of the first list operand, with the scalar operands evaluated once before it and the scalar operation of the head applied to the elements: the same doubles in the same order |
 | Two list operands | `_SYS.bcast` gives the scalar `NaN` when the lengths differ | Admitted when the lengths are equal by construction (`lengthKey()`: the same name, list literals of one length, an element-wise result or a `ReplaceAt` of such a list); otherwise declined |
 | `[x, 1] + [1, 2]` | `[(x + 1), (1 + 2)]` | An element-wise `build` over two list literals of one length: the same doubles |
-| `L^2`, `sqrt(L)`, `exp(L)`, `abs(L)` | `_SYS.pow(_tv1, _tv2)` in the closure, not the scalar square; the functions differ by mode | Declined |
+| `L^2`, `sqrt(L)`, `exp(L)`, `abs(L)` | `_SYS.pow(_tv1, _tv2)` in the closure, not the scalar square; the functions differ by mode | Admitted in the `strict` mode since slice 1 of the broadcast note (section "Element-wise heads and selection" below); declined in the `complex` mode |
 | A tuple operand of arithmetic | `[(_.P[0] + 1), (_.P[1] + 2)]` | Declined (a later slice) |
 | `Comprehension(body, Element(k, Range(a, b), guard))` | `const result = []`; `_SYS.rangeCount(a, b, step)` with the step `(b >= a ? 1 : -1)`, a `RangeError` when the count is over 2^32 − 1; a loop with `if (guard) { result.push(body); }` | A `loop` that carries the list, from the `list` of no element, whose body is an `if` of the guard: an `append` of the body (`(acc.push(v), acc)` when the list is not read elsewhere, else `[...acc, v]`) or the list. A guard or body that is not pure, and a bound that is not an integer literal of at most 2^31 − 1 in magnitude or a `Length` (the route has no test of the count): declined |
 | A list result | The array that the code made, or the input array itself (`If(c, L, [1, 2])` returns `_.L`) | The same: results are read-only, so the alias is allowed |
@@ -538,7 +538,7 @@ compared with `Object.is` at every depth over inputs with `NaN`, `±0`,
 | A list input or parameter `list<number>`, `vector<n>`, `vector` | `_.L` | same | yes | a list of reals |
 | `At(L, i)`, `First`, `Last` | `_SYS.atNumeric(_.L, i, "real")` | `_SYS.atNumeric(_.L, i, "number")`: the label is the text of the error for a nested array | yes | admitted, with the label `"number"` |
 | Element-wise `L + 1`, `L·x`, `−L`, `L + L`, `2L/x` | `_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.L, 1)` | same | yes | admitted (a `build`) |
-| Element-wise `Sqrt(L)`, `Sin(L)`, `L^2` | `_SYS.bcast((_tv1) => Math.sqrt(_tv1), _.L)` | same | – | declined for both (no element-wise function in the route) |
+| Element-wise `Sqrt(L)`, `Sin(L)`, `L^2` | `_SYS.bcast((_tv1) => Math.sqrt(_tv1), _.L)` | same | yes | admitted (a `build`, slice 1 of the broadcast note) |
 | `Sum`, `Product`, `Max`, `Min` of a name | `(_.L).reduce((_a, _b) => _a + _b, 0)` | same | yes | admitted |
 | A fold of an element-wise expression of the type `number` (`Sum(L + 1)`, `Max(2L)`, `Sum(L/2.5)`) | raw fold of the `bcast` | same | yes | admitted when the operand reads values of the type `number` only (`isWideRealInStrict()`) |
 | A fold whose operand has a radical or an inverse function of a real operand, or a complex value (`Sum(L·√x)` with `x: real`, `Sum(L + arcsin(p))` with `p: real<0..>`, `Sum(i·L)`) | `_SYS.cplx((…).reduce(_SYS.sadd, 0))` | the same with `x: real`; raw with `x: number` | – | declined (`isComplexValued()` decides it; the route does not copy that analysis) |
@@ -692,6 +692,57 @@ real, `k` integer), with the preamble where the existing code has one.
 | A real value of a name declared `complex`, `zf := 5` | `_SYS.cplx(5)`, on the complex lane | Declined |
 | A real expression of a name declared `complex`, `z := x + 1`, `Sqrt(z)` | lifted to the complex lane: `2i` at `x = -5`, also in the `strict` mode | Declined; `number` over a real or integer value and `real` over an integer value give the same doubles, admitted |
 | An input of a union of a number and a list, `u: list<real> \| real`, `v: integer \| vector<integer^2>` | one dispatch around the whole program and one body per member: `(Array.isArray(_.u) ? _SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.u, 1) : _.u + 1)`, `(Array.isArray(_.v) ? [(2 * _.v[0]), (2 * _.v[1])] : 2 * _.v)`, `(Array.isArray(_.u) ? _SYS.bcast((_tv3, _tv4) => { … }, _.u, _.x) : _.u * _.x + Math.sin(_.u))` | Declined, with the union in the message (what it needs: the result section) |
+
+### Element-wise heads and selection (slices 1 and 2 of the broadcast note)
+
+The design is [2026-11-12-structured-broadcast-over-lists.md](2026-11-12-structured-broadcast-over-lists.md);
+the tests are `test/compute-engine/compile-javascript-structured-broadcast.test.ts`.
+Each existing text is from a probe at `99cee49c8` (the existing emitter is
+the same at `984f3e660`) with `cse: false,
+constantFold: false`, `L` of the type `list<real>`, `x` real, in the `strict`
+mode (`tryCompileBroadcast()` in `compile-broadcast.ts`, `bcastWith()` and
+`selectWith()` in `javascript-runtime.ts`). For every row of the existing
+emitter: each operand of `_SYS.bcast` is a JavaScript argument, evaluated
+once, in order, before the first element (`L + Random()` draws once); a
+literal operand is an argument too (`3` stays the parameter `_tv2`, `1/3`
+is the double `0.3333333333333333`); the empty list gives `[]`; a `NaN`
+element gives the value of the scalar code at `NaN`; two lists of
+different lengths give the scalar `NaN`. A nested head is fused into one
+closure when every operand is pure (`sqrt(L + 1)`:
+`_SYS.bcast((_tv2, _tv3) => { const _tv1 = (_tv2 + _tv3); return Math.sqrt(_tv1); }, L, 1)`),
+otherwise it is a nested `_SYS.bcast` evaluated as an argument; both give
+the doubles of one closure per head, and the inner list is complete before
+a later operand with an effect. The route writes one `build` per head, from
+1 to the length of the first list operand, whose body reads each list at
+the index (`_SYS.atNumeric(L, i, "real")`) and applies the element form
+(`BroadcastForm`, `broadcastRule()` in `javascript-fragment-target.ts`): the
+same doubles, the operands evaluated once, in order, before the `build`.
+
+| Place | Element code of the existing closure | Decision for the fragment route |
+| --- | --- | --- |
+| `Sqrt(L)`, `Ln(L)`, `Sin(L)`, `Cos(L)`, `Tanh(L)`, `Sinh(L)`, `Cosh(L)`, `Arctan(L)`, `Arsinh(L)`, `Sign(L)`, `Floor(L)`, `Ceil(L)`, `Truncate(L)`, `Log(L)` | `Math.sqrt(e)`, `Math.log(e)`, `Math.sin(e)`, `Math.cos(e)`, `Math.tanh(e)`, `Math.sinh(e)`, `Math.cosh(e)`, `Math.atan(e)`, `Math.asinh(e)`, `Math.sign(e)`, `Math.floor(e)`, `Math.ceil(e)`, `Math.trunc(e)`, `Math.log10(e)` | The same call per element; `Floor` a list of integers |
+| `Tan`, `Cot`, `Sec`, `Csc`, `Gamma`, `GammaLn`, `Erf`, `Erfc`, `ErfInv`, `Erfi`, `Digamma`, `Trigamma`, `Factorial`, `Factorial2`, `Heaviside`, `Sinc`, `Zeta`, `LambertW`, `FresnelS`, `FresnelC`, `SinIntegral`, `ExpIntegralEi`, `LogIntegral`, `DirichletEta`, `DirichletBeta`, `EllipticK`, `EllipticE` of a list | `_SYS.tan(e)`, `_SYS.cot(e)`, …, `_SYS.lngamma(e)`, `_SYS.erfInv(e)`, `_SYS.ellipticK(e)` | The same call per element (the `call` of `REAL_CALL_HEADS` and `FUNCTIONS`) |
+| `Coth(L)`, `Arccot(L)`, `Arcsch(L)`, `Haversine(L)`, `Round(L)`, `Chop(L)` | `(Math.cosh(e) / Math.sinh(e))`, `(Math.PI / 2 - Math.atan(e))`, `Math.asinh(1 / (e))`, `(1 - Math.cos(e)) / 2`, `(Math.sign(e) * Math.round(Math.abs(e)))`, `_SYS.chop(e, 1e-10)` | The same text per element (`Round` for ties away from zero only; `Chop` with the tolerance of the engine) |
+| `Abs(L)` | `_SYS.absAny(e)`, which is `Math.abs(e)` for a number | `Math.abs(e)`: the same doubles |
+| `Exp(L)` (`Power(ExponentialE, L)`), `Square(L)`, `L^3`, `L^-2`, `2^L`, `L^x` | `_SYS.pow(e1, e2)` of the base and the exponent, `Math.E` for `ExponentialE` | `pow` of the two operands, `2.718281828459045` for the base `ExponentialE`: never the chain `x*x*x` or `Math.exp` of the scalar code |
+| `Root(L, 3)`, `Root(x, L)` | `_SYS.root(e1, e2)` | `root`, the same call |
+| `Log(L, 2)`, `Lb(L)`, `Log(L, x)`, `Log(x, L)` | `(Math.log(e1) / Math.log(e2))` | `log-quotient`, `Math.log(e1) / Math.log(e2)`: never `Math.log2` |
+| `Mod(L, 3)`, `Remainder(L, x)`, `Binomial(L, 2)`, `Arctan2(L, x)`, `Hypot(L, x)`, `PolyGamma`, `BesselJ`, `BesselY`, `BesselI`, `BesselK`, `ClausenCl`, `EllipticF`, `EllipticPi`, `Zeta(s, a)`, `HurwitzZeta`, `PolyLog`, `EllipticE(φ, m)`, `LambertW(x, k)` of a list and a real (either order) | `_SYS.floorMod(e1, e2)`, `_SYS.remainder`, `_SYS.binomial`, `Math.atan2`, `Math.hypot`, `_SYS.polygamma`, … | The same call per element; `floorMod` and `remainder` throw at the same element as the closure (beyond ±(2^53 − 1)) |
+| `Clamp(L, lo, hi)` | `Math.min(Math.max(e, lo), hi)` | `clamp`: `max` then `min` |
+| `L < x`, `x < L`, `L <= x`, `L > x` (canonically `Less(x, L)`), `L >= x` | `((e1) < (e2))`, `((e1) <= (e2))`, a list of JavaScript booleans | `less`, `less-equal`: a list of booleans (slice 2) |
+| `L == x`, `L != x` | `_SYS.eq(L, x)`, `_SYS.neq(L, x)`: `e === x`, `e !== x` per element of a list beside a number | `equal`, `not-equal`: `e === x`, `e !== x` |
+| `Not(L < 0)`, `And(L < 0, L > x)`, `Or(c1, c2, c3)`, `And(L < 0, x < 1)` | nested `_SYS.bcast((_tv1) => !(_tv1), …)`, `((_tv1) && (_tv2))`; every operand evaluated before the elements | `not`; `and`, `or` of the elements, each read before the operation |
+| `At(L < 0, k)`, `Length(L < 0)` | `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(_SYS.at(B, k))`, `(B).length` | The same read (`undefined` out of range), `length` |
+| `If(L < 0, L, 0)`, `If(L < x, 1, 2)`, `Which(L < 0, -1, L < 1, 0, True, 1)`, `Which(c1, a1, c2, a2)` | `_SYS.select(() => (c1), () => (a1), …, () => (true), () => (d))`: every list condition in clause order, then each arm that some position selects, once and whole, in clause order; at each position the first condition that is `true` there picks the element of a list arm or the value of a scalar arm, `NaN` where none does; `[]` for an empty condition | Conditions in clause order, then every arm in clause order, then a `build` over the first condition whose body is the chain of `if` of the cells, each cell read directly (`B[i - 1]`: the index is in range by construction). Admitted only when no operation of an arm can draw, throw, abort or reach the host (the lowering's `canThrow()`, after the arms are lowered: the route evaluates every arm), each arm a real, an integer or a flat list of them, and every list of one length by construction |
+| `If(L < 0, 1)`, `If(L < 0, L)` (restrictions) | `_SYS.restrict(c, 1, false, NaN)`, `_SYS.restrict(c, L, true, NaN)` (a list value is aligned with the conditions) | The selection with the default `NaN` |
+| `Arcsin(L)`, `Arccos`, `Arcosh`, `Artanh`, `Arccsc`, `Arcsec`, `Arcoth`, `Arsech` | `Math.asin(e)`, … (real, `NaN` off the domain) where the scalar code is `_SYS.casin(…)` | Declined (open choice 6 of the note) |
+| `Beta`, `AGM`, `CosIntegral`, `GammaRegularized`, `Gamma(s, z)` of a list | `_SYS.beta(e1, e2)`, … | Declined: the scalar rule proves the domain of each operand from its type (`REAL_CALL_HEADS` `domain`) |
+| `Sin(π·L)`, `Cos(π·L)`, `Tan(π·L)` | `_SYS.sinpi(e)` of the elements of `L` | Declined (a later change can read the half-turn kernel) |
+| `Floor(L + 1/3)` | the double `0.3333333333333333` in the closure | Declined, as the scalar rule declines an inexact constant beside a jump |
+| `Sech(L)`, `Csch(L)`, `Fract(L)`, `KroneckerDelta(L)` | `1 / Math.cosh(e)`, …; `KroneckerDelta(L)` is not broadcast (`(L === 0 ? 1 : 0)`) | Declined |
+| `L + M`, `Hypot(L, M)`, `If(L > M, L, M)` of lists of unstated lengths | the scalar `NaN` for different lengths; the selection returns `M` whole for a condition that is that `NaN` (an issue of the existing compiler) | Declined (a user decision, 2026-11-11): the remedy is a stated width, `list<real^3>` or `vector<3>` |
+| `Equal(L, M)`, `Max(L, x)`, `L < 1 < 2` | one boolean of the whole lists; a fold; one closure of the chain | Declined (slice 5) |
+| Any head in the `complex` mode | the complex code of the head per element | Declined |
 
 ## What step 1 implements from this list
 

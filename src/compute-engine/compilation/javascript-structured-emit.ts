@@ -1355,6 +1355,22 @@ class Emitter {
               precedence: CALL,
             };
           }
+          // An element of a list of booleans: the read of the existing
+          // emitter, `_SYS.at` with `undefined` for an index out of range,
+          // as for a row; a direct read where the index is in range by
+          // construction (a `build` over the length of the list).
+          if (element === 'boolean' && op.inRange === true)
+            return {
+              text: `${operand(operands[0], CALL)}[${operand(operands[1], ADDITIVE)} - 1]`,
+              precedence: CALL,
+            };
+          if (element === 'boolean') {
+            this.runtime.add('at');
+            return {
+              text: `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${call('_SYS.at', operands).text})`,
+              precedence: CALL,
+            };
+          }
           if (element !== 'real' && element !== 'integer')
             return fail(`an at of a list of the type ${op.operands[0].type}`);
           this.runtime.add('atNumeric');

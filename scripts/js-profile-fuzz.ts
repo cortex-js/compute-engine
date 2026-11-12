@@ -1794,6 +1794,19 @@ function genCollectionReal(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
   if (rng() < 0.15) return genRowReal(ctx, depth);
   if (rng() < 0.45) return genFunctionOfListsReal(ctx, depth);
+  // A list of booleans, a comparison of a list, read by `Length` and by
+  // `At` in a condition (slice 2 of the broadcast note).
+  if (rng() < 0.06) {
+    const d = Math.min(depth + 1, ctx.maxDepth);
+    const compare: Json = [
+      pick(rng, ['Less', 'GreaterEqual', 'Equal']),
+      genList(ctx, d),
+      genReal(ctx, d),
+    ];
+    return rng() < 0.4
+      ? ['Length', compare]
+      : ['If', ['At', compare, genIndex(ctx)], genReal(ctx, d), genReal(ctx, d)];
+  }
   if ((ctx.tupleLists?.length ?? 0) > 0 && rng() < 0.2) {
     const d = Math.min(depth + 1, ctx.maxDepth);
     const r = rng();
@@ -1858,6 +1871,11 @@ function genList(ctx: GenContext, depth: number): Json {
     const l = list();
     return [pick(rng, ['Add', 'Multiply', 'Subtract']), l, l];
   }
+  // Slices 1 and 2 of the broadcast note: a scalar head applied to each
+  // element of a list (and of a list beside itself), a comparison of a list
+  // as the condition of an element-wise `If` or `Which`, whose arms are the
+  // same list or reals.
+  if (r < 0.7) return genBroadcastList(ctx, depth);
   if (r < 0.84) {
     const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, ['j', 30]] };
     const spec: Json[] = ['Element', 'j', ['Range', pick(rng, [1, 1, 0, 3]), intBetween(rng, 0, 5)]];
@@ -1874,6 +1892,74 @@ function genList(ctx: GenContext, depth: number): Json {
         ? pick(rng, ctx.integers)
         : pick(rng, [0, 1, 3, 5]),
   ];
+}
+
+/** The scalar heads of one operand that the structured route applies to each
+ *  element of a list (`broadcastRule()`), and some that it declines
+ *  (`Arcsin`, `Sech`). */
+const BROADCAST_UNARY = [
+  'Sqrt', 'Ln', 'Exp', 'Sin', 'Cos', 'Tan', 'Tanh', 'Arctan', 'Abs', 'Sign',
+  'Floor', 'Ceil', 'Round', 'Truncate', 'Gamma', 'Erf', 'Factorial', 'Coth',
+  'Arccot', 'Haversine', 'Lb', 'Lg', 'Heaviside', 'Arcsin', 'Sech',
+];
+/** The scalar heads of two operands of `broadcastRule()`. */
+const BROADCAST_BINARY = [
+  'Power', 'Root', 'Log', 'Mod', 'Arctan2', 'Hypot', 'Remainder', 'Binomial',
+];
+
+/**
+ * A list made by an element-wise head (slices 1 and 2 of
+ * `docs/plans/2026-11-12-structured-broadcast-over-lists.md`): a scalar
+ * head of a list, of a list and a real (in either order, a literal
+ * exponent such as `3` or `1/3` too), of a list and the same list, or an
+ * element-wise `If` or `Which` whose conditions compare one list (with
+ * `Not`, `And` and `Or`) and whose arms are that list, an element-wise
+ * function of it, or reals.
+ */
+function genBroadcastList(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const sub = () => genReal(ctx, d);
+  const list = () => genList(ctx, d);
+  const r = rng();
+  if (r < 0.3) return [pick(rng, BROADCAST_UNARY), list()];
+  if (r < 0.6) {
+    const head = pick(rng, BROADCAST_BINARY);
+    const l = list();
+    const other: Json =
+      rng() < 0.2
+        ? l
+        : rng() < 0.4
+          ? pick(rng, [3, 2, -1, 0.5, ['Rational', 1, 3]] as Json[])
+          : sub();
+    return rng() < 0.5 ? [head, l, other] : [head, other, l];
+  }
+  // A selection over one list `l`.
+  const l = list();
+  const compare = (): Json => {
+    const c: Json = [
+      pick(rng, ['Less', 'LessEqual', 'Greater', 'GreaterEqual', 'Equal', 'NotEqual']),
+      l,
+      rng() < 0.2 ? l : sub(),
+    ];
+    const q = rng();
+    if (q < 0.15) return ['Not', c];
+    if (q < 0.3) return [pick(rng, ['And', 'Or']), c, [pick(rng, ['Less', 'Greater']), l, sub()]];
+    return c;
+  };
+  const arm = (): Json => {
+    const q = rng();
+    if (q < 0.35) return l;
+    if (q < 0.5) return [pick(rng, ['Sqrt', 'Abs', 'Negate', 'Sin']), l];
+    if (q < 0.65) return ['Add', l, sub()];
+    return sub();
+  };
+  const q = rng();
+  if (q < 0.5) return ['If', compare(), arm(), arm()];
+  if (q < 0.65) return ['If', compare(), arm()];
+  const clauses: Json[] = [compare(), arm(), compare(), arm()];
+  if (rng() < 0.7) clauses.push('True', arm());
+  return ['Which', ...clauses];
 }
 
 /** The counts of `Take` and `Drop`: in and out of the range of a short

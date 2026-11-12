@@ -11,6 +11,38 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles the scalar functions of a list,
+  the comparisons of a list and the selections on them.** In the `strict`
+  mode these forms declined with `outside-profile` and now compile, with the
+  values of the existing compiler: a scalar function applied to each element
+  of a list and real operands (`L^3`, `Exp(L)`, `Sqrt(L + 1)`, `Log(L, 2)`,
+  `Mod(L, 3)`, `Hypot(L, x)`, `Round(L)`, `Gamma(L)`, `BesselJ(n, L)`, …),
+  and of two lists whose lengths are equal by construction (one name, an
+  element-wise result of it, two comprehensions over one range) or whose
+  types state one width (`vector<3>`, `list<real^3>`); a comparison of a list
+  (`L < 0`, `L == 3`) and `Not`, `And`, `Or` of such lists, whose value is a
+  list of booleans, and `At` and `Length` of one; `If` and `Which` whose
+  conditions are such lists, with arms that are reals or lists of the same
+  length (`NaN` where no condition holds). Two lists of unstated lengths
+  still decline (`L + M`, `Hypot(L, M)`): declare one width. Also declined:
+  every element-wise function in the `complex` mode, `Arcsin` and the other
+  inverse functions whose scalar value can be complex, `Beta`, `AGM`,
+  `CosIntegral` and `GammaRegularized` of a list, `Sin(π·L)`, a power of a
+  list by an exact fraction of odd denominator (`L^(2/3)`), a selection arm
+  that draws, calls the host or can throw (`If(L > 0, Random(), 0)`,
+  `If(L > 0, Length(Range(1, n)), 0)`),
+  a list of booleans as an input, a local or the value of a helper, a list
+  whose elements the existing compiler reads as complex numbers
+  (`Arctan([√k for k in 1..n])`), `Max(L, x)` and `Equal(L, M)`.
+
+  ```js
+  ce.declare('L', 'list<real>');
+  const f = compile(ce.box(['If', ['Less', 'L', 0], 0, ['Sqrt', 'L']]), {
+    profile: 'numeric-kernel',
+  });
+  f.run({ L: [-1, 4, 9] }); // ➔ [0, 2, 3]
+  ```
+
 - **The `numeric-kernel` profile compiles names whose value is an
   expression, captured lists of lists and captured complex numbers.** These
   names declined with `unsupported binding` and now compile, with the
