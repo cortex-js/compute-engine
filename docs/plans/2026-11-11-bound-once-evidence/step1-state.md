@@ -671,3 +671,66 @@ on `586135360`). Source +180 −934, tests +25 −19.
   `n = 1`: 14 → 2.
 - `shared-collection-literal-evaluation` "a stored tuple whose inline
   function reads a variable …": `[[4,5],[4,5],3]` → `[[4,5],[6,7],3]`.
+
+## The change on main 38622ec29, for landing (2026-11-12)
+
+Worktree `/tmp/wt-compute-engine-06-land`, detached commits on main
+`38622ec29`: `022c36151` (the change of `c2b80446c` applied; one conflict,
+`docs/SCOPING-MODEL.md`, both sections kept), `be8fa7d77` (the five held
+tests), `391a02afe` (dead code), `d73edd7ed` (comments), `82f68ff0b` (model
+docs, CHANGELOG, Prettier), `382e8e033` (the import cycle) and the commits
+after it.
+
+### The five held tests (D15)
+
+`whole-collection-parameter` "Limitations of the rule": each local function
+whose parameter takes the list whole declares it `list` (`(t: list) =>
+count(t)`, `['Typed', 't', "'list'"]`); the untyped wrapper `r` keeps the
+mapped results. An untyped parameter of a local literal still gets a
+collection type from its own body (`(t) => count(t)` is
+`(t: collection<any>) -> …`): leftover 5 (b), removed later with D15.
+
+### Deleted
+
+`recordCanonicalLocal`, `canonicalLocalOf`, `CANONICAL_LOCALS` and the
+`canonicalLocalType()` path of `declareSteps()` (no writer since D8);
+`nestedBodyScopes`, `liveNestedScopes`; `enterStaticTypingView`,
+`leaveStaticTypingView`; nine unused imports; `export` dropped from
+`enterBranch`, `exitBranch`, `registerScopeActivation`,
+`isStatementListScope`, `localFunctionName`; the unused `scope` parameter of
+`withUseBeforeDeclarationErrors()`.
+
+### Fixed
+
+- Import cycle `effects-inference → match-dispatch → function-utils`: the
+  Match case check imported `matchPatternReferences`; it and
+  `collectCaptures` moved to `pattern-utils.ts`.
+- Comments that named the re-parenting of the body scope, the hiding of
+  parameters, the sweeps, assignment locals, `snapshotNestedScope`,
+  `capturedRunOf`, checkpoints; design labels in test names and comments.
+- Docs: `SCOPING-MODEL.md` (resolution from the home scope, block locals,
+  activations, stored lazy lists, value shields), `TYPE-SYSTEM.md` (static
+  binding view), `COMPILATION-MODEL.md` (block-local errors), `CHANGELOG.md`.
+
+### Not changed
+
+- `compilation/fragment.ts` `walkBlock` keeps its implicit-local branch
+  (structured route; unreachable with D8).
+- `asyncInFlight` serializes the awaited applications of one body scope; its
+  reason (the re-parenting) is gone, the code is kept.
+
+### Completion checks (2026-11-12)
+
+Full suite at `382e8e033`: 26 files, 58 tests failed (log in the session
+scratchpad). At main `38622ec29` the 26 files pass. All 20 failures of the
+12 files outside the known list fail at `c2b80446c` too. Moved after the run
+(`f7f6f737d`): `binder-mechanism` (4, the frame holds the static
+definition), `derivative-closed-form-cache` (1). `ce-1102` timed out at load
+46 and passes alone. Open (c): `absent-argument-annotated-parameter` (2),
+`spread-literal-result-kind` "the result of a call", `compile-codegen-copies`
+CE-329 "not provably an indexed list"; the type of a parameter or capture is
+static: `error-propagation` (2), `match-dispatch` (2), `match-expression`
+(1), with `types.md:683`. Nightly suites pass; lint, type check, madge
+clean. Timing (one worker, load 2.4 to 5.3): calculus 10.7/10.8/10.6 s
+against 10.9/10.7/10.6 s at main, simplify 2.0/2.0/2.0 against 2.2/2.1/2.0,
+integrate-symbolic-pole 17.4/17.7/17.7 against 19.2/17.6/17.4.
