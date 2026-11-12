@@ -329,7 +329,14 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
       portable.push(
         blocker(op, fn, 'a call of a function that is not in the program')
       );
-    if (op.kind === 'capture' && typeof op.snapshot !== 'number')
+    // A complex snapshot is the literal of its two parts in the code.
+    if (
+      op.kind === 'capture' &&
+      typeof op.snapshot !== 'number' &&
+      (typeof op.snapshot !== 'object' ||
+        typeof op.snapshot.re !== 'number' ||
+        typeof op.snapshot.im !== 'number')
+    )
       portable.push(
         blocker(op, fn, 'a capture that is not a snapshot of a number')
       );
@@ -802,7 +809,8 @@ function judgeLoop(
     if (op === undefined || depth > 16) return false;
     if (op.kind === 'literal')
       return typeof op.value === 'number' && op.value >= 1;
-    if (op.kind === 'capture') return op.snapshot >= 1;
+    if (op.kind === 'capture')
+      return typeof op.snapshot === 'number' && op.snapshot >= 1;
     if (op.kind === 'add' || op.kind === 'multiply')
       return (
         op.operands.length > 0 &&

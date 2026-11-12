@@ -982,7 +982,7 @@ export type IRCaptureRead = OperationBase & {
   readonly kind: 'capture';
   readonly capture: number;
   readonly binding: object;
-  readonly snapshot: number;
+  readonly snapshot: CaptureSnapshot;
 };
 
 /**
@@ -1382,9 +1382,16 @@ export type IRCapture = {
   readonly name: string;
   readonly type: ScalarKind;
   readonly representation: Representation;
-  /** The value of the binding when the program was compiled. */
-  readonly snapshot: number;
+  /** The value of the binding when the program was compiled: a number, or
+   *  the two parts of a complex number for the type `complex`. */
+  readonly snapshot: CaptureSnapshot;
 };
+
+/** The value of a captured binding (`IRCapture.snapshot`): a finite number,
+ *  or the finite parts of a complex number. */
+export type CaptureSnapshot =
+  | number
+  | { readonly re: number; readonly im: number };
 
 /** A list that the program holds once (`IRConstantRead`): the value of a
  *  captured binding when the program was compiled. */
@@ -1394,11 +1401,13 @@ export type IRConstant = {
   readonly binding: object;
   /** The name of the binding, for a message. */
   readonly name: string;
+  /** A list of reals or of integers, or a list of such lists (rank 2). */
   readonly type: ListType;
   readonly representation: Representation;
-  /** The elements, each a finite number; an integer for a list of
-   *  integers. */
-  readonly elements: readonly number[];
+  /** The elements, each a finite number (an integer for a list of
+   *  integers); for a list of lists, the rows, each an array of such
+   *  numbers, of any length. */
+  readonly elements: readonly number[] | readonly (readonly number[])[];
 };
 
 /** A resolved helper, written once as a function of the program. A helper

@@ -230,7 +230,7 @@ import {
 import {
   inPlaceUpdates,
   mutatesInPlace,
-  rootYieldsUnique,
+  rootCopyLevels,
 } from './structured-in-place.js';
 import { JAVASCRIPT_POLICY } from './javascript-structured-policy.js';
 
@@ -602,14 +602,21 @@ export function emitStructuredProgram(
   );
   const statements: string[] = [];
   const root = emitter.openRegion(program.root, statements, true)[0];
-  // A list value that can be the array of a constant is copied: the host
-  // can write the array of the value, and the next call reads the constant.
+  // A list value that can be the array of a constant, or hold a constant
+  // or a row of one as a row, is copied to that depth (`rootCopyLevels()`):
+  // the host can write the value at any depth, and the next call reads the
+  // constant.
+  const levels = constants.length > 0 ? rootCopyLevels(program) : 0;
+  if (levels === 'deep')
+    throw new Error(
+      'the value of the program is a list of rank 3 or more that can hold a constant'
+    );
   const value =
-    constants.length > 0 &&
-    isListType(yieldedValues(program.root)[0]?.type) &&
-    !rootYieldsUnique(program)
-      ? `${operand(root, CALL)}.slice()`
-      : root.text;
+    levels === 1
+      ? `${operand(root, CALL)}?.slice()`
+      : levels === 2
+        ? `${operand(root, CALL)}?.map((_r) => _r?.slice())`
+        : root.text;
   if (
     program.numericPolicy === 'bigint' &&
     (program.noValueResult !== undefined || emitter.lifted.size > 0)
@@ -753,9 +760,12 @@ class Emitter {
     return (this.program.constants ?? []).map((constant) => {
       const name = this.names.fresh();
       this.constantNames.push(name);
-      return `const ${name} = [${constant.elements
-        .map((e) => numberSource(e).text)
-        .join(', ')}];`;
+      // A row of a list of lists is an array of its cells.
+      const text = (e: number | readonly number[]): string =>
+        typeof e === 'number'
+          ? numberSource(e).text
+          : `[${e.map((c) => numberSource(c).text).join(', ')}]`;
+      return `const ${name} = [${constant.elements.map(text).join(', ')}];`;
     });
   }
 
@@ -1062,12 +1072,25 @@ class Emitter {
         this.define(op.result, atom(name));
         return undefined;
       }
-      case 'capture':
+      case 'capture': {
         // The snapshot is written as a number literal at each use, as the
-        // existing emitter writes the stored value of a captured binding.
+        // existing emitter writes the stored value of a captured binding; a
+        // complex snapshot as the object of its two parts, which a complex
+        // operation reads as it reads another complex value (not as a
+        // complex literal, whose parts it writes as constants): the
+        // existing emitter writes `(({ re: -0.5, im: 2 })).re`.
+        const { snapshot } = op;
         this.plain.add(op.result.id);
-        this.define(op.result, numberSource(op.snapshot));
+        this.define(
+          op.result,
+          typeof snapshot === 'number'
+            ? numberSource(snapshot)
+            : atom(
+                `({ re: ${numberSource(snapshot.re).text}, im: ${numberSource(snapshot.im).text} })`
+              )
+        );
         return undefined;
+      }
       case 'input': {
         if (!readsInputs) fail('the body of a helper reads an input');
         const input = this.program.inputs[op.input];

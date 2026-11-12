@@ -496,10 +496,10 @@ describe('a captured name declared number', () => {
     }
   });
 
-  test('a complex value keeps its decline', () => {
+  // A complex value is a complex capture
+  // (compile-javascript-structured-bindings.test.ts).
+  test('a complex value is a complex capture', () => {
     for (const mode of ['strict', 'complex'] as const)
-      expect(declineOf(['Add', 'cz', 'xr'], mode)).toMatch(
-        /unsupported binding cz/
-      );
+      expectSameAsExisting(['Add', 'cz', 'xr'], mode);
   });
 });

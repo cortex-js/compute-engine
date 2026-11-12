@@ -1172,7 +1172,9 @@ describe('the declines that stay, each with the cause in its message', () => {
     ['a seed that is a string expression', ['WithRandomSeed', ['String', "'a'", "'b'"], ['Random']], /String/],
     ['a boolean seed', ['WithRandomSeed', 'C', ['Random']], /the seed C of the type boolean/],
     ['a region whose value is a list', ['WithRandomSeed', 1, 'L'], /list operand L/],
-    ['a binding whose value draws', ['Add', 'r', 1], /unsupported binding r/],
+    // The value `Hold(Random())` is an expression of the program
+    // (`storedSnapshot()`), whose head the profile does not admit.
+    ['a binding whose value draws', ['Add', 'r', 1], /unsupported head Hold/],
     ['a lambda that draws', ['Map', ['Function', ['Add', 'u', ['Random']], 'u'], 'L'], /Map whose function has the node Random\(\), which is not pure, draws/],
     [
       'a draw in the domain of a comprehension (the interpreter evaluates it when the list is read)',

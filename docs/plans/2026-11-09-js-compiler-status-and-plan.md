@@ -910,6 +910,8 @@ and the shadow measure are off, and no consumer has the profile by default.
 | `4790e085732832cd9e528cc11f759b8f9e8db89d` | One copy before a loop, then updates in place; rows updated in place when a list owns its rows |
 | `0eb9d4778988822bcb042e08dc984d460923e8c5` | 43 scalar library heads; `If`/`Which` with a constant condition; one bound-name mechanism |
 | `edf0c42631a479230ffbb04bcd33d745725ceeed` | Matrix functions, element-wise arithmetic and folds of lists of lists, products by type (nested lists and matrices, slices 2 to 4) |
+| `a17a2632cc7df307eebd7c5fcba5e747940506b8` | Library functions of flat lists: orderings, searches, statistics, gathers, real indexes and counts |
+| `99cee49c8926048d73e590a0274567b9290e8bcc` | Numeric derivatives, limits, the log-space form and sampled integrals (numeric calculus, slices 3 and 4) |
 
 Each source change had a Claude review with probe programs and a Codex
 review, except the shadow measure (Codex, and a reading of its hook).
@@ -937,6 +939,7 @@ clean worktree):
 | `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | 8,964 of 9,424 (95.1%) | 87,356 passed, 1 failed (a 2 s time limit of `dag-shared-walks.test.ts`, at 2.4 s on a loaded machine) |
 | `4790e085732832cd9e528cc11f759b8f9e8db89d` | 9,188 of 9,545 (96.3%) | 87,731 passed, 0 failed |
 | `edf0c42631a479230ffbb04bcd33d745725ceeed` | 9,202 of 9,552 (96.3%) | 89,402 passed, 0 failed |
+| `99cee49c8926048d73e590a0274567b9290e8bcc` | 9,366 of 9,719 (96.4%) | 89,648 passed, 0 failed |
 
 The switch-off run at `4422cd7bf64eca17935bd7655e6a5f0a972a3199` failed only
 on the timeout of CE-1197, which does not depend on the switch. The prelude
@@ -962,6 +965,7 @@ the existing compiler compiles, and those of them that the profile admits):
 | `5d5060724e7de7caaca5192bb56fa7ed5c89143d` | 22,035 of 31,522 (69.9%) | 13,059 of 22,291 (58.6%) |
 | `4790e085732832cd9e528cc11f759b8f9e8db89d` | 23,293 of 32,323 (72.1%) | 14,097 of 22,974 (61.4%) |
 | `edf0c42631a479230ffbb04bcd33d745725ceeed` | 24,717 of 33,396 (74.0%) | 15,519 of 24,053 (64.5%) |
+| `99cee49c8926048d73e590a0274567b9290e8bcc` | 25,568 of 33,800 (75.6%) | 16,198 of 24,280 (66.7%) |
 
 The number of compilations grows because each change adds tests. The table
 of causes below is the first measure; the design notes of 2026-11-11

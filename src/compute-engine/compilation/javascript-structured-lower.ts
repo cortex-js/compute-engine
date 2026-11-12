@@ -150,7 +150,7 @@ import {
   JAVASCRIPT_POLICY,
   verifyJavaScriptProgram,
 } from './javascript-structured-policy.js';
-import { withOwnedCopies } from './structured-in-place.js';
+import { rootCopyLevels, withOwnedCopies } from './structured-in-place.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isLibraryOperator } from './builtin-callback.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
@@ -363,12 +363,21 @@ export type StructuredCapture = {
   /** The symbol nodes of the prepared tree that read the binding. */
   readonly symbols: ReadonlySet<Expression>;
   /** The value of the binding at the admission: a number, or `undefined`
-   *  for a list (`stored`). */
+   *  for a list, an expression and a complex number (`stored`). */
   readonly value: number | undefined;
   /** The value that the admission typed in place of each read: a number
-   *  literal, or a list literal of finite real number literals, which the
-   *  lowering writes as a new array at each call (`captureRead()`). */
+   *  literal, a list literal of finite real number literals or a list of
+   *  such lists (a constant of the program, `capturedList()`), a complex
+   *  number literal (`complex`), or an expression (`expression`). */
   readonly stored: Expression;
+  /** The value is an expression of the inputs (`x + 1` for `lv`), rewritten
+   *  for the angular unit: the existing compiler computes it once per call,
+   *  before the body (`const _val_lv = _.x + 1;`), and the lowering computes
+   *  it once, in the root region, at its first read (`storedRead()`). */
+  readonly expression?: true;
+  /** The value is a complex number with finite parts, which the existing
+   *  compiler writes as an object at each read (`({ re: -0.5, im: 2 })`). */
+  readonly complex?: { readonly re: number; readonly im: number };
   /** Throw when the binding or its value changed after the admission. */
   readonly assertCurrent: () => void;
 };
@@ -1303,7 +1312,15 @@ export class StructuredDeclineError extends Error {
 export function lowerStructuredProgram(
   preparation: StructuredPreparation
 ): IRProgram {
-  return withOwnedCopies(new Lowering(preparation).program());
+  const program = withOwnedCopies(new Lowering(preparation).program());
+  if (rootCopyLevels(program) === 'deep')
+    throw new StructuredDeclineError(
+      'the value of the program is a list of rank 3 or more, and the ' +
+        'program reads a captured list: a row of the value can hold the ' +
+        'captured list, which every call shares, below the two levels ' +
+        'that the profile copies'
+    );
+  return program;
 }
 
 /** The nodes that the annotation of `preparation` types, in its root
@@ -5227,8 +5244,16 @@ class Lowering {
     const capture = this.prep.captures.find((c) => c.symbols.has(node));
     if (capture === undefined)
       return fail(`no binding for the name ${node.symbol}`);
-    if (capture.value === undefined)
-      return this.capturedList(capture, operations);
+    // A value that is a name (`sv := y`) is a read of that name where the
+    // alias is read, as the existing compiler writes it at each read
+    // (`bindsFoldedValue()` binds applications only); another value is
+    // computed once (`storedRead()`).
+    if (capture.expression === true)
+      return isSymbol(capture.stored)
+        ? this.value(capture.stored, this.prep.annotation.scope, operations)
+        : this.storedRead(capture);
+    const snapshot = capture.complex ?? capture.value;
+    if (snapshot === undefined) return this.capturedList(capture, operations);
     const facts = this.facts(node, scope);
     const result = this.resultOf(facts);
     let index = this.captureIndex.get(capture.binding);
@@ -5239,7 +5264,7 @@ class Lowering {
         name: capture.name,
         type: scalarKind(facts.type),
         representation: result.representation,
-        snapshot: capture.value,
+        snapshot,
       });
       this.captureIndex.set(capture.binding, index);
     }
@@ -5247,13 +5272,100 @@ class Lowering {
       kind: 'capture',
       capture: index,
       binding: capture.binding,
-      snapshot: capture.value,
+      snapshot,
       result,
       operands: [],
       effect: 'pure',
       origin: node,
     });
     return result;
+  }
+
+  /** The value of each captured expression (`storedRead()`), by its
+   *  binding. */
+  private readonly storedValues = new Map<object, IRValue>();
+  /** The number of operations at the start of the root region that compute
+   *  the captured expressions (`storedRead()`). */
+  private storedEnd = 0;
+  /** Whether a captured expression is being lowered (`storedRead()`). */
+  private storing = false;
+
+  /**
+   * A read of a captured binding whose value is an expression
+   * (`StructuredCapture.expression`, `lv := x + 1`), which the admission
+   * typed in the root scope, where its names are read. The existing
+   * compiler computes it once per call, before the body
+   * (`const _val_lv = _.x + 1;`), and writes its name at each read. The
+   * lowering computes it once, at its first read, and puts its operations
+   * at the start of the root region, after those of the captured
+   * expressions lowered before it: before every operation of the body, so
+   * that its reads of the inputs come before a call of the host, which can
+   * change the inputs object (the emitter moves no pure value across such a
+   * call). Each read is that value. The admission refuses an impure value
+   * and a value that reads the host; a value whose operations can throw or
+   * abort declines here: the existing compiler computes every value before
+   * the body, also one that the body does not read on the path it takes. A
+   * value of another captured expression that it reads is lowered with it,
+   * before it. A read in the body of a helper declines: a helper has no
+   * root region.
+   */
+  private storedRead(capture: StructuredCapture): IRValue {
+    const known = this.storedValues.get(capture.binding);
+    if (known !== undefined) return known;
+    if (this.lowering.size > 0 || this.regions.length === 0)
+      throw new StructuredDeclineError(
+        `the value of ${capture.name} (${nodeText(capture.stored)}) is read ` +
+          `in the body of a helper, which the structured route does not ` +
+          `compute it in`
+      );
+    // A value that another captured expression reads is lowered with it.
+    const nested = this.storing;
+    const operations: IROperation[] = nested
+      ? this.regions[0].operations
+      : [];
+    const start = operations.length;
+    // The value is lowered alone, in the root scope: no value that a region
+    // around the read remembers, no loop and no integral of the read is
+    // around it.
+    const { regions, loops, scopes, panels } = this;
+    this.regions = [];
+    this.loops = [];
+    this.scopes = [];
+    this.panels = undefined;
+    this.storing = true;
+    let value: IRValue;
+    try {
+      value = this.inRegion(operations, () =>
+        this.value(capture.stored, this.prep.annotation.scope, operations)
+      );
+    } finally {
+      this.regions = regions;
+      this.loops = loops;
+      this.scopes = scopes;
+      this.panels = panels;
+      this.storing = nested;
+    }
+    for (let i = start; i < operations.length; i++) {
+      const op = operations[i];
+      if (
+        op.effect !== 'pure' ||
+        this.canThrow(op) ||
+        operationCanAbort(op, this.functions) ||
+        reachesHost(op, this.functions)
+      )
+        throw new StructuredDeclineError(
+          `the value of ${capture.name} (${nodeText(capture.stored)}) has ` +
+            `an operation that can throw, abort or read the host ` +
+            `(${nodeText(op.origin)}), which the profile does not compute ` +
+            `before the body`
+        );
+    }
+    if (!nested) {
+      this.regions[0].operations.splice(this.storedEnd, 0, ...operations);
+      this.storedEnd += operations.length;
+    }
+    this.storedValues.set(capture.binding, value);
+    return value;
   }
 
   /**
@@ -5279,12 +5391,25 @@ class Lowering {
     let index = this.constantIndex.get(capture.binding);
     if (index === undefined) {
       index = this.constants.length;
+      // A list of lists holds its rows, each the array of its cells.
+      const nested = isListType(result.type.element);
+      if (
+        nested &&
+        !node.ops.every((row) => isFunction(row, 'List') && row.nops > 0)
+      )
+        return fail(`a row of the captured value of ${capture.name} is not a list`);
       this.constants.push({
         binding: capture.binding,
         name: capture.name,
         type: result.type,
         representation: result.representation,
-        elements: node.ops.map((element) => element.re),
+        elements: nested
+          ? node.ops.map((row) =>
+              (row as Expression & { ops: readonly Expression[] }).ops.map(
+                (cell) => cell.re
+              )
+            )
+          : node.ops.map((element) => element.re),
       });
       this.constantIndex.set(capture.binding, index);
     }

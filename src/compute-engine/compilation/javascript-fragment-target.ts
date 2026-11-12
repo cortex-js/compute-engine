@@ -56,8 +56,13 @@ import { exactRationalDivisor } from './compiler-type-facts.js';
 import {
   SHIFT_JUMP_HEADS,
   closedExactJump,
+  foldValueImpure,
   tryConstantFold,
 } from './compile-folding.js';
+import {
+  foldCaptureRefusal,
+  foldedValueInRadians,
+} from './compile-folded-values.js';
 import { exactDoubleValue } from '../numeric-value/exact-integer-value.js';
 import {
   hasUnknownsWithMemo,
@@ -10679,10 +10684,27 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     const indexes = new Set<string>();
     const check = (node: Expression): void =>
       atNode(node, () => checkNode(node));
-    // The names that a form of the expression binds (`decidedBranch()`).
+    // The names that a form of the expression binds (`decidedBranch()`),
+    // or of the captured expression being checked (`checkStored()`).
     let rootBound: ReadonlySet<string> | undefined;
+    let storedBound: ReadonlySet<string> | undefined;
     const boundInRoot = (name: string): boolean =>
-      (rootBound ??= namesBoundIn(prepared.expr)).has(name);
+      (storedBound ?? (rootBound ??= namesBoundIn(prepared.expr))).has(name);
+    // A captured expression (`recordCapture()`) is checked where its names
+    // are read: in the root, with no index of the read around it.
+    const checkStored = (stored: Expression): void => {
+      const outerIndexes = [...indexes];
+      const outerBound = storedBound;
+      indexes.clear();
+      storedBound = namesBoundIn(stored);
+      try {
+        check(stored);
+      } finally {
+        indexes.clear();
+        for (const index of outerIndexes) indexes.add(index);
+        storedBound = outerBound;
+      }
+    };
     const checkNode = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
@@ -10785,12 +10807,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           registry &&
           mapped === undefined &&
           held &&
-          recordCapture(registry, node)
+          recordCapture(registry, node, checkStored)
         )
           return;
         if (held)
           throw new Error(
-            `JS scalar fragment: unsupported binding ${node.symbol}`
+            `JS scalar fragment: unsupported binding ${node.symbol}${
+              registry === undefined ? '' : heldValueCause(node)
+            }`
           );
         // A free symbol with no declared type is an input of the default
         // kind of the mode (`defaultKind()`); its inferred type is not
@@ -10824,7 +10848,11 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           )
         )
           throw new Error(
-            `JS scalar fragment: unsupported binding ${node.symbol}`
+            `JS scalar fragment: unsupported binding ${node.symbol}${
+              structured
+                ? unionCause(node.type.type) || scopedNameCause(node)
+                : ''
+            }`
           );
         return;
       }
@@ -12270,9 +12298,31 @@ function attachRootBlock(
   const free: (Expression & { symbol: string })[] = [];
   /** The indexes of the aggregates and comprehensions around the node. */
   const indexes = new Set<string>();
+  /** The stored values whose names `collect()` read. */
+  const values = new Set<Expression>();
   const collect = (node: Expression): void => {
     if (isSymbol(node)) {
       const name = node.symbol;
+      // The names of a captured expression (`storedSnapshot()`) are free
+      // symbols where the value is read, with no index around them.
+      const value =
+        bound.has(name) || indexes.has(name) || registry.hosts?.vars.has(name)
+          ? undefined
+          : resolvedValueDefinition(node)?.value;
+      if (
+        value !== undefined &&
+        !isNumber(value) &&
+        !values.has(value)
+      ) {
+        values.add(value);
+        const outer = [...indexes];
+        indexes.clear();
+        try {
+          collect(foldedValueInRadians(value, target));
+        } finally {
+          for (const index of outer) indexes.add(index);
+        }
+      }
       if (
         name === 'True' ||
         name === 'False' ||
@@ -12359,7 +12409,8 @@ function attachRootBlock(
     admission,
     named,
     undefined,
-    expression
+    expression,
+    free.map((s) => s.symbol)
   );
   /** The declared type of each free symbol, for the label of a list
    *  input (`elementLabel()`). */
@@ -12396,7 +12447,9 @@ function attachRootBlock(
         list === undefined
       )
         throw new Error(
-          `JS scalar fragment: unsupported binding ${node.symbol}`
+          `JS scalar fragment: unsupported binding ${node.symbol}${unionCause(
+            node.type.type
+          )}`
         );
     });
   const annotation = annotateCalls(body, admission.definition, named);
@@ -12549,7 +12602,12 @@ function admitFunctionBody(
    *  not a block, and that holds a block with statements as a value
    *  (`attachRootBlock()`): it is the value of the body, with no
    *  statements. */
-  expressionRoot = false
+  expressionRoot = false,
+  /** The names that a captured expression of the root can read as inputs
+   *  (`recordCapture()`): the free symbols of a root `Block`
+   *  (`attachRootBlock()`); none for a root `Function`, whose parameters
+   *  are not the names of a value written against the engine. */
+  storedInputs: readonly string[] = []
 ): void {
   const conditionContext =
     helper === undefined
@@ -12928,10 +12986,51 @@ function admitFunctionBody(
             `reads: the structured route maps a free symbol of an expression ` +
             `or of a root Block only`
         );
-      // The structured route reads a captured binding as its snapshot.
-      if (registry && recordCapture(registry, node)) return checkCollisions();
+      // The structured route reads a captured binding as its snapshot. A
+      // captured expression, in the root only, is checked where its names
+      // are read: the inputs of the program (`storedInputs`) are its only
+      // names there, and no parameter, local or index of the body is.
+      if (
+        registry &&
+        recordCapture(
+          registry,
+          node,
+          isRoot
+            ? (stored) => {
+                // A name of the value that the body binds would read the
+                // binder; the existing compiler refuses it too
+                // (`foldCapturedName()`).
+                const captured = stored.symbols.find(
+                  (name) => bindings.has(name) && !storedInputs.includes(name)
+                );
+                if (captured !== undefined)
+                  throw new Error(
+                    `JS scalar fragment: ${foldCaptureRefusal(node.symbol, captured)}`
+                  );
+                const outer = [...names];
+                names.clear();
+                for (const name of storedInputs) names.add(name);
+                try {
+                  checkValue(stored);
+                } finally {
+                  names.clear();
+                  for (const name of outer) names.add(name);
+                }
+              }
+            : undefined
+        )
+      )
+        return checkCollisions();
       throw new Error(
-        `JS scalar fragment: unsupported ${isRoot ? '' : 'helper '}capture ${node.symbol}`
+        `JS scalar fragment: unsupported ${isRoot ? '' : 'helper '}capture ${node.symbol}${
+          registry === undefined
+            ? ''
+            : !isRoot && storedSnapshot(node, registry)?.kind === 'expression'
+              ? `: its value ${nodeText(resolvedValueDefinition(node)!.value!)} ` +
+                `is an expression, which the structured route computes in the ` +
+                `root only`
+              : heldValueCause(node)
+        }`
       );
     }
     // A call of a function of the host (`hostHeadOf()`).
@@ -14251,7 +14350,8 @@ function numericSnapshot(
     (undeclared && !admitsUndeclared) ||
     (!undeclared &&
       (list
-        ? !isSubtype(binding.type.type, LIST_OF_REALS_TYPE)
+        ? !isSubtype(binding.type.type, LIST_OF_REALS_TYPE) &&
+          !isSubtype(binding.type.type, LIST_OF_LISTS_OF_REALS_TYPE)
         : !isSubtype(binding.type.type, 'real') &&
           !(
             admitsUndeclared &&
@@ -14295,23 +14395,137 @@ function numericSnapshot(
  *  (`isCapturedList()`). */
 const LIST_OF_REALS_TYPE = parseType('list<real>');
 
+/** The lists of lists of reals or of integers: the type of a captured list
+ *  of rank 2 (`isCapturedList()`). */
+const LIST_OF_LISTS_OF_REALS_TYPE = parseType('list<list<real>>');
+
 /**
  * Whether `value`, the value of a binding, is a list that the structured
  * route captures: a `List` of one or more finite real number literals, a
  * list of reals or of integers that the route writes as an array of
- * numbers. A list of lists, of tuples or of other values, and an empty
- * list, keep their refusal.
+ * numbers, or a `List` of one or more such lists (rank 2, rows of any
+ * length, as the existing compiler writes `[[1, 2], [3]]`), which it
+ * writes as an array of such arrays. A list of lists of lists, of tuples
+ * or of other values, and an empty list or an empty row, keep their
+ * refusal.
  */
 function isCapturedList(value: Expression): boolean {
+  const isFlat = (list: Expression): boolean =>
+    isFunction(list, 'List') &&
+    isLibraryOperator(list, 'List') &&
+    list.nops > 0 &&
+    isSubtype(list.type.type, LIST_OF_REALS_TYPE) &&
+    list.ops.every(
+      (op) => isNumber(op) && op.im === 0 && Number.isFinite(op.re)
+    );
+  if (isFlat(value)) return true;
   return (
     isFunction(value, 'List') &&
     isLibraryOperator(value, 'List') &&
     value.nops > 0 &&
-    isSubtype(value.type.type, LIST_OF_REALS_TYPE) &&
-    value.ops.every(
-      (op) => isNumber(op) && op.im === 0 && Number.isFinite(op.re)
-    )
+    isSubtype(value.type.type, LIST_OF_LISTS_OF_REALS_TYPE) &&
+    value.ops.every(isFlat)
   );
+}
+
+/**
+ * The value of the captured binding that the symbol `node` reads, on the
+ * structured route, when it is not a number or a list that
+ * `numericSnapshot()` captures:
+ *
+ * - `complex`: a complex number literal with finite parts and an imaginary
+ *   part that is not 0, of a binding with no declared type
+ *   (`hasNoDeclaredType()`) or declared `complex` or `number`. The existing
+ *   compiler writes it at each read as the object of its parts
+ *   (`({ re: -0.524, im: -0.566 })`), in both modes. A real value of a
+ *   binding declared `complex` keeps its refusal: the existing compiler
+ *   reads it on the complex lane (`_SYS.cplx(5)`), where the pass would type
+ *   the literal as a real number.
+ * - `expression`: an application that is not a `Function` literal, or a
+ *   symbol, that is pure through every stored value it reads
+ *   (`foldValueImpure()`), rewritten for the angular unit of the engine
+ *   (`foldedValueInRadians()`), as the existing compiler compiles it
+ *   (`tryFoldKnownSymbol()`: `const _val_lv = _.x + 1;` for an application,
+ *   the value written at the read for a symbol).
+ *
+ * As for `numericSnapshot()`, the binding is the one that the engine finds
+ * for the name where the program is compiled, and holds the value that the
+ * engine reads (no value of the frame of a call). `assertCurrent()` throws
+ * when the binding or its value changed.
+ */
+function storedSnapshot(
+  node: Expression & { symbol: string },
+  registry: StructuredRegistry
+):
+  | {
+      binding: object;
+      value: Expression;
+      stored: Expression;
+      kind: 'complex' | 'expression';
+      assertCurrent: () => void;
+    }
+  | undefined {
+  const binding = resolvedValueDefinition(node);
+  const value = binding?.value;
+  if (binding === undefined || value === undefined) return undefined;
+  const ambient = node.engine.lookupDefinition(node.symbol);
+  if (
+    !ambient ||
+    !('value' in ambient) ||
+    ambient.value !== binding ||
+    node.engine._getSymbolValue(node.symbol) !== value
+  )
+    return undefined;
+  let kind: 'complex' | 'expression';
+  if (isNumber(value)) {
+    const declared = binding.type.type;
+    if (
+      value.im === 0 ||
+      !Number.isFinite(value.re) ||
+      !Number.isFinite(value.im) ||
+      !(
+        hasNoDeclaredType(node) ||
+        (isSubtype(declared, 'number') && isSubtype('complex', declared))
+      )
+    )
+      return undefined;
+    kind = 'complex';
+  } else if (
+    (isFunction(value) && !isFunction(value, 'Function')) ||
+    isSymbol(value)
+  ) {
+    if (foldValueImpure(value) || liftedByDeclaration(node, value))
+      return undefined;
+    kind = 'expression';
+  } else return undefined;
+  const stored =
+    kind === 'expression'
+      ? foldedValueInRadians(value, registry.target)
+      : value;
+  const undeclared = hasNoDeclaredType(node);
+  const declaredType = binding.type.type;
+  return {
+    binding,
+    value,
+    stored,
+    kind,
+    assertCurrent: () => {
+      const current = node.engine.lookupDefinition(node.symbol);
+      if (
+        !current ||
+        !('value' in current) ||
+        current.value !== binding ||
+        binding.value !== value ||
+        resolvedValueDefinition(node) !== binding ||
+        hasNoDeclaredType(node) !== undeclared ||
+        (!undeclared && binding.type.type !== declaredType) ||
+        node.engine._getSymbolValue(node.symbol) !== value
+      )
+        throw new Error(
+          'JS scalar fragment invariant: different captured binding or value'
+        );
+    },
+  };
 }
 
 /**
@@ -14333,29 +14547,211 @@ function frameValue(
   return value;
 }
 
-/** Record the read `node` of a captured binding on the structured route.
- *  Returns false when `node` does not read a binding that the fragment
- *  captures (`numericSnapshot()`). */
+/**
+ * Record the read `node` of a captured binding on the structured route.
+ * Returns false when `node` does not read a binding that the fragment
+ * captures (`numericSnapshot()`, `storedSnapshot()`).
+ *
+ * A binding whose value is an expression (`storedSnapshot()`) is captured
+ * only with `checkStored`, where the program computes it in its root
+ * region (the root of an expression, of a root `Block` or of a root
+ * `Function`; not the body of a helper). `checkStored` admits the stored
+ * value, once per binding, where the names of the value are read (the root,
+ * with no index, parameter or local of the read around it), as any
+ * expression of the program: its names, its helpers and its calculus
+ * nodes. A value that reads a name of the host (a `vars` entry, a function
+ * of the host) is refused, and so is a list value in a compilation with a
+ * function of the host: the existing compiler then writes such a value at
+ * each read (`bindsFoldedValue()`).
+ */
 function recordCapture(
   registry: StructuredRegistry,
-  node: Expression & { symbol: string }
+  node: Expression & { symbol: string },
+  checkStored?: (stored: Expression) => void
 ): boolean {
   const snapshot = numericSnapshot(node, true);
-  if (snapshot === undefined) return false;
-  let entry = registry.captures.get(snapshot.binding);
-  if (entry === undefined) {
-    entry = {
-      binding: snapshot.binding,
-      name: node.symbol,
-      symbols: new Set(),
-      stored: snapshot.value,
-      value: snapshot.list ? undefined : snapshot.value.re,
-      assertCurrent: snapshot.assertCurrent,
-    };
-    registry.captures.set(snapshot.binding, entry);
+  const stored =
+    snapshot === undefined ? storedSnapshot(node, registry) : undefined;
+  if (snapshot === undefined && stored === undefined) return false;
+  if (stored?.kind === 'expression' && checkStored === undefined) return false;
+  const binding = (snapshot ?? stored)!.binding;
+  const known = registry.captures.get(binding);
+  if (known !== undefined) {
+    known.symbols.add(node);
+    return true;
   }
-  entry.symbols.add(node);
+  if (stored?.kind === 'expression') {
+    const host = hostNameOf(stored.value, registry);
+    if (host !== undefined)
+      throw new Error(
+        `JS scalar fragment: the value of ${node.symbol} ` +
+          `(${nodeText(stored.value)}) reads ${host}, a name of the host: ` +
+          `the existing compiler computes the value once per call, before ` +
+          `the body`
+      );
+    if (
+      [...(registry.hosts?.bindings.values() ?? [])].some(
+        (binding) => binding.form === 'call'
+      ) &&
+      !isSubtype(stored.value.type.type, 'number')
+    )
+      throw new Error(
+        `JS scalar fragment: the value of ${node.symbol} ` +
+          `(${nodeText(stored.value)}) is not a number, and the options ` +
+          `have a function of the host: the existing compiler writes the ` +
+          `value at each read`
+      );
+  }
+  const entry: CaptureEntry = {
+    binding,
+    name: node.symbol,
+    symbols: new Set([node]),
+    ...(snapshot !== undefined
+      ? {
+          stored: snapshot.value,
+          value: snapshot.list ? undefined : snapshot.value.re,
+        }
+      : stored!.kind === 'complex'
+        ? {
+            stored: stored!.stored,
+            value: undefined,
+            complex: { re: stored!.value.re, im: stored!.value.im },
+          }
+        : {
+            stored: stored!.stored,
+            value: undefined,
+            expression: true as const,
+          }),
+    assertCurrent: (snapshot ?? stored)!.assertCurrent,
+  };
+  registry.captures.set(binding, entry);
+  // The value is admitted after its entry is recorded: a value that reads
+  // its own name, directly or through another value, reaches the entry and
+  // stops; the pass refuses it (`symbolFacts()` in `fragment.ts`).
+  if (entry.expression === true) checkStored!(entry.stored);
   return true;
+}
+
+/**
+ * The cause, for the refusal of an input of the type `type`, when `type` is
+ * a union of shapes (`list<real> | real`, `integer | vector<integer^2>`):
+ * the existing compiler compiles one body per member, with one test of the
+ * shape at the binding (`docs/COMPILATION-MODEL.md`, R4), which the
+ * structured route does not do; `''` for another type.
+ */
+function unionCause(type: Type): string {
+  if (typeof type !== 'object' || type.kind !== 'union') return '';
+  return (
+    `: the input has the union type ${typeToString(type)}, which the ` +
+    `profile does not dispatch on: declare one member, or compile one ` +
+    `function per member`
+  );
+}
+
+/**
+ * The cause, for the refusal of a read of the binding of `node` that holds
+ * a value and that `recordCapture()` does not capture, of the classes that
+ * the structured route could otherwise hold (`storedSnapshot()`); `''` for
+ * another value, whose refusal names the binding only.
+ */
+function heldValueCause(node: Expression & { symbol: string }): string {
+  const value = resolvedValueDefinition(node)?.value;
+  if (value === undefined) return '';
+  const text = nodeText(value);
+  if (isFunction(value, 'Function'))
+    return `: its value ${text} is a function`;
+  if (isNumber(value) && value.im === 0 && Number.isFinite(value.re))
+    return (
+      `: its value ${text} is a real number, and the name is declared ` +
+      `${resolvedValueDefinition(node)!.type.toString()}: the existing ` +
+      `compiler reads it with that type`
+    );
+  if (isNumber(value)) return `: its value ${text} is not finite`;
+  if (liftedByDeclaration(node, value))
+    return (
+      `: its value ${text} is not complex-valued, and the name is ` +
+      `declared ${resolvedValueDefinition(node)!.type.toString()}: the ` +
+      `existing compiler lifts the value to a complex number where it ` +
+      `reads the name`
+    );
+  if ((isFunction(value) || isSymbol(value)) && foldValueImpure(value))
+    return (
+      `: its value ${text} is not pure: the existing compiler computes it ` +
+      `at each read`
+    );
+  return '';
+}
+
+/**
+ * The cause of the refusal of the free name `node` that a scope around it
+ * binds with no value and no type (a bare integrand `k` of
+ * `\int_0^x k\,dt`, which the `Integrate` scope binds), while the engine
+ * holds a value of the name: the existing compiler reads that value
+ * (`_val_k`). `''` for another name.
+ */
+function scopedNameCause(node: Expression & { symbol: string }): string {
+  if (resolvedValueDefinition(node)?.value !== undefined) return '';
+  const value = node.engine._getSymbolValue(node.symbol);
+  if (value === undefined || node.type.type !== 'unknown') return '';
+  return (
+    `: the name is read where a scope around it binds it with no value and ` +
+    `the type unknown, and the existing compiler reads the value ` +
+    `${nodeText(value)} of the engine there`
+  );
+}
+
+/**
+ * Whether the existing compiler lifts the stored value `value` of the name
+ * `node` to the complex lane where it reads the name: its own test
+ * (`compileSymbol()` in `compile-inner.ts`), the name complex-valued
+ * (`isComplexValued()`: declared `complex`) and the value a number that is
+ * not (`z := x + 1`, `z := x / y` with `x`, `y` real). It then reads `Sqrt(z)`
+ * as `2i` at `x = -5`, in the `strict` mode too; the route reads the value
+ * on its own lane, so such a value declines. A name declared `number` is
+ * complex-valued exactly when its value is, so it is never lifted.
+ */
+function liftedByDeclaration(
+  node: Expression & { symbol: string },
+  value: Expression
+): boolean {
+  return (
+    BaseCompiler.isComplexValued(node) &&
+    !BaseCompiler.isComplexValued(value) &&
+    isSubtype(value.type.type, 'number')
+  );
+}
+
+/**
+ * The first name of the host that the stored value `value` reads, directly
+ * or through the stored value of a symbol it reads: a name that a `vars`
+ * entry maps, or the head of a function of the host (`structuredHosts()`).
+ * `undefined` when there is none.
+ */
+function hostNameOf(
+  value: Expression,
+  registry: StructuredRegistry
+): string | undefined {
+  const hosts = registry.hosts;
+  if (hosts === undefined) return undefined;
+  const seen = new Set<Expression>();
+  const visit = (node: Expression): string | undefined => {
+    if (seen.has(node)) return undefined;
+    seen.add(node);
+    if (isSymbol(node)) {
+      if (hosts.vars.has(node.symbol) || hosts.heads.has(node.symbol))
+        return node.symbol;
+      const v = node.engine._getSymbolValue(node.symbol);
+      return v === undefined ? undefined : visit(v);
+    }
+    if (!isFunction(node)) return undefined;
+    if (hosts.heads.has(node.operator)) return node.operator;
+    for (const op of node.ops) {
+      const found = visit(op);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  return visit(value);
 }
 
 /** The snapshot read by the symbol `node`, for the sign of an operand
@@ -14856,7 +15252,6 @@ function annotateStructured(
   collect(annotation.scope);
   for (const fn of annotation.functions.values()) collect(fn.scope);
   refuseNestedListsInMode(scopes, registry.mode);
-  refuseCapturedListsWithRows(scopes, registry);
   refuseAbsentRowUses(
     annotation.root,
     [...registry.helpers.values()].map((helper) => helper.body),
@@ -14905,37 +15300,6 @@ function refuseNestedListsInMode(
             `${fragmentTypeToString(facts.type)}, a list of lists, which is not in ` +
             `the structured route in the \`complex\` mode: the existing compiler ` +
             `reads its cells on the complex lane`
-        );
-        noteRefusedNode(e, { node });
-        throw e;
-      }
-}
-
-/**
- * Refuse a program that reads a captured list (a constant of the program,
- * `IRConstant`, one array that every call shares) and has a node whose fact
- * is a list of lists. A row of a list of lists is placed as it is
- * (`[CL, CL]`, `ReplaceAt(R, 1, CL)`, a comprehension of `CL`), and the copy
- * of a result that is not unique (`rootYieldsUnique()`) is shallow, so a
- * caller that writes a row of the result would write the constant. This is
- * the simple version: it refuses also a program whose rows never hold the
- * constant.
- */
-function refuseCapturedListsWithRows(
-  scopes: readonly FragmentScope<ScalarRepresentation>[],
-  registry: StructuredRegistry
-): void {
-  const list = [...registry.captures.values()].find(
-    (capture) => capture.value === undefined
-  );
-  if (list === undefined) return;
-  for (const scope of scopes)
-    for (const [node, facts] of scope.facts)
-      if ('type' in facts && isNestedListType(facts.type)) {
-        const e = new Error(
-          `JS scalar fragment: the captured list ${list.name} is read by a ` +
-            `program with the list of lists ${nodeText(node)}, which is not in ` +
-            `the structured route: a row would share the array of the capture`
         );
         noteRefusedNode(e, { node });
         throw e;

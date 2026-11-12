@@ -276,14 +276,18 @@ describe('a type written by the host', () => {
 });
 
 describe('ce.assign(): a symbol with a value', () => {
-  test.each<[string, (ce: ComputeEngine) => void, 'capture' | RegExp]>([
+  // A list of lists is a constant of the program in the `strict` mode; the
+  // `complex` mode reads `x` as a complex number, which no element-wise
+  // operation of a list of lists takes.
+  test.each<[string, (ce: ComputeEngine) => void, 'capture' | RegExp, ('capture' | RegExp)?]>([
     ['an integer', (ce) => ce.assign('a', 3), 'capture'],
     ['a real number', (ce) => ce.assign('a', 2.5), 'capture'],
-    ['a complex number', (ce) => ce.assign('a', ce.complex(1, 2)), /unsupported binding a/],
-    ['a list of lists', (ce) => ce.assign('a', ce.box(['List', ['List', 1, 2]])), /unsupported binding a/],
-  ])('%s', (_name, assign, expected) => {
+    ['a complex number', (ce) => ce.assign('a', ce.complex(1, 2)), 'capture'],
+    ['a list of lists', (ce) => ce.assign('a', ce.box(['List', ['List', 1, 2]])), 'capture', /Add of a list of lists and the operand x of the type `complex` is not in the profile/],
+  ])('%s', (_name, assign, strict, complex = strict) => {
     for (const mode of ['strict', 'complex'] as const)
       for (const order of ['after', 'before'] as const) {
+        const expected = mode === 'strict' ? strict : complex;
         const ce = new ComputeEngine();
         const early = order === 'before' ? ce.box(['Add', 'x', 'a']) : undefined;
         assign(ce);

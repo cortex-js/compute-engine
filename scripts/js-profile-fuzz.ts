@@ -393,6 +393,18 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   inferred: 'real, written by ce.infer()',
 };
 
+/** The names whose value is an expression (`makeEngine()`): the profile
+ *  computes each once per call, as the existing compiler computes
+ *  `_val_lv`; the interpreter reads them through `subs()` of their values
+ *  (`interpret()`). */
+const EXPRESSION_VALUES: Readonly<Record<string, Json>> = {
+  lv: ['Add', 'x', 1],
+  ev: ['Multiply', 'y', ['Sin', 'x']],
+  ec: ['Add', ['Multiply', 2, 'ev'], 'k'],
+  cv: ['Add', ['Sqrt', 2], 'cr'],
+  lsv: ['List', 'x', ['Multiply', 2, 'y']],
+};
+
 /** The declarations of the engine, as the report prints them. */
 export const DECLARATIONS =
   'x, y: real; k: integer; p: real<0..>; q: real<-1..1>; z: complex; ' +
@@ -406,8 +418,11 @@ export const DECLARATIONS =
   'm: integer, assigned 3; cn: number, assigned 1.5; w: assigned 3 and ' +
   'g: assigned 0.75, with no declared type; cr: assigned 1/3 and crn: ' +
   'assigned 3333333333333333/10^16, with no declared type; CL: ' +
-  'list<real>, assigned [2, -0.5, 3]; the helpers of `HELPERS`, ' +
-  'assigned in the scope of each program';
+  'list<real>, assigned [2, -0.5, 3]; lv: assigned x + 1, ev: assigned ' +
+  'y·sin(x), ec: assigned 2·ev + k, cv: assigned √2 + cr, lsv: assigned ' +
+  '[x, 2y] (values that are expressions); CM2: assigned [[1, 2.5], [-3, ' +
+  '4]]; z0: assigned -0.5 + 2i; the helpers of `HELPERS`, assigned in the ' +
+  'scope of each program';
 
 /** An engine with the declarations of every program, and the angular unit
  *  `angularUnit` (`--deg`). */
@@ -432,6 +447,12 @@ export function makeEngine(angularUnit: 'rad' | 'deg' = 'rad'): ComputeEngine {
     type: 'list<real>',
     value: ['List', 2, -0.5, 3],
   } as never);
+  // Values that are expressions of the inputs (`EXPRESSION_VALUES`), a
+  // captured list of lists and a captured complex number.
+  for (const [name, value] of Object.entries(EXPRESSION_VALUES))
+    ce.assign(name, ce.expr(value));
+  ce.assign('CM2', ce.expr(['List', ['List', 1, 2.5], ['List', -3, 4]]));
+  ce.assign('z0', ce.expr(['Complex', -0.5, 2]));
   // The names and the functions of the host of `--host` (`HOST_OPTIONS`).
   ce.declare('vr', 'real');
   ce.declare('hp', '(real) -> real');
@@ -2564,6 +2585,10 @@ const EXPRESSION_SYMBOLS: readonly (readonly [Json, number])[] = [
   ['cn', 2],
   ['w', 2],
   ['g', 2],
+  ['lv', 5],
+  ['ec', 3],
+  ['cv', 2],
+  ['z0', 2],
 ];
 
 type ContextBase = Omit<GenContext, 'rng' | 'maxDepth'>;
@@ -2573,10 +2598,10 @@ const EXPRESSION_CONTEXT: ContextBase = {
   integers: ['k'],
   reals: ['x', 'y'],
   booleans: ['B'],
-  lists: ['L', 'I', 'LN', 'VN', 'CL'],
+  lists: ['L', 'I', 'LN', 'VN', 'CL', 'lsv'],
   tuples: ['P'],
   tupleLists: ['LQ'],
-  rowLists: ['R', 'MA', 'M2', 'M3'],
+  rowLists: ['R', 'MA', 'M2', 'M3', 'CM2'],
 };
 
 /**
@@ -3005,6 +3030,8 @@ function genFunction(
     ['cn', 1],
     ['w', 1],
     ['g', 1],
+    ['cv', 1],
+    ['z0', 1],
   ];
   for (const [name, kind] of parameters)
     if (
@@ -3485,14 +3512,23 @@ function interpret(
         ...program.parameters.map((name) => boxValue(ce, point[name], name)),
       ])
       .evaluate();
-  else
-    value = expr
+  else {
+    // The names whose value is an expression of the inputs, replaced by
+    // their values, three times for a chain (`ec` reads `ev`): `subs()`
+    // does not enter a stored value.
+    let inlined = expr;
+    const values = Object.fromEntries(
+      Object.entries(EXPRESSION_VALUES).map(([k, v]) => [k, ce.expr(v)])
+    );
+    for (let i = 0; i < 3; i++) inlined = inlined.subs(values);
+    value = inlined
       .subs(
         Object.fromEntries(
           Object.entries(point).map(([k, v]) => [k, boxValue(ce, v, k)])
         )
       )
       .evaluate();
+  }
   // A comprehension is a lazy view: its elements are read here.
   const n = (
     isFunction(value, 'Comprehension')

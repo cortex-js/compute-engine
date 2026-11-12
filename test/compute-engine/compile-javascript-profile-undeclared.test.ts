@@ -545,12 +545,15 @@ describe('a symbol with a value and no declared type', () => {
     expect((read.run as unknown as (v: object) => number)({ L: [10, 20, 30] })).toBeNaN();
   });
 
-  test('a complex value and a string value decline', () => {
+  // A complex value is a complex capture
+  // (compile-javascript-structured-bindings.test.ts).
+  test('a complex value is captured and a string value declines', () => {
     const ce = engine();
     ce.assign('c', ce.complex(1, 2));
     ce.assign('s', ce.string('hi'));
     for (const mode of ['strict', 'complex'] as const) {
-      expect(profile(ce.expr(['Add', 'x', 'c']), mode)).toEqual({ message: expect.stringMatching(/unsupported binding c/) });
+      expect('result' in profile(ce.expr(['Add', 'x', 'c']), mode)).toBe(true);
+      expectAgreement(ce.expr(['Add', 'x', 'c']), mode);
       expect(profile(ce.expr('s'), mode)).toEqual({ message: expect.stringMatching(/unsupported binding s/) });
     }
   });

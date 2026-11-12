@@ -11,6 +11,39 @@
 
 ### New Features
 
+- **The `numeric-kernel` profile compiles names whose value is an
+  expression, captured lists of lists and captured complex numbers.** These
+  names declined with `unsupported binding` and now compile, with the
+  values of the existing compiler. A name whose value is a pure expression
+  of the inputs (`lv := x + 1`, a list `[x, 2y]`, a chain of such values)
+  is computed once per call, before the body, as the existing compiler
+  computes `_val_lv`; the name and each name whose value it reads are in
+  `symbolDeps`. A value that is not pure, that reads the host, that a user
+  function reads, whose names a parameter or an index binds where it is
+  read, or that is real for a name declared `complex`, still declines. A
+  captured list of lists (`rows := [[1, 2], [3]]`) is one array, made once,
+  which no call writes: a result that can hold it or one of its rows is a
+  copy, so a host that writes into the result does not change the next
+  call; a result of rank 3 or more in such a program (`[rows, rows]`)
+  declines. A captured complex
+  number (`z0 := -0.5 + 2i`) is read as the existing compiler reads it. An
+  input of a union of a number and a list (`u: list<real> | real`) still
+  declines, with the union in the message.
+
+  ```js
+  ce.declare('x', 'real');
+  ce.assign('lv', ce.box(['Add', 'x', 1]));
+  ce.assign('rows', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+  const f = compile(ce.box(['Add', ['Multiply', 2, 'lv'], ['Sin', 'lv']]), {
+    profile: 'numeric-kernel',
+  });
+  f.run({ x: 0 }); // ➔ 2.8414709848078967
+  const g = compile(ce.box(['Multiply', 'x', 'rows']), {
+    profile: 'numeric-kernel',
+  });
+  g.run({ x: 2 }); // ➔ [[2, 4], [6, 8]]
+  ```
+
 - **The `numeric-kernel` profile compiles the functions of flat lists of
   numbers and the index operands that are not one integer.** These forms
   declined with `outside-profile` and now compile, with the values of the

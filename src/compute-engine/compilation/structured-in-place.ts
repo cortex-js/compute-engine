@@ -301,6 +301,41 @@ export function rootYieldsUnique(program: IRProgram): boolean {
   return analyzeInPlace(program).root;
 }
 
+/**
+ * The levels of the copy of the value of the root of `program` that a
+ * target that gives a list value to the host makes, so that a write of the
+ * host into the value at any depth never writes a constant
+ * (`IRConstantRead`), which every call shares: 0 for a program with no
+ * constant, and for a value that is not a list; for a list of lists, 0 when
+ * the value is unique and owns its rows (`inPlaceUpdates()`, rules 1 and 5:
+ * the call made the outer array and every row, and no other value holds
+ * one), else 2; for another list, 0 when the value is unique, else 1.
+ * A row of a list of lists can be a constant, a row of one, or a list that
+ * holds the constant as a row (`[CL, CL]`), so the copy of such a value has
+ * two levels. `'deep'` for a list of rank 3 or more in a program with a
+ * constant: a list of such a value can hold a constant at a depth that a
+ * copy of two levels does not reach (`[[CF]]`, `[CL2, CL2]`), and the
+ * ownership rules prove nothing below the rows; the target declines it.
+ */
+export function rootCopyLevels(program: IRProgram): 0 | 1 | 2 | 'deep' {
+  if ((program.constants ?? []).length === 0) return 0;
+  const last = program.root.operations[program.root.operations.length - 1];
+  const value = last?.kind === 'yield' ? last.operands[0] : undefined;
+  if (value === undefined || !isListType(value.type)) return 0;
+  if (listRank(value.type) > 2) return 'deep';
+  // A function of lists whose result is new at every depth (`new`): no
+  // constant and no row of one; also the absent value of a matrix function
+  // (`IRCollection.absent`), a number, which has no copy.
+  const definition = program.root.operations.find(
+    (op) => op.result?.id === value.id
+  );
+  if (definition?.kind === 'collection' && definition.resultArray === 'new')
+    return 0;
+  const analysis = analyzeInPlace(program);
+  if (isNested(value)) return analysis.root && analysis.rootRows ? 0 : 2;
+  return analysis.root ? 0 : 1;
+}
+
 /** For a `loop`, the levels of the copy that `withOwnedCopies()` would put
  *  before it, by the index of the carried value: the initial value is then
  *  taken as consumable by the loop, and with 2 as owning its rows. */
@@ -314,7 +349,21 @@ type Analysis = {
   inPlace: Set<IROperation>;
   loopInitials: Map<IROperation, boolean[]>;
   root: boolean;
+  /** The value of the root owns its rows (rules 4 to 6). */
+  rootRows: boolean;
 };
+
+/** The number of levels of lists of `type`: 1 for a list of numbers, 2 for
+ *  a list of lists of numbers. */
+function listRank(type: IRValue['type']): number {
+  let rank = 0;
+  let t: IRValue['type'] | undefined = type;
+  while (t !== undefined && isListType(t)) {
+    rank += 1;
+    t = elementOf(t);
+  }
+  return rank;
+}
 
 /** Whether `value` is a list of lists. */
 function isNested(value: IRValue): boolean {
@@ -817,8 +866,8 @@ function analyzeInPlace(
     yieldsUnique[i] = facts.unique;
     yieldsOwnedRows[i] = facts.rows;
   });
-  const root = analyze(program.root, []).unique;
-  return { inPlace, loopInitials, root };
+  const root = analyze(program.root, []);
+  return { inPlace, loopInitials, root: root.unique, rootRows: root.rows };
 }
 
 /** The most loops that `withOwnedCopies()` tries: each try analyzes the

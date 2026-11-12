@@ -593,13 +593,13 @@ describe('refusals', () => {
     );
   });
 
-  // A string, a tuple and a symbol whose value is a list of lists keep their
-  // earlier messages. A list of reals with a value is a captured list
-  // (compile-javascript-structured-captures.test.ts).
+  // A string and a tuple keep their earlier messages. A list of reals and a
+  // list of lists with a value are captured lists
+  // (compile-javascript-structured-captures.test.ts,
+  // compile-javascript-structured-bindings.test.ts).
   test.each([
     ['a string input', 'string', undefined],
     ['a named tuple input', 'tuple<x: real, y: real>', undefined],
-    ['a list of lists with a value', 'list<list<real>>', ['List', ['List', 1, 2]]],
   ] as [string, string, MathJsonExpression | undefined][])('%s', (_name, type, value) => {
     const ce = engine();
     ce.declare('S', type);

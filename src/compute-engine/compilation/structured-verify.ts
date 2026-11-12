@@ -393,30 +393,53 @@ export function verifyProgram(
         `the capture ${capture.name} of the type ${capture.type} has the representation ${capture.representation}`
       );
     // A snapshot is a finite number: a real, or an integer of the type
-    // `integer`. A capture of another type is refused, because an emitter
-    // writes the snapshot as a number literal: a `complex` capture would
-    // give a number where its reads promise a complex value.
-    if (capture.type !== 'real' && capture.type !== 'integer')
+    // `integer`; or, for the type `complex`, the two finite parts of a
+    // complex number. A capture of another type is refused, and so is a
+    // snapshot that is not of the form of its type: an emitter writes a
+    // number snapshot as a number literal and a complex one as the object
+    // of its parts.
+    const { snapshot } = capture;
+    if (
+      capture.type !== 'real' &&
+      capture.type !== 'integer' &&
+      capture.type !== 'complex'
+    )
       fail(`the capture ${capture.name} has the type ${capture.type}`);
-    if (!Number.isFinite(capture.snapshot))
+    if (capture.type === 'complex') {
+      if (
+        typeof snapshot !== 'object' ||
+        !Number.isFinite(snapshot.re) ||
+        !Number.isFinite(snapshot.im)
+      )
+        fail(
+          `the snapshot of the complex capture ${capture.name} is not a complex number of finite parts`
+        );
+    } else if (typeof snapshot !== 'number' || !Number.isFinite(snapshot))
       fail(`the snapshot of the capture ${capture.name} is not finite`);
-    if (capture.type === 'integer' && !Number.isInteger(capture.snapshot))
+    else if (capture.type === 'integer' && !Number.isInteger(snapshot))
       fail(
         `the snapshot of the integer capture ${capture.name} is not an integer`
       );
   }
 
-  // The constants of the program: a list of reals or of integers, each with
-  // its own binding, whose elements are finite numbers of the element type.
+  // The constants of the program: a list of reals or of integers, or a list
+  // of such lists (rank 2, rows of any length), each with its own binding,
+  // whose elements (the cells of each row) are finite numbers of the
+  // element type.
   for (const constant of program.constants ?? []) {
     if (bindings.has(constant.binding))
       fail(
         `the constant ${constant.name} has the binding of another capture or constant`
       );
     bindings.add(constant.binding);
+    const rowType =
+      isListType(constant.type) && isListType(constant.type.element)
+        ? constant.type.element
+        : undefined;
+    const cell = rowType?.element ?? (constant.type as ListType).element;
     if (
       !isListType(constant.type) ||
-      (constant.type.element !== 'real' && constant.type.element !== 'integer')
+      (cell !== 'real' && cell !== 'integer')
     )
       fail(`the constant ${constant.name} has the type ${String(constant.type)}`);
     if (!policy.representations.has(constant.representation))
@@ -429,15 +452,27 @@ export function verifyProgram(
       );
     if (constant.elements.length === 0)
       fail(`the constant ${constant.name} has no element`);
-    for (const element of constant.elements)
+    const checkCell = (element: unknown) => {
       if (
         typeof element !== 'number' ||
         !Number.isFinite(element) ||
-        (constant.type.element === 'integer' && !Number.isInteger(element))
+        (cell === 'integer' && !Number.isInteger(element))
       )
         fail(
-          `the constant ${constant.name} has the element ${String(element)}, which is not a finite number of the type ${String(constant.type.element)}`
+          `the constant ${constant.name} has the element ${String(element)}, which is not a finite number of the type ${String(cell)}`
         );
+    };
+    for (const element of constant.elements as readonly unknown[]) {
+      if (rowType === undefined) {
+        checkCell(element);
+        continue;
+      }
+      if (!Array.isArray(element))
+        fail(
+          `the constant ${constant.name} of the type ${String(constant.type)} has the row ${String(element)}, which is not an array`
+        );
+      for (const e of element as readonly unknown[]) checkCell(e);
+    }
   }
 
   // The bindings of the host: a scalar result, and a read is never pure.

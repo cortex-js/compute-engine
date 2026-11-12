@@ -603,25 +603,10 @@ describe('the declines of slice 1', () => {
     expect(attempt).toThrow(message);
   });
 
-  // A captured list is a constant of the program, one array for every call:
-  // a row of a list of lists is placed as it is, and the copy of a result is
-  // shallow, so a program with a captured list and a list of lists
-  // declines. A captured list of lists is not a constant.
-  test.each([
-    ['a captured list as a row', ['List', 'CL', 'CL'], /the captured list CL is read by a program with the list of lists/],
-    ['a captured list written as a row', ['ReplaceAt', 'M', 1, 'CL'], /the captured list CL is read by a program with the list of lists/],
-    ['a comprehension of a captured list', ['Comprehension', 'CL', ['Element', 'j', ['Range', 1, 2]]], /the captured list CL is read by a program with the list of lists/],
-    ['a captured list of lists', ['At', 'CM', 'i', 1], /unsupported binding CM/],
-  ] as [string, MathJsonExpression, RegExp][])('%s declines', (_name, json, message) => {
-    const engine = new ComputeEngine();
-    engine.declare('M', 'list<list<real>>');
-    engine.declare('i', 'integer');
-    engine.assign('CL', engine.box(['List', 1.5, 2.5]));
-    engine.assign('CM', engine.box(['List', ['List', 1.5, 2.5]]));
-    const attempt = () => compile(engine.box(json), PROFILE as never);
-    expect(declineCode(attempt)).toBe('outside-profile');
-    expect(attempt).toThrow(message);
-  });
+  // A captured list and a captured list of lists are constants of the
+  // program, read with their rows at every depth: a value of the program that
+  // can hold one is copied to that depth
+  // (compile-javascript-structured-bindings.test.ts).
 });
 
 //

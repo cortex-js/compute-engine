@@ -925,3 +925,185 @@ disagreements with the interpreter are the precision caveat of `Mod` and
 interpreter loses the fractional part (`2643000000`; `.N()` gives
 `0.5028841971693994`, the value of both compilers): a defect of the
 interpreter.
+
+## Result of the bindings of the numeric kernel
+
+On `99cee49c8926048d73e590a0274567b9290e8bcc`, the four classes of
+`unsupported binding` that section 9 of
+`docs/plans/2026-11-12-structured-broadcast-over-lists.md` assigns to the
+numeric kernel. Admission in `javascript-fragment-target.ts`
+(`storedSnapshot()`, `recordCapture()` with its `checkStored` callback,
+`hostNameOf()`, `heldValueCause()`, `unionCause()`, the rank 2 of
+`isCapturedList()`, the names of a value in `attachRootBlock()` and
+`admitFunctionBody()`, `refuseCapturedListsWithRows()` removed); the
+lowering `storedRead()` and the rank 2 of `capturedList()` in
+`javascript-structured-lower.ts`; `CaptureSnapshot` and the rows of
+`IRConstant` in `structured-ir.ts`, with their checks in
+`structured-verify.ts`; `rootCopyLevels()` in `structured-in-place.ts`;
+the text of a complex capture and of a constant of rows, and the root copy
+of two levels, in `javascript-structured-emit.ts`. Tests:
+`compile-javascript-structured-bindings.test.ts`. The rows of the existing
+code are in `2026-11-09-js-pilot-emission-rewrites.md`, "Values that are
+expressions, captured lists of lists, complex constants and unions at an
+input".
+
+**A, a value that is an expression.** The existing compiler binds an
+application that is pure through every value it reads once per call, in
+the preamble, before the body (`const _val_lv = _.x + 1;`), rewritten for
+the angular unit (`foldedValueInRadians()`); it writes a symbol value at
+the read, and an impure value at each read. The probes show no other
+order: the preamble runs before the body, a value that reads another is
+written after it, and the code reads the name at each read. The route
+captures such a value (`StructuredCapture.expression`): `recordCapture()`
+admits the stored value once, by the admission of the program, in the
+root, where its names are the inputs (the indexes of the read cleared; in
+a root `Block` the names of the value are free symbols of the block; in a
+root `Function` the parameters are not names of the value). The pass types
+it in the root scope (`storedValue`, `symbolFacts()` of `fragment.ts`,
+which refuses a value whose name a form binds where it is read and a value
+that reads its own name), and the lowering computes it once, when it
+lowers the first read, with its operations at the start of the root
+region, before every operation of the body (`storedRead()`), as the
+existing preamble computes it before the body: a function of the host that
+changes the inputs object (`h(g(x), lv)` with `g` setting `x`) does not
+change it, and the emitter moves no pure value across a call of the host.
+The value is pure and reads no host (the admission), and a value whose
+operations can throw or abort declines (the lowering). A real expression of
+a name declared `complex` (`z := x + 1`) declines: the existing compiler
+lifts it to the complex lane (`Sqrt(z)` is `2i` at `x = -5` in the
+`strict` mode too); a declaration `number` over a real or an integer
+value, and `real` over an integer value, give the same doubles on both
+routes in both modes, and are admitted. The name and each name of a
+chain are captures, so they are in `symbolDeps`; a new compilation reads a
+new value (`assertCurrent()` compares the stored value). Declined, each
+with its cause: an impure value, a value read in a helper or a local
+function, a value that reads a `vars` entry or a function of the host, a
+list value with a function of the host, a value that reads a name that a
+parameter, an index or a local binds where it is read (the existing
+compiler reads the name of the engine there, or refuses a root parameter),
+a cycle, a value whose code can throw (`Mod(k, y)`) or abort. A list value
+(`[x, 2y]`) and the lists that are not constants (a list of tuples, a list
+of lists of lists, a list with an empty row, a list with an element that
+is not finite, `list<number>` with an exact element) are captured
+expressions too: the lowering makes a new array per call, where the
+existing compiler hoists `_val_` once per artifact; the values are the
+same.
+
+**B, a captured list of lists.** A list of rows of finite real number
+literals (ragged admitted, as the existing compiler admits it; a declared
+`matrix<m×n>` too) is a constant of rank 2 (`IRConstant.elements` holds
+the rows; the verifier checks each cell). A read is never unique and never
+owns its rows (`inPlaceUpdates()` reads no `constant` as either), so no
+update writes the constant or a row of it. The value of the program is
+copied to the depth that can hold the constant (`rootCopyLevels()`): a list
+of lists that is not unique or does not own its rows is copied with two
+levels (`?.map((_r) => _r?.slice())`), another list that is not unique
+with one (`?.slice()`, also an absent row), and a function of lists whose
+result is new at every depth (`matmul`, `inv`, also its absent value
+`NaN`) is not copied. This replaces the refusal of a captured list in a
+program with a list of lists (`refuseCapturedListsWithRows()`): `[CL, CL]`,
+`ReplaceAt(M, 1, CL)` and a comprehension of `CL` are admitted. A value of
+rank 3 or more in a program with a constant declines (`rootCopyLevels()`
+gives `'deep'`, `lowerStructuredProgram()`): such a value can hold the
+constant or a row of it below the two levels of the copy (`[rows, rows]`,
+`[[CL]]`, `List(rows)`, a helper that returns `rows`), and the ownership
+rules say nothing below the rows. A loop that
+updates a cell of a row of a local made from the constant gets one copy of
+two levels before the loop (`withOwnedCopies()`). In the `complex` mode a
+list of lists declines, as any.
+
+**C, a complex constant.** A complex number with finite parts and an
+imaginary part that is not 0, of a name with no declared type or declared
+`complex` or `number`, is a capture of the type `complex` whose snapshot is
+its parts (`CaptureSnapshot`); the emitter writes the object at each read
+(`({ re: -0.524, im: -0.566 })`), which a complex operation reads as any
+complex value, as the existing compiler does, in both modes (not as a
+complex literal, whose `0` parts the route drops). A real value of a name
+declared `complex` declines: the existing compiler reads `_SYS.cplx(5)`;
+so does a real expression of such a name (A).
+`analyzeExecution()` counts a complex snapshot as portable.
+
+**D, a union of a number and a list at an input: not done.** The decline
+names the union (`unsupported binding u: the input has the union type
+list<real> | real, which the profile does not dispatch on`). The existing
+compiler puts one dispatch around the whole program and one body per
+member (`(Array.isArray(_.u) ? _SYS.bcast(…) : _.u + 1)`). On the route it
+needs: an admission, a typing pass and a lowering of the program once per
+member of each union input (a product over several such inputs), where the
+preparation holds one annotation per program (`recordStructured()`); an
+operation of the core that tests the shape of one input once, with one
+region per member, which the verifier admits only at a binding of a
+declared union (the R4/R5 rule); a result whose type is the union; and,
+for the list member of the witnesses (`u + 1`, `2v`, `sin(u) + u·x`),
+element-wise arithmetic of a list with scalars on the route, which the
+broadcast slice of the same note adds. It is not contained in this change.
+
+**Measures.** The witness set (128 test files of the census, minus
+`compile-call-broadcast-result-operand.test.ts`, whose run on the base
+spins in a union-input test), replayed with a Jest setup logger on the base
+and on the change: 520 distinct compilations declined with `unsupported
+binding` or `unsupported helper capture` before; after, A 25 of 58
+admitted, B 0 of 24 (each now declines at a later head: `Power` of a
+matrix, `Reduce` and `Map` of a list of lists, a list of lists of different
+element types, a tensor of rank 3), C 2 of 11 (`Abs` and `Max` of a complex
+operand that is not a name, a real value of a name declared `complex`), D 0
+of 70 (the union message); 13 of 357 others. All compilations of the set:
+1,509 admitted before, 1,548 after, 0 failures. The shadow measure on the
+same files (`CE_JS_PROFILE_SHADOW=1`): the profile admits 2,064 of 5,550
+compilations that the existing compiler compiles before, 2,103 after;
+`unsupported binding` 537 before, 312 after. The consumer switch (45 files,
+switch on and off): 1,956 tests pass on both. The fuzz tester
+(`--seed 271 --count 10000`, `--seed 272 --count 10000`,
+`--seed 273 --count 5000 --random`, `--seed 274 --count 5000 --host`): 0
+failures of the profile; 3 differences between the profile and the
+existing compiler, all at the base too and of no class of this change (a
+local function `Sqrt(k)` read on the complex lane, `EllipticK(10)` in a
+matrix product, the last bit of a complex division in a broadcast): defects
+of the existing compiler, filed. These measures are of the change before
+the review fixes (the decline at rank 3, the values computed at the start
+of the root region, the decline of a real expression of a name declared
+`complex`); after them, the fuzz runs of seeds 271 and 274 were run again
+(below the report of the review fixes).
+
+**The review fixes.** A value of rank 3 or more in a program with a
+constant declines (`rootCopyLevels()` gives `'deep'`); a captured
+expression is computed at the start of the root region, so a function of
+the host that changes the inputs object before the read (`h(g(x), lv)`)
+gives the value of the existing compiler (505); a real expression of a name
+declared `complex` declines; a bare integrand that the scope of the
+integral binds with no value (`\int_0^x k\,dt` with `k := sin(30)` in
+degrees) declines with that cause. The fuzz tester after these fixes:
+`--seed 271 --count 10000` and `--seed 274 --count 5000 --host`, 0
+failures; the same two differences between the profile and the existing
+compiler as before (seed 271), none for seed 274.
+
+**The second review.** A value that is a name (`sv := y`) is a read of
+that name where the alias is read: the existing compiler binds only an
+application before the body (`bindsFoldedValue()`: `isFunction(value)`),
+and writes a symbol value at each read, so a function of the host that
+changes `y` before the read changes the value (`h(g(x), sv)` is 509 on
+both routes). A value of a name is lifted to the complex lane by the
+existing compiler's own test (`compileSymbol()` in `compile-inner.ts`:
+the name complex-valued, the value a number that is not,
+`isComplexValued()`), and the route declines exactly those values
+(`liftedByDeclaration()`), not by the engine type of the value: `x / y`
+(`real | infinity | nan`), `Sqrt(x)`, `Ln(x)`, `x^y` and
+`If(y > 0, x, 1/x)` of a name declared `complex` decline.
+
+The choices of the route for a stored value, each against the test that
+the existing compiler makes for the same choice:
+
+| Choice | The existing compiler | The route | Result |
+| --- | --- | --- | --- |
+| Before the body or at each read | `bindsFoldedValue()`: an application that is not `foldValueImpure()`, outside the lowering of a user function, and not a collection when the options have functions of the host (`foldExcludedOps`) | an application: once, at the start of the root region (`storedRead()`); a name: at each read; a read in a helper: declines; a value that is not a number with a function of the host: declines | the same where admitted; the route declines more (a boolean value with a function of the host) |
+| Not bound at all | `foldValueImpure()` | the same function: declines | declines |
+| Lift to the complex lane | `isComplexValued(name) && !isComplexValued(value) && value is a number` | the same test (`liftedByDeclaration()`): declines | declines |
+| A real literal of a name declared `complex` | the same lift (`_SYS.cplx(5)`) | `numericSnapshot()` admits a literal only for a declared real or `number`: declines | declines; `number` is not lifted on either route |
+| A complex literal | folded as the object of its parts (complex-valued: no lift) | a complex capture, the object at each read | the same |
+| A name that a `vars` entry maps | not folded (`varsKeys`) | not captured (`varsEntryOf()` first) | the same |
+| The angular unit | `foldedValueInRadians()` | the same function | the same |
+| Once per artifact (`hoistable`) or once per call | once per artifact when the value reads no per-call binding | once per call | the same doubles: the value is pure |
+
+Not compared: a definition that a checkpoint restore marked `_rewound`
+(the existing compiler does not fold it; the route reads the ambient
+binding and its value, `storedSnapshot()`).

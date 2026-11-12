@@ -316,25 +316,33 @@ describe('a captured list', () => {
     ce.assign('huge', ce.box({ num: '1e400' }));
     ce.assign('LC', ce.box(['List', ['Complex', 1, 2], 3]));
     ce.assign('ev', ce.box(['Add', ['Power', 'x', 2], 1]));
-    declines(['Add', ['Length', 'LL'], 'x'], /unsupported binding LL/, ce);
-    declines(['Add', ['Length', 'LT'], 'x'], /unsupported binding LT/, ce);
-    declines(['Add', ['Length', 'LS'], 'x'], /unsupported binding LS/, ce);
-    declines(['Add', ['At', 'LI', 1], 'x'], /unsupported binding LI/, ce);
-    declines(['Add', 'huge', 'x'], /unsupported binding huge/, ce);
-    // A list declared with elements of the type `number` (`list<number>`,
-    // `vector<n>`): the profile reads an input or a parameter of these types
-    // as reals in the `strict` mode, and a captured list of them declines in
-    // both modes (the existing compiler reads `_val_LN`).
+    // A list of lists is a constant of rank 2
+    // (compile-javascript-structured-bindings.test.ts).
+    check(['Add', ['Length', 'LL'], 'x'], { ce, modes: ['strict'] });
+    // A list that is not a constant of the program (a list of tuples, of
+    // strings, of a value that is not finite, a list declared with elements
+    // of the type `number`) is a captured expression, which the program
+    // computes once per call, as the existing compiler computes `_val_LT`
+    // (compile-javascript-structured-bindings.test.ts): its elements are
+    // admitted as any list literal.
+    check(['Add', ['Length', 'LT'], 'x'], { ce, modes: ['strict'] });
+    declines(['Add', ['Length', 'LS'], 'x'], /unsupported head String/, ce);
+    check(['Add', ['At', 'LI', 1], 'x'], { ce });
+    declines(['Add', 'huge', 'x'], /unsupported binding huge: its value .* is not finite/, ce);
     ce.declare('LN', { type: 'list<number>', value: ['List', 0.5, ['Rational', 1, 3], 3] } as never);
     ce.declare('VN', { type: 'vector<3>', value: ['List', 0.5, ['Rational', 1, 3], 3] } as never);
     for (const name of ['LN', 'VN']) {
-      declines(['Add', ['At', name, 'k'], 'x'], new RegExp(`unsupported binding ${name}|At\\("${name}", k\\) has the type number`), ce);
-      declines(['Multiply', 'x', name], new RegExp(`unsupported binding ${name}`), ce);
+      check(['Add', ['At', name, 'k'], 'x'], { ce, modes: ['strict'] });
+      declines(['Add', ['At', name, 'k'], 'x'], new RegExp(`At\\("${name}", k\\) has the type number`), ce, ['complex']);
+      check(['Multiply', 'x', name], { ce });
     }
-    declines(['Add', ['At', 'LC', 2], 'x'], /unsupported binding LC|At\("LC", 2\) has the type complex/, ce);
+    declines(['Add', ['At', 'LC', 2], 'x'], /a list literal with an element of the type `complex`|At\("LC", 2\) has the type complex/, ce);
     // A value that is an expression of the inputs: the existing compiler
-    // writes its code once per call (`_val_ev`); the route does not.
-    declines(['Add', 'ev', 'y'], /unsupported binding ev/, ce);
+    // writes its code once per call (`_val_ev`), and the route computes it
+    // once (compile-javascript-structured-bindings.test.ts, which compares
+    // it with the interpreter: the interpreter reads the `x` of `ev` in the
+    // engine, not as a parameter of the function of `interpret()`).
+    check(['Add', 'ev', 'y'], { ce, interpreter: false });
   });
 });
 

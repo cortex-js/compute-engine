@@ -773,14 +773,38 @@ describe('the verifier', () => {
     [
       // The reads are changed too, so that only the check of the capture
       // itself can refuse the program.
-      'a complex capture with matching complex reads',
+      // A complex capture holds the two parts of a complex number.
+      'a complex capture with matching complex reads and a number snapshot',
       (reads: Record<string, unknown>[], captures: Record<string, unknown>[]) => {
         captures[0].type = 'complex';
         captures[0].representation = 'complex';
         for (const read of reads)
           read.result = { ...(read.result as object), type: 'complex', representation: 'complex' };
       },
-      /the capture offset has the type complex/,
+      /the snapshot of the complex capture offset is not a complex number of finite parts/,
+    ],
+    [
+      'a complex capture with a part that is not finite',
+      (reads: Record<string, unknown>[], captures: Record<string, unknown>[]) => {
+        const snapshot = { re: 1, im: Infinity };
+        captures[0].type = 'complex';
+        captures[0].representation = 'complex';
+        captures[0].snapshot = snapshot;
+        for (const read of reads) {
+          read.snapshot = snapshot;
+          read.result = { ...(read.result as object), type: 'complex', representation: 'complex' };
+        }
+      },
+      /the snapshot of the complex capture offset is not a complex number of finite parts/,
+    ],
+    [
+      'a real capture with a complex snapshot',
+      (reads: Record<string, unknown>[], captures: Record<string, unknown>[]) => {
+        const snapshot = { re: 1, im: 2 };
+        captures[0].snapshot = snapshot;
+        for (const read of reads) read.snapshot = snapshot;
+      },
+      /the snapshot of the capture offset is not finite/,
     ],
     [
       'a snapshot that is not finite',
