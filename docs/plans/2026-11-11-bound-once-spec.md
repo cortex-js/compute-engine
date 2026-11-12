@@ -594,3 +594,42 @@ step 1. Its design is
   mechanism that the removal of the flag left). It goes when those writes
   go; the list of those parts, with an example of each, is owed to the
   user.
+
+### D8. A local of a block is declared (user decisions, 2026-11-11)
+
+The second step of the activations stopped on `Block(c := 5, 2c)`: a run of
+a block removed the definitions that the boxing made and made new ones, and
+the assignment wrote the new one. With D6 a run makes no definition. The
+user then chose to remove the guess that made it necessary:
+
+- **A local of a block is made only by a `Declare`, and a `Declare` is
+  allowed only at the top level of a block.** A `Declare` in a branch of an
+  `If`, or anywhere else below a statement, is an error.
+- **`Assign(c, v)` writes the `c` that is in scope and never makes one.** In
+  a block, with no `c` in scope, it is an error.
+- **The type of a local** is the type that its `Declare` gives, or the type
+  of the initial value of the `Declare` as known at boxing; `unknown` when
+  nothing is known.
+- **A run of a block writes the values of its locals in its activation and
+  makes no definition.** The removal of the definitions of the boxing at
+  each run, the definitions of a run, and the evidence that an assignment
+  makes a local (`sweepCanonicalizationBindings()`,
+  `declareAssignmentLocals()`, `createBlockLocals()`, the
+  `first-assignment-in-branch` check) are removed.
+- **Epsil**: a local of a block is written `let c := 5` (user: "that would
+  be OK"). An assignment without `let` writes an existing variable.
+
+| Program | 0.187.1 | With D8 |
+|---|---|---|
+| `Block(Declare(c, 5), 2c)` | 10 | 10 |
+| `Block(c := 5, 2c)`, no `c` in scope | 10, a new local | error: `c` is not declared |
+| `Block(c := 5, 2c)`, a global `c` | 10, a new local hides the global | 10, and the global `c` is 5 |
+| `Block(If(True, Declare(t, 3)), t)` | 3 | error: a declaration in a branch |
+| `Block(If(False, Declare(t, 3)), t)`, a global `t = 9` | 9 | the same error |
+
+Open, to check before the code: what the LaTeX parser gives for `:=` in a
+block (the decision of record is that it is local: it then parses to a
+`Declare` with a value, or the decision is revisited); how many of the
+test files with a block whose first statement is an `Assign` (about 140)
+change mechanically; the Epsil programs of the corpus, of the
+documentation and of Tycho's preludes that assign without `let`.
