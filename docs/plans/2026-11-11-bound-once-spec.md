@@ -738,3 +738,42 @@ that a global assignment gives too
 (`lambda-param-collection-inference`), and a lazy comprehension passed to
 another function, which waits for the step of the activations where a
 lazy view holds its activation.
+
+### D10. A function local: its definition at boxing, its value in the run (2026-11-12)
+
+Two decisions met in `Block(Declare(q, unknown, a ↦ h(a)), Declare(h,
+unknown, t ↦ Count(t)), q([1, 2]))`: a local declared with a function
+literal is typed and behaves as a global assigned the same literal (which
+makes a function definition with a derived signature), and a run of a
+block makes no definition (D6). The author's choice, for the user to
+confirm or reverse:
+
+- **At boxing**, a `Declare` at the top level of a block whose initial
+  value is a function literal makes the local a function definition, with
+  what an assignment of that literal to a global derives (the signature,
+  the parameter that takes a list whole, the signatures of its callers in
+  the block), from the literal alone. This is "the type of its initial
+  value as the boxing types it" of D8, for a function.
+- **In a run**, the `Declare` writes the function value, with the
+  activation that made it, as the value of that definition in the
+  activation. A call reads the value there. The run changes nothing on the
+  definition.
+- A local that gets a function only by an `Assign`, or whose initial value
+  is not a literal, has the type of its `Declare`; a call of it is typed
+  from the value at the call (`unknown` when the type is `unknown`).
+
+Alternatives: the definition is made again at each run (against D6); or
+every function local is `unknown` (against the decision on function
+locals; it costs the derived signature and the parameter that takes a list
+whole).
+
+**State of the code (2026-11-12).** The worktree is at
+`52a0185e6` (step A of the activations: a run of a block writes the values
+of the static definitions; unfinished: 22 tests fail that passed before
+it, 14 of them for the case above). The change was applied on the current
+main (`dc51affd4`, with the removal of the checkpoints) in a new worktree,
+`/tmp/wt-compute-engine-06-main`: six files have conflicts to resolve
+(`boxed-operator-definition.ts`, `boxed-value-definition.ts`,
+`engine-scope.ts`, `function-utils.ts`, `control-structures.ts`,
+`core.ts`). The patch is kept outside `/tmp`
+(`~/dev/compute-engine-recovery/step1-all.patch`).

@@ -161,3 +161,96 @@ session scratchpad.
    section 3 (187 tests, not restated). Almost every failure is a program
    that assigns a name it does not declare
    (`assignment-to-undeclared-variable`). Files: see the report of this step.
+
+## Step A of the activations (the runs of a block): built in part (2026-11-12)
+
+Commits `36cc38fc8` to `fca33f891` (detached). Not finished: 22 tests fail
+that pass at `9bfb8e337` (list below). Source +323/-719 lines against
+`9bfb8e337` at `bb5d2264e`.
+
+### Built
+
+- Deleted (`library/control-structures.ts`): `sweepCanonicalizationBindings`,
+  `recordedBlockScopes`, `BlockRunState`/`blockRunStates`, `TOP_LEVEL_RUN`,
+  `callActivationKey`, `asyncRunLocals`, `AsyncRun`, `isImplicitRunLocal`,
+  `beginAsyncRun`, `endAsyncRun`. `function-utils.ts`: `createBlockLocals`
+  (`STATEMENT_LIST_SCOPES` is kept, filled by `noteStatementListScope()`).
+  `library/core.ts`: `initializeBlockLocal`, `BLOCK_REINSTALLS`,
+  `reinstallScopeKey`, the `_uninitialized` paths of `declareOne`.
+- `Declare` (`declareOne`, `core.ts`): when the current scope holds the
+  static local (`_blockLocal`) and an activation holds its value, the run
+  writes the value there (type check of a declared type; a declared type
+  that is not `unknown` makes the local declared; a function value under a
+  declared type goes through `assignFn()`), and declares nothing.
+- The initial value of a `Declare` is boxed with the outer binding of the
+  declared name (`withOuterNames()`, `core.ts`: a lending scope and a
+  shadow frame); a function literal value is not (its body reads the local).
+- `assignFn()` (`engine-declarations.ts`): a function value assigned to a
+  value definition that an activation holds is written as its value; the
+  binding is not turned into an operator definition.
+- Call frames (`function-utils.ts`): `holdBodyLocals()` makes the frame hold
+  the static definition of each parameter (`declareParameterActivation()`
+  now puts the static binding in the frame, value in the record; the
+  per-call definition remains only for a literal with no static binding)
+  and of each local of the body. `hideBodyScopeParams()` no longer hides a
+  block local. The frame is registered with no template.
+- `scopeActivation()` (`ambient-chain.ts`) holds only the locals of the
+  node: block locals (no value at the start) and binder variables
+  (`_isBinderVariable` or `binderNames`). A parameter or a boxing
+  placeholder that a nested block scope holds is not in its record.
+- `isActivation()` (`binders.ts`) also answers for a static parameter
+  definition (`isFunctionLiteralParameter`); `bindEscapingLocals` and
+  `runValue` treat it as a parameter.
+- Copies of captured scopes hold the record of the scope they copy
+  (`snapshotNestedScope` for a block run shares it; `holdValuesOf()` in
+  `copyChainToLeaving` and `rerootCapturedLocals`).
+- The pop of a frame (`engine-scope.ts`) skips every binding whose
+  definition the record holds.
+- Exact argument sources (`exact-argument-source.ts`) are keyed by frame and
+  static definition.
+- Memo dependencies (`collection-element-memo.ts`, `snapshotDeps`) record
+  the activation record of an activated definition and compare it.
+
+### Tests changed (class b)
+
+- `derivative-literal-parameter-shadow`: "a body node evaluated outside a
+  call" (renamed "...: the parameter has no value") and "a body node
+  evaluated after the type of the literal": `n + 1`, was `3` (a parameter
+  read outside any activation has no value).
+- `scratch-scope-chained-parent`: two tests, a run of a block makes no
+  `declare` event (was 1).
+
+### Open failures (pass at `9bfb8e337`)
+
+- (c) A local declared or assigned with an untyped function literal is a
+  value in the activation, not an operator definition with a derived
+  signature, so the derivations of a global do not apply:
+  `whole-collection-parameter` "Limitations of the rule" (4). Probably the
+  same cause, not checked one by one: `block-local-function-numeric` "Map
+  with the name of the local" (2), `ce-445` (2), `ce-689` "a literal that
+  calls a block local function", `annotated-parameter-undecided` "a local
+  annotated function resolves after the call returns",
+  `missing-result-only` "a local declared with a signature",
+  `function-values-rules` #490 defaults, `lazy-argument-capture` "mutual
+  recursion".
+- (a, not fixed) `block-declared-signature-clause` (3): a second run of a
+  block with `let g: sig` before `function g`: the first run retires the
+  static record (`retireBindingRecord`) that holds the clause installed
+  ahead, and nothing installs it again (`BLOCK_REINSTALLS` deleted). Needs
+  the signature and the clauses on the static definition.
+- Not classified: `compile-admission` "a Comprehension whose a guard/body
+  assigns a parameter of the function" (2); `ce-689` "a type handler that
+  reads a parameter by name" and "the static view diverges while an
+  awaited application is suspended"; `lazy-view-scope` "a call that reads
+  its view at once does not retain its frame"; `documentation` types.md:683
+  (`type(t.value)` gives `unknown`).
+- Known before: `ce-586` (D9), `assignment-stores-lazy-collection` (CE-1245),
+  `closure-frame-retained` "dependent limit" (both debug), `comprehension-
+  index-function` "Epsil" (step D).
+
+### Left of the design
+
+Step B (no `bindingInContext` corrections; delete `markActivation`,
+`_activationOf`, `staticBindingOf`, `callerBinding`, swept homes), step C
+(function values hold their activation; delete the re-parenting and
+`hideBodyScopeParams`), step D (lazy views), steps 4 and 6.
