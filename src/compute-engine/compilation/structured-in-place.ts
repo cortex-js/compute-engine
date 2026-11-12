@@ -178,8 +178,9 @@ function order(
  *    the definition of X no other value of the program holds it. These
  *    values are unique: the result of a `build`, of a `list`, of a `tuple`,
  *    of a `replace-at`, of an `append`, of a `copy` and of a function of
- *    lists with a list result (`collection`, which copies or joins its
- *    operands); the
+ *    lists whose list result is a new array by the fact of the target
+ *    (`IRCollection.resultArray` `new` or `copy`; not `transpose`, whose
+ *    result for the empty list is the operand); the
  *    result of a call of a function whose body yields a unique value; the
  *    result `i` of an `if` when the value `i` that each open branch yields
  *    is consumable by the yield of that branch (a closed branch yields
@@ -332,6 +333,20 @@ const READS: ReadonlySet<IROperation['kind']> = new Set<IROperation['kind']>([
   'copy',
 ]);
 
+/** Whether the use `op` of a list is one of `READS` whose result is not
+ *  the array of the list: a function of lists whose list result can be the
+ *  array of its operand (`IRCollection.resultArray` `operand` or none:
+ *  `_SYS.transpose([])` is `[]` itself) is not. */
+function readsOnly(op: IROperation): boolean {
+  if (!READS.has(op.kind)) return false;
+  return (
+    op.kind !== 'collection' ||
+    !isListType(op.result.type) ||
+    op.resultArray === 'new' ||
+    op.resultArray === 'copy'
+  );
+}
+
 function analyzeInPlace(
   program: IRProgram,
   owned: OwnedInitials = new Map()
@@ -409,11 +424,17 @@ function analyzeInPlace(
         case 'append':
         case 'copy':
           return true;
-        // Each function of lists with a list result makes a new array: a
-        // copy (`take`, `drop`, `reverse`, `sort`) or the elements of its
-        // operands (`join`); none gives the array of an operand.
+        // A function of lists whose result is a new array, by the fact of
+        // the target (`IRCollection.resultArray`): a copy (`take`, `drop`,
+        // `reverse`, `sort`), the elements of its operands (`join`), or new
+        // at every depth (`matrix-multiply`). A result that can be the
+        // array of an operand (`transpose`) or that states no fact is not
+        // unique.
         case 'collection':
-          return isListType(op.result.type);
+          return (
+            isListType(op.result.type) &&
+            (op.resultArray === 'new' || op.resultArray === 'copy')
+          );
         case 'call':
           return yieldsUnique[op.function] === true;
         // A conversion of a list that keeps its representation (a list of
@@ -555,7 +576,9 @@ function analyzeInPlace(
       return (facts.uses.get(value.id) ?? []).every((use) => {
         if (use.op === consumer) return true;
         const when = relation(use, at, consumer);
-        return when === 'apart' || (when === 'before' && READS.has(use.op.kind));
+        return (
+          when === 'apart' || (when === 'before' && readsOnly(use.op))
+        );
       });
     };
 
@@ -716,7 +739,7 @@ function analyzeInPlace(
               const rowWhen = relation(rowUse, barrier, consumer);
               return (
                 rowWhen === 'apart' ||
-                (rowWhen === 'before' && READS.has(update.kind))
+                (rowWhen === 'before' && readsOnly(update))
               );
             });
           }

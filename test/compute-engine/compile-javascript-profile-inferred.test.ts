@@ -187,11 +187,14 @@ const ROWS: Row[] = [
     complex: /x/,
   },
   {
+    // A matrix of `number` cells: real in the `strict` mode (slice 3 of the
+    // nested lists, `_SYS.det(x)`); the `complex` mode declines a list of
+    // lists.
     name: 'ce.infer(): matrix',
     write: inferFrom(['Determinant', 'x']),
     type: 'matrix',
     body: ['Determinant', 'x'],
-    strict: /Determinant|x/,
+    strict: true,
     complex: /Determinant|x/,
   },
   {

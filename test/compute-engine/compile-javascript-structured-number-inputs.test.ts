@@ -502,10 +502,13 @@ describe('declines that stay', () => {
       /the parameter L has the type vector<3>/,
     ],
     [
-      'a matrix',
-      fn(['Add', 'M', 1], ['M', 'matrix']),
+      // A matrix plus a number is in the profile since slice 2 of the nested
+      // lists (compile-javascript-structured-nested2.test.ts); two matrices
+      // of no stated dimensions are not.
+      'two matrices',
+      fn(['Add', 'M', 'N'], ['M', 'matrix'], ['N', 'matrix']),
       {},
-      /Add with the list operand M of the type `list<list<real>>` is not in the profile/,
+      /Add of the lists M and N, whose lengths are not equal by construction at every depth, is not in the profile/,
     ],
     [
       'a list of complex numbers',

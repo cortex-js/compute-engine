@@ -550,7 +550,9 @@ describe('refusals', () => {
     // `First`, `Last`, `Rest` and the other functions of lists are in the
     // route since slice 2 (compile-javascript-structured-collections2.test.ts).
     ['Take with a real count', body([L, typed('x', 'real')], ['At', ['Take', 'L', 'x'], 1]), /Take with x of the type `real` is not in the structured route, which reads an integer there/],
-    ['Norm with an order', body([L], ['Norm', 'L', 1]), /Norm with 2 operands is not in the structured route/],
+    // A numeric order is in the route since slice 3 of the nested lists
+    // (compile-javascript-structured-nested2.test.ts); a named one is not.
+    ['Norm with a named order', body([L], ['Norm', 'L', "'Frobenius'"]), /unsupported (bound )?head String/],
     ['Range with a literal step 0', body([L, I], ['At', ['Range', 1, 'i', 0], 1]), /Range with the literal step 0 is not in the structured route/],
     // The structured route admits `Comprehension` over one range and
     // `ReplaceAt` (compile-javascript-structured-heat.test.ts; design:

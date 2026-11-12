@@ -501,7 +501,9 @@ describe('the declines of slices 2 and 3', () => {
   ce.declare('Q6', 'tuple<real, real, real, real, real, real>');
   ce.assign('w', 0.75);
   const declines: [string, MathJsonExpression, RegExp, Mode?][] = [
-    ['Norm with an order', ['Norm', 'L', 1], /Norm with 2 operands is not in the profile/],
+    // A numeric order is in the profile since slice 3 of the nested lists
+    // (compile-javascript-structured-nested2.test.ts); a named one is not.
+    ['Norm with a named order', ['Norm', 'L', "'Frobenius'"], /unsupported head String/],
     ['Take with a real count', ['Take', 'L', 'x'], /Take with x of the type `real` is not in the profile, which reads an integer there/],
     ['Take of a tuple', ['Take', 'P', 1], /Take of P of the type `point<2>` is not in the profile, which reads a list of reals/],
     ['Range with a literal step 0', ['Range', 1, 'n', 0], /Range with the literal step 0 is not in the profile/],

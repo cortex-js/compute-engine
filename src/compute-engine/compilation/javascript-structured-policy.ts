@@ -21,6 +21,8 @@ import {
   isTupleType,
   listType,
   type AbortKind,
+  type CollectionFunctionName,
+  type CollectionResultArray,
   type IROperation,
   type IRProgram,
   type ValueType,
@@ -188,20 +190,53 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   // `_SYS.range(a, b, step)`, `_SYS.rotl(L, k)` and `_SYS.rotr(L, k)`. Each
   // list result is a new array.
   collections: {
-    'norm': { results: ['number'], operands: ['array'] },
+    // `_SYS.norm(L)`, and `_SYS.norm(L, p)` with an order.
+    'norm': { results: ['number'], operands: ['array', 'number'] },
     'mean': { results: ['number'], operands: ['array'] },
     'median': { results: ['number'], operands: ['array'] },
     'variance': { results: ['number'], operands: ['array'] },
     'dot': { results: ['number'], operands: ['array'] },
-    'take': { results: ['array'], operands: ['array', 'number'] },
-    'drop': { results: ['array'], operands: ['array', 'number'] },
-    'reverse': { results: ['array'], operands: ['array'] },
-    'sort': { results: ['array'], operands: ['array'] },
-    'join': { results: ['array'], operands: ['array'] },
-    'range': { results: ['array'], operands: ['number'] },
-    // `_SYS.rotl(L, k)` and `_SYS.rotr(L, k)`, a new array.
-    'rotate-left': { results: ['array'], operands: ['array', 'number'] },
-    'rotate-right': { results: ['array'], operands: ['array', 'number'] },
+    // `.slice(…)`, `.slice().reverse()`, `.slice().sort(…)`, `[...a, ...b]`
+    // and `_SYS.rotl`, `_SYS.rotr`: a new outer array that holds the
+    // elements (the rows) of the operands (`resultArray`, `copy`).
+    'take': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
+    'drop': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
+    'reverse': { results: ['array'], operands: ['array'], resultArray: 'copy' },
+    'sort': { results: ['array'], operands: ['array'], resultArray: 'copy' },
+    'join': { results: ['array'], operands: ['array'], resultArray: 'copy' },
+    'range': { results: ['array'], operands: ['number'], resultArray: 'new' },
+    'rotate-left': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
+    'rotate-right': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
+    // The matrix functions: `_SYS.det(M)`, `_SYS.trace(M)`,
+    // `_SYS.transpose(M)`, `_SYS.rref(M)`, `_SYS.inv(M)`,
+    // `_SYS.matpow(M, p)`, `_SYS.matmul(A, B)`, `_SYS.diagonal(M)` and
+    // `M.flat(Infinity)` (and `_SYS.mul(A, B)` for `matrix-product`), as the
+    // existing emitter writes their heads on the
+    // real lane. A list result that has no value is a number in place of the
+    // array (`NaN`, or `0` for `_SYS.matmul` of two empty lists).
+    //
+    // The array of each list result (`resultArray`, `javascript-runtime.ts`):
+    // `_SYS.transpose` gives its operand itself for a value that is not a
+    // matrix (`[]`, a list, `NaN`): `operand`. Each other helper makes a new
+    // array at every depth or gives a number: `_SYS.rref` and `_SYS.matpow`
+    // copy each row (`M^1` too), `_SYS.inv` slices the rows of its working
+    // copy, `_SYS.matmul` builds new rows (a list of `NaN` for an absent
+    // second operand), `_SYS.diagonal` builds new rows or a list of
+    // numbers, `.flat(Infinity)` a new list of numbers, and `_SYS.mul` of
+    // two lists takes a product (an absent factor is never an operand of
+    // `matrix-product`: `refuseAbsentMatrixUses()`).
+    'determinant': { results: ['number'], operands: ['array'] },
+    'trace': { results: ['number'], operands: ['array'] },
+    'transpose': { results: ['array'], operands: ['array'], resultArray: 'operand' },
+    'row-reduce': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'inverse': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'matrix-power': { results: ['array'], operands: ['array', 'number'], resultArray: 'new' },
+    'matrix-multiply': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    // `_SYS.mul(A, B)`, as the existing emitter writes `Multiply` of two
+    // operands whose types state their ranks, one a matrix.
+    'matrix-product': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'diagonal': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'flatten': { results: ['array'], operands: ['array'], resultArray: 'new' },
   },
   // The emitter writes each function as the existing emitter writes it for
   // the same operand (`FUNCTION_CODE` in `javascript-structured-emit.ts`):
@@ -478,9 +513,9 @@ export const JAVASCRIPT_BIGINT_POLICY: RepresentationPolicy = {
   // mode: the heads that make them decline at the lowering
   // (`javascript-structured-bigint.ts`).
   collections: {
-    take: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'] },
-    drop: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'] },
-    range: { results: ['bigint-array'], operands: ['bigint'] },
+    take: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'], resultArray: 'copy' },
+    drop: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'], resultArray: 'copy' },
+    range: { results: ['bigint-array'], operands: ['bigint'], resultArray: 'new' },
   },
   // The helpers of `bigint-runtime.ts` that the existing emitter calls for
   // the same heads (`javascript-structured-emit.ts`, `BIGINT_CODE`).
@@ -502,6 +537,17 @@ export const JAVASCRIPT_BIGINT_POLICY: RepresentationPolicy = {
   aborts: bigintAborts,
   noValueResult: 'number',
 };
+
+/** The field `resultArray` of an `IRCollection` of the function `fn`
+ *  under `policy`: the fact of the target's helper
+ *  (`OperationRule.resultArray`), or none. */
+export function collectionResultArray(
+  policy: RepresentationPolicy,
+  fn: CollectionFunctionName
+): { resultArray?: CollectionResultArray } {
+  const fact = policy.collections?.[fn]?.resultArray;
+  return fact === undefined ? {} : { resultArray: fact };
+}
 
 /** Throw when `program` is not a well-formed program of the JavaScript
  *  fragment target (`verifyProgram()` with `JAVASCRIPT_POLICY`, or with

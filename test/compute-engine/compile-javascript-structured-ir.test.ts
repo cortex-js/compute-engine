@@ -1100,8 +1100,8 @@ describe('the verifier: lists and tuples', () => {
     [
       'an unknown function of lists',
       fn(['Reverse', 'L'], L),
-      (op: IROperation) => ({ ...op, fn: 'transpose' }),
-      /the target has no function of lists transpose/,
+      (op: IROperation) => ({ ...op, fn: 'cross' }),
+      /the target has no function of lists cross/,
     ],
     [
       'a range with a real bound',
@@ -1283,7 +1283,7 @@ describe('the verifier: lists and tuples', () => {
     [
       'a norm of rows',
       fn(['Reverse', 'M'], M),
-      (op: IROperation) => ({ ...op, fn: 'norm', result: { ...op.result!, type: 'real', representation: 'number' } }),
+      (op: IROperation) => ({ ...op, fn: 'norm', resultArray: undefined, result: { ...op.result!, type: 'real', representation: 'number' } }),
       /the operand 1 of the function of lists norm has the type list<list<real>>|is used with another type/,
     ],
   ] as [string, MathJsonExpression, (op: IROperation) => IROperation, RegExp][])(

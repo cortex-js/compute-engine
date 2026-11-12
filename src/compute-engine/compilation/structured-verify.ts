@@ -35,6 +35,7 @@ import {
   type AbortKind,
   type BinaryFunctionName,
   type CollectionFunctionName,
+  type CollectionResultArray,
   type IntegerFunctionName,
   type IRRoutine,
   type Representation,
@@ -88,6 +89,11 @@ export type OperationRule = {
    *  operand has the representation of the result. For `and` and `or`, the
    *  value of each region after the first operand is an operand too. */
   readonly operands: readonly Representation[] | 'same';
+  /** For a function of lists with a list result (`collections`): what the
+   *  array of the result is (`CollectionResultArray`). An `IRCollection`
+   *  that states `resultArray` states this one. Absent: the result can be
+   *  the array of an operand. */
+  readonly resultArray?: CollectionResultArray;
 };
 
 /** The facts and the representations of a numeric routine of a target
@@ -684,7 +690,83 @@ export function verifyProgram(
         ? 'an operation aborts with no-value, and the program has no no-value result'
         : 'the program has a no-value result, and no operation aborts with no-value'
     );
+  verifyAbsentMatrices(program, fail);
 }
+
+/** The matrix functions that read an operand that can have no value
+ *  (`IRCollection.absent`): their runtime helper gives the absent value, or
+ *  a number, for it. */
+const ABSENT_MATRIX_READERS: ReadonlySet<CollectionFunctionName> = new Set([
+  'determinant',
+  'trace',
+  'norm',
+  'transpose',
+  'row-reduce',
+  'inverse',
+  'matrix-power',
+  'matrix-multiply',
+  'diagonal',
+  'dot',
+] as const);
+
+/**
+ * The checks of the values that can have no value (`IRCollection.absent`):
+ * only a matrix function with a list result carries the fact; a matrix
+ * function with a list result and such an operand carries it; and such a
+ * value is used only as the value of the program (a yield of the root), as
+ * an operand of a function of `ABSENT_MATRIX_READERS`, or as the list of an
+ * `at`.
+ */
+function verifyAbsentMatrices(
+  program: IRProgram,
+  fail: (message: string) => never
+): void {
+  const absent = new Set<number>();
+  const visit = (region: IRRegion, root: boolean) => {
+    for (const op of region.operations) {
+      op.operands.forEach((operand, i) => {
+        if (!absent.has(operand.id)) return;
+        const read =
+          (op.kind === 'yield' && root) ||
+          (op.kind === 'at' && i === 0) ||
+          (op.kind === 'collection' && ABSENT_MATRIX_READERS.has(op.fn));
+        if (!read)
+          fail(
+            `the value ${operand.id}, which can have no value, is an operand of ${op.kind}`
+          );
+      });
+      if (op.kind === 'collection') {
+        const listResult = op.result !== undefined && isListType(op.result.type);
+        if (op.absent === true && (!listResult || !MATRIX_LIST_FUNCTIONS.has(op.fn)))
+          fail(`the function of lists ${op.fn} carries the fact absent`);
+        if (
+          listResult &&
+          op.absent !== true &&
+          op.operands.some((o) => absent.has(o.id))
+        )
+          fail(
+            `the function of lists ${op.fn} reads a value that can have no value, and does not carry the fact absent`
+          );
+        if (op.absent === true) absent.add(op.result!.id);
+      }
+      for (const inner of regionsOf(op)) visit(inner, false);
+    }
+  };
+  for (const fn of program.functions) visit(fn.body, false);
+  visit(program.root, true);
+}
+
+/** The matrix functions with a list result that can have no value
+ *  (`IRCollection.absent`). */
+const MATRIX_LIST_FUNCTIONS: ReadonlySet<CollectionFunctionName> = new Set([
+  'transpose',
+  'row-reduce',
+  'inverse',
+  'matrix-power',
+  'matrix-multiply',
+  'matrix-product',
+  'diagonal',
+] as const);
 
 /**
  * The check of the abort kinds of `op` itself (`OperationBase.aborts`): a
@@ -1535,8 +1617,18 @@ function verifySignature(
       if (op.effect !== 'pure') fail('the operation copy is not pure');
       return;
     }
-    case 'collection':
-      return verifyCollection(op, policy, fail);
+    case 'collection': {
+      verifyCollection(op, policy, fail);
+      // After the operands and the result: the fact of the result array is
+      // the one of the target.
+      const stated = policy.collections?.[op.fn]?.resultArray;
+      if (op.resultArray !== undefined && op.resultArray !== stated)
+        fail(
+          `the function of lists ${op.fn} states the result array ${op.resultArray}, ` +
+            `and the target states ${stated ?? 'none'}`
+        );
+      return;
+    }
     case 'loop':
       return verifyLoop(op, policy, fail);
     case 'and':
@@ -1750,6 +1842,22 @@ function numericElement(
   return element === 'real' || element === 'integer' ? element : undefined;
 }
 
+/** The kind and the rank of the numbers of a list of the type `type` (a
+ *  list of reals or of integers, or a list of such lists at every depth),
+ *  or `undefined` for another type (a tuple, a list of tuples). */
+function numericCells(
+  type: ValueType
+): { kind: 'real' | 'integer'; rank: number } | undefined {
+  const element = elementOf(type);
+  if (element === 'real' || element === 'integer')
+    return { kind: element, rank: 1 };
+  if (element === undefined || !isListType(element)) return undefined;
+  const inner = numericCells(element);
+  return inner === undefined
+    ? undefined
+    : { kind: inner.kind, rank: inner.rank + 1 };
+}
+
 /**
  * The checks of a function of lists (`IRCollection`), by the rule of its
  * identifier (`CollectionFunctionName`): `norm`, `mean`, `median` and
@@ -1787,15 +1895,99 @@ function verifyCollection(
     fail(
       `the operand ${i + 1} of the function of lists ${fn} has the type ${operands[i].type}`
     );
+  /** The kind of the numbers of the list operand `i`, a list of reals or of
+   *  integers of the rank `rank` (any rank of 1 or more when absent). */
+  const cellsOf = (i: number, rank?: number): 'real' | 'integer' => {
+    const cell = numericCells(operands[i].type);
+    if (cell === undefined || (rank !== undefined && cell.rank !== rank))
+      return fail(
+        `the operand ${i + 1} of the function of lists ${fn} has the type ${operands[i].type}`
+      );
+    return cell.kind;
+  };
   let result: ValueType;
   switch (fn) {
     case 'norm':
+      // A list or a tuple of numbers, or a list of lists of numbers of any
+      // rank, and an order.
+      count(operands.length === 1 || operands.length === 2);
+      if (!isTupleType(operands[0].type)) cellsOf(0);
+      else listOperand(0, true);
+      if (
+        operands.length === 2 &&
+        operands[1].type !== 'real' &&
+        operands[1].type !== 'integer'
+      )
+        fail(`the order of the function of lists norm has the type ${operands[1].type}`);
+      result = 'real';
+      break;
     case 'mean':
     case 'median':
     case 'variance':
       count(operands.length === 1);
       listOperand(0, true);
       result = 'real';
+      break;
+    // The matrix functions: a matrix, a list of lists of rank 2 of reals or
+    // of integers.
+    case 'determinant':
+    case 'trace':
+      count(operands.length === 1);
+      cellsOf(0, 2);
+      result = 'real';
+      break;
+    case 'transpose':
+      count(operands.length === 1);
+      result = listType(listType(cellsOf(0, 2)));
+      break;
+    case 'row-reduce':
+    case 'inverse':
+      count(operands.length === 1);
+      cellsOf(0, 2);
+      result = listType(listType('real'));
+      break;
+    case 'matrix-power':
+      count(operands.length === 2);
+      cellsOf(0, 2);
+      if (operands[1].type !== 'integer')
+        fail(
+          `the exponent of the function of lists matrix-power has the type ${operands[1].type}`
+        );
+      result = listType(listType('real'));
+      break;
+    case 'matrix-multiply':
+    case 'matrix-product': {
+      // Two matrices, or a matrix and a list: of rank 2 for two matrices.
+      count(operands.length === 2);
+      const ranks = operands.map((o) => numericCells(o.type)?.rank);
+      if (
+        !ranks.every((r) => r === 1 || r === 2) ||
+        !ranks.some((r) => r === 2)
+      )
+        fail(
+          `the function of lists ${fn} reads ${operands[0].type} and ${operands[1].type}`
+        );
+      result =
+        ranks[0] === 2 && ranks[1] === 2
+          ? listType(listType('real'))
+          : listType('real');
+      break;
+    }
+    case 'diagonal': {
+      // The diagonal of a matrix, or the matrix of the diagonal of a list.
+      count(operands.length === 1);
+      const cell = numericCells(operands[0].type);
+      if (cell === undefined || cell.rank > 2)
+        fail(
+          `the operand of the function of lists diagonal has the type ${operands[0].type}`
+        );
+      result =
+        cell!.rank === 2 ? listType(cell!.kind) : listType(listType(cell!.kind));
+      break;
+    }
+    case 'flatten':
+      count(operands.length === 1);
+      result = listType(cellsOf(0));
       break;
     case 'dot':
       count(operands.length === 2);

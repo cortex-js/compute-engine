@@ -81,7 +81,10 @@ import {
 import { nodeText } from './fragment.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { isUserDefinedFunction } from './compile-statements.js';
-import { JAVASCRIPT_BIGINT_POLICY } from './javascript-structured-policy.js';
+import {
+  collectionResultArray,
+  JAVASCRIPT_BIGINT_POLICY,
+} from './javascript-structured-policy.js';
 import {
   STRUCTURED_OPERATION_LIMIT,
   StructuredLimitError,
@@ -953,7 +956,16 @@ class BigintLowering {
     operands: readonly IRValue[],
     node: Expression
   ): IRValue {
-    return this.push({ kind: 'collection', fn, operands }, INTEGER_LIST, node);
+    return this.push(
+      {
+        kind: 'collection',
+        fn,
+        ...collectionResultArray(JAVASCRIPT_BIGINT_POLICY, fn),
+        operands,
+      },
+      INTEGER_LIST,
+      node
+    );
   }
 
   // -------------------------------------------------------------------------

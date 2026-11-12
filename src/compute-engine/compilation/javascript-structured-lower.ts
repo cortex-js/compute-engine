@@ -88,6 +88,9 @@
  * node is, once per occurrence, and is never shared.
  */
 import type { Expression } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
 import type { CompileTarget } from './types.js';
 import { declareValueOperand } from './compile-declarations.js';
 import { exactRationalDivisor } from './compiler-type-facts.js';
@@ -142,6 +145,7 @@ import {
   type UnaryFunctionName,
 } from './structured-ir.js';
 import {
+  collectionResultArray,
   JAVASCRIPT_POLICY,
   verifyJavaScriptProgram,
 } from './javascript-structured-policy.js';
@@ -626,6 +630,225 @@ export const COLLECTION_HEADS: Readonly<
   Range: 'range',
   RotateLeft: 'rotate-left',
   RotateRight: 'rotate-right',
+  // The matrix functions (slice 3 of
+  // `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`);
+  // `Dot` with a list of lists is `matrix-multiply`.
+  Determinant: 'determinant',
+  Trace: 'trace',
+  Transpose: 'transpose',
+  RowReduce: 'row-reduce',
+  Inverse: 'inverse',
+  MatrixPower: 'matrix-power',
+  MatrixMultiply: 'matrix-multiply',
+  Diagonal: 'diagonal',
+  Flatten: 'flatten',
+};
+
+/** The rank of the engine type `type` when it states one: the number of
+ *  its dimensions, or the depth of its nested list types; `0` for a
+ *  number, `undefined` for another type (a union, a tensor of no stated
+ *  rank). */
+function engineRank(type: Type): number | undefined {
+  if (typeof type === 'string')
+    return isSubtype(type, 'number') ? 0 : undefined;
+  if (type.kind !== 'list') return undefined;
+  if (type.dimensions === null) return undefined;
+  const own = type.dimensions?.length ?? 1;
+  const inner = engineRank(type.elements);
+  return inner === undefined ? undefined : own + inner;
+}
+
+/** The dimensions that the list type `type` states, from the outer one,
+ *  `-1` for one that it does not state (the length of a `list<…>`), or
+ *  `undefined` for a type that is not a list of a stated rank of numbers. */
+function engineDimensions(type: Type): readonly number[] | undefined {
+  if (typeof type === 'string' || type.kind !== 'list') return undefined;
+  if (type.dimensions === null) return undefined;
+  if (type.dimensions !== undefined)
+    return typeof type.elements === 'string' &&
+      isSubtype(type.elements, 'number')
+      ? type.dimensions
+      : undefined;
+  if (typeof type.elements === 'string')
+    return isSubtype(type.elements, 'number') ? [-1] : undefined;
+  const inner = engineDimensions(type.elements);
+  return inner === undefined ? undefined : [-1, ...inner];
+}
+
+/** Whether the value of `node` is a matrix of one row or more by its type:
+ *  a stated number of rows of 1 or more, or the engine type `matrix`
+ *  (rectangular, of one row or more: the engine types the empty list
+ *  `list<never>`) of a name (an input or a parameter, whose value the host
+ *  or the caller gives of its type), of a list literal, or of an
+ *  element-wise result of such a matrix (`M + x`, which has its rows). */
+export function hasRows(node: Expression): boolean {
+  const type = node.type.type;
+  const dimensions = engineDimensions(type);
+  if (dimensions === undefined || dimensions.length !== 2) return false;
+  if (dimensions[0] >= 1) return true;
+  // A stated count of no row (`matrix<0x3>`).
+  if (dimensions[0] === 0) return false;
+  if (
+    isFunction(node) &&
+    ['Add', 'Multiply', 'Negate', 'Divide'].includes(node.operator) &&
+    isLibraryOperator(node, node.operator)
+  )
+    return node.ops.some(hasRows);
+  return (
+    typeof type === 'object' &&
+    type.kind === 'list' &&
+    type.dimensions?.length === 2 &&
+    (isSymbol(node) || isFunction(node, 'List'))
+  );
+}
+
+/**
+ * Whether the matrix function `node` (a head of `COLLECTION_HEADS` with a
+ * `collection` name of a matrix function, or `Dot` of a list of lists) can
+ * have no value: its result is then a number in place of the list (`NaN`
+ * for a singular inverse; `0` for a product of two empty lists), or a list
+ * of `NaN` of a lower rank (`MatrixMultiply(A, Inverse(B))` with `B`
+ * singular is `[NaN, NaN]`), as the
+ * runtime helper of the existing emitter gives it
+ * (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`, section
+ * 4). `ranks` are the ranks of the operands (0 for a number). Decided from
+ * the types only, and true when the types do not prove a value:
+ *
+ * - `Inverse`: a singular matrix.
+ * - `MatrixPower(M, p)`: unless `M` has rows by its type (`hasRows()`) and
+ *   `p` is an integer literal from 0 to the limit of the interpreter (a
+ *   negative exponent inverts; `_SYS.matpow` of the empty list is `NaN`).
+ * - `RowReduce(M)`: unless `M` has rows by its type (`_SYS.rref([])` is
+ *   `NaN`).
+ * - `MatrixMultiply` and `Dot`: a matrix and a matrix unless the columns of
+ *   the first and the rows of the second are stated and agree; a matrix and
+ *   a list unless the matrix has rows by its type (`_SYS.matmul` reads the
+ *   empty list as a list); a list and a matrix unless the length of the
+ *   list and the rows of the matrix are stated and agree.
+ * - `Multiply` of two lists, one a matrix (a matrix product, `_SYS.mul`):
+ *   unless the inner dimensions are stated and agree, also for a matrix and
+ *   a list (`_SYS.mul` gives `NaN` for dimensions that do not agree). Of a
+ *   number and a list: never (an element-wise product).
+ * - Every matrix function with a list result whose list operand can have
+ *   no value (`Transpose(Inverse(M))`).
+ */
+export function matrixResultCanBeAbsent(
+  node: Expression,
+  ranks: readonly number[]
+): boolean {
+  if (!isFunction(node)) return false;
+  // The value of a `Block` is its last operand
+  // (`Transpose(Block(Declare(B, …), Inverse(B)))`): the admission refuses
+  // every other carrier of a value that can be absent (a local, an `If`, a
+  // `Typed`, the value of a helper; `refuseAbsentMatrixUses()`).
+  const valueOf = (op: Expression): Expression => {
+    while (isFunction(op, 'Block') && op.nops > 0) op = op.ops[op.nops - 1];
+    return op;
+  };
+  const absentOperand = node.ops.some((operand, i) => {
+    const op = valueOf(operand);
+    return (
+      ranks[i] !== undefined &&
+      ranks[i] >= 1 &&
+      isFunction(op) &&
+      Object.hasOwn(MATRIX_RESULT_HEADS, op.operator) &&
+      matrixResultCanBeAbsent(
+        op,
+        op.ops.map((o) => engineRank(o.type.type) ?? -1)
+      )
+    );
+  });
+  if (absentOperand) return true;
+  switch (node.operator) {
+    case 'Inverse':
+      return true;
+    case 'MatrixPower': {
+      const p = node.op2;
+      return !(
+        hasRows(node.op1) &&
+        isNumber(p) &&
+        p.im === 0 &&
+        Number.isInteger(p.re) &&
+        p.re >= 0 &&
+        p.re <= MAX_MATRIX_POWER_EXPONENT
+      );
+    }
+    case 'RowReduce':
+      return !hasRows(node.op1);
+    case 'Multiply': {
+      if (
+        node.nops !== 2 ||
+        !ranks.every((r) => r >= 1) ||
+        !ranks.some((r) => r === 2)
+      )
+        return false;
+      const [a, b] = node.ops;
+      const da = engineDimensions(a.type.type);
+      const db = engineDimensions(b.type.type);
+      if (da === undefined || db === undefined) return true;
+      const inner = da[da.length - 1];
+      return !(inner >= 1 && inner === db[0] && da[0] >= 1);
+    }
+    case 'MatrixMultiply':
+    case 'Dot': {
+      const [a, b] = node.ops;
+      const da = engineDimensions(a.type.type);
+      const db = engineDimensions(b.type.type);
+      if (ranks[0] === 2 && ranks[1] === 2)
+        return !(
+          da !== undefined &&
+          db !== undefined &&
+          da[0] >= 1 &&
+          da[1] >= 1 &&
+          da[1] === db[0]
+        );
+      if (ranks[0] === 2 && ranks[1] === 1) return !hasRows(a);
+      if (ranks[0] === 1 && ranks[1] === 2)
+        return !(
+          da !== undefined &&
+          db !== undefined &&
+          da[0] >= 1 &&
+          da[0] === db[0]
+        );
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The functions of lists that are matrix functions: a list result of one
+ *  can have no value (`matrixResultCanBeAbsent()`). */
+const MATRIX_FUNCTIONS: ReadonlySet<CollectionFunctionName> = new Set([
+  'determinant',
+  'trace',
+  'transpose',
+  'row-reduce',
+  'inverse',
+  'matrix-power',
+  'matrix-multiply',
+  'matrix-product',
+  'diagonal',
+  'flatten',
+] as const);
+
+/** The rank of a value of the type `type`: 0 for a scalar or a tuple, and
+ *  the depth of its list types for a list. */
+function rankOf(type: ValueType): number {
+  const element = elementOf(type);
+  return element === undefined ? 0 : 1 + rankOf(element);
+}
+
+/** The heads of the matrix functions with a list result, which can have no
+ *  value (`matrixResultCanBeAbsent()`). */
+const MATRIX_RESULT_HEADS: Readonly<Record<string, true>> = {
+  Multiply: true,
+  Inverse: true,
+  MatrixPower: true,
+  RowReduce: true,
+  MatrixMultiply: true,
+  Dot: true,
+  Transpose: true,
+  Diagonal: true,
 };
 
 /** The heads that take a function operand on the structured route
@@ -700,7 +923,9 @@ export function userFunctionOperandSymbol(
  * types the parameter of a `Map` with the element type of its list):
  * `type` is then `T`; or with `T` a tuple type (the element type of a list
  * of tuples): `type` is `tuple`, and `tuple` the spelling of `T`, which the
- * rule of the head checks.
+ * rule of the head checks; or with `T` a list type (`vector`, `list<real>`,
+ * the type of a row of a list of lists): `type` is `list`, and `list` the
+ * spelling of `T`, which the rule of the head checks.
  */
 export function functionOperandParts(
   fn: Expression,
@@ -709,8 +934,9 @@ export function functionOperandParts(
   | {
       readonly parameters: readonly {
         readonly symbol: Expression & { symbol: string };
-        readonly type?: 'integer' | 'real' | 'number' | 'tuple';
+        readonly type?: 'integer' | 'real' | 'number' | 'tuple' | 'list';
         readonly tuple?: string;
+        readonly list?: string;
       }[];
       readonly body: Expression;
     }
@@ -723,8 +949,9 @@ export function functionOperandParts(
     return undefined;
   const parameters: {
     symbol: Expression & { symbol: string };
-    type?: 'integer' | 'real' | 'number' | 'tuple';
+    type?: 'integer' | 'real' | 'number' | 'tuple' | 'list';
     tuple?: string;
+    list?: string;
   }[] = [];
   for (const p of fn.ops.slice(1)) {
     if (isSymbol(p)) {
@@ -737,6 +964,10 @@ export function functionOperandParts(
     const spelling = type?.replace(/^'(.*)'$/, '$1');
     if (spelling !== undefined && /^tuple<.*>$/.test(spelling)) {
       parameters.push({ symbol: p.op1, type: 'tuple', tuple: spelling });
+      continue;
+    }
+    if (spelling !== undefined && /^(list|vector|matrix)\b/.test(spelling)) {
+      parameters.push({ symbol: p.op1, type: 'list', list: spelling });
       continue;
     }
     const declared =
@@ -1530,7 +1761,12 @@ class Lowering {
       return this.inScope(scope.inner.get(node), () =>
         this.functionOperand(node, facts, scope, operations)
       );
-    if (Object.hasOwn(COLLECTION_HEADS, operator))
+    // A head of a test operation (`Trace` of the tests) is not a function
+    // of lists.
+    if (
+      Object.hasOwn(COLLECTION_HEADS, operator) &&
+      !this.prep.testOperations.has(operator)
+    )
       return this.collection(node, facts, scope, operations);
 
     // The branch that the constant conditions select (`decidedBranch()`).
@@ -2452,6 +2688,12 @@ class Lowering {
       operations
     );
     const type = valueType(facts.type);
+    if (
+      isListType(type) &&
+      (kind === 'add' || kind === 'multiply') &&
+      isListType(elementOf(collection.type)!)
+    )
+      return this.foldRows(kind, collection, type, node, operations, effect);
     if (type !== 'real' && type !== 'integer')
       return fail(`the fold ${nodeText(node)} is not a number`);
     const tuple = collection.type;
@@ -2535,6 +2777,112 @@ class Lowering {
   }
 
   /**
+   * `Sum(M)` or `Product(M)` of the rows of a matrix `M` of one row or more
+   * (`withFoldOfRows()` in `javascript-fragment-target.ts`), as the existing
+   * emitter writes it, `(M).reduce((_a, _b) => _SYS.add(_a, _b), 0)`: the
+   * first row added to (multiplied by) the integer `0` (`1`) element by
+   * element, a `build` over the first row whose element is `0 + x`
+   * (`1 * x`), as `_SYS.add(0, row)` gives it; then a `loop` over the other
+   * rows, from 2 to the number of rows, whose carried value is the list so
+   * far and whose body is a `build` of the sum (product) of its elements and
+   * of the elements of the row, in this order. The rows of a matrix have
+   * one length, so each `build` runs over the length of the list so far.
+   */
+  private foldRows(
+    kind: 'add' | 'multiply',
+    collection: IRValue,
+    type: ListType,
+    node: Expression,
+    operations: IROperation[],
+    effect: EffectFact
+  ): IRValue {
+    const element = elementOf(type) as ScalarKind;
+    /** The `build` of `kind` of `left` (a number or a list) and of the
+     *  elements of the list `right`, over the length of `right`. */
+    const combine = (
+      left: IRValue,
+      right: IRValue,
+      into: IROperation[]
+    ): IRValue => {
+      const [one, length] = this.elementRange(right, node, into);
+      const index = this.newValue('integer', 'number');
+      const body: IROperation[] = [];
+      const a = isListType(left.type)
+        ? this.element(left, index, node, body)
+        : left;
+      const b = this.element(right, index, node, body);
+      const value = this.newValue(element, 'number');
+      body.push({
+        kind,
+        result: value,
+        operands: [a, b],
+        effect: 'pure',
+        origin: node,
+      });
+      const region: IRRegion = {
+        ...this.region(body, node, value),
+        parameters: [index],
+      };
+      const result = this.newValue(type, 'array');
+      into.push({
+        kind: 'build',
+        result,
+        operands: [one, length],
+        body: region,
+        effect: joinEffects(effect, region.effect),
+        ...touchesField(this.states(node), region.touches),
+        ascending: true,
+        origin: node,
+      });
+      return result;
+    };
+    const first = this.element(
+      collection,
+      this.numberLiteral(1, 'integer', node, operations),
+      node,
+      operations
+    );
+    const initial = combine(
+      this.numberLiteral(kind === 'add' ? 0 : 1, 'integer', node, operations),
+      first,
+      operations
+    );
+    const two = this.numberLiteral(2, 'integer', node, operations);
+    const rows = this.newValue('integer', 'number');
+    operations.push({
+      kind: 'length',
+      result: rows,
+      operands: [collection],
+      effect: 'pure',
+      origin: node,
+    });
+    const index = this.newValue('integer', 'number');
+    const accumulator = this.newValue(type, 'array');
+    const body: IROperation[] = [];
+    const next = combine(
+      accumulator,
+      this.element(collection, index, node, body),
+      body
+    );
+    const region: IRRegion = {
+      ...this.region(body, node, next),
+      parameters: [index, accumulator],
+    };
+    const result = this.newValue(type, 'array');
+    operations.push({
+      kind: 'loop',
+      results: [result],
+      operands: [two, rows, initial],
+      body: region,
+      effect: region.effect,
+      ...touchesField(region.touches),
+      ascending: true,
+      origin: node,
+    });
+    return result;
+  }
+
+  /**
    * `Add`, `Multiply`, `Negate` or `Divide` with a list operand, which the
    * rule of the head admitted (`elementwiseRule()` in
    * `javascript-fragment-target.ts`): each operand evaluated once, in
@@ -2563,35 +2911,89 @@ class Lowering {
             ? 'negate'
             : 'divide';
     const values = this.operands(node, facts, scope, operations);
-    const list =
-      values.find((v) => isListType(v.type)) ??
-      fail(`no list operand in ${nodeText(node)}`);
     const type = valueType(facts.type);
-    const element = elementOf(type) ?? fail(`${nodeText(node)} is not a list`);
-    const [one, length] = this.elementRange(list, node, operations);
-    const index = this.newValue('integer', 'number');
-    const body: IROperation[] = [];
-    const operands = values.map((v) =>
-      isListType(v.type) ? this.element(v, index, node, body) : v
-    );
-    const value = this.newValue(element, 'number');
-    body.push({ kind, result: value, operands, effect: 'pure', origin: node });
-    const region: IRRegion = {
-      ...this.region(body, node, value),
-      parameters: [index],
+    // A product of two lists, one a matrix (`nestedElementwise()`): the
+    // matrix product, `_SYS.mul(A, B)`.
+    if (
+      operator === 'Multiply' &&
+      values.length === 2 &&
+      values.every((v) => isListType(v.type)) &&
+      values.some((v) => rankOf(v.type) === 2)
+    ) {
+      const result = this.resultOf(facts);
+      const absent = matrixResultCanBeAbsent(
+        node,
+        values.map((v) => rankOf(v.type))
+      );
+      operations.push({
+        kind: 'collection',
+        fn: 'matrix-product',
+        ...collectionResultArray(JAVASCRIPT_POLICY, 'matrix-product'),
+        result,
+        operands: values,
+        effect: 'pure',
+        origin: node,
+        ...(absent ? { absent: true as const } : {}),
+      });
+      return result;
+    }
+    // One `build` per level of a list of lists (`nestedElementwise()` in
+    // `javascript-fragment-target.ts`): its body reads the element of each
+    // list operand at the index, a row at an outer level, and applies the
+    // operation of the head to the numbers at the last level; the scalar
+    // operands are the values evaluated once, before the outer `build`.
+    const level = (
+      operands: readonly IRValue[],
+      levelType: ValueType,
+      result: IRValue,
+      ops: IROperation[]
+    ): IRValue => {
+      const list =
+        operands.find((v) => isListType(v.type)) ??
+        fail(`no list operand in ${nodeText(node)}`);
+      const element =
+        elementOf(levelType) ?? fail(`${nodeText(node)} is not a list`);
+      const [one, length] = this.elementRange(list, node, ops);
+      const index = this.newValue('integer', 'number');
+      const body: IROperation[] = [];
+      const elements = operands.map((v) =>
+        isListType(v.type) ? this.element(v, index, node, body) : v
+      );
+      let value: IRValue;
+      if (isListType(element))
+        value = level(
+          elements,
+          element,
+          this.newValue(element, 'array'),
+          body
+        );
+      else {
+        value = this.newValue(element, 'number');
+        body.push({
+          kind,
+          result: value,
+          operands: elements,
+          effect: 'pure',
+          origin: node,
+        });
+      }
+      const region: IRRegion = {
+        ...this.region(body, node, value),
+        parameters: [index],
+      };
+      ops.push({
+        kind: 'build',
+        result,
+        operands: [one, length],
+        body: region,
+        effect: joinEffects(effect, region.effect),
+        ...touchesField(this.states(node), region.touches),
+        ascending: true,
+        origin: node,
+      });
+      return result;
     };
-    const result = this.resultOf(facts);
-    operations.push({
-      kind: 'build',
-      result,
-      operands: [one, length],
-      body: region,
-      effect: joinEffects(effect, region.effect),
-      ...touchesField(this.states(node), region.touches),
-      ascending: true,
-      origin: node,
-    });
-    return result;
+    return level(values, type, this.resultOf(facts), operations);
   }
 
   /**
@@ -2625,17 +3027,44 @@ class Lowering {
       values: readonly IRValue[],
       result: IRValue = this.resultOf(facts)
     ): IRValue => {
+      // A matrix function whose list result can have no value
+      // (`matrixResultCanBeAbsent()`).
+      const absent =
+        MATRIX_FUNCTIONS.has(fn) &&
+        isListType(result.type) &&
+        matrixResultCanBeAbsent(
+          node,
+          values.map((v) => rankOf(v.type))
+        );
       operations.push({
         kind: 'collection',
         fn,
+        ...collectionResultArray(JAVASCRIPT_POLICY, fn),
         result,
         operands: values,
         effect: 'pure',
         origin: node,
+        ...(absent ? { absent: true as const } : {}),
       });
       return result;
     };
+    const nested = operands.some((o) => {
+      const element = elementOf(o.type);
+      return element !== undefined && isListType(element);
+    });
     switch (operator) {
+      case 'Determinant':
+      case 'Trace':
+      case 'Transpose':
+      case 'RowReduce':
+      case 'Inverse':
+      case 'MatrixPower':
+      case 'Diagonal':
+      case 'Flatten':
+        return push(COLLECTION_HEADS[operator] as CollectionFunctionName, operands);
+      // A product of two lists is their inner product, as `Dot` is.
+      case 'MatrixMultiply':
+        return push(nested ? 'matrix-multiply' : 'dot', operands);
       case 'Norm':
       case 'Mean':
       case 'Median':
@@ -2668,6 +3097,7 @@ class Lowering {
         );
       case 'Dot': {
         const [a, b] = operands;
+        if (nested) return push('matrix-multiply', operands);
         if (!isTupleType(a.type) || !isTupleType(b.type))
           return push('dot', operands);
         const elements = a.type.elements;
@@ -4593,7 +5023,8 @@ class Lowering {
    * `Product`, that can make the existing compiler's early exit observable,
    * or `undefined` (`aggregate()`): an operation that `canThrowNoHost()`
    * answers for, but a `mod` that cannot throw, or that throws in every
-   * term alike. `_SYS.floorMod(a, b)` throws only for an operand beyond
+   * term alike, and an `inverse` or a `matrix-power` judged as such a `mod`
+ * (`throwingMatrixFunction()`). `_SYS.floorMod(a, b)` throws only for an operand beyond
    * ±(2^53 − 1), the infinities included (`integerOperand()` in
    * `javascript-runtime.ts`); `NaN` and a non-integer do not throw. So a
    * `mod` is harmless when each operand is a safe integer by construction
@@ -4663,6 +5094,14 @@ class Lowering {
             !op.operands.every((v) => safe(v) || (everyTerm && invariant(v)))
           )
             return op;
+          continue;
+        }
+        // An inverse or a power of a matrix throws for a matrix that is not
+        // square: harmless as a `mod` is when every term evaluates it with
+        // the same operands (it throws in the first term on both
+        // compilers, or never).
+        if (throwingMatrixFunction(op)) {
+          if (!(everyTerm && op.operands.every(invariant))) return op;
           continue;
         }
         if (regionsOf(op).length === 0) {
@@ -5238,6 +5677,21 @@ class Lowering {
   }
 }
 
+/** Whether `op` is a matrix function whose runtime helper can throw:
+ *  `_SYS.inv` and `_SYS.matpow` throw `expected-square-matrix` for a
+ *  rectangular matrix that is not square (but `M^1`), through
+ *  `nonSquareMatrixPower()` in `javascript-runtime.ts`. `_SYS.det`,
+ *  `_SYS.trace`, `_SYS.rref`, `_SYS.transpose`, `_SYS.diagonal`,
+ *  `_SYS.matmul`, `_SYS.mul` and `_SYS.norm` give `NaN` for an operand of
+ *  another shape and do not throw for an operand that the admission lets
+ *  them read (an absent row is never their operand). */
+function throwingMatrixFunction(op: IROperation): boolean {
+  return (
+    op.kind === 'collection' &&
+    (op.fn === 'inverse' || op.fn === 'matrix-power')
+  );
+}
+
 /** Whether the code of `op`, or of an operation of a region that it
  *  evaluates, or of the body of a function that it calls, can throw on
  *  JavaScript: `mod` (`_SYS.floorMod` throws for an operand beyond the safe
@@ -5246,7 +5700,8 @@ class Lowering {
  *  `replace-at` (`_SYS.replaceAt` throws for an index out of range),
  *  `host`, a function of the host, which can throw and
  *  whose calls the host can count, also when it is declared pure, and
- *  `routine` (`_SYS.integrate` throws the timeout of a deadline). A throw
+ *  `routine` (`_SYS.integrate` throws the timeout of a deadline), and
+ *  `inverse` and `matrix-power` (`throwingMatrixFunction()`). A throw
  *  is not an effect, so the lowering keeps such an operation where the
  *  existing emitter evaluates it (`ifStatement()`).
  *  `bodyThrows` answers for the function of index `i` of the program (a
@@ -5263,6 +5718,7 @@ function canThrow(
         op.fn === 'real-gcd' ||
         op.fn === 'real-lcm')) ||
     op.kind === 'replace-at' ||
+    throwingMatrixFunction(op) ||
     (host && op.kind === 'host') ||
     op.kind === 'routine' ||
     (op.kind === 'call' && bodyThrows(op.function)) ||

@@ -774,6 +774,42 @@ export type IRCopy = OperationBase & {
  *   than 2^32 - 1 elements has no value: compiled code throws, as the
  *   existing emitter does.
  *
+ * The matrix functions read a list of lists of rank 2 (a matrix) of reals
+ * or of integers; their list results are new lists whose rows are new
+ * (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`,
+ * section 4):
+ *
+ * - `determinant`, `trace`: one matrix; its determinant (`NaN` when it is
+ *   not square) and the sum of its diagonal, a real.
+ * - `transpose`: one matrix; the matrix of its columns, with its elements.
+ *   The transpose of the empty list is the empty list, which can be the
+ *   operand itself.
+ * - `row-reduce`: one matrix; its reduced row echelon form, a matrix of
+ *   reals.
+ * - `inverse`: one square matrix; its inverse, a matrix of reals.
+ * - `matrix-power`: a square matrix and an integer exponent; the power, a
+ *   matrix of reals (the identity for 0; the power of the inverse for a
+ *   negative exponent; the matrix for 1, square or not).
+ * - `matrix-multiply`: a matrix and a matrix, a matrix and a list, or a
+ *   list and a matrix; the matrix product, of rank 2 for two matrices and
+ *   a list of reals otherwise. A matrix and a list of another length give a
+ *   list of `NaN` elements.
+ * - `matrix-product`: the same operands and the same product, as
+ *   `Multiply` of a matrix computes it; dimensions that do not agree give
+ *   no value.
+ * - `diagonal`: a matrix, the list of its diagonal; or a list, the square
+ *   matrix with the list on its diagonal and zeros elsewhere.
+ * - `flatten`: a list of any rank; the list of its numbers, in order.
+ * - `norm` also reads a list of lists of any rank (the Frobenius norm), and
+ *   with a second operand, a real order `p` (the `p`-norm of a list; the
+ *   operator norm of the order 1, 2 or `+∞` of a matrix).
+ *
+ * A list result of `inverse` (a singular matrix), of `matrix-power`, of
+ * `row-reduce` and of `matrix-multiply` and `matrix-product` (dimensions
+ * that do not agree) can
+ * have no value: the operation then carries `absent`, and the value is the
+ * absent value of the target in place of the list (`IRCollection.absent`).
+ *
  * A list result has the elements of its operands: it is a list of integers
  * only when every list operand is one.
  */
@@ -790,7 +826,17 @@ export type CollectionFunctionName =
   | 'join'
   | 'range'
   | 'rotate-left'
-  | 'rotate-right';
+  | 'rotate-right'
+  | 'determinant'
+  | 'trace'
+  | 'transpose'
+  | 'row-reduce'
+  | 'inverse'
+  | 'matrix-power'
+  | 'matrix-multiply'
+  | 'matrix-product'
+  | 'diagonal'
+  | 'flatten';
 
 /**
  * An application of a function of lists that `fn` names
@@ -801,9 +847,42 @@ export type CollectionFunctionName =
  * emitter of the target writes each one (a runtime helper of the target).
  * `pure`.
  */
+/**
+ * What the array of the list result of a function of lists (`IRCollection`)
+ * is, a fact of the target's helper for the function:
+ *
+ * - `new`: a new array at every depth (`_SYS.matmul`, `_SYS.inv`: new rows
+ *   too).
+ * - `copy`: a new outer array whose elements are the elements of the
+ *   operands (`take`, `join`): for a list of lists, the rows of an operand.
+ * - `operand`: it can be the array of an operand itself
+ *   (`_SYS.transpose([])` is its operand).
+ *
+ * A `new` or a `copy` result is unique for `inPlaceUpdates()`; an
+ * `operand` result is not. A row of a `copy` result can be held by an
+ * operand: a write into a row copies it (a row read is never unique).
+ */
+export type CollectionResultArray = 'new' | 'copy' | 'operand';
+
 export type IRCollection = OperationBase & {
   readonly kind: 'collection';
   readonly fn: CollectionFunctionName;
+  /** The array of a list result (`CollectionResultArray`), from the policy
+   *  of the target (`OperationRule.resultArray` of the function): read by
+   *  `inPlaceUpdates()`. Absent: the result can be the array of an
+   *  operand, and is never unique. */
+  readonly resultArray?: CollectionResultArray;
+  /** The list result can have no value: its value is then the absent value
+   *  of the target in place of the list (a number in JavaScript, `NaN` for
+   *  a singular inverse), or a list of absent values of a lower rank
+   *  (`MatrixMultiply(A, Inverse(B))` with `B` singular is `[NaN, NaN]` in
+   *  JavaScript). Only a matrix function with a list result carries
+   *  it. The verifier admits such a value only as the value of the program
+   *  (a yield of the root), as the operand of a matrix function that reads
+   *  it (`ABSENT_MATRIX_READERS`, `structured-verify.ts`), and as the list
+   *  of an `at`; a matrix function with a list result and such an operand
+   *  carries it too. */
+  readonly absent?: true;
 };
 
 /**

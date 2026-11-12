@@ -70,7 +70,15 @@
  * list, a row read, a function of lists, a literal or a literal that
  * repeats a row, updated in each pass, with an alias, a `Break`, an inner
  * loop, a branch that writes the input, a call or a lambda that reads the
- * list, a row swap and a row of an input written into `A`.
+ * list, a row swap and a row of an input written into `A`. Slices 2 to 4
+ * of the note of the lists of lists (`genMatrixRows()`, `genMatrixReal()`):
+ * the input `M3: matrix<2x3>`, the matrix functions (`Determinant`,
+ * `Trace`, `Inverse`, `MatrixPower`, `MatrixMultiply`, `Dot`, `Transpose`,
+ * `RowReduce`, `Diagonal`, `Flatten`, `Norm` with and without an order),
+ * element-wise arithmetic of lists of lists with reals and with themselves,
+ * the sum and the product of the rows of a matrix, `Map` of a function
+ * literal over rows, and the product of two matrices or of a matrix and a
+ * list.
  *
  * Each call that gives a value is made again with the same inputs (the
  * same value), and every input is compared at every depth with its value
@@ -293,6 +301,7 @@ type InputKind =
   | 'rows'
   | 'matrix'
   | 'matrix22'
+  | 'matrix23'
   | 'boolean'
   | 'inferred';
 
@@ -320,6 +329,7 @@ const GLOBAL_INPUTS: Readonly<Record<string, InputKind>> = {
   R: 'rows',
   MA: 'matrix',
   M2: 'matrix22',
+  M3: 'matrix23',
   B: 'boolean',
   // The names that `HOST_OPTIONS` maps to another entry of the vars object
   // (`--host`).
@@ -348,7 +358,12 @@ const PARAMETERS: readonly (readonly [string, InputKind, string])[] = [
 ];
 
 /** The kinds of the inputs and parameters that are lists of lists. */
-const ROW_KINDS: ReadonlySet<InputKind> = new Set(['rows', 'matrix', 'matrix22']);
+const ROW_KINDS: ReadonlySet<InputKind> = new Set([
+  'rows',
+  'matrix',
+  'matrix22',
+  'matrix23',
+]);
 
 const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   real: 'real',
@@ -368,6 +383,7 @@ const TYPE_OF_KIND: Readonly<Record<InputKind, string>> = {
   rows: 'list<list<real>>',
   matrix: 'matrix',
   matrix22: 'matrix<2x2>',
+  matrix23: 'matrix<2x3>',
   boolean: 'boolean',
   inferred: 'real, written by ce.infer()',
 };
@@ -378,7 +394,7 @@ export const DECLARATIONS =
   'L: list<real>; I: list<integer>; LN: list<number>; VN: vector<3>; ' +
   'P: tuple<real, real>; ' +
   'LQ: list<tuple<real, real>>; R: list<list<real>>; MA: matrix; ' +
-  'M2: matrix<2x2>; B: boolean; ' +
+  'M2: matrix<2x2>; M3: matrix<2x3>; B: boolean; ' +
   'u: no declared type; xn: number; ' +
   'ex: nan | real | signed_infinity; xi: real, written by ce.infer() of ' +
   'Mod(xi, 2); h: real, assigned 2.5; ' +
@@ -958,6 +974,11 @@ const MATRICES22_IN: number[][][] = [
   [[1e300, -1e300], [5e-324, 1 / 3]],
 ];
 const MATRICES22_EDGE: number[][][] = [[[NaN, 1], [2, 3]], [[1, 2]]];
+const MATRICES23_IN: number[][][] = [
+  [[1, 2, 3], [4, 5, 6]],
+  [[-0, 0.5, 1e300], [7, -2, 5e-324]],
+];
+const MATRICES23_EDGE: number[][][] = [[[1, 2], [3, 4]]];
 
 /** The values of an input of the kind `kind` in the mode `mode`: those in
  *  its type first, then those outside it. */
@@ -999,6 +1020,8 @@ function gridOf(kind: InputKind, mode: Mode): Value[] {
       return [...MATRICES_IN, ...MATRICES_EDGE];
     case 'matrix22':
       return [...MATRICES22_IN, ...MATRICES22_EDGE];
+    case 'matrix23':
+      return [...MATRICES23_IN, ...MATRICES23_EDGE];
     case 'boolean':
       return [true, false];
   }
@@ -1060,7 +1083,8 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
       );
     case 'rows':
     case 'matrix':
-    case 'matrix22': {
+    case 'matrix22':
+    case 'matrix23': {
       if (
         !Array.isArray(v) ||
         !v.every((row) => Array.isArray(row) && row.every((x) => Number.isFinite(x)))
@@ -1073,7 +1097,8 @@ function inType(kind: InputKind, v: Value, mode: Mode): boolean {
         rows.length > 0 &&
         width > 0 &&
         rows.every((row) => row.length === width) &&
-        (kind === 'matrix' || (rows.length === 2 && width === 2))
+        (kind === 'matrix' ||
+          (rows.length === 2 && width === (kind === 'matrix23' ? 3 : 2)))
       );
     }
     case 'boolean':
@@ -2030,7 +2055,107 @@ function genRows(ctx: GenContext, depth: number): Json {
     return [pick(rng, ['RotateLeft', 'RotateRight']), rows(), pick(rng, COUNTS)];
   if (r < 0.8) return [pick(rng, ['Join', 'ListJoin']), rows(), rows()];
   if (r < 0.9) return ['If', genCondition(ctx, d), rows(), rows()];
+  if (r < 0.95) return genMatrixRows(ctx, d);
   return ['List', ['At', rows(), genIndex(ctx)], row()];
+}
+
+/** The names of matrices (`MA`, `M2`, `M3`, `MP`) of the context, or a
+ *  literal 2×2 matrix when it has none. */
+function genMatrix(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const names = (ctx.rowLists ?? []).filter((n) =>
+    ['MA', 'M2', 'M3', 'MP'].includes(n)
+  );
+  if (names.length > 0 && rng() < 0.85) return pick(rng, names);
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  return [
+    'List',
+    ['List', genReal(ctx, d), genReal(ctx, d)],
+    ['List', genReal(ctx, d), genReal(ctx, d)],
+  ];
+}
+
+/**
+ * A list of lists made by slices 2 to 4 of
+ * `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`:
+ * element-wise arithmetic with a real or of a name with itself, a matrix
+ * function with a matrix result (`Transpose`, `Inverse`, `MatrixPower`,
+ * `RowReduce`, `MatrixMultiply`, `Diagonal` of a list), a product of two
+ * matrices, and `Map` of a function literal over rows that makes rows.
+ * Results that can have no value decline where they are not the value of
+ * the program, an operand of a matrix function or the list of `At`.
+ */
+function genMatrixRows(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const rows = () => genRows(ctx, d);
+  const matrix = () => genMatrix(ctx, d);
+  const r = rng();
+  if (r < 0.12) return ['Add', rows(), genReal(ctx, d)];
+  if (r < 0.2) return ['Multiply', genReal(ctx, d), rows()];
+  if (r < 0.25) return ['Negate', rows()];
+  if (r < 0.3) return ['Divide', rows(), pick(rng, [2, 3, -0.5])];
+  if (r < 0.36) {
+    const m = matrix();
+    return rng() < 0.5 ? ['Add', m, m] : ['Subtract', m, ['Multiply', 2, m]];
+  }
+  if (r < 0.44) return ['Transpose', matrix()];
+  if (r < 0.5) return ['Inverse', matrix()];
+  if (r < 0.58)
+    return ['MatrixPower', matrix(), pick(rng, [0, 1, 2, 3, -1, ...ctx.integers])];
+  if (r < 0.63) return ['RowReduce', matrix()];
+  if (r < 0.7) return ['MatrixMultiply', matrix(), matrix()];
+  if (r < 0.76) return ['Multiply', matrix(), matrix()];
+  if (r < 0.8) return ['Diagonal', genList(ctx, d)];
+  const p = `r${depth}`;
+  const body: Json[] = [['Multiply', 2, p], ['Add', p, genReal(ctx, d)], ['Negate', p], p];
+  return ['Map', ['Function', pick(rng, body), p], rng() < 0.5 ? matrix() : rows()];
+}
+
+/** A real that reads a list of lists by slices 2 to 4: the determinant,
+ *  the trace or the norm of a matrix (with an order), an element of the
+ *  sum of the rows, of a matrix product, of a flattened list, of a
+ *  diagonal, of a `Map` over rows, or a matrix function of a matrix that
+ *  can have no value. */
+function genMatrixReal(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const matrix = () => genMatrix(ctx, d);
+  const r = rng();
+  if (r < 0.12) return ['Determinant', matrix()];
+  if (r < 0.2) return ['Trace', pick(rng, [matrix(), ['Inverse', matrix()]])];
+  if (r < 0.28) return ['Norm', genRows(ctx, d)];
+  if (r < 0.34)
+    return ['Norm', genRows(ctx, d), pick(rng, [1, 2, 'PositiveInfinity', 0.5])];
+  if (r < 0.42) return ['At', ['Sum', matrix()], genIndex(ctx)];
+  if (r < 0.48) return ['At', ['Product', matrix()], genIndex(ctx)];
+  if (r < 0.56)
+    return ['At', ['MatrixMultiply', matrix(), genList(ctx, d)], genIndex(ctx)];
+  if (r < 0.62) return ['At', ['Flatten', genRows(ctx, d)], genIndex(ctx)];
+  if (r < 0.68) return ['At', ['Diagonal', matrix()], genIndex(ctx)];
+  if (r < 0.76) {
+    const p = `r${depth}`;
+    return [
+      'At',
+      [
+        'Map',
+        ['Function', pick(rng, [['Sum', p], ['Length', p], ['Norm', p], ['At', p, 1]]), p],
+        genRows(ctx, d),
+      ],
+      genIndex(ctx),
+    ];
+  }
+  if (r < 0.84) return ['At', genMatrixRows(ctx, d), genIndex(ctx), genIndex(ctx)];
+  if (r < 0.92)
+    return [
+      'Determinant',
+      pick<Json>(rng, [
+        ['Inverse', matrix()],
+        ['Multiply', matrix(), matrix()],
+        ['Transpose', matrix()],
+      ]),
+    ];
+  return ['At', ['Dot', matrix(), genList(ctx, d)], genIndex(ctx)];
 }
 
 /** A real that reads a list of lists: an element (`At` with two indexes,
@@ -2043,8 +2168,9 @@ function genRowReal(ctx: GenContext, depth: number): Json {
   if (r < 0.5) return ['At', ['At', rows, genIndex(ctx)], genIndex(ctx)];
   if (r < 0.65) return ['Length', rows];
   if (r < 0.8) return ['Length', ['At', rows, genIndex(ctx)]];
-  if (r < 0.9) return ['Count', rows];
-  return ['Length', [pick(rng, ['First', 'Last']), rows]];
+  if (r < 0.88) return ['Count', rows];
+  if (r < 0.92) return ['Length', [pick(rng, ['First', 'Last']), rows]];
+  return genMatrixReal(ctx, depth);
 }
 
 /** A tuple of two reals: a tuple name, a tuple literal, or a call of the
@@ -2265,7 +2391,7 @@ const EXPRESSION_CONTEXT: ContextBase = {
   lists: ['L', 'I', 'LN', 'VN', 'CL'],
   tuples: ['P'],
   tupleLists: ['LQ'],
-  rowLists: ['R', 'MA', 'M2'],
+  rowLists: ['R', 'MA', 'M2', 'M3'],
 };
 
 /**
@@ -2783,7 +2909,11 @@ export function generateProgram(
               ? genTupleList(ctx, 0)
               : value < 0.13
                 ? genRows(ctx, 0)
-                : genReal(ctx, 0);
+                : value < 0.16
+                  ? genMatrixRows(ctx, 0)
+                  : value < 0.19
+                    ? genMatrixReal(ctx, 0)
+                    : genReal(ctx, 0);
       if (rng() < 0.03) json = ['ReplaceAt', 'L', pick(rng, [1, 2, -1]), json];
     }
     if (nodeCount(json) <= options.size)
@@ -3139,7 +3269,8 @@ function boxValue(ce: ComputeEngine, v: Value, name?: string): Expression {
   if (typeof v === 'number') return ce.number(v);
   // A list of lists holds rows, which are lists; a list of tuples holds
   // tuples.
-  const rows = name !== undefined && ['R', 'MA', 'M2', 'RP', 'MP'].includes(name);
+  const rows =
+    name !== undefined && ['R', 'MA', 'M2', 'M3', 'RP', 'MP'].includes(name);
   if (Array.isArray(v))
     return ce.function(
       name === 'P' || name === 'T' ? 'Tuple' : 'List',

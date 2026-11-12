@@ -520,6 +520,18 @@ export function hostArrays(
             add(op.result);
           if (op.kind === 'call' && returnsRows[op.function] === true)
             addRows(op.result);
+          // A function of lists whose result can be its operand
+          // (`IRCollection.resultArray` `operand` or none:
+          // `_SYS.transpose([])`) is the array of the host when an operand
+          // is; one whose result is new at every depth (`new`) holds no
+          // array of the host.
+          if (
+            op.kind === 'collection' &&
+            op.resultArray !== 'new' &&
+            op.resultArray !== 'copy' &&
+            op.operands.some((v) => shared.has(v.id))
+          )
+            add(op.result);
           // A row of a list of the host, or of a list that holds one, is
           // an array of the host.
           if (op.kind === 'at' && member(op.operands[0])) add(op.result);
@@ -531,7 +543,7 @@ export function hostArrays(
             ((op.kind === 'copy' && op.levels === 1) ||
               op.kind === 'list' ||
               op.kind === 'convert' ||
-              op.kind === 'collection' ||
+              (op.kind === 'collection' && op.resultArray !== 'new') ||
               op.kind === 'replace-at' ||
               op.kind === 'append') &&
             op.operands.some(member)

@@ -233,6 +233,20 @@ import {
 } from './structured-in-place.js';
 import { JAVASCRIPT_POLICY } from './javascript-structured-policy.js';
 
+/** The runtime helper of `_SYS` of each matrix function, as the existing
+ *  emitter writes its head on the real lane (`Determinant`, `Trace`,
+ *  `Transpose`, `RowReduce`, `Inverse`, `MatrixPower` and `Diagonal` in
+ *  `javascript-target.ts`). */
+const MATRIX_HELPERS: Readonly<Record<string, string>> = {
+  'determinant': 'det',
+  'trace': 'trace',
+  'transpose': 'transpose',
+  'row-reduce': 'rref',
+  'inverse': 'inv',
+  'matrix-power': 'matpow',
+  'diagonal': 'diagonal',
+};
+
 /**
  * The helpers of `bigint-runtime.ts` that the bigint emitter of the existing
  * compiler calls for each integer function (`compile-bigint-emit.ts`): a
@@ -1664,8 +1678,31 @@ class Emitter {
         this.runtime.add(op.fn);
         return call(`_SYS.${op.fn}`, operands);
       case 'dot':
+      case 'matrix-multiply':
         this.runtime.add('matmul');
         return call('_SYS.matmul', operands);
+      // `Multiply` of two operands whose types state their ranks, one a
+      // matrix (`compileMatrixProduct()` in `compile-linear-algebra.ts`).
+      case 'matrix-product':
+        this.runtime.add('mul');
+        return call('_SYS.mul', operands);
+      // The matrix functions: the helper of the existing emitter for the
+      // head (`linearAlgebraHelper()` in `javascript-target.ts`, real
+      // lane), each a new array whose rows are new, or a number; `flatten`
+      // is the method of the existing emitter, a new array.
+      case 'determinant':
+      case 'trace':
+      case 'transpose':
+      case 'row-reduce':
+      case 'inverse':
+      case 'matrix-power':
+      case 'diagonal': {
+        const helper = MATRIX_HELPERS[op.fn];
+        this.runtime.add(helper);
+        return call(`_SYS.${helper}`, operands);
+      }
+      case 'flatten':
+        return method('flat(Infinity)');
       case 'take':
       case 'drop': {
         const count = operands[1].text;

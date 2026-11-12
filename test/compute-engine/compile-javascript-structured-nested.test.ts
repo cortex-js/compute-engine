@@ -451,6 +451,16 @@ describe('every rule that reads a list declines a list of lists it does not read
     Apply: [['Apply', lambda(['Length', 'r'], 'r'), m]],
     // A scalar head with a rule of its own (`Mod(a, 1)`, a fractional part).
     Mod: [['Mod', m, 1], ['Mod', m, 2]],
+    // The matrix functions (slice 3, compile-javascript-structured-nested2.test.ts).
+    Determinant: [['Determinant', m]],
+    Trace: [['Trace', m]],
+    Transpose: [['Transpose', m]],
+    RowReduce: [['RowReduce', m]],
+    Inverse: [['Inverse', m]],
+    MatrixPower: [['MatrixPower', m, 2]],
+    MatrixMultiply: [['MatrixMultiply', m, m], ['MatrixMultiply', m, 'L']],
+    Diagonal: [['Diagonal', m]],
+    Flatten: [['Flatten', m]],
   });
   const cases: [string, string, MathJsonExpression][] = [];
   for (const [operand, m] of [['a list of lists', 'M'], ['a row read', R]] as const)
@@ -523,13 +533,14 @@ describe('the declines of slice 1', () => {
     ['a list of lists of complex numbers', ['At', 'Z', 1, 1], /the input Z has the type list<list<complex>>, and the profile admits a list of lists only of rows of reals/],
     // A product or a power of lists of lists (a user decision, 2026-11-11:
     // the remedy is a `matrix` declaration, slice 4).
-    ['a product of lists of lists', ['Multiply', 'M', 'M'], /Multiply with the list operand M of the type `list<list<real>>` is not in the profile/],
+    ['a product of lists of lists', ['Multiply', 'M', 'M'], /Multiply with the list operand M of the type `list<list<real>>` is not in the profile, which reads a product of lists whose types state their ranks: declare M a matrix/],
     ['a power of a list of lists', ['Power', 'M', 2], /Power with the list operand M is not in the profile/],
-    ['a product of matrices', ['Multiply', 'A', 'A'], /Multiply with the list operand A of the type `list<list<real>>` is not in the profile/],
-    ['element-wise arithmetic of a list of lists (slice 2)', ['Add', 'M', 1], /Add with the list operand M of the type `list<list<real>>` is not in the profile/],
-    ['a function of a list of lists (slice 2)', ['Map', ['Function', ['Length', 'r'], 'r'], 'M'], /Map with the function .* is not in the profile/],
-    ['a sum of the rows (slice 2)', ['Sum', 'M'], /Sum of one operand of the type `list<list<real>>` is not in the profile/],
-    ['a matrix function (slice 3)', ['Determinant', 'A'], /unsupported head Determinant|Determinant/],
+    // A product of two matrices is in the profile since slice 4
+    // (compile-javascript-structured-nested2.test.ts), with no other factor.
+    ['a product of matrices and a number', ['Multiply', 'x', 'A', 'A'], /Multiply with the list operand A of the type `list<list<real>>` is not in the profile, which reads a product of two matrices, or of a matrix and a list, with no other factor/],
+    // Rows of different lengths have no sum of rows (slice 2,
+    // compile-javascript-structured-nested2.test.ts).
+    ['a sum of the rows of rows of different lengths', ['Sum', 'M'], /Sum of the rows of M of the type list<list<real>> is not in the profile/],
     ['a row read in a sum', ['Sum', ['At', 'M', 'i']], /the row read .*, which is undefined for an index out of range, is not in the profile as an operand of Sum/],
     ['a row read as a local', ['Block', ['Declare', 'r', "'list<real>'", ['At', 'M', 'i']], ['Length', 'r']], /the row read .*, which is undefined for an index out of range, is not in the profile as an operand of Declare/],
     // The existing emitter writes `(If(…)).length`, which throws for an

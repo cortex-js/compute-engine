@@ -35,10 +35,13 @@ import {
 } from './constant-folding.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { realPowerBranchTerms } from '../numerics/real-power.js';
+import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
+import { flattenMayOpenKeptValue } from '../library/linear-algebra.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
   JavaScriptTarget,
   integrateDepth,
+  isIndexedCollectionOperand,
   isNonFiniteBound,
   type JavaScriptBody,
   type JavaScriptBodyEmitter,
@@ -136,7 +139,9 @@ import {
   FUNCTION_OPERAND_HEADS,
   functionOperandOf,
   functionOperandParts,
+  hasRows,
   literalSeedOf,
+  matrixResultCanBeAbsent,
   recordUserFunctionOperand,
   userFunctionOperandSymbol,
   lowerStructuredProgram,
@@ -3545,6 +3550,25 @@ export const NESTED_OPERAND_HEADS: ReadonlySet<string> = new Set([
   'ListJoin',
   'RotateLeft',
   'RotateRight',
+  // Slice 3: the matrix functions (`matrixFunctionRule()`).
+  'Determinant',
+  'Trace',
+  'Transpose',
+  'RowReduce',
+  'Inverse',
+  'MatrixPower',
+  'MatrixMultiply',
+  'Diagonal',
+  'Flatten',
+  'Norm',
+  'Dot',
+  // Slice 2: element-wise arithmetic of lists of lists
+  // (`nestedElementwise()`), and `Map` of the rows (`functionOperandRule()`).
+  'Map',
+  'Add',
+  'Multiply',
+  'Negate',
+  'Divide',
 ]);
 
 /**
@@ -3589,7 +3613,7 @@ function withoutNestedOperands(
             `\`${fragmentTypeToString(nestedType(nested)!)}\`, a list of lists, is not ` +
             `in the structured route, which reads a list of lists with At, Length, ` +
             `First, Last, Count, Take, Drop, Rest, Reverse, Join, the rotations, ` +
-            `ReplaceAt and a list literal or a comprehension of rows`
+            `ReplaceAt, a list literal or a comprehension of rows, and the matrix functions`
         );
       if ('type' in facts && isNestedListType(facts.type))
         return w.refuse(
@@ -5510,6 +5534,309 @@ function foldRule(
 }
 
 //
+// Matrix functions on the structured route (slice 3 of
+// `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`).
+//
+
+/** The heads of the matrix functions on the structured route
+ *  (`matrixFunctionRule()`); `Norm` is one when it reads a list of lists or
+ *  an order, and `Dot` when it reads a list of lists. */
+const MATRIX_HEADS: Readonly<Record<string, true>> = {
+  Determinant: true,
+  Trace: true,
+  Transpose: true,
+  RowReduce: true,
+  Inverse: true,
+  MatrixPower: true,
+  MatrixMultiply: true,
+  Diagonal: true,
+  Flatten: true,
+  Norm: true,
+};
+
+/** The kind and the rank of the numbers of a value of the facts `facts`: a
+ *  list of reals or of integers, or a list of such lists at every depth,
+ *  held as an array; `undefined` for another value (a tuple, a list of
+ *  tuples). */
+function numericCellsOf(
+  facts: FragmentValueFacts<ScalarRepresentation>
+): { kind: 'real' | 'integer'; rank: number } | undefined {
+  if (facts.representation !== 'array') return undefined;
+  let type: FragmentValueType | FragmentListType = facts.type;
+  let rank = 0;
+  while (type.kind === 'list') {
+    rank += 1;
+    type = type.element;
+  }
+  return rank >= 1 && (type.kind === 'real' || type.kind === 'integer')
+    ? { kind: type.kind, rank }
+    : undefined;
+}
+
+/** The fragment type of a list of the rank `rank` (1 or more) of numbers of
+ *  the kind `kind`. */
+function numericListType(
+  kind: 'real' | 'integer',
+  rank: number
+): FragmentListType {
+  let type: FragmentListType = { kind: 'list', element: { kind } };
+  for (let r = 1; r < rank; r++) type = { kind: 'list', element: type };
+  return type;
+}
+
+/** Whether the engine type of `node` is a matrix: a list type of two
+ *  stated dimensions (`matrix`, `matrix<m×n>`), whose rows have one length
+ *  (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`,
+ *  section 2). */
+function isEngineMatrix(node: Expression): boolean {
+  const type = node.type.type;
+  return (
+    typeof type === 'object' &&
+    type.kind === 'list' &&
+    type.dimensions?.length === 2
+  );
+}
+
+/**
+ * The matrix functions on the structured route, for a matrix: a list of
+ * lists of rank 2 of reals or of integers (`numericCellsOf()`), as the
+ * existing emitter writes each head on the real lane (`javascript-target.ts`,
+ * `linearAlgebraHelper()`); the lowering is `collection()` in
+ * `javascript-structured-lower.ts`, with the names of
+ * `docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`, section
+ * 4:
+ *
+ * - `Determinant(M)` and `Trace(M)`: a real, `_SYS.det(M)` and
+ *   `_SYS.trace(M)` (`NaN` for a matrix that is not square, or rows of
+ *   different lengths). Refused when the engine type of the node is not a
+ *   number (`Trace` of a `list<list<real>>` is `number | tensor`, and the
+ *   existing compiler writes its parent with `_SYS.bcast`).
+ * - `Transpose(M)` of a matrix by its engine type (`isEngineMatrix()`): a
+ *   matrix of the same numbers, `_SYS.transpose(M)`. Refused: rows of
+ *   different lengths (`list<list<real>>`), whose transpose has `undefined`
+ *   elements, and a rank other than 2.
+ * - `RowReduce(M)` and `Inverse(M)`: a matrix of reals, `_SYS.rref(M)` and
+ *   `_SYS.inv(M)` (which throws for a matrix that is not square).
+ * - `MatrixPower(M, p)` with an integer exponent (an integer fact, and an
+ *   integer literal or an engine type `integer`, as the existing compiler
+ *   requires): a matrix of reals, `_SYS.matpow(M, p)` (which throws for a
+ *   matrix that is not square and an exponent other than 1). Refused: a
+ *   literal exponent beyond the limit of the interpreter, which the existing
+ *   compiler declines. `Power(M, n)` of a `matrix` is `MatrixPower` in the
+ *   canonical form, and `Power(M, -1)` is `Inverse`.
+ * - `MatrixMultiply(A, B)` and `Dot(A, B)` with a matrix operand: the
+ *   matrix product `_SYS.matmul(A, B)` of two matrices (a matrix of reals),
+ *   of a matrix and a list, or of a list and a matrix (a list of reals);
+ *   `MatrixMultiply` of two lists is their inner product, a real, as `Dot`.
+ * - `Diagonal(M)` of a matrix by its engine type: the list of its diagonal;
+ *   `Diagonal(L)` of a list: the square matrix with `L` on its diagonal,
+ *   `_SYS.diagonal(…)`.
+ * - `Flatten(L)` of a list of any rank of reals or of integers: the list of
+ *   its numbers in order, `L.flat(Infinity)`.
+ * - `Norm(M)` of a list of lists of any rank, and `Norm(L, p)` of a list,
+ *   a tuple or a list of lists with a real or integer order `p`:
+ *   `_SYS.norm(M)` and `_SYS.norm(L, p)`. Refused: an order that is not a
+ *   number (`"Frobenius"`).
+ *
+ * A list result can have no value (`matrixResultCanBeAbsent()`): the
+ * admission refuses its uses but the value of the program, the operand of
+ * a matrix function and the list of an `At` (`refuseAbsentMatrixUses()`).
+ *
+ * `undefined` for `Dot` of no list of lists and for `Norm` of one list or
+ * tuple of numbers: the rule of `collectionRule()` reads them.
+ */
+function matrixFunctionRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> | undefined {
+  if (!isFunction(node)) return undefined;
+  const head = node.operator;
+  const refuse = (message: string): never =>
+    w.refuse(node, 'signature', `${head} ${message}`);
+  const facts = operandFacts(node, scope, context, w);
+  const cells = facts.map(numericCellsOf);
+  const nested = cells.some((c) => c !== undefined && c.rank >= 2);
+  if (head === 'Dot' && !nested) return undefined;
+  if (head === 'Norm' && !nested && node.nops === 1) return undefined;
+  const conversions = facts.map((f) => w.convert(f, f.type)!);
+  const describe = (i: number) =>
+    `${nodeText(node.ops[i])} of the type \`${fragmentTypeToString(facts[i].type)}\``;
+  const arity = (n: number) => {
+    if (node.nops !== n)
+      refuse(
+        `with ${node.nops} operands is not in the structured route, which reads ${n}`
+      );
+  };
+  /** The kind of the numbers of the operand `i`, a matrix (a list of lists
+   *  of rank 2 of reals or of integers). */
+  const matrixAt = (i: number): 'real' | 'integer' => {
+    const c = cells[i];
+    if (c === undefined || c.rank !== 2)
+      refuse(
+        `of ${describe(i)} is not in the structured route, which reads a matrix ` +
+          `(a list of lists of reals or of integers of rank 2)`
+      );
+    return c!.kind;
+  };
+  /** Refuse the operand `i` that is not a matrix by its engine type. */
+  const rectangularAt = (i: number) => {
+    if (!isEngineMatrix(node.ops[i]))
+      refuse(
+        `of ${nodeText(node.ops[i])} of the type ${node.ops[i].type.toString()} is not in ` +
+          `the structured route, which reads a matrix by its type (matrix, ` +
+          `matrix<m×n>): rows of different lengths give undefined elements`
+      );
+  };
+  const value = (type: FragmentValueType | FragmentListType) =>
+    w.valueFacts(node, type, conversions);
+  // The existing compiler reads each list operand of these heads with
+  // `collArg()`, which declines an operand that is not an indexed
+  // collection by its engine type (`Determinant(MatrixMultiply(A, B))`,
+  // whose operand has the type `matrix | number | vector`), and `Flatten`
+  // of an operand whose type does not show which elements are lists.
+  if (head !== 'Norm')
+    node.ops.forEach((op, i) => {
+      if (cells[i] === undefined) return;
+      if (!isIndexedCollectionOperand(op))
+        refuse(
+          `of ${nodeText(op)} of the type ${op.type.toString()} is not in the structured ` +
+            `route, which reads an operand that is a list by its type, as the existing ` +
+            `compiler does`
+        );
+      if (head === 'Flatten' && flattenMayOpenKeptValue(op.type.type, Infinity))
+        refuse(
+          `of ${nodeText(op)} of the type ${op.type.toString()} is not in the structured ` +
+            `route, which reads an operand whose type shows which elements are lists, as ` +
+            `the existing compiler does`
+        );
+    });
+  switch (head) {
+    case 'Determinant':
+    case 'Trace':
+      arity(1);
+      matrixAt(0);
+      if (!isSubtype(node.type.type, 'number'))
+        refuse(
+          `of the type ${node.type.toString()} is not in the structured route: the existing ` +
+            `compiler reads a value of a type that admits a list with _SYS.bcast`
+        );
+      return value({ kind: 'real' });
+    case 'Transpose': {
+      arity(1);
+      const kind = matrixAt(0);
+      rectangularAt(0);
+      return value(numericListType(kind, 2));
+    }
+    case 'RowReduce':
+    case 'Inverse':
+      arity(1);
+      matrixAt(0);
+      return value(numericListType('real', 2));
+    case 'MatrixPower': {
+      arity(2);
+      matrixAt(0);
+      const p = node.op2;
+      if (
+        facts[1].type.kind !== 'integer' ||
+        !(
+          (isNumber(p) && p.isInteger === true) ||
+          isSubtype(p.type.type, 'integer')
+        )
+      )
+        refuse(
+          `with ${describe(1)} is not in the structured route, which reads an integer ` +
+            `exponent: the interpreter takes the principal square root of a matrix ` +
+            `for a half-integer exponent, which _SYS.matpow does not compute`
+        );
+      if (isNumber(p) && Math.abs(p.re) > MAX_MATRIX_POWER_EXPONENT)
+        refuse(
+          `with an exponent beyond ${MAX_MATRIX_POWER_EXPONENT} is not in the structured ` +
+            `route: the interpreter keeps the power symbolic`
+        );
+      return value(numericListType('real', 2));
+    }
+    case 'MatrixMultiply':
+    case 'Dot': {
+      arity(2);
+      const ranks = cells.map((c, i) => {
+        if (c === undefined || c.rank > 2)
+          refuse(
+            `of ${describe(i)} is not in the structured route, which reads a matrix ` +
+              `or a list of reals or of integers`
+          );
+        return c!.rank;
+      });
+      if (ranks[0] === 1 && ranks[1] === 1) return value({ kind: 'real' });
+      return value(
+        numericListType('real', ranks[0] === 2 && ranks[1] === 2 ? 2 : 1)
+      );
+    }
+    case 'Diagonal': {
+      arity(1);
+      const c = cells[0];
+      if (c === undefined || c.rank > 2)
+        refuse(
+          `of ${describe(0)} is not in the structured route, which reads a matrix or a ` +
+            `list of reals or of integers`
+        );
+      if (c!.rank === 1) return value(numericListType(c!.kind, 2));
+      rectangularAt(0);
+      return value(numericListType(c!.kind, 1));
+    }
+    case 'Flatten': {
+      arity(1);
+      const c = cells[0];
+      if (c === undefined)
+        refuse(
+          `of ${describe(0)} is not in the structured route, which reads a list of ` +
+            `reals or of integers, at any rank`
+        );
+      // `Flatten([])` has the type `list` (any elements): the existing
+      // compiler reads an element of it with `_SYS.atWithValueMarker`,
+      // `undefined` out of range.
+      if (!isSubtype(node.type.type, 'list<number>'))
+        refuse(
+          `of the type ${node.type.toString()} is not in the structured route, which ` +
+            `makes a list of numbers by its type`
+        );
+      return value(numericListType(c!.kind, 1));
+    }
+    case 'Norm': {
+      if (node.nops !== 1 && node.nops !== 2)
+        refuse(
+          `with ${node.nops} operands is not in the structured route, which reads a list and an order`
+        );
+      if (
+        cells[0] === undefined &&
+        !(facts[0].type.kind === 'point' && collectionElement(facts[0]) !== undefined)
+      )
+        refuse(
+          `of ${describe(0)} is not in the structured route, which reads a list of ` +
+            `reals or of integers at any rank, or a tuple of reals`
+        );
+      if (
+        node.nops === 2 &&
+        facts[1].type.kind !== 'real' &&
+        facts[1].type.kind !== 'integer'
+      )
+        refuse(
+          `with the order ${describe(1)} is not in the structured route, which reads ` +
+            `an order that is a real or an integer`
+        );
+      if (!isSubtype(node.type.type, 'number'))
+        refuse(
+          `of the type ${node.type.toString()} is not in the structured route: the existing ` +
+            `compiler reads a value of a type that admits a list with _SYS.bcast`
+        );
+      return value({ kind: 'real' });
+    }
+  }
+  return undefined;
+}
+
+//
 // Functions of lists and function operands on the structured route (slices
 // 2 and 3 of `docs/plans/2026-11-11-structured-collections-and-lambdas.md`).
 //
@@ -5558,6 +5885,8 @@ function foldRule(
  *   step)`, a list of integers when the three are integers (an empty list
  *   for a step of the other sign, or a step 0 at run time). Refused: the
  *   literal step 0, which the existing compiler declines.
+ * - The matrix functions, `Norm` of a list of lists or with an order, and
+ *   `Dot` of a list of lists: `matrixFunctionRule()`.
  */
 function collectionRule(
   node: Expression,
@@ -5581,6 +5910,12 @@ function collectionRule(
   // `list<number>`): the existing compiler reads such a value as a possible
   // list, and writes its parent with `_SYS.bcast` (`x · (2 / Norm(…))` is
   // `x * (2 / n)` there, `x * 2 / n` on the route, another double).
+  // A matrix function of a list of lists (`matrixFunctionRule()`); `Dot` of
+  // a list of lists is a matrix product, whose value is a list.
+  if (Object.hasOwn(MATRIX_HEADS, head) || head === 'Dot') {
+    const matrix = matrixFunctionRule(node, scope, context, w);
+    if (matrix !== undefined) return matrix;
+  }
   if (
     ['Norm', 'Mean', 'Median', 'Variance', 'Dot'].includes(head) &&
     !isSubtype(node.type.type, 'number')
@@ -5984,10 +6319,19 @@ function functionOperandRule(
               ? [node.nops === 3 ? node.op3.type.type : element, element]
               : [element];
         declared?.forEach((p, i) => {
-          if (p.type === undefined || (!user && p.type !== 'tuple')) return;
+          if (
+            p.type === undefined ||
+            (!user && p.type !== 'tuple' && p.type !== 'list')
+          )
+            return;
           let annotation: Type;
           try {
-            annotation = p.type === 'tuple' ? parseType(p.tuple!) : p.type;
+            annotation =
+              p.type === 'tuple'
+                ? parseType(p.tuple!)
+                : p.type === 'list'
+                  ? parseType(p.list!)
+                  : p.type;
           } catch {
             annotation = 'unknown';
           }
@@ -6066,7 +6410,12 @@ function functionOperandRule(
        *  in the scope of the node. `predicate`: the body is the predicate
        *  of `Filter` or `Count`, whose value is only tested. */
       const body = (
-        types: readonly ('real' | 'integer' | FragmentElementType)[],
+        types: readonly (
+          | 'real'
+          | 'integer'
+          | FragmentElementType
+          | FragmentListType
+        )[],
         predicate = false
       ) => {
         const inner = w.open(node, scope);
@@ -6081,18 +6430,31 @@ function functionOperandRule(
             p.type === 'tuple' && p.tuple !== undefined
               ? structuredTupleType(parseType(p.tuple), mode)
               : undefined;
+          // A parameter typed with a list type takes a row of a list of
+          // lists (`Map` of rows), and only one.
           if (
             p.type !== undefined &&
             (p.type === 'tuple'
               ? type.kind !== 'point' || declaredTuple?.size !== type.size
-              : type.kind === 'point' ||
-                (p.type === 'integer' && type.kind !== 'integer'))
+              : p.type === 'list'
+                ? type.kind !== 'list'
+                : type.kind === 'point' ||
+                  type.kind === 'list' ||
+                  (p.type === 'integer' && type.kind !== 'integer'))
           )
             refuse(
-              `whose parameter ${p.symbol.symbol} is declared ${p.tuple ?? p.type} and takes ` +
+              `whose parameter ${p.symbol.symbol} is declared ${p.tuple ?? p.list ?? p.type} and takes ` +
                 `a ${type.kind === 'point' ? 'tuple' : type.kind} is not in the structured route`
             );
-          w.bind(p.symbol, inner, p.symbol.symbol, type, 'index');
+          // A row is a parameter, held as an array, as an argument of a
+          // helper is: a list is not an index.
+          w.bind(
+            p.symbol,
+            inner,
+            p.symbol.symbol,
+            type,
+            type.kind === 'list' ? 'parameter' : 'index'
+          );
         });
         // A body whose engine type admits a value that is not a number or a
         // boolean (`fm(L)` of `fm: (list<real>) -> real` has the type
@@ -6112,7 +6474,9 @@ function functionOperandRule(
           !(
             head === 'Map' &&
             structuredTupleType(engineType, mode) !== undefined
-          )
+          ) &&
+          // A row: the function of a `Map` of the rows of a list of lists.
+          !(head === 'Map' && isSubtype(engineType, 'list<number>'))
         )
           refuse(
             `whose function has a value of the type ${lambda!.body.type.toString()} is not in the ` +
@@ -6163,6 +6527,36 @@ function functionOperandRule(
             refuse(
               'over several lists is not in the structured route, which maps one list or tuple'
             );
+          // A function literal of the rows of a list of lists of rank 2
+          // (slice 2 of the nested lists): its parameter takes each row as
+          // it is (`M.map((_x) => _f(_x))`), and its value is a number or a
+          // row, a list of numbers.
+          const rows = lambda === undefined ? undefined : rowsOf(value(node.op2));
+          if (rows !== undefined) {
+            const facts = value(node.op2);
+            if (numericCellsOf(facts)?.rank !== 2)
+              refuse(
+                `of ${nodeText(node.op2)} of the type \`${fragmentTypeToString(facts.type)}\` is not ` +
+                  `in the structured route, which maps the rows of a list of lists of reals ` +
+                  `or of integers of rank 2`
+              );
+            const mapped = body([rows]);
+            if (mapped.type.kind === 'list') {
+              if (numericCellsOf(mapped)?.rank !== 1)
+                refuse(
+                  `whose function has a value of the type \`${fragmentTypeToString(mapped.type)}\` ` +
+                    `is not in the structured route, which maps a row to a number or to a list of numbers`
+                );
+              return w.valueFacts(
+                node,
+                { kind: 'list', element: mapped.type },
+                [w.convert(facts, facts.type)!]
+              );
+            }
+            return w.valueFacts(node, list(numeric(mapped)), [
+              w.convert(facts, facts.type)!,
+            ]);
+          }
           if (lambda !== undefined) {
             // A function literal of a list of numbers or of tuples, whose
             // parameter takes each element as it is
@@ -6380,6 +6774,10 @@ function elementwiseRule(
           `${head} with the tuple operand ${nodeText(node.ops[point])} is not in the ` +
             `structured route, which reads a tuple with At and Length and folds it`
         );
+      // Lists of lists: element-wise at every depth, with scalar operands
+      // (`nestedElementwise()`).
+      if (facts.some((f) => (numericCellsOf(f)?.rank ?? 0) >= 2))
+        return nestedElementwise(head, node, facts, scope, context, w);
       for (const [i, f] of facts.entries()) {
         const kind = f.type.kind;
         if (kind === 'list') {
@@ -6429,7 +6827,25 @@ function elementwiseRule(
       const lists = node.ops.filter((_, i) => facts[i].type.kind === 'list');
       if (lists.length > 1) {
         const keys = lists.map((op) => lengthKey(op, scope, context, w));
-        if (keys.some((k) => k === undefined) || new Set(keys).size > 1)
+        // Lists whose engine types state one length (`vector<2>`, the type
+        // of a matrix product `M·v` of a `matrix<2x2>`), which the host
+        // supplies or the product gives.
+        const width = (op: Expression) => {
+          const t = op.type.type;
+          return typeof t === 'object' &&
+            t.kind === 'list' &&
+            t.dimensions?.length === 1 &&
+            t.dimensions[0] >= 0
+            ? t.dimensions[0]
+            : undefined;
+        };
+        const widths = lists.map(width);
+        const stated =
+          widths.every((n) => n !== undefined) && new Set(widths).size === 1;
+        if (
+          !stated &&
+          (keys.some((k) => k === undefined) || new Set(keys).size > 1)
+        )
           return w.refuse(
             node,
             'signature',
@@ -6450,6 +6866,231 @@ function elementwiseRule(
         { kind: 'list', element: { kind: integer ? 'integer' : 'real' } },
         facts.map((f) => w.convert(f, f.type)!)
       );
+    },
+  };
+}
+
+/**
+ * The element-wise form of `head` (`ELEMENTWISE_HEADS`) with a list of lists
+ * among its operands
+ * (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`, slice
+ * 2): the operator applied to each number at every depth, with each scalar
+ * operand, as the existing emitter writes it, `_SYS.bcast((_tv1, _tv2) =>
+ * (_tv1 + _tv2), M, 1)`, which evaluates each operand once and recurses
+ * into each array. The lowering writes a `build` per level
+ * (`elementwise()` in `javascript-structured-lower.ts`). The result is a
+ * list of lists of the rank of the list operands, of integers when every
+ * number and every scalar operand is an integer (a quotient is a real).
+ *
+ * Refused: a list operand that is not a list of lists of numbers, list
+ * operands of different ranks (`_SYS.bcast` pairs each number of the list of
+ * lower rank with a row: `[[1, 2], [3, 4]] + [10, 20]` is
+ * `[[11, 12], [23, 24]]`), two list operands whose lengths are not equal by
+ * construction at every depth (`nestedLengthKeys()`: `_SYS.bcast` gives
+ * `NaN` for two lists of different lengths and `[NaN, NaN]` for two rows of
+ * different lengths), a product of two list operands (a matrix product,
+ * which the existing compiler chooses at run time for a list of lists:
+ * slice 4 reads a product by the types), and a scalar operand that is not a
+ * real or an integer, or that reads a name with no declared type.
+ */
+function nestedElementwise(
+  head: string,
+  node: Expression & { ops: readonly Expression[] },
+  facts: readonly FragmentValueFacts<ScalarRepresentation>[],
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const refuse = (message: string) =>
+    w.refuse(node, 'signature', `${head} ${message}`);
+  const lists = facts
+    .map((f, i) => (f.type.kind === 'list' ? i : -1))
+    .filter((i) => i >= 0);
+  const cells = facts.map(numericCellsOf);
+  for (const i of lists)
+    if (cells[i] === undefined)
+      return refuse(
+        `with the list operand ${nodeText(node.ops[i])} of the type ` +
+          `\`${fragmentTypeToString(facts[i].type)}\` is not in the structured route`
+      );
+  // A product of a list of lists and another list is a matrix product
+  // (slice 4): of two operands, each a matrix by its engine type or a list
+  // of numbers, `_SYS.mul(A, B)`, as the existing compiler writes it when
+  // the types state the ranks (`compileMatrixProduct()`). A `list<list<…>>`
+  // operand declines: the existing compiler chooses the product by the
+  // shape of the value at run time (`_SYS.matrixProductShape`); the remedy
+  // is a `matrix` declaration (a user decision of 2026-11-11).
+  if (head === 'Multiply' && lists.length > 1) {
+    const i = lists.find((k) => cells[k]!.rank >= 2)!;
+    const unsettled = lists.find(
+      (k) => cells[k]!.rank >= 2 && !isEngineMatrix(node.ops[k])
+    );
+    if (unsettled !== undefined)
+      return refuse(
+        `with the list operand ${nodeText(node.ops[unsettled])} of the type ` +
+          `\`${fragmentTypeToString(facts[unsettled].type)}\` is not in the structured route, ` +
+          `which reads a product of lists whose types state their ranks: declare ` +
+          `${nodeText(node.ops[unsettled])} a matrix`
+      );
+    if (node.ops.length !== 2 || lists.some((k) => cells[k]!.rank > 2))
+      return refuse(
+        `with the list operand ${nodeText(node.ops[i])} of the type ` +
+          `\`${fragmentTypeToString(facts[i].type)}\` is not in the structured route, ` +
+          `which reads a product of two matrices, or of a matrix and a list, with no other factor`
+      );
+    const ranks = lists.map((k) => cells[k]!.rank);
+    return w.valueFacts(
+      node,
+      numericListType('real', ranks[0] === 2 && ranks[1] === 2 ? 2 : 1),
+      facts.map((f) => w.convert(f, f.type)!)
+    );
+  }
+  const rank = cells[lists[0]]!.rank;
+  if (lists.some((i) => cells[i]!.rank !== rank))
+    return refuse(
+      `of the lists ${lists.map((i) => nodeText(node.ops[i])).join(' and ')} of the ` +
+        `ranks ${lists.map((i) => cells[i]!.rank).join(' and ')} is not in the ` +
+        `structured route, which reads lists of one rank: the existing compiler ` +
+        `pairs each element of the list of lower rank with a row`
+    );
+  for (const [i, f] of facts.entries()) {
+    if (f.type.kind === 'list') continue;
+    if (f.type.kind !== 'real' && f.type.kind !== 'integer')
+      return refuse(
+        `of a list of lists and the operand ${nodeText(node.ops[i])} of the type ` +
+          `\`${fragmentTypeToString(f.type)}\` is not in the structured route, ` +
+          `which applies an operator to the numbers of a list of lists and to real operands`
+      );
+    const undeclared = undeclaredNames(node.ops[i]).find((name) => {
+      const role = w.binding(scope, name.symbol)?.role;
+      if (role === 'local' || role === 'index') return false;
+      const fact = scope.facts.get(name);
+      return !(
+        fact !== undefined &&
+        'type' in fact &&
+        (fact.type.kind === 'real' || fact.type.kind === 'integer')
+      );
+    });
+    if (undeclared !== undefined)
+      return refuse(
+        `of a list of lists and the operand ${nodeText(node.ops[i])}, which reads ` +
+          `the name ${nodeText(undeclared)} with no declared type, is not in the ` +
+          `structured route: the existing compiler reads such a name as a possible list`
+      );
+  }
+  if (lists.length > 1) {
+    const keys = lists.map((i) => nestedLengthKeys(node.ops[i], scope, context, w));
+    if (!keys[0].some((k) => keys.every((other) => other.includes(k))))
+      return refuse(
+        `of the lists ${lists.map((i) => nodeText(node.ops[i])).join(' and ')}, whose ` +
+          `lengths are not equal by construction at every depth, is not in the ` +
+          `structured route: the existing compiler gives NaN for two lists of different lengths`
+      );
+  }
+  const integer =
+    head !== 'Divide' &&
+    facts.every((f, i) =>
+      f.type.kind === 'list' ? cells[i]!.kind === 'integer' : f.type.kind === 'integer'
+    );
+  return w.valueFacts(
+    node,
+    numericListType(integer ? 'integer' : 'real', rank),
+    facts.map((f) => w.convert(f, f.type)!)
+  );
+}
+
+/**
+ * The keys of the lengths of the list of lists `node` at every depth, typed
+ * in `scope`: two lists of lists that share a key have equal lengths at
+ * every depth by construction. A read of a name (two reads of one name in
+ * one expression read one value, as for `lengthKey()`), an engine type that
+ * states every dimension (`matrix<2x2>`, the type of a literal of rows of
+ * one length), and an element-wise result (the keys of its list operands,
+ * which its rule found equal), except a product of two lists. No other head
+ * passes on the keys of an operand: `Transpose` swaps the dimensions, and a
+ * `Map` over rows or a matrix function can change them; each has the keys
+ * of its engine type only.
+ */
+function nestedLengthKeys(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): string[] {
+  const keys: string[] = [];
+  if (isSymbol(node)) keys.push(`name ${node.symbol}`);
+  const type = node.type.type;
+  if (
+    typeof type === 'object' &&
+    type.kind === 'list' &&
+    type.dimensions !== undefined &&
+    type.dimensions !== null &&
+    type.dimensions.length >= 2 &&
+    type.dimensions.every((d) => d >= 0) &&
+    typeof type.elements === 'string'
+  )
+    keys.push(`dimensions ${type.dimensions.join('x')}`);
+  if (
+    isFunction(node) &&
+    ELEMENTWISE_HEADS.includes(node.operator) &&
+    isLibraryOperator(node, node.operator)
+  ) {
+    const lists = node.ops.filter(
+      (op) => w.value(op, scope, context).type.kind === 'list'
+    );
+    // A product of two lists is a matrix product (`_SYS.mul`), whose shape
+    // is not the shape of an operand: only the dimensions of its engine
+    // type, above, are its keys. The other element-wise heads keep the
+    // shape of their list operands, which their rule found equal.
+    if (lists.length > 0 && !(node.operator === 'Multiply' && lists.length > 1))
+      keys.push(...nestedLengthKeys(lists[0], scope, context, w));
+  }
+  return keys;
+}
+
+/**
+ * The rule `rule` of `Sum` or `Product`, with the fold of the rows of a
+ * matrix (`Sum(M)`, `Product(M)` of one list of lists): the list of the
+ * sums (products) of the rows element by element, as the existing emitter
+ * writes it, `(M).reduce((_a, _b) => _SYS.add(_a, _b), 0)`
+ * (`foldRows()` in `javascript-structured-lower.ts`). A list of integers
+ * when the numbers are integers.
+ *
+ * Refused: a list of lists that is not a matrix of rank 2 by its engine
+ * type, or that can have no row (`hasRows()`): `_SYS.add` of two rows of
+ * different lengths is `NaN`, and the sum of the empty list is the number
+ * `0`, other shapes than a list
+ * (`docs/plans/2026-11-11-structured-nested-lists-and-matrices.md`, section
+ * 7); the remedy is a `matrix` declaration.
+ */
+function withFoldOfRows(
+  rule: FragmentRule<ScalarRepresentation>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      if (!isFoldNode(node) || !isFunction(node))
+        return 'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      const [collection] = operandFacts(node, scope, context, w);
+      const cells = numericCellsOf(collection);
+      if (cells === undefined || cells.rank < 2)
+        return 'walk' in rule
+          ? rule.walk(node, scope, context, w)
+          : w.signatures(node, scope, context, rule.signatures);
+      if (cells.rank !== 2 || !isEngineMatrix(node.op1) || !hasRows(node.op1))
+        return w.refuse(
+          node,
+          'signature',
+          `${node.operator} of the rows of ${nodeText(node.op1)} of the type ` +
+            `${node.op1.type.toString()} is not in the structured route, which folds the ` +
+            `rows of a matrix of one row or more by its type (matrix, matrix<m×n>): ` +
+            `the existing compiler gives NaN for rows of different lengths and the ` +
+            `number 0 for no row`
+        );
+      return w.valueFacts(node, numericListType(cells.kind, 1), [
+        w.convert(collection, collection.type)!,
+      ]);
     },
   };
 }
@@ -7288,6 +7929,7 @@ function refuseUnsettledCollection(
 ): void {
   if (!admission.structured || !isFunction(node)) return;
   const head = node.operator;
+  if (admission.testOperations.has(head)) return;
   let operands: readonly Expression[];
   if (
     Object.hasOwn(FUNCTION_OPERAND_HEADS, head) &&
@@ -7345,7 +7987,11 @@ function refuseUnsettledCollection(
       const t = a.type.type;
       return typeof t !== 'string' && t.kind === 'tuple';
     };
+    // With a list of lists (a matrix) as an operand, the existing compiler
+    // calls `_SYS.matmul` whatever the widths (`compileStaticInnerProduct()`
+    // reads two lists of one stated width only).
     if (
+      !node.ops.some((a) => isNestedEngineList(a.type.type)) &&
       node.ops.some(
         (a) => !isTupleType(a) && staticCollectionWidth(a) !== undefined
       )
@@ -7605,12 +8251,16 @@ function structuredAdmission(
   // `Comprehension` read no list operand: a body that reads one is typed by
   // the rule of its own head.
   // A list of lists is an operand of the heads of `NESTED_OPERAND_HEADS`
-  // only (`withoutNestedOperands()`).
+  // only (`withoutNestedOperands()`); the element-wise heads read one
+  // themselves (`nestedElementwise()`).
   for (const [name, rule] of Object.entries(rules))
-    if (ELEMENTWISE_HEADS.includes(name))
-      rules[name] = withoutNestedOperands(name, elementwiseRule(name, rule));
+    if (testOperations.has(name)) rules[name] = withoutListOperands(name, rule);
+    else if (ELEMENTWISE_HEADS.includes(name))
+      rules[name] = elementwiseRule(name, rule);
     else if (!LIST_OPERAND_HEADS.includes(name))
       rules[name] = withoutListOperands(name, rule);
+    else if (name === 'Sum' || name === 'Product')
+      rules[name] = withFoldOfRows(withoutNestedOperands(name, rule));
     else if (!NESTED_OPERAND_HEADS.has(name) || name === 'Count')
       rules[name] = withoutNestedOperands(name, rule);
   return {
@@ -13087,7 +13737,10 @@ function collectStructuredHelper(
         `JS scalar fragment: two definitions of the helper ${name}`
       );
     // `resolveHelper()` checks this at the first call.
-    BaseCompiler.assertCapturedCallableBindings(node, target);
+    BaseCompiler.assertCapturedCallableBindings(
+      node,
+      withLocalFunctions(target, registry)
+    );
   }
   if (registry.mode === 'complex') refuseRangeSpecialization(node);
   refuseListWidthArgument(node);
@@ -13329,10 +13982,14 @@ function annotateStructured(
       ...Object.fromEntries(
         Object.keys(FUNCTION_OPERAND_HEADS).map((head) => [
           head,
-          withoutNestedOperands(
-            head,
-            functionOperandRule(registry.mode, registry.hosts)
-          ),
+          // `Map` of the rows of a list of lists reads them itself
+          // (`functionOperandRule()`).
+          head === 'Map'
+            ? functionOperandRule(registry.mode, registry.hosts)
+            : withoutNestedOperands(
+                head,
+                functionOperandRule(registry.mode, registry.hosts)
+              ),
         ])
       ),
       // `Typed` reads the mode for a `number` ascription (`typedRule()`).
@@ -13496,6 +14153,11 @@ function annotateStructured(
   refuseNestedListsInMode(scopes, registry.mode);
   refuseCapturedListsWithRows(scopes, registry);
   refuseAbsentRowUses(
+    annotation.root,
+    [...registry.helpers.values()].map((helper) => helper.body),
+    scopes
+  );
+  refuseAbsentMatrixUses(
     annotation.root,
     [...registry.helpers.values()].map((helper) => helper.body),
     scopes
@@ -13681,11 +14343,22 @@ function refuseAbsentRowUses(
     }
     return false;
   };
+  // The row reads placed in a list (an element of a literal, the body of a
+  // comprehension, the row of a `ReplaceAt`): the list can hold `undefined`
+  // for a row.
+  const placed: Expression[] = [];
   const seen = new Set<Expression>();
   const visit = (node: Expression): void => {
     if (!isFunction(node) || seen.has(node)) return;
     seen.add(node);
     node.ops.forEach((op, i) => {
+      if (
+        absent(op) &&
+        (node.operator === 'List' ||
+          (node.operator === 'Comprehension' && i === 0) ||
+          (node.operator === 'ReplaceAt' && i === 2))
+      )
+        placed.push(op);
       if (absent(op) && !allowed(node, i)) {
         const e = new Error(
           `JS scalar fragment: the row read ${nodeText(op)}, which is undefined ` +
@@ -13706,6 +14379,169 @@ function refuseAbsentRowUses(
         `JS scalar fragment: the value of the helper body ${nodeText(body)} is a ` +
           `row read, which is undefined for an index out of range, and is not in ` +
           `the structured route as the value of a helper`
+      );
+      noteRefusedNode(e, { node: body });
+      throw e;
+    }
+    visit(body);
+  }
+  if (placed.length > 0)
+    refuseRowsOfPlacedReads(root, helperBodies, isNested, placed[0]);
+}
+
+/** The heads whose code reads each row of a list of lists: the structured
+ *  lowering (`elementwise()`, `foldRows()`, `Map` over rows) reads a row
+ *  with its length, and an absent row (`undefined`) gives an empty row
+ *  there, where the existing emitter gives `NaN` (`_SYS.bcast`,
+ *  `_SYS.mapFn`, `_SYS.add`); the runtime helper of a matrix function
+ *  (`MATRIX_HEADS`, `Dot`, `Multiply` of two lists) dereferences each row
+ *  (`r.slice()` in `_SYS.rref`, `row[j]` in `_SYS.transpose`, `m[i][i]` in
+ *  `_SYS.trace`), so an absent row throws there, and the lowering takes the
+ *  operation as one that cannot throw (`canThrow()`). */
+const ROW_READING_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Multiply',
+  'Negate',
+  'Divide',
+  'Sum',
+  'Product',
+  'Map',
+  ...Object.keys(MATRIX_HEADS),
+  'Dot',
+]);
+
+/**
+ * Refuse, in a program that places a row read in a list (`[At(M, k), r]`,
+ * `ReplaceAt(R, 1, At(R, k))`), every node of `ROW_READING_HEADS` with an
+ * operand of a nested type. Such a list can hold `undefined` for a row, and
+ * which list holds it (a local, an argument, a join) is not followed: the
+ * refusal is for the whole program, the simple, sound version.
+ */
+function refuseRowsOfPlacedReads(
+  root: Expression,
+  helperBodies: readonly Expression[],
+  isNested: (node: Expression) => boolean,
+  read: Expression
+): void {
+  const seen = new Set<Expression>();
+  const visit = (node: Expression): void => {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    if (ROW_READING_HEADS.has(node.operator) && node.ops.some(isNested)) {
+      const e = new Error(
+        `JS scalar fragment: ${node.operator} of a list of lists is not in the ` +
+          `structured route in a program that places the row read ${nodeText(read)} ` +
+          `in a list: that row is undefined for an index out of range, where the ` +
+          `existing compiler gives NaN for the row or its matrix helper throws`
+      );
+      noteRefusedNode(e, { node });
+      throw e;
+    }
+    node.ops.forEach(visit);
+  };
+  visit(root);
+  helperBodies.forEach(visit);
+}
+
+/** The heads of the matrix functions that read an operand that can have no
+ *  value (a number in place of a list), with the positions of the matrix
+ *  operands: their runtime helper gives a number, or the absent value, for
+ *  it, as on the existing emitter (`ABSENT_MATRIX_READERS` in
+ *  `structured-verify.ts`). */
+const ABSENT_MATRIX_READERS: Readonly<Record<string, readonly number[]>> = {
+  Determinant: [0],
+  Trace: [0],
+  Norm: [0],
+  Transpose: [0],
+  RowReduce: [0],
+  Inverse: [0],
+  MatrixPower: [0],
+  MatrixMultiply: [0, 1],
+  Dot: [0, 1],
+  Diagonal: [0],
+};
+
+/**
+ * Refuse, on the structured route, a use of a matrix function whose list
+ * result can have no value (`matrixResultCanBeAbsent()`: a singular
+ * `Inverse(M)`, a product whose dimensions the types do not prove to agree;
+ * its value is then a number in place of the list), and of a `Block` whose
+ * value is one, except as the value of the program, as an operand of a
+ * matrix function of `ABSENT_MATRIX_READERS` (`Trace(Inverse(M))`), and as
+ * the list of an `At` (`At(Inverse(M), i, j)`, `NaN` or `undefined` for no
+ * value on both compilers). The existing emitter gives other values there,
+ * or throws (`Map(r ↦ Sum(r), Inverse(M))` throws `map is not a function`;
+ * `Inverse(M) + 1` is `NaN`, where an element-wise build would give the
+ * empty list). Refused: every other operand, an `If` of one, a local, an
+ * argument and the value of a helper body.
+ */
+function refuseAbsentMatrixUses(
+  root: Expression,
+  helperBodies: readonly Expression[],
+  scopes: readonly FragmentScope<ScalarRepresentation>[]
+): void {
+  const typeOf = (node: Expression) => {
+    for (const scope of scopes) {
+      const facts = scope.facts.get(node);
+      if (facts !== undefined && 'type' in facts) return facts.type;
+    }
+    return undefined;
+  };
+  const rankOf = (node: Expression): number => {
+    let type: { kind: string; element?: unknown } | undefined = typeOf(node);
+    let rank = 0;
+    while (type?.kind === 'list') {
+      rank += 1;
+      type = (type as FragmentListType).element;
+    }
+    return rank;
+  };
+  const absent = (node: Expression): boolean => {
+    if (!isFunction(node)) return false;
+    if (node.operator === 'Block')
+      return node.nops > 0 && absent(node.ops[node.nops - 1]);
+    return (
+      (Object.hasOwn(MATRIX_HEADS, node.operator) ||
+        node.operator === 'Dot' ||
+        node.operator === 'Multiply') &&
+      typeOf(node)?.kind === 'list' &&
+      matrixResultCanBeAbsent(node, node.ops.map(rankOf))
+    );
+  };
+  const allowed = (
+    parent: Expression & { operator: string; ops: readonly Expression[] },
+    i: number
+  ) =>
+    (parent.operator === 'At' && i === 0) ||
+    (parent.operator === 'Block' && i === parent.ops.length - 1) ||
+    (Object.hasOwn(ABSENT_MATRIX_READERS, parent.operator) &&
+      ABSENT_MATRIX_READERS[parent.operator].includes(i));
+  const seen = new Set<Expression>();
+  const visit = (node: Expression): void => {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    node.ops.forEach((op, i) => {
+      if (absent(op) && !allowed(node, i)) {
+        const e = new Error(
+          `JS scalar fragment: the value of ${nodeText(op)} can be a number in ` +
+            `place of a list (a matrix with no inverse, dimensions that the types ` +
+            `do not prove to agree), and is not in the structured route as an ` +
+            `operand of ${node.operator}: the route admits it as the value of the ` +
+            `program, an operand of a matrix function or the list of At`
+        );
+        noteRefusedNode(e, { node: op });
+        throw e;
+      }
+      visit(op);
+    });
+  };
+  visit(root);
+  for (const body of helperBodies) {
+    if (absent(body)) {
+      const e = new Error(
+        `JS scalar fragment: the value of the helper body ${nodeText(body)} can be ` +
+          `a number in place of a list, and is not in the structured route as the ` +
+          `value of a helper`
       );
       noteRefusedNode(e, { node: body });
       throw e;
@@ -13813,6 +14649,28 @@ function helperBinding(call: Expression) {
 }
 
 /**
+ * `target` with the local functions of the body of the root
+ * (`StructuredRegistry.localFunctions`) as its block local functions
+ * (`CompileTarget.localFunctions`), for `assertCapturedCallableBindings()`:
+ * a call of a local function in an argument of a helper call
+ * (`fr(lf(1))` after `lf(v) := 1`) reaches the local function, which the
+ * structured route checks at the call (`collectStructuredHelper()`), and
+ * not a captured binding of the engine. The existing compiler fills these
+ * names while it compiles the block.
+ */
+function withLocalFunctions(
+  target: CompileTarget<Expression>,
+  registry: StructuredRegistry | undefined
+): CompileTarget<Expression> {
+  if (registry === undefined || registry.localFunctions.size === 0)
+    return target;
+  const localFunctions = new Map<string, Expression>(target.localFunctions);
+  for (const [name, local] of registry.localFunctions)
+    localFunctions.set(name, local.literal);
+  return { ...target, localFunctions };
+}
+
+/**
  * Resolve the helper that `call` calls and check its body. On the
  * structured route (`named.structured`), the body has the admission of the
  * body of the root function (`admitFunctionBody()`): locals, writes, `If`
@@ -13837,7 +14695,10 @@ function resolveHelper(
       ?._lambdaLiteral;
   if (!binding || !held || !isFunction(held, 'Function'))
     throw new Error(`JS scalar fragment: unsupported head ${call.operator}`);
-  BaseCompiler.assertCapturedCallableBindings(call, target);
+  BaseCompiler.assertCapturedCallableBindings(
+    call,
+    withLocalFunctions(target, registry)
+  );
   const literal = userFunctionLiteral(call.engine, call.operator);
   if (literal !== held)
     throw new Error('JS scalar fragment: helper definition identity differs');

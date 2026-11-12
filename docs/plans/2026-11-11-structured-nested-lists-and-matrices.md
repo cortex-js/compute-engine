@@ -477,3 +477,140 @@ on `5fc85eda6` with the slice).
   between the profile and the existing compiler. The disagreements with
   the interpreter are scalar (`Fract(π·10^30)`, CE-1221; `Mod` and `Floor`
   near an integer, the class of CE-1203), none of a list of lists.
+
+## Result of slices 2 and 3
+
+Slice 4 (products by type) is in the same change.
+
+**Admitted** (the `strict` mode):
+
+- (a) The matrix functions as `collection` names, each written with the
+  runtime helper of the existing compiler: `determinant` (`_SYS.det`),
+  `trace`, `transpose`, `row-reduce` (`_SYS.rref`), `inverse` (`_SYS.inv`),
+  `matrix-power` (`_SYS.matpow`, an integer exponent by its type, a literal
+  no larger than `MAX_MATRIX_POWER_EXPONENT`), `matrix-multiply`
+  (`_SYS.matmul`, for `MatrixMultiply` and `Dot` with a nested operand),
+  `diagonal`, `flatten` (`.flat(Infinity)`), and `norm` of any rank with a
+  numeric order. A list result that can have no value carries `absent`
+  (`IRCollection.absent`, `matrixResultCanBeAbsent()`); it is admitted as
+  the value of the program, as an operand of a matrix function and as the
+  list of `At` (`refuseAbsentMatrixUses()` at admission,
+  `verifyAbsentMatrices()` in the verifier). A `transpose` result is not
+  unique for `inPlaceUpdates()`: `_SYS.transpose([])` is its operand.
+- (b) Element-wise `Add`, `Multiply`, `Negate` and `Divide` of lists of
+  lists: one `build` per level (`elementwise()`); scalar operands are
+  evaluated once, before the outer `build`; two nested operands only with
+  lengths equal at every depth by construction (`nestedLengthKeys()`: one
+  name, stated dimensions, element-wise results of these) and of one rank.
+- (c) `Sum` and `Product` of the rows of a matrix with one row or more by
+  its type (`hasRows()`: a name or a literal of the engine type `matrix`,
+  stated rows, an element-wise result of one): a `build` of `0 + x`
+  (`1 * x`) over the first row, then a `loop` over the other rows
+  (`foldRows()`). `Map` of a function literal over rows, with a number or a
+  row as its value; the row is a parameter held as an array.
+- (d) `Multiply` of two operands whose types state their ranks, one of rank
+  2: `matrix-product` (`_SYS.mul`), absent unless the inner dimensions are
+  stated and agree. Two lists whose engine types state one width
+  (`vector<2> + vector<2>`) are now added element-wise, so `M·v + w`
+  compiles.
+
+**Where the implementation differs from this note.**
+
+- `Reduce`, `Scan`, `Filter` and `Count` with a row parameter,
+  comprehensions over rows (`[f(r) for r in M]`), `Max` and `Min` by
+  `flatten`, and a `Loop` over rows are not in this change. They decline
+  with the default refusal.
+- A matrix function of an operand that is not an indexed collection by its
+  engine type declines (`Determinant(MatrixMultiply(A, B))`, of the type
+  `matrix | number | vector`), because the existing compiler's `collArg()`
+  declines it (`isIndexedCollectionOperand()`). So does `Flatten` of a type
+  that can hold a tuple (`flattenMayOpenKeptValue()`) or that is not
+  `list<number>` (`Flatten([])`, of the type `list`).
+- `Transpose` and `Diagonal` of rank 2 require an engine `matrix`; `Trace`
+  and `Determinant` require that the node's engine type is a number
+  (`Trace(M)` of a `list<list<real>>` is `number | tensor`, and the
+  existing compiler writes its parent with `_SYS.bcast`).
+- A program that places a row read in a list (an element of a literal, the
+  body of a comprehension, the row of a `ReplaceAt`) declines every
+  element-wise operation, fold and `Map` of a list of lists
+  (`refuseRowsOfPlacedReads()`): such a list can hold `undefined` for a
+  row, where the route makes an empty row and the existing compiler `NaN`.
+  The fuzz tester found it (`Map(r ↦ -r, ReplaceAt(R, -1, At(R, k)))`).
+- After review: a matrix product passes on no key of an operand to the
+  lengths of an element-wise sum (`nestedLengthKeys()`), so `A·B + A` of
+  `matrix<2x3>` and `matrix<3x2>` declines (it gave the sum of a 2×2
+  product and a 2×3 matrix where the existing compiler gives
+  `[NaN, NaN]`); the fact `absent` follows the value of a `Block`
+  (`Transpose(Block(…, Inverse(A)))`); `hasRows()` refuses a stated count of
+  no row (`matrix<0x3>`); each function of lists has a fact of its result
+  array in the policy (`OperationRule.resultArray`, copied to
+  `IRCollection.resultArray`: `new`, `copy`, or `operand` for `transpose`),
+  which `inPlaceUpdates()` reads; `inverse` and `matrix-power` can throw
+  (a matrix that is not square), and a `Sum` or a `Product` with an index
+  declines a term that computes one other than with the same operands in
+  every term (`termThrower()`); a local function called in the argument of a
+  helper (`fr(lf(1))`) compiled with an internal error and now compiles
+  (`withLocalFunctions()`).
+- On the in-place change (`4790e0857`): `unique()` reads `resultArray`
+  (`new` or `copy`: a new outer array; `operand` or none: not unique), and
+  a use by a function of lists whose result can be its operand is not a
+  read before an update (`readsOnly()`); `ownsRows()` stays false for every
+  `collection` result (a `new` result could own its rows, but the absent
+  and lower-rank results are not proved here: a row is copied on update,
+  which is sound); `hostArrays()` takes a `collection` whose result can be
+  its operand as the array of the host when an operand is, and a `new`
+  result as holding no row of the host. A loop that carries a matrix
+  function's result (`S = Transpose(A)`, then updates of an element or a
+  row in each pass) gets one copy of two levels before the loop
+  (`withOwnedCopies()`) and writes in place.
+- A product with a third factor (`x·A·B`) and a product of a
+  `list<list<…>>` factor decline (the latter with "declare M a matrix").
+- `Multiply` of two `matrix` inputs of no stated dimensions is admitted as
+  the value of the program or an operand of a matrix function only, as
+  `Inverse` is.
+- The verifier has no model of the throws of the helpers (`_SYS.matpow` of
+  a matrix that is not square, `_SYS.inv` of one): the JavaScript policy
+  has no `aborts`, and the existing compiler throws the same.
+
+**Known limitations** (both lines in `docs/COMPILATION-MODEL.md`):
+`Trace(A)` and `MatrixPower(A, 1)` of a matrix that is not square give a
+number and `A` on both routes, where the interpreter gives
+`expected-square-matrix`; `Diagonal([])` is `[]` on both routes; a local
+declared `matrix` that holds `Transpose([[]])` is folded as a matrix with
+rows.
+
+**Measures** (at `4e960b7d6` before, this change after).
+
+- Witness replay, the 241 files of slice 1's list (a matrix, a tensor,
+  `list<list`, a matrix function or a nested literal, with a compilation):
+  6,449 logged compilations; the profile admits 2,444 before and 2,600
+  after, 0 admitted before and declined after. Of the 730 that declined
+  before with a nested cause, 130 are admitted after (`Norm` with an order
+  29, `Determinant` 23, `MatrixPower` 14, `Trace` 13, `Inverse` 6,
+  `RowReduce` 6, `MatrixMultiply` 5, element-wise products 10, `Map` 4,
+  `Sum`/`Product` 4, `Diagonal` 3, others), 563 still decline with a
+  nested cause (a `tensor` input 135, an argument of a list of lists to a
+  scalar parameter 46, a `matrix` in the `complex` mode 25 + 10 + 9 + 8 +
+  6, `Matrix(…)` 16, a product of a `list<list<…>>` 14 + 6, `matrix<complex>`
+  11 + 5, `Rank` 8, `Reduce` 7, `Scan` 6, `Shape` 5, `Sum`/`Product` of rows
+  that are not a matrix by type 5 + 5 + 4), and 37 with another cause (an
+  argument type 14, a list literal of non-real elements 14). The 28
+  failures are the same before and after (an instrumentation artifact: the
+  wrapper adds `profile` to a direct target, and
+  `call-head-lexical-binding.test.ts`).
+- Shadow measure (`CE_JS_PROFILE_SHADOW=1`, 100 files: the 62 files with a
+  witness, then others; measured before the last two declines above were
+  added, which can only lower the count after): of 3,717 public
+  compilations that the existing compiler compiles, the profile admits 763
+  before and 907 after; 2 failures before and after.
+- `scripts/js-profile-fuzz.ts` with the input `M3: matrix<2x3>` and the
+  generators `genMatrixRows()` and `genMatrixReal()` (in 10,000 programs of
+  seed 221: `Determinant` in 71, `Dot` 73, `Norm` 69, `Inverse` 40,
+  `Transpose` 38, `MatrixMultiply` 36, `MatrixPower` 33): seeds 221 and 222 (10,000 each) and 223
+  (`--random`, 5,000): 0 differences of value or of shape between the
+  profile and the existing compiler; one failure, a `compile-error` of the
+  preparation for a local function called in the argument of a user
+  function (`Block(DefineFunction(lf, …), fr(lf(1)))`), the same at
+  `4e960b7d6`, fixed after review. The disagreements with the interpreter
+  are scalar (`Fract(π·10^30)`, CE-1221; `Mod` near a multiple, the class
+  of CE-1203; a guard with a pole), none of a list of lists.

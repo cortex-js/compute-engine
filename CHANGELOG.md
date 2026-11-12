@@ -79,11 +79,40 @@
   f.run({ M: [[1, 2], [3]], x: 9 }); // ➔ [[1, 9], [3]]
   ```
 
-  Arithmetic, folds, functions of lists and matrix functions of lists of
-  lists, a `tensor`, complex cells and the `complex` and `bigint` modes still
+  A `tensor`, complex cells and the `complex` and `bigint` modes still
   decline. So do a product and a power of lists of lists (`M·M`): with
   `list<list<real>>` the value decides whether the product is a matrix
   product; declare a matrix as `matrix`.
+
+- **The `numeric-kernel` profile compiles matrix functions, arithmetic and
+  folds of lists of lists.** In the `strict` mode these forms compile, with
+  the values of the existing compiler:
+  - `Determinant`, `Trace`, `Inverse`, `MatrixPower` with an integer
+    exponent, `MatrixMultiply`, `Dot` with a matrix operand, `Transpose`,
+    `RowReduce`, `Diagonal`, `Flatten` and `Norm` (also with a numeric order);
+  - element-wise `Add`, `Subtract`, `Multiply` by a number, `Negate` and
+    `Divide` of a list of lists, and the sum of two whose lengths are equal at
+    every depth by construction (`A + 2A`, `matrix<2x2> + matrix<2x2>`);
+  - `Sum` and `Product` of the rows of a `matrix`, and `Map` of a function
+    literal over the rows;
+  - the product `A·B` of two `matrix` values, or of a matrix and a list.
+
+  ```js
+  ce.declare('A', 'matrix<2x2>');
+  ce.declare('v', 'vector<2>');
+  const f = compile(ce.box(['Add', ['Multiply', 'A', 'v'], 'v']), {
+    profile: 'numeric-kernel',
+  });
+  f.run({ A: [[1, 2], [3, 4]], v: [1, 1] }); // ➔ [4, 8]
+  ```
+
+  A matrix that can have no value (the inverse of a singular matrix, a
+  product whose dimensions do not agree: `NaN` in place of the matrix) is
+  admitted only as the result, as the operand of a matrix function or as the
+  list of `At`; elsewhere the compilation declines. A product of lists of
+  lists that are not declared `matrix`, a product of more than two factors,
+  the sum of two `matrix` inputs of no stated dimensions, `Max`, `Filter`,
+  `Reduce` and `Scan` of rows still decline.
 
 - **The `numeric-kernel` profile compiles captured lists, folded constants
   and unread parameters.** Four forms that declined with `outside-profile`
