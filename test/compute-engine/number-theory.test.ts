@@ -1075,3 +1075,142 @@ describe('Stirling and Eulerian outside the triangle are 0', () => {
     expect(evalStr(json)).toEqual(expected);
   });
 });
+
+describe('integer functions on rational and non-positive operands', () => {
+  const compiled = (expr: unknown) =>
+    ce._getCompilationTarget('javascript').compile(ce.box(expr as any)).run!(
+      {}
+    );
+
+  const text = (x: { toString(): string }) =>
+    x.toString().replace(/"/g, '').replace(/π/g, 'pi').replace(/, /g, ',');
+
+  // [expression, evaluate(), LaTeX parse route]
+  const exactCases: [unknown, string, string | undefined][] = [
+    [
+      ['NextPrime', ['Rational', 7, 2]],
+      '5',
+      '\\operatorname{NextPrime}(\\frac{7}{2})',
+    ],
+    [['NextPrime', ['Rational', 5, 2]], '3', undefined],
+    [['NextPrime', ['Rational', -7, 2]], '2', undefined],
+    [['NextPrime', ['Rational', 7, 2], -1], '3', undefined],
+    [['NextPrime', ['Rational', 7, 2], 2], '7', undefined],
+    [['DivisorSigma', -1, 12], '7/3', '\\operatorname{DivisorSigma}(-1, 12)'],
+    [['DivisorSigma', -2, 10], '13/10', undefined],
+    [['DivisorSigma', -1, -12], '7/3', undefined],
+    [['DivisorSigma', -3, 1], '1', undefined],
+    [
+      ['IsSquareFree', ['Rational', 6, 35]],
+      'True',
+      '\\operatorname{IsSquareFree}(\\frac{6}{35})',
+    ],
+    [['IsSquareFree', ['Rational', 12, 35]], 'False', undefined],
+    [['IsSquareFree', ['Rational', 6, 25]], 'False', undefined],
+    [['IsSquareFree', ['Rational', -6, 35]], 'True', undefined],
+    [['IsSquareFree', 30], 'True', undefined],
+    [
+      ['FactorInteger', ['Rational', 12, 35]],
+      '[(2,2),(3,1),(5,-1),(7,-1)]',
+      '\\operatorname{FactorInteger}(\\frac{12}{35})',
+    ],
+    [['FactorInteger', ['Rational', -1, 2]], '[(-1,1),(2,-1)]', undefined],
+    [
+      ['FactorInteger', ['Rational', 1, 360]],
+      '[(2,-3),(3,-2),(5,-1)]',
+      undefined,
+    ],
+    [
+      ['CatalanNumber', ['Rational', 1, 2]],
+      '8 / (3pi)',
+      '\\operatorname{CatalanNumber}(\\frac{1}{2})',
+    ],
+    [['CatalanNumber', ['Rational', 5, 2]], '1024 / (105pi)', undefined],
+    [['IsPerfect', -6], 'False', '\\operatorname{IsPerfect}(-6)'],
+    [['IsPerfect', 0], 'False', undefined],
+    [['IsPerfect', 6], 'True', undefined],
+  ];
+  for (const [expr, expected, latex] of exactCases) {
+    const label = JSON.stringify(expr);
+    test(`${label} = ${expected} (evaluate)`, () => {
+      const got = ce.box(expr as any).evaluate();
+      expect(text(got)).toBe(expected);
+    });
+    if (latex)
+      test(`${latex} = ${expected} (parse route)`, () => {
+        const got = ce.parse(latex).evaluate();
+        expect(text(got)).toBe(expected);
+      });
+  }
+
+  test('the compiled code agrees with evaluate()', () => {
+    expect(compiled(['NextPrime', ['Rational', 7, 2]])).toBe(5);
+    expect(compiled(['DivisorSigma', -1, 12])).toBeCloseTo(7 / 3, 12);
+    expect(compiled(['IsPerfect', -6])).toBe(false);
+  });
+
+  test('NextPrime of a real is a float for a float operand, `.N()` included', () => {
+    for (const mode of ['evaluate', 'N'] as const) {
+      const got = ce.box(['NextPrime', 100.5])[mode]();
+      expect(got.re).toBe(101);
+      expect(got.isExact).toBe(false);
+    }
+    expect(ce.box(['NextPrime', ['Rational', 7, 2]]).N().re).toBe(5);
+  });
+
+  test('NextPrime keeps its integer results, including below 2', () => {
+    expect(ce.box(['NextPrime', 10]).evaluate().toString()).toBe('11');
+    expect(ce.box(['NextPrime', -10]).evaluate().toString()).toBe('2');
+    expect(ce.box(['NextPrime', 10, -1]).evaluate().toString()).toBe('7');
+  });
+
+  test('DivisorSigma(k < 0) agrees with SigmaMinus1 and N()', () => {
+    expect(ce.box(['DivisorSigma', -1, 100]).evaluate().toString()).toBe(
+      ce.box(['SigmaMinus1', 100]).evaluate().toString()
+    );
+    expect(ce.box(['DivisorSigma', -1, 12]).N().re).toBeCloseTo(7 / 3, 12);
+  });
+
+  test('DivisorSigma(k < 0) with a huge order stays unevaluated', () => {
+    const huge = ce.box(['DivisorSigma', -10000000, 12]).evaluate();
+    expect(huge.operator).toBe('DivisorSigma');
+  });
+
+  test('DivisorSigma(k, 0) and CatalanNumber at a pole stay unevaluated', () => {
+    expect(ce.box(['DivisorSigma', -1, 0]).evaluate().operator).toBe(
+      'DivisorSigma'
+    );
+    expect(
+      ce.box(['CatalanNumber', ['Rational', -1, 2]]).evaluate().operator
+    ).toBe('CatalanNumber');
+    expect(
+      ce.box(['CatalanNumber', ['Rational', 1, 3]]).evaluate().operator
+    ).toBe('CatalanNumber');
+  });
+
+  test('CatalanNumber(1/2).N(), a float and a large half-integer', () => {
+    expect(ce.box(['CatalanNumber', ['Rational', 1, 2]]).N().re).toBeCloseTo(
+      8 / (3 * Math.PI),
+      12
+    );
+    expect(ce.box(['CatalanNumber', ['Rational', 1, 3]]).N().re).toBeCloseTo(
+      0.8490700205447396,
+      12
+    );
+    expect(ce.box(['CatalanNumber', 2.5]).evaluate().re).toBeCloseTo(
+      3.1042792709733,
+      12
+    );
+    expect(
+      ce.box(['CatalanNumber', ['Rational', 4001, 2]]).evaluate().operator
+    ).toBe('CatalanNumber');
+  });
+
+  test('integer operands are unchanged', () => {
+    expect(text(ce.box(['FactorInteger', 360]).evaluate())).toBe(
+      '[(2,3),(3,2),(5,1)]'
+    );
+    expect(ce.box(['CatalanNumber', 5]).evaluate().toString()).toBe('42');
+    expect(ce.box(['DivisorSigma', 2, 6]).evaluate().toString()).toBe('50');
+  });
+});

@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The integer functions answer for a rational operand and a negative
+  order.** `NextPrime(7/2)` was an `incompatible-type` error (now `5`, the
+  smallest prime above `7/2`; `NextPrime(7/2, -1)` is `3`),
+  `DivisorSigma(-1, 12)` was left unevaluated (now `7/3`, as
+  `SigmaMinus1(12)`; `DivisorSigma(-2, 10)` is `13/10`),
+  `FactorInteger(12/35)` and `IsSquareFree(6/35)` were `incompatible-type`
+  errors (now `[(2, 2), (3, 1), (5, -1), (7, -1)]`, the primes of the
+  denominator with negated exponents, and `True`),
+  `CatalanNumber(1/2)` was an error (now `8/(3π)`, by
+  `Γ(2n+1) / (Γ(n+1) Γ(n+2))`; other rationals and floats are evaluated
+  numerically, a non-half-integer rational stays unevaluated under
+  `evaluate()`), and `IsPerfect(-6)` was left unevaluated (now `False`: a
+  perfect number is positive). Integer operands are unchanged, and a huge
+  negative order of `DivisorSigma` stays unevaluated instead of building a
+  denominator of millions of digits.
+  (#542, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
