@@ -204,6 +204,15 @@ diagnostic, not a cascade, for a statement that reads a name whose
 statement failed. Its forward-read rule also refuses a read THROUGH a call
 (`issues/CE-1007.md`); this spec catches the direct read only.
 
+**User decision, 2026-11-12.** CE implements what Tycho's prelude runner
+does, even where no code shrinks: Tycho should not hold a copy of CE's
+scoping rules. So the sites query is approved as work (a short spec of its
+own, written after this change is measured: for a parsed program, each
+symbol site with its role, its source range and the binding it resolves
+to; it reads the resolution the bound-once rule computes and needs no
+run). The compiled run with per-name typed results was sent to session
+compute-engine-ef for its opinion; it is not decided.
+
 ## 6. Order and acceptance
 
 After step 1 of the bound-once spec is on main. First a measurement: the
