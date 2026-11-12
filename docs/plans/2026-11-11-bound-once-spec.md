@@ -389,38 +389,32 @@ and a symbol with a plain definition, once the ambient chaining is gone.
 For a parameter, a binder variable and a block local the keys of today
 stay (C1).
 
-### C4. Temporary values and hidden values are one stated mechanism (3, 4, 14)
+### C4. Temporary values and hidden values: `ce.withValues()`, nothing new (3, 4, 14)
 
-For the extent of a call, a definition can have a temporary value, or have
-its value hidden. Both are a record on the evaluation context, keyed by the
-definition (for a name with no definition: by home scope and name), that
-the value read tests. Neither declares anything, pushes a scope or moves
-the type version.
+Revised on 2026-11-11 after the user's question ("is it worth introducing a
+mechanism for temporary values?"). The first answer to the review was a
+new record on the evaluation context. It is withdrawn: the engine already
+has the construct.
 
-- `ce.withValues(values, fn)` resolves each name from the current scope, as
-  today, and gives the definition found a temporary value; a name with no
-  definition gets one keyed on the current scope. A value outside the
-  declared type is refused, as today.
-- The interpreted fallback of `compile()` and the other engine sites use an
-  internal form that takes the expression: each name is resolved as the
-  expression resolves it (rule 1), and the temporary value can be of
-  another type than the declared one, as the shadow of the old fallback
-  allowed.
-- Hidden values (the value shield): the value only, not the type; of every
-  occurrence that resolves to the named definitions, parameters, binder
-  variables and block locals excepted; under the cache key that a shield
-  has today (`ce._withValueShieldKey()`), which stays.
-- Both are captured with the evaluation context of an asynchronous
-  evaluation and installed for each synchronous segment, as an operation
-  environment is (rule 8 of the slice 1 spec). A hide inside a
-  `withValues`, or the reverse: the innermost record of a definition wins.
-- Removed with this: the scratch scope of a shield, its shadow
-  declarations and their marks (`markShieldDeclaration()`, `isShield()`),
-  and `rebindEscaping()` at the two shield sites.
+`ce.withValues(values, fn)` writes each value on the definition of the
+name and puts back the earlier value and type when `fn` returns; the value
+`undefined` gives the name no stored value while `fn` runs. The
+interpreted fallback of `compile()` and the value shield (`simplify()`,
+`HoldValues`, the calculus functions) use it, and their scopes, shadow
+declarations and shield marks are deleted. No mechanism is added.
 
-Alternative for `withValues`: keep writing on the definitions, as today.
-Not chosen: it moves the type version at each call of a fallback, and a
-declared name of the wrong scope is written.
+Known costs, measured in step 1 and reported, not designed around:
+
+- A write on a definition moves the type version, so each call retires
+  cached types. The scratch scope of the shield existed to avoid that.
+- `withValues` finds a definition from the current scope. An engine site
+  runs it where the names of its expression resolve.
+- `withValues` is synchronous and refuses a value outside the declared
+  type.
+
+If the first cost is too high, the remedy is a change of how `withValues`
+is built (a record that the value read tests, with no write), behind the
+same API. That is a later decision, taken on figures.
 
 ### C5. A popped scope (5)
 
