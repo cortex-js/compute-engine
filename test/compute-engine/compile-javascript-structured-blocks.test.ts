@@ -535,16 +535,23 @@ describe('a helper declared function', () => {
     expect(result.code).toBe('_tv1(_.x) + 1');
   });
 
-  test('a body with an Integrate with no closed form declines', () => {
-    // An integral with a closed form is admitted
-    // (`compile-javascript-structured-calculus.test.ts`).
+  test('a body with an Integrate with no closed form: the routine integrate', () => {
+    // An integral with a closed form is its closed form
+    // (`compile-javascript-structured-calculus.test.ts`); one with none is
+    // the call `_SYS.integrate` of the existing compiler
+    // (`compile-javascript-structured-calculus2.test.ts`).
     const ce = engine();
     helper(
       ce,
       'f',
       fn(['Integrate', ['Sqrt', ['Add', 't', ['Power', 'u', 4]]], ['Limits', 'u', 0, 1]], 't')
     );
-    declines(['f', 'x'], /has no closed form/, ce, ['strict']);
+    const expr = ce.expr(['f', 'x']);
+    const existing = compile(expr, EXISTING as never) as CompilationResult<'javascript'>;
+    const profile = compile(expr, PROFILE as never) as CompilationResult<'javascript'>;
+    expect(profile.pure).toBe(false);
+    for (const x of [0.5, 2, 7])
+      expect(Object.is(run(profile, { x }), run(existing, { x }))).toBe(true);
   });
 
   test('in the complex mode, a helper declared function declines', () => {

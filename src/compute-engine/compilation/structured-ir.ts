@@ -905,6 +905,49 @@ export type IRSeeded = OperationBase & {
 };
 
 /**
+ * The numeric routines that the representation names, by an identifier
+ * that names no target (`IRRoutine`):
+ *
+ * - `integrate`: two real operands, the lower and the upper bound (an
+ *   integer fits, and a bound can be infinite). The result is a real that
+ *   approximates the integral of the body over the interval between the
+ *   bounds, negated when the upper bound is less than the lower one, or not
+ *   a number when the routine finds no value (a divergent integral with no
+ *   sign, an integrand with no real value on a part of the interval). With
+ *   `initialPanels`, the routine starts from that number of equal panels.
+ */
+export type RoutineName = 'integrate';
+
+/**
+ * An application of a numeric routine that `fn` names (`RoutineName`) to
+ * the body region: the structured form of a definite integral. The
+ * operands are evaluated once, in order, before the routine runs. The body
+ * is an open region with one parameter, a `real`, that yields one real or
+ * integer value; it runs zero or more times, each time with the parameter
+ * bound to a number that the routine chooses, in an order that the routine
+ * chooses. The body reads its parameter and the values of the regions
+ * around it, which no operation changes while the routine runs. No `exit`
+ * leaves the body.
+ *
+ * The policy of the target states the facts of each routine
+ * (`RepresentationPolicy.routines`): the operation has the effect of the
+ * routine joined with the effect of its body, the states of both, and the
+ * abort kinds of the routine. A routine that keeps state between calls (a
+ * count of the routines in progress, a budget of evaluations), or that
+ * samples a random source of the runtime, is `effectful`, so no pass shares,
+ * removes or moves it. A routine whose body runs at many points is never
+ * hoisted out of a loop and is never merged with another occurrence.
+ */
+export type IRRoutine = OperationBase & {
+  readonly kind: 'routine';
+  readonly fn: RoutineName;
+  readonly body: IRRegion;
+  /** The number of equal panels from which `integrate` starts: a positive
+   *  integer. Absent: the default of the target. */
+  readonly initialPanels?: number;
+};
+
+/**
  * A call of code that the host of the compilation supplies
  * (`IRProgram.hosts[host]`): a function of the host called with the
  * operands, or, with no operand, a value of the host read at this position.
@@ -961,8 +1004,8 @@ export type IRYield = {
  * `exit` defines no value and has no effect (`pure`).
  *
  * Between the `exit` and the body of its loop there are only branches of
- * `if` operations: no region of a `build`, of an `and`, an `or` or a
- * `seeded`, and no body of a function. The `exit` passes values to the
+ * `if` operations: no region of a `build`, of an `and`, an `or`, a
+ * `seeded` or a `routine`, and no body of a function. The `exit` passes values to the
  * results of the loop as the yield of the body does, so each value keeps
  * one definition.
  */
@@ -1001,6 +1044,7 @@ export type IROperation =
   | IRTrace
   | IRDraw
   | IRSeeded
+  | IRRoutine
   | IRHostCall
   | IRYield
   | IRExit;
@@ -1008,7 +1052,8 @@ export type IROperation =
 export type IRRegion = {
   /** The values that the region defines at its entry, before its first
    *  operation: the parameters of the body of a `loop`, and the index of
-   *  the body of a `build`. Each is visible in
+   *  the body of a `build`, and the real parameter of the body of a
+   *  `routine`. Each is visible in
    *  the region and in the regions nested in it. The body of a function
    *  has none: the parameters of a function are `IRFunction.parameters`,
    *  which the verifier defines at the entry of its body in the same way. */
@@ -1175,6 +1220,11 @@ export function unionStates(
   return all.size === 0 ? undefined : [...all].sort();
 }
 
+/** The states `states` in a message: their names, or `none`. */
+export function statesText(states: readonly IRState[] | undefined): string {
+  return states === undefined ? 'none' : states.join(', ');
+}
+
 /** `{ touches }` when `states` is not empty, else `{}`: the field of an
  *  operation or a region that touches `states` (`unionStates()`). */
 export function touchesField(
@@ -1288,7 +1338,12 @@ function regionReachesHost(
 /** The regions that `op` evaluates. */
 export function regionsOf(op: IROperation): readonly IRRegion[] {
   if (op.kind === 'if') return [op.then, op.else];
-  if (op.kind === 'loop' || op.kind === 'build' || op.kind === 'seeded')
+  if (
+    op.kind === 'loop' ||
+    op.kind === 'build' ||
+    op.kind === 'seeded' ||
+    op.kind === 'routine'
+  )
     return [op.body];
   if (op.kind === 'and' || op.kind === 'or') return op.rest;
   return [];

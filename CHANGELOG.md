@@ -88,10 +88,57 @@
   g.run({ x: 1 }); // ➔ 1.0806046117362795
   ```
 
-  An integral or a derivative with no closed form (`∫₀ᵃ √(1 + t⁴) dt`,
-  which the compiler without the profile integrates numerically), an
-  integrand that draws, the `complex` mode, `NIntegrate` and `Limit`
-  still decline with `outside-profile`.
+  A derivative with no closed form (`ND(t ↦ t³, x)`, which the compiler
+  without the profile differentiates numerically), an integrand that
+  draws, the `complex` mode, `NIntegrate` and `Limit` still decline with
+  `outside-profile`.
+
+- **The `numeric-kernel` profile of `compile()` integrates numerically a
+  definite integral that has no closed form.** Such an integral declined
+  with `outside-profile`. In the `strict` mode the profile now writes the
+  call of the compiler without the profile, `_SYS.integrate`, with the
+  integrand as a function of its variable, one call per `Limits` clause
+  (the first clause outermost) and the same starting panel count: the
+  integrand is evaluated at the same points, in the same order, and the
+  result is the same number. The integrand can read inputs, captured
+  numbers, the locals of a block and a loop index, and call user
+  functions; the integral can be in a branch, a `Loop`, a `Map`,
+  another integral or the body of a user function. Such a result reports
+  `pure: false` and `shippable: false`.
+
+  ```js
+  ce.declare('a', 'real');
+  const f = compile(ce.parse('\\int_0^a \\sqrt{1+t^4} dt'), { profile: 'numeric-kernel' });
+  f.run({ a: 1 }); // ➔ 1.0894294132248226
+  ```
+
+  Still declined: an integrand that the compiler without the profile
+  computes again in log space where its value is not finite
+  (`∫₀¹ t¹⁰⁰ e^{-t²} dt`), the option `quadrature: 'monte-carlo'`, a bound
+  that reads the variable of its own clause (`∫₀ˣ √(1 + x⁴) dx`), an
+  integrand that reads or calls a function of the host, a `Sum` or a
+  `Product` whose terms hold such an integral (below), and an indefinite
+  integral with no closed form. A rounding of such an integral
+  (`⌊∫₀ᵃ √(1 + t⁴) dt⌋`) compiles, and so does a rounding of the variable
+  in the integrand when the variable also has a value of its own.
+
+- **The `numeric-kernel` profile declines a `Sum` or a `Product` whose
+  terms can throw.** The compiler without the profile stops a sum or a
+  product at the first term that is `NaN`, and the profile evaluated every
+  term: `Sum(Mod(1, j/k), Limits(j, 0, n))` at `k = 0` gave `NaN` without
+  the profile and threw a `RangeError` with it (the second term divides by
+  zero, and `Mod` of an infinite operand throws). A sum or a product
+  declines with `outside-profile` when a term can throw where an earlier
+  term is `NaN`, or integrates numerically, also through a user function
+  or a function that `Map` or `Reduce` calls. `Mod` throws only for an
+  operand beyond ±(2^53 − 1), so a `Mod` whose operands are each an index
+  of the sum, an integer literal or the same value in every term stays
+  admitted: `Sum(Mod(k, 3), Limits(k, 1, n))`, `Product(1 + Mod(k, 2),
+  Limits(k, 1, n))`, `Sum(Mod(k, m), Limits(k, 1, n))` with an input `m`. A
+  term that reads or calls a function of the host is ordered and counted
+  as before, and so is every term of a sum or a product of fewer than four
+  written-out terms, which the compiler without the profile evaluates in
+  full.
 
 - **The `numeric-kernel` profile compiles lists of the type `list<number>`
   in the `strict` mode.** An input or a parameter of the type
@@ -124,6 +171,12 @@
   ```
 
 ### Resolved Issues
+
+- **The `numeric-kernel` profile declines `x·Conjugate(Haversine(2y))`.**
+  The compilation failed with an internal error (`compile-error`): the
+  profile writes `Conjugate` of a real operand as the operand, and did not
+  check the grouping of the haversine in the product, as it does for
+  `x·Haversine(2y)`. Both now decline with `outside-profile`.
 
 - **`ce.infer()` gives a type to a symbol declared with the type
   `unknown`.** After `ce.declare('x', 'unknown')`, `ce.infer([ce.parse('x +

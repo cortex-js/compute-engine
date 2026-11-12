@@ -147,9 +147,14 @@
  *   --calculus           Also generate the calculus heads of an expression
  *                        (`genCalculus()`): `Integrate` of an elementary
  *                        integrand in `t` with bounds that are literals or
- *                        leaves, `D` of one in a name, and `Apply` of the
- *                        `Derivative` of a literal. The profile admits such
- *                        a node as its closed form only. Without the option,
+ *                        leaves, a definite `Integrate` with no closed form
+ *                        (`genQuadrature()`: an expression of the program
+ *                        in `t`, infinite and reversed bounds, two clauses,
+ *                        an integral in an integrand), `D` of one in a name,
+ *                        and `Apply` of the `Derivative` of a literal. The
+ *                        profile admits a node with a closed form as that
+ *                        closed form, and one with none as the routine
+ *                        `integrate` (`_SYS.integrate`). Without the option,
  *                        the programs are those of the same seed before the
  *                        option was added.
  *   --deg                Each engine has the angular unit `deg`: the
@@ -1456,11 +1461,72 @@ const INTEGRANDS: readonly ((v: Json) => Json)[] = [
   (v) => ['Add', ['Power', v, 3], ['Multiply', 2, v]],
 ];
 
+/** Integrands with no closed form that the engine finds, as functions of
+ *  their variable (`genQuadrature()`). */
+const QUADRATURE_INTEGRANDS: readonly ((v: Json) => Json)[] = [
+  (v) => ['Sqrt', ['Add', 1, ['Power', v, 4]]],
+  (v) => ['Sin', ['Power', v, 3]],
+  (v) => ['Exp', ['Negate', ['Power', v, 4]]],
+  (v) => ['Divide', 1, ['Add', 2, ['Cos', ['Power', v, 3]]]],
+];
+
+/**
+ * A definite `Integrate` that the existing compiler integrates numerically
+ * (`--calculus`): an integrand with no closed form in `t`, at times added
+ * to or multiplied by an expression of the program that reads `t`
+ * (`genReal()`), with bounds that are literals or `2·arctan` of a leaf, in
+ * either order; `e^{-t⁴}` alone from or to `±∞`; or two clauses whose inner
+ * bound reads the outer variable; or an integral in the integrand of
+ * another one.
+ *
+ * An integral that does not converge makes the runtime sample 10⁷ points
+ * at each call (the Monte Carlo fallback), so a bound that reads an input
+ * stays in (−π, π) (`sin(t³)` up to a large input does not converge), an
+ * infinite bound has the decaying integrand only, and an expression of the
+ * program, which can have a pole, is in one integrand in four.
+ */
+function genQuadrature(ctx: GenContext, depth: number): Json {
+  const { rng } = ctx;
+  const d = Math.min(depth + 1, ctx.maxDepth);
+  const body = (v: string): Json => {
+    const base = pick(rng, QUADRATURE_INTEGRANDS)(v);
+    if (rng() < 0.75) return base;
+    const inner: GenContext = { ...ctx, symbols: [...ctx.symbols, [v, 40]] };
+    return [rng() < 0.5 ? 'Add' : 'Multiply', base, genReal(inner, d)];
+  };
+  const bound = (): Json =>
+    rng() < 0.4
+      ? pick<Json>(rng, [0, 1, -1, 2, 0.5])
+      : ['Multiply', 2, ['Arctan', genLeaf(ctx)]];
+  const r = rng();
+  if (r < 0.1) {
+    const decaying = QUADRATURE_INTEGRANDS[2]('t');
+    return rng() < 0.5
+      ? ['Integrate', decaying, ['Limits', 't', bound(), 'PositiveInfinity']]
+      : ['Integrate', decaying, ['Limits', 't', 'NegativeInfinity', bound()]];
+  }
+  if (r < 0.65)
+    return ['Integrate', body('t'), ['Limits', 't', bound(), bound()]];
+  if (r < 0.85)
+    return [
+      'Integrate',
+      ['Sin', ['Multiply', 's', ['Power', 't', 3]]],
+      ['Limits', 's', pick<Json>(rng, [0, 1]), bound()],
+      ['Limits', 't', 0, 's'],
+    ];
+  return [
+    'Integrate',
+    ['Integrate', body('s'), ['Limits', 's', 0, 't']],
+    ['Limits', 't', pick<Json>(rng, [0, -1]), pick<Json>(rng, [1, 0.5])],
+  ];
+}
+
 /**
  * A calculus node (`--calculus`): `Integrate` of an elementary integrand in
- * `t`, times a leaf at times, with bounds that are literals or leaves; `D`
- * of an elementary function of a name of the program in that name; or
- * `Apply` of the derivative, of order 1 or 2, of a literal in `t`.
+ * `t`, times a leaf at times, with bounds that are literals or leaves; a
+ * definite `Integrate` with no closed form (`genQuadrature()`); `D` of an
+ * elementary function of a name of the program in that name; or `Apply` of
+ * the derivative, of order 1 or 2, of a literal in `t`.
  */
 function genCalculus(ctx: GenContext, depth: number): Json {
   const { rng } = ctx;
@@ -1471,8 +1537,9 @@ function genCalculus(ctx: GenContext, depth: number): Json {
   const bound = (): Json =>
     rng() < 0.4 ? pick<Json>(rng, [0, 1, -1, 2]) : genLeaf(ctx);
   const r = rng();
-  if (r < 0.5)
+  if (r < 0.25)
     return ['Integrate', integrand(), ['Limits', 't', bound(), bound()]];
+  if (r < 0.5) return genQuadrature(ctx, depth);
   if (r < 0.75)
     return [
       'Apply',

@@ -190,7 +190,8 @@ function order(
  *    unique: the caller of the code, or of the function, or the next call,
  *    can hold the array and read it after the call.
  * 2. C runs in the same iteration as the definition of X: no body of a
- *    `loop` or of a `build` is between the region of the definition and C.
+ *    `loop`, of a `build` or of a `routine` (which runs its body at each
+ *    point that it samples) is between the region of the definition and C.
  *    Otherwise C would run once per iteration on the one array of X. The
  *    body of a `seeded` region runs once, where the region is, and is not
  *    such a body; a `draw` reads no list.
@@ -385,7 +386,12 @@ function analyzeInPlace(program: IRProgram): {
       if (start < 0) return false;
       for (const p of at.slice(start + 1)) {
         const owner = facts.owners.get(p.region);
-        if (owner?.kind === 'loop' || owner?.kind === 'build') return false;
+        if (
+          owner?.kind === 'loop' ||
+          owner?.kind === 'build' ||
+          owner?.kind === 'routine'
+        )
+          return false;
       }
       // 3: one use by C; every other use runs in the other branch, or
       // before C and makes a number.

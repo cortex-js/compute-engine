@@ -52,7 +52,9 @@ import {
   type IROperation,
   type IRProgram,
   type IRRegion,
+  type IRState,
   type IRValue,
+  statesText,
 } from './structured-ir.js';
 import {
   consumableLoopInitials,
@@ -201,7 +203,9 @@ type Visit = (
  * A `draw` outside every `seeded` region is a blocker with the reason that
  * names the random stream: two calls give different values, and a call made
  * inside a seeded frame of its caller advances that frame. A `seeded` region
- * whose body touches no other state is `pure` and is no blocker.
+ * whose body touches no other state is `pure` and is no blocker. An
+ * `effectful` routine (`IRRoutine`) is a blocker of both properties whose
+ * reason names its states, and a loop whose body holds one is no candidate.
  *
  * `workerPortable`: false for an `unknown` operation, an `effectful`
  * operation, a `draw` or a `seeded` region anywhere (also a pure one), a
@@ -277,7 +281,10 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
       ? DRAW_REASON
       : b.effect === 'unknown'
         ? 'an operation whose definition does not state its effects'
-        : 'an operation whose definition states an effect',
+        : b.blocker.kind === 'routine'
+          ? `a numeric routine that touches the states ${statesText(b.states)} of the runtime: ` +
+            'its state lasts from one call to the next, and it can sample a random source of the runtime'
+          : 'an operation whose definition states an effect',
   }));
   // A draw and a seeded region are blockers of their own below, wherever
   // they are.
@@ -289,7 +296,9 @@ export function analyzeExecution(program: IRProgram): ExecutionAnalysis {
         ? WORKER_DRAW_REASON
         : b.effect === 'unknown'
           ? 'an operation whose definition does not state its effects: it can call a closure of the host, which a worker does not have'
-          : 'an operation with an effect that the effect facts do not name: a worker may not provide it',
+          : b.blocker.kind === 'routine'
+            ? `a numeric routine that touches the states ${statesText(b.states)} of the runtime, which the runtime of a worker does not share`
+            : 'an operation with an effect that the effect facts do not name: a worker may not provide it',
     }));
 
   const inPlace = inPlaceUpdates(program);
@@ -393,11 +402,14 @@ function effectBlockers(program: IRProgram): {
   effect: 'effectful' | 'unknown';
   /** The operation touches the random stream only (`onlyRandom()`). */
   draws: boolean;
+  /** The states that the operation touches. */
+  states?: readonly IRState[];
 }[] {
   const found: {
     blocker: ExecutionBlocker;
     effect: 'effectful' | 'unknown';
     draws: boolean;
+    states?: readonly IRState[];
   }[] = [];
   const visitedFunctions = new Map<string, boolean>();
   /** Whether `region` holds an operation that is not pure; reports each.
@@ -436,6 +448,7 @@ function effectBlockers(program: IRProgram): {
           blocker: blocker(op, fn, ''),
           effect: op.effect,
           draws: onlyRandom(op),
+          states: op.touches,
         });
       }
     }

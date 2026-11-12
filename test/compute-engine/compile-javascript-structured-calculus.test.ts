@@ -230,12 +230,9 @@ describe('STRUCTURED CALCULUS: the closed form of the existing compiler', () => 
 
 describe('STRUCTURED CALCULUS: declines', () => {
   const ce = engine();
+  // A definite integral with no closed form is the routine `integrate`
+  // (`compile-javascript-structured-calculus2.test.ts`).
   const cases: [string, Json, string][] = [
-    [
-      'an integral with no closed form',
-      Int(['Sqrt', ['Add', 1, Pow('t', 4)]], 0, 'a'),
-      'has no closed form that the engine finds at compile time',
-    ],
     [
       'an indefinite integral with no closed form',
       ['Integrate', ['Sqrt', ['Add', 1, Pow('t', 4)]], 't'],
@@ -344,14 +341,16 @@ describe('STRUCTURED CALCULUS: the shared step pool of the closed-form searches'
   });
 
   test('a search that runs out of steps: quadrature on one, a decline on the other', () => {
-    // `t eᵗ cos t` spends 9 steps of a search; with 5, no closed form.
+    // `t eᵗ cos t` spends 9 steps of a search; with 5, no closed form, and
+    // the existing compiler writes the log-space alternative of the
+    // integrand, which the route does not have (slice 3).
     const latex = '\\int_0^a t e^{t} \\cos t dt';
     setAntiderivativeAttemptBudgetForTesting(5);
     expect(compile(engine().parse(latex), EXISTING).code).toContain(
       '_SYS.integrate'
     );
     expect(() => compile(engine().parse(latex), PROFILE)).toThrow(
-      'has no closed form'
+      /has no closed form .* is computed again in log space/
     );
     setAntiderivativeAttemptBudgetForTesting();
     const ce = engine();
@@ -446,8 +445,9 @@ describe('STRUCTURED CALCULUS: the result', () => {
   // empties it at the start and the end of each compilation, so an answer
   // made with the definition of `k` in one engine is not read for the
   // definition of `k` in another one. With `k := Sin(30)` the search for a
-  // closed form refuses the definition, which reads the angular unit, and
-  // the route declines; the existing compiler integrates numerically.
+  // closed form refuses the definition, which reads the angular unit; the
+  // existing compiler integrates numerically, and the route declines the
+  // binding of `k`, whose value is not a number.
   for (const order of [
     ['3', 'Sin(30)'],
     ['Sin(30)', '3'],
@@ -464,7 +464,7 @@ describe('STRUCTURED CALCULUS: the result', () => {
       // the existing compiler, which empties the memos when it ends.
       const profiles = programs.map(({ value, expr }) => {
         if (value === '3') return compile(expr, PROFILE);
-        expect(() => compile(expr, PROFILE)).toThrow('has no closed form');
+        expect(() => compile(expr, PROFILE)).toThrow('unsupported binding k');
         return undefined;
       });
       programs.forEach(({ value, expr }, i) => {

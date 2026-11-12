@@ -167,6 +167,36 @@ test('the generator writes the forms of slices 4 and 5', () => {
     expect([form, forms.has(form)]).toEqual([form, true]);
 });
 
+test('the generator writes the integrals of the routine integrate (--calculus)', () => {
+  // Slice 2 of docs/plans/2026-11-11-structured-numeric-calculus.md:
+  // definite integrals with no closed form, with infinite bounds, two
+  // clauses and an integral in an integrand.
+  const forms = new Set<string>();
+  const visit = (json: unknown): void => {
+    if (!Array.isArray(json)) return;
+    const [head, ...ops] = json;
+    if (head === 'Integrate') {
+      const limits = ops.slice(1) as unknown[][];
+      if (limits.length === 2) forms.add('two clauses');
+      if (Array.isArray(ops[0]) && ops[0][0] === 'Integrate') forms.add('a nested integral');
+      if (limits.some((l) => l.includes('PositiveInfinity') || l.includes('NegativeInfinity')))
+        forms.add('an infinite bound');
+      if (JSON.stringify(ops[0]).includes('["Power","t",4]')) forms.add('an integrand with no closed form');
+    }
+    json.forEach(visit);
+  };
+  for (let i = 0; i < 3000; i++)
+    visit(
+      generateProgram(7, i, {
+        depth: DEFAULT_OPTIONS.depth,
+        size: DEFAULT_OPTIONS.size,
+        calculus: true,
+      }).json
+    );
+  for (const form of ['two clauses', 'a nested integral', 'an infinite bound', 'an integrand with no closed form'])
+    expect([form, forms.has(form)]).toEqual([form, true]);
+});
+
 test('no difference between the two compilers and no failure of the profile, but the known ones', () => {
   const unexplained = result.findings.filter(
     (f) =>

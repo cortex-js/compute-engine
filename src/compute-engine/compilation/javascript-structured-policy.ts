@@ -14,6 +14,7 @@
  */
 import type { Expression } from '../global-types.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
+import { initialPanelsForDimensions } from '../numerics/gauss-kronrod.js';
 import {
   elementOf,
   isListType,
@@ -273,6 +274,29 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'fract': { results: ['number'], operands: ['number'] },
     'mod-one': { results: ['number'], operands: ['number'] },
     'hypot': { results: ['number'], operands: ['number'] },
+  },
+  // `_SYS.integrate(f, lo, hi[, panels])`, as the existing emitter writes a
+  // definite `Integrate` with no closed form (`compileIntegrate()` in
+  // `javascript-target.ts`): `f` is the body as a closure of the parameter.
+  // The runtime keeps the count of the integrals in progress and a budget of
+  // nested evaluations as module state (`quadrature`), and an outermost
+  // integral that does not converge samples 10^7 points from the live
+  // entropy source of the engine (`entropy`; a seeded frame does not
+  // discharge it, `docs/RANDOMNESS-MODEL.md`). It throws only the timeout
+  // of an ambient deadline (`error`); no value is `NaN`. The default of the
+  // panels is the starting count of a single integral
+  // (`initialPanelsForDimensions(1)`): the emitter writes no fourth argument
+  // for it.
+  routines: {
+    integrate: {
+      results: ['number'],
+      operands: ['number'],
+      parameter: 'number',
+      effect: 'effectful',
+      touches: ['entropy', 'quadrature'],
+      aborts: ['error'],
+      defaultPanels: initialPanelsForDimensions(1),
+    },
   },
 };
 

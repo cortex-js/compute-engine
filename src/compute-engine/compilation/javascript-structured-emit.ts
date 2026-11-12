@@ -228,6 +228,7 @@ import {
   mutatesInPlace,
   rootYieldsUnique,
 } from './structured-in-place.js';
+import { JAVASCRIPT_POLICY } from './javascript-structured-policy.js';
 
 /**
  * The helpers of `bigint-runtime.ts` that the bigint emitter of the existing
@@ -784,7 +785,8 @@ class Emitter {
     // this rule), or an operand that can be written into this code can (an operand that
     // an earlier operation of the region defines and that has one use, there:
     // a loop, a build and a seeded are statements, and their results are
-    // names). `aborting[k]`: the number of operations before position `k`
+    // names; a routine is effectful, so its result is a name too).
+    // `aborting[k]`: the number of operations before position `k`
     // whose code can abort. A value whose code can abort is not moved across
     // another one: the abort that ends the call would change.
     const abortsHere: boolean[] = [];
@@ -803,7 +805,12 @@ class Emitter {
       abortsHere.push(
         statesAbort(op, this.program.functions) || op.operands.some(writtenInto)
       );
-      if (op.kind !== 'loop' && op.kind !== 'build' && op.kind !== 'seeded')
+      if (
+        op.kind !== 'loop' &&
+        op.kind !== 'build' &&
+        op.kind !== 'seeded' &&
+        op.kind !== 'routine'
+      )
         for (const v of op.kind === 'if'
           ? op.results
           : op.result
@@ -1489,6 +1496,36 @@ class Emitter {
           `const ${name} = _SYS.withRandomSeed(${seed}, () => { ${[...body, `return ${value.text};`].join(' ')} });`
         );
         return undefined;
+      }
+      case 'routine': {
+        // `_SYS.integrate((t) => { …; return value; }, lo, hi[, panels])`,
+        // the call of the existing emitter (`compileIntegrate()` in
+        // `javascript-target.ts`). The body is a closure of its parameter:
+        // its statements stay in it, and a value of the regions around it is
+        // a name that the closure reads (`region()` writes a value at its use
+        // only in its own region). The routine is effectful: `region()` binds
+        // its call to a `const` at its position. The panels are written when
+        // they are not the default of the policy, as the existing emitter
+        // writes them.
+        const rule = JAVASCRIPT_POLICY.routines?.[op.fn];
+        if (op.fn !== 'integrate' || rule === undefined)
+          return fail(`no emission for the routine ${String(op.fn)}`);
+        const [parameter] = op.body.parameters ?? [];
+        if (parameter === undefined)
+          return fail('a routine whose body has no parameter');
+        const name = this.bind(parameter);
+        const body: string[] = [];
+        const [value] = this.openRegion(op.body, body, readsInputs);
+        const closure = `(${name}) => { ${[...body, `return ${value.text};`].join(' ')} }`;
+        const panels =
+          op.initialPanels === undefined ||
+          op.initialPanels === rule.defaultPanels
+            ? ''
+            : `, ${op.initialPanels}`;
+        return {
+          text: `_SYS.integrate(${closure}, ${operand(operands[0], CONDITIONAL)}, ${operand(operands[1], CONDITIONAL)}${panels})`,
+          precedence: CALL,
+        };
       }
       case 'trace': {
         const trace = this.options.trace;

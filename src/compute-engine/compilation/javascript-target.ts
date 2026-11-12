@@ -13140,7 +13140,7 @@ export const UNROLL_LIMIT = 100;
  * closure the statement form introduces, and the flat chain is the more
  * readable emission for the trivial sums that dominate that size.
  */
-const UNROLL_STATEMENT_MIN_TERMS = 4;
+export const UNROLL_STATEMENT_MIN_TERMS = 4;
 
 /**
  * Extract index, lower, and upper from a Limits expression.
@@ -18732,7 +18732,7 @@ function emitSumProduct(
  */
 const INTEGRATE_DEPTH = new WeakMap<Expression, number>();
 
-function integrateDepth(expr: Expression): number {
+export function integrateDepth(expr: Expression): number {
   const cached = INTEGRATE_DEPTH.get(expr);
   if (cached !== undefined) return cached;
   let depth = 0;

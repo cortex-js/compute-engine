@@ -36,10 +36,13 @@ import {
   type BinaryFunctionName,
   type CollectionFunctionName,
   type IntegerFunctionName,
+  type IRRoutine,
   type Representation,
+  type RoutineName,
   type UnaryFunctionName,
   type ValueType,
   ROUNDED_INTEGER_FUNCTIONS,
+  statesText,
 } from './structured-ir.js';
 
 /** The operations whose operands and result the policy constrains, with no
@@ -84,6 +87,26 @@ export type OperationRule = {
    *  operand has the representation of the result. For `and` and `or`, the
    *  value of each region after the first operand is an operand too. */
   readonly operands: readonly Representation[] | 'same';
+};
+
+/** The facts and the representations of a numeric routine of a target
+ *  (`IRRoutine`, `RepresentationPolicy.routines`). */
+export type RoutineRule = OperationRule & {
+  /** The representation of the parameter of the body. */
+  readonly parameter: Representation;
+  /** The effect of the routine itself, without its body: a routine that
+   *  keeps state between calls or samples a source of the runtime is
+   *  `effectful`. */
+  readonly effect: EffectFact;
+  /** The states that the routine itself touches (`IRState`), sorted;
+   *  absent when there is none. */
+  readonly touches?: readonly IRState[];
+  /** The kinds of abort of the routine itself (`AbortKind`), sorted;
+   *  absent when it does not abort. */
+  readonly aborts?: readonly AbortKind[];
+  /** The number of equal panels from which `integrate` starts when the
+   *  operation states none (`IRRoutine.initialPanels`). */
+  readonly defaultPanels?: number;
 };
 
 /**
@@ -151,6 +174,10 @@ export type RepresentationPolicy = {
   readonly integers?: Readonly<
     Partial<Record<IntegerFunctionName, OperationRule>>
   >;
+  /** The numeric routines that the target has (`IRRoutine`), each with its
+   *  facts and representations; absent: none. A routine that is not listed
+   *  is not in the target (a GLSL policy has none). */
+  readonly routines?: Readonly<Partial<Record<RoutineName, RoutineRule>>>;
   /** The kinds of abort of the operation `op` itself (`AbortKind`), sorted,
    *  or `undefined` when it does not abort: each operation carries them
    *  (`OperationBase.aborts`), and the verifier checks that they are these.
@@ -259,6 +286,15 @@ export type RepresentationPolicy = {
  * and the effect and the states of its body without `random`
  * (`dischargedEffect()`): it discharges `random` only, and never an `unknown`
  * body. A target whose policy has no `draw` or no `seeded` refuses it.
+ *
+ * For a `routine` (`IRRoutine`): the policy lists its name
+ * (`RepresentationPolicy.routines`; a target with no routines refuses it);
+ * it has two real or integer operands of the representations of its rule, a
+ * body with one `real` parameter of the representation of the rule that
+ * yields one real or integer value, a `real` result, and `initialPanels`
+ * absent or a positive integer; its effect is the effect of the rule joined
+ * with the effect of the body, its states the union of the states of both,
+ * and its abort kinds those of the rule; no `exit` in its body leaves it.
  *
  * For a host operation (`IRHostCall`): it names a binding of
  * `IRProgram.hosts`; a read has no operand; the operands and the result have
@@ -532,10 +568,11 @@ export function verifyProgram(
     if (
       region.parameters !== undefined &&
       owner?.kind !== 'loop' &&
-      owner?.kind !== 'build'
+      owner?.kind !== 'build' &&
+      owner?.kind !== 'routine'
     )
       fail(
-        'a region that is not the body of a loop or of a build has parameters'
+        'a region that is not the body of a loop, of a build or of a routine has parameters'
       );
     const effects: EffectFact[] = [];
     const states: (readonly IRState[] | undefined)[] = [];
@@ -573,7 +610,7 @@ export function verifyProgram(
           );
       }
       verifySignature(op, program, policy, fail);
-      verifyStates(op, program, fail);
+      verifyStates(op, program, fail, policy);
       if (verifyAborts(op, policy, fail)) noValue = true;
       effects.push(op.effect);
       states.push(op.touches);
@@ -670,8 +707,13 @@ function verifyAborts(
     )
       fail(`the operation ${op.kind} has a malformed list of abort kinds`);
   }
+  // A routine has the abort kinds of its rule (`RoutineRule.aborts`).
   const expected =
-    op.kind === 'yield' || op.kind === 'exit' ? undefined : policy.aborts?.(op);
+    op.kind === 'yield' || op.kind === 'exit'
+      ? undefined
+      : op.kind === 'routine'
+        ? routineRule(op, policy)?.aborts
+        : policy.aborts?.(op);
   const text = (kinds: readonly AbortKind[] | undefined) =>
     kinds === undefined || kinds.length === 0 ? 'none' : kinds.join(', ');
   if (text(aborts) !== text(expected))
@@ -684,8 +726,17 @@ function verifyAborts(
 const isEffect = (e: unknown): e is EffectFact =>
   e === 'pure' || e === 'effectful' || e === 'unknown';
 
-const statesText = (states: readonly IRState[] | undefined): string =>
-  states === undefined ? 'none' : states.join(', ');
+/** The rule of the routine of `op` in `policy`, or `undefined` when the
+ *  target does not have it. */
+function routineRule(
+  op: IRRoutine,
+  policy: RepresentationPolicy
+): RoutineRule | undefined {
+  const routines = policy.routines;
+  return routines !== undefined && Object.hasOwn(routines, op.fn)
+    ? routines[op.fn]
+    : undefined;
+}
 
 const sameStates = (
   a: readonly IRState[] | undefined,
@@ -701,12 +752,14 @@ const sameStates = (
  * states of each region, and a call the states of the body of its function.
  * A `draw` names exactly `random`. A `seeded` has the effect and the states
  * of its body without `random` (`dischargedEffect()`): an `unknown` body is
- * never discharged.
+ * never discharged. A `routine` has the effect of its rule joined with the
+ * effect of its body, and the states of both (`RoutineRule`).
  */
 function verifyStates(
   op: IROperation,
   program: IRProgram,
-  fail: (message: string) => never
+  fail: (message: string) => never,
+  policy: RepresentationPolicy
 ): void {
   const touches = op.touches;
   if (touches !== undefined) {
@@ -739,6 +792,18 @@ function verifyStates(
     if (op.effect !== expected.effect || !sameStates(touches, expected.touches))
       fail(
         `a seeded has the effect ${op.effect} and the states ${statesText(touches)}, and its body discharged gives ${expected.effect} and ${statesText(expected.touches)}`
+      );
+    return;
+  }
+  if (op.kind === 'routine') {
+    // The rule is checked by `verifySignature()`, which runs first.
+    const rule = routineRule(op, policy);
+    if (rule === undefined) return;
+    const effect = joinEffects(rule.effect, op.body.effect);
+    const states = unionStates(rule.touches, op.body.touches);
+    if (op.effect !== effect || !sameStates(touches, states))
+      fail(
+        `a routine ${op.fn} has the effect ${op.effect} and the states ${statesText(touches)}, and the target states ${effect} and ${statesText(states)} for it and its body`
       );
     return;
   }
@@ -839,6 +904,7 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'capture',
   'draw',
   'seeded',
+  'routine',
   'host',
 ]);
 
@@ -1548,6 +1614,63 @@ function verifySignature(
       )
         fail(
           `the body of a seeded yields a ${value?.type} value, and the seeded has a result of the type ${op.result.type}`
+        );
+      return;
+    }
+    case 'routine': {
+      // The effect, the states and the abort kinds are checked by
+      // `verifyStates()` and `verifyAborts()`; that no `exit` leaves the
+      // body, with the region (a routine is a barrier of `exit`).
+      const rule =
+        routineRule(op, policy) ??
+        fail(`the target has no routine ${String(op.fn)}`);
+      arity(2);
+      operandsIn(
+        rule.operands === 'same' ? [op.result.representation] : rule.operands
+      );
+      op.operands.forEach((operand, i) => {
+        if (operand.type !== 'real' && operand.type !== 'integer')
+          fail(
+            `the ${i === 0 ? 'lower' : 'upper'} bound of a routine ${op.fn} has the type ${operand.type}`
+          );
+      });
+      const parameters = op.body.parameters ?? [];
+      if (parameters.length !== 1)
+        fail(
+          `the body of a routine ${op.fn} has ${parameters.length} parameters, not one`
+        );
+      if (
+        parameters[0].type !== 'real' ||
+        parameters[0].representation !== rule.parameter
+      )
+        fail(
+          `the parameter of a routine ${op.fn} has the type ${parameters[0].type} and the representation ${parameters[0].representation}`
+        );
+      resultIn(rule.results);
+      if (op.result.type !== 'real')
+        fail(
+          `a routine ${op.fn} has a result of the type ${op.result.type}, not real`
+        );
+      const yielded = yieldedValues(op.body);
+      if (yielded.length !== 1)
+        fail(
+          `the body of a routine ${op.fn} yields ${yielded.length} values, not one`
+        );
+      const value = yielded[0];
+      if (
+        !fitsType(value.type, 'real') ||
+        !rule.results.includes(value.representation)
+      )
+        fail(
+          `the body of a routine ${op.fn} yields a ${value.type} value, not a real`
+        );
+      const panels = op.initialPanels;
+      if (
+        panels !== undefined &&
+        !(typeof panels === 'number' && Number.isInteger(panels) && panels > 0)
+      )
+        fail(
+          `a routine ${op.fn} starts from ${String(panels)} panels, not a positive integer`
         );
       return;
     }

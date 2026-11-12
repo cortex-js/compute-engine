@@ -119,6 +119,7 @@ import {
   operationCanAbort,
   reachesHost,
   regionsOf,
+  definedValues,
   touchesField,
   type EffectFact,
   type IRCapture,
@@ -139,11 +140,17 @@ import {
   type BinaryFunctionName,
   type UnaryFunctionName,
 } from './structured-ir.js';
-import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
+import {
+  JAVASCRIPT_POLICY,
+  verifyJavaScriptProgram,
+} from './javascript-structured-policy.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isLibraryOperator } from './builtin-callback.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
-import { UNROLL_LIMIT } from './javascript-target.js';
+import {
+  UNROLL_LIMIT,
+  UNROLL_STATEMENT_MIN_TERMS,
+} from './javascript-target.js';
 
 export type StructuredInput = IRInput;
 
@@ -244,6 +251,33 @@ export type StructuredCapture = {
   readonly assertCurrent: () => void;
 };
 
+/**
+ * A definite `Integrate` node with no closed form, as the admission read it
+ * (`integralParts()` in `javascript-fragment-target.ts`): the integrand as a
+ * body in the variables of the clauses (a `Function` integrand unwrapped,
+ * as `integrandLambda()` unwraps it), and the clauses, the first one
+ * outermost. The annotation types the bounds of each clause with the
+ * variables of the clauses before it, and the body with every variable, a
+ * real, in the scope of the node.
+ */
+export type StructuredIntegral = {
+  readonly clauses: readonly {
+    /** The name of the variable. */
+    readonly name: string;
+    /** The symbol node of the variable, which the annotation binds. */
+    readonly variable: Expression;
+    readonly lower: Expression;
+    readonly upper: Expression;
+  }[];
+  readonly body: Expression;
+  /** The starting panel count of the node when it is the outermost
+   *  integral of its body: `initialPanelsForDimensions()` of its clauses and
+   *  of the deepest chain of `Integrate` nodes in its operands, as
+   *  `compileIntegrate()` measures it. An integral in the body or in a bound
+   *  of another one has the count of the outermost one. */
+  readonly panels: number;
+};
+
 /** The facts that the preparation of the structured route records, and
  *  that the lowering reads. */
 export type StructuredPreparation = {
@@ -306,6 +340,9 @@ export type StructuredPreparation = {
    *  annotation typed it in the place of the node, and the node is lowered
    *  as it. */
   readonly closedForms?: ReadonlyMap<Expression, Expression>;
+  /** Each definite `Integrate` node of the program with no closed form,
+   *  which the existing compiler integrates numerically (`integral()`). */
+  readonly integrals?: ReadonlyMap<Expression, StructuredIntegral>;
   readonly numericPolicy: 'strict' | 'complex';
   /** The iteration budget of the compilation (`CompileTarget.iterationBudget`),
    *  recorded on each `loop`. */
@@ -834,6 +871,16 @@ export class StructuredLimitError extends Error {
   }
 }
 
+/** A program that the lowering finds outside the profile, for a reason that
+ *  the admission cannot see (the operations of a node): the profile
+ *  declines it with `'outside-profile'` and this message. */
+export class StructuredDeclineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StructuredDeclineError';
+  }
+}
+
 /** Lower the program that `preparation` describes, without verifying it:
  *  the caller verifies it (`lowerStructuredFragment()` does both). */
 export function lowerStructuredProgram(
@@ -923,6 +970,10 @@ class Lowering {
   /** The ids of the values that a `Declare` or an `Assign` writes to a
    *  local (`toLocal()`, `IRProgram.localValues`). */
   private readonly localValues = new Set<number>();
+  /** The panel count of the outermost integral being lowered in the
+   *  current body (`integral()`), or none. A helper body starts with none:
+   *  it measures its own integrals, as `compileIntegrate()` does. */
+  private panels: number | undefined = undefined;
 
   constructor(private readonly prep: StructuredPreparation) {}
 
@@ -1369,6 +1420,13 @@ class Lowering {
     if (operator === 'Sum' || operator === 'Product')
       return this.inScope(scope.inner.get(node), () =>
         this.aggregate(node, facts, scope, operations)
+      );
+
+    // A definite integral with no closed form (`integral()`).
+    const integral = this.prep.integrals?.get(node);
+    if (integral !== undefined)
+      return this.inScope(scope.inner.get(node), () =>
+        this.integral(node, integral, facts, scope, operations)
       );
 
     if (operator === 'If') {
@@ -3021,6 +3079,94 @@ class Lowering {
   }
 
   /**
+   * A definite `Integrate` with no closed form (`StructuredIntegral`), as
+   * the existing emitter writes it (`compileIntegrate()` in
+   * `javascript-target.ts`): one `routine` `integrate` per clause, nested,
+   * the first clause outermost. The bounds of the first clause are
+   * evaluated where the node is, the lower one first; the bounds of a later
+   * clause are operations of the body of the clause before it, evaluated
+   * at each of its samples. The body of the last clause is the integrand.
+   * Each body binds the variable of its clause to its parameter and starts
+   * a new epoch (`changed()`), so no node of the body is the value of an
+   * earlier lowering outside it: every operation of the integrand runs at
+   * each sample, as the code of the existing emitter with `cse: false`
+   * does. Each clause starts from the panel count of the outermost integral
+   * of the body that holds the node (`panels`), or of this node.
+   */
+  private integral(
+    node: Expression & { ops: readonly Expression[] },
+    integral: StructuredIntegral,
+    facts: FragmentValueFacts<ScalarRepresentation>,
+    scope: FragmentScope<ScalarRepresentation>,
+    operations: IROperation[]
+  ): IRValue {
+    const inner = scope.inner.get(node);
+    if (inner === undefined)
+      return fail(`no scope for the integral ${nodeText(node)}`);
+    const rule = JAVASCRIPT_POLICY.routines?.integrate;
+    if (rule === undefined) return fail('the target has no routine integrate');
+    const outermost = this.panels === undefined;
+    const panels = this.panels ?? integral.panels;
+    if (outermost) this.panels = panels;
+    const { clauses, body } = integral;
+    // The conversion of each bound, then of the body (`integralRule()` in
+    // `javascript-fragment-target.ts`).
+    const conversion = (i: number) => facts.conversions?.[i];
+    const clause = (d: number, out: IROperation[]): IRValue => {
+      const { name, lower, upper } = clauses[d];
+      const bound = (b: Expression, i: number) =>
+        this.convert(this.value(b, inner, out), conversion(i), node, out);
+      const lo = bound(lower, 2 * d);
+      const hi = bound(upper, 2 * d + 1);
+      const parameter = this.newValue('real', 'number');
+      const bodyOperations: IROperation[] = [];
+      const value = this.inRegion(bodyOperations, () => {
+        const values = new Map(this.bound.get(inner) ?? []);
+        values.set(name, parameter);
+        this.bound.set(inner, values);
+        this.wrote(inner);
+        this.changed();
+        return d + 1 < clauses.length
+          ? clause(d + 1, bodyOperations)
+          : this.convert(
+              this.value(body, inner, bodyOperations),
+              conversion(2 * clauses.length),
+              node,
+              bodyOperations
+            );
+      });
+      const region: IRRegion = {
+        ...this.region(
+          bodyOperations,
+          d + 1 < clauses.length ? node : body,
+          value
+        ),
+        parameters: [parameter],
+      };
+      const result =
+        d === 0 ? this.resultOf(facts) : this.newValue('real', 'number');
+      out.push({
+        kind: 'routine',
+        fn: 'integrate',
+        result,
+        operands: [lo, hi],
+        body: region,
+        initialPanels: panels,
+        effect: joinEffects(rule.effect, region.effect),
+        ...touchesField(rule.touches, region.touches),
+        ...(rule.aborts !== undefined ? { aborts: rule.aborts } : {}),
+        origin: node,
+      });
+      return result;
+    };
+    try {
+      return clause(0, operations);
+    } finally {
+      if (outermost) this.panels = undefined;
+    }
+  }
+
+  /**
    * A product with a complex result, which the rule of `Multiply` admitted
    * with each operand in its own representation, lowered as the existing
    * emitter writes it (`Multiply` in `javascript-target.ts`):
@@ -3287,9 +3433,23 @@ class Lowering {
    *   with the operations of the representation: `Number.isSafeInteger(b)`
    *   is `|b| <= 2^53 - 1`, `Number.isFinite(b)` is `|b| < ∞`.
    *
-   * The early exit of the existing emitter on a `NaN` accumulator gives the
-   * same value: `NaN` absorbs both operations, and it skips a term only when
-   * the term has no effect.
+   * The existing emitter stops at the first term whose value is `NaN`
+   * (`if (_tv1 !== _tv1) return NaN`, `emitSumProduct()`) when its terms are
+   * skippable by its purity oracle and can be `NaN`, in a loop and in an
+   * unrolled sum of `UNROLL_STATEMENT_MIN_TERMS` terms or more; a shorter
+   * unrolled sum is one chain that evaluates every term, and its terms are
+   * not refused. `NaN` absorbs
+   * both operations, so the value is the same when a later term has no
+   * effect and cannot throw. A term that can throw where an earlier term is
+   * `NaN` (`termThrower()`: a `routine`, a `replace-at`, a call of a
+   * function whose body can throw, a `mod` but one whose operands are safe
+   * integers or the same in every term; a read or a call of the host is
+   * left out, as the admission orders and counts those) declines
+   * (`StructuredDeclineError`): `Sum(Mod(1, j/k))`
+   * at `k = 0` was `NaN` on the existing compiler and a `RangeError` of
+   * `_SYS.floorMod` at the second term here, and a sum of integrals that do
+   * not converge drew 160 times from the entropy source here and 32 times
+   * there.
    *
    * The operations that the lowering adds (the sum, the guard) are `pure`.
    * The effect fact of the node is not read: it joins the effects of the
@@ -3375,16 +3535,36 @@ class Lowering {
 
     const clause = (i: number, out: IROperation[]): IRValue => {
       const { index, lower, upper } = clauses[i];
-      const term = (k: IRValue, into: IROperation[]): IRValue => {
+      // `exits`: the existing emitter can stop at this term when the sum is
+      // `NaN` before it. It cannot in an unrolled clause of fewer than
+      // `UNROLL_STATEMENT_MIN_TERMS` terms, a flat chain that evaluates
+      // every term (`emitSumProduct()`, the same unroll condition as here),
+      // so a term there is not refused.
+      const term = (
+        k: IRValue,
+        into: IROperation[],
+        exits: boolean
+      ): IRValue => {
         bindIndex(index, k);
-        return i + 1 < clauses.length
-          ? clause(i + 1, into)
-          : this.convert(
-              this.value(body, inner, into),
-              bodyConversion,
-              node,
-              into
-            );
+        const start = into.length;
+        const value =
+          i + 1 < clauses.length
+            ? clause(i + 1, into)
+            : this.convert(
+                this.value(body, inner, into),
+                bodyConversion,
+                node,
+                into
+              );
+        const thrower = exits ? this.termThrower(into.slice(start)) : undefined;
+        if (thrower !== undefined)
+          throw new StructuredDeclineError(
+            `${node.operator} ${nodeText(node)} has a term that can throw or ` +
+              `integrates numerically (${nodeText(thrower.origin)}): the ` +
+              `existing compiler can stop the ${sum ? 'sum' : 'product'} at ` +
+              `its first term that is NaN, and not evaluate the later terms`
+          );
+        return value;
       };
       const identity = (into: IROperation[]) =>
         this.numberLiteral(sum ? 0 : 1, type, node, into);
@@ -3400,7 +3580,14 @@ class Lowering {
           unrollFits(hi - lo + 1, unrolledTermSize(body, rest), UNROLL_LIMIT)
         ) {
           const terms: IRValue[] = [];
-          for (let k = lo; k <= hi; k++) terms.push(term(literal(k, out), out));
+          const exits = hi - lo + 1 >= UNROLL_STATEMENT_MIN_TERMS;
+          for (let k = lo; k <= hi; k++) {
+            // The index literal is defined before the term: it varies across
+            // the terms, and is a safe integer (`termThrower()`).
+            const indexValue = literal(k, out);
+            this.aggregateIndexes.add(indexValue.id);
+            terms.push(term(indexValue, out, exits));
+          }
           if (terms.length === 1) return terms[0];
           return push(
             sum ? 'add' : 'multiply',
@@ -3438,10 +3625,11 @@ class Lowering {
 
       const loop = (into: IROperation[]): IRValue => {
         const indexValue = this.newValue('integer', 'number');
+        this.aggregateIndexes.add(indexValue.id);
         const accumulator = this.newValue(type, representation);
         const bodyOperations: IROperation[] = [];
         const t = this.inRegion(bodyOperations, () =>
-          term(indexValue, bodyOperations)
+          term(indexValue, bodyOperations, true)
         );
         if (widerType(type, t.type) !== type)
           fail(`a term of ${nodeText(node)} has the type ${t.type}`);
@@ -4120,6 +4308,116 @@ class Lowering {
       return known;
     });
 
+  /** The ids of the index values of the loops of `Sum` and `Product`
+   *  (`aggregate()`): integers whose bounds are guarded to the safe range. */
+  private readonly aggregateIndexes = new Set<number>();
+
+  /**
+   * The operation of `term`, the operations of one term of a `Sum` or a
+   * `Product`, that can make the existing compiler's early exit observable,
+   * or `undefined` (`aggregate()`): an operation that `canThrowNoHost()`
+   * answers for, but a `mod` that cannot throw, or that throws in every
+   * term alike. `_SYS.floorMod(a, b)` throws only for an operand beyond
+   * ±(2^53 − 1), the infinities included (`integerOperand()` in
+   * `javascript-runtime.ts`); `NaN` and a non-integer do not throw. So a
+   * `mod` is harmless when each operand is a safe integer by construction
+   * (an index of an aggregate, whose bounds are guarded, or an integer
+   * literal in the safe range), or, for a `mod` that every term evaluates
+   * (one of `term`, not in a region of one), the same value in every term
+   * (a value defined before the term, or computed in it by pure operations
+   * from such values, inputs, captures and constants): then it throws in
+   * the first term on both compilers, or never. `Mod(k, 3)`, `x·Mod(k, 2)`,
+   * `Mod(k, m)` with an input `m` are harmless; `Mod(1, j/k)` is not.
+   */
+  private termThrower(term: readonly IROperation[]): IROperation | undefined {
+    const defined = new Map<number, IROperation>();
+    const collect = (operations: readonly IROperation[]): void => {
+      for (const op of operations) {
+        for (const v of definedValues(op)) defined.set(v.id, op);
+        for (const region of regionsOf(op)) {
+          for (const p of region.parameters ?? []) defined.set(p.id, op);
+          collect(region.operations);
+        }
+      }
+    };
+    collect(term);
+    const safe = (v: IRValue): boolean => {
+      if (this.aggregateIndexes.has(v.id)) return true;
+      const op = defined.get(v.id);
+      return (
+        op?.kind === 'literal' &&
+        typeof op.value === 'number' &&
+        Number.isSafeInteger(op.value)
+      );
+    };
+    const invariants = new Map<number, boolean>();
+    const invariant = (v: IRValue): boolean => {
+      const op = defined.get(v.id);
+      if (op === undefined) return !this.aggregateIndexes.has(v.id);
+      let known = invariants.get(v.id);
+      if (known === undefined) {
+        known =
+          op.kind === 'literal' ||
+          op.kind === 'input' ||
+          op.kind === 'capture' ||
+          op.kind === 'constant' ||
+          (op.effect === 'pure' &&
+            regionsOf(op).length === 0 &&
+            op.operands.every(invariant));
+        invariants.set(v.id, known);
+      }
+      return known;
+    };
+    const visit = (
+      operations: readonly IROperation[],
+      everyTerm: boolean
+    ): IROperation | undefined => {
+      for (const op of operations) {
+        if (op.kind === 'mod') {
+          if (
+            !op.operands.every((v) => safe(v) || (everyTerm && invariant(v)))
+          )
+            return op;
+          continue;
+        }
+        if (regionsOf(op).length === 0) {
+          if (this.canThrowNoHost(op)) return op;
+          continue;
+        }
+        if (op.kind === 'routine') return op;
+        for (const region of regionsOf(op)) {
+          const found = visit(region.operations, false);
+          if (found !== undefined) return found;
+        }
+      }
+      return undefined;
+    };
+    return visit(term, true);
+  }
+
+  /** Whether each function of the program can throw other than by a call
+   *  of the host (`canThrow()` with `host` false), by index. */
+  private readonly throwingBodiesNoHost = new Map<number, boolean>();
+
+  /** `canThrow()` of `op` with a call or a read of the host left out: the
+   *  admission orders and counts those in a `Sum` or a `Product`
+   *  (`aggregate()`). */
+  private readonly canThrowNoHost = (op: IROperation): boolean =>
+    canThrow(
+      op,
+      (i) => {
+        let known = this.throwingBodiesNoHost.get(i);
+        if (known === undefined) {
+          const fn = this.functions[i];
+          if (fn === undefined) return fail(`no function ${i} for a call`);
+          known = fn.body.operations.some(this.canThrowNoHost);
+          this.throwingBodiesNoHost.set(i, known);
+        }
+        return known;
+      },
+      false
+    );
+
   /**
    * The value `value` written to the local `name` (a `Declare` or an
    * `Assign`, `node`), as a value of the type of the local (`binding`):
@@ -4608,8 +4906,10 @@ class Lowering {
     // valid (`inScope()`).
     const loops = this.loops;
     const regions = this.regions;
+    const panels = this.panels;
     this.loops = [];
     this.regions = [];
+    this.panels = undefined;
     let value: IRValue;
     try {
       value = this.inScope(entry.scope, () => {
@@ -4626,6 +4926,7 @@ class Lowering {
     } finally {
       this.loops = loops;
       this.regions = regions;
+      this.panels = panels;
     }
     this.lowering.delete(name);
     const result = {
@@ -4656,23 +4957,26 @@ class Lowering {
  *  evaluates, or of the body of a function that it calls, can throw on
  *  JavaScript: `mod` (`_SYS.floorMod` throws for an operand beyond the safe
  *  integer range) and `replace-at` (`_SYS.replaceAt` throws for an index
- *  out of range), and `host`, a function of the host, which can throw and
- *  whose calls the host can count, also when it is declared pure. A throw
+ *  out of range), `host`, a function of the host, which can throw and
+ *  whose calls the host can count, also when it is declared pure, and
+ *  `routine` (`_SYS.integrate` throws the timeout of a deadline). A throw
  *  is not an effect, so the lowering keeps such an operation where the
  *  existing emitter evaluates it (`ifStatement()`).
  *  `bodyThrows` answers for the function of index `i` of the program (a
  *  called function is lowered before its call). */
 function canThrow(
   op: IROperation,
-  bodyThrows: (i: number) => boolean
+  bodyThrows: (i: number) => boolean,
+  host = true
 ): boolean {
   return (
     op.kind === 'mod' ||
     op.kind === 'replace-at' ||
-    op.kind === 'host' ||
+    (host && op.kind === 'host') ||
+    op.kind === 'routine' ||
     (op.kind === 'call' && bodyThrows(op.function)) ||
     regionsOf(op).some((region) =>
-      region.operations.some((inner) => canThrow(inner, bodyThrows))
+      region.operations.some((inner) => canThrow(inner, bodyThrows, host))
     )
   );
 }

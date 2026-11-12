@@ -434,3 +434,172 @@ calculus head, `-w 4`):
   complex number and of the closed form `0` above; the witness replay and
   the shadow measure ran before these two refusals were added, which only
   decline more.
+
+## 10. Result of slice 2
+
+Implemented on `f56cd5f2908d403d9990aeb1171eee2a726b37b5`, then moved onto
+`5fc85eda6867e8e607b4262ca22afb52619747d0`: an integrand that reads a
+constant of the program (a captured list, declared once outside the
+closure), a name declared `number`, or a node that reads no input (folded)
+gives the doubles of the existing compiler. The review then changed
+`inexactJumpConstant()` (the rule of `Floor`, `Ceil`, `Round`, `Truncate`):
+a name bound by a scope of the program (a parameter, a local, an index, the
+variable of an integral) and the variable of a `Limits` or an `Element`
+clause are variables, also when the engine has a value for the name, and a
+node that holds a function literal or a bound name is not a constant. So
+`⌊∫₀ᵃ √(1 + t⁴) dt⌋`, which declined on the integrand taken for a
+constant, and `∫₀ˣ (⌊t⌋ + √(1 + t⁴)) dt` with `t := 1/3`, which declined
+on `t` read through its value, compile with the doubles of the existing
+compiler (`Math.floor(_SYS.integrate(…))`).
+
+**The operation.** `IRRoutine` (`structured-ir.ts`): the kind `routine`,
+`fn: 'integrate'`, operands lower and upper, one body region whose one
+parameter is the variable, and `initialPanels`. The policy gives the facts
+(`RepresentationPolicy.routines`, `RoutineRule`): for JavaScript the result
+and operands `number`, the parameter `number`, `effectful`, the states
+`entropy` and `quadrature`, the abort `error`, and `defaultPanels` 16. The
+verifier (`structured-verify.ts`) checks that the policy has the routine,
+two real or integer operands, one real parameter, a real result and yield,
+a positive integer `initialPanels`, an effect and states equal to the
+policy's joined with the body's, the aborts of the policy, and no `exit`
+that leaves the body. The rule 2 of `structured-in-place.ts` and the
+reasons of `analyzeExecution()` treat it as a loop body and as an operation
+that touches runtime states (not independent, not portable). The emitter
+writes `_SYS.integrate((p) => { …; return v; }, lo, hi[, panels])`, the
+panels only when they differ from `defaultPanels`.
+
+**The lowering.** `quadratureIntegral()` in the admission records the
+clauses, the body and the panel count (`StructuredRegistry.integrals`);
+`integralRule()` types the bounds clause by clause in the scope of the
+variables before them, binds each variable as a real index and types the
+body; `Lowering.integral()` writes one `routine` per clause, nested, the
+bounds of a later clause in the body of the clause before it, each body a
+new region (no value of an enclosing scope is moved into it, and no value
+of it out). The panel count is that of the existing compiler
+(`initialPanelsForDimensions()` of the clauses plus `integrateDepth()`,
+exported from `javascript-target.ts`), measured at the outermost integral
+of a body and inherited by the integrals in its bodies and bounds; a helper
+body starts again.
+
+**What is admitted** (strict mode): a definite integral with no closed form
+over one or more plain `Limits` clauses, with literal, infinite, input,
+expression, reversed and dependent bounds; an integrand that reads inputs,
+captured numbers, locals, a loop index or a lambda parameter, or calls a
+user function; an integral in a bound, an integrand, a branch, a `Loop`, `Map`, `Reduce(Map(…))`, `Apply`, `Max`, a block
+local, a helper body, a root `Function`. The tests
+(`compile-javascript-structured-calculus2.test.ts`, 43) compare the doubles
+with `Object.is`, the sequence of abscissas of every call of
+`adaptiveQuadrature()` and `monteCarloEstimate()`, the interpreter within
+1e-7, `canCompile`, `pure: false`, `shippable: false` and `symbolDeps`; a
+non-converging integral with a seeded `entropy` handler; an expired ambient
+deadline (the same `CancellationError`). The existing compiler reports no
+`pure` for these programs.
+
+**What stays declined, and why.** The log-space form (`logSpaceProduct()`
+gives a form; slice 3); `quadrature: 'monte-carlo'` (`_SYS.integrateMC`;
+slice 3); a bound that reads the variable of its own clause or of a later
+one (`∫₀ˣ √(1 + x⁴) dx`, where the existing compiler reads the input `x`
+in the bound and the route types the bound in the scope of the variable);
+an integrand or a later bound that reads or calls the host or holds a
+`Loop` or a `WithRandomSeed`, also through a helper (slice 5); a `Sum`
+or a `Product` whose terms hold such an integral, also through a helper
+or a function that `Map` calls (`aggregate()` in the lowering declines a
+term that can throw where an earlier term is `NaN`, `termThrower()`: a
+`routine`, a `replace-at`, a call of a function whose body can throw, and
+a `mod` unless each operand is an aggregate index, an integer literal or,
+where every term evaluates it, the same value in every term, since
+`_SYS.floorMod` throws only for an operand beyond ±(2^53 − 1), the index
+of a written-out term counting as a value that varies; the host is left
+out, and an unrolled clause of fewer than `UNROLL_STATEMENT_MIN_TERMS`
+(4) terms is not refused, as the existing emitter writes it as one chain
+that evaluates every term: the existing
+emitter stops at the first term that is `NaN`, so a later term does not
+sample its integrand or throw; the random tester found a sum of five
+terms that do not converge, which drew 160 times on the route and 32 on
+the existing compiler, and `Sum(Mod(1, j/k))` at `k = 0`, `NaN` there and
+a `RangeError` of `_SYS.floorMod` here). Lowering the exit itself was not
+done: the existing emitter has it in a loop and in an unrolled sum of
+`UNROLL_STATEMENT_MIN_TERMS` terms or more, only when its purity oracle
+finds the terms skippable and their type or code admits `NaN`, and has
+none in a shorter unrolled sum; an
+integrand that draws (as in slice 1); an indefinite integral with no
+closed form; the `complex` mode; the `bigint` mode (both compilers
+decline).
+
+**Where the implementation differs from the note.**
+
+- The panel default is a field of the policy (`defaultPanels`), so the
+  emitter does not name the number.
+- The log-space form declines whenever `logSpaceProduct()` gives one, also
+  for an integrand that the existing compiler does not rewrite; such a
+  program declines for another reason too.
+- The note expected no new rule in `analyzeExecution()`; a `routine` has
+  its own two reasons, which name the states that it touches.
+- `structuredValueParts()` reads the variables of a definite integral as
+  bound names, so a root block does not count them as free names; this
+  holds for an integral with a closed form too.
+- The order of the closed-form searches inside an integral with no closed
+  form differs (the existing compiler searches the integrand first, then
+  the bounds from the last clause): a known-limitations line.
+
+**Measures** (on `f56cd5f29`, before and after, `-w 4`):
+
+- Witness replay on the 121 test files that name `compile` and a calculus
+  head at the base, the new test file excluded (each
+  JavaScript compilation with a calculus head compiled again with the
+  profile, the values of the admitted ones compared at four points): of
+  263 distinct programs (program and mode), 129 admitted before, 164 after;
+  35 newly admitted, none lost. Value differences after: three, none of
+  them new: `∫ sinh x / cosh² x · cos² x` from `t` to ∞ takes the Monte
+  Carlo fallback on the live entropy source, which differs between two
+  calls of the same compiler (equal with a seeded source); `D(g², g)` with
+  `g: list<real>` given a number (outside its type, slice 1); and
+  `∫₀¹ x·y` with `y` assigned after boxing, which gives `NaN` on the base
+  as well (a known-limitations line). The 99 that stay declined: a
+  derivative with no closed form 27, the log space 17, `Limit` 15, jets 7,
+  a host read in the integrand 4, `EvaluateAt` 3, `NIntegrate` 3, the
+  `complex` mode 2, `monte-carlo` 2, other forms 19.
+- Shadow measure: the profile admits 7,139 of 8,737 baseline compilations
+  (7,079 before); public compilations 1,987 of 3,470 (1,937), engine
+  integrands 477 of 542 (467). The same two tests fail with the measure on
+  as in slice 1, before and after.
+- Consumers with the switch: 1,897 tests pass with and without it, before
+  and after; the engine's compilations admitted: 5,332 of 5,437 before and
+  after.
+- The rule of a `Sum` or a `Product` whose term can throw, measured with
+  the shadow measure on the 190 test files that call `compile()` and name
+  `Sum` or `Product`, on `4e960b7d6` and with this change: the profile
+  admits 6,873 of 9,980 baseline compilations (6,850 of 9,979 before). One
+  compilation that main admits declines on the rule:
+  `Sum(Mod(n^n, 10^10), Limits(n, 1, 1000))` (`compile-integer-range-guard`),
+  whose term throws at `n = 14` (`14^14` is beyond 2^53) on both
+  compilers, with no earlier term `NaN`: the route was right there, and the
+  decline gives the interpreter's value through the fallback. A first form
+  of the rule declined every term with a `Mod` (`Sum(Mod(k, 3))`); the
+  rule now reads the operands (`termThrower()`). The review then found
+  that the index of a written-out term was read as the same value in every
+  term (the unrolled witness `Sum(Mod(1, j/m), Limits(j, 0, 3))` was
+  admitted and threw where the existing compiler gives `NaN`), and that a
+  sum of fewer than 4 written-out terms has no exit there. With both fixed
+  the profile admits 6,871 of 9,980, and two compilations of one more
+  program decline: `Sum(Mod(n^n, 7), Limits(n, 1, 10))`
+  (`compile-integer-range-guard`, `review-compiler-regressions`), 25 on
+  both compilers, which the old route had right. The rule cannot prove
+  `n^n` within ±(2^53 − 1) without evaluating each written-out term: a
+  loss, kept for a sound rule.
+- The random tester: `--calculus` also writes integrals with no closed
+  form (`genQuadrature()`: an integrand with no closed form, at times with
+  an expression of the program in `t`, bounds that are literals or
+  `2·arctan` of a leaf, `e^{-t⁴}` to `±∞`, two clauses, an integral in an
+  integrand). An integral that does not converge samples 10⁷ points at
+  each call, so the first form of the generator (any leaf or `±∞` as a
+  bound) ran about 500 programs in 25 minutes. On `5fc85eda6`, seeds 191
+  and 192 (5,000 programs each, `--calculus`) and 193 (10,000): no profile
+  failure; no difference from the existing compiler but one in seed 192,
+  `Sum(Mod(1, j/k))` at `k = 0`, which has no calculus node (the existing
+  emitter stops the sum at its first `NaN` term, the route runs on to a
+  term that throws; an issue). On `f56cd5f29`, seed 192 found the sum of
+  integrals that drew 160 times against 32, refused since, and seed 191
+  a `compile-error` for `x·Conjugate(Haversine(1))` (no calculus;
+  `5fc85eda6` folds that node, and `x·Conjugate(Haversine(2y))` still
+  fails: an issue).

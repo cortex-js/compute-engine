@@ -1550,3 +1550,214 @@ describe('the verifier: the policy JS-bigint', () => {
     );
   });
 });
+
+// Slice 2 of docs/plans/2026-11-11-structured-numeric-calculus.md: the
+// operation `routine` (`integrate`) and its rule in the policy.
+describe('the verifier: routines', () => {
+  type Made = ReturnType<typeof madeProgram>;
+  /**
+   * A made program whose root is `integrate` of its parameter between the
+   * literal 0 and the input `x`, with the routine replaced by `change`.
+   */
+  function madeRoutine(change: (op: Op, m: Made) => Op = (op) => op) {
+    const m = madeProgram();
+    const lo = m.value('real');
+    const hi = m.value('real');
+    const t = m.value('real');
+    const r = m.value('real');
+    const routine: Op = {
+      kind: 'routine',
+      fn: 'integrate',
+      result: r,
+      operands: [lo, hi],
+      body: { ...m.region([m.yieldOf(t)]), parameters: [t] },
+      initialPanels: 4,
+      effect: 'effectful',
+      touches: ['entropy', 'quadrature'],
+      aborts: ['error'],
+      origin: m.origin,
+    };
+    const changed = change(routine, m);
+    const rootOps: Op[] = [
+      { kind: 'input', input: 0, result: m.condition, operands: [], effect: 'pure', origin: m.origin },
+      { kind: 'literal', value: 0, result: lo, operands: [], effect: 'pure', origin: m.origin },
+      { kind: 'input', input: 1, result: hi, operands: [], effect: 'pure', origin: m.origin },
+      changed,
+      m.yieldOf(changed.result!),
+    ];
+    const root: IRRegion = {
+      ...m.region(rootOps, changed.effect),
+      ...(changed.aborts !== undefined ? { canAbort: true as const } : {}),
+    };
+    return { program: { ...m.program, root }, prepared: m.prepared };
+  }
+  const verify =
+    (made: ReturnType<typeof madeRoutine>, policy: RepresentationPolicy = JAVASCRIPT_POLICY) =>
+    () =>
+      verifyCore(made.program, made.prepared, policy);
+
+  test('control: the made routine verifies', () => {
+    expect(verify(madeRoutine())).not.toThrow();
+  });
+
+  test('a target with no routines (a GLSL policy) refuses it', () => {
+    expect(verify(madeRoutine(), { ...JAVASCRIPT_POLICY, routines: undefined })).toThrow(
+      /the target has no routine integrate/
+    );
+  });
+
+  test.each([
+    ['a routine that the policy does not list', (op: Op) => ({ ...op, fn: 'limit' }), /the target has no routine limit/],
+    ['one operand', (op: Op) => ({ ...op, operands: [op.operands[0]] }), /the operation routine has 1 operands, not 2/],
+    [
+      'a boolean bound',
+      (op: Op, m: Made) => ({ ...op, operands: [op.operands[0], m.condition] }),
+      /an operand of the operation routine has the representation boolean/,
+    ],
+    [
+      'a pure routine',
+      (op: Op) => ({ ...op, effect: 'pure', touches: undefined }),
+      /a routine integrate has the effect pure and the states none, and the target states effectful and entropy, quadrature/,
+    ],
+    ['a missing state', (op: Op) => ({ ...op, touches: ['quadrature'] }), /a routine integrate has the effect effectful and the states quadrature,/],
+    ['no abort kind', (op: Op) => ({ ...op, aborts: undefined }), /the operation routine has the abort kinds none, and the target states error/],
+    [
+      'a result of the type integer',
+      (op: Op) => ({ ...op, result: { ...op.result!, type: 'integer' } }),
+      /a routine integrate has a result of the type integer, not real|used with another type/,
+    ],
+    ['zero panels', (op: Op) => ({ ...op, initialPanels: 0 }), /a routine integrate starts from 0 panels, not a positive integer/],
+    [
+      'a body with no parameter',
+      (op: Op) => {
+        const routine = op as Extract<Op, { kind: 'routine' }>;
+        const { parameters: _parameters, ...body } = routine.body;
+        return { ...routine, body };
+      },
+      /the body of a routine integrate has 0 parameters, not one|has no definition/,
+    ],
+    [
+      'an integer parameter',
+      (op: Op) => {
+        const routine = op as Extract<Op, { kind: 'routine' }>;
+        const t = { ...routine.body.parameters![0], type: 'integer' as ScalarKind };
+        return {
+          ...routine,
+          body: { ...routine.body, parameters: [t], operations: [{ ...routine.body.operations[0], operands: [t] }] },
+        };
+      },
+      /the parameter of a routine integrate has the type integer/,
+    ],
+    [
+      'a body that yields two values',
+      (op: Op) => {
+        const routine = op as Extract<Op, { kind: 'routine' }>;
+        const [t] = routine.body.parameters!;
+        return {
+          ...routine,
+          body: { ...routine.body, operations: [{ ...routine.body.operations[0], operands: [t, t] }] },
+        };
+      },
+      // The check of the yield of a region refuses it first.
+      /the body of a routine integrate yields 2 values, not one|the operation yield has 2 operands, not 1/,
+    ],
+  ] as [string, (op: Op, m: Made) => Op, RegExp][])('%s', (_name, change, message) => {
+    expect(verify(madeRoutine(change))).toThrow(message);
+  });
+
+  test('an exit that leaves the routine', () => {
+    // `loop k in 1..2 { integrate(t => if (C) exit else t, 0, 0) }`: the
+    // exit is in a region of the routine, between it and its loop.
+    const m = madeProgram();
+    const from = m.value('integer');
+    const to = m.value('integer');
+    const k = m.value('integer');
+    const c = m.value('boolean');
+    const t = m.value('real');
+    const v = m.value('real');
+    const lo = m.value('real');
+    const r = m.value('real');
+    const branch: Op = {
+      kind: 'if',
+      results: [v],
+      operands: [c],
+      then: m.region([{ kind: 'exit', operands: [], effect: 'pure', origin: m.origin }]),
+      else: m.region([m.yieldOf(t)]),
+      effect: 'pure',
+      origin: m.origin,
+    };
+    const routine: Op = {
+      kind: 'routine',
+      fn: 'integrate',
+      result: r,
+      operands: [lo, lo],
+      body: {
+        ...m.region([
+          { kind: 'input', input: 0, result: c, operands: [], effect: 'pure', origin: m.origin },
+          branch,
+          m.yieldOf(v),
+        ]),
+        parameters: [t],
+      },
+      effect: 'effectful',
+      touches: ['entropy', 'quadrature'],
+      aborts: ['error'],
+      origin: m.origin,
+    };
+    const loopBody: IRRegion = {
+      ...m.region(
+        [
+          { kind: 'literal', value: 0, result: lo, operands: [], effect: 'pure', origin: m.origin },
+          routine,
+          { kind: 'yield', operands: [], effect: 'pure', origin: m.origin },
+        ],
+        'effectful'
+      ),
+      canAbort: true,
+      parameters: [k],
+    };
+    const loop: Op = {
+      kind: 'loop',
+      results: [],
+      operands: [from, to],
+      body: loopBody,
+      effect: 'effectful',
+      touches: ['entropy', 'quadrature'],
+      origin: m.origin,
+    };
+    const rootOps: Op[] = [
+      { kind: 'literal', value: 1, result: from, operands: [], effect: 'pure', origin: m.origin },
+      { kind: 'literal', value: 2, result: to, operands: [], effect: 'pure', origin: m.origin },
+      loop,
+      { kind: 'literal', value: 1, result: m.one, operands: [], effect: 'pure', origin: m.origin },
+      m.yieldOf(m.one),
+    ];
+    const root: IRRegion = { ...m.region(rootOps, 'effectful'), canAbort: true };
+    expect(() => verifyCore({ ...m.program, root }, m.prepared, JAVASCRIPT_POLICY)).toThrow(
+      /an exit is in a region of the operation routine, between it and its loop/
+    );
+  });
+
+  test('a lowered integral has the facts of the policy', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const preparation = structured().prepareStructured(
+      ce.expr([
+        'Integrate',
+        ['Sqrt', ['Add', 1, ['Power', 't', 4]]],
+        ['Limits', 't', 0, 'x'],
+      ] as MathJsonExpression),
+      OPTIONS
+    );
+    const program = lowerStructuredFragment(preparation);
+    const routine = program.root.operations.find((op) => op.kind === 'routine');
+    expect(routine).toMatchObject({
+      fn: 'integrate',
+      effect: 'effectful',
+      touches: ['entropy', 'quadrature'],
+      aborts: ['error'],
+      initialPanels: 16,
+    });
+    expect(program.root.canAbort).toBe(true);
+  });
+});

@@ -441,7 +441,7 @@ constantFold: false`; the tests are
 | Place | What the existing emitter does | Decision for the fragment route |
 | --- | --- | --- |
 | `x · ∫₀¹ t² dt`, `∫₀ᵃ e^{-t²} dt` | `compileIntegrate()`: the closed form of `closedFormIntegral()` in parentheses, `_.x * (0.3333333333333333)`, `(0.5 * _SYS.erf(_.a) * Math.sqrt(Math.PI))` | The node is the closed form (`closedFormReplacement()`), lowered as one value: `_.x * 0.3333333333333333`, `0.5 * _SYS.erf(_.a) * Math.sqrt(3.141592653589793)` |
-| `∫₀ᵃ √(1 + t⁴) dt` | No closed form: `_SYS.integrate((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, _.a)` | Declined (quadrature is slice 2) |
+| `∫₀ᵃ √(1 + t⁴) dt` | No closed form: `_SYS.integrate((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, _.a)` | Declined in slice 1; the routine `integrate` since slice 2 (next table) |
 | `∫₀¹ (t + Random()) dt` | `closedFormIntegral()` evaluates the integral at compile time, with its draw: `(1.0442009924764881)` | Declined: the integral is not pure |
 | `D(x³ + x, x)`, `1 / D(x³ + x, x)` | `compileDerivative()`: the closed form in parentheses (since CE-1216; it had none before, `1 / 3 * (_.x * _.x) + 1`): `(3 * (_.x * _.x) + 1)`, `1 / (3 * (_.x * _.x) + 1)` | The closed form (`derivativeClosedForm()`), lowered as one value, as for `Integrate` |
 | `ND(t ↦ t³, 1.5)`, `ND(t ↦ t³, x)` | `6.750000000000016`; `_SYS.nd(((t) => _SYS.pow3(t)), 1, 'scalar')(_.x)` | The number; declined (the stencil is slice 4) |
@@ -449,6 +449,39 @@ constantFold: false`; the tests are
 | `f⁗(x)` of a large literal | Taylor jets (`jetDerivativeTarget()`) | Declined |
 | `Derivative(Sin)` | `((x) => Math.cos(x))` | Declined: a function value |
 | Any calculus node, `complex` mode | `_SYS.cplx((_SYS.pow3(_.a) / 3))` | Declined |
+
+### Integrals with no closed form
+
+Slice 2 of `docs/plans/2026-11-11-structured-numeric-calculus.md`, read at
+`f56cd5f29` (2026-11-11) with `x`, `y`, `a`, `b` declared `real`, `k := 3`,
+`h(u) := √(1 + u⁴)`, `q(y) := ∫₀ʸ √(1 + t⁴) dt`, `cse: false,
+constantFold: false` (scratchpad probe `forms.ts`). `F(t)` is `√(1 + t⁴)`.
+The tests are
+`test/compute-engine/compile-javascript-structured-calculus2.test.ts`. The
+route writes each clause as the operation `routine` `integrate` (`integral()`
+in `javascript-structured-lower.ts`) and the emitter as
+`_SYS.integrate((p) => { …; return v; }, lo, hi[, panels])`, bound to a
+`const` at its position.
+
+| Place | What the existing emitter does | Decision for the fragment route |
+| --- | --- | --- |
+| `∫₀¹ F`, `∫ₐᵇ F`, `∫_{sin a}^{b+1} F`, `∫₁⁰ F` | `_SYS.integrate((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, 1)`, `…, _.a, _.b)`, `…, Math.sin(_.a), _.b + 1)`, `…, 1, 0)`: the bounds are evaluated in the arguments, after the closure is made (no effect), the lower one first; a reversed interval is the routine's | The same call: `_SYS.integrate((_tv1) => { const _tv2 = _tv1 * _tv1; return Math.sqrt(_tv2 * _tv2 + 1); }, 0, 1)`, the bounds `const` values before it in the same order. The same abscissas and doubles (tests) |
+| `∫₀^∞ e^{-t⁴} dt`, `∫_{-∞}^∞` | `…, 0, Infinity)`, `…, -Infinity, Infinity)` | The literals `Infinity`, `-Infinity` as bounds; the routine's transform |
+| The starting panel count | `initialPanelsForDimensions(clauses + the deepest chain of Integrate nodes in the operands)` (`integrateDepth()`), measured at the outermost node of the tree, before inner closed forms, and inherited by every node in its integrand and bounds (`target.quadratureInitialPanels`); written as a fourth argument when it is not the count of one integral (16): `∫₀¹ ∫₀ᵗ sin(s t³) ds dt`, whose inner integral has a closed form, is `_SYS.integrate((t) => ((Math.pow(t, -3) + -Math.cos(_SYS.pow4(t)) / _SYS.pow3(t))), 0, 1, 4)` | The same count (`StructuredIntegral.panels`, measured by the shared `integrateDepth()`), set on each `routine` of the node and inherited by the integrals lowered in its bodies and bounds (`Lowering.panels`); the emitter writes it when it differs from `defaultPanels` of the policy |
+| Two or three clauses, `∫₀¹∫₀ᵘ sin(u v³) dv du` | The first clause outermost; the bounds of clause d read the variables of clauses 0..d−1 and are evaluated in the closure of clause d−1: `_SYS.integrate((x) => (_SYS.integrate((y) => (Math.sin(x * _SYS.pow3(y))), 0, x, 4)), 0, 1, 4)` | One `routine` per clause, nested; the bounds of a later clause are operations of the body of the clause before it: `_SYS.integrate((_tv1) => { const _tv3 = _SYS.integrate((_tv2) => { return Math.sin(_tv1 * (_tv2 * _tv2 * _tv2)); }, 0, _tv1, 4); return _tv3; }, 0, 1, 4)` |
+| A nested integral with no closed form, an integral in a bound | Each node is compiled where it is, with the inherited panels | The same, by the rule of the row above; tests compare the abscissas of every level |
+| An integrand that reads an input, a captured value, a helper | `Math.sin(_.x * _SYS.pow3(t))`, `Math.sin(3 * _SYS.pow3(t))`, `(t) => (_fn_h(t))`: each read at each sample | The same reads in the closure (`_.x`, the snapshot `3`, a call of the helper): no value is moved out of the closure (the body starts a new epoch of the memo) |
+| A helper whose body integrates, `q(x) + 1` | `_fn_q(_.x) + 1`, the helper measures its own tree | The same: a helper body starts with no inherited panels |
+| An integral in the written-out terms of `Sum` | One call per term, the index a literal: `(_SYS.integrate((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, 1)) + (… + 2 …) + (… + 3 …)` | Declined: the existing emitter stops the sum at the first term that is `NaN` (`if (_tv1 !== _tv1) return NaN`), so a later term does not sample its integrand; with five terms that do not converge, the route drew 160 times from the entropy source, the existing compiler 32 (`aggregate()` in the lowering declines a term that can throw, `canThrow()`; also a `Product`, a loop, a helper whose body integrates, and a helper that `Map` calls) |
+| An integral in a branch of `If`, a `Loop` body, `Map`, `Apply`, `Max` | Inline in the branch, the loop, the arrow of `map`, `Math.max(_SYS.integrate(…), _SYS.integrate(…))` | The `routine` in the region of the branch, of the `Loop` or of the `build`; the two operands of `Max` in order. The same doubles (tests) |
+| The variable has the name of an input, `∫₀ˣ F(x) dx` | `_SYS.integrate((x) => (Math.sqrt(_SYS.pow4(x) + 1)), 0, _.x)`: the bound reads the input | Declined: a bound that reads the variable of its own clause or of a later one (`quadratureIntegral()`); the route types each bound in the scope of the variables before it |
+| An integrand that the target does not lower, `∫₀¹ W(t⁴) dt` | `_SYS.integrate((t) => (_SYS.lambertW(_SYS.pow4(t))), 0, 1)`; a head with no lowering declines the program | Declined by the admission of the head (`unsupported head LambertW`) |
+| A product that overflows against itself, `∫₀^∞ t¹⁰⁰ e^{-t} dt` | The log-space alternative (`logSpaceProduct()`, also with `cse: false`): `((_tv1) => _SYS.integrate((t) => (_SYS.finiteOr(Math.pow(t, 100) * Math.exp(-t), _tv1, t)), 0, Infinity))((t) => (Math.exp(-t + 100 * Math.log(Math.abs(t))) * Math.pow(Math.sign(t), 100)))` | Declined (slice 3): every integrand for which `logSpaceProduct()` gives a form (the test: `∫₀¹ t¹⁰⁰ e^{-t²} dt`; `∫₀^∞ t¹⁰⁰ e^{-t} dt` declines before, on the cap of the closed-form search), also one that the existing compiler does not rewrite (a node mapped by the host, or impure, which declines on its own) |
+| `quadrature: 'monte-carlo'` | `_SYS.integrateMC((t) => (Math.sqrt(_SYS.pow4(t) + 1)), 0, 1)` | Declined (slice 3) when the integral has no closed form; a closed form is admitted as before |
+| An integrand that draws, reads or calls the host, or calls a helper whose body does | The draw or the call at each sample; a draw makes the integral impure, and the search for a closed form evaluates it at compile time | Declined (`refuseLazyFunctionOperands()`, and "is not pure" before the search) |
+| `complex` mode | `_SYS.cplx(_SYS.integrate((t) => ((() => { … _SYS.csqrt(…) … })()), 0, 1))` | Declined, as in slice 1 |
+| `∫₀¹ sin(1/t)/t dt`, which does not converge | The outermost integral samples 10⁷ points from the entropy source of the engine (`ce.effects.entropy`): a different value at each call with the default source | The same call; with a deterministic `entropy` handler, the same samples and the same double (test) |
+| An ambient deadline (`withAmbientDeadline()`) that has expired | `adaptiveQuadrature()` throws a timeout `CancellationError` at its first panel | The same error (test) |
 
 ### Values of the type `number` in the `strict` mode
 

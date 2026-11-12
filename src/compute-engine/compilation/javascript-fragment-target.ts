@@ -38,6 +38,7 @@ import { realPowerBranchTerms } from '../numerics/real-power.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
   JavaScriptTarget,
+  integrateDepth,
   isNonFiniteBound,
   type JavaScriptBody,
   type JavaScriptBodyEmitter,
@@ -146,12 +147,16 @@ import {
   recordStructuredPreparation,
   STRUCTURED_OPERATION_LIMIT,
   StructuredLimitError,
+  StructuredDeclineError,
   structuredPreparationOf,
   type StructuredCapture,
   type StructuredInput,
   type StructuredForm,
+  type StructuredIntegral,
   type StructuredPreparation,
 } from './javascript-structured-lower.js';
+import { initialPanelsForDimensions } from '../numerics/gauss-kronrod.js';
+import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { staticCollectionWidth } from './compile-linear-algebra.js';
 import { linearAlgebraLane } from './compile-lanes.js';
 import { MIN_UNROLLED_WIDTH } from './fixed-width-unroll.js';
@@ -742,7 +747,7 @@ const floorFacts = realOperatorFacts('Floor', 1, () => 'integer');
 const floorRule = {
   walk: (node, scope, context, w) => {
     const constant = isFunction(node)
-      ? inexactJumpConstant(node.ops)
+      ? inexactJumpConstant(node.ops, scope)
       : undefined;
     if (constant !== undefined)
       return w.refuse(
@@ -786,15 +791,40 @@ const floorRule = {
  * `0.0204…`, and the code would give 0 at `k = 49`, where the value is 1.
  * The existing rule gives its exemptions to literals only, too.
  *
+ * A name that a scope of the program binds (a parameter, a local, the
+ * index of a loop or of a `Sum`, the variable of an integral: the names of
+ * `scope` and of its parents but the root, which holds the inputs) is a
+ * variable, also when the engine has a value for it (`t := 1/3` and
+ * `Floor(t)` in the integrand of `∫ … dt`); so is the variable of a
+ * `Limits` or an `Element` clause in the operand. A node that holds a
+ * function literal (the integrand of an `Integrate`) or a bound name is
+ * not a constant, and its operands are judged in turn.
+ *
  * A node object reached on several paths (a DAG) is visited once: the
  * verdict of a function node does not depend on its parent, and is
  * remembered, and the question whether a node has unknowns keeps one memo
  * for the call (`hasUnknownsWithMemo()`).
  */
 function inexactJumpConstant(
-  operands: readonly Expression[]
+  operands: readonly Expression[],
+  scope?: FragmentScope<ScalarRepresentation>
 ): Expression | undefined {
   const unknowns: ReferencesMemo = new Map();
+  const bound = new Set<string>();
+  for (let s = scope; s?.parent !== undefined; s = s.parent)
+    for (const name of s.bindings.keys()) bound.add(name);
+  const binds = new Map<Expression, boolean>();
+  /** `node` is or holds a function literal or a bound name. */
+  const holdsBinding = (node: Expression): boolean => {
+    if (isSymbol(node)) return bound.has(node.symbol);
+    if (!isFunction(node)) return false;
+    let known = binds.get(node);
+    if (known === undefined) {
+      known = node.operator === 'Function' || node.ops.some(holdsBinding);
+      binds.set(node, known);
+    }
+    return known;
+  };
   const verdicts = new Map<Expression, Expression | undefined>();
   const exact = (n: Expression): boolean => {
     if (!isNumber(n)) return false;
@@ -823,9 +853,12 @@ function inexactJumpConstant(
     // A closed node that is not pure (`6·Random()`) is not a constant: the
     // existing compiler folds only a pure node and writes the code of this
     // one, whose operands are judged in turn.
+    if (isSymbol(node) && bound.has(node.symbol)) return undefined;
+    if (isFunction(node) && node.operator === 'Function') return undefined;
     if (
       !hasUnknownsWithMemo(node, unknowns) &&
-      (!isFunction(node) || node.isPure)
+      (!isFunction(node) || node.isPure) &&
+      !holdsBinding(node)
     ) {
       if (isNumber(node))
         return exact(node) || divisionFactor(node, parent) ? undefined : node;
@@ -840,7 +873,8 @@ function inexactJumpConstant(
       return undefined;
     if (verdicts.has(node)) return verdicts.get(node);
     let found: Expression | undefined;
-    for (const op of node.ops) {
+    const clause = node.operator === 'Limits' || node.operator === 'Element';
+    for (const op of clause ? node.ops.slice(1) : node.ops) {
       found = visit(op, node);
       if (found !== undefined) break;
     }
@@ -1640,7 +1674,7 @@ function structuredScalarFunctionRule(
           `${head} with other than one operand is not in the structured route`
         );
       if (jump === 'rounding') {
-        const constant = inexactJumpConstant(node.ops);
+        const constant = inexactJumpConstant(node.ops, scope);
         if (constant !== undefined)
           return w.refuse(
             node,
@@ -4316,6 +4350,20 @@ function structuredValueParts(
       inner: [node.op1],
     };
   }
+  // A definite integral (`integralParts()`): the bounds of each clause with
+  // the variables before it, then the integrand. The admission reaches one
+  // only when it has no closed form (`closedFormReplacement()`).
+  const integral =
+    node.operator === 'Integrate' ? integralParts(node) : undefined;
+  if (integral !== undefined)
+    return {
+      outer: [],
+      indexes: integral.clauses.map((c) => ({
+        index: c.name,
+        bounds: [c.lower, c.upper],
+      })),
+      inner: [integral.body],
+    };
   if (node.operator === 'Typed') {
     if (!bodyValue)
       throw new Error(
@@ -6176,9 +6224,15 @@ function refuseHaversineGrouping(
 ): void {
   if (!admission.structured || !isFunction(node)) return;
   /** A haversine that the existing emitter writes with no parentheses, also
-   *  as the value of a block. */
+   *  as the value of a block, and as the operand of a `Conjugate`, which
+   *  the lowering writes as its real operand (the form `identity`): the
+   *  emission of `x · Conjugate(Haversine(2y))` failed on the grouping. */
   const value = (op: Expression): Expression =>
-    isFunction(op, 'Block') && op.nops > 0 ? value(op.ops[op.nops - 1]) : op;
+    isFunction(op, 'Block') && op.nops > 0
+      ? value(op.ops[op.nops - 1])
+      : isFunction(op, 'Conjugate') && op.nops === 1
+        ? value(op.op1)
+        : op;
   const bare = (op: Expression): boolean => {
     const v = value(op);
     return isFunction(v, 'Haversine') && v.nops === 1 && !input(v.op1);
@@ -7061,7 +7115,8 @@ function refuseLazyDraws(
 function refuseLazyFunctionOperands(
   annotation: FragmentAnnotation<ScalarRepresentation>,
   helpers: ReadonlyMap<string, ResolvedHelper>,
-  hosts: StructuredHosts | undefined
+  hosts: StructuredHosts | undefined,
+  integrals?: ReadonlyMap<Expression, StructuredIntegral>
 ): void {
   const { isDraw } = drawReaders(helpers);
   const isHost = (node: Expression): boolean =>
@@ -7097,6 +7152,28 @@ function refuseLazyFunctionOperands(
   };
   const visit = (scope: FragmentScope<ScalarRepresentation>) => {
     for (const node of scope.facts.keys()) {
+      // The integrand, and the bounds of each clause after the first, of a
+      // definite integral that the route integrates numerically
+      // (`quadratureIntegral()`): the routine evaluates them at points that
+      // it chooses, and the interpreter at other points.
+      const integral = integrals?.get(node);
+      if (integral !== undefined) {
+        const found = [
+          integral.body,
+          ...integral.clauses.slice(1).flatMap((c) => [c.lower, c.upper]),
+        ]
+          .map((e) => impureNodes(e).at(0) ?? blocker(e))
+          .find((e) => e !== null && e !== undefined);
+        if (found !== undefined && found !== null)
+          throw new Error(
+            `JS scalar fragment: the integral ${nodeText(node)} has the node ` +
+              `${nodeText(found)}, which is not pure, draws, runs code of the ` +
+              `host or can abort, is not in the structured route: the ` +
+              `compiled code evaluates the integrand at the points of its ` +
+              `quadrature, and the interpreter at the points of its own`
+          );
+        continue;
+      }
       if (
         !isFunction(node) ||
         node.operator === 'Apply' ||
@@ -8230,7 +8307,12 @@ function recordStructured(
     hosts
   );
   refuseLazyDraws(prepared.annotation, registry.helpers);
-  refuseLazyFunctionOperands(prepared.annotation, registry.helpers, hosts);
+  refuseLazyFunctionOperands(
+    prepared.annotation,
+    registry.helpers,
+    hosts,
+    registry.integrals
+  );
   refuseHoistedDraws(prepared.annotation, registry.helpers, hosts);
   refusePureHostInAggregates(prepared.annotation, registry.helpers, hosts);
   chainForms(prepared.annotation, registry.helpers, hosts, registry.forms);
@@ -8292,6 +8374,7 @@ function recordStructured(
     ...(registry.closedForms.size === 0
       ? {}
       : { closedForms: registry.closedForms }),
+    ...(registry.integrals.size === 0 ? {} : { integrals: registry.integrals }),
     numericPolicy: registry.mode,
     iterationBudget: target.iterationBudget,
     ...(hosts === undefined || hosts.bindings.size === 0
@@ -8743,6 +8826,12 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
             `program has more than ${STRUCTURED_OPERATION_LIMIT} operations, ` +
             `the limit of the profile`,
         });
+      if (e instanceof StructuredDeclineError)
+        throw new CompileDeclineError({
+          code: 'outside-profile',
+          kind: 'capability',
+          message: `Could not compile with the profile 'numeric-kernel': ${e.message}`,
+        });
       throw profileInternalError(phase, e);
     }
   }
@@ -8980,16 +9069,18 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       if (seen.has(node)) return;
       seen.add(node);
       // A calculus node is the expression that replaces it
-      // (`closedFormReplacement()`).
-      if (registry !== undefined && isCalculusNode(node))
-        return check(
-          closedFormReplacement(
-            node,
-            registry,
-            prepared.target,
-            node !== prepared.expr
-          )
+      // (`closedFormReplacement()`); a definite integral with no closed
+      // form is checked as itself, its variables bound as indexes
+      // (`structuredValueParts()`).
+      if (registry !== undefined && isCalculusNode(node)) {
+        const replacement = closedFormReplacement(
+          node,
+          registry,
+          prepared.target,
+          node !== prepared.expr
         );
+        if (replacement !== node) return check(replacement);
+      }
       refuseListHead(node, admission);
       refuseBooleanClaim(node, admission);
       refuseUndirectedInfinity(node, admission);
@@ -9400,12 +9491,18 @@ function closedFormReplacement(
         `structured route: the existing compiler reads its closed form in ` +
         `the lane of the type of the node`
     );
-  let replacement = registry.closedForms.get(node);
+  // A definite integral with no closed form is the node itself
+  // (`quadratureIntegral()`).
+  let replacement =
+    registry.closedForms.get(node) ??
+    (registry.integrals.has(node) ? node : undefined);
   if (replacement === undefined) {
     replacement = findClosedForm(node, registry, target);
-    registry.closedForms.set(node, replacement);
-    for (const name of calculusDependencies(node))
-      target.symbolDeps?.add(name);
+    if (replacement !== node) {
+      registry.closedForms.set(node, replacement);
+      for (const name of calculusDependencies(node))
+        target.symbolDeps?.add(name);
+    }
   }
   // A complex number in the node or in its replacement: the existing
   // compiler can read the node on the complex lane around a real closed
@@ -9533,16 +9630,13 @@ function findClosedForm(
             !isFunction(limit, 'Limits') ||
             limit.ops.slice(1).some((bound) => isSymbol(bound, 'Nothing'))
         );
-      throw new Error(
-        indefinite
-          ? `JS scalar fragment: the indefinite integral ${text} has no ` +
-              `closed form that the engine finds at compile time, and no value ` +
-              `at a point`
-          : `JS scalar fragment: the integral ${text} has no closed form that ` +
-              `the engine finds at compile time: the existing compiler ` +
-              `integrates it numerically (\`_SYS.integrate\`), which the ` +
-              `structured route does not have`
-      );
+      if (indefinite)
+        throw new Error(
+          `JS scalar fragment: the indefinite integral ${text} has no ` +
+            `closed form that the engine finds at compile time, and no value ` +
+            `at a point`
+        );
+      return quadratureIntegral(node, registry, target);
     }
     return closed;
   }
@@ -9628,6 +9722,145 @@ function findClosedForm(
   return closed;
 }
 
+/** The parts of a definite integral (`integralParts()`), once per node. */
+const INTEGRAL_PARTS = new WeakMap<
+  Expression,
+  Omit<StructuredIntegral, 'panels'>
+>();
+
+/**
+ * The parts of `node`, an `Integrate` of the library with one or more
+ * clauses `Limits(t, a, b)` of a variable name and two bounds that are not
+ * `Nothing`: each clause, and the integrand as a body in the variables (a
+ * `Function` integrand unwrapped, its parameters matched to the variables
+ * by name, as `integrandLambda()` does for the existing compiler). Another
+ * node gives `undefined`. A `Function` integrand whose parameters do not
+ * match the variables is refused.
+ */
+function integralParts(
+  node: Expression
+): Omit<StructuredIntegral, 'panels'> | undefined {
+  if (
+    !isFunction(node, 'Integrate') ||
+    !isLibraryOperator(node, 'Integrate') ||
+    node.nops < 2
+  )
+    return undefined;
+  const known = INTEGRAL_PARTS.get(node);
+  if (known !== undefined) return known;
+  const clauses: StructuredIntegral['clauses'][number][] = [];
+  for (const limit of node.ops.slice(1)) {
+    if (
+      !isFunction(limit, 'Limits') ||
+      limit.nops !== 3 ||
+      !isSymbol(limit.op1) ||
+      [limit.op1, limit.op2, limit.op3].some((e) => isSymbol(e, 'Nothing'))
+    )
+      return undefined;
+    clauses.push({
+      name: limit.op1.symbol,
+      variable: limit.op1,
+      lower: limit.op2,
+      upper: limit.op3,
+    });
+  }
+  let body: Expression;
+  try {
+    body = BaseCompiler.integrandLambda(
+      node.op1,
+      clauses.map((c) => c.name),
+      node.ops.slice(1)
+    ).bodyExpr;
+  } catch (e) {
+    throw new Error(
+      `JS scalar fragment: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  const parts = { clauses, body };
+  INTEGRAL_PARTS.set(node, parts);
+  return parts;
+}
+
+/**
+ * The definite integral `node`, which has no closed form, as the route
+ * integrates it numerically: the node itself, recorded with its parts and
+ * its panel count in `registry.integrals`, or a refusal. The existing
+ * compiler writes `_SYS.integrate` of the integrand as a function of the
+ * variable (`compileIntegrate()` in `javascript-target.ts`), and the route
+ * writes the same call (`integral()` in `javascript-structured-lower.ts`).
+ * Refused, each with its own message:
+ *
+ * - the option `quadrature: 'monte-carlo'`: the existing compiler writes
+ *   `_SYS.integrateMC`;
+ * - an integrand that the existing compiler computes again in log space
+ *   where its value is not finite (`logSpaceProduct()`: a product of a
+ *   power and an exponential, `x¹⁰⁰·e⁻ˣ`): it writes a second function of
+ *   the variable and `_SYS.finiteOr`;
+ * - a clause that is not `Limits(t, a, b)` of a variable name, two clauses
+ *   of one variable, and a bound that reads the variable of its own clause
+ *   or of a later one (`∫₀ˣ f(x) dx`): the route evaluates every bound in
+ *   the scope of the variables of the clauses before it.
+ *
+ * The integrand is checked with the other values of the program, and a body
+ * that draws, runs code of the host or can abort is refused after the
+ * annotation (`refuseLazyFunctionOperands()`).
+ */
+function quadratureIntegral(
+  node: Expression & { ops: readonly Expression[] },
+  registry: StructuredRegistry,
+  target: CompileTarget<Expression>
+): Expression {
+  const text = nodeText(node);
+  const prefix = `JS scalar fragment: the integral ${text} has no closed form that the engine finds at compile time`;
+  if (target.quadrature === 'monte-carlo')
+    throw new Error(
+      `${prefix}, and the option quadrature is 'monte-carlo': the existing ` +
+        `compiler integrates it with the Monte Carlo estimator ` +
+        `(\`_SYS.integrateMC\`), which the structured route does not have`
+    );
+  const parts = integralParts(node);
+  if (parts === undefined)
+    throw new Error(
+      `${prefix}, and a clause of it is not Limits(t, a, b) of a variable ` +
+        `name: the structured route integrates numerically over such clauses only`
+    );
+  const names = parts.clauses.map((c) => c.name);
+  if (new Set(names).size !== names.length)
+    throw new Error(
+      `${prefix}, and two of its clauses have one variable: the structured ` +
+        `route integrates over variables of distinct names`
+    );
+  parts.clauses.forEach((clause, d) => {
+    const read = names
+      .slice(d)
+      .find(
+        (name) =>
+          clause.lower.symbols.includes(name) ||
+          clause.upper.symbols.includes(name)
+      );
+    if (read !== undefined)
+      throw new Error(
+        `${prefix}, and a bound of the clause of ${clause.name} reads the ` +
+          `name ${read} of a variable of that clause or of a later one: the ` +
+          `structured route evaluates a bound in the scope of the variables ` +
+          `of the clauses before it`
+      );
+  });
+  if (logSpaceProduct(parts.body, names) !== undefined)
+    throw new Error(
+      `${prefix}, and its integrand is a product that is computed again in ` +
+        `log space where its value is not finite (\`_SYS.finiteOr\` of the ` +
+        `existing compiler), which the structured route does not have`
+    );
+  registry.integrals.set(node, {
+    ...parts,
+    panels: initialPanelsForDimensions(
+      parts.clauses.length + Math.max(0, ...node.ops.map(integrateDepth))
+    ),
+  });
+  return node;
+}
+
 /** The rule of a head of `CALCULUS_HEADS` or of `Apply` on the structured
  *  route: a node that the admission replaced (`closedFormReplacement()`)
  *  has the facts of its replacement, typed in its place; another node has
@@ -9640,6 +9873,9 @@ function closedFormRule(
     walk: (node, scope, context, w) => {
       const replacement = registry.closedForms.get(node);
       if (replacement !== undefined) return w.type(replacement, scope, context);
+      const integral = registry.integrals.get(node);
+      if (integral !== undefined)
+        return integralRule(node, integral, scope, context, w);
       if (rule === undefined)
         return w.refuse(
           node,
@@ -9651,6 +9887,56 @@ function closedFormRule(
         : w.signatures(node, scope, context, rule.signatures);
     },
   };
+}
+
+/**
+ * A definite integral with no closed form (`quadratureIntegral()`) on the
+ * structured route, in the scope of the node: for each clause in order, its
+ * bounds, each with a real or an integer fact, typed with the variables of
+ * the clauses before it, then its variable, a real; then the integrand,
+ * with a real or an integer fact. The integral is a real. The conversions
+ * are those of the bounds, two per clause, then of the integrand. The
+ * lowering writes the code of the existing emitter (`integral()` in
+ * `javascript-structured-lower.ts`).
+ */
+function integralRule(
+  node: Expression,
+  integral: StructuredIntegral,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const inner = w.open(node, scope);
+  const conversions: FragmentConversion<ScalarRepresentation>[] = [];
+  const number = (
+    value: Expression,
+    what: string,
+    facts: FragmentValueFacts<ScalarRepresentation>
+  ) => {
+    const kind = facts.type.kind;
+    if (kind !== 'real' && kind !== 'integer')
+      w.refuse(
+        node,
+        'signature',
+        `${nodeText(node)} has ${what} ${nodeText(value)} of the type ` +
+          `\`${fragmentTypeToString(facts.type)}\`: the structured route ` +
+          `integrates a real integrand between real bounds`
+      );
+    conversions.push(w.convert(facts, facts.type)!);
+  };
+  for (const clause of integral.clauses) {
+    for (const bound of [clause.lower, clause.upper])
+      number(bound, 'the bound', w.value(bound, inner, context));
+    w.bind(clause.variable, inner, clause.name, { kind: 'real' }, 'index');
+  }
+  // The integrand is an expression, not a loop: a `Break` in it has no loop
+  // to leave.
+  number(
+    integral.body,
+    'the integrand',
+    w.value(integral.body, inner, { ...context, loop: undefined })
+  );
+  return w.valueFacts(node, { kind: 'real' }, conversions);
 }
 
 /**
@@ -10471,12 +10757,17 @@ function admitFunctionBody(
     atNode(node, () => checkValueNode(node, bodyValue));
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
     // A calculus node is the expression that replaces it
-    // (`closedFormReplacement()`).
-    if (registry !== undefined && isCalculusNode(node))
-      return checkValue(
-        closedFormReplacement(node, registry, target, !bodyValue),
-        bodyValue
+    // (`closedFormReplacement()`); a definite integral with no closed form
+    // is checked as itself (`structuredValueParts()`).
+    if (registry !== undefined && isCalculusNode(node)) {
+      const replacement = closedFormReplacement(
+        node,
+        registry,
+        target,
+        !bodyValue
       );
+      if (replacement !== node) return checkValue(replacement, bodyValue);
+    }
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     refuseUndirectedInfinity(node, admission);
@@ -11239,8 +11530,27 @@ function admitFunctionBody(
       // A calculus node reads the names of the expression that replaces it
       // (`closedFormReplacement()`): the variable of an integral is not a
       // capture.
-      if (isCalculusNode(node))
-        return visit(closedFormReplacement(node, registry, target, false));
+      // A definite integral with no closed form reads its operands, its
+      // variables bound.
+      if (isCalculusNode(node)) {
+        const replacement = closedFormReplacement(
+          node,
+          registry,
+          target,
+          false
+        );
+        if (replacement !== node) return visit(replacement);
+        const variables = (registry.integrals.get(node)?.clauses ?? [])
+          .map((c) => c.name)
+          .filter((n) => !bound.has(n));
+        for (const n of variables) bound.add(n);
+        try {
+          if (isFunction(node)) for (const op of node.ops) visit(op);
+        } finally {
+          for (const n of variables) bound.delete(n);
+        }
+        return;
+      }
       if (isSymbol(node)) {
         if (bound.has(node.symbol)) return;
         if (registry.localFunctions.has(node.symbol))
@@ -11646,6 +11956,9 @@ type StructuredRegistry = {
    *  searches of integrals spent. */
   readonly closedForms: Map<Expression, Expression>;
   readonly closedFormSearch: { spent: number };
+  /** Each definite `Integrate` node of the program with no closed form,
+   *  which the route integrates numerically (`quadratureIntegral()`). */
+  readonly integrals: Map<Expression, StructuredIntegral>;
 };
 
 /**
@@ -11716,6 +12029,7 @@ function structuredRegistry(
     localCalls: new Set(),
     closedForms: new Map(),
     closedFormSearch: { spent: 0 },
+    integrals: new Map(),
   };
 }
 
