@@ -542,13 +542,132 @@ and the compilation declined).
 - (rule) `tycho-item-332-untyped-program-compile` (2): the helpers of the
   untyped program are `function` locals, a call is `unknown`, and
   `let (rx, ry) = csqrt(…)` declines with `fallback: false`.
-- `ce-689` last expectation: a read of a parameter in a call frame records a
-  read by name (`noteParameterReadByName()` in `storedValue`), so the view
-  stays counted as different after the application ends.
+- `ce-689` last expectation: passes since step E (the note of a read by
+  name is deleted).
 - CE-1251: still 500 (the held `t*k` reads the local `t` of the body).
-- Step D not started. Removing the substitution into a stored lazy list
-  (`bindReadVariablesOfLazyCollection()` in `listedAssignedValue()`) makes 12
-  tests of `assignment-stores-lazy-collection` read the variable when the
-  element is computed (`first(big)` is 11 after `k = 10`), one of them a
-  self-reference (`xs = filter(xs, …)` stays unevaluated), and leaves
-  `comprehension-index-function` "Epsil" at `Apply((a) => a + 1, 2)`.
+- The CE-626/CE-1234 witness passes (`586135360`).
+
+## Step D: a stored lazy list is a closure (D14, 2026-11-12)
+
+Commits `8f343270d`, `c63092aae` and the commit that holds this section
+(detached, on `586135360`).
+
+### Built
+
+- A lazy collection keeps ONE activation link
+  (`boxed-expression/lazy-view-context.ts`, rewritten): the lexical scope of
+  the evaluation that made it, when its chain holds an activation and the
+  collection reads a name it does not bind whose value an activation holds
+  (`readsActivatedName()`; a raw symbol counts). A collection that is the
+  evaluated node itself (a node of a body) is copied first. A collection
+  that the evaluation did not make (the value of a variable) keeps what it
+  has. Every read (`each`, `at`, `get`, `indexWhere`, `contains`,
+  `subsetOf`, the facets and their memo, the evaluation of the collection,
+  the asynchronous evaluation) pushes that activation as the lexical scope.
+- The operands that are variables are replaced with their values when a
+  lazy collection is stored (`withOperandValues()`, `library/core.ts`, in
+  place of `bindReadVariablesOfLazyCollection()`): `xs = filter(xs, …)`
+  filters the old `xs`. A `let` function held by a global is its literal.
+- The end of a call does not rebuild a collection that keeps an activation
+  (`captureClosures()`), and the substitution of the parameters leaves alone
+  one whose activation does not reach the frame being left (a caller's
+  collection in a recursion).
+- The cycle guard of a symbol's queries is keyed by the activation record
+  for an activated definition (`_activationKey()`, `boxed-symbol.ts`), and a
+  name inside a collection that keeps an activation is not a self-reference
+  of the definition being written (`isSelfReferentialValue()`).
+- `definingScopeOf()`, `captureNestedLocals()`, `bindingInContext()` and
+  `map-lowering.ts` find the activation of a scope on the parent links from
+  the current lexical scope (`activationOnLinks()`), not on the stack.
+- Deleted: `bindReadVariablesOfLazyCollection`, `bindOutlivedLocalsOfLazyValue`,
+  `bindLazyArgumentLocals`, `bindEscapingLocals`, `closeOverBlockRun`,
+  `BLOCK_RUN_*`, `TEMPLATES_WITH_BLOCK_RUNS`, `capturedRunOf`,
+  `cloneDefinitionWithValue`, `mayWriteThroughCall`, `namesFreely`,
+  `holdsLazyCollection`, `outlivedWalkSkips`, `mayReadCallerBindings`,
+  `declaredLocalNames`, `liveScopeOf`, `sequenceDefinitionScope`, the record
+  of the stack, the nested-scope snapshots, `retainCallFrameOfResult`,
+  `recordOutlivedLazyViewContexts`, the `recorded` path of
+  `snapshotNestedScope()`, the `prepareOne` hook of `bindTuplePattern()`.
+- Docs: `src/epsil/docs/evaluation.md`, `for-agents.md`, `from-python.md`
+  (the rule, and how to freeze with `listFrom`); `docs/SCOPING-MODEL.md`
+  "Lazy view context lifetime".
+
+### Kept on purpose
+
+- `bindingKeyedSubs`, `applicationValue`: the end-of-call substitution of
+  the parameter values (a held `If(0 < u, n, n)` in the result shows `2`).
+- `snapshotNestedScope()`: `copyChainToLeaving()` (step E).
+- A FINITE lazy collection that reads a variable is still listed at the
+  assignment (`listedAssignedValue()`), as the brief asks.
+
+### Tests moved (class b)
+
+`assignment-stores-lazy-collection` (11), `lazy-view-scope` (6, one of
+them failing at `586135360` too: the frame of a call is not disposed); see
+the report of the step for each program.
+
+## Step E: the deletion pass (2026-11-12)
+
+Commits `9a26ea536`, `df6af1378`, `8f207b182`, `1bb673ca5`, `35a76882f`,
+`5aa8b5bf5`, `488c9254f` and the commit that holds this section (detached,
+on `586135360`). Source +180 −934, tests +25 −19.
+
+### Deleted
+
+- `noteParameterReadByName()` and its record (`static-typing-view.ts`), the
+  call in `storedValue`: `ce-689` passes in full.
+- `markActivation`, `staticBindingOf`, the `Activated` type, the fields
+  `_activationOf` and `_scopeActivationOf` of a value definition and their
+  snapshot entries, `_cloneForActivation`: nothing set them any more.
+  `sameBindingDef()` is identity.
+- The retain marks: `retainScope`, `isRetainedScope`, `RETAINED_SCOPES`,
+  `isRetainedNodeScope`, `retainScopesReachedByLiteral`,
+  `nodesReadingLeftCall`, the `retain` parameter of `captureNestedLocals`.
+- `enterNestedBodyScopes`, `exitNestedBodyScopes`, `liveNestedScopes`,
+  `nestedBodyScopes`, `withIndexScopeInUse(Async)` and every call site
+  (`Loop`, `Comprehension`, the comprehension walk, `Sum`, `Product`, the
+  three call paths of `function-utils.ts`).
+- `snapshotNestedScope`, `CLOSURE_LOCALS_SCOPES`, `rerootCapturedLocals`,
+  `copyChainToLeaving`, `CHAIN_COPIES`, `holdValuesOf`; `rerootKind` has no
+  `'through-frame'` case.
+
+### Built
+
+- A lazy collection made in an activation holds the values of the
+  operands that are variables of an activation, and is boxed again, so the
+  checks of its operands run on their values
+  (`withActivatedOperandValues()`, `lazy-view-context.ts`):
+  `Block(L := [[1, 2]], Map((t: real) ↦ 2t, L))` is the
+  `incompatible-type` error again (`block-local-list-rank-join`). It also
+  fixes `f(n, s) = take(s, 2) if n == 0 else f(n - 1, map(x => 2x, s))`,
+  `f(1, 1..oo)`, which gave `[4, 8]` (now `[2, 4]`).
+- A free-name operand of a stored lazy collection reads the binding it has
+  at the assignment (`withOperandValues()`, `core.ts`).
+
+### Kept
+
+- Tombstones (`binding-tombstone.ts`): a debug check that tests pin
+  (`binding-debug-invariant` "reports a use of a dead binding with both
+  stacks").
+- The searches of the stack in `engine-scope.ts` and `function-utils.ts`:
+  they find the innermost call frame, count call frames and count holders,
+  which the rule does not replace.
+- The run-time path of `declareSteps()` after the activated-local path: it
+  is the path of a top-level declaration (the global scope, a scope that
+  the host pushes). Instrumented on `test/epsil` and the block, scope and
+  closure files, it never ran inside an activation.
+- The `holdUntil` write at a run: the static definition of a block local
+  gets its `holdUntil` only there.
+  `Block(Declare(h, real, 2, {holdUntil: "N"}), h + 1)` gives `h + 1` with
+  it and `3` without it.
+- `captureClosures` and its rebuilds: with them off, 162 tests of the
+  closure files fail ("a closure assigned to a name that it reads as
+  another binding › the closure keeps the parameter of its own call").
+
+### Tests moved (class b)
+
+- `review-async-regressions` "ApplyWhole …" and "declared broadcast …": a
+  comprehension boxed before the caller's scope is pushed reads its home
+  `n = 1`: 14 → 2.
+- `shared-collection-literal-evaluation` "a stored tuple whose inline
+  function reads a variable …": `[[4,5],[4,5],3]` → `[[4,5],[6,7],3]`.
