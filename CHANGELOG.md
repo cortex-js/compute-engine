@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`evaluate()` and `simplify()` fold the hyperbolic functions of `Ln(q)` for
+  an exact rational `q`, and `Arsech` of a rational above 1** (#534,
+  contributed by [enumeratio](https://github.com/enumeratio)). `Sinh(Ln 2)`
+  was unevaluated (now `3/4`), `Tanh(Ln 3)` is `4/5`, `Cosh(Ln 2)` is `5/4`, and
+  the three reciprocals follow, through the helper that already gives `Sinh(0)`
+  and `Arcosh(1)`; `Arsech(2)` is `iπ/3` and `Arsech(3/2)` is `i arccos(2/3)`,
+  the values `.N()` gives.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
