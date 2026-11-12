@@ -718,3 +718,21 @@ structured compiler and 30 others (the nine defects, the undecided
 programs, the three known cases). The objects of these commits are in the
 main repository; each accepted round is committed in the worktree from
 now on.
+
+**After the defects round (2026-11-12).** The worktree is at
+`dcc5b7417a322096ecc3a720450cfebc7dc2cac5` (six more commits). Built: a
+local declared with a function literal goes through the code of a global
+assignment (`assignFn()`; `ce-772` passes); a read before a top-level
+`let` is `read-before-declaration`; an undeclared assignment at a value
+position is `assignment-in-operand`; the defects of the `match` capture,
+the doubled error and the diagnostic range. Left: a function that writes a
+name declared by a later top-level `let` (the valid form needed a hoist
+that broke 25 Epsil tests; the Epsil run and check give the error and a
+host `Block` gives `[2, 2]`); three consequences of the function-local
+rule (a call head that is a `let` function is not substituted in a stored
+lazy collection; partial application of a `let` literal is lost; a `let`
+function read as a value differs between the two routes), one wrong value
+that a global assignment gives too
+(`lambda-param-collection-inference`), and a lazy comprehension passed to
+another function, which waits for the step of the activations where a
+lazy view holds its activation.
