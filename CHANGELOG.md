@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`IntegerString` and `DigitsFrom` use the exact integer, not a double.**
+  `IntegerString` read the operand as a double, so an integer past 2^53 lost
+  its digits and, in base 10, came out in exponent notation:
+  `IntegerString(123456789012345678901234567890)` was
+  `"1.2345678901234568e+29"` (now `"123456789012345678901234567890"`),
+  `IntegerString(Factorial(30))` was `"2.65252859812191058636e+32"` (now
+  `"265252859812191058636308480000000"`), and `IntegerString(Factorial(50), 16)`
+  was `"49eebc961ed2780000000000000000000000000000000000000000"` (now
+  `"49eebc961ed279b02b1ef4f28d19a84f5973a1d2c7800000000000"`). `DigitsFrom`
+  summed the digits in a double too, so
+  `DigitsFrom(IntegerString(Factorial(50), 16), 16)` was
+  `3.0414093201713376e+64` (now 50! exactly). Small and negative values are
+  unchanged. (#523, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

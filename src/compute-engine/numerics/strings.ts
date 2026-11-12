@@ -201,13 +201,13 @@ function fromRoman(roman: string): [result: number, rest: string] {
 export function fromDigits(
   s: string,
   baseInput?: string | number
-): [result: number, rest: string] {
+): [result: number, rest: string, exact?: bigint] {
   s = s.trim();
   if (s.length === 0) return [NaN, ''];
   if (s.startsWith('+')) return fromDigits(s.slice(1), baseInput);
   if (s.startsWith('-')) {
-    const [v, r] = fromDigits(s.slice(1), baseInput);
-    return [-v, r];
+    const [v, r, e] = fromDigits(s.slice(1), baseInput);
+    return [-v, r, e === undefined ? undefined : -e];
   }
   let base = 10;
   if (typeof baseInput === 'string') baseInput = baseInput.toLowerCase();
@@ -232,6 +232,9 @@ export function fromDigits(
   }
 
   let value = 0;
+  // The double loses digits past 2^53; `exact` is the integer itself.
+  const bigBase = Number.isInteger(base) && base >= 2 ? BigInt(base) : null;
+  let exact = 0n;
   for (let i = 0; i < s.length; i++) {
     const k = {
       ' ': -1,
@@ -293,13 +296,13 @@ export function fromDigits(
       // so the lookup lowercases the character rather than doubling the table.
     }[s[i].toLowerCase()];
     if (k !== -1) {
-      if (k === undefined) return [value, s.substring(i)];
-      if (k >= base) return [value, s.substring(i)];
+      if (k === undefined || k >= base) return [value, s.substring(i)];
       value = value * base + k;
+      if (bigBase !== null) exact = exact * bigBase + BigInt(k);
     }
   }
 
-  return [value, ''];
+  return [value, '', bigBase !== null ? exact : undefined];
 }
 
 /**
