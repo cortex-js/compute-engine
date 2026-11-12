@@ -1,3 +1,22 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Zeta(s)` at a complex `s` answers with the digits it has, or stays
+  unevaluated,** as `HurwitzZeta(s, 1)` does (#NNN, contributed by
+  [enumeratio](https://github.com/enumeratio)). The one-operand form summed
+  the Euler-Maclaurin series with no estimate of its rounding error, and
+  `N(Zeta(1/2 + 10⁶ i))` was `0.0760890698156149 + 2.805102100269535i`, where
+  the value is `0.0760890697382271 + 2.80510210101930i`: 1.6e-9 off, printed
+  with sixteen digits. Measured against mpmath over `Re s` from `-5.5` to `3`
+  and `|Im s|` from 1 to 10⁶, the relative error was at most 2.2e-13 up to
+  `|Im s| = 100`, 5.9e-13 at 400 and 1000, 7.3e-11 at 10⁵ and 1.6e-9 at 10⁶.
+  It now takes the Hurwitz kernel at `a = 1`, which tallies its rounding
+  error, repeats in double-double when that is large, and declines when it
+  still is: at most 9.1e-14 over the answered points, and `|Im s| >= 10⁵`
+  stays `Zeta(s)`. The result is a double at every precision, as for the other
+  complex special functions.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
