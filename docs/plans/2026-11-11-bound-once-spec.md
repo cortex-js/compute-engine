@@ -201,7 +201,8 @@ Decisions:
 ### M2, first part (2026-11-11): the answers, with nothing deleted
 
 A prototype at `eed70f79a` changes four places of `boxed-symbol.ts`
-(`docs/plans/2026-11-11-bound-once-evidence/prototype-four-sites.patch.txt`,
+(`docs/plans/2026-11-11-bound-once-evidence/prototype-four-sites-and-fallback.patch.txt`,
+which also holds the change of M1 below;
 about 30 lines): a free name resolves from its home scope for its type and
 for its value, and a symbol with a definition reads that definition unless
 it is a parameter, the variable of a binder or the local of a block. It
@@ -225,5 +226,31 @@ deletes nothing and keeps the caches as they are.
   6, `issue-489-curried-function-capture` 6, `hold-values` 5). `Solve`, the
   integrals and the limits do not fail.
 
-Not done: M1 (the engine function behind each of the 75 files), the
-deletions of section 5, M3.
+### M1, first part (2026-11-11): the interpreted fallback of `compile()`
+
+The largest group of the 75 files is one engine function: the `run` that a
+declined compilation returns (`fallbackRun`, `compile-references.ts`). It
+pushed a scope, declared a shadow of each input with the type of its
+run-time value (six cases) and assigned it, then evaluated the expression,
+which was boxed outside. With the rule it becomes
+`ce.withValues(values, () => expr.evaluate())`: 22 lines in place of 51,
+and no scope. With that one change, the nine test files of the group pass
+(222 tests), and the full suite goes from 287 failures in 107 files to 110
+in 48.
+
+What remains, 110 failures:
+
+- 55 in 27 files that push a scope in the test.
+- 55 in 21 files that do not: `HoldValues` and the value shield, which hide
+  a value with a valueless shadow in a scratch scope (`hold-values` 5,
+  `value-shield-scratch-scope` 3); a free name captured by a function
+  literal and the renaming of a local at an application
+  (`ce-473-captured-free-symbol` 6, `issue-489-curried-function-capture`
+  4, `derivative-user-function-body` 3, four files with 1);
+  `tycho-325-integrate-list-limit-broadcast` 7 (its helper declares values
+  in a scope: the host pattern, in a helper); `simplify` 5;
+  `ce-597-unknowns-library-letter-operand` 4;
+  `ce-535-531-binder-declaration-cache` 4; ten files with 1 or 2.
+
+Not done: the engine function behind each of these 21 files, the deletions
+of section 5, M3.
