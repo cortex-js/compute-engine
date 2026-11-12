@@ -616,8 +616,8 @@ user then chose to remove the guess that made it necessary:
   makes a local (`sweepCanonicalizationBindings()`,
   `declareAssignmentLocals()`, `createBlockLocals()`, the
   `first-assignment-in-branch` check) are removed.
-- **Epsil**: a local of a block is written `let c := 5` (user: "that would
-  be OK"). An assignment without `let` writes an existing variable.
+- **Epsil**: a local is written with `let` (user: "that would be OK").
+  An assignment without `let` writes an existing variable.
 
 | Program | 0.187.1 | With D8 |
 |---|---|---|
@@ -627,9 +627,30 @@ user then chose to remove the guess that made it necessary:
 | `Block(If(True, Declare(t, 3)), t)` | 3 | error: a declaration in a branch |
 | `Block(If(False, Declare(t, 3)), t)`, a global `t = 9` | 9 | the same error |
 
-Open, to check before the code: what the LaTeX parser gives for `:=` in a
-block (the decision of record is that it is local: it then parses to a
-`Declare` with a value, or the decision is revisited); how many of the
-test files with a block whose first statement is an `Assign` (about 140)
-change mechanically; the Epsil programs of the corpus, of the
-documentation and of Tycho's preludes that assign without `let`.
+The survey (`2026-11-11-bound-once-evidence/d8-survey.md`) answered the
+open points, and the user decided the rest on 2026-11-11:
+
+- **LaTeX**: no change. In a `;` block the parser already gives a
+  `Declare` for the first `:=` of a name and an `Assign` for the later ones.
+- **Epsil**: the spelling is the existing `let c = 5`. The top level of a
+  program is a block: a variable is introduced by `let` there too (user:
+  "require the `let`"). 17 programs of the documentation and 1 of the
+  corpus change; Tycho's 13 onboarding preludes need none.
+- **Outside any block** (`ce.assign('c', 5)`, an `Assign` evaluated at the
+  host level): it declares the variable in the current scope, as today.
+- **Two declarations of one name in one block**: an error, as today
+  (`variable-redeclaration`).
+- **A read before the declaration**: the name means the local in the whole
+  block; a read before its `Declare` runs is an error, as today
+  (`read-before-declaration`); the initial value of a `Declare` is computed
+  with the outer name (`Block(Declare(z, z + 1), z)` with a global `z = 9`
+  is 10).
+- **Destructuring**: the same rule; new names need a declaration.
+- **The type of a local** with an initial value: the type of that value as
+  the boxing types it.
+
+D8 deletes about 890 lines by the survey's count (the removal of
+definitions at each run, the definitions of a run, `assignment-locals.ts`,
+the assignment evidence). Up to 212 test files have a block that assigns a
+name it does not declare; 12 are about the implicit local and change in
+meaning.
