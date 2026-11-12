@@ -106,6 +106,7 @@ import {
 } from '../numerics/numeric-complex.js';
 import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
 import { bigBessel } from '../numerics/bessel-big.js';
+import { bigAiry } from '../numerics/airy-big.js';
 import {
   logGammaComplex,
   logGammaPrincipal,
@@ -5447,6 +5448,18 @@ function evaluateAiry(
   const special = airyValueAtInfinity(kind, x, ce);
   if (special !== undefined) return special;
   if (!shouldNumericize(numericApproximation, x)) return undefined;
+  // Above machine precision `Ai` and `Bi` of a real argument have the digits
+  // asked for or stay unevaluated (`bigAiry` declines where it cannot reach
+  // them). The derivatives and a complex argument keep the double kernels.
+  if (
+    (kind === 'Ai' || kind === 'Bi') &&
+    bignumPreferred(ce) &&
+    isRealLiteral(x) &&
+    !Number.isNaN(x.re)
+  ) {
+    const value = bigAiry(ce, kind, bigRealOperand(ce, x));
+    return value === undefined ? undefined : boxBignumApprox(ce, value);
+  }
   if (isNumber(x) && x.isComplex) {
     const kernel =
       kind === 'Ai'

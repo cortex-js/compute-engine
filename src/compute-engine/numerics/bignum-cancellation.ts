@@ -71,3 +71,39 @@ export function bigWithCancellation(
     BigDecimal.precision = digits;
   }
 }
+
+/** Consecutive terms below the tolerance that end `sumByRatio`. */
+const RATIO_SERIES_CONSECUTIVE = 2;
+
+/**
+ * Σ term_k for `term_{k+1} = term_k · ratio(k)` from `first` (the term of
+ * index `from`), at `BigDecimal.precision`, with the largest term. The caller
+ * guarantees that `|ratio(k)|` does not increase for k ≥ `from`; then once the
+ * next ratio is at most ½ the tail is at most the term, so the sum ends after
+ * `RATIO_SERIES_CONSECUTIVE` terms in a row at most 10^−precision times the
+ * largest term with that bound holding. `undefined` past `maxTerms`.
+ */
+export function sumByRatio(
+  first: BigDecimal,
+  from: number,
+  ratio: (k: number) => BigDecimal,
+  maxTerms: number,
+  checkTime?: () => void
+): Scaled | undefined {
+  const tol = new BigDecimal(`1e-${BigDecimal.precision}`);
+  let term = first;
+  let sum = first;
+  let peak = first.abs();
+  let small = 0;
+  for (let k = from; k < from + maxTerms; k++) {
+    checkTime?.();
+    const next = ratio(k + 1).abs();
+    if (next.lte(BigDecimal.HALF) && term.abs().lte(tol.mul(peak))) {
+      if (++small >= RATIO_SERIES_CONSECUTIVE) return { value: sum, peak };
+    } else small = 0;
+    term = term.mul(ratio(k));
+    sum = sum.add(term);
+    if (term.abs().gt(peak)) peak = term.abs();
+  }
+  return undefined;
+}

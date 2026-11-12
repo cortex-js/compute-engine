@@ -2,6 +2,17 @@
 
 ### Resolved Issues
 
+- **`AiryAi`, `AiryBi`, `ExpIntegralEi` and `LogIntegral` carry the precision
+  asked for at a real argument** (#ISSUE2, contributed by
+  [enumeratio](https://github.com/enumeratio)). `N(ExpIntegralEi(2), 30)` was
+  the double `4.95423435600189` and is now
+  `4.95423435600189016337950513023`; `AiryAi(1/3)`, `AiryBi(-2.5)` and
+  `LogIntegral(10)` likewise. Ai and Bi come from the Bessel kernels of order
+  ±1/3 (DLMF 9.6), Ei and li from the series, and from the continued fraction
+  of E₁ for `x ≤ −40`. Measured against mpmath at 30, 50 and 100 digits, the
+  error is at most half a unit of the last digit; a call the kernels cannot
+  vouch for (`ExpIntegralEi(5000)`, `AiryBi(300)`) stays unevaluated.
+
 - **`BesselJ`, `BesselY`, `BesselI` and `BesselK` carry the precision asked for
   at a real argument, and a real non-integer order has a value** (#ISSUE,
   contributed by [enumeratio](https://github.com/enumeratio)). `N(BesselJ(1, 1/3), 30)`
