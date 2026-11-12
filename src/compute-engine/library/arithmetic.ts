@@ -6057,6 +6057,12 @@ const HURWITZ_PEEL_LIMIT = 20;
 const HURWITZ_NEGATIVE_ORDER_LIMIT = 100;
 
 /**
+ * The most terms `Zeta(s, −k)` adds to ζ(s) in exact form: the sum is k
+ * rational terms, so past this k the expression stays unevaluated.
+ */
+const ZETA_NEGATIVE_INTEGER_BASE_LIMIT = 1000;
+
+/**
  * The largest order n for which ζ(−n, a) with a SYMBOLIC `a` (a free
  * variable, or an irrational constant such as `Pi`) is rewritten as the
  * Bernoulli polynomial in `a`. The polynomial has n + 2 terms whose
@@ -6462,6 +6468,37 @@ function evaluateGeneralizedZeta(
 
   if (!a.isComplex && a.re === 0)
     return engine.function('Zeta', [s]).evaluate({ numericApproximation });
+
+  // Exact integer s > 1 and a = −k: the terms n < k are j^(−s) for j = k − n
+  // from 1 to k, the term n = k is omitted and n > k sums to ζ(s), so
+  // Zeta(2, −1) is 1 + ζ(2).
+  const aInt = asSmallInteger(a);
+  if (
+    !numericApproximation &&
+    sInt !== null &&
+    sInt > 1 &&
+    aInt !== null &&
+    aInt < 0 &&
+    -aInt <= ZETA_NEGATIVE_INTEGER_BASE_LIMIT &&
+    isNumber(s) &&
+    s.isExact &&
+    isNumber(a) &&
+    a.isExact
+  ) {
+    // Σ_{j=1..k} j^(−s) as a reduced fraction
+    let num = 0n;
+    let den = 1n;
+    for (let j = 1n; j <= BigInt(-aInt); j++) {
+      const d = j ** BigInt(sInt);
+      num = num * d + den;
+      den *= d;
+      const g = bigintGcd(num, den);
+      num /= g;
+      den /= g;
+    }
+    const head = engine.function('Zeta', [s]).evaluate();
+    return head.add(engine.number([num, den]));
+  }
 
   const atInfinity = zetaAtInfiniteOperand(engine, s, a);
   if (atInfinity !== undefined) return atInfinity ?? undefined;

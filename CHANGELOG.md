@@ -7,7 +7,7 @@
   count: `Zeta(0, 0)` was `-1/2` (now `1/2`), `Zeta(0, -1)` was `1/2` (now
   `3/2`) and `Zeta(0, -2)` was `3/2` (now `5/2`), a nonpositive integer `a`
   coming out 1 too small. The compiled `Zeta` agrees. The omission stays for
-  `s != 0`: `Zeta(2, -1)` is `1 + ζ(2)`. (#524, contributed by
+  `s != 0`, and for an integer `s > 1` and `a = -k` (up to `k = 1000`) `Zeta(s, -k)` now evaluates exactly to `ζ(s) + Σ_{j=1..k} j^-s`: `Zeta(2, -1)` is `1 + π²/6` (was unevaluated), `Zeta(2, -2)` is `5/4 + π²/6` and `Zeta(3, -1)` is `1 + ζ(3)`. (#524, contributed by
   [enumeratio](https://github.com/enumeratio))
 
 ## 0.187.1 _2026-11-11_

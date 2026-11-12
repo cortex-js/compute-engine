@@ -757,6 +757,72 @@ describe('Zeta(0, a) keeps the term n + a = 0 (1/2 − a for every a)', () => {
   });
 });
 
+describe('Zeta(s, −k) for an integer s > 1 is ζ(s) + Σ_{j=1..k} j^(−s)', () => {
+  const cases: [number, number, any, number][] = [
+    [
+      2,
+      -1,
+      ['Add', 1, ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]]],
+      1 + Math.PI ** 2 / 6,
+    ],
+    [
+      2,
+      -2,
+      [
+        'Add',
+        ['Rational', 5, 4],
+        ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]],
+      ],
+      1.25 + Math.PI ** 2 / 6,
+    ],
+    [3, -1, ['Add', 1, ['Zeta', 3]], 1 + 1.2020569031595942],
+    [
+      4,
+      -3,
+      [
+        'Add',
+        ['Rational', 1393, 1296],
+        ['Multiply', ['Rational', 1, 90], ['Power', 'Pi', 4]],
+      ],
+      1393 / 1296 + Math.PI ** 4 / 90,
+    ],
+  ];
+  for (const [s, a, expected, value] of cases) {
+    test(`Zeta(${s}, ${a}) = ${JSON.stringify(expected)} (evaluate)`, () => {
+      expect(new ComputeEngine().expr(['Zeta', s, a]).evaluate().json).toEqual(
+        expected
+      );
+    });
+    test(`Zeta(${s}, ${a}) = ${value} (N)`, () => {
+      expect(new ComputeEngine().expr(['Zeta', s, a]).N().re).toBeCloseTo(
+        value,
+        12
+      );
+    });
+  }
+
+  test('the parse route', () => {
+    const e = new ComputeEngine();
+    expect(e.parse('\\zeta(2,-1)').evaluate().json).toEqual(cases[0][2]);
+    expect(e.parse('\\zeta(2,-1)').N().re).toBeCloseTo(cases[0][3], 12);
+  });
+
+  test('a base point past the cap stays unevaluated, and s <= 1 is unchanged', () => {
+    const e = new ComputeEngine();
+    expect(e.expr(['Zeta', 2, -1001]).evaluate().json).toEqual([
+      'Zeta',
+      2,
+      -1001,
+    ]);
+    expect(e.expr(['Zeta', 1, -1]).evaluate().json).toEqual('ComplexInfinity');
+    expect(e.expr(['Zeta', -1, -2]).evaluate().json).toEqual([
+      'Rational',
+      35,
+      12,
+    ]);
+  });
+});
+
 describe('Two-operand Zeta at edge operands', () => {
   test('a non-finite base point does not hang', () => {
     expect(ce.expr(['Zeta', 2, 'NegativeInfinity']).N().isNumberLiteral).toBe(
