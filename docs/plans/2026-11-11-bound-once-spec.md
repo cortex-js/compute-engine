@@ -654,3 +654,29 @@ definitions at each run, the definitions of a run, `assignment-locals.ts`,
 the assignment evidence). Up to 212 test files have a block that assigns a
 name it does not declare; 12 are about the implicit local and change in
 meaning.
+
+### D9. The checkpoint API is removed (user decision, 2026-11-11)
+
+`ce.checkpoint()`, `ce.restore()` and `ce.discard()`, deprecated since
+0.187.0, are removed as a step of this work, with their journal
+(`checkpoint.ts`, `checkpoint-journal.ts`: about 1,300 lines), the mark of
+a definition that a restore removed and the rule that makes an expression
+bound to it inert (CE-586, decided 2026-10-28), and the 26 test files that
+call a checkpoint, as far as they are about it.
+
+The case that led to the decision: with D6 the definition of the index of
+a `Sum` and of the local of a `Block` is the one of the boxing, and a
+restore removed it when the expression was boxed after the checkpoint
+(`ce-586-disposed-definition-inert.test.ts`, "a Sum index and a Block
+local built in the window still run": 14 and 8 expected, `3n²` and `2a`
+received). The rules did not say what a restore does to a definition that
+belongs to an expression. The options were: the restore leaves such a
+definition, the test changes, or the API goes.
+
+Before the removal, as the slice 1 spec says (rule 13): the two uses in
+the engine, which make a registration all-or-nothing
+(`engine-library-bootstrap.ts`, the group-theory registration), remove
+what they declared when they fail; Tycho is told (two of its tests inject
+a failure of a restore through the internal `_restoreCheckpointSnapshot()`).
+It comes after D8 and the activations in the same worktree, as a task of
+its own. Until then the one test of CE-586 stays failing.
