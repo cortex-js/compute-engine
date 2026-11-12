@@ -1,3 +1,21 @@
+## Unreleased
+
+### Resolved Issues
+
+- **`BesselJ`, `BesselY`, `BesselI` and `BesselK` carry the precision asked for
+  at a real argument, and a real non-integer order has a value** (#ISSUE,
+  contributed by [enumeratio](https://github.com/enumeratio)). `N(BesselJ(1, 1/3), 30)`
+  was the double `0.16436254381427073` and is now
+  `0.164362543814270735363798698286`; the four heads use series, Hankel's
+  expansions and the digamma series of the integer orders at the working
+  precision, and a call the kernel cannot vouch for (`BesselI(0, 5000)`, past
+  the series) stays unevaluated instead of printing a double's digits as more.
+  `BesselJ(0.5, 2)` was unevaluated and is `0.5130161365618278`
+  (`√(2/(π·2))·sin 2`); the same holds for `Y`, `I` and `K` at a positive
+  argument. Measured against mpmath at 30, 50 and 100 digits over orders 0 to
+  200 and arguments 10⁻⁵ to 10⁵, the error is at most half a unit of the last
+  digit. `evaluate()` still leaves an exact operand exact.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

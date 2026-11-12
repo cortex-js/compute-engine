@@ -1745,7 +1745,14 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
       expect(ce2.box([h, 0, ['Complex', 1, 2]]).N().isNumberLiteral).toBe(true);
-      both([h, ['Rational', 1, 2], 1], symbolic(h));
+      // A non-integer real order has a value at a positive argument under
+      // `.N()`; `evaluate()` leaves it exact.
+      expect(symbolic(h)(ce2.box([h, ['Rational', 1, 2], 1]).evaluate())).toBe(
+        true
+      );
+      expect(ce2.box([h, ['Rational', 1, 2], 1]).N().isNumberLiteral).toBe(
+        true
+      );
     }
     for (const h of ['BesselY', 'BesselK']) {
       expect(symbolic(h)(ce2.box([h, 0, -1]).evaluate())).toBe(true);
