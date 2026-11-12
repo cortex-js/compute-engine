@@ -3,6 +3,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
 import { engine, exprToString } from '../utils';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 function evaluate(expr: Expression): string {
   return exprToString(engine.expr(expr)?.evaluate({ materialization: true }));
@@ -5035,11 +5036,12 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
     expect(count.operator).toBe('Count');
     expect(count.nops).toBe(2);
 
-    // One operand past the arity is still an `unexpected-argument` error.
-    const over = ce.box(['Count', ['Sequence', ['List', 1, 2], 'b', 'c']]);
-    expect(args(over)).toEqual(
-      args(ce.box(['Contains', ['Sequence', ['List', 1, 2], 'b', 'c']]))
-    );
+    // `Count` takes a level specification as a third operand; one operand past
+    // that is still an `unexpected-argument` error.
+    const levels = ce.box(['Count', ['Sequence', ['List', 1, 2], 'b', 'c']]);
+    expect(levels.nops).toBe(3);
+    expect(levels.isValid).toBe(true);
+    const over = ce.box(['Count', ['Sequence', ['List', 1, 2], 'b', 'c', 'd']]);
     expect(over.isValid).toBe(false);
   });
 
@@ -6421,5 +6423,171 @@ describe('Length of an infinite collection', () => {
     expect(typeOf(['Range', 1, 10])).toBe('integer');
     expect(typeOf('xs')).toBe('integer | signed_infinity');
     expect(typeOf('Integers')).toBe('integer | signed_infinity');
+  });
+});
+
+describe('Wolfram call forms of the list heads', () => {
+  const ev = (expr: Expression): string =>
+    engine.box(expr).evaluate({ materialization: true }).toString();
+  const cases: [string, Expression, string][] = [
+    // First and Last with the value of an empty collection
+    ['First([], 0)', ['First', ['List'], 0], '0'],
+    ['Last([], 7)', ['Last', ['List'], 7], '7'],
+    ['First([1, 2], 9) ignores the default', ['First', ['List', 1, 2], 9], '1'],
+    ['Last([1, 2], 9) ignores the default', ['Last', ['List', 1, 2], 9], '2'],
+    ['First([], x) with a symbolic default', ['First', ['List'], 'x'], 'x'],
+    [
+      'First([[]], 0) is the inner list',
+      ['First', ['List', ['List']], 0],
+      '[]',
+    ],
+    // Flatten with an infinite depth
+    [
+      'Flatten(xs, +oo) flattens completely',
+      ['Flatten', ['List', ['List', 1, ['List', 2]], 3], 'PositiveInfinity'],
+      '[1,2,3]',
+    ],
+    [
+      'Flatten(xs, 1) is unchanged',
+      ['Flatten', ['List', ['List', 1, ['List', 2]], 3], 1],
+      '[1,[2],3]',
+    ],
+    // Fold without a seed starts from the first element
+    ['Fold(Add, xs)', ['Fold', 'Add', ['List', 1, 2, 3]], '6'],
+    [
+      'Fold(f, xs) reads the first element as the seed',
+      [
+        'Fold',
+        ['Function', ['Subtract', 'a', 'b'], 'a', 'b'],
+        ['List', 10, 1, 2],
+      ],
+      '7',
+    ],
+    [
+      'Fold(Add, 0, xs) keeps its seed',
+      ['Fold', 'Add', 10, ['List', 1, 2]],
+      '13',
+    ],
+    // Count at levels
+    ['Count(xs, 1, 1)', ['Count', ['List', 1, 2, 1], 1, 1], '2'],
+    [
+      'Count(xs, 1, 2) counts levels 1 to 2',
+      ['Count', ['List', ['List', 1, 1], 1], 1, 2],
+      '3',
+    ],
+    [
+      'Count(xs, 1, [1]) counts level 1 only',
+      ['Count', ['List', ['List', 1, 1], 1], 1, ['List', 1]],
+      '1',
+    ],
+    [
+      'Count(xs, 1, [2]) counts level 2 only',
+      ['Count', ['List', ['List', 1, 1], 1], 1, ['List', 2]],
+      '2',
+    ],
+    [
+      'Count(xs, 1, [1, 2])',
+      ['Count', ['List', ['List', 1, 1], 1], 1, ['List', 1, 2]],
+      '3',
+    ],
+    [
+      'Count(xs, 1, +oo)',
+      ['Count', ['List', ['List', 1, ['List', 1]], 1], 1, 'PositiveInfinity'],
+      '3',
+    ],
+    [
+      'Count(xs, [1], [0]) reads level 0 as xs itself',
+      ['Count', ['List', 1], ['List', 1], ['List', 0]],
+      '1',
+    ],
+    ['Count(xs, 1) is unchanged', ['Count', ['List', 1, 2, 1], 1], '2'],
+    // Unique with a test
+    [
+      'Unique(xs, test) keeps the first of each class',
+      [
+        'Unique',
+        ['List', 1, 2, 3, 4],
+        ['Function', ['Equal', ['Mod', 'a', 2], ['Mod', 'b', 2]], 'a', 'b'],
+      ],
+      '[1,2]',
+    ],
+    [
+      'Unique(xs, test) is not transitive-closed: it compares with the kept ones',
+      [
+        'Unique',
+        ['List', 1, 1.2, 2, 2.5],
+        ['Function', ['Less', ['Abs', ['Subtract', 'a', 'b']], 1], 'a', 'b'],
+      ],
+      '[1,2]',
+    ],
+    ['Unique(xs) is unchanged', ['Unique', ['List', 1, 1, 2]], '[1,2]'],
+  ];
+  for (const [name, expr, expected] of cases)
+    test(`${name} = ${expected} (evaluate)`, () => {
+      expect(ev(expr)).toBe(expected);
+    });
+
+  test('the type of First(xs, default) is the element or the default', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('xs', 'list<integer>');
+    expect(ce2.box(['First', 'xs', 'NaN']).type.matches('number')).toBe(true);
+    expect(ce2.box(['First', 'xs', "'none'"]).type.matches('integer')).toBe(
+      false
+    );
+    expect(ce2.box(['Last', 'xs', 0]).type.toString()).toBe('integer');
+  });
+
+  test('a level specification that is not read leaves Count unevaluated', () => {
+    expect(
+      engine.box(['Count', ['List', 1, 2, 1], 1, ['List', -1]]).evaluate()
+        .operator
+    ).toBe('Count');
+    expect(
+      engine.box(['Count', ['List', 1, 2, 1], 1, 'x']).evaluate().operator
+    ).toBe('Count');
+  });
+
+  test('a depth that is not an integer or +oo is refused by Flatten', () => {
+    expect(
+      engine.box(['Flatten', ['List', ['List', 1]], 'NegativeInfinity']).isValid
+    ).toBe(false);
+  });
+
+  // The lowerings read the operands of the one-operand forms, so the wider
+  // forms decline rather than drop an operand.
+  const declined: [string, Expression][] = [
+    ['First(xs, d)', ['First', 'xs', 0]],
+    ['Last(xs, d)', ['Last', 'xs', 0]],
+    ['Count(xs, v, levels)', ['Count', 'xs', 1, 1]],
+    [
+      'Unique(xs, test)',
+      ['Unique', 'xs', ['Function', ['Equal', 'a', 'b'], 'a', 'b']],
+    ],
+  ];
+  for (const [name, expr] of declined)
+    for (const to of ['javascript', 'python'])
+      test(`${name} is not compiled to ${to}`, () => {
+        const ce2 = new ComputeEngine();
+        ce2.declare('xs', 'list<integer>');
+        expect(() => compile(ce2.box(expr), { to, fallback: false })).toThrow(
+          /not compiled/
+        );
+      });
+
+  test('Flatten(xs, +oo) compiles on JavaScript and agrees', () => {
+    const expr = engine.box([
+      'Flatten',
+      ['List', ['List', 1, ['List', 2]], 3],
+      'PositiveInfinity',
+    ]);
+    const r = compile(expr, { fallback: false });
+    expect(r.run!()).toEqual([1, 2, 3]);
+  });
+
+  test('Fold(f, xs) compiles as Reduce does', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('xs', 'list<integer>');
+    const r = compile(ce2.box(['Fold', 'Add', 'xs']), { fallback: false });
+    expect(r.run!({ xs: [1, 2, 3] })).toBe(6);
   });
 });

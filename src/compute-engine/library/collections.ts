@@ -1794,6 +1794,66 @@ function selectionVerdict(
 }
 
 /**
+ * The levels `[from, to]` a level specification names: an integer `n` is the
+ * levels 1 to `n`, `+oo` is every level from 1, `[n]` is level `n` only and
+ * `[from, to]` an inclusive range (level 0 is the collection itself).
+ * `undefined` for any other specification.
+ */
+function levelRange(
+  ce: ComputeEngine,
+  spec: Expression
+): [from: number, to: number] | undefined {
+  const bound = (e: Expression): number | undefined => {
+    if (e.isSame(ce.PositiveInfinity)) return Infinity;
+    const n = toInteger(e);
+    return n === null || n < 0 ? undefined : n;
+  };
+  if (isFunction(spec, 'List') && spec.nops >= 1 && spec.nops <= 2) {
+    const from = bound(spec.op1);
+    const to = spec.nops === 2 ? bound(spec.ops[1]) : from;
+    if (from === undefined || to === undefined || to < from) return undefined;
+    return [from, to];
+  }
+  const to = bound(spec);
+  return to === undefined || to < 1 ? undefined : [1, to];
+}
+
+/**
+ * `Count(xs, v, levels)`: how many of the parts of `xs` at the given levels
+ * are structurally the same as `v`. The parts of a list are its elements, and
+ * a nested list has parts of its own: `Count([[1, 1], 1], 1, 2)` is `2` (the
+ * two inner ones) and `Count([[1, 1], 1], 1, [1])` is `1`. A level
+ * specification that is not read, , a predicate `v`
+ * or a collection that is not a literal list leaves the call unevaluated.
+ */
+function countAtLevels(
+  ce: ComputeEngine,
+  xs: Expression,
+  what: Expression | undefined,
+  spec: Expression
+): Expression | undefined {
+  if (what === undefined || what.isFunction === true) return undefined;
+  if (!isFunction(xs, 'List')) return undefined;
+  if (searchedValueStatus(what) === 'undecided') return undefined;
+  const range = levelRange(ce, spec);
+  if (range === undefined) return undefined;
+  const [from, to] = range;
+  const limit = ce.iterationLimit;
+  let n = 0;
+  let visited = 0;
+  const walk = (part: Expression, level: number): boolean => {
+    if (level >= from && part.isSame(what)) n += 1;
+    if (level >= to || !isFunction(part, 'List')) return true;
+    for (const x of part.ops) {
+      if (++visited > limit) return false;
+      if (!walk(x, level + 1)) return false;
+    }
+    return true;
+  };
+  return walk(xs, 0) ? ce.number(n) : undefined;
+}
+
+/**
  * The `Error` VALUE carried by a predicate result, or `undefined` when the
  * result is not error-valued.
  *
@@ -6105,6 +6165,27 @@ function componentResultTypeD(
     if (proven !== undefined) return proven;
   }
   return elementReadType(xs, element);
+}
+
+/**
+ * The type of `First(xs, default)` and `Last(xs, default)`: the element read,
+ * or the default when the collection is empty.
+ */
+function withEmptyDefaultType(
+  read: Type,
+  fallback: OperandDescriptor | undefined
+): Type {
+  return fallback === undefined ? read : widen(read, fallback.type);
+}
+
+/** The default of `First(xs, default)` when `xs` holds no element. */
+function emptyDefault(
+  xs: Expression,
+  fallback: Expression | undefined
+): Expression | undefined {
+  if (fallback === undefined || isSymbol(xs, 'Missing')) return undefined;
+  if (!xs.isCollection || !xs.isIndexedCollection) return undefined;
+  return xs.count === 0 ? fallback : undefined;
 }
 
 /**
@@ -13945,7 +14026,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // marker sits (`SEARCHED_VALUE_POLICY`).
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(collection<any>, any?) -> integer | infinity',
+    // The optional third operand is a level specification (Wolfram's
+    // `Count[expr, pattern, levelspec]`), for the value form: see
+    // `countAtLevels`.
+    signature: '(collection<any>, any?, any?) -> integer | infinity',
     // Only the 1-arg cardinality form can answer an infinity: it reports
     // `xs.count` as it stands, and an unbounded source counts infinitely many
     // elements (`Count(Range(1, +oo))` and `Count(Repeat(5))` are both `+oo`).
@@ -14070,7 +14154,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const adjusted = validateAgainstDeclaration(ce, 'Count', stripped, true);
       return ce._fn('Count', adjusted ?? stripped);
     },
-    evaluate: ([xs, what], { engine }) => {
+    evaluate: ([xs, what, levels], { engine }) => {
       // A decided non-collection source is refused the same way `Length` is,
       // in both the 1-arg and the 2-arg form. The declared `collection<any>`
       // parameter makes `validateArguments` wrap a STATICALLY decided operand
@@ -14082,6 +14166,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // application that never evaluates.
       const wrongKind = nonCollectionSizeOperandError(engine, xs, 'Count');
       if (wrongKind !== undefined) return wrongKind;
+
+      if (levels !== undefined) return countAtLevels(engine, xs, what, levels);
 
       // A lazy emptiness query can run the predicate. Read structural
       // emptiness here and let the counting walk determine the other cases.
@@ -15349,15 +15435,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `initial` parameter is a `value`, which the default policy
     // (`signatureParamsPropagateAbsence`) does not read as a collection.
     missingBehavior: 'propagate',
+    // `Fold(f, xs)` has no seed (Wolfram's `Fold[f, list]`): it is
+    // `Reduce(xs, f)`, which starts from the first element.
     signature:
       '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
     canonical: (ops, { engine }) =>
       withFixpointRecord(engine, () => {
+        const unseeded = ops.length === 2;
         // The collection is checked FIRST so the callback's compatibility
         // gate can judge the reducer's element parameter against its element
         // type, and the seed before the reducer, whose bare accumulator is
         // typed from the seed's type (as `Reduce`).
-        const collection = checkCollectionOperand(engine, ops[2]);
+        const collection = checkCollectionOperand(
+          engine,
+          unseeded ? ops[1] : ops[2]
+        );
         const arity = {
           operator: 'Fold',
           supply: ACCUMULATOR_SUPPLY,
@@ -15372,8 +15464,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // The seed is a value: a bare `N` there is a variable, not the
         // library operator, as in the seed of `Reduce`
         // (`canonicalValueOperand`).
-        const initial = canonicalValueOperand(engine, ops[1]);
-        if (!initial?.isValid) return null;
+        const initial = unseeded
+          ? undefined
+          : canonicalValueOperand(engine, ops[1]);
+        if (!unseeded && !initial?.isValid) return null;
         const fn = canonicalFoldCombiner(
           engine,
           ops,
@@ -15382,7 +15476,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           arity
         );
         if (!fn) return null;
-        return engine._fn('Reduce', [collection, fn, initial]);
+        return engine._fn(
+          'Reduce',
+          initial ? [collection, fn, initial] : [collection, fn]
+        );
       }),
   },
 
@@ -18360,20 +18457,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['First([7, 8, 9])'],
     description: 'The first element of a collection.',
     complexity: 8200,
-    signature: '(xs: indexed_collection<any>) -> any',
+    // The optional second operand is the value of an empty collection
+    // (Wolfram's `First[expr, def]`): `First([], 0)` is `0`, and a collection
+    // that has an element ignores it.
+    signature: '(xs: indexed_collection<any>, default: any?) -> any',
     missingBehavior: 'handle',
     // A restricted collection `L {c}` whose condition is not decided moves
     // out of the application: `First((1, 2) {0 < t})` is `1 {0 < t}`
     // (`threadsConditionals`, see `types-definitions.ts`).
     threadsConditionals: true,
-    type: ([xs], context) =>
+    type: ([xs, fallback], context) =>
       BoxedType.forResult(
-        accessorResultTypeD(xs, 1),
+        withEmptyDefaultType(accessorResultTypeD(xs, 1), fallback),
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
-    evaluate: ([xs], { engine: ce, expression }) =>
-      componentAt(xs, 1, ce, 'First', expression),
+    evaluate: ([xs, fallback], { engine: ce, expression }) =>
+      emptyDefault(xs, fallback) ?? componentAt(xs, 1, ce, 'First', expression),
   },
 
   Second: {
@@ -18543,17 +18643,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Last([7, 8, 9])'],
     description: 'The last element of a collection.',
     complexity: 8200,
-    signature: '(xs: indexed_collection<any>) -> any',
+    // The optional second operand is the value of an empty collection, as for
+    // `First`.
+    signature: '(xs: indexed_collection<any>, default: any?) -> any',
     missingBehavior: 'handle',
     threadsConditionals: true,
-    type: ([xs], context) =>
+    type: ([xs, fallback], context) =>
       BoxedType.forResult(
-        accessorResultTypeD(xs, -1),
+        withEmptyDefaultType(accessorResultTypeD(xs, -1), fallback),
         context.engine._typeResolver
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
-    evaluate: ([xs], { engine: ce, expression }) =>
-      componentAt(xs, -1, ce, 'Last', expression),
+    evaluate: ([xs, fallback], { engine: ce, expression }) =>
+      emptyDefault(xs, fallback) ?? componentAt(xs, -1, ce, 'Last', expression),
   },
 
   Rest: {
@@ -20909,13 +21011,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
+    // The last arm takes a test of two elements (Wolfram's
+    // `DeleteDuplicates[list, test]`): an element is dropped when the test
+    // holds between an earlier kept element and it.
     signature:
-      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)',
+      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)',
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
       if (!isWalkableFiniteCollection(ops[0])) return undefined;
+      if (ops.length > 1) return uniqueUnderTest(ce, ops[0], ops[1]);
       const tallied = tally(ops[0]!);
       if (tallied === undefined) return undefined;
       const [values] = tallied;
@@ -24604,6 +24710,41 @@ function failedTallyError(
     if (failed !== undefined) return failed;
   }
   return undefined;
+}
+
+/** `Unique(xs, test)`: the first of each class of elements the test relates. */
+function uniqueUnderTest(
+  ce: ComputeEngine,
+  xs: Expression,
+  test: Expression
+): Expression | undefined {
+  const f = applicable(test);
+  const limit = ce.iterationLimit;
+  const kept: Expression[] = [];
+  let steps = 0;
+  for (const x of xs.each()) {
+    const failed = failedCellError(x);
+    if (failed !== undefined) return failed;
+    let duplicate = false;
+    for (const y of kept) {
+      if (++steps > limit) return undefined;
+      const applied = f([y, x]);
+      if (applied === undefined) throw invalidPredicateError(test);
+      const verdict = selectionVerdict(applied);
+      if (verdict === 'True') {
+        duplicate = true;
+        break;
+      }
+      if (verdict !== 'False') {
+        const err = predicateErrorValue(applied);
+        if (err) return err;
+        if (isUndecidedVerdict(applied)) return undefined;
+        throw predicateResultError('Unique', test);
+      }
+    }
+    if (!duplicate) kept.push(x);
+  }
+  return isString(xs) ? joinCharacters(ce, kept) : ce.function('List', kept);
 }
 
 /** The distinct elements of `collection` and the count of each, or

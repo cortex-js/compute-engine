@@ -1,3 +1,31 @@
+## Unreleased
+
+### Resolved Issues
+
+- **`First` and `Last` take the value of an empty collection, `Flatten` takes
+  an infinite depth, `Fold` needs no seed, `Count` takes levels and `Unique`
+  takes a test,** the call forms of Wolfram's `First[expr, def]`,
+  `Flatten[list, Infinity]`, `Fold[f, list]`, `Count[expr, pattern, levelspec]`
+  and `DeleteDuplicates[list, test]`. Each was an error (`First([], 0)`,
+  `Flatten(xs, +oo)`, `Count(xs, 1, 2)`, `Unique(xs, test)` said
+  `unexpected-argument` or `incompatible-type`, and `Fold(Add, xs)` said
+  `missing`). `First([], 0)` is `0` and `Last([], 7)` is `7`, while a
+  collection that has an element ignores the default (`First([1, 2], 9)` is
+  `1`); the type of the call is the element or the default. `Flatten` with
+  `+oo` flattens completely, as with no depth. `Fold(Add, [1, 2, 3])` is
+  `Reduce([1, 2, 3], Add)`, `6`, starting from the first element.
+  `Count([[1, 1], 1], 1, 2)` counts the parts at levels 1 to 2 (`3`), a
+  list `[n]` names one level (`Count([[1, 1], 1], 1, [1])` is `1`) and
+  `[from, to]` a range, with `+oo` for every level; a level specification
+  that is not read, or a predicate, leaves the call unevaluated.
+  `Unique([1, 2, 3, 4], (a, b) => a mod 2 == b mod 2)` is `[1, 2]`: an
+  element is dropped when the test holds between a kept element and it. The
+  JavaScript and Python targets decline the wider forms of `First`, `Last`,
+  `Count` and `Unique` (`Could not compile ...: the form with 3 operands is
+  not compiled`) where they used to drop the operand; `Flatten(xs, +oo)` and
+  `Fold(f, xs)` compile as `Flatten(xs)` and `Reduce(xs, f)` do.
+  (#538, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

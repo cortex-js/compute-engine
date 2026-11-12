@@ -542,6 +542,14 @@ function compileOutermost(
  */
 const _compilingUnionMember = new WeakSet<CompileTarget<Expression>>();
 
+/** The most operands of a head that its lowerings read. */
+const COMPILED_OPERAND_LIMIT: ReadonlyMap<string, number> = new Map([
+  ['First', 1],
+  ['Last', 1],
+  ['Count', 2],
+  ['Unique', 1],
+]);
+
 /** The most bodies that the dispatch of the declared-union inputs emits. */
 const MAX_UNION_DISPATCH_BODIES = 4;
 
@@ -3629,6 +3637,15 @@ export function compileExpr(
   if (h === 'Clamp' && args.length !== 3)
     throw new Error(
       `Could not compile \`Clamp\`: expected three operands, got ${args.length}`
+    );
+
+  // The lowerings of these heads read the operands they know, so an operand
+  // of a wider form (`First(xs, default)`, `Count(xs, v, levels)`,
+  // `Unique(xs, test)`) was dropped from the emitted code.
+  const compiledOperands = COMPILED_OPERAND_LIMIT.get(h);
+  if (compiledOperands !== undefined && args.length > compiledOperands)
+    throw new Error(
+      `Could not compile \`${h}\`: the form with ${args.length} operands is not compiled`
     );
 
   // Handle function calls
