@@ -20,7 +20,9 @@ import {
   compileDiagnosticOf,
   isCompileDeclineError,
   isKindDeclineError,
+  type CompileDeclineError,
 } from './diagnostics.js';
+import { compilationScope, inCallerScope } from './compile-scope.js';
 import { rawTargetCheck } from './raw-target-check.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { rewritePartialApplications } from './partial-application.js';
@@ -29,7 +31,11 @@ import {
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
-import { withVarsValuesHidden } from './vars-inputs.js';
+import {
+  compileInputNames,
+  withSymbolicInputs,
+  withVarsValuesHidden,
+} from './vars-inputs.js';
 import { fragmentErrorDiagnostic } from './fragment.js';
 import type { CanCompileResult } from './fragment.js';
 import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
@@ -52,6 +58,7 @@ export type CompileExpressionOptions<T extends string = string> = {
     JSSource | ((...args: unknown[]) => unknown)
   >;
   vars?: Record<MathJsonSymbol, JSSource>;
+  symbolic?: readonly MathJsonSymbol[];
   imports?: unknown[];
   preamble?: string;
   fallback?: boolean;
@@ -325,6 +332,45 @@ function compileExpression<
   const ce = expr.engine;
   if (ce._opensOperation(false))
     return ce._withOperation(expr, () => compile<T, R>(expr, options));
+  // The compiler looks a name up by its spelling from the current scope, and
+  // the expression reads each name from the scope it was boxed in: the
+  // compilation runs in a scope that gives each name of `expr` the
+  // definition that its occurrence reads, or declines
+  // (`compilationScope()`).
+  // Its interpreter fallback is built for the scope of the call
+  // (`inCallerScope()`).
+  // A name of the `symbolic` option is an input wherever it is read: its
+  // value is hidden for the time of the compilation (`withSymbolicInputs()`).
+  const scope = compilationScope(expr, compileInputNames(options));
+  const symbolic = options?.symbolic;
+  const run = (): CompilationResult<T, R> => {
+    const result = withSymbolicInputs(expr, symbolic, () =>
+      compileInScope<T, R>(expr, options)
+    );
+    return isCompileDeclineError(result)
+      ? compileInScope<T, R>(expr, options, result)
+      : result;
+  };
+  return inCallerScope(expr, () => {
+    if (scope === undefined) return run();
+    if (isCompileDeclineError(scope))
+      return compileInScope<T, R>(expr, options, scope);
+    return ce._inScope(scope, run);
+  });
+}
+
+/**
+ * `compileExpression()` in the current scope. With `decline`, the
+ * compilation declines with it, after the checks of the options.
+ */
+function compileInScope<
+  T extends string = 'javascript',
+  R = DefaultRunnerResult<T>,
+>(
+  expr: Expression,
+  options?: CompileExpressionOptions<T>,
+  decline?: CompileDeclineError
+): CompilationResult<T, R> {
   assertCompilationOptionsContract(options);
   assertProfileTarget(options);
   // (The shared per-compilation budgets — the antiderivative pool — are NOT
@@ -382,6 +428,7 @@ function compileExpression<
   }
 
   try {
+    if (decline !== undefined) throw decline;
     // Determine the target to use
     if (options?.target) {
       // Direct target override - use BaseCompiler. Registered language
@@ -586,6 +633,7 @@ function compileExpression<
       operators: options?.operators,
       functions: options?.functions,
       vars: options?.vars,
+      symbolic: options?.symbolic,
       callerLocals: options?.callerLocals,
       imports: options?.imports,
       preamble: options?.preamble,
@@ -655,6 +703,7 @@ function compileExpression<
         if (registered)
           return registered.compile(expr, {
             vars: options?.vars,
+            symbolic: options?.symbolic,
             fallback: true,
           }) as unknown as CompilationResult<T, R>;
       }
@@ -774,18 +823,32 @@ export function canCompile(
             `'${name ?? 'custom'}' has no fragment definition. Call compile().`,
         },
       };
-    return check.call(languageTarget, expr, {
-      functions: options?.functions,
-      vars: options?.vars,
-      callerLocals: options?.callerLocals,
-      preamble: options?.preamble,
-      mode: options?.mode,
-      iterationBudget: options?.iterationBudget,
-      cse: options?.cse,
-      constantFold: options?.constantFold,
-      storage: options?.storage,
-      strictTypes: options?.strictTypes,
-    });
+    // The names of `expr` are read from the scope of `compile()`
+    // (`compilationScope()`).
+    const scope = compilationScope(expr, compileInputNames(options));
+    if (isCompileDeclineError(scope))
+      return { ok: false, diagnostic: scope.diagnostic };
+    const answer = () =>
+      check.call(languageTarget, expr, {
+        functions: options?.functions,
+        vars: options?.vars,
+        callerLocals: options?.callerLocals,
+        preamble: options?.preamble,
+        mode: options?.mode,
+        iterationBudget: options?.iterationBudget,
+        cse: options?.cse,
+        constantFold: options?.constantFold,
+        storage: options?.storage,
+        strictTypes: options?.strictTypes,
+      });
+    const symbolic = options?.symbolic;
+    const hidden = (): CanCompileResult => {
+      const result = withSymbolicInputs(expr, symbolic, answer);
+      return isCompileDeclineError(result)
+        ? { ok: false, diagnostic: result.diagnostic }
+        : result;
+    };
+    return scope === undefined ? hidden() : expr.engine._inScope(scope, hidden);
   } catch (e) {
     return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
   }

@@ -45,6 +45,7 @@ import {
   UNSETTLED_SHAPE_CODE,
   UNTYPED_INPUT_CODE,
 } from './diagnostics.js';
+import { callerScopeOf } from './compile-scope.js';
 import { protocolOfSymbol } from '../engine-protocols.js';
 import { planProtocolDispatch } from './protocol-dispatch.js';
 import { buildCaseClosure } from '../boxed-expression/match-dispatch.js';
@@ -1888,8 +1889,10 @@ export function buildInterpreterFallback<T extends string>(
   // that is current when the fallback is built, the scope `compile()` is
   // called in. An expression boxed in a pushed scope and compiled after its
   // pop reads its canonical names from their own definitions, and its held
-  // names from this scope, as an evaluation after the pop does.
-  const buildScope = ce.context.lexicalScope;
+  // names from this scope, as an evaluation after the pop does. A
+  // compilation that runs in the scope of `expr` builds its fallback there,
+  // and the scope of the call is the one it recorded (`callerScopeOf()`).
+  const buildScope = callerScopeOf(ce);
   // The binding record that the occurrence of `k` reads, or `undefined`.
   // With `declare`, a name with no definition is declared in the scope that
   // it resolves from: the home scope of a free name, `buildScope` for a

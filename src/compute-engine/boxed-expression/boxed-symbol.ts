@@ -1488,6 +1488,43 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
+   * The scope that this occurrence resolves its name from: the home scope
+   * of a free name, or the scope whose chain gave the definition of a
+   * symbol with a definition. `undefined` for an occurrence that reads an
+   * activation (a parameter, the variable of a binder, the local of a
+   * block), for a symbol with a definition that records no such scope,
+   * and for a symbol that is not canonical. A compilation reads the names
+   * of an expression from one of these scopes (`compilationScope()`,
+   * `compilation/compile-scope.ts`).
+   * @internal
+   */
+  _resolutionScope(): Scope | undefined {
+    const def = this._def;
+    if (def !== undefined)
+      return readsActivation(def) ? undefined : this._defHome;
+    return this._homeScope;
+  }
+
+  /**
+   * For a free name: the definition that its name would resolve to with
+   * `scope` as its home scope, with the skips of its own resolution
+   * (`_freeNameBinding()`): a binder variable, a parameter, and a library
+   * operator when its unit reads the name as a variable. `compilationScope()`
+   * compares it with `_resolvedDefinition()`.
+   * @internal
+   */
+  _freeNameBindingFrom(scope: Scope): BoxedDefinition | undefined {
+    const variable = this._readsAsVariable(this._homeScope ?? scope);
+    return freeNameBindingAndScope(
+      this.engine,
+      this._id,
+      scope,
+      variable,
+      scope
+    )?.def;
+  }
+
+  /**
    * The definition that this occurrence reads: its own definition, or, for a
    * free name, the definition that its name resolves to in the current
    * context (`freeNameBindingInContext()`). `undefined` for a free name whose

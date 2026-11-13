@@ -46,6 +46,7 @@ export const IR_OPTIONS = {
   quadrature: 'mapped',
   functions: 'declined',
   vars: 'mapped',
+  symbolic: 'mapped',
   operators: 'declined',
   imports: 'declined',
   preamble: 'declined',

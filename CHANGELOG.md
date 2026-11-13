@@ -1,3 +1,47 @@
+## [Unreleased]
+
+### New Features
+
+- **The compile option `symbolic` names the symbols that are inputs of the
+  compiled code.** `compile(expr, { symbolic: ['a'] })` reads `a` as an
+  input wherever the compilation reads its name: in the expression, in the
+  bodies of the functions that the expression calls and in the values of the
+  symbols that it reads. Its stored value is not folded, and no analysis of
+  the compiler reads it: with `a: real` holding 4 and `f(x) := |a| x`,
+  `f(x) + a` compiles to `4 + _fn_f(_.x)` without the option and to
+  `_.a + _fn_f(_.x)`, with `x * Math.abs(_.a)` for `_fn_f`, with it. Unlike
+  `vars`, the option gives no source text: the name is emitted as any other
+  input of the target. A host that declares a name in a scope pushed around
+  a compilation (an axis, a parameter of a kernel) names it in `symbolic`,
+  so that a function defined outside that scope reads the input too. A name
+  whose type was only inferred from an assigned value, and a constant, make
+  the compilation decline.
+
+### Resolved Issues
+
+- **A compilation reads each name from the scope the expression was boxed
+  in, as its evaluation does.** With `a := 10`, `x + a` boxed, and then a
+  pushed scope that declares `a` again with the value 1, the compiled code
+  of `x + a` was `1 + _.x` on every target, where `evaluate()` reads 10; it
+  is now `10 + _.x`. A user function that the expression calls is the one it
+  was boxed with. An expression boxed in a scope that was popped compiles
+  with the definitions of that scope. An expression built from operands
+  boxed in scopes that give a name different definitions
+  (`ce.function('Add', [a, b])`) declines with the code `compile-error` and
+  the name in `binding`, and falls back to the interpreter (CE-1273).
+
+- **The value of a `vars` input is hidden in the body of a function that the
+  compiled expression calls.** With a slider `a: real` that holds 4,
+  `f(x) := |a| x`, a scope that declares `a` again with no value and
+  `compile(f(x), { vars: { a: '_.a' } })`, the emitted function was
+  `x * _.a`: the compiler read the outer value 4 in the body and dropped the
+  absolute value, so `a = -3`, `x = 2` gave −6. It is now
+  `x * Math.abs(_.a)`, which gives 6. The value is hidden on every
+  definition that an occurrence of the name reads, in the expression, in the
+  bodies of the functions it calls and in the values of the names it reads.
+  A name that `vars` maps is an input wherever it is read, and takes no part
+  in the choice of the scope of the compilation.
+
 ## 0.188.0 _2026-11-13_
 
 ### Breaking Changes
@@ -109,7 +153,11 @@
   popped keeps its definitions for the expressions boxed in it: with
   `ce.pushScope()`, `ce.declare('x', 'integer')`, `ce.assign('x', 5)`,
   `e = ce.parse('x+1')` and `ce.popScope()`, `e.evaluate()` was `x + 1` and
-  is `6`.
+  is `6`. To give a name a value for one evaluation, or to hide its value,
+  use `ce.withValues({ x: 3 }, () => e.evaluate())` in place of a
+  declaration in a pushed scope: it writes on the definition that the
+  expression reads, so it also reaches a stored function that the
+  expression calls, which `ce.rebind()` does not.
 - **`Type(x)` of a name with no declared type is the type of the value it
   holds, and of a declared name its declared type, in a block as at the top
   level.** `do { let v = [1, 2, 3]; v = [4]; type(v) }` was

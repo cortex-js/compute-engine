@@ -37,7 +37,11 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { entrySource } from './function-purity.js';
-import { withVarsValuesHidden } from './vars-inputs.js';
+import {
+  compileInputNames,
+  withSymbolicInputs,
+  withVarsValuesHidden,
+} from './vars-inputs.js';
 import {
   isSymbol,
   isNumber,
@@ -151,10 +155,12 @@ import type {
 } from './types.js';
 import {
   compileDiagnosticOf,
+  isCompileDeclineError,
   KindDeclineError,
   unsettledShapeDecline,
   assertNoProfileOption,
 } from './diagnostics.js';
+import { compilationScope } from './compile-scope.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
   IntervalArithmetic,
@@ -6646,11 +6652,28 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // declared type (`withVarsValuesHidden`). A call of a user function
       // that shadows a library operator is compiled under a private name
       // (`withShadowingCallsRenamed`).
-      result = withVarsValuesHidden(expr, options.vars, () =>
-        withShadowingCallsRenamed(expr, options, (renamed) =>
-          this.compileOrThrow(renamed, options)
-        )
-      );
+      // The names of `expr` are read from the scope it was boxed in
+      // (`compilationScope()`). `compile()` has made that scope current,
+      // and comes here again for the fallback of its decline.
+      const scope = compilationScope(expr, compileInputNames(options));
+      if (isCompileDeclineError(scope)) throw scope;
+      // A name of `symbolic` is an input as a name of `vars` is; a name
+      // whose value cannot be left out declines (`withSymbolicInputs()`).
+      const compileHere = () => {
+        const compiled = withSymbolicInputs(expr, options.symbolic, () =>
+          withVarsValuesHidden(expr, options.vars, () =>
+            withShadowingCallsRenamed(expr, options, (renamed) =>
+              this.compileOrThrow(renamed, options)
+            )
+          )
+        );
+        if (isCompileDeclineError(compiled)) throw compiled;
+        return compiled;
+      };
+      result =
+        scope === undefined
+          ? compileHere()
+          : expr.engine._inScope(scope, compileHere);
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.

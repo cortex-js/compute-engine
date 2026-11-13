@@ -1,11 +1,12 @@
 /**
  * A user function reads the free names of its body in the scope where it is
- * defined. The compiler resolves names in the scope where the compilation
- * runs, so when the two scopes bind a name of the body to different
- * definitions, the compilation declines (CE-217). Before the fix, with a
- * global `a := 2`, `G := x ↦ x + a` and an inner scope with its own
- * `a := 1000`, the compiled `G(x)` gave 1001 at x = 1 where the interpreter
- * gives 3.
+ * defined. A compilation of a call reads them there too: it runs in a scope
+ * in which each name of the expression and of the bodies it calls is the
+ * definition that the interpreter reads (CE-1273, `compilationScope()`), and
+ * it declines when there is no such scope, or when the compile scope hides
+ * a library head of the body (CE-217). With a global `a := 2`,
+ * `G := x ↦ x + a` and an inner scope with its own `a := 1000`, the compiled
+ * `G(x)` gives 3 at x = 1, as the interpreter does.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -33,7 +34,7 @@ function both(
 }
 
 describe('COMPILE a user function against the scope of its definition', () => {
-  it('declines when the compile scope binds a free name of the body again', () => {
+  it('reads the definition scope when the compile scope binds a free name of the body again', () => {
     const r = both((ce) => {
       ce.assign('a', 2);
       ce.declare('G', 'function');
@@ -43,11 +44,10 @@ describe('COMPILE a user function against the scope of its definition', () => {
       ce.assign('a', 1000);
     }, 'G(x)');
     expect(r.interpreted).toBe('3');
-    expect(r.compiled).toBeUndefined();
-    expect(r.error).toMatch(/body reads `a`.*different definition/);
+    expect(r.compiled).toBe(3);
   });
 
-  it('declines for a user function named like a library function', () => {
+  it('reads the definition scope for a user function named like a library function', () => {
     const r = both((ce) => {
       ce.assign('a', 2);
       ce.declare('Erf', 'function');
@@ -57,7 +57,7 @@ describe('COMPILE a user function against the scope of its definition', () => {
       ce.assign('a', 1000);
     }, '\\operatorname{Erf}(x)');
     expect(r.interpreted).toBe('3');
-    expect(r.error).toMatch(/body reads `a`/);
+    expect(r.compiled).toBe(3);
   });
 
   it('declines when the compile scope shadows a library head of the body', () => {
@@ -72,7 +72,7 @@ describe('COMPILE a user function against the scope of its definition', () => {
     expect(r.error).toMatch(/body reads `Sin`/);
   });
 
-  it('checks the body of a function that the body calls', () => {
+  it('reads the definition scope for a function that the body calls', () => {
     const r = both((ce) => {
       ce.assign('a', 2);
       ce.declare('H', 'function');
@@ -84,15 +84,16 @@ describe('COMPILE a user function against the scope of its definition', () => {
       ce.assign('a', 1000);
     }, 'G(x)');
     expect(r.interpreted).toBe('6');
-    expect(r.error).toMatch(/call of `H`: its body reads `a`/);
+    expect(r.compiled).toBe(6);
   });
 
-  it('declines when the definition scope was popped', () => {
+  it('reads the definition scope after it was popped', () => {
     const r = both((ce) => {
       // `G` is defined in a scope that is popped before `G(x)` is evaluated,
       // so its body reads a binding of the popped scope. The debug check of
       // dead bindings (`CE_DEBUG_BINDINGS`) reports every such use, so it
-      // would throw here by design. The decline is the subject of this test.
+      // would throw here by design. A popped scope keeps its definitions,
+      // for a compilation as for an evaluation.
       ce._debugBindings = false;
       ce.assign('a', 2);
       ce.declare('G', 'function');
@@ -103,7 +104,7 @@ describe('COMPILE a user function against the scope of its definition', () => {
       ce.popScope();
     }, 'G(x)');
     expect(r.interpreted).toBe('1001');
-    expect(r.error).toMatch(/body reads `a`/);
+    expect(r.compiled).toBe(1001);
   });
 
   it('compiles when the scopes agree', () => {

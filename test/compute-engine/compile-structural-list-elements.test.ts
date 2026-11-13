@@ -474,11 +474,13 @@ describe('review of f2c053f1e', () => {
     expect(() => BaseCompiler.compileRoot(expr, target)).toThrow(/Range/);
   });
 
-  test('a scope push or pop is seen by the next compilation', () => {
+  test('a compilation reads the scope the expression was boxed in, and a new binding of the expression reads the current scope', () => {
     const R = ['List', ['Range', 0.5, 1.5]];
     const S = ['List', ['List', 0.5, 1.5]];
     const type = 'list<list<real>>';
-    // A value declared in a pushed scope, then the scope popped.
+    // An expression boxed in a pushed scope keeps the `w` of that scope after
+    // the pop (CE-1273). Bound again after the pop, it reads the outer `w`,
+    // which holds a Range.
     {
       const ce = setup();
       ce.declare('rs', 'list<real>');
@@ -491,11 +493,15 @@ describe('review of f2c053f1e', () => {
         true
       );
       ce.popScope();
+      expect(compile(expr, { to: 'javascript', fallback: false }).success).toBe(
+        true
+      );
       expect(() =>
-        compile(expr, { to: 'javascript', fallback: false })
+        compile(ce.rebind(expr), { to: 'javascript', fallback: false })
       ).toThrow(/Range/);
     }
-    // A Range declared in a pushed scope.
+    // An expression boxed outside keeps the outer `w` in a pushed scope that
+    // declares a Range. Bound again in the pushed scope, it reads the Range.
     {
       const ce = setup();
       ce.declare('rs', 'list<real>');
@@ -507,8 +513,11 @@ describe('review of f2c053f1e', () => {
       );
       ce.pushScope();
       ce.declare('w', { type, value: ce.box(R as never) });
+      expect(compile(expr, { to: 'javascript', fallback: false }).success).toBe(
+        true
+      );
       expect(() =>
-        compile(expr, { to: 'javascript', fallback: false })
+        compile(ce.rebind(expr), { to: 'javascript', fallback: false })
       ).toThrow(/Range/);
       ce.popScope();
     }

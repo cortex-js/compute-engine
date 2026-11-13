@@ -179,8 +179,15 @@ describe('call-head inference follows lexical bindings', () => {
       ce.assign('h', ce.box(['Function', 9, 'u']));
       const result = compile(map);
       expect(ce.box(['ListFrom', map]).evaluate().json).toEqual(['List', 7, 7]);
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/different binding/);
+      if (bare) {
+        // The occurrence of `h` gives the scope the expression was boxed in,
+        // and the compilation reads the `h` of that scope (CE-1273).
+        expect(result.success).toBe(true);
+        expect((result.run as (v: object) => unknown)({})).toEqual([7, 7]);
+      } else {
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/different binding/);
+      }
     }
   );
 
@@ -375,7 +382,7 @@ describe('call-head inference follows lexical bindings', () => {
   });
 
   test.each([false, true])(
-    'a closed captured definition has an accurate compiler diagnostic (bare: %s)',
+    'a captured definition of a popped scope compiles, or has an accurate compiler diagnostic (bare: %s)',
     (bare) => {
       const ce = new ComputeEngine();
       ce.pushScope();
@@ -388,8 +395,15 @@ describe('call-head inference follows lexical bindings', () => {
       ]);
       ce.popScope();
       const result = compile(map);
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/definition is not in scope/);
+      if (bare) {
+        // A popped scope keeps its definitions for the expressions boxed in
+        // it, for a compilation as for an evaluation (CE-1273).
+        expect(result.success).toBe(true);
+        expect((result.run as (v: object) => unknown)({})).toEqual([7, 7]);
+      } else {
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/definition is not in scope/);
+      }
     }
   );
 

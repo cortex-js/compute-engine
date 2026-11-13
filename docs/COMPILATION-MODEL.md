@@ -755,6 +755,91 @@ sums are written in place only where the in-order loop writes in place
   next loop that can run on the pool, before its other checks: that loop
   throws `signal.reason` also when its count of passes is under `minPasses`.
 
+## The scope a compilation reads
+
+A compilation reads each name from the scope the expression was boxed in,
+as its evaluation does (`docs/SCOPING-MODEL.md`). It does not read the scope
+that is current when `compile()` is called.
+
+Before it compiles, `compileExpression()` chooses the scope
+(`compilationScope()`, `compilation/compile-scope.ts`). It walks the
+expression, the bodies of the user functions that the expression calls and
+the values of the variables that it reads, and compares, for each
+occurrence of a name, the definition that a lookup from a scope gives with
+the definition that the occurrence is bound to:
+
+- When the current scope gives each name its own definition, the
+  compilation runs as it is called, and the emitted code is that of a
+  compilation in the scope of the expression.
+- Otherwise the whole compilation runs in the scope of an occurrence that
+  does (`ce._inScope()`). A scope that was popped qualifies: it keeps its
+  definitions.
+- When no scope does, the compilation declines with the code
+  `compile-error` and the name in `binding`.
+
+```js
+ce.declare('x', 'real');
+ce.declare('a', 'real');
+ce.assign('a', 10);
+const expr = ce.parse('x + a');
+ce.pushScope();
+ce.declare('a', 'real');
+ce.assign('a', 1);
+compile(expr).code;               // '10 + _.x'
+compile(ce.rebind(expr)).code;    // '1 + _.x'
+
+// Operands boxed in two scopes that define `a` differently: a decline, and
+// the interpreter gives 13 for x = 2 (10 for the first `a`, 1 for the
+// second).
+compile(ce.function('Add', [expr, ce.parse('a')])).success; // false
+```
+
+What the walk does not compare: a parameter, the variable of a binder and
+the local of a block (they are bound inside the expression); a symbol bound
+to a definition of the standard library; a name that the `vars` option
+maps. Such a name is an input of the code wherever it is read by its name,
+in the expression and in the bodies of the functions it calls, and its
+stored value is not read: with `a := 2`, `f(x) := a x` and `f(x) + a` bound
+in a scope that declares `a` again with no value,
+`compile(expr, { vars: { a: '_.a' } })` is `_.a + _fn_f(_.x)`, and the body
+of `_fn_f` reads `_.a`. Without `vars` the same compilation declines: the
+interpreter reads 2 in the body of `f` and the `a` of the inner scope
+beside it. A scope other than the current one is chosen only when it reads
+each name of `vars` as the current scope does. For the time of the
+compilation the stored value of a `vars` name with a declared type is
+hidden on every definition that an occurrence of the name reads
+(`withVarsValuesHidden()`, `compilation/vars-inputs.ts`), so no analysis of
+the compiler reads it: `f(x) := |a| x` with `a: real` holding 4 emits
+`x * Math.abs(_.a)`, not `x * _.a`. A held
+(non-canonical) name is compared with the scope `compile()` is called in,
+where an evaluation binds it. The interpreter fallback of a result
+evaluates in the scope `compile()` was called in.
+
+The option `symbolic` names inputs with no source text
+(`compile(expr, { symbolic: ['a', 'x'] })`). A name in it is read as a name
+of `vars` is: it is an input wherever the compilation reads its name, it
+takes no part in the choice of the scope, and its stored value is hidden on
+every definition that an occurrence reads. It is emitted as any plain input
+of the target. Its type is the one that the scope of the compilation
+declares for the name, so a host that declares an axis or a kernel
+parameter in a scope pushed around the compilation names it in `symbolic`:
+a function defined outside that scope, whose body reads the name as a free
+name or as a library operator of the same name, then reads the input. A
+name whose value cannot be hidden (a constant, a type inferred from an
+assigned value) makes the compilation decline (`withSymbolicInputs()`,
+`compilation/vars-inputs.ts`). The option `inputs` of the bound-once spec
+(a type given at the call, with no scope) is not built.
+
+`compileShader()` does not make this choice: it reads the current scope,
+and declines when the body of a function it emits reads a name that the
+current scope defines differently.
+
+Known decline: the initializer of a `Declare` that reads an outer variable
+with the name of the local (`Block(Declare(k, 'real', k + 1), 2k)` with an
+outer `k`). The interpreter gives 8 for `k = 3`; the block compiler finds a
+local by its name and declines ("reads the block local before any statement
+gives it a value").
+
 ## Shapes are settled at compile time
 
 Compiled code settles the shape of every value at compile time, and emits no

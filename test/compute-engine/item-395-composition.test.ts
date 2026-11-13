@@ -516,9 +516,11 @@ describe('Composition review fixes', () => {
     }
   });
 
-  test('a composition whose step name is hidden where it is compiled declines', () => {
+  test('a composition whose step name is hidden where it is compiled calls the step it was made with, or declines', () => {
     // The composition is made with the global `f`; it is compiled in a scope
-    // that declares another `f`, which the compiled call would call.
+    // that declares another `f`. The compiled code never calls that other
+    // `f`: the applied composition reads the scope it was boxed in
+    // (CE-1273), and the callback of `Map` declines.
     const local = new ComputeEngine();
     local.declare('L', 'list<real>');
     local.assign('f', local.box(['Function', ['Multiply', 2, 'y'], 'y']));
@@ -535,7 +537,7 @@ describe('Composition review fixes', () => {
         evaluate: () => local.number(100),
       } as never);
       expect(compile(map).success).toBe(false);
-      expect(compile(call).success).toBe(false);
+      expect(run(compile(call), { x: 3 })).toBe(-6);
     } finally {
       local.popScope();
     }

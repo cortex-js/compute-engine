@@ -638,9 +638,10 @@ describe('CE-593: the impurity test reads the current values', () => {
 describe('CE-593: the inlining reads the scope of the definition', () => {
   // `f` captured the outer `P = (1, 2)`; the compile scope declares another
   // `P = (3, 4)`. The interpreter reads the captured `P`. The inlining of
-  // point calls ran before the check of `compile()`, removed the call, and
-  // read the inner `P`: `(x * vec2(3.0, 4.0)).x`. The check now runs before
-  // the inlining. Modeled on `compile-user-function-definition-scope.test.ts`.
+  // point calls must not read the inner `P` (`(x * vec2(3.0, 4.0)).x`).
+  // `compile()` runs in the scope that the body of `f` reads (CE-1273) and
+  // emits the captured `P`; `compileShader()` declines. Modeled on
+  // `compile-user-function-definition-scope.test.ts`.
   function scoped(): ComputeEngine {
     const ce = engine(['Tuple', 1, 2]);
     ce.declare('f', 'function');
@@ -654,8 +655,8 @@ describe('CE-593: the inlining reads the scope of the definition', () => {
   test.each(['glsl'] as const)('%s: compile()', (to) => {
     const ce = scoped();
     expect(ce.parse('f(x).x').subs({ x: 2 }).evaluate().re).toBe(2);
-    expect(compileError(ce, 'f(x).x', to)).toMatch(
-      /body reads `P`.*different definition/
+    expect(compileError(ce, 'f(x).x', to)).toBe(
+      'success: (x * vec2(1.0, 2.0)).x'
     );
   });
 

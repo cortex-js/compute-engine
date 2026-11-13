@@ -1,6 +1,13 @@
 import type { Expression } from '../global-types.js';
 import type { BoxedValueDefinition } from '../types-definitions.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
+import { CompileDeclineError } from './diagnostics.js';
+import {
+  isDictionary,
+  isFunction,
+  isObject,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import {
   contextAssumedValues,
   withDeclaredTypeOnly,
@@ -10,6 +17,14 @@ import {
 /**
  * Run `fn` (one compilation) with the stored value of every DECLARED symbol
  * named in `vars` hidden, and restore the values when `fn` returns or throws.
+ *
+ * The definitions of a name of `vars` are the one that the current scope
+ * gives it, and each one that an occurrence of the name reads in `expr`, in
+ * the bodies of the functions that `expr` calls and in the values of the
+ * names that it reads (`reachedInputDefinitions()`): an expression reads its
+ * names from the scope it was boxed in, so these can differ. A host that
+ * declares a slider again with no value in the scope of a compilation leaves
+ * the outer definition, with its value, in the body of a stored function.
  *
  * A `vars` entry maps a symbol to a run-time input of the compiled code: the
  * code reads the input, never the engine value. But while the symbol holds a
@@ -60,10 +75,7 @@ export function withVarsValuesHidden<T>(
   let shielded: Set<BoxedValueDefinition> | undefined;
   const ce = expr.engine;
   const assumed = contextAssumedValues(ce);
-  for (const name of Object.keys(vars)) {
-    const def = ce.lookupDefinition(name);
-    if (!isValueDef(def)) continue;
-    const v = def.value;
+  for (const v of inputDefinitions(expr, Object.keys(vars)).keys()) {
     if (v.isConstant || v.inferredType) continue;
     // A value an assumption puts in force (`assume(a = 4)`): shielded.
     if (assumed.has(v)) (shielded ??= new Set()).add(v);
@@ -93,4 +105,148 @@ export function withVarsValuesHidden<T>(
   } finally {
     for (const [def, stored] of hidden) def.value = stored;
   }
+}
+
+/**
+ * The value definitions, each with its name, that the occurrences of the
+ * names `names` read in `expr`, in the bodies of the functions that `expr` calls and in the values
+ * of the names that it reads. A node and a definition are visited once. The
+ * value of a name of `names` is not followed, unless it is a function
+ * literal: the compilation does not read it.
+ */
+function reachedInputDefinitions(
+  expr: Expression,
+  names: ReadonlySet<string>
+): Map<BoxedValueDefinition, string> {
+  const result = new Map<BoxedValueDefinition, string>();
+  const seen = new Set<object>();
+  const stack: Expression[] = [expr];
+  const push = (e: unknown): void => {
+    if (e !== undefined && e !== null) stack.push(e as Expression);
+  };
+  const followValue = (
+    name: string,
+    value: BoxedValueDefinition | undefined
+  ): void => {
+    if (value === undefined || value.isConstant || seen.has(value)) return;
+    seen.add(value);
+    const stored = value.storedValue;
+    if (names.has(name) && stored?.operator !== 'Function') return;
+    push(stored);
+  };
+  while (stack.length > 0) {
+    const e = stack.pop()!;
+    if (seen.has(e)) continue;
+    seen.add(e);
+    if (isSymbol(e)) {
+      // An occurrence that reads a parameter, the variable of a binder or
+      // the local of a block is not the name of the option: it is bound
+      // inside the expression or the body (`_resolutionScope()`).
+      const local =
+        (
+          e as unknown as { _resolutionScope?(): unknown }
+        )._resolutionScope?.() === undefined;
+      const value = e.valueDefinition;
+      if (local) continue;
+      if (value !== undefined && names.has(e.symbol) && !result.has(value))
+        result.set(value, e.symbol);
+      followValue(e.symbol, value);
+      continue;
+    }
+    if (isDictionary(e)) {
+      for (const v of e.values) push(v);
+      continue;
+    }
+    if (isObject(e)) {
+      for (const v of e._slots.values()) push(v);
+      continue;
+    }
+    if (!isFunction(e)) continue;
+    const op = e.operatorDefinition;
+    if (op !== undefined && !seen.has(op)) {
+      seen.add(op);
+      push(op._lambdaLiteral);
+    }
+    followValue(e.operator, e.valueDefinition);
+    for (const x of e.ops) push(x);
+  }
+  return result;
+}
+
+/**
+ * The names that the options of a compilation make inputs of the code: the
+ * keys of `vars` and the names of `symbolic`, as the keys of one record, or
+ * `undefined` when there is none.
+ */
+export function compileInputNames(
+  options:
+    | {
+        vars?: Readonly<Record<string, unknown>>;
+        symbolic?: readonly string[];
+      }
+    | undefined
+): Readonly<Record<string, unknown>> | undefined {
+  const symbolic = options?.symbolic;
+  if (symbolic === undefined || symbolic.length === 0) return options?.vars;
+  const names: Record<string, unknown> = { ...options?.vars };
+  for (const name of symbolic) names[name] = true;
+  return names;
+}
+
+/**
+ * Run `fn` (one compilation) with each name of `symbolic` read as an input:
+ * its stored value is hidden as the value of a `vars` name is
+ * (`withVarsValuesHidden()`). A name whose value cannot be hidden (its type
+ * was inferred from the value, it is a constant, or it holds a function
+ * literal, which a call inlines) gives a `CompileDeclineError`, and `fn` is
+ * not run.
+ */
+export function withSymbolicInputs<T>(
+  expr: Expression,
+  symbolic: readonly string[] | undefined,
+  fn: () => T
+): T | CompileDeclineError {
+  if (symbolic === undefined || symbolic.length === 0) return fn();
+  for (const [v, name] of inputDefinitions(expr, symbolic)) {
+    const stored = v.isConstant ? undefined : v.storedValue;
+    const holdsFunction = stored?.operator === 'Function';
+    if (!v.isConstant && !holdsFunction) {
+      if (!v.inferredType || stored === undefined) continue;
+    }
+    return new CompileDeclineError({
+      code: 'compile-error',
+      kind: 'correctness',
+      binding: name,
+      message:
+        `Could not compile: the name "${name}" of the \`symbolic\` option ` +
+        (v.isConstant
+          ? `is a constant.`
+          : holdsFunction
+            ? `holds a function, which compiled code cannot take as an input.`
+            : `has no declared type, so its value cannot be left out. ` +
+              `Declare its type, for example with ` +
+              `\`ce.declare("${name}", "real")\`.`),
+    });
+  }
+  const names: Record<string, unknown> = {};
+  for (const name of symbolic) names[name] = true;
+  return withVarsValuesHidden(expr, names, fn);
+}
+
+/**
+ * The value definitions of the names `names` in a compilation of `expr`,
+ * each with its name: the one that the current scope gives a name, and each
+ * one that an occurrence of the name reads (`reachedInputDefinitions()`).
+ */
+function inputDefinitions(
+  expr: Expression,
+  names: readonly string[]
+): Map<BoxedValueDefinition, string> {
+  const result = reachedInputDefinitions(expr, new Set(names));
+  const ce = expr.engine;
+  for (const name of names) {
+    const def = ce.lookupDefinition(name);
+    if (isValueDef(def) && !result.has(def.value)) result.set(def.value, name);
+  }
+  return result;
 }

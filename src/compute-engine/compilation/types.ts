@@ -2404,6 +2404,28 @@ export interface CompilationOptions<Expr = unknown> {
   vars?: Record<MathJsonSymbol, TargetSource>;
 
   /**
+   * The names of the symbols that are inputs of the compiled code.
+   *
+   * A symbol named here is read as an input wherever the compilation reads
+   * its name: in the expression, in the bodies of the user functions that
+   * the expression calls and in the values of the symbols that it reads. Its
+   * stored value is not read (it is not folded, and no analysis sees it),
+   * and the emitted code names it as any other input of the target (`_.a`
+   * on JavaScript). The host supplies its value at each run. Unlike `vars`,
+   * the option gives no source text.
+   *
+   * The type of the input is the type that the scope of the compilation
+   * declares for the name. A host that declares the name in a scope pushed
+   * around the compilation (an axis, a parameter of a kernel) names it here,
+   * so that a function defined outside that scope reads the input too.
+   *
+   * A symbol whose value cannot be left out makes the compilation decline:
+   * a constant, and a symbol whose type was inferred from an assigned value
+   * and not declared.
+   */
+  symbolic?: readonly MathJsonSymbol[];
+
+  /**
    * GLSL target only: the names of the symbols that are locals of the code
    * that calls the compiled code, such as the parameters of the function
    * that the host wraps the code in (`float userFn(float x, float y) { … }`).
