@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Integrate` of `sinᵐ(u)·cosⁿ(u)` for a linear `u` is a closed form**
+  (#NNN, contributed by [enumeratio](https://github.com/enumeratio)).
+  `∫ sin³x dx`, `∫ cos⁵x dx`, `∫ sin³x cos²x dx` and `∫ sin⁴x dx` were left as
+  `Integrate` (only `sin²`, `cos²` and the secant, cosecant, tangent and
+  cotangent powers had a rule); `∫ sin³x dx` is now `cos³x/3 − cos x`. An odd
+  power is `du` times a polynomial in the other function (sin² + cos² = 1),
+  and an even-even product goes through the reduction formulas
+  (A&S 4.3.127–128). A constant factor and a linear argument are read
+  (`∫ 3 sin³(2x + 1) dx`), and a degree angular unit scales as for the other
+  trigonometric integrals.
+  A power above 40 and an argument that is not linear are left to the other
+  strategies.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
