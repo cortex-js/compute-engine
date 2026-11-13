@@ -28,7 +28,15 @@ const result = spawnSync(
   ],
   {
     stdio: 'inherit',
-    env: { ...process.env, CE_TEST_PYTHON: '1', CE_PYTHON: python },
+    // `CE_FULL_SUITE`: this run has every Python test file, so each test has
+    // the limit of a run of the whole suite (`config/jest.config.cjs`,
+    // `testTimeout`).
+    env: {
+      ...process.env,
+      CE_TEST_PYTHON: '1',
+      CE_PYTHON: python,
+      CE_FULL_SUITE: '1',
+    },
   }
 );
 if (result.error) throw result.error;

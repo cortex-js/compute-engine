@@ -21,12 +21,19 @@ module.exports = {
   // default is 5 s. The full suite takes 88 s on the development machine and
   // 1,700 to 2,600 s on a CI runner, so an asynchronous test that takes a
   // fraction of a second here, such as the first test of a file, which makes a
-  // new engine, can pass 5 s there and fail with no defect. Local runs keep the
-  // default, so that an asynchronous test that becomes slow still fails during
-  // development. A test that names its own limit keeps it on CI, also when that
-  // limit is shorter than this one. A synchronous test never fails on this
-  // limit: Jest cannot interrupt it, and counts it as passed when it returns.
-  testTimeout: process.env.CI ? 60_000 : 5_000,
+  // new engine, can pass 5 s there and fail with no defect. A local run of the
+  // whole suite has the same limit: with every worker busy and other sessions
+  // on the machine, such a test can wait longer than 5 s for a core.
+  // `CE_FULL_SUITE` marks such a run: `scripts/test.sh` sets it for its
+  // `test`, `coverage` and `snapshot` variants, whatever Jest arguments
+  // follow, and `scripts/test-python.mjs` sets it for the Python tests. Every
+  // other local run (`bash scripts/test.sh <name>`, `npx jest -- <path>`)
+  // keeps the default, so that an asynchronous test that becomes slow still
+  // fails during development. A test that names its own
+  // limit keeps it, also when that limit is shorter than this one. A
+  // synchronous test never fails on this limit: Jest cannot interrupt it, and
+  // counts it as passed when it returns.
+  testTimeout: process.env.CI || process.env.CE_FULL_SUITE ? 60_000 : 5_000,
   collectCoverageFrom: ['src/**/*.ts', '!<rootDir>/node_modules/'],
   coverageReporters: ['lcov'],
   coverageDirectory: '../coverage',

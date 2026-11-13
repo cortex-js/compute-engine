@@ -47,6 +47,22 @@ async function collectUntilProbeGone(
   throw new Error(`the definition that waits on "${probe}" was not collected`);
 }
 
+/** Collect until at most `limit` definitions wait on `name`, at most 20
+ * times, and return the number that wait then. One collection does not
+ * always free the definitions of a popped scope when many test workers load
+ * the machine. */
+async function collectUntilAtMost(
+  ce: ComputeEngine,
+  name: string,
+  limit: number
+): Promise<number> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await collect();
+    if (_provisionalDependentCount(ce, name) <= limit) break;
+  }
+  return _provisionalDependentCount(ce, name);
+}
+
 /** Define `fnName := x ↦ head(x) + 1`, with `head` undeclared: the body
  * applies `head` provisionally, and the definition waits on `head`. */
 function defineApplying(ce: ComputeEngine, fnName: string, head: string) {
@@ -74,15 +90,13 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
       ce.pushScope();
       for (let i = 0; i < 20; i++) defineApplying(ce, `f_${i}`, `h_${i}`);
       ce.popScope();
-      await collect();
       // One per name at most: the definitions of the earlier passes were
       // collected. Before the fix, `pass + 1` definitions waited on `h_0`.
-      expect(_provisionalDependentCount(ce, 'h_0')).toBeLessThanOrEqual(1);
+      expect(await collectUntilAtMost(ce, 'h_0', 1)).toBeLessThanOrEqual(1);
     }
     moveTypingMemo(ce);
-    await collect();
-    expect(_provisionalDependentCount(ce, 'h_0')).toBe(0);
-    expect(_provisionalDependentCount(ce, 'h_19')).toBe(0);
+    expect(await collectUntilAtMost(ce, 'h_0', 0)).toBe(0);
+    expect(await collectUntilAtMost(ce, 'h_19', 0)).toBe(0);
     // A declaration of a name that only collected bodies applied has
     // nothing to re-derive and throws nothing.
     expect(() => ce.declare('h_0', '(real) -> real')).not.toThrow();
@@ -126,8 +140,7 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
     defineApplying(ce, 'fDropped', 'h');
     ce.popScope();
     moveTypingMemo(ce);
-    await collect();
-    expect(_provisionalDependentCount(ce, 'h')).toBe(1);
+    expect(await collectUntilAtMost(ce, 'h', 1)).toBe(1);
 
     ce.declare('h', '(real) -> real');
     expect(_provisionalDependentCount(ce, 'h')).toBe(0);
@@ -149,7 +162,18 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
       /the body of a function applies "k"/
     );
     moveTypingMemo(ce);
-    await collect();
+    // Collect until the value is accepted, at most 20 times. The registry
+    // is not read in between: `withValues()` itself must skip the collected
+    // body.
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await collect();
+      try {
+        ce.withValues({ k: 2 }, () => 1);
+        break;
+      } catch {
+        // The body is not collected yet.
+      }
+    }
     expect(ce.withValues({ k: 2 }, () => 1)).toBe(1);
   });
 

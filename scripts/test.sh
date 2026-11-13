@@ -22,6 +22,15 @@ if [ "$#" -gt 0 ]; then
   JEST_ARGS=("$@")
 fi
 
+# The `test`, `coverage` and `snapshot` variants are the runs of the whole
+# suite: `CE_FULL_SUITE` gives each test the limit of a CI run
+# (`config/jest.config.cjs`, `testTimeout`). The arguments are not examined:
+# a run of one of these variants that a Jest option narrows to some files
+# (`--runTestsByPath <file>`) has this limit too. A `--testTimeout` in the
+# arguments replaces it, as it replaces any limit of the configuration.
+case "$VARIANT" in
+  test|-test|coverage|-coverage|snapshot|-snapshot) export CE_FULL_SUITE=1 ;;
+esac
 
 if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
     npx --no-install jest --coverage "${JEST_ARGS[@]}"
