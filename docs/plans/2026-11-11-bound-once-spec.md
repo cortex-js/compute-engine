@@ -1023,3 +1023,35 @@ whose 939 failing tests are the yardstick): how many pass again; which
 treatment of the body was needed and its cost; what is left in the journal
 of `inference-rollback.ts`; the lines removed and added; the time.
 
+**D18, measured (session compute-engine-42, 2026-11-13; report
+`_TASKS/2026-11-12-leftovers-removal/D18-measurement.md`, worktree head
+`53f839c49`; figures as its agent reported them, not run again).** The rule
+holds in one form: a use of a parameter writes its requirement in the
+environment of the literal's unit, later uses of the same boxing READ the
+requirements recorded so far, and the entry is written on the definition
+once, when the boxing of the literal ends. Of the 939 tests that failed
+with no inference, 889 pass again, with 1 new failure; a parameter makes no
+rollback record and no state event; no time difference on `calculus`,
+`simplify` and a timing of 1,000 literals.
+
+Where the hypothesis as first stated was wrong:
+
+- A later use must see what the earlier uses required. With the parameter
+  read as `unknown` until the literal is complete, `a ↦ a[1] + a[2]` is
+  typed `(a: tuple<unknown, number>)` and 124 tests fail.
+- "Nothing to undo" is false inside the body: the trial of one arm of an
+  overloaded operator leaves a requirement behind (`xs ↦ Sort(xs)` on
+  `[3, 1, 2]` gave three errors). The remedy needs no journal: a write
+  made during a trial goes in the trial's own environment.
+
+Not reached: the rollback frame stays (27 writers in 12 files; its users
+are the overload trials and the Epsil static check). Block locals and
+binder variables could take the same store (not tried). Three sites of
+`library/core.ts` write on definitions older than the boxing; the rule does
+not reach them. A second boxing of the body (not finished: 1.5 to 2 times
+the cost) fixes a wrong value that main has: `(A, B) ↦ (A·B − B·A,
+Determinant(A), Determinant(B))` gives the zero matrix. The second switch
+needs no code: an expression already uses the types it requires of its
+untyped host names and commits nothing. Not run: the full suite, Tycho's
+instruments.
+
