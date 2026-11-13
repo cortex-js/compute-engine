@@ -238,7 +238,7 @@ exports[`simplify: relational 2\\pi < 4\\pi 1`] = `True`;
 
 exports[`simplify: relational 2a < 4b 1`] = `["Less", "a", ["Multiply", 2, "b"]]`;
 
-exports[`simplify: trigonometry \\cos(\\arccos(x)) 1`] = `["Cos", ["Arccos", "x"]]`;
+exports[`simplify: trigonometry \\cos(\\arccos(x)) 1`] = `x`;
 
 exports[`simplify: trigonometry \\cos(\\frac{\\pi}{2}) 1`] = `0`;
 
@@ -254,17 +254,17 @@ exports[`simplify: trigonometry \\cos(x + \\pi) 1`] = `["Negate", ["Cos", "x"]]`
 
 exports[`simplify: trigonometry \\cosh(-x) 1`] = `["Cosh", "x"]`;
 
-exports[`simplify: trigonometry \\cosh^2(x) - \\sinh^2(x) 1`] = `["Subtract", ["Square", ["Cosh", "x"]], ["Square", ["Sinh", "x"]]]`;
+exports[`simplify: trigonometry \\cosh^2(x) - \\sinh^2(x) 1`] = `1`;
 
 exports[`simplify: trigonometry \\cot(x)\\tan(x) 1`] = `1`;
 
 exports[`simplify: trigonometry \\csc(x)\\sin(x) 1`] = `["Multiply", ["Sin", "x"], ["Csc", "x"]]`;
 
-exports[`simplify: trigonometry \\frac{\\sin(x)}{\\cos(x)} 1`] = `["Divide", ["Sin", "x"], ["Cos", "x"]]`;
+exports[`simplify: trigonometry \\frac{\\sin(x)}{\\cos(x)} 1`] = `["Tan", "x"]`;
 
 exports[`simplify: trigonometry \\sec^2(x) - \\tan^2(x) 1`] = `["Subtract", ["Square", ["Sec", "x"]], ["Square", ["Tan", "x"]]]`;
 
-exports[`simplify: trigonometry \\sin(\\arcsin(x)) 1`] = `["Sin", ["Arcsin", "x"]]`;
+exports[`simplify: trigonometry \\sin(\\arcsin(x)) 1`] = `x`;
 
 exports[`simplify: trigonometry \\sin(\\frac{\\pi}{2}) 1`] = `1`;
 
@@ -284,7 +284,7 @@ exports[`simplify: trigonometry \\sin^2(x) + \\cos^2(x) 1`] = `1`;
 
 exports[`simplify: trigonometry \\sinh(-x) 1`] = `["Negate", ["Sinh", "x"]]`;
 
-exports[`simplify: trigonometry \\tan(\\arctan(x)) 1`] = `["Tan", ["Arctan", "x"]]`;
+exports[`simplify: trigonometry \\tan(\\arctan(x)) 1`] = `x`;
 
 exports[`simplify: trigonometry \\tan(\\frac{\\pi}{4}) 1`] = `1`;
 

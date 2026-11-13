@@ -1,3 +1,22 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A circular or hyperbolic function of its own inverse folds under
+  `evaluate()`, `.N()` and `simplify()`, and `simplify()` completes the parity,
+  composition and imaginary-argument identities** (#NNN, contributed by
+  [enumeratio](https://github.com/enumeratio)). `Sin(Arcsin(x))` was
+  unevaluated (now `x`, for the twelve function and inverse pairs), and
+  `N(Sin(Arcsin(5)))` was `5 − 3.0e-16i` (now `5`). `Arcsin(Sin(3))` is `π − 3`,
+  `Arccos(Cos(5))` is `2π − 5` and `Arctan(Tan(2))` is `2 − π` for an exact real
+  argument, in the half-turn of the angular unit; `Arcsin(Sin(x))` stays.
+  `simplify()` gives `Arccos(-x) = π − Arccos(x)` (and `Arcsec`),
+  `Arcoth(-x) = −Arcoth(x)`, `Cos(Arcsin(x)) = √(1 − x²)`, `Sin(Arctan(x)) =
+  x/√(1 + x²)` and the other Pythagorean compositions, `Cos(it) = Cosh(t)` and
+  its five siblings, `sin(x)/cos(x) = tan(x)` (and `cot`, `tanh`, `coth`) and
+  `cosh²(x) − sinh²(x) = 1`. `Arcsin(Sin(4)).simplify()` no longer overflows the
+  stack.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

@@ -1,5 +1,10 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
+import {
+  imaginaryArgumentValue,
+  inverseCompositionValue,
+} from '../boxed-expression/trigonometry.js';
 import { negatedArgument, oddEvenStep } from './simplify-trig.js';
 
 /**
@@ -33,9 +38,14 @@ const ODD_HYPERBOLIC = new Set(['Sinh', 'Tanh', 'Coth', 'Csch']);
 const EVEN_HYPERBOLIC = new Set(['Cosh', 'Sech']);
 
 // Odd inverse hyperbolic functions: f(-x) = -f(x). This is true on the
-// principal branches for every complex x, also on the branch cuts of Artanh
-// and Arcsch.
-const ODD_INVERSE_HYPERBOLIC = new Set(['Arsinh', 'Artanh', 'Arcsch']);
+// principal branches for every complex x, also on the branch cuts of Artanh,
+// Arcoth and Arcsch.
+const ODD_INVERSE_HYPERBOLIC = new Set([
+  'Arsinh',
+  'Artanh',
+  'Arcoth',
+  'Arcsch',
+]);
 
 // Inverse hyperbolic functions
 const INVERSE_HYPERBOLIC = new Set([
@@ -50,6 +60,53 @@ const INVERSE_HYPERBOLIC = new Set([
 export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
+
+  // sinh(u)/cosh(u) -> tanh(u) and cosh(u)/sinh(u) -> coth(u). At a zero of
+  // the denominator both sides are `~oo`.
+  if (op === 'Divide' && isFunction(x)) {
+    const num = x.op1;
+    const den = x.op2;
+    if (isFunction(num) && isFunction(den) && num.op1 && den.op1) {
+      const to =
+        num.operator === 'Sinh' && den.operator === 'Cosh'
+          ? 'Tanh'
+          : num.operator === 'Cosh' && den.operator === 'Sinh'
+            ? 'Coth'
+            : undefined;
+      if (to && num.op1.isSame(den.op1) && isMergeable(num.op1))
+        return {
+          value: ce._fn(to, [num.op1]),
+          because: `${num.operator.toLowerCase()}(x)/${den.operator.toLowerCase()}(x) -> ${to.toLowerCase()}(x)`,
+        };
+    }
+  }
+
+  // cosh²(u) - sinh²(u) -> 1 (DLMF 4.37.2), also inside a larger sum.
+  if (op === 'Add' && isFunction(x) && x.ops.length >= 2) {
+    const squared = (term: Expression, fn: string): Expression | undefined =>
+      isFunction(term, 'Power') &&
+      term.op2.isSame(2) &&
+      isFunction(term.op1, fn) &&
+      term.op1.op1
+        ? term.op1.op1
+        : undefined;
+    for (let i = 0; i < x.ops.length; i++) {
+      const cosh = squared(x.ops[i], 'Cosh');
+      if (!cosh || !isMergeable(cosh)) continue;
+      for (let j = 0; j < x.ops.length; j++) {
+        const negated = x.ops[j];
+        const sinh = isFunction(negated, 'Negate')
+          ? squared(negated.op1, 'Sinh')
+          : undefined;
+        if (!sinh || !sinh.isSame(cosh)) continue;
+        const rest = x.ops.filter((_, k) => k !== i && k !== j);
+        return {
+          value: rest.length === 0 ? ce.One : ce._fn('Add', [ce.One, ...rest]),
+          because: 'cosh²(x) - sinh²(x) -> 1',
+        };
+      }
+    }
+  }
 
   // Handle basic hyperbolic functions
   if (HYPERBOLIC_FUNCS.has(op) && isFunction(x)) {
@@ -100,6 +157,18 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
       if (EVEN_HYPERBOLIC.has(op)) return oddEvenStep(op, negated, false, ce);
     }
 
+    // f(f⁻¹(x)) = x, and the imaginary argument (`Cosh(i·t) = Cos(t)`).
+    const composed = inverseCompositionValue(op, arg);
+    if (composed)
+      return { value: composed, because: `${op}(${arg.operator}(x)) -> x` };
+    const imaginary = imaginaryArgumentValue(op, arg);
+    if (imaginary)
+      return {
+        value: imaginary,
+        because: `${op}(i·t) -> circular`,
+        purpose: 'transform',
+      };
+
     // Note: sinh/cosh -> exponential conversions are expansions, not
     // simplifications. They are intentionally NOT included here to preserve
     // function identity for rules like |sinh(x)| -> sinh(|x|) and
@@ -111,7 +180,8 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (!arg) return undefined;
 
-    // arsinh(-x) = -arsinh(x), artanh(-x) = -artanh(x), arcsch(-x) = -arcsch(x)
+    // arsinh(-x) = -arsinh(x), artanh(-x) = -artanh(x), arcoth(-x) = -arcoth(x),
+    // arcsch(-x) = -arcsch(x)
     if (ODD_INVERSE_HYPERBOLIC.has(op)) {
       const negated = negatedArgument(arg);
       if (negated) return oddEvenStep(op, negated, true, ce);

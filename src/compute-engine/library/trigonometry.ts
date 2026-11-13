@@ -22,6 +22,7 @@ import {
 import { isOperatorDef } from '../boxed-expression/definition-guards.js';
 import {
   arctan2AtInfinity,
+  compositionValue,
   constructibleValues,
   evalTrig,
   halfTurnAngle,
@@ -790,6 +791,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           // A quantity that only the evaluation reveals: see `trigFunction()`.
           if (isFunction(x, 'Quantity'))
             return quantityTrigValue('Arctan', x, numericApproximation);
+          // `Arctan(Tan(y))` for an exact real `y`: see `trigFunction()`.
+          const composed = compositionValue('Arctan', expression);
+          if (composed !== undefined)
+            return numericApproximation ? composed.N() : composed.evaluate();
           // An argument outside the range of a double, read from the operand
           // before its numeric evaluation (`.N()` at machine precision makes
           // `10^{400}·(1 + i)` the double `~oo`).
@@ -2265,6 +2270,13 @@ function trigFunction(
         // leaves the call unevaluated.
         if (isFunction(x, 'Quantity'))
           return quantityTrigValue(operator, x, numericApproximation);
+        // `Sin(Arcsin(z)) = z` and the other cancelling pairs, and the
+        // principal value of `Arcsin(Sin(y))` for an exact real `y`: read
+        // from the call before its operand is evaluated, as `.N()` turns the
+        // operand `Arcsin(5)` into a complex number first.
+        const composed = compositionValue(operator, expression);
+        if (composed !== undefined)
+          return numericApproximation ? composed.N() : composed.evaluate();
         // An inverse function at an argument outside the range of a double:
         // at machine precision `.N()` made `10^{400}` the double `+∞`, which
         // the branch below would read as an infinite argument. The operand
