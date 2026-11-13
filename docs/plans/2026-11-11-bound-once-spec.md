@@ -907,3 +907,28 @@ on the scratch build
 asked of tycho-desk. The engine's own timing shows no difference from main
 on `calculus`, `simplify` and `integrate-symbolic-pole`.
 
+### Performance of step 1 and the baseline (user decision 2026-11-12)
+
+The acceptance baseline stays the release 0.187.1 with binding units OFF
+(C8). Measured by tycho-desk with three arms (units off / units on / step 1
+with the fixes of `240547189e2ad1225a26fedc730ec4598c020940`): the othello
+call 475-486 / 645-667 / 571-593 ms; the codegen audit 36.8-40.4 /
+41.8-42.3 / 42.5-43.0 s. Step 1 is faster than what Tycho runs today (units
+on) and not within 10% of units off. The remaining gap is
+`issues/CE-1210.md` and does not block step 1. One compiled statement of
+the turing-patterns prelude runs about 12% slower with identical emitted
+code and runtime helpers; not pursued.
+
+Measure with Tycho's instruments, in `/Users/arno/dev/tycho-ce-scratch`
+(`scripts/repros/2026-11-11-ce1210-othello-prelude-call-timing.mts`,
+`2026-11-12-showcase-prelude-statement-timing.mts`, the codegen audit),
+before a commit: the engine's symbolic test files show nothing.
+
+**To examine (user, 2026-11-12): a static type does not depend on a
+value.** Every cached type is invalidated at each iteration of a loop or
+element of a comprehension, because the write of an index and the pop of a
+scope move the type version, and they move it because a type may read a
+value. The user's rule to test: the type of a CONSTANT may depend on its
+value, as a literal type; any other inferred type does not. A probe
+measures what changes and what it gains.
+
