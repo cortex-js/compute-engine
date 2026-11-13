@@ -605,13 +605,11 @@ describe('Number theory: an infinite collection operand stays unevaluated', () =
     ).toEqual(23));
 });
 
-describe('Number theory: a non-integer element stays unevaluated', () => {
+describe('Number theory: a non-integer element of ChineseRemainder stays unevaluated', () => {
   // A float or a rational element is not rounded. A float literal with an
   // integer value (2.0) is an integer, as for `FromContinuedFraction`, and
   // makes the result a float.
   for (const input of [
-    ['FromDigits', ['List', 1.5, 2]],
-    ['FromDigits', ['List', ['Rational', 3, 2], 2]],
     ['ChineseRemainder', ['List', 2.5, 3], ['List', 3, 5]],
     ['ChineseRemainder', ['List', ['Rational', 5, 2], 3], ['List', 3, 5]],
     ['ChineseRemainder', ['List', 2, 3], ['List', 3.5, 5]],
@@ -620,6 +618,14 @@ describe('Number theory: a non-integer element stays unevaluated', () => {
       expect(ce.expr(input).evaluate().operator).toBe(
         (input as [string, ...MathJsonExpression[]])[0]
       ));
+  // A non-integer digit is combined, not rounded: Wolfram's
+  // FromDigits[{1.5, 2}] is 17. and FromDigits[{3/2, 2}] is 17.
+  test('FromDigits([1.5, 2]) = 17.0', () =>
+    expect(ce.expr(['FromDigits', ['List', 1.5, 2]]).evaluate().re).toBe(17));
+  test('FromDigits([3/2, 2]) = 17', () =>
+    expect(
+      ce.expr(['FromDigits', ['List', ['Rational', 3, 2], 2]]).evaluate().json
+    ).toEqual(17));
   test('FromDigits([2.0, 3]) = 23.0', () =>
     expect(
       ce.expr(['FromDigits', ['List', { num: '2.0' }, 3]]).evaluate().json

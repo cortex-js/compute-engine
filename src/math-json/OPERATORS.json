@@ -2262,15 +2262,16 @@
       "name": "DigitCount",
       "category": "Number Theory",
       "arity": "optional",
-      "signature": "(integer, integer?, integer?) -> integer | list<integer>",
+      "signature": "(integer, integer?, integer?, integer?) -> integer | list<integer>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.",
+      "description": "Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`. With a fourth argument `length`, the digits are first zero-padded on the left (or cut to their last `length`), so `DigitCount(5, 2, 0, 8)` is 6.",
       "examples": [
-        "DigitCount(122, 10, 2)  // 2"
+        "DigitCount(122, 10, 2)  // 2",
+        "DigitCount(5, 2, 0, 8)  // 6"
       ]
     },
     {
@@ -2293,15 +2294,16 @@
       "name": "DigitSum",
       "category": "Number Theory",
       "arity": "optional",
-      "signature": "(integer, integer?) -> integer",
+      "signature": "(integer, integer?, integer?) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.",
+      "description": "Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored. With a third argument `k`, sum only the first `k` digits (most-significant first), or the last `|k|` when `k` is negative; `k` past the digit count sums them all.",
       "examples": [
-        "DigitSum(1234)  // 10"
+        "DigitSum(1234)  // 10",
+        "DigitSum(1234, 10, 2)  // 3"
       ]
     },
     {
@@ -3350,15 +3352,17 @@
       "name": "FromDigits",
       "category": "Number Theory",
       "arity": "optional",
-      "signature": "(collection<any>, integer?) -> integer",
+      "signature": "(collection<any>, number?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).",
+      "description": "Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `FromDigits([1, 1, 0], -2)` is 2 and `FromDigits([a, b, c], x)` is `a x^2 + b x + c`.",
       "examples": [
-        "FromDigits([1, 2, 3, 4])  // 1234"
+        "FromDigits([1, 2, 3, 4])  // 1234",
+        "FromDigits([1, 1, 0], -2)  // 2",
+        "FromDigits([a, b, c], x)  // a x^2 + b x + c"
       ]
     },
     {
@@ -3951,16 +3955,17 @@
       "name": "IntegerString",
       "category": "Core",
       "arity": "optional",
-      "signature": "(integer, integer?) -> string",
+      "signature": "(integer, integer?, integer?) -> string",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`IntegerString(n, base=10)`       return a string representation of the integer `n` in base `base`.",
+      "description": "`IntegerString(n, base=10, length)`       return a string representation of the integer `n` in base `base`.       With `length`, the digits of |n| are padded on the left with zeros,       or cut to the last `length` digits.",
       "examples": [
         "IntegerString(255, 16)",
-        "IntegerString(10, 2)"
+        "IntegerString(10, 2)",
+        "IntegerString(5, 2, 8)  // \"00000101\""
       ]
     },
     {

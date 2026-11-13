@@ -2,10 +2,14 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  OperandDescriptor,
   SymbolDefinitions,
 } from '../global-types.js';
 import { asRational, toBigint } from '../boxed-expression/numerics.js';
-import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+} from '../boxed-expression/type-guards.js';
 import { checkTypes } from '../boxed-expression/validate.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
@@ -43,6 +47,7 @@ import {
 } from '../boxed-expression/float-result.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { Complex } from 'complex.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { BigNum } from '../numerics/types.js';
 import {
@@ -169,6 +174,23 @@ const LOG10_4 = Math.log10(4);
  * that into a 30s+ hang.
  */
 const MAX_DIGIT_ITERATION_DIGITS = 1_000_000;
+
+/** The most digits `FromDigits` combines when the base or a digit is not an integer. */
+const MAX_FROM_DIGITS_TERMS = 10_000;
+
+/** A number or an unknown symbol: what `FromDigits` can combine into a sum. */
+function isNumericOperand(x: Expression): boolean {
+  return x.type.matches('number') || x.type.isUnknown;
+}
+
+/** Is `FromDigits(digits, base)` an integer by its operand types? */
+function fromDigitsIsInteger(
+  digitsOp: OperandDescriptor | undefined,
+  baseOp: OperandDescriptor | undefined
+): boolean {
+  if (baseOp !== undefined && !isSubtype(baseOp.type, 'integer')) return false;
+  return digitsOp !== undefined && isSubtype(digitsOp.type, 'list<integer>');
+}
 
 /** The most elements `finiteElements()` reads from a collection operand. */
 const MAX_ENUMERATED_ELEMENTS = 1_000_000;
@@ -1147,7 +1169,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           const l = groundEnumerationOperand(expr.ops[2]);
           if (l === undefined) return undefined;
           const len = l === null ? null : toBigint(l);
-          if (len === null || len < 0n) return false;
+          if (len === null || len < 0n || len > MAX_DIGIT_ITERATION_DIGITS)
+            return false;
         }
         return true;
       },
@@ -1167,10 +1190,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
           if (lenOp !== undefined) {
             const len = toBigint(lenOp);
-            if (len === null || len < 0n) return undefined;
+            if (len === null || len < 0n || len > MAX_DIGIT_ITERATION_DIGITS)
+              return undefined;
             const L = Number(len);
-            while (digits.length < L) digits.unshift(0n);
             if (digits.length > L) digits.splice(0, digits.length - L);
+            else digits.unshift(...Array<bigint>(L - digits.length).fill(0n));
           }
           return ce.function(
             'List',
@@ -1182,8 +1206,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     DigitCount: {
       description:
-        'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.',
-      signature: '(integer, integer?, integer?) -> integer | list<integer>',
+        'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`. With a fourth argument `length`, the digits are first zero-padded on the left (or cut to their last `length`), so `DigitCount(5, 2, 0, 8)` is 6.',
+      signature:
+        '(integer, integer?, integer?, integer?) -> integer | list<integer>',
       broadcastable: true,
       // One count, or the list of the counts of every digit.
       type: ([, , digit], context) =>
@@ -1191,9 +1216,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           digit !== undefined ? 'integer' : 'list<integer>',
           context.engine._typeResolver
         ),
-      examples: ['DigitCount(122, 10, 2)  // 2'],
+      examples: [
+        'DigitCount(122, 10, 2)  // 2',
+        'DigitCount(5, 2, 0, 8)  // 6',
+      ],
       evaluate: floatResultIfFloatOperand(
-        ([nOp, baseOp, digitOp], { engine: ce }) => {
+        ([nOp, baseOp, digitOp, lengthOp], { engine: ce }) => {
           const k = toBigint(nOp);
           if (k === null) return undefined;
           const base = baseOp === undefined ? 10n : toBigint(baseOp);
@@ -1205,8 +1233,25 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
             return undefined;
           const counts = new Map<bigint, number>();
-          for (const d of bigintDigitsLSB(m, base, ce._deadline))
-            counts.set(d, (counts.get(d) ?? 0) + 1);
+          let digitsLSB = bigintDigitsLSB(m, base, ce._deadline);
+          if (lengthOp !== undefined) {
+            const length = toBigint(lengthOp);
+            if (
+              length === null ||
+              length < 0n ||
+              length > MAX_DIGIT_ITERATION_DIGITS
+            )
+              return undefined;
+            const L = Number(length);
+            digitsLSB =
+              digitsLSB.length >= L
+                ? digitsLSB.slice(0, L)
+                : [
+                    ...digitsLSB,
+                    ...Array<bigint>(L - digitsLSB.length).fill(0n),
+                  ];
+          }
+          for (const d of digitsLSB) counts.set(d, (counts.get(d) ?? 0) + 1);
 
           if (digitOp !== undefined) {
             const d = toBigint(digitOp);
@@ -1320,47 +1365,94 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     FromDigits: {
       description:
-        'Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).',
-      signature: '(collection<any>, integer?) -> integer',
-      examples: ['FromDigits([1, 2, 3, 4])  // 1234'],
-      evaluate: ([digitsOp, baseOp], { engine: ce }) => {
+        'Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `FromDigits([1, 1, 0], -2)` is 2 and `FromDigits([a, b, c], x)` is `a x^2 + b x + c`.',
+      signature: '(collection<any>, number?) -> number',
+      type: ([digitsOp, baseOp], context) =>
+        BoxedType.forResult(
+          fromDigitsIsInteger(digitsOp, baseOp) ? 'integer' : 'number',
+          context.engine._typeResolver
+        ),
+      examples: [
+        'FromDigits([1, 2, 3, 4])  // 1234',
+        'FromDigits([1, 1, 0], -2)  // 2',
+        'FromDigits([a, b, c], x)  // a x^2 + b x + c',
+      ],
+      evaluate: ([digitsOp, baseOp], { engine: ce, numericApproximation }) => {
         const digitOps = finiteElements(digitsOp);
         if (digitOps === undefined) return undefined;
-        // `toBigint` ROUNDS a non-integer (1.5 → 2), so a non-integer digit
-        // declines instead of combining the rounded value.
+        const base = baseOp ?? ce.number(10);
+
+        // Integer digits in an integer base: one exact bigint Horner pass.
         const digits = digitOps.map((t) =>
           t.isInteger === true ? toBigint(t) : null
         );
-        if (digits.length === 0 || digits.includes(null)) return undefined;
-        const base = baseOp === undefined ? 10n : toBigint(baseOp);
-        if (base === null || base < 2n) return undefined;
-        let result = 0n;
-        for (const d of digits) result = result * base + d!;
-        // A float digit or base (`2.0`) makes the result a float.
-        return floatIfFloatOperand([...digitOps, baseOp], ce.number(result));
+        const radix = base.isInteger === true ? toBigint(base) : null;
+        if (radix !== null && !digits.includes(null)) {
+          let result = 0n;
+          for (const d of digits) result = result * radix + d!;
+          // A float digit or base (`2.0`) makes the result a float.
+          return floatIfFloatOperand([...digitOps, baseOp], ce.number(result));
+        }
+
+        // Any other number or symbol: the sum of d·base^k, left to the
+        // arithmetic. Past the cap the call stays unevaluated.
+        if (digitOps.length > MAX_FROM_DIGITS_TERMS) return undefined;
+        if (!isNumericOperand(base) || !digitOps.every(isNumericOperand))
+          return undefined;
+        const n = digitOps.length;
+        const sum = ce.function(
+          'Add',
+          digitOps.map((d, i) => {
+            const k = n - 1 - i;
+            // `Power(base, 0)` and `Power(base, 1)` are left to no rule,
+            // so a symbolic base would keep them as written.
+            if (k === 0) return d;
+            const power =
+              k === 1 ? base : ce.function('Power', [base, ce.number(k)]);
+            return ce.function('Multiply', [d, power]);
+          })
+        );
+        return numericApproximation ? sum.N() : sum.evaluate();
       },
     },
 
     DigitSum: {
       description:
-        'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.',
-      signature: '(integer, integer?) -> integer',
+        'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored. With a third argument `k`, sum only the first `k` digits (most-significant first), or the last `|k|` when `k` is negative; `k` past the digit count sums them all.',
+      signature: '(integer, integer?, integer?) -> integer',
       broadcastable: true,
-      examples: ['DigitSum(1234)  // 10'],
-      evaluate: floatResultIfFloatOperand(([nOp, baseOp], { engine: ce }) => {
-        const k = toBigint(nOp);
-        if (k === null) return undefined;
-        const base = baseOp === undefined ? 10n : toBigint(baseOp);
-        if (base === null || base < 2n) return undefined;
-        const m = k < 0n ? -k : k;
-        // Pre-check: stay symbolic rather than iterate a pathologically
-        // large number of digits (see MAX_DIGIT_ITERATION_DIGITS). Below
-        // the threshold, `bigintDigitSum` is a single O(digits) pass (not
-        // the O(digits²) naive mod/divide loop this used to be).
-        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
-          return undefined;
-        return ce.number(bigintDigitSum(m, base, ce._deadline));
-      }),
+      examples: ['DigitSum(1234)  // 10', 'DigitSum(1234, 10, 2)  // 3'],
+      evaluate: floatResultIfFloatOperand(
+        ([nOp, baseOp, kOp], { engine: ce }) => {
+          const k = toBigint(nOp);
+          if (k === null) return undefined;
+          const base = baseOp === undefined ? 10n : toBigint(baseOp);
+          if (base === null || base < 2n) return undefined;
+          const m = k < 0n ? -k : k;
+          // Pre-check: stay symbolic rather than iterate a pathologically
+          // large number of digits (see MAX_DIGIT_ITERATION_DIGITS). Below
+          // the threshold, `bigintDigitSum` is a single O(digits) pass (not
+          // the O(digits²) naive mod/divide loop this used to be).
+          if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+            return undefined;
+          if (kOp !== undefined) {
+            const k = toBigint(kOp);
+            if (k === null) return undefined;
+            const digits = bigintDigitsLSB(m, base, ce._deadline).reverse();
+            const taken =
+              k >= 0n
+                ? digits.slice(
+                    0,
+                    k > BigInt(digits.length) ? digits.length : Number(k)
+                  )
+                : digits.slice(
+                    -k > BigInt(digits.length) ? 0 : digits.length + Number(k)
+                  );
+            return ce.number(taken.reduce((sum, d) => sum + d, 0n));
+          }
+          return ce.number(bigintDigitSum(m, base, ce._deadline));
+        }
+      ),
     },
 
     DivisorSigma: {

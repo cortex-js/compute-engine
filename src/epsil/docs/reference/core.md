@@ -817,9 +817,9 @@ Read one line of text from the host: the terminal in a command-line host, the `p
 
 ### integerString
 
-MathJSON `IntegerString` · `(integer, integer?) -> string`
+MathJSON `IntegerString` · `(integer, integer?, integer?) -> string`
 
-`IntegerString(n, base=10)`       return a string representation of the integer `n` in base `base`.
+`IntegerString(n, base=10, length)`       return a string representation of the integer `n` in base `base`.       With `length`, the digits of |n| are padded on the left with zeros,       or cut to the last `length` digits.
 
 ```epsil
 integerString(255, 16)
@@ -829,6 +829,11 @@ integerString(255, 16)
 ```epsil
 integerString(10, 2)
 // ➔ "1010"
+```
+
+```epsil
+integerString(5, 2, 8)
+// ➔ "00000101"
 ```
 
 ### InvisibleOperator

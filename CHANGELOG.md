@@ -16,6 +16,24 @@
   `3.0414093201713376e+64` (now 50! exactly). Small and negative values are
   unchanged. (#523, contributed by [enumeratio](https://github.com/enumeratio))
 
+- **`FromDigits` takes any base, and `IntegerString`,
+  `DigitCount` and `DigitSum` take their length and position arguments.**
+  The base was an integer of at least 2: `FromDigits([1, 1, 0], -2)` (now
+  `2`), `FromDigits([1, 2, 3], 1/2)` (now `17/4`) and
+  `FromDigits([a, b, c], x)` (now `a x^2 + b x + c`) all stayed unevaluated.
+  An integer base of any sign, a rational, float, complex or symbolic base,
+  and symbolic digits combine as the sum of `d * base^k`; a float operand
+  gives a float, and past 10,000 digits a non-integer base stays
+  unevaluated. `IntegerString(5, 2, 8)` was an `unexpected-argument` error
+  (now `"00000101"`; a length drops the sign and cuts to the last digits),
+  `DigitCount(5, 2, 0, 8)` was the same error (now `6`: the digits are
+  padded to the length first) and `DigitSum(1234, 10, 2)` was too (now `3`,
+  the sum of the first two digits; a negative `k` sums the last `|k|`, and a
+  list of `k` threads). The padded length of `IntegerString`, `IntegerDigits`
+  and `DigitCount` is capped at 1,000,000: `IntegerDigits(5, 2, 10^9)` used to
+  allocate until it ran out of memory and now stays unevaluated.
+  (#NNN, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

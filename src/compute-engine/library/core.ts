@@ -3310,6 +3310,13 @@ const NUMBER_FROM_DECIMAL =
 // no spelling that reads it correctly today, so refusing is the honest
 // answer. Both cases are excluded, since `"0X10"` reads as a prefix to a
 // human even though `fromDigits` only special-cases the lowercase spelling.
+/**
+ * The longest padded `IntegerString(n, base, length)` the handler builds;
+ * past it the call stays unevaluated (`length` of 10^12 would allocate a
+ * terabyte string).
+ */
+const MAX_INTEGER_STRING_LENGTH = 1_000_000;
+
 const NUMBER_FROM_BASE_INTEGER = /^[+-]?(?!0[xXbB])[0-9a-zA-Z]+$/;
 
 // The `base` operand of `NumberFrom`/`DigitsFrom` may be written as a STRING
@@ -12317,14 +12324,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     IntegerString: {
-      description: `\`IntegerString(n, base=10)\` \
-      return a string representation of the integer \`n\` in base \`base\`.`,
+      description: `\`IntegerString(n, base=10, length)\` \
+      return a string representation of the integer \`n\` in base \`base\`. \
+      With \`length\`, the digits of |n| are padded on the left with zeros, \
+      or cut to the last \`length\` digits.`,
       // @todo could accept `0xcafe`, `0b01010` or `(deadbeef)_16` as string formats
       // @todo could accept "roman"... as base
-      // @todo could accept optional third parameter as the (padded) length of the output
       broadcastable: true,
-      signature: '(integer, integer?) -> string',
-      examples: ['IntegerString(255, 16)', 'IntegerString(10, 2)'],
+      signature: '(integer, integer?, integer?) -> string',
+      examples: [
+        'IntegerString(255, 16)',
+        'IntegerString(10, 2)',
+        'IntegerString(5, 2, 8)  // "00000101"',
+      ],
       evaluate: (ops, { engine }) => {
         const ce = engine;
         const op1 = ops[0];
@@ -12339,6 +12351,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `DigitsFrom(IntegerString(n))` round-trips for negative integers.
         const op2 = ops[1] ?? ce.Nothing;
         if (sym(op2) === 'Nothing') return ce.string(val.toString());
+        const lengthOp = ops[2];
 
         const base = asSmallInteger(op2);
         if (base === null) return ce.typeError('integer', op2.type, op2);
@@ -12349,7 +12362,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             op2.toString()
           );
 
-        return ce.string(val.toString(base));
+        if (lengthOp === undefined) return ce.string(val.toString(base));
+
+        // With a length the sign is dropped and the digits are padded or
+        // cut to it, as `IntegerDigits(n, base, length)` does. A negative
+        // length, or one past the cap, stays unevaluated.
+        const length = asSmallInteger(lengthOp);
+        if (length === null || length < 0 || length > MAX_INTEGER_STRING_LENGTH)
+          return undefined;
+        const digits = (val < 0n ? -val : val).toString(base);
+        return ce.string(
+          digits.length >= length
+            ? digits.slice(digits.length - length)
+            : digits.padStart(length, '0')
+        );
       },
     },
   },
