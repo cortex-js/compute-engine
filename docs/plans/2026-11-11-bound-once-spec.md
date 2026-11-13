@@ -932,3 +932,53 @@ value. The user's rule to test: the type of a CONSTANT may depend on its
 value, as a literal type; any other inferred type does not. A probe
 measures what changes and what it gains.
 
+### D16. A static type does not depend on a value (user decision 2026-11-13)
+
+The static type of a node is a function of the definitions and of their
+declared or inferred types, and of the values of constants (a constant may
+have a literal type). The write of the value of a variable, a parameter, a
+binder index or a block local changes no type and invalidates no cached
+type. The inferred type of a variable is not revised from the value it
+holds: this reverses the ruling of 2026-08-16 (10 tests). Not adopted: an
+assumption that narrows the type of an assigned symbol (the probe's own
+choice; main's behaviour stays). An assignment that changes the TYPE of a
+variable reports that change itself (a latent defect today: it relied on
+the value write).
+
+Measured (`~/dev/compute-engine-recovery/probe-type-value-report.md`,
+patch `probe-type-value.patch`, worktree
+`/tmp/wt-compute-engine-06-typeprobe` at `c0703702f`): 26 tests change in 7
+groups, each as the rule predicts; about 170 lines go (`_reviseInferredType`,
+`_liveValueType` and their memo). Alone it gains little time.
+
+### D17. The cached types survive a run: the fix of CE-1210 (user decision 2026-11-13)
+
+One call of the othello prelude makes 13,306 invalidations of the type
+caches (5,894 pops of a scope, 4,856 writes of a block local, 2,556 writes
+of an index) and 98,227 type computations; 65% of its time is under type
+computation. With no invalidation the call takes 231-235 ms where it takes
+1,009-1,091 ms. D16 removes the value writes; the pop of a scope is where
+the gain is, and a pop cannot stop invalidating while a cached answer
+depends on the scope of its READER: the probe's pop rule served stale
+types and stale effects (a function literal's effects are resolved from
+the current scope, not from the scope the literal was boxed in). The work:
+find and remove each answer that reads the current scope (the effects of a
+literal first; the per-frame key of a cached type; a held operand, ROADMAP
+CE-1258), then make a pop keep the caches, and measure with the check for
+stale answers (`CE_TYPE_PARANOID` in the probe) and with Tycho's
+instruments. The aim: types are settled before a run, and a run changes
+only values.
+
+### Open: inference applied before evaluation (user's idea, 2026-11-13)
+
+In place of D15 ("nothing is inferred for a parameter"), which makes
+`xs ↦ Sum(xs)` return `[1, 2, 3]` for `[1, 2, 3]` with no error (measured
+by session compute-engine-42: 939 tests, thirteen programs of the Epsil
+corpus): boxing writes nothing, as today for free names, and the engine
+applies the inference once, before an expression is evaluated. For the
+parameters of a function literal the moment is its definition. The user
+leans towards applying it to every `unknown` name, host names included,
+and wants its effect on Tycho understood first (asked of tycho-desk; a
+build with a switch is the test). D15 is held until then. Leftovers 1, 3,
+4 and 5 (a) are independent of it.
+
