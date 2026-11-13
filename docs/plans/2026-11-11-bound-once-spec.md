@@ -982,7 +982,17 @@ and wants its effect on Tycho understood first (asked of tycho-desk; a
 build with a switch is the test). D15 is held until then. Leftovers 1, 3,
 4 and 5 (a) are independent of it.
 
-### D18. Boxing sets the types of the definitions it creates, and of nothing else (user decision 2026-11-13; to try)
+### D18. Boxing sets the types of the definitions it creates, and of nothing else (user decision 2026-11-13)
+
+**ADOPTED on 2026-11-13 in the form that was measured (the paragraph "D18,
+measured" below): a use of a parameter writes its requirement in the
+environment of the literal's unit; later uses of the same boxing read the
+requirements recorded so far; a write made during a trial goes in the
+trial's environment; the entry is written on the definition once, when the
+boxing of the literal ends. Session compute-engine-42 lands it, after the
+leftovers 1, 3, 4 and 5 (a), with the full suite and Tycho's checks first.
+The text below is the hypothesis as first stated; its second bullet of
+"the moment" (derive everything at the end) was wrong.**
 
 D15 is WITHDRAWN. The inference of a parameter from its uses stays; what
 changes is when and where it is applied.
