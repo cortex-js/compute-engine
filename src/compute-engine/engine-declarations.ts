@@ -4214,8 +4214,8 @@ function assignNamedValue(
  *
  * The value is written with `ce.assign()` into the binding that is visible
  * when the function is called. Before the write, the function copies all the
- * fields of the value definition of the binding (`_checkpointSnapshot()`),
- * and after `fn` it writes the copy back (`_restoreCheckpointSnapshot()`). So
+ * fields of the value definition of the binding (`_fieldSnapshot()`),
+ * and after `fn` it writes the copy back (`_restoreFieldSnapshot()`). So
  * every read of the name while `fn` runs gets the value: an expression boxed
  * before the call, an expression boxed inside `fn`, and also the body of a
  * function or a held value stored in another binding. Example: with
@@ -4328,7 +4328,7 @@ export function withValuesFn<T>(
       name,
       record,
       def: record.value,
-      snapshot: record.value._checkpointSnapshot(),
+      snapshot: record.value._fieldSnapshot(),
     });
   }
   return runWithBindingValues(
@@ -4382,7 +4382,7 @@ export function withBindingValuesFn<T>(
       name,
       record,
       def: record.value,
-      snapshot: record.value._checkpointSnapshot(),
+      snapshot: record.value._fieldSnapshot(),
     });
   }
   return runWithBindingValues(
@@ -4509,7 +4509,7 @@ function restoreWithValuesBindings(
       if (installed === def && def.disposed) continue;
       const valueBefore = def.storedValue;
       const armBefore = hasFunctionArm(def);
-      def._restoreCheckpointSnapshot(snapshot);
+      def._restoreFieldSnapshot(snapshot);
       const armAfter = hasFunctionArm(def);
       if (installed !== def) {
         // `fn` assigned a function to the name, and maybe a value after it:

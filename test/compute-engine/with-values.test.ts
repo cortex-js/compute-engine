@@ -297,10 +297,10 @@ describe('ce.withValues', () => {
   // the internal restore of the value definition.
   function breakRestore(ce: ComputeEngine, name: string): Error {
     const def = ce.lookupDefinition(name) as unknown as {
-      value: { _restoreCheckpointSnapshot: (s: unknown) => void };
+      value: { _restoreFieldSnapshot: (s: unknown) => void };
     };
     const restoreError = new Error('restore failed');
-    def.value._restoreCheckpointSnapshot = () => {
+    def.value._restoreFieldSnapshot = () => {
       throw restoreError;
     };
     return restoreError;
@@ -386,13 +386,13 @@ describe('ce.withValues', () => {
 
 describe('the snapshot of a value definition', () => {
   // `ce.withValues()` puts back the earlier state of a binding with the
-  // snapshot of its value definition (`_checkpointSnapshot()`). Adding a
+  // snapshot of its value definition (`_fieldSnapshot()`). Adding a
   // mutable field to the class requires extending the snapshot and a test.
   // This test fails when a field is added without being captured: the failure
   // names the field, so the fix is to add it to the snapshot or to the
   // exclusion list below with a reason.
 
-  /** Not captured, each for a reason stated on `_checkpointSnapshot`. */
+  /** Not captured, each for a reason stated on `_fieldSnapshot`. */
   const VALUE_DEF_EXCLUSIONS = new Set([
     'name', // identity
     '_engine', // identity
@@ -436,7 +436,7 @@ describe('the snapshot of a value definition', () => {
     ce.assign('drift', ce.number(1));
     const def = ce.lookupDefinition('drift') as { value: any };
     const captured = new Set(
-      Object.keys(def.value._checkpointSnapshot() as object)
+      Object.keys(def.value._fieldSnapshot() as object)
     );
     const missing = Object.getOwnPropertyNames(def.value).filter(
       (f) => !captured.has(f) && !VALUE_DEF_EXCLUSIONS.has(f)
@@ -448,15 +448,15 @@ describe('the snapshot of a value definition', () => {
     const ce = new ComputeEngine();
     ce.assign('rt', ce.number(1));
     const half = (ce.lookupDefinition('rt') as { value: any }).value;
-    const before = half._checkpointSnapshot() as Record<string, unknown>;
+    const before = half._fieldSnapshot() as Record<string, unknown>;
 
     // Move a representative field on each axis the tuple covers.
     half.holdUntil = 'never';
     half.inferredType = !half.inferredType;
     half._isConstant = true;
 
-    half._restoreCheckpointSnapshot(before);
-    const after = half._checkpointSnapshot() as Record<string, unknown>;
+    half._restoreFieldSnapshot(before);
+    const after = half._fieldSnapshot() as Record<string, unknown>;
     for (const key of Object.keys(before))
       expect([key, after[key]]).toEqual([key, before[key]]);
   });

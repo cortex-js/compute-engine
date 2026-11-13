@@ -979,7 +979,7 @@ export class _BoxedValueDefinition
    * snapshot also holds the activation that the current scope reads it from
    * and its entry there.
    * @internal */
-  _checkpointSnapshot(): unknown {
+  _fieldSnapshot(): unknown {
     const activation = isActivatedDefinition(this)
       ? activationRecordOf(this, this._engine.context?.lexicalScope)
       : undefined;
@@ -1021,16 +1021,16 @@ export class _BoxedValueDefinition
     };
   }
 
-  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim and
+  /** Restore the fields captured by {@link _fieldSnapshot}, verbatim and
    * setter-bypassing — the public `type` setter is a computed view that
    * allocates a fresh `BoxedType` and wipes `_value`/`_defValue` on a write
    * to `unknown`, so a faithful restore must write the private fields. The
    * record OBJECT is never replaced: live boxed expressions hold it by
    * identity.
    * @internal */
-  _restoreCheckpointSnapshot(snapshot: unknown): void {
+  _restoreFieldSnapshot(snapshot: unknown): void {
     const s = snapshot as ReturnType<
-      _BoxedValueDefinition['_checkpointSnapshot']
+      _BoxedValueDefinition['_fieldSnapshot']
     > &
       Record<string, unknown>;
     this.wikidata = s.wikidata as string | undefined;

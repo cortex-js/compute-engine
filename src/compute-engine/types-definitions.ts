@@ -2721,13 +2721,13 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * {@link _typeSlotSnapshot}, which covers only the slots an inference
    * re-derivation moves. Opaque, for the same reason.
    * @internal */
-  _checkpointSnapshot(): unknown;
+  _fieldSnapshot(): unknown;
 
-  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim and
+  /** Restore the fields captured by {@link _fieldSnapshot}, verbatim and
    * setter-bypassing. Never replaces the record object: live boxed
    * expressions hold it by identity.
    * @internal */
-  _restoreCheckpointSnapshot(snapshot: unknown): void;
+  _restoreFieldSnapshot(snapshot: unknown): void;
 
   /** The type known in the CURRENT state: {@link declaredType} narrowed by
    * everything the assumptions in force prove about this definition. Reading

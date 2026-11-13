@@ -209,9 +209,9 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** Opaque snapshot/restore of EVERY mutable field, for `ce.withValues()`
    * — mirror of the members documented in `types-definitions.ts`.
    * @internal */
-  _checkpointSnapshot(): unknown;
+  _fieldSnapshot(): unknown;
   /** @internal */
-  _restoreCheckpointSnapshot(snapshot: unknown): void;
+  _restoreFieldSnapshot(snapshot: unknown): void;
 
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
