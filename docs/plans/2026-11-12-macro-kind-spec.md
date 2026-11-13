@@ -411,3 +411,22 @@ many corpus rows depend on it was not measured.
 - Its tests: no value differs from the block local; the self-referential
   macro test becomes `macro-cycle`; D-316 keeps a small rewrite in Tycho;
   the GLSL tests of a function that reads an axis need section 5c.
+
+**State of what this spec assumes** (`compute-engine-06`, 2026-11-12).
+Step 1 of the rule spec is on main, commit
+`d2f392f08a39b831669fa22430ad853096f993ad`: rules 1 and 4, C3, D5 and D8
+are built, and `docs/SCOPING-MODEL.md` is rewritten. Three later items
+touch this spec, and the implementer reads them first:
+
+- D11: a `let` with a function literal is a variable that holds a function
+  value, and a function statement in a block is a local. Both hide a macro
+  of the same name (rule 6).
+- `docs/plans/2026-11-12-program-operator-spec.md` (ROADMAP CE-1255,
+  approved, not built): an Epsil program becomes one `Program(…)`
+  expression whose statements are put in a canonical order. Rule 5 is
+  about the engine's state when the program is boxed, so that order does
+  not change it; a macro is declared by the host, not by a statement.
+- ROADMAP CE-1258 (a design pass, planned): a held operand would record
+  the scope it was boxed in. The case "A held operand" of section 6 then
+  expands with the macros of that scope, not of the scope current at the
+  release.
