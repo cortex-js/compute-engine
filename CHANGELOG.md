@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`MatrixRank` of a matrix of free symbols is its generic rank when that is
+  full** (#NNN, contributed by [enumeratio](https://github.com/enumeratio)).
+  `MatrixRank([[a, b], [c, d]])` was unevaluated, though
+  `MatrixRank([[a, b], [a, b]])` was already 1; it is 2, as is
+  `[[x, 1], [1, x]]`, a `2 × 3` or `3 × 2` of symbols, and a `3 × 3` (the
+  symbolic-determinant path covered a literal nonzero determinant only). The
+  rank is `min(rows, columns)` when the exact rank at an integer point is, since
+  some maximal minor is then not the zero function. A matrix whose rank at every
+  point tried is lower stays unevaluated, as does one whose entries are never
+  rational at an integer point (trigonometric entries).
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

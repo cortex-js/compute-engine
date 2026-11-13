@@ -4626,6 +4626,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.number(columnCount - nullity);
         }
 
+        // Full rank of a matrix of free symbols (`[[a, b], [c, d]]`).
+        const full = genericFullRank(op, rowCount, columnCount);
+        if (full !== undefined) return full;
+
         // Symbolic path: entries could not be reduced to numbers (e.g. a
         // matrix of trig functions). Use the symbolic determinant to decide
         // full rank vs. rank-deficiency for a small square matrix. Stay
@@ -8922,6 +8926,71 @@ function ratMul([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
 }
 function ratDiv([an, ad]: BigRat, [bn, bd]: BigRat): BigRat {
   return ratNorm(an * bd, ad * bn);
+}
+
+/** Largest matrix, in entries, that `genericFullRank()` samples. */
+const GENERIC_RANK_MAX_ENTRIES = 400;
+
+/** The integer points `genericFullRank()` tries: one assignment per entry of the list. */
+const GENERIC_RANK_POINTS = 4;
+
+const SAMPLE_PRIMES = [
+  2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+];
+
+/**
+ * The rank of a matrix over the field of functions of its free symbols, when
+ * it is full (`min(rows, columns)`), else `undefined`.
+ *
+ * Full rank at one point is full rank everywhere it is not lost to a
+ * coincidence: if the exact rank of the matrix with its symbols replaced by
+ * integers is `min(rows, columns)`, some maximal minor is nonzero at that point,
+ * so it is not the zero function, and the generic rank cannot be smaller.
+ * `[[a, b], [c, d]]` is 2 because `[[2, 3], [5, 7]]` has rank 2. A point at
+ * which an entry is not an exact rational (a pole, a radical) is skipped. A
+ * rank below the full one at every point tried proves nothing (the rank may be
+ * lost on a thin set, `[[x, 1], [1, x]]` at `x = 1`), so it stays unevaluated,
+ * as does a matrix too large to sample.
+ */
+function genericFullRank(
+  op: Expression,
+  rows: number,
+  cols: number
+): Expression | undefined {
+  if (!isFunction(op, 'List') || rows * cols > GENERIC_RANK_MAX_ENTRIES)
+    return undefined;
+  const ce = op.engine;
+  const unknowns = op.unknowns;
+  if (unknowns.length === 0 || unknowns.length > SAMPLE_PRIMES.length)
+    return undefined;
+  const full = Math.min(rows, cols);
+  const entryRows = op.shape.length === 1 ? [op] : op.ops;
+
+  for (let attempt = 0; attempt < GENERIC_RANK_POINTS; attempt++) {
+    // A distinct prime for each symbol, shifted by the attempt.
+    const point: Record<string, Expression> = {};
+    unknowns.forEach((name, i) => {
+      point[name] = ce.number(
+        SAMPLE_PRIMES[(i * 3 + attempt) % SAMPLE_PRIMES.length]
+      );
+    });
+    const sampled = ce.function(
+      'List',
+      entryRows.map((row) =>
+        ce.function(
+          'List',
+          (isFunction(row, 'List') ? row.ops : [row]).map((entry) =>
+            entry.subs(point).evaluate()
+          )
+        )
+      )
+    );
+    const matrix = tensorToRationalMatrix(sampled, rows, cols);
+    if (matrix === undefined) continue;
+    if (exactRationalRref(matrix).pivotCols.length === full)
+      return ce.number(full);
+  }
+  return undefined;
 }
 
 /**
