@@ -14,7 +14,7 @@
  */
 
 import type { Expression } from '../../global-types.js';
-import { Decline, lower } from './lower.js';
+import { Decline, hostVarOp, lower } from './lower.js';
 import { SliceInternalError, verify } from './verify.js';
 import { ALL_PASSES, runPasses, type PassOptions } from './passes.js';
 import { JS, printJavaScript, type JavaScriptResult } from './print-js.js';
@@ -260,21 +260,50 @@ export type SliceOptions = {
    *  signature unless its operands prove a real value (README, "The
    *  complex lane"). Default `'strict'`. */
   readonly mode?: 'strict' | 'complex';
-  /** JavaScript: the passes of all the loops and builds of one call of
-   *  `run()`, nested ones and those of user functions included; over it,
-   *  `run()` throws a `CancellationError` with the cause
-   *  `iteration-limit-exceeded`. GLSL has no budget. */
+  /** The rule of `compile()`'s option: a `Sum` or a `Product` of more
+   *  passes than the budget is NaN; on JavaScript, the passes of all the
+   *  `Loop`s of one call of `run()`, nested ones and those of user
+   *  functions included, over it throw a `CancellationError` with the cause
+   *  `iteration-limit-exceeded`. GLSL counts no `Loop` pass. */
   readonly iterationBudget?: number;
+  /** A name read as the host's text, in the scope of the entry, at each
+   *  use (an effectful operation): `compile()`'s `vars`. The text has no
+   *  `$` followed by a digit. */
+  readonly vars?: Readonly<Record<string, string>>;
 };
 
-/** The rows and the syntax of one compilation. */
+/** The rows and the syntax of one compilation: those of `extend`, and a
+ *  row per name of `vars`, of one operation per lane. */
 function tables(options: SliceOptions): {
   rows: readonly OperatorRow[];
   syntax: Syntax;
 } {
-  const x = options.extend;
+  const lanes = ['real', 'integer', 'boolean'] as const;
+  const vars = Object.values(options.vars ?? {});
+  const x: Extension = {
+    rows: [
+      ...(options.extend?.rows ?? []),
+      ...vars.map((_, k) => ({
+        arity: 0 as const,
+        signatures: lanes.map((l) => [[], l, hostVarOp(k, l)] as const),
+        threads: false,
+        effect: 'effectful' as const,
+      })),
+    ],
+    spellings: {
+      ...options.extend?.spellings,
+      ...Object.fromEntries(
+        vars.flatMap((text, k) =>
+          // A newline: a text that ends in a `//` comment keeps the `)`.
+          lanes.map((l) => [hostVarOp(k, l), `(${text}\n)`])
+        )
+      ),
+    },
+    helpers: options.extend?.helpers,
+  };
   const base = TARGETS[options.target].syntax;
-  if (x === undefined) return { rows: OPERATORS, syntax: base };
+  if (options.extend === undefined && vars.length === 0)
+    return { rows: OPERATORS, syntax: base };
   return {
     rows: [...OPERATORS, ...(x.rows ?? [])],
     syntax: {
@@ -298,6 +327,8 @@ export function sliceProgram(
   const p = lower(expr, rows, {
     fold: options.constantFold,
     mode: options.mode,
+    iterationBudget: options.iterationBudget,
+    vars: Object.keys(options.vars ?? {}),
   });
   verify(p, rows);
   const warnings = seededWarnings(p, rows);

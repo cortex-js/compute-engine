@@ -89,4 +89,6 @@ export type Lowering = {
   readonly wide: 'real' | 'complex';
   /** The name of the user function whose body is being lowered. */
   inFunction?: string;
+  /** The `iterationBudget`: a `Sum` or a `Product` of more passes is NaN. */
+  readonly budget?: number;
 };

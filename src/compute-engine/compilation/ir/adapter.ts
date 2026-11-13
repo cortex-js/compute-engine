@@ -18,13 +18,7 @@ import { ALL_PASSES } from './passes.js';
 import { Decline } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
 import type { JavaScriptResult } from './print-js.js';
-import {
-  argumentIndex,
-  entryOf,
-  regionsOf,
-  type Program,
-  type Region,
-} from './ir.js';
+import { argumentIndex, entryOf, type Program } from './ir.js';
 
 const PREFIX = "Could not compile with the profile 'ir'";
 
@@ -32,8 +26,7 @@ const PREFIX = "Could not compile with the profile 'ir'";
  * The class of each option of `compile()` in the profile: `mapped` (read
  * by the adapter or by `compile()`), `no-op` (admitted with no effect:
  * `storage` is ignored on the JavaScript target by contract,
- * `CompilationOptions.storage`; no program of the profile has an
- * `Integrate`, which `quadrature` selects for), or `declined` (declined by
+ * `CompilationOptions.storage`), or `declined` (declined by
  * name when given, `refusal()`). `compile-expression.ts` checks that every
  * option of `CompileExpressionOptions` has a class here.
  */
@@ -50,9 +43,9 @@ export const IR_OPTIONS = {
   constantFold: 'mapped',
   mode: 'mapped',
   storage: 'no-op',
-  quadrature: 'no-op',
+  quadrature: 'mapped',
   functions: 'declined',
-  vars: 'declined',
+  vars: 'mapped',
   operators: 'declined',
   imports: 'declined',
   preamble: 'declined',
@@ -73,6 +66,7 @@ type IrOptions = { readonly [K in IrOptionName]?: unknown } & {
   readonly mode?: string;
   readonly symbolDeps?: Set<string>;
   readonly varsObjectRefs?: Set<string>;
+  readonly vars?: Readonly<Record<string, unknown>>;
 };
 
 /** Rows and spellings that a test adds to the compilations of the profile
@@ -135,14 +129,6 @@ function decline(message: string, extra: Partial<CompileDiagnostic> = {}) {
   });
 }
 
-/** Whether a region of `p` has a counted loop (a `Sum`, a `Product`, or a
- *  reduction of a list). */
-function hasLoop(p: Program): boolean {
-  const walk = (r: Region): boolean =>
-    r.body.some((i) => i.k === 'loop' || regionsOf(i).some(walk));
-  return p.functions.some((f) => walk(f.body));
-}
-
 /**
  * The compilation of `expr` with the profile `'ir'`: a successful result,
  * or a throw of a `CompileDeclineError` (`'outside-profile'` for a decline,
@@ -156,11 +142,22 @@ export function compileWithIrProfile(
   const given = options?.mode ?? 'strict';
   const mode = given === 'complex' ? 'complex' : 'strict';
   const refused =
-    given === mode
-      ? optionDecline(options)
-      : `the option \`mode\` with the value '${String(given)}'`;
+    given !== mode
+      ? `the option \`mode\` with the value '${String(given)}'`
+      : options?.quadrature === 'monte-carlo'
+        ? "the option `quadrature` with the value 'monte-carlo'"
+        : optionDecline(options);
   if (refused !== undefined)
     throw decline(`${refused} is not supported by the profile 'ir'`);
+  // `vars`: a name read as the host's text (`compile()` checks that each
+  // entry is a string).
+  // No prototype: an entry named `__proto__` is an entry.
+  const vars: Record<string, string> = Object.create(null);
+  for (const [name, text] of Object.entries(options?.vars ?? {})) {
+    if (typeof text !== 'string' || text.trim() === '' || /\$\d/.test(text))
+      throw decline(`the vars entry of ${name} is not a source text`);
+    vars[name] = text;
+  }
   let slice: JavaScriptResult & { warnings: Warning[]; program: Program };
   try {
     slice = compileSlice(expr, {
@@ -172,6 +169,8 @@ export function compileWithIrProfile(
       },
       constantFold: options?.constantFold !== false,
       mode,
+      iterationBudget: options?.iterationBudget,
+      vars,
       extend: testExtension,
     });
   } catch (e) {
@@ -189,14 +188,6 @@ export function compileWithIrProfile(
     });
   }
   const p = slice.program;
-  // The public budget counts the passes of a `Loop`, which the slice does
-  // not have; a `Sum` or a `Product` over the budget gives NaN, which the
-  // slice does not do. Every counted loop declines (a reduction of a list
-  // too), since the slice cannot tell them apart.
-  if (options?.iterationBudget !== undefined && hasLoop(p))
-    throw decline(
-      "the option `iterationBudget` with a counted loop (a Sum, a Product or a reduction of a list) is not supported by the profile 'ir'"
-    );
 
   const entry = entryOf(p);
   const positional = entry.positional ?? 0;

@@ -1138,3 +1138,31 @@ required 471; `vars` 342; `Integrate` 336; a symbol with a value that is
 not a number or a list of numbers 287; `Loop` 282. Missing structurally: the
 code of the profile cannot be stored or sent to a worker (20 worker-pool
 tests fail with the switch on).
+
+Third batch (the marking of integers of 2^53 or more deleted; `Loop` over a
+list or a range; `iterationBudget` by the public rule; the `vars` option;
+`Integrate` of one variable through the engine's quadrature routine). First
+measures on the code that holds bound-once step 1; 5,083 lines:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 9,216 of 9,680 (95.2%) |
+| Every JavaScript compile | 21,596 of 38,219 (56.5%) |
+| Public `compile()` calls | 12,338 of 28,489 (43.3%) |
+
+Largest causes after it: `mode: 'bigint'` 1,029; a list where a scalar is
+required 479 (six different constructs, the largest a list used as a
+condition); a symbol with a value that is not a number or a list of numbers
+301; `Comprehension` 263; input type `any` 247; `Apply` 234; `Map` of a
+function that is not a one-parameter literal 234; `Tuple` 233; `Reduce`
+forms 213; the `functions` option 212.
+
+Next step: code that can be stored and sent to a worker
+(`docs/plans/2026-11-12-ir-profile-shippable-code.md`, option A recommended),
+then a `bigint` lane.
+
+Proposed definition of done (not approved): the profile is the default for
+JavaScript and GLSL with a decline falling back to the interpreter; Tycho's
+audit passes on it; the engine's consumers run on it with the suite green,
+worker pool included; `javascript-target.ts` and the structured route are
+deleted; the pipeline stays under a stated line budget (10,000 proposed).

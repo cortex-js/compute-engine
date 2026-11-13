@@ -612,7 +612,7 @@ export const PROGRAMS: Json[] = [
  */
 // prettier-ignore
 export const DECLINES: Record<string, Json> = {
-  'not in the slice': ['Integrate', 'x', 'x'],
+  'not in the slice': ['Digamma', 'x'],
   'Less of complex': ['If', ['Less', 'Z', 1], 1, 2],
   'bound that is not an integer': ['Sum', 'k', ['Limits', 'k', 1, 'x']],
   'different lengths': ['Add', 'L', ['List', 1, 2]],

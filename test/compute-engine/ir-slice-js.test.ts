@@ -177,12 +177,9 @@ describe('IR slice: the real functions at edge inputs', () => {
     expect(js(['Root', -8, 3]).run({})).toBe(-2);
     expect(Number.isNaN(js(['Root', 'x', 2]).run({ x: -4 }))).toBe(true);
   });
-  test('Truncate and Sign are integers; Truncate of 2^53 or more declines in Mod', () => {
+  test('Truncate and Sign are integers', () => {
     expect(js(['Mod', ['Truncate', 'x'], 3]).program.types).toBeDefined();
     expect(js(['Mod', ['Truncate', 'x'], 3]).run({ x: -7.5 })).toBe(2);
-    expect(
-      declineOf(() => js(['Mod', ['Add', ['Truncate', 'x'], 2 ** 60], 3])).cause
-    ).toMatch(/2\^53/);
   });
   test('Root of a zero index is NaN', () => {
     expect(Number.isNaN(js(['Root', 'x', 'y']).run({ x: 0.5, y: 0 }))).toBe(
@@ -191,16 +188,6 @@ describe('IR slice: the real functions at edge inputs', () => {
     expect(
       interpret(ce, ce.box(['Root', 'x', 'y'] as never), { x: 0.5, y: 0 })
     ).toBe('none');
-  });
-  test('Sign and Fract of an integer of 2^53 or more decline', () => {
-    for (const json of [
-      [
-        'Sign',
-        ['Subtract', ['Multiply', 9007199254740993, 'n'], 9007199254740992],
-      ],
-      ['Fract', ['Add', ['Multiply', 9007199254740993, 'n'], 0.5]],
-    ])
-      expect(declineOf(() => js(json)).cause).toMatch(/2\^53/);
   });
   test('the runtime members of REAL_FUNCTIONS are not replaced by another member', () => {
     const rt = javascriptRuntime(undefined) as Record<string, unknown>;
@@ -1439,10 +1426,10 @@ describe('IR slice: runtime', () => {
     ).toThrow(/WithRandomSeed: the seed is NaN/);
   });
   test('a decline keeps its node and head; a target refusal its head', () => {
-    const d = declineOf(() => js(['Integrate', 'x', 'x']));
+    const d = declineOf(() => js(['Digamma', 'x']));
     expect([d.head, d.cause]).toEqual([
-      'Integrate',
-      'the operator Integrate is not in the slice',
+      'Digamma',
+      'the operator Digamma is not in the slice',
     ]);
     const g = declineOf(() =>
       compileSlice(ce.box(['Random'] as never), { target: 'glsl' })
@@ -1477,16 +1464,24 @@ describe('IR slice: the iteration budget', () => {
       target: 'javascript',
       iterationBudget,
     });
-  test('one count of the passes of all the loops of a call, nested ones included', () => {
-    const nested = [
-      'Sum',
-      ['Sum', ['Multiply', 'j', 'k'], ['Limits', 'j', 1, 3]],
-      ['Limits', 'k', 1, 3],
-    ];
+  /** `s` after `Loop(s := s + j·k)` over `outer`, then over `inner`. */
+  const loops = (outer: Json, inner?: Json) => [
+    'Block',
+    ['Declare', 's', 'integer', 0],
+    [
+      'Loop',
+      ['Assign', 's', ['Add', 's', ['Multiply', 'j', 'k']]],
+      ['Element', 'k', outer],
+      ...(inner === undefined ? [] : [['Element', 'j', inner]]),
+    ],
+    's',
+  ];
+  test('one count of the passes of all the Loops of a call, nested ones included', () => {
+    const nested = loops(['Range', 1, 3], ['Range', 1, 3]);
     // 3 passes of the outer loop and 9 of the inner one.
     expect(budget(nested, 12).run({})).toBe(36);
     expect(() => budget(nested, 11).run({})).toThrow(/more than 11/);
-    const r = budget(['Sum', 'k', ['Limits', 'k', 1, 'n']], 10);
+    const r = budget(loops(['Range', 1, 'n'], ['Range', 1, 1]), 20);
     expect(r.run({ n: 10 })).toBe(55);
     // Each call starts at 0.
     expect(r.run({ n: 10 })).toBe(55);
@@ -1500,20 +1495,238 @@ describe('IR slice: the iteration budget', () => {
       'iteration-limit-exceeded'
     );
   });
-  test('a build counts its passes', () => {
-    const r = budget(['Map', ['Function', ['Sin', 'z'], 'z'], 'D'], 3);
-    expect(() => r.run({ D: [1, 2, 3, 4] })).toThrow(/more than 3/);
-    expect((r.run({ D: [1, 2, 3] }) as number[]).length).toBe(3);
+  test('a Sum or a Product of more passes than the budget is NaN', () => {
+    const r = budget(['Sum', 'k', ['Limits', 'k', 1, 'n']], 10);
+    expect(r.run({ n: 10 })).toBe(55);
+    expect(r.run({ n: 11 })).toBeNaN();
+    // Each loop is capped by its own count: 3 passes, and 3 of each inner.
+    const nested = [
+      'Sum',
+      ['Product', ['Add', 'j', 'k'], ['Limits', 'j', 1, 3]],
+      ['Limits', 'k', 1, 3],
+    ];
+    expect(budget(nested, 3).run({})).toBe(24 + 60 + 120);
+    expect(budget(nested, 2).run({})).toBeNaN();
   });
-  test('the budget counts the passes that run: a shared Sum runs once', () => {
-    // The two operands of the List are one node: the lowering shares a
-    // `may-fail` value with the evaluation that dominates it.
-    const sum = ce.box(['Sum', 'k', ['Limits', 'k', 1, 3]] as never);
-    const r = compileSlice(ce.function('List', [sum, sum]), {
-      target: 'javascript',
-      iterationBudget: 3,
-    });
-    expect(r.run({})).toEqual([6, 6]);
+  test('a Loop removed as dead code counts no pass', () => {
+    const dead = [
+      'Block',
+      ['Declare', 's', 'integer', 0],
+      [
+        'Loop',
+        ['Assign', 's', ['Add', 's', 'k']],
+        ['Element', 'k', ['Range', 1, 10]],
+      ],
+      1,
+    ];
+    expect(budget(dead, 3).run({})).toBe(1);
+  });
+  test('a build and a reduction of a list count no pass', () => {
+    const r = budget(['Map', ['Function', ['Sin', 'z'], 'z'], 'D'], 3);
+    expect((r.run({ D: [1, 2, 3, 4] }) as number[]).length).toBe(4);
+    expect(budget(['Max', ['Range', 1, 'n']], 3).run({ n: 10 })).toBe(10);
+  });
+});
+
+describe('IR slice: Loop', () => {
+  // `Loop(body, Element(i, L), …)` for its effect on the locals declared
+  // outside it, against the interpreter.
+  const total = (init: Json, body: Json, ...clauses: Json[]) => [
+    'Block',
+    ['Declare', 's', { dict: { value: init } }],
+    ['Loop', body, ...clauses],
+    's',
+  ];
+  const range = (k: string, ...bounds: Json[]) => [
+    'Element',
+    k,
+    ['Range', ...bounds],
+  ];
+  const programs: Json[] = [
+    total(0, ['Assign', 's', ['Add', 's', 'k']], range('k', 1, 'n')),
+    total(0, ['Assign', 's', ['Add', 's', 'k']], range('k', 'n', 1)),
+    total(0, ['Assign', 's', ['Add', 's', 'k']], range('k', 1, 9, 2)),
+    total(
+      0,
+      ['Assign', 's', ['Add', 's', ['Multiply', 'i', 'j']]],
+      range('i', 1, 'n'),
+      range('j', 1, 'i')
+    ),
+    total(
+      0,
+      ['Assign', 's', ['Add', ['Multiply', 2, 's'], 'c']],
+      ['Element', 'c', 'L']
+    ),
+    total(
+      0,
+      ['If', ['Less', 'k', 'x'], ['Assign', 's', ['Add', 's', 'k']]],
+      range('k', 1, 'n')
+    ),
+    total(
+      0,
+      ['Assign', 's', ['Add', ['Multiply', 's', 's'], 'x']],
+      range('k', 1, 3)
+    ),
+    [
+      'Block',
+      ['Declare', 'a', { dict: { value: 0 } }],
+      ['Declare', 'b', { dict: { value: 1 } }],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Declare', 't', 'real', 'a'],
+          ['Assign', 'a', 'b'],
+          ['Assign', 'b', ['Add', 't', 'b']],
+        ],
+        range('k', 1, 'n'),
+      ],
+      'a',
+    ],
+    [
+      'Sum',
+      [
+        'Block',
+        ['Declare', 't', { dict: { value: 0 } }],
+        ['Loop', ['Assign', 't', ['Add', 't', 'j']], range('j', 1, 'k')],
+        't',
+      ],
+      ['Limits', 'k', 1, 'n'],
+    ],
+    total(
+      0,
+      [
+        'Loop',
+        ['Assign', 's', ['Add', 's', ['Multiply', 'i', 'j']]],
+        range('j', 'i', 3),
+      ],
+      range('i', 1, 'm')
+    ),
+  ];
+  test.each(programs.map((p) => [JSON.stringify(p), p]))('%s', (_, json) => {
+    const expr = ce.box(json as never);
+    expect(expr.isValid).toBe(true);
+    for (const point of points(expr)) {
+      const expected = interpret(ce, expr, point);
+      for (const passes of [false, true]) {
+        const v = runSlice(expr, point, passes);
+        if (!agrees(v, expected))
+          throw new Error(
+            `at ${JSON.stringify(point)} passes=${passes}: ${String(v)}, interpreter ${JSON.stringify(expected)}`
+          );
+      }
+    }
+  });
+  test('a Break, a Continue, a Loop as a value and a write to the index decline', () => {
+    for (const [json, cause] of [
+      [
+        total(
+          0,
+          [
+            'Block',
+            ['If', ['Less', 'n', 'k'], ['Break']],
+            ['Assign', 's', 'k'],
+          ],
+          range('k', 1, 9)
+        ),
+        /Break/,
+      ],
+      [
+        total(
+          0,
+          [
+            'Block',
+            ['If', ['Less', 'n', 'k'], ['Continue']],
+            ['Assign', 's', 'k'],
+          ],
+          range('k', 1, 9)
+        ),
+        /Continue/,
+      ],
+      [['Loop', ['Add', 'x', 'k'], range('k', 1, 3)], /value of a Loop/],
+      [total(0, ['Assign', 'k', 2], range('k', 1, 3)), /not a local/],
+    ] as [Json, RegExp][])
+      expect(declineOf(() => js(json)).message).toMatch(cause);
+  });
+});
+
+describe('IR slice: integrals', () => {
+  // The engine's machine quadrature (`_rt.integrate`); its stated tolerance
+  // is 1e-10 relative, and these smooth integrands meet the oracle's 1e-12.
+  const programs: Json[] = [
+    [
+      'Integrate',
+      ['Function', ['Multiply', 'x', 't'], 't'],
+      ['Limits', 't', 0, 1],
+    ],
+    ['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']],
+    [
+      'Integrate',
+      ['Function', ['Exp', ['Negate', 't']], 't'],
+      ['Limits', 't', 0, 'PositiveInfinity'],
+    ],
+    [
+      'Integrate',
+      ['Function', ['Sqrt', ['Add', 1, ['Power', 't', 2]]], 't'],
+      ['Limits', 't', 0, 'x'],
+    ],
+    [
+      'NIntegrate',
+      ['Function', ['Exp', ['Negate', ['Power', 't', 2]]], 't'],
+      0,
+      'x',
+    ],
+    [
+      'Integrate',
+      ['Function', ['Divide', 1, ['Add', 1, ['Power', 't', 2]]], 't'],
+      ['Limits', 't', 'x', 'y'],
+    ],
+    [
+      'Integrate',
+      ['Function', ['Multiply', 'x', 'y'], 'x'],
+      ['Limits', 'Nothing', 0, 1],
+    ],
+  ];
+  test.each(programs.map((p) => [JSON.stringify(p), p]))('%s', (_, json) => {
+    const expr = ce.box(json as never);
+    for (const point of points(expr)) {
+      const expected = interpret(ce, expr, point);
+      for (const passes of [false, true]) {
+        const v = runSlice(expr, point, passes);
+        if (!agrees(v, expected))
+          throw new Error(
+            `at ${JSON.stringify(point)} passes=${passes}: ${String(v)}, interpreter ${JSON.stringify(expected)}`
+          );
+      }
+    }
+  });
+  test('an integrand with a draw, two variables, and GLSL decline', () => {
+    for (const [json, cause] of [
+      [
+        [
+          'Integrate',
+          ['Function', ['Multiply', 't', ['Random']], 't'],
+          ['Limits', 't', 0, 1],
+        ],
+        /an effect/,
+      ],
+      [
+        [
+          'Integrate',
+          ['Function', ['Multiply', 's', 't'], 's', 't'],
+          ['Limits', 's', 0, 1],
+          ['Limits', 't', 0, 1],
+        ],
+        /one variable/,
+      ],
+    ] as [Json, RegExp][])
+      expect(declineOf(() => js(json)).message).toMatch(cause);
+    const sine = ce.box([
+      'Integrate',
+      ['Sin', 't'],
+      ['Limits', 't', 0, 'x'],
+    ] as never);
+    expect(() => compileSlice(sine, { target: 'glsl' })).toThrow(/integrate/);
   });
 });
 

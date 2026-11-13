@@ -21,7 +21,7 @@
  */
 
 import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
-import { makeRandomHelpers } from '../javascript-runtime.js';
+import { makeRandomHelpers, SYS_HELPERS } from '../javascript-runtime.js';
 import type { RandomSeedFrame } from '../../numerics/random.js';
 import { rangeCount } from '../../numerics/range-count.js';
 import {
@@ -45,6 +45,7 @@ const guard = (n: string, what: string) =>
   `if (!(${n} < 4294967296)) throw new RangeError('${what} of more than 2^32 iterations');`;
 
 const tick = '  _rt.tick();';
+const pass = '  _rt.pass();';
 
 const number = (x: number) =>
   Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
@@ -124,6 +125,10 @@ export const JS: Syntax = Object.freeze({
         `const ${count} = ${out}.length;`,
       ],
     }),
+    integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
+      open: [`const ${out} = _rt.integrate((${t}) => {`],
+      close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
+    }),
     seeded: ({ outs, args: [seed] }) => ({
       open: [
         ...outs.map((o) => `let ${o};`),
@@ -159,11 +164,11 @@ export const JS: Syntax = Object.freeze({
   assign: (name, value) => `${name} = ${value};`,
   ifOpen: (cond) => `if (${cond}) {`,
   elseOpen: '} else {',
-  loopOpen: (k, lo, hi) => [
+  loopOpen: (k, lo, hi, passes) => [
     `const ${k}_lo = ${lo}, ${k}_hi = ${hi};`,
     guard(`${k}_hi - ${k}_lo`, 'a loop'),
     `for (let ${k} = ${k}_lo; ${k} <= ${k}_hi; ${k}++) {`,
-    tick,
+    passes ? pass : tick,
   ],
   close: '}',
   ret: (value, _type, copy) =>
@@ -192,14 +197,16 @@ export type JavaScriptResult = {
 /** The runtime of the code: over the frame slot and the draws of `ce`, or
  *  with no engine, a slot of its own and `Math.random()`. `tick()` begins
  *  each pass of a loop or a build: it checks the engine's deadline every
- *  1024 passes and, with a `budget`, adds one to the passes of the call
- *  (`resetPasses()` at its start), as `compile()`'s `iterationBudget`. */
+ *  1024 passes. `pass()` begins each pass of a `Loop`: a `tick()` and,
+ *  with a `budget`, one more pass of the call (`resetPasses()` at its
+ *  start), as `compile()`'s `iterationBudget`. */
 export function javascriptRuntime(
   ce: ComputeEngine | undefined,
   budget?: number
 ) {
   const passes = makeLoopPassCounter();
   const limit = budget === undefined ? undefined : Math.floor(budget);
+  const tick = () => checkDeadlineEvery(ce?._deadlineFrame, 0x3ff);
   let slot: RandomSeedFrame | undefined;
   const random = makeRandomHelpers({
     random: () => (ce ? ce._liveRandom() : Math.random()),
@@ -226,13 +233,20 @@ export function javascriptRuntime(
       return random.withRandomSeed(seed, body);
     },
     rangeCount,
+    // The existing compiler's quadrature (adaptive Gauss-Kronrod, with a
+    // Monte-Carlo fallback that draws from the engine).
+    integrate: (f: (x: number) => number, a: number, b: number) =>
+      SYS_HELPERS.integrate(f, a, b, undefined, () =>
+        ce ? ce._liveRandom() : Math.random()
+      ),
     pow: realPow,
     mod: floorMod,
-    tick:
+    tick,
+    pass:
       limit === undefined
-        ? () => checkDeadlineEvery(ce?._deadlineFrame, 0x3ff)
+        ? tick
         : () => {
-            checkDeadlineEvery(ce?._deadlineFrame, 0x3ff);
+            tick();
             passes.countLoopPass(limit);
           },
     resetPasses: passes.resetLoopPasses,

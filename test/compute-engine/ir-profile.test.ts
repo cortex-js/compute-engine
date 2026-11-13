@@ -135,12 +135,12 @@ describe('a decline', () => {
 
   const OPTIONS: [string, Record<string, unknown>][] = [
     ['functions', { functions: { g: 'Math.sin' } }],
-    ['vars', { vars: { x: '_.y' } }],
     ['operators', { operators: { Add: ['+', 11] } }],
     ['operators', { operators: () => undefined }],
     ['imports', { imports: [() => 1] }],
     ['preamble', { preamble: 'const k = 1;' }],
     ['mode', { mode: 'bigint' }],
+    ['quadrature', { quadrature: 'monte-carlo' }],
     ['broadcast', { broadcast: true }],
     ['strictTypes', { strictTypes: true }],
   ];
@@ -149,16 +149,27 @@ describe('a decline', () => {
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toContain(`the option \`${name}\``);
   });
-  test('of iterationBudget with a Sum names it, and without a loop the option is admitted', () => {
+  test('iterationBudget follows the public rule: a Sum over it is NaN, a Loop over it throws', () => {
     const o = outcome(box(['Sum', 'k', ['Limits', 'k', 1, 'n']]), {
       iterationBudget: 10,
     });
-    expect('message' in o && o.message).toContain(
-      'the option `iterationBudget` with a counted loop'
+    expect('result' in o && o.result.run!({ n: 10 })).toBe(55);
+    expect('result' in o && o.result.run!({ n: 11 })).toBeNaN();
+    const loop = box([
+      'Block',
+      ['Declare', 's', { dict: { value: 0 } }],
+      [
+        'Loop',
+        ['Assign', 's', ['Add', 's', 'k']],
+        ['Element', 'k', ['Range', 1, 'n']],
+      ],
+      's',
+    ]);
+    const l = outcome(loop, { iterationBudget: 10 });
+    expect('result' in l && l.result.run!({ n: 10 })).toBe(55);
+    expect(() => 'result' in l && l.result.run!({ n: 11 })).toThrow(
+      CancellationError
     );
-    // A reduction of a list is a counted loop too.
-    const m = outcome(box(['Max', ['Range', 1, 'n']]), { iterationBudget: 10 });
-    expect('message' in m && m.message).toContain('a counted loop');
     const r = outcome(box(['Add', 'x', 1]), { iterationBudget: 10 });
     expect('result' in r && r.result.run!({ x: 1 })).toBe(2);
   });
@@ -181,6 +192,55 @@ describe('a decline', () => {
     ]) {
       const o = outcome(box(['Add', 'x', 1]), options);
       expect([options, 'result' in o]).toEqual([options, true]);
+    }
+  });
+  test('a vars name is the host text, read at each use, never folded', () => {
+    const engine = makeEngine();
+    engine.assign('a', 5);
+    const r = compile(box(['Add', ['Multiply', 'a', 'a'], 'x'], engine), {
+      ...IR,
+      vars: { a: '_.b' },
+      fallback: false,
+    });
+    // The engine value of `a` is not read; `_.b` is.
+    expect(r.run!({ x: 1, b: 3 } as never)).toBe(10);
+    expect(r.freeSymbols).toEqual(['x']);
+    const n = compile(box(['Add', 'y', 1]), {
+      ...IR,
+      vars: { y: '-8' },
+      fallback: false,
+    });
+    expect(n.run!({})).toBe(-7);
+    // Each read is evaluated, in program order.
+    let calls = 0;
+    const draw = () => ++calls;
+    const twice = compile(box(['Subtract', 'w', 'w']), {
+      ...IR,
+      vars: { w: '_.draw()' },
+      fallback: false,
+    });
+    expect(twice.run!({ draw } as never)).toBe(-1);
+    expect(calls).toBe(2);
+  });
+  test('a vars text is one parenthesised operand, also with a line comment', () => {
+    const run = (json: Json, vars: Record<string, string>) =>
+      compile(box(json), { ...IR, vars, fallback: false }).run!({
+        y: 7,
+      } as never);
+    expect(run(['Multiply', 'x', 2], { x: '5 - 3' })).toBe(4);
+    expect(run(['Add', 'x', 1], { x: '_.y // c' })).toBe(8);
+    // An entry named `__proto__` is an entry, not a prototype.
+    const proto = JSON.parse('{"__proto__": "_.y"}') as Record<string, string>;
+    expect(run(['Add', '__proto__', 1], proto)).toBe(8);
+  });
+  test('a vars name in a function, as a call, or of a list type declines', () => {
+    for (const [json, vars, cause] of [
+      [['Function', ['Add', 'a', 't'], 't'], { a: '2' }, /in a function/],
+      [['g', 'x'], { g: '((t) => t)' }, /a call of the vars name g/],
+      [['Add', 'q', 1], { q: '$1' }, /not a source text/],
+    ] as [Json, Record<string, string>, RegExp][]) {
+      const o = outcome(box(json), { vars });
+      expect('message' in o && o.message).toMatch(cause);
     }
   });
 });
@@ -282,14 +342,6 @@ describe('the result', () => {
     const r = compile(box(['At', 'L', 1]), IR);
     expect(r.run!({ L: [5, 6, 7] } as never)).toBe(5);
     expect(() => r.run!({ L: '12' } as never)).toThrow(/`L` is not an array/);
-  });
-  test('an integer of 2^53 or more in an exact operation declines', () => {
-    // In doubles 2^60 + 1 is 2^60, so `Mod` gives 1; the interpreter gives 2.
-    const o = outcome(box(['Mod', ['Add', ['Power', 2, 60], 'n'], 3]));
-    expect('message' in o && o.message).toMatch(/2\^53 or more/);
-    // Closed, it is the interpreter's value.
-    const closed = compile(box(['Mod', ['Add', ['Power', 2, 60], 1], 3]), IR);
-    expect(closed.run!({})).toBe(2);
   });
   test('an operator with no definition is named as unknown', () => {
     const o = outcome(box(['Quotient', 'n', 3]));

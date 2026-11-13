@@ -73,8 +73,9 @@ export type Syntax = {
   ifOpen(cond: string): string;
   readonly elseOpen: string;
   /** The lines that open a counted loop of the index `k` from `lo` to `hi`,
-   *  each bound evaluated once. */
-  loopOpen(k: string, lo: string, hi: string): string[];
+   *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
+   *  iteration budget counts. */
+  loopOpen(k: string, lo: string, hi: string, passes: boolean): string[];
   readonly close: string;
   /** `copy`: the value can be (or hold) an input. */
   ret(value: string, type: IRType, copy: boolean): string;
@@ -313,7 +314,12 @@ export function printProgram(
           line(syntax.declare(type(v), name(v), use(i.init[j]), true));
         });
         syntax
-          .loopOpen(name(i.body.params[0]), use(i.lo), use(i.hi))
+          .loopOpen(
+            name(i.body.params[0]),
+            use(i.lo),
+            use(i.hi),
+            i.passes === true
+          )
           .forEach((s) => line(s));
         nested(i.body, i.outs.map(name), true);
         line(syntax.close);

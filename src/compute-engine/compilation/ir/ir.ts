@@ -66,7 +66,17 @@ export type Instr =
   | { k: 'op'; out: V; op: string; args: V[] }
   | { k: 'list'; out: V; args: V[] }
   | { k: 'if'; outs: V[]; cond: V; then: Region; else: Region }
-  | { k: 'loop'; outs: V[]; lo: V; hi: V; init: V[]; body: Region }
+  /** `passes`: each pass is a pass of a `Loop`, which the iteration
+   *  budget counts. */
+  | {
+      k: 'loop';
+      outs: V[];
+      lo: V;
+      hi: V;
+      init: V[];
+      body: Region;
+      passes?: boolean;
+    }
   | { k: 'call'; outs: V[]; fn: string; args: V[] }
   /** The region row `op`; `site` is the source text, for a warning. */
   | {

@@ -130,12 +130,34 @@ export function listLowering(cx: Lowering) {
       return v;
     });
     const init = integer(REDUCTIONS.get(e.operator)!.identity);
-    return accumulate(e, r, init, lo, hi, (k) =>
-      cx.withFrame(true, (frame) => {
-        frame.names.set(index.symbol, { v: k, role: 'index' });
-        return cx.scalar(e.ops[0]);
-      })
-    );
+    const run = () =>
+      accumulate(e, r, init, lo, hi, (k) =>
+        cx.withFrame(true, (frame) => {
+          frame.names.set(index.symbol, { v: k, role: 'index' });
+          return cx.scalar(e.ops[0]);
+        })
+      );
+    if (cx.budget === undefined || !Number.isFinite(cx.budget)) return run();
+    // `iterationBudget`: a loop of more passes than the budget is NaN
+    // (`CompilationOptions.iterationBudget`), `hi - lo < budget` otherwise.
+    const span = cx.apply(e, cx.row('Subtract'), [hi, lo]);
+    const budget = integer(Math.floor(cx.budget));
+    const within = cx.apply(e, cx.row('Less'), [span, budget]);
+    let lane: Lane = 'real';
+    return cx.branch(
+      e,
+      within,
+      () => {
+        const v = run();
+        lane = type(v).lane;
+        return v;
+      },
+      () =>
+        lane === 'complex'
+          ? b.constant({ re: NaN, im: NaN }, 'complex')
+          : b.constant(NaN, 'real'),
+      true
+    )!;
   };
 
   /** The fold of `r` over the scalars and the elements of the lists of

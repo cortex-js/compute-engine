@@ -93,10 +93,10 @@ uses: a negative base with a rational exponent of odd denominator gives the
 interpreter's real root (`(-8)^(1/3)` is -2), also for a run-time exponent. On
 GLSL it is `pow()`, whose value for a negative base is undefined in GLSL ES
 3.00: the driver gives NaN, 0 or any value. A real literal at or above 2^53 is a
-real. An integer constant of 2^53 or more, or a value computed from one by `+`,
-`-`, `*`, `Abs`, `Max` or `Min`, declines where it reaches `Mod`, `Floor`,
-`Ceil`, `Round` or a comparison: the interpreter computes with it exactly, and
-a double does not hold it (`Mod(2^60 + n, 3)`). A closed node keeps the
+real. An integer value of 2^53 or more is a double and its low digits are
+unspecified (`Mod(2^60 + n, 3)`; rule 3 of
+`docs/plans/2026-11-12-js-route-course-correction.md`): the compiler makes no
+analysis of integer ranges. A closed node keeps the
 interpreter's value (`Mod(2^60 + 1, 3)` is 2). At run time, `Mod` (`_rt.mod`,
 `floorMod()`) throws a `RangeError` for an operand beyond ±(2^53 − 1) or
 infinite, as the existing compiler does (`docs/COMPILATION-MODEL.md`,
@@ -223,7 +223,8 @@ node is memoised by the effect of what it emitted: a node whose lowering
 emitted an effectful instruction is lowered again at each use; a `may-fail`
 lowering (a loop, a build, a call of a recursive function) is shared, because
 the evaluation that dominates the use fails first if it fails. So the budget
-counts the passes that run: a `Sum` node used twice runs its loop once. The operands of `And`, `Or` and a
+counts the passes that run, and a `Loop` whose carried values are not read
+is removed and counts none. The operands of `And`, `Or` and a
 chain are lowered lazily, in arms; the `hoist` pass makes a speculatable arm a
 plain `and` or `or`. After each pass a check compares the sequence of effectful
 instructions (operation, operands, results and region); the same check runs
@@ -239,14 +240,41 @@ the engine's frame slot): a compiled draw reads the frame it runs in.
 
 ## Loops and the runtime
 
-On JavaScript each pass of a loop or a build begins with `_rt.tick()`: it checks
-the engine's deadline (`ce.withTimeLimit()`) every 1024 passes, and with the
-`iterationBudget` option it adds one to one count for a call of `run()`, nested
-loops, builds and the loops of user functions included; over the budget, `run()`
-throws a `CancellationError` with the cause `iteration-limit-exceeded`, as
-`compile()` does (`docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes"). The
-count is in the runtime, reset when `run()` starts, and is not in the IR. GLSL
-has no deadline and no budget.
+On JavaScript each pass of a loop or a build begins with `_rt.tick()`, which
+checks the engine's deadline (`ce.withTimeLimit()`) every 1024 passes. The
+`iterationBudget` option follows the rule of `compile()`
+(`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop`
+instruction with `passes`) begins with `_rt.pass()`, which also adds one to one
+count for a call of `run()`, nested loops and the loops of user functions
+included; over the budget, `run()` throws a `CancellationError` with the cause
+`iteration-limit-exceeded` (`docs/COMPILATION-MODEL.md`, "A limit on `Loop`
+passes"). The count is in the runtime, reset when `run()` starts. A `Sum` or a
+`Product` with `Limits` whose count of passes is more than the budget is NaN
+(`hi - lo < budget` is false), each loop by its own count: the lowering writes
+that test as an `if`. A `Loop` in an integrand counts its passes once per
+sample of the quadrature, whose number of samples is unspecified. A build, a `Filter` and a reduction of a list count no
+pass. GLSL has no deadline and counts no `Loop` pass.
+
+`Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
+counted loop per clause over the source of `L` (an input list, a list, a
+`Range`), a later clause lowered in the body of the one before, so it reads
+its index. The locals declared outside the loop that the body writes are its
+carried values. A `Loop` with no `Element` clause, a `Break`, a `Continue`, a
+`Return`, a write to the index and a `Loop` whose value is read decline: the
+structured regions have no early exit.
+
+`Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
+(infinite ones too) and a real integrand (a function literal of one
+parameter, or a body in the name of the `Limits`) are the region
+`integrate`: the integrand is an arrow function that the runtime passes to
+the existing compiler's quadrature (`SYS_HELPERS.integrate`: adaptive
+Gauss-Kronrod, stated tolerance 1e-10 relative and 1e-12 absolute, with a
+Monte-Carlo fallback that draws from the engine). As for any pure
+operation, the number of evaluations of an integral is unspecified (an
+unused one is removed), and the fallback's draws are not the program's. An
+integrand with an
+effectful operation declines (the routine chooses its samples), as do two
+variables and the option `quadrature: 'monte-carlo'`. GLSL has no spelling.
 
 ## User functions
 
@@ -302,7 +330,9 @@ the `numeric-kernel` profile.
   A `CancellationError` is thrown as it is.
 - **Options.** One table classifies every option of `compile()`
   (`IR_OPTIONS` in `adapter.ts`; `compile-expression.ts` fails the type check
-  when an option has no class). Mapped: `iterationBudget` (see below),
+  when an option has no class). Mapped: `iterationBudget` ("Loops and the
+  runtime"), `vars` (below), `quadrature` (`'adaptive'`; `'monte-carlo'`
+  declines),
   `entryChecks` (a `{re, im}` value for a scalar real or integer input or
   parameter, and a value that is not an array for a list input, throw a
   `TypeError` that names it; a number for a scalar complex input or
@@ -314,19 +344,20 @@ the `numeric-kernel` profile.
   `varsObjectRefs` (the inputs read from the inputs object,
   filled also when a literal declines for a free name). Admitted with no
   effect: `storage` (the JavaScript target ignores it,
-  `CompilationOptions.storage`), `quadrature` (no program of the profile has
-  an `Integrate`), `mode: 'strict'`, `broadcast: false` (the result has no
-  `broadcast()`), and an empty `functions`, `vars`, `operators`, `imports` or
-  blank `preamble`. Declined by name: `functions`, `vars`, `operators` (both
-  forms), `imports`, `preamble`, the `mode` `'bigint'`,
+  `CompilationOptions.storage`), `mode: 'strict'`, `broadcast: false` (the
+  result has no `broadcast()`), and an empty `functions`, `operators`,
+  `imports` or blank `preamble`. Declined by name: `functions`, `operators`
+  (both forms), `imports`, `preamble`, the `mode` `'bigint'`,
   `broadcast: true`, `strictTypes: true`.
-- **The budget.** The public `iterationBudget` counts the passes of a `Loop`,
-  which this pipeline does not have, and gives NaN for a `Sum` or a `Product`
-  of more passes than the budget, which this pipeline does not do. The profile
-  therefore passes no budget to the pipeline, compiles a program with no
-  counted loop as usual, and declines a program with one (a `Sum`, a
-  `Product`, or a reduction of a list such as `Max(Range(1, n))`) when the
-  option is set. The engine's deadline is checked every 1024 passes as always.
+- **`vars`.** A mapped name is read as the host's text at each use, in
+  program order (an effectful operation, so `w - w` with `w: '_.draw()'`
+  calls `draw` twice), in the scope of the entry, where `_` is the inputs
+  object. The mapping wins over the engine's value of the name and is never
+  folded; a local of the same name shadows it. Its lane is the name's type
+  (a wide or `any` type is a real). A read in a user function or a root
+  function literal (no such scope), a call of a mapped name, a list or
+  complex type, and a text with `$` and a digit decline. A mapped name is not
+  an input (`freeSymbols`).
 - **Calling convention.** The result is `calling: 'expression'`,
   `run(inputs)`, or, for a root `Function` literal, `calling: 'lambda'`,
   `run(a0, a1, …)`, as the existing compiler's result is called by

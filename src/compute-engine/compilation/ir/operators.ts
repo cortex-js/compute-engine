@@ -436,6 +436,19 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     results: (_, ys) => [...ys],
     alias: (j, ys) => [ys[j]],
   },
+  // The engine's machine quadrature from `a` to `b` of the region's yield
+  // at its parameter.
+  {
+    op: 'integrate',
+    effect: 'may-fail',
+    args: [R, R],
+    params: [R],
+    results: (_, ys) =>
+      ys.length === 1 && ys[0].shape.length === 0 && widensTo(ys[0].lane, R)
+        ? [{ lane: R, shape: [] }]
+        : undefined,
+    alias: () => [],
+  },
 ]);
 
 /** The reductions, by head: the row that accumulates from its identity,

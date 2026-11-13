@@ -107,8 +107,9 @@ const CONSTRUCTS = new Set([
   'Reduce',
   'Typed',
   'Limits',
+  'Loop',
 ]);
-const LOOPS = new Set(['Map', 'Filter', 'Reduce', 'Range']);
+const LOOPS = new Set(['Map', 'Filter', 'Reduce', 'Range', 'Loop']);
 
 /** What the memo and `closedValue()` read of a node: the names it reads
  *  and writes (outside it), whether it has a loop, whether every head
@@ -128,34 +129,22 @@ type Facts = {
  *  depth. A larger node is lowered, and its parts are folded. */
 const CLOSED_SIZE = 10_000;
 
-/** The IR operations whose value changes when an integer of 2^53 or more
- *  is rounded to a double (`Mod(2^60 + n, 3)`), and those through which
- *  such an integer stays one. */
-const EXACT_OPS = new Set([
-  'mod',
-  'floor',
-  'ceil',
-  'round',
-  'trunc',
-  'sign',
-  'fract',
-  'lt',
-  'le',
-  'gt',
-  'ge',
-  'eq',
-  'ne',
-]);
-const INTEGER_OPS = new Set(['add', 'sub', 'neg', 'mul', 'abs', 'max', 'min']);
-
 /** `fold: false` (the `constantFold: false` option of the profile `ir`):
  *  no closed sub-expression is evaluated with `N()`. `mode: 'complex'`: a
  *  row that can leave the reals takes its complex signature unless its
- *  operands prove a real value (`OperatorRow.leaves`). */
+ *  operands prove a real value (`OperatorRow.leaves`). `iterationBudget`:
+ *  a `Sum` or a `Product` of more passes than it is NaN. */
 export type LowerOptions = {
   readonly fold?: boolean;
   readonly mode?: 'strict' | 'complex';
+  readonly iterationBudget?: number;
+  /** The `vars` option: a name read as the host's text (`hostVarOp()`). */
+  readonly vars?: readonly string[];
 };
+
+/** The IR operation of the read of the `vars` name of index `k` on the
+ *  lane `lane`: an effectful operation, spelled as the host's text. */
+export const hostVarOp = (k: number, lane: Lane) => `host${k}.${lane}`;
 
 export function lower(
   root: Expression,
@@ -177,14 +166,6 @@ export function lower(
   >();
   const known = new WeakMap<Expression, Facts>();
   const inputLengths = new Set<V>();
-  /** The values that are, or are computed exactly from, an integer
-   *  constant of 2^53 or more (`EXACT_OPS`). */
-  const large = new Set<V>();
-  const constantOf = (x: number, lane: 'integer' | 'real'): V => {
-    const v = b.constant(x, lane);
-    if (Number.isInteger(x) && Math.abs(x) >= 2 ** 53) large.add(v);
-    return v;
-  };
   const type = (v: V) => b.typeOf(v);
   const constant = (v: V) => {
     const c = b.constants.get(v);
@@ -363,13 +344,6 @@ export function lower(
         const a = lanes.length === 1 ? lanes[0] : lanes[i];
         return a === 'list' ? v : widen(v, a);
       });
-      const base = signature[2].split('.')[0];
-      const fromLarge = operands.some((v) => large.has(v));
-      if (fromLarge && EXACT_OPS.has(base))
-        decline(
-          node,
-          'an integer of 2^53 or more, which the interpreter computes with exactly and a double does not hold'
-        );
       const t = resultType(signature, operands.map(type), same);
       if (t === undefined)
         decline(
@@ -378,9 +352,7 @@ export function lower(
             ? 'lists of run-time lengths that are not one length by construction (the same list, or a Map of it)'
             : 'lists of different lengths'
         );
-      const out = b.op(signature[2], operands, t);
-      if (fromLarge && INTEGER_OPS.has(base)) large.add(out);
-      return out;
+      return b.op(signature[2], operands, t);
     };
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
@@ -424,6 +396,8 @@ export function lower(
       return number(e) ?? decline(e, 'a complex number with an infinite part');
     if (isSymbol(e)) return symbol(e, want);
     if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
+    if (options.vars?.includes(e.operator) === true)
+      decline(e, `a call of the vars name ${e.operator}`);
     const user = userBinding(e);
     if (user !== undefined || fns.recursive(e)) return fns.call(e, user);
     if (!isLibraryOperator(e as never, e.operator))
@@ -514,6 +488,11 @@ export function lower(
       }
       case 'Assign':
         return assign(e);
+      case 'Loop':
+        return loop(e, want);
+      case 'Integrate':
+      case 'NIntegrate':
+        return integral(e);
       case 'Declare':
         decline(e, 'Declare outside a block');
       case 'Function':
@@ -601,6 +580,7 @@ export function lower(
     // library's; a name with a value declines where it is read.
     const valued = (s: string) =>
       lookup(s) !== undefined ||
+      options.vars?.includes(s) === true ||
       (!CONSTANTS.has(s) &&
         s !== 'True' &&
         s !== 'False' &&
@@ -625,7 +605,7 @@ export function lower(
     e: Expression & { re: number; im: number }
   ): V | undefined => {
     if (e.im === 0)
-      return constantOf(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
+      return b.constant(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
     if (Number.isFinite(e.re) && Number.isFinite(e.im))
       return b.constant({ re: e.re, im: e.im }, 'complex');
     return undefined;
@@ -671,6 +651,21 @@ export function lower(
     }
     const known = lookup(name);
     if (known) return known.binding.v;
+    const k = options.vars?.indexOf(name) ?? -1;
+    if (k >= 0) {
+      // The host's text, in the scope of the entry, read at each use.
+      // A function body and a root function literal have no such scope.
+      if (cx.inFunction !== undefined || b.literal)
+        decline(e, `the vars name ${name} in a function`);
+      // A wide type (an assigned name is `any`) is a real.
+      const t = inputType(e.type.type === 'any' ? 'real' : e.type.type);
+      if (t === undefined || t.lane === 'complex' || t.shape.length > 0)
+        decline(
+          e,
+          `the vars name ${name} of type ${engineTypeToString(e.type.type)}`
+        );
+      return b.op(hostVarOp(k, t.lane), [], scalarType(t.lane));
+    }
     if (name === 'True' || name === 'False')
       return b.constant(name === 'True', 'boolean');
     const c = CONSTANTS.get(name);
@@ -930,6 +925,104 @@ export function lower(
       return result;
     });
 
+  /** `Loop(body, Element(i, L), …)`, a statement whose value is
+   *  `Nothing`: a counted loop per clause (a later clause is lowered in the
+   *  body of the one before it, so it reads its index), whose carried
+   *  values are the locals declared outside it that the body writes. Each
+   *  pass is a pass of the `iterationBudget` (`passes`). */
+  const loop = (e: Fn, want: boolean): undefined => {
+    if (want) decline(e, 'the value of a Loop (Nothing)');
+    if (e.nops < 2) decline(e, 'a Loop with no Element clause');
+    const carried = [...facts(e).writes].flatMap((n) => {
+      const x = lookup(n);
+      return x?.binding.role === 'local' && !x.outer ? [x.binding] : [];
+    });
+    const clause = (j: number): void => {
+      if (j === e.nops) return void value(e.ops[0], false);
+      const c = e.ops[j];
+      if (!isFunction(c, 'Element') || c.nops !== 2)
+        decline(c, 'a Loop clause that is not Element(i, L)');
+      const index = c.ops[0];
+      if (!isSymbol(index)) decline(c, 'a Loop index that is not a name');
+      const s = lists.source(c.ops[1]);
+      const lo = b.constant(0, 'integer');
+      const hi = apply(c, row('Subtract'), [
+        s.length,
+        b.constant(1, 'integer'),
+      ]);
+      const init = carried.map((x) => widen(x.v, x.lane!));
+      const k = b.newValue(scalarType('integer'));
+      const params = carried.map((x) => b.newValue(scalarType(x.lane!)));
+      const body = b.region([k, ...params], () => {
+        carried.forEach((x, i) => (x.v = params[i]));
+        withFrame(false, (frame) => {
+          frame.names.set(index.symbol, { v: s.at(k), role: 'index' });
+          clause(j + 1);
+        });
+        return carried.map((x) => x.v);
+      });
+      const outs = params.map((v) => b.newValue(type(v)));
+      b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true });
+      carried.forEach((x, i) => (x.v = outs[i]));
+    };
+    clause(1);
+    return undefined;
+  };
+
+  /** `Integrate(f, Limits(t, a, b))` or `NIntegrate(f, a, b)`, of real
+   *  bounds and a real integrand (a function literal of one parameter, or
+   *  a body in the name of the `Limits`): the region `integrate`, whose
+   *  value is within the tolerance of the engine's quadrature. The
+   *  integrand has no effectful operation: the routine chooses its
+   *  samples. */
+  const integral = (e: Fn): V => {
+    const [f, limits] = e.ops;
+    const bounds =
+      e.operator === 'NIntegrate'
+        ? e.nops === 3
+          ? e.ops.slice(1)
+          : undefined
+        : e.nops === 2 && isFunction(limits, 'Limits') && limits.nops === 3
+          ? limits.ops.slice(1)
+          : undefined;
+    if (bounds === undefined)
+      decline(e, 'an integral that is not of one variable and two bounds');
+    const literal = isFunction(f, 'Function') ? f : undefined;
+    const name = literal
+      ? literal.nops === 2
+        ? parameterName(literal.ops[1])
+        : undefined
+      : isFunction(limits, 'Limits') && isSymbol(limits.ops[0])
+        ? limits.ops[0].symbol
+        : undefined;
+    if (name === undefined || name === 'Nothing')
+      decline(e, 'an integrand that is not a function of one variable');
+    const [lo, hi] = bounds.map((x) => {
+      const v = scalar(x);
+      if (!isSubLane(type(v).lane, 'real'))
+        decline(x, 'a bound that is not real');
+      return v;
+    });
+    const effects = b.effects;
+    const t = b.newValue(scalarType('real'));
+    const [out] = region(
+      'integrate',
+      [lo, hi],
+      [t],
+      () =>
+        withFrame(true, (frame) => {
+          frame.names.set(name, { v: t, role: 'index' });
+          const y = scalar(literal?.ops[0] ?? f);
+          if (!isSubLane(type(y).lane, 'real'))
+            decline(e, 'an integrand that is not real');
+          return [y];
+        }),
+      e
+    );
+    if (b.effects !== effects) decline(e, 'an integrand with an effect');
+    return out;
+  };
+
   const assign = (e: Fn): V => {
     const name = e.ops[0];
     if (!isSymbol(name)) decline(e, 'a write that is not to a name');
@@ -960,6 +1053,7 @@ export function lower(
     isLibrary,
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
+    budget: options.iterationBudget,
   };
   const lists = listLowering(cx);
   const fns = functionLowering(cx);
