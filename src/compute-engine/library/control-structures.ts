@@ -1,5 +1,12 @@
 import { scopeActivation } from '../boxed-expression/ambient-chain.js';
-import { markCallableHome } from '../boxed-expression/binders.js';
+import {
+  carryLazyViewContexts,
+  inLazyViewContext,
+} from '../boxed-expression/lazy-view-context.js';
+import {
+  markCallableHome,
+  sameBindingDef,
+} from '../boxed-expression/binders.js';
 import { canonicalValueOperand } from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -3951,15 +3958,87 @@ function evaluateBlock(
   //
   // A block that the host evaluates directly is a program: each of its
   // statements is its own top-level evaluation (`runsAsProgram`).
-  return resolveEscapingLambda(
+  return lazyResultOverLocalValues(
     ce,
-    evaluateStatements(
+    resolveEscapingLambda(
       ce,
-      ops,
-      numericApproximation ? { numericApproximation: true } : undefined,
-      runsAsProgram(ce, false)
+      evaluateStatements(
+        ce,
+        ops,
+        numericApproximation ? { numericApproximation: true } : undefined,
+        runsAsProgram(ce, false)
+      )
     )
   );
+}
+
+/** The depth of nested lazy collections that `lazyResultOverLocalValues`
+ * walks. */
+const MAX_LAZY_RESULT_DEPTH = 16;
+
+/**
+ * The value `result` of a block, with each source of a lazy collection that
+ * is a local of the block replaced by the value the local holds.
+ *
+ * An element-wise operation on a collection of more than
+ * `MAX_SIZE_EAGER_COLLECTION` elements gives a lazy `Map` whose sources are
+ * the operands as they are written: `x + y` with two locals that hold 120
+ * elements is `Map((_1, _2) ↦ _1 + _2, x, y)`. A local has no value after
+ * its block, so a collection that names one has no element outside the
+ * block. The result names the values instead, as `Map(f, x)` written in
+ * the block does: `Map((_1, _2) ↦ _1 + _2, Range(1, 120), Range(1, 120))`.
+ *
+ * Only a source is replaced: a symbol operand of a lazy collection, or of a
+ * lazy collection that is its source, that reads a binding of the scope of
+ * the block and whose value is a collection. A function literal keeps its
+ * names, as a closure does, and a result that is not a lazy collection is
+ * returned as it is.
+ *
+ * Must be called while the scope of the block is the current lexical
+ * scope.
+ */
+function lazyResultOverLocalValues(
+  ce: ComputeEngine,
+  result: Expression,
+  depth = 0
+): Expression {
+  // The value of a `Return` leaves the block inside the `Return`, which the
+  // call of the function unwraps after the block has ended.
+  if (isFunction(result, 'Return') && result.nops === 1) {
+    const value = lazyResultOverLocalValues(ce, result.op1, depth);
+    return value === result.op1 ? result : ce._fn('Return', [value]);
+  }
+  if (!isFunction(result) || !result.isLazyCollection) return result;
+  if (result.operator === 'Function' || depth > MAX_LAZY_RESULT_DEPTH)
+    return result;
+  const locals = ce.context.lexicalScope.bindings;
+  let changed = false;
+  const ops = result.ops.map((op) => {
+    let next = op;
+    if (isSymbol(op)) {
+      // The occurrence must read the local itself: a global of the same
+      // name, read by a function that the block calls, is another binding.
+      const binding = locals.get(op.symbol);
+      if (
+        binding === undefined ||
+        !('value' in binding) ||
+        !sameBindingDef(binding.value, op.valueDefinition)
+      )
+        return op;
+      // A collection made in a call keeps the activation of that call
+      // (`lazy-view-context.ts`); the value is read there, so a collection
+      // that a recursive call returns does not take the value of this run.
+      const value = inLazyViewContext(result, () => op.evaluate());
+      if (value === op || value.isCollection !== true) return op;
+      next = lazyResultOverLocalValues(ce, value, depth + 1);
+    } else next = lazyResultOverLocalValues(ce, op, depth + 1);
+    if (next !== op) changed = true;
+    return next;
+  });
+  if (!changed) return result;
+  const rebuilt = ce.function(result.operator, ops);
+  carryLazyViewContexts(result, rebuilt);
+  return rebuilt;
 }
 
 /**
@@ -4048,15 +4127,18 @@ async function evaluateBlockAsync(
     options._precisionWindow,
     program
   );
-  // `resolveEscapingLambda` reads the block scope as the current lexical
-  // scope. It runs after an `await`, so the context stack of this evaluation
-  // (which holds the block scope) must be put in place explicitly.
+  // `resolveEscapingLambda` and `lazyResultOverLocalValues` read the block
+  // scope as the current lexical scope. They run after an `await`, so the
+  // context stack of this evaluation (which holds the block scope) must be
+  // put in place explicitly.
+  const leave = (): Expression =>
+    lazyResultOverLocalValues(ce, resolveEscapingLambda(ce, result));
   return options._effects === undefined
-    ? resolveEscapingLambda(ce, result)
+    ? leave()
     : runWithEvaluationEffects(
         ce,
         options._effects,
-        () => resolveEscapingLambda(ce, result),
+        leave,
         options._contextStack,
         options._precisionWindow
       );
