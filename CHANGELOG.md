@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`ContinuedFraction` of a quadratic irrational is its periodic form, and of another exact real is only the terms its precision vouches for** (#NNN, contributed by [enumeratio](https://github.com/enumeratio)). `ContinuedFraction(Sqrt(2))` was twenty terms `[1, 2, 2, …]`; it is `[1, [2]]` (as `(1 + Sqrt(5))/2` is `[1, [1]]` and `(3 + Sqrt(7))/5` is `[1, 7, [1, 2, 1, 8, 13, 8]]`), and with a count `n` it is exactly `n` terms (`ContinuedFraction(Sqrt(2), 40)` stopped at 21). `ContinuedFraction(ExponentialE, 40)` was 19 terms with a wrong last term (`…, 12, 2` for `…, 12, 1, 1, 14`); it is the 40 terms, computed to a precision that is doubled and checked, or left unevaluated. `ContinuedFraction(Pi, 30)` was 13 terms. `FromContinuedFraction([1, [2]])` is `Sqrt(2)`: a last list is the period.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

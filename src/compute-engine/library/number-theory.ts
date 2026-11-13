@@ -40,8 +40,25 @@ import {
   floatIfFloatOperand,
   floatNumbersIfFloatOperand,
   floatResultIfFloatOperand,
+  hasFloatOperand,
 } from '../boxed-expression/float-result.js';
+import {
+  MAX_CONTINUED_FRACTION_TERMS,
+  certifiedTerms,
+  rational,
+  surdAdd,
+  surdFromPeriodicTerms,
+  surdFromRational,
+  surdFromRoot,
+  surdInverse,
+  surdMultiply,
+  surdNegate,
+  surdPeriodicTerms,
+  surdTerms,
+  type Surd,
+} from '../numerics/continued-fractions.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { BigNum } from '../numerics/types.js';
@@ -188,6 +205,197 @@ function finiteElements(op: Expression | undefined): Expression[] | undefined {
     elements.push(x);
   }
   return elements;
+}
+
+/**
+ * `x` as `a + b·√d` with rational `a`, `b`, when it is an exact quadratic
+ * irrational written with the four operations and square roots of rationals
+ * (`√2`, `(1 + √5)/2`, `3 − √7/2`); `undefined` otherwise. A sum or product
+ * of two different radicals is not one quadratic field, so it is declined.
+ */
+function quadraticSurd(x: Expression): Surd | undefined {
+  if (isNumber(x)) {
+    if (!x.isExact) return undefined;
+    if (x.isRational) {
+      const n = toBigint(x.numerator);
+      const d = toBigint(x.denominator);
+      return n === null || d === null || d === 0n
+        ? undefined
+        : surdFromRational(rational(n, d));
+    }
+    const nv = x.numericValue;
+    if (!(nv instanceof ExactNumericValue) || nv.im !== 0) return undefined;
+    const [n, d] = nv.rational;
+    return surdFromRoot(rational(BigInt(n), BigInt(d)), BigInt(nv.radical));
+  }
+  if (!isFunction(x)) return undefined;
+  const ops = x.ops.map(quadraticSurd);
+  if (ops.some((o) => o === undefined)) return undefined;
+  const [a, b] = ops as Surd[];
+  switch (x.operator) {
+    case 'Add':
+      return (ops as Surd[])
+        .slice(1)
+        .reduce<Surd | undefined>((acc, o) => acc && surdAdd(acc, o), a);
+    case 'Multiply':
+      return (ops as Surd[])
+        .slice(1)
+        .reduce<Surd | undefined>((acc, o) => acc && surdMultiply(acc, o), a);
+    case 'Negate':
+      return ops.length === 1 ? surdNegate(a) : undefined;
+    case 'Subtract':
+      return ops.length === 2 ? surdAdd(a, surdNegate(b)) : undefined;
+    case 'Divide': {
+      const inv = ops.length === 2 ? surdInverse(b) : undefined;
+      return inv && surdMultiply(a, inv);
+    }
+    case 'Sqrt':
+      return ops.length === 1 ? rationalSquareRoot(a) : undefined;
+    case 'Root':
+    case 'Power': {
+      const e = x.ops[1];
+      const half =
+        x.operator === 'Root'
+          ? isNumber(e) && e.isSame(2)
+          : isNumber(e) && e.isSame(x.engine.number([1, 2]));
+      return half ? rationalSquareRoot(a) : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** `√r` for a positive rational `r = n/m`, as `√(nm)/m`. */
+function rationalSquareRoot(r: Surd): Surd | undefined {
+  if (r.b[0] !== 0n || r.a[0] <= 0n) return undefined;
+  return surdFromRoot(rational(1n, r.a[1]), r.a[0] * r.a[1]);
+}
+
+/** The digits past which a real number is not expanded to certified terms. */
+const MAX_CERTIFIED_DIGITS = 20_000;
+
+/**
+ * The first `n` terms of the real number `x`, each vouched for by an
+ * interval: `x` is computed to `d` digits, the terms common to both ends of
+ * the interval it is known to lie in are kept, and the terms are returned
+ * only when the same `n` come out of `2d` digits. `undefined` when `n`
+ * terms are not reached within `MAX_CERTIFIED_DIGITS` or the two precisions
+ * disagree: a term the working precision cannot vouch for is not given.
+ */
+function certifiedExpansion(
+  ce: ComputeEngine,
+  x: Expression,
+  n: number
+): bigint[] | undefined {
+  if (n > MAX_CONTINUED_FRACTION_TERMS) return undefined;
+  const termsAt = (digits: number): bigint[] | undefined =>
+    ce._withTransientPrecision(digits, () => {
+      const v = x.N();
+      if (!isNumber(v) || v.isComplex === true) return undefined;
+      const bd = v.bignumRe;
+      if (bd === undefined || !bd.isFinite()) return undefined;
+      // |x - v| < (|⌊v⌋| + 2) · 10^-(digits - 3): the last few digits of a
+      // kernel are not vouched for.
+      const scale = 10n ** BigInt(digits - 3);
+      const shift = bd.exponent < 0 ? 10n ** BigInt(-bd.exponent) : 1n;
+      const sig =
+        bd.exponent < 0
+          ? bd.significand
+          : bd.significand * 10n ** BigInt(bd.exponent);
+      const whole = sig / shift;
+      const slack = (whole < 0n ? -whole : whole) + 2n;
+      const den = shift * scale;
+      return certifiedTerms(
+        rational(sig * scale - slack * shift, den),
+        rational(sig * scale + slack * shift, den),
+        n
+      );
+    });
+  for (let digits = 2 * n + 30; digits <= MAX_CERTIFIED_DIGITS; digits *= 2) {
+    const terms = termsAt(digits);
+    if (terms === undefined) return undefined;
+    if (terms.length < n) continue;
+    const again = termsAt(2 * digits);
+    if (again === undefined || again.length < n) return undefined;
+    return terms.every((t, i) => t === again[i]) ? terms : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The expansion of an exact real `x` that is not a rational: the periodic
+ * form of a quadratic irrational (`√2` is `[1, [2]]`, Lagrange's theorem)
+ * or its first `n` terms, and the certified terms of another real
+ * (`ExponentialE`), `n` defaulting to 20. `undefined` declines; `null` is
+ * an operand for the rational and float expansions.
+ */
+function irrationalExpansion(
+  ce: ComputeEngine,
+  x: Expression,
+  n: number | undefined
+): Expression | undefined | null {
+  if (x.isRational || (isNumber(x) && !x.isExact)) return null;
+  const list = (terms: bigint[] | undefined) =>
+    terms &&
+    ce.function(
+      'List',
+      terms.map((t) => ce.number(t))
+    );
+  const surd = quadraticSurd(x);
+  if (surd === undefined || surd.b[0] === 0n)
+    return list(certifiedExpansion(ce, x, n ?? 20));
+  if (n !== undefined) return list(surdTerms(surd, n));
+  const p = surdPeriodicTerms(surd);
+  return (
+    p &&
+    ce.function('List', [
+      ...p.pre.map((t) => ce.number(t)),
+      ce.function(
+        'List',
+        p.period.map((t) => ce.number(t))
+      ),
+    ])
+  );
+}
+
+/**
+ * The value of the terms `[a₀, …, [p₀, …]]` whose last element is the
+ * repeating period: a quadratic irrational (Lagrange's theorem). `null`
+ * when the last element is not a list, `undefined` when it cannot be read
+ * (a non-integer term, an empty period).
+ */
+function fromPeriodicTerms(
+  ce: ComputeEngine,
+  elements: Expression[],
+  numericApproximation: boolean | undefined
+): Expression | undefined | null {
+  const tail = elements[elements.length - 1];
+  if (tail === undefined || !isFunction(tail) || tail.operator !== 'List')
+    return null;
+  const preOps = elements.slice(0, -1);
+  const periodOps = finiteElements(tail);
+  if (periodOps === undefined) return undefined;
+  const integers = (ops: Expression[]) => {
+    const ts = ops.map((t) => (t.isInteger === true ? toBigint(t) : null));
+    return ts.includes(null) ? undefined : (ts as bigint[]);
+  };
+  const pre = integers(preOps);
+  const period = integers(periodOps);
+  if (pre === undefined || period === undefined) return undefined;
+  const x = surdFromPeriodicTerms(pre, period);
+  if (x === undefined) return undefined;
+  // a + b√d, the way `1/2 (1 + √5)` is written
+  const value = ce
+    .function('Add', [
+      ce.number(x.a),
+      ce.function('Multiply', [
+        ce.number(x.b),
+        ce.function('Sqrt', [ce.number(x.d)]),
+      ]),
+    ])
+    .evaluate();
+  return numericApproximation || hasFloatOperand([...preOps, ...periodOps])
+    ? value.N()
+    : value;
 }
 
 /** `canEnumerate` acceptance for `Divisors`/`PrimeFactors`: a nonzero
@@ -981,7 +1189,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ContinuedFraction: {
       description:
-        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; an inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to the optional `n` terms (default 20).',
+        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully. An exact quadratic irrational (`Sqrt(2)`) is expanded to its periodic form `[a0, …, [period]]` (`[1, [2]]`), or to the optional `n` terms. Another exact real (`ExponentialE`) is expanded to `n` terms (default 20), each computed at a precision that vouches for it. An inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to `n` terms (default 20).',
       // The value is a FINITE real: the expansion needs the order of the
       // real line and an infinity has no expansion, so every infinity and
       // every non-real number is off-carrier — an `incompatible-type`
@@ -995,7 +1203,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // to the handler. Ruling recorded in
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 10.
-      signature: '(real, integer?) -> list<integer>',
+      signature: '(real, integer?) -> list<integer | list<integer>>',
       broadcastable: true,
       nanBehavior: ['reject', 'reject'],
       requires: ([, n]) => {
@@ -1008,7 +1216,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         return n.re >= 1;
       },
-      examples: ['ContinuedFraction(43/19)  // [2, 3, 1, 4]'],
+      examples: [
+        'ContinuedFraction(43/19)  // [2, 3, 1, 4]',
+        'ContinuedFraction(Sqrt(2))  // [1, [2]]',
+      ],
       // Decline-only: the provable declines are a definitively unavailable
       // `x`, and a term count that `Number(toBigint(nOp) ?? 0n)` puts below 1
       // (a valueless symbol included). Success on a ground `x` further
@@ -1028,11 +1239,23 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: floatResultIfFloatOperand(([xOp, nOp], { engine: ce }) => {
-        if (xOp === undefined) return undefined;
+      evaluate: floatResultIfFloatOperand(([operand, nOp], options) => {
+        const { engine: ce, expression } = options;
+        if (operand === undefined) return undefined;
         const maxTerms =
           nOp === undefined ? undefined : Number(toBigint(nOp) ?? 0n);
         if (maxTerms !== undefined && maxTerms < 1) return undefined;
+
+        // An exact operand is expanded as written: `.N()` has made it a
+        // float by here, and a float has no terms past its precision.
+        let xOp = operand;
+        if (options.numericApproximation && isFunction(expression)) {
+          const written = expression.ops[0]?.evaluate();
+          if (written !== undefined && !hasFloatOperand([written]))
+            xOp = written;
+        }
+        const irrational = irrationalExpansion(ce, xOp, maxTerms);
+        if (irrational !== null) return irrational;
 
         // The expansion is the exact Euclidean expansion of a rational
         // `a / b`: the operand itself when it is exact, and its best
@@ -1089,15 +1312,20 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     FromContinuedFraction: {
       description:
-        'Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`.',
+        'Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. A last element that is a list is the repeating period, `[1, [2]]`: the quadratic irrational `Sqrt(2)`.',
       signature: '(collection<any>) -> number',
-      examples: ['FromContinuedFraction([2, 3, 1, 4])  // 43/19'],
+      examples: [
+        'FromContinuedFraction([2, 3, 1, 4])  // 43/19',
+        'FromContinuedFraction([1, [2]])  // Sqrt(2)',
+      ],
       evaluate: ([listOp], { engine: ce, numericApproximation }) => {
         // `toBigint` ROUNDS a non-integer (2.5 → 3), so gate each term on
         // exact integrality: a non-integer term declines instead of silently
         // reconstructing from the rounded value.
         const termOps = finiteElements(listOp);
         if (termOps === undefined) return undefined;
+        const periodic = fromPeriodicTerms(ce, termOps, numericApproximation);
+        if (periodic !== null) return periodic;
         const terms = termOps.map((t) =>
           t.isInteger === true ? toBigint(t) : null
         );

@@ -69,7 +69,7 @@ function floorDiv(a: bigint, b: bigint): bigint {
 }
 
 /** Integer (floor) square root of `n ≥ 0` via Newton's method on bigints. */
-function isqrt(n: bigint): bigint {
+export function isqrt(n: bigint): bigint {
   if (n < 0n) throw new RangeError('isqrt of negative');
   if (n < 2n) return n;
   let x = 1n << ((BigInt(n.toString(2).length) + 1n) / 2n);
