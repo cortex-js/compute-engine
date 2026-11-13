@@ -1161,8 +1161,17 @@ Next step: code that can be stored and sent to a worker
 (`docs/plans/2026-11-12-ir-profile-shippable-code.md`, option A recommended),
 then a `bigint` lane.
 
-Proposed definition of done (not approved): the profile is the default for
+Definition of done (user, 2026-11-12): the profile is the default for
 JavaScript and GLSL with a decline falling back to the interpreter; Tycho's
-audit passes on it; the engine's consumers run on it with the suite green,
-worker pool included; `javascript-target.ts` and the structured route are
-deleted; the pipeline stays under a stated line budget (10,000 proposed).
+corpus is the yardstick (its codegen audit over its documents and its seeded
+tests pass on the profile), in preference to the synthetic suite measures;
+the engine's consumers run on it with the suite green, worker pool included;
+`javascript-target.ts` and the structured route are deleted; the pipeline
+stays under 10,000 lines.
+
+Other user decisions of 2026-11-12, after batch 3:
+
+- The run-time `RangeError` of `Mod` beyond the safe integer range is to be
+  removed ("a slippery slope"): no guard at all for integers of 2^53 or more.
+- The shape of a complex result: whatever is simplest. A result is reduced
+  to a number only where that is trivial; no machinery for it.
