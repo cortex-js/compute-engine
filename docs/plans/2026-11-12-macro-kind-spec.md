@@ -626,3 +626,38 @@ and `_fn_h(3.0, x, y)`. Differences from the brief of the task:
   function, is outside the GLSL fragment; the pass counter and the `_gpu_*`
   helpers read no input; the multi-clause dispatch and the declared union
   dispatch are emitted on JavaScript only.
+
+**M7, acceptance run by `tycho-desk`** (2026-11-13, archive of
+`9fb18f1b0a2d1d08086fc08f09a80770f36992ff` plus M7; M7 is on main as
+`56b680347ae5dbeaf162451149cdf4a52d4e12f3`). No engine defect found.
+
+- Option absent: codegen audit unchanged against the macro build, 1,295
+  records, 0 differences in the text of code and preamble.
+- Function threading off, `callerLocals: ['t', 'x', 'y', 'z']` on every GLSL
+  compile with no `vars`, value rows as macros: the direct programs give the
+  expected values and the text of section 5c (`k(1) + y`, `h(3)`,
+  `\sum_{x=1}^{3} (x + k(1))` = 39 with the statement form, a macro that
+  reaches an axis through a function). Codegen audit against the same build
+  with no switch: 0 new declines, 11 records with changed code, 908
+  unchanged; 376 records only off and 291 only on are the same rows with
+  another input text, and their values were not compared record by record.
+  One GLSL record of the corpus has an `_in_` parameter
+  (`neyret/iiypd8tktp`): Tycho's inliner removes most calls before the GLSL
+  compile.
+- Tycho's tests: 72 more fail with both switches (27 from threading off, 45
+  from the macros), 1 is fixed. 47 are tests of the mechanism being
+  removed; about 25 were not all read, and at least two are the raw-body
+  lowering case. No failure that was traced is an engine fault.
+- A defect in Tycho appears with threading off: its structural inliner of
+  function bodies writes `v + x` into `\sum_{x=1}^{3} (x + k(1))`, where the
+  index captures `x` (15 where the value is 39). It must rename the binder
+  or keep the call.
+- A helper with two texts in Tycho's two shader lanes: not found in the
+  audit corpus; whether the audit compiles the colour lane of every
+  document was not confirmed.
+- Line counts in `document-ce-manager.ts`. Deleted now: 0. Dead once Tycho
+  adopts a release with M7 and fixes that inliner: the function half of the
+  threading, 202 lines, plus the ambient-parameter fields and their
+  transport (not measured). Needs Tycho's lowering of raw bodies first: the
+  rest of the threading, 1,109 lines, and the publication of value rows as
+  lambdas, 140 lines. Stays: as in the second report.
