@@ -1,3 +1,13 @@
+## Unreleased
+
+### Issues Resolved
+
+- **`a \triangle b = c` is `Equal(SymmetricDifference(a, b), c)`** (#NNN,
+  contributed by [enumeratio](https://github.com/enumeratio)). `\triangle`
+  had the precedence of `=`, so it was read as `a \triangle (b = c)`, an
+  `incompatible-type` error once canonical. It now has the precedence of
+  `\cup` and `\cap`.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

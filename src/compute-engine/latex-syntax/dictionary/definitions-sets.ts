@@ -1549,17 +1549,11 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\triangle'], // or \\ominus
     kind: 'infix',
     // @todo: parser could check that lhs and rhs are sets
-    precedence: COMPARISON_PRECEDENCE,
-    parse: parseSetOperator(
-      'SymmetricDifference',
-      COMPARISON_PRECEDENCE,
-      'both'
-    ),
-    serialize: serializeSetOperator(
-      '\\triangle',
-      COMPARISON_PRECEDENCE,
-      'both'
-    ),
+    // The precedence of `\cup` and `\cap`, tighter than a relation:
+    // `a \triangle b = c` is `Equal(SymmetricDifference(a, b), c)`.
+    precedence: 350,
+    parse: parseSetOperator('SymmetricDifference', 350, 'both'),
+    serialize: serializeSetOperator('\\triangle', 350, 'both'),
   },
 
   // Predicates/Relations
