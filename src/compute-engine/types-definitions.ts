@@ -9,6 +9,7 @@ import type {
 } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { LatexString } from './latex-syntax/types.js';
+import type { MathJsonExpression } from '../math-json/types.js';
 import type {
   ComputeEngine,
   Expression,
@@ -155,6 +156,21 @@ export type ValueDefinition = BaseDefinition & {
    * `ComputeEngine` and possible other environment settings */
   value:
     LatexString | ExpressionInput | ((ce: ComputeEngine) => Expression | null);
+
+  /** The raw MathJSON body of a macro: `ce.declare('A', { macro: body })`.
+   *
+   * A macro has no value and the type `unknown`. A name of the input
+   * (MathJSON or LaTeX) that resolves to the macro where it is boxed in a
+   * canonical or a structural form is replaced by the body, boxed at that
+   * place, in the scope of the occurrence and in the same form. A position
+   * that takes a name (a parameter, an index, the variable of `D`, the
+   * target of `Assign`) is not an occurrence, and a symbol made with
+   * `ce.symbol()` is not expanded. A parameter, an index or a local of the
+   * same name hides the macro.
+   *
+   * A definition with `macro` takes no other field.
+   */
+  macro: MathJsonExpression;
 
   eq: (a: Expression) => boolean | undefined;
   neq: (a: Expression) => boolean | undefined;
@@ -2563,6 +2579,11 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
     * **Default:** `evaluate`
     */
   holdUntil: 'never' | 'evaluate' | 'N';
+
+  /** The raw body of a macro definition (`ce.declare(name, { macro })`),
+   * `undefined` for every other value definition. A macro definition has no
+   * value and the type `unknown`. */
+  readonly macro?: MathJsonExpression;
 
   /** The current value of the symbol: the value an `assume(x = …)` puts in
    *  force for the current context if there is one, else the stored value.

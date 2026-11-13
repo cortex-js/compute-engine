@@ -174,12 +174,23 @@ import {
 } from './function-literal.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
+  declaredBinderNamesOf,
   ownIndexClause,
   symbolAtSite,
   replaceAtSite,
   type BindingSiteSelector,
   type OwnIndexClause,
 } from './binding-sites.js';
+import {
+  anyMacroDeclared,
+  beginExpansion,
+  endExpansion,
+  expandMacro,
+  isExpanding,
+  isMacroDef,
+  isNameOperand,
+  withSourceOffsets as macroBodyWithSourceOffsets,
+} from './macro.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import {
   markBinderVariable,
@@ -413,6 +424,18 @@ function boxHold(
   // `Sequence` spliced out of a list or of the arguments of a function.
   if (expr === null || expr === undefined) return ce.error('missing');
 
+  // A held macro name is raw, and keeps the name: `ReleaseHold` makes it
+  // canonical during an evaluation, so it stays the name
+  // (`BoxedSymbol.canonical`).
+  const symbolName =
+    typeof expr === 'string'
+      ? expr
+      : typeof expr === 'object' && !Array.isArray(expr) && 'sym' in expr
+        ? expr.sym
+        : undefined;
+  if (symbolName !== undefined && resolvesToMacro(ce, symbolName))
+    return box(ce, symbolName, { canonical: false });
+
   if (typeof expr === 'string') return box(ce, expr, options);
 
   if (Array.isArray(expr)) {
@@ -488,6 +511,9 @@ type BoxFunctionOptions = {
    * `Sum(k^2, Limits(k, 1, 3))` was typed `list<integer>`). Set by
    * `boxFunctionInternal` (`isStructuralBinder`). */
   unboundSymbols?: boolean;
+  /** Structural form only: the structural binders around this node, whose
+   * names hide a macro (`HiddenBinders`). Set with `unboundSymbols`. */
+  hidden?: HiddenBinders;
   /** The definition of `name` in the system scope, given by
    * `ce._libraryCall()`: the call is bound to this definition, also where
    * a binding of the program shadows `name` (`ce._qualifiedHead`). */
@@ -550,6 +576,217 @@ function boxStructuralSymbol(
     return symbol._asStructural?.(true) ?? bound;
   }
   return ce.symbol(name, { canonical: false, metadata });
+}
+
+/**
+ * The structural binders and lazy calls around the node being boxed,
+ * innermost first. A structural binder makes no scope, so a macro of a name
+ * that one of them binds, or that a lazy call writes at an operand that takes
+ * a name, is hidden by this record, not by the lookup (rule 6 of
+ * `docs/plans/2026-11-12-macro-kind-spec.md`). A node pushes its head and its
+ * operands as written; the names are found only when a name below it
+ * resolves to a macro (`isHiddenByBinder()`). Made only on an engine with a
+ * macro (`hidesNames()`).
+ */
+type HiddenBinders = {
+  readonly head: MathJsonSymbol;
+  readonly ops: ReadonlyArray<ExpressionInput>;
+  readonly parent: HiddenBinders | undefined;
+  names?: ReadonlySet<string>;
+};
+
+/** True when one of the binders `binders` binds `name`
+ * (`structuralBinderNames()`, computed once per binder). */
+function isHiddenByBinder(
+  ce: ComputeEngine,
+  binders: HiddenBinders | undefined,
+  name: string
+): boolean {
+  for (let b = binders; b !== undefined; b = b.parent) {
+    b.names ??= new Set(structuralBinderNames(ce, b.head, b.ops));
+    if (b.names.has(name)) return true;
+  }
+  return false;
+}
+
+/**
+ * The expansion of the macro that the name `name`, written in the input,
+ * denotes at this place (`macro.ts`), or `undefined` when the name does not
+ * resolve to a macro definition. `options` are the options the name is boxed
+ * with, and the body is boxed with the same ones.
+ *
+ * The raw form never expands. A name resolves as `ce.symbol()` resolves it: a
+ * parameter of the function literal being canonicalized
+ * (`ce._isShadowedParameter()`) and every definition up the scope chain
+ * (an index, a local, a declaration of a pushed scope) come before a macro
+ * of an outer scope. Below a structural binder, a name that the binder binds
+ * is not expanded (`HiddenBinders`).
+ */
+function macroAt(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  options: {
+    canonical?: CanonicalOptions;
+    structural?: boolean;
+    scope?: Scope;
+    unboundSymbols?: boolean;
+    hidden?: HiddenBinders;
+  },
+  sourceOffsets?: [start: number, end: number]
+): Expression | undefined {
+  if (!anyMacroDeclared(ce)) return undefined;
+  if (options.canonical === false && options.structural !== true)
+    return undefined;
+  const def = resolvesToMacro(ce, name);
+  if (def === undefined) return undefined;
+  if (isHiddenByBinder(ce, options.hidden, name)) return undefined;
+  return expandMacro(ce, def, name, sourceOffsets, (body) =>
+    box(ce, body, {
+      canonical: options.canonical,
+      structural: options.structural,
+      scope: options.scope,
+      unboundSymbols: options.unboundSymbols,
+      hidden: options.hidden,
+    })
+  );
+}
+
+/** The macro definition that `name` resolves to here, as `ce.symbol()`
+ * resolves it (a parameter of the function literal being canonicalized
+ * first), or `undefined`. */
+function resolvesToMacro(
+  ce: ComputeEngine,
+  name: MathJsonSymbol
+): BoxedValueDefinition | undefined {
+  if (
+    !anyMacroDeclared(ce) ||
+    !ce._macroNames.has(name) ||
+    ce._isShadowedParameter(name)
+  )
+    return undefined;
+  const def = ce.lookupDefinition(name);
+  return isMacroDef(def) && isValueDef(def) ? def.value : undefined;
+}
+
+/**
+ * The names that the structural binder `name(…ops)` binds in its operands:
+ * the binding sites that its operator definition declares
+ * (`declaredBinderNamesOf()`, the table that `binderSitesOf()` of Epsil
+ * reads), and, for a `Block`, the names of its top-level `Declare` and
+ * `DefineFunction` statements. Clause visibility is not read: a name bound by
+ * a later clause is taken as bound in the whole node.
+ */
+function structuralBinderNames(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  ops: ReadonlyArray<ExpressionInput>
+): readonly string[] {
+  return binderNamesOf(
+    ce,
+    name,
+    ops.map((op) => shallowRaw(ce, op, BINDING_SITE_DEPTH))
+  );
+}
+
+/** How deep a binding site can be below an operand of a binder: the index
+ * of `Element(Tuple(p, q), pairs)` is at depth 2. */
+const BINDING_SITE_DEPTH = 3;
+
+/** `x` boxed raw down to `depth` levels of function nodes, with `Nothing` in
+ * place of a deeper node: enough for the binding-site selectors, without
+ * boxing the body of a deep tree once for each binder that holds it. */
+function shallowRaw(
+  ce: ComputeEngine,
+  x: ExpressionInput,
+  depth: number
+): Expression {
+  if (x instanceof _BoxedExpression) return x;
+  const fn: ReadonlyArray<unknown> | undefined = Array.isArray(x)
+    ? x
+    : typeof x === 'object' && x !== null && 'fn' in x
+      ? (x as { fn: ReadonlyArray<unknown> }).fn
+      : undefined;
+  const head = fn?.[0];
+  if (fn === undefined || typeof head !== 'string')
+    return box(ce, x, { canonical: false });
+  if (depth === 0) return ce.symbol('Nothing');
+  return new BoxedFunction(
+    ce,
+    head,
+    fn.slice(1).map((op) => shallowRaw(ce, op as ExpressionInput, depth - 1)),
+    { canonical: false }
+  );
+}
+
+/** True when the structural node `name(…)` hides names from a macro in its
+ * operands (`HiddenBinders`): a binder, or a lazy operator, whose operands
+ * can take a name. */
+function hidesNames(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  scope: Scope | undefined
+): boolean {
+  if (name === 'Function') return true;
+  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  return (
+    def !== undefined &&
+    !isValueDef(def) &&
+    (def.operator.scoped || def.operator.lazy)
+  );
+}
+
+/**
+ * The names written at the operands of `name(…raw)` that take a name
+ * (`isNameOperand()`): the operand when it is a symbol, each symbol element
+ * of a `List` there, and the first operand of a `Tuple`, a `Pair`, an
+ * `Element` or a `To` there or in that list (`Solve(eq, [x, y])`,
+ * `FindRoot(f, [(a, 1)])`, `Solve(eq, Element(x, Reals))`,
+ * `Limit(f, To(x, a))`). The other fields of such a spec (a start value, a
+ * domain, a point) are not names.
+ */
+function nameOperandNames(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  raw: ReadonlyArray<Expression>
+): string[] {
+  const def = lookupApplicable(name, ce.context.lexicalScope, ce);
+  if (def === undefined || isValueDef(def)) return [];
+  const names: string[] = [];
+  const spec = (x: Expression, inList: boolean) => {
+    if (isSymbol(x)) names.push(x.symbol);
+    else if (
+      isFunction(x, 'Tuple') ||
+      isFunction(x, 'Pair') ||
+      isFunction(x, 'Element') ||
+      isFunction(x, 'To')
+    ) {
+      if (isSymbol(x.op1)) names.push(x.op1.symbol);
+    } else if (!inList && isFunction(x, 'List'))
+      for (const y of x.ops) spec(y, true);
+  };
+  for (let i = 0; i < raw.length; i++)
+    if (isNameOperand(name, def.operator, i, raw)) spec(raw[i], false);
+  return names;
+}
+
+/** `structuralBinderNames()` for operands boxed raw. */
+function binderNamesOf(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  raw: ReadonlyArray<Expression>
+): readonly string[] {
+  const names = [
+    ...declaredBinderNamesOf(ce, name, raw),
+    ...nameOperandNames(ce, name, raw),
+  ];
+  if (name === 'Block')
+    for (const op of raw)
+      if (
+        (isFunction(op, 'Declare') || isFunction(op, 'DefineFunction')) &&
+        isSymbol(op.op1)
+      )
+        names.push(op.op1.symbol);
+  return names;
 }
 
 /**
@@ -645,6 +882,9 @@ function boxFunctionInternal(
     isStructuralBinder(ce, name, options.scope)
   )
     options.unboundSymbols = true;
+  // The names it binds hide a macro in its operands (`macroAt()`).
+  if (structural && anyMacroDeclared(ce) && hidesNames(ce, name, options.scope))
+    options.hidden = { head: name, ops, parent: options.hidden };
 
   // Deep tree: box what is left of it with an explicit work stack instead of
   // recursing into it (see `preboxDeepOperands`). The operands come back
@@ -909,6 +1149,7 @@ function boxFunctionInternal(
     structural,
     scope: options.scope,
     unboundSymbols: options.unboundSymbols,
+    hidden: options.hidden,
   };
   const boxOne =
     ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
@@ -958,6 +1199,7 @@ type PreboxOperandOptions =
       structural: boolean;
       scope: Scope | undefined;
       unboundSymbols: boolean | undefined;
+      hidden: HiddenBinders | undefined;
     };
 
 /**
@@ -1068,6 +1310,7 @@ function buildPreboxedNode(
       structural: operandOptions?.structural ?? false,
       scope: operandOptions?.scope,
       unboundSymbols: operandOptions?.unboundSymbols,
+      hidden: operandOptions?.hidden,
     });
     return canonicalForm(fn, forms, operandOptions?.scope);
   }
@@ -1163,6 +1406,7 @@ function preboxDeepOperands(
         structural: options.structural ?? false,
         scope: options.scope,
         unboundSymbols: options.unboundSymbols,
+        hidden: options.hidden,
       };
 
   type Frame = {
@@ -1178,6 +1422,9 @@ function preboxDeepOperands(
       ops: ReadonlyArray<ExpressionInput>;
     } | null;
     index: number;
+    /** The options its operands are boxed with: those of the construction,
+     *  with the structural binders around the node (`HiddenBinders`). */
+    readonly options: PreboxOperandOptions;
   };
 
   const stack: Frame[] = [
@@ -1187,6 +1434,7 @@ function preboxDeepOperands(
       boxed: [],
       index: 0,
       cause: fullyCanonical ? { operator: name, ops } : null,
+      options: operandOptions,
     },
   ];
 
@@ -1210,6 +1458,21 @@ function preboxDeepOperands(
               operandOptions.unboundSymbols !== true
           )
         ) {
+          // Below a structural binder, a nested binder hides the names it
+          // binds from a macro, as the recursion does (`boxFunctionInternal`).
+          const childOptions =
+            frame.options?.structural === true &&
+            anyMacroDeclared(ce) &&
+            hidesNames(ce, node.name, frame.options.scope)
+              ? {
+                  ...frame.options,
+                  hidden: {
+                    head: node.name,
+                    ops: node.ops,
+                    parent: frame.options.hidden,
+                  },
+                }
+              : frame.options;
           const child: Frame = {
             source: op,
             ops: node.ops,
@@ -1218,6 +1481,7 @@ function preboxDeepOperands(
             cause: fullyCanonical
               ? { operator: node.name, ops: node.ops }
               : null,
+            options: childOptions,
           };
           stack.push(child);
           if (fullyCanonical) ce._inferenceCause = child.cause;
@@ -1246,7 +1510,7 @@ function preboxDeepOperands(
         frame.boxed.push(
           (ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
             ? boxInternal
-            : box)(ce, op, operandOptions)
+            : box)(ce, op, frame.options)
         );
         frame.index += 1;
         continue;
@@ -1256,7 +1520,7 @@ function preboxDeepOperands(
       const parent = stack[stack.length - 1];
       if (fullyCanonical) ce._inferenceCause = parent.cause;
       parent.boxed.push(
-        buildPreboxedNode(ce, frame.source!, frame.boxed, operandOptions)
+        buildPreboxedNode(ce, frame.source!, frame.boxed, parent.options)
       );
       parent.index += 1;
     }
@@ -1572,6 +1836,7 @@ export function box(
     structural?: boolean;
     scope?: Scope;
     unboundSymbols?: boolean;
+    hidden?: HiddenBinders;
   }
 ): Expression {
   beginInferenceTransaction(ce);
@@ -1655,7 +1920,46 @@ export function rebind(
     };
     return box(ce, toSharedJson(expr), { canonical, structural, scope });
   }
+  return unboundRebuilder(ce, { structural, scope })(
+    [expr],
+    undefined,
+    false,
+    undefined
+  )![0];
+}
 
+/**
+ * The rebuild of `rebind()` for the raw and the structural forms, without
+ * recursion (an explicit stack, as `preboxDeepOperands()`): a function that
+ * rebuilds the operands `ops`, each distinct node once for each binder record
+ * around it, and returns them.
+ *
+ * With `expand` (the raw operands of a lazy call, `expandMacroOperands()`),
+ * it rebuilds in the raw form, keeps a node that nothing below it changed,
+ * and returns `undefined` when no operand changed. A raw symbol whose name
+ * resolves to a macro is replaced by the raw body of the macro, rebuilt the
+ * same way while the macro is in the cycle set; when the name stays a name
+ * (an operand that takes a name, or a name that a binder or a lazy call
+ * around it binds, `HiddenBinders`), by a fresh raw symbol of the name that
+ * `canonical` does not expand (`BoxedSymbol._keptName`). An operand whose
+ * role is `opaque` or `held` is kept as it is, also below the call
+ * (`operandPolicies()`). A rebuilt node keeps the metadata of the node, and
+ * a node that holds no macro name is recorded (`macroFree`), so that a lazy
+ * call boxed later from it does not walk it again.
+ */
+function unboundRebuilder(
+  ce: ComputeEngine,
+  {
+    structural,
+    scope,
+    expand = false,
+  }: { structural: boolean; scope?: Scope; expand?: boolean }
+): (
+  ops: ReadonlyArray<Expression>,
+  policy: ReadonlyArray<OperandPolicy> | undefined,
+  underBinder: boolean,
+  hidden: HiddenBinders | undefined
+) => Expression[] | undefined {
   const nodeOptions: BoxFunctionOptions = structural
     ? { canonical: false, structural: true, scope }
     : { canonical: false, structural: false };
@@ -1682,34 +1986,328 @@ export function rebind(
   // part of the tree that is below a binder and a part that is not, so each
   // case has its own cache.
   const rebuiltUnderBinder = new Map<Expression, Expression>();
-  const rebuild = (node: Expression, underBinder: boolean): Expression => {
-    const cache = underBinder ? rebuiltUnderBinder : rebuilt;
-    let out = cache.get(node);
-    if (out === undefined) {
-      if (isFunction(node)) {
-        const ops = serializedOperands(node);
-        const opsUnderBinder =
-          underBinder ||
-          (structural && isStructuralBinder(ce, node.operator, scope));
-        out = boxFunction(
-          ce,
-          node.operator,
-          node.operator === 'Hold'
-            ? ops.map(rebuildHeld)
-            : ops.map((x) => rebuild(x, opsUnderBinder)),
-          nodeOptions
-        );
-      } else
-        out = box(
-          ce,
-          node.json,
-          underBinder ? { ...nodeOptions, unboundSymbols: true } : nodeOptions
-        );
-      cache.set(node, out);
-    }
-    return out;
+  // With a macro declared, a structural binder or a lazy call hides names
+  // from a macro (`HiddenBinders`) while its operands are rebuilt, as when
+  // `box()` boxes the MathJSON. The result of a node then depends on the binders
+  // around it, so each binder record has its own cache; a record is made once
+  // for each rebuild of a binder node.
+  const macros = (structural || expand) && anyMacroDeclared(ce);
+  const hiddenCaches = new Map<HiddenBinders, Map<Expression, Expression>>();
+  const cacheOf = (
+    underBinder: boolean,
+    hidden: HiddenBinders | undefined
+  ): Map<Expression, Expression> => {
+    if (hidden === undefined) return underBinder ? rebuiltUnderBinder : rebuilt;
+    let c = hiddenCaches.get(hidden);
+    if (c === undefined) hiddenCaches.set(hidden, (c = new Map()));
+    return c;
   };
-  return rebuild(expr, false);
+  // The scope is the same for the whole rebuild, so a name resolves once.
+  const macroOf = new Map<string, BoxedValueDefinition | undefined>();
+  const operatorOf = new Map<
+    string,
+    { hides: boolean; lazy: BoxedOperatorDefinition | undefined }
+  >();
+  const infoOf = (op: MathJsonSymbol) => {
+    let info = operatorOf.get(op);
+    if (info === undefined) {
+      const def = expand
+        ? lookupApplicable(op, scope ?? ce.context.lexicalScope, ce)
+        : undefined;
+      info = {
+        hides: macros && hidesNames(ce, op, scope),
+        lazy:
+          def !== undefined && !isValueDef(def) && def.operator.lazy
+            ? def.operator
+            : undefined,
+      };
+      operatorOf.set(op, info);
+    }
+    return info;
+  };
+
+  type Frame = {
+    readonly node: Expression | undefined;
+    readonly ops: ReadonlyArray<Expression>;
+    readonly policy: ReadonlyArray<OperandPolicy> | undefined;
+    readonly underBinder: boolean;
+    readonly hidden: HiddenBinders | undefined;
+    readonly cache: Map<Expression, Expression> | undefined;
+    /** The macros whose body this node is the root of: they leave the cycle
+     *  set when the node is done. */
+    readonly defs: BoxedValueDefinition[] | undefined;
+    i: number;
+    /** The rebuilt operands; with `expand`, only once one changed. */
+    out: Expression[] | undefined;
+    /** No macro name below (`macroFree`). */
+    clean: boolean;
+  };
+
+  return (ops, policy, underBinder, hidden) => {
+    const stack: Frame[] = [];
+    const entered: BoxedValueDefinition[] = [];
+    const leave = (defs: BoxedValueDefinition[] | undefined): void => {
+      if (defs !== undefined) for (const def of defs) endExpansion(def);
+    };
+    const settle = (
+      f: Frame,
+      defs: BoxedValueDefinition[] | undefined,
+      x: Expression,
+      clean: boolean
+    ): void => {
+      leave(defs);
+      give(f, x, clean);
+    };
+    const give = (f: Frame, x: Expression, clean: boolean): void => {
+      if (expand && x !== f.ops[f.i] && f.out === undefined)
+        f.out = f.ops.slice(0, f.i);
+      f.out?.push(x);
+      f.clean &&= clean;
+      f.i += 1;
+    };
+    // Give `f` the rebuild of `x`, its next operand, with whether it holds
+    // no macro name; or push a frame for `x`, which gives it when done.
+    const visit = (
+      f: Frame,
+      x: Expression,
+      underBinder: boolean,
+      hidden: HiddenBinders | undefined,
+      asName: boolean
+    ): void => {
+      let node = x;
+      let defs: BoxedValueDefinition[] | undefined;
+      if (expand) {
+        while (isSymbol(node) && !node.isCanonical) {
+          const name = node.symbol;
+          if (
+            !ce._macroNames.has(name) ||
+            (node as { _keptName?: true })._keptName === true
+          )
+            return settle(f, defs, node, true);
+          let def = macroOf.get(name);
+          if (def === undefined && !macroOf.has(name))
+            macroOf.set(name, (def = resolvesToMacro(ce, name)));
+          if (def === undefined) return settle(f, defs, node, false);
+          if (asName || isHiddenByBinder(ce, hidden, name))
+            return settle(f, defs, keptName(ce, node), true);
+          if (isExpanding(def))
+            return settle(f, defs, ce.error('macro-cycle', name), true);
+          beginExpansion(def);
+          entered.push(def);
+          (defs ??= []).push(def);
+          const offsets = node.sourceOffsets;
+          node = box(
+            ce,
+            offsets === undefined
+              ? def.macro!
+              : macroBodyWithSourceOffsets(def.macro!, offsets),
+            RAW_OPERAND
+          );
+          asName = false;
+        }
+        if (
+          !isFunction(node) ||
+          node.isCanonical ||
+          (macroFree.get(node) === ce._macroCount && node.engine === ce)
+        )
+          return settle(f, defs, node, true);
+      }
+      const cache = cacheOf(underBinder, hidden);
+      const hit = cache.get(node);
+      if (hit !== undefined)
+        return settle(f, defs, hit, macroFree.get(hit) === ce._macroCount);
+      // With `expand`, a function node gets here, and the operand roles of
+      // `Hold` keep its operand (`operandPolicies()`).
+      if (!isFunction(node) || (!expand && node.operator === 'Hold')) {
+        const out = isFunction(node)
+          ? boxFunction(
+              ce,
+              node.operator,
+              serializedOperands(node).map(rebuildHeld),
+              nodeOptions
+            )
+          : box(
+              ce,
+              node.json,
+              underBinder || hidden !== undefined
+                ? { ...nodeOptions, unboundSymbols: underBinder, hidden }
+                : nodeOptions
+            );
+        cache.set(node, out);
+        return settle(f, defs, out, false);
+      }
+      const nodeOps = expand ? node.ops : serializedOperands(node);
+      const info = infoOf(node.operator);
+      const binder = structural && isStructuralBinder(ce, node.operator, scope);
+      stack.push({
+        node,
+        ops: nodeOps,
+        policy:
+          info.lazy !== undefined
+            ? operandPolicies(info.lazy.operandRoles(nodeOps), nodeOps)
+            : undefined,
+        underBinder: underBinder || binder,
+        hidden: info.hides
+          ? { head: node.operator, ops: nodeOps, parent: hidden }
+          : hidden,
+        cache,
+        defs,
+        i: 0,
+        out: expand ? undefined : [],
+        clean: true,
+      });
+      return undefined;
+    };
+
+    stack.push({
+      node: undefined,
+      ops,
+      policy,
+      underBinder,
+      hidden,
+      cache: undefined,
+      defs: undefined,
+      i: 0,
+      out: expand ? undefined : [],
+      clean: true,
+    });
+    try {
+      for (;;) {
+        const f = stack[stack.length - 1];
+        if (f.i < f.ops.length) {
+          const x = f.ops[f.i];
+          const p = f.policy?.[f.i];
+          if (p === 'skip') give(f, x, false);
+          else visit(f, x, f.underBinder, f.hidden, p === 'name');
+          continue;
+        }
+        stack.pop();
+        const node = f.node;
+        if (node === undefined) return f.out;
+        const out =
+          f.out === undefined
+            ? node
+            : boxFunction(
+                ce,
+                node.operator,
+                f.out,
+                expand
+                  ? {
+                      ...nodeOptions,
+                      metadata: {
+                        latex: node.verbatimLatex,
+                        sourceOffsets: node.sourceOffsets,
+                      },
+                    }
+                  : nodeOptions
+              );
+        f.cache!.set(node, out);
+        if (expand && f.clean && out.engine === ce)
+          macroFree.set(out, ce._macroCount);
+        leave(f.defs);
+        give(stack[stack.length - 1], out, f.clean);
+      }
+    } finally {
+      leave(entered);
+    }
+  };
+}
+
+/** True when the raw node `x` of `ce` is known to hold no macro name: a
+ * canonical node, a symbol whose name is not a macro name or that is kept as
+ * a name, a node recorded by a walk or by `boxRawOperands()` (`macroFree`),
+ * or a leaf that is not a symbol. */
+function holdsNoMacroName(ce: ComputeEngine, x: Expression): boolean {
+  if (x.isCanonical) return true;
+  if (isSymbol(x))
+    return (
+      !ce._macroNames.has(x.symbol) ||
+      (x as { _keptName?: true })._keptName === true
+    );
+  if (!isFunction(x)) return true;
+  return macroFree.get(x) === ce._macroCount && x.engine === ce;
+}
+
+/**
+ * The raw operands `ops` boxed, as `boxOperands(ce, ops, RAW_OPERAND)`. On
+ * an engine with a macro, an operand whose boxing made no raw node that can
+ * hold a macro name (`IComputeEngine._macroSuspects`) is recorded as holding
+ * none (`macroFree`), so the walk of the raw operands of the call
+ * (`expandMacroOperands()`) does not visit it.
+ */
+function boxRawOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput>
+): Expression[] {
+  if (ce._macroCount === 0) return boxOperands(ce, ops, RAW_OPERAND);
+  const boxOne =
+    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
+      ? boxInternal
+      : box;
+  const result: Expression[] = [];
+  for (const op of ops) {
+    const before = ce._macroSuspects;
+    const x = boxOne(ce, op, RAW_OPERAND);
+    if (
+      ce._macroSuspects === before &&
+      isFunction(x) &&
+      !x.isCanonical &&
+      x.engine === ce
+    )
+      macroFree.set(x, ce._macroCount);
+    result.push(x);
+  }
+  return result;
+}
+
+/** What the walk of the raw operands of a lazy call does with an operand:
+ * keep it as it is (`skip`: the role `opaque` or `held`), keep a macro name
+ * there as a name (`name`: a symbol with the role `bound` or `clause`), or
+ * walk it (`undefined`). */
+type OperandPolicy = 'skip' | 'name' | undefined;
+
+/** The `OperandPolicy` of each operand `ops` of a lazy call whose operand
+ * roles are `roles`, or `undefined` when every operand is walked. */
+function operandPolicies(
+  roles: ReadonlyArray<string> | undefined,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<OperandPolicy> | undefined {
+  if (roles === undefined) return undefined;
+  let out: OperandPolicy[] | undefined;
+  for (let i = 0; i < ops.length; i++) {
+    const role = roles[i];
+    const p: OperandPolicy =
+      role === 'opaque' || role === 'held'
+        ? 'skip'
+        : (role === 'bound' || role === 'clause') && isSymbol(ops[i])
+          ? 'name'
+          : undefined;
+    if (p !== undefined) (out ??= [])[i] = p;
+  }
+  return out;
+}
+
+/** The raw function nodes that hold no macro name of their engine: the
+ * value is `ce._macroCount` when that was found, so a later macro
+ * declaration voids it. Read and written by the walk of
+ * `unboundRebuilder()`; a node is never changed. */
+const macroFree = new WeakMap<Expression, number>();
+
+/** A fresh raw symbol of the name of `node`, which `canonical` does not
+ * expand (`BoxedSymbol._keptName`). */
+function keptName(
+  ce: ComputeEngine,
+  node: Expression & { readonly symbol: string }
+): Expression {
+  const kept = ce.symbol(node.symbol, {
+    canonical: false,
+    metadata: {
+      latex: node.verbatimLatex,
+      sourceOffsets: node.sourceOffsets,
+    },
+  });
+  if (!kept.isCanonical) (kept as { _keptName?: true })._keptName = true;
+  return kept;
 }
 
 /** The operands `get json()` serializes for a function node: those of its
@@ -1739,6 +2337,7 @@ function boxInternal(
     structural?: boolean;
     scope?: Scope;
     unboundSymbols?: boolean;
+    hidden?: HiddenBinders;
   }
 ): Expression {
   if (expr === null || expr === undefined) return ce.error('missing');
@@ -1773,6 +2372,10 @@ function boxInternal(
     // counted like the MathJSON one below (see `boxingDepth`).
     //
     const forms = options?.canonical ?? true;
+    // A raw node taken as it is can hold a macro name
+    // (`IComputeEngine._macroSuspects`).
+    if (forms === false && ce._macroCount > 0 && !holdsNoMacroName(ce, expr))
+      ce._macroSuspects += 1;
     // A boxed symbol requested in the structural form is marked for it, as a
     // symbol boxed from MathJSON is (`boxStructuralSymbol()`), so that its
     // `subs()` boxes a replacement structurally. The getter marks a copy, so
@@ -1828,6 +2431,7 @@ function boxInternal(
       structural,
       scope: options?.scope,
       unboundSymbols: options.unboundSymbols,
+      hidden: options.hidden,
     });
     boxingDepth -= 1;
     return canonicalForm(fn, options?.canonical ?? true, options?.scope);
@@ -1881,12 +2485,15 @@ function boxInternal(
         options.canonical === false &&
         options.unboundSymbols !== true
       )
-        return boxStructuralSymbol(ce, sym);
+        return macroAt(ce, sym, options) ?? boxStructuralSymbol(ce, sym);
       const canonicalSymbol = canonical || options.canonical !== false;
-      return ce.symbol(sym, {
-        canonical: canonicalSymbol,
-        autoDeclare: canonical,
-      });
+      return (
+        macroAt(ce, sym, options) ??
+        ce.symbol(sym, {
+          canonical: canonicalSymbol,
+          autoDeclare: canonical,
+        })
+      );
     }
 
     if (matchesNumber(expr)) return ce.number(expr);
@@ -1923,12 +2530,15 @@ function boxInternal(
         structural,
         metadata,
         unboundSymbols: options.unboundSymbols,
+        hidden: options.hidden,
       });
       boxingDepth -= 1;
       return canonicalForm(fn, options.canonical!, options.scope);
     }
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
     if ('sym' in expr) {
+      const macro = macroAt(ce, expr.sym, options, metadata?.sourceOffsets);
+      if (macro !== undefined) return macro;
       if (
         structural &&
         !canonical &&
@@ -3291,7 +3901,14 @@ function makeCanonicalFunctionCore(
   // merge lowering (library/collections.ts), which this structural
   // construction would bypass.
   if (name === 'Dictionary' && !named && !ops.some(isSpreadOperand)) {
-    const boxedOps = boxOperands(ce, ops, RAW_OPERAND);
+    // A macro name in an entry is the raw body, as in the operands of any
+    // other lazy operator (`expandMacroOperands()`).
+    const boxedOps = expandMacroOperands(
+      ce,
+      name,
+      boxRawOperands(ce, ops),
+      undefined
+    );
     const dict = new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,
     });
@@ -4500,6 +5117,37 @@ function devolveValueOperands(
   return result ?? xs;
 }
 
+/**
+ * `xs`, the operands of the lazy operator `name` as written, where each name
+ * that resolves to a macro, at any depth, is replaced by the raw body of the
+ * macro (rule 2 of `docs/plans/2026-11-12-macro-kind-spec.md`), itself
+ * expanded the same way: the handler then reads what it reads for the program
+ * with the body written in place of the name. The operands stay raw.
+ *
+ * Not an occurrence: a name that the call or a binder or lazy call inside it
+ * binds or takes as a name (`HiddenBinders`: a binding site, a parameter of
+ * `Function`, a local of `Block`, an operand that takes a name,
+ * `nameOperandNames()`), an operand held on purpose (the `opaque` and `held`
+ * roles, and the operand of a nested `Hold`), and an operand whose role is
+ * `bound` or `clause` when it is a symbol.
+ */
+function expandMacroOperands(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  xs: ReadonlyArray<Expression>,
+  roles: ReadonlyArray<string> | undefined
+): ReadonlyArray<Expression> {
+  if (!anyMacroDeclared(ce)) return xs;
+  return (
+    unboundRebuilder(ce, { structural: false, expand: true })(
+      xs,
+      operandPolicies(roles, xs),
+      false,
+      { head: name, ops: xs, parent: undefined }
+    ) ?? xs
+  );
+}
+
 /** `xs`, the operands of an operator without a `canonical` handler, where
  * each operand whose role in `roles` is `statement` is canonicalized as a
  * branch (`canonicalBranch()`): a `Declare` is the error
@@ -4558,7 +5206,7 @@ function applyOperatorDefinition(
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    let xs = rawOps ?? boxOperands(ce, ops, RAW_OPERAND);
+    let xs = rawOps ?? boxRawOperands(ce, ops);
     // A bare `N` or `D` held at an operand whose role is `value` (the
     // `operands` handler of the definition) is a variable
     // (`devolveAtValuePositions`). The other operands of a lazy operator are
@@ -4568,6 +5216,8 @@ function applyOperatorDefinition(
     // a value: a comparison is a chain of any length (`Equal(2, 2, N)`),
     // although its signature lists two parameters.
     const roles = opDef.operandRoles(xs);
+    // A macro name in an operand, where it is not a name, is the raw body.
+    xs = expandMacroOperands(ce, name, xs, roles);
     if (roles !== undefined && !opDef.inferredSignature)
       xs = devolveValueOperands(ce, xs, roles);
     // A parameter with a default value that the call leaves out receives its
@@ -5294,7 +5944,7 @@ function canonicalizeBinder(
   // The selector reads the operands, so they must be boxed before the handler
   // runs. Raw (unbound) boxing is what a lazy operator does anyway, and the
   // result is handed on so it is done once.
-  const xs = boxOperands(ce, ops, RAW_OPERAND);
+  const xs = boxRawOperands(ce, ops);
 
   const preSites = sites(xs, 'pre');
 

@@ -1,5 +1,6 @@
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { isDeclaredLocal } from './declared-local.js';
+import { anyMacroDeclared, expandMacro } from './macro.js';
 import { isScratchBinding, scratchRootOf } from '../scratch-scopes.js';
 import { noteKindTypeDeclaration } from './residue-class.js';
 import type {
@@ -385,6 +386,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   declare _homeScope?: Scope;
 
+  /** True on a raw symbol that the walk of the raw operands of a lazy call
+   * (`expandMacroOperands()`, `box.ts`) put in place of a macro name that
+   * stays a name: a name at an operand that takes a name, or a name that a
+   * binder binds. `canonical` does not expand it. Set on a fresh symbol
+   * only, never on a symbol of the caller.
+   * @internal */
+  declare _keptName?: true;
+
   /**
    * For a symbol with a definition: the scope whose chain gave the definition
    * when the symbol was made. The symbol resolves its name from this scope
@@ -595,14 +604,30 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Return a new canonical symbol, scoped in the current context. The
     // source position rides along (a bare-symbol statement is the idiomatic
     // Epsil return value; the debugger pauses on it by its offsets).
-    return this._withParseScope(() =>
-      this.engine.symbol(
+    // A name that resolves to a macro here is expanded in this scope
+    // (`macro.ts`): a raw operand made canonical later, outside an
+    // evaluation, is an occurrence of the input. During an evaluation
+    // (`ReleaseHold`, the replacement of a rule) it is the name.
+    return this._withParseScope(() => {
+      const symbol = this.engine.symbol(
         this._id,
         this.sourceOffsets !== undefined
           ? { metadata: { sourceOffsets: this.sourceOffsets } }
           : undefined
+      );
+      const def = isSymbol(symbol) ? symbol.valueDefinition : undefined;
+      // A name that the walk of the raw operands of a lazy call kept as a
+      // name (`Solve(eq, A)`, an index) stays a name (`_keptName`).
+      if (
+        def?.macro === undefined ||
+        this._keptName === true ||
+        !anyMacroDeclared(this.engine)
       )
-    );
+        return symbol;
+      return expandMacro(this.engine, def, this._id, this.sourceOffsets, (x) =>
+        this.engine.box(x)
+      );
+    });
   }
 
   is(

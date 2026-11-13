@@ -179,6 +179,10 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _isDevolvedShadow: true | undefined;
 
+  /** The raw body of a macro definition — mirror of the member documented in
+   * `types-definitions.ts`. */
+  readonly macro?: MathJsonExpression;
+
   /** Declared placeholder skeleton for bare-constructor declarations —
    * mirror of the member documented in `types-definitions.ts`.
    * @internal */

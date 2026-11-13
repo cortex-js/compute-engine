@@ -65,6 +65,7 @@ import {
   typeFor,
 } from './constraint-subject.js';
 import type { LatexString } from '../latex-syntax/types.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isDictionary, isFunction, isNumber, isSymbol } from './type-guards.js';
@@ -413,6 +414,13 @@ export class _BoxedValueDefinition
   // If 'N', the symbol is replaced during a numeric evaluation.
   holdUntil: 'never' | 'evaluate' | 'N' = 'evaluate';
 
+  // The raw body of a macro definition (`ce.declare(name, { macro })`,
+  // `macro.ts`). A macro definition has no value and the type `unknown`.
+  // Set once, by the constructor, and only on a macro definition: `declare`
+  // makes no own field on the others, so a spread of a definition carries no
+  // `macro`, and a field snapshot has nothing to keep.
+  declare macro?: MathJsonExpression;
+
   // Those optional handlers are used to compare the symbol with other
   // symbols or values. This is useful for example with sets
   eq?: (a: Expression) => boolean | undefined;
@@ -485,6 +493,8 @@ export class _BoxedValueDefinition
     if (def.url) this.url = def.url;
 
     if (def.holdUntil) this.holdUntil = def.holdUntil;
+
+    if (def.macro !== undefined) this.macro = def.macro;
 
     if (def.isConstant) {
       this._isConstant = def.isConstant;

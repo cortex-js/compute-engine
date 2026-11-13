@@ -124,7 +124,12 @@ export function createSymbolExpression(
   if (engine.strict && !isValidSymbol(name))
     return engine.error(['invalid-symbol', validateSymbol(name)], name);
 
-  if (!canonical) return new BoxedSymbol(engine, name, { metadata });
+  if (!canonical) {
+    // A raw symbol of a macro name (`IComputeEngine._macroSuspects`).
+    if (engine._macroCount > 0 && engine._macroNames.has(name))
+      engine._macroSuspects += 1;
+    return new BoxedSymbol(engine, name, { metadata });
+  }
 
   // A function parameter shadows any same-named constant (`i`, `e`, ...) within
   // its body: while that body is being canonicalized, the parameter name is on

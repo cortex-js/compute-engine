@@ -1637,6 +1637,29 @@ export interface IComputeEngine {
    * @internal */
   _qualifiedHead: { name: string; definition: BoxedDefinition } | undefined;
 
+  /** The number of macro definitions declared on this engine
+   * (`ce.declare(name, { macro })`, `boxed-expression/macro.ts`). Zero means
+   * that no name can resolve to a macro, and boxing skips every macro test.
+   * It is never decremented, and a declaration raises it, so it is also the
+   * version of `_macroNames`.
+   * @internal */
+  _macroCount: number;
+
+  /** The names of the macro definitions declared on this engine, in any
+   * scope: a symbol whose name is not in the set is not a macro name, and
+   * the macro tests skip it before any lookup. Never shrinks.
+   * @internal */
+  readonly _macroNames: Set<string>;
+
+  /** How many raw nodes that can hold a macro name the boxing has made or
+   * taken as they are: a raw symbol whose name is in `_macroNames`, and a
+   * boxed raw node that is not known to hold none. A boxing of raw operands
+   * that does not raise it gives operands with no macro name
+   * (`boxRawOperands()`, `boxed-expression/box.ts`). Raised only while
+   * `_macroCount` is not zero.
+   * @internal */
+  _macroSuspects: number;
+
   /**
    * Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
    * (object form, which also accepts an attribution `label`). A tighter

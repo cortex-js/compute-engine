@@ -158,6 +158,37 @@
   `\constant` is an error. Without the command, `c_1` is a symbol, as
   before.
 
+- **A macro: `ce.declare(name, { macro: body })`.** A macro keeps a raw
+  MathJSON body and has no value and no type of its own. Where a name of the
+  input (MathJSON or LaTeX) resolves to a macro, boxing replaces it by the
+  body, boxed at that place, in the scope of the occurrence and in the same
+  form (canonical, partial or structural). So a parameter or an index of the
+  reader binds the names of the body, and an operator gives the value it
+  gives for the body written in place of the name (`D(A, x)`,
+  `\int A\,dx`):
+
+  ```ts
+  ce.declare('A', { macro: ['Multiply', 'k', 'x'] });
+  ce.parse('\\sum_{k=1}^{3} A').evaluate(); // 6x
+  ce.declare('B', { macro: ['Add', ['Power', 'x', 2], ['Power', 'y', 2]] });
+  ce.assign('f', ['Function', ['Add', 'B', 1], 'x']);
+  ce.box(['f', 3]).evaluate(); // y^2 + 10
+  ```
+
+  A parameter, an index or a local of the same name hides the macro. A
+  position that takes a name (a parameter, an index, the variable of `D` or
+  `Solve`, the target of `Assign` or `Declare`) is not an occurrence, and a
+  symbol made with `ce.symbol()` is not expanded. The raw form keeps the
+  name, and so does a held operand, also when `ReleaseHold` releases it.
+  Nothing is expanded during an evaluation (`evaluate()`, `N()`,
+  `simplify()`, `compile()`, `replace()`, ...): a name boxed then, such as
+  the replacement of a rule or a `ce.parse()` in a host callback, is the
+  plain name. A macro that reaches itself is `Error('macro-cycle', name)`. A macro is declared before
+  the expressions that name it are boxed: an expression boxed earlier keeps
+  the name, which has no value. `ce.assign()`, an evaluated `Assign` and
+  `ce.withValues()` on a macro throw; a definition with `macro` takes no
+  other field. In LaTeX, `A(x+1)` is a product.
+
 - **Experimental: the `ir` profile of the JavaScript target.**
   `compile(expr, { profile: 'ir' })` compiles the expression with a new
   compiler; it can change or be removed without notice. A program or an

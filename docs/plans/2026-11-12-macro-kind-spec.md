@@ -26,7 +26,16 @@ form, written by hand and run on the same source, unless a cell says
    parameter, an index, the variable of `D`, `Solve` or `Limit`, the
    target of `Assign` or `Declare`. A symbol that code makes with
    `ce.symbol(name)` is not expanded either, so a working variable of an
-   engine algorithm is never replaced by a body.
+   engine algorithm is never replaced by a body. **Nothing is expanded
+   while an operation is in progress on the engine** (`evaluate()`, `N()`,
+   `simplify()`, `compile()`, `replace()`, each part of an asynchronous
+   evaluation): a name that library code boxes there is the symbol of rule
+   7. So that this loses nothing, **a lazy call expands its raw operands
+   when it is boxed**: a macro name at any depth of an operand whose
+   boxing the operator defers (`Solve`, `FindRoot`, the body of `D`) is
+   replaced by the raw body then, with the same exceptions for name
+   positions and hidden names, found without a scope as in the structural
+   form.
 3. **The body is boxed by the same rule**, so a macro that it names is
    expanded too. A macro that reaches itself through macros is
    `macro-cycle`: `Error('macro-cycle', name)` at the occurrence. The
@@ -74,9 +83,10 @@ ce.declare('A', { macro: ['Add', ['Power', 'x', 2], ['Power', 'y', 2]] });
   an unknown field today. A body that boxes to an `Error` gives that
   `Error` at each occurrence. A host with LaTeX passes the `.json` of a
   raw parse.
-- The definition is a third kind beside a value definition and an operator
-  definition: `isValueDef()` and `isOperatorDef()` are false for it. For
-  the parser it is not a function.
+- The definition is a value definition that carries the raw body
+  (`def.value.macro`), with no value and the type `unknown`; rule 7 then
+  needs no code. (The reviewed draft made it a third kind of definition;
+  92 files test for the two kinds.) For the parser it is not a function.
 - A macro is declared once in a scope: a second `ce.declare` of the name
   there is the error of today for a second declaration, and `ce.assign()`
   or an `Assign` on a macro name is an error. A host that changes a macro declares its
@@ -85,8 +95,8 @@ ce.declare('A', { macro: ['Add', ['Power', 'x', 2], ['Power', 'y', 2]] });
 - `ce.lookupDefinition('A')` gives the macro definition, with its kind and
   its raw body. `ce.box('A')` is the body, boxed in the current scope.
 - A macro has no parameters. LaTeX `A(x+1)` is a product, since `A` is not
-  a function, and `A` is expanded; MathJSON `['A', 1]` is the error of
-  today for a call of a name that is not a function. This replaces
+  a function, and `A` is expanded; MathJSON `['A', 1]` stays `['A', 1]`
+  and evaluates to itself, as for a name declared `unknown`. This replaces
   "the macro kind, with parameters" of section 6 of the rule spec; Tycho
   needs none (`tycho-desk`: a row with explicit parameters is a function
   and reads an axis as a global; for `c = |\cos a|` drawn as `y = c(x)` it
@@ -98,9 +108,10 @@ input into a symbol (`boxed-expression/box.ts`), not `ce.symbol()`. The
 engine substitutes a `holdUntil: 'never'` constant in `ce.symbol()`
 (`engine-expression-entrypoints.ts`), which library code also calls for its
 working variables (`ce.symbol('t')` in `solve-linear-system.ts`), so that
-site is not used. Besides it: the definition kind and the readers of a
-definition that must know it (the parser's test of a function, `ce.assign`,
-`ce.withValues`, the scope printer, the undo of `ce.loadLibrary()`).
+site is not used. Besides it: the walk that expands a tree with no scope
+(the structural form and the raw operands of a lazy call share it, with
+`ce.rebind()`), the parser's test of a function, and the refusals of
+`ce.assign`, `Assign` and `ce.withValues`.
 
 ## 3. Examples
 
@@ -213,6 +224,17 @@ helper reads, directly or through the helpers it calls, as a parameter of
 the emitted helper. Without it Tycho keeps that half. It is a change of the
 shader targets, not of the macro kind.
 
+At a call under a binder of the same name (`\sum_{x=1}^{3} A` with
+`A = x + k(1)`), the helper receives the INPUT `x`, not the index: the `x`
+inside `k` is the global one. `tycho-desk` (2026-11-12, on the scratch
+build): until this exists, a value row that reaches an axis through a
+function cannot be a macro in Tycho, because Tycho registers `k` with a
+threaded parameter and the `k(1)` of the raw body is then a wrong call. So
+most of Tycho's deletion waits for M7: value rows that read an axis
+directly are macros now; rows that reach one through a function, and the
+function threading, come with M7; a value row drawn as a function of its
+free name (`y = a(x)`) stays a Tycho function.
+
 ## 6. The hard cases
 
 - **A reader boxed before the macro is declared** (row 10). Nothing is
@@ -228,13 +250,16 @@ shader targets, not of the macro kind.
   boxes nothing again, and `e` holds no macro name any more. A binder built
   around a boxed reader binds its variable in the expanded body, by D5:
   `Sum(ce.box('A'), k, 1, 3)` with `A = k x` is `6x`.
-- **A held operand** (`Hold(A)`, a lazy operand) is raw and keeps the
-  name. It is expanded when it is made canonical (`ReleaseHold`), with the
-  macros of the scope current then: the one case where an expansion
-  happens during an evaluation.
-- **A rule** (`ce.rules()`, `replace()`) is a form like any other: a macro
-  name in its pattern or its replacement is expanded when that part is
-  made canonical.
+- **A held operand.** `Hold(A)` keeps the name, and `ReleaseHold` runs
+  during an evaluation, so it gives the symbol `A`, not the body. An
+  operand that an operator holds for its own use (`opaque`, `held` roles)
+  keeps its names too. To revisit with the design pass on held arguments
+  (ROADMAP CE-1258).
+- **A rule** (`ce.rules()`, `replace()`): a part that is made canonical
+  when the rule is created is expanded; a replacement that is made
+  canonical when the rule is applied keeps the name.
+- **A host callback that calls `ce.parse()` during an evaluation** gets no
+  expansion.
 - **Size.** There is no limit: a host that declares a chain of depth 25
   that doubles at each level gets a form of 2^25 nodes. A reader holds one copy of a body for each occurrence, and a
   chain multiplies (`B = A + A`, `C = B + B`). Measured by `tycho-desk` on
@@ -427,6 +452,126 @@ touch this spec, and the implementer reads them first:
   about the engine's state when the program is boxed, so that order does
   not change it; a macro is declared by the host, not by a statement.
 - ROADMAP CE-1258 (a design pass, planned): a held operand would record
-  the scope it was boxed in. The case "A held operand" of section 6 then
-  expands with the macros of that scope, not of the scope current at the
-  release.
+  the scope it was boxed in. The case "A held operand" of section 6 is then
+  decided again: a release could expand with the macros of that scope.
+
+**Result** (implementer under `compute-engine-67`, 2026-11-12, worktree
+base `2e6ca255ba4c364ac6f159e7e21cc5a257227a2a`, four review rounds
+applied). Sections 1, 2, 3, 4, 6, 7 and acceptance items 1 to 3 are built.
+The definition is a value definition with a `macro` field, the type
+`unknown` and no value (`isMacroDef()`, `boxed-expression/macro.ts`), not a
+third kind; each engine counts its macros (`ce._macroCount`) and keeps
+their names (`ce._macroNames`), and an engine with none skips every test. Expansion happens only at boxing: while an
+evaluation is in progress on the engine (an operation environment is in
+place: `evaluate()`, `N()`, `simplify()`, `compile()`, a slice of
+`evaluateAsync()`, `replace()`, ...; `anyMacroDeclared()`), a name that
+resolves to a macro is the plain symbol of rule 7. Outside an evaluation it
+is expanded at the two places of `box.ts` that box a symbol of the input
+(`macroAt()`), in `BoxedSymbol.canonical` for a raw symbol made canonical
+later, and in the raw operands of a lazy call before its handler, at any
+depth (`expandMacroOperands()`, also for `Dictionary`): each macro name is
+replaced by its raw body, expanded the same way while its macro is in the
+cycle set, and the operands stay raw. That walk is the raw and structural
+rebuild of `ce.rebind()` (`unboundRebuilder()`), with an explicit stack and
+the hidden-name records of the structural form (`HiddenBinders`); it keeps
+the metadata of a rebuilt node and never changes a node of the caller. A
+name that stays a name is replaced by a fresh raw symbol that `canonical`
+does not expand (`BoxedSymbol._keptName`). A position that takes a name is
+read from the data: the roles `opaque` and `held`, in the call or in a lazy
+call inside it, a symbol with the role `bound` or `clause`, a signature
+parameter that names `symbol`, the binding sites and `Block` locals, and a
+table of five operators (`Solve`, `NSolve`, `FindRoot`, `FindFit`, and
+`Limit(f, To(x, a))` or `Limit(f, x, a[, d])` when `f` is not a `Function`
+literal and holds `x`, the handler's own tests; the handler of `NLimit`
+reads its second operand as the point). At such an operand the names are
+the symbol, the symbol elements of a `List`, and the first operand of a
+`Tuple`, `Pair`, `Element` or `To`; they hide the macro in the whole
+call.
+Raw boxing counts the raw nodes that can hold a macro name
+(`ce._macroSuspects`): the raw operands of a lazy call whose boxing counted
+none are not walked, and a node that a walk found to hold none is not
+walked again. Differences from the text: the parse oracle
+answers the type `any` for a macro, since a valueless name of type
+`unknown` is a call by the one-uppercase-letter predicate rule; a held
+operand keeps the name also at `ReleaseHold`, and a name in the replacement
+of a rule stays the name (both are made canonical during an evaluation);
+the occurrence of an early reader inside an operation takes the type of its
+use, as a name declared `unknown` does (a bare early reader is `unknown`).
+Rows 1 to 10 give the "Proposed" values; rows 1 and 7 compile on
+JavaScript, GLSL, interval-js and Python, and the program of section 4
+emits one `_cse1` on each; WGSL is not a target of this source tree.
+Probes: 243 operand positions of the lazy operators give the hand-expanded
+value, with the macro at the operand and one level inside it; 44
+name-position programs (both forms) give the value of a plain variable. On
+an engine with an unrelated macro, boxing `Solve` of a 16-level MathJSON
+tree (65,535 nodes in the raw operand) and a program of lazy calls nested
+6 deep take the time they take with no macro, within the noise of the
+measure; at 22 levels the MathJSON boxing runs out of memory with or
+without a macro (raw boxing boxes each path). The time to box
+`neyret/sc3azg0frd` was not measured.
+
+**Acceptance run by `tycho-desk`, interim** (2026-11-12, scratch build of
+main `8c2d6f97fac86fe5e8b6093ed7cdd57df9d4ef39` plus this change). With no
+macro declared: codegen audit 1,295 records unchanged, 0 changed; audit
+time and the `othello` instrument equal to its base build within noise;
+its test suite fails the same 42 tests as on the bound-once build. With
+value rows declared macros behind a switch: its direct probes give the
+expected values; `cx-macro-transport` passes 16 of 16; registering and
+evaluating `neyret/sc3azg0frd` takes 33 to 35 ms against 18 to 19 ms, and
+`art/2ki2hjsouf` is unchanged at about 800 ms. Its deletion is not done: it
+first boxes the right side of a definition row alone, and the measured
+line count is owed, split by what waits for M7 (section 5c).
+
+**Acceptance run by `tycho-desk`, second report** (2026-11-13, same build,
+switch `TYCHO_CE_MACRO=1`). The macro kind alone lets Tycho delete nothing:
+deleted 0 lines, added 101 (experiment quality). A value row is declared a
+macro when every implicit parameter is read lexically, it has no parameter
+that reaches it through a function, and it is not a free-name row called as
+a function; every other row keeps Tycho's lambda route, so each piece of
+the threading code is still needed.
+
+- Tests of item 5 of section 9 with the switch on: `cx-macro-transport` 16
+  of 16, `free-name-value-definition` 12 of 12, `function-body-axis-binding`
+  7 of 8 before a Tycho adaptation that a direct probe shows fixed (file not
+  run again), `cy-function-implicit-params` 38 of 39 (the failure asserts
+  the mechanism: it expects the call `s(x)`).
+- Its node suite, switch on against off: 6 more files fail. The causes are
+  assertions on the mechanism (a lambda binding, a threaded call, the
+  macro's name in transported LaTeX), Tycho's string route
+  `expandFunctionRefs(latex)`, which reads a raw parse and so never
+  expands, and one row of `graph-paper/with-self-read-rename`, whose value
+  was not checked.
+- Codegen audit, switch on against off (1,295 records off): 1,145
+  unchanged, 11 changed code, 0 new declines, 139 only off, 54 only on, all
+  in two documents. `art/hyvhlz4chj`: 3 records changed, the same 13
+  series, values not compared. `neyret/62urmx2dcm`: 2 series off, 1 on.
+  The cause is in Tycho: it lowers the body of a row before it publishes a
+  lambda (`max`/`min` to `ElementMax`, list indexing, a `Sum` whose bounds
+  are a list), and a raw macro body skips those lowerings. The engine
+  refuses a list as the bound of a `Sum` in every spelling, on 0.187.1 and
+  on this build. So the body Tycho declares must be its lowered body, and
+  its lowering must run on a form where the other macros are still names;
+  today it runs on boxed, typed forms. This is Tycho's largest
+  prerequisite.
+- Line counts, measured by script on `document-ce-manager.ts` (20,236
+  lines). Deletable with M7: the threading, 1,311 lines (`_threadNode` 487,
+  `_threadMacroRefs` 133, `_threadingRowHead` 120, `_threadFunctionCall`
+  99, 13 smaller methods), and the publication of a value row as a lambda,
+  140 lines; 1,451 lines in that file, not counting call sites, the
+  `implicitParams`/`ambientParams` fields in 10 other files, and tests.
+  Stays: the arity scan (144 lines) and `macro-arity.ts` (599), which
+  classification reads; free-name and bound-name rows (185); the self-read
+  rename (82) and `block-local-rename.ts` (604). Uncertain: a row with a
+  free name that is read bare elsewhere needs "name to call with its free
+  name", which may keep a reduced `_threadNode`.
+- Audit time with the switch on: 46 s against 48 s off (one run each).
+
+The figure of section 9 (about 3,900 lines deletable) is not confirmed: the
+measured figure is 0 lines with this change alone and 1,451 lines in one
+file once M7 is built and Tycho lowers raw bodies.
+
+The values of `art/hyvhlz4chj` agree with the switch on (`tycho-desk`,
+2026-11-13): Tycho's test of the document's colour chain against an
+independent JavaScript model passes in both modes (tolerance 1e-6), and the
+3 changed records differ only by the inlined helpers of the value rows and
+renumbered temporaries. The emitted code of the records was not run.

@@ -10,6 +10,7 @@ import {
   TypeString,
 } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
+import { isMacroDef } from './boxed-expression/macro.js';
 import {
   innermostCallFrameBody,
   staticViewDiverges,
@@ -502,6 +503,9 @@ function collectAppliedNonFunctions(node: unknown, result: Set<string>): void {
   )
     collectAppliedNonFunctions((node as { fn: unknown }).fn, result);
 }
+
+/** The type that the parse oracle answers for a macro (`_scopeResolution()`). */
+const MACRO_RESOLUTION_TYPE = new BoxedType('any');
 
 export class ComputeEngine implements IComputeEngine {
   /** @internal Factory for creating LatexSyntax instances. Registered by the
@@ -1714,6 +1718,18 @@ export class ComputeEngine implements IComputeEngine {
    */
   _qualifiedHead: { name: string; definition: BoxedDefinition } | undefined =
     undefined;
+
+  /** See `IComputeEngine._macroCount`.
+   * @internal */
+  _macroCount = 0;
+
+  /** See `IComputeEngine._macroNames`.
+   * @internal */
+  readonly _macroNames = new Set<string>();
+
+  /** See `IComputeEngine._macroSuspects`.
+   * @internal */
+  _macroSuspects = 0;
 
   /** The inference-write choke point — see
    * `IComputeEngine._noteInferenceWrite`. Subscribers, in order: the
@@ -4801,6 +4817,10 @@ export class ComputeEngine implements IComputeEngine {
     | undefined {
     if (!def) return undefined;
     if (isOperatorDef(def)) return { type: def.operator.signature };
+    // A macro is not a function for the parser (`macro.ts`): its body has a
+    // type only where it is boxed, and the answer `any`, which is neither
+    // `unknown` nor a function, makes `A(x+1)` a product.
+    if (isMacroDef(def)) return { type: MACRO_RESOLUTION_TYPE };
     if (isValueDef(def))
       return {
         type: def.value.type,

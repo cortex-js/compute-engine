@@ -213,6 +213,12 @@ import {
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
+import {
+  isMacroDef,
+  isMathJsonShape,
+  macroWriteError,
+  noteMacroDeclared,
+} from './boxed-expression/macro.js';
 import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
 import { hostCollectionSource } from './boxed-expression/shared-evaluation-memo.js';
 
@@ -2871,6 +2877,38 @@ export function declareFn(
 
   const def = arg2;
 
+  // A macro (`macro.ts`): a value definition with the raw body, no value and
+  // the type `unknown`. The body is checked to be MathJSON, and not boxed.
+  if (
+    typeof def === 'object' &&
+    def !== null &&
+    (def as { macro?: unknown }).macro !== undefined
+  ) {
+    const fields = Object.keys(def).filter(
+      (k) => (def as Record<string, unknown>)[k] !== undefined
+    );
+    const body = (def as { macro?: unknown }).macro;
+    const problem =
+      fields.length !== 1
+        ? 'A macro definition has no field other than `macro`'
+        : !isMathJsonShape(body)
+          ? 'The `macro` field must be a MathJSON expression'
+          : undefined;
+    if (problem !== undefined)
+      throw Error(
+        [`Invalid argument for "${id}"`, fields.join(', '), problem].join(
+          '\n|   '
+        )
+      );
+    ce._declareSymbolValue(
+      id,
+      { type: 'unknown', macro: body as MathJsonExpression },
+      scope
+    );
+    noteMacroDeclared(ce, id);
+    return ce;
+  }
+
   if (isValidValueDef(def)) {
     // Phase 3 §6.3 — declared-signature reconciliation (declare-with-value and
     // `Declare(f, type, value)` evaluate paths). When declaring a function
@@ -3383,6 +3421,9 @@ function assignNamedValue(
   // Cannot set the value of 'Nothing'
   // @todo: could have a 'locked' attribute on the definition
   if (id === 'Nothing') return ce;
+
+  // A macro has no value (`macro.ts`).
+  if (isMacroDef(ce.lookupDefinition(id))) throw macroWriteError('assign', id);
 
   // A function literal assigned to a symbol declared with a function type
   // whose parameters have a value kind arm (`f: (real | umeasurement) -> …`)
@@ -4315,6 +4356,7 @@ export function withValuesFn<T>(
         `withValues(): "${name}" is bound to a function definition. withValues() gives a value to a variable only`
       );
     if (record.value.isConstant) throw new ConstantAssignmentError(name);
+    if (isMacroDef(record)) throw macroWriteError('withValues', name);
     if (hasProvisionalDependents(ce, name)) throw appliedByBody();
     const input = values[name];
     if (
@@ -4366,6 +4408,7 @@ export function withBindingValuesFn<T>(
         `withValues(): "${name}" is bound to a function definition. withValues() gives a value to a variable only`
       );
     if (record.value.isConstant) throw new ConstantAssignmentError(name);
+    if (isMacroDef(record)) throw macroWriteError('withValues', name);
     if (hasProvisionalDependents(ce, name))
       throw new Error(
         `withValues(): the body of a function applies "${name}" as a function, and a value would change that body for good. Declare "${name}" first`

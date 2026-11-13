@@ -139,6 +139,96 @@ The setters `value` and `type` of a free name are host writes: they declare
 the name in its home scope, as `ce.assign()` and `ce.declare()` do
 (`ce.box('w').value = 3` declares `w`).
 
+## Macros
+
+A macro (`ce.declare(name, { macro: body })`, `boxed-expression/macro.ts`)
+is a value definition that keeps a raw MathJSON body (`macro`), with no
+value and the type `unknown`. It is expanded in place: where boxing turns a
+name of the input into a canonical, partial or structural symbol
+(`macroAt()`, `box.ts`), a name that resolves to a macro is replaced by the
+body, boxed there with the options of the occurrence. The name resolves as
+`ce.symbol()` resolves it, so a parameter of the function literal being
+canonicalized, an index, a block local and a declaration of a pushed scope
+come first and hide the macro. The body is boxed by the same rule, so a
+macro that it names is expanded too; a macro met again while its body is
+boxed is `Error('macro-cycle', name)`. The root of the body takes the
+`sourceOffsets` of the name.
+
+Nothing is expanded while an evaluation is in progress on the engine
+(`anyMacroDeclared()`, `macro.ts`): an operation environment is in place
+(`evaluate()`, `N()`, `simplify()`, `compile()`, a slice of
+`evaluateAsync()`, `replace()` and the other operations), or the run driver
+of an Epsil program evaluates a statement. There a name that resolves to a
+macro is the plain symbol of that name, with no value and the type
+`unknown`, at every site, so library code that boxes names during an
+evaluation never expands a macro of the same name. A host callback that
+calls `ce.parse()` or `ce.box()` during an evaluation gets no expansion
+either.
+
+- Not an occurrence: the raw form, a symbol made by `ce.symbol()` (an engine
+  algorithm's working variable), the head of a call, and a position that
+  takes a name. A binder's variable is declared in its scope before the
+  operands are canonicalized, so it resolves to the variable; the target of
+  `Assign` and `Declare` is kept as a name by their handlers.
+- A held operand (`Hold`) keeps the name, unbound. `ReleaseHold` makes it
+  canonical during an evaluation, so it stays the name; so does a name in
+  the replacement of a rule, made canonical when the rule is applied.
+  `BoxedSymbol.canonical` expands a raw macro name made canonical outside an
+  evaluation. A symbol bound before the macro was declared (a free name) is
+  canonical, so it is not boxed again and reads the name, which has no value.
+- The structural form makes no scope for a binder, so the names that a
+  structural binder binds are found from the binding sites of its operator
+  definition (`declaredBinderNamesOf()`), and for a `Block` from its
+  top-level `Declare` and `DefineFunction` statements; a macro of such a name
+  is not expanded below the binder.
+- The parse oracle answers the type `any` for a macro, which is neither
+  `unknown` nor a function, so LaTeX `A(x+1)` is a product.
+- `ce.assign()`, an evaluated `Assign` and `ce.withValues()` on a macro
+  throw. A host changes a macro by declaring it again in a new scope and
+  boxing its readers again.
+
+- A lazy operator receives its operands raw, and its handler can read a
+  bare symbol by its shape (`D` reads it as a function name, `Integrate` as
+  a constant integrand), and it can make an operand canonical only when the
+  call is evaluated (`Solve`, `FindRoot`), where nothing is expanded. So each
+  macro name in the raw operands of a lazy call, at any depth, is replaced
+  by the raw body, itself expanded the same way, before the handler runs
+  (`expandMacroOperands()`, `box.ts`, also for the entries of
+  `Dictionary`); the operands stay raw, and the handler sees what it sees
+  for the program with the body written in place of the name. The walk is
+  the raw and structural rebuild of `ce.rebind()` (`unboundRebuilder()`),
+  with an explicit stack and the same records of hidden names as the
+  structural form; a rebuilt node keeps its metadata, and a node of the
+  caller is never changed. Not replaced: an operand whose role is `opaque`
+  or `held`, in the call or in a lazy call inside it (the operand of
+  `Hold`), and a name that stays a name: a symbol operand with the role
+  `bound` or `clause`, a name at an operand that takes a name
+  (`isNameOperand()`, `macro.ts`: the signature names the type `symbol` at
+  that position, or its table lists the operand, as for the unknowns of
+  `Solve` and the variable of `Limit(f, To(x, a))`, and of `Limit(f, x, a)`
+  when `f` is not a `Function` literal and holds `x`), and a name that the call, or a binder, a `Block` or a lazy call
+  inside it, binds or takes as a name. A name that stays a name is replaced
+  by a fresh raw symbol of the name that `BoxedSymbol.canonical` does not
+  expand (`_keptName`), so the handler can make the operand canonical, put
+  it in a new node or substitute in it, and the name stays a name.
+- At an operand that takes a name, the names are the operand when it is a
+  symbol, each symbol element of a `List` there, and the first operand of a
+  `Tuple`, a `Pair`, an `Element` or a `To` there or in that list; a start
+  value, a domain or a point is an ordinary occurrence. Such a name hides the macro in every
+  operand of the call, as the variable of a binder does. In the structural
+  form a lazy call and a binder push a record of their
+  operands, and the names are found only when a name below resolves to a
+  macro (`HiddenBinders`, `box.ts`).
+- A raw body is expanded while its macro is in the cycle set, so a cycle
+  through a lazy operand is `macro-cycle` at the same depth as elsewhere.
+- Each engine counts its macros (`ce._macroCount`) and keeps their names
+  (`ce._macroNames`); an engine with none skips every macro test, and a
+  symbol whose name is not a macro name is skipped before any lookup. Raw
+  boxing counts the raw nodes that can hold a macro name that it makes or
+  takes as they are (`ce._macroSuspects`), so the raw operands of a lazy
+  call whose boxing counted none are not walked, and a node that a walk
+  found to hold none is not walked again (`boxRawOperands()`, `macroFree`).
+
 ## Callable resolution
 
 A callable name denotes the binding selected where the call or callback was
