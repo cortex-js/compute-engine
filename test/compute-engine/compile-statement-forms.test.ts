@@ -601,8 +601,9 @@ describe('PYTHON: THE LOOP FORM KEEPS THE SCOPE OF THE BODY', () => {
         'Block',
         ['Declare', 'w', "'unknown'", 100],
         [
-          'Assign',
+          'Declare',
           's',
+          "'unknown'",
           [
             'Sum',
             [

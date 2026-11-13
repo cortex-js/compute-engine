@@ -137,7 +137,7 @@ describe('PYTHON: IDENTIFIERS WITH THE SAME NFKC FORM', () => {
       const fn = py.compileFunction(
         e.box([
           'Block',
-          ['Assign', fi, 'x'],
+          ['Declare', fi, "'unknown'", 'x'],
           ['Assign', fi, ['Add', fi, 1]],
           fi,
         ]),

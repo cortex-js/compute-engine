@@ -133,7 +133,11 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
     const ce = new ComputeEngine();
     const src = [
       'Sum',
-      ['Block', ['Assign', 't', ['Add', 'k', 1]], ['Multiply', 't', 't']],
+      [
+        'Block',
+        ['Declare', 't', "'unknown'", ['Add', 'k', 1]],
+        ['Multiply', 't', 't'],
+      ],
       limits,
     ];
     const code = py.compile(ce.box(src)).code;
