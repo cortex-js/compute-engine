@@ -1,3 +1,23 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`D` differentiates `ErfInv`, `HurwitzZeta` and `LerchPhi` in `a`, `Beta`,
+  `BarnesG`, `LogBarnesG`, the complete `EllipticK` and `EllipticE`, and
+  `ClausenCl` of a literal order, and reads `D(f, [x, n])` as `D(f, {x, n})`**
+  (#NNN, contributed by [enumeratio](https://github.com/enumeratio)). Each was
+  the inert `Apply(Derivative(f, …), …)`: `D(ErfInv(x), x)` is now
+  `½√π·e^(ErfInv(x)²)`, `D(HurwitzZeta(s, x), x)` is `−s·HurwitzZeta(s + 1, x)`,
+  `D(Beta(a, b), a)` is `Beta(a, b)(ψ(a) − ψ(a + b))`, and `D(EllipticK(m), m)`
+  is `(E(m) − (1 − m)K(m))/(2m(1 − m))`, with the chain rule over every operand
+  and the inert form kept for an operand with no closed form (`∂ₛζ(s, a)`,
+  `Zeta'(s)`, a symbolic `ClausenCl` order). The coefficients of a `Series`
+  follow: `Series(ErfInv(x), x, 0, 5)` is `½√π x + π^(3/2) x³/24 + 7π^(5/2)
+  x⁵/960 + O(x⁷)`. `D(x^5, [x, 3])` was unevaluated and is `60x²`; a pair
+  `[x, n]` of a variable and a number is the order pair `{x, n}` already was
+  (a negative order is an error, a fractional or symbolic one and an order past
+  1000 stay inert).
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

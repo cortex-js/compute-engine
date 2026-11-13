@@ -533,11 +533,12 @@ describe('the reference analysis probes a caller compile handler without compili
   // expression for real, or the decline never reaches the report.
   test('a handler that compiles a synthesized expression still declines', () => {
     const ce = new ComputeEngine();
-    // `d/dx erfinv(x)` evaluates to `Apply(Derivative(ErfInv, 1), x)`, which
+    // `d/dx ζ(x)` evaluates to `Apply(Derivative(Zeta, 1), x)`, which
     // the JavaScript target computes by numeric differentiation and glsl
-    // cannot lower, although glsl lowers `ErfInv` itself. (The example was
-    // `d/dx Γ(x) = Γ(x)ψ(x)` until glsl gained a `Digamma` lowering.)
-    const expr = ce.box(['D', ['ErfInv', 'x'], 'x']);
+    // cannot lower, although glsl lowers `Zeta` itself. (The example was
+    // `d/dx Γ(x) = Γ(x)ψ(x)` until glsl gained a `Digamma` lowering, and
+    // `d/dx erfinv(x)` until the derivative had a closed form.)
+    const expr = ce.box(['D', ['Zeta', 'x'], 'x']);
     const js = compile(expr, { to: 'javascript' });
     expect(js.success).toBe(true);
     expect(js.unsupported ?? []).toEqual([]);
