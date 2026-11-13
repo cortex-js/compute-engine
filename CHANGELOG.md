@@ -1,3 +1,15 @@
+## Unreleased
+
+### Issues Resolved
+
+- **`A \setminus B \setminus C` is `SetMinus(A, B, C)`,** as
+  `A \subset B \subset C` is `Subset(A, B, C)` (#NNN, contributed by
+  [enumeratio](https://github.com/enumeratio)). It was read as
+  `SetMinus(A, SetMinus(B, C))`, a different set: `\{1,2,3,4\} \setminus
+  \{2\} \setminus \{4\}` evaluated to `{1, 3, 4}` where `{1, 3}` is correct.
+  `SetMinus(A, B, C)` was already written as that chain, so it did not read
+  back. `\backslash` reads the same way.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

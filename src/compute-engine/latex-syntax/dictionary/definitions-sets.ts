@@ -429,8 +429,8 @@ function serializeSetOperator(
  * right operand is then read one precedence level up, so the next `\subset`
  * is left to the caller's infix loop and `_appendAssociativeOperand()`
  * extends the chain in place. The other modes parse the right operand at the
- * operator's own precedence (associativity `none`), so `A \setminus B
- * \setminus C` nests to the right as before.
+ * operator's own precedence (associativity `none`), so those nest to the
+ * right.
  */
 function parseSetOperator(
   name: string,
@@ -1530,7 +1530,9 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\setminus'],
     kind: 'infix',
     precedence: 650,
-    parse: parseSetOperator('SetMinus', 650, 'both'),
+    // A chain is one call: `A \setminus B \setminus C` is `SetMinus(A, B, C)`,
+    // `(A \setminus B) \setminus C`, not `A \setminus (B \setminus C)`.
+    parse: parseSetOperator('SetMinus', 650, 'chain'),
     serialize: serializeSetOperator('\\setminus', 650, 'both'),
   },
   {
@@ -1542,7 +1544,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\backslash'],
     kind: 'infix',
     precedence: 650,
-    parse: parseSetOperator('SetMinus', 650, 'both'),
+    parse: parseSetOperator('SetMinus', 650, 'chain'),
   },
   {
     name: 'SymmetricDifference',
