@@ -252,6 +252,27 @@ takes the cheap option and never declares, so no scratch-scope exemption is
 necessary. Not scoped or scheduled. Do it when a third instance of the pattern
 appears.
 
+### CE-1258. A held argument is bound where it is boxed
+
+**Status:** waits for user (design); design, L. Starts after step 1 of `docs/plans/2026-11-11-bound-once-spec.md` is on main. The user asked for the design pass on 2026-11-12.
+**Witness:** plausible; eight of the eighteen defects that the reviews of step 1 found, and `issues/CE-1251.md`, are a held argument whose names are bound where it is evaluated.
+
+A held (not canonical) operand is the one place where a name is not bound
+in the scope the expression was boxed in: it is bound when the operand is
+evaluated, in whatever scope is current. The engine repairs this at each
+call of a hold function (it substitutes the held arguments into the body,
+replaces the caller's locals by their values, copies a scope for each
+call) and in the interpreter fallback of `compile()` (it collects the
+names of held operands apart).
+
+The design to examine: a held operand records the scope and the activation
+it was boxed in, as a function value does, and is evaluated there; a
+`bind` parameter supplies the value of one name for that evaluation. First
+step: a probe, with the lines it removes, the programs that change, and
+the programs of `issues/CE-1251.md` and of the list in
+`docs/plans/2026-11-11-bound-once-evidence/step1-state.md` (answers wrong
+before and after step 1).
+
 ## Symbolic computation
 
 ### CE-148. A complex-valued function whose parts cannot be separated has no symbolic limit
