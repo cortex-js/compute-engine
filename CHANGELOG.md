@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Series` stays unevaluated at an infinity written as a call, at
+  `ComplexInfinity`, and where a library function has a derivative the engine
+  cannot evaluate** (#NNN, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+  `Series(AiryAi(x), x, DirectedInfinity(1), 3)` was a Taylor expansion with
+  `AiryAi(~oo)` and `(x − ∞)³` terms, and `Series(1/x, x, DirectedInfinity(1), 3)`
+  was `1/∞ − (x − ∞)/∞² + …`; `DirectedInfinity(±1)` is now read as `±∞`.
+  At `ComplexInfinity` and `DirectedInfinity` of a non-real direction the call
+  was expanded as `+∞`, which is wrong for `exp(x)`; it is now the expansion
+  at `+∞` and at `−∞` when the two agree (`1/(x + 1)`, `(x² + 1)/(x² − x + 2)`)
+  and stays `Series` when they differ or have a branch point (`exp(x)`,
+  `√x`).
+  `Series(Hypergeometric2F1(1, 1, 3, x), x, 1, 3)` was a sum of
+  `Apply(Derivative(Hypergeometric2F1, 0, 0, 0, 3), 1, 1, 3, 1)` terms, though
+  the function runs in `(1 − x)·ln(1 − x)` there and its first derivative is a
+  pole. A coefficient that holds a `Derivative` of a library function the
+  table of derivatives does not know is no coefficient, so the call stays
+  `Series`; a function the engine does not define (`f`) keeps its symbolic
+  `f(0) + f′(0)x + …`.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
