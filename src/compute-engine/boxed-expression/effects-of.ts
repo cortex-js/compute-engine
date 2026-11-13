@@ -1520,11 +1520,35 @@ function couldBeCallable(t: Type | undefined): boolean {
   if (t === undefined) return false;
   if (typeof t === 'string')
     return t === 'unknown' || t === 'any' || t === 'function' || t === 'symbol';
+  // A union none of whose arms can hold a function is not callable. Every
+  // other union is taken as callable, as before this test: an `expression`
+  // arm counts, although a result declared `expression` alone does not (the
+  // string test above).
+  if (t.kind === 'union') return !t.types.every(cannotHoldFunction);
   return (
     t.kind === 'signature' ||
     t.kind === 'intersection' ||
-    t.kind === 'union' ||
     t.kind === 'reference'
+  );
+}
+
+/** Whether no value of the type `t` is a function: a primitive type that does
+ * not include `function` and is not `symbol` (a symbol can name a function),
+ * a literal value, a numeric type, or a union of such types. Every other type
+ * gives `false`. */
+function cannotHoldFunction(t: Type): boolean {
+  if (typeof t === 'string')
+    return (
+      t !== 'unknown' &&
+      t !== 'any' &&
+      t !== 'expression' &&
+      t !== 'function' &&
+      t !== 'symbol'
+    );
+  return (
+    t.kind === 'value' ||
+    t.kind === 'numeric' ||
+    (t.kind === 'union' && t.types.every(cannotHoldFunction))
   );
 }
 

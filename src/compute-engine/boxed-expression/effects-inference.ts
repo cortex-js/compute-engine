@@ -5,6 +5,7 @@ import type {
   Type,
 } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
+import { withStaticTypingView } from '../static-typing-view.js';
 import {
   broadcastableBaseMatches,
   collectionElementType,
@@ -1974,6 +1975,44 @@ export function functionLiteralCallSignatureType(expr: Expression): Type {
   return here.effects === undefined
     ? shape
     : { ...shape, effects: here.effects };
+}
+
+/**
+ * The parameters of the signature that `functionLiteralCallSignatureType()`
+ * gives for the `Function` literal `expr` (the argument slots, the optional
+ * slots and the variadic tail, derived in the scope the literal is written
+ * in), with the result `any` and no effects. It does not read the type of the
+ * body, so a check of the arguments of a call does not type the body.
+ *
+ * `undefined` when `expr` is not a valid `Function` literal, or when it has a
+ * full-signature marker (a generic literal states its parameters there): the
+ * caller reads the type of the literal.
+ */
+export function functionLiteralParameterSignature(
+  expr: Expression
+): Type | undefined {
+  if (!isFunction(expr, 'Function') || !expr.isValid) return undefined;
+  if (functionLiteralDeclaredSignature(expr) !== undefined) return undefined;
+  const body = functionLiteralBody(expr);
+  if (body === undefined) return undefined;
+  const ce = expr.engine;
+  const paramOps = expr.ops.slice(1);
+  const build = (): Type => ({
+    kind: 'signature',
+    ...signatureArgumentsOfSlots(
+      paramOps,
+      functionLiteralParameterSlots(expr, body)
+    ),
+    ...restParameterSignatureTail(paramOps),
+    result: 'any',
+  });
+  const scoped = expr.ops[0];
+  const written = scoped?.isScoped ? scoped.localScope?.parent : undefined;
+  return withStaticTypingView(ce, () =>
+    written && written !== ce.context?.lexicalScope
+      ? ce._inScope(written, build)
+      : build()
+  );
 }
 
 /**

@@ -163,6 +163,7 @@ import {
 import {
   EffectContractError,
   effectContractErrorValue,
+  functionLiteralParameterSignature,
   inferFunctionLiteralEffects,
   isEffectContractError,
   presentedValueType,
@@ -7855,6 +7856,33 @@ function makeLambda(
     declaredSignature !== undefined &&
     (declaredSignature.typeParams?.length ?? 0) > 0;
   const validateApplication = hasAnnotatedParam || isGenericLiteral;
+  // The checks of the arguments of a call read the parameters of the
+  // signature and never its result, so they do not type the body. The
+  // parameters are kept until the type generation moves
+  // (`_typeCacheGeneration()`). That key is enough: the slots it does not
+  // follow are those of the parameters with no annotation, and each check
+  // below relaxes them; the annotated slots and the rest tail are fixed for
+  // the literal. A literal with a full-signature marker states its parameters
+  // in its type, and a read made while the type of the literal is being
+  // computed gets what the type gives at that time.
+  let parameterSignatureCell:
+    | { generation: number; signature: Type }
+    | undefined;
+  const parameterSignature = (): Type => {
+    if (
+      declaredSignature !== undefined ||
+      (fnExpr as { _isTypeInFlight?: () => boolean })._isTypeInFlight?.()
+    )
+      return fnExpr.type.type;
+    const generation = ce._typeCacheGeneration();
+    if (parameterSignatureCell?.generation !== generation)
+      parameterSignatureCell = {
+        generation,
+        signature:
+          functionLiteralParameterSignature(fnExpr) ?? fnExpr.type.type,
+      };
+    return parameterSignatureCell.signature;
+  };
 
   // A BARE parameter of a PARTIALLY annotated literal imposes NO constraint
   // (ruled 2026-08-09). The §6.4 gate above is all-or-nothing — one annotation
@@ -8670,7 +8698,7 @@ function makeLambda(
       // `boxed-expression/boxed-function.ts`; `docs/ERROR-MODEL.md`).
       if (ce.strict && hasAnnotatedParam && _validateArguments) {
         const fullSig = acceptNaNAtNumericParams(
-          relaxBareParams(fnExpr.type.type),
+          relaxBareParams(parameterSignature()),
           evaluatedKnownArgs
         );
         if (typeof fullSig !== 'string' && fullSig.kind === 'signature') {
@@ -8863,7 +8891,7 @@ function makeLambda(
         ce,
         evaluatedArgs,
         acceptNaNAtNumericParams(
-          relaxBareParams(fnExpr.type.type),
+          relaxBareParams(parameterSignature()),
           evaluatedArgs
         )
       );
@@ -8894,7 +8922,7 @@ function makeLambda(
       options?.holdArguments !== true &&
       options?.mapElement !== true &&
       _declaredArgumentUndecided?.(
-        relaxParamSlots(fnExpr.type.type, unannotatedParamIndexes),
+        relaxParamSlots(parameterSignature(), unannotatedParamIndexes),
         evaluatedArgs
       )
     ) {

@@ -706,6 +706,15 @@
 
 ### Resolved Issues
 
+- **A call of a function literal with an annotated parameter no longer types
+  the body of the literal to check its arguments.** The check reads the
+  parameter types only. An interpreted call of a typed function that runs a
+  loop is faster: one call of `legal(B, B[65])` in Tycho's othello prelude
+  went from a median of 1,160 ms to 670 ms. An
+  operator whose declared result is a union of types that cannot hold a
+  function (`Floor`) is no longer typed at each evaluation to look for the
+  effects of a function it could return (CE-1210).
+
 - **A parameter named `c_1` in the initial conditions of `DSolve` or
   `RSolve` is a parameter.** It was taken for a constant of integration and
   solved for: `DSolve([y'' = y, y(0) = c_1, y'(0) = 0], y, x)` was `y = 0`,

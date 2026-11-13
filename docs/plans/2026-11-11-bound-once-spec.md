@@ -1065,3 +1065,179 @@ needs no code: an expression already uses the types it requires of its
 untyped host names and commits nothing. Not run: the full suite, Tycho's
 instruments.
 
+**D18, as built (session compute-engine-42, 2026-11-13): on main, commit
+`42937817d9fd477b7c226ad15334e6bc05aaf3e2`.** Patch
+`_TASKS/2026-11-12-leftovers-removal/land-d18.patch`; source +474 −117 in
+11 files; no existing test expectation changed; one new test file
+(`d18-end-of-literal-event.test.ts`). Tycho's checks on that build
+(tycho-desk): emitted code unchanged (1,295 audit records), 0 census rows
+changed, othello 558-578 ms against 555-583 ms on its base build. The
+figures and the programs below are as those sessions reported them, not
+run again. The built form differs from the text above in eight places:
+
+- (a) The requirements are in an environment of the LITERAL, not of the
+  unit of the operation. With the operation's environment,
+  `map(x => N(x + random()), 1..100)` gave a different sum at each read
+  (CE-432).
+- (b) The step that binds again a body boxed before the literal counts as
+  part of the boxing of the literal (`ce.function('Function', [u + 1, u])`
+  was typed `-> integer` otherwise).
+- (c) "No invalidation" does not hold. One state event is sent at the end
+  write, only when the type changed: a cached type of ANOTHER node can
+  depend on the parameter before the literal is complete (`F` and `G`
+  declared `(unknown, unknown) -> unknown`, `F` assigned a body that calls
+  itself and `G`, `G(n, K) = F(n, K)`: `G` was typed `-> unknown` where main
+  gives `-> list<number>`). The cache keys of D17 would remove the event.
+- (d) Once its literal is complete, a parameter is an existing definition:
+  a use in a later boxing writes in the environment of that unit.
+- (e) A requirement with no common value with the earlier ones sets the
+  parameter to `never` in the environment of the literal
+  (`n ↦ Range(n) + n[1]`).
+- (f) The end write skips a parameter that has assignment evidence
+  (`x ↦ { x + 1; x := [1, 2]; x }`).
+- (g) One provenance record for each parameter when a rollback frame is
+  open (the Epsil static check); the provenance history has one entry at
+  the end, not one for each use.
+- (h) The definition branch of the fresh-matrix repair skips a parameter,
+  which is repaired through its entry of the environment; the branch stays
+  for the other definitions.
+
+The writers of the rollback journal that remain: block locals and binder
+variables, the definition branch of the repair for a name that is not a
+parameter, the three sites of `library/core.ts`, the inference of an
+operator signature, declarations and definition swaps, the provisional
+registry, and (g). Not started, each its own item: the same store for block
+locals and binder variables; a second boxing of a body; the three sites of
+`library/core.ts`.
+
+### Under review: how inference is done (2026-11-13)
+
+The user asked for a review of the inference model before the next work of
+this section. Nothing here is decided. The model under test: types flow
+forward only (a declaration, a literal, an initial value, the type of an
+argument at a call), and only these decide a meaning; a name with no type
+is a scalar; what a use requires of a name is kept for checks, for the
+inputs of `compile()` and for `ce.infer()`, and decides no value; one
+language rule decides whether a parameter with no declared type takes a
+list whole (the body hands it to an operation on collections) or the call
+is mapped, from all the uses, before the body is boxed; a function has no
+inferred signature, and a call is typed from the body for the types of its
+arguments; an evaluation asks the value for its shape, not a static type.
+Three measurements were started by session ce-desk (reports in
+`~/dev/compute-engine-recovery/fc-bit/`, `fc-typereads/`, `fc-d16/`), and
+Tycho was consulted (session tycho-desk).
+
+**Tycho's answer (tycho-desk, 2026-11-13; from a read of Tycho's source
+and its census of 688 Desmos states, nothing run).** Tycho can live with
+the model, and the rule "a requirement decides no value and is written on
+no definition" is the one that lets it delete code: the scratch scopes
+that exist to discard inference writes (`_withScratchScope`, 15 call
+sites; `withRowParamScope`; `withDefinitionArmShadow`), the parameters
+declared `any` so that a use does not narrow them, the importer's retry
+after a narrowed declaration, and about a dozen reads of the inferred flag.
+It asks for four things:
+
+1. The whole-or-mapped rule follows a pass to a user function whose
+   parameter is whole, to a fixpoint, recursion included. `l(p) =
+   \sqrt{p[1]^2 + p[2]^2}`, `k(p) = \max(0, l(p))`, `k([3, 4])` is 5 in
+   Desmos (measured by Tycho, 2026-10-20). Tycho does not need an alias
+   followed.
+2. A reducer (`Max`, `Min`, `Sum`, `Mean`, `Median`, `Total`, `Product`)
+   takes the parameter whole only when the parameter is its only operand:
+   `f(x) = \max(x, 2)` on `[1, 2, 3]` is `[2, 2, 3]` in Desmos (measured).
+3. "A name with no type is a scalar" is a default for readings, not a
+   check: an untyped parameter that receives a point computes on the point.
+4. A callback of a library operator is typed from the element type of the
+   collection (an untyped `c => c > k` in `filter` must not decline in
+   `compile()`).
+
+Tycho has the same rule as a function of the body today
+(`readsAsWholeList`, `graph-paper/graph/chain-staging.ts:274-351`; the
+fixpoint over the call graph is `wholeListParameters`,
+`graph-paper/graph/broadcast-positions.ts:297-367`): a parameter is whole
+when it is the first operand, as a bare name, of one of 19 collection
+operators, with condition 2 for the reducers. Its census: 155 of 2,811
+parameters (104 of 1,792 functions, 31 states) are whole. With one
+documented rule in the engine, that analysis can go for the routes that
+call a function by reference; Tycho keeps the types it declares from its
+own evidence (points, widths). It also asks for an API that gives the
+requirements of an expression as data, in place of `ce.infer()` and the
+inferred flag.
+
+What Desmos does, from Tycho's measurements: a list argument is
+substituted whole and the operations broadcast, zipped to the shortest
+list (`w(n) = \{n < 3: n \cdot [1, 2], -1\}` at `[1, 5]` is `[1, -1]`;
+`f(a, b) = a + 10b` at `[1, 2]`, `[3, 0, 7]` is `[31, 2]`). This equals a
+mapped call only when the body holds no list of its own and one argument
+is a list. Tycho covers the difference with declared types
+(`real | list<real>` binds the list whole) and with its zip lowering, and
+asks that a declared union with a list arm keeps binding the argument
+whole.
+
+Measured by tycho-desk on the live Desmos calculator, 2026-11-13 (script
+`~/dev/tycho/_TASK/desmos/desmos-corpus-scripts/2026-11-13-list-argument-substitute-or-map-gt.mjs`),
+argument `[1, 2, 3]`. "Engine" is the value on main, from the probe of
+session ce-desk for the first five rows and from `docs/BROADCAST-MODEL.md`
+for the last:
+
+| Function | Desmos | Engine |
+|---|---|---|
+| `f(x) = 5` | `5` | `[5, 5, 5]` |
+| `f(a) = [a, 2a]` | error: a list in a list | `[[1,2],[2,4],[3,6]]` |
+| `f(n) = \sum_{k=1}^{n} k` | `[1, 3, 6]` | `[1, 3, 6]` |
+| `f(n) = [1...n]` | error: a list in a list | three ranges |
+| `f(x) = \{x > 1: 1, -1\}` | `[-1, 1, 1]` | `[-1, 1, 1]` |
+| `f(a, b) = a + b` at `[1,2,3]`, `[10,20]` | `[11, 22]` | `incompatible-dimensions` |
+
+So Desmos does not map a call: it substitutes the list, and each operation
+broadcasts (the bound of a sum included). Tycho's position: the engine's
+rule "the call is mapped" is acceptable as the engine's own rule, with
+these differences documented; the zip of two lists of different lengths is
+the one that occurs in documents, and Tycho's importer lowers it.
+
+**The measurements (session ce-desk, 2026-11-13; reports
+`~/dev/compute-engine-recovery/fc-bit/report.md` and
+`fc-typereads/report.md`).**
+
+- *Collect, then box* (mode `two` on the D18 measurement tree: a first
+  boxing of the body that is thrown away collects the requirements, a
+  second boxing has the parameters typed from the start). 887 of the 939
+  tests of the D15 yardstick pass again, against 889 for D18's form; the
+  commutator written first gives `[[−1,−3],[3,1]]`, not the zero matrix.
+  It costs one more boxing of each body with a bare parameter (1.2 to 1.4
+  times on a timing of 1,000 literals, taken under load; a nested literal
+  is boxed 2^depth times). It does not make the answer independent of the
+  order of the uses: the first pass combines them one at a time, as today.
+- *Only whole-or-mapped is kept for a parameter* (mode `bit`). 444 tests
+  that pass with D18 fail: 322 compare a printed type, 79 are a
+  compilation, 42 are a value, 1 tests the mechanism. Of the 42: in 10 the
+  rule gives another answer (`a ↦ a[1] + a[2]` on a list of two points is
+  `(4, 6)`, not `[3, 7]`); 14 come from the encoding of the measurement;
+  14 need a type finer than the one bit (a limit that needs its variable
+  numeric, a body that inference finds invalid, compiled code for a
+  parameter with no settled shape); 4 are not traced. So one bit decides
+  the interpreted value of almost every program of the yardstick, and the
+  types that inference gives a parameter are what its printed signature,
+  its static errors and its compilation as a function value are made of.
+- *Who reads static types in one othello call.* Three callers start about
+  92% of the reads: the check of the arguments of a call (it typed the
+  body of the literal twice per call), a purity test at each evaluation,
+  and the element-wise test of a connective. 14 of the 15 largest readers
+  ask about a node of a function body whose answer cannot change during a
+  run. Removing the first two reads, with the invalidation unchanged, took
+  one call from a median of 1,160 ms to 670 ms.
+
+What Tycho could delete when a use writes on no definition (tycho-desk,
+2026-11-13, spans measured with a script on Tycho main, comments
+included): about 345 lines and 13 clauses that read the inferred flag
+(`_openBindingShadowsOf` and `_shadowOpenBindingsOf`, 61 lines; the
+importer's `redeclareInScope` and its retry, about 107; `withRowLocals`,
+32; `withDefinitionArmShadow` and `withDefinitionStampShadow`, 38;
+`paramShadowType` and the parameters declared `any` with their warnings,
+about 80; the D-229 deferral, about 10; `_withScratchScope`, 15). The
+scopes that declare parameters or shadow a name stay as plain scopes; the
+14 call sites of `_withScratchScope` were not classified one by one.
+Tycho's statement of the larger gain: the scopes that remain no longer
+carry correctness (today a missing scratch scope is a type that leaks with
+no message).
+
