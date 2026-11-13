@@ -36,11 +36,32 @@ Guaranteed:
    difference of 1e-12 of the interpreter's machine-precision value. A numeric
    routine (integral, derivative, limit) is within its own stated tolerance.
    A difference in the last two digits from the existing compiler is expected.
+   **Where a function is ill-conditioned the guarantee is on the argument,
+   not on the result** (user decision, 2026-11-12): the default mode computes
+   a function with the JavaScript `Math` function or the direct formula in
+   doubles, and gives the function's value at an argument within a few units
+   in the last place of the given one. Near a branch point, a pole or a
+   cancellation the result can therefore differ from the interpreter's by
+   more than 1e-12, or be `±Infinity` or `NaN` where the interpreter is
+   finite (`Arsech(x)` at x = 1 - 1e-16; `Arctan(Ln(x))` at x = 0). The
+   compiler carries no special formula to follow the interpreter there. On a
+   branch cut the side follows the sign of the zero part, as IEEE 754
+   functions do. The principle (user, 2026-11-12): a host that wants
+   precision and accuracy uses the interpreter, one that wants speed uses
+   the compiler, and one that needs a sound answer around a pole uses the
+   `interval-js` target. GLSL already handles poles, `NaN` and infinities
+   by its own rules. A "high-precision float" mode that calls the
+   interpreter's machine kernels where they exist is possible later, and is
+   not a priority until a use shows it is needed.
 2. **Shape.** Shapes are settled at compile time (R1 to R6), with no run-time
    test of a type or a shape.
 3. **Exact integers.** Sums, differences and products of integers below 2^53,
    `Floor`, `Mod`, comparisons and list indexes give the exact integer. The
-   compiler does not reassociate or fuse an integer expression.
+   compiler does not reassociate or fuse an integer expression. **An integer
+   value of 2^53 or more is a double in the default mode and its low digits
+   are unspecified** (user decision, 2026-11-12): `Mod(Factorial(25), 7)` has
+   no guaranteed value. The compiler makes no analysis of integer ranges. The
+   remedy for the host is the `bigint` mode.
 4. **Seeded draws.** A `WithRandomSeed` frame whose body has ONE draw site
    (one `Random()`, one list draw, one shuffle) gives the interpreter's value
    bit for bit: the draws of the site start at index 0 on entry of the frame,

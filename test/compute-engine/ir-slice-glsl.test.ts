@@ -22,7 +22,10 @@ import {
 import { JS } from '../../src/compute-engine/compilation/ir/print-js';
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
 import { spellingOf } from '../../src/compute-engine/compilation/ir/print';
-import { REAL_FUNCTIONS } from '../../src/compute-engine/compilation/ir/operators';
+import {
+  COMPLEX_FUNCTIONS,
+  REAL_FUNCTIONS,
+} from '../../src/compute-engine/compilation/ir/operators';
 import {
   interpret,
   makeEngine,
@@ -45,10 +48,11 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, and a function with no builtin defined on every real)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a function with no builtin defined on every real, and the complex lane)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'rangecount', 'at', 'log10', 'hypot', 'asin', 'acos',
-      'acosh', 'atanh', ...Object.keys(REAL_FUNCTIONS).filter((f) => f !== 'fract')]);
+      'acosh', 'atanh', ...Object.keys(REAL_FUNCTIONS).filter((f) => f !== 'fract'),
+      ...Object.keys(COMPLEX_FUNCTIONS)]);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
         expect(spellingOf(JS, op)).toBeDefined();

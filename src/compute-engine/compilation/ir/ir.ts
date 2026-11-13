@@ -3,7 +3,7 @@
  *
  * A program is a list of functions; the entry function's parameters are the
  * inputs. Every value is defined once and has one type: a scalar lane
- * (`real`, `integer`, `boolean`) and a shape (the lengths of the nested
+ * (`real`, `integer`, `boolean`, `complex`) and a shape (the lengths of the nested
  * lists around the scalars: `[]` for a scalar, `[3]` for a list of three).
  * A length is a number, or an integer VALUE of the program that holds a
  * length known only at run time (`{ v }`): the length parameter of an input,
@@ -23,7 +23,10 @@
  * The representation names no target.
  */
 
-export type Lane = 'real' | 'integer' | 'boolean';
+export type Lane = 'real' | 'integer' | 'boolean' | 'complex';
+
+/** The value of a constant of the `complex` lane. */
+export type Cx = { readonly re: number; readonly im: number };
 
 /** A value: an index in `Program.types`. */
 export type V = number;
@@ -36,10 +39,19 @@ export type IRType = { readonly lane: Lane; readonly shape: readonly Length[] };
 // `{ kind: 'tuple'; elements: IRType[] }` in a union with the type above,
 // read by `elem` with a literal index and printed as an array or a struct.
 
-/** A typed literal. A bigint or a complex pair is another member. */
+/** A typed literal. A bigint is another member. */
 export type Literal =
   | { readonly lane: 'real' | 'integer'; readonly value: number }
-  | { readonly lane: 'boolean'; readonly value: boolean };
+  | { readonly lane: 'boolean'; readonly value: boolean }
+  | { readonly lane: 'complex'; readonly value: Cx };
+
+/** The key of a constant: equal keys are one value (`-0` is not `0`). */
+export function literalKey(lane: Lane, value: number | boolean | Cx): string {
+  const n = (x: number | boolean) => (Object.is(x, -0) ? '-0' : String(x));
+  return typeof value === 'object'
+    ? `c ${lane} ${n(value.re)} ${n(value.im)}`
+    : `c ${lane} ${n(value)}`;
+}
 
 export type Region = {
   /** The parameters of a function, the index and the carried values of a
@@ -90,6 +102,8 @@ export type Program = {
   types: IRType[];
   readonly functions: IRFunction[];
   readonly entry: string;
+  /** The names whose engine value the program holds as a literal. */
+  readonly captures?: readonly string[];
 };
 
 export const scalarType = (lane: Lane): IRType => ({ lane, shape: [] });
@@ -152,8 +166,17 @@ export function mapLengths(t: IRType, f: (v: V) => V): IRType {
   };
 }
 
+/** A value of the lane `a` is read as is where `b` is read. A real read
+ *  as a complex is converted (`widensTo`): the two have other
+ *  representations. */
 export function isSubLane(a: Lane, b: Lane): boolean {
   return a === b || (a === 'integer' && b === 'real');
+}
+
+/** A value of the lane `a` stands where `b` is read, converted to the
+ *  complex lane when `b` is complex. */
+export function widensTo(a: Lane, b: Lane): boolean {
+  return isSubLane(a, b) || (b === 'complex' && a !== 'boolean');
 }
 
 /** Two shapes are one shape: the same numbers and the same length values
@@ -178,11 +201,12 @@ export function isSubType(
   return sameShape(a.shape, b.shape, constant) && isSubLane(a.lane, b.lane);
 }
 
-/** The type of a value that is either `a` or `b`, or `undefined`. */
+/** The type of a value that is either `a` or `b` (converted to the
+ *  complex lane when the other is complex), or `undefined`. */
 export function joinType(a: IRType, b: IRType): IRType | undefined {
   if (!sameShape(a.shape, b.shape)) return undefined;
-  if (isSubLane(a.lane, b.lane)) return b;
-  return isSubLane(b.lane, a.lane) ? a : undefined;
+  if (widensTo(a.lane, b.lane)) return b;
+  return widensTo(b.lane, a.lane) ? a : undefined;
 }
 
 /** The type of an element of a list of type `t`. */
@@ -235,7 +259,11 @@ export function recursiveFunctions(
 export class Builder {
   readonly types: IRType[] = [];
   /** The value of each constant. */
-  readonly constants = new Map<V, number | boolean>();
+  readonly constants = new Map<V, number | boolean | Cx>();
+  /** The names whose engine value is a literal of the program. */
+  readonly captures = new Set<string>();
+  /** The instruction of each `op` value. */
+  readonly defs = new Map<V, Instr & { k: 'op' }>();
   readonly functions: IRFunction[] = [];
   private open: Region[] = [];
   private readonly paramNames: string[] = [];
@@ -287,6 +315,7 @@ export class Builder {
       types: this.types,
       functions: [main, ...this.functions],
       entry: 'main',
+      captures: [...this.captures],
     };
   }
 
@@ -317,6 +346,7 @@ export class Builder {
 
   emit(i: Instr): void {
     if (this.effectful(i)) this.effects++;
+    if (i.k === 'op') this.defs.set(i.out, i);
     this.current().body.push(i);
   }
 
@@ -338,9 +368,8 @@ export class Builder {
     return v;
   }
 
-  constant(value: number | boolean, lane: Lane): V {
-    const key = `c ${lane} ${Object.is(value, -0) ? '-0' : String(value)}`;
-    return this.once(key, () => {
+  constant(value: number | boolean | Cx, lane: Lane): V {
+    return this.once(literalKey(lane, value), () => {
       const out = this.newValue(scalarType(lane));
       this.constants.set(out, value);
       const literal = { lane, value } as Literal;

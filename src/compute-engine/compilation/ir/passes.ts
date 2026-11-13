@@ -32,11 +32,13 @@ import {
   argsOf,
   elementType,
   lengthValues,
+  literalKey,
   mapDirectArgs,
   mapLengths,
   outsOf,
   regionsOf,
   scalarType,
+  type Cx,
   type IRType,
   type Instr,
   type Literal,
@@ -46,6 +48,7 @@ import {
 } from './ir.js';
 import { effects, effectTrace, sameTrace } from './effects.js';
 import {
+  foldOf,
   MAX_PRODUCT_EXPONENT,
   rowOfOp,
   type OperatorRow,
@@ -238,7 +241,7 @@ function perElement(
 }
 
 const scalarize: Pass = (p, rows) => {
-  const constants = new Map<V, number | boolean>();
+  const constants = new Map<V, number | boolean | Cx>();
   return rewrite(p, (i) => {
     if (i.k === 'const') constants.set(i.out, i.value.value);
     if (i.k !== 'op') return undefined;
@@ -294,7 +297,7 @@ const fold: Pass = (p, rows) => {
       i.args.every((a) => constants.has(a))
     ) {
       const args = i.args.map((a) => constants.get(a)!.value);
-      const value = rowOfOp(rows, i.op)!.row.fold?.(...args);
+      const value = foldOf(rows, i.op)?.(...args);
       if (value !== undefined)
         return [
           {
@@ -346,7 +349,7 @@ const hoist: Pass = (p, rows) => {
 };
 
 const strength: Pass = (p) => {
-  const constants = new Map<V, number | boolean>();
+  const constants = new Map<V, number | boolean | Cx>();
   return rewrite(p, (i, subst) => {
     if (i.k === 'const') constants.set(i.out, i.value.value);
     if (i.k !== 'op' || i.op !== 'pow') return undefined;
@@ -382,10 +385,7 @@ const cse: Pass = (p, rows) => {
   const scopes: Map<string, V>[] = [];
   const key = (i: Instr): string | undefined => {
     if (!fx.mergeable(i)) return undefined;
-    if (i.k === 'const') {
-      const { lane, value } = i.value;
-      return `c ${lane} ${Object.is(value, -0) ? '-0' : String(value)}`;
-    }
+    if (i.k === 'const') return literalKey(i.value.lane, i.value.value);
     if (i.k === 'op') return `o ${i.op} ${i.args.join(',')}`;
     if (i.k === 'list') return `l ${p.types[i.out].lane} ${i.args.join(',')}`;
     return undefined;

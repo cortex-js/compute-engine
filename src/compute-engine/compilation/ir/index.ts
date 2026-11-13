@@ -75,7 +75,7 @@ export type Profile = {
 
 export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
   javascript: {
-    lanes: ['real', 'integer', 'boolean'],
+    lanes: ['real', 'integer', 'boolean', 'complex'],
     rank: Infinity,
     runtimeLengths: true,
     draws: true,
@@ -139,7 +139,11 @@ export function admits(
     }
     if (i.k === 'region') {
       if (i.op === 'seeded' && !profile.frames)
-        return { head: 'WithRandomSeed', site: i.site, cause: 'WithRandomSeed' };
+        return {
+          head: 'WithRandomSeed',
+          site: i.site,
+          cause: 'WithRandomSeed',
+        };
       if (profile.syntax.regions[i.op] === undefined)
         return {
           site: i.site,
@@ -252,6 +256,10 @@ export type SliceOptions = {
   /** `false`: the lowering evaluates no closed sub-expression with `N()`
    *  (the `fold` pass is a separate switch of `passes`). */
   readonly constantFold?: boolean;
+  /** `'complex'`: a row that can leave the reals takes its complex
+   *  signature unless its operands prove a real value (README, "The
+   *  complex lane"). Default `'strict'`. */
+  readonly mode?: 'strict' | 'complex';
   /** JavaScript: the passes of all the loops and builds of one call of
    *  `run()`, nested ones and those of user functions included; over it,
    *  `run()` throws a `CancellationError` with the cause
@@ -287,7 +295,10 @@ export function sliceProgram(
 ): Program & { warnings: Warning[] } {
   const profile = TARGETS[options.target];
   const { rows, syntax } = tables(options);
-  const p = lower(expr, rows, { fold: options.constantFold });
+  const p = lower(expr, rows, {
+    fold: options.constantFold,
+    mode: options.mode,
+  });
   verify(p, rows);
   const warnings = seededWarnings(p, rows);
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);

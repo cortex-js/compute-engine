@@ -7,7 +7,8 @@
  * through it.
  *
  * A draw, a random frame, a power, a `Mod`, the length of a `Range` and the
- * functions of `REAL_FUNCTIONS` call the runtime `_rt`: the engine's own
+ * functions of `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS` (a complex value
+ * is a `{ re, im }` object) call the runtime `_rt`: the engine's own
  * `makeRandomHelpers()` (over the engine's frame slot, `ce._random()`),
  * `realPow()` (the interpreter's real root of a negative base),
  * `floorMod()` (which throws beyond the safe integer range) and
@@ -29,6 +30,7 @@ import {
 } from '../../../common/interruptible.js';
 import { argumentIndex, entryOf, type Program } from './ir.js';
 import {
+  COMPLEX_FUNCTIONS,
   floorMod,
   realPow,
   REAL_FUNCTIONS,
@@ -43,6 +45,9 @@ const guard = (n: string, what: string) =>
   `if (!(${n} < 4294967296)) throw new RangeError('${what} of more than 2^32 iterations');`;
 
 const tick = '  _rt.tick();';
+
+const number = (x: number) =>
+  Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
 
 export const JS: Syntax = Object.freeze({
   ops: {
@@ -89,12 +94,11 @@ export const JS: Syntax = Object.freeze({
     asinh: 'Math.asinh($0)',
     acosh: 'Math.acosh($0)',
     atanh: 'Math.atanh($0)',
-    // The functions of `REAL_FUNCTIONS`, by name.
+    // The functions of `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS`, by name.
     ...Object.fromEntries(
-      Object.keys(REAL_FUNCTIONS).map((f) => [
-        f,
-        `_rt.${f}(${REAL_FUNCTIONS[f as keyof typeof REAL_FUNCTIONS].length === 2 ? '$0, $1' : '$0'})`,
-      ])
+      Object.entries({ ...REAL_FUNCTIONS, ...COMPLEX_FUNCTIONS }).map(
+        ([f, g]) => [f, `_rt.${f}(${g.length === 2 ? '$0, $1' : '$0'})`]
+      )
     ),
   },
   regions: {
@@ -133,13 +137,11 @@ export const JS: Syntax = Object.freeze({
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
   },
   constant: ({ value: x }) =>
-    typeof x === 'boolean'
-      ? String(x)
-      : Object.is(x, -0)
-        ? '(-0)'
-        : x < 0
-          ? `(${x})`
-          : String(x),
+    typeof x === 'object'
+      ? `({ re: ${number(x.re)}, im: ${number(x.im)} })`
+      : typeof x === 'boolean'
+        ? String(x)
+        : number(x),
   input: (name) =>
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
@@ -210,10 +212,11 @@ export function javascriptRuntime(
     iterationLimit: () => ce?.iterationLimit ?? Infinity,
     deadline: () => ce?._deadlineFrame,
   });
-  // `REAL_FUNCTIONS` first: a member of the same name after it would
-  // replace it, which a test refuses.
+  // `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS` first: a member of the same
+  // name after them would replace one, which a test refuses.
   return {
     ...REAL_FUNCTIONS,
+    ...COMPLEX_FUNCTIONS,
     ...random,
     withRandomSeed: <T>(seed: unknown, body: () => T): T => {
       if (typeof seed !== 'number' || !Number.isFinite(seed))

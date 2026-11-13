@@ -112,7 +112,8 @@ export function listLowering(cx: Lowering) {
       return [next];
     });
     const out = b.newValue(scalarType(lane!));
-    b.emit({ k: 'loop', outs: [out], lo, hi, init: [init], body });
+    const start = cx.widen(init, lane!);
+    b.emit({ k: 'loop', outs: [out], lo, hi, init: [start], body });
     return out;
   };
 

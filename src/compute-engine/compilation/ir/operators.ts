@@ -15,10 +15,16 @@
  * new IR operation (a target with no spelling declines it). The tables are
  * frozen: a caller adds rows for one compilation (`compileSlice`'s
  * `extend` option).
+ *
+ * The complex lane: a complex signature reads `complex` operands, and a
+ * real operand is converted where it is read (`cplx`, which the lowering
+ * adds). In `mode: 'complex'`, a row with `leaves` takes its complex
+ * signature unless its operands prove a real value.
  */
 
 import {
   elementType,
+  widensTo,
   type IRType,
   type Lane,
   type Length,
@@ -34,6 +40,8 @@ import {
   arcschReal,
   arsechReal,
 } from '../../numerics/inverse-hyperbolic.js';
+import { SYS_HELPERS as SYS } from '../javascript-runtime.js';
+import type { Cx } from './ir.js';
 
 export type Effect = 'pure' | 'may-fail' | 'effectful';
 
@@ -75,6 +83,13 @@ export type OperatorRow = {
   /** `operand`: the result can be (a part of) its list operand, so it can
    *  alias an input; otherwise the result is a new value. */
   readonly alias?: 'operand';
+  /** The row can leave the reals: in `mode: 'complex'` it takes its
+   *  complex signature unless the operand `nonnegative` is proved `>= 0`
+   *  or the operand `integer` is on the integer lane. */
+  readonly leaves?: {
+    readonly nonnegative?: number;
+    readonly integer?: number;
+  };
 };
 
 /** The modulo of the interpreter: the sign of the divisor (`Mod(-7, 3)` is
@@ -168,7 +183,52 @@ export const REAL_FUNCTIONS = Object.freeze({
   hav: (x: number): number => Math.sin(x / 2) ** 2,
 });
 
+// prettier-ignore
+const KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'catan',
+  'casin', 'cacos', 'cacot', 'casec', 'cacsc', 'ccoth', 'casinh', 'cacosh', 'catanh', 'cacoth',
+  'casech', 'cacsch', 'cconj', 'cabs', 'carg'] as const;
+
+/**
+ * The complex functions that the JavaScript runtime `_rt` calls by the name
+ * of their IR operation, and that the fold computes (`foldOf()`): the
+ * engine's machine complex functions (`SYS_HELPERS` of the existing
+ * runtime: complex.js and the kernels of `numerics/numeric-complex.ts`),
+ * and the ring operations part by part. `cplx` is the conversion of a
+ * real.
+ */
+export const COMPLEX_FUNCTIONS = Object.freeze({
+  cplx: (x: number): Cx => ({ re: x, im: 0 }),
+  cadd: (a: Cx, b: Cx): Cx => ({ re: a.re + b.re, im: a.im + b.im }),
+  csub: (a: Cx, b: Cx): Cx => ({ re: a.re - b.re, im: a.im - b.im }),
+  cmul: (a: Cx, b: Cx): Cx => ({
+    re: a.re * b.re - a.im * b.im,
+    im: a.re * b.im + a.im * b.re,
+  }),
+  cdiv: (a: Cx, b: Cx): Cx => SYS.cdivedge(a.re, a.im, b.re, b.im),
+  cpow: (a: Cx, b: Cx): Cx => SYS.cpow(a, b),
+  croot: (a: Cx, b: Cx): Cx => SYS.croot(a, b),
+  ...(Object.fromEntries(KERNELS.map((f) => [f, SYS[f]])) as Pick<
+    typeof SYS,
+    (typeof KERNELS)[number]
+  >),
+  cre: (z: Cx): number => z.re,
+  cim: (z: Cx): number => z.im,
+  ceq: (a: Cx, b: Cx): boolean => a.re === b.re && a.im === b.im,
+  cne: (a: Cx, b: Cx): boolean => a.re !== b.re || a.im !== b.im,
+});
+
+/** The value of the IR operation `op` on constants: its function of
+ *  `COMPLEX_FUNCTIONS`, or the `fold` of its row. */
+export function foldOf(
+  rows: readonly OperatorRow[],
+  op: string
+): ((...args: any[]) => unknown) | undefined {
+  const f = (COMPLEX_FUNCTIONS as Record<string, (...a: any[]) => unknown>)[op];
+  return f ?? rowOfOp(rows, op)?.row.fold;
+}
+
 const F = REAL_FUNCTIONS;
+const C: Lane = 'complex';
 const R: Lane = 'real';
 const I: Lane = 'integer';
 const B: Lane = 'boolean';
@@ -184,13 +244,28 @@ function row(
   return { threads: true, effect: 'pure', ...options, head, arity, signatures };
 }
 
-/** The integer and the real signature of an arithmetic operation `op`. */
-function arith(op: string, n: number): Signature[] {
-  return [
+/** The integer and the real signature of an arithmetic operation `op`,
+ *  and with `complex`, the complex one `c<op>`. */
+function arith(op: string, n: number, complex = false): Signature[] {
+  const s: Signature[] = [
     [Array(n).fill(I), I, `${op}.int`],
     [Array(n).fill(R), R, op],
   ];
+  return complex ? [...s, [Array(n).fill(C), C, `c${op}`]] : s;
 }
+
+/** The real signature of `op`, and the complex one `cop`. */
+function rc(op: string, n: number, cop = `c${op}`): Signature[] {
+  return [
+    [Array(n).fill(R), R, op],
+    [Array(n).fill(C), C, cop],
+  ];
+}
+
+/** In `mode: 'complex'`: complex unless the operand is nonnegative
+ *  (`cut`), or always (`domain`). */
+const cut: Options = { leaves: { nonnegative: 0 } };
+const domain: Options = { leaves: {} };
 
 /** `x`, with every object and array it holds frozen (not functions),
  *  also the children of a container that is already frozen. */
@@ -220,19 +295,25 @@ const part: Options = { threads: false, alias: 'operand' };
 
 // prettier-ignore
 export const OPERATORS: readonly OperatorRow[] = Object.freeze([
-  row('Add',          'variadic', arith('add', 1),               { fold: (a: number, b: number) => a + b }),
-  row('Subtract',     2,          arith('sub', 2),               { fold: (a: number, b: number) => a - b }),
-  row('Negate',       1,          arith('neg', 1),               { fold: (a: number) => -a }),
-  row('Multiply',     'variadic', arith('mul', 1),               { fold: (a: number, b: number) => a * b }),
-  row('Divide',       2,          [[[R, R], R, 'div']],          { fold: (a: number, b: number) => a / b }),
-  row('Power',        2,          [[[R, R], R, 'pow']],          { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' } }),
-  row('Sqrt',         1,          [[[R], R, 'sqrt']],            { fold: Math.sqrt }),
-  row('Abs',          1,          arith('abs', 1),               { fold: Math.abs }),
-  row('Exp',          1,          [[[R], R, 'exp']],             { fold: Math.exp }),
-  row('Ln',           1,          [[[R], R, 'ln']],              { fold: Math.log }),
-  row('Sin',          1,          [[[R], R, 'sin']],             { fold: Math.sin, ...angle }),
-  row('Cos',          1,          [[[R], R, 'cos']],             { fold: Math.cos, ...angle }),
-  row('Tan',          1,          [[[R], R, 'tan']],             { fold: Math.tan, ...angle }),
+  row('Add',          'variadic', arith('add', 1, true),         { fold: (a: number, b: number) => a + b }),
+  row('Subtract',     2,          arith('sub', 2, true),         { fold: (a: number, b: number) => a - b }),
+  row('Negate',       1,          arith('neg', 1, true),         { fold: (a: number) => -a }),
+  row('Multiply',     'variadic', arith('mul', 1, true),         { fold: (a: number, b: number) => a * b }),
+  row('Divide',       2,          rc('div', 2),                  { fold: (a: number, b: number) => a / b }),
+  row('Power',        2,          rc('pow', 2),                  { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
+  row('Sqrt',         1,          rc('sqrt', 1),                 { fold: Math.sqrt, ...cut }),
+  row('Abs',          1,          [...arith('abs', 1), [[C], R, 'cabs']], { fold: Math.abs }),
+  row('Exp',          1,          rc('exp', 1),                  { fold: Math.exp }),
+  row('Ln',           1,          rc('ln', 1),                   { fold: Math.log, ...cut }),
+  row('Sin',          1,          rc('sin', 1),                  { fold: Math.sin, ...angle }),
+  row('Cos',          1,          rc('cos', 1),                  { fold: Math.cos, ...angle }),
+  row('Tan',          1,          rc('tan', 1),                  { fold: Math.tan, ...angle }),
+  row('Real',         1,          [[[C], R, 'cre']],             {}),
+  row('Imaginary',    1,          [[[C], R, 'cim']],             {}),
+  row('Conjugate',    1,          [[[C], C, 'cconj']],           {}),
+  row('Argument',     1,          [[[C], R, 'carg']],            {}),
+  // The conversion of a real to the complex lane, which the lowering adds.
+  row(undefined,      1,          [[[R], C, 'cplx']],            {}),
   row('Floor',        1,          [[[R], I, 'floor']],           { fold: Math.floor }),
   row('Ceil',         1,          [[[R], I, 'ceil']],            { fold: Math.ceil }),
   row('Round',        1,          [[[R], I, 'round']],           { fold: roundHalfAway, settings: ['roundingTies'] }),
@@ -240,24 +321,24 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Truncate',     1,          [[[R], I, 'trunc']],           { fold: Math.trunc }),
   row('Sign',         1,          [[[R], I, 'sign']],            { fold: Math.sign }),
   row('Fract',        1,          [[[R], R, 'fract']],           { fold: F.fract }),
-  row('Log',          1,          [[[R], R, 'log10']],           { fold: Math.log10 }),
+  row('Log',          1,          rc('log10', 1, 'clog10'),      { fold: Math.log10, ...cut }),
   row('Hypot',        2,          [[[R, R], R, 'hypot']],        { fold: Math.hypot }),
-  row('Root',         2,          [[[R, R], R, 'root']],         { fold: F.root }),
-  row('Arctan',       1,          [[[R], R, 'atan']],            { fold: Math.atan, ...angle }),
+  row('Root',         2,          rc('root', 2),                 { fold: F.root, ...cut }),
+  row('Arctan',       1,          rc('atan', 1),                 { fold: Math.atan, ...angle }),
   row('Arctan2',      2,          [[[R, R], R, 'atan2']],        { fold: F.atan2, ...angle }),
-  row('Arcsin',       1,          [[[R], R, 'asin']],            { fold: Math.asin, ...angle }),
-  row('Arccos',       1,          [[[R], R, 'acos']],            { fold: Math.acos, ...angle }),
-  row('Arccot',       1,          [[[R], R, 'acot']],            { fold: F.acot, ...angle }),
-  row('Arcsec',       1,          [[[R], R, 'asec']],            { fold: F.asec, ...angle }),
-  row('Arccsc',       1,          [[[R], R, 'acsc']],            { fold: F.acsc, ...angle }),
+  row('Arcsin',       1,          rc('asin', 1),                 { fold: Math.asin, ...angle, ...domain }),
+  row('Arccos',       1,          rc('acos', 1),                 { fold: Math.acos, ...angle, ...domain }),
+  row('Arccot',       1,          rc('acot', 1),                 { fold: F.acot, ...angle }),
+  row('Arcsec',       1,          rc('asec', 1),                 { fold: F.asec, ...angle, ...domain }),
+  row('Arccsc',       1,          rc('acsc', 1),                 { fold: F.acsc, ...angle, ...domain }),
   row('Haversine',    1,          [[[R], R, 'hav']],             { fold: F.hav, ...angle }),
-  row('Coth',         1,          [[[R], R, 'coth']],            { fold: F.coth }),
-  row('Arsinh',       1,          [[[R], R, 'asinh']],           { fold: Math.asinh }),
-  row('Arcosh',       1,          [[[R], R, 'acosh']],           { fold: Math.acosh }),
-  row('Artanh',       1,          [[[R], R, 'atanh']],           { fold: Math.atanh }),
-  row('Arcoth',       1,          [[[R], R, 'acoth']],           { fold: F.acoth }),
-  row('Arsech',       1,          [[[R], R, 'asech']],           { fold: F.asech }),
-  row('Arcsch',       1,          [[[R], R, 'acsch']],           { fold: F.acsch }),
+  row('Coth',         1,          rc('coth', 1),                 { fold: F.coth }),
+  row('Arsinh',       1,          rc('asinh', 1),                { fold: Math.asinh }),
+  row('Arcosh',       1,          rc('acosh', 1),                { fold: Math.acosh, ...domain }),
+  row('Artanh',       1,          rc('atanh', 1),                { fold: Math.atanh, ...domain }),
+  row('Arcoth',       1,          rc('acoth', 1),                { fold: F.acoth, ...domain }),
+  row('Arsech',       1,          rc('asech', 1),                { fold: F.asech, ...domain }),
+  row('Arcsch',       1,          rc('acsch', 1),                { fold: F.acsch }),
   row('Erf',          1,          [[[R], R, 'erf']],             { fold: F.erf }),
   row('Erfc',         1,          [[[R], R, 'erfc']],            { fold: F.erfc }),
   row('Gamma',        1,          [[[R], R, 'gamma']],           { fold: F.gamma }),
@@ -273,8 +354,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Greater',      'chain',    [[[R], B, 'gt']],              { fold: (a: number, b: number) => a > b }),
   row('GreaterEqual', 'chain',    [[[R], B, 'ge']],              { fold: (a: number, b: number) => a >= b }),
   // `Equal` of two lists compares the lists.
-  row('Equal',        'chain',    [[[R], B, 'eq']],              { fold: (a: number, b: number) => a === b, ...list }),
-  row('NotEqual',     2,          [[[R, R], B, 'ne']],           { fold: (a: number, b: number) => a !== b, ...list }),
+  row('Equal',        'chain',    [[[R], B, 'eq'], [[C], B, 'ceq']], { fold: (a: number, b: number) => a === b, ...list }),
+  row('NotEqual',     2,          [[[R, R], B, 'ne'], [[C, C], B, 'cne']], { fold: (a: number, b: number) => a !== b, ...list }),
   row('And',          'variadic', [[[B], B, 'and']],             { fold: (a: boolean, b: boolean) => a && b, ...list }),
   row('Or',           'variadic', [[[B], B, 'or']],              { fold: (a: boolean, b: boolean) => a || b, ...list }),
   row('Not',          1,          [[[B], B, 'not']],             { fold: (a: boolean) => !a, ...list }),
@@ -410,20 +491,24 @@ export function regionRow(op: string): RegionRow | undefined {
 }
 
 /** The first signature of `row` that accepts operands of `types` (a
- *  scalar of a sub-lane, or a list of elements of a sub-lane; a list
- *  where a scalar is read when the row threads), or `undefined`. */
+ *  scalar of a lane that widens to the operand's, or a list of such
+ *  elements; a list where a scalar is read when the row threads), or
+ *  `undefined`. With `complex`, only a signature of complex operands. */
 export function signatureOf(
   row: OperatorRow,
-  types: readonly IRType[]
+  types: readonly IRType[],
+  complex = false
 ): Signature | undefined {
-  const sub = (a: Lane, b: Lane) =>
-    a === b || (a === 'integer' && b === 'real');
-  return row.signatures.find(([args]) =>
-    types.every((t, i) => {
-      const a = args.length === 1 ? args[0] : args[i];
-      if (a === 'list') return t.shape.length > 0;
-      return sub(t.lane, a) && (t.shape.length === 0 || row.threads);
-    })
+  const operand = (args: readonly Operand[], i: number) =>
+    args.length === 1 ? args[0] : args[i];
+  return row.signatures.find(
+    ([args]) =>
+      (!complex || args.includes('complex')) &&
+      types.every((t, i) => {
+        const a = operand(args, i);
+        if (a === 'list') return t.shape.length > 0;
+        return widensTo(t.lane, a) && (t.shape.length === 0 || row.threads);
+      })
   );
 }
 

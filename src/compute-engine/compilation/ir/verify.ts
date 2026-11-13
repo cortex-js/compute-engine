@@ -69,7 +69,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
     const scope = new Set(visible);
     const define = (v: V) => {
       const t = type(v);
-      if (!['real', 'integer', 'boolean'].includes(t.lane))
+      if (!['real', 'integer', 'boolean', 'complex'].includes(t.lane))
         fail(`v${v}: lane ${t.lane}`);
       for (const n of t.shape)
         if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)
@@ -104,11 +104,15 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           t.lane === lane &&
           (lane === 'boolean'
             ? typeof value === 'boolean'
-            : typeof value === 'number' &&
-              // A folded integer operation can give NaN (`Mod(1, 0)`).
-              (lane === 'real' ||
-                !Number.isFinite(value) ||
-                Number.isInteger(value)));
+            : lane === 'complex'
+              ? typeof value === 'object' &&
+                typeof value.re === 'number' &&
+                typeof value.im === 'number'
+              : typeof value === 'number' &&
+                // A folded integer operation can give NaN (`Mod(1, 0)`).
+                (lane === 'real' ||
+                  !Number.isFinite(value) ||
+                  Number.isInteger(value)));
         if (!ok)
           fail(`const v${i.out}: ${String(value)} is not a ${typeToString(t)}`);
         if (typeof value === 'number') constants.set(i.out, value);

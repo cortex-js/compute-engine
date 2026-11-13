@@ -131,7 +131,8 @@ export const GLSL: Syntax = Object.freeze({
     ].join('\n'),
   },
   regions: {},
-  constant: ({ value: x }) => (typeof x === 'boolean' ? String(x) : float(x)),
+  // The profile has no complex lane (`TARGETS.glsl.lanes`).
+  constant: ({ value: x }) => (typeof x === 'number' ? float(x) : String(x)),
   input: glslParameterName,
   positional: glslParameterName,
   length: () => {

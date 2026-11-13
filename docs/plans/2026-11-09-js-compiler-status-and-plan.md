@@ -1118,3 +1118,23 @@ beyond the safe range throws). Measured in the worktree on the same patch;
 
 After it, `mode: 'complex'` stays the largest cause of a decline (6,378),
 then a symbol with a value (650).
+
+Second batch (a complex lane with `mode: 'complex'`, complex literals and
+inputs; a name that holds a number or a list of numbers is lowered as its
+value), on top of bound-once step 1
+(`d2f392f08a39b831669fa22430ad853096f993ad`). The contract was loosened by
+the user during this batch: no fidelity to the interpreter at ill-conditioned
+points or for integers of 2^53 or more (rules 1 and 3 of the course
+correction). Measured in the worktree; 4,900 lines:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 8,997 of 9,681 (92.9%) |
+| Every JavaScript compile | 20,776 of 38,230 (54.3%) |
+| Public `compile()` calls | 11,736 of 28,496 (41.2%) |
+
+Largest causes after it: `mode: 'bigint'` 1,029; a list where a scalar is
+required 471; `vars` 342; `Integrate` 336; a symbol with a value that is
+not a number or a list of numbers 287; `Loop` 282. Missing structurally: the
+code of the profile cannot be stored or sent to a worker (20 worker-pool
+tests fail with the switch on).

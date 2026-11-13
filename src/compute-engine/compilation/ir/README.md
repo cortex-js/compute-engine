@@ -46,6 +46,24 @@ default.
 A root `Function` literal compiles to a function of positional parameters, then
 the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
 
+A free name that has a value in the engine (a constant, or a variable) is
+that value, lowered at compile time as a literal, only when the value is a
+number of the engine (an integer, a rational, a radical such as `Sqrt(2)`, a
+complex) or a list of such numbers: no symbol and no other application. The
+value is read from the innermost binding of the name (`ce.lookupDefinition`),
+as the interpreter reads a symbol that is not a call. Any other value
+declines, also a closed one (`Pi + 1`), since the names in a stored
+expression have bindings of their own (an outer `a = 2` and `v := a + 1`
+give 3 in the interpreter under a scope that declares `a = 10`). The program
+lists the name in `captures` (`symbolDeps`), unless its binding is the
+library's. A name with a value read in the body of a user function declines:
+the interpreter reads the binding of the body, which need not be the one of
+the name where the call is compiled. `Pi` and `ExponentialE` decline when the
+innermost binding of the name is not the library constant. A reassignment
+after the compilation does not change the code, and the inputs object is not
+read for that name (the existing compiler also writes `ce.assign('v', 10)`
+into `v + x` as `10 + _.x`).
+
 ## The contracts
 
 1. **Numbers.** On JavaScript a `real` is an `f64` and an `integer` is exact
@@ -98,7 +116,13 @@ spelling only where GLSL ES 3.00 has a builtin defined on every real (`atan`,
 `asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
 
 Inputs: a scalar with no declared type, or of type `unknown` or `number`, is a
-real (a deliberate difference from the existing compiler). An outer list of no
+real in the `strict` mode (a deliberate difference from the existing
+compiler) and a complex in the `complex` mode; a scalar `complex` input is
+on the complex lane, and a number given for a complex input is lifted to
+`{re, im: 0}`, also with `entryChecks: false`. A list of complex elements
+declines: an entry of such a list can be a number or a `{re, im}` object (the
+ABI of `docs/COMPILATION-MODEL.md`), and only a run-time test tells them
+apart. An outer list of no
 stated length (`list<real>`, `vector`, `list<list<real^2>>`) has a run-time
 length (JavaScript only), also as a parameter of a root function literal: the
 length is a positional parameter before the list, read from the argument.
@@ -111,6 +135,63 @@ canonical form), and a type `real`, `integer` or `boolean`, as a string or a
 symbol; with the type `unknown`, or none, the local is a real (a boolean for a
 boolean value), as the interpreter admits a real write to `let t = 0`.
 Another attribute (`constant`) declines.
+
+## The complex lane
+
+A third lane, `complex`, is a `{re, im}` object on JavaScript; a real or an
+integer is converted to it where a complex is read (`cplx`, which `apply()`,
+the arms of a conditional, a list, a local and an accumulator insert), so the
+lane of every value is settled at compile time and no code tests a value. The
+rows `Add`, `Subtract`, `Negate`, `Multiply`, `Divide`, `Power`, `Root`,
+`Sqrt`, `Exp`, `Ln`, `Log`, the trigonometric and hyperbolic rows, `Abs`
+(real), `Real`, `Imaginary`, `Conjugate`, `Argument` (real), `Equal` and
+`NotEqual` have a complex signature; another row (a comparison, `Floor`,
+`Mod`, `Max`, ...) declines a complex operand. The JavaScript runtime calls
+`COMPLEX_FUNCTIONS` (`operators.ts`), which the fold calls too: the engine's
+machine complex functions (`SYS_HELPERS` of the existing runtime), and the
+ring operations part by part. GLSL declines the lane. In the `strict` mode a
+program whose root is complex returns a `{re, im}` object, also when its
+imaginary part is 0. In the `complex` mode the adapter returns a complex
+root of imaginary part exactly 0 as the number, as the ABI of the mode says
+(`CompileMode`); it states no such rule for the elements of a list, which
+stay `{re, im}`. A program whose root is real returns a number.
+
+The mode. A row with `leaves` (`Sqrt`, `Ln`, `Log`, `Power`, `Root`,
+`Arcsin`, `Arccos`, `Arcsec`, `Arccsc`, `Arcosh`, `Artanh`, `Arcoth`,
+`Arsech`) takes its complex signature in both modes when its operands are
+finite constants on which its real function is NaN: `Ln(-2)·x` is complex,
+with and without `constantFold`, as the `strict` contract says of a
+logarithm or a radical of a provably negative operand. Otherwise, in the
+default `mode: 'strict'` a row takes the signature of its operands' lanes:
+a real operation outside its real domain is NaN (`Sqrt(x)` at `x = -4`). In
+`mode: 'complex'` a row with `leaves` takes its complex signature unless an
+operand proves the real value by what cannot change after the
+compilation: an exponent on the integer lane (`x^2`, `x^n`), or a base or
+radicand that is a nonnegative constant, or a value of `Abs`, `Exp`, an
+even power, or a sum or a product of such values (`Sqrt(x^2 + 1)`). The type
+of an input is not read: an assumption narrows it (`assume(s >= 0)` makes
+it `real<0..>`) and `forget()` widens it again after the compilation. `Sqrt(x)` at
+`x = -4` is then `{re: 0, im: 2}`.
+
+Inputs in the complex mode: an input of type `number`, `unknown` or no
+declared type is complex (`CompileMode`), so a comparison of it declines;
+an input declared `real` or `integer` stays real. The strict mode reads such
+an input as a real.
+
+Declined: `Max`, `Min`, `Floor` and the other integer rows of a complex, a
+comparison other than `Equal` and `NotEqual`, the real functions (`Gamma`,
+`Erf`, `Zeta`, ...) of a complex, a complex `Max` or `Min` reduction, and
+`ComplexInfinity` as a literal; a real pole (`Gamma(-2)`) stays a real
+infinity.
+
+Ill-conditioned points (docs/plans/2026-11-12-js-route-course-correction.md,
+rule 1): near a branch point, a pole or a cancellation the lane gives the
+function's value at an argument within a few ulps of the given one, which
+can differ from the interpreter by more than 1e-12 or be ±∞ or NaN where
+the interpreter is finite (`Arctan(Ln(x))` at `x = 0` is NaN, the
+interpreter gives `-π/2`; `Ln(x)·y` at `x = 0` is `-∞ + NaN·i`). On a branch
+cut the side follows the sign of the zero part, IEEE style (`Argument(-Z)`
+at `Z = 0` is π); the adapter makes a `-0` part of a complex input `+0`.
 
 ## Lists
 
@@ -224,17 +305,20 @@ the `numeric-kernel` profile.
   when an option has no class). Mapped: `iterationBudget` (see below),
   `entryChecks` (a `{re, im}` value for a scalar real or integer input or
   parameter, and a value that is not an array for a list input, throw a
-  `TypeError` that names it), `cse: false` (the passes without `cse`),
+  `TypeError` that names it; a number for a scalar complex input or
+  parameter is lifted to `{re, im: 0}` and a `-0` part made `+0`, in any
+  case), `mode: 'complex'` (reported in the result's `mode`), `cse: false` (the passes without `cse`),
   `constantFold: false` (the lowering evaluates no closed sub-expression with
   `N()`, and the `fold` pass is off), `symbolDeps` (the user functions
-  compiled in) and `varsObjectRefs` (the inputs read from the inputs object,
+  compiled in and the names whose value the code holds, `captures`) and
+  `varsObjectRefs` (the inputs read from the inputs object,
   filled also when a literal declines for a free name). Admitted with no
   effect: `storage` (the JavaScript target ignores it,
   `CompilationOptions.storage`), `quadrature` (no program of the profile has
   an `Integrate`), `mode: 'strict'`, `broadcast: false` (the result has no
   `broadcast()`), and an empty `functions`, `vars`, `operators`, `imports` or
   blank `preamble`. Declined by name: `functions`, `vars`, `operators` (both
-  forms), `imports`, `preamble`, a `mode` other than `'strict'`,
+  forms), `imports`, `preamble`, the `mode` `'bigint'`,
   `broadcast: true`, `strictTypes: true`.
 - **The budget.** The public `iterationBudget` counts the passes of a `Loop`,
   which this pipeline does not have, and gives NaN for a `Sum` or a `Product`

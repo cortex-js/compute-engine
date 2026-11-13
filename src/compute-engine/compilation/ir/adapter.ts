@@ -48,6 +48,7 @@ export const IR_OPTIONS = {
   varsObjectRefs: 'mapped',
   cse: 'mapped',
   constantFold: 'mapped',
+  mode: 'mapped',
   storage: 'no-op',
   quadrature: 'no-op',
   functions: 'declined',
@@ -55,7 +56,6 @@ export const IR_OPTIONS = {
   operators: 'declined',
   imports: 'declined',
   preamble: 'declined',
-  mode: 'declined',
   broadcast: 'declined',
   strictTypes: 'declined',
 } as const;
@@ -70,6 +70,7 @@ type IrOptions = { readonly [K in IrOptionName]?: unknown } & {
   readonly constantFold?: boolean;
   readonly entryChecks?: boolean;
   readonly iterationBudget?: number;
+  readonly mode?: string;
   readonly symbolDeps?: Set<string>;
   readonly varsObjectRefs?: Set<string>;
 };
@@ -105,10 +106,6 @@ function given(x: unknown): boolean {
  *  with the value `value`, or `undefined` when the value is admitted. */
 function refusal(name: IrOptionName, value: unknown): string | undefined {
   switch (name) {
-    case 'mode':
-      return value === undefined || value === 'strict'
-        ? undefined
-        : `the option \`mode\` with the value '${String(value)}'`;
     case 'broadcast':
     case 'strictTypes':
       return value === true ? `the option \`${name}\`` : undefined;
@@ -156,7 +153,12 @@ export function compileWithIrProfile(
   expr: Expression,
   options: IrOptions | undefined
 ): CompilationResult<'javascript'> {
-  const refused = optionDecline(options);
+  const given = options?.mode ?? 'strict';
+  const mode = given === 'complex' ? 'complex' : 'strict';
+  const refused =
+    given === mode
+      ? optionDecline(options)
+      : `the option \`mode\` with the value '${String(given)}'`;
   if (refused !== undefined)
     throw decline(`${refused} is not supported by the profile 'ir'`);
   let slice: JavaScriptResult & { warnings: Warning[]; program: Program };
@@ -169,6 +171,7 @@ export function compileWithIrProfile(
         ...(options?.constantFold === false ? { fold: false } : {}),
       },
       constantFold: options?.constantFold !== false,
+      mode,
       extend: testExtension,
     });
   } catch (e) {
@@ -213,20 +216,37 @@ export function compileWithIrProfile(
     );
   for (const f of p.functions)
     if (f.source !== undefined) options?.symbolDeps?.add(f.source);
+  // A name whose engine value the code holds as a literal.
+  for (const name of p.captures ?? []) options?.symbolDeps?.add(name);
 
   // The entry check of `entryChecks` (docs/COMPILATION-MODEL.md, R6): a
   // `{re, im}` value for a scalar real or integer input, and a value that
   // is not an array for an input that the code reads as an array, throw a
-  // `TypeError` that names the input.
-  type Checked = readonly [string, number, 'array' | 'real'];
+  // `TypeError` that names the input. A number for a scalar complex input
+  // is lifted to `{re, im: 0}`, and a zero part of a complex input is +0
+  // (the interpreter has no -0: `Ln` of `-4 - 0i` is on the upper side of
+  // the cut), also with `entryChecks: false`: the code reads its parts.
+  type Shape = 'array' | 'real' | 'complex';
+  type Checked = readonly [string, number, Shape];
   const checked = entry.paramNames.flatMap((name, k): Checked[] => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);
     if (entry.lengthOf[k]) return [];
     if (t.shape.length > 0) return [[name, i, 'array'] as const];
+    if (t.lane === 'complex') return [[name, i, 'complex'] as const];
     return t.lane === 'boolean' ? [] : [[name, i, 'real'] as const];
   });
-  const check = (value: unknown, name: string, shape: 'array' | 'real') => {
+  /** The value `value` of the input `name`, lifted to `{re, im}`. */
+  const check = (value: unknown, name: string, shape: Shape): unknown => {
+    if (shape === 'complex') {
+      const z =
+        typeof value === 'number'
+          ? { re: value, im: 0 }
+          : (value as { re: number; im: number });
+      return Object.is(z.re, -0) || Object.is(z.im, -0)
+        ? { re: z.re + 0, im: z.im + 0 }
+        : z;
+    }
     if (shape === 'array' && !Array.isArray(value))
       throw new TypeError(
         `The input \`${name}\` is not an array: the code reads it as an array`
@@ -240,19 +260,43 @@ export function compileWithIrProfile(
       throw new TypeError(
         `The input \`${name}\` is not a real number: the code reads it as a real`
       );
+    return value;
   };
   const checks = options?.entryChecks !== false && checked.length > 0;
+  const lifted = checked.filter(([, , shape]) => shape === 'complex');
+  const toCheck = checks ? checked : lifted;
+  // The ABI of `mode: 'complex'` (`CompileMode`): a complex value of
+  // imaginary part 0 is returned as the number, at the root only (the ABI
+  // states no rule for the elements of a list).
+  const project =
+    mode === 'complex' && p.types[entry.body.yields[0]].shape.length === 0
+      ? (v: unknown) =>
+          typeof v === 'object' && v !== null && (v as { im: number }).im === 0
+            ? (v as { re: number }).re
+            : v
+      : (v: unknown) => v;
   const f = slice.run as (...args: unknown[]) => unknown;
   const run = literal
     ? (...args: unknown[]) => {
-        if (checks)
-          for (const [name, k, shape] of checked) check(args[k], name, shape);
-        return f(...args.slice(0, argumentIndex(entry, positional)));
+        args = args.slice(0, argumentIndex(entry, positional));
+        for (const [name, k, shape] of toCheck)
+          args[k] = check(args[k], name, shape);
+        return project(f(...args));
       }
     : (vars: Record<string, unknown> = {}) => {
-        if (checks)
-          for (const [name, , shape] of checked) check(vars[name], name, shape);
-        return f(vars);
+        // A lifted value goes in a view of the inputs that the code reads,
+        // each read once by name (an inherited or a non-enumerable input
+        // stays readable); the host's object is not changed.
+        let view = vars;
+        for (const [name, , shape] of toCheck) {
+          const given = vars[name];
+          const v = check(given, name, shape);
+          if (v === given) continue;
+          if (view === vars)
+            view = Object.fromEntries(inputs.map((n) => [n, vars[n]]));
+          view[name] = v;
+        }
+        return project(f(view));
       };
 
   const warnings: CompileDiagnostic[] = slice.warnings.map((w) => ({
@@ -271,7 +315,7 @@ export function compileWithIrProfile(
     // The code holds its helpers; it reads the runtime `_rt`, so it cannot
     // be stored and run elsewhere (no `runtimeVersion`).
     preamble: '',
-    mode: 'strict',
+    mode,
     profile: 'ir',
     shippable: false,
     ...(warnings.length > 0 ? { warnings } : {}),

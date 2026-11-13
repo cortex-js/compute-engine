@@ -28,6 +28,10 @@
  *   chain after the first, are lowered in an arm: evaluated only when the
  *   values before them do not decide. The `hoist` pass moves a pure one
  *   out of its arm.
+ * - A free name with a value in the engine is that value, a literal of the
+ *   program (`Program.captures`), when it is a number or a list of numbers,
+ *   or an expression with no free name and no effect.
+ * - A real read where a complex is read is converted there (`widen()`).
  *
  * Nothing persists between two calls of `lower()`: every cache is made per
  * call.
@@ -52,6 +56,7 @@ import {
   Builder,
   isSubLane,
   joinType,
+  widensTo,
   lengthValues,
   sameShape,
   scalarType,
@@ -144,8 +149,13 @@ const EXACT_OPS = new Set([
 const INTEGER_OPS = new Set(['add', 'sub', 'neg', 'mul', 'abs', 'max', 'min']);
 
 /** `fold: false` (the `constantFold: false` option of the profile `ir`):
- *  no closed sub-expression is evaluated with `N()`. */
-export type LowerOptions = { readonly fold?: boolean };
+ *  no closed sub-expression is evaluated with `N()`. `mode: 'complex'`: a
+ *  row that can leave the reals takes its complex signature unless its
+ *  operands prove a real value (`OperatorRow.leaves`). */
+export type LowerOptions = {
+  readonly fold?: boolean;
+  readonly mode?: 'strict' | 'complex';
+};
 
 export function lower(
   root: Expression,
@@ -183,6 +193,66 @@ export function lower(
   const same = (x: readonly Length[], y: readonly Length[]) =>
     sameShape(x, y, constant);
   const row = (head: string) => rowOfHead(rows, head)!;
+
+  /** `v` where a value of `lane` is read: converted to the complex lane
+   *  when it is real, as it is otherwise. */
+  const widen = (v: V, lane: Lane): V =>
+    lane === 'complex' && type(v).lane !== 'complex'
+      ? b.op('cplx', [v], { lane, shape: type(v).shape })
+      : v;
+
+  /** `cplx` of `v` appended to the closed region `r` (an arm). */
+  const widenIn = (r: Region, v: V, t: IRType): V => {
+    if (type(v).lane === t.lane || t.lane !== 'complex') return v;
+    const out = b.newValue(t);
+    r.body.push({ k: 'op', out, op: 'cplx', args: [v] });
+    return out;
+  };
+
+  /** `v` is proved `>= 0` by what cannot change after the compilation: a
+   *  constant, an operation whose value is nonnegative (`abs`, `exp`, an
+   *  even power), a sum or a product of such values. Not the type of an
+   *  input: an assumption narrows it (`assume(s >= 0)` makes the type of
+   *  `s` `real<0..>`) and `forget()` widens it again. */
+  const nonnegative = (v: V, depth = 0): boolean => {
+    const c = constant(v);
+    if (c !== undefined) return c >= 0;
+    const i = b.defs.get(v);
+    if (i === undefined || depth > 16) return false;
+    const op = i.op.split('.')[0];
+    const k = constant(i.args[1]);
+    if (['abs', 'cabs', 'exp', 'hypot'].includes(op)) return true;
+    if (op === 'pow' && k !== undefined && Number.isInteger(k) && k % 2 === 0)
+      return true;
+    if (op === 'mul' && i.args[0] === i.args[1]) return true;
+    return (
+      ['add', 'mul', 'max', 'pow', 'sqrt'].includes(op) &&
+      (op === 'pow' ? [i.args[0]] : i.args).every((a) =>
+        nonnegative(a, depth + 1)
+      )
+    );
+  };
+
+  /** Whether `r` takes its complex signature on `args`: in every mode when
+   *  the operands are finite constants on which the row's real function is
+   *  NaN (`Ln(-2)`, a complex-shaped value of the `strict` mode); in
+   *  `mode: 'complex'` when its row can leave the reals and no operand
+   *  proves a real value (an operand `nonnegative()`, an integer exponent
+   *  where the row says so). */
+  const leaves = (r: OperatorRow, args: V[]): boolean => {
+    if (r.leaves === undefined) return false;
+    const c = args.map(constant);
+    if (
+      r.fold !== undefined &&
+      c.every((x) => x !== undefined && Number.isFinite(x)) &&
+      Number.isNaN(r.fold(...c))
+    )
+      return true;
+    if (options.mode !== 'complex') return false;
+    const { nonnegative: k, integer: j } = r.leaves;
+    if (j !== undefined && type(args[j]).lane === 'integer') return false;
+    return k === undefined || !nonnegative(args[k]);
+  };
 
   const lookup = (name: string) => {
     let outer = false;
@@ -277,9 +347,10 @@ export function lower(
         row(c.head),
         args.filter((_, i) => i !== c.index)
       );
-    const operation = (operands: V[]): V => {
-      const types = operands.map(type);
-      const signature = signatureOf(r, types);
+    const complex = leaves(r, args);
+    const operation = (given: V[]): V => {
+      const types = given.map(type);
+      const signature = signatureOf(r, types, complex);
       if (signature === undefined)
         decline(
           node,
@@ -287,6 +358,11 @@ export function lower(
             ? `${r.head} of a list`
             : `${r.head} of ${types.map(typeToString).join(', ')}`
         );
+      const [lanes] = signature;
+      const operands = given.map((v, i) => {
+        const a = lanes.length === 1 ? lanes[0] : lanes[i];
+        return a === 'list' ? v : widen(v, a);
+      });
       const base = signature[2].split('.')[0];
       const fromLarge = operands.some((v) => large.has(v));
       if (fromLarge && EXACT_OPS.has(base))
@@ -294,7 +370,7 @@ export function lower(
           node,
           'an integer of 2^53 or more, which the interpreter computes with exactly and a double does not hold'
         );
-      const t = resultType(signature, types, same);
+      const t = resultType(signature, operands.map(type), same);
       if (t === undefined)
         decline(
           node,
@@ -344,10 +420,8 @@ export function lower(
   };
 
   const node = (e: Expression, want: boolean): V | undefined => {
-    if (isNumber(e)) {
-      if (e.im !== 0) decline(e, 'a complex number');
-      return constantOf(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
-    }
+    if (isNumber(e))
+      return number(e) ?? decline(e, 'a complex number with an infinite part');
     if (isSymbol(e)) return symbol(e, want);
     if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
     const user = userBinding(e);
@@ -385,10 +459,13 @@ export function lower(
         const [t, k] = [type(l), constant(i)];
         const n = t.shape[0];
         // Out of range, the interpreter gives NaN for a number, `Missing`
-        // for a boolean or a list; the `fold` pass makes a constant index
+        // for a boolean or a list, and `_at` gives the number NaN, which
+        // is not a complex value; the `fold` pass makes a constant index
         // in range an element.
         if (
-          (t.lane === 'boolean' || t.shape.length > 1) &&
+          (t.lane === 'boolean' ||
+            t.lane === 'complex' ||
+            t.shape.length > 1) &&
           !(
             typeof n === 'number' &&
             k !== undefined &&
@@ -399,7 +476,7 @@ export function lower(
         )
           decline(
             e,
-            'an index that can be out of range, of a list of booleans or of lists'
+            'an index that can be out of range, of a list of booleans, of complex numbers or of lists'
           );
         return apply(e, row('At'), [l, i]);
       }
@@ -431,7 +508,7 @@ export function lower(
         return value(e.ops[0], want);
       case 'WithRandomSeed': {
         const seed = scalar(e.ops[0]);
-        if (e.nops !== 2 || type(seed).lane === 'boolean')
+        if (e.nops !== 2 || !isSubLane(type(seed).lane, 'real'))
           decline(e, 'a seed that is not a number');
         return seededFrame(e, seed, () => value(e.ops[1], want), want);
       }
@@ -539,8 +616,48 @@ export function lower(
     }
     if (isSymbol(n, 'True') || isSymbol(n, 'False'))
       return b.constant(isSymbol(n, 'True'), 'boolean');
-    if (!isNumber(n) || n.im !== 0) return undefined;
-    return constantOf(n.re, Number.isSafeInteger(n.re) ? 'integer' : 'real');
+    return isNumber(n) ? number(n) : undefined;
+  };
+
+  /** The literal of the number `e`: an integer, a real, or a complex of
+   *  finite parts (not `ComplexInfinity`, which a real pole gives). */
+  const number = (
+    e: Expression & { re: number; im: number }
+  ): V | undefined => {
+    if (e.im === 0)
+      return constantOf(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
+    if (Number.isFinite(e.re) && Number.isFinite(e.im))
+      return b.constant({ re: e.re, im: e.im }, 'complex');
+    return undefined;
+  };
+
+  /** The value that the name `name` holds in the innermost binding of
+   *  the engine (as the interpreter reads a symbol that is not a call,
+   *  docs/SCOPING-MODEL.md), and whether that binding is the library's. */
+  const held = (name: string) => {
+    const binding = ce.lookupDefinition(name);
+    const library = ce.contextStack[0]?.lexicalScope.bindings.get(name);
+    return binding !== undefined && 'value' in binding
+      ? { value: binding.value.value, library: binding === library }
+      : undefined;
+  };
+
+  /** The value of the free name `e`, which holds `v` in the engine: a
+   *  literal when `v` is a number or a list of numbers (no symbol, no
+   *  other application); any other value declines, as its names have
+   *  bindings of their own. The name is a capture (`symbolDeps`) unless its
+   *  binding is the library's. */
+  const captured = (e: Expression, name: string, v: Expression): V => {
+    const numbers = (x: Expression): boolean =>
+      isNumber(x) ||
+      (isFunction(x, 'List') && x.nops > 0 && x.ops.every(numbers));
+    if (!numbers(v))
+      decline(
+        e,
+        'a symbol with a value that is not a number or a list of numbers'
+      );
+    if (!held(name)!.library) b.captures.add(name);
+    return value(v)!;
   };
 
   const symbol = (
@@ -558,17 +675,21 @@ export function lower(
       return b.constant(name === 'True', 'boolean');
     const c = CONSTANTS.get(name);
     if (c !== undefined) {
-      if (isShadowedSymbol(e as never))
+      // The symbol's binding, and the innermost binding of its name.
+      if (isShadowedSymbol(e as never) || held(name)?.library !== true)
         decline(e, `${name} is not the library constant here`);
       return b.constant(c, 'real');
     }
+    // In a function body the interpreter reads the binding of the body,
+    // which need not be the binding of the name where the call is: a
+    // capture there declines, as a read of an input does.
+    const h = cx.inFunction === undefined ? held(name) : undefined;
+    if (h?.value !== undefined) return captured(e, name, h.value);
     if (cx.inFunction !== undefined)
       decline(
         e,
         `the function ${cx.inFunction} reads ${name}, which is not a parameter (a capture)`
       );
-    if (resolvedValueDefinition(e)?.value !== undefined)
-      decline(e, 'a symbol with a value');
     return input(e, name, e.type.type);
   };
 
@@ -581,7 +702,7 @@ export function lower(
     t: Parameters<typeof inputType>[0],
     positional = false
   ): V => {
-    const ir = inputType(t);
+    const ir = inputType(t, cx.wide);
     if (ir === undefined)
       decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
     const shape = ir.shape.map((n) => {
@@ -632,8 +753,8 @@ export function lower(
     const join = (x: V, y: V, cause: string): V => {
       const t = joinType(type(x), type(y));
       if (t === undefined) decline(node, cause);
-      a.region.yields.push(x);
-      c.region.yields.push(y);
+      a.region.yields.push(widenIn(a.region, x, t));
+      c.region.yields.push(widenIn(c.region, y, t));
       outs.push(b.newValue(t));
       return outs[outs.length - 1];
     };
@@ -746,16 +867,19 @@ export function lower(
     }
     if (lengthValues(t).length > 0)
       decline(e, 'a list of lists of run-time length');
-    return b.list(elements, {
-      lane: t.lane,
-      shape: [elements.length, ...t.shape],
-    });
+    return b.list(
+      elements.map((v) => widen(v, t!.lane)),
+      {
+        lane: t.lane,
+        shape: [elements.length, ...t.shape],
+      }
+    );
   };
 
   const local = (s: Expression, v: V, lane: Lane): V => {
-    if (!isSubLane(type(v).lane, lane))
+    if (!widensTo(type(v).lane, lane))
       decline(s, `a value that is not ${lane}`);
-    return v;
+    return widen(v, lane);
   };
 
   const block = (e: Fn, want: boolean): V | undefined =>
@@ -783,7 +907,11 @@ export function lower(
             : isSymbol(declared)
               ? declared.symbol
               : 'unknown';
-          if (!['real', 'integer', 'boolean', 'unknown'].includes(typeName))
+          if (
+            !['real', 'integer', 'boolean', 'complex', 'unknown'].includes(
+              typeName
+            )
+          )
             decline(s, `a local of type ${typeName}`);
           const v = scalar(value);
           // With no type, a number is a real: a later write of a real to
@@ -791,8 +919,8 @@ export function lower(
           const lane: Lane =
             typeName !== 'unknown'
               ? (typeName as Lane)
-              : type(v).lane === 'boolean'
-                ? 'boolean'
+              : type(v).lane === 'boolean' || type(v).lane === 'complex'
+                ? type(v).lane
                 : 'real';
           result = local(s, v, lane);
           frame.names.set(name.symbol, { v: result, lane, role: 'local' });
@@ -830,6 +958,8 @@ export function lower(
     withFrame,
     region,
     isLibrary,
+    widen,
+    wide: options.mode === 'complex' ? 'complex' : 'real',
   };
   const lists = listLowering(cx);
   const fns = functionLowering(cx);

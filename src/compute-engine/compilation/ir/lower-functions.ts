@@ -32,20 +32,28 @@ import { parameterName } from './lower-lists.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
- * boolean, or a list of them of stated lengths, or of a run-time length
- * (the outer list). A scalar with no declared type (`unknown`) or of type
- * `number` is a real: this pipeline reads an undeclared name as a real
- * input. `any`, a list element of type `unknown` or `any`, and an inner
- * list of run-time length have no IR type.
+ * boolean, a complex (a scalar), or a list of reals, integers or booleans
+ * of stated lengths, or of a run-time length (the outer list). A scalar
+ * with no declared type (`unknown`) or of type `number` is `wide`: a real,
+ * or a complex in `mode: 'complex'`. `any`, a list element of type
+ * `unknown` or `any`, and an inner list of run-time length have no IR
+ * type.
  */
 export function inputType(
-  t: Type
+  t: Type,
+  wide: 'real' | 'complex' = 'real'
 ): { lane: Lane; shape: (number | 'run-time')[] } | undefined {
   const lane = (t: Type, element: boolean): Lane | undefined => {
-    if (t === 'number' || (t === 'unknown' && !element)) return 'real';
+    // A complex list entry declines (below).
+    if (t === 'number' || (t === 'unknown' && !element))
+      return !element ? wide : wide === 'complex' ? undefined : 'real';
     if (t === 'unknown' || t === 'any') return undefined;
     if (isSubtype(t, 'integer')) return 'integer';
     if (isSubtype(t, 'real')) return 'real';
+    // A list entry of a complex list can be a number or a `{re, im}`
+    // object (docs/COMPILATION-MODEL.md, the ABI): only a run-time test
+    // tells them apart, so such a list declines.
+    if (isSubtype(t, 'complex')) return element ? undefined : 'complex';
     return isSubtype(t, 'boolean') ? 'boolean' : undefined;
   };
   const shape: (number | 'run-time')[] = [];
@@ -193,7 +201,7 @@ export function functionLowering(cx: Lowering) {
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
     const args = e.ops.map((op, i) => {
-      const v = cx.value(op)!;
+      const v = cx.widen(cx.value(op)!, fn.params[i].lane);
       if (type(v).shape.length > 0)
         decline(
           op,

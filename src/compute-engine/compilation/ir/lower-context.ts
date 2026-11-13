@@ -82,6 +82,11 @@ export type Lowering = {
   /** `e` is a call of the library operator of its name (not a user
    *  function, not a shadowed name). */
   isLibrary(e: Fn): boolean;
+  /** `v` where a value of `lane` is read (a real converted to complex). */
+  widen(v: V, lane: Lane): V;
+  /** The lane of an input of type `number`, `unknown` or none: complex in
+   *  `mode: 'complex'`. */
+  readonly wide: 'real' | 'complex';
   /** The name of the user function whose body is being lowered. */
   inFunction?: string;
 };

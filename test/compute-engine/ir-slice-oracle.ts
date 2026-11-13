@@ -20,12 +20,16 @@ import {
 type Json = unknown;
 
 export type Value = number | boolean | Value[];
-export type Point = Record<string, number | boolean | number[] | number[][]>;
+export type Complex = { re: number; im: number };
+export type Point = Record<
+  string,
+  number | boolean | number[] | number[][] | Complex | Complex[]
+>;
 
-/** The interpreter's value: a number, a boolean, a list, or a tag for a
- *  value that is not a real number. */
+/** The interpreter's value: a number, a boolean, a list, a complex number,
+ *  or a tag for a value that is not a number. */
 export type Expected =
-  number | boolean | Expected[] | 'complex' | 'complex-infinity' | 'none';
+  number | boolean | Expected[] | Complex | 'complex-infinity' | 'none';
 
 /** An engine with the inputs of the tests declared: `x`, `y` real; `n`,
  *  `m` integer; `L`, `M` lists of three reals; `I` a list of three
@@ -53,7 +57,12 @@ export function makeEngine(): ComputeEngine {
   ce.declare('J', 'list<integer>');
   ce.declare('Q', 'list<list<real^2>>');
   ce.declare('p', 'boolean');
+  ce.declare('Z', 'complex');
+  ce.declare('W', 'complex');
+  ce.declare('C', 'list<complex^2>');
   ce.assign('h', 2.5);
+  // `hx` has a value with a free name: it declines.
+  ce.assign('hx', ce.box(['Add', 'x', 1]));
   ce.declare('a', 'any');
   const fn = (json: unknown) => ce.box(json as never);
   ce.declare('f', '(real, real) -> real');
@@ -125,6 +134,8 @@ export function makeMachineEngine(): ComputeEngine {
 
 function boxValue(ce: ComputeEngine, v: Point[string]): Expression {
   if (typeof v === 'boolean') return v ? ce.True : ce.False;
+  if (typeof v === 'object' && !Array.isArray(v))
+    return ce.number(ce.complex(v.re, v.im));
   if (Array.isArray(v))
     return ce.function(
       'List',
@@ -136,7 +147,9 @@ function boxValue(ce: ComputeEngine, v: Point[string]): Expression {
 function read(e: Expression): Expected {
   if (isNumber(e)) {
     if (e.im !== 0)
-      return Number.isFinite(e.im) ? 'complex' : 'complex-infinity';
+      return Number.isFinite(e.im) && Number.isFinite(e.re)
+        ? { re: e.re, im: e.im }
+        : 'complex-infinity';
     return e.re;
   }
   if (isSymbol(e, 'True')) return true;
@@ -149,7 +162,6 @@ function read(e: Expression): Expected {
   // A lazy list (`Map`, `Filter`, `Range`): its elements.
   if (isFunction(e) && e.isCollection && e.isFiniteCollection)
     return read(e.engine.function('ListFrom', [e]).evaluate().N());
-  if (isFunction(e, 'Complex')) return 'complex';
   return 'none';
 }
 
@@ -193,9 +205,18 @@ export const TOLERANCE = 1e-12;
  *
  * - no number in the interpreter (an error, `Missing`, an unevaluated
  *   form): a caveat value only, NaN, 0, an infinity or `undefined` (a
- *   throw is handled by the caller);
- * - a complex value: NaN (the real lane of the `strict` mode);
- * - `ComplexInfinity` (a pole): an infinity or NaN;
+ *   throw is handled by the caller), or a complex with such a part or
+ *   with zero parts;
+ * - a complex value: NaN (the real lane of the `strict` mode), or a
+ *   `{re, im}` value whose parts agree within `TOLERANCE` of the larger
+ *   modulus (a part of a product or a quotient carries an error of the
+ *   order of the modulus: `W/x/Arccsc(W)/x` at `W = 1000 - 1000i`, `x = 2`
+ *   has a real part of -0.0417 with an error of 4e-11);
+ * - `ComplexInfinity` (a pole): an infinity or NaN, or a `{re, im}` value
+ *   with such a part;
+ * - a real number: a number, or a `{re, im}` value (the complex lane)
+ *   whose real part agrees and whose imaginary part is 0 within
+ *   `TOLERANCE` of the real part;
  * - a number: the same NaN, the same infinity, or within `TOLERANCE`
  *   relative, with an absolute floor of `TOLERANCE` for a value that
  *   cancels to near 0 (the precision of the target);
@@ -207,15 +228,42 @@ export function agrees(
   expected: Expected | 'engine-error'
 ): boolean {
   if (expected === 'engine-error') throw new Error('the interpreter failed');
+  const cx = (x: unknown): x is Complex =>
+    typeof x === 'object' && x !== null && 're' in x && 'im' in x;
   if (expected === 'none')
     return (
       v === undefined ||
       (typeof v === 'number' &&
-        (Number.isNaN(v) || v === 0 || !Number.isFinite(v)))
+        (Number.isNaN(v) || v === 0 || !Number.isFinite(v))) ||
+      (cx(v) &&
+        (!(Number.isFinite(v.re) && Number.isFinite(v.im)) ||
+          (v.re === 0 && v.im === 0)))
     );
-  if (expected === 'complex') return Number.isNaN(v);
+  if (cx(expected)) {
+    if (!cx(v)) return Number.isNaN(v);
+    const scale = Math.max(
+      1,
+      Math.hypot(v.re, v.im),
+      Math.hypot(expected.re, expected.im)
+    );
+    const part = (a: number, b: number) =>
+      Number.isNaN(a) || Number.isNaN(b)
+        ? Number.isNaN(a) && Number.isNaN(b)
+        : !Number.isFinite(a) || !Number.isFinite(b)
+          ? a === b
+          : Math.abs(a - b) <= TOLERANCE * scale;
+    return part(v.re, expected.re) && part(v.im, expected.im);
+  }
   if (expected === 'complex-infinity')
-    return typeof v === 'number' && !Number.isFinite(v);
+    return cx(v)
+      ? !Number.isFinite(v.re) || !Number.isFinite(v.im)
+      : typeof v === 'number' && !Number.isFinite(v);
+  if (cx(v) && typeof expected === 'number')
+    return (
+      agrees(v.re, expected) &&
+      (Number.isNaN(expected) ||
+        Math.abs(v.im) <= TOLERANCE * Math.max(1, Math.abs(expected)))
+    );
   if (Array.isArray(expected))
     return (
       Array.isArray(v) &&
@@ -234,8 +282,16 @@ export function agrees(
 }
 
 /** Whether two compiled values have the same bits (`Object.is` on each
- *  number: NaN equals NaN, -0 differs from 0). */
+ *  number, and on each part of a complex: NaN equals NaN, -0 differs from
+ *  0). */
 export function sameBits(a: unknown, b: unknown): boolean {
+  if (typeof a === 'object' && a !== null && !Array.isArray(a))
+    return (
+      typeof b === 'object' &&
+      b !== null &&
+      sameBits((a as Complex).re, (b as Complex).re) &&
+      sameBits((a as Complex).im, (b as Complex).im)
+    );
   if (Array.isArray(a))
     return (
       Array.isArray(b) &&
@@ -266,9 +322,8 @@ export function hasLoop(json: unknown): boolean {
 
 /** The free inputs of a program, by name. */
 export function inputsOf(expr: Expression): string[] {
-  return [...expr.unknowns].filter((s) =>
-    ['x', 'y', 'n', 'm', 'L', 'M', 'I', 'D', 'E', 'J', 'Q', 'p'].includes(s)
-  );
+  const names = 'x y n m L M I D E J Q p Z W C'.split(' ');
+  return [...expr.unknowns].filter((s) => names.includes(s));
 }
 
 /** Input points: ordinary values, a zero, a negative, a value past 1. */
@@ -390,6 +445,21 @@ const Q_VALUES = [
   [[1e300, -1e300]],
 ];
 [...POINTS, ...EDGE_POINTS].forEach((p, i) => (p.Q = Q_VALUES[i]));
+
+// The values of `Z`, `W` and `C`: off the axes, on the negative real axis
+// (the cut of `Sqrt` and `Ln`), on the imaginary axis past `i` (the cut of
+// `Arctan`), at 0, and past 1 on the real axis (the cut of `Arcsin`).
+// prettier-ignore
+const COMPLEX_VALUES: [Complex, Complex][] = [
+  [{ re: 1.5, im: -0.5 }, { re: -2, im: 3 }], [{ re: -4, im: 0 }, { re: 0, im: 2 }],
+  [{ re: 0, im: 0 }, { re: 0.25, im: 0.75 }], [{ re: 2, im: 0 }, { re: -1, im: -1 }],
+  [{ re: 0, im: -3 }, { re: 3, im: 0 }], [{ re: -0.5, im: 1e-3 }, { re: 1e3, im: -1e3 }],
+  [{ re: 1, im: 1 }, { re: -1, im: 0 }],
+];
+[...POINTS, ...EDGE_POINTS].forEach((p, i) => {
+  [p.Z, p.W] = COMPLEX_VALUES[i];
+  p.C = COMPLEX_VALUES[(i + 3) % COMPLEX_VALUES.length];
+});
 
 export function pointsFor(expr: Expression, points = POINTS): Point[] {
   const names = inputsOf(expr);
@@ -543,7 +613,7 @@ export const PROGRAMS: Json[] = [
 // prettier-ignore
 export const DECLINES: Record<string, Json> = {
   'not in the slice': ['Integrate', 'x', 'x'],
-  'complex number': ['Complex', 1, 2],
+  'Less of complex': ['If', ['Less', 'Z', 1], 1, 2],
   'bound that is not an integer': ['Sum', 'k', ['Limits', 'k', 1, 'x']],
   'different lengths': ['Add', 'L', ['List', 1, 2]],
   'one length by construction': ['Add', 'D', 'E'],
@@ -554,7 +624,7 @@ export const DECLINES: Record<string, Json> = {
   'of a list of booleans': ['If', ['At', ['Map', ['Function', ['Less', 'z', 0], 'z'], 'D'], 'n'], 1, 2],
   'not a literal': ['Map', 'g', 'D'],
   'in a loop': ['Block', ['Declare', 't', 'real', 0], ['Sum', ['Block', ['Assign', 't', 'k'], 'k'], ['Limits', 'k', 1, 3]], 't'],
-  'symbol with a value': ['Add', 'h', 1],
+  'symbol with a value that is not': ['Add', 'hx', 1],
   'Sinh': ['Sinh', 'x'],
   'Equal of a list': ['If', ['Equal', 'L', 'M'], 1, 2],
   'canonical form': ['Add', 'p', 1],
