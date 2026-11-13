@@ -559,9 +559,7 @@ function analyzeInPlace(
      *  regions, no region of an operation that can evaluate it more than
      *  once where it is. */
     const sameIteration = (definition: Position, at: Position): boolean => {
-      const start = at.findIndex(
-        (p) => p.region === definition.at(-1)!.region
-      );
+      const start = at.findIndex((p) => p.region === definition.at(-1)!.region);
       if (start < 0) return false;
       return at.slice(start + 1).every((p) => {
         const owner = facts.owners.get(p.region)?.kind;
@@ -625,9 +623,7 @@ function analyzeInPlace(
       return (facts.uses.get(value.id) ?? []).every((use) => {
         if (use.op === consumer) return true;
         const when = relation(use, at, consumer);
-        return (
-          when === 'apart' || (when === 'before' && readsOnly(use.op))
-        );
+        return when === 'apart' || (when === 'before' && readsOnly(use.op));
       });
     };
 
@@ -930,7 +926,12 @@ export function withOwnedCopies(program: IRProgram): IRProgram {
       if (op.kind === 'loop' && updates(op.body))
         op.results.forEach((result, i) => {
           if (isListType(result.type))
-            candidates.push({ loop: op, i, nested: isNested(result), repeated });
+            candidates.push({
+              loop: op,
+              i,
+              nested: isNested(result),
+              repeated,
+            });
         });
       const once =
         op.kind === 'if' ||
@@ -994,7 +995,9 @@ export function withOwnedCopies(program: IRProgram): IRProgram {
     const two = nested && !repeated ? trial(2) : undefined;
     const chosen =
       two !== undefined &&
-      two.gained.some((op) => one === undefined || !one.analysis.inPlace.has(op))
+      two.gained.some(
+        (op) => one === undefined || !one.analysis.inPlace.has(op)
+      )
         ? two
         : one !== undefined && one.gained.length > 0
           ? one
@@ -1109,7 +1112,11 @@ function withRegions(
         op.alternative === undefined ? undefined : f(op.alternative);
       return body === op.body && alternative === op.alternative
         ? op
-        : { ...op, body, ...(alternative === undefined ? {} : { alternative }) };
+        : {
+            ...op,
+            body,
+            ...(alternative === undefined ? {} : { alternative }),
+          };
     }
     case 'and':
     case 'or': {

@@ -568,9 +568,7 @@ export function hostArrays(
           // A closed branch yields nothing (`yieldedValues()` is empty).
           if (op.kind === 'if')
             op.results.forEach((result, j) => {
-              const values = [op.then, op.else].map(
-                (b) => yieldedValues(b)[j]
-              );
+              const values = [op.then, op.else].map((b) => yieldedValues(b)[j]);
               if (values.some((v) => v !== undefined && shared.has(v.id)))
                 add(result);
               if (values.some((v) => v !== undefined && rows.has(v.id)))

@@ -163,8 +163,7 @@ export function inferFn(
         existing !== undefined &&
         !(
           isValueDef(existing) &&
-          (existing.value.inferredType ||
-            existing.value.declaredType.isUnknown)
+          (existing.value.inferredType || existing.value.declaredType.isUnknown)
         )
       ) {
         skipped.push({ name, scope, reason: 'defined' });

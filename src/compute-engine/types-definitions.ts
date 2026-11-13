@@ -4010,5 +4010,4 @@ export interface BoxedOperatorDefinition
    * signature/effect pair was consistent when snapshotted).
    * @internal */
   _restoreRederivationSnapshot(snapshot: unknown): void;
-
 }

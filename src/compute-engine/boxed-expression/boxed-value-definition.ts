@@ -1018,9 +1018,7 @@ export class _BoxedValueDefinition
    * identity.
    * @internal */
   _restoreFieldSnapshot(snapshot: unknown): void {
-    const s = snapshot as ReturnType<
-      _BoxedValueDefinition['_fieldSnapshot']
-    > &
+    const s = snapshot as ReturnType<_BoxedValueDefinition['_fieldSnapshot']> &
       Record<string, unknown>;
     this.wikidata = s.wikidata as string | undefined;
     this.description = s.description as string | string[] | undefined;

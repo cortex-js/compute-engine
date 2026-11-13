@@ -134,7 +134,10 @@ export function hasArbitraryConstant(expr: Expression): boolean {
  */
 export function replaceArbitraryConstants(
   expr: Expression,
-  replace: (operator: ArbitraryOperator, index: number) => Expression | undefined
+  replace: (
+    operator: ArbitraryOperator,
+    index: number
+  ) => Expression | undefined
 ): Expression {
   if (!hasArbitraryConstant(expr)) return expr;
   return rewriteWithBinders(
@@ -413,7 +416,9 @@ function finalIndexes<T>(
   return map(result, (x) =>
     replaceArbitraryConstants(x, (operator, k) => {
       const to = table.get(k);
-      return to === undefined ? undefined : arbitraryCall(x.engine, operator, to);
+      return to === undefined
+        ? undefined
+        : arbitraryCall(x.engine, operator, to);
     })
   );
 }
@@ -596,7 +601,8 @@ export function withIntegrationConstants(
     () => {
       const operation = OPERATIONS.get(ce)!;
       const reserved = new Set<string>();
-      for (const input of inputs) if (input !== undefined) collectNames(input, reserved);
+      for (const input of inputs)
+        if (input !== undefined) collectNames(input, reserved);
       const frame: IntegrationFrame = { reserved, names: [] };
       operation.frames.push(frame);
       let result: Expression | undefined;
@@ -642,7 +648,8 @@ export function recordIntegrationConstant(
   name: string
 ): void {
   const frame = integrationFrame(ce);
-  if (frame !== undefined && !frame.names.includes(name)) frame.names.push(name);
+  if (frame !== undefined && !frame.names.includes(name))
+    frame.names.push(name);
 }
 
 /** The names of the constants of integration of the running `DSolve` or

@@ -7866,8 +7866,7 @@ function makeLambda(
   // in its type, and a read made while the type of the literal is being
   // computed gets what the type gives at that time.
   let parameterSignatureCell:
-    | { generation: number; signature: Type }
-    | undefined;
+    { generation: number; signature: Type } | undefined;
   const parameterSignature = (): Type => {
     if (
       declaredSignature !== undefined ||

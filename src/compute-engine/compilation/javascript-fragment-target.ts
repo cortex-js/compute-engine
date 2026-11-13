@@ -733,42 +733,42 @@ const integerWhenAll = (
 const modFacts = realOperatorFacts('Mod', 2, integerWhenAll);
 const modRule = (forms: Map<Expression, StructuredForm>) =>
   ({
-  walk: (node, scope, context, w) => {
-    if (isFunction(node) && node.nops === 2) {
-      const [a, b] = node.ops;
-      if (isNumber(b) && b.im === 0 && b.re === 1) {
-        const refuseInteger = () =>
-          w.refuse(
+    walk: (node, scope, context, w) => {
+      if (isFunction(node) && node.nops === 2) {
+        const [a, b] = node.ops;
+        if (isNumber(b) && b.im === 0 && b.re === 1) {
+          const refuseInteger = () =>
+            w.refuse(
+              node,
+              'signature',
+              `Mod of the integer ${nodeText(a)} and the literal divisor 1 is ` +
+                `not in the structured route: the existing emitter writes % ` +
+                `for a dividend that it proves integer-valued and not negative`
+            );
+          if (
+            isSubtype(a.type.type, 'integer') ||
+            BaseCompiler.isIntegerValued(a)
+          )
+            return refuseInteger();
+          const facts = modFacts.walk(node, scope, context, w);
+          // A dividend that the pass types as an integer, whatever its engine
+          // type (`Length(LQ)`): the form `mod-one` has a real operand.
+          if (facts.type.kind === 'integer') return refuseInteger();
+          forms.set(node, 'mod-one');
+          return facts;
+        }
+        if (isSafeNonNegativeInteger(a) && isSafeNonNegativeInteger(b))
+          return w.refuse(
             node,
             'signature',
-            `Mod of the integer ${nodeText(a)} and the literal divisor 1 is ` +
-              `not in the structured route: the existing emitter writes % ` +
-              `for a dividend that it proves integer-valued and not negative`
+            `Mod of ${nodeText(a)} and ${nodeText(b)}, each a literal or of a ` +
+              `type in integer<0..2^53 - 1>, is not in the structured route: the ` +
+              `existing emitter writes % for it`
           );
-        if (
-          isSubtype(a.type.type, 'integer') ||
-          BaseCompiler.isIntegerValued(a)
-        )
-          return refuseInteger();
-        const facts = modFacts.walk(node, scope, context, w);
-        // A dividend that the pass types as an integer, whatever its engine
-        // type (`Length(LQ)`): the form `mod-one` has a real operand.
-        if (facts.type.kind === 'integer') return refuseInteger();
-        forms.set(node, 'mod-one');
-        return facts;
       }
-      if (isSafeNonNegativeInteger(a) && isSafeNonNegativeInteger(b))
-        return w.refuse(
-          node,
-          'signature',
-          `Mod of ${nodeText(a)} and ${nodeText(b)}, each a literal or of a ` +
-            `type in integer<0..2^53 - 1>, is not in the structured route: the ` +
-            `existing emitter writes % for it`
-        );
-    }
-    return modFacts.walk(node, scope, context, w);
-  },
-}) satisfies FragmentRule<ScalarRepresentation>;
+      return modFacts.walk(node, scope, context, w);
+    },
+  }) satisfies FragmentRule<ScalarRepresentation>;
 
 /** The integers from `0` to `2^53 - 1`, both included. */
 const SAFE_NON_NEGATIVE_INTEGER_TYPE = parseType(
@@ -805,15 +805,15 @@ const floorRuleOf = (inputs: ReadonlySet<string>) =>
       const constant = isFunction(node)
         ? inexactJumpConstant(node.ops, scope, inputs)
         : undefined;
-    if (constant !== undefined)
-      return w.refuse(
-        node,
-        'signature',
-        `Floor of an operand with the exact constant ${nodeText(constant)}, ` +
-          `which no double holds exactly, is not in the structured route: the ` +
-          `existing compiler rewrites such a node or declines it ` +
-          `(inexact-jump-operand)`
-      );
+      if (constant !== undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `Floor of an operand with the exact constant ${nodeText(constant)}, ` +
+            `which no double holds exactly, is not in the structured route: the ` +
+            `existing compiler rewrites such a node or declines it ` +
+            `(inexact-jump-operand)`
+        );
       return floorFacts.walk(node, scope, context, w);
     },
   }) satisfies FragmentRule<ScalarRepresentation>;
@@ -2012,7 +2012,10 @@ const REAL_CALL_HEADS: Readonly<Record<string, RealCallEntry>> = {
   // The incomplete `EllipticE(φ, m)` is real-only; `complexContinuation()`
   // answers `real` for it.
   EllipticE: {
-    arities: { 1: { call: 'elliptic-e' }, 2: { call: 'elliptic-e-incomplete' } },
+    arities: {
+      1: { call: 'elliptic-e' },
+      2: { call: 'elliptic-e-incomplete' },
+    },
     continuation: true,
   },
 };
@@ -2076,7 +2079,11 @@ function realCallArities(entry: {
   if (counts.length === 0) return 'two operands or more';
   return (
     counts.map((n) => `${n}`).join(' or ') +
-    (variadic ? ' operand or more' : counts.at(-1) === 1 ? ' operand' : ' operands')
+    (variadic
+      ? ' operand or more'
+      : counts.at(-1) === 1
+        ? ' operand'
+        : ' operands')
   );
 }
 
@@ -3550,7 +3557,11 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Return: {
     walk: (node, scope, context, w) => {
       if (!isFunction(node) || node.nops !== 1)
-        return w.refuse(node, 'signature', 'Return is in the structured route only as Return(value)');
+        return w.refuse(
+          node,
+          'signature',
+          'Return is in the structured route only as Return(value)'
+        );
       const value = w.value(node.op1, scope, context);
       return w.valueFacts(node, value.type, [w.convert(value, value.type)!]);
     },
@@ -3699,8 +3710,7 @@ function withoutNestedOperands(
         'walk' in rule
           ? rule.walk(node, scope, context, w)
           : w.signatures(node, scope, context, rule.signatures);
-      if (head === 'Count' && isFunction(node) && node.nops === 1)
-        return facts;
+      if (head === 'Count' && isFunction(node) && node.nops === 1) return facts;
       const inner = scope.inner.get(node);
       const nestedType = (operand: Expression) => {
         const f = scope.facts.get(operand) ?? inner?.facts.get(operand);
@@ -4275,7 +4285,8 @@ function structuredNestedListType(
   const kind = isSubtype(cell, 'integer')
     ? 'integer'
     : isSubtype(cell, 'real') ||
-        (mode === 'strict' && declaredNumberKind(cell, 'strict')?.kind === 'real')
+        (mode === 'strict' &&
+          declaredNumberKind(cell, 'strict')?.kind === 'real')
       ? 'real'
       : undefined;
   if (kind === undefined)
@@ -4392,8 +4403,7 @@ type StructuredTypeShape = {
  *  a list), of any rank. */
 function isNestedListType(type: { readonly kind: string }): boolean {
   return (
-    type.kind === 'list' &&
-    (type as FragmentListType).element.kind === 'list'
+    type.kind === 'list' && (type as FragmentListType).element.kind === 'list'
   );
 }
 
@@ -4489,7 +4499,9 @@ const structuredDefinition: Pick<
   // lengths of the rows of two of them are not known to be equal.
   mapsListArguments: (lists, scope, context, w) =>
     lists.length < 2 ||
-    (lists.every((l) => (numericCellsOf(w.value(l, scope, context))?.rank ?? 0) === 1) &&
+    (lists.every(
+      (l) => (numericCellsOf(w.value(l, scope, context))?.rank ?? 0) === 1
+    ) &&
       listsOfOneLength(lists, scope, context, w)),
   bindingLimit: (type, binding) =>
     type.kind === 'list'
@@ -4790,7 +4802,9 @@ function comprehensionClauses(
 ): { clauses: readonly ComprehensionClause[] } | { refusal: string } {
   const specs = node.ops.slice(1);
   if (specs.length === 0)
-    return { refusal: 'Comprehension with no generator is not in the structured route' };
+    return {
+      refusal: 'Comprehension with no generator is not in the structured route',
+    };
   // A comprehension whose type is not a list (`list | missing` over the
   // empty list literal): the existing compiler reads an element of it with
   // `_SYS.atWithValueMarker`, `undefined` out of range, where a list of
@@ -5224,7 +5238,8 @@ function aggregateRule(
   const facts = walkAggregate(node, scope, context, w, true);
   if (!('representation' in facts)) return facts;
   const kind = facts.type.kind;
-  if (kind === 'list') return listAggregateFacts(node, facts, scope, context, w);
+  if (kind === 'list')
+    return listAggregateFacts(node, facts, scope, context, w);
   if (kind !== 'real' && kind !== 'integer')
     return w.refuse(
       node,
@@ -5282,14 +5297,16 @@ function listAggregateFacts(
   const head = node.operator;
   const what = `${head} whose body ${nodeText(node.op1)} is a list`;
   const refuse = (cause: string) =>
-    w.refuse(node, 'signature', `${what} is not in the structured route: ${cause}`);
+    w.refuse(
+      node,
+      'signature',
+      `${what} is not in the structured route: ${cause}`
+    );
   if ((numericCellsOf(facts)?.rank ?? 0) !== 1)
     return refuse('the body is not a list of reals or of integers');
   const width = statedWidth(node.op1);
   // `aggregateRefusal()` admitted clauses `Limits(k, a, b)` only.
-  const clauses = node.ops
-    .slice(1)
-    .map((c) => (isFunction(c) ? c.ops : []));
+  const clauses = node.ops.slice(1).map((c) => (isFunction(c) ? c.ops : []));
   const indexes = new Set(
     clauses.map(([k]) => (k !== undefined && isSymbol(k) ? k.symbol : ''))
   );
@@ -5318,10 +5335,7 @@ function listAggregateFacts(
   }
   if (width === undefined) {
     const key = lengthKey(node.op1, scope.inner.get(node) ?? scope, context, w);
-    if (
-      key === undefined ||
-      key.split(' ').some((token) => indexes.has(token))
-    )
+    if (key === undefined || key.split(' ').some((token) => indexes.has(token)))
       return refuse(
         `the length of the body is not the same in every term by construction ` +
           `(declare its width: \`vector<3>\` or \`list<real^3>\`): the existing ` +
@@ -5755,7 +5769,8 @@ function nestedReplaceAt(
       typeof engine === 'object' &&
       engine.kind === 'list' &&
       ((engine.dimensions?.length ?? 0) >= 2 ||
-        (typeof engine.elements === 'object' && engine.elements.kind === 'list'))
+        (typeof engine.elements === 'object' &&
+          engine.elements.kind === 'list'))
     )
   )
     return refuse(
@@ -5786,7 +5801,9 @@ function nestedReplaceAt(
       return v.kind === 'list' && value.representation === 'array'
         ? (() => {
             const row = joinedRows(slot, v);
-            return row === undefined ? undefined : { kind: 'list', element: row };
+            return row === undefined
+              ? undefined
+              : { kind: 'list', element: row };
           })()
         : undefined;
     if (slot.kind !== 'real' && slot.kind !== 'integer') return undefined;
@@ -5794,11 +5811,16 @@ function nestedReplaceAt(
     return {
       kind: 'list',
       element: {
-        kind: slot.kind === 'integer' && v.kind === 'integer' ? 'integer' : 'real',
+        kind:
+          slot.kind === 'integer' && v.kind === 'integer' ? 'integer' : 'real',
       },
     };
   };
-  const result = written(list.type as FragmentListType, indexes.length, value.type);
+  const result = written(
+    list.type as FragmentListType,
+    indexes.length,
+    value.type
+  );
   if (result === undefined)
     return refuse(
       `of ${nodeText(node.ops[0])} of the type \`${fragmentTypeToString(list.type)}\` ` +
@@ -5958,7 +5980,9 @@ function tupleRule(
  *  `broadcastRule()`). Only `At`, `Length`, the connectives and the
  *  condition of an element-wise selection read one
  *  (`refuseBooleanListUses()`). */
-function isBooleanList(facts: FragmentValueFacts<ScalarRepresentation>): boolean {
+function isBooleanList(
+  facts: FragmentValueFacts<ScalarRepresentation>
+): boolean {
   return (
     facts.representation === 'array' &&
     facts.type.kind === 'list' &&
@@ -6323,7 +6347,10 @@ function matrixFunctionRule(
         );
       if (
         cells[0] === undefined &&
-        !(facts[0].type.kind === 'point' && collectionElement(facts[0]) !== undefined)
+        !(
+          facts[0].type.kind === 'point' &&
+          collectionElement(facts[0]) !== undefined
+        )
       )
         refuse(
           `of ${describe(0)} is not in the structured route, which reads a list of ` +
@@ -6609,9 +6636,7 @@ function collectionRule(
       if (
         node.ops
           .slice(0, 2)
-          .some(
-            (b) => !isNumber(b) || b.im !== 0 || !Number.isFinite(b.re)
-          )
+          .some((b) => !isNumber(b) || b.im !== 0 || !Number.isFinite(b.re))
       )
         refuse(
           'with a bound that is not a finite number literal is not in the structured route: ' +
@@ -6712,11 +6737,7 @@ function collectionRule(
                 `which joins lists of one element type`
             );
         });
-        return w.valueFacts(
-          node,
-          { kind: 'list', element: row! },
-          conversions
-        );
+        return w.valueFacts(node, { kind: 'list', element: row! }, conversions);
       }
       const tupleAt = facts.findIndex(
         (f) => listElementType(f)?.kind === 'point'
@@ -7090,10 +7111,7 @@ function functionOperandRule(
        *  of `Filter` or `Count`, whose value is only tested. */
       const body = (
         types: readonly (
-          | 'real'
-          | 'integer'
-          | FragmentElementType
-          | FragmentListType
+          'real' | 'integer' | FragmentElementType | FragmentListType
         )[],
         predicate = false
       ) => {
@@ -7210,7 +7228,8 @@ function functionOperandRule(
           // (slice 2 of the nested lists): its parameter takes each row as
           // it is (`M.map((_x) => _f(_x))`), and its value is a number or a
           // row, a list of numbers.
-          const rows = lambda === undefined ? undefined : rowsOf(value(node.op2));
+          const rows =
+            lambda === undefined ? undefined : rowsOf(value(node.op2));
           if (rows !== undefined) {
             const facts = value(node.op2);
             if (numericCellsOf(facts)?.rank !== 2)
@@ -7649,7 +7668,10 @@ const BROADCAST_OPERATIONS: Readonly<
   Record<
     string,
     {
-      readonly operation: Extract<BroadcastForm, { operation: unknown }>['operation'];
+      readonly operation: Extract<
+        BroadcastForm,
+        { operation: unknown }
+      >['operation'];
       readonly nops: number;
     }
   >
@@ -7735,25 +7757,27 @@ function broadcastForm(
   if (COMPLEX_CELL_HEADS.has(head))
     return refuse(
       `the scalar code of ${head} of a real operand is complex, where the ` +
-      `existing compiler applies the real function to each element`
+        `existing compiler applies the real function to each element`
     );
   if (ANGULAR_HEADS.has(head) && node.engine.angularUnit !== 'rad')
-    return refuse(`the angular unit is ${node.engine.angularUnit}, not radians`);
+    return refuse(
+      `the angular unit is ${node.engine.angularUnit}, not radians`
+    );
   if (
     (head === 'Sin' || head === 'Cos' || head === 'Tan') &&
     readsAsPiMultiple(node.ops[0])
   )
     return refuse(
       'the operand is a multiple of Pi, for which the existing emitter ' +
-      'writes the half-turn kernel of each element'
+        'writes the half-turn kernel of each element'
     );
   if (head === 'Floor' || head === 'Ceil' || head === 'Round') {
     const constant = inexactJumpConstant(node.ops, scope, inputs);
     if (constant !== undefined)
       return refuse(
         `the operand holds the exact constant ${nodeText(constant)}, which no ` +
-        `double holds exactly, and the route declines it beside a jump, as for ` +
-        `a scalar operand (inexact-jump-operand)`
+          `double holds exactly, and the route declines it beside a jump, as for ` +
+          `a scalar operand (inexact-jump-operand)`
       );
     if (head === 'Round' && node.engine.roundingTies !== 'away-from-zero')
       return refuse(
@@ -7801,8 +7825,8 @@ function broadcastForm(
     if (entry.domain !== undefined)
       return refuse(
         `the structured route proves the domain of the operands of ${head} ` +
-        `from their types, and has no such proof for the elements of a list ` +
-        `(${entry.domain.why})`
+          `from their types, and has no such proof for the elements of a list ` +
+          `(${entry.domain.why})`
       );
     const form = Object.hasOwn(entry.arities, nops)
       ? entry.arities[nops]
@@ -7994,7 +8018,8 @@ function selectionBroadcastRule(
         'walk' in rule
           ? rule.walk(node, scope, context, w)
           : w.signatures(node, scope, context, rule.signatures);
-      if (!isFunction(node) || !isLibraryOperator(node, head)) return fallback();
+      if (!isFunction(node) || !isLibraryOperator(node, head))
+        return fallback();
       const ops = node.ops;
       // The positions of the conditions; a last condition `True` of a
       // `Which` is the default clause.
@@ -8015,7 +8040,11 @@ function selectionBroadcastRule(
       if (listCondition === undefined) return fallback();
       const what = `${head} with the list condition ${nodeText(ops[listCondition])}`;
       const refuse = (cause: string) =>
-        w.refuse(node, 'signature', `${what} is not in the structured route: ${cause}`);
+        w.refuse(
+          node,
+          'signature',
+          `${what} is not in the structured route: ${cause}`
+        );
       if (mode === 'complex')
         return refuse(
           'in the complex mode the existing compiler selects on the complex lane'
@@ -8026,19 +8055,30 @@ function selectionBroadcastRule(
           `the program binds the name ${shadowed}, which the element-wise ` +
             `selection reads as a library constant`
         );
-      if (head === 'If' ? ops.length !== 2 && ops.length !== 3 : ops.length % 2 !== 0)
-        return refuse(`${head} with ${ops.length} operands is not an element-wise selection`);
+      if (
+        head === 'If'
+          ? ops.length !== 2 && ops.length !== 3
+          : ops.length % 2 !== 0
+      )
+        return refuse(
+          `${head} with ${ops.length} operands is not an element-wise selection`
+        );
       for (const i of conditions)
         if (!isBooleanList(w.value(ops[i], scope, context)))
           return refuse(
             `the condition ${nodeText(ops[i])} is not a list of booleans, and the ` +
               `existing compiler decides a scalar condition at run time`
           );
-      const arms = ops.map((_, i) => i).filter((i) => !(head === 'If' ? i === 0 : i % 2 === 0));
+      const arms = ops
+        .map((_, i) => i)
+        .filter((i) => !(head === 'If' ? i === 0 : i % 2 === 0));
       for (const i of arms) {
         const f = w.value(ops[i], scope, context);
         const scalar = f.type.kind === 'real' || f.type.kind === 'integer';
-        if (!scalar && (f.type.kind !== 'list' || collectionElement(f) === undefined))
+        if (
+          !scalar &&
+          (f.type.kind !== 'list' || collectionElement(f) === undefined)
+        )
           return refuse(
             `the arm ${nodeText(ops[i])} has the type \`${fragmentTypeToString(f.type)}\`, ` +
               `and the element-wise selection reads arms that are reals, integers or ` +
@@ -8103,7 +8143,8 @@ function listExtremumRule(
         'walk' in rule
           ? rule.walk(node, scope, context, w)
           : w.signatures(node, scope, context, rule.signatures);
-      if (!isFunction(node) || node.nops < 2 || isFoldNode(node)) return fallback();
+      if (!isFunction(node) || node.nops < 2 || isFoldNode(node))
+        return fallback();
       const facts = operandFacts(node, scope, context, w);
       const list = facts.findIndex((f) => f.type.kind === 'list');
       if (list < 0) return fallback();
@@ -8113,7 +8154,11 @@ function listExtremumRule(
         const cells = numericCellsOf(f);
         const scalar = f.type.kind === 'real' || f.type.kind === 'integer';
         if (scalar) continue;
-        if (cells === undefined || cells.rank > 2 || (cells.rank === 2 && scalars === 0))
+        if (
+          cells === undefined ||
+          cells.rank > 2 ||
+          (cells.rank === 2 && scalars === 0)
+        )
           return w.refuse(
             node,
             'signature',
@@ -8121,7 +8166,9 @@ function listExtremumRule(
               `\`${fragmentTypeToString(f.type)}\` is not in the structured route, ` +
               `which takes the extremum of the elements of lists of reals or of ` +
               `integers and of real or integer operands` +
-              (cells?.rank === 2 ? ' (a list of lists beside another list declines)' : '')
+              (cells?.rank === 2
+                ? ' (a list of lists beside another list declines)'
+                : '')
           );
       }
       forms.set(node, 'list-extremum');
@@ -8258,12 +8305,15 @@ function broadcastRule(
           return kind === 'list' || kind === 'point';
         }).length > 1
       )
-        return listEqualityFacts(node, scope, context, w, forms) ?? w.refuse(
-          node,
-          'signature',
-          `${what} and another list or tuple is not in the structured route, ` +
-            `which compares two lists of reals or of integers whole (one ` +
-            `boolean, as the interpreter and the existing compiler give it)`
+        return (
+          listEqualityFacts(node, scope, context, w, forms) ??
+          w.refuse(
+            node,
+            'signature',
+            `${what} and another list or tuple is not in the structured route, ` +
+              `which compares two lists of reals or of integers whole (one ` +
+              `boolean, as the interpreter and the existing compiler give it)`
+          )
         );
       const kind = broadcastKind(form);
       const facts = readsBooleans(form)
@@ -8385,7 +8435,9 @@ function nestedElementwise(
       );
   }
   if (lists.length > 1) {
-    const keys = lists.map((i) => nestedLengthKeys(node.ops[i], scope, context, w));
+    const keys = lists.map((i) =>
+      nestedLengthKeys(node.ops[i], scope, context, w)
+    );
     if (!keys[0].some((k) => keys.every((other) => other.includes(k))))
       return refuse(
         `of the lists ${lists.map((i) => nodeText(node.ops[i])).join(' and ')}, whose ` +
@@ -8394,7 +8446,9 @@ function nestedElementwise(
       );
   }
   const integer = facts.every((f, i) =>
-    f.type.kind === 'list' ? cells[i]!.kind === 'integer' : f.type.kind === 'integer'
+    f.type.kind === 'list'
+      ? cells[i]!.kind === 'integer'
+      : f.type.kind === 'integer'
   );
   const kind = kindOf(integer);
   // A list of lists of booleans is not a value of the structured route.
@@ -8819,8 +8873,7 @@ function isNestedEngineList(type: Type): boolean {
   return (
     typeof type === 'object' &&
     type.kind === 'list' &&
-    ((type.dimensions?.length ?? 0) >= 2 ||
-      isSubtype(type, 'list<list<any>>'))
+    ((type.dimensions?.length ?? 0) >= 2 || isSubtype(type, 'list<list<any>>'))
   );
 }
 
@@ -8920,8 +8973,7 @@ function refuseHaversineGrouping(
   const value = (op: Expression): Expression =>
     isFunction(op, 'Block') && op.nops > 0
       ? value(op.ops[op.nops - 1])
-      : (isFunction(op, 'Conjugate') || isFunction(op, 'Real')) &&
-          op.nops === 1
+      : (isFunction(op, 'Conjugate') || isFunction(op, 'Real')) && op.nops === 1
         ? value(op.op1)
         : op;
   const bare = (op: Expression): boolean => {
@@ -9324,12 +9376,7 @@ function isWideRealInStrict(node: Expression): boolean {
     const numeric =
       isSubtype(t, 'number') ||
       (element !== undefined && isSubtype(element, 'number'));
-    if (
-      numeric &&
-      !isRealValued(e) &&
-      e.nops > 0 &&
-      e.ops.every(isRealValued)
-    )
+    if (numeric && !isRealValued(e) && e.nops > 0 && e.ops.every(isRealValued))
       return false;
     return e.ops.every(visit);
   };
@@ -9764,8 +9811,7 @@ function refuseSumOfNestedSums(expr: Expression, helperBody = false): void {
       node.op1.ops.some(
         (list) =>
           isFunction(list, 'List') &&
-          (helperBody ||
-            list.ops.some((op) => chains(op, node.op1.operator)))
+          (helperBody || list.ops.some((op) => chains(op, node.op1.operator)))
       )
     )
       throw new Error(
@@ -11369,8 +11415,16 @@ function recordStructured(
   chainForms(prepared.annotation, registry.helpers, hosts, registry.forms);
   refuseStrictWideReads(prepared.annotation, registry.mode);
   refuseBooleanListUses(prepared.annotation, registry.forms);
-  refuseComplexElementLanes(prepared.annotation, registry.forms, registry.target);
-  refuseUnstableLengthKeys(prepared.annotation, registry.forms, hostReadNames(registry));
+  refuseComplexElementLanes(
+    prepared.annotation,
+    registry.forms,
+    registry.target
+  );
+  refuseUnstableLengthKeys(
+    prepared.annotation,
+    registry.forms,
+    hostReadNames(registry)
+  );
   refuseComplexListQuotients(prepared.annotation, registry.mode);
   refuseLocalFunctionArithmetic(
     prepared.annotation,
@@ -11725,10 +11779,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       this.phaseSum = 0;
       const start = globalThis.performance.now();
       const result = super.compile(expr, options);
-      onPhase(
-        'assembly',
-        globalThis.performance.now() - start - this.phaseSum
-      );
+      onPhase('assembly', globalThis.performance.now() - start - this.phaseSum);
       return result;
     });
   }
@@ -12183,9 +12234,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       // and the other branches (`decidedBranch()`).
       if (structured)
         refuseSelections(node, boundInRoot, node === prepared.expr);
-      const decided = structured
-        ? decidedBranch(node, boundInRoot)
-        : undefined;
+      const decided = structured ? decidedBranch(node, boundInRoot) : undefined;
       if (decided !== undefined) return check(decided);
       refuseListHead(node, admission);
       refuseBooleanClaim(node, admission);
@@ -12783,10 +12832,10 @@ function findClosedForm(
         node.ops
           .slice(1)
           .some(
-          (limit) =>
-            !isFunction(limit, 'Limits') ||
-            limit.ops.slice(1).some((bound) => isSymbol(bound, 'Nothing'))
-        );
+            (limit) =>
+              !isFunction(limit, 'Limits') ||
+              limit.ops.slice(1).some((bound) => isSymbol(bound, 'Nothing'))
+          );
       if (indefinite)
         throw new Error(
           `JS scalar fragment: the indefinite integral ${text} has no ` +
@@ -12956,10 +13005,7 @@ function numericDerivative(
     literal = isFunction(fn, 'Function') ? fn : undefined;
     point = args[1];
   } else {
-    if (
-      isSymbol(args[0]) &&
-      registry.localFunctionNames.has(args[0].symbol)
-    )
+    if (isSymbol(args[0]) && registry.localFunctionNames.has(args[0].symbol))
       throw new Error(
         `${prefix}, and its function is the local function ` +
           `${args[0].symbol}: the structured route differentiates ` +
@@ -12967,8 +13013,7 @@ function numericDerivative(
       );
     // The same function as the numeric derivative of the library.
     literal = resolveDerivativeFunctionLiteral(args[0]) as
-      | (Expression & { ops: readonly Expression[] })
-      | undefined;
+      (Expression & { ops: readonly Expression[] }) | undefined;
     if (operator === 'Derivative') {
       if (args.length > 2 || node.ops.length !== 2)
         throw new Error(
@@ -13083,7 +13128,10 @@ function numericLimit(
     ? 1
     : isSymbol(x, 'NegativeInfinity')
       ? -1
-      : isNumber(x) && x.im === 0 && !Number.isFinite(x.re) && !Number.isNaN(x.re)
+      : isNumber(x) &&
+          x.im === 0 &&
+          !Number.isFinite(x.re) &&
+          !Number.isNaN(x.re)
         ? Math.sign(x.re)
         : 0;
   if (sign !== 0) {
@@ -13808,11 +13856,7 @@ function attachRootBlock(
         bound.has(name) || indexes.has(name) || registry.hosts?.vars.has(name)
           ? undefined
           : resolvedValueDefinition(node)?.value;
-      if (
-        value !== undefined &&
-        !isNumber(value) &&
-        !values.has(value)
-      ) {
+      if (value !== undefined && !isNumber(value) && !values.has(value)) {
         values.add(value);
         const outer = [...indexes];
         indexes.clear();
@@ -14137,8 +14181,7 @@ function admitFunctionBody(
   // (`decidedBranch()`).
   let bodyBound: ReadonlySet<string> | undefined;
   const boundInBody = (name: string): boolean =>
-    parameters.includes(name) ||
-    (bodyBound ??= namesBoundIn(body)).has(name);
+    parameters.includes(name) || (bodyBound ??= namesBoundIn(body)).has(name);
   // The body of a helper is not in the tree of the root, which
   // `prepareFragment()` walks.
   if (admission.structured) refuseSumOfNestedSums(body, !isRoot);
@@ -14175,8 +14218,7 @@ function admitFunctionBody(
     if (isFunction(n, 'If') && n.nops === 3) {
       addTail(n.op2);
       addTail(n.op3);
-    } else if (isFunction(n, 'Block') && n.nops > 0)
-      addTail(n.ops[n.nops - 1]);
+    } else if (isFunction(n, 'Block') && n.nops > 0) addTail(n.ops[n.nops - 1]);
     else if (isFunction(n, 'Return') && n.nops === 1) addTail(n.op1);
   };
   if (!expressionRoot) addTail(bodyValue);
@@ -14256,8 +14298,10 @@ function admitFunctionBody(
         .concat(admission.structured ? ['list<real>', 'list<integer>'] : [])
         .concat(
           admission.structured &&
-            (tupleListLocalType(declared, named.structured?.mode ?? 'strict') !==
-              undefined ||
+            (tupleListLocalType(
+              declared,
+              named.structured?.mode ?? 'strict'
+            ) !== undefined ||
               nestedListLocalType(
                 declared,
                 named.structured?.mode ?? 'strict'
@@ -14466,8 +14510,7 @@ function admitFunctionBody(
   // The root of a block (not of a `Function`, `helperInputs`) checks the
   // captured expressions that the body of a helper reads.
   if (isRoot && registry?.helperInputs !== undefined)
-    registry.rootStored = (stored, name) =>
-      rootStoredCheck(stored, name, true);
+    registry.rootStored = (stored, name) => rootStoredCheck(stored, name, true);
   const checkValueNode = (node: Expression, bodyValue: boolean): void => {
     ADMISSION_WORK.values += 1;
     // A calculus node is the expression that replaces it
@@ -14501,10 +14544,7 @@ function admitFunctionBody(
     // as the existing emitter writes it (`(x) => x + 1` for `Return(x +
     // 1)`, a `return` in each branch of a tail `If`). Elsewhere it ends the
     // function before its end, which the structured route does not write.
-    if (
-      admission.structured &&
-      isReturnNode(node)
-    ) {
+    if (admission.structured && isReturnNode(node)) {
       const ops = (node as Expression & { ops: readonly Expression[] }).ops;
       if (ops.length !== 1 || !tails.has(node) || notTail.has(node))
         throw new Error(
@@ -14964,7 +15004,10 @@ function admitFunctionBody(
         ? tuplePatternNames(statement.op1)
         : undefined;
     if (pattern !== undefined && (inBlock || statement.operator === 'Assign'))
-      return checkDestructuring(statement as Expression & { ops: readonly Expression[] }, pattern);
+      return checkDestructuring(
+        statement as Expression & { ops: readonly Expression[] },
+        pattern
+      );
     if (isFunction(statement, 'Declare') && inBlock) {
       const declared = declareLocal(statement);
       declarations.push({ node: statement, name: declared.local });
@@ -15048,10 +15091,18 @@ function admitFunctionBody(
       checkValue(statement.op1);
       checkCondition(statement, conditionContext);
       const branchSlot =
-        slot === 'loop-body' || slot === 'loop-statement' ? 'branch' : undefined;
+        slot === 'loop-body' || slot === 'loop-statement'
+          ? 'branch'
+          : undefined;
       for (const branch of statement.ops.slice(1))
         nested(() =>
-          checkStructuredStatement(branch, 'branch', false, undefined, branchSlot)
+          checkStructuredStatement(
+            branch,
+            'branch',
+            false,
+            undefined,
+            branchSlot
+          )
         );
       return;
     }
@@ -15265,8 +15316,9 @@ function admitFunctionBody(
                 `JS scalar fragment: the bound ${nodeText(bound)} of a Loop does not have the type integer`
               );
           }
-        const index = (spec as Expression & { op1: Expression & { symbol: string } })
-          .op1.symbol;
+        const index = (
+          spec as Expression & { op1: Expression & { symbol: string } }
+        ).op1.symbol;
         if (
           names.has(index) ||
           locals.has(index) ||
@@ -15281,7 +15333,13 @@ function admitFunctionBody(
       }
       loopDepth += 1;
       try {
-        checkStructuredStatement(loop.ops[0], 'loop', false, undefined, 'loop-body');
+        checkStructuredStatement(
+          loop.ops[0],
+          'loop',
+          false,
+          undefined,
+          'loop-body'
+        );
       } finally {
         loopDepth -= 1;
       }
@@ -16349,8 +16407,7 @@ function numericSnapshot(
   const isUndeclared = (n: Expression) =>
     admitsUndeclared ? hasNoDeclaredType(n) : hasInferredType(n);
   const undeclared = isUndeclared(node);
-  const list =
-    admitsUndeclared && value !== undefined && isCapturedList(value);
+  const list = admitsUndeclared && value !== undefined && isCapturedList(value);
   if (
     !binding ||
     (undeclared && !admitsUndeclared) ||
@@ -16789,8 +16846,7 @@ function heldValueCause(node: Expression & { symbol: string }): string {
   const value = resolvedValueDefinition(node)?.value;
   if (value === undefined) return '';
   const text = nodeText(value);
-  if (isFunction(value, 'Function'))
-    return `: its value ${text} is a function`;
+  if (isFunction(value, 'Function')) return `: its value ${text} is a function`;
   if (isNumber(value) && value.im === 0 && Number.isFinite(value.re))
     return (
       `: its value ${text} is a real number, and the name is declared ` +
@@ -18269,8 +18325,9 @@ function resolveHelper(
   }
   if (
     !functionTyped &&
-    (registry === undefined ? (signature!.args?.length ?? 0) : signatureArgs.length) !==
-      parameters.length
+    (registry === undefined
+      ? (signature!.args?.length ?? 0)
+      : signatureArgs.length) !== parameters.length
   )
     throw new Error('JS scalar fragment: helper signature arity differs');
   // The compiled code is in radians: on the structured route the body of

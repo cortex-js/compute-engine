@@ -97,9 +97,7 @@ const TUPLE_TYPES = new Map<string, TupleType>();
 
 /** The list type of elements of the type `element` (a scalar kind, or an
  *  interned tuple or list type), interned. */
-export function listType(
-  element: ScalarKind | TupleType | ListType
-): ListType {
+export function listType(element: ScalarKind | TupleType | ListType): ListType {
   let type = LIST_TYPES.get(element);
   if (type === undefined) {
     const text = `list<${String(element)}>`;
@@ -1198,10 +1196,7 @@ export type IRSeeded = OperationBase & {
  * first is not a number and the alternative's is.
  */
 export type RoutineName =
-  | 'integrate'
-  | 'integrate-sampled'
-  | 'limit'
-  | 'derivative';
+  'integrate' | 'integrate-sampled' | 'limit' | 'derivative';
 
 /**
  * An application of a numeric routine that `fn` names (`RoutineName`) to
@@ -1412,8 +1407,7 @@ export type IRCapture = {
 /** The value of a captured binding (`IRCapture.snapshot`): a finite number,
  *  or the finite parts of a complex number. */
 export type CaptureSnapshot =
-  | number
-  | { readonly re: number; readonly im: number };
+  number | { readonly re: number; readonly im: number };
 
 /** A list that the program holds once (`IRConstantRead`): the value of a
  *  captured binding when the program was compiled. */
@@ -1683,16 +1677,10 @@ function regionReachesHost(
 /** The regions that `op` evaluates. */
 export function regionsOf(op: IROperation): readonly IRRegion[] {
   if (op.kind === 'if') return [op.then, op.else];
-  if (
-    op.kind === 'loop' ||
-    op.kind === 'build' ||
-    op.kind === 'seeded'
-  )
+  if (op.kind === 'loop' || op.kind === 'build' || op.kind === 'seeded')
     return [op.body];
   if (op.kind === 'routine')
-    return op.alternative === undefined
-      ? [op.body]
-      : [op.body, op.alternative];
+    return op.alternative === undefined ? [op.body] : [op.body, op.alternative];
   if (op.kind === 'and' || op.kind === 'or') return op.rest;
   return [];
 }

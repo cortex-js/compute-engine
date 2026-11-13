@@ -1889,7 +1889,8 @@ class Lowering {
     // result of the function as it is.
     if (operator === 'Typed') return this.value(node.ops[0], scope, operations);
     // `Return(v)` in tail position of a function body (the admission).
-    if (operator === 'Return') return this.value(node.ops[0], scope, operations);
+    if (operator === 'Return')
+      return this.value(node.ops[0], scope, operations);
 
     // A derivative or a limit with no closed form (`numericRoutine()`).
     const routine = this.prep.routines?.get(node);
@@ -2103,7 +2104,14 @@ class Lowering {
         signature.kind === 'function' &&
         args.some((v, i) => this.mapsArgument(signature, v, i))
       )
-        return this.elementCall(operator, node, args, facts, operations, effect);
+        return this.elementCall(
+          operator,
+          node,
+          args,
+          facts,
+          operations,
+          effect
+        );
       const index = this.helper(operator, args, facts, node);
       const result = this.resultOf(facts);
       const callEffect = joinEffects(effect, this.functions[index].body.effect);
@@ -2912,7 +2920,9 @@ class Lowering {
         [from, to] = range.ops.map((b) => {
           const value = this.value(b, at, into);
           if (value.type !== 'integer')
-            fail(`the bound ${nodeText(b)} of a comprehension is not an integer`);
+            fail(
+              `the bound ${nodeText(b)} of a comprehension is not an integer`
+            );
           return value;
         });
       } else {
@@ -2966,7 +2976,10 @@ class Lowering {
         operands: [from, to, acc],
         body: region,
         effect: joinEffects(i === 0 ? effect : 'pure', region.effect),
-        ...touchesField(i === 0 ? this.states(node) : undefined, region.touches),
+        ...touchesField(
+          i === 0 ? this.states(node) : undefined,
+          region.touches
+        ),
         ...(list === undefined
           ? testsRangeCount(source, false)
             ? { checksCount: true as const }
@@ -3368,12 +3381,7 @@ class Lowering {
       );
       let value: IRValue;
       if (isListType(element))
-        value = level(
-          elements,
-          element,
-          this.newValue(element, 'array'),
-          body
-        );
+        value = level(elements, element, this.newValue(element, 'array'), body);
       else if (form !== undefined)
         value = this.broadcastElement(form, elements, element, node, body);
       else {
@@ -3427,10 +3435,20 @@ class Lowering {
     const values = this.operands(node, facts, scope, operations);
     const step = (acc: IRValue, x: IRValue, into: IROperation[]): IRValue => {
       const result = this.newValue(type, 'number');
-      into.push({ kind, result, operands: [acc, x], effect: 'pure', origin: node });
+      into.push({
+        kind,
+        result,
+        operands: [acc, x],
+        effect: 'pure',
+        origin: node,
+      });
       return result;
     };
-    const fold = (list: IRValue, acc: IRValue, into: IROperation[]): IRValue => {
+    const fold = (
+      list: IRValue,
+      acc: IRValue,
+      into: IROperation[]
+    ): IRValue => {
       const [one, length] = this.elementRange(list, node, into);
       const index = this.newValue('integer', 'number');
       const accumulator = this.newValue(type, 'number');
@@ -3465,11 +3483,15 @@ class Lowering {
       operations
     );
     for (const v of values)
-      acc = isListType(v.type) ? fold(v, acc, operations) : step(acc, v, operations);
+      acc = isListType(v.type)
+        ? fold(v, acc, operations)
+        : step(acc, v, operations);
     if (!values.every((v) => isListType(v.type))) return acc;
     // Every operand a list (of one level, by the rule): `NaN` when the sum
     // of their lengths is 0.
-    const lengths = values.map((v) => this.elementRange(v, node, operations)[1]);
+    const lengths = values.map(
+      (v) => this.elementRange(v, node, operations)[1]
+    );
     let count = lengths[0];
     if (lengths.length > 1) {
       count = this.newValue('integer', 'number');
@@ -3760,7 +3782,10 @@ class Lowering {
         push({ kind: 'unary', fn: 'ln' }, [operands[0]], real()),
         push({ kind: 'unary', fn: 'ln' }, [operands[1]], real()),
       ]);
-    if ('operation' in form && (form.operation === 'and' || form.operation === 'or')) {
+    if (
+      'operation' in form &&
+      (form.operation === 'and' || form.operation === 'or')
+    ) {
       // `((a) && (b) && (c))`: each later operand is a value of the body,
       // which its region yields.
       const result = this.newValue('boolean', 'boolean');
@@ -3776,13 +3801,18 @@ class Lowering {
     }
     if ('operation' in form)
       return push(
-        { kind: form.operation as Exclude<typeof form.operation, 'and' | 'or'> },
+        {
+          kind: form.operation as Exclude<typeof form.operation, 'and' | 'or'>,
+        },
         operands
       );
     const args =
       form.after === undefined
         ? operands
-        : [...operands, this.numberLiteral(form.after, 'real', origin, operations)];
+        : [
+            ...operands,
+            this.numberLiteral(form.after, 'real', origin, operations),
+          ];
     return push(
       args.length === 1
         ? { kind: 'unary', fn: form.call as UnaryFunctionName }
@@ -3856,7 +3886,10 @@ class Lowering {
       case 'MatrixPower':
       case 'Diagonal':
       case 'Flatten':
-        return push(COLLECTION_HEADS[operator] as CollectionFunctionName, operands);
+        return push(
+          COLLECTION_HEADS[operator] as CollectionFunctionName,
+          operands
+        );
       // A product of two lists is their inner product, as `Dot` is.
       case 'MatrixMultiply':
         return push(nested ? 'matrix-multiply' : 'dot', operands);
@@ -4361,7 +4394,11 @@ class Lowering {
         const stopsWhen = operator !== 'All' && !operator.endsWith('While');
         const literalOf = (value: number | boolean, into: IROperation[]) => {
           if (typeof value === 'number')
-            return literal(value, Number.isNaN(value) ? 'real' : 'integer', into);
+            return literal(
+              value,
+              Number.isNaN(value) ? 'real' : 'integer',
+              into
+            );
           const result = this.newValue('boolean', 'boolean');
           into.push({
             kind: 'literal',
@@ -4436,9 +4473,7 @@ class Lowering {
           const element = this.element(list, index, node, body);
           const test = apply([element], body);
           const exit: IROperation[] = [];
-          const value = this.inRegion(exit, () =>
-            found(element, index, exit)
-          );
+          const value = this.inRegion(exit, () => found(element, index, exit));
           exit.push({
             kind: 'exit',
             operands: [value],
@@ -5285,7 +5320,9 @@ class Lowering {
       elementOf(type) ?? fail(`the body of ${nodeText(node)} is not a list`);
     const bodyConversion = facts.conversions?.[2 * clauses.length];
     const bound = (b: Expression): number =>
-      isNumber(b) ? Math.floor(b.re) : fail(`the bound ${nodeText(b)} is not a literal`);
+      isNumber(b)
+        ? Math.floor(b.re)
+        : fail(`the bound ${nodeText(b)} is not a literal`);
     const literal = (value: number, into: IROperation[]) =>
       this.numberLiteral(value, 'integer', node, into);
     const bindIndex = (name: string, value: IRValue) => {
@@ -6159,9 +6196,7 @@ class Lowering {
     if (known !== undefined) return known;
     // A value that another captured expression reads is lowered with it.
     const nested = this.storing;
-    const operations: IROperation[] = nested
-      ? this.regions[0].operations
-      : [];
+    const operations: IROperation[] = nested ? this.regions[0].operations : [];
     const start = operations.length;
     // The value is lowered alone, in the root scope: no value that a region
     // around the read remembers, no loop and no integral of the read is
@@ -6248,7 +6283,9 @@ class Lowering {
         nested &&
         !node.ops.every((row) => isFunction(row, 'List') && row.nops > 0)
       )
-        return fail(`a row of the captured value of ${capture.name} is not a list`);
+        return fail(
+          `a row of the captured value of ${capture.name} is not a list`
+        );
       this.constants.push({
         binding: capture.binding,
         name: capture.name,
@@ -6337,8 +6374,22 @@ class Lowering {
       // the existing emitter's `continue` skips them in that branch.
       if (loopBody && isFunction(s, 'If') && (s.nops === 2 || s.nops === 3)) {
         if (s.ops.slice(1).some(endsInContinue))
-          return this.ifStatement(s, scope, operations, liveOut, statements.slice(i + 1), true);
-        closed = this.ifStatement(s, scope, operations, live[i], undefined, true);
+          return this.ifStatement(
+            s,
+            scope,
+            operations,
+            liveOut,
+            statements.slice(i + 1),
+            true
+          );
+        closed = this.ifStatement(
+          s,
+          scope,
+          operations,
+          live[i],
+          undefined,
+          true
+        );
         continue;
       }
       closed = this.statement(s, scope, operations, live[i]);
@@ -6492,7 +6543,9 @@ class Lowering {
   ): void {
     const pattern = node.ops[0] as Expression & { ops: readonly Expression[] };
     const names = pattern.ops.map((p) =>
-      isSymbol(p) ? p.symbol : fail(`the pattern ${nodeText(pattern)} is not a tuple of names`)
+      isSymbol(p)
+        ? p.symbol
+        : fail(`the pattern ${nodeText(pattern)} is not a tuple of names`)
     );
     const value =
       node.operator === 'Declare' ? declareValueOperand(node.ops) : node.ops[1];
@@ -6503,8 +6556,13 @@ class Lowering {
       components = value.ops.map((op) => this.value(op, scope, operations));
     else {
       const tuple = this.value(value, scope, operations);
-      if (!isTupleType(tuple.type) || tuple.type.elements.length !== names.length)
-        return fail(`the value of ${nodeText(node)} is not a tuple of ${names.length} components`);
+      if (
+        !isTupleType(tuple.type) ||
+        tuple.type.elements.length !== names.length
+      )
+        return fail(
+          `the value of ${nodeText(node)} is not a tuple of ${names.length} components`
+        );
       const elements = tuple.type.elements;
       components = elements.map((element, i) => {
         const result = this.newValue(element, 'number');
@@ -6532,7 +6590,10 @@ class Lowering {
         return fail(`the name ${name} is not a local`);
       let locals = this.bound.get(binder);
       if (locals === undefined) this.bound.set(binder, (locals = new Map()));
-      locals.set(name, this.toLocal(components[i], binding, name, node, operations));
+      locals.set(
+        name,
+        this.toLocal(components[i], binding, name, node, operations)
+      );
       this.wrote(binder);
     });
     this.changed();
@@ -6566,7 +6627,7 @@ class Lowering {
    * or `undefined` (`aggregate()`): an operation that `canThrowNoHost()`
    * answers for, but a `mod` that cannot throw, or that throws in every
    * term alike, and an `inverse` or a `matrix-power` judged as such a `mod`
- * (`throwingMatrixFunction()`). `_SYS.floorMod(a, b)` throws only for an operand beyond
+   * (`throwingMatrixFunction()`). `_SYS.floorMod(a, b)` throws only for an operand beyond
    * ±(2^53 − 1), the infinities included (`integerOperand()` in
    * `javascript-runtime.ts`); `NaN` and a non-integer do not throw. So a
    * `mod` is harmless when each operand is a safe integer by construction
@@ -6632,9 +6693,7 @@ class Lowering {
               op.fn === 'real-gcd' ||
               op.fn === 'real-lcm'))
         ) {
-          if (
-            !op.operands.every((v) => safe(v) || (everyTerm && invariant(v)))
-          )
+          if (!op.operands.every((v) => safe(v) || (everyTerm && invariant(v))))
             return op;
           continue;
         }
@@ -6774,23 +6833,39 @@ class Lowering {
       this.restore(before);
       const inner: IROperation[] = [];
       const tail =
-        rest !== undefined && !(statement !== undefined && endsInContinue(statement))
+        rest !== undefined &&
+        !(statement !== undefined && endsInContinue(statement))
           ? rest
           : [];
       const closed = this.inRegion(inner, () => {
-        const live = new Set([...liveOut, ...tail.flatMap((s) => [...this.namesOf(s)])]);
+        const live = new Set([
+          ...liveOut,
+          ...tail.flatMap((s) => [...this.namesOf(s)]),
+        ]);
         // `loopStatement`: the `If` is a statement of the body of a loop, and
         // a `Continue` that ends a branch is not lowered: the branch does not
         // run `rest` (`tail` is empty).
-        if (loopStatement && statement !== undefined && endsInContinue(statement)) {
+        if (
+          loopStatement &&
+          statement !== undefined &&
+          endsInContinue(statement)
+        ) {
           if (isFunction(statement, 'Block')) {
             const blockScope = scope.inner.get(statement);
             if (blockScope === undefined) return fail('no scope for a block');
-            return this.statements(statement.ops.slice(0, -1), blockScope, inner, live);
+            return this.statements(
+              statement.ops.slice(0, -1),
+              blockScope,
+              inner,
+              live
+            );
           }
           return false;
         }
-        if (statement !== undefined && this.statement(statement, scope, inner, live))
+        if (
+          statement !== undefined &&
+          this.statement(statement, scope, inner, live)
+        )
           return true;
         return this.statements(tail, scope, inner, liveOut, true);
       });
@@ -6993,7 +7068,8 @@ class Lowering {
     };
     // The list of a loop over a list, and its length; the bounds of a loop
     // over a range.
-    const source = (spec as Expression & { op2: Expression } | undefined)?.op2;
+    const source = (spec as (Expression & { op2: Expression }) | undefined)
+      ?.op2;
     const list =
       overList && source !== undefined
         ? this.value(source, scope, operations)
@@ -7097,13 +7173,7 @@ class Lowering {
       try {
         if (clause + 1 < clauses.length)
           this.inRegion(inner, () =>
-            this.loopStatement(
-              node,
-              loopScope,
-              inner,
-              carriedNames,
-              clause + 1
-            )
+            this.loopStatement(node, loopScope, inner, carriedNames, clause + 1)
           );
         else {
           const outerBody = this.loopBody;
@@ -7113,7 +7183,14 @@ class Lowering {
               // An `If` that is the whole body is a statement of the body,
               // where a branch can end in `Continue`.
               isFunction(body, 'If') && (body.nops === 2 || body.nops === 3)
-                ? this.ifStatement(body, loopScope, inner, carriedNames, undefined, true)
+                ? this.ifStatement(
+                    body,
+                    loopScope,
+                    inner,
+                    carriedNames,
+                    undefined,
+                    true
+                  )
                 : this.statement(body, loopScope, inner, carriedNames)
             );
           } finally {
@@ -7277,7 +7354,8 @@ class Lowering {
         );
         const inner = ranks.map((r) => (r > 0 ? r - 1 : 0));
         if (inner.some((r) => r > 0)) {
-          const row = elementOf(result.type) ?? fail(`${nodeText(node)} is not a list`);
+          const row =
+            elementOf(result.type) ?? fail(`${nodeText(node)} is not a list`);
           return level(cells, inner, this.newValue(row, 'array'), body);
         }
         const element = this.newValue(
@@ -7430,9 +7508,7 @@ class Lowering {
         : {}),
       result,
       body,
-      ...(inputs.size > 0
-        ? { inputs: [...inputs].sort((a, b) => a - b) }
-        : {}),
+      ...(inputs.size > 0 ? { inputs: [...inputs].sort((a, b) => a - b) } : {}),
       origin: node,
     });
     this.functionIndex.set(name, this.functions.length - 1);

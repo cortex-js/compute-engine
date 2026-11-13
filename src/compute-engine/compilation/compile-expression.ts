@@ -606,10 +606,10 @@ function compileExpression<
     // The profile `ir` (experimental) compiles with the IR compiler
     // (`ir/adapter.ts`); a decline falls back in the catch below.
     if (options?.profile === 'ir')
-      return compileWithIrProfile(expr, options) as unknown as CompilationResult<
-        T,
-        R
-      >;
+      return compileWithIrProfile(
+        expr,
+        options
+      ) as unknown as CompilationResult<T, R>;
     if (options?.profile === 'numeric-kernel')
       return strictTypesChecked(
         expr,

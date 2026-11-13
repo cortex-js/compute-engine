@@ -311,60 +311,60 @@ const FUNCTION_CODE: Readonly<
     { readonly real?: string; readonly complex?: string }
   >
 > = {
-  exp: { real: 'Math.exp', complex: 'cexp' },
-  ln: { real: 'Math.log', complex: 'cln' },
-  sin: { real: 'Math.sin', complex: 'csin' },
-  cos: { real: 'Math.cos', complex: 'ccos' },
-  tanh: { real: 'Math.tanh', complex: 'ctanh' },
-  abs: { real: 'Math.abs', complex: 'cabs' },
-  atan2: { real: 'Math.atan2' },
+  'exp': { real: 'Math.exp', complex: 'cexp' },
+  'ln': { real: 'Math.log', complex: 'cln' },
+  'sin': { real: 'Math.sin', complex: 'csin' },
+  'cos': { real: 'Math.cos', complex: 'ccos' },
+  'tanh': { real: 'Math.tanh', complex: 'ctanh' },
+  'abs': { real: 'Math.abs', complex: 'cabs' },
+  'atan2': { real: 'Math.atan2' },
   // The heads of `javascript-target.ts` that write one call for a real
   // operand and one runtime helper for an `{re, im}` object.
-  tan: { real: '_SYS.tan', complex: 'ctan' },
-  cot: { real: '_SYS.cot', complex: 'ccot' },
-  sec: { real: '_SYS.sec', complex: 'csec' },
-  csc: { real: '_SYS.csc', complex: 'ccsc' },
-  sinh: { real: 'Math.sinh', complex: 'csinh' },
-  cosh: { real: 'Math.cosh', complex: 'ccosh' },
-  atan: { real: 'Math.atan', complex: 'catan' },
-  asinh: { real: 'Math.asinh', complex: 'casinh' },
-  gamma: { real: '_SYS.gamma', complex: 'cgamma' },
-  sign: { real: 'Math.sign', complex: 'csign' },
+  'tan': { real: '_SYS.tan', complex: 'ctan' },
+  'cot': { real: '_SYS.cot', complex: 'ccot' },
+  'sec': { real: '_SYS.sec', complex: 'csec' },
+  'csc': { real: '_SYS.csc', complex: 'ccsc' },
+  'sinh': { real: 'Math.sinh', complex: 'csinh' },
+  'cosh': { real: 'Math.cosh', complex: 'ccosh' },
+  'atan': { real: 'Math.atan', complex: 'catan' },
+  'asinh': { real: 'Math.asinh', complex: 'casinh' },
+  'gamma': { real: '_SYS.gamma', complex: 'cgamma' },
+  'sign': { real: 'Math.sign', complex: 'csign' },
   // A real operand of `Conjugate` is the operand itself (the form
   // `identity` of the lowering): no real call.
-  conjugate: { complex: 'cconj' },
-  asin: { real: 'Math.asin', complex: 'casin' },
-  acos: { real: 'Math.acos', complex: 'cacos' },
-  acosh: { real: 'Math.acosh', complex: 'cacosh' },
-  atanh: { real: 'Math.atanh', complex: 'catanh' },
-  log10: { real: 'Math.log10', complex: 'clog10' },
-  log2: { real: 'Math.log2', complex: 'clog2' },
-  erf: { real: '_SYS.erf' },
-  erfc: { real: '_SYS.erfc' },
-  digamma: { real: '_SYS.digamma' },
-  sinpi: { real: '_SYS.sinpi' },
-  cospi: { real: '_SYS.cospi' },
-  tanpi: { real: '_SYS.tanpi' },
-  ceil: { real: 'Math.ceil' },
-  acot: { complex: 'cacot' },
-  acsc: { complex: 'cacsc' },
-  asec: { complex: 'casec' },
-  acoth: { complex: 'cacoth' },
-  asech: { complex: 'casech' },
-  acsch: { complex: 'cacsch' },
-  coth: { complex: 'ccoth' },
-  sech: { complex: 'csech' },
-  csch: { complex: 'ccsch' },
-  factorial: { real: '_SYS.factorial' },
-  factorial2: { real: '_SYS.factorial2' },
-  trunc: { real: 'Math.trunc' },
+  'conjugate': { complex: 'cconj' },
+  'asin': { real: 'Math.asin', complex: 'casin' },
+  'acos': { real: 'Math.acos', complex: 'cacos' },
+  'acosh': { real: 'Math.acosh', complex: 'cacosh' },
+  'atanh': { real: 'Math.atanh', complex: 'catanh' },
+  'log10': { real: 'Math.log10', complex: 'clog10' },
+  'log2': { real: 'Math.log2', complex: 'clog2' },
+  'erf': { real: '_SYS.erf' },
+  'erfc': { real: '_SYS.erfc' },
+  'digamma': { real: '_SYS.digamma' },
+  'sinpi': { real: '_SYS.sinpi' },
+  'cospi': { real: '_SYS.cospi' },
+  'tanpi': { real: '_SYS.tanpi' },
+  'ceil': { real: 'Math.ceil' },
+  'acot': { complex: 'cacot' },
+  'acsc': { complex: 'cacsc' },
+  'asec': { complex: 'casec' },
+  'acoth': { complex: 'cacoth' },
+  'asech': { complex: 'casech' },
+  'acsch': { complex: 'cacsch' },
+  'coth': { complex: 'ccoth' },
+  'sech': { complex: 'csech' },
+  'csch': { complex: 'ccsch' },
+  'factorial': { real: '_SYS.factorial' },
+  'factorial2': { real: '_SYS.factorial2' },
+  'trunc': { real: 'Math.trunc' },
   // The real code of `fract` is a template (`REAL_TEMPLATES`).
-  fract: {},
+  'fract': {},
   // `Mod(a, 1)`: the helper that the existing emitter calls for a dividend
   // that it does not write twice, `(x - Math.floor(x)) % 1`; its inline
   // form `((a - Math.floor(a)) % 1)` gives the same value.
   'mod-one': { real: '_SYS.fract' },
-  hypot: { real: 'Math.hypot' },
+  'hypot': { real: 'Math.hypot' },
   // The real-only special functions and the continuation heads of real
   // operands (`REAL_CALL_HEADS` in `javascript-fragment-target.ts`): the
   // helper that the existing emitter names for the head.
@@ -1867,9 +1867,7 @@ class Emitter {
         return call('_SYS.atNumeric', [
           ...operands,
           atom(
-            JSON.stringify(
-              this.elementLabels.get(op.operands[0].id) ?? element
-            )
+            JSON.stringify(this.elementLabels.get(op.operands[0].id) ?? element)
           ),
         ]);
       }
@@ -2058,15 +2056,16 @@ class Emitter {
     // A loop with no end is `while (true)`, as the existing emitter writes
     // `Loop(body)` (`compileForLoop()` in `compile-loops.ts`): no operation
     // reads its index (the verifier).
-    const range = op.unbounded === true
-      ? { before: [], header: 'while (true)', index: undefined }
-      : index.representation === 'bigint'
-        ? {
-            before: [],
-            header: `for (let ${k} = ${operand(from, CONDITIONAL)}; ${k} <= ${operand(to, RELATIONAL + 1)}; ${k}++)`,
-            index: undefined,
-          }
-        : this.rangeHeader(k, from, to, op.ascending === true);
+    const range =
+      op.unbounded === true
+        ? { before: [], header: 'while (true)', index: undefined }
+        : index.representation === 'bigint'
+          ? {
+              before: [],
+              header: `for (let ${k} = ${operand(from, CONDITIONAL)}; ${k} <= ${operand(to, RELATIONAL + 1)}; ${k}++)`,
+              index: undefined,
+            }
+          : this.rangeHeader(k, from, to, op.ascending === true);
     // The test of the existing emitter's loop over a `Range` clause
     // (`compileCountedRange()`), before the first pass.
     if (op.checksCount === true && !('last' in range))

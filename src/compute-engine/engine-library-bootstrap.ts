@@ -257,7 +257,6 @@ export function loadLibraryLate(
       entries.push([name, def]);
     }
 
-
   // A definition that `ce.declare()` rejects is found only when it is
   // declared. The binding and the provenance of each name are recorded
   // before its declaration, and the type and kind registries before the

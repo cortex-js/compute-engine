@@ -2460,13 +2460,11 @@ export function walkAggregate<R>(
   // leave.
   const body = w.value(ops[0], inner, { ...context, loop: undefined });
   const t = body.type;
-  if (
-    !(
-      isScalarNumeric(t) ||
-      t.kind === 'complex' ||
-      (listBody && numberListRank(t) === 1)
-    )
-  )
+  if (!(
+    isScalarNumeric(t) ||
+    t.kind === 'complex' ||
+    (listBody && numberListRank(t) === 1)
+  ))
     return w.refuse(
       node,
       'signature',
@@ -3564,9 +3562,9 @@ export function walkAssign<R>(
         : operandFacts !== undefined
           ? operandFacts[i]
           : ({
-            type: from,
-            representation: value.representation,
-          } as FragmentValueFacts<R>);
+              type: from,
+              representation: value.representation,
+            } as FragmentValueFacts<R>);
     if (
       (local.kind === 'list' && w.definition.listLocals !== true) ||
       local.kind === 'statement' ||

@@ -590,7 +590,8 @@ export function evaluateSolve(
   ops: ReadonlyArray<Expression>
 ): Expression {
   // The solver does not read the values of the unknowns.
-  const specs = ops[0] === undefined ? undefined : parseSolveSpecs(ops.slice(1));
+  const specs =
+    ops[0] === undefined ? undefined : parseSolveSpecs(ops.slice(1));
   const result = withArbitraryIndexes(
     ce,
     ops,

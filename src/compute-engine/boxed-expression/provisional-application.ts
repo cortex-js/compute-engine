@@ -346,10 +346,7 @@ export function unregisterProvisionalDependent(def: object | undefined): void {
     for (const name of registration.names) {
       const waiting = byName.get(name);
       if (waiting === undefined) continue;
-      if (
-        waiting.refs.delete(registration.ref) &&
-        frame !== undefined
-      )
+      if (waiting.refs.delete(registration.ref) && frame !== undefined)
         removedFrom.push(name);
       if (waiting.refs.size === 0) byName.delete(name);
     }
@@ -457,10 +454,7 @@ export function takeProvisionalDependents(
   for (const entry of taken) {
     const registration = REGISTRATIONS.get(entry.def);
     if (registration === undefined) continue;
-    if (
-      registration.names.delete(name) &&
-      frame !== undefined
-    )
+    if (registration.names.delete(name) && frame !== undefined)
       strippedRegistrations.push(registration);
   }
   if (frame !== undefined) {

@@ -2946,10 +2946,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       );
       const k = m === null ? undefined : Number(m[2] ?? m[3]);
       if (m === null || !Number.isSafeInteger(k))
-        return parser.error(
-          ['unexpected-argument', { str: content }],
-          start
-        );
+        return parser.error(['unexpected-argument', { str: content }], start);
       return [
         m[1] === 'c' ? 'ArbitraryConstant' : 'ArbitraryInteger',
         k,

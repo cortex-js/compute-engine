@@ -437,11 +437,10 @@ export function verifyProgram(
         ? constant.type.element
         : undefined;
     const cell = rowType?.element ?? (constant.type as ListType).element;
-    if (
-      !isListType(constant.type) ||
-      (cell !== 'real' && cell !== 'integer')
-    )
-      fail(`the constant ${constant.name} has the type ${String(constant.type)}`);
+    if (!isListType(constant.type) || (cell !== 'real' && cell !== 'integer'))
+      fail(
+        `the constant ${constant.name} has the type ${String(constant.type)}`
+      );
     if (!policy.representations.has(constant.representation))
       fail(
         `the constant ${constant.name} has the representation ${constant.representation}, which the target does not have`
@@ -803,8 +802,12 @@ function verifyAbsentMatrices(
           );
       });
       if (op.kind === 'collection') {
-        const listResult = op.result !== undefined && isListType(op.result.type);
-        if (op.absent === true && (!listResult || !MATRIX_LIST_FUNCTIONS.has(op.fn)))
+        const listResult =
+          op.result !== undefined && isListType(op.result.type);
+        if (
+          op.absent === true &&
+          (!listResult || !MATRIX_LIST_FUNCTIONS.has(op.fn))
+        )
           fail(`the function of lists ${op.fn} carries the fact absent`);
         if (
           listResult &&
@@ -1179,7 +1182,9 @@ function verifySignature(
       )
         fail(`a read of the input ${op.input} does not match the input`);
       if (input?.unread)
-        fail(`a read of the input ${input.name}, which the program never reads`);
+        fail(
+          `a read of the input ${input.name}, which the program never reads`
+        );
       return;
     }
     case 'capture': {
@@ -1883,23 +1888,26 @@ function verifySignature(
       if (panels !== undefined) {
         if (op.fn !== 'integrate')
           fail(`a routine ${op.fn} states a number of panels`);
-        if (
-          !(typeof panels === 'number' && Number.isInteger(panels) && panels > 0)
-        )
+        if (!(
+          typeof panels === 'number' &&
+          Number.isInteger(panels) &&
+          panels > 0
+        ))
           fail(
             `a routine ${op.fn} starts from ${String(panels)} panels, not a positive integer`
           );
       }
       const order = op.order;
       if (op.fn === 'derivative') {
-        if (
-          !(typeof order === 'number' && Number.isInteger(order) && order > 0)
-        )
+        if (!(
+          typeof order === 'number' &&
+          Number.isInteger(order) &&
+          order > 0
+        ))
           fail(
             `a routine derivative has the order ${String(order)}, not a positive integer`
           );
-      } else if (order !== undefined)
-        fail(`a routine ${op.fn} has an order`);
+      } else if (order !== undefined) fail(`a routine ${op.fn} has an order`);
       return;
     }
     case 'host': {
@@ -2121,7 +2129,9 @@ function verifyCollection(
         operands[1].type !== 'real' &&
         operands[1].type !== 'integer'
       )
-        fail(`the order of the function of lists norm has the type ${operands[1].type}`);
+        fail(
+          `the order of the function of lists norm has the type ${operands[1].type}`
+        );
       result = 'real';
       break;
     case 'mean':
@@ -2185,7 +2195,9 @@ function verifyCollection(
           `the operand of the function of lists diagonal has the type ${operands[0].type}`
         );
       result =
-        cell!.rank === 2 ? listType(cell!.kind) : listType(listType(cell!.kind));
+        cell!.rank === 2
+          ? listType(cell!.kind)
+          : listType(listType(cell!.kind));
       break;
     }
     case 'flatten':

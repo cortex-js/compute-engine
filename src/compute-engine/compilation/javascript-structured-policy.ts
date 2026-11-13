@@ -207,14 +207,30 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // `.slice(…)`, `.slice().reverse()`, `.slice().sort(…)`, `[...a, ...b]`
     // and `_SYS.rotl`, `_SYS.rotr`: a new outer array that holds the
     // elements (the rows) of the operands (`resultArray`, `copy`).
-    'take': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
-    'drop': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
+    'take': {
+      results: ['array'],
+      operands: ['array', 'number'],
+      resultArray: 'copy',
+    },
+    'drop': {
+      results: ['array'],
+      operands: ['array', 'number'],
+      resultArray: 'copy',
+    },
     'reverse': { results: ['array'], operands: ['array'], resultArray: 'copy' },
     'sort': { results: ['array'], operands: ['array'], resultArray: 'copy' },
     'join': { results: ['array'], operands: ['array'], resultArray: 'copy' },
     'range': { results: ['array'], operands: ['number'], resultArray: 'new' },
-    'rotate-left': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
-    'rotate-right': { results: ['array'], operands: ['array', 'number'], resultArray: 'copy' },
+    'rotate-left': {
+      results: ['array'],
+      operands: ['array', 'number'],
+      resultArray: 'copy',
+    },
+    'rotate-right': {
+      results: ['array'],
+      operands: ['array', 'number'],
+      resultArray: 'copy',
+    },
     // The matrix functions: `_SYS.det(M)`, `_SYS.trace(M)`,
     // `_SYS.transpose(M)`, `_SYS.rref(M)`, `_SYS.inv(M)`,
     // `_SYS.matpow(M, p)`, `_SYS.matmul(A, B)`, `_SYS.diagonal(M)` and
@@ -235,21 +251,44 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     // `matrix-product`: `refuseAbsentMatrixUses()`).
     'determinant': { results: ['number'], operands: ['array'] },
     'trace': { results: ['number'], operands: ['array'] },
-    'transpose': { results: ['array'], operands: ['array'], resultArray: 'operand' },
-    'row-reduce': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'transpose': {
+      results: ['array'],
+      operands: ['array'],
+      resultArray: 'operand',
+    },
+    'row-reduce': {
+      results: ['array'],
+      operands: ['array'],
+      resultArray: 'new',
+    },
     'inverse': { results: ['array'], operands: ['array'], resultArray: 'new' },
-    'matrix-power': { results: ['array'], operands: ['array', 'number'], resultArray: 'new' },
-    'matrix-multiply': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'matrix-power': {
+      results: ['array'],
+      operands: ['array', 'number'],
+      resultArray: 'new',
+    },
+    'matrix-multiply': {
+      results: ['array'],
+      operands: ['array'],
+      resultArray: 'new',
+    },
     // `_SYS.mul(A, B)`, as the existing emitter writes `Multiply` of two
     // operands whose types state their ranks, one a matrix.
-    'matrix-product': { results: ['array'], operands: ['array'], resultArray: 'new' },
+    'matrix-product': {
+      results: ['array'],
+      operands: ['array'],
+      resultArray: 'new',
+    },
     'diagonal': { results: ['array'], operands: ['array'], resultArray: 'new' },
     'flatten': { results: ['array'], operands: ['array'], resultArray: 'new' },
     // The statistics: `_SYS.populationVariance(L)`, …,
     // `_SYS.covariance(L, M)`, a number.
     'population-variance': { results: ['number'], operands: ['array'] },
     'standard-deviation': { results: ['number'], operands: ['array'] },
-    'population-standard-deviation': { results: ['number'], operands: ['array'] },
+    'population-standard-deviation': {
+      results: ['number'],
+      operands: ['array'],
+    },
     'skewness': { results: ['number'], operands: ['array'] },
     'kurtosis': { results: ['number'], operands: ['array'] },
     'mode': { results: ['number'], operands: ['array'] },
@@ -273,8 +312,16 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'ordering': { results: ['array'], operands: ['array'], resultArray: 'new' },
     'unique': { results: ['array'], operands: ['array'], resultArray: 'new' },
     'repeat': { results: ['array'], operands: ['number'], resultArray: 'new' },
-    'linspace': { results: ['array'], operands: ['number'], resultArray: 'new' },
-    'slice': { results: ['array'], operands: ['array', 'number'], resultArray: 'new' },
+    'linspace': {
+      results: ['array'],
+      operands: ['number'],
+      resultArray: 'new',
+    },
+    'slice': {
+      results: ['array'],
+      operands: ['array', 'number'],
+      resultArray: 'new',
+    },
     'at-real': { results: ['number'], operands: ['array', 'number'] },
     'gather': { results: ['array'], operands: ['array'], resultArray: 'new' },
   },
@@ -427,7 +474,7 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   // timeout of an ambient deadline. `_SYS.nd(f, order, 'scalar')(x)` (the
   // stencil `centeredDiffHigherOrder()`) keeps no state and does not throw.
   routines: {
-    integrate: {
+    'integrate': {
       results: ['number'],
       operands: ['number'],
       parameter: 'number',
@@ -444,14 +491,14 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
       touches: ['entropy', 'quadrature'],
       aborts: ['error'],
     },
-    limit: {
+    'limit': {
       results: ['number'],
       operands: ['number'],
       parameter: 'number',
       effect: 'pure',
       aborts: ['error'],
     },
-    derivative: {
+    'derivative': {
       results: ['number'],
       operands: ['number'],
       parameter: 'number',
@@ -582,9 +629,21 @@ export const JAVASCRIPT_BIGINT_POLICY: RepresentationPolicy = {
   // mode: the heads that make them decline at the lowering
   // (`javascript-structured-bigint.ts`).
   collections: {
-    take: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'], resultArray: 'copy' },
-    drop: { results: ['bigint-array'], operands: ['bigint-array', 'bigint'], resultArray: 'copy' },
-    range: { results: ['bigint-array'], operands: ['bigint'], resultArray: 'new' },
+    take: {
+      results: ['bigint-array'],
+      operands: ['bigint-array', 'bigint'],
+      resultArray: 'copy',
+    },
+    drop: {
+      results: ['bigint-array'],
+      operands: ['bigint-array', 'bigint'],
+      resultArray: 'copy',
+    },
+    range: {
+      results: ['bigint-array'],
+      operands: ['bigint'],
+      resultArray: 'new',
+    },
   },
   // The helpers of `bigint-runtime.ts` that the existing emitter calls for
   // the same heads (`javascript-structured-emit.ts`, `BIGINT_CODE`).
