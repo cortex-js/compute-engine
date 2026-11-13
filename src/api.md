@@ -746,7 +746,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
 parses one.
 
 ####### type
@@ -1578,7 +1578,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### ComputeEngine.type() {#type-11}
+##### ComputeEngine.type() {#type-12}
 
 ```ts
 type(type): BoxedType
@@ -2007,6 +2007,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
+  `macro`: [`MathJsonExpression`](#mathjsonexpression);
   `eq`: (`a`) => `boolean` \| `undefined`;
   `neq`: (`a`) => `boolean` \| `undefined`;
   `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
@@ -2091,6 +2092,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
+  `macro`: [`MathJsonExpression`](#mathjsonexpression);
   `eq`: (`a`) => `boolean` \| `undefined`;
   `neq`: (`a`) => `boolean` \| `undefined`;
   `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
@@ -4147,6 +4149,7 @@ type ValueDefinition = BaseDefinition & {
   value:   | LatexString
      | ExpressionInput
      | ((ce) => Expression | null);
+  macro: MathJsonExpression;
   eq: (a) => boolean | undefined;
   neq: (a) => boolean | undefined;
   cmp: (a) => "=" | ">" | "<" | undefined;
@@ -4200,6 +4203,25 @@ value:
 `value` can be a JS function since for some constants, such as
 `Pi`, the actual value depends on the `precision` setting of the
 `ComputeEngine` and possible other environment settings
+
+#### ValueDefinition.macro
+
+```ts
+macro: MathJsonExpression;
+```
+
+The raw MathJSON body of a macro: `ce.declare('A', { macro: body })`.
+
+A macro has no value and the type `unknown`. A name of the input
+(MathJSON or LaTeX) that resolves to the macro where it is boxed in a
+canonical or a structural form is replaced by the body, boxed at that
+place, in the scope of the occurrence and in the same form. A position
+that takes a name (a parameter, an index, the variable of `D`, the
+target of `Assign`) is not an occurrence, and a symbol made with
+`ce.symbol()` is not expanded. A parameter, an index or a local of the
+same name hides the macro.
+
+A definition with `macro` takes no other field.
 
 #### ValueDefinition.subscriptEvaluate?
 
@@ -6450,6 +6472,20 @@ Some examples:
 - `Pi` has `holdUntil: 'N'` (special numeric constant)
 
 **Default:** `evaluate`
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedValueDefinition.macro? {#macro}
+
+```ts
+readonly macro?: MathJsonExpression;
+```
+
+The raw body of a macro definition (`ce.declare(name, { macro })`),
+`undefined` for every other value definition. A macro definition has no
+value and the type `unknown`.
 
 </MemberCard>
 
@@ -12639,6 +12675,49 @@ per canonicalization would not be).
 
 <MemberCard>
 
+### ParameterRequirement {#parameterrequirement}
+
+```ts
+type ParameterRequirement = {
+  type: BoxedType;
+  cause: InferenceCauseContext;
+};
+```
+
+What the uses of a parameter of a function literal required while the
+literal is boxed (decision D18 of
+`docs/plans/2026-11-11-bound-once-spec.md`): the type that a read of the
+parameter gives, and the cause of the use that last changed it, recorded
+as the provenance of the type when it is written on the definition.
+
+</MemberCard>
+
+<MemberCard>
+
+### ParameterRecord {#parameterrecord}
+
+```ts
+type ParameterRecord = {
+  requirements: Map<BoxedValueDefinition, ParameterRequirement>;
+  env: UnitEnvironment;
+  collectorDepth: number;
+  memoStarts: number;
+  created: Set<BoxedValueDefinition>;
+};
+```
+
+The record of a function literal while it is boxed: the requirement of
+each parameter, keyed by its value definition, and the environment of the
+literal, which holds the entries that the uses of its parameters write
+(outside a trial) and that a later use reads. The environment is made with
+the record: a read of it is recorded only by the caches whose computation
+started after that (`collectorDepth`, `objectDepCollectorDepth()`), as a
+computation that started before boxes the literal again.
+
+</MemberCard>
+
+<MemberCard>
+
 ### JSImplementation {#jsimplementation}
 
 ```ts
@@ -13438,7 +13517,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
 parses one.
 
 ####### type
@@ -14270,7 +14349,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### IComputeEngine.type() {#type-10}
+##### IComputeEngine.type() {#type-11}
 
 ```ts
 type(type): BoxedType
@@ -14699,6 +14778,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
+  `macro`: [`MathJsonExpression`](#mathjsonexpression);
   `eq`: (`a`) => `boolean` \| `undefined`;
   `neq`: (`a`) => `boolean` \| `undefined`;
   `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
@@ -14783,6 +14863,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
+  `macro`: [`MathJsonExpression`](#mathjsonexpression);
   `eq`: (`a`) => `boolean` \| `undefined`;
   `neq`: (`a`) => `boolean` \| `undefined`;
   `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
@@ -18740,7 +18821,7 @@ singular values of a matrix.
 
 <MemberCard>
 
-##### Expression.type {#type-12}
+##### Expression.type {#type-13}
 
 ```ts
 get type(): BoxedType

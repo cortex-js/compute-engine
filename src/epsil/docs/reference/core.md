@@ -374,6 +374,18 @@ MathJSON `ApplyWhole` · `(name: any, arguments: any*) -> unknown`
 
 Apply a function to arguments, each bound whole (engine-internal).
 
+### arbitraryConstant
+
+MathJSON `ArbitraryConstant` · `(integer) -> number`
+
+ArbitraryConstant(k): an arbitrary number, the k-th of a result: a constant of integration, the free parameter of an identity. Inside one result, two calls with the same index are the same value, and two calls with different indexes are independent. It has no value.
+
+### arbitraryInteger
+
+MathJSON `ArbitraryInteger` · `(integer) -> integer`
+
+ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the parameter of a family of roots, of a diophantine or a congruence solution. Inside one result, two calls with the same index are the same value, and two calls with different indexes are independent. It has no value.
+
 ### arc
 
 MathJSON `Arc` · `(any+) -> number`
