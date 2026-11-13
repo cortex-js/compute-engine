@@ -982,3 +982,44 @@ and wants its effect on Tycho understood first (asked of tycho-desk; a
 build with a switch is the test). D15 is held until then. Leftovers 1, 3,
 4 and 5 (a) are independent of it.
 
+### D18. Boxing sets the types of the definitions it creates, and of nothing else (user decision 2026-11-13; to try)
+
+D15 is WITHDRAWN. The inference of a parameter from its uses stays; what
+changes is when and where it is applied.
+
+- While the body of a function literal is boxed, a use of a parameter
+  records what it requires and writes nothing. When the boxing of the
+  literal finishes, the types of its parameters are derived once from the
+  requirements, and belong to the literal. The moment is the END OF THE
+  BOXING OF THE LITERAL, not a definition (an anonymous function has none)
+  and not an evaluation: a call `f(L)` is boxed, typed and compiled before
+  it is ever evaluated, and whether it maps over `L` is settled then.
+- The rule: boxing may set the types of definitions that the boxing itself
+  creates (the parameters of a literal; to examine: the locals of a block
+  and the variable of a binder), and of nothing that existed before it (a
+  host name, anything boxed earlier). Such a definition is not visible
+  outside the literal until the literal is complete, so setting its type
+  needs no global invalidation, and a trial boxing discards the literal
+  with it, so nothing is undone.
+- A host name gets no type from a boxing or an evaluation. To examine as a
+  second switch: an evaluation or a compilation USES the types that the
+  expression requires of its untyped host names, for that evaluation only,
+  and commits nothing; `ce.infer()` stays the explicit commit. Tycho
+  (tycho-desk, 2026-11-13, from its source): a commit to a host name would
+  bring back "inference writes a type that a later assignment contradicts"
+  and would write through its throwaway scopes onto names it declares
+  `unknown` on purpose.
+
+Known difficulty, to measure: while the body is boxed, the canonical form
+of a node reads the types of its operands, so a node boxed before a later
+use narrows the parameter was built, and may have cached a type, with the
+parameter `unknown`. Three treatments: no cached type for a body node until
+the literal is complete; box the body a second time when the requirements
+changed a parameter's type; accept the form built with `unknown` (what a
+parameter declared `unknown` gets today).
+
+Measurement (session compute-engine-42, on its removal of the leftovers,
+whose 939 failing tests are the yardstick): how many pass again; which
+treatment of the body was needed and its cost; what is left in the journal
+of `inference-rollback.ts`; the lines removed and added; the time.
+
