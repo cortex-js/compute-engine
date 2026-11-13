@@ -102,12 +102,11 @@ export type StateEvent =
        * (`scratch-scopes.ts`). See "Scratch events" in the documentation of
        * {@link axisMaskOf}. */
       scratch?: boolean;
-      /** Set only on a true narrowing: the binding is a parameter of a
-       * function literal that the canonicalization in progress declared,
-       * and no evaluation that keeps its result in the memo of shared
-       * evaluations started since that canonicalization started
-       * (`_parameterNarrowingKeepsEvaluations`). It does not advance the
-       * evaluation version: see `noteStateEvent`. */
+      /** Set only on a true narrowing: the bindings are the parameters of
+       * a function literal whose boxing ends, and no evaluation that keeps
+       * its result in the memo of shared evaluations started since that
+       * boxing started (`ParameterRecord.memoStarts`). It does not advance
+       * the evaluation version: see `noteStateEvent`. */
       parameter?: boolean;
     }
   /** The deferred half of a value-type inference: see `noteStateEvent`. */
@@ -641,10 +640,10 @@ export class EngineConfigurationLifecycle {
     // (`endHostHandlerCall`). Two events that advance other versions do not
     // always advance them:
     //
-    // - the narrowing of a parameter flagged `parameter` does not: no result
-    //   of the memo, kept or to be kept, can have read the type of that
-    //   binding before the narrowing (`_parameterNarrowingKeepsEvaluations`,
-    //   `index.ts`).
+    // - the narrowing of the parameters of a literal flagged `parameter`
+    //   does not: no result of the memo, kept or to be kept, can have read
+    //   the type of those bindings before the narrowing
+    //   (`canonicalFunctionLiteralArguments()`, `function-utils.ts`).
     // - `inference-settled` advances them only when an evaluation that
     //   keeps its result in the memo started after it was scheduled. Each
     //   inference that it follows advanced them when it was sent, except a
@@ -662,8 +661,8 @@ export class EngineConfigurationLifecycle {
     // only these events happened did not change state either.
     //
     // An element-wise operator over a list makes a function literal at each
-    // evaluation (`lazyBroadcastMap`, `collection-utils.ts`), and boxing its
-    // body narrows its parameter. When these two events always advanced the
+    // evaluation (`lazyBroadcastMap`, `collection-utils.ts`), and the end of
+    // its boxing narrows its parameter. When these two events always advanced the
     // version, the copies of a node that holds such an operator could not
     // read the result of the first copy, and each was evaluated (CE-882).
     const advancesEvaluation =

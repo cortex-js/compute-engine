@@ -268,17 +268,24 @@ export function stampObjectDepsAtEnd(deps: ObjectDeps | undefined): void {
 
 /**
  * Report a field read of `obj`, whose version was `version` at the moment of
- * the read, to every collector currently open.
+ * the read, to every collector currently open from the index `fromCollector`
+ * on: a collector opened before `obj` was made does not record it (the
+ * environment of a function literal being boxed, `ParameterRecord`).
  *
  * This is called from `BoxedObject._field()`, the engine's hottest object
  * path, so the no-collector case — no cache-backed computation is running, by
  * far the common case — is one counter increment and a single length check,
  * with no allocation and no iteration.
  */
-export function recordObjectRead(obj: VersionedObject, version: number): void {
+export function recordObjectRead(
+  obj: VersionedObject,
+  version: number,
+  fromCollector = 0
+): void {
   _objectReads += 1;
   if (_collectors.length === 0) return;
-  for (let i = 0; i < _collectors.length; i++) collect(i, obj, version);
+  for (let i = fromCollector; i < _collectors.length; i++)
+    collect(i, obj, version);
 }
 
 /** Add one read to the open collector of index `i`, as {@link addDep} adds
@@ -388,9 +395,10 @@ export function objectDepsValid(deps: ObjectDeps | undefined): boolean {
   return true;
 }
 
-/** How many collectors are currently open. Test observability for the
- * push/pop pairing (a leaked collector would silently over-attribute every
- * later computation's reads); not used by the engine itself.
+/** How many collectors are currently open. Read when the environment of a
+ * function literal being boxed is made (`ParameterRecord`), and by the tests
+ * of the push/pop pairing (a leaked collector would silently over-attribute
+ * every later computation's reads).
  * @internal */
 export function objectDepCollectorDepth(): number {
   return _collectors.length;

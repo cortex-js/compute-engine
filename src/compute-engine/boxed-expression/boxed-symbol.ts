@@ -57,9 +57,11 @@ import type {
   SymbolInterface,
   StaticShape,
   TypeProvenanceEntry,
+  ParameterRecord,
 } from '../global-types.js';
 
 import { activeRollbackFrame } from '../inference-rollback.js';
+import { isFunctionLiteralParameter } from './function-literal.js';
 import {
   UnitEnvironment,
   definitionHome,
@@ -992,18 +994,24 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   private _inferInEnvironment(
     home: object,
     t: Type,
-    inferenceMode: 'narrow' | 'widen' | 'replace'
+    inferenceMode: 'narrow' | 'widen' | 'replace',
+    literal?: ParameterRecord
   ): boolean {
     const ce = this.engine;
     const state = ce._boxingState;
     const trial = state.trialEnvironment();
     const env =
       trial ??
+      literal?.env ??
       state.currentOperation() ??
       (this._env ??= new UnitEnvironment());
     if (trial === undefined) state.noteUnitWrite(env);
     const name = this._id;
-    const from = this._unitEntry(home);
+    const from = this._unitEntry(
+      home,
+      literal?.env ?? this._env,
+      literal?.collectorDepth
+    );
     const fromType: Type = from?.type ?? 'unknown';
     const to = ce.type(
       inferenceMode === 'replace'
@@ -1032,8 +1040,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (to.isUnknown && inferenceMode !== 'replace') return false;
     // A requirement that the entry excludes (`q(t)` after `2q` in the same
     // unit: a function and a number) is not written: the entry keeps the
-    // earlier requirement, and no occurrence reads the type `never`.
-    if (inferenceMode === 'narrow' && to.type === 'never') return false;
+    // earlier requirement, and no occurrence reads the type `never`. In the
+    // environment of a function literal (`literal`), the requirement of a
+    // parameter is written as the write on its definition was: the
+    // parameter is then typed `never`, and a call of the literal is an
+    // error (`n ↦ Range(n) + n[1]`).
+    if (
+      inferenceMode === 'narrow' &&
+      to.type === 'never' &&
+      literal === undefined
+    )
+      return false;
     if (from !== undefined && to.type === from.type) return true;
     // In an operation, a first requirement on the value definition of this
     // occurrence that the inferred type of the definition already meets is
@@ -1119,8 +1136,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * During a trial (`EngineBoxingState.withTrial()`), the entry of the
    * environment of the trial is read first (rule 13).
    */
-  private _unitEntry(key: object): BoxedType | undefined {
-    return readUnitEntry(this.engine._boxingState, this._env, key, this._id);
+  private _unitEntry(
+    key: object,
+    env: UnitEnvironment | undefined = this._env,
+    fromCollector = 0
+  ): BoxedType | undefined {
+    return readUnitEntry(
+      this.engine._boxingState,
+      env,
+      key,
+      this._id,
+      fromCollector
+    );
   }
 
   /** True when the unit of this occurrence, or the operation in progress,
@@ -1159,8 +1186,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    *
    * Boxing writes no requirement on a definition that it did not make. A
    * definition that the root construction in progress made in a scope that
-   * the construction created (a parameter of a function literal, the index
-   * of a `Sum`, a local of a block) is still narrowed by its uses: the
+   * the construction created (the index of a `Sum`, a local of a block) is
+   * still narrowed by its uses (a parameter of a function literal is not:
+   * `_inferOnParameter()`): the
    * boxing state records each definition made during the
    * construction (`EngineBoxingState.noteDefinitionMade()`). A definition
    * that the construction made in a scope that existed before it outlives
@@ -1246,16 +1274,32 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
     if (!isValueDef(def)) return undefined;
     const v = def.value;
+    // The uses of a parameter of a function literal write their entries in
+    // the environment of the literal while it is boxed, and an occurrence
+    // reads them there (`_inferOnParameter()`). After the boxing, the
+    // definition is read as any other definition with an inferred type.
+    let entryEnv = this._env;
+    let fromCollector = 0;
+    if (isFunctionLiteralParameter(v)) {
+      const record = this.engine._parameterRecord(v);
+      if (record !== undefined) {
+        entryEnv = record.env;
+        fromCollector = record.collectorDepth;
+      }
+    }
     if (!readsActivation(def)) {
       // A declaration made after the boxing on the home chain hides the
       // definition of the occurrence (`_homeBinding()`).
       const found = this._homeBinding(def);
       if (found !== undefined && found !== def) {
         if (isOperatorDef(found)) return found.operator.signature;
-        return this._typeOfDefinitionInUnit(found.value, this._unitEntry(v));
+        return this._typeOfDefinitionInUnit(
+          found.value,
+          this._unitEntry(v, entryEnv, fromCollector)
+        );
       }
       if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
-      const entry = this._unitEntry(v);
+      const entry = this._unitEntry(v, entryEnv, fromCollector);
       if (entry === undefined) return undefined;
       return this._typeOfDefinitionInUnit(v, entry);
     }
@@ -1283,13 +1327,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       !(v._blockLocal !== true && isBlockLocalBinding(resolved))
     ) {
       if (isOperatorDef(resolved)) return resolved.operator.signature;
-      return this._typeOfDefinitionInUnit(resolved.value, this._unitEntry(v));
+      return this._typeOfDefinitionInUnit(
+        resolved.value,
+        this._unitEntry(v, entryEnv, fromCollector)
+      );
     }
     if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
     // With no environment and no operation in progress, `_unitEntry()` is
     // `undefined`, but the read is recorded: the type is computed again in
     // an operation.
-    const entry = this._unitEntry(v);
+    const entry = this._unitEntry(v, entryEnv, fromCollector);
     if (entry === undefined) return undefined;
     return this._typeOfDefinitionInUnit(v, entry);
   }
@@ -1547,6 +1594,78 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return false;
   }
 
+  /**
+   * The requirement `t` of a use of this occurrence, a parameter of a
+   * function literal whose value definition is `v` (decision D18 of
+   * `docs/plans/2026-11-11-bound-once-spec.md`).
+   *
+   * While the literal is boxed, the requirement is written under `v` in the
+   * environment of the literal (`ParameterRecord`, `_inferInEnvironment()`),
+   * as for a definition that existed before the boxing: a later use of the
+   * same boxing reads the meet of the type of `v` and the requirements so
+   * far (`_unitType()`). The environment belongs to the literal, not to an
+   * operation in progress: a type cached from that read stays valid in the
+   * next operation. During a trial (the trial of an arm of an overloaded
+   * operator) the write goes in the environment of the trial, which is
+   * thrown away with it. The literal records, outside a trial, the type that
+   * a read gives after the write, and writes it on `v` once, when the
+   * boxing of the literal ends (`canonicalFunctionLiteralArguments()`).
+   *
+   * No write is made on `v` here, so there is no rollback record and no
+   * state event. After the boxing of the literal, the definition is one
+   * that existed before any later boxing: a use in a boxing writes its
+   * requirement in the environment of that unit (`_unitWriteScope()`), and
+   * a use outside a boxing adds nothing.
+   */
+  private _inferOnParameter(
+    def: BoxedDefinition,
+    v: BoxedValueDefinition,
+    t: Type,
+    inferenceMode: 'narrow' | 'widen' | 'replace'
+  ): boolean {
+    const ce = this.engine;
+    const record = ce._parameterRecord(v);
+    if (record === undefined) {
+      const unitScope = this._unitWriteScope(def);
+      return unitScope === undefined
+        ? false
+        : this._inferInEnvironment(unitScope, t, inferenceMode);
+    }
+    const { requirements, env } = record;
+    const inTrial = ce._boxingState.trialEnvironment() !== undefined;
+    // A widening (a result) is made only on the index of a loop, never on a
+    // parameter (`control-structures.ts`).
+    console.assert(
+      inferenceMode !== 'widen',
+      'A parameter of a function literal is not widened'
+    );
+    const written = this._inferInEnvironment(v, t, inferenceMode, record);
+    if (written && !inTrial) {
+      // The type that a read of the parameter gives now: the meet of the
+      // starting type of `v` (the type that a caller inferred for it, or
+      // `unknown`) and the entry.
+      const entry = this._unitEntry(v, env, record.collectorDepth);
+      const start = v.type.type;
+      const read =
+        entry === undefined ||
+        start === 'unknown' ||
+        inferenceMode === 'replace'
+          ? entry
+          : ce.type(narrow(start, entry.type));
+      // The cause is that of the use that changed the type: a use that
+      // requires what the record holds already leaves it, as a write on a
+      // definition that lands on its type records no provenance.
+      const previous = requirements.get(v);
+      const type = read === undefined || read.type === 'never' ? entry : read;
+      if (type !== undefined && previous?.type.type !== type.type)
+        requirements.set(v, {
+          type,
+          cause: ce._inferenceCause ?? undefined,
+        });
+    }
+    return written;
+  }
+
   private _inferWithoutFacts(
     t: Type,
     inferenceMode: 'narrow' | 'widen' | 'replace'
@@ -1584,6 +1703,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       )
         return false;
       if (def.value.inferredType || def.value.type.isUnknown) {
+        // A use of a parameter of a function literal writes nothing on its
+        // definition (`_inferOnParameter()`).
+        if (isFunctionLiteralParameter(def.value))
+          return this._inferOnParameter(def, def.value, t, inferenceMode);
         // Boxing does not narrow,
         // widen or mark a definition that existed before it: the
         // requirement goes in the environment of the unit
@@ -1735,15 +1858,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
             // the computation that declared it: its inference advances no
             // version that a cache outliving that computation keys on.
             ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
-            // The narrowing of a parameter that the canonicalization in
-            // progress declared, when no evaluation that keeps its result in
-            // the memo of shared evaluations started since it started: it
-            // does not advance the evaluation version
-            // (`_parameterNarrowingKeepsEvaluations`).
-            ...(!widening &&
-            this.engine._parameterNarrowingKeepsEvaluations(this._id, def)
-              ? { parameter: true }
-              : {}),
           });
         }
         // Single emission point for the write's passive observers: the

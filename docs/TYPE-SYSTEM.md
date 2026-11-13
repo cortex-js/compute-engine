@@ -1586,6 +1586,28 @@ With `a = ce.parse('x + 1')`: `a.op1.type` is `number`,
 `a.op1.type` is `string`; after `ce.assign('x', ce.string('ab'))`, it is
 `string` too (the meet is `never`, so the definition wins).
 
+A parameter of a function literal with no annotation follows the same rule
+while the literal is boxed (its body, and the rebinding of a body boxed
+before the literal): a use writes its requirement under the definition of
+the parameter in an environment of the literal, and a later use reads the
+meet of the type that the definition starts with and the requirements so
+far. During the trial of an arm of an overloaded operator, the write goes in
+the environment of the trial, which is thrown away with it. When the boxing
+of the literal ends, the type that a read then gives is written on the
+definition once, marked as inferred, with the use that last changed it as
+its provenance: `a ↦ a[1] + a[2]` is typed
+`(a: tuple<number, number>) -> number`. That write has no rollback record:
+the definition was made by this boxing. When it changes a type, one state
+event follows it, because a type cached on another node during the boxing
+can depend on the type of the parameter before the literal was complete
+(the cache keys do not hold the definitions they read). After that, the
+definition is one that existed before any later boxing: a use in the body
+boxed again (a compilation that substitutes a call into it) writes its
+requirement in the environment of that unit, as for any inferred
+definition. A read of the environment of the literal is a dependency only
+of the caches computed during the boxing: a computation that started
+before boxes the literal again.
+
 An operation (`evaluate()`, `simplify()`, `subs()`, `compile()`, …) writes its
 requirements in an environment of its own, which reads the environments of
 its input. It does not change the types that the input reads. The

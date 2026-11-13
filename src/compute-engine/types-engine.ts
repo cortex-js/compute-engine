@@ -39,6 +39,7 @@ import type {
   EffectHandlers,
 } from './types-effects.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
+import type { UnitEnvironment } from './binding-unit.js';
 import type { InferenceRollbackFrame } from './inference-rollback.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
@@ -265,6 +266,38 @@ export type InferenceCauseContext = {
   operator: string;
   ops: ReadonlyArray<ExpressionInput>;
   expr?: Expression;
+};
+
+/** What the uses of a parameter of a function literal required while the
+ * literal is boxed (decision D18 of
+ * `docs/plans/2026-11-11-bound-once-spec.md`): the type that a read of the
+ * parameter gives, and the cause of the use that last changed it, recorded
+ * as the provenance of the type when it is written on the definition. */
+export type ParameterRequirement = {
+  type: BoxedType;
+  cause?: InferenceCauseContext;
+};
+
+/** The record of a function literal while it is boxed: the requirement of
+ * each parameter, keyed by its value definition, and the environment of the
+ * literal, which holds the entries that the uses of its parameters write
+ * (outside a trial) and that a later use reads. The environment is made with
+ * the record: a read of it is recorded only by the caches whose computation
+ * started after that (`collectorDepth`, `objectDepCollectorDepth()`), as a
+ * computation that started before boxes the literal again. */
+export type ParameterRecord = {
+  requirements: Map<BoxedValueDefinition, ParameterRequirement>;
+  env: UnitEnvironment;
+  collectorDepth: number;
+  /** `sharedEvaluationStarts()` when the record was made: the end of the
+   * boxing sends its narrowing as one that keeps the memo of shared
+   * evaluations when no evaluation that keeps a result started since. */
+  memoStarts: number;
+  /** The parameter definitions that the literal's frame declared at the
+   * first reference of their name. A binding that existed before the frame
+   * (a local of an earlier boxing of the same scope) is held by nodes that
+   * this boxing did not make. */
+  created: Set<BoxedValueDefinition>;
 };
 
 /** A HOST (JavaScript) implementation of a protocol member. A callback carries
@@ -2638,37 +2671,30 @@ export interface IComputeEngine {
     def: BoxedDefinition,
     created?: boolean
   ): void;
-  /**
-   * Whether a narrowing of `def`, the binding of the shadowed name `name` (a
-   * parameter of a function literal), can leave the results of the memo of
-   * shared evaluations as they are (`shared-evaluation-memo.ts`), so that it
-   * does not advance the evaluation version. True when all of these hold:
-   *
-   * - the innermost construct that shadows `name` is a function literal. A
-   *   `Block` hoists its locals into its scope before it pushes its frame,
-   *   so their bindings existed before its canonicalization started.
-   * - that construct DECLARED `def` while its
-   *   canonicalization, still in progress, ran. Every node that holds `def`
-   *   was then made by that canonicalization, and only such a node reads
-   *   the type of `def`.
-   * - no evaluation that keeps its result in the memo started since that
-   *   canonicalization started (`sharedEvaluationStarts()`). No entry can
-   *   then hold, and no evaluation in progress can keep, a result of a node
-   *   that read the type of `def` before the narrowing.
-   *
-   * Example: `Abs(L)` over a list `L` maps the literal `_1 ↦ Abs(_1)` on the
-   * elements (`lazyBroadcastMap`, `collection-utils.ts`). Boxing its body
-   * narrows `_1` from `number` to `complex | infinity`; no result of the memo
-   * can depend on `_1`, and the copies of the expression around the `Abs`
-   * keep their results. @internal */
-  _parameterNarrowingKeepsEvaluations(
-    name: string,
-    def: BoxedDefinition
-  ): boolean;
   /** The bindings cached on the TOP shadowed-parameter frame — read just
    * before popping it so a literal's parameter declarations can adopt the
    * binding the body's references accumulated type evidence on. @internal */
   _currentShadowedParameterDefs(): ReadonlyMap<string, BoxedDefinition>;
+
+  /** The record of the function literal being boxed that declared the
+   * parameter whose value definition is `def` (decision D18 of
+   * `docs/plans/2026-11-11-bound-once-spec.md`); `undefined` when no literal
+   * that is being boxed declared `def`. @internal */
+  _parameterRecord(def: BoxedValueDefinition): ParameterRecord | undefined;
+
+  /** The record of the top shadowed-parameter frame, read just before it is
+   * popped; `undefined` for the frame of a `Block`. @internal */
+  _currentParameterRecord(): ParameterRecord | undefined;
+
+  /** Run `f`, a step of the boxing of a function literal after its
+   * shadowed-parameter frame is popped (the rebinding of its body), with
+   * the uses of the parameter definitions `params` recording their
+   * requirements in `record` (`_parameterRecord()`). @internal */
+  _withClosingLiteral<T>(
+    params: ReadonlySet<BoxedValueDefinition>,
+    record: ParameterRecord,
+    f: () => T
+  ): T;
 
   /** Enter a user-function application, throwing a `CancellationError`
    * (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded

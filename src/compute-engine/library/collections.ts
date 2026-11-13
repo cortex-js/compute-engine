@@ -6224,8 +6224,13 @@ function parameterIndexReadType(
   // still `unknown`, or it is the `dictionary<any> | indexed_collection<any>`
   // shape that the validation of `At` writes before the first read is
   // recorded), the components of a tuple, or the element type of an indexed
-  // collection.
-  const current = resolveTypeAlias(xs.type.type);
+  // collection. While the literal is boxed, the reads seen so far are the
+  // requirements that the literal recorded for the parameter, not its
+  // definition (decision D18 of `docs/plans/2026-11-11-bound-once-spec.md`).
+  const current = resolveTypeAlias(
+    ce._parameterRecord(binding.value)?.requirements.get(binding.value)?.type
+      .type ?? xs.type.type
+  );
   let components: Type[] | undefined = undefined;
   let element: Type | undefined = undefined;
   let keyed = false;

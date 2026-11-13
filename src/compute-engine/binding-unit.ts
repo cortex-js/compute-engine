@@ -51,8 +51,8 @@ export class UnitEnvironment {
    * came from (`writes()`). A write that a journal removes stays in the
    * list: the next pass makes the same write again. */
   private _writes:
-    | Map<object, Map<string, { type: BoxedType; cause: object }[]>>
-    | undefined = undefined;
+    Map<object, Map<string, { type: BoxedType; cause: object }[]>> | undefined =
+    undefined;
 
   /** For each scope, the names of library operators that the unit reads as
    * variables (`readsAsVariable()`). */
@@ -664,13 +664,15 @@ function unitReadToken(
  * The entry that an occurrence whose environment is `env` reads for `name`
  * under `key` (a home scope or a value definition), see `unitEntryOf()`.
  * The read is recorded for the caches that are being computed, with the
- * entry found as its version (`UnitReadToken`).
+ * entry found as its version (`UnitReadToken`), by the collectors from the
+ * index `fromCollector` on (`recordObjectRead()`).
  */
 export function readUnitEntry(
   context: UnitReadContext,
   env: UnitEnvironment | undefined,
   key: object,
-  name: string
+  name: string,
+  fromCollector = 0
 ): BoxedType | undefined {
   const entry = unitEntryOf(context, env, key, name);
   if (noObjectDepsCollector()) {
@@ -679,7 +681,8 @@ export function readUnitEntry(
   }
   recordObjectRead(
     unitReadToken(context, env, key, name, false),
-    definitionId(entry)
+    definitionId(entry),
+    fromCollector
   );
   return entry;
 }

@@ -26,6 +26,7 @@ import {
   functionLiteralBody,
   functionLiteralDeclaredSignature,
   functionLiteralParameterType,
+  isFunctionLiteralParameter,
   optionalParameterTarget,
   restParameterSignatureTail,
   signatureArgumentsOfSlots,
@@ -133,6 +134,8 @@ import type {
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   TypeProvenanceEntry,
+  ParameterRequirement,
+  ParameterRecord,
 } from '../global-types.js';
 import { recordTypeProvenance, currentBoxingEpoch } from './type-provenance.js';
 import {
@@ -6015,9 +6018,11 @@ function couldRepairFreshMatrixInference(
     }
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) continue;
-    // Keep this test in step with `repairFreshMatrixInference`, which
-    // explains it: a symbol already typed as a collection or as text is not
-    // a numeric guess, so it is not eligible.
+    // Keep these tests in step with `repairFreshMatrixInference`, which
+    // explains them: a parameter is not retyped, and a symbol already typed
+    // as a collection or as text is not a numeric guess, so it is not
+    // eligible.
+    if (isFunctionLiteralParameter(def.value)) continue;
     if (hasNonNumericShapeEvidence(def.value.type.type)) continue;
     if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
       eligible.add(name);
@@ -6065,6 +6070,9 @@ type UnitRepairSite = {
   env: UnitEnvironment | undefined;
   key: object;
   eligible: boolean;
+  /** For a parameter of a function literal being boxed: the record of the
+   * literal, which holds the entry (`ParameterRecord`). */
+  literal?: ParameterRecord;
 };
 
 /**
@@ -6077,9 +6085,11 @@ type UnitRepairSite = {
  * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the requirements of
  * a free name, and of a name whose definition has an inferred type or the type
  * `unknown`, are entries of the environment (rule 2), and the type of an
- * occurrence reads them (rule 4). The repair replaces that entry. A
- * definition that the root construction made in a scope that it created (a
- * parameter of a function literal) is still narrowed by its uses
+ * occurrence reads them (rule 4). The repair replaces that entry. The uses
+ * of a parameter of a function literal write entries too
+ * (`BoxedSymbol._inferOnParameter()`). A definition that the root
+ * construction made in a scope that it created (the index of a `Sum`, a
+ * local of a block) is still narrowed by its uses
  * (`BoxedSymbol._unitWriteScope()`): its uses wrote no entry, and the repair
  * retypes that definition.
  */
@@ -6124,16 +6134,23 @@ function unitRepairSite(
 
   const state = ce._boxingState;
   const trial = state.trialEnvironment();
-  const operation = state.currentOperation();
+  // The uses of a parameter of a function literal being boxed write in the
+  // environment of the literal (`BoxedSymbol._inferOnParameter()`).
+  const literal = free
+    ? undefined
+    : ce._parameterRecord(key as BoxedValueDefinition);
+  const operation =
+    literal === undefined ? state.currentOperation() : undefined;
+  const own = literal?.env ?? sym._env;
   const entry =
     trial?.lookup(key, name) ??
     operation?.lookup(key, name) ??
-    sym._env?.lookup(key, name);
+    own?.lookup(key, name);
   // The uses of a definition wrote on the definition, not in an
   // environment.
   if (!free && entry === undefined) return undefined;
 
-  const env = trial ?? operation ?? sym._env;
+  const env = trial ?? operation ?? own;
   // The failure leg of the repair undoes its writes through the journal that
   // a root construction opens (`EngineBoxingState.noteUnitWrite()`).
   if (env === undefined || !state.isRootActive)
@@ -6142,11 +6159,12 @@ function unitRepairSite(
     entry === undefined ||
     trial?.get(key, name) !== undefined ||
     operation?.journaledEntry(key, name) === true ||
-    sym._env?.journaledEntry(key, name) === true;
+    own?.journaledEntry(key, name) === true;
   return {
     env,
     key,
     eligible: fresh && !hasNonNumericShapeEvidence(sym.type.type),
+    literal,
   };
 }
 
@@ -6209,6 +6227,12 @@ function repairFreshMatrixInference(
     }
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) continue;
+    // A parameter of a function literal is not retyped on its definition: its
+    // uses write in the environment of the unit, and the repair replaces
+    // that entry above (decision D18 of
+    // `docs/plans/2026-11-11-bound-once-spec.md`). A parameter with no entry
+    // yet has no numeric guess to repair.
+    if (isFunctionLiteralParameter(def.value)) continue;
     // "Fresh" = the definition's type was first inferred (unknown → concrete)
     // during this boxing operation — the forward log recorded by
     // `BoxedSymbol._infer()` — or is still unknown (never inferred; the
@@ -6301,6 +6325,15 @@ function repairFreshMatrixInference(
   // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), so the events
   // below are sent only for a write on a definition.
   const marks = new Map<UnitEnvironment, number>();
+  // The literal being boxed writes the entry of a parameter on its
+  // definition when its boxing ends (`BoxedSymbol._inferOnParameter()`), so
+  // it records the entry that the repair replaces too. For each record of
+  // requirements that the repair changes, its content before the repair:
+  // the failure leg puts it back, with the records of the discarded re-box.
+  const parameterRecords = new Map<
+    Map<BoxedValueDefinition, ParameterRequirement>,
+    Map<BoxedValueDefinition, ParameterRequirement>
+  >();
   let definitionWrites = false;
   for (const name of names) {
     const site = sites.get(name);
@@ -6308,7 +6341,25 @@ function repairFreshMatrixInference(
       const env = site.env!;
       ce._boxingState.noteUnitWrite(env);
       if (!marks.has(env)) marks.set(env, env.journalLength());
-      env.set(site.key, name, ce.type(targetType));
+      const entry = ce.type(targetType);
+      env.set(site.key, name, entry);
+      const parameter = site.key as BoxedValueDefinition;
+      const requirements =
+        ce._boxingState.trialEnvironment() === undefined
+          ? site.literal?.requirements
+          : undefined;
+      if (requirements !== undefined) {
+        if (!parameterRecords.has(requirements))
+          parameterRecords.set(requirements, new Map(requirements));
+        requirements.set(parameter, {
+          type: entry,
+          cause: {
+            operator: op.operator,
+            ops: isFunction(op) ? op.ops : [],
+            expr: op,
+          },
+        });
+      }
       continue;
     }
     definitionWrites = true;
@@ -6403,6 +6454,10 @@ function repairFreshMatrixInference(
     }
   }
   for (const [env, mark] of marks) env.undoJournal(mark);
+  for (const [requirements, before] of parameterRecords) {
+    requirements.clear();
+    for (const [parameter, type] of before) requirements.set(parameter, type);
+  }
   for (const fresh of freshlyAdded) ce._freshlyInferred?.delete(fresh);
   if (definitionWrites)
     ce._noteStateEvent({

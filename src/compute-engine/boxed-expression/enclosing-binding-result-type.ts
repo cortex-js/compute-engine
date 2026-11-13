@@ -72,7 +72,13 @@ export function nonScalarEnclosingBindings(
   for (const name of variableNames(expr)) {
     const binding = enclosingBinding(scope, system, name);
     if (binding === undefined || !('value' in binding)) continue;
-    const type = binding.value.type.type;
+    // While the function literal of a parameter is boxed, its type is the
+    // record of what its uses required so far (decision D18 of
+    // `docs/plans/2026-11-11-bound-once-spec.md`).
+    const type =
+      expr.engine
+        ._parameterRecord(binding.value)
+        ?.requirements.get(binding.value)?.type.type ?? binding.value.type.type;
     if (type === 'unknown' || isSubtype(type, 'number')) continue;
     found.push({ name, binding, type });
   }

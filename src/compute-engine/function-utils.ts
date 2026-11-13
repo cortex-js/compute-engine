@@ -40,6 +40,7 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
   Scope,
+  ParameterRecord,
 } from './global-types.js';
 import type { EffectHandlers } from './types-effects.js';
 import { runWithEvaluationEffects } from './effects-registry.js';
@@ -231,6 +232,14 @@ import {
 } from '../common/type/utils.js';
 import { kindTypeNames } from './boxed-expression/value-kinds.js';
 import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
+import type { BoxedType } from '../common/type/boxed-type.js';
+import {
+  currentBoxingEpoch,
+  recordTypeProvenance,
+} from './boxed-expression/type-provenance.js';
+import { UnitEnvironment } from './binding-unit.js';
+import { objectDepCollectorDepth } from './boxed-expression/object-deps.js';
+import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import { enterFunctionBody, exitFunctionBody } from './statement-position.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
@@ -1278,6 +1287,7 @@ export function canonicalFunctionLiteralArguments(
   let captured: ProvisionalCapture | undefined;
   let block: Expression;
   let shadowedDefs: ReadonlyMap<string, BoxedDefinition> = new Map();
+  let record: ParameterRecord | undefined;
   // The body is not in a branch, also when the literal is written in one:
   // a `Declare` at the own level of the body declares a local of the body
   // (`enterFunctionBody()`, `statement-position.ts`).
@@ -1319,6 +1329,7 @@ export function canonicalFunctionLiteralArguments(
     // (and shared) while the frame is still on the stack — the parameter
     // declarations below adopt them.
     shadowedDefs = ce._currentShadowedParameterDefs();
+    record = ce._currentParameterRecord();
   } finally {
     exitFunctionBody();
     captured = endProvisionalCapture();
@@ -1399,11 +1410,16 @@ export function canonicalFunctionLiteralArguments(
   // Record the binding of each parameter as a parameter binding
   // (`markFunctionLiteralParameter()`): a call of a parameter named `Return`
   // is then not read as the `Return` statement.
+  const parameterDefs = new Set<BoxedValueDefinition>();
+  const parameterBindings = new Map<BoxedValueDefinition, BoxedDefinition>();
   for (const param of params)
     for (const name of functionLiteralParameterNames(param)) {
       const binding = blockScope.bindings.get(name);
-      if (binding !== undefined && 'value' in binding)
+      if (binding !== undefined && 'value' in binding) {
         markFunctionLiteralParameter(ce, binding.value);
+        parameterDefs.add(binding.value);
+        parameterBindings.set(binding.value, binding);
+      }
     }
   // The default value of a parameter must fit the parameter type: the
   // annotation, or, for a bare parameter, the type that the body's uses
@@ -1420,7 +1436,8 @@ export function canonicalFunctionLiteralArguments(
     const type =
       functionLiteralParameterType(param) ??
       (binding !== undefined && 'value' in binding
-        ? binding.value.type.type
+        ? (record?.requirements.get(binding.value)?.type.type ??
+          binding.value.type.type)
         : undefined);
     if (type === undefined) return;
     // A symbol that the annotation lists (`mode: symbol<Auto> = Auto`) fits
@@ -1430,7 +1447,97 @@ export function canonicalFunctionLiteralArguments(
     if (!defaultOp.type.matches(type))
       params[i] = ce.typeError(type, defaultOp.type, defaultOp);
   });
-  block = rebindParameters(block, params);
+  // The rebinding of the body is a step of the boxing of the literal: a use
+  // of a parameter that it boxes records its requirement as a use of the
+  // body did.
+  // The frame of a function literal always has a record
+  // (`_pushShadowedParameters()`).
+  console.assert(record !== undefined, 'A function literal has a record');
+  const closing = record!;
+  block = ce._withClosingLiteral(parameterDefs, closing, () =>
+    rebindParameters(block, params)
+  );
+
+  // The boxing of the literal is complete: what the uses of each parameter
+  // required is written on its definition, once (decision D18 of
+  // `docs/plans/2026-11-11-bound-once-spec.md`). The definitions were made
+  // by this boxing and belong to the literal, so the write has no rollback
+  // record; one state event follows it (below). The cause of the use that last changed
+  // the requirement is the provenance of the type (`_typeProvenance`), as
+  // for an inference written on a definition.
+  let typeChanged = false;
+  let allCreated = true;
+  let widening = false;
+  let allScratch = true;
+  for (const [value, { type, cause }] of closing.requirements) {
+    // A definition that already has the type (the body of a literal boxed
+    // again, which keeps its scope) is not written: the write would replace
+    // its `BoxedType` and move its `_writeVersion`, which the memos of the
+    // elements of a lazy collection read (`collection-element-memo.ts`).
+    // A parameter with assignment evidence (`Assign(x, [1, 2])` in the
+    // body, `joinAssignmentEvidence()` in `library/core.ts`) has the join of
+    // its assigned value types as its type, and a use does not narrow it
+    // (`BoxedSymbol._inferWithoutFacts()`): the record of the uses made
+    // before the assignment is not written over it.
+    if (value._assignmentEvidence && value.value === undefined) continue;
+    const current = value.type;
+    if (
+      current.type === type.type ||
+      (typeof current.type === 'object' &&
+        typeof type.type === 'object' &&
+        current.toString() === type.toString() &&
+        isSubtype(current.type, type.type) &&
+        isSubtype(type.type, current.type))
+    )
+      continue;
+    if (!isSubtype(type.type, current.type)) widening = true;
+    value._setType(() => type);
+    value.inferredType = true;
+    typeChanged = true;
+    if (!closing.created.has(value)) allCreated = false;
+    if (!isScratchBinding(ce, parameterBindings.get(value) ?? value))
+      allScratch = false;
+    if (cause !== undefined) {
+      cause.expr ??= ce._fn(
+        cause.operator,
+        cause.ops.map((o: ExpressionInput) => ce.expr(o, { form: 'raw' })),
+        { canonical: false }
+      );
+      // The provenance history is journaled as a whole while a rollback
+      // frame is open (family 7, `recordTypeProvenance()`): the entry of the
+      // creation of the definition is in it, and the undo pops in order.
+      recordTypeProvenance(ce, value, {
+        type,
+        kind: 'inferred',
+        axis: 'type',
+        cause: cause.expr,
+        epoch: currentBoxingEpoch(ce),
+      });
+    }
+  }
+  // One state event for the literal when a write changed a type: a type
+  // cached on another node during the boxing (the recursive call of a
+  // function whose signature is derived from a copy of the literal) can
+  // depend on the type of a parameter before the literal is complete, and
+  // its cache is keyed on the versions that the event advances. Cache keys
+  // that hold the definitions they read (decision D17 of
+  // `docs/plans/2026-11-11-bound-once-spec.md`) would remove this event.
+  // A narrowing made when no evaluation that keeps its result in the memo
+  // of shared evaluations started since the boxing started does not advance
+  // the evaluation version (`parameter`, `noteStateEvent`): no result of
+  // the memo can have read the types of these parameters.
+  if (typeChanged)
+    ce._noteStateEvent({
+      kind: 'inference',
+      valueType: true,
+      widening,
+      ...(allScratch ? { scratch: true } : {}),
+      ...(!widening &&
+      allCreated &&
+      sharedEvaluationStarts() === closing.memoStarts
+        ? { parameter: true }
+        : {}),
+    });
   const literal = ce._fn('Function', [
     block,
     ...bindParameterOperands(ce, block, params),

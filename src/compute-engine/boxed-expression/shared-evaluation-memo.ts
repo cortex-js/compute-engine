@@ -258,10 +258,10 @@ export function noteSharedEvaluationStart(): void {
  * started between them, and no evaluation in progress at the second moment
  * started between them. A caller compares two readings to show that no
  * evaluation that keeps its result started in an interval
- * (`_parameterNarrowingKeepsEvaluations`, `index.ts`; `noteStateEvent`,
- * `engine-configuration-lifecycle.ts`). An evaluation that started before
- * the interval and runs through it is not seen. A start on another engine
- * also counts, which can only make that test fail when it could pass.
+ * (`noteStateEvent`, `engine-configuration-lifecycle.ts`). An evaluation
+ * that started before the interval and runs through it is not seen. A start
+ * on another engine also counts, which can only make that test fail when it
+ * could pass.
  */
 export function sharedEvaluationStarts(): number {
   return startCount;

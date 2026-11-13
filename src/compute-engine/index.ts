@@ -83,6 +83,7 @@ import type {
   InferenceWriteEvent,
   InferenceCauseContext,
   EvaluateOptions,
+  ParameterRecord,
 } from './global-types.js';
 
 import type {
@@ -235,7 +236,6 @@ import type { KindRegistryState } from './types-definitions.js';
 import { createKindRegistry } from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import { markLibraryCall } from './library-shadowing.js';
-import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import {
   declareProtocolImpl,
   declareProtocolImplementationImpl,
@@ -301,6 +301,8 @@ import { EngineNumericConfiguration } from './engine-numeric-configuration.js';
 import { EngineRuntimeState } from './engine-runtime-state.js';
 import { EngineBoxingState } from './engine-boxing-state.js';
 import { UnitEnvironment } from './binding-unit.js';
+import { objectDepCollectorDepth } from './boxed-expression/object-deps.js';
+import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import { EngineStartupCoordinator } from './engine-startup-coordinator.js';
 import { loadLibraryLate } from './engine-library-bootstrap.js';
 import { createTypeResolver } from './engine-type-resolver.js';
@@ -3593,13 +3595,9 @@ export class ComputeEngine implements IComputeEngine {
      * (`headHasNoTypeInformation()`, `boxed-expression/invisible-operator.ts`).
      */
     liftedBody: boolean;
-    /** The bindings of `defs` that this frame DECLARED, at the first
-     * reference of their name. A binding that existed before the frame was
-     * pushed (a local that a `Block` hoisted, a binding left by an earlier
-     * canonicalization of the same scope) is in `defs` but not here. */
-    created: Set<BoxedDefinition>;
-    /** `sharedEvaluationStarts()` when the frame was pushed. */
-    memoStarts: number;
+    /** For a function literal: what the uses of its parameters require,
+     * recorded while the literal is boxed (`ParameterRecord`). */
+    record: ParameterRecord | undefined;
   }[] = [];
 
   /** @internal */
@@ -3619,23 +3617,16 @@ export class ComputeEngine implements IComputeEngine {
       boundary: boundary ?? this.context.lexicalScope,
       functionLiteral,
       liftedBody,
-      created: new Set(),
-      memoStarts: sharedEvaluationStarts(),
+      record: functionLiteral
+        ? {
+            requirements: new Map(),
+            env: new UnitEnvironment(),
+            collectorDepth: objectDepCollectorDepth(),
+            memoStarts: sharedEvaluationStarts(),
+            created: new Set(),
+          }
+        : undefined,
     });
-  }
-
-  /** See `IComputeEngine._parameterNarrowingKeepsEvaluations`. @internal */
-  _parameterNarrowingKeepsEvaluations(
-    name: string,
-    def: BoxedDefinition
-  ): boolean {
-    const frame = this._shadowFrame(name);
-    return (
-      frame !== undefined &&
-      frame.functionLiteral &&
-      frame.created.has(def) &&
-      frame.memoStarts === sharedEvaluationStarts()
-    );
   }
 
   /** The innermost frame that shadows `name` in the current lexical scope.
@@ -3778,7 +3769,7 @@ export class ComputeEngine implements IComputeEngine {
     const frame = this._shadowFrame(name);
     if (frame === undefined) return;
     frame.defs.set(name, def);
-    if (created) frame.created.add(def);
+    if (created && 'value' in def) frame.record?.created.add(def.value);
     // Marked now, not only when the literal is complete: a nested literal in
     // the body can compute its type before that, and the type is then cached.
     if (frame.functionLiteral && 'value' in def)
@@ -3792,6 +3783,49 @@ export class ComputeEngine implements IComputeEngine {
   _currentShadowedParameterDefs(): ReadonlyMap<string, BoxedDefinition> {
     const stack = this._shadowedParameterStack;
     return stack.length > 0 ? stack[stack.length - 1].defs : new Map();
+  }
+
+  /** The function literals whose shadowed-parameter frame is popped, while
+   * their boxing ends: the parameter definitions of each, with its record
+   * (`_withClosingLiteral()`). @internal */
+  private _closingLiterals: {
+    params: ReadonlySet<BoxedValueDefinition>;
+    record: ParameterRecord;
+  }[] = [];
+
+  /** See `IComputeEngine._parameterRecord`. @internal */
+  _parameterRecord(def: BoxedValueDefinition): ParameterRecord | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const frame = stack[i];
+      if (frame.record === undefined) continue;
+      for (const d of frame.defs.values())
+        if ('value' in d && d.value === def) return frame.record;
+    }
+    const closing = this._closingLiterals;
+    for (let i = closing.length - 1; i >= 0; i--)
+      if (closing[i].params.has(def)) return closing[i].record;
+    return undefined;
+  }
+
+  /** See `IComputeEngine._currentParameterRecord`. @internal */
+  _currentParameterRecord(): ParameterRecord | undefined {
+    const stack = this._shadowedParameterStack;
+    return stack[stack.length - 1]?.record;
+  }
+
+  /** See `IComputeEngine._withClosingLiteral`. @internal */
+  _withClosingLiteral<T>(
+    params: ReadonlySet<BoxedValueDefinition>,
+    record: ParameterRecord,
+    f: () => T
+  ): T {
+    this._closingLiterals.push({ params, record });
+    try {
+      return f();
+    } finally {
+      this._closingLiterals.pop();
+    }
   }
 
   /**

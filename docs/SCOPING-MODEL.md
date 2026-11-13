@@ -565,7 +565,10 @@ stop there.
 Canonicalization establishes identities and types; evaluation owns values.
 The definition of a parameter, a binder variable and a block local is the one
 that the boxing made (the static definition); an evaluation writes and reads
-its value in an activation and makes no definition.
+its value in an activation and makes no definition. The type of a parameter
+of a function literal with no annotation is written on its definition once,
+when the boxing of the literal ends, from what its uses in the body
+required (`TYPE-SYSTEM.md`, "The type of a name with no explicit type").
 
 ### Block locals
 
