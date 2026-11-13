@@ -882,3 +882,28 @@ journal of `inference-rollback.ts`, the `declare` event after a rollback,
 the undo of the Epsil static check) is deleted with it. Measurements:
 `~/dev/compute-engine-recovery/probe-infer-report.md`. It is landed by
 session compute-engine-42 with the other leftovers, after step 1.
+
+### State: step 1 is on main (2026-11-12)
+
+Commit `d2f392f08a39b831669fa22430ad853096f993ad`: the rule, declared locals
+(D8), activations (D6, D12), function locals (D11), the `bind` substitution
+(D13), lazy lists as closures (D14). Not released; Tycho stays on 0.187.1.
+Source: 75 files, 3,751 lines added, 8,498 removed.
+
+Not in it, each its own change: the compile options `inputs` and
+`symbolic` (C6); no parameter inference (D15) and the other leftovers
+(session compute-engine-42); the `Program` operator, the sites query and
+the program runner (ROADMAP CE-1255); the macro kind; the design pass on
+held arguments (ROADMAP CE-1258; `issues/CE-1259.md` and `CE-1260.md` are
+two regressions of hold functions that step 1 landed with, by user
+decision). Still in the code and expected to go: the rebuild of closures
+at the end of a call (`captureClosures`; disabling it breaks 162 tests, the
+reason is not understood yet) and the automatic listing of a finite lazy
+list at an assignment (`listedAssignedValue()`).
+
+Acceptance still open (C8): Tycho's `othello` instrument and codegen audit
+on the scratch build
+(`~/dev/compute-engine-recovery/cortex-js-compute-engine-0.187.1.tgz`),
+asked of tycho-desk. The engine's own timing shows no difference from main
+on `calculus`, `simplify` and `integrate-symbolic-pole`.
+
