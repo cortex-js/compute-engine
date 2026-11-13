@@ -1326,7 +1326,9 @@ describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
     expect(ce.box(['Apply', fn, 'False'] as never).evaluate().json).toBe(0);
   });
 
-  test('a block with no nested assignment is kept as it is', () => {
+  test('a block with no nested assignment', () => {
+    // The `c` of the block is a free name when the block is boxed, and the
+    // parameter `c` in the body of the literal.
     const ce = new ComputeEngine();
     const block = ce.box([
       'Block',
@@ -1334,7 +1336,6 @@ describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
       ['Add', 'w', 1],
     ] as never);
     const fn = ce.function('Function', [block, ce.symbol('c')]);
-    expect(fn.op1).toBe(block);
     expect(ce.box(['Apply', fn, 3] as never).evaluate().json).toBe(7);
   });
 });

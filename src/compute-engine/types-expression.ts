@@ -175,10 +175,6 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _writeVersion: number;
 
-  /** True when the un-applied-operator repair created this binding.
-   * @internal */
-  _isDevolvedShadow: true | undefined;
-
   /** The raw body of a macro definition — mirror of the member documented in
    * `types-definitions.ts`. */
   readonly macro?: MathJsonExpression;

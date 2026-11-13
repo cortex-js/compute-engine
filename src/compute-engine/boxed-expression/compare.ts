@@ -34,14 +34,7 @@ import {
   freeBinding,
 } from './type-guards.js';
 import { isLibraryOperator, isShadowedSymbol } from '../library-shadowing.js';
-import {
-  bodyFreeNameHome,
-  boundVariableBindings,
-  freeNameBindingInContext,
-  isBodyFreeName,
-  sameBindingDef,
-} from './binders.js';
-import { isFunctionLiteralParameter } from './function-literal.js';
+import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
 import {
@@ -102,41 +95,11 @@ export function sameBinding(
   // `\sum_{k=1}^n`) while `ce.box(json)` binds it.
   const ea = boundA?.get(a.symbol);
   const eb = boundB?.get(b.symbol);
-  // The copy of a free name in the scope of the body of a function literal
-  // (`markBodyFreeName()`) stands for
-  // the outer name: when the name resolves to a definition, the copy reads
-  // it, as a free name does, and is not the variable of the body's scope.
-  const ra = bodyCopyReading(a);
-  const rb = bodyCopyReading(b);
-  // When the name resolves to no definition, a copy reached under the
-  // `Block` of the body, which lists it among its bindings, is the free name
-  // of its recorded home scope (`bodyCopyHome()`). A copy taken out of the
-  // literal is compared as the variable of the body's scope, as before: the
-  // `f` of `ce.box(['Function', ['Block', 'f'], 'x'])` and a later
-  // `ce.box('f')` are not the same binding (`docs/SCOPING-MODEL.md`,
-  // "Canonical and runtime scopes").
-  const ca =
-    ra === undefined && ea != null && ea === a.valueDefinition
-      ? bodyCopyHome(a)
-      : undefined;
-  const cb =
-    rb === undefined && eb != null && eb === b.valueDefinition
-      ? bodyCopyHome(b)
-      : undefined;
   // A free name (`isFreeName()`, `binding-unit.ts`) has no definition, but
   // it is never the variable of a binder: it was not inside a binder when it
-  // was boxed. The same holds for such a copy, which the `Block` of the
-  // body lists among its bindings.
-  const aBound =
-    ra === undefined &&
-    ca === undefined &&
-    !isFreeName(a) &&
-    isBoundHere(ea, a.valueDefinition);
-  const bBound =
-    rb === undefined &&
-    cb === undefined &&
-    !isFreeName(b) &&
-    isBoundHere(eb, b.valueDefinition);
+  // was boxed.
+  const aBound = !isFreeName(a) && isBoundHere(ea, a.valueDefinition);
+  const bBound = !isFreeName(b) && isBoundHere(eb, b.valueDefinition);
   // One is its binder's variable and the other is a free reference: different
   // symbols, whatever they are spelled.
   if (aBound !== bBound) return false;
@@ -153,19 +116,8 @@ export function sameBinding(
   // current context (`resolvedBaseDefinition()`). When neither side
   // resolves, two free names are the same binding when they have the same
   // home scope; a free name and a raw occurrence are different.
-  const ad = ra ?? resolvedBaseDefinition(a);
-  const bd = rb ?? resolvedBaseDefinition(b);
-  // Such a copy is the free name of the scope that the literal is written
-  // in (rule 1 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): it
-  // is the same binding as a free name that resolves to no definition, or
-  // another such copy, with that home scope and name, and no other
-  // occurrence. With `F = y ↦ (x ↦ y^x)`, the value of `F(x)` (`x_1 ↦ x^x_1`)
-  // is the literal `x_1 ↦ x^x_1` boxed at the top level.
-  if (ca !== undefined || cb !== undefined) {
-    const ka = ca ?? (ad === undefined ? freeNameHome(a) : undefined);
-    const kb = cb ?? (bd === undefined ? freeNameHome(b) : undefined);
-    return ka !== undefined && ka === kb;
-  }
+  const ad = resolvedBaseDefinition(a);
+  const bd = resolvedBaseDefinition(b);
   if (ad === undefined && bd === undefined && (isFreeName(a) || isFreeName(b)))
     return (
       isFreeName(a) &&
@@ -227,70 +179,6 @@ export function sameBinding(
   // asks for it explicitly (`sameSyntactic`) rather than relying on
   // unboundness as an implicit signal.
   return false;
-}
-
-/**
- * The definition that the copy `sym` of a free name in the scope of the
- * body of a function literal (`markBodyFreeName()`, `binders.ts`) reads:
- * the definition that its name resolves to in the current context
- * (`freeNameBindingInContext()`), which skips the variable of a binder and
- * the parameter of a function literal or of a call frame. `undefined` when
- * `sym` is not such a copy, when the copy has assignment evidence (a local
- * of the body), or when the name resolves to no definition: the copy is
- * then compared as the free name of its home scope (`bodyCopyHome()`), or,
- * with no recorded home scope, as the variable of the body's scope.
- */
-function bodyCopyReading(
-  sym: Expression & { symbol: string }
-): BoxedBaseDefinition | undefined {
-  const v = sym.valueDefinition;
-  // A copy that became a parameter of a literal (the variable that
-  // `Limit(sin(x)/x, 0)` infers) is the variable of a binder: it keeps the
-  // comparison of a bound variable.
-  if (
-    v === undefined ||
-    !isBodyFreeName(v) ||
-    (v as { _assignmentEvidence?: boolean })._assignmentEvidence === true ||
-    isFunctionLiteralParameter(v)
-  )
-    return undefined;
-  const def = freeNameBindingInContext(sym.engine, sym.symbol, undefined, true);
-  if (def === undefined) return undefined;
-  return 'value' in def ? def.value : def.operator;
-}
-
-/**
- * The home scope of `sym` when it is a copy of a free name in the scope of
- * the body of a function literal (`markBodyFreeName()`) with no assignment
- * evidence, recorded by `bodyFreeNameHome()`. A copy that became the
- * parameter of a literal made after its body (`isFunctionLiteralParameter()`:
- * the variable that `Limit(sin(x)/x, 0)` infers) is a parameter, not a free
- * name. `undefined` otherwise. The
- * caller has checked that the name resolves to no definition
- * (`bodyCopyReading()`).
- */
-function bodyCopyHome(
-  sym: Expression & { symbol: string }
-): object | undefined {
-  const v = sym.valueDefinition;
-  if (
-    v === undefined ||
-    !isBodyFreeName(v) ||
-    (v as { _assignmentEvidence?: boolean })._assignmentEvidence === true ||
-    isFunctionLiteralParameter(v)
-  )
-    return undefined;
-  return bodyFreeNameHome(v);
-}
-
-/** The home scope of `sym` when it is a free name (`isFreeName()`), else
- * `undefined`. */
-function freeNameHome(
-  sym: Expression & { symbol: string }
-): object | undefined {
-  return isFreeName(sym)
-    ? (sym as { _homeScope?: object })._homeScope
-    : undefined;
 }
 
 /**

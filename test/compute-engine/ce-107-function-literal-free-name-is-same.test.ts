@@ -2,13 +2,13 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * Canonicalization wraps the body of a function literal in a `Block`, and a
- * free name that no statement types is declared in the scope of that `Block`.
- * `isSame()` compares the binding of a symbol as well as its name, so the
- * literal's `f` is not the same symbol as a global `f`. This limit is a
- * decision, not an oversight: `docs/SCOPING-MODEL.md`, "Canonical and runtime
- * scopes", states it and why it stays. These tests hold the statements of that
- * section. Each one uses its own engine, because the result depends on whether
- * `f` is already declared.
+ * free name of the body is a free name of the scope that the literal is
+ * written in: the boxing declares nothing. `isSame()` compares the binding of
+ * a symbol as well as its name, and the literal's `f` is the same binding as
+ * a global `f`. `docs/SCOPING-MODEL.md`, "Canonical and runtime scopes",
+ * states this. These tests hold the statements of that section. Each one uses
+ * its own engine, because the result depends on whether `f` is already
+ * declared.
  */
 const BOXED = ['D', ['Function', ['Block', 'f'], 'x'], 'x'];
 const LATEX = '\\frac{\\mathrm{d}f}{\\mathrm{d}x}';
@@ -67,7 +67,7 @@ describe('the free name of a function literal', () => {
     const body = literal.op1!.op1!;
     const global = ce.box('f');
     expect(body.json).toBe('f');
-    expect(body.isSame(global)).toBe(false);
+    expect(body.isSame(global)).toBe(true);
     ce.assign('f', 5);
     expect(global.evaluate().json).toBe(5);
     expect(ce.box(['Apply', literal, 3]).evaluate().json).toBe(5);

@@ -333,10 +333,7 @@ export function inScope<T>(
   });
 
   try {
-    // During boxing this temporary lexical scope is the correct restart owner
-    // for a devolved builtin shadow. Outside boxing, `withScopedRepair()` is a
-    // transparent single pass, so evaluation side effects are never repeated.
-    return ce._boxingState.withScopedRepair(scope, f);
+    return f();
   } finally {
     const popped = ce._evalContextStack.pop();
     // Mirror popEvalContext: reverting assumptions modified inside the

@@ -947,8 +947,8 @@ const CAPTURED_SYMBOLS = new WeakMap<object, readonly CapturedSymbol[]>();
  * The symbols of the body of the canonical function literal `literal` that
  * a call reads from the scope the literal is defined in, one entry for each
  * name. An occurrence is captured when it is bound to a binding outside the
- * literal, or to the valueless copy that the body scope declared for a free
- * symbol (the call reads the outer binding of the name). These are not
+ * literal, or when it is a free name (the call reads the binding that the
+ * name has then in the scope that the literal is written in). These are not
  * captured: a constant, a parameter of a function literal, a binding of a
  * nested scope of the body (the index of a `Sum`, a local of a nested
  * block), and a local of the body scope (a `let` local).
@@ -984,13 +984,20 @@ export function capturedSymbols(
   visit(body);
   for (const [name, occurrence] of occurrences) {
     const def = occurrence.valueDefinition;
-    if (def === undefined || def.isConstant || def._blockLocal === true)
+    // A free name of the body: a call reads it in the scope that the
+    // literal is written in.
+    if (def === undefined) {
+      if ((occurrence as { _isFreeName?: boolean })._isFreeName === true)
+        result.push({ name, occurrence });
       continue;
+    }
+    if (def.isConstant || def._blockLocal === true) continue;
     if (isFunctionLiteralParameter(def) || nested.has(def)) continue;
     const own = bodyScope?.bindings.get(name);
     if (own !== undefined && 'value' in own && own.value === def) {
       // A binding of the body scope is captured only when it is the
-      // valueless copy that the body scope declared for a free symbol.
+      // valueless binding that the body scope declared for a call head with
+      // no definition (`makeCanonicalFunctionCore()`).
       if (!def.inferredType || def.value !== undefined) continue;
     }
     result.push({ name, occurrence });
@@ -1017,10 +1024,8 @@ function outerBindingOf(
 }
 
 /** A binding that a call of a function literal reads for a captured symbol,
- * with its type when the type of the definition was inferred. Boxing
- * declares no outer binding for the copy
- * that the body scope declared for a free symbol: the entry then has no
- * `binding`, and the binding is found by name from `literal` when the entry
+ * with its type when the type of the definition was inferred. A free name
+ * of the body has no definition: the entry then has no `binding`, and the binding is found by name from `literal` when the entry
  * is read (`capturedTypeWidenings()`). */
 type CapturedTypeEntry = readonly [
   binding: BoxedValueDefinition | undefined,
@@ -1052,14 +1057,25 @@ export function noteDefinitionCapturedTypes(
   if (!isFunction(literal, 'Function')) return;
   const bindings: Array<CapturedTypeEntry> = [];
   // Computed once for this record, from the types of now.
-  let cells: Set<object> | undefined;
+  let cells: Set<object | string> | undefined;
   for (const entry of capturedSymbols(literal)) {
     const own = entry.occurrence.valueDefinition;
-    const copy =
-      own !== undefined && own.inferredType && own.value === undefined;
+    // A free name of the body: its type is the type of the occurrence, read
+    // in the environment of the unit, and the binding is found by name when
+    // the record is read.
+    if (own === undefined) {
+      let type = entry.occurrence.type;
+      if (type.isUnknown) {
+        cells ??= numberCellBindings(literal);
+        if (cells.has(entry.name)) type = literal.engine.type('number');
+      }
+      bindings.push([undefined, type, entry.name, literal] as const);
+      continue;
+    }
+    const copy = own.inferredType && own.value === undefined;
     const outer = copy ? outerBindingOf(literal, entry.name) : undefined;
     if (copy && outer === undefined) {
-      // A free symbol of the body that has no outer binding yet: the type
+      // A call head of the body that has no outer binding yet: the type
       // is the type of the occurrence (rule 4 of the binding units), and
       // the binding is the one that a later declaration or assignment of
       // the name makes, found by name when the record is read.
@@ -1082,7 +1098,7 @@ export function noteDefinitionCapturedTypes(
     let type = binding.type;
     if (type.isUnknown) {
       cells ??= numberCellBindings(literal);
-      if ((own !== undefined && cells.has(own)) || cells.has(binding))
+      if (cells.has(own) || cells.has(binding))
         type = literal.engine.type('number');
     }
     bindings.push([binding, type, entry.name] as const);
@@ -1104,8 +1120,8 @@ export function noteDefinitionCapturedTypes(
  * captured symbol does not count. The walk reads each node one time, so a
  * body that shares its operands is not unfolded, as in `capturedSymbols()`.
  */
-function numberCellBindings(literal: Expression): Set<object> {
-  const out = new Set<object>();
+function numberCellBindings(literal: Expression): Set<object | string> {
+  const out = new Set<object | string>();
   if (!isFunction(literal, 'Function')) return out;
   const seen = new Set<Expression>();
   const visit = (e: Expression): void => {
@@ -1115,6 +1131,13 @@ function numberCellBindings(literal: Expression): Set<object> {
       for (const op of e.ops) {
         const def = isSymbol(op) ? op.valueDefinition : undefined;
         if (def !== undefined && op.type.isUnknown) out.add(def);
+        // A free name is matched by its name.
+        else if (
+          isSymbol(op) &&
+          (op as { _isFreeName?: boolean })._isFreeName === true &&
+          op.type.isUnknown
+        )
+          out.add(op.symbol);
       }
     for (const op of e.ops) visit(op);
   };

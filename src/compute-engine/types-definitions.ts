@@ -2716,10 +2716,6 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * accepted and re-stamped, never checked against the declaration. */
   effectsDeclared: boolean;
 
-  /** True when the un-applied-operator repair created this binding.
-   * @internal */
-  _isDevolvedShadow: true | undefined;
-
   /** Snapshot the coupled type/value slots for an exact later restore via
    * {@link _restoreTypeSlots}. The result is OPAQUE — it captures private
    * fields, including states the public setters cannot express — so it is

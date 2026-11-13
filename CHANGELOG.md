@@ -133,6 +133,21 @@
   JavaScript that returned `i + 30001` and now returns `30001 + i`. The value
   is the same. A `let` local and a parameter are ordered as variables, as
   before: with `let i = floor(x)`, the code returns `i + 30001`.
+- **A name with no definition in the body of a function literal or of a
+  `Block` is the free name of the scope that the expression is written in.**
+  Boxing no longer declares a copy of it in the scope of the body. The `f` of
+  `ce.box(['Function', ['Block', 'f'], 'x'])` and a later `ce.box('f')` were
+  not `isSame` and now are; the same holds for
+  `ce.box(['Block', ['Add', 'f', 1]])`. Values are unchanged: after
+  `f := 5`, the literal applied to `3` is `5`, as before. A library operator
+  name used as a value in a body (`N` in `x ↦ N + x`) is a free name too,
+  as it is at the top level.
+- **An assignment or a declaration with a value no longer types the symbol
+  that is its value.** With `ce.declare('q', 'integer')` and
+  `ce.declare('uu', 'unknown')`, `ce.assign('q', ce.symbol('uu'))` typed `uu`
+  as `integer`; `uu` now keeps the type `unknown`. The same holds for
+  `ce.declare('r', { type: 'real', value: ce.symbol('zz') })` with `zz`
+  declared `unknown`. Declare the type of the symbol to give it one.
 
 ### New Features
 

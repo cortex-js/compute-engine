@@ -122,12 +122,12 @@ expression read another scope. The resolution skips the variables of
 binders, because a free name was not inside a binder when it was boxed, and
 it skips a library operator for a name that the expression reads as a
 variable (`N` in `N + 1`). With no definition, a free name stays symbolic.
-A free name of the body of a function literal has a definition in the scope
-of the body, which the boxing made, and is a free name for the resolution:
-it does not read the variable of a binder or a parameter of a call that has
-its name. An occurrence that has a definition keeps it: with `n: real`, the
-value of `n + 1` boxed at the top is not changed by a declaration of `n` in a
-pushed scope. A scope that was popped keeps its definitions, and an
+A name of the body of a function literal that has no definition is a free
+name of the scope that the literal is written in: the boxing declares no copy
+of it in the scope of the body, and it does not read the variable of a binder
+or a parameter of a call that has its name. An occurrence that has a
+definition keeps it: with `n: real`, the value of `n + 1` boxed at the top is
+not changed by a declaration of `n` in a pushed scope. A scope that was popped keeps its definitions, and an
 expression boxed in it reads them.
 
 **Identity.** Two occurrences are the same binding (`sameBinding()`,
@@ -631,40 +631,23 @@ the caller boxed it, into the body: `mySum(k^2, k, 3)` is `14`.
 assignments. A consumer translating a simultaneous assignment must snapshot
 all right-hand sides before committing any left-hand side.
 
-A free symbol that a `Block` does not declare is declared in the scope of the
-`Block` when the `Block` is boxed outside a function literal: after
+A free symbol that a `Block` does not declare is not declared by the boxing:
+it is a free name of the scope that the expression is written in. After
 `ce.box(['Block', ['Add', 'f', 1]])`, the `f` of the block and a later
-`ce.box('f')` are not `isSame`, but evaluation reads the same value (after
-`f := 5` the block gives `6`). A host can box a `Block` first and then make it
-the body of a function literal, and that declaration then becomes the binding
-of a parameter of the same name. A function literal behaves the same way:
-canonicalization wraps its body in a `Block`, and a free symbol that no
-statement types (a bare `f`, a tuple, an equation) is declared in the scope
-of that `Block`. So `ce.box(['Function', ['Block', 'f'], 'x'])` and a later
-`ce.box('f')` are not `isSame`, although evaluation reads the same value.
+`ce.box('f')` are `isSame`, and after `f := 5` the block gives `6`. A host can
+box a `Block` first and then make it the body of a function literal: an
+occurrence of the name of a parameter is then that parameter
+(`ce.function('Function', [ce.box(['Block', ['Add', 'x', 1]]), ce.box('x')])`
+applied to `3` is `4`). A function literal behaves the same way:
+canonicalization wraps its body in a `Block`, and a free symbol of the body is
+a free name of the scope that the literal is written in. So the `f` of
+`ce.box(['Function', ['Block', 'f'], 'x'])` and a later `ce.box('f')` are
+`isSame`, and the literal applied to `3` reads the value of `f`.
 
 Two literals made by two routes are `isSame`: on an engine where `f` is not
 declared, `ce.box(['D', ['Function', ['Block', 'f'], 'x'], 'x'])` and a later
 `ce.parse('\\frac{\\mathrm{d}f}{\\mathrm{d}x}')` are `isSame`, and both
-evaluate to `0`, also after `f := 5`. The `f` of a literal and a symbol `f`
-outside every literal are not `isSame`. A host that compares such
-expressions compares their `.json`.
-
-This limit stays by a user decision (2026-11-05), because each fix that was
-tried costs more than the `isSame` result is worth:
-
-- Declaring the free name outside the literal changes what other code
-  relies on: effect records, rollback frames, the new derivation of
-  `g(t) := 2a(t)` when `a` is defined later, and `CountIf` callbacks that must
-  not declare `q`.
-- Keeping the declaration and making `isSame` compare it as the outer binding
-  requires boxing a literal that a host builds
-  (`ce.function('Function', [block, x])`) again from its MathJSON, so that the
-  change does not reach other expressions that share the `Block`. That reads
-  every name in the current scope, which can change a value: with `y := 7`
-  declared in a pushed scope, `['Block', ['Tuple', 'f', 'y', 'x']]` boxed there,
-  the scope popped, and the literal then built and applied to `3`, the result
-  is `(f, 7, 3)` today and was `(f, y, 3)` with that fix.
+evaluate to `0`, also after `f := 5`.
 
 `test/compute-engine/ce-107-function-literal-free-name-is-same.test.ts` holds
 this behavior.

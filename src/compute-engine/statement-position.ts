@@ -108,40 +108,6 @@ export function isInBodyOrBranch(): boolean {
 }
 
 /**
- * The bindings that the engine declared for a free symbol of the body of a
- * function literal, in the scope that the literal is written in, when a use
- * of the symbol in the body narrowed its type (`_inferOnOuterBinding()`,
- * `boxed-expression/boxed-symbol.ts`). The program did not declare them.
- */
-const FREE_SYMBOL_DECLARATIONS = new WeakSet<object>();
-
-/** Record that the engine declared `def` for a free symbol of a body. */
-export function markFreeSymbolDeclaration(def: object): void {
-  FREE_SYMBOL_DECLARATIONS.add(def);
-}
-
-/**
- * True when `def` is the binding of a free symbol that the engine declared
- * (`markFreeSymbolDeclaration()`) and `hasValue` is false (no assignment
- * gave it a value), while the body of a function literal is canonicalized
- * (`enterFunctionBody()`).
- *
- * Such a binding is not a declaration for an assignment in the body. The
- * engine makes it when a use of the free symbol narrows its type, and then
- * boxes the whole expression again.
- */
-export function isFreeSymbolDeclarationInBody(
-  def: object,
-  hasValue: boolean
-): boolean {
-  return (
-    !hasValue &&
-    savedBranchDepths.length > 0 &&
-    FREE_SYMBOL_DECLARATIONS.has(def)
-  );
-}
-
-/**
  * The names that a function definition statement (`DefineFunction`, the
  * Epsil `function f(…) { … }` or `f(x) = …`) defines in the statement list
  * of the `Declare` statement that is canonicalized now, or `undefined` when

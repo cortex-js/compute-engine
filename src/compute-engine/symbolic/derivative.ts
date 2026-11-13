@@ -56,7 +56,6 @@ import { isSubtype } from '../../common/type/subtype.js';
 import {
   boundVariableBindings,
   boundVariableNamesInOperand,
-  rebindBodyFreeNames,
   rewriteWithBinders,
   sameBindingDef,
   valueDefinitionInContext,
@@ -5409,11 +5408,7 @@ function partialFromFunctionLiteral(
   names.forEach((n, i) => {
     map[n] = args[i];
   });
-  const value = substituteParameters(ce, body, map);
-  // The body leaves its literal, as the value of a call does: a copy of a
-  // free name of the body is the free name of the host
-  // (`rebindBodyFreeNames()`).
-  return rebindBodyFreeNames(value);
+  return substituteParameters(ce, body, map);
 }
 
 /**

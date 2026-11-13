@@ -42,13 +42,6 @@ export class InferenceRollbackFrame {
    * canonicalization-adjacent hot paths, and most record nothing. */
   private _journal: RollbackUndoEntry[] | null = null;
 
-  /** `EngineBoxingState` repair-frame depth when this frame opened. At
-   * close, every still-live repair frame at or above this depth must have
-   * `repairRequested` unset: a repair frame pushed and popped inside this
-   * frame's lifetime was consumed by its own rebuild loop (which ran inside
-   * this frame), so only the still-live frames need the close-time scan. */
-  readonly boxingRepairDepthAtOpen: number;
-
   /** True for a frame that must not execute the construction-level repairs
    * (`devolveUnappliedOperator`, `repairFreshMatrixInference`) — the
    * repair-free TRIAL validation mode of phase 2c, which admits repairs by
@@ -58,11 +51,7 @@ export class InferenceRollbackFrame {
    * repair helpers assert against it. */
   readonly forbidsRepairs: boolean;
 
-  constructor(options: {
-    boxingRepairDepthAtOpen: number;
-    forbidsRepairs?: boolean;
-  }) {
-    this.boxingRepairDepthAtOpen = options.boxingRepairDepthAtOpen;
+  constructor(options: { forbidsRepairs?: boolean }) {
     this.forbidsRepairs = options.forbidsRepairs ?? false;
   }
 

@@ -1057,7 +1057,6 @@ export class ComputeEngine implements IComputeEngine {
       'A rollback frame must be opened inside a boxing-pass window (see _withBoxingPassWindow)'
     );
     const frame = new InferenceRollbackFrame({
-      boxingRepairDepthAtOpen: this._boxingState.frameDepth(),
       forbidsRepairs: options?.forbidsRepairs,
     });
     this._rollbackFrames.push(frame);
@@ -1083,17 +1082,6 @@ export class ComputeEngine implements IComputeEngine {
           callable: false,
           shadowsCallable: false,
         });
-      // Every repair (devolve-shadow) frame pushed at or above the depth
-      // recorded at open and still live must have consumed its rebuild
-      // request: a request consumed by its own rebuild loop ran INSIDE this
-      // rollback frame; one still pending at close would rebuild against
-      // rolled-back state after the frame is gone.
-      console.assert(
-        !this._boxingState.hasRepairRequestedAtOrAbove(
-          frame.boxingRepairDepthAtOpen
-        ),
-        'A boxing-repair request is still pending as a rollback frame closes'
-      );
       // The body's error is never masked by an undo error in release: each
       // undo entry is caught individually (`rollback()`), and only debug
       // builds escalate the failure — with the body error attached as
@@ -4859,10 +4847,7 @@ export class ComputeEngine implements IComputeEngine {
     if (!isValueDef(def)) return true;
     const { value } = def;
     if (value.type.matches('function')) return false;
-    const hostDeclaration =
-      value.value === undefined &&
-      !value.inferredType &&
-      !value._isDevolvedShadow;
+    const hostDeclaration = value.value === undefined && !value.inferredType;
     return !hostDeclaration;
   }
 

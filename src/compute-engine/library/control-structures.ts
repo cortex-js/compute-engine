@@ -18,7 +18,6 @@ import {
   enterFunctionBody,
   exitBody,
   exitFunctionBody,
-  isFreeSymbolDeclarationInBody,
   isInBodyOrBranch,
 } from '../statement-position.js';
 import {
@@ -119,7 +118,6 @@ import type {
   Scope,
   CollectionHandlers,
   BoxedValueDefinition,
-  BoxedDefinition,
 } from '../global-types.js';
 import {
   errorValue,
@@ -4761,15 +4759,13 @@ function firstAssignmentInCase(
 
 /**
  * True when `name` has a binding that an assignment writes: a binding that
- * `lookupDefinition()` finds, other than one that the engine made for a free
- * symbol of the body of a function literal (`isUndeclaredFreeSymbol()`).
+ * `lookupDefinition()` finds.
  */
 export function isDeclaredForAssignment(
   ce: ComputeEngine,
   name: string
 ): boolean {
-  const def = ce.lookupDefinition(name);
-  return def !== undefined && !isUndeclaredFreeSymbol(def);
+  return ce.lookupDefinition(name) !== undefined;
 }
 
 /**
@@ -4955,19 +4951,6 @@ function isGenericDefinition(
   if (declared !== undefined && isPolymorphicType(declared)) return true;
   const target = ce.lookupDefinition(name);
   return isGenericTarget(target) || canonInstallSkipped(target);
-}
-
-/**
- * True when `def` is a binding that the engine made for a free symbol of
- * the body of a function literal that is canonicalized now, and that has
- * no value (`isFreeSymbolDeclarationInBody()`, `statement-position.ts`). An
- * assignment in the body does not treat it as a declaration.
- */
-export function isUndeclaredFreeSymbol(def: BoxedDefinition): boolean {
-  return (
-    isValueDef(def) &&
-    isFreeSymbolDeclarationInBody(def, def.value.value !== undefined)
-  );
 }
 
 /**

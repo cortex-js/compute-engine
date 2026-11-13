@@ -143,7 +143,6 @@ import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isWildcard } from './pattern-utils.js';
 import { isScratchBinding } from '../scratch-scopes.js';
-import { markBodyFreeName } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
@@ -1040,22 +1039,20 @@ export function checkArity(
  * Prose-style fallback for un-applied builtin operators: a single
  * uppercase-letter symbol bound to a **standard-library** operator (`N`, `D`)
  * that appears as a bare operand of a numeric function (`N + 1`, `M = N + 1`,
- * `S/D`) almost always means a variable, not the builtin. Devolve it to an
- * unknown symbol by shadowing the builtin in the current scope; its type is
- * then inferred like any other free variable.
+ * `S/D`) almost always means a variable, not the builtin. This occurrence
+ * becomes a free name that its unit reads as a variable; its type is then
+ * inferred like any other free variable. Nothing is declared.
  *
  * Only *root-scope* (standard library) bindings devolve — a user-declared
- * function used as an operand is a genuine error and is preserved. Note the
- * shadow persists in the scope: a later `N(...)` in the same scope refers to
- * the variable, not the builtin (same convention as type inference, which is
- * also use-order dependent).
+ * function used as an operand is a genuine error and is preserved. A later
+ * application `N(...)` still calls the library operator.
  *
  * The repair applies only to an operand that is itself bound to an OPERATOR
  * definition — an un-applied operator. A symbol bound to a value definition
  * has a type of its own, and re-boxing it here would silently launder the
  * parameter check it just failed.
  *
- * Returns the re-boxed symbol, or `null` if the fallback does not apply.
+ * Returns the free name, or `null` if the fallback does not apply.
  */
 function devolveUnappliedOperator(
   ce: ComputeEngine,
@@ -1066,8 +1063,7 @@ function devolveUnappliedOperator(
   // 2c's trial validation, which admits a repairable operand by
   // `isRepairableOperatorSymbol` without running the repair. An ORDINARY
   // frame (the Epsil static checking pass) legitimately reaches this: the
-  // shadow declaration below routes through `ce.declare`, which the
-  // declaration journal family rolls back.
+  // repair declares nothing, so there is nothing to roll back.
   console.assert(
     !repairsForbiddenByRollbackFrame(ce),
     'devolveUnappliedOperator must not run in trial (repair-free) validation'
@@ -1087,7 +1083,7 @@ function devolveUnappliedOperator(
 
   const def = scope.bindings.get(name)!;
   if (!scope.parent) {
-    // Bound to the standard library: shadow it in the current scope
+    // Bound to the standard library: read this occurrence as a variable
     if (!isOperatorDef(def)) return null;
     // A top-level `ce.assign('F', x ↦ x²)` hoists its definition into the
     // same parentless scope as the standard library, so scope position alone
@@ -1101,53 +1097,32 @@ function devolveUnappliedOperator(
       def.operator._isLambda
     )
       return null;
-    // The shadow is declared where an auto-declared free variable goes: in
-    // the first scope that is not marked `noAutoDeclare`. The scope of a
-    // binder (`Sum`, `Product`, `Integrate`, `D`) is marked so: the letter is
-    // a free variable of the whole expression, as `M` is in `Σ M·k`, not a
-    // local of the binder. A shadow declared in the scope of the binder is
-    // not reached by a later `ce.assign('N', 2)`: `Sum(N·k, (k, 1, 3))`
-    // evaluated to `6N` while `unknowns` no longer listed `N`.
+    // The home scope of the free name is the first scope that is not marked
+    // `noAutoDeclare`. The scope of a binder (`Sum`, `Product`, `Integrate`,
+    // `D`) is marked so: the letter is a free variable of the whole
+    // expression, as `M` is in `Σ M·k`, not a local of the binder, so a
+    // later `ce.assign('N', 2)` reaches `Sum(N·k, (k, 1, 3))`.
     let declareScope = ce.context.lexicalScope;
     while (declareScope.noAutoDeclare && declareScope.parent)
       declareScope = declareScope.parent;
-    // Boxing declares no name: the
-    // occurrence becomes a free name that its unit reads as a variable, and
-    // the resolution of the name in that unit skips the library operator
-    // (`BoxedSymbol._asFreeVariable()`, `binding-unit.ts`). A scope that
-    // the boxing created (the body of a function literal) still gets the
-    // declaration below, as a free name does (`createSymbolExpression()`).
-    if (ce._boxingState.isPersistentScope(declareScope) !== false)
-      return (
-        op as unknown as { _asFreeVariable(home: Scope): Expression }
-      )._asFreeVariable(declareScope);
-    if (declareScope === ce.context.lexicalScope) ce.declare(name, 'unknown');
-    else ce._inScope(declareScope, () => ce.declare(name, 'unknown'));
-    // Remember the shadow we just created: a later operand of the same
-    // expression still carries the stale operator binding and has to be
-    // rebound to it (see below).
-    let shadowScope: Scope | null = ce.context.lexicalScope;
-    while (shadowScope && !shadowScope.bindings.has(name))
-      shadowScope = shadowScope.parent;
-    const shadow = shadowScope?.bindings.get(name);
-    if (shadowScope && shadow && isValueDef(shadow)) {
-      shadow.value._isDevolvedShadow = true;
-      ce._boxingState.noteDevolvedShadow(shadowScope);
-      // The shadow stands for a free name of the scope that the boxing is
-      // written in, the first persistent scope up the chain.
-      let home: Scope | null | undefined = declareScope.parent;
-      while (home && ce._boxingState.isPersistentScope(home) === false)
-        home = home.parent;
-      while (home?.noAutoDeclare && home.parent) home = home.parent;
-      if (home) markBodyFreeName(shadow.value, home);
+    // Boxing declares no name: the occurrence becomes a free name that its
+    // unit reads as a variable, and the resolution of the name in that unit
+    // skips the library operator (`BoxedSymbol._asFreeVariable()`,
+    // `binding-unit.ts`). In a scope that the boxing made (the body of a
+    // function literal), its home scope is the scope that the literal is
+    // written in, as for any free name of a body (`createSymbolExpression()`).
+    while (
+      ce._boxingState.isPersistentScope(declareScope) === false &&
+      declareScope.parent
+    ) {
+      declareScope = declareScope.parent;
+      while (declareScope.noAutoDeclare && declareScope.parent)
+        declareScope = declareScope.parent;
     }
-    return ce.box(name);
+    return (
+      op as unknown as { _asFreeVariable(home: Scope): Expression }
+    )._asFreeVariable(declareScope);
   }
-  // The name was already shadowed with a value BY THIS REPAIR (e.g. by a
-  // previous operand of the same expression): rebind this occurrence to the
-  // shadow. Any other value definition — in particular a user declaration —
-  // is not a repair target.
-  if (isValueDef(def) && def.value._isDevolvedShadow) return ce.box(name);
   return null;
 }
 
@@ -1264,8 +1239,8 @@ function candidateOperand(
 
 /**
  * True when the name `name`, read in the current scope, resolves to a library
- * operator that `devolveUnappliedOperator` would repair (or to the variable
- * that repair already declared), WITHOUT binding or declaring anything. A
+ * operator that `devolveUnappliedOperator` would repair, WITHOUT binding or
+ * declaring anything. A
  * parameter of the function literal being canonicalized resolves to the
  * parameter, so it is not repaired.
  */
@@ -1286,7 +1261,7 @@ function resolvesToRepairableOperator(
         def.operator._isLambda
       )
     );
-  return isValueDef(def) && def.value._isDevolvedShadow === true;
+  return false;
 }
 
 const ANY_VALUES_SIGNATURE: FunctionSignature = {
@@ -1436,13 +1411,7 @@ export function devolveAtValuePositions(
     // not repaired stays raw, for the operator to canonicalize itself.
     // The repaired operand can be a free name that its unit reads as a
     // variable (`BoxedSymbol._asFreeVariable()`).
-    if (
-      devolved === op ||
-      !isSymbol(devolved) ||
-      (devolved.valueDefinition?._isDevolvedShadow !== true &&
-        !isFreeName(devolved))
-    )
-      return;
+    if (devolved === op || !isSymbol(devolved) || !isFreeName(devolved)) return;
     result ??= [...ops];
     result[i] = devolved;
   });

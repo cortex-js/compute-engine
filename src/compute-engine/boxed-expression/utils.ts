@@ -55,7 +55,6 @@ import {
   boundVariableNamesInOperand,
   binderBindingOf,
   callableBindingInContext,
-  rebindBodyFreeNames,
   rewriteWithBinders,
   withCallableBinding,
 } from './binders.js';
@@ -482,11 +481,7 @@ function betaReduceLambda(call: Expression): Expression | undefined {
   // evaluates it.
   if (callsAnyOf(body, new Set(Object.keys(substitution)))) return undefined;
 
-  // The body leaves its literal, as the value of a call does: a copy of a
-  // free name of the body is the free name of the host
-  // (`rebindBodyFreeNames()`).
-  const value = body.subs(substitution);
-  return rebindBodyFreeNames(value);
+  return body.subs(substitution);
 }
 
 /**

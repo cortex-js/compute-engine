@@ -5418,10 +5418,6 @@ export class BoxedFunction
     // application is rebuilt when it is evaluated again
     // (`applyFunctionLiteralWith`). A node over other operands is another
     // expression, and the source text of this node does not describe it.
-    // The evaluation of a symbol with
-    // no value can give another symbol of the same name (the free name of
-    // the host in place of the copy of a body, `rebindBodyFreeNames()`): the
-    // source text of this node still describes the result.
     const sameText =
       sameOps ||
       (ops.length === this.ops.length &&

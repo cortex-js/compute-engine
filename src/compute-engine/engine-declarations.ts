@@ -600,18 +600,6 @@ export function declareSymbolValue(
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
 
-  // If a boxing construction is running and it had earlier auto-declared this
-  // same name into a scope of its own making (a binder body's free symbol),
-  // this declaration into a longer-lived scope makes the construction's two
-  // occurrences denote different bindings — while every later boxing of the
-  // same input finds this binding first and resolves both occurrences to it.
-  // The boxing state then rebuilds the construction so its output matches
-  // every later one. A no-op outside a boxing construction, and for any name
-  // the construction did not transiently auto-declare.
-  // (First-boxing binding divergence, Tycho item 178(a)+(c) —
-  // `docs/SCOPING-MODEL.md`.)
-  ce._boxingState.noteDeclarationIn(scope, name);
-
   // State event: `shadowsCallable` must be captured BEFORE the placeholder
   // install below, while the chain still shows any shadowed binding — and
   // resolved through the TARGET scope's chain, not the engine's current
@@ -815,11 +803,6 @@ export function declareSymbolOperator(
           def.arithmetic,
           { supersedes: supersededOperator }
         );
-
-  // Same first-boxing divergence check as `declareSymbolValue` above: an
-  // operator declaration for a name the running construction transiently
-  // auto-declared also changes what later boxings resolve that name to.
-  ce._boxingState.noteDeclarationIn(scope, name);
 
   // State event: capture the shadow BEFORE the placeholder install, through
   // the TARGET scope's chain.
@@ -2857,13 +2840,9 @@ export function declareFn(
     // handler but no `signature` also has an inferred signature, and so does
     // a function literal given to `ce.assign()`. Only an operator that holds
     // nothing the author gave is upgradable (`isReplaceableOperatorShell()`).
-    //
-    // The shadow that a read of a library function as a value makes (`[N, 1]`,
-    // `devolveUnappliedOperator()`) is declared explicitly with the type
-    // `unknown`, but it also comes from a use, so it is upgradable.
     const inferred =
       (isValueDef(existing) &&
-        (existing.value.inferredType || existing.value._isDevolvedShadow) &&
+        existing.value.inferredType &&
         existing.value.value === undefined) ||
       (isOperatorDef(existing) &&
         isReplaceableOperatorShell(existing.operator));
@@ -4164,27 +4143,6 @@ function assignNamedValue(
     // `docs/plans/2026-08-30-assumptions-write-audit.md`).
     const valueDef = def.value;
     ce._withoutFacts(() => deriveAndWriteAssignedType(ce, valueDef, value));
-
-    // A symbol with no value and no type that becomes the value of a symbol
-    // with a DECLARED type is a use of that symbol at the declared type, as
-    // an argument of a declared parameter is: narrow it. Without this,
-    // `q: integer := uu` left `uu` typed `unknown`, and `Tuple(q)` was typed
-    // `tuple<integer>` while its value was typed `tuple<unknown>`. A symbol
-    // that has a value or a type is not changed: the check above holds it to
-    // the declared type.
-    if (
-      !valueDef.inferredType &&
-      !valueDef.type.isUnknown &&
-      isSymbol(value) &&
-      value.type.isUnknown &&
-      value.value === undefined
-    ) {
-      const contract =
-        valueDef._placeholderSkeleton !== undefined
-          ? valueDef._placeholderSkeleton
-          : valueDef.type.type;
-      value._infer(() => contract, 'narrow');
-    }
 
     // ... and set the value. A value admitted on overlap only is recorded,
     // so that each read of the symbol tests its evaluated value against the

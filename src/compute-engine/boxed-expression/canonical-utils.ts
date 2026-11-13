@@ -305,13 +305,8 @@ function isArithmeticOverFreeSymbols(
 export function narrowFreeSymbolCells(list: Expression): Expression {
   if (!isFunction(list)) return list;
   let candidates: Expression[] | undefined;
-  let elements: Expression[] | undefined;
   for (const op of list.ops) {
-    if (isFreeSymbolCell(op)) (elements ??= []).push(op);
-    else if (
-      isFunction(op) &&
-      FREE_SYMBOL_ARITHMETIC_OPERATORS.has(op.operator)
-    ) {
+    if (isFunction(op) && FREE_SYMBOL_ARITHMETIC_OPERATORS.has(op.operator)) {
       // The operator is tested first: reading the type of every element of
       // a large list here would compute the element types during the
       // canonical form, before any reader asks for them.
@@ -320,7 +315,7 @@ export function narrowFreeSymbolCells(list: Expression): Expression {
         (candidates ??= []).push(...symbols);
     }
   }
-  if (candidates === undefined && elements === undefined) return list;
+  if (candidates === undefined) return list;
   const t = list.type.type;
   if (typeof t === 'string' || t.kind !== 'list') return list;
   const e = t.elements;
@@ -331,15 +326,6 @@ export function narrowFreeSymbolCells(list: Expression): Expression {
       e.types.some((x) => x === 'unknown'))
   )
     return list;
-  for (const op of candidates ?? []) op._infer(() => 'number', 'narrow');
-  // A free symbol that is an element is not inferred. In the body of a
-  // function literal, it is bound to its outer binding with no inference
-  // (`_bindToOuterBinding()`, `boxed-symbol.ts`), so that the type of the
-  // list, which reads it as a number cell, follows that binding. The method
-  // is not on the `Expression` interface, and a type import of `BoxedSymbol`
-  // here makes a circular import (`npm run check:deps`), so the call is cast.
-  // It is not an optional call: if the method is renamed, the call throws.
-  for (const op of elements ?? [])
-    (op as unknown as { _bindToOuterBinding(): void })._bindToOuterBinding();
+  for (const op of candidates) op._infer(() => 'number', 'narrow');
   return list;
 }

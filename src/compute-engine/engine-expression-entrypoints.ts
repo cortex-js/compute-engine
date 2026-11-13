@@ -19,8 +19,6 @@ import {
 } from './boxed-expression/type-provenance.js';
 import { NumericValue } from './numeric-value/types.js';
 import { isRational } from './numerics/rationals.js';
-import { markFreeSymbolDeclaration } from './statement-position.js';
-import { markBodyFreeName } from './boxed-expression/binders.js';
 import { freeNameHomeScope } from './binding-unit.js';
 import type { Rational } from './numerics/types.js';
 import type {
@@ -313,7 +311,7 @@ export function createSymbolExpression(
   const result = Object.hasOwn(commonSymbols, name)
     ? commonSymbols[name]
     : undefined;
-  let def = engine.lookupDefinition(name);
+  const def = engine.lookupDefinition(name);
   // An interned symbol (`Pi`, `ExponentialE`, `Nothing`, …) is created once,
   // at startup, bound to its LIBRARY definition. Return it only while that is
   // still the definition the name resolves to: a user binding of the same
@@ -349,94 +347,42 @@ export function createSymbolExpression(
   // Boxing declares no name
   // (`binding-unit.ts`): a name with no definition is a free name, a
   // canonical symbol with no definition, whose home scope is the scope that
-  // the declaration below would go in. This applies to a scope that existed
-  // before the boxing started, and to a symbol made outside a boxing. A
-  // scope that the boxing made (the body of a function literal) still gets
-  // the declaration below. The home scope skips the scope of a binder also
+  // an automatic declaration would go in. This applies to a scope that
+  // existed before the boxing started, and to a symbol made outside a
+  // boxing. The home scope skips the scope of a binder also
   // when the name is boxed outside the canonicalization of the binder
   // (`freeNameHomeScope()`).
   const homeScope = freeNameHomeScope(autoScope);
-  if (engine._boxingState.isPersistentScope(homeScope) !== false) {
-    engine._boxingState.noteRootFreeName(name);
+  if (engine._boxingState.isPersistentScope(homeScope) !== false)
     return new BoxedSymbol(engine, name, { metadata, homeScope });
-  }
-  // In a scope that the boxing made, a name that the construction took as
-  // the free name of an enclosing persistent scope (a free symbol of a
-  // binder body that is also a free name outside the body,
-  // `EngineBoxingState.noteOuterFreeName()`) is that free name.
-  const home = engine._boxingState.outerFreeNameHome(name);
-  if (home !== undefined) {
-    for (let s: typeof autoScope | null = autoScope; s; s = s.parent)
-      if (s === home)
-        return new BoxedSymbol(engine, name, { metadata, homeScope: home });
-  }
-  def = engine._declareSymbolValue(
-    name,
-    { type: 'unknown', inferred: true },
-    autoScope
-  );
-  // When the target scope was created BY the running boxing construction (a
-  // function body's scope — recreated fresh by every boxing of the same
-  // input), record the name with the boxing state. If a sibling occurrence
-  // OUTSIDE the binder later declares the same name into a scope that
-  // outlives the construction, the construction is rebuilt so this occurrence
-  // resolves to that binding — the resolution every later boxing of the same
-  // input performs. Without the rebuild, the first-ever boxing of such a
-  // shape binds the two occurrences differently and compares `isSame` false
-  // against every later one.
-  // (First-boxing binding divergence, Tycho item 178(a)+(c) —
-  // `docs/SCOPING-MODEL.md`.)
-  // The binding is also marked as the binding of a free symbol: in the body
-  // of a function literal, an assignment does not treat it as a declaration
-  // (`isFreeSymbolDeclarationInBody()`, `statement-position.ts`).
-  if (engine._boxingState.isPersistentScope(autoScope) === false) {
-    engine._boxingState.noteTransientAutoDeclare(name);
-    markFreeSymbolDeclaration(def);
-    if (isValueDef(def))
-      markBodyFreeName(
-        def.value,
-        bodyFreeNameHomeScope(engine, name, autoScope)
-      );
-  }
-  const freeSym = new BoxedSymbol(engine, name, { metadata, def });
-  // Provenance: binding created as a side effect of boxing a free symbol —
-  // see the annotated-parameter branch above for the contract (creation
-  // only, occurrence as cause).
-  if (isValueDef(def))
-    recordTypeProvenance(engine, def.value, {
-      type: def.value.type,
-      kind: 'auto-declared',
-      axis: 'type',
-      cause: freeSym,
-      epoch: currentBoxingEpoch(engine),
-    });
-  return freeSym;
+  // In a scope that the boxing made (the body of a function literal), a name
+  // with no definition is a free name of the scope that the literal is
+  // written in.
+  return new BoxedSymbol(engine, name, {
+    metadata,
+    homeScope: bodyFreeNameHomeScope(engine, autoScope) ?? homeScope,
+  });
 }
 
 /**
- * The home scope of the free name
- * `name` whose copy a boxing declares in `autoScope`, a scope that the
- * boxing made (the body of a function literal). It is the home scope that
- * the name would have if it were boxed in the first persistent scope up the
+ * The home scope of a free name boxed in `autoScope`, a scope that the
+ * boxing made (the body of a function literal): the home scope that the
+ * name would have if it were boxed in the first persistent scope up the
  * chain, the scope that the literal is written in (rule 1 of
- * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), adjusted by the
- * operation in progress as the home of a free name is (`homeScopeOf()`).
- * `sameBinding()` (`compare.ts`) reads it: the copy and a free name of that
- * home scope are the same binding when the name resolves to no definition.
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`). The operation in
+ * progress adjusts it as it adjusts the home of every free name
+ * (`homeScopeOf()`, applied by the `BoxedSymbol` constructor).
  */
 function bodyFreeNameHomeScope(
   engine: SymbolHost,
-  name: string,
   autoScope: import('./global-types.js').Scope
-): object | undefined {
+): import('./global-types.js').Scope | undefined {
   let scope = autoScope.parent;
   while (scope && engine._boxingState.isPersistentScope(scope) === false)
     scope = scope.parent;
   if (!scope) return undefined;
   while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
-  const home = freeNameHomeScope(scope);
-  const operation = engine._boxingState.currentOperation();
-  return operation !== undefined ? operation.homeScopeOf(name, home) : home;
+  return freeNameHomeScope(scope);
 }
 
 /**

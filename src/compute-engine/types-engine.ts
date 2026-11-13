@@ -2624,10 +2624,7 @@ export interface IComputeEngine {
    * the boundary of the lowest function-literal frame of the
    * shadowed-parameter stack that is on the current scope chain.
    * `undefined` when no function literal is being canonicalized here.
-   * A use of a free symbol of the body is written on the binding of this
-   * scope, as a use of the symbol outside the literal is, because a call
-   * of the literal reads that binding (`_inferOnOuterBinding()`,
-   * `boxed-expression/boxed-symbol.ts`). @internal */
+   * @internal */
   _functionLiteralDefiningScope(): Scope | undefined;
   /** The binding already auto-declared for an active shadowed parameter during
    * the current body's canonicalization, if any. @internal */

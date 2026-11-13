@@ -549,38 +549,6 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     expect(reads).toBe(30);
   });
 
-  test('a rebuild removes the requirements of the discarded pass', () => {
-    const ce = engine();
-    const state = new EngineBoxingState<object>();
-    const env = new UnitEnvironment();
-    const scope = {};
-    env.set(scope, 'a', ce.type('real'));
-    env.setScalarUsesMap(scope, 'a', true);
-    let pass = 0;
-    state.withRootRepair(() => {
-      pass += 1;
-      state.setUnitEnvironment(env);
-      state.noteUnitWrite(env);
-      if (pass === 1) {
-        env.set(scope, 'a', ce.type('integer'));
-        env.setScalarUsesMap(scope, 'a', undefined);
-        env.set(scope, 'b', ce.type('boolean'));
-        // Ask for a rebuild of the root construction.
-        state.noteDevolvedShadow(scope);
-      } else env.set(scope, 'c', ce.type('string'));
-      return pass;
-    });
-    expect(pass).toBe(2);
-    expect(env.get(scope, 'a')?.toString()).toBe('real');
-    expect(env.scalarUsesMap(scope, 'a')).toBe(true);
-    expect(env.get(scope, 'b')).toBeUndefined();
-    expect(env.get(scope, 'c')?.toString()).toBe('string');
-    // The journal is closed when the root construction ends.
-    env.set(scope, 'd', ce.type('real'));
-    env.undoJournal();
-    expect(env.get(scope, 'd')?.toString()).toBe('real');
-  });
-
   test('an exception removes the requirements of the failed pass', () => {
     const ce = engine();
     const state = new EngineBoxingState<object>();
@@ -632,55 +600,6 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     expect(envY.get(scope, 'y')?.toString()).toBe('integer');
   });
 
-  test('a rebuild removes the writes in an environment opened in a scoped frame', () => {
-    const ce = engine();
-    const state = new EngineBoxingState<object>();
-    const envX = new UnitEnvironment();
-    const envY = new UnitEnvironment();
-    const scope = {};
-    let scopedPasses = 0;
-    state.withRootRepair(() => {
-      state.noteUnitWrite(envX);
-      envX.set(scope, 'x', ce.type('real'));
-      state.withScopedRepair(scope, () => {
-        scopedPasses += 1;
-        state.noteUnitWrite(envX);
-        state.noteUnitWrite(envY);
-        if (scopedPasses === 1) {
-          envX.set(scope, 'a', ce.type('boolean'));
-          envY.set(scope, 'b', ce.type('boolean'));
-          state.noteDevolvedShadow(scope);
-        }
-        return scopedPasses;
-      });
-      return 0;
-    });
-    expect(scopedPasses).toBe(2);
-    expect(envX.get(scope, 'x')?.toString()).toBe('real');
-    expect(envX.get(scope, 'a')).toBeUndefined();
-    expect(envY.get(scope, 'b')).toBeUndefined();
-  });
-
-  test('the undo of the environment of a discarded pass does not widen the caches', () => {
-    const ce = engine();
-    const state = new EngineBoxingState<object>();
-    const scope = {};
-    let pass = 0;
-    const envs: UnitEnvironment[] = [];
-    state.withRootRepair(() => {
-      pass += 1;
-      const env = state.unitEnvironment()!;
-      envs.push(env);
-      state.noteUnitWrite(env);
-      env.set(scope, 'x', ce.type('integer'));
-      if (pass === 1) state.noteDevolvedShadow(scope);
-      return pass;
-    });
-    expect(pass).toBe(2);
-    // The second pass has an environment of its own.
-    expect(envs[1]).not.toBe(envs[0]);
-  });
-
   test('two operands from two units and a throwing pass: no requirement kept', () => {
     const ce = engine();
     const x = ce.parse('x');
@@ -698,36 +617,6 @@ describe('BINDING UNITS: ENVIRONMENTS', () => {
     expect(x.type.toString()).toBe(typeX);
     expect(y.type.toString()).toBe(typeY);
     expect([envOf(x)!.counter, envOf(y)!.counter]).not.toEqual(before);
-  });
-
-  test('a rebuild of a scoped frame removes only the writes of that frame', () => {
-    const ce = engine();
-    const state = new EngineBoxingState<object>();
-    const env = new UnitEnvironment();
-    const root = {};
-    const scope = {};
-    let rootPasses = 0;
-    let scopedPasses = 0;
-    state.withRootRepair(() => {
-      rootPasses += 1;
-      state.setUnitEnvironment(env);
-      state.noteUnitWrite(env);
-      env.set(root, 'a', ce.type('real'));
-      state.withScopedRepair(scope, () => {
-        scopedPasses += 1;
-        if (scopedPasses === 1) {
-          env.set(scope, 'b', ce.type('boolean'));
-          state.noteDevolvedShadow(scope);
-        } else env.set(scope, 'c', ce.type('string'));
-        return scopedPasses;
-      });
-      return rootPasses;
-    });
-    expect(rootPasses).toBe(1);
-    expect(scopedPasses).toBe(2);
-    expect(env.get(root, 'a')?.toString()).toBe('real');
-    expect(env.get(scope, 'b')).toBeUndefined();
-    expect(env.get(scope, 'c')?.toString()).toBe('string');
   });
 
   test('an undo of the record of the uses only does not widen the caches', () => {

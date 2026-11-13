@@ -1,7 +1,7 @@
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { isDeclaredLocal } from './declared-local.js';
 import { anyMacroDeclared, expandMacro } from './macro.js';
-import { isScratchBinding, scratchRootOf } from '../scratch-scopes.js';
+import { isScratchBinding } from '../scratch-scopes.js';
 import { noteKindTypeDeclaration } from './residue-class.js';
 import type {
   MathJsonExpression,
@@ -138,13 +138,10 @@ import {
   evaluateInOwnBindings,
   evaluateInOwnBindingsAsync,
   bindingInContext,
-  bodyFreeNameHome,
   freeNameBindingAndScope,
   homeChainBinding,
   readsActivation,
-  isBodyFreeName,
   isBlockLocalBinding,
-  rebindBodyFreeNames,
   sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
@@ -153,14 +150,11 @@ import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { beginStoreGuard } from './store-guard.js';
-import { isFunctionLiteralParameter } from './function-literal.js';
 import {
   staticBindingIn,
   staticParentOf,
   withStaticTypingView,
 } from '../static-typing-view.js';
-import { markFreeSymbolDeclaration } from '../statement-position.js';
-import { isProvisionalHead } from './provisional-application.js';
 import {
   asyncEvaluationOf,
   beginAsyncEvaluation,
@@ -1169,9 +1163,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * of a `Sum`, a local of a block) is still narrowed by its uses: the
    * boxing state records each definition made during the
    * construction (`EngineBoxingState.noteDefinitionMade()`). A definition
-   * that the construction made in a scope that existed before it (the
-   * declaration of a free name of the body of a function literal in the
-   * scope that the literal is written in, `_inferOnOuterBinding()`) outlives
+   * that the construction made in a scope that existed before it outlives
    * the construction, and its uses write in the environment. The scope of a
    * made definition is found on the chain of the current scope; when it is
    * not there, on the lexical chains that existed when the construction
@@ -1283,11 +1275,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // body of `(a: real) ↦ …` is not the parameter, and the `i` of the
       // closed form of `∫₀¹ i·x dx`, declared in a scope that was popped,
       // is not the constant `i`.
-      // A free name of the body of a function literal has no binding of
-      // its own outside the body: it reads its name, as a free name does
-      // (`markBodyFreeName()`). With `f := x ↦ 1 + a x`, the type of `f`
-      // follows a later assignment of `a`.
-      (this._ownDefinitionOnChain(v) || isBodyFreeName(v)) &&
+      this._ownDefinitionOnChain(v) &&
       // A local of a block, when the definition of the occurrence is not
       // one, is the local of a block that the occurrence was not written in
       // (the type of the body of a function read at a call in the block):
@@ -1402,18 +1390,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
-   * A free name of the same name as
-   * this symbol, with the home scope `home`. The value of a call of a
-   * function literal puts it in place of a copy of a free name of the body
-   * (`markBodyFreeName()`), so the value is the binding of the host's name
-   * (`rebindBodyFreeNames()`, `binders.ts`).
-   * @internal
-   */
-  _asFreeName(home: Scope): BoxedSymbol {
-    return new BoxedSymbol(this.engine, this._id, { homeScope: home });
-  }
-
-  /**
    * For a free name: the definition that its name resolves to in the current
    * context (`freeNameBindingInContext()`). The resolution skips a library
    * operator when the unit of the occurrence reads the name as a variable
@@ -1450,10 +1426,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   /**
    * For a symbol bound to `def`, a definition that is not read in an
    * activation (`readsActivation()`): the definition that its name resolves
-   * to from its home chain (`homeChainBinding()`). A copy of a free name of
-   * the body of a function literal (`markBodyFreeName()`) resolves as that
-   * free name does, from the scope that the literal is written in, and reads
-   * `def`, which has no value, when the name has no definition there.
+   * to from its home chain (`homeChainBinding()`).
    */
   private _homeBinding(def: BoxedDefinition): BoxedDefinition | undefined {
     const home = this._defHome;
@@ -1462,19 +1435,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // As for a free name (`_freeNameBinding()`), the type version is the key.
     const cached = this._cachedResolution(version, false);
     if (cached !== undefined) return cached.def;
-    const bodyHome = isValueDef(def)
-      ? (bodyFreeNameHome(def.value) as Scope | undefined)
-      : undefined;
-    const found =
-      bodyHome !== undefined
-        ? (freeNameBindingAndScope(
-            this.engine,
-            this._id,
-            bodyHome,
-            isValueDef(def) && def.value._isDevolvedShadow === true,
-            bodyHome
-          ) ?? { def, scope: undefined })
-        : homeChainBinding(this._id, def, home);
+    const found = homeChainBinding(this._id, def, home);
     this._resolution = { version, variable: false, ...found };
     return found.def;
   }
@@ -1584,141 +1545,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return binding !== this._def && scope.binderNames?.has(name) === true;
     }
     return false;
-  }
-
-  /**
-   * Bind a free symbol of the body of a function literal that is being
-   * canonicalized to its outer binding, with no inference: when the symbol
-   * has no outer binding, it is declared in the scope that the outermost
-   * literal is written in, with the inferred type `unknown`. The guards are
-   * those of `_inferOnOuterBinding()`.
-   *
-   * A list literal calls this for each of its elements that is a symbol
-   * (`narrowFreeSymbolCells()`, `canonical-utils.ts`). The list does not
-   * require a type of the symbol, so nothing is narrowed. But the body must
-   * read the outer binding, as a list written outside a literal does: the
-   * type of the list then reads the symbol as a number cell (`() ↦ [x]` is
-   * typed `() -> vector<1>`), and that type follows a later assignment of the
-   * outer binding. A valueless copy in the scope of the body is hidden by a
-   * call, so a type read from the copy did not follow that assignment.
-   *
-   * A binding with assignment evidence (a local of the body that an
-   * `Assign` gives a value, `t` in `function g(c) { if c { t = h() }; [t] }`)
-   * is not a copy of an outer binding, and is left as it is: `_infer()`
-   * does not reach the outer binding for it either. Declaring it outside
-   * made the assignment a write outside the function.
-   */
-  _bindToOuterBinding(): void {
-    if (this.engine._resolveOnlyDepth > 0) return;
-    const def = this._def;
-    if (def === undefined || !isValueDef(def)) return;
-    if (def.value._assignmentEvidence) return;
-    if (!def.value.inferredType && !def.value.type.isUnknown) return;
-    if (this.isShadowedByBinder()) return;
-    this._inferOnOuterBinding('unknown');
-  }
-
-  /**
-   * Write the narrowing `t` of this symbol on its outer binding too, when
-   * this symbol is a free symbol of the body of a function literal that is
-   * being canonicalized, bound to the copy that the body scope declared for
-   * it.
-   *
-   * A free symbol of a body (`y` in `x ↦ x + y`) that has no binding yet
-   * is declared in the scope of the body. A call of the literal hides that
-   * valueless copy and reads the binding of the scope that the literal is
-   * written in. So a narrowing written only on the copy (`x + y` infers
-   * `y: number`) gave the literal a type that relied on `y: number` while
-   * the outer `y` could hold a string. The narrowing is written on the
-   * outer binding as a use of the symbol outside the literal writes it: the
-   * outer binding is narrowed, or it is declared with the type `t` (an
-   * inferred type) in the scope that the outermost literal is written in.
-   * That declaration also requests a rebuild of the expression that is being
-   * boxed (`noteDeclarationIn()`, `engine-boxing-state.ts`): the rebuild binds
-   * the body to the outer binding, and the type of the literal then follows
-   * a later assignment of that binding.
-   *
-   * A list literal calls this with `unknown` (`_bindToOuterBinding()`): it
-   * narrows nothing, and only binds the body to the outer binding.
-   *
-   * A narrowing to a function type is not written: an unresolved call head
-   * has its own mechanism (`markForwardCallReference()`).
-   * (User decision 2026-10-25, option (a) of CE-473 in `ROADMAP.md`.)
-   */
-  private _inferOnOuterBinding(t: Type): void {
-    const ce = this.engine;
-    const boundary = ce._functionLiteralDefiningScope();
-    if (boundary === undefined) return;
-    if (isSubtype(t, 'function')) return;
-    const def = this._def;
-    if (def === undefined || !isValueDef(def)) return;
-    const value = def.value;
-    if (
-      value.isConstant ||
-      value.value !== undefined ||
-      value._blockLocal === true ||
-      isFunctionLiteralParameter(value)
-    )
-      return;
-    const name = this._id;
-    if (name.startsWith('_') || ce._isShadowedParameter(name)) return;
-    // A narrowing that comes from a reading the engine revises later is not
-    // written outside: the product reading of a juxtaposition whose head has
-    // no definition yet (`(g)(t)` read as `g·t`) is re-derived as an
-    // application when `g` gets a function definition
-    // (`repairProvisionalDependents()`), and an outer binding narrowed to
-    // `number` would stop that repair.
-    if (isProvisionalHead(name)) return;
-    // The scope of the copy: a scope between the current scope and the
-    // scope that the outermost literal is written in. A binding at or above
-    // that scope is already the outer binding.
-    let home: Scope | undefined;
-    for (
-      let s: Scope | null | undefined = ce.context?.lexicalScope;
-      s && s !== boundary;
-      s = s.parent
-    ) {
-      const b = s.bindings.get(name);
-      if (b === undefined) continue;
-      if (b === def) home = s;
-      break;
-    }
-    if (home === undefined) return;
-    if (home.binderNames?.has(name) === true) return;
-    let outerScope = boundary;
-    while (outerScope.noAutoDeclare && outerScope.parent)
-      outerScope = outerScope.parent;
-    for (let s: Scope | null | undefined = boundary; s; s = s.parent) {
-      const b = s.bindings.get(name);
-      if (b === undefined) continue;
-      if (!isValueDef(b)) return;
-      ce._bindingSymbol(name, s)?._infer(() => t, 'narrow');
-      return;
-    }
-    // Inside a resolve-only region (serialization), `_infer()` narrows a
-    // binding declared under a scratch scope, and reaches this function. A
-    // declaration in `outerScope` lasts after the region unless that scope
-    // is under a registered scratch scope, so it is made only in that case.
-    if (ce._resolveOnlyDepth > 0 && scratchRootOf(ce, outerScope) === undefined)
-      return;
-    // Boxing declares no name: the
-    // narrowing is a requirement on the free name, under its home scope (the
-    // scope that the literal is written in), in the environment of the unit
-    // (`binding-unit.ts`). A call of the literal reads the binding of that
-    // scope by name.
-    if (ce._boxingState.isPersistentScope(outerScope) !== false) {
-      new BoxedSymbol(ce, name, { homeScope: outerScope })._infer(
-        () => t,
-        'narrow'
-      );
-      ce._boxingState.noteOuterFreeName(outerScope, name);
-      return;
-    }
-    // The binding is marked: it is not a declaration for an assignment in
-    // the body (`isFreeSymbolDeclarationInBody()`, `statement-position.ts`).
-    markFreeSymbolDeclaration(
-      ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope)
-    );
   }
 
   private _inferWithoutFacts(
@@ -1955,8 +1781,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           )
             alias._infer(() => inferred.type, 'narrow');
         }
-        if (inferenceMode === 'narrow')
-          this._inferOnOuterBinding(inferred.type);
         return true;
       }
       return false;
@@ -2904,10 +2728,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       ) {
         const binding = this._contextBinding();
         const expr = valueOfBinding(binding);
-        // With no value, a copy of a free name of the body of a function
-        // literal evaluates to the free name of the host, as the value of a
-        // call has it (`rebindBodyFreeNames()`).
-        if (expr === undefined) return rebindBodyFreeNames(this);
+        if (expr === undefined) return this;
         // The exact evaluation, which a numeric read tests (`_testedRead()`).
         const exact = options?.numericApproximation
           ? { ...options, numericApproximation: false }

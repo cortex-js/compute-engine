@@ -178,10 +178,11 @@ describe('BINDING UNITS: THE COPY OF A FREE NAME OF A BODY', () => {
     expect(literal.isSame(value)).toBe(true);
   });
 
-  test('a copy taken out of its literal is not the free name', () => {
+  test('a free name taken out of its literal is the free name', () => {
+    // The boxing declares no copy of `f` in the scope of the body.
     const ce = engine();
     const literal = ce.box(['Function', ['Block', 'f'], 'x']);
-    expect(literal.op1!.op1!.isSame(ce.box('f'))).toBe(false);
+    expect(literal.op1!.op1!.isSame(ce.box('f'))).toBe(true);
   });
 
   test('a copy that became the parameter of a literal is a parameter', () => {

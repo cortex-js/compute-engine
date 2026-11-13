@@ -13,7 +13,6 @@ import {
   evaluateInOwnBindings,
   isParameterActivation,
   markCallableFrame,
-  rebindBodyFreeNames,
   rebindToBindings,
   rewriteWithBinders,
   sameBindingDef,
@@ -7325,14 +7324,12 @@ export function inlineCallParameters(
  * as a library operator gives for an operand of the wrong type. `undefined`
  * when each captured value is of its type.
  *
- * The type of the literal relies on the type of each captured symbol. The
- * use-inference writes on the outer binding of the symbol too
- * (`_inferOnOuterBinding()`, `boxed-expression/boxed-symbol.ts`), and an
- * assignment of a value of another type to that binding changes its type,
- * and so the type of the literal. But a value can reach a binding that the
- * inference did not see: a body that kept a copy of the symbol in its own
- * scope (the narrowing was made where no expression was being boxed), or a
- * host that writes the value of a definition directly. Without this check,
+ * The type of the literal relies on the type of each captured symbol. A
+ * free name of the body reads the binding that its name has in the scope
+ * that the literal is written in, and an assignment of a value of another
+ * type to that binding changes its type, and so the type of the literal.
+ * But a value can reach a binding without changing its type: a host that
+ * writes the value of a definition directly. Without this check,
  * the call then gave a value outside its static type.
  *
  * `capturedScope` is the scope the literal was defined in, the parent of
@@ -9113,13 +9110,6 @@ function makeLambda(
         }
       }
 
-      // The value leaves the call: a copy of a free name of the body is the
-      // free name of the host (`rebindBodyFreeNames()`).
-      const unrebound = result;
-      result = rebindBodyFreeNames(result);
-      if (viewsMade && result !== unrebound)
-        carryLazyViewContexts(unrebound, result);
-
       // Honor a numeric-approximation request (`N(f(2))`) by approximating
       // the (exactly-evaluated) result HERE, while the function's scope
       // frame is still pushed. Approximating after the frame is popped
@@ -9783,21 +9773,6 @@ export function isApplicableDef(def: BoxedDefinition): boolean {
     const value = (def as { value: BoxedValueDefinition }).value;
     const t = value.type;
     const tt = t.type;
-    // The variable that the repair of `devolveUnappliedOperator`
-    // (`validate.ts`) declares when a library operator name is used as a
-    // value (`[N, 1]`, `∫ N dt`) stays applicable only once its type says it
-    // holds a function. Its type is often still `unknown` (no numeric use
-    // narrowed it), and an `unknown` binding is applicable: `N(2.3)` then
-    // called the variable, not the library operator, for the lifetime of the
-    // engine.
-    if (value._isDevolvedShadow === true)
-      return (
-        !t.isUnknown &&
-        tt !== 'any' &&
-        tt !== 'value' &&
-        tt !== 'unknown' &&
-        t.matches('function')
-      );
     if (t.isUnknown) return true;
     if (tt === 'any' || tt === 'value' || tt === 'unknown') return true;
     return t.matches('function');

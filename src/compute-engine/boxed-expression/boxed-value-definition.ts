@@ -398,11 +398,6 @@ export class _BoxedValueDefinition
   // It counts frames, not a state of the record.
   _holders = 0;
 
-  // True when this binding was created to shadow a standard-library operator
-  // used as a bare value (`N + 1`, `S / D`). This provenance belongs to the
-  // binding itself; replacing the definition naturally discards the marker.
-  _isDevolvedShadow: true | undefined = undefined;
-
   // Bumped on every semantic change to THIS definition (value write, type
   // change, disposal). Used with binding-identity re-resolution to validate
   // per-dependency caches (the `Comprehension` element memo) without an
@@ -619,21 +614,6 @@ export class _BoxedValueDefinition
           } else {
             throw declaredTypeError(this.name, this._value, this._type);
           }
-        }
-        // A symbol with no value and no type as the value of a DECLARED type
-        // is a use of that symbol at the declared type: narrow it, as the
-        // assignment route does (`assignFn`, `engine-declarations.ts`).
-        // Without this, `ce.declare('r', { type: 'real', value: zz })` left
-        // `zz` typed `unknown`, a type that the declared `real` does not
-        // contain.
-        else if (
-          !this.inferredType &&
-          isSymbol(this._value) &&
-          this._value.type.isUnknown &&
-          this._value.value === undefined
-        ) {
-          const contract = this._placeholderSkeleton ?? this._type.type;
-          this._value._infer(() => contract, 'narrow');
         }
         // A declared placeholder skeleton refines from the initializer,
         // exactly as it refines from an assignment (Phase 1 rulings, ruled
@@ -1020,7 +1000,6 @@ export class _BoxedValueDefinition
       _isConstant: this._isConstant,
       _deadStack: this._deadStack,
       _deadScope: this._deadScope,
-      _isDevolvedShadow: this._isDevolvedShadow,
       disposed: this.disposed,
       holdUntil: this.holdUntil,
       eq: this.eq,
@@ -1065,7 +1044,6 @@ export class _BoxedValueDefinition
     this._isConstant = s._isConstant as boolean;
     this._deadStack = s._deadStack as string | undefined;
     this._deadScope = s._deadScope as string | undefined;
-    this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
     this.disposed = s.disposed as boolean;
     this.holdUntil = s.holdUntil as 'never' | 'evaluate' | 'N';
     this.eq = s.eq as typeof this.eq;

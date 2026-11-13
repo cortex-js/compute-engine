@@ -125,25 +125,23 @@ describe('a declared FUNCTION SIGNATURE still refuses an unknown value', () => {
 // with a declared type is a use of that symbol at the declared type. It is
 // narrowed, as an argument at a declared parameter is, so that the static type
 // of an expression that reads the declared symbol holds its value.
-describe('a valueless untyped symbol as the value of a declared symbol is narrowed', () => {
+describe('a valueless untyped symbol as the value of a declared symbol is not narrowed', () => {
+  // An assignment or a declaration types the name it writes, not a second
+  // name that is its value.
   test('assign route', () => {
     const ce = new ComputeEngine();
     ce.declare('q', 'integer');
-    // The occurrence of `uu` in the value is narrowed; a new boxing of `uu`
-    // is another unit, which does not read it.
     const uu = ce.box('uu');
     ce.assign('q', uu);
-    expect(uu.type.toString()).toBe('integer');
-    const t = ce.box(['Tuple', 'q']);
-    expect(t.type.toString()).toBe('tuple<integer>');
-    expect(t.evaluate().type.toString()).toBe('tuple<integer>');
+    expect(uu.type.toString()).toBe('unknown');
+    expect(ce.box(['Tuple', 'q']).type.toString()).toBe('tuple<integer>');
   });
 
   test('declare-with-value route', () => {
     const ce = new ComputeEngine();
     const zz = ce.box('zz');
     ce.declare('r', { type: 'real', value: zz });
-    expect(zz.type.toString()).toBe('real');
+    expect(zz.type.toString()).toBe('unknown');
   });
 
   test('a symbol with a value is not narrowed', () => {

@@ -23,19 +23,16 @@
  * `_writeVersion` continuity) stays load-bearing when either side holds a
  * value.
  *
- * Test doctrine (lazy-collection rounds): budgets are pinned on the
- * `facetComputeCount()` module counter — never wall-clock — with
- * non-vacuity floors. The swap is performed at the seam (replacing the
- * pinned wrapper's inner definition directly), which is byte-for-byte what
- * the auto-declare route does: no state event, no version bump.
+ * Since the boxing declares no copy of a free name of a function body, the
+ * `c` of `R_xz` is a free name with no definition: there is no inner
+ * definition to swap, and the test of the swap is gone. The test below keeps
+ * the rule that a binding for the name becoming reachable invalidates.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { facetComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
 import {
   snapshotMemoDeps,
   memoDepsStillValid,
 } from '../../src/compute-engine/boxed-expression/collection-element-memo';
-import { _BoxedValueDefinition } from '../../src/compute-engine/boxed-expression/boxed-value-definition';
 
 /** The scaled lizeqlnn5e state of the item-182 suite: forward-referenced
  * user functions, `R_xz` carrying the free symbol `c` that no reachable
@@ -70,75 +67,29 @@ function makeD(ce: ComputeEngine) {
   );
 }
 
-/** The pinned wrapper of the snapshot's `c` dependency, reached the same
- * way the engine reaches it: the occurrence's `_def` binding wrapper. */
-function cDepAndWrapper(ce: ComputeEngine, D: ReturnType<typeof makeD>) {
+/** The snapshot of the dependencies of `D`, with its `c` dependency. */
+function cDep(D: ReturnType<typeof makeD>) {
   const deps = snapshotMemoDeps(D);
   expect(deps).toBeDefined();
-  const cDep = (deps as unknown as { name: string }[]).find(
+  const dep = (deps as unknown as { name: string }[]).find(
     (d) => d.name === 'c'
-  ) as unknown as {
-    occurrence: { _def: { value: unknown } };
-    valueDef: { value: unknown };
-    resolved: unknown;
-  };
-  // Non-vacuity: the storm's shape — a valueless pinned binding whose name
-  // chain-resolves to no value. Since the use `cos(c)` in the body narrows
-  // the outer binding of `c` (user decision 2026-10-25 on CE-473 in
-  // `ROADMAP.md`), the chain resolves `c` to that outer binding, which
-  // holds no value.
-  expect(cDep).toBeDefined();
-  expect(cDep.valueDef.value).toBeUndefined();
-  const resolved = cDep.resolved as { value?: { value?: unknown } } | undefined;
-  expect(resolved?.value?.value).toBeUndefined();
-  return { deps: deps!, cDep, wrapper: cDep.occurrence._def };
+  ) as unknown as { valueDef: unknown; resolved: unknown } | undefined;
+  // Non-vacuity: `c` is a free name of the body of `R_xz` with no
+  // definition, which no chain resolves.
+  expect(dep).toBeDefined();
+  expect(dep!.valueDef).toBeUndefined();
+  expect(dep!.resolved).toBeUndefined();
+  return deps!;
 }
 
 describe('Tycho item 186 — valueless rebind of a lambda-body free', () => {
-  test('a valueless→valueless inner-definition swap keeps the facet memo serving', () => {
-    const ce = documentState();
-    const D = makeD(ce);
-    expect(D.count).toBe(100);
-    const settled = facetComputeCount();
-    expect(D.count).toBe(100); // warm repeat
-    expect(facetComputeCount() - settled).toBe(0);
-
-    const { deps, wrapper } = cDepAndWrapper(ce, D);
-
-    // The auto-declare route's swap: a fresh VALUELESS inner definition
-    // replaces the pinned one, no state event, no version bump.
-    wrapper.value = new _BoxedValueDefinition(ce, 'c', {});
-
-    expect(memoDepsStillValid(D, deps)).toBe(true);
-    const before = facetComputeCount();
-    expect(D.count).toBe(100);
-    expect(facetComputeCount() - before).toBe(0); // memo survived the rebind
-  });
-
-  test('a swap to a definition HOLDING a value still invalidates', () => {
-    const ce = documentState();
-    const D = makeD(ce);
-    expect(D.count).toBe(100);
-
-    const { deps, wrapper } = cDepAndWrapper(ce, D);
-
-    const withValue = new _BoxedValueDefinition(ce, 'c', {});
-    withValue.value = ce.box(5);
-    wrapper.value = withValue;
-
-    // Either side holding a value makes identity load-bearing again.
-    expect(memoDepsStillValid(D, deps)).toBe(false);
-    const before = facetComputeCount();
-    expect(D.count).toBe(100); // same answer (count never read `c`'s value)
-    expect(facetComputeCount() - before).toBeGreaterThan(0); // recomputed
-  });
-
   test('a binding for the name becoming REACHABLE still invalidates (case-2 discipline)', () => {
     const ce = documentState();
     const D = makeD(ce);
     expect(D.count).toBe(100);
 
-    const { deps } = cDepAndWrapper(ce, D);
+    const deps = cDep(D);
+    expect(memoDepsStillValid(D, deps)).toBe(true);
     ce.assign('c', 2); // the chain now resolves `c` → re-resolution flips
     expect(memoDepsStillValid(D, deps)).toBe(false);
   });

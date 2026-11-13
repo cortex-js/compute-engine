@@ -376,17 +376,17 @@ export function armArityCapable(arm: FunctionSignature, opType: Type): boolean {
  * A write-free version of the `devolveUnappliedOperator` repair's
  * precondition: a bare single-uppercase symbol bound to a standard-library
  * operator (`N`, `D`) used where a value is required almost always means a
- * variable. `validateArguments` repairs such an operand (by declaring a
- * shadow), so the filter must not refute an arm on its account — but the
- * filter cannot perform the declaration itself (§4.2).
+ * variable. `validateArguments` repairs such an operand (it becomes a free
+ * name read as a variable), so the filter must not refute an arm on its
+ * account — but the filter cannot perform the repair itself (§4.2).
  *
  * Stays in lockstep with `devolveUnappliedOperator`: the operand must be bound
  * to an OPERATOR definition; a root-scope operator counts only when it is a
  * library builtin, not a user-assigned function literal (`ce.assign('F', x ↦
  * x²)` hoists into the same parentless scope as the library, and the repair
- * refuses it so that `F` used as a value surfaces `incompatible-type`); and a
- * value binding counts only when the repair itself created it (a
- * user-declared symbol keeps its declared-type check). A precondition wider
+ * refuses it so that `F` used as a value surfaces `incompatible-type`); a
+ * value binding does not count (a user-declared symbol keeps its
+ * declared-type check). A precondition wider
  * than the repair would let an overload arm survive its trial and then fail
  * the real validation with no sibling arm tried.
  */
@@ -410,7 +410,7 @@ export function isRepairableOperatorSymbol(
     // public interface; read it structurally for the same cycle reason.
     return (def.operator as { _isLambda?: boolean })._isLambda !== true;
   }
-  return 'value' in def && def.value._isDevolvedShadow === true;
+  return false;
 }
 
 /** The caller policies the filter must mirror to stay faithful to
