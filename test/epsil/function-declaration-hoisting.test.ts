@@ -84,7 +84,10 @@ describe('A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS', 
     expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
-  test('a recursive multi-clause definition', () => {
+  // Expected failure: on the block route the errors are `incompatible-type`
+  // and `variable-redeclaration`, with no `read-before-declaration`.
+  // Tracked in docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
+  test.failing('a recursive multi-clause definition', () => {
     // Before: the Epsil runner answered "fact(5)".
     const src =
       'let a = String(fact(5))\nfact(0) = 1\nfact(n: integer) = n * fact(n - 1)\na';

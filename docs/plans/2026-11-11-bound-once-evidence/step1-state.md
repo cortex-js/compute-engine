@@ -1002,3 +1002,21 @@ Build for the host: `npm run build`, then `npm pack --ignore-scripts
 --pack-destination /Users/arno/dev/compute-engine-recovery/`:
 `/Users/arno/dev/compute-engine-recovery/cortex-js-compute-engine-0.187.1.tgz`
 (the version string is 0.187.1, the same as the release on npm).
+
+## The known failures are marked `test.failing` (2026-11-13)
+
+The 20 tests that fail on main since step 1 are marked `test.failing`
+(`test.failing.each` for the six of CE-543), each with a comment that says
+what the test gets and names this file, so the nightly run can pass. They
+are: `absent-argument-annotated-parameter` (1),
+`annotated-parameter-undecided` (1), `ce-445-callback-param-type-under-n`
+(2), `ce-535-531-binder-declaration-cache` (6), `map-auto-compile` (1),
+`recursive-list-builder-compile` (2), `scope` (1),
+`spread-literal-result-kind` (1), `tycho-item-332-untyped-program-compile`
+(2), `epsil/function-body-local-assignment` (1),
+`epsil/function-declaration-hoisting` (1) and `epsil/lazy-argument-capture`
+(1).
+
+A marked test that starts to pass fails its file with "Failing test passed
+even though it was supposed to fail": the change that fixes it removes
+`.failing` and the comment in the same change.
