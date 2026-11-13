@@ -25,6 +25,7 @@
 import {
   elementType,
   widensTo,
+  type Cx,
   type IRType,
   type Lane,
   type Length,
@@ -41,7 +42,6 @@ import {
   arsechReal,
 } from '../../numerics/inverse-hyperbolic.js';
 import { SYS_HELPERS as SYS } from '../javascript-runtime.js';
-import type { Cx } from './ir.js';
 
 export type Effect = 'pure' | 'may-fail' | 'effectful';
 

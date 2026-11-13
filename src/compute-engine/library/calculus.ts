@@ -109,7 +109,6 @@ import {
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
   isApplicableDef,
-  lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { rationalize } from '../numerics/rationals.js';
