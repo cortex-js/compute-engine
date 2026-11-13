@@ -19,6 +19,10 @@ import {
   nonRealDataError,
   nonRealDatum,
 } from './statistics-data.js';
+import {
+  floatIfFloatOperand,
+  hasFloatOperand,
+} from '../boxed-expression/float-result.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { nonNegativeSign, positiveSign } from '../boxed-expression/sgn.js';
 import {
@@ -64,6 +68,33 @@ const DISTRIBUTION_HEADS = [
 /** True if `x` is one of the five distribution constructor expressions. */
 export function isDistributionExpression(x: Expression): boolean {
   return DISTRIBUTION_HEADS.includes(x.operator);
+}
+
+/**
+ * Is a parameter of `dist` or the point `x` a float? A float operand gives a
+ * float result (docs/ERROR-MODEL.md), so `PDF(NormalDistribution(0, 1), 0.5)`
+ * is a float and not `0.6240 / √π`, exact on one side and float on the other.
+ */
+function hasFloat(dist: Expression, ...points: Expression[]): boolean {
+  return hasFloatOperand([...distOps(dist), ...points]);
+}
+
+/** `r` as a float when a parameter of `dist` or `points` is a float: a
+ * result that is an exact number (`0` off a support) is made a float too. */
+function floatIfFloat(
+  dist: Expression,
+  x: Expression,
+  r: Expression
+): Expression {
+  return floatIfFloatOperand([...distOps(dist), x], r) ?? r;
+}
+
+/** True for the distributions on the integers. */
+function isDiscrete(dist: Expression): boolean {
+  return (
+    dist.operator === 'BinomialDistribution' ||
+    dist.operator === 'PoissonDistribution'
+  );
 }
 
 /** Operands of a distribution expression (always a function). */
@@ -773,10 +804,21 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     },
 
     UniformDistribution: {
-      description: 'Continuous uniform distribution on the interval [a, b].',
+      description:
+        'Continuous uniform distribution on the interval [a, b]. `UniformDistribution([a, b])` is the same, and `UniformDistribution()` is on [0, 1].',
       signature: '(real, real) -> expression<UniformDistribution>',
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
+        // Wolfram's forms: `UniformDistribution()` is on [0, 1] and
+        // `UniformDistribution([a, b])` is `UniformDistribution(a, b)`.
+        if (ops.length === 0) ops = [ce.Zero, ce.One];
+        else if (
+          ops.length === 1 &&
+          isFunction(ops[0]) &&
+          ops[0].operator === 'List' &&
+          ops[0].nops === 2
+        )
+          ops = ops[0].ops;
         if (ops.length !== 2) return null;
         let a = ops[0].canonical;
         let b = ops[1].canonical;
@@ -841,9 +883,14 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: ['reject', 'propagate'],
       evaluate: ([dist, x], { numericApproximation, engine: ce }) => {
         if (!dist || !x || !isDistributionExpression(dist)) return undefined;
-        const r = distributionPDF(ce, dist, x, !!numericApproximation);
+        // A discrete mass at a non-integer point is the exact `0`, even for a
+        // float point or parameter (Wolfram: `PDF[PoissonDistribution[2.], 1/2]`).
+        if (isDiscrete(dist) && isFiniteRealLiteral(x) && x.isInteger !== true)
+          return ce.Zero;
+        const numeric = !!numericApproximation || hasFloat(dist, x);
+        const r = distributionPDF(ce, dist, x, numeric);
         if (!r) return undefined;
-        return numericApproximation ? r.N() : r.evaluate();
+        return floatIfFloat(dist, x, numeric ? r.N() : r.evaluate());
       },
     },
 
@@ -855,9 +902,18 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: ['reject', 'propagate'],
       evaluate: ([dist, x], { numericApproximation, engine: ce }) => {
         if (!dist || !x || !isDistributionExpression(dist)) return undefined;
-        const r = distributionCDF(ce, dist, x, !!numericApproximation);
+        // A discrete CDF is a step function: a float point is read as its
+        // floor, so `CDF(PoissonDistribution(2), 2.5)` is `5 / e^2` as in
+        // Wolfram. Only a float parameter gives a float.
+        let point = x;
+        if (isDiscrete(dist) && isNumber(x) && !x.isExact) {
+          const v = litVal(x);
+          if (v !== undefined) point = ce.number(Math.floor(v));
+        }
+        const numeric = !!numericApproximation || hasFloat(dist, point);
+        const r = distributionCDF(ce, dist, point, numeric);
         if (!r) return undefined;
-        return numericApproximation ? r.N() : r.evaluate();
+        return floatIfFloat(dist, point, numeric ? r.N() : r.evaluate());
       },
     },
 
@@ -888,9 +944,13 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           if (!r) return undefined;
           return numericApproximation ? r.N() : r.evaluate();
         }
-        const r = distributionQuantile(ce, dist, p, pv, !!numericApproximation);
+        // A discrete quantile is a search, made under `.N()` only (above): a
+        // float does not start it.
+        const numeric =
+          !!numericApproximation || (!isDiscrete(dist) && hasFloat(dist, p));
+        const r = distributionQuantile(ce, dist, p, pv, numeric);
         if (!r) return undefined;
-        return numericApproximation ? r.N() : r.evaluate();
+        return floatIfFloat(dist, p, numeric ? r.N() : r.evaluate());
       },
     },
   },
@@ -1468,7 +1528,24 @@ function empiricalQuantile(
 // overloads in `library/statistics.ts`. Exact/symbolic construction as above.
 //
 
+/** A moment as a float when a parameter it is computed from is: `Add` drops
+ * a float `0.0`, so `Mean(UniformDistribution(0.0, 4))` would be exact. */
+function floatMoment(
+  used: ReadonlyArray<Expression>,
+  r: Expression
+): Expression {
+  return floatIfFloatOperand(used, r) ?? r;
+}
+
 export function distributionMean(
+  ce: ComputeEngine,
+  dist: Expression
+): Expression | undefined {
+  const r = distributionMeanExact(ce, dist);
+  return r && floatMoment(distOps(dist), r);
+}
+
+function distributionMeanExact(
   ce: ComputeEngine,
   dist: Expression
 ): Expression | undefined {
@@ -1494,6 +1571,20 @@ export function distributionMean(
 }
 
 export function distributionVariance(
+  ce: ComputeEngine,
+  dist: Expression
+): Expression | undefined {
+  const r = distributionVarianceExact(ce, dist);
+  if (!r) return r;
+  // Only the parameters the variance depends on: it is `σ²` for a normal.
+  const used =
+    dist.operator === 'NormalDistribution'
+      ? distOps(dist).slice(1)
+      : distOps(dist);
+  return floatMoment(used, r);
+}
+
+function distributionVarianceExact(
   ce: ComputeEngine,
   dist: Expression
 ): Expression | undefined {
@@ -1535,7 +1626,7 @@ export function distributionStandardDeviation(
     default: {
       const v = distributionVariance(ce, dist);
       if (!v) return undefined;
-      return ce.function('Sqrt', [v]).evaluate();
+      return floatMoment([v], ce.function('Sqrt', [v]).evaluate());
     }
   }
 }

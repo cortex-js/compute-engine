@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A float operand of `PDF`, `CDF`, `Quantile`, `Mean`, `Variance` and `StandardDeviation` of a distribution gives a float, and `UniformDistribution` takes `[a, b]` and no operands** (#NNN, contributed by [enumeratio](https://github.com/enumeratio)). `PDF(NormalDistribution(0.0, 1), 1/2)` was `√2 / (2 e^(1/8) √π)` and A float point of a discrete distribution is read as Wolfram does: `CDF(PoissonDistribution(2), 2.5)` is its floor's `5 / e^2` and `PDF(PoissonDistribution(2), 0.5)` is `0`. `PDF(NormalDistribution(0, 1), 0.5)` was `0.6240… / √π`, each half exact; both are the float `0.3520653267642995`, as are `PDF(PoissonDistribution(2), 3.0)` (was `1.3333… / e²`), `CDF(PoissonDistribution(2.0), 1/2)` (was `e^-2`) and `Mean(UniformDistribution(0.0, 4))` (was the exact `2`). `UniformDistribution([1, 3])` is `UniformDistribution(1, 3)` and `UniformDistribution()` is `UniformDistribution(0, 1)`; `Mean(UniformDistribution([1, 3]))` was an error and is `2`.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

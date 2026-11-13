@@ -258,7 +258,7 @@ Sample Standard Deviation of a collection of numbers.
 
 MathJSON `UniformDistribution` · `(real, real) -> expression<UniformDistribution>`
 
-Continuous uniform distribution on the interval [a, b].
+Continuous uniform distribution on the interval [a, b]. `UniformDistribution([a, b])` is the same, and `UniformDistribution()` is on [0, 1].
 
 ### variance
 
