@@ -399,22 +399,28 @@ describe('EPSIL FORMATTER — time is not exponential in nesting depth', () => {
 
 describe('EPSIL FORMATTER — deep indentation', () => {
   // Each level applies a function literal, whose body aligns under the open
-  // parenthesis, so at depth 160 a line starts past column 2000.
+  // parenthesis, and holds the next level in a call of a function with a
+  // name of 61 characters, whose argument aligns under its open parenthesis.
+  // A level indents by about 55 columns, so at depth 40 a line starts past
+  // column 2000. The formatter recurses for each level, and the depth stays
+  // far from the limit of the call stack, which is between 160 and 200
+  // levels of this chain.
+  const LONG_NAME = 'f' + '_long'.repeat(12);
   function chain(depth: number): MathJsonExpression {
     let node: MathJsonExpression = ['Add', 'x0', 1];
     for (let i = depth; i >= 1; i--) {
       const v = `variable${i}`;
       node = [
         'Apply',
-        ['Function', ['List', node, ['Multiply', v, v], 'z'], v],
+        ['Function', ['List', [LONG_NAME, node], ['Multiply', v, v], 'z'], v],
         ['Add', `x${i}`, ['Multiply', 2, `y${i}`]],
       ];
     }
     return node;
   }
 
-  test('a 160-deep application chain indents past column 2000', () => {
-    const lines = serializeEpsil(chain(160)).split('\n');
+  test('a 40-deep application chain indents past column 2000', () => {
+    const lines = serializeEpsil(chain(40)).split('\n');
     expect(Math.max(...lines.map(leadingSpaces))).toBeGreaterThan(2000);
     for (const line of lines) expect(/[ \t]$/.test(line)).toBe(false);
   });
