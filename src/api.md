@@ -1081,6 +1081,11 @@ Verbatim LaTeX and source positions are dropped, as the MathJSON route
 drops them. A mutable object is rebuilt as its record snapshot, as that
 route boxes it.
 
+To give a name a value for one evaluation, or to hide its value, use
+`withValues()`, not a declaration in a pushed scope followed by
+`rebind()`: a stored function that the expression calls reads the names
+of the scope it was defined in, which a pushed scope does not change.
+
 ####### expr
 
 [`Expression`](#expression-5)
@@ -13851,6 +13856,11 @@ sub-expression stays shared in the result as well.
 Verbatim LaTeX and source positions are dropped, as the MathJSON route
 drops them. A mutable object is rebuilt as its record snapshot, as that
 route boxes it.
+
+To give a name a value for one evaluation, or to hide its value, use
+`withValues()`, not a declaration in a pushed scope followed by
+`rebind()`: a stored function that the expression calls reads the names
+of the scope it was defined in, which a pushed scope does not change.
 
 ####### expr
 
