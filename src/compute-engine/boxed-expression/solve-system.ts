@@ -10,7 +10,7 @@ import {
   solveLinearInequalitySystem,
 } from './solve-linear-system.js';
 import { congruenceResidue } from './solve-congruence.js';
-import { freshParameters } from './diophantine.js';
+import { arbitraryIntegers } from './arbitrary-constants.js';
 import { chineseRemainder, lcm } from '../numerics/numeric-bigint.js';
 
 /** The comparisons that can be a chain: `Less(a, b, c)` is `a < b < c`. */
@@ -126,7 +126,7 @@ export function solveSystem(
       let M = 1n;
       for (const mm of moduli) M = lcm(M, mm);
       const container = ce.function('List', [...equations]);
-      const t = freshParameters(ce, container, 1)[0];
+      const t = arbitraryIntegers(ce, container, 1)[0];
       const root =
         M === 1n
           ? t

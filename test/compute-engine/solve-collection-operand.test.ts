@@ -340,8 +340,8 @@ describe('SOLVE: SEVERAL EQUATIONS IN ONE UNKNOWN', () => {
     const a = solveBox(['Solve', ['List', sin2x, cosx], 'x']);
     const b = solveBox(['Solve', ['List', cosx, sin2x], 'x']);
     expect(a.operator).toBe('List');
-    expect(a.toString()).toBe('[2pi * t + pi]');
-    expect(b.toString()).toBe('[2pi * t + pi]');
+    expect(a.toString()).toBe('[pi + 2pi * ArbitraryInteger(1)]');
+    expect(b.toString()).toBe('[pi + 2pi * ArbitraryInteger(1)]');
   });
 
   test('periodic equations: a common root of a scaled argument', () => {
@@ -353,10 +353,10 @@ describe('SOLVE: SEVERAL EQUATIONS IN ONE UNKNOWN', () => {
     const sinx = ['Equal', ['Sin', 'x'], 0];
     const cosx4 = ['Equal', ['Cos', ['Divide', 'x', 4]], 0];
     expect(solveBox(['Solve', ['List', sinx, cosx4], 'x']).toString()).toBe(
-      '[4pi * t + 2pi]'
+      '[4pi * ArbitraryInteger(1) + 2pi]'
     );
     expect(solveBox(['Solve', ['List', cosx4, sinx], 'x']).toString()).toBe(
-      '[4pi * t + 2pi]'
+      '[4pi * ArbitraryInteger(1) + 2pi]'
     );
   });
 
@@ -461,7 +461,7 @@ describe('SOLVE: A LIST OF INEQUALITIES STAYS UNEVALUATED', () => {
         ['List', ['Congruent', 'x', 2, 3], ['Congruent', 'x', 3, 5]],
         'x',
       ]).toString()
-    ).toBe('[15t + 8]');
+    ).toBe('[8 + 15ArbitraryInteger(1)]');
   });
 });
 

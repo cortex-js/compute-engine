@@ -88,14 +88,14 @@ describe('ce.infer(): `skipped` lists the symbols that it did not change', () =>
   });
 });
 
-describe('Solve: a generated parameter avoids a name that was only used', () => {
+describe('Solve: the parameter of a family does not depend on the names that were used', () => {
   test('`t` of an expression made before the solve keeps its type', () => {
     const ce = new ComputeEngine();
     const held = ce.parse('t + 1');
     const roots = ce
       .box(['Solve', ['Equal', ['Sin', 'x'], 0], 'x'])
       .evaluate();
-    expect(roots.json).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
+    expect(roots.json).toEqual(['List', ['Multiply', 'Pi', ['ArbitraryInteger', 1]]]);
     expect(held.type.toString()).toBe('number');
   });
 
@@ -105,14 +105,14 @@ describe('Solve: a generated parameter avoids a name that was only used', () => 
     const roots = ce
       .box(['Solve', ['Equal', ['Sin', 'x'], 0], 'x'])
       .evaluate();
-    expect(roots.json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    expect(roots.json).toEqual(['List', ['Multiply', 'Pi', ['ArbitraryInteger', 1]]]);
   });
 
-  test('with no earlier use, the parameter is `t`', () => {
+  test('with no earlier use, the parameter is the same', () => {
     const ce = new ComputeEngine();
     const roots = ce
       .box(['Solve', ['Equal', ['Sin', 'x'], 0], 'x'])
       .evaluate();
-    expect(roots.json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    expect(roots.json).toEqual(['List', ['Multiply', 'Pi', ['ArbitraryInteger', 1]]]);
   });
 });

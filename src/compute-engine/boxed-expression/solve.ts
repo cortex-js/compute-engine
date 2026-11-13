@@ -21,6 +21,10 @@ import {
 } from './type-guards.js';
 import { conditionalValue, restrictionParts } from './conditional-value.js';
 import {
+  hasArbitraryConstant,
+  replaceArbitraryConstants,
+} from './arbitrary-constants.js';
+import {
   polynomialDegree,
   getPolynomialCoefficients,
   fromCoefficients,
@@ -3196,6 +3200,7 @@ function factorHasNoRoot(
     isFunction(f, 'Power') &&
     !f.op1.has(x) &&
     f.op1.unknowns.length === 0 &&
+    !hasArbitraryConstant(f.op1) &&
     f.op1.is(0) === false
   )
     return true;
@@ -3495,19 +3500,32 @@ function isRealForSolve(
   const names = expr.unknowns.filter(
     (name) => name === unknown || isGenericRealParameter(ce, name)
   );
-  if (names.length === 0) return isRealWhereNumber(expr);
+  // An arbitrary constant is read as a symbol with no type: a generic real
+  // parameter (user decision, 2026-11-12).
+  const constants = hasArbitraryConstant(expr);
+  if (names.length === 0 && !constants) return isRealWhereNumber(expr);
   ce.pushScope();
   try {
     const substitution: Record<string, Expression> = {};
     let i = 0;
-    for (const name of names) {
+    const scratchSymbol = (): Expression => {
       let scratch: string;
       do scratch = `_real_solve_${i++}`;
       while (expr.has(scratch));
       ce.declare(scratch, 'real');
-      substitution[name] = ce.symbol(scratch);
+      return ce.symbol(scratch);
+    };
+    for (const name of names) substitution[name] = scratchSymbol();
+    let real = expr.subs(substitution);
+    if (constants) {
+      const scratch = new Map<number, Expression>();
+      real = replaceArbitraryConstants(real, (operator, k) => {
+        if (operator !== 'ArbitraryConstant') return undefined;
+        if (!scratch.has(k)) scratch.set(k, scratchSymbol());
+        return scratch.get(k);
+      });
     }
-    return isRealWhereNumber(expr.subs(substitution));
+    return isRealWhereNumber(real);
   } finally {
     ce.popScope();
   }
@@ -5187,7 +5205,7 @@ function univariateRoots(
       polyExpr === originalExpr &&
       isFunction(originalExpr, 'Multiply') &&
       getPolynomialCoefficients(originalExpr, x)?.some(
-        (c) => c.unknowns.length > 0
+        (c) => c.unknowns.length > 0 || hasArbitraryConstant(c)
       )
     ) {
       const subTrace: RuleSteps | undefined = trace ? [] : undefined;
@@ -6650,7 +6668,8 @@ function validateRoots(
     // wrongly accept an extraneous root (e.g. simplification rules like
     // `ln(a) + ln(b) → ln(ab)` assume principal domains and can collapse a
     // non-zero constant to 0).
-    if (value.unknowns.length === 0) return false;
+    if (value.unknowns.length === 0 && !hasArbitraryConstant(value))
+      return false;
 
     // A root with a symbolic (parametric) coefficient — e.g. the quadratic
     // formula for `x^2 - a x + 1 = 0` — substituted back into the equation

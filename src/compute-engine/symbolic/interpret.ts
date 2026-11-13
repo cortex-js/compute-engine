@@ -11,6 +11,10 @@ import {
 } from './solver-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
+  hasArbitraryConstant,
+  replaceArbitraryConstants,
+} from '../boxed-expression/arbitrary-constants.js';
+import {
   complexValueOf,
   numericValueOf,
 } from '../boxed-expression/numerics.js';
@@ -590,19 +594,17 @@ function rSolveBody(
     if (!isFunction(solEq, 'Equal')) return null;
     const generalTerm = solEq.op2;
 
-    const constants = generalTerm.freeVariables
-      .filter((v) => /^c_\d+$/.test(v))
-      .sort();
-    if (constants.length !== L) return null;
-    if (generalTerm.freeVariables.some((v) => v !== 'n' && !/^c_\d+$/.test(v)))
-      return null;
+    // The constants are the `ArbitraryConstant` calls of the result.
+    const constants = arbitraryConstantIndexes(generalTerm);
+    if (constants === undefined || constants.length !== L) return null;
+    if (generalTerm.freeVariables.some((v) => v !== 'n')) return null;
 
     // Basis functions B_i(n): the general term with c_i = 1 and c_{j≠i} = 0.
-    const basis = constants.map((ci) => {
-      const map: Record<string, number> = {};
-      for (const cj of constants) map[cj] = cj === ci ? 1 : 0;
-      return generalTerm.subs(map).simplify();
-    });
+    const basis = constants.map((ci) =>
+      replaceArbitraryConstants(generalTerm, (_, k) =>
+        ce.number(k === ci ? 1 : 0)
+      ).simplify()
+    );
 
     // Resolve the constants: Σᵢ cᵢ·Bᵢ(j) = sⱼ for j = 1…L.
     const matrix: Expression[][] = [];
@@ -618,6 +620,22 @@ function rSolveBody(
   } catch {
     return null;
   }
+}
+
+/**
+ * The indexes of the `ArbitraryConstant` calls of `expr`, in increasing
+ * order, or `undefined` when `expr` holds an `ArbitraryInteger` call.
+ */
+function arbitraryConstantIndexes(expr: Expression): number[] | undefined {
+  const indexes = new Set<number>();
+  let integer = false;
+  replaceArbitraryConstants(expr, (operator, k) => {
+    if (operator === 'ArbitraryConstant') indexes.add(k);
+    else integer = true;
+    return undefined;
+  });
+  if (integer) return undefined;
+  return [...indexes].sort((a, b) => a - b);
 }
 
 /** The closed-form body reproduces every sample numerically (high precision). */
@@ -729,7 +747,8 @@ function validateAnchor(
 ): Expression | null {
   const free = anchor.freeVariables;
 
-  if (free.length === 0)
+  // An anchor that holds an arbitrary constant is not numeric.
+  if (free.length === 0 && !hasArbitraryConstant(anchor))
     return findNumericUpperBound(ce, term, index, anchor, m);
 
   if (free.length !== 1) return null;

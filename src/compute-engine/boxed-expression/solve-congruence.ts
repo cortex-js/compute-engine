@@ -6,7 +6,7 @@ import type {
 import { isFunction } from './type-guards.js';
 import { toBigint } from './numerics.js';
 import { getPolynomialCoefficients } from './polynomials.js';
-import { freshParameters } from './diophantine.js';
+import { arbitraryIntegers } from './arbitrary-constants.js';
 import { gcd, modularInverse } from '../numerics/numeric-bigint.js';
 
 /** Canonical residue of `x` in `[0, m)` (floored), for `m > 0`. */
@@ -76,7 +76,7 @@ export function solveCongruence(
   if (res === undefined) return undefined;
   if (res === 'none') return []; // decided: no solutions
 
-  const t = freshParameters(ce, expr, 1)[0];
+  const t = arbitraryIntegers(ce, expr, 1)[0];
   // mod 1: every integer is a solution — the family is the bare parameter.
   if (res.m === 1n) return [t];
 

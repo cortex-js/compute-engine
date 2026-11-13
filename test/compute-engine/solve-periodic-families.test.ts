@@ -2,11 +2,24 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 // With no domain, or over the real or the complex numbers, `Solve` of a
-// periodic equation returns its families of roots `x₀ + T·t` with a fresh
-// integer parameter `t` (the same names as the diophantine solver). Over a
+// periodic equation returns its families of roots `x₀ + T·Z(1)` with an
+// integer parameter `ArbitraryInteger(1)` (as the diophantine solver). Over a
 // bounded domain, the result is the list of the roots in the domain.
 
 const ce = new ComputeEngine();
+
+/** `expr` with `ArbitraryInteger(index)` replaced by `k`. */
+function withParameter(expr: Expression, k: number, index = 1): Expression {
+  return (
+    expr.replace(
+      {
+        match: expr.engine.box(['ArbitraryInteger', index]),
+        replace: expr.engine.number(k),
+      },
+      { recursive: true }
+    ) ?? expr
+  );
+}
 
 function solve(latex: string, unknown = 'x'): Expression {
   return ce.parse(`\\operatorname{Solve}(${latex}, ${unknown})`).evaluate();
@@ -22,13 +35,12 @@ function checkFamilies(
   result: Expression,
   f: (x: number) => number,
   lo = -9,
-  hi = 9,
-  param = 't'
+  hi = 9
 ): void {
   expect(result.operator).toBe('List');
   const members: number[] = [];
   for (const family of result.ops!) {
-    const at = (k: number) => family.subs({ [param]: k }).N().re;
+    const at = (k: number) => withParameter(family, k).N().re;
     const step = Math.abs(at(1) - at(0));
     // A family without the parameter is one root.
     const kmax =
@@ -67,12 +79,12 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
       'List',
       [
         'Add',
-        ['Multiply', 2, 'Pi', 't'],
+        ['Multiply', 2, 'Pi', ['ArbitraryInteger', 1]],
         ['Multiply', ['Rational', 1, 6], 'Pi'],
       ],
       [
         'Add',
-        ['Multiply', 2, 'Pi', 't'],
+        ['Multiply', 2, 'Pi', ['ArbitraryInteger', 1]],
         ['Multiply', ['Rational', 5, 6], 'Pi'],
       ],
     ]);
@@ -88,30 +100,30 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
 
   test('families with the same roots become one family', () => {
     // 0 + 2πt and π + 2πt are πt
-    expect(solve('\\sin x = 0').toString()).toBe('[pi * t]');
-    expect(solve('\\cos x = 0').toString()).toBe('[pi * t + 1/2 * pi]');
+    expect(solve('\\sin x = 0').toString()).toBe('[pi * ArbitraryInteger(1)]');
+    expect(solve('\\cos x = 0').toString()).toBe('[1/2 * pi + pi * ArbitraryInteger(1)]');
     expect(solve('\\sin x + \\cos x = 0').toString()).toBe(
-      '[pi * t - 1/4 * pi]'
+      '[-1/4 * pi + pi * ArbitraryInteger(1)]'
     );
-    expect(solve('\\sin(x)^2 = 1').toString()).toBe('[pi * t + 1/2 * pi]');
+    expect(solve('\\sin(x)^2 = 1').toString()).toBe('[1/2 * pi + pi * ArbitraryInteger(1)]');
     // π/2, 7π/6 and 11π/6 are a third of a turn apart
     const r = solve('2\\sin(x)^2 - \\sin x - 1 = 0');
     expect(r.nops).toBe(1);
     checkFamilies(r, (x) => 2 * Math.sin(x) ** 2 - Math.sin(x) - 1);
     // sin(πn) = 0 for every integer n
-    expect(solve('\\sin(\\pi n) = 0', 'n').toString()).toBe('[t]');
+    expect(solve('\\sin(\\pi n) = 0', 'n').toString()).toBe('[ArbitraryInteger(1)]');
   });
 
   test('each family has its root in (-T/2, T/2]', () => {
     expect(solve('\\sin x = -\\frac12').toString()).toBe(
-      '[2pi * t - 5/6 * pi,2pi * t - 1/6 * pi]'
+      '[2pi * ArbitraryInteger(1) - 5/6 * pi,2pi * ArbitraryInteger(1) - 1/6 * pi]'
     );
-    expect(solve('\\cos x = -1').toString()).toBe('[2pi * t + pi]');
-    expect(solve('\\sin(x + 1) = 0').toString()).toBe('[pi * t - 1]');
+    expect(solve('\\cos x = -1').toString()).toBe('[pi + 2pi * ArbitraryInteger(1)]');
+    expect(solve('\\sin(x + 1) = 0').toString()).toBe('[-1 + pi * ArbitraryInteger(1)]');
   });
 
   test('a tangent gives families with the period π', () => {
-    expect(solve('\\tan x = 1').toString()).toBe('[pi * t + 1/4 * pi]');
+    expect(solve('\\tan x = 1').toString()).toBe('[1/4 * pi + pi * ArbitraryInteger(1)]');
     checkFamilies(
       solve('\\tan x = \\sqrt3'),
       (x) => Math.tan(x) - Math.sqrt(3)
@@ -121,7 +133,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
   test('each factor of a product gives families with its own period', () => {
     const r = solve('\\sin(2x)\\cos(3x) = 0');
     // the roots kπ/2 of sin(2x) and π/6 + kπ/3 of cos(3x)
-    expect(r.toString()).toBe('[1/2 * pi * t,1/3 * pi * t + 1/6 * pi]');
+    expect(r.toString()).toBe('[1/2 * pi * ArbitraryInteger(1),1/3 * pi * ArbitraryInteger(1) + 1/6 * pi]');
     checkFamilies(r, (x) => Math.sin(2 * x) * Math.cos(3 * x));
     // The periods π and √2·π have no common multiple
     checkFamilies(
@@ -129,45 +141,46 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
       (x) => Math.sin(x) * Math.sin(Math.SQRT2 * x)
     );
     // πt is in πt/2
-    expect(solve('\\sin(x)\\sin(2x) = 0').toString()).toBe('[1/2 * pi * t]');
+    expect(solve('\\sin(x)\\sin(2x) = 0').toString()).toBe('[1/2 * pi * ArbitraryInteger(1)]');
   });
 
   test('a polynomial factor gives its roots as they are', () => {
     const r = solve('(x - 1)\\sin x = 0');
-    expect(r.toString()).toBe('[1,pi * t]');
+    expect(r.toString()).toBe('[1,pi * ArbitraryInteger(1)]');
     checkFamilies(r, (x) => (x - 1) * Math.sin(x));
     // 0 is a root of both factors
-    expect(solve('x\\sin x = 0').toString()).toBe('[pi * t]');
+    expect(solve('x\\sin x = 0').toString()).toBe('[pi * ArbitraryInteger(1)]');
   });
 
   test('a factor with poles gives the families of the whole product', () => {
     // cos(x) = 0 where tan(x) has a pole: only the roots of tan(x)
     const r = solve('\\tan(x)\\cos(x) = 0');
-    expect(r.toString()).toBe('[pi * t]');
+    expect(r.toString()).toBe('[pi * ArbitraryInteger(1)]');
   });
 
   test('a free parameter of the equation is kept', () => {
     expect(solve('\\sin x = a').toString()).toBe(
-      '[If(|a| <= 1, 2pi * t + arcsin(a)),If(|a| <= 1, 2pi * t - arcsin(a) + pi)]'
+      '[If(|a| <= 1, arcsin(a) + 2pi * ArbitraryInteger(1)),If(|a| <= 1, -arcsin(a) + pi + 2pi * ArbitraryInteger(1))]'
     );
-    expect(solve('\\tan x = a').toString()).toBe('[pi * t + arctan(a)]');
+    expect(solve('\\tan x = a').toString()).toBe('[arctan(a) + pi * ArbitraryInteger(1)]');
   });
 
-  test('the parameter is not a symbol of the equation', () => {
+  test('the parameter is a constant, not a symbol of the equation', () => {
     const engine = new ComputeEngine();
     const r = engine
       .parse('\\operatorname{Solve}(\\sin x = \\frac{b}{2}, x)')
       .evaluate();
-    expect(r.has('t')).toBe(true);
+    expect(JSON.stringify(r.json)).toContain('["ArbitraryInteger",1]');
+    expect(r.has('t')).toBe(false);
+    // A symbol `t` of the equation is the symbol of the user.
     const s = engine
       .parse('\\operatorname{Solve}(\\sin(x) + t = 1, x)')
       .evaluate();
-    expect(s.has('t_1')).toBe(true);
+    expect(s.has('t')).toBe(true);
+    expect(JSON.stringify(s.json)).toContain('["ArbitraryInteger",1]');
   });
 
-  test('the parameter is not a symbol that the user declared or used', () => {
-    // With no symbol `t` of the user, the parameter is `t`.
-    const fresh = new ComputeEngine();
+  test('the parameter does not depend on the symbols of the user', () => {
     const solveSin = (engine: ComputeEngine) =>
       engine
         .box([
@@ -176,45 +189,42 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
           ['Element', 'x', 'RealNumbers'],
         ])
         .evaluate();
-    expect(solveSin(fresh).json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    const family = ['List', ['Multiply', 'Pi', ['ArbitraryInteger', 1]]];
+    const fresh = new ComputeEngine();
+    expect(solveSin(fresh).json).toEqual(family);
     // A second solve uses the same parameter.
-    expect(solveSin(fresh).json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    expect(solveSin(fresh).json).toEqual(family);
 
-    // A `t` that the user declared is not the parameter. If it were, a value
-    // assigned to `t` later would give a value that is not a root.
+    // A `t` that the user declared: the same result, and a value assigned
+    // to `t` does not reach it.
     const declared = new ComputeEngine();
     declared.declare('t', 'number');
     const r = solveSin(declared);
-    expect(r.has('t')).toBe(false);
-    expect(r.json).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
+    expect(r.json).toEqual(family);
     declared.assign('t', 0.5);
     for (const k of [-2, 0, 3]) {
-      const root = r.ops![0].subs({ t_1: declared.number(k) }).N().re;
+      const root = withParameter(r.ops![0], k).N().re;
       expect(Math.abs(Math.sin(root))).toBeLessThan(1e-12);
     }
 
-    // The same for a `t` that the user used in an expression and committed
-    // with `ce.infer()` (boxing alone declares nothing).
+    // A `t` that the user used in an expression.
     const used = new ComputeEngine();
     used.infer([used.box(['Add', 't', 1])]);
-    expect(solveSin(used).has('t')).toBe(false);
+    expect(solveSin(used).json).toEqual(family);
 
-    // A `t` that the user declared in an inner scope is not the parameter
-    // while the scope is open.
+    // A `t` that the user declared in an inner scope.
     const inner = new ComputeEngine();
     inner.pushScope();
     try {
       inner.declare('t', 'number');
-      expect(solveSin(inner).json).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
+      expect(solveSin(inner).json).toEqual(family);
     } finally {
       inner.popScope();
     }
-    expect(solveSin(inner).json).toEqual(['List', ['Multiply', 'Pi', 't']]);
+    expect(solveSin(inner).json).toEqual(family);
   });
 
-  test('the parameter is declared integer', () => {
-    // The parameter cannot receive a value that is not an integer, so an
-    // earlier result cannot become a value that is not a root.
+  test('a solve declares nothing', () => {
     const engine = new ComputeEngine();
     const solveSin = () =>
       engine
@@ -225,22 +235,17 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         ])
         .evaluate();
     const r = solveSin();
-    expect(engine.box('t').type.toString()).toBe('integer');
-    // A use of `t` after the solve refers to the parameter: a second solve
-    // uses `t` again.
-    engine.box(['Add', 't', 1]);
-    expect(solveSin().json).toEqual(['List', ['Multiply', 'Pi', 't']]);
-    expect(() => engine.assign('t', 0.5)).toThrow(/integer/);
-    // The parameter cannot be declared again in the same scope.
-    expect(() => engine.declare('t', 'number')).toThrow(/already declared/);
-    engine.assign('t', 3);
-    expect(Math.abs(Math.sin(r.ops![0].N().re))).toBeLessThan(1e-12);
+    expect(engine.lookupDefinition('t')).toBeUndefined();
+    expect(engine.lookupDefinition('t_1')).toBeUndefined();
+    // `t` stays free for the user.
+    engine.assign('t', 0.5);
+    expect(solveSin().json).toEqual(r.json);
+    expect(Math.abs(Math.sin(withParameter(r.ops![0], 3).N().re))).toBeLessThan(
+      1e-12
+    );
 
-    // A solve in a temporary scope declares the parameter in the scope of
-    // the caller. `x` is read by the body of `g`, so the unknown `x` is
-    // renamed and the solve runs in a temporary scope. If the parameter
-    // were declared there, it would disappear with the scope, and
-    // `assign('t', 0.25)` would give the value x + π/2, which is not a root.
+    // A solve in a temporary scope: `x` is read by the body of `g`, so the
+    // unknown `x` is renamed and the solve runs in a temporary scope.
     const renamed = new ComputeEngine();
     renamed.declare('g', 'function');
     renamed.assign(
@@ -248,11 +253,10 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
       renamed.box(['Function', ['Sin', ['Subtract', 'a', 'x']], 'a'])
     );
     const rr = renamed.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate();
-    expect(rr.has('t')).toBe(true);
-    expect(renamed.box('t').type.toString()).toBe('integer');
-    expect(() => renamed.assign('t', 0.25)).toThrow(/integer/);
+    expect(JSON.stringify(rr.json)).toContain('["ArbitraryInteger",1]');
+    expect(renamed.lookupDefinition('t')).toBeUndefined();
 
-    // The same for a solve in the activation scope of a function call.
+    // A solve in the activation scope of a function call.
     const called = new ComputeEngine();
     called.declare('F', 'function');
     called.assign(
@@ -264,33 +268,9 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
     );
     expect(called.box(['F']).evaluate().json).toEqual([
       'List',
-      ['Multiply', 'Pi', 't'],
+      ['Multiply', 'Pi', ['ArbitraryInteger', 1]],
     ]);
-    expect(() => called.assign('t', 0.5)).toThrow(/integer/);
-
-    // A `t` declared in an inner scope after the solve is not the parameter
-    // of a second solve.
-    const later = new ComputeEngine();
-    later.box([
-      'Solve',
-      ['Equal', ['Sin', 'x'], 0],
-      ['Element', 'x', 'RealNumbers'],
-    ]);
-    later.pushScope();
-    try {
-      later.declare('t', 'number');
-      expect(
-        later
-          .box([
-            'Solve',
-            ['Equal', ['Sin', 'x'], 0],
-            ['Element', 'x', 'RealNumbers'],
-          ])
-          .evaluate().json
-      ).toEqual(['List', ['Multiply', 'Pi', 't_1']]);
-    } finally {
-      later.popScope();
-    }
+    expect(called.lookupDefinition('t')).toBeUndefined();
   });
 
   test('a float root gives a family', () => {
@@ -305,7 +285,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         .parse('\\operatorname{Solve}(\\sin x = \\frac12, x)')
         .evaluate()
         .toString()
-    ).toBe('[360t + 30,360t + 150]');
+    ).toBe('[30 + 360ArbitraryInteger(1),150 + 360ArbitraryInteger(1)]');
   });
 
   test('over the real or the complex numbers, the result is the same', () => {
@@ -378,7 +358,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('[2pi * t + pi]');
+    ).toBe('[pi + 2pi * ArbitraryInteger(1)]');
     // A rational coefficient: the common period of sin(x) and cos(x/4) is
     // 8π, and the common roots are 2π + 4πk
     expect(
@@ -394,7 +374,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('[4pi * t + 2pi]');
+    ).toBe('[4pi * ArbitraryInteger(1) + 2pi]');
     // cos(3kπ) is ±1: no common root, and this is a decision
     expect(
       ce
@@ -443,7 +423,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         .box(['Solve', ['List', ...system], 'x'])
         .evaluate()
         .toString()
-    ).toBe('[2pi * t]');
+    ).toBe('[2pi * ArbitraryInteger(1)]');
     // A condition with no common root keeps the decision
     expect(
       ce
@@ -500,7 +480,7 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         'x',
       ])
       .evaluate();
-    expect(or.toString()).toBe('[pi * t,2000000000/2000000001 * pi * t]');
+    expect(or.toString()).toBe('[pi * ArbitraryInteger(1),2000000000/2000000001 * pi * ArbitraryInteger(1)]');
     const product = ce
       .box(['Solve', ['Equal', ['Multiply', ['Sin', 'x'], sinAx], 0], 'x'])
       .evaluate();
@@ -531,11 +511,11 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('[pi * t]');
+    ).toBe('[pi * ArbitraryInteger(1)]');
   });
 
   test('the alternatives of an Or give the union of their families', () => {
-    expect(solve('\\sin(x) = 0 \\lor x = 2').toString()).toBe('[2,pi * t]');
+    expect(solve('\\sin(x) = 0 \\lor x = 2').toString()).toBe('[2,pi * ArbitraryInteger(1)]');
     expect(solve('\\sin(x) = 2 \\lor x = 2').toString()).toBe('[2]');
   });
 
@@ -580,8 +560,8 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('[pi * t]');
-    expect(solve('e^{\\sin(x)} = 1').toString()).toBe('[pi * t]');
+    ).toBe('[pi * ArbitraryInteger(1)]');
+    expect(solve('e^{\\sin(x)} = 1').toString()).toBe('[pi * ArbitraryInteger(1)]');
   });
 
   test('a hyperbolic function has an imaginary period', () => {
@@ -620,11 +600,11 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
     // for each complex `c`
     const result = overC(['Equal', ['Sin', 'x'], 'ImaginaryUnit']);
     expect(result.toString()).toBe(
-      '[2pi * t + arcsin(i),2pi * t + pi - arcsin(i)]'
+      '[2pi * ArbitraryInteger(1) + arcsin(i),pi + 2pi * ArbitraryInteger(1) - arcsin(i)]'
     );
     for (const family of result.ops!) {
       for (const k of [-2, 0, 3]) {
-        const z = family.subs({ t: k }).N();
+        const z = withParameter(family, k).N();
         const v = ce.box(['Sin', z]).N();
         expect(Math.hypot(v.re, v.im - 1)).toBeLessThan(1e-12);
       }
@@ -635,7 +615,7 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
         ['Power', ['Sin', 'x'], 2],
         ['Rational', 1, 4],
       ]).toString()
-    ).toBe('[pi * t - 1/6 * pi,pi * t + 1/6 * pi]');
+    ).toBe('[-1/6 * pi + pi * ArbitraryInteger(1),1/6 * pi + pi * ArbitraryInteger(1)]');
   });
 });
 

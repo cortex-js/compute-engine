@@ -344,6 +344,8 @@
       "Annotated",
       "Apply",
       "ApplyWhole",
+      "ArbitraryConstant",
+      "ArbitraryInteger",
       "Arc",
       "AssertPresent",
       "Assign",

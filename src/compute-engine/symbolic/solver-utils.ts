@@ -1,6 +1,9 @@
-import { isValueDef } from '../boxed-expression/utils.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import type { Expression } from '../global-types.js';
+import {
+  recordIntegrationConstant,
+  reservedIntegrationNames,
+} from '../boxed-expression/arbitrary-constants.js';
 
 export function collectSymbols(
   expr: Expression,
@@ -23,20 +26,35 @@ export function freshSymbolName(
   }
 }
 
+/**
+ * `count` symbols `c_1`, `c_2`, … for the constants of integration of a
+ * `DSolve` or an `RSolve`. A name of `equation` or of an operand of the
+ * running operation is skipped, and so is a name that the user declared: its
+ * type or its value would reach the constant inside the solver. The name
+ * does not choose the index of the constant in the result.
+ *
+ * The constants are symbols inside the operation, so that the code of the
+ * initial conditions can solve for them. The operation replaces each one
+ * that is left in its result by an `ArbitraryConstant` call
+ * (`withIntegrationConstants()`). The names given are recorded:
+ * `integrationConstantNames()` tells them apart from a parameter of the user
+ * with the same spelling.
+ */
 export function integrationConstants(
   equation: Expression,
   count: number
 ): Expression[] {
   const ce = equation.engine;
   const usedSymbols = collectSymbols(equation);
+  const reserved = reservedIntegrationNames(ce);
   const result: Expression[] = [];
 
   for (let i = 1; result.length < count; i++) {
     const name = `c_${i}`;
-    if (usedSymbols.has(name)) continue;
-    const def = ce.lookupDefinition(name);
-    if (def && !(isValueDef(def) && def.value.inferredType)) continue;
+    if (usedSymbols.has(name) || reserved?.has(name)) continue;
+    if (ce.lookupDefinition(name) !== undefined) continue;
     usedSymbols.add(name);
+    recordIntegrationConstant(ce, name);
     result.push(ce.symbol(name));
   }
 

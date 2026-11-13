@@ -2,6 +2,40 @@
 
 ### Breaking Changes
 
+- **The parameter of a family of roots is `["ArbitraryInteger", k]`, and a
+  constant of integration is `["ArbitraryConstant", k]`.** They were the
+  symbols `t`, `t_1`, … and `c_1`, `c_2`, …. The free parameter of an
+  identity is `["ArbitraryConstant", 1]`, where it was `t`.
+  `Solve(sin(x) = 0, x)` was `[π·t]` and is now
+  `["List", ["Multiply", "Pi", ["ArbitraryInteger", 1]]]`; `DSolve(y' = y,
+  y, x)` was `y = c_1·eˣ` and is now `y = ArbitraryConstant(1)·eˣ`.
+- **The constants are not in `unknowns`, `symbols` or `freeVariables`.** A
+  host finds them by their operator.
+- **`subs()` and `ce.assign()` no longer reach a constant.** `r.subs({ t: 2 })`
+  and `ce.assign('c_1', 2)` leave a result as it is. Replace the constant
+  instead:
+  `r.replace({ match: ce.box(['ArbitraryInteger', 1]), replace: 2 }, { recursive: true })`.
+- **A solve for the parameter of a result needs that replacement first.** An
+  unknown of `Solve` is a symbol, and a constant is not one: to solve
+  `π·ArbitraryInteger(1) = 3π` for the parameter, replace the constant with
+  a symbol, then solve for that symbol.
+- **A solve declares nothing.** `t` stays free for the user: after a solve,
+  `ce.assign('t', 0.5)` is accepted, where it threw a type error, and an
+  expression in `t` made after a solve no longer has the type `integer`.
+  The result of a solve no longer depends on the names that were declared or
+  used before it: after `ce.parse('t + 1')`, `Solve(sin(x) = 0, x)` was
+  `[π·t_1]`, and is now the same as in a new engine.
+- **A compilation of a result with a constant declines.** It took `t` or
+  `c_1` as an input; the result now names the operator in `unsupported`. A
+  host replaces the constant with a symbol of its own first.
+- **The LaTeX of a constant is `\constant{n_{1}}` or `\constant{c_{1}}`.**
+  A family is `\pi\constant{n_{1}}`, shown as `π n_1`, where it was
+  `\pi t`. A renderer needs the macro `\constant`, which shows its argument
+  (`\newcommand{\constant}[1]{#1}`); without it, the formula is an error.
+- **A constant is never inferred as a variable.** `Solve` and `D` with no
+  stated variable infer it from the free names: a result that held `t` could
+  make `Solve` of that result infer `t`.
+
 - **`ce.checkpoint()`, `ce.restore()` and `ce.discard()` are removed**, with
   the type `EngineCheckpoint` and the class `CheckpointError`; they were
   deprecated since 0.187.0. To give names values for one computation, use
@@ -95,6 +129,28 @@
   assignment.
 
 ### New Features
+
+- **Two operators stand for the arbitrary constants of a result.**
+  `["ArbitraryConstant", k]` is any number (a constant of integration, the
+  free parameter of an identity) and `["ArbitraryInteger", k]` is any integer
+  (the parameter of a family of roots, of a diophantine or a congruence
+  solution). The index `k` is a positive integer literal; any other operand
+  is an error. A call has no value: `evaluate()` and `N()` keep it. Inside
+  one result, two calls with the same index are the same value, and two
+  calls with different indexes are independent:
+  `ArbitraryConstant(1) − ArbitraryConstant(1)` simplifies to `0`, and
+  `ArbitraryConstant(1) − ArbitraryConstant(2)` stays. The indexes are given
+  for one evaluation of `Solve`, `DSolve` or `RSolve`, from the smallest one
+  that its input does not use: a solve whose equation holds
+  `ArbitraryInteger(1)` gives its new parameter the index 2. Two results of
+  two solves both use the index 1, so an expression that combines them
+  identifies their constants; replace the indexes of one result first.
+
+- **`\constant{c_{k}}` and `\constant{n_{k}}` read and write the
+  constants in LaTeX.** `\constant{c_{1}}` is `["ArbitraryConstant", 1]`
+  and `\constant{n_{1}}` is `["ArbitraryInteger", 1]`. Any other argument of
+  `\constant` is an error. Without the command, `c_1` is a symbol, as
+  before.
 
 - **Experimental: the `ir` profile of the JavaScript target.**
   `compile(expr, { profile: 'ir' })` compiles the expression with a new
@@ -581,6 +637,11 @@
   ```
 
 ### Resolved Issues
+
+- **A parameter named `c_1` in the initial conditions of `DSolve` or
+  `RSolve` is a parameter.** It was taken for a constant of integration and
+  solved for: `DSolve([y'' = y, y(0) = c_1, y'(0) = 0], y, x)` was `y = 0`,
+  and is now `y = (c_1/2)·eˣ + (c_1/2)·e⁻ˣ`, as with any other name.
 
 - **A compilation with the `numeric-kernel` profile of a deeply shared tree
   ends.** When one node object is an operand several times

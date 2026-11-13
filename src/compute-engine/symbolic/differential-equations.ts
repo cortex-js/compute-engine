@@ -28,6 +28,10 @@ import {
   solutionRecord,
 } from './solver-utils.js';
 import { withRadianConvention } from './angular-unit.js';
+import {
+  integrationConstantNames,
+  withIntegrationConstants,
+} from '../boxed-expression/arbitrary-constants.js';
 
 /**
  * The step budget of one variation-of-parameters step of `DSolve`: the two
@@ -1707,8 +1711,12 @@ function applyScalarConditions(
     equations.push(equation.canonical);
   }
 
+  // The constants of integration are the names that
+  // `integrationConstants()` gave, not every name spelled `c_k`: a parameter
+  // of the user `c_1` is not solved for (CE-1253).
+  const given = new Set(integrationConstantNames(solution.engine));
   const constantNames = [...collectSymbols(solution)].filter((name) =>
-    /^c_\d+$/.test(name)
+    given.has(name)
   );
   if (constantNames.length === 0) return undefined;
 
@@ -3298,9 +3306,22 @@ function solveSecondOrderCauchyEuler(
  *
  * The returned expression is a `List` of `Equal` expressions for `y(x)`.
  * Unsupported equations return `undefined`, allowing the `DSolve` operator to
- * remain inert.
+ * remain inert. Each constant of integration of the result is an
+ * `ArbitraryConstant` call (`withIntegrationConstants()`).
  */
 export function dSolve(
+  equation: Expression,
+  dependent: Expression,
+  independent: Expression
+): Expression | undefined {
+  return withIntegrationConstants(
+    equation.engine,
+    [equation, dependent, independent],
+    () => dSolveWithConstants(equation, dependent, independent)
+  );
+}
+
+function dSolveWithConstants(
   equation: Expression,
   dependent: Expression,
   independent: Expression

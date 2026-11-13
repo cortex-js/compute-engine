@@ -1120,7 +1120,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     ).toEqual([0, 1]);
     // Over the real numbers: the family of roots `πt`, with an integer `t`
     expect(solveIn(['Sin', 'x'], 'RealNumbers').evaluate().toString()).toBe(
-      '[pi * t]'
+      '[pi * ArbitraryInteger(1)]'
     );
   });
 
@@ -1160,7 +1160,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     expect(isUnevaluated(solveIn(f, 'RealNumbers'))).toBe(true);
     // A trig function gives its family of roots `πt`
     expect(ce.box(['Solve', ['Sin', 'x'], 'x']).evaluate().toString()).toBe(
-      '[pi * t]'
+      '[pi * ArbitraryInteger(1)]'
     );
   });
 

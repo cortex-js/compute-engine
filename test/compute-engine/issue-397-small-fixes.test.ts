@@ -74,34 +74,32 @@ describe('Wikidata ids name the concept of the head', () => {
 
 describe('Solve of an identity, a contradiction, an unsolved equation', () => {
   test('an identity has one solution with a free parameter', () => {
-    expect(solve(['Equal', 'x', 'x'])).toEqual(['List', 't']);
-    expect(solve(['Equal', 0, 0])).toEqual(['List', 't']);
+    expect(solve(['Equal', 'x', 'x'])).toEqual(['List', ['ArbitraryConstant', 1]]);
+    expect(solve(['Equal', 0, 0])).toEqual(['List', ['ArbitraryConstant', 1]]);
     expect(
       solve([
         'Equal',
         ['Multiply', 2, ['Add', 'x', 1]],
         ['Add', ['Multiply', 2, 'x'], 2],
       ])
-    ).toEqual(['List', 't']);
+    ).toEqual(['List', ['ArbitraryConstant', 1]]);
   });
 
-  test('the free parameter does not reuse a symbol of the equation', () => {
-    expect(solve(['Equal', 't', 't'], 't')).toEqual(['List', 't_1']);
+  test('the free parameter is a constant, not a symbol of the equation', () => {
+    expect(solve(['Equal', 't', 't'], 't')).toEqual(['List', ['ArbitraryConstant', 1]]);
   });
 
-  test('the free parameter is not a symbol with a type or an assumption', () => {
-    // A `t` declared as an integer, or assumed positive, cannot take every
-    // value of `x`.
+  test('the free parameter does not depend on a symbol with a type or an assumption', () => {
     const typed = new ComputeEngine();
     typed.declare('t', 'integer');
     expect(
       typed.box(['Solve', ['Equal', 'x', 'x'], 'x']).evaluate().json
-    ).toEqual(['List', 't_1']);
+    ).toEqual(['List', ['ArbitraryConstant', 1]]);
     const assumed = new ComputeEngine();
     assumed.assume(assumed.parse('t > 0'));
     expect(
       assumed.box(['Solve', ['Equal', 'x', 'x'], 'x']).evaluate().json
-    ).toEqual(['List', 't_1']);
+    ).toEqual(['List', ['ArbitraryConstant', 1]]);
   });
 
   test('a chain of equalities holds when each adjacent pair is equal', () => {
@@ -116,7 +114,7 @@ describe('Solve of an identity, a contradiction, an unsolved equation', () => {
     ).toEqual(['List', 2]);
     expect(solve(['Equal', 'x', 0, ['Add', 'x', 1]])).toEqual(['List']);
     expect(solve(['Equal', 'x', 'x', ['Add', 'x', 1]])).toEqual(['List']);
-    expect(solve(['Equal', 'x', 'x', 'x'])).toEqual(['List', 't']);
+    expect(solve(['Equal', 'x', 'x', 'x'])).toEqual(['List', ['ArbitraryConstant', 1]]);
   });
 
   test('a contradiction has no solution', () => {

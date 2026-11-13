@@ -16,8 +16,14 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  */
 
 /** The single free parameter of a solved family (the fresh `t`, not `x`). */
-function paramOf(expr, unknown: string): string {
-  return expr.symbols.find((s: string) => s !== unknown)!;
+/** `expr` with its parameter `ArbitraryInteger(1)` replaced by `k`. */
+function atParameter(expr, k: number) {
+  return (
+    expr.replace(
+      { match: ce.box(['ArbitraryInteger', 1]), replace: ce.number(k) },
+      { recursive: true }
+    ) ?? expr
+  );
 }
 
 describe('Mod — modular reduction of large integers', () => {
@@ -157,9 +163,8 @@ describe('Solving linear congruences', () => {
     expect(roots.length).toBe(1);
 
     const root = roots[0];
-    const t = paramOf(root, 'n');
     for (const tv of [0, 1, -1]) {
-      const nVal = root.subs({ [t]: tv });
+      const nVal = atParameter(root, tv);
       const check = ce
         .box(['Congruent', ['Multiply', 6, nVal], 4, 7])
         .evaluate();
@@ -177,9 +182,8 @@ describe('Solving linear congruences', () => {
     const roots = cong.solve('x3') as any[];
     expect(roots.length).toBe(1);
     const root = roots[0];
-    const t = paramOf(root, 'x3');
     for (const tv of [0, 1, -1, 2]) {
-      const xVal = root.subs({ [t]: tv });
+      const xVal = atParameter(root, tv);
       const check = ce
         .box(['Congruent', ['Multiply', 4, xVal], 2, 6])
         .evaluate();
@@ -204,9 +208,8 @@ describe('Solving systems of congruences (CRT)', () => {
     expect(sol && !Array.isArray(sol)).toBe(true);
 
     const root = (sol as Record<string, any>)['x5'];
-    const t = paramOf(root, 'x5');
     for (const tv of [0, 1]) {
-      const xVal = root.subs({ [t]: tv });
+      const xVal = atParameter(root, tv);
       for (const [r, m] of [
         [2, 3],
         [3, 5],
@@ -230,9 +233,8 @@ describe('Solving systems of congruences (CRT)', () => {
     const sol = ce.box(['And', c1, c2]).solve('x7');
     expect(sol && !Array.isArray(sol)).toBe(true);
     const root = (sol as Record<string, any>)['x7'];
-    const t = paramOf(root, 'x7');
     for (const tv of [0, 1, -1]) {
-      const xVal = root.subs({ [t]: tv });
+      const xVal = atParameter(root, tv);
       for (const [r, m] of [
         [2, 4],
         [6, 8],

@@ -381,6 +381,30 @@
       "description": "Approximately-not-equal relation."
     },
     {
+      "name": "ArbitraryConstant",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(integer) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "ArbitraryConstant(k): an arbitrary number, the k-th of a result: a\n\nconstant of integration, the free parameter of an identity. Inside one\n\nresult, two calls with the same index are the same value, and two\n\ncalls with different indexes are independent. It has no value."
+    },
+    {
+      "name": "ArbitraryInteger",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the\n\nparameter of a family of roots, of a diophantine or a congruence\n\nsolution. Inside one result, two calls with the same index are the\n\nsame value, and two calls with different indexes are independent. It\n\nhas no value."
+    },
+    {
       "name": "Arc",
       "category": "Core",
       "arity": "variadic",
@@ -9144,7 +9168,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom(\"integer\")`. The observer does not evaluate its operand. Recover the text with `StringFrom(Type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `Type(x) == \"some text\"` is now always `False` — use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text.",
+      "description": "The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom(\"integer\")`. The observer does not evaluate its operand, except a name with no declared type, which gives the widened type of the value it holds. Recover the text with `StringFrom(Type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `Type(x) == \"some text\"` is now always `False` — use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text.",
       "examples": [
         "Type(\"hi\")",
         "Type([1, 2, 3])"

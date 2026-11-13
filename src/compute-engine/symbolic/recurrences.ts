@@ -1,6 +1,10 @@
 import type { Expression } from '../global-types.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import {
+  integrationConstantNames,
+  withIntegrationConstants,
+} from '../boxed-expression/arbitrary-constants.js';
+import {
   appendDistinctRoot,
   characteristicPolynomial,
   collectSymbols,
@@ -216,9 +220,11 @@ function applyConditions(
   const ce = solution.engine;
   const generalTerm = solutionEquation.op2;
 
-  const constantNames = [...collectSymbols(solution)]
-    .filter((name) => /^c_\d+$/.test(name))
-    .sort();
+  // The constants are the names that `integrationConstants()` gave, in the
+  // order it gave them, not every name spelled `c_k` (CE-1253).
+  const given = integrationConstantNames(ce);
+  const present = collectSymbols(solution);
+  const constantNames = given.filter((name) => present.has(name));
   if (constantNames.length === 0) return undefined;
   const order = constantNames.length;
 
@@ -278,9 +284,22 @@ function applyConditions(
  *
  * Currently supports equations such as
  * `a(n + 2) = a(n + 1) + a(n)` and optional initial conditions in a list:
- * `RSolve([recurrence, a(0)=0, a(1)=1], a, n)`.
+ * `RSolve([recurrence, a(0)=0, a(1)=1], a, n)`. Each constant of the
+ * result is an `ArbitraryConstant` call (`withIntegrationConstants()`).
  */
 export function rSolve(
+  equation: Expression,
+  dependent: Expression,
+  index: Expression
+): Expression | undefined {
+  return withIntegrationConstants(
+    equation.engine,
+    [equation, dependent, index],
+    () => rSolveWithConstants(equation, dependent, index)
+  );
+}
+
+function rSolveWithConstants(
   equation: Expression,
   dependent: Expression,
   index: Expression

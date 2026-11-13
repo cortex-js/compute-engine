@@ -9,6 +9,32 @@ function shiftedValue(solution: ReturnType<typeof rsolve>, shift: number) {
   return rhs.subs({ n: engine.number(shift).add(engine.symbol('n')) });
 }
 
+/**
+ * `expr` at the point `sample`: `c_k` in `sample` is the value of the
+ * constant `ArbitraryConstant(k)`, every other key the value of a symbol.
+ */
+function atSample(
+  expr: ReturnType<typeof rsolve>,
+  sample: Record<string, number>
+): ReturnType<typeof rsolve> {
+  let result = expr;
+  const symbols: Record<string, number> = {};
+  for (const [key, value] of Object.entries(sample)) {
+    const k = /^c_(\d+)$/.exec(key);
+    if (k === null) symbols[key] = value;
+    else
+      result =
+        result.replace(
+          {
+            match: engine.box(['ArbitraryConstant', Number(k[1])]),
+            replace: engine.number(value),
+          },
+          { recursive: true }
+        ) ?? result;
+  }
+  return result.subs(symbols);
+}
+
 function verifyRecurrence(
   recurrence: unknown,
   solution: ReturnType<typeof rsolve>,
@@ -27,7 +53,10 @@ function verifyRecurrence(
   }
 
   if (substituted.operator !== 'Equal') return false;
-  const residual = substituted.op1.sub(substituted.op2).subs(sample).simplify();
+  const residual = atSample(
+    substituted.op1.sub(substituted.op2),
+    sample
+  ).simplify();
   return Math.abs(residual.N().re) < 1e-10;
 }
 
@@ -40,7 +69,7 @@ describe('RSolve', () => {
     ];
     const solution = rsolve(recurrence);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`[a(n) == "c_1" * 2^n]`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[a(n) == ArbitraryConstant(1) * 2^n]`);
     expect(verifyRecurrence(recurrence, solution, { c_1: 3, n: 5 })).toBe(true);
   });
 
@@ -79,7 +108,7 @@ describe('RSolve', () => {
     const solution = rsolve(recurrence);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[a(n) == "c_2" * n + "c_1"]`
+      `[a(n) == n * ArbitraryConstant(2) + ArbitraryConstant(1)]`
     );
     expect(
       verifyRecurrence(recurrence, solution, { c_1: 3, c_2: 5, n: 4 })
@@ -179,7 +208,7 @@ describe('RSolve', () => {
 
     expect(result.operator).toBe('List');
     expect(result.toString()).toMatchInlineSnapshot(
-      `[a(n) == "c_1" * i^n + "c_2" * (-i)^n]`
+      `[a(n) == ArbitraryConstant(1) * i^n + ArbitraryConstant(2) * (-i)^n]`
     );
   });
 });

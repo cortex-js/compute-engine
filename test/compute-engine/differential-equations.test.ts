@@ -40,6 +40,32 @@ function finalSystemSample(
   return [sample.op1.N().re, sample.op2.ops.map((op) => op.N().re)];
 }
 
+/**
+ * `expr` at the point `sample`: `c_k` in `sample` is the value of the
+ * constant `ArbitraryConstant(k)`, every other key the value of a symbol.
+ */
+function atSample(
+  expr: ReturnType<typeof dsolve>,
+  sample: Record<string, number>
+): ReturnType<typeof dsolve> {
+  let result = expr;
+  const symbols: Record<string, number> = {};
+  for (const [key, value] of Object.entries(sample)) {
+    const k = /^c_(\d+)$/.exec(key);
+    if (k === null) symbols[key] = value;
+    else
+      result =
+        result.replace(
+          {
+            match: engine.box(['ArbitraryConstant', Number(k[1])]),
+            replace: engine.number(value),
+          },
+          { recursive: true }
+        ) ?? result;
+  }
+  return result.subs(symbols);
+}
+
 function verifyFirstOrderSolution(
   solution: ReturnType<typeof dsolve>,
   rhs: unknown
@@ -57,9 +83,8 @@ function verifyFirstOrderSolution(
       { recursive: true }
     ) ?? expectedTemplate;
   const sample = { c_1: 2, x: 0.75 };
-  const value = derivative
-    .subs(sample)
-    .sub(expected.structural.subs(sample))
+  const value = atSample(derivative, sample)
+    .sub(atSample(expected.structural, sample))
     .simplify()
     .N().re;
   return Math.abs(value) < 1e-10;
@@ -104,7 +129,7 @@ function verifyEquationSolution(
 
   const lhs = substituted.op1.evaluate().canonical;
   const rhs = substituted.op2.evaluate().canonical;
-  const residual = lhs.sub(rhs).subs(sample).simplify();
+  const residual = atSample(lhs.sub(rhs), sample).simplify();
   const value = residual.N().re;
   return Math.abs(value) < 1e-10;
 }
@@ -134,11 +159,10 @@ function verifySystemSolution(
     }
     if (substituted.operator !== 'Equal') return false;
 
-    const residual = substituted.op1
-      .evaluate()
-      .sub(substituted.op2.evaluate())
-      .subs(sample)
-      .simplify();
+    const residual = atSample(
+      substituted.op1.evaluate().sub(substituted.op2.evaluate()),
+      sample
+    ).simplify();
     if (Math.abs(residual.N().re) >= 1e-10) return false;
   }
   return true;
@@ -165,7 +189,7 @@ describe('DSolve', () => {
   test('solves y prime equals y', () => {
     const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
 
-    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) == "c_1" * e^x]`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) == ArbitraryConstant(1) * e^x]`);
     expect(verifyFirstOrderSolution(solution, ['y', 'x'])).toBe(true);
   });
 
@@ -177,7 +201,7 @@ describe('DSolve', () => {
     ]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" / e^(-3x)]`
+      `[y(x) == ArbitraryConstant(1) / e^(-3x)]`
     );
     expect(
       verifyFirstOrderSolution(solution, ['Multiply', 3, ['y', 'x']])
@@ -192,7 +216,7 @@ describe('DSolve', () => {
     ]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == 1/3 * x^3 + "c_1"]`
+      `[y(x) == 1/3 * x^3 + ArbitraryConstant(1)]`
     );
     expect(verifyFirstOrderSolution(solution, ['Power', 'x', 2])).toBe(true);
   });
@@ -205,7 +229,7 @@ describe('DSolve', () => {
     ]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == x + "c_1" / e^x - 1]`
+      `[y(x) == x + ArbitraryConstant(1) / e^x - 1]`
     );
     expect(
       verifyFirstOrderSolution(solution, ['Subtract', 'x', ['y', 'x']])
@@ -220,7 +244,7 @@ describe('DSolve', () => {
     ]);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" / e^(x^2)]`
+      `[y(x) == ArbitraryConstant(1) / e^(x^2)]`
     );
     expect(
       verifyFirstOrderSolution(solution, [
@@ -230,14 +254,14 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
-  test('uses a fallback integration constant when c_1 is already declared', () => {
+  test('a declared c_1 does not change the constant of integration', () => {
     engine.pushScope();
     try {
       engine.declare('c_1', 'real');
       const solution = dsolve(['Equal', ['D', ['y', 'x'], 'x'], ['y', 'x']]);
 
       expect(solution.toString()).toMatchInlineSnapshot(
-        `[y(x) == "c_2" * e^x]`
+        `[y(x) == ArbitraryConstant(1) * e^x]`
       );
       expect(verifyFirstOrderSolution(solution, ['y', 'x'])).toBe(true);
     } finally {
@@ -254,7 +278,7 @@ describe('DSolve', () => {
 
     expect(solution.operator).toBe('List');
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x,z(x) == "c_2" * e^(2x)]`
+      `[y(x) == ArbitraryConstant(1) * e^x,z(x) == ArbitraryConstant(2) * e^(2x)]`
     );
     expect(
       verifySystemSolution(equations, solution, { c_1: 2, c_2: 3, x: 0.75 })
@@ -282,7 +306,7 @@ describe('DSolve', () => {
     const solution = dsolve(['List', ...equations], ['List', 'y', 'z']);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x,z(x) == "c_2" * e^x]`
+      `[y(x) == ArbitraryConstant(1) * e^x,z(x) == ArbitraryConstant(2) * e^x]`
     );
     expect(
       verifySystemSolution(equations, solution, { c_1: 2, c_2: 3, x: 0.75 })
@@ -338,7 +362,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[1/2 * y(x)^2 == 1/2 * x^2 + "c_1"]`
+      `[1/2 * y(x)^2 == 1/2 * x^2 + ArbitraryConstant(1)]`
     );
   });
 
@@ -367,6 +391,7 @@ describe('DSolve', () => {
     const text = solution.toString();
     expect(text).toContain('k');
     expect(text).not.toContain('c_1');
+    expect(text).not.toContain('ArbitraryConstant');
     expect(text).not.toContain('y_value');
   });
 
@@ -383,7 +408,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1"^2 + "c_1" * x]`
+      `[y(x) == x * ArbitraryConstant(1) + ArbitraryConstant(1)^2]`
     );
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, x: 0.75 })
@@ -403,7 +428,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * x + sin("c_1")]`
+      `[y(x) == x * ArbitraryConstant(1) + sin(ArbitraryConstant(1))]`
     );
     expect(
       verifyEquationSolution(equation, solution, { c_1: 0.5, x: 0.75 })
@@ -435,7 +460,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) / x == "c_1" + ln(x)]`
+      `[y(x) / x == ln(x) + ArbitraryConstant(1)]`
     );
   });
 
@@ -516,7 +541,7 @@ describe('DSolve', () => {
 
     expect(solution.operator).toBe('List');
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[-1 / y(x) + ln(|y(x) + 1| / |y(x)|) == "c_1" + x]`
+      `[-1 / y(x) + ln(|y(x) + 1| / |y(x)|) == x + ArbitraryConstant(1)]`
     );
   });
 
@@ -530,7 +555,7 @@ describe('DSolve', () => {
 
     expect(solution.operator).toBe('List');
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[-1/2 * ln(|y(x)^2 + 1|) + ln(|y(x)|) == "c_1" + x]`
+      `[-1/2 * ln(|y(x)^2 + 1|) + ln(|y(x)|) == x + ArbitraryConstant(1)]`
     );
   });
 
@@ -546,7 +571,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == ("c_1" * AiryBiPrime(-x) + AiryAiPrime(-x)) / ("c_1" * AiryBi(-x) + AiryAi(-x))]`
+      `[y(x) == (AiryBiPrime(-x) * ArbitraryConstant(1) + AiryAiPrime(-x)) / (AiryBi(-x) * ArbitraryConstant(1) + AiryAi(-x))]`
     );
     expect(verifyEquationSolution(equation, result, { c_1: 0.7, x: 0.4 })).toBe(
       true
@@ -571,7 +596,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) * x^2 + x * y(x)^2 == "c_1"]`
+      `[y(x) * x^2 + x * y(x)^2 == ArbitraryConstant(1)]`
     );
   });
 
@@ -645,7 +670,7 @@ describe('DSolve', () => {
     ]);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * e^(-x)]`
+      `[y(x) == ArbitraryConstant(1) * e^x + ArbitraryConstant(2) * e^(-x)]`
     );
     expect(
       verifyEquationSolution(
@@ -661,7 +686,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * e^(-x)]`
+      `[y(x) == ArbitraryConstant(1) * e^x + ArbitraryConstant(2) * e^(-x)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
@@ -682,7 +707,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^(1/2 * x * (1 + sqrt(5))) + "c_2" * e^(1/2 * x * (1 - sqrt(5)))]`
+      `[y(x) == ArbitraryConstant(1) * e^(1/2 * x * (1 + sqrt(5))) + ArbitraryConstant(2) * e^(1/2 * x * (1 - sqrt(5)))]`
     );
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
@@ -698,7 +723,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * cos(x) + "c_2" * sin(x)]`
+      `[y(x) == sin(x) * ArbitraryConstant(2) + cos(x) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
@@ -753,7 +778,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_2" * x * e^x + "c_1" * e^x]`
+      `[y(x) == x * ArbitraryConstant(2) * e^x + ArbitraryConstant(1) * e^x]`
     );
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
@@ -765,7 +790,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_2" * x + "c_1"]`
+      `[y(x) == x * ArbitraryConstant(2) + ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, solution, { c_1: 2, c_2: 3, x: 0.75 })
@@ -787,7 +812,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * e^(2x) + "c_3" * e^(3x)]`
+      `[y(x) == ArbitraryConstant(1) * e^x + ArbitraryConstant(2) * e^(2x) + ArbitraryConstant(3) * e^(3x)]`
     );
     expect(
       verifyEquationSolution(equation, solution, {
@@ -814,7 +839,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_3" * x^2 * e^x + "c_2" * x * e^x + "c_1" * e^x]`
+      `[y(x) == ArbitraryConstant(3) * x^2 * e^x + x * ArbitraryConstant(2) * e^x + ArbitraryConstant(1) * e^x]`
     );
     expect(
       verifyEquationSolution(equation, solution, {
@@ -842,7 +867,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * cos(sqrt(3)/2 * x) * e^(-1/2 * x) + "c_3" * sin(sqrt(3)/2 * x) * e^(-1/2 * x)]`
+      `[y(x) == ArbitraryConstant(1) * e^x + sin(sqrt(3)/2 * x) * ArbitraryConstant(3) * e^(-1/2 * x) + cos(sqrt(3)/2 * x) * ArbitraryConstant(2) * e^(-1/2 * x)]`
     );
     expect(
       verifyEquationSolution(equation, solution, {
@@ -859,7 +884,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == 1/2 * x^2 + "c_2" * x + "c_1"]`
+      `[y(x) == 1/2 * x^2 + x * ArbitraryConstant(2) + ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
@@ -875,7 +900,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == -x + "c_1" * e^x + "c_2" * e^(-x)]`
+      `[y(x) == -x + ArbitraryConstant(1) * e^x + ArbitraryConstant(2) * e^(-x)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.75 })
@@ -965,7 +990,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * cos(x) + "c_2" * sin(x) - cos(x) * ln(|tan(x) + sec(x)|)]`
+      `[y(x) == sin(x) * ArbitraryConstant(2) + cos(x) * ArbitraryConstant(1) - cos(x) * ln(|tan(x) + sec(x)|)]`
     );
     expect(result.operator).toBe('List');
   });
@@ -983,7 +1008,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * x^2 + "c_2" / x]`
+      `[y(x) == ArbitraryConstant(1) * x^2 + ArbitraryConstant(2) / x]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
@@ -1003,7 +1028,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" + "c_2" * ln(x)]`
+      `[y(x) == ln(x) * ArbitraryConstant(2) + ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
@@ -1024,7 +1049,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * cos(ln(x)) + "c_2" * sin(ln(x))]`
+      `[y(x) == sin(ln(x)) * ArbitraryConstant(2) + cos(ln(x)) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
@@ -1041,7 +1066,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * AiryAi(x) + "c_2" * AiryBi(x)]`
+      `[y(x) == AiryBi(x) * ArbitraryConstant(2) + AiryAi(x) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 1.7 })
@@ -1062,7 +1087,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * AiryAi(-x) + "c_2" * AiryBi(-x)]`
+      `[y(x) == AiryBi(-x) * ArbitraryConstant(2) + AiryAi(-x) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 1.7 })
@@ -1079,7 +1104,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * AiryAi(2x + 1/2) + "c_2" * AiryBi(2x + 1/2)]`
+      `[y(x) == AiryBi(2x + 1/2) * ArbitraryConstant(2) + AiryAi(2x + 1/2) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 0.9 })
@@ -1100,7 +1125,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * BesselJ(2, x) + "c_2" * BesselY(2, x)]`
+      `[y(x) == BesselY(2, x) * ArbitraryConstant(2) + BesselJ(2, x) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 1, c_2: 2, x: 1.5 })
@@ -1121,7 +1146,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * BesselI(1, x) + "c_2" * BesselK(1, x)]`
+      `[y(x) == BesselK(1, x) * ArbitraryConstant(2) + BesselI(1, x) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 1, c_2: 2, x: 1.5 })
@@ -1197,7 +1222,7 @@ describe('DSolve', () => {
     ]);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == ("c_1" + int(e^x * x^x dx)) / e^x]`
+      `[y(x) == (int(e^x * x^x dx) + ArbitraryConstant(1)) / e^x]`
     );
   }, 120_000);
 
@@ -1212,7 +1237,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * cos(x) + "c_2" * sin(x) + sin(x) * CosIntegral(x) - cos(x) * SinIntegral(x)]`
+      `[y(x) == sin(x) * ArbitraryConstant(2) + cos(x) * ArbitraryConstant(1) + sin(x) * CosIntegral(x) - cos(x) * SinIntegral(x)]`
     );
     for (const x of [0.4, 1.3, 2.7])
       expect(
@@ -1328,7 +1353,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" + x + "c_2" * ln(x)]`
+      `[y(x) == x + ln(x) * ArbitraryConstant(2) + ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
@@ -1349,7 +1374,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == 1/4 * x^3 + "c_1" * x^2 + "c_2" / x - 5/2]`
+      `[y(x) == 1/4 * x^3 + ArbitraryConstant(1) * x^2 + ArbitraryConstant(2) / x - 5/2]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
@@ -1371,7 +1396,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == 1/2 * x + "c_1" * cos(ln(x)) + "c_2" * sin(ln(x))]`
+      `[y(x) == 1/2 * x + sin(ln(x)) * ArbitraryConstant(2) + cos(ln(x)) * ArbitraryConstant(1)]`
     );
     expect(
       verifyEquationSolution(equation, result, { c_1: 2, c_2: 3, x: 2 })
@@ -1528,7 +1553,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * e^(-x) + 1/2 * x * e^x]`
+      `[y(x) == 1/2 * x * e^x + ArbitraryConstant(1) * e^x + ArbitraryConstant(2) * e^(-x)]`
     );
     expect(hasUnfoldedExpProduct(result)).toBe(false);
     expect(hasPythagoreanPair(result)).toBe(false);
@@ -1565,7 +1590,7 @@ describe('DSolve', () => {
     // The ½eˣsin²x + ½eˣcos²x pair from variation of parameters must be
     // collected to ½eˣ.
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * cos(x) + "c_2" * sin(x) + 1/2 * e^x]`
+      `[y(x) == 1/2 * e^x + sin(x) * ArbitraryConstant(2) + cos(x) * ArbitraryConstant(1)]`
     );
     expect(hasUnfoldedExpProduct(result)).toBe(false);
     expect(hasPythagoreanPair(result)).toBe(false);
@@ -1583,7 +1608,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
 
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * e^(-x) + 1/3 * e^(2x)]`
+      `[y(x) == 1/3 * e^(2x) + ArbitraryConstant(1) * e^x + ArbitraryConstant(2) * e^(-x)]`
     );
     expect(hasUnfoldedExpProduct(result)).toBe(false);
     expect(hasPythagoreanPair(result)).toBe(false);
@@ -1605,7 +1630,7 @@ describe('DSolve', () => {
     const result = dsolve(equation);
     expect(result.operator).toBe('List');
     expect(result.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * cos(x) + "c_2" * sin(x)]`
+      `[y(x) == sin(x) * ArbitraryConstant(2) + cos(x) * ArbitraryConstant(1)]`
     );
   });
 
@@ -1647,7 +1672,7 @@ describe('DSolve', () => {
 
     expect(implicit.operator).toBe('List');
     expect(implicit.toString()).toEqual(explicit.toString());
-    expect(implicit.toString()).toMatchInlineSnapshot(`[y(x) == "c_1" * e^x]`);
+    expect(implicit.toString()).toMatchInlineSnapshot(`[y(x) == ArbitraryConstant(1) * e^x]`);
   });
 
   //
@@ -1662,7 +1687,7 @@ describe('DSolve', () => {
       'x',
     ]);
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == x * ("c_1" + x)]`
+      `[y(x) == x * (x + ArbitraryConstant(1))]`
     );
   });
 
@@ -1717,7 +1742,7 @@ describe('DSolve LaTeX parsing on a fresh engine', () => {
       .evaluate();
 
     expect(solution.operator).toBe('List');
-    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) == "c_1" * e^x]`);
+    expect(solution.toString()).toMatchInlineSnapshot(`[y(x) == ArbitraryConstant(1) * e^x]`);
   });
 
   test('solves a second-order IC list entered as LaTeX', () => {

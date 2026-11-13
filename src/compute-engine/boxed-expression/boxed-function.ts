@@ -398,6 +398,7 @@ import {
 } from './solve-domain.js';
 import { solveSystem, solveOr } from './solve-system.js';
 import { solveCongruence } from './solve-congruence.js';
+import { withArbitraryIndexes } from './arbitrary-constants.js';
 import { replace } from './rules.js';
 import { negate } from './negate.js';
 import { simplifyValueBlind } from './simplify.js';
@@ -7009,6 +7010,29 @@ export class BoxedFunction
     // `ce._opensOperation()`).
     if (this.engine._opensOperation(false))
       return this.engine._withOperation(this, () => this.solve(vars));
+    // The arbitrary constants of the result are numbered for this operation
+    // (`arbitrary-constants.ts`). `vars` is read once: an iterator is
+    // exhausted after one pass.
+    const names =
+      vars === undefined || vars === null
+        ? undefined
+        : normalizedUnknownsForSolve(vars);
+    return withArbitraryIndexes(
+      this.engine,
+      [this],
+      () => this._solveWithIndexes(names),
+      { unknowns: names ?? [] }
+    );
+  }
+
+  /** @internal The body of `solve()`. */
+  _solveWithIndexes(
+    vars?: Iterable<string> | string | Expression | Iterable<Expression>
+  ):
+    | null
+    | ReadonlyArray<Expression>
+    | Record<string, Expression>
+    | Array<Record<string, Expression>> {
     // An equation that holds a residue class is not solved (see
     // `evaluateSolve()`): `null`, as for any equation the solver cannot
     // solve, and not an empty list of roots.

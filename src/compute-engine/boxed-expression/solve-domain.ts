@@ -38,12 +38,14 @@ import { expand } from './expand.js';
 import { together } from './factor.js';
 import { asRational } from './numerics.js';
 import { interval } from '../numerics/interval.js';
-import {
-  tryDiophantineSolve,
-  isIntegerDomain,
-  freshParameters,
-} from './diophantine.js';
+import { tryDiophantineSolve, isIntegerDomain } from './diophantine.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
+import {
+  arbitraryConstants,
+  arbitraryIntegers,
+  hasArbitraryConstant,
+  withArbitraryIndexes,
+} from './arbitrary-constants.js';
 import { holdsKindValue } from './residue-class.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { halfTurnAngle } from './trigonometry.js';
@@ -347,9 +349,9 @@ function isRestrictedUnknown(ce: ComputeEngine, x: string): boolean {
  * - When the equation does not depend on `x` once it is expanded, it is an
  *   identity (`x = x`, `2(x + 1) = 2x + 2`, `0 = 0`) or a contradiction
  *   (`x + 1 = x + 2`, `1 = 0`). An identity is true for every value of `x`:
- *   the answer is a list with one fresh free parameter, `[t]`, the same form
- *   as the parametric answers of the congruence and diophantine solvers. A
- *   contradiction has no solution: `[]`. When the remaining constant has
+ *   the answer is a list with one free parameter, `[ArbitraryConstant(1)]`,
+ *   the same form as the parametric answers of the congruence and
+ *   diophantine solvers. A contradiction has no solution: `[]`. When the remaining constant has
  *   other unknowns (`a = 0`), the answer depends on them, and `Solve` stays
  *   unevaluated.
  * - When the root finder produced candidate roots and rejected all of them
@@ -407,7 +409,7 @@ export function emptyRootsAnswer(
     if (constants.every((constant) => !constant.has(x))) {
       if (constants.every((constant) => constant.isSame(0))) {
         if (conditioned || isRestrictedUnknown(ce, x)) return undefined;
-        return ce.function('List', freshParameters(ce, equation, 1, 'number'));
+        return ce.function('List', arbitraryConstants(ce, equation, 1));
       }
       return undefined;
     }
@@ -587,7 +589,14 @@ export function evaluateSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression {
-  const result = evaluateSolveOperands(ce, ops);
+  // The solver does not read the values of the unknowns.
+  const specs = ops[0] === undefined ? undefined : parseSolveSpecs(ops.slice(1));
+  const result = withArbitraryIndexes(
+    ce,
+    ops,
+    () => evaluateSolveOperands(ce, ops),
+    { unknowns: specs && solveUnknownNames(ops[0], specs) }
+  );
   if (result !== undefined) return result;
   const eq = ops[0];
   if (eq === undefined) return canonicalSolve(ce, ops);
@@ -813,9 +822,12 @@ function evaluateSolveOperands(
       let equations: Expression[] = [];
       const sideCandidates: Expression[] = [];
       for (const item of remaining) {
+        // A predicate that holds an arbitrary constant (`x ≠ Z(1)`) has a
+        // name that is not a spec unknown, as a predicate with a free symbol.
         if (
           isSideConditionPredicate(item) &&
-          item.unknowns.every((u) => specNames.has(u))
+          item.unknowns.every((u) => specNames.has(u)) &&
+          !hasArbitraryConstant(item)
         )
           sideCandidates.push(item);
         else equations.push(item);
@@ -3224,9 +3236,9 @@ function sameRootValue(
 //
 // With no domain, or over the real or the complex numbers, a periodic
 // equation has infinitely many roots. The answer of `Solve` is then a list of
-// families `x₀ + T·t`, one for each class of roots, where `t` is a fresh
-// integer parameter (the same names as the diophantine solver: `t`, `t_1`,
-// …): `sin(x) = 1/2` gives `[π/6 + 2πt, 5π/6 + 2πt]`. Each family holds only
+// families `x₀ + T·t`, one for each class of roots, where `t` is a new
+// integer parameter `ArbitraryInteger(k)`, as for the diophantine solver
+// (`arbitrary-constants.ts`): `sin(x) = 1/2` gives `[π/6 + 2πt, 5π/6 + 2πt]`. Each family holds only
 // roots, and together the families hold every root.
 //
 // A product of factors gives the families of each factor, with the period of
@@ -3894,7 +3906,7 @@ function periodicCommonRoots(
     }
     const reduced = reduceRootFamilies(ce, families);
     if (reduced === undefined) return 'undecided';
-    const t = freshParameters(ce, ce.function('List', [...equations]), 1)[0];
+    const t = arbitraryIntegers(ce, ce.function('List', [...equations]), 1)[0];
     return reduced.map((f) => familyExpression(ce, f, t));
   }
   return 'undecided';
@@ -3930,7 +3942,7 @@ function alternativeRootFamilies(
     if (partialRootListReason(alt, x, found, stats) !== undefined)
       return undefined;
     if (found.length === 0) {
-      // Only a decided empty list (not the `[t]` of an identity).
+      // Only a decided empty list (not the free parameter of an identity).
       const answer = emptyRootsAnswer(ce, alt, x, stats, false);
       if (isFunction(answer, 'List') && answer.nops === 0) continue;
       return undefined;
@@ -3969,12 +3981,13 @@ function alternativeRootFamilies(
     }
     if (!inFamily) isolated.push(root);
   }
-  const t = freshParameters(ce, alternatives, 1)[0];
+  const t = arbitraryIntegers(ce, alternatives, 1)[0];
   return [...isolated, ...reduced.map((f) => familyExpression(ce, f, t))];
 }
 
 /**
- * The expression of the roots of `family` with the integer parameter `t`:
+ * The expression of the roots of `family` with the integer parameter `t` (an
+ * `ArbitraryInteger` call):
  * `root + spacing·t`. A root `If(guard, r)` gives
  * `If(guard, r + spacing·t)`.
  */
@@ -4031,7 +4044,7 @@ function periodicRootFamilies(
   );
   if (result === undefined) return undefined;
   if (!result.periodic) return { periodic: false, roots: [...roots] };
-  const t = freshParameters(ce, equation, 1)[0];
+  const t = arbitraryIntegers(ce, equation, 1)[0];
   return {
     periodic: true,
     roots: [
@@ -5042,15 +5055,14 @@ function confirmExact(
   const v = predBody.subs(subs).evaluate();
   if (isEquation) {
     if (v.isIdenticallyEqual(0) === true) return true;
-    return v.unknowns.length > 0 ? undefined : false;
+    return v.unknowns.length > 0 || hasArbitraryConstant(v) ? undefined : false;
   }
   const s = sym(v);
   if (s === 'True') return true;
   if (s === 'False') return false;
   const ce = v.engine;
-  return v.unknowns.some(
-    (name) => !ce.symbol(name).type.matches('collection<any>')
-  )
+  return hasArbitraryConstant(v) ||
+    v.unknowns.some((name) => !ce.symbol(name).type.matches('collection<any>'))
     ? undefined
     : false;
 }

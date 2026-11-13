@@ -64,6 +64,7 @@ import {
   resolvesToSystemBinding,
 } from '../boxed-expression/operand-descriptor.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
+import { canonicalArbitrary } from '../boxed-expression/arbitrary-constants.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
 import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
@@ -10335,6 +10336,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return result;
         });
       },
+    },
+
+    ArbitraryConstant: {
+      description: [
+        'ArbitraryConstant(k): an arbitrary number, the k-th of a result: a',
+        'constant of integration, the free parameter of an identity. Inside one',
+        'result, two calls with the same index are the same value, and two',
+        'calls with different indexes are independent. It has no value.',
+      ],
+      broadcastable: false,
+      signature: '(integer) -> number',
+      canonical: (ops, { engine }) =>
+        canonicalArbitrary(engine, 'ArbitraryConstant', ops),
+    },
+
+    ArbitraryInteger: {
+      description: [
+        'ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the',
+        'parameter of a family of roots, of a diophantine or a congruence',
+        'solution. Inside one result, two calls with the same index are the',
+        'same value, and two calls with different indexes are independent. It',
+        'has no value.',
+      ],
+      broadcastable: false,
+      signature: '(integer) -> integer',
+      canonical: (ops, { engine }) =>
+        canonicalArbitrary(engine, 'ArbitraryInteger', ops),
     },
 
     Solve: {

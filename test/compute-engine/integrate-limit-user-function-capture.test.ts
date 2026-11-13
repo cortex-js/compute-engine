@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { Expression } from '../../src/compute-engine/global-types';
 import { rewriteWithBinders } from '../../src/compute-engine/boxed-expression/binders';
 
 // The variable of `Integrate` and of `Limit` never reads a symbol inside a
@@ -508,24 +507,18 @@ describe('Solve with a renamed unknown keeps its constraints', () => {
     expect(solve(3)).toBe('[3]');
   });
 
-  // `sin(h(k)) = 0` is `sin(k₁ − k) = 0`: a family of roots with a fresh
-  // integer parameter `t`, which is declared where the caller can read it.
-  test('the parameter of a family of roots is in the caller scope', () => {
+  // `sin(h(k)) = 0` is `sin(k₁ − k) = 0`: a family of roots with the
+  // integer parameter `ArbitraryInteger(1)`, a constant that needs no
+  // declaration in any scope.
+  test('the parameter of a family of roots is a constant', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.parse('a \\mapsto a - k'));
     const r = ce
       .box(['Solve', ['Equal', ['Sin', ['h', 'k']], 0], 'k'] as never)
       .evaluate();
-    expect(r.toString()).toBe('[k + 2pi * t,k + 2pi * t + pi]');
-    const t: Expression[] = [];
-    const walk = (e: Expression) => {
-      if (e.symbol === 't') t.push(e);
-      e.ops?.forEach(walk);
-    };
-    walk(r);
-    expect(t.length).toBeGreaterThan(0);
-    for (const s of t)
-      expect(s.valueDefinition).toBe(ce.box('t').valueDefinition);
+    expect(r.toString()).toBe('[k + 2pi * ArbitraryInteger(1),k + pi + 2pi * ArbitraryInteger(1)]');
+    expect(r.has('t')).toBe(false);
+    expect(ce.lookupDefinition('t')).toBeUndefined();
   });
 });
 

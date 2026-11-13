@@ -1866,6 +1866,19 @@ function serializeTuple(
   return joinLatex(['(', body, ')']);
 }
 
+/** `\constant{c_{k}}` (letter `c`) or `\constant{n_{k}}` (letter `n`) for a
+ * valid call; any other call is written as a function. */
+function serializeArbitrary(
+  letter: 'c' | 'n'
+): (serializer: Serializer, expr: MathJsonExpression) => string {
+  return (serializer, expr) => {
+    const k = nops(expr) === 1 ? machineValue(operand(expr, 1)) : null;
+    if (k !== null && Number.isSafeInteger(k) && k >= 1)
+      return `\\constant{${letter}_{${k}}}`;
+    return serializer.serializeFunction(expr);
+  };
+}
+
 export const DEFINITIONS_CORE: LatexDictionary = [
   //
   // Constants
@@ -2906,6 +2919,42 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\error'],
     parse: (parser: Parser) =>
       ['Error', parser.parseGroup()] as MathJsonExpression,
+  },
+  // An arbitrary constant prints inside `\constant{…}`, which shows its
+  // argument: `\constant{c_{1}}` is `ArbitraryConstant(1)`, shown as `c_1`,
+  // and `\constant{n_{1}}` is `ArbitraryInteger(1)`. Without the command,
+  // `c_1` is a symbol.
+  { name: 'ArbitraryConstant', serialize: serializeArbitrary('c') },
+  { name: 'ArbitraryInteger', serialize: serializeArbitrary('n') },
+  {
+    latexTrigger: ['\\constant'],
+    parse: (parser: Parser) => {
+      const start = parser.index;
+      parser.skipSpace();
+      const tokens: string[] = [];
+      if (parser.parseStringGroup(false, tokens) === null)
+        return parser.error('expected-argument', start);
+      const content = tokens
+        .map((t) =>
+          t === '<{>' ? '{' : t === '<}>' ? '}' : t === '<space>' ? ' ' : t
+        )
+        .join('');
+      // `c_{k}` or `n_{k}`, `k` a positive integer with no leading zero. A
+      // single digit can be written without braces, as in LaTeX.
+      const m = /^\s*([cn])\s*_\s*(?:\{\s*([1-9][0-9]*)\s*\}|([1-9]))\s*$/.exec(
+        content
+      );
+      const k = m === null ? undefined : Number(m[2] ?? m[3]);
+      if (m === null || !Number.isSafeInteger(k))
+        return parser.error(
+          ['unexpected-argument', { str: content }],
+          start
+        );
+      return [
+        m[1] === 'c' ? 'ArbitraryConstant' : 'ArbitraryInteger',
+        k,
+      ] as MathJsonExpression;
+    },
   },
   {
     name: 'Error',

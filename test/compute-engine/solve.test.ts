@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
+import { hasArbitraryConstant } from '../../src/compute-engine/boxed-expression/arbitrary-constants';
 
 function expr(s: string) {
   return engine.parse(s);
@@ -2746,17 +2747,23 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
     const values = (roots as any[]).map((r) => r.N().re).sort((a, b) => a - b);
     for (const v of values) expect(Math.abs(f(v))).toBeLessThan(1e-9);
     // `Solve` gives the same list, except for a periodic equation: `Solve`
-    // then gives the families of roots `x₀ + T·t`, and `solve()` gives the
+    // then gives the families of roots `x₀ + T·Z(1)`, and `solve()` gives the
     // principal roots, one root of each family in one period. Each principal
     // root is a member of a family, and each family has a principal root.
     const solved = solveOp(latex);
-    const families = solved.ops!.filter((op) => op.unknowns.length > 0);
+    const families = solved.ops!.filter((op) => hasArbitraryConstant(op));
     if (families.length === 0) expect(solved.nops).toBe(values.length);
     else {
       const isMember = (family: any, v: number) => {
-        const t = family.unknowns[0];
-        const a = family.subs({ [t]: 0 }).N().re;
-        const step = family.subs({ [t]: 1 }).N().re - a;
+        const at = (k: number) =>
+          (
+            family.replace(
+              { match: ce.box(['ArbitraryInteger', 1]), replace: ce.number(k) },
+              { recursive: true }
+            ) ?? family
+          ).N().re;
+        const a = at(0);
+        const step = at(1) - a;
         const k = Math.round((v - a) / step);
         return Math.abs(a + k * step - v) < 1e-9;
       };

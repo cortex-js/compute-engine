@@ -127,7 +127,7 @@ describe('DSOLVE VARIATION-OF-PARAMETERS STEP BUDGET', () => {
     const ce = new ComputeEngine();
     const result = dsolve(ce, ['Tan', 'x']);
     expect(result.toString()).toBe(
-      '[y(x) == "c_1" * cos(x) + "c_2" * sin(x) - cos(x) * ln(|tan(x) + sec(x)|)]'
+      '[y(x) == sin(x) * ArbitraryConstant(2) + cos(x) * ArbitraryConstant(1) - cos(x) * ln(|tan(x) + sec(x)|)]'
     );
     expect(dSolveVariationStats.spent).toBe(false);
     // 1,160 steps, rule steps included.

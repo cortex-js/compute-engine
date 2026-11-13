@@ -18,6 +18,7 @@ import {
   withoutPeriodicDuplicates,
 } from './solve-domain.js';
 import { solveSystem } from './solve-system.js';
+import { withArbitraryIndexes } from './arbitrary-constants.js';
 import { normalizedUnknownsForSolve, liftIntegrand } from './utils.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { labelFor } from './explain-labels.js';
@@ -101,6 +102,33 @@ export function explainExpression(
  * what `solve()` returns.
  */
 function explainSolve(expr: Expression, options?: ExplainOptions): Explanation {
+  // The arbitrary constants are numbered for this operation, as in `solve()`
+  // (`arbitrary-constants.ts`): the indexes of the result first, so that it
+  // is the result of `solve()`, then those that occur only in a step.
+  return withArbitraryIndexes(
+    expr.engine,
+    [expr],
+    () => explainSolveWithIndexes(expr, options),
+    {
+      unknowns: normalizedUnknownsForSolve(options?.variable),
+      primary: (explanation) => [explanation.result],
+      map: (explanation, f) => ({
+        ...explanation,
+        initial: f(explanation.initial),
+        result: f(explanation.result),
+        steps: explanation.steps.map((step) => ({
+          ...step,
+          value: f(step.value),
+        })),
+      }),
+    }
+  );
+}
+
+function explainSolveWithIndexes(
+  expr: Expression,
+  options?: ExplainOptions
+): Explanation {
   const ce = expr.engine;
   const canonical = expr.canonical;
   const operator = canonical.operator;

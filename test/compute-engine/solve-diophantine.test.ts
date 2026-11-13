@@ -20,6 +20,20 @@ function tuples(expr: Expression): number[][] {
   });
 }
 
+/** `expr` with `ArbitraryInteger(i + 1)` replaced by `values[i]`. */
+function atParameters(expr: Expression, values: number[]): Expression {
+  const ce = expr.engine;
+  let result = expr;
+  values.forEach((v, i) => {
+    result =
+      result.replace(
+        { match: ce.box(['ArbitraryInteger', i + 1]), replace: ce.number(v) },
+        { recursive: true }
+      ) ?? result;
+  });
+  return result;
+}
+
 /** True if the `Solve` expression stayed unevaluated (undecided / inert). */
 function isInert(expr: Expression): boolean {
   return expr.evaluate().operator === 'Solve';
@@ -209,8 +223,8 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
       // Verify by substituting several integer parameter values, rather than
       // pinning the parametric form.
       for (const tv of [-3, -1, 0, 2, 5]) {
-        const nv = tuple.op1.subs({ t: ce.number(tv) }).evaluate();
-        const mv = tuple.op2.subs({ t: ce.number(tv) }).evaluate();
+        const nv = atParameters(tuple.op1, [tv]).evaluate();
+        const mv = atParameters(tuple.op2, [tv]).evaluate();
         expect(3 * nv.re + 4 * mv.re).toBe(7);
         expect(Number.isInteger(nv.re)).toBe(true);
         expect(Number.isInteger(mv.re)).toBe(true);
@@ -220,13 +234,11 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
     }
   });
 
-  test('parameter name is fresh: a bound `t` does not leak into the result', () => {
+  test('the parameter is a constant: a bound `t` does not leak into the result', () => {
     ce.pushScope();
     try {
       ce.declare('n', 'integer');
       ce.declare('m', 'integer');
-      // An earlier solve declared the parameter `t` in the global scope. The
-      // declaration in this scope keeps the value 5 out of that parameter.
       ce.declare('t', 'integer');
       ce.assign('t', 5); // `t` now has a value
       const r = ce
@@ -238,14 +250,13 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
         ])
         .evaluate();
       const tuple = r.op1;
-      // The result must NOT have collapsed `t`→5 (which would make the
-      // coordinates concrete garbage); it stays parametric in a fresh symbol.
+      // The result must NOT have collapsed to concrete values: it stays
+      // parametric in the constant `ArbitraryInteger(1)`.
       expect(tuple.op1.symbols.includes('t')).toBe(false);
-      // The fresh parameter still verifies the equation.
-      const freshName = tuple.op1.symbols.find((s) => s !== 'n' && s !== 'm')!;
+      expect(JSON.stringify(tuple.json)).toContain('["ArbitraryInteger",1]');
       for (const tv of [0, 3]) {
-        const nv = tuple.op1.subs({ [freshName]: ce.number(tv) }).evaluate();
-        const mv = tuple.op2.subs({ [freshName]: ce.number(tv) }).evaluate();
+        const nv = atParameters(tuple.op1, [tv]).evaluate();
+        const mv = atParameters(tuple.op2, [tv]).evaluate();
         expect(3 * nv.re + 4 * mv.re).toBe(7);
       }
     } finally {
@@ -253,7 +264,7 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
     }
   });
 
-  test('parameter name is fresh: a declared `t` with no value is not the parameter', () => {
+  test('the parameter does not depend on a declared `t`', () => {
     const solveLinear = (engine: ComputeEngine) => {
       engine.declare('n', 'integer');
       engine.declare('m', 'integer');
@@ -266,28 +277,27 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
         ])
         .evaluate();
     };
-    // With no symbol `t` of the user, the parameter is `t`.
-    expect(solveLinear(new ComputeEngine()).op1.op1.symbols).toContain('t');
+    const fresh = solveLinear(new ComputeEngine());
+    expect(JSON.stringify(fresh.json)).toContain('["ArbitraryInteger",1]');
 
-    // A `t` that the user declared is not the parameter: if it were, a value
-    // assigned to `t` later would make the tuple a value that is not a
-    // solution.
+    // A `t` that the user declared: the same result, and a value assigned
+    // to `t` does not reach it.
     const engine = new ComputeEngine();
     engine.declare('t', 'number');
-    const tuple = solveLinear(engine).op1;
-    expect(tuple.op1.symbols).not.toContain('t');
-    expect(tuple.op1.symbols).toContain('t_1');
+    const result = solveLinear(engine);
+    expect(result.json).toEqual(fresh.json);
+    const tuple = result.op1;
     engine.assign('t', 0.5);
     for (const tv of [-2, 0, 3]) {
-      const nv = tuple.op1.subs({ t_1: engine.number(tv) }).N().re;
-      const mv = tuple.op2.subs({ t_1: engine.number(tv) }).N().re;
+      const nv = atParameters(tuple.op1, [tv]).N().re;
+      const mv = atParameters(tuple.op2, [tv]).N().re;
       expect(3 * nv + 4 * mv).toBe(7);
       expect(Number.isInteger(nv)).toBe(true);
       expect(Number.isInteger(mv)).toBe(true);
     }
   });
 
-  test('parameter names are fresh: three parameters next to a declared `t`', () => {
+  test('three parameters next to a declared `t`', () => {
     const engine = new ComputeEngine();
     engine.declare('t', 'number');
     engine.declare('a', 'integer');
@@ -303,18 +313,17 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
       ])
       .evaluate();
     expect(r.operator).toBe('List');
-    const names = new Set(r.symbols);
-    expect(names.has('t')).toBe(false);
-    for (const n of ['t_1', 't_2', 't_3']) expect(names.has(n)).toBe(true);
+    expect(r.symbols).toEqual(['a', 'b', 'c'].filter((n) => r.has(n)));
+    const json = JSON.stringify(r.json);
+    for (const k of [1, 2, 3])
+      expect(json).toContain(`["ArbitraryInteger",${k}]`);
+    expect(json).not.toContain('["ArbitraryInteger",4]');
     engine.assign('t', 0.5);
     // Each family is a Pythagorean triple for integer parameter values.
     for (const tuple of r.ops!) {
-      const sub = {
-        t_1: engine.number(2),
-        t_2: engine.number(3),
-        t_3: engine.number(1),
-      };
-      const [a, b, c] = tuple.ops!.map((x) => x.subs(sub).N().re);
+      const [a, b, c] = tuple.ops!.map(
+        (x) => atParameters(x, [2, 3, 1]).N().re
+      );
       expect(a * a + b * b).toBe(c * c);
     }
   });
@@ -342,20 +351,16 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
       const tuple = r.op1;
       expect(tuple.operator).toBe('Tuple');
       // Two free parameters; verify over a small grid.
-      const params = [
-        ...new Set(
-          [...tuple.op1.symbols, ...tuple.op2.symbols, ...tuple.op3.symbols].filter(
-            (s) => s !== 'a' && s !== 'b' && s !== 'c'
-          )
-        ),
-      ];
-      expect(params.length).toBe(2);
+      const json = JSON.stringify(tuple.json);
+      expect(json).toContain('["ArbitraryInteger",1]');
+      expect(json).toContain('["ArbitraryInteger",2]');
+      expect(json).not.toContain('["ArbitraryInteger",3]');
       for (const t1 of [-1, 0, 2])
         for (const t2 of [-2, 1]) {
-          const sub = { [params[0]]: ce.number(t1), [params[1]]: ce.number(t2) };
-          const av = tuple.op1.subs(sub).evaluate().re;
-          const bv = tuple.op2.subs(sub).evaluate().re;
-          const cv = tuple.op3.subs(sub).evaluate().re;
+          const sub = [t1, t2];
+          const av = atParameters(tuple.op1, sub).evaluate().re;
+          const bv = atParameters(tuple.op2, sub).evaluate().re;
+          const cv = atParameters(tuple.op3, sub).evaluate().re;
           expect(2 * av + 3 * bv + 5 * cv).toBe(1);
         }
     } finally {
@@ -382,15 +387,15 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
       const fam = r.op1; // first family
       for (const tv of [0, 1, 2]) {
         // `.N().re`: closed forms in √2 stay symbolic, so numericize.
-        const pv = fam.op1.subs({ t: ce.number(tv) }).N().re;
-        const qv = fam.op2.subs({ t: ce.number(tv) }).N().re;
+        const pv = atParameters(fam.op1, [tv]).N().re;
+        const qv = atParameters(fam.op2, [tv]).N().re;
         expect(pv * pv - 2 * qv * qv).toBeCloseTo(1, 6);
       }
       // The negation family also satisfies the equation.
       const neg = r.op2;
       for (const tv of [0, 1, 2]) {
-        const pv = neg.op1.subs({ t: ce.number(tv) }).N().re;
-        const qv = neg.op2.subs({ t: ce.number(tv) }).N().re;
+        const pv = atParameters(neg.op1, [tv]).N().re;
+        const qv = atParameters(neg.op2, [tv]).N().re;
         expect(pv * pv - 2 * qv * qv).toBeCloseTo(1, 6);
       }
     } finally {
@@ -414,8 +419,8 @@ describe('DIOPHANTINE — unbounded, parametric results', () => {
     expect(r.nops).toBe(1);
     const tuple = r.op1;
     for (const tv of [-2, 0, 3]) {
-      const xv = tuple.op1.subs({ t: ce.number(tv) }).evaluate().re;
-      const yv = tuple.op2.subs({ t: ce.number(tv) }).evaluate().re;
+      const xv = atParameters(tuple.op1, [tv]).evaluate().re;
+      const yv = atParameters(tuple.op2, [tv]).evaluate().re;
       expect(3 * xv + 4 * yv).toBe(7);
     }
   });
@@ -464,14 +469,10 @@ describe('DIOPHANTINE — Pythagorean triples (3 unknowns, homogeneous)', () => 
         for (let tv = -3; tv <= 3; tv++)
           for (let t1 = -3; t1 <= 3; t1++)
             for (let t2 = -3; t2 <= 3; t2++) {
-              const sub = {
-                t: ce.number(tv),
-                t_1: ce.number(t1),
-                t_2: ce.number(t2),
-              };
-              const xv = tuple.op1.subs(sub).evaluate().re;
-              const yv = tuple.op2.subs(sub).evaluate().re;
-              const zv = tuple.op3.subs(sub).evaluate().re;
+              const sub = [tv, t1, t2];
+              const xv = atParameters(tuple.op1, sub).evaluate().re;
+              const yv = atParameters(tuple.op2, sub).evaluate().re;
+              const zv = atParameters(tuple.op3, sub).evaluate().re;
               expect(Number.isInteger(xv)).toBe(true);
               expect(Number.isInteger(yv)).toBe(true);
               expect(Number.isInteger(zv)).toBe(true);
@@ -501,11 +502,11 @@ describe('DIOPHANTINE — Pythagorean triples (3 unknowns, homogeneous)', () => 
         ])
         .evaluate();
       const engine = (tuple: Expression, tv: number, t1: number, t2: number) => {
-        const sub = { t: ce.number(tv), t_1: ce.number(t1), t_2: ce.number(t2) };
+        const sub = [tv, t1, t2];
         return [
-          tuple.op1.subs(sub).evaluate().re,
-          tuple.op2.subs(sub).evaluate().re,
-          tuple.op3.subs(sub).evaluate().re,
+          atParameters(tuple.op1, sub).evaluate().re,
+          atParameters(tuple.op2, sub).evaluate().re,
+          atParameters(tuple.op3, sub).evaluate().re,
         ];
       };
       for (const [tv, t1, t2] of [
@@ -572,14 +573,10 @@ describe('DIOPHANTINE — Pythagorean triples (3 unknowns, homogeneous)', () => 
         for (let tv = -2; tv <= 2; tv++)
           for (let t1 = -3; t1 <= 3; t1++)
             for (let t2 = -3; t2 <= 3; t2++) {
-              const sub = {
-                t: ce.number(tv),
-                t_1: ce.number(t1),
-                t_2: ce.number(t2),
-              };
-              const xv = tuple.op1.subs(sub).evaluate().re;
-              const yv = tuple.op2.subs(sub).evaluate().re;
-              const zv = tuple.op3.subs(sub).evaluate().re;
+              const sub = [tv, t1, t2];
+              const xv = atParameters(tuple.op1, sub).evaluate().re;
+              const yv = atParameters(tuple.op2, sub).evaluate().re;
+              const zv = atParameters(tuple.op3, sub).evaluate().re;
               // Roles landed correctly ⇒ y² = x² + z² holds.
               expect(yv * yv).toBe(xv * xv + zv * zv);
             }
@@ -615,11 +612,11 @@ describe('DIOPHANTINE — Pythagorean triples (3 unknowns, homogeneous)', () => 
       expect(r.nops).toBe(2);
       // z has the hypotenuse role (last unknown) ⇒ family A === famA / B === famB.
       const engine = (tuple: Expression, tv: number, t1: number, t2: number) => {
-        const sub = { t: ce.number(tv), t_1: ce.number(t1), t_2: ce.number(t2) };
+        const sub = [tv, t1, t2];
         return [
-          tuple.op1.subs(sub).evaluate().re,
-          tuple.op2.subs(sub).evaluate().re,
-          tuple.op3.subs(sub).evaluate().re,
+          atParameters(tuple.op1, sub).evaluate().re,
+          atParameters(tuple.op2, sub).evaluate().re,
+          atParameters(tuple.op3, sub).evaluate().re,
         ];
       };
       for (const [tv, t1, t2] of [

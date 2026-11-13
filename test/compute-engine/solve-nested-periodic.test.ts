@@ -105,7 +105,13 @@ function expectFamiliesOf(
   expect(result.operator).toBe('List');
   const members: number[] = [];
   for (const family of result.ops!) {
-    const at = (k: number) => family.subs({ t: k }).N().re;
+    const at = (k: number) =>
+      (
+        family.replace(
+          { match: ce.box(['ArbitraryInteger', 1]), replace: ce.number(k) },
+          { recursive: true }
+        ) ?? family
+      ).N().re;
     const step = Math.abs(at(1) - at(0));
     expect(step).toBeGreaterThan(0);
     const kmax = Math.ceil((Math.max(-lo, hi) + Math.abs(at(0))) / step);
@@ -167,19 +173,19 @@ describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: expr.solve()', () => {
 describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: Solve with no domain', () => {
   test('sin(sin(x)) = 0', () => {
     const result = solveLatex('\\sin(\\sin(x))=0');
-    expect(result.toString()).toBe('[pi * t]');
+    expect(result.toString()).toBe('[pi * ArbitraryInteger(1)]');
     expectFamiliesOf(result, (x) => Math.sin(Math.sin(x)));
   });
 
   test('sin(cos(x)) = 0', () => {
     const result = solveLatex('\\sin(\\cos(x))=0');
-    expect(result.toString()).toBe('[pi * t + 1/2 * pi]');
+    expect(result.toString()).toBe('[1/2 * pi + pi * ArbitraryInteger(1)]');
     expectFamiliesOf(result, (x) => Math.sin(Math.cos(x)));
   });
 
   test('sin(2·sin(x)) = 0', () => {
     const result = solveLatex('\\sin(2\\sin(x))=0');
-    expect(result.toString()).toBe('[pi * t]');
+    expect(result.toString()).toBe('[pi * ArbitraryInteger(1)]');
     expectFamiliesOf(result, (x) => Math.sin(2 * Math.sin(x)));
   });
 
