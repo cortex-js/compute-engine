@@ -127,7 +127,7 @@ const TABLE = {
   minor: ['P3', 'P4', 'P4'],
   confidence: ['P2', 'P3', 'P4'],
 };
-const BODY_WORD_CAP = 500;
+const BODY_WORD_CAP = 1024;
 const IN_PROGRESS_DAYS = 3;
 const AGE_DAYS = 60;
 const ANSWER_DAYS = 1;

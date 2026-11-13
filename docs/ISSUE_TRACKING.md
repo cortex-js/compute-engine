@@ -118,7 +118,7 @@ Rules for the body:
 
 - The first line is one sentence that says what the user sees, with no engine
   terms. This is the line the board reads.
-- The body is at most 500 words outside code blocks and outside the
+- The body is at most 1024 words outside code blocks and outside the
   `## CE answer` and `## Decision` sections. A `## Decision` section records
   the board's answer to a question, as `User decision <date>: …`, and the
   session that fixes the issue reads it there. It gives the program, what it gives today, what it
