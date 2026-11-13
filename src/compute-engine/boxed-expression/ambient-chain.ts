@@ -21,12 +21,15 @@ const activatedDefinitions = new WeakSet<object>();
 /**
  * Record that `scope` is an activation of `template`, or holds the values
  * of an evaluation with no template (a call frame). `values` holds the
- * value of each static definition in this evaluation.
+ * value of each static definition in this evaluation. With `known`, the
+ * definitions of `values` are those of an activation registered before,
+ * and are already in `activatedDefinitions`.
  */
 function registerScopeActivation(
   scope: Scope,
   template: Scope | undefined,
-  values?: Map<object, unknown>
+  values?: Map<object, unknown>,
+  known = false
 ): void {
   if (template !== undefined) {
     scopeTemplates.set(scope, template);
@@ -34,7 +37,7 @@ function registerScopeActivation(
   }
   if (values === undefined) return;
   activationValues.set(scope, values);
-  for (const def of values.keys()) activatedDefinitions.add(def);
+  if (!known) for (const def of values.keys()) activatedDefinitions.add(def);
 }
 
 // The body scope of the function literal that each call frame applies
@@ -205,6 +208,39 @@ export function renewIterationActivation(
   const binding = template.bindings.get(name) as { value?: object } | undefined;
   if (binding?.value === undefined || !values.has(binding.value)) return;
   const fresh: Scope = { ...scope, bindings: new Map(scope.bindings) };
-  registerScopeActivation(fresh, template, new Map(values));
+  registerScopeActivation(fresh, template, new Map(values), true);
   (top as { lexicalScope: Scope }).lexicalScope = fresh;
+}
+
+/**
+ * True when every name resolves from the scope `a` as it resolves from the
+ * scope `b`: the two chains of parents reach the same scope, and before it
+ * they have, level by level, the same template (an activation of the same
+ * scope, the frame of a call of the same function literal) and the same
+ * bindings. Two activations of one scope are equivalent unless an
+ * evaluation declared a name in one of them. The values that the
+ * activations hold may differ: a cache keyed on the chain records the
+ * values it reads (`effects-of.ts`).
+ */
+export function equivalentChains(
+  a: Scope | null | undefined,
+  b: Scope | null | undefined
+): boolean {
+  while (a !== b) {
+    if (a == null || b == null) return false;
+    const ka = scopeTemplates.get(a) ?? frameBodies.get(a);
+    if (
+      ka === undefined ||
+      ka !== (scopeTemplates.get(b) ?? frameBodies.get(b))
+    )
+      return false;
+    if (a.bindings !== b.bindings) {
+      if (a.bindings.size !== b.bindings.size) return false;
+      for (const [name, binding] of a.bindings)
+        if (b.bindings.get(name) !== binding) return false;
+    }
+    a = a.parent;
+    b = b.parent;
+  }
+  return true;
 }

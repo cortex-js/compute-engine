@@ -146,10 +146,26 @@ function frameInProgress(ce: ViewEngine, frame: object): boolean {
  * outside the call (a block local function is found in the first case
  * only). Two calls of the same literal have the same body scope, so they
  * share the entries.
+ *
+ * Only the frame of a literal that `ce` is applying counts: a lazy
+ * collection made by a call that has returned pushes the frame of that call
+ * again when an element is computed (`lazy-view-context.ts`), and the
+ * static view reads such a frame as it reads it from outside
+ * (`staticBindingIn()`, `staticParentOf()`). With a key of its own, a node
+ * read at each element both from that frame and from the frame of its
+ * reader was typed twice per element, each time to the same type.
  */
 export function innermostCallFrameBody(ce: ViewEngine): object | undefined {
-  const frame = innermostFrame(ce._evalContextStack);
-  return frame === undefined ? undefined : frameBodyScopes.get(frame);
+  const stack = ce._evalContextStack;
+  const frame = innermostFrame(stack);
+  if (frame === undefined) return undefined;
+  const body = frameBodyScopes.get(frame);
+  if (body !== undefined && applyingEngine(body) === ce) return body;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const outer = frameBodyScopes.get(stack[i].lexicalScope);
+    if (outer !== undefined && applyingEngine(outer) === ce) return outer;
+  }
+  return undefined;
 }
 
 /** True while a type computation of `ce` runs. */

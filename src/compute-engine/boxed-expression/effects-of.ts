@@ -24,9 +24,11 @@ import type {
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
 
 import { isDictionary, isFunction, isString, sym } from './type-guards.js';
+import { equivalentChains, isActivatedDefinition } from './ambient-chain.js';
 
 /**
  * # The runtime effect channel (`docs/EFFECTS-MODEL.md`, "Runtime counterpart")
@@ -90,11 +92,13 @@ import { isDictionary, isFunction, isString, sym } from './type-guards.js';
  */
 
 /** The names that one effects computation resolved by name, each with the
- * definition it resolved to (`undefined` for none). */
-export type EffectsLookups = Map<
-  string,
-  ReturnType<ComputeEngine['lookupDefinition']>
->;
+ * definition it resolved to (`undefined` for none), and the value
+ * definitions whose value it read and whose values are held by activations
+ * (`isActivatedDefinition()`, `ambient-chain.ts`), each with the value it
+ * read. Two activations of one scope can hold two values of such a
+ * definition, and the memos are served in every activation of a scope
+ * whose chain is equivalent (`equivalentChains()`). */
+export type EffectsLookups = Map<string | BoxedValueDefinition, unknown>;
 
 /** One lookup record for each effects
  * computation in progress, the innermost last. */
@@ -142,9 +146,24 @@ export function effectsLookupsValid(
   ce: ComputeEngine,
   record: EffectsLookups
 ): boolean {
-  for (const [name, def] of record)
-    if (ce.lookupDefinition(name) !== def) return false;
+  for (const [key, recorded] of record) {
+    if (typeof key === 'string') {
+      if (ce.lookupDefinition(key) !== recorded) return false;
+    } else if (key.value !== recorded) return false;
+  }
   return true;
+}
+
+/** The value of the value definition `def`, read by the projection. When
+ * the value is held by activations, the read is recorded in the lookup
+ * record of the innermost effects computation. */
+function readBindingValue(def: BoxedValueDefinition): Expression | undefined {
+  const value = def.value;
+  if (isActivatedDefinition(def)) {
+    const top = _effectsLookupStack[_effectsLookupStack.length - 1];
+    if (top !== undefined && !top.has(def)) top.set(def, value);
+  }
+  return value;
 }
 
 /** Add the names of `record` (a served memo's) to the record of the
@@ -223,7 +242,7 @@ function dictionaryEffects(
   if (
     cached !== undefined &&
     cached.callable === callable &&
-    cached.scope === scope &&
+    (cached.scope === scope || equivalentChains(cached.scope, scope)) &&
     (cached.deps === undefined || effectsLookupsValid(ce, cached.deps))
   ) {
     if (cached.deps !== undefined) mergeEffectsLookups(cached.deps);
@@ -255,7 +274,7 @@ const dictionaryEffectsMemo = new WeakMap<
   object,
   {
     callable: number;
-    scope: unknown;
+    scope: Scope | undefined;
     value: ComputedEffects;
     deps: EffectsLookups | undefined;
   }
@@ -1319,7 +1338,9 @@ function releasedContent(op: Expression): Expression {
   if (name !== undefined) {
     const def = lookupByName(op.engine, name);
     const value =
-      def !== undefined && 'value' in def ? def.value.value : undefined;
+      def !== undefined && 'value' in def
+        ? readBindingValue(def.value)
+        : undefined;
     if (value !== undefined && isQuote(value)) return value.ops[0] ?? op;
     return op;
   }
@@ -1397,7 +1418,7 @@ function valueBindingEffects(
   //    The stored value is consulted only when the declared type could be
   //    callable, so an ordinary `x: number` binding is never materialized.
   if (couldBeCallable(declared)) {
-    const valueType = def.value?.type?.type;
+    const valueType = readBindingValue(def)?.type?.type;
     if (hasSignatureArm(valueType)) return signatureEffects(valueType);
   }
 

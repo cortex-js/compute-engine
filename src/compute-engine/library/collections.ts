@@ -17664,7 +17664,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // outside a value that does not show the domain of its elements: with
       // `E: list<integer>` assigned `[]`, `At(E, 5)` is typed `integer | nan`
       // and is `NaN` (user decision 2026-10-20, see `absenceMarker()`).
-      const readType = expression?.type.type;
+      // It decides only the marker of an absent read, so it is computed when
+      // one is needed: the type of the node as written can cost more than the
+      // read itself (an element read of a lazy list at each element of
+      // another). The same holds for `declaredBase()`.
+      let readTypeMemo: { type: Type | undefined } | undefined;
+      const readType = (): Type | undefined =>
+        (readTypeMemo ??= { type: expression?.type.type }).type;
       // The declared element type of the collection that the index at
       // position `step` reads: the type of the base as written, peeled
       // through the indices before `step`, as `chainAbsorbMarker()` peels.
@@ -17672,12 +17678,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // these elements, and its markers must keep the declared domain: with
       // `E: list<integer>` assigned `[]`, `At(E, [1], 1)` is `NaN`, as
       // `At(At(E, [1]), 1)` is (user decision 2026-10-20).
-      const declaredBase = isFunction(expression)
-        ? expression.ops[0]?.type.type
-        : undefined;
+      let declaredBaseMemo: { type: Type | undefined } | undefined;
+      const declaredBase = (): Type | undefined =>
+        (declaredBaseMemo ??= {
+          type: isFunction(expression)
+            ? expression.ops[0]?.type.type
+            : undefined,
+        }).type;
       const declaredElementType = (step: number): Type | undefined => {
-        if (declaredBase === undefined) return undefined;
-        let t: Type = declaredBase;
+        const base = declaredBase();
+        if (base === undefined) return undefined;
+        let t: Type = base;
         for (let i = 1; i < step; i++) {
           const peeled = collectionElementType(t) ?? 'any';
           t = isCollectionIndex(ops[i])
@@ -17696,7 +17707,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `At(L, 1, "b")` reads the same type. `undefined` when an earlier
       // index is neither.
       const writtenRecordAt = (step: number): Type | undefined => {
-        let t: Type | undefined = declaredBase;
+        let t: Type | undefined = declaredBase();
         for (let i = 1; i < step && t !== undefined; i++) {
           const r = resolveTypeAlias(t);
           const k = ops[i];
@@ -17734,7 +17745,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `At(M, 1, 1)` is `NaN`, as `First(First(M))` is (user decision
         // 2026-10-20).
         if (isAbsentValue(expr))
-          return chainAbsorbMarker(ce, expr.type.type, ops, index, readType);
+          return chainAbsorbMarker(ce, expr.type.type, ops, index, readType());
 
         // An INTERMEDIATE value that is a restriction whose condition is not
         // decided yet — the row `[1, 2] {0 < t}` of `[[1, 2] {0 < t}, [3, 4]]`
@@ -17759,7 +17770,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           isAbsentValue(opAtIndex) ||
           (isNumber(opAtIndex) && opAtIndex.isInfinity === true)
         )
-          return chainAbsorbMarker(ce, expr.type.type, ops, index, readType);
+          return chainAbsorbMarker(ce, expr.type.type, ops, index, readType());
 
         // A string key, or a CHARACTER key read as its text: a character and
         // the one-character string with the same content are the same value,
@@ -17786,9 +17797,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const v = expr.get(key);
           if (v === undefined)
             return index + 1 < ops.length
-              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType())
               : (optionalFieldAbsenceMarker(ce, writtenRecordAt(index), key) ??
-                  absenceMarker(ce, expr, readType));
+                  absenceMarker(ce, expr, readType()));
           expr = v;
           index += 1;
           continue;
@@ -17857,8 +17868,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const v = at(expr, key);
           if (v === undefined)
             return index + 1 < ops.length
-              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
-              : absenceMarker(ce, expr, readType);
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType())
+              : absenceMarker(ce, expr, readType());
           expr = v;
           index += 1;
           continue;
@@ -17905,9 +17916,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // collection that the gather reads decides
             // (`declaredElementType`).
             let marker: Expression | undefined;
+            const lastReadType =
+              index + 1 === ops.length ? readType() : undefined;
             const gatherReadType =
-              index + 1 === ops.length && readType !== undefined
-                ? collectionElementType(readType)
+              lastReadType !== undefined
+                ? collectionElementType(lastReadType)
                 : declaredElementType(index);
             for (const m of indices) {
               // An absent entry (`NaN`, `Missing`)
@@ -17981,8 +17994,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!Number.isInteger(i)) {
           if (!isProvablyNonIntegerIndex(opAtIndex)) return undefined;
           return index + 1 < ops.length
-            ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
-            : absenceMarker(ce, expr, readType);
+            ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType())
+            : absenceMarker(ce, expr, readType());
         }
         // An index that is not a safe integer is read exactly (see
         // `elementAtLargePosition()`).
@@ -17990,8 +18003,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const large = elementAtLargePosition(expr, opAtIndex);
           if (large === 'outside')
             return index + 1 < ops.length
-              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
-              : absenceMarker(ce, expr, readType);
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType())
+              : absenceMarker(ce, expr, readType());
           if (large !== undefined) {
             expr = large;
             index += 1;
@@ -18013,8 +18026,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         if (v === undefined)
           return index + 1 < ops.length
-            ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
-            : absenceMarker(ce, expr, readType);
+            ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType())
+            : absenceMarker(ce, expr, readType());
         expr = v;
         index += 1;
       }

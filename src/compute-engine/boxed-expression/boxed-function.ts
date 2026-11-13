@@ -57,7 +57,7 @@ import {
   hasAsyncOnlyApplication,
 } from './async-only-descendants.js';
 import { callbackSlots } from './callback-slots.js';
-import { scopeActivation } from './ambient-chain.js';
+import { equivalentChains, scopeActivation } from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import {
   bindsWholeAtInferredPointParameter,
@@ -2515,11 +2515,18 @@ export class BoxedFunction
       !cacheOff('effects') &&
       this._effects.generation === callableVersion &&
       this._effects.value !== null &&
-      this._effectsScope === scope &&
+      // Each evaluation of a scoped node is made in an activation of its
+      // scope, so the scope of a loop body is another object at each turn.
+      // An activation whose names resolve as in the one the entry was
+      // computed in serves it (`equivalentChains()`); the values of the
+      // activations that the projection read are in `_effectsDeps`.
+      (this._effectsScope === scope ||
+        equivalentChains(this._effectsScope, scope)) &&
       this._effectsStaticView === staticViewDiverges(this.engine) &&
       (this._effectsDeps === undefined ||
         effectsLookupsValid(this.engine, this._effectsDeps))
     ) {
+      this._effectsScope = scope;
       if (CACHE_STATS) recordCache('effects', 'hit');
       if (this._effectsDeps !== undefined)
         mergeEffectsLookups(this._effectsDeps);
@@ -7161,6 +7168,15 @@ export class BoxedFunction
     // `missing` arm, so it is an indexed collection here, and a broadcast
     // maps it cell by cell: `Sin([1,2,3]{0<t})` is `[NaN, NaN, NaN]` once
     // `t = -1` (decision 2026-11-02).
+    //
+    // The type of a node is in the result of the signature of its operator,
+    // so an operator whose result is an indexed collection (`Comprehension`,
+    // `-> list`) decides it without the type of the node, which can cost
+    // more than the read that asks (an element read of a lazy list at each
+    // element of another, when each element moves the type version).
+    const operatorDef = this.operatorDefinition;
+    if (operatorDef !== undefined && signatureResultFacts(operatorDef).indexed)
+      return true;
     if (this.type.matches(INDEXED_COLLECTION_SHAPE_TYPE)) return true;
 
     // An ABSTRACT collection type (`collection<T>`: not indexed, not a set,
@@ -22135,6 +22151,12 @@ function evaluateStringPreservingCollection(
   // lazy collection operators it is about, with no re-entrancy.
   if (def.collection?.iterator === undefined) return undefined;
   if (!expr.isLazyCollection) return undefined;
+  // The type of a node is in the result of the signature of its operator, so
+  // an operator whose result cannot be a string (`Comprehension`, `-> list`)
+  // needs no type of the node: computing it can cost more than the
+  // evaluation (a lazy list read at each element of another, when each
+  // element moves the type version).
+  if (!signatureResultFacts(def).admitsString) return undefined;
   if (!expr.type.matches('string')) return undefined;
   // The walk must be known to terminate, or an unwalkable source (a symbolic
   // bound, an operand that cannot be enumerated) would silently answer `""`
@@ -22203,6 +22225,38 @@ function evaluateStringPreservingCollection(
     parts.push(c.string);
   }
   return expr.engine.string(parts.join(''));
+}
+
+/** What the result of the signature of an operator says of every node of
+ * the operator, whose type is in that result: whether it can be a string
+ * (`evaluateStringPreservingCollection()`) and whether it is an indexed
+ * collection (`isIndexedCollection`). */
+type SignatureResultFacts = { admitsString: boolean; indexed: boolean };
+
+/** For each operator definition, its `SignatureResultFacts` and the
+ * signature they were read from (a definition can be given a new signature
+ * in place). */
+const signatureResultFactsMemo = new WeakMap<
+  BoxedOperatorDefinition,
+  { signature: BoxedType; facts: SignatureResultFacts }
+>();
+
+function signatureResultFacts(
+  def: BoxedOperatorDefinition
+): SignatureResultFacts {
+  const signature = def.signature;
+  const memo = signatureResultFactsMemo.get(def);
+  if (memo !== undefined && memo.signature === signature) return memo.facts;
+  const result = functionResult(signature.type);
+  const facts: SignatureResultFacts =
+    result === undefined
+      ? { admitsString: true, indexed: false }
+      : {
+          admitsString: couldMatch(result, 'string'),
+          indexed: isSubtype(result, INDEXED_COLLECTION_SHAPE_TYPE),
+        };
+  signatureResultFactsMemo.set(def, { signature, facts });
+  return facts;
 }
 
 /**

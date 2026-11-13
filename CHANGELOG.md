@@ -127,6 +127,12 @@
   gives `[4, 5, 6]`. A variable that is an operand of the collection
   (`xs` in `xs = filter(xs, p)`) still gives the value it holds at the
   assignment.
+- **A `const` local of a block is ordered as a constant in a sum or a
+  product, as a global constant is.** In Epsil,
+  `function h(x: real) -> real { const i = floor(x); 30001 + i }` compiles to
+  JavaScript that returned `i + 30001` and now returns `30001 + i`. The value
+  is the same. A `let` local and a parameter are ordered as variables, as
+  before: with `let i = floor(x)`, the code returns `i + 30001`.
 
 ### New Features
 
