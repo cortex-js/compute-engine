@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Σ_{k≥a} kⁿ·rᵏ/k!` has a closed form** (#NNN, contributed by
+  [enumeratio](https://github.com/enumeratio)). `Sum(k³/k!, k = 1..∞)` was
+  unevaluated under `evaluate()` and `simplify()` and a float under `.N()`
+  (`13.591409142296198`); it is `5e`, Dobiński's formula `Σ kⁿ/k! = e·Bₙ`
+  (`Bₙ` the Bell number). With a ratio the sum is `eʳ·Tₙ(r)`, the Touchard
+  polynomial: `Σ k²xᵏ/k! = (x² + x)·eˣ`; a lower bound above 1 subtracts the
+  terms below it (`Σ_{k≥2} k²/k! = 2e − 1`); and a polynomial over `k!` is the
+  sum of its terms (`Σ (k² + k)/k! = 3e`). `.N()` of the closed form carries
+  the working precision (`13.5914091422952261768`). Orders up to 200 are
+  expanded; a negative power of `k` (`Σ 1/(k·k!)`) is still a `Sum`.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features
