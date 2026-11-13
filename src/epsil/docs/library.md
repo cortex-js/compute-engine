@@ -450,7 +450,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `besselJ` | `BesselJ` | `(order: complex, complex \| infinity) -> number` | Bessel function of the first kind |
 | `besselK` | `BesselK` | `(order: complex, complex \| infinity) -> number` | Modified Bessel function of the second kind (Macdonald function) |
 | `besselY` | `BesselY` | `(order: complex, complex \| infinity) -> number` | Bessel function of the second kind (Neumann function) |
-| `beta` | `Beta` | `(complex \| infinity, complex \| infinity) -> number` | Euler beta function |
+| `beta` | `Beta` | `(complex \| infinity, complex \| infinity, (complex \| infinity)?, (complex \| infinity)?) -> number` | Euler beta function |
 | `catalanConstant` | `CatalanConstant` | constant `real<0.915965594177219..0.9159655941772191>` = `0.915965594177219015055` | Catalan's constant G ≈ 0.9160. |
 | `ceil` | `Ceil` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number up to the next largest integer, or with a step to the least multiple of the step that is at least the number. |
 | `chop` | `Chop` | `(T) -> T where T: number` | Replace tiny numeric values with zero. |
@@ -478,7 +478,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `floor` | `Floor` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number down to the nearest integer, or with a step to the greatest multiple of the step that is at most the number. |
 | `fract` | `Fract` | `(real \| signed_infinity \| ~oo) -> real<0..1>` | Fractional part of a number: x - floor(x) |
 | `gcd` | `GCD` | `(any*) -> number` | Greatest Common Divisor |
-| `gamma` | `Gamma` | `(complex \| infinity, (complex \| infinity)?) -> number` | Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt. |
+| `gamma` | `Gamma` | `(complex \| infinity, (complex \| infinity)?, (complex \| infinity)?) -> number` | Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt; with three, Γ(s, z0) − Γ(s, z1). |
 | `gammaLn` | `GammaLn` | `(complex \| infinity) -> number` | Natural logarithm of the gamma function. |
 | `goldenRatio` | `GoldenRatio` | constant `real<1.618033988749894..1.618033988749895>` = `1/2 * (1 + sqrt(5))` | The golden ratio φ = (1+√5)/2 ≈ 1.618. |
 | `half` | `Half` | constant `rational` = `1/2` | The rational number one half (1/2). |
@@ -825,19 +825,19 @@ The [Statistics reference](/epsil/reference/statistics/) has the full descriptio
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `betaRegularized` | `BetaRegularized` | `(complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Regularized incomplete beta function I_x(a, b) |
+| `betaRegularized` | `BetaRegularized` | `(complex \| infinity, complex \| infinity, complex \| infinity, (complex \| infinity)?) -> number` | Regularized incomplete beta function I_x(a, b); with four arguments, I_z1(a, b) − I_z0(a, b) |
 | `binCounts` | `BinCounts` | `(collection<number>, list<number> \| number) -> list<number>` | Count the number of elements falling into each bin. |
 | `binomialDistribution` | `BinomialDistribution` | `(integer<0..>, real<0..1>) -> expression<BinomialDistribution>` | Binomial distribution: number of successes in n independent trials, each with success probability p. |
 | `cdf` | `CDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..1>` | Cumulative distribution function P(X ≤ x) of a distribution. |
 | `correlation` | `Correlation` | `(collection<number \| tuple>, collection<number>?) -> nan \| real<-1..1>` | Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
 | `covariance` | `Covariance` | `(collection<number \| tuple>, collection<number>?) -> nan \| real` | Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
-| `erf` | `Erf` | `(complex \| signed_infinity) -> complex` | Gauss error function |
-| `erfInv` | `ErfInv` | `(complex \| infinity) -> number` | Inverse of the error function |
+| `erf` | `Erf` | `(complex \| signed_infinity, (complex \| signed_infinity)?) -> complex` | Gauss error function; with two arguments, Erf(z1) − Erf(z0) |
+| `erfInv` | `ErfInv` | `(complex \| infinity, (complex \| infinity)?) -> number` | Inverse of the error function; with two arguments, the x with Erf(z0, x) = z, that is ErfInv(z + Erf(z0)) |
 | `erfc` | `Erfc` | `(complex \| signed_infinity) -> complex` | Complementary error function: 1 - Erf(x) |
 | `erfi` | `Erfi` | `(complex \| signed_infinity) -> complex \| signed_infinity` | Imaginary error function: -i·Erf(i·x) |
 | `exponentialDistribution` | `ExponentialDistribution` | `(real<0<..>) -> expression<ExponentialDistribution>` | Exponential distribution with rate parameter λ. |
 | `findFit` | `FindFit` | `(any, any, any, any, dictionary?) -> dictionary` | Nonlinear least-squares fit of a model to data. |
-| `gammaRegularized` | `GammaRegularized` | `(complex \| infinity, complex \| infinity) -> number` | Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a) |
+| `gammaRegularized` | `GammaRegularized` | `(complex \| infinity, complex \| infinity, (complex \| infinity)?) -> number` | Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1) |
 | `histogram` | `Histogram` | `(collection<number>, list<number> \| number) -> list<tuple<number, integer>>` | Compute a histogram of the values in a collection. |
 | `interquartileRange` | `InterquartileRange` | `((collection<number> \| number)+) -> +oo \| nan \| real<0..>` | Interquartile range (Q3 - Q1) of a collection. |
 | `kurtosis` | `Kurtosis` | `((collection<number> \| number)+) -> nan \| real` | Kurtosis of a collection of numbers. |

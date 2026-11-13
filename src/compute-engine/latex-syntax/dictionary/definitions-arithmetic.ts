@@ -3714,8 +3714,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'Beta',
   },
   // `\mathrm{B}(2, 3)`: the conventional spelling this now serializes to.
-  // Only a parenthesized list of exactly two arguments (the arity of the Beta
-  // function) makes it `Beta`. Otherwise this returns `null`, so the generic
+  // Only a parenthesized list of two to four arguments (`B(a, b)`, the
+  // incomplete `B(z, a, b)` and the generalized `B(z0, z1, a, b)`) makes it
+  // `Beta`. Otherwise this returns `null`, so the generic
   // parser reads the upright letter `B_upright` as before: a bare
   // `\mathrm{B}` or `\mathrm{B}x` is the symbol, and `\mathrm{B}(x+1)` is
   // that symbol applied to `x+1`.
@@ -3724,7 +3725,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'function',
     parse: (parser: Parser) => {
       const args = parser.parseArguments('enclosure');
-      if (args === null || args.length !== 2) return null;
+      if (args === null || args.length < 2 || args.length > 4) return null;
       return ['Beta', ...args] as MathJsonExpression;
     },
   },

@@ -123,6 +123,10 @@ import {
   rangeVarianceClosedForm,
 } from './range-closed-form.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
+import {
+  evaluateErfBetween,
+  evaluateErfInvShifted,
+} from './generalized-special-forms.js';
 
 // Geometric mean:
 // Harmonic mean:
@@ -421,7 +425,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     // for complex (no complex kernel).
     //
     Erf: {
-      description: 'Gauss error function',
+      description:
+        'Gauss error function; with two arguments, Erf(z1) − Erf(z0)',
       complexity: 7500,
       // The error functions apply to each element of a list, as the other
       // special functions of one argument (`Gamma`, `Zeta`, …) do.
@@ -435,27 +440,39 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // limit at complex infinity). `NaN` propagates (explicit: this
       // carrier is not a subtype of `complex`, so the derived default
       // would be `reject`).
-      signature: '(complex | signed_infinity) -> complex',
+      signature:
+        '(complex | signed_infinity, (complex | signed_infinity)?) -> complex',
       nanBehavior: 'propagate',
       // Erf is entire and bounded on the reals (Erf(±∞) = ±1); a finite
       // complex argument gives a finite complex value. An operand of unproven
       // realness (a `number`-typed symbol) keeps the generic finite hedge —
       // its value may be complex, so it must not claim real.
-      type: ([x], context) => {
+      type: ([x, x1], context) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN
         // arm answers the sharp `nan`.
         if (!x || provablyNaNOperand(x)) return undefined;
-        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
-        if (extendedReal === false)
+        if (x1 !== undefined && provablyNaNOperand(x1)) return undefined;
+        // Erf(z0, z1) = Erf(z1) − Erf(z0) is real where both operands are,
+        // and finite when both are.
+        const operands = x1 === undefined ? [x] : [x, x1];
+        const extendedReal = operands.map((o) =>
+          typeFact(o.type, EXTENDED_REAL_TYPE)
+        );
+        if (extendedReal.includes(false))
           return BoxedType.forResult(
-            x.facts.finite === true ? 'complex' : 'number',
+            operands.every((o) => o.facts.finite === true)
+              ? 'complex'
+              : 'number',
             context.engine._typeResolver
           );
-        if (extendedReal === true)
+        if (extendedReal.every((r) => r === true))
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN((ops, options) => {
+        if (ops.length === 2) return evaluateErfBetween(options, ops);
+        const [x] = ops;
+        const { numericApproximation, engine: ce } = options;
         if (!isNumber(x)) return undefined;
         if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
@@ -540,7 +557,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     ErfInv: {
-      description: 'Inverse of the error function',
+      description:
+        'Inverse of the error function; with two arguments, the x with Erf(z0, x) = z, that is ErfInv(z + Erf(z0))',
       complexity: 7500,
       broadcastable: true,
       // The engine has a REAL kernel only. On the real segment (−1, 1) the
@@ -553,12 +571,18 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // infinity is decided: erfinv has no limit there, so `±∞` and `~oo`
       // answer NaN. `NaN` propagates (explicit: the
       // carrier is not below `complex`).
-      signature: '(complex | infinity) -> number',
+      signature: '(complex | infinity, (complex | infinity)?) -> number',
       nanBehavior: 'propagate',
-      type: ([x], context) => {
+      type: ([x, z], context) => {
         // A proven-NaN operand declines, so the framework's proven-NaN arm
         // answers; an infinite literal is a decided NaN.
         if (!x || provablyNaNOperand(x)) return undefined;
+        // ErfInv(z0, z) is the one-operand inverse at a shifted point
+        // (`evaluateErfInvShifted`): nothing is claimed of its range.
+        if (z !== undefined)
+          return provablyNaNOperand(z)
+            ? undefined
+            : BoxedType.forResult('number', context.engine._typeResolver);
         if (
           x.structureOf?.()?.kind === 'number' &&
           isSubtype(x.type, 'infinity')
@@ -596,7 +620,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           );
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN((ops, options) => {
+        if (ops.length === 2) return evaluateErfInvShifted(options, ops);
+        const [x] = ops;
+        const { numericApproximation, engine: ce } = options;
         if (!isNumber(x)) return undefined;
         if (x.isNaN === true) return ce.NaN;
         // No limit at any infinity: the indeterminate form on both routes

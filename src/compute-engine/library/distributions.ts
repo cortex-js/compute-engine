@@ -28,6 +28,10 @@ import {
 } from '../boxed-expression/infinite-point.js';
 import { parseType } from '../../common/type/parse.js';
 import {
+  evaluateGammaBetween,
+  evaluateRegularizedBetaBetween,
+} from './generalized-special-forms.js';
+import {
   binomialQuantile,
   poissonQuantile,
 } from '../numerics/distributions.js';
@@ -458,7 +462,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     //
     GammaRegularized: {
       description:
-        'Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)',
+        'Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1)',
       complexity: 7500,
       // Both slots take the Γ-family carrier: every finite complex point has
       // a value or a documented capability gap, and every infinity is in the
@@ -467,7 +471,8 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // propagates — stated explicitly because the carrier is not a subtype
       // of `complex`, so the policy derived from the signature alone would be
       // `reject`.
-      signature: '(complex | infinity, complex | infinity) -> number',
+      signature:
+        '(complex | infinity, complex | infinity, (complex | infinity)?) -> number',
       broadcastable: true,
       nanBehavior: 'propagate',
       // A finite real ONLY on the proven domain a > 0, z ≥ 0 (there
@@ -476,26 +481,38 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // the unconditional `real` this definition used to claim was unsound.
       // Both gates NARROW on `true`, so the descriptor sign channel errs on
       // the wide side: an unproven sign claims `number`.
-      type: ([a, z], context) => {
+      type: ([a, z, z1], context) => {
         // A provably-NaN operand DECLINES: a handler answer is never widened,
         // so answering `number` here would suppress any sharper claim the
         // framework can derive.
-        if ((a && isSubtype(a.type, 'nan')) || (z && isSubtype(z.type, 'nan')))
+        if (
+          (a && isSubtype(a.type, 'nan')) ||
+          (z && isSubtype(z.type, 'nan')) ||
+          (z1 && isSubtype(z1.type, 'nan'))
+        )
           return undefined;
+        // Q(a, z0) − Q(a, z1) is real where both terms are.
+        const real = (x: typeof z) =>
+          x !== undefined &&
+          x.facts.finite === true &&
+          isSubtype(x.type, 'real') &&
+          nonNegativeSign(x.facts.sgn) === true;
         if (
           a !== undefined &&
-          z !== undefined &&
           a.facts.finite === true &&
-          z.facts.finite === true &&
           isSubtype(a.type, 'real') &&
-          isSubtype(z.type, 'real') &&
           positiveSign(a.facts.sgn) === true &&
-          nonNegativeSign(z.facts.sgn) === true
+          real(z) &&
+          (z1 === undefined || real(z1))
         )
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([a, z], { numericApproximation, engine: ce }) => {
+      evaluate: (ops, options) => {
+        // Q(a, z0, z1) = Q(a, z0) − Q(a, z1).
+        if (ops.length === 3) return evaluateGammaBetween(options, ops, true);
+        const [a, z] = ops;
+        const { numericApproximation, engine: ce } = options;
         if (!a || !z) return undefined;
         // The infinite points are exact, so they are answered on both routes
         // and BEFORE any kernel sees an `Infinity` argument.
@@ -612,14 +629,15 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     },
 
     BetaRegularized: {
-      description: 'Regularized incomplete beta function I_x(a, b)',
+      description:
+        'Regularized incomplete beta function I_x(a, b); with four arguments, I_z1(a, b) − I_z0(a, b)',
       complexity: 7500,
       // The three slots take the Γ-family carrier, as `GammaRegularized`
       // does; `betaRegularizedValueAtInfinity` says which infinite points
       // have a value here. `NaN` propagates (explicit: the carrier is not a
       // subtype of `complex`).
       signature:
-        '(complex | infinity, complex | infinity, complex | infinity) -> number',
+        '(complex | infinity, complex | infinity, complex | infinity, (complex | infinity)?) -> number',
       broadcastable: true,
       nanBehavior: 'propagate',
       // A finite real ONLY on the proven domain x ∈ [0, 1], a > 0, b > 0
@@ -627,10 +645,15 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // definition used to claim was unsound outside it. As for
       // `GammaRegularized` above, every gate narrows on `true`, so an
       // unproven fact claims the wide `number`.
-      type: ([x, a, b], context) => {
+      type: (ops, context) => {
+        // The four-operand form `BetaRegularized(z0, z1, a, b)` has two
+        // endpoints in front of the parameters.
+        const [x, a, b] = ops.length === 4 ? [ops[0], ops[2], ops[3]] : ops;
+        const x1 = ops.length === 4 ? ops[1] : undefined;
         // A provably-NaN operand declines, as `GammaRegularized` does.
         if (
           (x && isSubtype(x.type, 'nan')) ||
+          (x1 && isSubtype(x1.type, 'nan')) ||
           (a && isSubtype(a.type, 'nan')) ||
           (b && isSubtype(b.type, 'nan'))
         )
@@ -640,6 +663,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           a !== undefined &&
           b !== undefined &&
           isSubtype(x.type, UNIT_INTERVAL) &&
+          (x1 === undefined || isSubtype(x1.type, UNIT_INTERVAL)) &&
           a.facts.finite === true &&
           b.facts.finite === true &&
           isSubtype(a.type, 'real') &&
@@ -650,7 +674,12 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x, a, b], { numericApproximation, engine: ce }) => {
+      evaluate: (ops, options) => {
+        // I_z1(a, b) − I_z0(a, b).
+        if (ops.length === 4)
+          return evaluateRegularizedBetaBetween(options, ops);
+        const [x, a, b] = ops;
+        const { numericApproximation, engine: ce } = options;
         if (!x || !a || !b) return undefined;
         // The infinite points are exact, so they are answered on both routes
         // and BEFORE any kernel sees an `Infinity` argument.

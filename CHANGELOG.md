@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Beta`, `BetaRegularized`, `Erf`, `ErfInv`, `Gamma` and `GammaRegularized`
+  take the incomplete and generalized call forms, and `PolyGamma(z)` is the
+  digamma** (#NNN, contributed by [enumeratio](https://github.com/enumeratio)).
+  `Beta(1/2, 2, 3)` was an `unexpected-argument` error and is now `11/192`
+  (`Beta(1/4, 1/2, 2, 3)` is `109/3072`); `Beta(z, a, b)` is `I_z(a, b)·B(a, b)`
+  (DLMF 8.17.1) for real `a, b > 0` and `z` in [0, 1], and the four-operand
+  form is `B_z1 − B_z0`. `BetaRegularized(z0, z1, a, b)` is `I_z1 − I_z0`
+  (`0.5067` for `0.2, 0.5, 2, 3`), `Erf(z0, z1)` is `Erf(z1) − Erf(z0)`
+  (`Erf(0.1, 0.5)` is `0.408036961794761645479…`), `ErfInv(z0, z)` is
+  `ErfInv(z + Erf(z0))`, `Gamma(a, z0, z1)` is `Γ(a, z0) − Γ(a, z1)` and
+  `GammaRegularized(a, z0, z1)` is `Q(a, z0) − Q(a, z1)`. A difference of
+  endpoints that agree in many digits is computed at a precision raised by the
+  digits it cancels (`Erf(1, 1 + 10⁻¹⁰⁰)` is `4.151074974205947e-101`), through
+  the complementary function where the terms are close to 1, and stays
+  unevaluated past 500 guard digits. `PolyGamma(1)` was a `missing` error and is
+  `PolyGamma(0, 1)`, the digamma. The widened forms have no compiled lowering
+  and decline on every target, where `Erf(x, y)` compiled as `Erf(x)`;
+  `\mathrm{B}(z, a, b)` parses.
+
 ## 0.187.1 _2026-11-11_
 
 ### New Features

@@ -908,8 +908,8 @@
     {
       "name": "Beta",
       "category": "Arithmetic",
-      "arity": "2",
-      "signature": "(complex | infinity, complex | infinity) -> number",
+      "arity": "optional",
+      "signature": "(complex | infinity, complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -918,20 +918,22 @@
       "description": "Euler beta function",
       "wikidata": "Q468881",
       "examples": [
-        "[Beta(2, 3), N(Beta(1/2, 1/2))]"
+        "[Beta(2, 3), N(Beta(1/2, 1/2))]",
+        "Beta(1/2, 2, 3)",
+        "Beta(1/4, 1/2, 2, 3)"
       ]
     },
     {
       "name": "BetaRegularized",
       "category": "Statistics",
-      "arity": "3",
-      "signature": "(complex | infinity, complex | infinity, complex | infinity) -> number",
+      "arity": "optional",
+      "signature": "(complex | infinity, complex | infinity, complex | infinity, (complex | infinity)?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Regularized incomplete beta function I_x(a, b)"
+      "description": "Regularized incomplete beta function I_x(a, b); with four arguments, I_z1(a, b) − I_z0(a, b)"
     },
     {
       "name": "BigO",
@@ -2770,14 +2772,14 @@
     {
       "name": "Erf",
       "category": "Statistics",
-      "arity": "1",
-      "signature": "(complex | signed_infinity) -> complex",
+      "arity": "optional",
+      "signature": "(complex | signed_infinity, (complex | signed_infinity)?) -> complex",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Gauss error function"
+      "description": "Gauss error function; with two arguments, Erf(z1) − Erf(z0)"
     },
     {
       "name": "Erfc",
@@ -2806,14 +2808,14 @@
     {
       "name": "ErfInv",
       "category": "Statistics",
-      "arity": "1",
-      "signature": "(complex | infinity) -> number",
+      "arity": "optional",
+      "signature": "(complex | infinity, (complex | infinity)?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Inverse of the error function"
+      "description": "Inverse of the error function; with two arguments, the x with Erf(z0, x) = z, that is ErfInv(z + Erf(z0))"
     },
     {
       "name": "Error",
@@ -3381,17 +3383,18 @@
       "name": "Gamma",
       "category": "Arithmetic",
       "arity": "optional",
-      "signature": "(complex | infinity, (complex | infinity)?) -> number",
+      "signature": "(complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.",
+      "description": "Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt; with three, Γ(s, z0) − Γ(s, z1).",
       "wikidata": "Q190573",
       "examples": [
         "[Gamma(1/2), N(Gamma(1/2)), N(Gamma(5))]",
-        "N(Gamma(2, 1))"
+        "N(Gamma(2, 1))",
+        "N(Gamma(2, 1, 3))"
       ]
     },
     {
@@ -3412,14 +3415,14 @@
     {
       "name": "GammaRegularized",
       "category": "Statistics",
-      "arity": "2",
-      "signature": "(complex | infinity, complex | infinity) -> number",
+      "arity": "optional",
+      "signature": "(complex | infinity, complex | infinity, (complex | infinity)?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)"
+      "description": "Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1)"
     },
     {
       "name": "GamutMap",
@@ -6473,7 +6476,8 @@
       "description": "Polygamma function, the n-th derivative of the digamma function",
       "wikidata": "Q857956",
       "examples": [
-        "N(PolyGamma(2, 1))"
+        "N(PolyGamma(2, 1))",
+        "N(PolyGamma(1))"
       ]
     },
     {

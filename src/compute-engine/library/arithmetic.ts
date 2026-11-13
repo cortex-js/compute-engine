@@ -537,6 +537,10 @@ import {
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
+import {
+  evaluateGammaBetween,
+  evaluateIncompleteBeta,
+} from './generalized-special-forms.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import {
   MeasuredWalk,
@@ -7049,8 +7053,11 @@ function isExactIntegerGammaArgument(
  */
 function evaluateGamma(
   ops: ReadonlyArray<Expression>,
-  { numericApproximation, engine }: EvaluateHandlerOptions
+  options: EvaluateHandlerOptions
 ): Expression | undefined {
+  const { numericApproximation, engine } = options;
+  // Γ(a, z0, z1) = Γ(a, z0) − Γ(a, z1).
+  if (ops.length === 3) return evaluateGammaBetween(options, ops, false);
   if (ops.length === 2) {
     const [s, z] = ops;
     // The infinite points (`Γ(s, +∞) = 0`, `Γ(±∞, z)`, `NaN` for the
@@ -8645,7 +8652,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Gamma: {
       description:
-        'Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.',
+        'Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt; with three, Γ(s, z0) − Γ(s, z1).',
       wikidata: 'Q190573',
       complexity: 8000,
       broadcastable: true,
@@ -8662,8 +8669,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // sharpness). No `canonical` handler and no fast path, so a proven
       // off-carrier operand is rejected at BOXING; with every numeric
       // point in the carrier, that seam only ever sees a non-number.
-      signature: '(complex | infinity, (complex | infinity)?) -> number',
-      examples: ['[Gamma(1/2), N(Gamma(1/2)), N(Gamma(5))]', 'N(Gamma(2, 1))'],
+      signature:
+        '(complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number',
+      examples: [
+        '[Gamma(1/2), N(Gamma(1/2)), N(Gamma(5))]',
+        'N(Gamma(2, 1))',
+        'N(Gamma(2, 1, 3))',
+      ],
       nanBehavior: 'propagate',
       // Γ(z) has poles (value `~oo`) at the non-positive integers; the
       // incomplete Γ(s, z) keeps the generic handler. A provably-NaN
@@ -8861,7 +8873,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // for m >= 1 (DLMF 5.15.2), an asymptotic series for m = 0, and the
       // reflection formula left of the imaginary axis.
       signature: '(order: integer, complex | infinity) -> number',
-      examples: ['N(PolyGamma(2, 1))'],
+      // The one-operand form is the digamma, `PolyGamma(0, z)`. Any other call
+      // is boxed as written, and the boxing seam checks it against the
+      // signature.
+      canonical: (ops, { engine }) =>
+        engine._fn(
+          'PolyGamma',
+          ops.length === 1
+            ? [engine.Zero, ops[0].canonical]
+            : ops.map((op) => op.canonical)
+        ),
+      examples: ['N(PolyGamma(2, 1))', 'N(PolyGamma(1))'],
       nanBehavior: 'propagate',
       // ψⁿ(x) has poles (value `~oo`) at the non-positive integers. A
       // provably-NaN operand declines (`specialFunctionType` records what
@@ -9195,14 +9217,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // carrier is not a subtype of `complex`). No `canonical` handler, so
       // a proven off-carrier operand is rejected at boxing. A non-real
       // finite operand stays symbolic — no complex kernel.
-      signature: '(complex | infinity, complex | infinity) -> number',
-      examples: ['[Beta(2, 3), N(Beta(1/2, 1/2))]'],
+      // The three- and four-operand forms are the incomplete beta function
+      // `B_z(a, b)` and the generalized one `B_z1(a, b) − B_z0(a, b)`
+      // (`evaluateIncompleteBeta`).
+      signature:
+        '(complex | infinity, complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number',
+      examples: [
+        '[Beta(2, 3), N(Beta(1/2, 1/2))]',
+        'Beta(1/2, 2, 3)',
+        'Beta(1/4, 1/2, 2, 3)',
+      ],
       nanBehavior: 'propagate',
       // B(a, b) has Γ-poles (value `~oo`) where a or b is a non-positive
       // integer (unless cancelled). Such an argument may be a pole → claim the
       // top type `number` per the non-finite typing convention, rather than
       // `real`. (`B(−2, 2) = 1/2` is finite but `number` still admits it.)
       type: (ops, context) => {
+        if (ops.length > 2)
+          return BoxedType.forResult(
+            specialFunctionType(ops),
+            context.engine._typeResolver
+          );
         const nonposInt = (x: OperandDescriptor | undefined) =>
           x !== undefined &&
           factsOf(x.type).integer &&
@@ -9214,7 +9249,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: guardDigitsN(([a, b], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, options) => {
+        if (ops.length > 2) return evaluateIncompleteBeta(options, ops);
+        const [a, b] = ops;
+        const { numericApproximation, engine } = options;
         // The infinite points are exact, so they are answered on both
         // routes (the exact rational form below already answered 0 for a
         // SIGNED infinity against a positive-integer partner; `~oo` and the

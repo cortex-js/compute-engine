@@ -23,9 +23,9 @@ category.
 
 ### betaRegularized
 
-MathJSON `BetaRegularized` · `(complex | infinity, complex | infinity, complex | infinity) -> number`
+MathJSON `BetaRegularized` · `(complex | infinity, complex | infinity, complex | infinity, (complex | infinity)?) -> number`
 
-Regularized incomplete beta function I_x(a, b)
+Regularized incomplete beta function I_x(a, b); with four arguments, I_z1(a, b) − I_z0(a, b)
 
 ### binCounts
 
@@ -64,15 +64,15 @@ Sample covariance (n − 1 denominator) of paired data, given as two equal-lengt
 
 ### erf
 
-MathJSON `Erf` · `(complex | signed_infinity) -> complex`
+MathJSON `Erf` · `(complex | signed_infinity, (complex | signed_infinity)?) -> complex`
 
-Gauss error function
+Gauss error function; with two arguments, Erf(z1) − Erf(z0)
 
 ### erfInv
 
-MathJSON `ErfInv` · `(complex | infinity) -> number`
+MathJSON `ErfInv` · `(complex | infinity, (complex | infinity)?) -> number`
 
-Inverse of the error function
+Inverse of the error function; with two arguments, the x with Erf(z0, x) = z, that is ErfInv(z + Erf(z0))
 
 ### erfc
 
@@ -100,9 +100,9 @@ Nonlinear least-squares fit of a model to data. FindFit(data, model, params, var
 
 ### gammaRegularized
 
-MathJSON `GammaRegularized` · `(complex | infinity, complex | infinity) -> number`
+MathJSON `GammaRegularized` · `(complex | infinity, complex | infinity, (complex | infinity)?) -> number`
 
-Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)
+Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1)
 
 ### histogram
 

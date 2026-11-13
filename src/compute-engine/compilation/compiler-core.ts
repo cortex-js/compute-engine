@@ -312,6 +312,7 @@ import {
   ELEMENTWISE_WIDTH_OPERATORS,
   ORDERING_HEADS,
   OVERRIDABLE_CONTROL_FLOW_HEADS,
+  SPECIAL_FUNCTION_OPERAND_RANGES,
   TUPLE_ARITHMETIC_HEADS,
   memoFor,
 } from './compiler-tables.js';
@@ -3629,6 +3630,24 @@ export function compileExpr(
   if (h === 'Clamp' && args.length !== 3)
     throw new Error(
       `Could not compile \`Clamp\`: expected three operands, got ${args.length}`
+    );
+
+  // The lowerings of the special functions below take the call shapes the
+  // built-in helpers do. A widened shape (`Erf(z0, z1)`, `Beta(z, a, b)`,
+  // `Gamma(a, z0, z1)`, …) is a difference or a product of those calls, and
+  // a lowering that reads the leading operands compiled it as the call
+  // without the rest (`_SYS.erf(_.x, _.y)` ignores `y`), so it declines.
+  const operandRange = SPECIAL_FUNCTION_OPERAND_RANGES[h];
+  if (
+    operandRange !== undefined &&
+    (args.length < operandRange[0] || args.length > operandRange[1])
+  )
+    throw new Error(
+      `Could not compile \`${h}\`: the lowering takes ${
+        operandRange[0] === operandRange[1]
+          ? operandRange[0]
+          : `${operandRange[0]} or ${operandRange[1]}`
+      } operands, got ${args.length}`
     );
 
   // Handle function calls
