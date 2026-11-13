@@ -22,7 +22,7 @@ function hasError(expr: any): boolean {
 
 describe('bare Break/Continue in statement position → Error', () => {
   test('bare `Break` as a Block statement is an error', () => {
-    const block = ce.box(['Block', 'Break', ['Assign', 'x', 1]]);
+    const block = ce.box(['Block', 'Break', ['Declare', 'x', "'unknown'", 1]]);
     expect(block.ops![0].operator).toBe('Error');
   });
 
@@ -36,14 +36,19 @@ describe('bare Break/Continue in statement position → Error', () => {
   });
 
   test('function form `Break()` in a Block stays valid', () => {
-    const block = ce.box(['Block', ['Break'], ['Assign', 'x', 1]]);
+    const block = ce.box([
+      'Block',
+      ['Break'],
+      ['Declare', 'x', "'unknown'", 1],
+    ]);
     expect(block.ops![0].operator).toBe('Break');
     expect(hasError(block)).toBe(false);
   });
 
   test('function form `Continue()` in an If branch inside a Loop stays valid', () => {
-    // A free name does not count as declared for an assignment in a branch
-    // (`first-assignment-in-branch`), so `x` is declared first.
+    // An assignment in a branch writes a variable that is in scope
+    // (`assignment-to-undeclared-variable` otherwise), so `x` is declared
+    // first.
     ce.pushScope();
     try {
       ce.declare('x', 'integer');
@@ -59,7 +64,7 @@ describe('bare Break/Continue in statement position → Error', () => {
   });
 
   test('bare `Return` is left untouched (not an error)', () => {
-    const block = ce.box(['Block', 'Return', ['Assign', 'x', 1]]);
+    const block = ce.box(['Block', 'Return', ['Declare', 'x', "'unknown'", 1]]);
     expect(block.ops![0].operator).not.toBe('Error');
   });
 });

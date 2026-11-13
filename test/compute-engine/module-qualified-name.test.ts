@@ -123,10 +123,12 @@ describe('the serialized form of a library binding', () => {
   test('a library call made before a shadowing function keeps its binding', () => {
     const ce = new ComputeEngine();
     const call = ce.box(['Floor', 'x']);
+    // `x` is given its value in the scope the call was boxed in: the call
+    // reads its names from that scope.
+    ce.assign('x', 2.5);
     ce.pushScope();
     try {
       ce.assign('Floor', ce.box(['Function', 100, 'y']));
-      ce.assign('x', 2.5);
       expect(call.json).toEqual(['Apply', ['Module', 'Floor'], 'x']);
       expect(call.toMathJson()).toEqual(['Apply', ['Module', 'Floor'], 'x']);
       expect(call.evaluate().toString()).toBe('2');

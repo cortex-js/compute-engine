@@ -29,16 +29,19 @@ describe('BINDING UNITS — names declared by the Epsil static check', () => {
     ]);
   });
 
-  test('a `:=`-bound literal pins its signature', () => {
+  test('a `:=` to an undeclared name binds no literal', () => {
     expect(check('k := (n: integer) => n + 1\nk(1.5)')).toEqual([
-      ['expected `integer`, got `1.5` at `1.5`', 'incompatible-type'],
+      [
+        '`k` is not declared: write `let k = …`',
+        'assignment-to-undeclared-variable',
+      ],
     ]);
   });
 
-  test('a named call to a `:=`-bound literal with a rest parameter', () => {
+  test('a named call to a `let`-bound literal with a rest parameter', () => {
     const r = executeEpsil(
       engine(),
-      'f := (a, ...rest) => Length(rest)\nf(a: 1)'
+      'let f = (a, ...rest) => Length(rest)\nf(a: 1)'
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.re).toBe(0);

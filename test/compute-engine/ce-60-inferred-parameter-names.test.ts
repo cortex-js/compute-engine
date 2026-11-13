@@ -81,7 +81,7 @@ describe('CE-60: an inferred signature keeps the parameter names', () => {
 
   test('a rest parameter keeps the names of the positional slots', () => {
     const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'f := (a, ...rest) => Length(rest)\nf(a: 1)');
+    const r = executeEpsil(ce, 'let f = (a, ...rest) => Length(rest)\nf(a: 1)');
     expect(r.diagnostics).toEqual([]);
     expect(r.value.re).toBe(0);
   });

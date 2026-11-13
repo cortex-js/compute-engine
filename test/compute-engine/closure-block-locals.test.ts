@@ -11,7 +11,7 @@
  *   the evaluation of a function literal in the body of a function that is
  *   being applied re-roots the literal on the call frame
  *   (`captureAtCreation`, `function-utils.ts`).
- * - A returned literal whose body assigns a local function (`g := z ↦ 3`)
+ * - A returned literal whose body declares a local function (`g := z ↦ 3`)
  *   and calls it is rebuilt on a new body scope when the call ends
  *   (`captureClosures`). The call `g(0)` finds its callee by the scope that
  *   holds its binding, and the frame of a later application stood for the
@@ -37,8 +37,8 @@ const withLocalFunction = [
   'Function',
   [
     'Block',
-    ['Assign', 'k', 1],
-    ['Assign', 'f', ['Function', ['Add', 'z', 'k'], 'z']],
+    ['Declare', 'k', "'unknown'", 1],
+    ['Declare', 'f', "'unknown'", ['Function', ['Add', 'z', 'k'], 'z']],
     ['Function', ['Add', ['Multiply', 'y', 'x'], ['f', 'x']], 'x'],
   ],
   'y',
@@ -49,7 +49,7 @@ const withoutLocalFunction = [
   'Function',
   [
     'Block',
-    ['Assign', 'k', 1],
+    ['Declare', 'k', "'unknown'", 1],
     ['Function', ['Add', ['Multiply', 'y', 'x'], 'k'], 'x'],
   ],
   'y',
@@ -60,7 +60,11 @@ const innerLocalFunction = [
   'Function',
   [
     'Function',
-    ['Block', ['Assign', 'g', ['Function', 3, 'z']], ['Add', 'x', ['g', 0]]],
+    [
+      'Block',
+      ['Declare', 'g', "'unknown'", ['Function', 3, 'z']],
+      ['Add', 'x', ['g', 0]],
+    ],
     'x',
   ],
   'w',
@@ -98,8 +102,13 @@ describe('a closure that calls a local function of the call that made it', () =>
             'Function',
             [
               'Block',
-              ['Assign', 'k', 1],
-              ['Assign', 'f', ['Function', ['Add', 'z', 'k'], 'z']],
+              ['Declare', 'k', "'unknown'", 1],
+              [
+                'Declare',
+                'f',
+                "'unknown'",
+                ['Function', ['Add', 'z', 'k'], 'z'],
+              ],
               ['Assign', 'k', 10],
               ['Function', ['Add', ['Multiply', 'y', 'x'], ['f', 'x']], 'x'],
             ],
@@ -126,8 +135,13 @@ describe('a closure that calls a local function of the call that made it', () =>
               'Function',
               [
                 'Block',
-                ['Assign', 'k', 1],
-                ['Assign', 'f', ['Function', ['Add', 'z', 'k'], 'z']],
+                ['Declare', 'k', "'unknown'", 1],
+                [
+                  'Declare',
+                  'f',
+                  "'unknown'",
+                  ['Function', ['Add', 'z', 'k'], 'z'],
+                ],
                 [
                   'Function',
                   [
@@ -161,12 +175,17 @@ describe('a closure that calls a local function of the call that made it', () =>
             'Function',
             [
               'Block',
-              ['Assign', 'k', 1],
+              ['Declare', 'k', "'unknown'", 1],
               [
                 'Function',
                 [
                   'Block',
-                  ['Assign', 'f', ['Function', ['Add', 'z', 'k'], 'z']],
+                  [
+                    'Declare',
+                    'f',
+                    "'unknown'",
+                    ['Function', ['Add', 'z', 'k'], 'z'],
+                  ],
                   ['Add', ['Multiply', 'y', 'x'], ['f', 'x']],
                 ],
                 'x',
@@ -202,7 +221,7 @@ describe('a returned closure that defines and calls a local function', () => {
           'Function',
           [
             'Block',
-            ['Assign', 'g', ['Function', 3, 'z']],
+            ['Declare', 'g', "'unknown'", ['Function', 3, 'z']],
             ['Add', 'x', ['g', 0]],
           ],
           'x',
@@ -234,7 +253,12 @@ describe('a returned closure that defines and calls a local function', () => {
               'Function',
               [
                 'Block',
-                ['Assign', 'g', ['Function', ['Multiply', 'w', 'z'], 'z']],
+                [
+                  'Declare',
+                  'g',
+                  "'unknown'",
+                  ['Function', ['Multiply', 'w', 'z'], 'z'],
+                ],
                 ['Add', 'x', ['g', 2]],
               ],
               'x',
@@ -250,8 +274,8 @@ describe('a returned closure that defines and calls a local function', () => {
 
   test('the local function is defined in a nested block of the closure', () => {
     // w ↦ (x ↦ Block(g := z ↦ 0, If(x > 0, Block(g := z ↦ 3, x + g(0)), 0)))
-    // `g` is assigned first at the block level, because a first assignment
-    // in a branch is a static error.
+    // `g` is declared at the block level, and the block of the branch
+    // assigns it.
     expect(
       json([
         'Apply',
@@ -263,7 +287,7 @@ describe('a returned closure that defines and calls a local function', () => {
               'Function',
               [
                 'Block',
-                ['Assign', 'g', ['Function', 0, 'z']],
+                ['Declare', 'g', "'unknown'", ['Function', 0, 'z']],
                 [
                   'If',
                   ['Greater', 'x', 0],
@@ -312,10 +336,9 @@ const declaredInBranch = (value: unknown, body: unknown) => [
 
 describe('a returned closure that declares a local function in a nested block', () => {
   // A nested block of the returned literal is rebuilt on a new scope when
-  // the call ends (`captureClosures`), and a run of the block gives the
-  // `Declare` local a new binding in that scope. The call `g(0)` is bound to
-  // the hoisted `g`, whose home is the old scope: the new scope must stand
-  // for it. (CE-794.)
+  // the call ends (`captureClosures`). The call `g(0)` is bound to the `g`
+  // that the `Declare` makes, whose home is the old scope: the new scope must
+  // stand for it. (CE-794.)
   const witness = declaredInBranch(['Function', 3, 'z'], [
     'Add',
     'x',

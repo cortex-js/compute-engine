@@ -205,7 +205,7 @@ describe('The type of the Product of matrices that are not square', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'x', ['List', m]],
+      ['Declare', 'x', "'unknown'", ['List', m]],
       ['Product', 'x'],
     ]);
     expect(expr.type.toString()).toBe('matrix<integer^(2x3)>');
@@ -218,7 +218,7 @@ describe('The type of the Product of matrices that are not square', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'x', ['List', m, m]],
+      ['Declare', 'x', "'unknown'", ['List', m, m]],
       ['Product', 'x'],
     ]);
     expect(expr.type.toString()).toBe('number');

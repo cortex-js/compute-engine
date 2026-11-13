@@ -113,12 +113,13 @@ describe('SUBS RENAMES A BINDER THAT WOULD CAPTURE A REPLACEMENT', () => {
   });
 
   test('a local of a Block', () => {
-    const result = subs(['Block', ['Assign', 't', 1], ['Add', 'y', 't']], {
-      y: 't',
-    });
+    const result = subs(
+      ['Block', ['Declare', 't', "'unknown'", 1], ['Add', 'y', 't']],
+      { y: 't' }
+    );
     expect(result.json).toEqual([
       'Block',
-      ['Assign', 't_1', 1],
+      ['Declare', 't_1', "'unknown'", 1],
       ['Add', 't', 't_1'],
     ]);
     expect(result.evaluate().toString()).toBe('t + 1');
@@ -174,7 +175,11 @@ describe('SUBS RENAMES A BINDER THAT WOULD CAPTURE A REPLACEMENT', () => {
     const engine = new ComputeEngine();
     // A closure that captured `a = 2`.
     const closure = engine
-      .box(['Block', ['Assign', 'a', 2], ['Function', ['Multiply', 'a', 'x'], 'x']])
+      .box([
+        'Block',
+        ['Declare', 'a', "'unknown'", 2],
+        ['Function', ['Multiply', 'a', 'x'], 'x'],
+      ])
       .evaluate();
     const sum = engine.function('Sum', [
       engine.function('Add', [

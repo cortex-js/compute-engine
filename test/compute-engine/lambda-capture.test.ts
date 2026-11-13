@@ -291,26 +291,29 @@ describe('LAMBDAS INSIDE BigOps', () => {
     expect(result).toMatchInlineSnapshot(`66`); // correct: Sum was defined in scope where lc_c4=20
   });
 
-  test('Sum canonicalized before scope change reads the scope it is evaluated in', () => {
+  test('Sum canonicalized before scope change reads the scope it was boxed in', () => {
     // Sum is boxed in the OUTER scope (lc_c4=10), then evaluated inside a
-    // scope that shadows lc_c4=20. A directly evaluated expression reads the
-    // environment it is evaluated in (ruled 2026-09-15, Tycho item 295), so
-    // the shadow is read: (1+20) + (2+20) + (3+20) = 66. A stored FUNCTION
-    // value is a closure and keeps its defining scope (the tests above).
+    // scope that shadows lc_c4=20. An expression reads the scope it was
+    // boxed in, so the shadow is not read: (1+10) + (2+10) + (3+10) = 36.
+    // Bound again in the inner scope (`ce.rebind()`), it reads the shadow:
+    // (1+20) + (2+20) + (3+20) = 66.
     const sumExpr = ce.expr([
       'Sum',
       ['Add', 'lc_k4d', 'lc_c4'],
       ['Limits', 'lc_k4d', 1, 3],
     ]); // boxed outside calling scope (lc_c4=10)
     let result: unknown;
+    let rebound: unknown;
     try {
       ce.pushScope();
       ce.declare('lc_c4', { value: 20 }); // shadow in calling scope
       result = sumExpr.evaluate().valueOf();
+      rebound = ce.rebind(sumExpr).evaluate().valueOf();
     } finally {
       ce.popScope();
     }
-    expect(result).toMatchInlineSnapshot(`66`); // the shadowing scope's lc_c4=20
+    expect(result).toBe(36); // the outer lc_c4=10
+    expect(rebound).toBe(66); // the shadowing scope's lc_c4=20
   });
 });
 

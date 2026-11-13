@@ -6,8 +6,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 //
 // The interpreter checks each argument of a call against the declared type
 // of its parameter: `g(1.5)` is an `incompatible-type` error when `g` is
-// declared `(integer) -> integer` (by `let g: (integer) -> integer`, or by
-// the annotation `function g(k: integer)`). The compiled code must not give
+// declared `(integer) -> integer` (by `let g: (integer) -> integer = …`, or
+// by the annotation `function g(k: integer)`). The compiled code must not give
 // a value there:
 //
 // - an argument that cannot be of the type fails the compilation;
@@ -57,8 +57,19 @@ const DECLARED = 'let g: (integer) -> integer\nfunction g(k) { k + 1 }\n';
 const ASSIGNED = 'let g: (integer) -> integer = (k) => k + 1\n';
 const ANNOTATED = 'function g(k: integer) { k + 1 }\n';
 
+describe('A `let` DECLARATION THEN A DEFINITION', () => {
+  test('a program compiled as one block declares `g` twice', () => {
+    // At the top level of a program, the declaration gives the signature of
+    // the function. The compiled program is one block, where the function
+    // statement declares the local `g` a second time.
+    expect(interpret(DECLARED + 'g(1)').value).toBe(2);
+    expect(() => compileProgram(DECLARED + 'g(1)')).toThrow(
+      /variable-redeclaration/
+    );
+  });
+});
+
 describe.each([
-  ['a `let` declaration then a definition', DECLARED],
   ['a `let` declaration with a function value', ASSIGNED],
   ['a parameter annotation', ANNOTATED],
 ])('A CALL OF A FUNCTION DECLARED (integer) -> integer: %s', (_, head) => {
@@ -157,7 +168,7 @@ describe.each([
 
 describe('OTHER DECLARED PARAMETER TYPES', () => {
   test('a ranged integer type is not tested', () => {
-    const head = 'let g: (integer<0..>) -> integer\nfunction g(k) { k + 1 }\n';
+    const head = 'let g: (integer<0..>) -> integer = (k) => k + 1\n';
     expect(interpret('let x = -1\n' + head + 'g(x)').errors).toBe(1);
     expect(js(head + 'g(x)', { x: 1 })).toBe(2);
     expect(interval(head + 'g(x)', { x: 1 })).toEqual({
@@ -167,7 +178,7 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
   });
 
   test('a bounded real type is not tested', () => {
-    const head = 'let g: (real<0..>) -> real\nfunction g(k) { k + 1 }\n';
+    const head = 'let g: (real<0..>) -> real = (k) => k + 1\n';
     expect(interpret('let x = -0.5\n' + head + 'g(x)').errors).toBe(1);
     expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
     expect(interval(head + 'g(x)', { x: 0.5 })).toEqual({
@@ -185,9 +196,9 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
   // a value of the type. Before 2026-10-19 the interpreter admitted it
   // (`g(0)` gave a value).
   test.each([
-    ['let g: (real<0<..>) -> real\nfunction g(k) { k + 1 }\n', 0, 0.5],
+    ['let g: (real<0<..>) -> real = (k) => k + 1\n', 0, 0.5],
     ['function g(k: real<0<..>) { k + 1 }\n', 0, 0.5],
-    ['let g: (real<..<3>) -> real\nfunction g(k) { k + 1 }\n', 3, 2.5],
+    ['let g: (real<..<3>) -> real = (k) => k + 1\n', 3, 2.5],
   ])('an excluded bound is refused: %s', (head, bound, inside) => {
     expect(interpret(head + `g(${bound})`).errors).toBe(1);
     expect(interpret(`let x = ${bound}\n` + head + 'g(x)').errors).toBe(1);
@@ -209,7 +220,7 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
   });
 
   test('a rational parameter is not tested', () => {
-    const head = 'let g: (rational) -> real\nfunction g(k) { k + 1 }\n';
+    const head = 'let g: (rational) -> real = (k) => k + 1\n';
     expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
     expect(compileProgram(head + 'g(x)', 'interval-js').success).toBe(true);
     expect(js(head + 'g(1)')).toBe(2);
@@ -218,7 +229,7 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
   test('the declared result type is not checked', () => {
     // The body breaks the result type, and the interpreter gives the
     // value of the body.
-    const source = 'let g: (real) -> integer\nfunction g(k) { k + 1 }\ng(1.5)';
+    const source = 'let g: (real) -> integer = (k) => k + 1\ng(1.5)';
     expect(interpret(source).value).toBe(2.5);
     expect(js(source)).toBe(2.5);
     expect(interval(source)).toEqual({

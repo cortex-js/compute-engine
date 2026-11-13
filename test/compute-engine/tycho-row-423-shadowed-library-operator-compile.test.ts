@@ -221,6 +221,17 @@ describe('composed and recursive uses', () => {
       expect(result.run({ x })).toBeCloseTo(6 * x * x * (x ** 3 + 100), 9);
   });
 
+  test('the derivative of a call of the user Gamma is symbolic', () => {
+    // The renamed call is bound to the copy that holds the literal, so the
+    // derivative reads the literal and not a function with no body.
+    const ce = engine('x\\mapsto x^3+100');
+    const expr = ce.parse('\\frac{d}{dx}\\Gamma(x)');
+    const { result, warnings } = compiled(expr, 'javascript');
+    expect(warnings).toEqual([]);
+    expect(result.code).not.toContain('_SYS.nd');
+    expect(result.run({ x: 2 })).toBe(12);
+  });
+
   test('a complex-valued user function keeps its complex lane', () => {
     // The library `Gamma` of a real argument is real. The user function is
     // complex, so `Gamma(x) + 1` adds 1 to a complex value.
@@ -434,8 +445,9 @@ describe('the parts of the compiler that read a head by its name', () => {
       const { result } = compiled(early, to);
       expect(result.success).toBe(true);
     }
-    ce.assign('y', 0.5);
-    expect(early.N().re).toBeCloseTo(Math.sqrt(Math.PI), 12);
+    // `early` reads `y` from the scope it was boxed in, so its value is
+    // given by substitution, which keeps the binding of the node.
+    expect(early.subs({ y: 0.5 }).N().re).toBeCloseTo(Math.sqrt(Math.PI), 12);
     expect(compiled(early, 'javascript').result.run({ y: 0.5 })).toBeCloseTo(
       Math.sqrt(Math.PI),
       12

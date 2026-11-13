@@ -109,7 +109,7 @@ describe('interval-js: Linspace', () => {
     // `assignment-in-operand`.
     const json = [
       'Block',
-      ['Assign', 'c', 0],
+      ['Declare', 'c', "'unknown'", 0],
       ['Loop', 0, ['Element', 'k', ['Linspace', ['Assign', 'c', 1], 9, 0]]],
       'c',
     ];
@@ -165,7 +165,7 @@ describe('interval-js: Linspace', () => {
     });
     const loop = [
       'Block',
-      ['Assign', 'c', 0],
+      ['Declare', 'c', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 'c', ['Add', 'c', 'k']],

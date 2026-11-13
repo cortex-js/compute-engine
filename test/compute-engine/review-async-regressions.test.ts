@@ -112,7 +112,7 @@ describe('asynchronous evaluation regression cases', () => {
     ce.maxCollectionSize = 1;
     const expr = ce.box([
       'Block',
-      ['Assign', 'xs', ['Range', 1, 3]],
+      ['Declare', 'xs', "'unknown'", ['Range', 1, 3]],
       ['Map', ['Function', ['Add', 'x', 1], 'x'], 'xs'],
     ]);
     const sync = expr.evaluate();
@@ -141,7 +141,7 @@ describe('asynchronous evaluation regression cases', () => {
     ).toBe('(6, 7)');
   });
 
-  test('ApplyWhole binds caller locals inside lazy collection arguments', async () => {
+  test('ApplyWhole: a lazy collection argument reads the names of its home scope', async () => {
     const ce = new ComputeEngine();
     ce.assign('n', 1);
     const fn = ce.box([
@@ -149,8 +149,9 @@ describe('asynchronous evaluation regression cases', () => {
       ['Block', ['Declare', 'n', 'real', 99], ['Sum', 'xs']],
       'xs',
     ]);
-    // Box before entering the caller's scope: the collection's free n has
-    // an outer binding, but must read the caller's ordinary shadow at call.
+    // Boxed before the caller's scope is pushed: the `n` of the collection
+    // resolves from its home scope, the global `n = 1`, and a declaration
+    // of `n` in a scope pushed later is not read.
     const source = ce.box([
       'Comprehension',
       'n',
@@ -161,17 +162,17 @@ describe('asynchronous evaluation regression cases', () => {
     try {
       const expr = ce.function('ApplyWhole', [fn, source]);
       expect(source.isLazyCollection).toBe(true);
-      expect(expr.evaluate().toString()).toBe('14');
-      expect((await expr.evaluateAsync()).toString()).toBe('14');
+      expect(expr.evaluate().toString()).toBe('2');
+      expect((await expr.evaluateAsync()).toString()).toBe('2');
       expect(
         (await expr.evaluateAsync({ numericApproximation: true })).toString()
-      ).toBe('14');
+      ).toBe('2');
     } finally {
       ce.popScope();
     }
   });
 
-  test('declared broadcast retains whole lazy arguments and caller bindings', async () => {
+  test('declared broadcast retains whole lazy arguments, which read their home scope', async () => {
     const ce = new ComputeEngine();
     ce.maxCollectionSize = 1;
     ce.assign('n', 1);
@@ -198,7 +199,7 @@ describe('asynchronous evaluation regression cases', () => {
         (await expr.evaluateAsync()).each(),
         (x) => x.re
       );
-      expect(sync).toEqual([14]);
+      expect(sync).toEqual([2]);
       expect(async).toEqual(sync);
     } finally {
       ce.popScope();

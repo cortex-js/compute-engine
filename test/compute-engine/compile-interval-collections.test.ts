@@ -637,7 +637,12 @@ describe('Interval target — collection-valued roots', () => {
         ['g', ['f', 'x']],
       ],
       // Through a block local.
-      ['Block', ...define, ['Assign', 'w', ['f', 'x']], ['Add', 'w', 1]],
+      [
+        'Block',
+        ...define,
+        ['Declare', 'w', "'unknown'", ['f', 'x']],
+        ['Add', 'w', 1],
+      ],
     ];
     for (const shape of SHAPES) {
       const ce = new ComputeEngine();
@@ -660,7 +665,7 @@ describe('Interval target — collection-valued roots', () => {
       engine(),
       [
         'Block',
-        ['Assign', 'z', 1],
+        ['Declare', 'z', "'unknown'", 1],
         ['List', ['Less', 'x', 'z'], ['Less', 'x', 2]],
       ],
       /Could not compile `List`/

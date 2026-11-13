@@ -137,6 +137,7 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
         // bare declaration is refused, not installed. The head-position
         // surfacing this test pins is unchanged — the declared arrow and the
         // stored value's arrow are unioned by `valueBindingEffects`.
+        ce.declare('tally', 'number');
         ce.declare(
           'bump',
           spelling === 'type'
@@ -548,10 +549,9 @@ describe('Selecting and storing heads drop the LATENT half', () => {
     const ce = engine();
     // The suppressed term is the LATENT one; an operand's own effects still
     // reach the block through `effectsOf`.
-    expect(eff(ce.box(['Block', ['Assign', 'x', 1], ['Random']]))).toEqual([
-      'random',
-      'scope',
-    ]);
+    expect(
+      eff(ce.box(['Block', ['Declare', 'x', "'unknown'", 1], ['Random']]))
+    ).toEqual(['random', 'scope']);
     expect(eff(ce.box(['Block', ['Map', 'randomF', ['List', 1, 2]]]))).toEqual([
       'random',
     ]);
@@ -561,7 +561,7 @@ describe('Selecting and storing heads drop the LATENT half', () => {
         ce.box([
           'WithRandomSeed',
           42,
-          ['Block', ['Assign', 'x', 1], ['Random']],
+          ['Block', ['Declare', 'x', "'unknown'", 1], ['Random']],
         ])
       )
     ).toEqual(['scope']);
@@ -695,7 +695,7 @@ describe('`WithRandomSeed` — the canonical discharger', () => {
     const e = ce.box([
       'WithRandomSeed',
       42,
-      ['Block', ['Assign', 'counter', 1], ['Random']],
+      ['Block', ['Declare', 'counter', "'unknown'", 1], ['Random']],
     ]);
     expect(eff(e)).toEqual(['scope']);
     expect(e.isPure).toBe(false);

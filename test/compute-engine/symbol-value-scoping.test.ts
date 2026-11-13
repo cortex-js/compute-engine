@@ -52,6 +52,16 @@ function epsil(src: string): string {
   return executeEpsil(new ComputeEngine(), src).value.toString();
 }
 
+/** Run `src` on an engine on which `names` are declared with no value. A
+ * local of a program always has a value, so a name with no value is a
+ * variable that the host declares, and an assignment in the program writes
+ * it. */
+function epsilWithGlobals(names: string[], src: string): string {
+  const ce = new ComputeEngine();
+  for (const name of names) ce.declare(name, 'unknown');
+  return executeEpsil(ce, src).value.toString();
+}
+
 /** `let d = 3x^2 + 1` via the raw-MathJSON route. */
 function assignD(ce: ComputeEngine): void {
   ce.box([
@@ -77,8 +87,12 @@ describe('SPEC: staleness (one-evaluate-late)', () => {
   });
 
   test('Epsil route: bare deref and N agree', () => {
-    expect(epsil('let d = 3x^2 + 1\nlet x = 2\nd')).toEqual('13');
-    expect(epsil('let d = 3x^2 + 1\nlet x = 2\nN(d)')).toEqual('13');
+    // `x` is a variable of the host with no value: a `let` of it after `d`
+    // would be a use before its declaration.
+    expect(epsilWithGlobals(['x'], 'let d = 3x^2 + 1\nx = 2\nd')).toEqual('13');
+    expect(epsilWithGlobals(['x'], 'let d = 3x^2 + 1\nx = 2\nN(d)')).toEqual(
+      '13'
+    );
   });
 
   test('the compiled route agrees with evaluate()', () => {
@@ -118,7 +132,9 @@ describe('SPEC: the late-bound/early-bound ruling', () => {
     // free. The same three statements give different answers by declaration
     // order. Must hold before AND after the fix.
     expect(epsil('let x = 2\nlet d = 3x^2 + 1\nx = 3\nN(d)')).toEqual('13');
-    expect(epsil('let d = 3x^2 + 1\nlet x = 2\nx = 3\nN(d)')).toEqual('28');
+    expect(
+      epsilWithGlobals(['x'], 'let d = 3x^2 + 1\nx = 2\nx = 3\nN(d)')
+    ).toEqual('28');
   });
 });
 
@@ -368,8 +384,10 @@ describe('SPEC: cycle behavior (must not regress)', () => {
     // dereference and fall back to the stored value (returning at the
     // re-entry point instead yields 'b + 3'; returning the bare symbol yields
     // 'a + 2' — both regressions of the residual pinned here).
-    expect(epsil('let s\ns = s + 1\ns')).toEqual('s + 1');
-    expect(epsil('a = b + 1\nb = a + 1\na')).toEqual('b + 1');
+    expect(epsilWithGlobals(['s'], 's = s + 1\ns')).toEqual('s + 1');
+    expect(epsilWithGlobals(['a', 'b'], 'a = b + 1\nb = a + 1\na')).toEqual(
+      'b + 1'
+    );
   });
 
   test('a cycle further down the chain costs only its own dereference', () => {
@@ -380,8 +398,12 @@ describe('SPEC: cycle behavior (must not regress)', () => {
     // The values look one level deeper than written because assignment is EAGER
     // (see the late/early ruling): by the time `q = p + 1` runs, `p` already
     // dereferences to `q + 1`, so `q` stores `q + 2`.
-    expect(epsil('p = q + 1\nq = p + 1\np')).toEqual('q + 1');
-    expect(epsil('a = p + 5\np = q + 1\nq = p + 1\na')).toEqual('q + 6');
+    expect(epsilWithGlobals(['p', 'q'], 'p = q + 1\nq = p + 1\np')).toEqual(
+      'q + 1'
+    );
+    expect(
+      epsilWithGlobals(['a', 'p', 'q'], 'a = p + 5\np = q + 1\nq = p + 1\na')
+    ).toEqual('q + 6');
   });
 
   test('a self-referential ARGUMENT substitutes once (Tycho item 46)', () => {

@@ -960,16 +960,19 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     expect(def.drawsRandom).toBe(false);
   });
 
-  it('a CONDITIONAL Declare does not dominate → `scope`', () => {
+  it('a CONDITIONAL Declare is an error (`declaration-below-statement`)', () => {
     // h() := Block(If(flag, Declare(n, 0)), Assign(n, 5), n)
-    // On the flag-false path the Assign writes through to the outer `n`.
+    // A local is declared only by a statement of a block, not in a branch.
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
     const literal = ce.box([
       'Function',
       ['Block', ['If', 'flag9x', ['Declare', 'n', "'unknown'", 0]], ['Assign', 'n', 5], 'n'],
     ]);
-    expect(specifier(literal)).toBe('scope');
+    expect(literal.isValid).toBe(false);
+    expect(JSON.stringify(literal.json)).toContain(
+      'declaration-below-statement'
+    );
   });
 
   it('a Declare in a NESTED Block does not dominate the outer Assign', () => {
@@ -1051,6 +1054,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       [
         'Block',
         ['Declare', 'n', "'unknown'", 0],
+        ['Declare', 'm', "'unknown'", 0],
         ['Assign', 'n', 1],
         ['Function', ['Assign', ['Tuple', 'n', 'm'], ['Tuple', 1, 2]]],
       ],

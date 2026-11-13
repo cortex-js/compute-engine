@@ -419,15 +419,16 @@ describe('an evaluation keeps the registry it started with', () => {
         // `await`, the second one after it.
         ['List', ['Print', { str: 'list1' }], ['Print', { str: 'list2' }]],
         ['Set', ['Print', { str: 'set1' }], ['Print', { str: 'set2' }]],
-        // A function held by a VALUE definition: a lambda assigned inside
+        // A function held by a VALUE definition: a lambda declared inside
         // the block. Its application is synchronous and happens in the
         // synchronous start of the statement's `evaluateAsync()`, before the
         // driver reaches any operator handler. (A function assigned at the
         // top level becomes an operator definition and takes the handler
         // route instead.)
         [
-          'Assign',
+          'Declare',
           'g',
+          "'unknown'",
           ['Function', ['Block', ['Print', { str: 'fn' }, 'x'], 'x'], 'x'],
         ],
         ['g', 9],
@@ -653,7 +654,13 @@ describe('entropy', () => {
   test('the denial is an error value inside a program, not a throw', () => {
     const ce = new ComputeEngine();
     const result = ce.withEffects({ entropy: null }, () =>
-      ce.box(['Block', ['Assign', 'r', ['Random']], ['Add', 'r', 1]]).evaluate()
+      ce
+        .box([
+          'Block',
+          ['Declare', 'r', "'unknown'", ['Random']],
+          ['Add', 'r', 1],
+        ])
+        .evaluate()
     );
     expect(JSON.stringify(result.json)).toContain('capability-denied');
   });

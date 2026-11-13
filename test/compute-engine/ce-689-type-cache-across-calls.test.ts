@@ -183,14 +183,13 @@ describe('CE-689: the type cache across calls of a function literal', () => {
 
   test('the static view diverges while an awaited application is suspended', async () => {
     // After its first `await`, an awaited application of a literal gives
-    // the engine back the enclosing stack, but the body scope of the literal
-    // keeps the frame of the application as parent and its parameters taken
-    // out until the application ends. A walk from the body scope then
-    // reads `x` = 4 in the frame, and the same walk in the static view reads
-    // the valueless parameter. So the static view differs from the bindings,
-    // and a sign, a value or an evaluation computed in it must have a key of
-    // its own (`_cacheGeneration()`), also when no frame is on the current
-    // stack.
+    // the engine back the enclosing stack. The value of the parameter `x` is
+    // held by the frame of the application, which a walk from the body scope
+    // does not reach: the walk reads the valueless parameter, inside the
+    // static view and outside it. The static view is still counted as
+    // different while an application of the literal runs, so a sign, a value
+    // or an evaluation computed in it has a key of its own
+    // (`_cacheGeneration()`), also when no frame is on the current stack.
     const ce = new ComputeEngine();
     let release!: () => void;
     let entered!: () => void;
@@ -232,7 +231,7 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     } finally {
       release();
     }
-    expect(outside).toBe('4');
+    expect(outside).toBeUndefined();
     expect(inside).toBeUndefined();
     expect(generations[1]).not.toBe(generations[0]);
     expect((await first).toString()).toBe('5');
@@ -332,7 +331,7 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     executeEpsil(
       ce,
       `function outer(k) {
-  r = ReadLiteralType689()
+  let r = ReadLiteralType689()
   even(n) = true if n == 0 else odd(n - 1)
   odd(n) = false if n == 0 else even(n - 1)
   [even(k), r]
@@ -374,7 +373,7 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     });
     const block = ce.box([
       'Block',
-      ['Assign', 'c689', 5],
+      ['Declare', 'c689', "'unknown'", 5],
       [
         'Map',
         ['Function', ['TypeOf689b', ['Divide', 'x', 'c689']], 'x'],

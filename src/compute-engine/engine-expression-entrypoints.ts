@@ -19,7 +19,7 @@ import {
 } from './boxed-expression/type-provenance.js';
 import { NumericValue } from './numeric-value/types.js';
 import { isRational } from './numerics/rationals.js';
-import { markFreeSymbolDeclaration } from './assignment-locals.js';
+import { markFreeSymbolDeclaration } from './statement-position.js';
 import { markBodyFreeName } from './boxed-expression/binders.js';
 import { freeNameHomeScope } from './binding-unit.js';
 import type { Rational } from './numerics/types.js';
@@ -146,10 +146,10 @@ export function createSymbolExpression(
       // condition of an `If` whose branch Blocks reference the same parameter).
       // The binding is cached on the shadowed-parameter stack, so reuse is
       // bounded to THIS body's canonicalization (never an outer/global binding
-      // of the same name, which a parameter must shadow). Sharing one binding
-      // across all references avoids stray per-block copies that apply-time
-      // parameter hiding never removes — those break recursion through
-      // Block-wrapped branches.
+      // of the same name, which a parameter must shadow). All references
+      // share one binding, the one that a call frame holds with the value of
+      // the call: a per-block copy would have no value in the call, and
+      // recursion through Block-wrapped branches would read it.
       const cached = engine._shadowedParameterDef(name);
       if (cached !== undefined)
         return new BoxedSymbol(engine, name, { metadata, def: cached });
@@ -160,13 +160,12 @@ export function createSymbolExpression(
       // body scope of the literal. The first reference can be in a nested function
       // literal: with `v` the parameter of `(v: list<integer>) ↦ Count(
       // Filter(xs, c ↦ v[3] = 1 && Min(Map(1..3, j ↦ v[j])) >= 0))`, the first
-      // reference is in the body of `c ↦ …`. A binding declared there has no
-      // value and an explicit type, so the application of the outer literal
-      // does not hide it (`hideBodyScopeParams()`, `function-utils.ts`), and a
-      // read of `v` by name in the body of `c ↦ …` (the callback `j ↦ v[j]`
-      // that `Map` applies) found it before the frame that holds the value.
+      // reference is in the body of `c ↦ …`. A binding declared there would
+      // not be the one that the frame of the outer literal holds, and a read
+      // of `v` by name in the body of `c ↦ …` (the callback `j ↦ v[j]` that
+      // `Map` applies) would find it before the frame that holds the value.
       // A scope marked `noAutoDeclare` is not used: the search falls back to
-      // the innermost scope that accepts a declaration, as before.
+      // the innermost scope that accepts a declaration.
       const boundary = engine._shadowedParameterBoundary(name);
       let autoScope = engine.context.lexicalScope;
       for (let s: typeof autoScope | null = autoScope; s; s = s.parent) {
@@ -384,7 +383,7 @@ export function createSymbolExpression(
   // `docs/SCOPING-MODEL.md`.)
   // The binding is also marked as the binding of a free symbol: in the body
   // of a function literal, an assignment does not treat it as a declaration
-  // (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+  // (`isFreeSymbolDeclarationInBody()`, `statement-position.ts`).
   if (engine._boxingState.isPersistentScope(autoScope) === false) {
     engine._boxingState.noteTransientAutoDeclare(name);
     markFreeSymbolDeclaration(def);
@@ -460,7 +459,7 @@ export function createBindingSymbolExpression(
 ): Expression | undefined {
   const binding = scope.bindings.get(name);
   if (!isValueDef(binding)) return undefined;
-  return new BoxedSymbol(engine, name, { def: binding });
+  return new BoxedSymbol(engine, name, { def: binding, defHome: scope });
 }
 
 /**
@@ -494,7 +493,10 @@ export function createLibrarySymbolExpression(
     return common;
   if (isValueDef(library) && library.value.holdUntil === 'never')
     return library.value.value ?? engine.Nothing;
-  return new BoxedSymbol(engine, name, { def: library });
+  return new BoxedSymbol(engine, name, {
+    def: library,
+    defHome: engine._evalContextStack[0]?.lexicalScope,
+  });
 }
 
 export function createNumberExpression(

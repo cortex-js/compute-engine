@@ -447,9 +447,9 @@ describe('A USER BINDING OF Pi IN SPECIAL VALUES AND SOLVE', () => {
   });
 });
 
-// An `Assign` in a block stores its value with each symbol that reads a local
-// of the block replaced by the value of that local. A result that the engine
-// built with the library π holds a symbol bound to the library constant, and
+// A `Declare` in a block stores its value with each symbol that reads a
+// local of the block replaced by the value of that local. A result that the
+// engine built with the library π holds a symbol bound to the library constant, and
 // the evaluation of that symbol reads the constant, not a block local named
 // `Pi`. So the stored value keeps the library π.
 describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
@@ -465,7 +465,7 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
   test('an assigned closed form keeps the library π', () => {
     const ce = new ComputeEngine();
     const value = ce
-      .box(['Block', ...localPi, ['Assign', 's', sum], 's'])
+      .box(['Block', ...localPi, ['Declare', 's', "'unknown'", sum], 's'])
       .evaluate();
     expect(value.toString()).toBe('1/6 * pi^2');
     expect(value.N().re).toBeCloseTo(Math.PI ** 2 / 6, 12);
@@ -482,7 +482,12 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
   test('the stored value combines with the local Pi', () => {
     const ce = new ComputeEngine();
     const value = ce
-      .box(['Block', ...localPi, ['Assign', 's', sum], ['Multiply', 's', 'Pi']])
+      .box([
+        'Block',
+        ...localPi,
+        ['Declare', 's', "'unknown'", sum],
+        ['Multiply', 's', 'Pi'],
+      ])
       .evaluate();
     expect(value.N().re).toBeCloseTo((3 * Math.PI ** 2) / 6, 12);
   });
@@ -495,7 +500,7 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
       .box([
         'Block',
         ...localPi,
-        ['Assign', 's', ['Hold', 'Pi']],
+        ['Declare', 's', "'unknown'", ['Hold', 'Pi']],
         ['Assign', 'Pi', 4],
         's',
       ])
@@ -506,7 +511,7 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
   test('an assigned closed form keeps the library π, asynchronously', async () => {
     const ce = new ComputeEngine();
     const value = await ce
-      .box(['Block', ...localPi, ['Assign', 's', sum], 's'])
+      .box(['Block', ...localPi, ['Declare', 's', "'unknown'", sum], 's'])
       .evaluateAsync();
     expect(value.toString()).toBe('1/6 * pi^2');
     expect(value.N().re).toBeCloseTo(Math.PI ** 2 / 6, 12);
@@ -518,7 +523,7 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
       .box([
         'Block',
         ...localPi,
-        ['Assign', 's', ['Hold', 'Pi']],
+        ['Declare', 's', "'unknown'", ['Hold', 'Pi']],
         ['Assign', 'Pi', 4],
         's',
       ])
@@ -540,7 +545,7 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
       5,
       ['Dictionary', ['KeyValuePair', 'constant', 'True']],
     ],
-    ['Assign', 's', ['Hold', 'c']],
+    ['Declare', 's', "'unknown'", ['Hold', 'c']],
     's',
   ];
 

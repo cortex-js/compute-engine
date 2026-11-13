@@ -371,7 +371,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
           'Function',
           [
             'Block',
-            ['Assign', 'v', ['Map', F, ['List', 1, 2]]],
+            ['Declare', 'v', "'unknown'", ['Map', F, ['List', 1, 2]]],
             ['Function', ['ListFrom', 'v'], 'y'],
           ],
           'd',
@@ -520,7 +520,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
         'Function',
         [
           'Block',
-          ['Assign', 'h', ['Function', ['Map', F, 'ys'], 'ys']],
+          ['Declare', 'h', "'unknown'", ['Function', ['Map', F, 'ys'], 'ys']],
           ['h', ['List', 1, 2]],
         ],
         'd',
@@ -644,11 +644,11 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     expect(listed(ce, ['g', 10, ['List', 1, 2]])).toEqual(['List', 10, 20]);
   });
 
-  test('a call that reads its view at once does not retain its frame', () => {
+  test('the definition of a parameter outlives the call, whether the view is read at once or later', () => {
     // `Spy(x)` returns `x` and keeps the definition of `d` that the call
-    // reads. The frame of a call that returns its view is retained: its
-    // definitions are not disposed. The frame of a call that reads the view
-    // at once is disposed at its pop, as any frame.
+    // reads. A parameter has one definition, in the scope of the literal;
+    // a call holds its value in its activation, and the pop of the call
+    // does not dispose the definition, in both cases.
     const ce = engine([]);
     ce._debugBindings = true;
     let spied: any = undefined;
@@ -669,7 +669,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
       10,
       20,
     ]);
-    expect(spied?.value?.disposed).toBe(true);
+    expect(spied?.value?.disposed).toBe(false);
     expect(listed(ce, ['gOut', 10, ['List', 1, 2]])).toEqual(['List', 10, 20]);
     expect(spied?.value?.disposed).toBe(false);
   });
@@ -731,7 +731,15 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
     // of the call of `g`.
     const ce = engine([
       ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
-      ['H', ['Function', ['Block', ['Assign', 'v', ['g', 5, 'xs']], 'v'], 'd', 'xs']],
+      [
+        'H',
+        [
+          'Function',
+          ['Block', ['Declare', 'v', "'unknown'", ['g', 5, 'xs']], 'v'],
+          'd',
+          'xs',
+        ],
+      ],
     ]);
     ce._debugBindings = true;
     for (const numericApproximation of [false, true]) {
@@ -834,7 +842,15 @@ describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
     // above: `H` has `d = 10`, the view was made by `g` with `d = 5`.
     const ce = engine([
       ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
-      ['H', ['Function', ['Block', ['Assign', 'v', ['g', 5, 'xs']], 'v'], 'd', 'xs']],
+      [
+        'H',
+        [
+          'Function',
+          ['Block', ['Declare', 'v', "'unknown'", ['g', 5, 'xs']], 'v'],
+          'd',
+          'xs',
+        ],
+      ],
     ]);
     for (const numericApproximation of [false, true]) {
       const view = await ce
@@ -849,16 +865,13 @@ describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
   });
 });
 
-// A lazy view holds its operands unevaluated, also its callback literal, and
-// a symbol of these operands keeps the binding of its canonicalization. A
-// view that a loop iteration assigns to a variable of an enclosing scope is
+// A view that a loop iteration assigns to a variable of an enclosing scope is
 // read after the loop has written another value in its index, or after the
-// call that ran the loop has returned. Before, the view read the index at the
-// read: `[7, 8]` at the top level (with the debug flag, a read of a discarded
-// scope), and `[d + 1, d + 2]` in a function. Now the `Assign` replaces, in
-// the stored view, the locals of the loops and blocks that the variable
-// outlives with their values (`bindOutlivedLocalsOfLazyValue`,
-// `function-utils.ts`).
+// call that ran the loop has returned. The view keeps the activation of the
+// iteration that made it (`boxed-expression/lazy-view-context.ts`), and each
+// iteration has its own activation, so the view reads the index of its
+// iteration. A global, and a local of a scope that the view did not leave,
+// are read when an element is computed.
 describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION', () => {
   /** The value of the Epsil program `source`, with and without the debug
    * check of dead bindings. */
@@ -934,13 +947,12 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION', () => {
       'let h = []; let r = [do { if i == 2 { h = Map(x => x + i, Range(1, Infinity)) }; i } for i in 1..3]; ListFrom(Take(h, 2))',
       ['List', 3, 4],
     ],
-    // The assignment also replaces a variable of the scope of the stored
-    // variable with its value (`bindReadVariablesOfLazyCollection`), so the
-    // later `m = 50` does not change `h`.
+    // The callback reads `m` when an element is computed: the later
+    // `m = 50` is read.
     [
-      'a variable of the scope of the stored variable is read at the assignment',
+      'a variable of the scope of the stored variable is read when an element is computed',
       'let h = []; let m = 1; for d in [3] { h = Map(x => x + m, Range(1, Infinity)) }; m = 50; ListFrom(Take(h, 2))',
-      ['List', 2, 3],
+      ['List', 51, 52],
     ],
   ];
 
@@ -967,8 +979,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION', () => {
   });
 });
 
-// The review cases of the assignment rule above
-// (`bindOutlivedLocalsOfLazyValue`, `function-utils.ts`).
+// The review cases of the rule above.
 describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
   function run(source: string, debug: boolean): Json {
     const ce = new ComputeEngine();
@@ -1012,10 +1023,12 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
       'let r = 0; for d in [3, 6] { if d == 3 { r = {"a" -> Map(x => x + d, Range(1, Infinity))} } }; ListFrom(Take(r["a"], 2))',
       ['List', 4, 5],
     ],
+    // The callback reads the local `d` through the activation of the block,
+    // where the assignment has written `2`.
     [
-      'a destructuring assignment is simultaneous',
+      'a destructuring assignment writes a local that the view reads',
       'let h = []; for i in [1] { let d = 1; (d, h) := (2, Map(x => x + d, Range(1, Infinity))) }; ListFrom(Take(h, 2))',
-      ['List', 2, 3],
+      ['List', 3, 4],
     ],
     [
       'a call of the innermost of two locals that hold a function',
@@ -1039,14 +1052,12 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
       'type Box = object{v: any}; let o = Box(v: []); for d in [3, 6] { if d == 3 { o.v = Map(x => x + d, Range(1, Infinity)) } }; ListFrom(Take(o.v, 2))',
       ['List', 4, 5],
     ],
-    // A view stored in a field reads the locals of every loop and block of
-    // the chain with their values at the store, also a local of the scope
-    // of its object: the name of the receiver does not tell how long the
-    // object lives. The last store reads `total = 10`.
+    // A view stored in a field reads a local of the block through the
+    // activation of the block when an element is computed: `total = 20`.
     [
-      'a field reads a local of the scope of its object at the store',
+      'a field reads a local of the scope of its object when an element is computed',
       'type Box = object{v: any}; let r = 0; if true { let total = 0; let o = Box(v: []); for i in [1, 2] { o.v = Map(x => x + total, Range(1, Infinity)); total = total + 10 }; r = ListFrom(Take(o.v, 2)) }; r',
-      ['List', 11, 12],
+      ['List', 21, 22],
     ],
     // An alias in an inner scope names the object of `o`: the view reads
     // the `i` of the last iteration, not a discarded one.
@@ -1060,13 +1071,8 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
       'type Box = object{v: any}; let o = Box(v: []); for i in [1, 2] { function g(p: Box) { p.v = Map(x => x + i, Range(1, Infinity)) }; g(o) }; ListFrom(Take(o.v, 2))',
       ['List', 3, 4],
     ],
-    // The branches of an `If` are values: the `If` stays unevaluated while
-    // `c` is free, and its view is read when `c` gets a value.
-    [
-      'a view in a branch of an If with a free condition',
-      'let h = []; for i in [1, 2] { h = If(c, Map(x => x + i, Range(1, Infinity)), Range(1, Infinity)) }; c = True; ListFrom(Take(h, 2))',
-      ['List', 3, 4],
-    ],
+    // The view keeps the activation of its iteration; its operands are
+    // not rewritten.
     [
       'a view under a node that stays unevaluated',
       'let r = 0; for d in [3, 6] { if d == 3 { r = ListFrom(TakeWhile(Range(1, Infinity), x => x < d)) } }; r',
@@ -1075,7 +1081,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
         [
           'TakeWhile',
           ['Range', 1, 'PositiveInfinity'],
-          ['Function', ['Block', ['Less', 'x', 3]], 'x'],
+          ['Function', ['Block', ['Less', 'x', 'd']], 'x'],
         ],
       ],
     ],
@@ -1086,6 +1092,29 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
       test(`${name}${debug ? ', with the debug check' : ''}`, () => {
         expect(run(source, debug)).toEqual(expected);
       });
+
+  // The `If` stays unevaluated while `c`, declared by the host with no
+  // value, is free. Its branch is not evaluated, so no view is made in the
+  // loop: the branch is evaluated when `h` is read, after the loop, where
+  // the loop variable `i` has no value.
+  for (const debug of [false, true])
+    test(`a view in a branch of an If with a free condition${
+      debug ? ', with the debug check' : ''
+    }`, () => {
+      const ce = new ComputeEngine();
+      ce._debugBindings = debug;
+      ce.declare('c', 'boolean');
+      const r = executeEpsil(
+        ce,
+        'let h = []; for i in [1, 2] { h = If(c, Map(x => x + i, Range(1, Infinity)), Range(1, Infinity)) }; c = True; ListFrom(Take(h, 2))'
+      );
+      expect(r.diagnostics).toEqual([]);
+      expect(r.value!.json).toEqual([
+        'List',
+        ['Add', 'i', 1],
+        ['Add', 'i', 2],
+      ]);
+    });
 
   test('a call of a local that a local of an inner block shadows with a number', () => {
     // The inner `f` holds `5`, not a function. The view read after the

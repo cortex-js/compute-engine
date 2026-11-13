@@ -250,11 +250,10 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
     expect(inner).toBeCloseTo(outer, 10);
   });
 
-  test('a free variable reads the declaration of the current scope', () => {
-    // A symbol that is not in a call position keeps the compatibility
-    // reading of `docs/SCOPING-MODEL.md`: its value is read from the
-    // innermost binding of its name, so a later declaration of `a` in a
-    // pushed scope is read.
+  test('a free variable reads the scope it was boxed in, and rebind reads the current scope', () => {
+    // A symbol that is not in a call position reads the scope it was boxed
+    // in, as a call does: a declaration of `a` in a pushed scope is read
+    // only by the integral bound again in that scope (`ce.rebind()`).
     const ce = new ComputeEngine();
     ce.assign('a', 2);
     const I = ce.parse('\\int_0^1 a x\\,dx');
@@ -262,8 +261,10 @@ describe('CE-614: an integral keeps the binding of the function it calls', () =>
     ce.pushScope();
     ce.declare('a', 'real');
     ce.assign('a', 10);
-    expect(I.evaluate().json).toEqual(5);
-    expect(I.N().re).toBeCloseTo(5, 12);
+    expect(I.evaluate().json).toEqual(1);
+    const J = ce.rebind(I);
+    expect(J.evaluate().json).toEqual(5);
+    expect(J.N().re).toBeCloseTo(5, 12);
     ce.popScope();
     expect(I.evaluate().json).toEqual(1);
   });

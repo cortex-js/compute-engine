@@ -81,14 +81,16 @@ describe('only the annotated slots of a function literal are a contract', () => 
     const { expr } = box(
       'function k(p, n: number) { p[1] + n }\nk((1, 2, 3), "a")'
     );
-    expect(errorsIn(expr).join(' ')).toMatch(/incompatible-type/);
+    // The program is a block, where `k` is a variable that holds the
+    // function: the call is checked when it is applied.
+    expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
   });
 
   test('a fully annotated function enforces every slot', () => {
     const { expr } = box(
       'function k(p: indexed_collection<number>, n: number) { p[1] + n }\nk(5, 1)'
     );
-    expect(errorsIn(expr).join(' ')).toMatch(/incompatible-type/);
+    expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
   });
 
   test('the assign route with a Function literal follows the same rule', () => {
@@ -157,7 +159,7 @@ describe('only the annotated slots of a function literal are a contract', () => 
     const { expr: refused } = box(
       'function k(n: number, p, ...rest) { p[1] + n }\nk("a", (1, 2), 3)'
     );
-    expect(errorsIn(refused).join(' ')).toMatch(/incompatible-type/);
+    expect(refused.evaluate().toString()).toMatch(/incompatible-type/);
   });
 });
 

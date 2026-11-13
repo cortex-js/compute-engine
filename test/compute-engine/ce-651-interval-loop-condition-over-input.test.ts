@@ -22,7 +22,7 @@ import { IntervalArithmetic } from '../../src/compute-engine/interval';
 function loopOf(body: unknown) {
   return [
     'Block',
-    ['Assign', 's', 0],
+    ['Declare', 's', "'unknown'", 0],
     ['Loop', body, ['Element', 'k', ['Range', 1, 5]]],
     's',
   ];
@@ -31,7 +31,7 @@ function loopOf(body: unknown) {
 /** `n ≔ 0; Loop(Block(n ≔ i; If(i > x, Break)), i ∈ 1..5); n + 1` */
 const BREAK_PAST_INPUT = [
   'Block',
-  ['Assign', 'n', 0],
+  ['Declare', 'n', "'unknown'", 0],
   [
     'Loop',
     ['Block', ['Assign', 'n', 'i'], ['If', ['Greater', 'i', 'x'], ['Break']]],

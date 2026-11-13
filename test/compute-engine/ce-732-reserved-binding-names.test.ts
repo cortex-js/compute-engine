@@ -144,10 +144,10 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         'Function',
         [
           'Block',
-          ['Assign', 'let', 1],
+          ['Declare', 'let', "'unknown'", 1],
           [
             'Block',
-            ['Assign', 'eval', ['Add', 'let', 'y']],
+            ['Declare', 'eval', "'unknown'", ['Add', 'let', 'y']],
             ['Assign', 'let', ['Multiply', 'eval', 2]],
           ],
           'let',
@@ -164,7 +164,12 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         'Function',
         [
           'Block',
-          ['Assign', 'eval', ['Function', ['Multiply', 2, 'let'], 'let']],
+          [
+            'Declare',
+            'eval',
+            "'unknown'",
+            ['Function', ['Multiply', 2, 'let'], 'let'],
+          ],
           ['eval', 'y'],
         ],
         ['Typed', 'y', R],
@@ -383,7 +388,7 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         'g',
         ce.box([
           'Function',
-          ['Block', ['Assign', local, 1], ['Add', 'Math', local]],
+          ['Block', ['Declare', local, "'unknown'", 1], ['Add', 'Math', local]],
           ['Typed', 'Math', R],
         ] as never)
       );
@@ -402,7 +407,11 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         'Map',
         [
           'Function',
-          ['Block', ['Assign', '_p', 1], ['Add', 'Math', '_p', 'y']],
+          [
+            'Block',
+            ['Declare', '_p', "'unknown'", 1],
+            ['Add', 'Math', '_p', 'y'],
+          ],
           'Math',
         ],
         ['List', 1, 2],
@@ -519,7 +528,7 @@ describe('CE-732: a local of a loop body with a reserved name', () => {
       const code = checkLoop(
         [
           'Block',
-          ['Assign', 's', 0],
+          ['Declare', 's', "'unknown'", 0],
           [
             'Loop',
             ['Block', ['Declare', v, I, 'i'], ['Assign', 's', ['Add', 's', v]]],
@@ -539,7 +548,7 @@ describe('CE-732: a local of a loop body with a reserved name', () => {
       const code = checkLoop(
         [
           'Block',
-          ['Assign', 's', 0],
+          ['Declare', 's', "'unknown'", 0],
           [
             'Loop',
             [
@@ -567,7 +576,7 @@ describe('CE-732: a local of a loop body with a reserved name', () => {
       const code = checkLoop(
         [
           'Block',
-          ['Assign', 's', 0],
+          ['Declare', 's', "'unknown'", 0],
           [
             'Loop',
             [
@@ -598,7 +607,7 @@ describe('CE-732: a local of a loop body inside a function literal', () => {
           'Function',
           [
             'Block',
-            ['Assign', 's', 0],
+            ['Declare', 's', "'unknown'", 0],
             [
               'Loop',
               [
@@ -657,7 +666,7 @@ describe('CE-732: a binding with a reserved name, interval-js target', () => {
     const { code, value } = run(
       [
         'Block',
-        ['Assign', 'arguments', ['Multiply', 2, 'n']],
+        ['Declare', 'arguments', "'unknown'", ['Multiply', 2, 'n']],
         ['Add', 'arguments', 1],
       ],
       { n: 3 }
@@ -679,7 +688,7 @@ describe('CE-732: a binding with a reserved name, interval-js target', () => {
     const { code, value } = run(
       [
         'Block',
-        ['Assign', 'c', 0],
+        ['Declare', 'c', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 'c', ['Add', 'c', 'let']],

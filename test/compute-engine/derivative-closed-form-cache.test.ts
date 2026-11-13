@@ -17,7 +17,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import * as DerivativeModule from '../../src/compute-engine/symbolic/derivative';
-import { markActivation } from '../../src/compute-engine/boxed-expression/binders';
+import { registerCallFrame } from '../../src/compute-engine/boxed-expression/ambient-chain';
 
 const F = ['Function', ['Multiply', ['Sin', 'x'], ['Exp', 'x']], 'x'];
 
@@ -248,18 +248,18 @@ describe('the closed form of Derivative(f, n) across evaluation points', () => {
     }
   });
 
-  test('inside a call, a closed form that reads a parameter is recorded without symbol dependencies', () => {
+  test('inside a call, a closed form that reads a parameter keeps the parameter symbolic', () => {
     // Inside a call of a user function, a parameter reads its value from the
-    // call frame's parameter ACTIVATION, which each call declares and writes
-    // without bumping a `_writeVersion`. So a closed form recorded there is
-    // valid only at its exact generation, and the next call (a new
-    // generation) must do the closing `simplify()` again.
+    // activation of the call frame, which the call writes without a
+    // declaration. A closed form recorded in one call reads the parameter by
+    // name, so another call with another value gives the same closed form.
     //
     // Evaluating `g(t)` cannot show this: each call evaluates a new copy of
     // the inner function literal, and the cache is keyed on the literal
     // object. So the test differentiates ONE literal inside simulated call
-    // frames, declared as `declareParameterActivation` in
-    // `function-utils.ts` declares them.
+    // frames, made as a call makes them: the frame holds the static
+    // definition of `t`, and its activation holds the value of the call
+    // (`holdBodyLocals()` in `function-utils.ts`).
     const ce = new ComputeEngine({ precision: 'machine' });
     const g = ce.box([
       'Function',
@@ -290,14 +290,16 @@ describe('the closed form of Derivative(f, n) across evaluation points', () => {
     const staticBinding = t.valueDefinition!;
     expect(staticBinding).toBeDefined();
 
+    const bodyScope = g.ops[0].localScope!;
     const inCall = (value: number): Expression | undefined => {
       ce.pushScope();
-      const scope = ce.context.lexicalScope;
-      ce.declare('t', { value, inferred: true });
-      const activation = scope.bindings.get('t');
-      if (activation === undefined || !('value' in activation))
-        throw new Error('no activation');
-      markActivation(activation.value, staticBinding);
+      const frame = ce.context.lexicalScope;
+      frame.bindings.set('t', { value: staticBinding } as never);
+      registerCallFrame(
+        frame,
+        bodyScope,
+        new Map([[staticBinding, ce.number(value)]])
+      );
       try {
         return DerivativeModule.derivative(literal, 3);
       } finally {
@@ -305,17 +307,8 @@ describe('the closed form of Derivative(f, n) across evaluation points', () => {
       }
     };
 
-    const first = inCall(2);
-    expect(first?.toString()).toBe('6 * |t|');
-    // Count the `simplify()` calls of the second call.
-    const simplify = jest.spyOn(Object.getPrototypeOf(first), 'simplify');
-    try {
-      const second = inCall(-3);
-      expect(second?.toString()).toBe('6 * |t|');
-      expect(simplify).toHaveBeenCalled();
-    } finally {
-      simplify.mockRestore();
-    }
+    expect(inCall(2)?.toString()).toBe('6 * |t|');
+    expect(inCall(-3)?.toString()).toBe('6 * |t|');
   });
 
   test('a recursive function that applies the derivative is unaffected', () => {

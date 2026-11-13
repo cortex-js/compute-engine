@@ -21,17 +21,11 @@ import {
   tombstoneBinding,
 } from './boxed-expression/binding-tombstone.js';
 import {
-  ambientChainParent,
+  activationValuesOf,
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
-import { isRetainedScope } from './boxed-expression/lazy-view-context.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
 import { notePushedScope } from './pending-call-scopes.js';
-import {
-  addChainingFrame,
-  chainedScopeOf,
-  removeChainingFrame,
-} from './scope-chaining.js';
 
 export function pushScope(
   ce: IComputeEngine,
@@ -48,50 +42,29 @@ export function pushScope(
   );
 }
 
+/**
+ * Pop the scope that `pushScope()` pushed. The scope keeps its definitions:
+ * an expression boxed in it reads them after the pop, as before it. Each
+ * definition only stops listening to configuration changes (a popped
+ * definition is not rounded again at a change of precision). The frame of a
+ * call (`name` is `call`) is discarded as any evaluation frame is: a value
+ * that reads it after the call reads the values that its activation holds.
+ */
 export function popScope(ce: IComputeEngine): void {
-  popEvalContext(ce);
+  const context = ce._evalContextStack.pop();
+  discardEvalContext(ce, context, context?.name !== 'call');
 }
 
 export function pushEvalContext(
   ce: IComputeEngine,
   scope: Scope,
-  name?: string,
-  options?: {
-    /**
-     * Chain `scope` onto the ambient scope for the life of the frame, so a
-     * node evaluated in a child scope reads that scope's declarations —
-     * when and why in `ambientChainParent` (`boxed-expression/ambient-
-     * chain.ts`). A call frame is never chained.
-     */
-    ambient?: boolean;
-  }
+  name?: string
 ): void {
   if (!name) {
     const l = ce._evalContextStack.length;
     if (l === 0) name = 'system';
     if (l === 1) name = 'global';
     name ??= `anonymous_${l - 1}`;
-  }
-
-  let restoreParentOnPop: Scope | null | undefined;
-  if (options?.ambient === true) {
-    const parent = ambientChainParent(ce.context?.lexicalScope, scope);
-    if (parent !== undefined) {
-      // The same scope object can be live in another frame that already
-      // chained it — two evaluations of one node interleaved on the async
-      // path, where a suspended frame is not the top of the stack. The
-      // parent link to restore is then the ORIGINAL one that frame saved,
-      // not the link this frame found (already re-pointed); and only the
-      // last such frame to be discarded restores it (`discardEvalContext`).
-      // The registry of chained scopes (`scope-chaining.ts`) holds that
-      // original link.
-      const chained = chainedScopeOf(scope);
-      restoreParentOnPop =
-        chained !== undefined
-          ? (chained.parent as Scope | null | undefined)
-          : scope.parent;
-      scope.parent = parent;
-    }
   }
 
   // A scope object outlives its frame by design (a canonicalized `Sum` pushes
@@ -117,14 +90,8 @@ export function pushEvalContext(
     _typeVersionAtPush: ce._typeVersion,
     _semanticVersionAtPush: ce._semanticVersion,
     _worldVersionAtPush: ce._worldVersion,
-    ...(restoreParentOnPop !== undefined
-      ? { _restoreParentOnPop: restoreParentOnPop }
-      : {}),
   });
-  const frame = ce._evalContextStack[ce._evalContextStack.length - 1];
-  countHolders(frame);
-  if (restoreParentOnPop !== undefined)
-    addChainingFrame(scope, frame, restoreParentOnPop);
+  countHolders(ce._evalContextStack[ce._evalContextStack.length - 1]);
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
@@ -158,74 +125,17 @@ export function removeEvalContext(
   discardEvalContext(ce, context);
 }
 
-/**
- * Take a frame that chains its scope onto an ambient scope out of the
- * registry of chained scopes (`scope-chaining.ts`). When it was the last
- * live frame for its scope, give the scope its original parent link back.
- * A no-op for a frame that does not chain its scope.
- *
- * For a frame that leaves its stack. `discardEvalContext` calls it, and so
- * does the `ce.contextStack` setter for each frame that the new stack does
- * not keep. Without that call, the registry keeps a frame that is no longer
- * live: the next push of the same scope then takes the link that frame
- * saved, and the pop that follows does not restore the link.
- */
-export function releaseChainingFrame(context: EvalContext): void {
-  if (context._restoreParentOnPop === undefined) return;
-  if (removeChainingFrame(context.lexicalScope, context))
-    context.lexicalScope.parent = context._restoreParentOnPop;
-}
-
 function discardEvalContext(
   ce: IComputeEngine,
-  context: EvalContext | undefined
+  context: EvalContext | undefined,
+  keepDefinitions = false
 ): void {
-  // A scope chained onto the ambient scope for this frame gets its own
-  // parent link back: the chaining lasts exactly as long as the frame —
-  // unless another live frame still chains the same scope object (an
-  // interleaved evaluation of the same node on the async path), which then
-  // restores the original link when it is discarded itself
-  // (`releaseChainingFrame`).
-  if (context !== undefined) releaseChainingFrame(context);
   // Definitions owned by a scope may subscribe to engine-wide lifecycle
   // events. Release those subscriptions as soon as the scope is discarded,
   // rather than retaining otherwise-dead local constants for the lifetime of
   // the engine. Disposal is intentionally idempotent.
   //
-  // The frame of a call is retained when a lazy callback view that resolves
-  // names in it is reachable from the value that the call returns
-  // (`retainCallFrameOfResult`), or when a closure whose scope chain reaches
-  // the frame was made during the call or is part of the value that the call
-  // returns (`retainScope`). Both are in
-  // `boxed-expression/lazy-view-context.ts`, and `isRetainedScope` reads
-  // the mark. The view or the closure can read the frame after the call has
-  // returned, so its pop is not the end of the life of its definitions:
-  // they are not disposed and not tombstoned.
-  // They only stop listening to configuration changes, because the engine
-  // holds each listener strongly and would keep them for its lifetime. The
-  // cost: the definitions of a retained frame are never marked `disposed`
-  // (the readers of that flag treat them as live), their `_writeVersion`
-  // does not advance here, and the debug check of dead bindings
-  // (`ce._debugBindings`) does not cover them. A call that returns no view
-  // (it read its views at once) and makes no closure that reads its frame
-  // is not retained.
-  const retained =
-    context?.name === 'call' && isRetainedScope(context.lexicalScope);
-  // The local scope of an expression node (a block, a loop, a comprehension,
-  // a big operator) is retained when a closure has a chain that reaches it
-  // (`retainScopesReachedByLiteral`, `function-utils.ts`): the closure can
-  // read its definitions after this pop. For an activation (the copy that an
-  // asynchronous evaluation pushes), the mark is on the activation or on the
-  // scope that it copies, whichever the chain of the closure holds, so both
-  // are read (`isRetainedNodeScope`). Such a pop disposes
-  // the definitions, as before, and only does not tombstone them. The scope
-  // is made once at canonicalization and pushed at each run, so a disposed
-  // definition stays disposed when the scope is pushed again: a pop that
-  // kept the definitions alive would make the `disposed` state of the
-  // definitions depend on whether an earlier run made a closure. The cost:
-  // the debug check of dead bindings does not cover a retained node scope.
-  //
-  // A pop does not tombstone either when another context of the stack still
+  // A pop does not tombstone when another context of the stack still
   // has the same scope: a recursive call that runs the same loop pops the
   // scope while the loop of the caller still runs in it, and the caller
   // then reads its index. A push revives the tombstones, but the loop of
@@ -253,34 +163,20 @@ function discardEvalContext(
   // definition is treated as dead by the assumptions (`assume.ts`) and by
   // the caches keyed on its `_writeVersion`.
   const keepsTombstone =
+    !keepDefinitions &&
     ce._debugBindings &&
     !isDormantPop() &&
     context !== undefined &&
-    !retained &&
-    !isRetainedNodeScope(context.lexicalScope) &&
     !ce._evalContextStack.some((c) => c.lexicalScope === context.lexicalScope);
-  // The pop of an activation (the copy of a local scope that an asynchronous
-  // evaluation pushes) tombstones the definitions of the scope that it
-  // copies, when no live context holds them: the symbols of the body are
-  // bound to those definitions, and the evaluation that read them through
-  // the copy has ended. They are not disposed here: the activation used its
-  // own. Another asynchronous evaluation of the same node can still be
-  // suspended on its own copy of the stack. Its reads are not reported: the
-  // check reads the definition that the context of the read finds, the one
-  // of its own activation (`assertLiveRead`, `binders.ts`).
+  // The pop of an activation neither disposes nor tombstones the static
+  // definitions of its scope: they outlive the evaluation, and only their
+  // values of this evaluation, held by the activation, end with it.
   const template =
-    ce._debugBindings && context !== undefined
+    context !== undefined
       ? scopeActivationTemplate(context.lexicalScope)
       : undefined;
-  if (template !== undefined && keepsTombstone) {
-    for (const binding of template.bindings.values()) {
-      if (isValueDef(binding) && holderCount(binding.value) === 0)
-        tombstoneBinding(binding.value, context!.name ?? '<unnamed>');
-    }
-  }
-  // The definitions that this frame counted (`countHolders`). A retained
-  // frame keeps its count: its definitions stay alive.
-  const counted = retained ? undefined : context?._countedDefs;
+  // The definitions that this frame counted (`countHolders`).
+  const counted = context?._countedDefs;
   if (context !== undefined) {
     context._discarded = true;
     if (counted !== undefined) {
@@ -288,12 +184,31 @@ function discardEvalContext(
       noteFrameUncounted(context);
     }
   }
-  for (const binding of context?.lexicalScope.bindings.values() ?? []) {
-    if (retained) {
-      if (isValueDef(binding))
+  const held =
+    context !== undefined
+      ? activationValuesOf(context.lexicalScope)
+      : undefined;
+  for (const [name, binding] of context?.lexicalScope.bindings ?? []) {
+    if (
+      (template !== undefined && template.bindings.get(name) === binding) ||
+      (isValueDef(binding) && held?.has(binding.value) === true)
+    ) {
+      if (isValueDef(binding) && counted?.delete(binding.value))
+        decrementHolders(ce, binding.value);
+      continue;
+    }
+    // A popped scope keeps its definitions: this frame stops holding each
+    // one, and the pop disposes none, also one that the pop of another
+    // frame kept for this frame (`keptDefinitions`).
+    if (keepDefinitions) {
+      if (isValueDef(binding)) {
+        const def = binding.value;
+        if (counted?.delete(def)) decrementHolders(ce, def);
+        if (holderCount(def) === 0) keptDefinitions.delete(def);
         (
-          binding.value as { _releaseConfigurationChange?: () => boolean }
+          def as { _releaseConfigurationChange?: () => boolean }
         )._releaseConfigurationChange?.();
+      }
       continue;
     }
     if (isValueDef(binding)) {
@@ -322,8 +237,9 @@ function discardEvalContext(
   }
   // What is left in `counted` is a counted definition that the scope no
   // longer holds (replaced or removed by a route that does not uncount it,
-  // `uncountRemovedHolder`). It is uncounted too, and it is not this
-  // scope's to dispose, unless an earlier pop kept it for this frame.
+  // `uncountRemovedHolder`). It is uncounted too, and it is disposed only
+  // when no frame holds it any more and an earlier pop kept it for this
+  // frame (`settleKeptDefinition`).
   if (counted !== undefined && counted.size > 0) {
     for (const def of counted as Set<BoxedValueDefinition>) {
       decrementHolders(ce, def);
@@ -586,15 +502,6 @@ function defToString(name: string, def: BoxedDefinition): string {
   } else result = 'unknown';
 
   return result;
-}
-
-/** True when `scope`, or the scope that the activation `scope` copies, is
- * the local scope of an expression node that a closure can read after its
- * pop (`retainScopesReachedByLiteral`, `function-utils.ts`). */
-function isRetainedNodeScope(scope: Scope): boolean {
-  if (isRetainedScope(scope)) return true;
-  const template = scopeActivationTemplate(scope);
-  return template !== undefined && isRetainedScope(template);
 }
 
 /** The empty set of counted definitions, shared by the frames whose scope

@@ -306,10 +306,13 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
     ],
     ['let xs = [do { let y = k * 2; y } for k in 1..3]; xs', '["List",2,4,6]'],
     ['[k for k in 1..4 if k % 2 == 0]', '["List",2,4]'],
-    ['[do { t = i; t } for i in 1..3, j in 1..i]', '["List",1,2,2,3,3,3]'],
+    ['[do { let t = i; t } for i in 1..3, j in 1..i]', '["List",1,2,2,3,3,3]'],
     // A dependent clause with a guard: the bound of the listing is the count
     // of the domains without the guard.
-    ['[do { t = i; t } for i in 1..3, j in 1..i if j > 1]', '["List",2,3,3]'],
+    [
+      '[do { let t = i; t } for i in 1..3, j in 1..i if j > 1]',
+      '["List",2,3,3]',
+    ],
   ])('%s', async (source, expected) => {
     expect(await resultJson(source)).toEqual([expected, expected]);
   });
@@ -320,9 +323,9 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
     expect(async).toBe(sync);
   });
 
-  test('a list literal lists a comprehension whose body assigns a local', async () => {
+  test('a list literal lists a comprehension whose body declares a local', async () => {
     const source =
-      'function g() { let xs = [do { t = k * 2; t } for k in 1..3]; xs }\n[g(), g()]';
+      'function g() { let xs = [do { let t = k * 2; t } for k in 1..3]; xs }\n[g(), g()]';
     const expected = '["List",["List",2,4,6],["List",2,4,6]]';
     expect(await resultJson(source)).toEqual([expected, expected]);
   });
@@ -371,9 +374,9 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
       JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
     expect(value('let calls = 0')).toBe('0');
     value('function keep(j) scope { calls = calls + 1; j > 1 }');
-    expect(value('[do { t = i; t } for i in 1..3, j in 1..i if keep(j)]')).toBe(
-      '["List",2,3,3]'
-    );
+    expect(
+      value('[do { let t = i; t } for i in 1..3, j in 1..i if keep(j)]')
+    ).toBe('["List",2,3,3]');
     expect(value('calls')).toBe('6');
   });
 

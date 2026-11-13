@@ -147,16 +147,20 @@ describe('CE-1177: the GLSL emitter writes the body that the pass typed', () => 
     expect(record.untyped).toEqual([]);
   });
 
-  test('a local declared by its first assignment', () => {
-    // The first `Assign` of a local with no `Declare` declares it. The pass
-    // checks it in the walk of the block, and records it as a statement.
+  test('a local declared by a Declare statement', () => {
+    // The `Declare` of a local is a statement of the block. The pass checks
+    // it in the walk of the block, and records it as a statement.
     const ce = new ComputeEngine();
     ce.declare('a', { signature: '(number) scope -> number' });
     ce.assign(
       'a',
       ce.box([
         'Function',
-        ['Block', ['Assign', 'w', ['Multiply', 2, 't']], ['Add', 'w', 1]],
+        [
+          'Block',
+          ['Declare', 'w', "'unknown'", ['Multiply', 2, 't']],
+          ['Add', 'w', 1],
+        ],
         't',
       ])
     );

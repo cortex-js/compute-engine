@@ -10,12 +10,11 @@
  * with "operand is not an indexed collection", while the equivalent binding
  * through a parameter (`Apply(Function(Length(d), d), [4,5,4])`) compiled.
  *
- * Now the hoisted binding carries the statically-readable `Declare` type, and
- * the `Assign` canonical handler records assignment evidence — the JOIN over
- * every assignment canonicalized against the binding, widened through
- * `widenAssignedType` — so reads of the local (which resolve the binding
- * lazily) see a type that admits every value the block can bind. The binding
- * stays inferred and valueless, so evaluation-time behavior is unchanged.
+ * A local of a block is made by a `Declare`, and its binding carries the
+ * type that the `Declare` gives, or the type of its initial value, so the
+ * routes that never evaluate see it. An `Assign` writes a variable in scope;
+ * one to an undeclared name is the static error
+ * `assignment-to-undeclared-variable`, and a compilation declines it.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -45,15 +44,29 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     expect(r.run()).toBe(3);
   });
 
-  test('Assign-only block (no Declare) compiles and runs', () => {
+  test('a Declare with no written type takes the type of its value', () => {
     const e = ce().box([
       'Block',
-      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Declare', 'd', "'unknown'", ['List', 4, 5, 4]],
       ['Length', 'd'],
     ]);
     const r = compile(e, { to: 'javascript' });
     expect(r.success).toBe(true);
     expect(r.run()).toBe(3);
+  });
+
+  test('an Assign to an undeclared local is invalid and declines', () => {
+    const e = ce().box([
+      'Block',
+      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Length', 'd'],
+    ]);
+    expect(e.isValid).toBe(false);
+    expect(JSON.stringify(e.json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
+    const r = compile(e, { to: 'javascript' });
+    expect(r.success).toBe(false);
   });
 
   test('At over a Block local compiles (gather index)', () => {
@@ -95,7 +108,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     // interpreted alike.
     const shadow = [
       'Block',
-      ['Assign', 'd', ['List', 1, 2]],
+      ['Declare', 'd', "'unknown'", ['List', 1, 2]],
       ['Block', ['Declare', 'd', "'number'", 7], ['Add', 'd', 1]],
     ];
     expect(engine.box(shadow).evaluate().toString()).toBe('8');
@@ -109,7 +122,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     // static error `assignment-type-mismatch`.
     const e = ce().box([
       'Block',
-      ['Assign', 'd', ['List', 1, 2]],
+      ['Declare', 'd', "'unknown'", ['List', 1, 2]],
       ['Assign', 'd', { str: 'ab' }],
       ['Length', 'd'],
     ]);
@@ -124,8 +137,13 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     // at run time and `Length` must fail closed rather than emit `.length`.
     const e = ce().box([
       'Block',
-      ['Assign', 'd', ['List', 1, 2]],
-      ['Assign', 'f', ['Function', ['Assign', 'd', { str: 'zz' }]]],
+      ['Declare', 'd', "'unknown'", ['List', 1, 2]],
+      [
+        'Declare',
+        'f',
+        "'unknown'",
+        ['Function', ['Assign', 'd', { str: 'zz' }]],
+      ],
       ['Length', 'd'],
     ]);
     const r = compile(e, { to: 'javascript' });
@@ -135,7 +153,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
   test('reassignment in a loop body stays sound: compiled matches interpreted', () => {
     const mj = [
       'Block',
-      ['Assign', 'd', ['List', 1, 2]],
+      ['Declare', 'd', "'unknown'", ['List', 1, 2]],
       [
         'Loop',
         ['Assign', 'd', ['Append', 'd', 9]],
@@ -184,16 +202,18 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
 });
 
 describe('destructured Block locals take their types from the pattern position', () => {
-  // `(x, y) := v` binds one block-local per pattern leaf. The item-235 fix
-  // hoisted a plain-symbol target only, so a destructured local stayed
-  // `unknown` and a type-gated read of it (`Length`, `At`) failed closed on
-  // the compile routes. The hoist now declares every leaf, and the `Assign`
-  // canonical handler joins each leaf's type from the matching position of
-  // the RHS tuple type.
+  // `Declare((x, y), "unknown", v)` declares one block-local per pattern
+  // leaf, and each leaf takes its type from the matching position of the
+  // tuple type of `v`, so a type-gated read of it (`Length`, `At`) compiles.
   test('Length over a destructured list local compiles and runs', () => {
     const e = ce().box([
       'Block',
-      ['Assign', ['Tuple', 'xs', 'n'], ['Tuple', ['List', 1, 2, 3], 2]],
+      [
+        'Declare',
+        ['Tuple', 'xs', 'n'],
+        "'unknown'",
+        ['Tuple', ['List', 1, 2, 3], 2],
+      ],
       ['Length', 'xs'],
     ]);
     expect(e.evaluate().toString()).toBe('3');
@@ -205,7 +225,12 @@ describe('destructured Block locals take their types from the pattern position',
   test('At with a destructured index compiles', () => {
     const e = ce().box([
       'Block',
-      ['Assign', ['Tuple', 'xs', 'n'], ['Tuple', ['List', 1, 2, 3], 2]],
+      [
+        'Declare',
+        ['Tuple', 'xs', 'n'],
+        "'unknown'",
+        ['Tuple', ['List', 1, 2, 3], 2],
+      ],
       ['At', 'xs', 'n'],
     ]);
     const r = compile(e, { to: 'javascript' });
@@ -217,8 +242,9 @@ describe('destructured Block locals take their types from the pattern position',
     const nested = ce().box([
       'Block',
       [
-        'Assign',
+        'Declare',
         ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        "'unknown'",
         ['Tuple', 1, ['Tuple', ['List', 5, 6], 3]],
       ],
       ['Add', 'a', ['Length', 'b'], 'c'],
@@ -229,7 +255,12 @@ describe('destructured Block locals take their types from the pattern position',
     expect(r1.run()).toBe(6);
     const skipped = ce().box([
       'Block',
-      ['Assign', ['Tuple', '_', 'ys'], ['Tuple', 1, ['List', 7, 8]]],
+      [
+        'Declare',
+        ['Tuple', '_', 'ys'],
+        "'unknown'",
+        ['Tuple', 1, ['List', 7, 8]],
+      ],
       ['Length', 'ys'],
     ]);
     const r2 = compile(skipped, { to: 'javascript' });
@@ -240,7 +271,7 @@ describe('destructured Block locals take their types from the pattern position',
   test('a reassignment of a different kind joins, as for a plain local', () => {
     const e = ce().box([
       'Block',
-      ['Assign', ['Tuple', 'x', 'y'], ['Tuple', 1, 2]],
+      ['Declare', ['Tuple', 'x', 'y'], "'unknown'", ['Tuple', 1, 2]],
       ['Assign', ['Tuple', 'x', 'y'], ['Tuple', ['List', 1], 2]],
       ['Length', 'x'],
     ]);
@@ -254,7 +285,7 @@ describe('destructured Block locals take their types from the pattern position',
     engine
       .box([
         'Block',
-        ['Assign', ['Tuple', 'x', 'y'], ['Tuple', 1, 2]],
+        ['Declare', ['Tuple', 'x', 'y'], "'unknown'", ['Tuple', 1, 2]],
         ['Add', 'x', 'y'],
       ])
       .evaluate();

@@ -273,7 +273,11 @@ describe('CE-593: user functions and locals read the point', () => {
     const ce = engine(['Tuple', 1, 2]);
     ce.parse('f(t) := t P').evaluate();
     const r = compile(
-      ce.box(['Block', ['Assign', 'a', ['f', 'x']], ['PointX', 'a']]),
+      ce.box([
+        'Block',
+        ['Declare', 'a', "'unknown'", ['f', 'x']],
+        ['PointX', 'a'],
+      ]),
       { to, fallback: false }
     );
     expect(r.code).toBe(code);
@@ -318,14 +322,18 @@ describe('CE-593: user functions and locals read the point', () => {
   ] as const)('%s: a Block local', (to, whole, coordinate) => {
     const ce = engine(['Tuple', 1, 2]);
     const r = compile(
-      ce.box(['Block', ['Assign', 'a', ['Multiply', 2, 'P']], 'a']),
+      ce.box([
+        'Block',
+        ['Declare', 'a', "'unknown'", ['Multiply', 2, 'P']],
+        'a',
+      ]),
       { to, fallback: false }
     );
     expect(r.code).toBe(whole);
     const s = compile(
       ce.box([
         'Block',
-        ['Assign', 'a', ['Multiply', 'x', 'P']],
+        ['Declare', 'a', "'unknown'", ['Multiply', 'x', 'P']],
         ['PointX', 'a'],
       ]),
       { to, fallback: false }

@@ -90,8 +90,9 @@ A default value is one of:
 A default is a constant. A symbol that names a variable (a `let` of the
 program), or a symbol that is not declared and that no `symbol<…>` parameter
 type lists, is not a default value: write a constant, or pass the argument.
-A function statement is defined before the statements of its block run, so a
-`const` written after it is not a constant for its defaults:
+At the top level of a program, a function statement is defined before the
+other statements run, so a `const` written after it is not a constant for its
+defaults:
 `function f(k = W) { k + 1 }; const W = 5` is an error. A known limitation:
 a constant declaration that the host canonicalizes and does not run makes its
 name a constant for a later default. On an engine where `W` is a variable,
@@ -130,6 +131,53 @@ body:
 An anonymous function can have a multi-statement body too, by making that body
 a [`do` block](#do-block-expressions) — but at that point a named `function` is
 usually clearer.
+
+### Local functions {#local-functions}
+
+A function statement in a function body or a block declares a **local** of
+that block, as `let` does: a variable whose value is the function, from the
+statement on. It can be called after its statement, and two local functions
+can call each other, since a call in a body runs when the function is called:
+
+```epsil
+function area(r) {
+  function sq(x) { x * x }
+  3 * sq(r)
+}
+area(2)
+// ➔ 12
+```
+
+```epsil
+function parity(n) {
+  function isEven(k) { if k == 0 { true } else { isOdd(k - 1) } }
+  function isOdd(k) { if k == 0 { false } else { isEven(k - 1) } }
+  isEven(n)
+}
+parity(10)
+// ➔ True
+```
+
+A call of a local function before its statement is the error
+`read-before-declaration`, as a read of a `let` before its declaration. A
+second function statement of the same name in the block, or a `let` of that
+name, is the error `variable-redeclaration`: a local function has one clause,
+and the [clauses](#multiple-clauses-literal-parameters) of a function, and a
+signature declared before its definition (`let f: (integer) -> integer`
+then `function f(x) { … }`), are for the top level of a program. In a block,
+give the type with the value:
+
+```epsil
+function g() {
+  let h: (integer) -> integer = (x) => x + 1
+  h(2)
+}
+g()
+// ➔ 3
+```
+
+The type of a local function is its declared type, or `function` when it has
+none, and a call of it is typed from that type.
 
 ### Effect specifiers
 
@@ -366,7 +414,7 @@ A mapsto binds loosely enough to sit on the right-hand side of an
 assignment:
 
 ```epsil
-f = x => x + 1
+let f = x => x + 1
 ```
 
 A lambda can take **no** parameters — an empty parameter list `()` before the
@@ -1315,7 +1363,7 @@ pipeline is the whole right-hand side of an assignment:
 ```epsil
 a + b |> f        // (a + b) |> f
 a || b |> f       // (a || b) |> f
-x = a |> f        // x = (a |> f)
+let x = a |> f    // let x = (a |> f)
 ```
 
 It is left-associative, so `a |> f |> g` is `g(f(a))`, which is what reading it

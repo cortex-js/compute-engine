@@ -595,17 +595,21 @@ describe('COMPILE reference analysis of a declaration', () => {
     expect(r.run({ z: 2 })).toBe(3);
   });
 
-  // An assignment that the canonical form hoists into the scope of the block
-  // declares a local of the block, which the generated code declares too:
-  // it was listed as free (`v` below).
-  it('does not list a local that an assignment declares as a free symbol', () => {
+  // A `Declare` at the top level of a block makes a local of the block,
+  // which the generated code declares too: it is not free (`v` below).
+  it('does not list a local that a Declare makes as a free symbol', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
     for (const to of ['javascript', 'glsl'] as const) {
       expect(
-        compile(ce.box(['Block', ['Assign', 'v', 2], ['Multiply', 'v', 'x']]), {
-          to,
-        }).freeSymbols
+        compile(
+          ce.box([
+            'Block',
+            ['Declare', 'v', "'unknown'", 2],
+            ['Multiply', 'v', 'x'],
+          ]),
+          { to }
+        ).freeSymbols
       ).toEqual(['x']);
       // `u` is bound outside the expression: a write of `u` is a write of
       // the input, which stays free.
@@ -613,7 +617,7 @@ describe('COMPILE reference analysis of a declaration', () => {
         compile(
           ce.box([
             'Block',
-            ['Assign', 'v', 2],
+            ['Declare', 'v', "'unknown'", 2],
             ['Assign', 'u', ['Add', 'u', 'v']],
           ]),
           { to }
@@ -626,8 +630,8 @@ describe('COMPILE reference analysis of a declaration', () => {
   // the body, which the generated code declares: it was listed as free
   // (`w` below, not declared). A chained assignment `t := w := t + i` is
   // the static error `assignment-in-operand`, so the body writes `w` and
-  // `t` in two statements. A first assignment in a loop body is the static
-  // error `first-assignment-in-branch`, so the body declares `w`.
+  // `t` in two statements. An assignment writes a variable that is in
+  // scope, so the body declares `w` and the enclosing block declares `t`.
   it('does not list the inner target of a chained assignment as a free symbol', () => {
     const range = ['Element', 'i', ['Range', 1, 3]];
     const chained = [
@@ -640,7 +644,12 @@ describe('COMPILE reference analysis of a declaration', () => {
         const ce = new ComputeEngine();
         expect(
           compile(
-            ce.box(['Block', ['Assign', 't', 0], ['Loop', chained, range], 't']),
+            ce.box([
+              'Block',
+              ['Declare', 't', "'unknown'", 0],
+              ['Loop', chained, range],
+              't',
+            ]),
             { to }
           ).freeSymbols
         ).toEqual([]);
@@ -651,7 +660,7 @@ describe('COMPILE reference analysis of a declaration', () => {
         compile(
           ce.box([
             'Block',
-            ['Assign', 't', 0],
+            ['Declare', 't', "'unknown'", 0],
             ['Loop', chained, range],
             ['Add', 't', 'w'],
           ]),
@@ -820,8 +829,10 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
   });
 
   it('reports no unsupported operator for a definition inside a loop body', () => {
+    // The function statement declares a local of the loop body, so it
+    // comes before its call.
     const r = program(
-      'let t = 0\nfor i in 1..3 { t = t + g(i)\nfunction g(k) { k + 1 } }\nt',
+      'let t = 0\nfor i in 1..3 { function g(k) { k + 1 }\nt = t + g(i) }\nt',
       'javascript'
     );
     expect(r.success).toBe(true);

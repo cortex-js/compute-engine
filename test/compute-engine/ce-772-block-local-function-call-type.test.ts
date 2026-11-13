@@ -4,12 +4,10 @@ import type { BoxedType } from '../../src/common/type/boxed-type';
 
 //
 // A block is boxed, and its statements are typed, before its first statement
-// runs. A local that a statement of the block gives a function literal holds
-// no value at that time: an `Assign` gives it the type `function`, and a
-// `let` (a `Declare` with a value) leaves it `unknown`. Neither type gives
-// the parameters of the function, so a call of the local is typed `unknown`.
-// The call is not typed as a broadcast over a list argument: the function
-// can read the whole list (`Count`), and the value is then a scalar.
+// runs. A local that holds a function (declared with a function literal, or
+// made by a function statement) is a variable of type `function`: a call of
+// the local is typed from that type, `unknown`, and the static type holds
+// the value of the call, whatever the function does with a list.
 //
 // Each test reads the type right after boxing, before the block runs: the
 // evaluation gives the local its value, and a later read of the type could
@@ -38,10 +36,10 @@ function expectTypeHoldsValue(type: BoxedType, value: Expression): void {
 }
 
 describe('A CALL OF A FUNCTION THAT A BLOCK DEFINES, TYPED BEFORE THE BLOCK RUNS', () => {
-  test('a local assigned a function literal, called on a list', () => {
+  test('a local declared with a function literal, called on a list', () => {
     const { type, value } = typeThenValue([
       'Block',
-      ['Assign', 'f', COUNT],
+      ['Declare', 'f', "'unknown'", COUNT],
       ['f', NESTED],
     ]);
     expect(value.toString()).toBe('2');
@@ -61,10 +59,10 @@ describe('A CALL OF A FUNCTION THAT A BLOCK DEFINES, TYPED BEFORE THE BLOCK RUNS
     expect(type.matches('list')).toBe(false);
   });
 
-  test('a local assigned two function literals, called on a list', () => {
+  test('a local declared with a function literal and assigned another, called on a list', () => {
     const { type, value } = typeThenValue([
       'Block',
-      ['Assign', 'f', COUNT],
+      ['Declare', 'f', "'unknown'", COUNT],
       ['Assign', 'f', ['Function', ['List', 't', 't'], 't']],
       ['f', NESTED],
     ]);
@@ -75,8 +73,8 @@ describe('A CALL OF A FUNCTION THAT A BLOCK DEFINES, TYPED BEFORE THE BLOCK RUNS
   test('a local that receives the result of the call', () => {
     const { type, value } = typeThenValue([
       'Block',
-      ['Assign', 'f', COUNT],
-      ['Assign', 'y', ['f', NESTED]],
+      ['Declare', 'f', "'unknown'", COUNT],
+      ['Declare', 'y', "'unknown'", ['f', NESTED]],
       'y',
     ]);
     expect(value.toString()).toBe('2');
@@ -86,29 +84,29 @@ describe('A CALL OF A FUNCTION THAT A BLOCK DEFINES, TYPED BEFORE THE BLOCK RUNS
   test('the call as an element of a list literal', () => {
     const { type, value } = typeThenValue([
       'Block',
-      ['Assign', 'f', COUNT],
+      ['Declare', 'f', "'unknown'", COUNT],
       ['List', ['f', NESTED]],
     ]);
     expect(value.toString()).toBe('[2]');
     expectTypeHoldsValue(type, value);
   });
 
-  test('a function with a scalar body, called on a list, is typed `unknown` too', () => {
-    // The evaluation maps `f` over the list. The type of the call does not
-    // say so: before the block runs, `f` has no signature, and the type
-    // `unknown` holds both a list and a scalar.
+  test('a function with a scalar body, called on a list', () => {
+    // The evaluation maps `f` over the list; the call is typed from the
+    // type of the variable `f`.
     const { type, value } = typeThenValue([
       'Block',
-      ['Assign', 'f', ['Function', ['Add', 't', 1], 't']],
+      ['Declare', 'f', "'unknown'", ['Function', ['Add', 't', 1], 't']],
       ['f', ['List', 1, 2, 3]],
     ]);
     expect(value.toString()).toBe('[2,3,4]');
+    expectTypeHoldsValue(type, value);
     expect(type.toString()).toBe('unknown');
   });
 
-  test('a function defined with `DefineFunction` keeps the result type of its literal', () => {
-    // `DefineFunction` installs the literal on the local when the block is
-    // boxed, so the call is typed from the literal's signature.
+  test('a function defined with `DefineFunction`', () => {
+    // The function statement makes a variable of type `function`, as a
+    // `Declare` with a function literal does.
     const { type, value } = typeThenValue([
       'Block',
       ['DefineFunction', 'f', COUNT],
@@ -116,7 +114,7 @@ describe('A CALL OF A FUNCTION THAT A BLOCK DEFINES, TYPED BEFORE THE BLOCK RUNS
     ]);
     expect(value.toString()).toBe('2');
     expectTypeHoldsValue(type, value);
-    expect(type.matches('integer | signed_infinity')).toBe(true);
+    expect(type.toString()).toBe('unknown');
   });
 });
 

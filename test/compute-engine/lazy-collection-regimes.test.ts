@@ -360,10 +360,11 @@ describe('lazy collection evaluate memo', () => {
     expect(e.evaluate().at(2)!.toString()).toBe(high);
   });
 
-  test('a memoized view re-resolves inside a re-pushed populated scope', () => {
-    // Re-pushing an already-populated scope bumps NO generation (only
-    // `popScope` bumps), so `ce._anyVersion` alone does not characterize the
-    // resolution environment: the memo also stamps the ambient lexical scope.
+  test('a memoized view keeps its binding inside a re-pushed populated scope', () => {
+    // An expression reads the scope it was boxed in, also inside a re-pushed
+    // populated scope; the same expression bound again in that scope
+    // (`ce.rebind()`) reads the scope, and the memo of one is not served for
+    // the other.
     const ce = new ComputeEngine();
     ce.assign('xs', ce.box(['List', 1, 2]));
     ce.pushScope();
@@ -376,7 +377,8 @@ describe('lazy collection evaluate memo', () => {
 
     ce.pushScope(saved);
     try {
-      expect(e.evaluate().toString()).toBe('[7,9]');
+      expect(e.evaluate().toString()).toBe('[1,2,9]');
+      expect(ce.rebind(e).evaluate().toString()).toBe('[7,9]');
       // …and it agrees with a node boxed inside the scope.
       expect(ce.box(['Append', 'xs', 9]).evaluate().toString()).toBe('[7,9]');
     } finally {
@@ -581,8 +583,8 @@ describe('lazy collection evaluate memo — async parity', () => {
     expect((await e.evaluateAsync()).at(2)!.toString()).toBe(high);
   });
 
-  test('a memoized view re-resolves inside a re-pushed populated scope', async () => {
-    // The ambient-scope axis, on the async path — same shape as the sync test.
+  test('a memoized view keeps its binding inside a re-pushed populated scope', async () => {
+    // The same, on the async path.
     const ce = new ComputeEngine();
     ce.assign('xs', ce.box(['List', 1, 2]));
     ce.pushScope();
@@ -595,7 +597,8 @@ describe('lazy collection evaluate memo — async parity', () => {
 
     ce.pushScope(saved);
     try {
-      expect((await e.evaluateAsync()).toString()).toBe('[7,9]');
+      expect((await e.evaluateAsync()).toString()).toBe('[1,2,9]');
+      expect((await ce.rebind(e).evaluateAsync()).toString()).toBe('[7,9]');
     } finally {
       ce.popScope();
     }
@@ -1028,8 +1031,8 @@ describe('conditional-handler memo staleness gates', () => {
     expect(value.evaluate()).not.toBe(value.evaluate());
   });
 
-  test('a memoized view re-resolves inside a re-pushed populated scope', () => {
-    // The ambient-scope axis, on the declined path.
+  test('a memoized view keeps its binding inside a re-pushed populated scope', () => {
+    // The same, on the declined path.
     const ce = new ComputeEngine();
     ce.assign('xs', bigList(ce, 120));
     ce.pushScope();
@@ -1046,7 +1049,8 @@ describe('conditional-handler memo staleness gates', () => {
 
     ce.pushScope(saved);
     try {
-      expect(e.evaluate().count).toBe(131);
+      expect(e.evaluate().count).toBe(121);
+      expect(ce.rebind(e).evaluate().count).toBe(131);
     } finally {
       ce.popScope();
     }

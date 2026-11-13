@@ -1012,31 +1012,10 @@ export function unitCounterOfOperands(ops: readonly unknown[]): number {
   return sum;
 }
 
-/** A number for each definition that a free name resolves to, given at
- * its first read (`noteResolutionRead()`), and for each entry that a read
- * of an environment found (`readUnitEntry()`). */
+/** A number for each entry that a read of an environment found
+ * (`readUnitEntry()`). */
 const definitionIds = new WeakMap<object, number>();
 let lastDefinitionId = 0;
-
-/**
- * For one engine and one free name: an object whose version (`_version`) is
- * the number of the definition that the name resolves to now, or 0 when it
- * resolves to none. A cache entry that keeps this version
- * (`recordObjectRead()`) is computed again when the name resolves to
- * another definition (`objectDepsValid()`, `object-deps.ts`): after a
- * declaration of the name in a pushed scope, and after the pop of that
- * scope.
- */
-class ResolutionToken {
-  constructor(private readonly _resolve: () => object | undefined) {}
-
-  /** See `VersionedObject._ref` (`object-deps.ts`). */
-  readonly _ref = new WeakRef(this);
-
-  get _version(): number {
-    return definitionId(this._resolve());
-  }
-}
 
 /** The number of the definition or the entry `def` (`definitionIds`), or 0
  * for none. */
@@ -1049,48 +1028,6 @@ function definitionId(def: object | undefined): number {
     definitionIds.set(def, id);
   }
   return id;
-}
-
-/** For each engine, then each key and each name, its token. */
-const resolutionTokens = new WeakMap<
-  object,
-  Map<string, Map<string, ResolutionToken>>
->();
-
-/**
- * Record, for the caches that are being computed, that a read depends on the
- * definition that the free name `name` resolves to in the current context
- * (rules 3 and 4 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`):
- * a type cached on a compound expression is computed again when that
- * definition is another one. `resolve` gives that definition; it is kept
- * for the engine, the name and `key` (which tells apart the readings of a
- * name, `N` as a variable or as the library operator), so it must depend on
- * nothing else. The result is the definition that `resolve` gives now.
- *
- * The dependency is on the resolved definition, not on the current lexical
- * scope: a call of a function literal pushes a scope at each call, and a
- * type that depends on the scope would be computed again in each call.
- */
-export function noteResolutionRead<D extends object>(
-  engine: object,
-  name: string,
-  key: string,
-  resolve: () => D | undefined
-): D | undefined {
-  if (noObjectDepsCollector()) {
-    countObjectRead();
-    return resolve();
-  }
-  let byKey = resolutionTokens.get(engine);
-  if (byKey === undefined) resolutionTokens.set(engine, (byKey = new Map()));
-  let tokens = byKey.get(key);
-  if (tokens === undefined) byKey.set(key, (tokens = new Map()));
-  let token = tokens.get(name);
-  if (token === undefined)
-    tokens.set(name, (token = new ResolutionToken(resolve)));
-  const def = resolve();
-  recordObjectRead(token, definitionId(def));
-  return def;
 }
 
 /**

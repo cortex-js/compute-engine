@@ -107,20 +107,28 @@ canonicalized (by a `subs()` during its evaluation). The free name of the
 body of a function literal has its home scope in the scope that the literal
 is written in.
 
-**Resolution.** For a type read, an evaluation, a compilation and a
-comparison, the definition of a free name is found when the read happens,
-from the current context (`bindingInContext()`). The resolution skips the
-variables of binders, because a free name was not inside a binder when it was
-boxed, and it skips a library operator for a name that the expression reads as
-a variable (`N` in `N + 1`). With no definition, a free name stays symbolic.
-So `a = ce.parse('x + 1'); ce.assign('x', 3); a.evaluate()` is `4`, also when
-the assignment is made in a pushed scope. A free name of the body of a
-function literal has a definition in the scope of the body, which the boxing
-made, and is a free name for the resolution: when the scope of the body is
-not current, it does not read the variable of a binder or a parameter of a
-call that has its name. An occurrence that has a definition reads another
-definition of its name only when that definition hides its own (a
-declaration in a scope pushed under the scope that holds its definition).
+**Resolution.** An expression resolves each name from the scope it was
+boxed in, its home scope, for its type and for its value; the current scope
+plays no part (`homeChainBinding()`, `boxed-expression/binders.ts`). For a
+type read, an evaluation, a compilation and a comparison, the definition of a
+free name is found when the read happens, on the chain of its home scope, and
+the answer is cached until a definition of that name changes. So a
+declaration made later in the home scope, or in one of its ancestors, is
+read, and a declaration in a scope that is not on that chain is never read:
+`a = ce.parse('x + 1'); ce.assign('x', 3); a.evaluate()` is `4`, and with the
+assignment made in a pushed scope it is `x + 1`. `ce.rebind(expr)` gives the
+expression bound in the current scope, and is the only way to make an
+expression read another scope. The resolution skips the variables of
+binders, because a free name was not inside a binder when it was boxed, and
+it skips a library operator for a name that the expression reads as a
+variable (`N` in `N + 1`). With no definition, a free name stays symbolic.
+A free name of the body of a function literal has a definition in the scope
+of the body, which the boxing made, and is a free name for the resolution:
+it does not read the variable of a binder or a parameter of a call that has
+its name. An occurrence that has a definition keeps it: with `n: real`, the
+value of `n + 1` boxed at the top is not changed by a declaration of `n` in a
+pushed scope. A scope that was popped keeps its definitions, and an
+expression boxed in it reads them.
 
 **Identity.** Two occurrences are the same binding (`sameBinding()`,
 `compare.ts`) when both resolve to the same definition. When neither
@@ -152,47 +160,22 @@ the `g` of its own call of `h`, also when `k` stores it in its own `g`, so
 being assigned, or when the literal has no definition of the name outside it
 (`readsOtherBinding()`, `engine-declarations.ts`).
 
-A lazy view that is assigned to a variable outside a loop or a block reads
-the locals of that loop or block with their values at the assignment, not
-their bindings (`bindOutlivedLocalsOfLazyValue`, `function-utils.ts`). A view
-holds its callback literal unevaluated, so no closure captures the scope of
-the iteration, and the scope changes before the view is read: the next
-iteration writes its index, and the end of the block disposes its locals.
-With `for d in [3, 6] { if d == 3 { h = Map(x => x + d, R) } }`, `h` reads
-`d = 3`. A name that the call of the callback reads by its binding, and that
-the view does not name, reads the same values: with `f = (x, k = d) => x * k`,
-`h = Map(f, R)` in that loop gives `3, 6`. A view made at the top level gets a
-record of the loop and block scopes that the variable outlives
-(`recordOutlivedLazyViewContexts`, `lazy-view-context.ts`); a view made in a
-function call already reads the context of that call. The record is made
-while the context where the view was made is on the stack, and a later
-assignment further out extends it while the frame of the earlier record is
-on the stack. A view that leaves either context as the value of a block has
-no record and reads `d` in the context of its reader: with
-`h = do { let z = 0; Map(f, R) }` in that loop, the elements of `h` are `d`
-and `2d`. The rule also applies to a base case of a sequence (`L_0 := v`)
-and to a declared subscripted name (`h_1 := v`). For a `let` local this
-differs from a closure, which shares the binding: with
-`if true { let m = 1; h = Map(x => x + m, R); f = (x) => x + m; m = 5 }`,
-the elements of `h` read `m = 1` and `f(0)` gives `5`. A view that is read
-in its own scope, or that is stored in a variable of the same scope, reads
-the current values. One exception: an Epsil assignment (`Assign` or
-`Declare`) of a lazy collection that stays lazy stores the variables that
-the collection reads, also in an inline function, with their values at that
-statement. With `let d = 3`, `let t = map(x => x + d, 1..oo)` and `d = 5`,
-`take(t, 2)` gives `4, 5`. A variable that holds a function is stored as
-that function, which reads the later values of its own variables: with
-`let f = x => x + d` and `let t = map(f, 1..oo)`, `take(t, 2)` gives
-`6, 7` after `d = 5` (`src/epsil/docs/evaluation.md`). A view stored in a field of an object reads the locals
-of every loop and block of the chain with their values at the store: with
-`let o = {v: R}` and `for i in [1, 2] { o.v = Map(x => x + i, R) }`, `o.v`
-reads `i = 2`. The name of the receiver does not tell how long the object
-lives, because a variable of an inner scope can name the same object as an
-outer one: with `for i in [1, 2] { let p = o; p.v = Map(x => x + i, R) }`,
-the store through `p` also gives `o.v` the value `i = 2`, and no read of
-`o.v` after the loop reads a discarded `i`. The cost is that a view in a
-field of an object of the same block reads the locals of that block with
-their values at the store, not at the read.
+A lazy collection that is stored in a variable (a `Map` or a `Filter` of an
+endless range, a lazy comprehension) is a closure: it reads a parameter, a
+binder variable or a block local through the activation it was made in, and
+a global when an element is computed ("Lazy view context lifetime" below).
+A variable that is an operand of the collection (`xs` in `Filter(xs, p)`)
+gives the value it holds at the assignment, so `xs = filter(xs, c => c > 2)`
+filters the collection that `xs` held before. Each iteration of a loop has
+its own activation, so with
+`for d in [3, 6] { if d == 3 { h = map(x => x + d, R) } }`, `h` reads
+`d = 3`. With `let d = 3`, `let t = map(x => x + d, 1..oo)` and `d = 5`,
+`take(t, 2)` gives `[6, 7]`. A program that needs the elements at a
+statement lists them there: `listFrom(take(map(x => x + d, 1..oo), 2))` is
+`[4, 5]` after `d = 5`. A finite lazy collection that reads a variable is
+listed when it is assigned (`listedAssignedValue()`, `library/core.ts`):
+with `let k = 3`, `let t = map(x => x + k, 1..4)` and `k = 10`, `t` is
+`[4, 5, 6, 7]`.
 
 A call created before its function is defined is a forward reference. It
 waits for a definition in its original lexical environment, not an unrelated
@@ -302,14 +285,12 @@ symbols. Copying that value into the caller's scope and resolving it there can
 silently capture same-named bindings and is forbidden.
 
 Reading a symbol's VALUE during evaluation (`valueDefinitionInContext`,
-`boxed-expression/binders.ts`) walks the scope chain for the innermost binding
-of the name — the compatibility reading: a declaration made in a scope pushed
-after the occurrence was bound, or a re-pushed saved scope, is read, and the
-lazy-collection memo stamps the ambient scope for that reason — with BINDER
-bindings of a binding other than the occurrence's own skipped. A binder
-binding is a call frame's parameter activation (`markActivation`) or a binder
-operator's variable (`markBinderVariable`): a `Sum` or `Product` index, a
-comprehension or loop index, a `D` or `Integrate` variable. A same-named
+`boxed-expression/binders.ts`) reads the definition that the occurrence
+resolves to from its home scope ("Free names" above). A parameter of a
+function literal, a binder variable (`markBinderVariable`: a `Sum` or
+`Product` index, a comprehension or loop index, a `D` or `Integrate`
+variable) and a block local have their value in an activation, found on the
+links from the current lexical scope ("Activations" below). A same-named
 parameter of the function being evaluated is not the symbol an outer
 occurrence denotes, so an expression boxed outside a call frame evaluates to
 the same value inside it, however many times a handler re-evaluates it.
@@ -327,18 +308,16 @@ kept for an ordinary declaration, which a comprehension or `Sum` binder was
 treated as. Two conditions bound the skip. An occurrence with NO binding that
 is not a free name (a raw symbol) still reads the innermost binding
 by name, because it denotes nothing in particular; a free name skips the
-binder bindings ("Free names" above). And an occurrence whose own binding is itself a binder's variable
-also reads by name: two big operators that use the same index name can be
-evaluated at once (the asynchronous lane suspends one mid-loop), and the
-loop's per-term assignment and the body's read must resolve the name the same
-way.
+binder bindings ("Free names" above). An occurrence whose own binding is a
+binder's variable reads that definition, with the value of the activation of
+the evaluation in progress: two big operators that use the same index name
+can be evaluated at once (the asynchronous lane suspends one mid-loop), and
+each reads its own iteration.
 
-Ordinary shadowing declarations deliberately keep re-pointing earlier-bound
-occurrences (ruled 2026-08-22): the re-pushed-scope reading and the compile
-fallback runner rely on it. A shield (`markShieldDeclaration`) intercepts for
-the same reason, including a shield that sits on a binder's own variable —
-which is how `D`, `Integrate`, `Limit` and `Solve` hide an assigned value of
-their variable.
+A declaration in a pushed scope does not re-point an occurrence that was
+bound earlier; `ce.rebind(expr)` does. `D`, `Integrate`, `Limit` and `Solve`
+hide an assigned value of their variable with a value shield (see "Binders"
+below).
 
 A pass that substitutes a binder's current index value into a finished term —
 the leak repair of a big-operator fold (`evaluateBigOpTerm`), the
@@ -360,18 +339,11 @@ whose preamble has to sit inside the lambda body, and the shader targets,
 which have no place for an untyped value binding. Both are recorded in
 `ROADMAP.md`.
 
-A node that owns a local scope — a comprehension, a sum, a block — pushes that
-scope again on every evaluation. Its parent link is the scope it was
-canonicalized in, so a declaration made later in a scope pushed on top of that
-one (a child scope that shadows `n` with a value) would not be on the chain.
-Ruled 2026-09-15: a directly evaluated expression reads the environment it is
-evaluated in, so the re-pushed scope is chained onto the ambient scope for the
-life of the frame — only when the ambient chain descends from the scope's own
-parent, so an unrelated chain captures nothing, and never onto the scope
-itself (`ambientChainParent`, `boxed-expression/ambient-chain.ts`). A call
-frame is never chained: a stored function value is a closure and evaluates in
-its own environment, as the rule above states. The collection memos resolve a
-scoped instance's dependencies through the same chain (`withAmbientChain`).
+A node that owns a local scope — a comprehension, a sum, a block — pushes an
+activation of that scope on every evaluation ("Activations" below). Its names
+resolve from the scopes they were boxed in: a declaration made in a scope
+pushed on top of the scope of the node (a child scope that shadows `n` with a
+value) is not read.
 
 ## Binders
 
@@ -455,9 +427,11 @@ integral (`implicitIntegralVariables()` in `binding-sites.ts`). So in
 The implementation is `implicitVariableCandidates()` and
 `defaultImplicitVariable()` in `src/compute-engine/boxed-expression/utils.ts`.
 
-Shielding is implemented by a valueless shadow binding with the original type,
-not by renaming or by head-specific substitution. Binding tombstones prevent a
-lookup from falling through to a shadowed outer definition.
+Shielding hides the value of the definition of the variable for the extent
+of the evaluation (`withValueShield()`, `boxed-expression/utils.ts`;
+`boxed-expression/hidden-values.ts`): a read of the value finds none, the type
+and the assumptions are kept, and nothing is written on the definition, so a
+shield can run inside a type derivation.
 
 ## Rebuilding a scoped node
 
@@ -498,11 +472,70 @@ stop there.
 
 ## Canonical and runtime scopes
 
-Canonicalization may establish identities and types, but runtime evaluation
-owns runtime values. A nested scope must not read a stale canonicalization-time
-scope when an enclosing runtime scope has since executed `Declare` or `Assign`.
-Closure capture records the bindings a body actually denotes and restores them
-at invocation.
+Canonicalization establishes identities and types; evaluation owns values.
+The definition of a parameter, a binder variable and a block local is the one
+that the boxing made (the static definition); an evaluation writes and reads
+its value in an activation and makes no definition.
+
+### Block locals
+
+A local of a block is made only by a `Declare` (in Epsil, `let`), and a
+`Declare` is allowed only at the top level of a block or of a function body.
+The name means the local in the whole block.
+
+- `Block(Declare(c, 5), 2c)` is `10`.
+- `Assign(c, v)` writes the `c` that is in scope and never makes one. In a
+  block, a function body, a binder body, a branch or a loop body, an `Assign`
+  to a name that no scope declares is the error
+  `assignment-to-undeclared-variable`: `Block(c := 5, 2c)` with no `c` in
+  scope. With a global `c`, the same block gives `10` and the global `c` is
+  `5`. Outside every block (`ce.assign('c', 5)`, an `Assign` evaluated at the
+  host level), an `Assign` declares the variable in the current scope.
+- A `Declare` below a statement (in a branch of an `If`, a loop body) is the
+  error `declaration-below-statement`.
+- Two declarations of one name in one block are the error
+  `variable-redeclaration`; a function statement (`DefineFunction`) of a
+  block declares its name too.
+- A read before the declaration has run is the error
+  `read-before-declaration`. The initial value of a `Declare` is computed with
+  the outer name: with a global `z = 9`, `Block(Declare(z, z + 1), z)` is
+  `10`.
+- An assignment in a value operand to a name that is not declared
+  (`Sum(Assign(s, s + i), Limits(i, 1, 3))`) is the error
+  `assignment-in-operand`.
+- The type of a local is the type its `Declare` gives, or the type of its
+  initial value as the boxing types it; `unknown` when nothing is known.
+
+A local that holds a function, whether it is declared with a function
+literal, assigned one, or made by a function statement, is a variable: its
+definition is a value definition with the declared type (`function` when the
+`Declare` gives none), and its value in the activation of the run is a
+function value. No signature is derived for it from its body, and a call of
+it is typed from its declared type. A call with a list argument takes the
+list whole when the parameter type of the function value is a collection,
+and maps the call over the list otherwise: `(t: list) ↦ Count(t)` applied to
+`[1, 2]` is `2`, `(t) ↦ 2t` gives `[2, 4]`, and `(a) ↦ h(a)`, with `h` a
+local, maps the call (nothing is derived for `a` from `h`).
+
+### Activations
+
+Every evaluation of a function literal, of a binder and of a block makes an
+activation: the values of its locals for that evaluation, with a link to the
+activation in which the literal, the binder or the block was itself
+evaluated (`scopeActivation()`, `holdBodyLocals()`,
+`boxed-expression/ambient-chain.ts`, `function-utils.ts`). A parameter, a
+binder variable and a block local are read by following these links from the
+activation of the evaluation in progress (`activationRecordOf()`); there is
+no search of the stack of evaluations in progress. A binder that iterates (a
+loop, `Sum`, `Product`, a comprehension) makes one activation per iteration
+(`renewIterationActivation()`).
+
+A function value keeps the activation it was made in. With
+`add(a) := x ↦ x + a`, `g := add(2)` and `h := add(10)`, `g(1)` is `3` and
+`h(1)` is `11`. A closure made in an iteration keeps that iteration:
+`for d in [3, 6] { if d == 3 { h = (x => x + d) } }; h(1)` is `4`. A call of
+a hold function with a `bind` parameter substitutes each held argument, as
+the caller boxed it, into the body: `mySum(k^2, k, 3)` is `14`.
 
 `Block` is sequential: later statements observe earlier declarations and
 assignments. A consumer translating a simultaneous assignment must snapshot
@@ -570,41 +603,28 @@ is not allowed. The effects and cache axes are described in
 
 ## Lazy view context lifetime
 
-A callback view records the evaluation stack through its innermost call frame,
-the creation context, and the enclosing call frames its lexical chain reaches.
-Nested block and loop scopes record binding identities, values and write
-versions at creation. Creating the record does not clone scope definitions.
-If those scopes are still live and unchanged, reads use the live stack;
-otherwise the record builds and caches copies chained onto the call frame.
-An enumeration chooses once at its first pull, so later pulls use the same
-context even after the creating call returns. A closure instead shares mutable
-block locals and observes subsequent writes.
+A lazy collection (a `Map` or a `Filter` of an endless range, a lazy
+comprehension) keeps the activation it was made in, as a function value
+does: the lexical scope of the evaluation that made it, when that scope's
+chain holds an activation (`boxed-expression/lazy-view-context.ts`). Each
+read of the collection (an element, its count, its finiteness) runs with
+that activation as the lexical scope, so a parameter, a binder variable or a
+block local is read there, and a global is read when the element is
+computed. A collection that reads no such name keeps no activation. A
+collection made outside every activation is read in the context of its
+reader, which resolves the same names.
 
-Call frames are shared rather than copied. Before a call pops, a reachability
-walk retains frames read by views in its result, including views reachable
-through closure bodies, scope bindings and dictionaries. It visits each node
-and scope once and stops below the call. Evaluating a function literal also
-retains scopes reached by that closure: a closure can escape through assignment
-rather than the returned result. This conservative rule retains a frame even
-when the closure is immediately consumed. Retention marks are weak; they do
-not keep otherwise unreachable frames alive.
+A node of a function body is evaluated by every call of the function, so a
+collection that is that node itself is copied before it takes the
+activation of a call. A rebuild of a collection by the end of a call (the
+substitution of the parameter values) carries its activation. A held
+collection that a call returns without evaluating it takes the activation
+of the call (`adoptHeldLazyViews`, `function-utils.ts`).
 
-A retained call frame is neither disposed nor tombstoned on pop. A retained
-node scope can still dispose definitions but must not tombstone them. Retention
-therefore also affects type-contribution and assumption readers of the disposed
-flag, definition write versions, and the dead-binding debug check.
-
-Rebuilding a view carries its record, including through returned closures and
-parameter substitution. Adopting an unevaluated view held in a shared function
-body requires a new node so invocations cannot overwrite one another's record.
-Top-level views normally use their reader's context; an outward assignment can
-record the loop and block scopes it leaves, as described in "Callable resolution".
-
-The reachability walk cannot observe values stored privately by host code.
-Such an escape does not retain its call frame. Disposed definitions keep their
-values, but a later symbol evaluation can trigger the dead-binding debug check;
-a name lookup alone does not run that check. Host escapes are therefore not
-evidence that the managed reachability walk retained a frame.
+An assignment that stores a lazy collection replaces each operand that is a
+variable with the value it holds then (`withOperandValues`,
+`library/core.ts`): `xs = filter(xs, p)` filters the collection that `xs`
+held before the statement.
 
 ## Temporary names
 

@@ -355,6 +355,33 @@ describe('ce.withValues', () => {
     expect(thrown).toBe(fnError);
     expect(ce.box('a').value).toBeUndefined();
   });
+
+  test('a call of withValues() inside a function puts back the value of its parameter', () => {
+    // The value of a parameter is held by the activation of the call: the
+    // restore writes it back there.
+    for (const shouldThrow of [false, true]) {
+      const ce = new ComputeEngine();
+      ce.declare('g', {
+        signature: '() -> integer',
+        evaluate: (_ops, { engine }) => {
+          try {
+            return engine.withValues({ x: 9 }, () => {
+              if (shouldThrow) throw new Error('fn failed');
+              return engine.number(0);
+            });
+          } catch {
+            return engine.number(0);
+          }
+        },
+      });
+      const call = ce.box([
+        'Apply',
+        ['Function', ['Block', ['g'], 'x'], 'x'],
+        2,
+      ]);
+      expect(call.evaluate().json).toBe(2);
+    }
+  });
 });
 
 describe('the snapshot of a value definition', () => {

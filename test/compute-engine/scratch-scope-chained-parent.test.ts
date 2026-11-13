@@ -7,21 +7,15 @@ import type { StateEvent } from '../../src/compute-engine/engine-configuration-l
 // registers while it runs: a declaration into it, or into a scope created
 // under it, advances no engine-wide cache version, because the pop that ends
 // the computation discards the binding. `scratchRootOf` decides "created
-// under" by walking the parent links. A persistent local scope (the local
-// scope of a block, a sum, a comprehension) is chained onto the ambient
-// scope while the node evaluates: its parent link is re-pointed for the life
-// of the frame (`pushEvalContext`, `engine-scope.ts`). A block boxed outside
-// the scratch scope and evaluated inside it then sat under the scratch scope
-// through the re-pointed link, and a `Declare` the block runs was classified
-// scratch, although the block's scope and the binding outlive the
-// computation. The walk now follows the link the scope had before it was
-// chained (`chainedScopeOf`, `scope-chaining.ts`).
+// under" by walking the parent links. An evaluation of a block runs in an
+// activation of its scope, linked to the scope it is evaluated in (`docs/plans/2026-11-11-bound-once-spec.md`, section 11): a `Declare` that the run
+// makes is a declaration of the run, which ends with it, and under a scratch
+// scope it is scratch. The static scope of the block keeps its binding.
 //
 // The two value shields (`simplifyValueBlind` in `simplify.ts`,
-// `withValueShield` in `utils.ts`) register their scope only while their
-// shadow declarations are made: a name the shielded work declares with a
-// value after a cache was filled inside the shield must retire that cache,
-// and a scope created inside the shield can escape with the result.
+// `withValueShield` in `utils.ts`) hide values without a scope and without a
+// declaration (`withHiddenValues()`): a write that the shielded work makes
+// after a cache was filled inside the shield retires that cache.
 
 function trapDeclares(ce: ComputeEngine): StateEvent[] {
   const events: StateEvent[] = [];
@@ -36,8 +30,8 @@ function trapDeclares(ce: ComputeEngine): StateEvent[] {
 }
 
 // Boxed in the global scope: the block's local scope is created under the
-// global scope. A `Declare` statement in the body declares into the block's
-// local scope when the block runs.
+// global scope. The local of the `Declare` statement is declared when the
+// block is boxed; a run of the block writes its value and declares nothing.
 const BLOCK = [
   'Block',
   ['Declare', 't', "'integer'", 3],
@@ -45,7 +39,7 @@ const BLOCK = [
 ];
 
 describe('a declaration into a scope chained onto a scratch scope', () => {
-  test('is not a scratch declaration', () => {
+  test('a run of a block evaluated in the scratch scope declares nothing', () => {
     const ce = new ComputeEngine();
     const block = ce.box(BLOCK);
     const events = trapDeclares(ce);
@@ -54,9 +48,8 @@ describe('a declaration into a scope chained onto a scratch scope', () => {
     const result = withScratchScope(ce as any, scratch, () => block.evaluate());
     ce.popScope();
     expect(result.json).toBe(4);
-    expect(events).toHaveLength(1);
-    expect(events[0].kind === 'declare' && events[0].scratch).toBeUndefined();
-    // The binding outlives the scratch computation.
+    expect(events).toHaveLength(0);
+    // The static binding of the block outlives the scratch computation.
     expect((block as any).localScope.bindings.has('t')).toBe(true);
   });
 
@@ -85,8 +78,8 @@ describe('a declaration into a scope chained onto a scratch scope', () => {
   });
 });
 
-describe('a value shield registers its scope for its shadow declarations only', () => {
-  test('a block run inside the shield keeps its declaration (not scratch)', () => {
+describe('a value shield declares nothing', () => {
+  test('a block run inside the shield declares nothing', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 5);
     const block = ce.box([
@@ -101,13 +94,13 @@ describe('a value shield registers its scope for its shadow declarations only', 
     const declaresOfT = events.filter(
       (e) => e.kind === 'declare' && e.scratch === true
     );
-    // Only the shield declaration of `x` is scratch; the `Declare` of `t`
-    // in the block is not.
-    expect(declaresOfT).toHaveLength(1);
-    expect(events).toHaveLength(2);
+    // The shield declares nothing, and the run of the block declares
+    // nothing either.
+    expect(declaresOfT).toHaveLength(0);
+    expect(events).toHaveLength(0);
   });
 
-  test('a name the shielded work declares with a value retires the caches', () => {
+  test('a value the shielded work assigns retires the caches', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 5);
     ce.assign('y', 1);
@@ -115,20 +108,17 @@ describe('a value shield registers its scope for its shadow declarations only', 
     const events = trapDeclares(ce);
     const signs = withValueShield(ce, ['x'], () => {
       const before = e.sgn;
-      // Declared into the shield scope after the sign was cached: not a
-      // scratch declaration, so the `any` axis advances and the cached
-      // positive sign is not served for the value `-2`.
-      ce.declare('y', { type: 'integer', value: -3 });
+      // Assigned after the sign was cached: the `any` axis advances and the
+      // cached positive sign is not served for the value `-2`.
+      ce.assign('y', -3);
       return [before, e.sgn, e.evaluate().json];
     });
     expect(signs[0]).toBe('positive');
     expect(signs[1]).not.toBe('positive');
     expect(signs[2]).toBe(-2);
-    expect(events).toHaveLength(2);
-    expect(events[0].kind === 'declare' && events[0].scratch).toBe(true);
-    expect(events[1].kind === 'declare' && events[1].scratch).toBeUndefined();
-    // The shield scope is popped: `y` reads its outer value again.
-    expect(e.evaluate().json).toBe(2);
+    expect(events).toHaveLength(0);
+    // The assignment is not undone by the shield.
+    expect(e.evaluate().json).toBe(-2);
   });
 
   test('simplify still hides the assigned value and keeps the caches', () => {

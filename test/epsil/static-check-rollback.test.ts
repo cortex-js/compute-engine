@@ -114,7 +114,7 @@ describe('STATIC CHECK — engine state rolls back', () => {
     // scope, which pops with it — nothing to roll back, nothing left behind.
     const second = check(
       ce,
-      'f := (x: number, y: string) => x + 3\nf(y: "ok", x: 1)'
+      'let f = (x: number, y: string) => x + 3\nf(y: "ok", x: 1)'
     );
     expect(second).toHaveLength(0);
     expect(ce.lookupDefinition('f')).toBeUndefined();

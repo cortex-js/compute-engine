@@ -6,14 +6,10 @@ import { ComputeEngine } from '../../src/compute-engine';
  * body reads it inside the frame, whose chain goes through the scope that
  * defined the function, not through the block.
  *
- * Each run of a block removes the bindings that canonicalization made in
- * its scope, and a `Declare` statement makes a new binding for the run. The
- * symbol in the argument was still bound to the removed binding, so the
- * read in the frame did not find it and read the name in the defining
- * scope. With a global `y := 5` and a global `g := x ↦ x + 0.5`,
- * `Block(Declare(y, 'real'), g(y))` gave `5.5`, not `y + 0.5`: the argument
- * read the global `y`, not the valueless local. A function whose body is
- * `NumericApproximation(x)` gave `5` on the asynchronous route.
+ * The argument reads the local of the block, not a name of the defining
+ * scope: with a global `y := 5` and a global `g := x ↦ x + 0.5`,
+ * `Block(Declare(y, 'real', 3), g(y))` is `3.5`, on both the synchronous and
+ * the asynchronous route.
  */
 
 const DECLARE_Y = ['Declare', 'y', "'real'", 3];
@@ -95,7 +91,7 @@ describe('A REMOVED LOCAL IN AN ARGUMENT, MORE FORMS', () => {
     const expr = [
       'Block',
       DECLARE_Y,
-      ['Assign', 'L', ['Map', 'g', ['List', 'y']]],
+      ['Declare', 'L', "'unknown'", ['Map', 'g', ['List', 'y']]],
       ['Block', DECLARE_Y, ['Assign', 'y', 7], ['At', 'L', 1]],
     ];
     expect(ce.box(expr).evaluate().toString()).toBe('3.5');
@@ -225,7 +221,7 @@ describe('CONTROLS', () => {
     const expr = [
       'Block',
       DECLARE_Y,
-      ['Assign', 'h', ['Function', ['Add', 'y', 0.5]]],
+      ['Declare', 'h', "'unknown'", ['Function', ['Add', 'y', 0.5]]],
       ['Block', DECLARE_Y, ['Assign', 'y', 2], ['h']],
     ];
     expect(ce.box(expr).evaluate().toString()).toBe('3.5');

@@ -53,16 +53,15 @@ test('root parameter offset cannot hide the helper capture', () => {
     .toThrow(/helper bindings collide with the root function/);
 });
 
-// A root binding named like the helper is the binding that the call reads,
-// so the call is not a helper call: the fragment refuses its head before the
-// name-collision check.
-test('a root local named helper shadows the helper', () => {
+// A root binding named like the helper is the binding that the call reads:
+// a call of a local declared `real` is invalid, and the compile declines.
+test('a call of a root local named helper is invalid and declines', () => {
   const ce = setup();
   const expression = ce.expr(['Function', ['Block',
     ['Declare', 'helper', "'real'", 'x'], ['helper', 'x']], typed('x')]);
-  expect(expression.isValid).toBe(true);
+  expect(expression.isValid).toBe(false);
   expect(() => new ScalarFragmentJavaScriptTarget().compile(expression, { fallback: false }))
-    .toThrow(/unsupported head helper/);
+    .toThrow();
 });
 
 test('root local cannot hide the helper capture', () => {

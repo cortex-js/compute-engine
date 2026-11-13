@@ -239,15 +239,16 @@ const TWO_T = ['Function', ['Multiply', 2, 't'], 't'];
 /** The call `call` in a block that binds the local `g` to `fn`. */
 const LOCAL = (fn: Json, call: Json): Json => [
   'Block',
-  ['Assign', 'g', fn],
+  ['Declare', 'g', "'unknown'", fn],
   call,
 ];
 const UNKNOWN_SEVEN = ['Function', 7, ['Typed', 't', "'unknown'"]];
 const Q_BLOCK = (body: Json): Json => [
   'Block',
   [
-    'Assign',
+    'Declare',
     'q',
+    "'unknown'",
     ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 2]],
   ],
   body,
@@ -698,7 +699,7 @@ describe('one point named through an alias or a nominal type', () => {
     const ce = engine();
     ce.declare('y', 'tuple<real, real>');
     expect(compiled(ce, LOCAL(TWO_T, ['g', 'r']), 'javascript')!.code).toBe(
-      '(() => {\nlet g;\ng = ((t) => 2 * t);\nreturn (((t) => [(2 * t[0]), (2 * t[1])]))(_.r)\n})()'
+      '(() => {\nlet g = ((t) => 2 * t);\nreturn (((t) => [(2 * t[0]), (2 * t[1])]))(_.r)\n})()'
     );
     for (const to of ['interval-js', 'python']) {
       for (const s of ['r', 'm', 'y'])

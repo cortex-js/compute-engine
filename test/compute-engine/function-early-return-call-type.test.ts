@@ -83,8 +83,9 @@ describe('CE-737: the type of a call of a function with an early Return', () => 
         fn([
           'Block',
           [
-            'Assign',
+            'Declare',
             'k',
+            "'unknown'",
             [
               'Function',
               [

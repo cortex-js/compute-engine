@@ -328,11 +328,15 @@ describe('FREE_VARIABLES', () => {
 });
 
 describe('SCOPED_UNKNOWNS', () => {
-  it('Block: should exclude locally assigned variables', () => {
-    // x is free, y is locally assigned
+  it('Block: an assignment to a name that no scope declares makes no local', () => {
+    // The assignment is an error, and `y` is not a local of the block.
     const block = engine.expr(['Block', ['Assign', 'y', 5], ['Add', 'x', 'y']]);
+    expect(block.isValid).toBe(false);
+    expect(JSON.stringify(block.json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
     expect(block.unknowns).toContain('x');
-    expect(block.unknowns).not.toContain('y');
+    expect(block.unknowns).toContain('y');
   });
 
   it('Block: should exclude locally declared variables', () => {
@@ -356,18 +360,18 @@ describe('SCOPED_UNKNOWNS', () => {
     expect(block.defines).toContain('f');
   });
 
-  it('Block: should exclude the names of a destructuring assignment', () => {
+  it('Block: should exclude the names of a destructuring declaration with a value', () => {
     // `a` and `b` are block locals; `x`, read in the value, is free.
     const block = engine.expr([
       'Block',
-      ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'x', 2]],
+      ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 'x', 2]],
       ['Add', 'a', 'b'],
     ]);
     expect(block.unknowns).toEqual(['x']);
     expect(
       engine.expr([
         'Block',
-        ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 1, 2]],
+        ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 1, 2]],
         ['Add', 'a', 'b'],
       ]).unknowns
     ).toEqual([]);
@@ -376,7 +380,12 @@ describe('SCOPED_UNKNOWNS', () => {
   it('Block: should exclude every leaf of a nested destructuring pattern', () => {
     const json = [
       'Block',
-      ['Assign', ['Tuple', 'a', ['Tuple', 'b', 'c']], ['Tuple', 1, ['Tuple', 2, 3]]],
+      [
+        'Declare',
+        ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        "'unknown'",
+        ['Tuple', 1, ['Tuple', 2, 3]],
+      ],
       ['Add', 'a', 'b', 'c', 'y'],
     ] as const;
     expect(engine.expr(json).unknowns).toEqual(['y']);
@@ -386,7 +395,7 @@ describe('SCOPED_UNKNOWNS', () => {
   it('Block: the `_` position of a destructuring pattern is not a free variable', () => {
     const block = engine.expr([
       'Block',
-      ['Assign', ['Tuple', 'q', '_'], ['Tuple', 'v', 2]],
+      ['Declare', ['Tuple', 'q', '_'], "'unknown'", ['Tuple', 'v', 2]],
       ['Add', 'q', 1],
     ]);
     expect(block.unknowns).toEqual(['v']);
@@ -411,7 +420,11 @@ describe('SCOPED_UNKNOWNS', () => {
     // type is `Typed(statement, type)`; its targets are still locals.
     const block = engine.expr([
       'Block',
-      ['Typed', ['Assign', ['Tuple', 'm', 'n'], ['Tuple', 'u', 2]], "'tuple'"],
+      [
+        'Typed',
+        ['Declare', ['Tuple', 'm', 'n'], "'unknown'", ['Tuple', 'u', 2]],
+        "'tuple'",
+      ],
     ]);
     expect(block.unknowns).toEqual(['u']);
   });
@@ -427,7 +440,12 @@ describe('SCOPED_UNKNOWNS', () => {
       ['Block', ['Assign', ['Tuple', 'a', 'b'], ['Tuple', ['Add', 'a', 1], 2]], 'a'],
       ['Block', ['Typed', ['Assign', 'a', ['Add', 'a', 1]], "'real'"]],
       // A read in an earlier statement.
-      ['Block', ['Assign', 'q', ['Multiply', 2, 'a']], ['Assign', 'a', 1], ['Add', 'a', 'q']],
+      [
+        'Block',
+        ['Declare', 'q', "'unknown'", ['Multiply', 2, 'a']],
+        ['Assign', 'a', 1],
+        ['Add', 'a', 'q'],
+      ],
     ] as const;
     for (const json of cases) {
       expect(ce.box(json).unknowns).toEqual(['a']);
@@ -455,13 +473,13 @@ describe('SCOPED_UNKNOWNS', () => {
   });
 
   it('Block: a local that a function literal reads before its first write is not free', () => {
-    // No scope declares `c`, so the block makes a local for it, and the
-    // function `g` reads that local when it is called, after `c = 2`.
+    // `c` is a local of the block, and the function `g` reads that local
+    // when it is called, after the declaration of `c`.
     const ce = new ComputeEngine();
     const block = ce.box([
       'Block',
-      ['Assign', 'g', ['Function', ['Add', 'x', 'c'], 'x']],
-      ['Assign', 'c', 2],
+      ['Declare', 'g', "'unknown'", ['Function', ['Add', 'x', 'c'], 'x']],
+      ['Declare', 'c', "'unknown'", 2],
       ['g', 1],
     ]);
     expect(block.unknowns).toEqual([]);
@@ -473,8 +491,9 @@ describe('SCOPED_UNKNOWNS', () => {
     const json = [
       'Block',
       [
-        'Assign',
+        'Declare',
         'fact',
+        "'unknown'",
         [
           'Function',
           [
@@ -649,7 +668,7 @@ describe('DEFINES', () => {
   it('Block defines each assignment/declaration', () => {
     const block = engine.box([
       'Block',
-      ['Assign', 'a', 1],
+      ['Declare', 'a', "'unknown'", 1],
       ['Declare', 'b', 'integer', 0],
       ['Add', 'a', 'b'],
     ]);
@@ -663,7 +682,12 @@ describe('DEFINES', () => {
     expect(assign.references).toEqual(['v']);
     const block = engine.box([
       'Block',
-      ['Assign', ['Tuple', 'a', ['Tuple', 'b', 'c']], ['Tuple', 1, ['Tuple', 2, 3]]],
+      [
+        'Declare',
+        ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        "'unknown'",
+        ['Tuple', 1, ['Tuple', 2, 3]],
+      ],
       ['Add', 'a', 'b', 'c'],
     ]);
     expect(block.defines).toEqual(['a', 'b', 'c']);

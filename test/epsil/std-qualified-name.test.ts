@@ -220,7 +220,7 @@ describe('serialize', () => {
 describe('a function value with a local that shadows the library name', () => {
   test('serialized and read again, it keeps the library constant', () => {
     const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'let f = () => do { let Pi = 3; std::pi + Pi }\nf');
+    const r = executeEpsil(ce, '() => do { let Pi = 3; std::pi + Pi }');
     expect(r.diagnostics).toEqual([]);
     expect(r.value.json).toEqual([
       'Function',

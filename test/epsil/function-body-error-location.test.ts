@@ -61,7 +61,7 @@ describe('an error in the body of a called function', () => {
       'let v = y + h(1, g("a"))',
       'g("a")',
     ],
-    ['function g(x) { Ln(x) + 1 }', 'v = y + g("a")', 'g("a")'],
+    ['function g(x) { Ln(x) + 1 }', 'let v = 0\nv = y + g("a")', 'g("a")'],
   ])('%s, %s underlines %s', (fn, stmt, expected) => {
     expect(underlines(`${fn}\nlet y = 5\n${stmt}\n0`)).toEqual([expected]);
   });

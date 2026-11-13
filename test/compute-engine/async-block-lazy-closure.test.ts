@@ -25,7 +25,7 @@ function declareC(value: unknown, attributes: unknown[] = []): unknown {
 
 const heldSum = [
   'Function',
-  ['Block', ['Assign', 's', ['Hold', ['Add', 'c', 'k']]], 's'],
+  ['Block', ['Declare', 's', "'unknown'", ['Hold', ['Add', 'c', 'k']]], 's'],
   'k',
 ];
 
@@ -133,7 +133,12 @@ const cases: [string, unknown][] = [
     [
       'Block',
       declareC(5),
-      ['Assign', 'h', ['Function', ['Block', ['Add', 'c', 'k']], 'k']],
+      [
+        'Declare',
+        'h',
+        "'unknown'",
+        ['Function', ['Block', ['Add', 'c', 'k']], 'k'],
+      ],
       ['Map', 'h', ['List', 1, 2]],
     ],
   ],
@@ -347,7 +352,7 @@ const cases: [string, unknown][] = [
       [
         'Block',
         ['Declare', 'k', { str: 'real' }, 1],
-        ['Assign', 's', ['Hold', ['Add', 'c', 'k']]],
+        ['Declare', 's', "'unknown'", ['Hold', ['Add', 'c', 'k']]],
         's',
       ],
     ],
@@ -552,6 +557,7 @@ describe('a function literal that leaves a block reads its locals on both routes
       [
         'Block',
         declareC(5),
+        ['Declare', 'h', "'unknown'", ['Function', ['Add', 1, 'k'], 'k']],
         ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
         ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
       ],
@@ -576,7 +582,7 @@ describe('a function literal that leaves a block reads its locals on both routes
       'a local that does not read another local',
       [
         'Block',
-        ['Assign', 'h', ['Function', ['Add', 1, 'k'], 'k']],
+        ['Declare', 'h', "'unknown'", ['Function', ['Add', 1, 'k'], 'k']],
         ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
       ],
       '[2,3]',
@@ -586,7 +592,7 @@ describe('a function literal that leaves a block reads its locals on both routes
       [
         'Block',
         declareC(5),
-        ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        ['Declare', 'h', "'unknown'", ['Function', ['Add', 'c', 'k'], 'k']],
         ['Map', ['Function', ['Add', ['h', 'k'], 1], 'k'], ['List', 1, 2]],
       ],
       '[7,8]',
@@ -596,7 +602,7 @@ describe('a function literal that leaves a block reads its locals on both routes
       [
         'Block',
         declareC(5),
-        ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+        ['Declare', 'h', "'unknown'", ['Function', ['Add', 'c', 'k'], 'k']],
         [
           'Block',
           ['Declare', 'd', { str: 'real' }, 10],
@@ -610,7 +616,7 @@ describe('a function literal that leaves a block reads its locals on both routes
       [
         'Block',
         declareC(5),
-        ['Assign', 'p', ['Function', ['Greater', 'k', 'c'], 'k']],
+        ['Declare', 'p', "'unknown'", ['Function', ['Greater', 'k', 'c'], 'k']],
         [
           'Filter',
           ['List', 4, 5, 6, 7],
@@ -637,7 +643,7 @@ describe('a function literal that leaves a block reads its locals on both routes
     const program = [
       'Block',
       declareC(5),
-      ['Assign', 'h', ['Function', ['Add', 'c', 'k'], 'k']],
+      ['Declare', 'h', "'unknown'", ['Function', ['Add', 'c', 'k'], 'k']],
       ['Map', ['Function', ['h', 'k'], 'k'], ['List', 1, 2]],
     ];
     const sync = new ComputeEngine().box(program as any).N();
@@ -783,7 +789,7 @@ describe('a function literal evaluated in a block of a function body reads the l
             [
               'Block',
               declareC(5),
-              ['Assign', 'g', literal],
+              ['Declare', 'g', "'unknown'", literal],
               ['Assign', 'c', 7],
               ['Apply', 'g', 'n'],
             ],

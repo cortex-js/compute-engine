@@ -108,7 +108,7 @@ not show that it fits, the call stays unevaluated:
 ```epsil
 function twice(k: integer) { 2*k }
 let r = twice(m)   // twice(m)
-m = 1.5
+let m = 1.5
 r                  // Error(ErrorCode("incompatible-type", "integer", "1.5"), …)
 ```
 

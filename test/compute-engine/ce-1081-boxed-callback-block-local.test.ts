@@ -30,7 +30,11 @@ function list(ce: ComputeEngine, x: Expression): string {
 function blockLocal(init: unknown): unknown {
   return [
     'Function',
-    ['Block', ['Assign', 'q', init], ['Multiply', 'q', ['Divide', 'row', 'row']]],
+    [
+      'Block',
+      ['Declare', 'q', "'unknown'", init],
+      ['Multiply', 'q', ['Divide', 'row', 'row']],
+    ],
     'row',
   ];
 }
@@ -91,7 +95,7 @@ describe('A LITERAL WITH A LOCAL, BOXED BEFORE A MAP OVER ROWS (CE-1081)', () =>
     const ce = new ComputeEngine();
     const SUM = [
       'Function',
-      ['Block', ['Assign', 'q', 't'], ['Add', 'a', 'q']],
+      ['Block', ['Declare', 'q', "'unknown'", 't'], ['Add', 'a', 'q']],
       'a',
       't',
     ];

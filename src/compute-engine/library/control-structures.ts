@@ -1,34 +1,26 @@
-import {
-  markCallableHome,
-  markSweptBinding,
-} from '../boxed-expression/binders.js';
+import { scopeActivation } from '../boxed-expression/ambient-chain.js';
+import { markCallableHome } from '../boxed-expression/binders.js';
 import { canonicalValueOperand } from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   applicable,
-  declareAssignmentLocals,
-  enterNestedBodyScopes,
   evaluateStatements,
   evaluateStatementsAsync,
-  exitNestedBodyScopes,
   resolveEscapingLambda,
 } from '../function-utils.js';
 import type { CallbackSupply } from '../boxed-expression/callback-arity.js';
 import { canonicalCallbackOperand } from './collections.js';
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import {
-  assignmentLocalsOf,
+  canonicalBranch,
+  canonicalStatement,
+  enterBody,
   enterFunctionBody,
+  exitBody,
   exitFunctionBody,
-  isInBranch,
   isFreeSymbolDeclarationInBody,
-  keptAssignmentLocalBoundary,
-  recordAssignmentLocals,
-  recordLaterDeclarationLocals,
-  withPairedFunctionNames,
-} from '../assignment-locals.js';
-import { noteAssignmentLocal } from '../boxed-expression/provisional-application.js';
-import { canonicalBranch, canonicalStatement } from '../statement-position.js';
+  isInBodyOrBranch,
+} from '../statement-position.js';
 import {
   CLAUSE_ROLE,
   everyOperand,
@@ -53,6 +45,7 @@ import {
   broadcastCellType,
   broadcastElementType,
   collectionElementType,
+  declaredTypeNamesMissing,
   functionResult,
   resolveTypeAlias,
   resolveTypeForCompilation,
@@ -94,15 +87,20 @@ import {
   isSubtype,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
-import type { FunctionSignature, Type } from '../../common/type/types.js';
+import type { Type } from '../../common/type/types.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
-import { functionLiteralDeclaredSignature } from '../boxed-expression/function-literal.js';
-import { isGenericTarget } from '../multi-clause.js';
 import {
-  canonInstallSkipped,
-  clauseSignatureOf,
-  sameParameterDomain,
-} from '../clause-identity.js';
+  functionLiteralDeclaredSignature,
+  functionLiteralParameterName,
+  functionLiteralParameterType,
+  functionLiteralReturnType,
+  isDestructuringParameter,
+  restParameterIndex,
+  requiredParameterCount,
+  restParameterSignatureTail,
+} from '../boxed-expression/function-literal.js';
+import { isGenericTarget } from '../multi-clause.js';
+import { canonInstallSkipped } from '../clause-identity.js';
 import {
   CancellationError,
   checkDeadline,
@@ -183,13 +181,7 @@ import {
   bindIndexAuthoritatively,
   substituteBinderValues,
 } from './utils.js';
-import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
-import { recordCanonicalLocal } from '../boxed-expression/declared-local.js';
-import { noteScopeDeclaration } from '../scope-declaration-count.js';
-import {
-  asyncEvaluationOf,
-  topLevelEvaluationEpoch,
-} from '../boxed-expression/evaluation-epoch.js';
+import { asyncEvaluationOf } from '../boxed-expression/evaluation-epoch.js';
 import {
   coarsenEvidenceType,
   isInEvidenceSession,
@@ -684,62 +676,32 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         );
       },
       canonical: (ops, options) => canonicalLoopLike('Loop', ops, options),
-      // While the loop runs, its own scope (the index) and the scopes nested
-      // in its body are marked as in use, so that a function literal
-      // evaluated in the body captures the current index value and the
-      // current body locals instead of reading the shared scopes later (see
-      // `captureNestedLocals`, `function-utils.ts`).
-      evaluate: (ops, { engine: ce, expression }) => {
-        const nested = enterNestedBodyScopes(expression, {
-          includeRoot: true,
-          save: false,
-        });
-        try {
-          return run(
-            runLoop(ops[0], ops.slice(1), ce),
-            ce._timeRemaining,
-            ce._deadlineFrame
-          );
-        } finally {
-          exitNestedBodyScopes(ce, nested);
-        }
-      },
+      evaluate: (ops, { engine: ce }) =>
+        run(
+          runLoop(ops[0], ops.slice(1), ce),
+          ce._timeRemaining,
+          ce._deadlineFrame
+        ),
       evaluateAsync: async (
         ops,
-        {
-          engine: ce,
+        { engine: ce, signal, effects, _contextStack, _precisionWindow }
+      ) =>
+        runAsync(
+          // The loop body is evaluated synchronously, and `runAsync`
+          // suspends this handler between time slices: every step must run
+          // with the host capability registry and the context stack (the
+          // scope of the loop index) this evaluation captured.
+          withEvaluationEffects(
+            ce,
+            effects,
+            runLoop(ops[0], ops.slice(1), ce),
+            _contextStack,
+            _precisionWindow
+          ),
+          ce._timeRemaining,
           signal,
-          effects,
-          expression,
-          _contextStack,
-          _precisionWindow,
-        }
-      ) => {
-        const nested = enterNestedBodyScopes(expression, {
-          includeRoot: true,
-          save: false,
-        });
-        try {
-          return await runAsync(
-            // The loop body is evaluated synchronously, and `runAsync`
-            // suspends this handler between time slices: every step must run
-            // with the host capability registry and the context stack (the
-            // scope of the loop index) this evaluation captured.
-            withEvaluationEffects(
-              ce,
-              effects,
-              runLoop(ops[0], ops.slice(1), ce),
-              _contextStack,
-              _precisionWindow
-            ),
-            ce._timeRemaining,
-            signal,
-            ce._deadlineFrame
-          );
-        } finally {
-          exitNestedBodyScopes(ce, nested);
-        }
-      },
+          ce._deadlineFrame
+        ),
     },
 
     Comprehension: {
@@ -830,21 +792,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // same. The static check reports a read written by name in the pass
       // (`src/epsil/parallel-checks.ts`), and a target that runs the passes
       // in parallel declines a pass that reads an accumulator.
-      evaluate: (ops, { engine: ce, expression }) => {
-        const nested = enterNestedBodyScopes(expression, {
-          includeRoot: true,
-          save: false,
-        });
-        try {
-          return run(
-            runLoop(ops[0], ops.slice(1), ce, true),
-            ce._timeRemaining,
-            ce._deadlineFrame
-          );
-        } finally {
-          exitNestedBodyScopes(ce, nested);
-        }
-      },
+      evaluate: (ops, { engine: ce }) =>
+        run(
+          runLoop(ops[0], ops.slice(1), ce, true),
+          ce._timeRemaining,
+          ce._deadlineFrame
+        ),
     },
 
     ParallelComprehension: {
@@ -925,15 +878,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // change the shape (a literal position folded into another head).
         // The equivalent assignment is canonicalized before the target: the
         // canonical symbol declares a name that no scope declares, and the
-        // assignment must see that name undeclared to report a first
-        // assignment in a branch (`equivalentAssign()`).
+        // assignment must see that name undeclared to report an assignment
+        // to an undeclared variable (`equivalentAssign()`).
         //
-        // For the same reason, the first assignment in a branch is checked
-        // on the raw target before the positions and the value are
-        // canonicalized, as the canonical `Assign` checks its target before
-        // its value: `t` in `AddTo(t, t)`, or `L` in
-        // `AddTo(At(L, Length(L)), 1)`, would otherwise be declared by the
-        // canonical value or position, and the check would not see it.
+        // For the same reason, the target is checked on the raw target
+        // before the positions and the value are canonicalized, as the
+        // canonical `Assign` checks its target before its value: `t` in
+        // `AddTo(t, t)`, or `L` in `AddTo(At(L, Length(L)), 1)`, would
+        // otherwise be declared by the canonical value or position, and the
+        // check would not see it.
         const name = isSymbol(target)
           ? target.symbol
           : isFunction(target, 'At') && isSymbol(target.op1)
@@ -942,11 +895,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         if (
           name !== undefined &&
           name !== 'Nothing' &&
-          isInBranch() &&
+          isInBodyOrBranch() &&
           !isDeclaredForAssignment(ce, name) &&
           !ce._isShadowedParameter(name)
         )
-          return ce.error(['first-assignment-in-branch', name]);
+          return ce.error(['assignment-to-undeclared-variable', name]);
         if (isFunction(target, 'At') && isSymbol(target.op1)) {
           const positions = target.ops.slice(1).map((x) => x.canonical);
           const v = value.canonical;
@@ -1271,10 +1224,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           ...ops.slice(1).map((c) => c.canonical),
         ];
         // A case of a `Match` is a branch, as a branch of an `If` is, in a
-        // block and at the top level: a first assignment of a name in it is
-        // a static error (`first-assignment-in-branch`). The case bodies
-        // stay raw, so the check reads their structure
-        // (`firstAssignmentInCase()`).
+        // block and at the top level: an assignment in it to a name that no
+        // scope declares is a static error
+        // (`assignment-to-undeclared-variable`). The case bodies stay raw,
+        // so the check reads their structure (`firstAssignmentInCase()`).
         for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
           (seg) => seg.cases
         )) {
@@ -1285,7 +1238,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
                 ? undefined
                 : firstAssignmentInCase(ce, part, captures);
             if (name !== undefined)
-              return ce.error(['first-assignment-in-branch', name]);
+              return ce.error(['assignment-to-undeclared-variable', name]);
           }
         }
         // An assignment in a case body to a local of the enclosing block is
@@ -3971,364 +3924,6 @@ function evaluateWhich(
   return options.engine.Missing;
 }
 
-/**
- * The block scopes whose bindings at the start of their first run are
- * recorded: each binding that the sweep kept at that time carries the
- * `_blockTemplate` mark. On the asynchronous route the key is the block
- * scope itself (the template), not the activation that the run uses.
- */
-const recordedBlockScopes = new WeakSet<Scope>();
-
-/**
- * What the sweep knows of the bindings that the runs of a block made (the
- * bindings of the block scope that have no `_blockTemplate` mark and no
- * `_declaredByStatement` mark: the implicit locals of its assignments).
- *
- * - `epoch`: the top-level evaluation of the last run
- *   (`topLevelEvaluationEpoch`, `boxed-expression/evaluation-epoch.ts`).
- * - `key`: the function call of the last run (`callActivationKey`).
- * - `saved`: for each other run key and each top-level evaluation, the
- *   bindings that the runs of the block made with that key in that
- *   evaluation, kept while a run of another key or evaluation (a recursive
- *   call) uses the block scope. They are put back only for a run of the same
- *   key and the same evaluation. A run of another evaluation is a new
- *   top-level evaluation, or an asynchronous evaluation that runs at the
- *   same time, which has its own number: its runs between two parts of this
- *   evaluation do not reset the locals of this evaluation. One key can have
- *   runs of several evaluations that alternate: each statement after the
- *   first of an asynchronous program block is a new top-level evaluation on
- *   the same frames (`beginAsyncStatement`, `evaluation-epoch.ts`), and an
- *   `evaluateAsync()` that an earlier statement started and did not await
- *   can still run. The outer map is weak: the entry of a call goes away with
- *   the scope of the call, so a sum of many calls (`Sum(g(k), k, 1, 10^5)`)
- *   does not keep an entry for each call. A call whose runs made no binding
- *   has no entry. `TOP_LEVEL_RUN` keeps the entry of one evaluation only.
- */
-type BlockRunState = {
-  epoch: number;
-  key: object;
-  saved: WeakMap<object, Map<number, Map<string, BoxedDefinition>>>;
-};
-
-/** Keyed by the block scope (the template on the asynchronous route). */
-const blockRunStates = new WeakMap<Scope, BlockRunState>();
-
-/** The key of a run of a synchronous top-level evaluation that is not inside
- * a function call. The number of the synchronous top-level evaluation of an
- * engine only grows, so a run with this key and an older number never comes
- * again (`sweepCanonicalizationBindings`). */
-const TOP_LEVEL_RUN = {};
-
-/**
- * The function call that the current run of a block is part of: the scope
- * of the innermost call frame on the evaluation-context stack (the
- * `freshScope` that `makeLambda` in `function-utils.ts` makes for each call
- * and pushes as a `'call'` frame).
- *
- * Outside any call, the key of the asynchronous evaluation that the run is
- * part of: the outermost activation on the stack (a copy of the scope of a
- * scoped node, made for one asynchronous evaluation of the node,
- * `asyncScopeActivation`, `boxed-expression/boxed-function.ts`), other than
- * the current scope. Before each asynchronous evaluation had its own number
- * (`topLevelEvaluationEpoch`), asynchronous evaluations that ran at the same
- * time shared one, and without this key, a run in one of them read the
- * locals of a run in another: `Promise.all` of three `evaluateAsync()` of
- * one `Sum` of a block gave `3t + 6`, `3t + 15` and `3t + 24`.
- *
- * When there is neither, the asynchronous evaluation whose context stack is
- * in place (`asyncEvaluationOf`, `boxed-expression/evaluation-epoch.ts`), or
- * `TOP_LEVEL_RUN` for a synchronous evaluation.
- */
-function callActivationKey(ce: ComputeEngine): object {
-  const stack = ce._evalContextStack;
-  for (let i = stack.length - 1; i >= 0; i--)
-    if (stack[i].name === 'call') return stack[i].lexicalScope;
-  const current = ce.context.lexicalScope;
-  for (const frame of stack)
-    if (
-      frame.lexicalScope !== current &&
-      scopeActivationTemplate(frame.lexicalScope) !== undefined
-    )
-      return frame.lexicalScope;
-  return asyncEvaluationOf(stack) ?? TOP_LEVEL_RUN;
-}
-
-/**
- * Prepare the block scope that is the current lexical scope for a new run of
- * the block. Shared by the synchronous and asynchronous block evaluators.
- *
- * - The canonicalization-time bookkeeping is removed: see the comment in
- *   `evaluateBlock`, which is the reason for this part of the sweep.
- * - An assignment to a name that has no binding in the scope chain
- *   (`x ≔ x + 1` with `x` not declared) makes a binding in the block scope
- *   with the assigned value: an implicit local of the block. As a variable of
- *   a JavaScript or Python function, this local keeps its value from one run
- *   of the block to the next inside one evaluation (the iterations of a loop
- *   whose body is the block: `Loop(Block(t ≔ t + 1; …), 1..3)` ends with
- *   `t + 3`), and starts with no value in a new top-level evaluation and in
- *   a new function call. Before, it also kept its value from one top-level
- *   evaluation to the next: `Block(x ≔ x + 1; 2x)` gave `2(x + 1)`, then
- *   `2(x + 2)`.
- *
- *   So, at the start of a run in a new top-level evaluation, the bindings
- *   that the runs of the block made are removed. At the start of a run in
- *   another function call, or in another evaluation, they are set aside for
- *   the call and the evaluation that made them, and the bindings of the new
- *   call and evaluation (if a run of the block in that call and evaluation
- *   made some) are put back. A run of another evaluation can come between
- *   two runs of one evaluation when the two are asynchronous evaluations
- *   that run at the same time, each with its own number. A recursive call that
- *   runs the block again then does not reset the locals of the calls around
- *   it for their next runs. The block scope is one object for all the
- *   calls. When the block is in the body of a function literal, an
- *   application of the literal that starts while another one runs saves the
- *   bindings and values of the block scope, and puts them back when it ends
- *   (`enterNestedBodyScopes`, `function-utils.ts`). So after a recursive
- *   call, the enclosing run reads its own locals again.
- *
- *   A binding that the block scope held before its first run (a function
- *   clause installed at canonicalization) is kept, and so is a local of a
- *   `Declare` statement (`_declaredByStatement`), which `createBlockLocals`
- *   (`function-utils.ts`) replaces at each run. An assignment to a name
- *   declared outside the block writes that outer binding and makes nothing
- *   here.
- *
- * On the asynchronous route the current scope is an activation: a copy of
- * the block scope made for this run (`asyncScopeActivation`,
- * `boxed-expression/boxed-function.ts`). The copy holds what the block scope
- * held when the run started, so a binding of the activation is kept only
- * when the binding of the same name in the block scope carries the mark, or
- * when the run is in the same evaluation and call as the last synchronous
- * run. The locals that an asynchronous run makes stay out of the block scope:
- * they are kept for the next asynchronous run of the same evaluation and
- * call in `asyncRunLocals` (`beginAsyncRun`, `endAsyncRun`).
- */
-function sweepCanonicalizationBindings(ce: ComputeEngine): void {
-  const scope = ce.context.lexicalScope;
-  const template = scopeActivationTemplate(scope) ?? scope;
-  type Marks = { _declaredByStatement?: boolean; _blockTemplate?: boolean };
-  const isValueless = (def: BoxedDefinition): boolean =>
-    'value' in def && def.value.value === undefined;
-  if (!recordedBlockScopes.has(template)) {
-    recordedBlockScopes.add(template);
-    for (const def of template.bindings.values())
-      if (!isValueless(def)) (def as Marks)._blockTemplate = true;
-  }
-  const remove = (name: string, def: BoxedDefinition): void => {
-    scope.bindings.delete(name);
-    // An occurrence boxed in the block still holds the removed binding: an
-    // argument of a call reads it in the scope of the block
-    // (`sweptCallerBinding`, `binders.ts`).
-    markSweptBinding(def, template);
-    // A binding with no value is one that the canonicalization made: its
-    // type is the static type of the local, which the `Declare` handler
-    // gives to the binding of each run (`canonicalLocalType()`,
-    // `library/core.ts`).
-    if (isValueless(def)) recordCanonicalLocal(template, name, def);
-    // A binding with a value changed what the name resolves to in this
-    // scope, so its removal is counted as a declaration of the scope
-    // (`noteScopeDeclaration`).
-    if (!isValueless(def)) noteScopeDeclaration(scope);
-  };
-  // The bindings that the runs of the block made
-  const madeByRuns = new Map<string, BoxedDefinition>();
-  for (const [name, def] of [...scope.bindings]) {
-    if ((def as Marks)._declaredByStatement === true) continue;
-    if (isValueless(def)) remove(name, def);
-    else if (
-      (template.bindings.get(name) as Marks | undefined)?._blockTemplate !==
-      true
-    )
-      madeByRuns.set(name, def);
-  }
-
-  const epoch = topLevelEvaluationEpoch(ce);
-  const key = callActivationKey(ce);
-  const state = blockRunStates.get(template);
-  // An asynchronous run: the bindings that the activation copied from the
-  // block scope were made by synchronous runs. They are kept only for a run
-  // of the same evaluation and call, and the state of the synchronous runs is
-  // not changed. The locals of the earlier asynchronous runs come from
-  // `asyncRunLocals` (`beginAsyncRun`).
-  if (scope !== template) {
-    if (state === undefined || state.epoch !== epoch || state.key !== key)
-      for (const [name, def] of madeByRuns) remove(name, def);
-    return;
-  }
-  if (state === undefined) {
-    for (const [name, def] of madeByRuns) remove(name, def);
-    blockRunStates.set(template, { epoch, key, saved: new WeakMap() });
-    return;
-  }
-  if (state.key === key && state.epoch === epoch) return;
-  // A run of another key (another function call), or of another top-level
-  // evaluation. The bindings of the last run are set aside for its key and
-  // evaluation. A synchronous top-level evaluation with no call
-  // (`TOP_LEVEL_RUN`) does not come back once a newer one runs, so its
-  // entry replaces the one of an older evaluation, and none is kept when
-  // the new run is of a newer such evaluation.
-  if (
-    madeByRuns.size > 0 &&
-    !(state.key === TOP_LEVEL_RUN && key === TOP_LEVEL_RUN)
-  ) {
-    let byEpoch = state.saved.get(state.key);
-    if (byEpoch === undefined || state.key === TOP_LEVEL_RUN) {
-      byEpoch = new Map();
-      state.saved.set(state.key, byEpoch);
-    }
-    byEpoch.set(state.epoch, madeByRuns);
-  }
-  for (const [name, def] of madeByRuns) remove(name, def);
-  const byEpoch = state.saved.get(key);
-  const restored = byEpoch?.get(epoch);
-  if (key === TOP_LEVEL_RUN) state.saved.delete(key);
-  else byEpoch?.delete(epoch);
-  if (restored !== undefined)
-    for (const [name, def] of restored) {
-      if (scope.bindings.has(name)) continue;
-      scope.bindings.set(name, def);
-      noteScopeDeclaration(scope);
-    }
-  state.key = key;
-  state.epoch = epoch;
-}
-
-/**
- * The implicit locals that the asynchronous runs of a block made, keyed by
- * the block scope, then by the run key (`callActivationKey`) of the
- * evaluation and call that the runs are part of, then by the number of the
- * evaluation of the runs (`topLevelEvaluationEpoch`). One run key can have
- * runs of several evaluations that alternate: each statement after the
- * first of an asynchronous program block is a new top-level evaluation on
- * the same frames (`beginAsyncStatement`, `evaluation-epoch.ts`), and an
- * `evaluateAsync()` that an earlier statement started and did not await can
- * still run. The map of run keys is weak, so the entries of a call or an
- * evaluation go away with its scope.
- */
-const asyncRunLocals = new WeakMap<
-  Scope,
-  WeakMap<object, Map<number, Map<string, BoxedDefinition>>>
->();
-
-/** An asynchronous run of a block, from `beginAsyncRun` to `endAsyncRun`. */
-type AsyncRun = {
-  activation: Scope;
-  template: Scope;
-  epoch: number;
-  key: object;
-};
-
-/**
- * Whether `def`, the binding of `name` in a scope of a block, is an implicit
- * local that a run of the block made: not a binding that the block scope
- * held before its first run (its `_blockTemplate` mark), not a `let` or
- * `const` local (`_declaredByStatement`, which `createBlockLocals` makes
- * again at each run), and not a binding with no value.
- */
-function isImplicitRunLocal(
-  template: Scope,
-  name: string,
-  def: BoxedDefinition
-): boolean {
-  type Marks = { _declaredByStatement?: boolean; _blockTemplate?: boolean };
-  return (
-    (def as Marks)._declaredByStatement !== true &&
-    !('value' in def && def.value.value === undefined) &&
-    (template.bindings.get(name) as Marks | undefined)?._blockTemplate !== true
-  );
-}
-
-/**
- * At the start of an asynchronous run of a block, after
- * `sweepCanonicalizationBindings`, put in the activation of the run (a copy
- * of the block scope made for the run, `asyncScopeActivation`,
- * `boxed-expression/boxed-function.ts`) the implicit locals that the last
- * asynchronous run of the same evaluation and call made. Return the run, for
- * `endAsyncRun`, or `undefined` when the run is not in an activation, or is
- * part of no call and no asynchronous evaluation that can run the block
- * again (`TOP_LEVEL_RUN`).
- *
- * An implicit local keeps its value from one run of the block to the next
- * inside one evaluation and one function call (see
- * `sweepCanonicalizationBindings`). A synchronous run writes it into the
- * block scope itself. An asynchronous run writes it into its activation, and
- * the next run copies the block scope, not that activation. So the locals
- * are kept here between the runs. Without this, each asynchronous run
- * started with no value for the local: with an operator that has only an
- * `evaluateAsync` handler in the body, `Sum(Block(t ≔ t + 1; …; t), k, 1, 3)`
- * gave `3t + 3` with `evaluateAsync()` and `3t + 6` with `evaluate()`. They
- * are not written into the block scope, because an asynchronous evaluation
- * that runs at the same time copies the block scope too, and must not read
- * them.
- */
-function beginAsyncRun(ce: ComputeEngine): AsyncRun | undefined {
-  const activation = ce.context.lexicalScope;
-  const template = scopeActivationTemplate(activation);
-  if (template === undefined) return undefined;
-  const key = callActivationKey(ce);
-  if (key === TOP_LEVEL_RUN) return undefined;
-  const run: AsyncRun = {
-    activation,
-    template,
-    epoch: topLevelEvaluationEpoch(ce),
-    key,
-  };
-  const stored = asyncRunLocals.get(template)?.get(key)?.get(run.epoch);
-  if (stored === undefined) return run;
-  // Replace the implicit locals that the activation holds (the sweep kept
-  // the ones that the synchronous runs of this evaluation and call made)
-  // with the ones of the last asynchronous run.
-  const bindings = activation.bindings;
-  const write = (name: string, def: BoxedDefinition | undefined): void => {
-    if (def === undefined) bindings.delete(name);
-    else bindings.set(name, def);
-    noteScopeDeclaration(activation);
-  };
-  for (const [name, def] of [...bindings])
-    if (!stored.has(name) && isImplicitRunLocal(template, name, def))
-      write(name, undefined);
-  for (const [name, def] of stored)
-    if (bindings.get(name) !== def) write(name, def);
-  return run;
-}
-
-/**
- * At the end of an asynchronous run of a block, keep the implicit locals of
- * its activation for the next asynchronous run of the same evaluation and
- * call (see `beginAsyncRun`).
- */
-function endAsyncRun(run: AsyncRun | undefined): void {
-  if (run === undefined) return;
-  let byKey = asyncRunLocals.get(run.template);
-  if (byKey === undefined) {
-    byKey = new WeakMap();
-    asyncRunLocals.set(run.template, byKey);
-  }
-  let byEpoch = byKey.get(run.key);
-  if (byEpoch === undefined) {
-    byEpoch = new Map();
-    byKey.set(run.key, byEpoch);
-  }
-  const locals = new Map<string, BoxedDefinition>();
-  for (const [name, def] of run.activation.bindings)
-    if (isImplicitRunLocal(run.template, name, def)) locals.set(name, def);
-  byEpoch.set(run.epoch, locals);
-}
-
-/**
- * Give each assignment local of the block whose scope is the current
- * lexical scope a binding with no value in that scope, when the scope does
- * not bind the name yet (`declareAssignmentLocals`, `function-utils.ts`).
- * The sweep removed the binding that the canonicalization made, and without
- * this one an assignment to the local wrote a binding of the same name made
- * after the block was canonicalized. On the asynchronous route the current
- * scope is an activation of the block scope, which holds the record.
- */
-function declareRunAssignmentLocals(ce: ComputeEngine): void {
-  const scope = ce.context.lexicalScope;
-  declareAssignmentLocals(ce, scopeActivationTemplate(scope) ?? scope, scope);
-}
-
 /** Evaluate a Block expression. */
 function evaluateBlock(
   ops: ReadonlyArray<Expression>,
@@ -4338,32 +3933,6 @@ function evaluateBlock(
   }: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression {
   if (ops.length === 0) return ce.Nothing;
-
-  // The Block's canonicalization scope was pushed as the runtime scope
-  // (scoped operator). Sweep stale canonicalization bookkeeping from it:
-  // *inferred, valueless* bindings are auto-declared references and hoisted
-  // `Declare`/`Assign` targets from the canonical pass. If left in place
-  // they shadow the runtime chain — e.g. a function *parameter* referenced
-  // from a Block nested inside the function body auto-declared a valueless
-  // shadow here at canonicalization, hiding the call value in the lambda's
-  // fresh scope. Runtime `Declare`/`Assign` statements re-create genuine
-  // block-locals below; reads of everything else resolve by name up the
-  // chain.
-  //
-  // The keep-test is "was this created by a `Declare` STATEMENT"
-  // (`_declaredByStatement`, set by the `Declare` handler) — NOT "is its type
-  // inferred". An auto-declared shadow inherits the DECLARED type of the outer
-  // binding it shadows, so an *annotated* parameter read from a nested Block
-  // left an explicitly-typed valueless shadow that the inferred-only test kept,
-  // and it then hid the call value in the lambda's fresh scope:
-  // `function s(k: number) { if 1 > 0 { k } else { 0 } }` returned the symbol
-  // `k`, while the same function with a bare `k` returned the argument.
-  // (Epsil wraps each `if` branch in a Block, which is why the conditional
-  // shape surfaced it.) Locals from a previous evaluation of this block carry
-  // the marker and are still kept — replaced when the statements start
-  // (`createBlockLocals`, called by `evaluateStatements`).
-  sweepCanonicalizationBindings(ce);
-  declareRunAssignmentLocals(ce);
 
   // If the block's final value is a bare symbol bound to a user-defined
   // function literal (`helper(x) = …` → a block-local operator definition),
@@ -4456,10 +4025,9 @@ function runsAsProgram(ce: ComputeEngine, async: boolean): boolean {
 }
 
 /**
- * The asynchronous twin of `evaluateBlock`: the same scope sweep, then the
- * statements awaited in order (`evaluateStatementsAsync`), so a statement
- * holding an asynchronous-only application is evaluated instead of staying
- * inert in the block's value.
+ * The asynchronous twin of `evaluateBlock`: the statements awaited in order
+ * (`evaluateStatementsAsync`), so a statement holding an asynchronous-only
+ * application is evaluated instead of staying inert in the block's value.
  */
 async function evaluateBlockAsync(
   ops: ReadonlyArray<Expression>,
@@ -4467,31 +4035,21 @@ async function evaluateBlockAsync(
 ): Promise<Expression> {
   const ce = options.engine;
   if (ops.length === 0) return ce.Nothing;
-  sweepCanonicalizationBindings(ce);
-  // Before the first `await`, while the activation of this run is still the
-  // current lexical scope.
-  const run = beginAsyncRun(ce);
-  declareRunAssignmentLocals(ce);
   // Read before the first `await`: the counts of running evaluations that
   // the test reads change while the statements run.
   const program = runsAsProgram(ce, true);
-  let result: Expression;
-  try {
-    result = await evaluateStatementsAsync(
-      ce,
-      ops,
-      options.signal,
-      options._effects,
-      options._contextStack,
-      // The numeric request reaches the last statement only, as in
-      // `evaluateBlock`.
-      options.numericApproximation ? true : undefined,
-      options._precisionWindow,
-      program
-    );
-  } finally {
-    endAsyncRun(run);
-  }
+  const result = await evaluateStatementsAsync(
+    ce,
+    ops,
+    options.signal,
+    options._effects,
+    options._contextStack,
+    // The numeric request reaches the last statement only, as in
+    // `evaluateBlock`.
+    options.numericApproximation ? true : undefined,
+    options._precisionWindow,
+    program
+  );
   // `resolveEscapingLambda` reads the block scope as the current lexical
   // scope. It runs after an `await`, so the context stack of this evaluation
   // (which holds the block scope) must be put in place explicitly.
@@ -4510,9 +4068,7 @@ async function evaluateBlockAsync(
  *
  *  Canonicalize a Block expression
  *
- * - Hoist any `Declare` expression to the top of the block
- * - Add a `Declare` expression for any `Assign` expression
- * - Error for any `Declare` expression that's an argument to a function
+ * - Hoist the target of each `Declare` statement to the top of the block
  *
  */
 
@@ -4648,7 +4204,9 @@ export function staticDeclarations(
         if (source !== undefined && source !== 'unknown') {
           try {
             const parsed = parseType(source, ce._typeResolver);
-            if (isValidType(parsed)) {
+            // A type that names `missing` cannot be declared: the `Declare`
+            // reports it when it runs.
+            if (isValidType(parsed) && !declaredTypeNamesMissing(parsed)) {
               declaredTypes.set(nameExpr.symbol, parsed);
               explicitlyDeclared.add(nameExpr.symbol);
             }
@@ -4745,8 +4303,16 @@ function canonicalBlock(
         scope !== undefined &&
         ce._shadowedParameterBoundary(name) === scope.parent) ||
       parentBinderNames?.has(name) === true;
+    // A function statement declares a local too (`localFunctionName()`).
     for (const statement of ops) {
       const op = typedStatement(statement);
+      const local = localFunctionName(ce, op);
+      if (local !== undefined) {
+        if (redeclares(local))
+          refused.set(statement, ce.error(['variable-redeclaration', local]));
+        else accepted.add(local);
+        continue;
+      }
       if (!isFunction(op, 'Declare')) continue;
       const target = op.ops[0];
       const names = (
@@ -4764,21 +4330,10 @@ function canonicalBlock(
   }
   const hoistedNames = declaredNames.filter((name) => accepted.has(name));
 
-  // The names that this block hoists into its scope below, each with the
-  // index of the first statement that declares it (a `Declare`, an `Assign`
-  // or a `DefineFunction`). Kept only for the top-level block of a program
-  // (`isProgramBlock()`): see `LATER_DECLARATIONS`.
   const programBlock = scope !== undefined && isProgramBlock(ce, scope);
-  const firstDeclaration = programBlock ? new Map<string, number>() : undefined;
-  // The index of the first statement that declares each name, read in one
-  // pass over the statements.
-  const firstIndex =
-    firstDeclaration !== undefined ? firstDeclarationIndex(ops) : undefined;
-  const noteHoisted = (name: string): void => {
-    if (firstDeclaration === undefined || firstDeclaration.has(name)) return;
-    const at = firstIndex?.get(name);
-    if (at !== undefined) firstDeclaration.set(name, at);
-  };
+  // For the top-level block of a program (`isProgramBlock()`), the index of
+  // the first statement that declares each name.
+  const firstIndex = programBlock ? firstDeclarationIndex(ops) : undefined;
   // In the top-level block of a program, the `let` or `const` names of a
   // library constant (`i`, `e`, `Pi`, …) that a statement after the first
   // one declares. The block declares such a name, and makes it shadow the
@@ -4799,29 +4354,23 @@ function canonicalBlock(
   );
 
   // Hoist the block's own locals into the block scope BEFORE canonicalizing
-  // the statements. `Declare`/`Assign` only register their symbol at
-  // *evaluation* time, so without this a reference to a block-local from a
+  // the statements. `Declare` only registers its symbol at *evaluation*
+  // time, so without this a reference to a block-local from a
   // nested scope (an inner `Block`, an `If` branch inside a `Loop` body, …)
   // finds no binding during canonicalization and auto-declares a valueless
   // shadow in the *inner* scope — which then permanently hides the enclosing
   // block's runtime binding (the canonicalization-scope-vs-runtime-scope
   // defect: `Block(Declare(k), Assign(k, 7), Block(k))` evaluated to `k`).
   //
-  // - A top-level `Declare(name, …)` always introduces a block-local.
-  // - A top-level `Assign(name, …)` introduces a block-local only when the
-  //   name is not visible in the scope chain (assignment to a visible
-  //   binding — including a constant, which errors at runtime — must keep
-  //   binding upward).
+  // Only a `Declare` statement of the block introduces a block-local. An
+  // `Assign` writes the binding that is in scope, and an `Assign` to a name
+  // that no scope declares is an error (`isInBodyOrBranch()`).
   //
-  // The hoisted binding is identical to an auto-declared one (inferred type,
-  // no value), so the `Declare` evaluate handler upgrades it in place at
-  // runtime exactly as it upgrades an auto-declared binding. A
-  // statically-readable declared type rides on the binding (still marked
-  // `inferred`, still valueless — both the evaluate-time upgrade and the
-  // stale-binding hiding in `hideBodyScopeParams` key on that pair, so
-  // runtime behavior is unchanged); it is what lets reads of the local later
-  // in the block, and the compiler's operand type gates, see the type the
-  // program declared.
+  // The hoisted binding is the static definition of the local: each run of
+  // the block writes its value in the activation of the run. A
+  // statically-readable declared type is the declared type of the binding;
+  // it is what lets reads of the local later in the block, and the
+  // compiler's operand type gates, see the type the program declared.
   // A name that cannot be bound (`UNBINDABLE_NAMES`: `Nothing`, `Missing`,
   // `Module`) is not hoisted: its `Declare` defines nothing, and a local of
   // that name would capture the later reads of the absence marker (a
@@ -4836,7 +4385,10 @@ function canonicalBlock(
     }
     const hoisted = ce._declareSymbolValue(
       name,
-      { type: declaredTypes.get(name) ?? 'unknown', inferred: true },
+      {
+        type: declaredTypes.get(name) ?? 'unknown',
+        inferred: !explicitlyDeclared.has(name),
+      },
       scope
     );
     // A block local, not a free symbol: see `_blockLocal`.
@@ -4847,167 +4399,32 @@ function canonicalBlock(
     }
   };
   if (scope) {
-    for (const name of hoistedNames) {
-      if (deferred.has(name)) continue;
-      if (!UNBINDABLE_NAMES.has(name) && !scope.bindings.has(name)) {
+    for (const name of hoistedNames)
+      if (!deferred.has(name) && !scope.bindings.has(name))
         hoistDeclared(scope, name);
-        noteHoisted(name);
-      }
-    }
-    // The names that the `Assign` statements below make locals of the
-    // block. Each run of the block gives each of them a new binding, so an
-    // assignment to it never writes a binding of the same name made later
-    // (`declareAssignmentLocals`, `function-utils.ts`).
-    const assignmentLocals: string[] = [];
-    // The assignment locals that a binding of an enclosing scope would have
-    // taken, if a later statement of the top-level block of a program had
-    // not declared it, or if the binding had existed when the function
-    // literal of this block was first written (`recordLaterDeclarationLocals`,
-    // `withKeptAssignmentLocals`).
-    const laterDeclarationLocals: string[] = [];
-    // A block in a branch of a conditional or in the body of a loop
-    // (`isInBranch()`) declares no local by assignment: a first assignment
-    // of a name there is a static error. The name must be declared with a
-    // value before the branch, so that it has a value on every path.
-    const inBranch = isInBranch();
+    // A function statement of a block (`localFunctionName()`) makes a
+    // local, as a `Declare` does: a variable whose type is the signature
+    // that the statement writes (`writtenSignatureOf()`) and whose value, in
+    // a run of the block, is the function value that the statement makes
+    // when it runs.
     for (const statement of ops) {
-      const op = typedStatement(statement);
-      const target = isFunction(op, 'Assign') ? op.ops[0] : undefined;
-      // A destructuring assignment `(x, y) := v` binds one local per pattern
-      // leaf (nested patterns included, `_` positions bind nothing), on the
-      // same rule as a plain symbol target: each leaf that is not visible in
-      // the scope chain is a block-local. Without this the leaves were never
-      // hoisted, so a read of one on a route that never evaluates — a
-      // compile — saw no binding at all, and the `Assign` canonical handler
-      // had no binding to record the leaf's type on.
-      const names =
-        target === undefined
-          ? []
-          : isFunction(target, 'Tuple')
-            ? tuplePatternNames(target)
-            : [sym(target)];
-      for (const name of names) {
-        if (!name || name === 'Nothing') continue;
-        if (scope.bindings.has(name) || isDeclaredInScopeChain(ce, name))
-          continue;
-        // A parameter of an enclosing function literal is declared after
-        // the body of that literal is canonicalized, so `lookupDefinition`
-        // does not find it yet; the shadowed-parameter stack holds its name.
-        // An assignment to it writes the parameter, and is not a local.
-        if (isShadowedByEarlierDeclaration(ce, name)) continue;
-        if (inBranch) {
-          if (!refused.has(statement))
-            refused.set(
-              statement,
-              ce.error(['first-assignment-in-branch', name])
-            );
-          continue;
-        }
-        assignmentLocals.push(name);
-        noteAssignmentLocal(name);
-        if (
-          ce.lookupDefinition(name) !== undefined ||
-          ce._isShadowedParameter(name)
-        )
-          laterDeclarationLocals.push(name);
-        const hoisted = ce._declareSymbolValue(
-          name,
-          { type: 'unknown', inferred: true },
-          scope
-        );
-        // A block local introduced by assignment: see `_blockLocal`.
-        if (isValueDef(hoisted)) {
-          hoisted.value._blockLocal = true;
-          markCallableHome(hoisted, scope);
-        }
-        noteHoisted(name);
+      const name = localFunctionName(ce, typedStatement(statement));
+      if (name === undefined || scope.bindings.has(name)) continue;
+      if (refused.has(statement)) continue;
+      const hoisted = ce._declareSymbolValue(
+        name,
+        {
+          type: writtenSignatureOf(typedStatement(statement)),
+          inferred: false,
+        },
+        scope
+      );
+      if (isValueDef(hoisted)) {
+        hoisted.value._blockLocal = true;
+        markCallableHome(hoisted, scope);
       }
-    }
-    recordAssignmentLocals(scope, assignmentLocals);
-    recordLaterDeclarationLocals(scope, laterDeclarationLocals);
-    // A one-step function definition written inside a block —
-    // `DefineFunction(name, Function(…))`, the surface form `name(x) = …` —
-    // is BLOCK-LOCAL, on the same rule as `Declare`: it binds in the block it
-    // is written in, SHADOWS a same-named outer function instead of
-    // overwriting it, and dies with the frame.
-    //
-    // Hoisting the name here is what makes that true. `defineFunctionClause`
-    // (multi-clause.ts) installs onto the binding it finds by walking the
-    // scope chain, so with no block-scope binding to find it reaches up: a
-    // nested `sq(m) = m * m` left `sq` callable at top level once the
-    // enclosing function was defined, and a nested definition of an existing
-    // outer function replaced it permanently. The explicit two-step form
-    // (`let sq; sq(m) = m * m`) already behaved correctly precisely because
-    // the `Declare` hoist above gave it a block-scope binding to install on.
-    //
-    // Unconditional, unlike the `Assign` hoist: a visible outer binding is
-    // exactly the case that must be shadowed rather than written through.
-    // The exception is a name owned by a declared nominal type, whose
-    // definition is a smart-CONSTRUCTOR definition: types are engine-global,
-    // not scoped, so that definition must reach the type's constructor.
-    //
-    // The name is declared `function`-typed (not `unknown`) so that a call to
-    // it later in the block resolves to this binding as an applicable
-    // operator instead of deferring past it to the outer definition
-    // (`lookupApplicable`, boxed-expression/lookup.ts).
-    //
-    // The type-registry check below is wider than the constructor test of
-    // `isFunctionDeclarationStatement()`: it also leaves out a same-name
-    // function of an ALIAS type. Such a definition is not made block-local,
-    // so its clause still reaches the binding that the alias declaration
-    // made.
-    for (const statement of ops) {
-      const op = typedStatement(statement);
-      if (
-        !isFunction(op, 'DefineFunction') ||
-        !isFunctionDeclarationStatement(ce, op)
-      )
-        continue;
-      const name = sym(op.ops[0]);
-      if (!name || name === 'Nothing') continue;
-      if (scope.bindings.has(name)) continue;
-      if (ce._typeRegistry[name]?.def !== undefined) continue;
-      ce._declareSymbolValue(name, { type: 'function', inferred: true }, scope);
-      noteHoisted(name);
     }
   }
-
-  // The names hoisted above that no statement before the current one
-  // declares, for a top-level block of a program (`LATER_DECLARATIONS`).
-  // Before each statement is canonicalized, the names that it declares
-  // first are removed from the set.
-  const later =
-    firstDeclaration !== undefined && scope !== undefined
-      ? new Set(firstDeclaration.keys())
-      : undefined;
-  if (later !== undefined) LATER_DECLARATIONS.set(scope!, later);
-  // The same names, grouped by the index of the statement that declares
-  // them first.
-  const declaredFirstAt = new Map<number, string[]>();
-  if (firstDeclaration !== undefined)
-    for (const [name, at] of firstDeclaration) {
-      const names = declaredFirstAt.get(at);
-      if (names === undefined) declaredFirstAt.set(at, [name]);
-      else names.push(name);
-    }
-
-  // The names that the function definition statements of this block define.
-  const functionStatementNames = functionDefinitionNames(ops);
-
-  // The parameter domains of the function clauses that the statements of
-  // this block define, for each name (`blockClauseRedefinition()`). Only a
-  // block of an Epsil program has this record: while `executeEpsil()` runs
-  // (`_epsilBatchId`) or while the static pass of `epsil check` runs
-  // (`_staticTypeCheckDepth`). On the host route a clause with the parameter
-  // domain of an earlier clause replaces it, as the guide documents for
-  // `DefineFunction`. The top-level block of a program has no record either:
-  // there, the installation of each clause and the static pass make the
-  // check for the statements of an Epsil program.
-  const blockClauses =
-    !programBlock &&
-    (ce._epsilBatchId !== undefined || ce._staticTypeCheckDepth > 0)
-      ? new Map<string, FunctionSignature[]>()
-      : undefined;
 
   // The scope that encloses the block: the boundary of the shadow of its
   // names (`_shadowedParameterBoundary()`).
@@ -5020,6 +4437,7 @@ function canonicalBlock(
   // The number of frames pushed for the names in `deferred`.
   let deferredFrames = 0;
   let statements: Expression[];
+  enterBody();
   try {
     // We canonicalize the statements in the local scope. A refused
     // re-declaration stands as its error value.
@@ -5030,8 +4448,6 @@ function canonicalBlock(
     statements = withEvidenceSession(ce, () =>
       ce._inScope(scope, () =>
         ops.map((op, i) => {
-          if (later !== undefined)
-            for (const name of declaredFirstAt.get(i) ?? []) later.delete(name);
           // Declare the names in `deferred` that this statement declares
           // first, and make them shadow the library constants from here on.
           const declaredHere = [...deferred].filter(
@@ -5054,23 +4470,7 @@ function canonicalBlock(
           // literal binds it), it is a variable, as in `x + N`.
           // The repair runs here, once the scope of the block and its locals
           // exist, so that a local `N` stays the local.
-          // A `Declare` of a function signature without a value is valid
-          // when a function definition statement of the same name is in
-          // this block (`withPairedFunctionNames()`).
-          const statement = isFunction(typedStatement(op), 'Declare')
-            ? withPairedFunctionNames(functionStatementNames, () =>
-                canonicalStatement(ce, op)
-              )
-            : canonicalStatement(ce, op);
-          if (blockClauses !== undefined) {
-            const redefinition = blockClauseRedefinition(
-              ce,
-              op,
-              statement,
-              blockClauses
-            );
-            if (redefinition !== undefined) return redefinition;
-          }
+          const statement = canonicalStatement(ce, op);
           return isSymbol(statement)
             ? canonicalValueOperand(ce, statement)
             : statement;
@@ -5078,13 +4478,13 @@ function canonicalBlock(
       )
     );
   } finally {
+    exitBody();
     for (; deferredFrames > 0; deferredFrames -= 1) ce._popShadowedParameters();
     ce._popShadowedParameters();
-    if (later !== undefined) LATER_DECLARATIONS.delete(scope!);
   }
 
   if (scope !== undefined)
-    statements = withUseBeforeDeclarationErrors(ce, ops, statements, scope);
+    statements = withUseBeforeDeclarationErrors(ce, ops, statements);
 
   return ce._fn('Block', statements, { scope });
 }
@@ -5121,96 +4521,55 @@ export function declareHasValue(args: ReadonlyArray<Expression>): boolean {
 }
 
 /**
- * The error `function-redefinition` when the block statement `op` defines a
- * clause of a function whose parameter domain is the domain of a clause that
- * an earlier statement of the same block defines, else `undefined`.
- * `canonical` is the canonical form of `op`, and `clauses` holds, for each
- * name, the parameter domains of the clauses that the earlier statements of
- * the block define. The function adds the clause of `op` to `clauses` when it
- * is not a redefinition.
- *
- * In an Epsil program, two clauses of one function with the same parameter
- * domain are an error, because the second would replace the first with no
- * message (`f(x) = x` then `f(x) = 2 * x`; the parameter names do not count).
- * The caller, `canonicalBlock()`, calls this function only for a block of an
- * Epsil program: on the host route the second clause replaces the first. At the
- * top level of an Epsil program, the installation of the second clause
- * (`checkSameUnitClauseRedefinition()`) and the static pass of `epsil check`
- * report it. Those checks do not see the statements of a function body or of
- * a block, so the block refuses the second statement here, as it refuses a
- * second `let` of a name. The error makes the block invalid: a function whose
- * body has it is not defined, and the static pass reports it before the
- * program runs. Clauses with different parameter domains (another arity,
- * another parameter type, a literal parameter) add to the function.
- *
- * The domain is the one that `defineFunctionClause()` (`multi-clause.ts`)
- * compares to choose between replacing a clause and adding one. These
- * statements are not compared:
- * - a generic clause: a second clause of a generic function is the error
- *   `generic-clause-unsupported`;
- * - a definition of the constructor of a declared type, which is not a clause
- *   (`isFunctionDeclarationStatement()`);
- * - a definition that the canonical handler of `DefineFunction` did not
- *   install for another reason (`canonInstallSkipped()`). It is not recorded,
- *   so that a later clause is not reported as the redefinition of a clause
- *   that does not exist.
- *
- * An assignment of the name (`f = (x) => 42`), or a declaration of the name
- * with a value (`let f = (x) => 42`), removes the clauses recorded for it,
- * because it replaces all the clauses of the function. A declaration without
- * a value (`let f: (integer) -> integer`) states a signature and replaces no
- * clause, so it removes nothing, as at the top level
- * (`forgetReplacedClauses()`, `src/epsil/static-diagnostics.ts`).
+ * The name of the local that the statement `op` of a block declares when it
+ * is a function statement (`isFunctionDeclarationStatement()`), or
+ * `undefined`. The definition of the constructor of a declared type, or of
+ * a function of the same name as an alias type, is not a local: types are
+ * engine-global, and the definition reaches the binding of the type.
  */
-function blockClauseRedefinition(
+function localFunctionName(
   ce: ComputeEngine,
-  op: Expression,
-  canonical: Expression,
-  clauses: Map<string, FunctionSignature[]>
-): Expression | undefined {
-  const raw = typedStatement(op);
-  if (!isFunction(raw, 'DefineFunction')) {
-    if (
-      isFunction(raw, 'Assign') ||
-      (isFunction(raw, 'Declare') && declareHasValue(raw.ops))
-    )
-      for (const name of statementDeclaredNames(op)) clauses.delete(name);
+  op: Expression
+): string | undefined {
+  if (!isFunction(op) || !isFunctionDeclarationStatement(ce, op))
     return undefined;
-  }
-  if (!isFunctionDeclarationStatement(ce, raw)) return undefined;
-  const statement = typedStatement(canonical);
-  if (!isFunction(statement, 'DefineFunction')) return undefined;
-  const name = sym(statement.ops[0]);
-  const literal = statement.ops[1];
-  if (name === undefined || !isFunction(literal, 'Function')) return undefined;
-  const literalType = literal.type.type;
-  if (isPolymorphicType(literalType)) return undefined;
-  const signature = clauseSignatureOf(literalType);
-  const defined = clauses.get(name) ?? [];
-  if (defined.some((earlier) => sameParameterDomain(earlier, signature)))
-    return ce.error(['function-redefinition', name]);
-  if (!canonInstallSkipped(ce.lookupDefinition(name))) {
-    defined.push(signature);
-    clauses.set(name, defined);
-  }
-  return undefined;
+  const name = sym(op.ops[0])!;
+  return ce._typeRegistry[name]?.def === undefined ? name : undefined;
 }
 
 /**
- * The names that the `DefineFunction` statements of the statement list
- * `ops` define (the Epsil `function f(…) { … }` and `f(x) = …`).
+ * The type of the local that the function statement `op` declares: the
+ * signature that its literal writes, when it writes a type. An unannotated
+ * parameter is `unknown`, and so is an absent result type; nothing is read
+ * from the body. A literal that writes no type, or that has a destructuring
+ * parameter, which a signature does not state, gives `function`.
  */
-export function functionDefinitionNames(
-  ops: ReadonlyArray<Expression>
-): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const statement of ops) {
-    const op = typedStatement(statement);
-    if (!isFunction(op, 'DefineFunction')) continue;
-    const name = sym(op.ops[0]);
-    if (name) names.add(name);
-  }
-  return names;
+function writtenSignatureOf(op: Expression): Type {
+  const literal = isFunction(op) ? op.ops[1] : undefined;
+  if (literal === undefined || !isFunction(literal, 'Function'))
+    return 'function';
+  const declared = functionLiteralDeclaredSignature(literal);
+  if (declared !== undefined) return declared;
+  const params = literal.ops.slice(1);
+  const result = functionLiteralReturnType(literal);
+  const types = params.map(functionLiteralParameterType);
+  if (result === undefined && types.every((t) => t === undefined))
+    return 'function';
+  if (params.some(isDestructuringParameter)) return 'function';
+  const rest = restParameterIndex(params);
+  const fixed = rest < 0 ? params : params.slice(0, rest);
+  const slots = fixed.map((p, i) => ({
+    name: functionLiteralParameterName(p),
+    type: types[i] ?? ('unknown' as Type),
+  }));
+  const required = requiredParameterCount(fixed);
+  return {
+    kind: 'signature',
+    ...(required > 0 ? { args: slots.slice(0, required) } : {}),
+    ...(required < slots.length ? { optArgs: slots.slice(required) } : {}),
+    ...restParameterSignatureTail(params),
+    result: result ?? 'unknown',
+  };
 }
 
 /**
@@ -5220,15 +4579,12 @@ export function functionDefinitionNames(
  * `["Error", ["ErrorCode", "read-before-declaration", name]]`. `ops` are the
  * statements as they were before canonicalization, in the same order.
  *
- * A local of the block is a name that a `Declare` statement declares, or an
- * assignment local (the target of a first assignment at the own level of
- * the block, `assignmentLocalsOf()`). A use is a read of the name, or an
- * assignment to it, that runs when the statement runs:
- *
- * - in a statement before the declaration (`do { a = k; let k = 2 }`);
- * - in the value of the first assignment that declares the name
- *   (`t = t + 1`). The value of a `Declare` reads the binding of an
- *   enclosing scope (`let t = t * 2`), so it is not a use.
+ * A local of the block is a name that a `Declare` statement or a function
+ * statement (`localFunctionName()`) declares. A use
+ * is a read of the name, or an assignment to it, that runs when the
+ * statement runs, in a statement before the declaration
+ * (`do { a = k; let k = 2 }`). The value of a `Declare` reads the binding of
+ * an enclosing scope (`let t = t * 2`), so it is not a use.
  *
  * A use in a function literal is not counted: it runs when the function is
  * called, which can be after the declaration. A use in a nested scope that
@@ -5244,8 +4600,7 @@ export function functionDefinitionNames(
 function withUseBeforeDeclarationErrors(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  statements: Expression[],
-  scope: Scope
+  statements: Expression[]
 ): Expression[] {
   // A block built again from statements that are canonical already (a
   // rebuild of a part of a canonical expression) was checked when the
@@ -5253,30 +4608,36 @@ function withUseBeforeDeclarationErrors(
   if (ops.every((op) => op.isCanonical)) return statements;
   // The index of the statement that declares each local of the block.
   const declaredAt = new Map<string, number>();
-  const assignmentLocals = new Set(assignmentLocalsOf(scope) ?? []);
   ops.forEach((raw, i) => {
     const op = typedStatement(raw);
-    let names: string[] = [];
-    if (isFunction(op, 'Declare'))
-      names = isFunction(op.ops[0], 'Tuple')
-        ? tuplePatternNames(op.ops[0])
-        : [sym(op.ops[0])].filter((n): n is string => n !== undefined);
-    else if (isFunction(op, 'Assign') && op.ops[0] !== undefined)
-      names = (
-        isFunction(op.ops[0], 'Tuple')
-          ? tuplePatternNames(op.ops[0])
-          : [sym(op.ops[0])].filter((n): n is string => n !== undefined)
-      ).filter((n) => assignmentLocals.has(n));
+    const local = localFunctionName(ce, op);
+    if (local !== undefined && !declaredAt.has(local)) declaredAt.set(local, i);
+    if (!isFunction(op, 'Declare')) return;
+    const names = isFunction(op.ops[0], 'Tuple')
+      ? tuplePatternNames(op.ops[0])
+      : [sym(op.ops[0])].filter((n): n is string => n !== undefined);
     for (const name of names)
       if (name !== 'Nothing' && !declaredAt.has(name)) declaredAt.set(name, i);
   });
-  // A function definition statement (`DefineFunction`) gives its name its
-  // value from the start of the block: the definition is hoisted. So a use
-  // of the name before any statement of the block is valid
-  // (`function g(k) { k + 1 }; g = (k) => k + 5`).
-  for (const name of functionDefinitionNames(ops)) declaredAt.delete(name);
   if (declaredAt.size === 0) return statements;
+  const check = useBeforeDeclarationCheck(ce, declaredAt);
+  return statements.map((statement, i) => check(statement, i) ?? statement);
+}
 
+/**
+ * The check of `withUseBeforeDeclarationErrors()` for a list of statements
+ * whose locals are declared at the indexes `declaredAt`: a function that
+ * gives, for the canonical form `statement` of the statement at index `i`,
+ * the static error `read-before-declaration` when the statement uses a local
+ * before the statement that declares it, else `undefined`. The top level of
+ * an Epsil program, which the runner boxes one statement at a time, uses it
+ * for each statement (`boxTopLevelStatement()`,
+ * `src/epsil/static-diagnostics.ts`).
+ */
+export function useBeforeDeclarationCheck(
+  ce: ComputeEngine,
+  declaredAt: ReadonlyMap<string, number>
+): (statement: Expression, i: number) => Expression | undefined {
   // The nodes that `findUse()` walked with no use found, for each value of
   // `limit` and of `shadowed`. Such a node is not walked again: a value
   // built by sharing a node at each level (`Beta(t, t)`) has few distinct
@@ -5338,14 +4699,10 @@ function withUseBeforeDeclarationErrors(
   };
 
   const none: ReadonlySet<string> = new Set();
-  return statements.map((statement, i) => {
-    if (!statement.isValid) return statement;
-    // The value of the first assignment that declares a name reads the
-    // name as the value of a `Declare` does (`x := x + 1` is
-    // `Declare(x, "unknown", x + 1)`): it is not a use before the
-    // declaration.
+  return (statement, i) => {
+    if (!statement.isValid) return undefined;
     const found = findUse(statement, i, none);
-    if (found === undefined) return statement;
+    if (found === undefined) return undefined;
     const code = ce.function(
       'ErrorCode',
       [ce.string('read-before-declaration'), ce.string(found.name)],
@@ -5354,20 +4711,20 @@ function withUseBeforeDeclarationErrors(
         : { metadata: { sourceOffsets: found.site } }
     );
     return ce.function('Error', [code]);
-  });
+  };
 }
 
 /**
  * The first name that the raw guard or body `part` of a case of a `Match`
  * assigns and that no scope declares, or `undefined`.
  *
- * Such an assignment is a first assignment in a branch, which is a static
- * error. A name is declared when a scope of the scope chain declares it,
+ * Such an assignment is an assignment to an undeclared variable, which is a
+ * static error. A name is declared when a scope of the scope chain declares it,
  * when it is a parameter of an enclosing function literal, when it is a
  * capture of the pattern of the case (`captures`), or when a `Declare` in
  * `part` declares it (a `let` local of the case). The body of a function
- * literal in `part` is not read: a first assignment there declares a local
- * of that body.
+ * literal in `part` is not read: the boxing of that body checks its own
+ * assignments.
  */
 function firstAssignmentInCase(
   ce: ComputeEngine,
@@ -5442,74 +4799,6 @@ function assignmentTypeMismatchIn(
 function containsAssignment(e: Expression): boolean {
   if (!isFunction(e)) return false;
   return e.operator === 'Assign' || e.ops.some(containsAssignment);
-}
-
-/**
- * For the top-level block of a program, while one of its statements is
- * canonicalized: the names that the block hoisted into its scope and that no
- * earlier statement declares (with a `let`, a `const`, an assignment or a
- * `function` statement). The key is the scope of the block.
- *
- * `canonicalBlock()` declares all the names of a block in its scope before
- * it canonicalizes the statements, so that a forward reference finds its
- * binding. A function body decides at canonicalization which names it owns
- * (`isDeclaredInScopeChain()`): an assignment to a name that no enclosing
- * scope declares makes a local of the body. For a name in this set, the
- * hoisted binding does not count. Thus, in
- * `function g(k) { t = k + 1; t }; let t = 0; [g(1), g(2), t]`, `t` is a
- * local of `g`, and the value is `[2, 3, 0]`. This is also what
- * `executeEpsil()` gives, because it canonicalizes one top-level statement
- * at a time.
- *
- * A read of a name is not changed: it finds the hoisted binding, as before.
- * A block that is not the top-level block of a program (a function body, a
- * `do` block) declares its names when it starts, as documented in
- * `src/epsil/docs/declarations.md`.
- *
- * The Epsil runner uses the same set for its program scope
- * (`markLaterDeclarations()`, `laterDeclarationReached()`): before it
- * installs a `function` statement ahead of its turn, it declares the names
- * of the statements before that statement, and these names are later
- * declarations for the statements before them.
- */
-const LATER_DECLARATIONS = new WeakMap<Scope, Set<string>>();
-
-/**
- * Add `names` to the later declarations of `scope` (`LATER_DECLARATIONS`):
- * bindings of `scope` that a function body canonicalized from now on does
- * not count as declared, so an assignment to one of these names in the body
- * makes a local of the body. A read of the name still finds the binding.
- *
- * Used by the Epsil runner (`prepareFunctionDeclarations()`,
- * `execute-epsil.ts`) for the names that it declares in the program scope
- * before the statement that declares them runs. The runner removes each
- * name with `laterDeclarationReached()` before it boxes that statement.
- */
-export function markLaterDeclarations(
-  scope: Scope,
-  names: Iterable<string>
-): void {
-  let later = LATER_DECLARATIONS.get(scope);
-  for (const name of names) {
-    if (later === undefined) {
-      later = new Set();
-      LATER_DECLARATIONS.set(scope, later);
-    }
-    later.add(name);
-  }
-}
-
-/**
- * Remove `name` from the later declarations of `scope`
- * (`markLaterDeclarations()`): the statement that declares it is reached,
- * and from now on the binding counts as declared. The entry of `scope` is
- * removed when no name is left.
- */
-export function laterDeclarationReached(scope: Scope, name: string): void {
-  const later = LATER_DECLARATIONS.get(scope);
-  if (later === undefined) return;
-  later.delete(name);
-  if (later.size === 0) LATER_DECLARATIONS.delete(scope);
 }
 
 /**
@@ -5669,37 +4958,9 @@ function isGenericDefinition(
 }
 
 /**
- * True when a scope of the current scope chain declares `name`, as the
- * engine looks it up (`lookupDefinition()`). A binding that the top-level
- * block of a program hoisted for a later statement does not count
- * (`LATER_DECLARATIONS`): the lookup continues in the enclosing scope.
- * In the body of a function literal, a binding that the engine made for a
- * free symbol of the body, with no value, does not count either
- * (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`). When a function
- * literal is built again and its first canonicalization made `name` a local,
- * the search stops at the scope that the literal is written in
- * (`withKeptAssignmentLocals()`): a binding there was made later.
- */
-function isDeclaredInScopeChain(ce: ComputeEngine, name: string): boolean {
-  const boundary = keptAssignmentLocalBoundary(name);
-  for (
-    let s: Scope | null = ce.context.lexicalScope;
-    s && s !== boundary;
-    s = s.parent
-  ) {
-    const binding = s.bindings.get(name);
-    if (binding === undefined) continue;
-    if (LATER_DECLARATIONS.get(s)?.has(name)) continue;
-    if (isUndeclaredFreeSymbol(binding)) continue;
-    return true;
-  }
-  return false;
-}
-
-/**
  * True when `def` is a binding that the engine made for a free symbol of
  * the body of a function literal that is canonicalized now, and that has
- * no value (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`). An
+ * no value (`isFreeSymbolDeclarationInBody()`, `statement-position.ts`). An
  * assignment in the body does not treat it as a declaration.
  */
 export function isUndeclaredFreeSymbol(def: BoxedDefinition): boolean {
@@ -5707,38 +4968,6 @@ export function isUndeclaredFreeSymbol(def: BoxedDefinition): boolean {
     isValueDef(def) &&
     isFreeSymbolDeclarationInBody(def, def.value.value !== undefined)
   );
-}
-
-/**
- * True when `name` is on the shadowed-parameter stack
- * (`_pushShadowedParameters()`) because of a parameter or of a declaration
- * that is visible here. `canonicalBlock()` pushes the names of the `Declare`
- * statements of a block, with the enclosing scope of the block as the
- * boundary. When the innermost entry for `name` is that of a top-level block
- * of a program, and a later statement of that block declares `name`
- * (`LATER_DECLARATIONS`), the entry does not count. Nothing encloses such a
- * block, so no other entry can name a parameter.
- *
- * When a function literal is built again and its first canonicalization made
- * `name` a local (`withKeptAssignmentLocals()`), an entry outside the literal
- * does not count either: its boundary is above the scope that the literal is
- * written in. A program block that is still canonicalized can start such a
- * rebuild, when it installs a function that the literal calls. The entry of
- * a parameter or a declaration of the literal has its boundary at that scope
- * or inside it, and still counts.
- */
-function isShadowedByEarlierDeclaration(
-  ce: ComputeEngine,
-  name: string
-): boolean {
-  if (!ce._isShadowedParameter(name)) return false;
-  const boundary = ce._shadowedParameterBoundary(name);
-  const home = keptAssignmentLocalBoundary(name) as Scope | undefined;
-  for (let s = home?.parent; s; s = s.parent) if (s === boundary) return false;
-  for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent)
-    if (s.parent === boundary && LATER_DECLARATIONS.get(s)?.has(name))
-      return false;
-  return true;
 }
 
 /**
@@ -6478,9 +5707,9 @@ function canonicalLoopLike(
         : [idxCanonical, collCanonical, guardCanonical]
     );
   });
-  // The body of a `Loop` is a branch: a first assignment of a name there is
-  // a static error. The term of a `Comprehension` is a value: a block there
-  // declares its own locals for each element.
+  // The body of a `Loop` is a branch: a `Declare` there is a static error.
+  // The term of a `Comprehension` is a value: a block there declares its own
+  // locals for each element.
   // The count of branches starts again at zero for the term, so a block in
   // the term declares its locals also when the `Comprehension` is in a
   // branch, as for the body of a function literal (`enterFunctionBody()`).
@@ -6700,8 +5929,8 @@ function* runLoop(
  *   element of the list.
  * - The caller gets the static errors of the long form. When the result is
  *   not valid, the canonical `AddTo` is that result, so `t += e` has the
- *   errors of `t = t + e`: a first assignment of an undeclared `t` in a
- *   branch or a loop body (`first-assignment-in-branch`), a value whose type
+ *   errors of `t = t + e`: an assignment of an undeclared `t`
+ *   (`assignment-to-undeclared-variable`), a value whose type
  *   the local does not accept, and an invalid sum (`s += "a"` with `s` a
  *   number).
  *
@@ -6911,32 +6140,20 @@ function comprehensionIndexNames(
 }
 
 /**
- * Per-walk isolation of a `Comprehension`'s index values, WITHOUT a separate
- * binding scope.
+ * The index values of one walk of a `Comprehension`.
  *
- * The index values must live in the comprehension's own `localScope` bindings
- * — the scope every subexpression of the body resolves against. A scoped
- * subexpression (a `Block`, a scoped big-op, a nested comprehension) follows
- * its canonical parent chain, which reaches `localScope` but would never
- * reach a runtime-created sibling scope: binding the indices anywhere else
- * makes those subexpressions evaluate BLIND to the indices (an applied
- * function literal whose piecewise guard was then undecidable escaped with
- * its parameters permanently free — wrong values, not just wasted work).
- *
- * But `localScope` is created once at canonicalization and outlives every
- * walk, and walks interleave (paused `each()` generators, a dependent
- * `.count` read mid-iteration), so concurrent walks writing their indices
- * into it directly would clobber each other. The isolation contract: each
- * walk brackets every synchronous advance with save → install its own
- * current values → advance → capture → restore. Since an advance never
- * spans a `yield`, no other walk can observe the installed values.
+ * Each synchronous advance of a walk runs in an activation of the
+ * comprehension's scope, pushed for that advance only, which starts with no
+ * value for the indexes. Walks interleave (paused `each()` generators, a
+ * dependent `.count` read mid-iteration), so a walk keeps its own index
+ * values here: before an advance it writes them in the new activation
+ * (`install()`), and after the advance it reads them back (`capture()`).
  */
 class ComprehensionIndexFrame {
   private ce: ComputeEngine;
   private defs: (BoxedValueDefinition | undefined)[];
   /** This walk's current index values, persisted across advances. */
   private mine: (Expression | undefined)[];
-  private saved: (Expression | undefined)[] = [];
 
   constructor(ce: ComputeEngine, scope: Scope | undefined, names: string[]) {
     this.ce = ce;
@@ -6949,12 +6166,11 @@ class ComprehensionIndexFrame {
     this.mine = names.map(() => undefined);
   }
 
-  /** Save the scope's current index values and install this walk's. */
+  /** Write this walk's index values in the activation of the advance. */
   install(): void {
-    this.saved = this.defs.map((d) => d?.value);
     // Ephemeral index writes: bump `_anyVersion` and the per-def
-    // `_writeVersion`, not `_semanticVersion` — installing/restoring a
-    // walk's indices is not a semantic mutation of the document.
+    // `_writeVersion`, not `_semanticVersion` — installing a walk's indices
+    // is not a semantic mutation of the document.
     this.ce._ephemeralWriteDepth += 1;
     try {
       this.defs.forEach((d, i) => {
@@ -6967,18 +6183,10 @@ class ComprehensionIndexFrame {
     }
   }
 
-  /** Capture the (possibly advanced) index values, then restore the saved
-   * ones. Call in a `finally` paired with `install()`. */
-  captureAndRestore(): void {
+  /** Read the (possibly advanced) index values. Call in a `finally` paired
+   * with `install()`, before the activation is popped. */
+  capture(): void {
     this.mine = this.defs.map((d) => d?.value);
-    this.ce._ephemeralWriteDepth += 1;
-    try {
-      this.defs.forEach((d, i) => {
-        if (d && d.value !== this.saved[i]) d.value = this.saved[i];
-      });
-    } finally {
-      this.ce._ephemeralWriteDepth -= 1;
-    }
   }
 
   /** This walk's current index values as a substitution map (C2), or
@@ -6995,12 +6203,11 @@ class ComprehensionIndexFrame {
 /**
  * Stream a `Comprehension`'s body values one at a time.
  *
- * The comprehension's own scope is pushed — and this walk's index values
- * installed in it (see `ComprehensionIndexFrame`) — ONLY around each
+ * An activation of the comprehension's scope, which holds this walk's index
+ * values (see `ComprehensionIndexFrame`), is pushed ONLY around each
  * synchronous `inner.next()` advance: the step that assigns the next index
- * and evaluates the body. Both are undone BEFORE the value is yielded. So
- * neither the eval-context stack nor the installed index values are ever held
- * across a `yield`: a consumer that stops early or abandons the iterator
+ * and evaluates the body. It is popped BEFORE the value is yielded. So the
+ * eval-context stack is never held across a `yield`: a consumer that stops early or abandons the iterator
  * leaves nothing pushed to leak (this is safe even though `each()` does not
  * forward `.return()` to us), and interleaved walks of the same comprehension
  * cannot observe each other's indices. Because each element is produced on
@@ -7022,12 +6229,8 @@ function* comprehensionStream(
 
   const scope = isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
   const indexNames = comprehensionIndexNames(elements);
-  // The index values are installed in the comprehension's OWN `localScope`
-  // bindings for the duration of each advance (see ComprehensionIndexFrame):
-  // that is the scope every subexpression of the body — including scoped
-  // ones like a `Block` or a big-op, whose canonical parent chains never
-  // reach a runtime-created scope — resolves against, so the body evaluates
-  // with the indices actually visible.
+  // The index values are written in the activation of the comprehension's
+  // scope that each advance pushes (see ComprehensionIndexFrame).
   const frame = new ComprehensionIndexFrame(ce, scope, indexNames);
   const state: LoopState = walkState ?? { stopped: false, count: 0 };
   const inner = runNestedElements(body, elements, ce, state, () => {});
@@ -7056,52 +6259,13 @@ function* comprehensionStream(
       // gave `[1, 4, 9]`. The comprehension's own scope is passed because it
       // has left the ambient chain by this point.
       let subs: Record<string, Expression> | undefined;
-      if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
+      if (scope)
+        ce._pushEvalContext(scopeActivation(ce.context.lexicalScope, scope));
       frame.install();
-      // The scopes nested in the comprehension (an inner `Block` of the body,
-      // a `Sum` in it) are shared by every walk of this comprehension, like
-      // the index scope above. A walk can run outside any application of the
-      // function whose body contains the comprehension — a lazy comprehension
-      // is walked when its value is read, often after that function has
-      // returned — so a recursive call made from the body is not re-entrant
-      // for the function-application check. Marking the nested scopes as in
-      // use for the duration of the advance makes that inner application (and
-      // any inner walk of the same comprehension) save and restore them. See
-      // `enterNestedBodyScopes`.
-      //
-      // The index scope of the comprehension is marked as in use too, as a
-      // `Loop` marks its own scope, but it is not saved: the index frame above
-      // puts back the values of each walk. A function literal that the body
-      // evaluates (a closure that an element assigns to an outer variable)
-      // then captures the scopes that are in use (`captureNestedLocals`,
-      // `function-utils.ts`): it gets a copy of the index with the value of
-      // its element, and its chain reaches the frame of the call that runs the
-      // comprehension. Without the mark, the capture stopped below the index
-      // scope: with `h = (x) => x` and
-      // `b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]];
-      // ListFrom(c); 0 }`, the call `b(1)` then `h(1)` gave `d + 1`, not `4`.
-      // An element that is itself a function literal (`[x => x + i for i in
-      // 1..3]`) is captured in the same way when the body evaluates it. Its
-      // symbols keep the binding of the index that they got at
-      // canonicalization, so the substitution of the index values below still
-      // replaces them, and the elements are `x ↦ x + 1`, `x ↦ x + 2`, ... as
-      // before. Each such element now also costs one snapshot of the index
-      // scope and one rebuild of the literal.
-      //
-      // While the index scope is marked, two other functions of
-      // `function-utils.ts` see it as in use: `copyChainToLeaving` replaces it,
-      // in a chain that it copies at the end of a call, by a snapshot that
-      // holds the index value of the element, and `rerootingIsNoop` never
-      // treats a re-rooting through it as a no-op.
-      const nested = enterNestedBodyScopes(expr, {
-        includeRoot: true,
-        saveRoot: false,
-      });
       try {
         r = inner.next();
       } finally {
-        exitNestedBodyScopes(ce, nested);
-        frame.captureAndRestore();
+        frame.capture();
         if (scope) ce._popEvalContext();
       }
       if (r.done) {
@@ -7176,19 +6340,12 @@ function comprehensionEnumeratedCount(
         ? ce._fn('Element', clause.ops.slice(0, 2))
         : clause
     );
-  // The count drive binds the indices in the shared `localScope` (where
-  // dependent clause domains resolve them), bracketed by a
-  // ComprehensionIndexFrame: reading `.count` while another walk is paused
-  // must not clobber that walk's indices — the frame restores the scope's
-  // values when the (fully synchronous) drive completes.
+  // The count drive binds the indices in an activation of the scope of its
+  // own (where dependent clause domains resolve them), so reading `.count`
+  // while another walk is paused does not touch that walk's indices.
   const scope = expr.isScoped ? expr.localScope : undefined;
-  const frame = new ComprehensionIndexFrame(
-    ce,
-    scope,
-    comprehensionIndexNames(elements)
-  );
-  if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
-  frame.install();
+  if (scope)
+    ce._pushEvalContext(scopeActivation(ce.context.lexicalScope, scope));
   try {
     let n = 0;
     const state: LoopState = { stopped: false, count: 0 };
@@ -7217,7 +6374,6 @@ function comprehensionEnumeratedCount(
       return undefined;
     throw e;
   } finally {
-    frame.captureAndRestore();
     if (scope) ce._popEvalContext();
   }
 }
@@ -7258,7 +6414,9 @@ function scanIndependentClauses(expr: Expression):
   const clauses = expr.ops.slice(1);
   const scoped = expr.isScoped && expr.localScope !== undefined;
   if (scoped)
-    ce._pushEvalContext(expr.localScope!, undefined, { ambient: true });
+    ce._pushEvalContext(
+      scopeActivation(ce.context.lexicalScope, expr.localScope!)
+    );
   try {
     let empty = false;
     let unknown = false;
@@ -7538,7 +6696,9 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
   const ce = expr.engine;
   const scoped = expr.isScoped && expr.localScope !== undefined;
   if (scoped)
-    ce._pushEvalContext(expr.localScope!, undefined, { ambient: true });
+    ce._pushEvalContext(
+      scopeActivation(ce.context.lexicalScope, expr.localScope!)
+    );
   let walk = false;
   let infinite = false;
   let unknown = false;

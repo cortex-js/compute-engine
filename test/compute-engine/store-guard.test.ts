@@ -143,10 +143,11 @@ describe('STORE GUARD AT THE CACHES OF EVALUATED VALUES', () => {
 });
 
 describe('A JOINED ASYNCHRONOUS WALK READS THE MEMO IN ITS OWN CONTEXT', () => {
-  // Two evaluations started in a scope where `b` is local share one walk.
-  // The second one reads the memo when the walk ends, in its own evaluation
-  // context: the scope where it started, not the scope current when the
-  // walk ended (the global scope, where `b` is 100).
+  // Two evaluations of the expression bound in a scope where `b` is local
+  // (`ce.rebind()`) share one walk. The second one reads the memo when the
+  // walk ends, with the binding of its own expression, not the binding of
+  // the expression of the global scope (where `b` is 100), whose walk ends
+  // at the same time.
   test.each([
     ['Reverse', ['Reverse', ['List', 1, 'b']], '[2,1]', '[100,1]'],
     ['Take', ['Take', ['List', 1, 'b', 3], 2], '[1,2]', '[1,100]'],
@@ -156,8 +157,9 @@ describe('A JOINED ASYNCHRONOUS WALK READS THE MEMO IN ITS OWN CONTEXT', () => {
     const e = ce.box(json as any);
     ce.pushScope();
     ce.declare('b', { value: 2 } as any);
-    const p1 = e.evaluateAsync();
-    const p2 = e.evaluateAsync();
+    const local = ce.rebind(e);
+    const p1 = local.evaluateAsync();
+    const p2 = local.evaluateAsync();
     ce.popScope();
     const p3 = e.evaluateAsync();
     const [r1, r2, r3] = await Promise.all([p1, p2, p3]);

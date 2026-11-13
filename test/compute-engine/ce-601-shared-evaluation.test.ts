@@ -143,6 +143,9 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
   test('An assignment between two reads of a shared node', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 1);
+    // The statements are boxed before the block: `y` is the global `y`, not
+    // a local of the block.
+    ce.declare('y', 'unknown');
     const xp1 = ce.function('Add', [ce.symbol('x'), ce.number(1)]);
     const b = ce.function('Block', [
       ce.function('Assign', [ce.symbol('y'), xp1]),
@@ -376,9 +379,10 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     expect(l.evaluate().json).toEqual(['List', 1, 11, 21]);
   });
   test('A declaration into an ancestor scope of a lower frame', () => {
-    // The frame of the expression reads `y` through the scope `s1`, which is
-    // not the scope of a frame. The call `h()` is on top of the stack, with
-    // a chain that does not hold `s1`, when `Poke` declares `y` there.
+    // The expression is boxed in a scope whose parent is `s1`, which is not
+    // the scope of a frame, so it reads `y` through `s1`. The call `h()` is
+    // on top of the stack, with a chain that does not hold `s1`, when `Poke`
+    // declares `y` there.
     const ce = new ComputeEngine();
     ce.assign('y', 1);
     const s1 = { parent: ce.context.lexicalScope, bindings: new Map() };
@@ -391,11 +395,12 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
       },
     });
     ce.assign('h', ce.box(['Function', ['Poke']]));
-    const t = ce.function('Add', [ce.symbol('y'), ce.number(1)]);
-    // `t` is kept from its second read on, so it is read twice before `h()`.
-    const l = ce.function('List', [t, t, ce.function('h', []), t]);
     ce.pushScope({ parent: s1, bindings: new Map() });
     try {
+      const t = ce.function('Add', [ce.symbol('y'), ce.number(1)]);
+      // `t` is kept from its second read on, so it is read twice before
+      // `h()`.
+      const l = ce.function('List', [t, t, ce.function('h', []), t]);
       expect(l.evaluate().json).toEqual(['List', 2, 2, 0, 11]);
     } finally {
       ce.popScope();

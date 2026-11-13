@@ -13,10 +13,9 @@ import type { EvaluateOptions, Expression } from '../../src/compute-engine';
 /**
  * An engine on which the function names that the blocks of this file assign
  * (`fn`, `g`, `h`, `q`, `w`) are declared with no value. An assignment in a block
- * then writes the binding of the engine. Without the declaration, the first
- * assignment of the name would declare a local of the block, and the call
- * in an earlier statement would be a use of the local before its
- * declaration: a static error (`read-before-declaration`).
+ * then writes the binding of the engine. Without the declaration, the
+ * assignment of the name in a block would be a static error
+ * (`assignment-to-undeclared-variable`).
  */
 function newEngine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -31,7 +30,12 @@ const SQUARE = ['Function', ['Power', 'z', 2], 'z'];
  * stores `g(3)`, then assigns `g`, then reads the stored value. */
 const STORED_THEN_ASSIGNED = [
   'List',
-  ['Block', ['Assign', 'r', ['g', 3]], ['Assign', 'g', SQUARE], 'r'],
+  [
+    'Block',
+    ['Declare', 'r', "'unknown'", ['g', 3]],
+    ['Assign', 'g', SQUARE],
+    'r',
+  ],
 ];
 
 /** The `Sum` of `test/compute-engine/batch9-evaluation.test.ts`: the term
@@ -76,7 +80,7 @@ describe('inside one top-level evaluation, the result stays symbolic', () => {
         'List',
         [
           'Block',
-          ['Assign', 'r', ['g', 3]],
+          ['Declare', 'r', "'unknown'", ['g', 3]],
           ['Assign', 'g', ['Function', 'x', ['Typed', 'x', { str: 'string' }]]],
           'r',
         ],
@@ -153,7 +157,7 @@ describe('a program block that is not canonical', () => {
   // it is still a program (`runsAsProgram()`, `library/control-structures.ts`).
   const PROGRAM = [
     'Block',
-    ['Assign', 'r', ['fn', 3]],
+    ['Declare', 'r', "'unknown'", ['fn', 3]],
     ['Assign', 'fn', ['Function', ['Multiply', 2, 'z'], 'z']],
     ['Tuple', 'r', ['fn', 3]],
   ];
@@ -208,9 +212,9 @@ describe('the result of an unresolved call over the same operands', () => {
     const call = { fn: ['h', 'y'], sourceOffsets: [5, 9] };
     const expr = ce.box([
       'List',
-      ['Block', ['Assign', 'r', call], 'r'],
+      ['Block', ['Declare', 'r', "'unknown'", call], 'r'],
     ] as never);
-    const original = expr.ops![0].ops![0].ops![1];
+    const original = expr.ops![0].ops![0].ops![2];
     expect(original.toString()).toBe('h(y)');
     expect(original.sourceOffsets).toEqual([5, 9]);
     const result = expr.evaluate().ops![0];
@@ -226,7 +230,7 @@ describe('the result of an unresolved call over the same operands', () => {
 function storeThenAssign(h: string): unknown[] {
   return [
     'Block',
-    ['Assign', 'r', [h, 'k']],
+    ['Declare', 'r', "'unknown'", [h, 'k']],
     ['Assign', h, ['Function', ['Multiply', 2, 'z'], 'z']],
     'r',
   ];
@@ -305,7 +309,7 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     const ce = engineWithTick();
     const waiting = (h: string): unknown[] => [
       'Block',
-      ['Assign', 'r', [h, 'k']],
+      ['Declare', 'r', "'unknown'", [h, 'k']],
       ['Tick'],
       ['Assign', h, ['Function', ['Multiply', 2, 'z'], 'z']],
       'r',
@@ -324,7 +328,7 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     const pending = ce
       .box([
         'Block',
-        ['Assign', 'r', ['h', 'k']],
+        ['Declare', 'r', "'unknown'", ['h', 'k']],
         ['Tick'],
         ['Assign', 'h', ['Function', ['Multiply', 2, 'z'], 'z']],
         'r',

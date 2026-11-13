@@ -35,18 +35,35 @@ describe('a declared parameter type is checked when a later value decides it', (
     ce.declare('m', { type: 'unknown', inferred: true });
     const block = ce.box([
       'Tuple',
-      ['Block', ['Assign', 'r', ['g', ['h', 'm']]], ['Assign', 'm', 1.5], 'r'],
+      [
+        'Block',
+        ['Declare', 'r', "'unknown'", ['g', ['h', 'm']]],
+        ['Assign', 'm', 1.5],
+        'r',
+      ],
     ]);
     expect(errorCode(block.evaluate().json)).toBe(INCOMPATIBLE);
   });
 
   test('the Epsil form gives the error', () => {
     const ce = new ComputeEngine();
+    // A `let` with no value is an error, so `m` is declared by the host.
+    ce.declare('m', { type: 'unknown', inferred: true });
     const { value } = executeEpsil(
       ce,
-      'let h: (integer) -> integer\nfunction h(k) { 2*k }\nlet m\nlet r = g(h(m))\nm = 1.5\nr'
+      'let h: (integer) -> integer\nfunction h(k) { 2*k }\nlet r = g(h(m))\nm = 1.5\nr'
     );
     expect(errorCode(value?.json)).toBe(INCOMPATIBLE);
+  });
+
+  test('the Epsil form with a `let` that has no value is an error', () => {
+    const { diagnostics } = executeEpsil(
+      new ComputeEngine(),
+      'let h: (integer) -> integer\nfunction h(k) { 2*k }\nlet m\nlet r = g(h(m))\nm = 1.5\nr'
+    );
+    expect(diagnostics.map((d) => d.message[3])).toContain(
+      'declaration-without-value'
+    );
   });
 
   test('the call stays, and its value is checked at the next evaluation', () => {

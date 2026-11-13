@@ -75,17 +75,16 @@ describe('A FUNCTION DEFINED UNDER A DECLARATION THAT STATES ITS EFFECTS', () =>
   });
 
   test('the compilation is refused', () => {
-    expect(() => compileProgram(source)).toThrow(
-      /Could not compile `DefineFunction`: .*pure/
-    );
+    // The compiled program is one block, where the declaration and the
+    // function statement are two declarations of `g`.
+    expect(() => compileProgram(source)).toThrow(/variable-redeclaration/);
   });
 
   test('a definition that meets the declared effects still compiles', () => {
-    const plain =
-      'let g: (integer) random -> real\nfunction g(k) { Random() }\ng(1)';
+    const plain = 'let g: (integer) random -> real = (k) => Random()\ng(1)';
     const value = compileProgram(plain).run!({} as never);
     expect(typeof value).toBe('number');
-    const pure = 'let h: (integer) pure -> integer\nfunction h(k) { k + 1 }\nh(1)';
+    const pure = 'let h: (integer) pure -> integer = (k) => k + 1\nh(1)';
     expect(compileProgram(pure).run!({} as never)).toBe(2);
   });
 });

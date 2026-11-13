@@ -1622,30 +1622,21 @@ function compilePythonStatements(
   // A destructuring declare that is the whole loop body
   // (`Loop(Declare((a, b), "unknown", (k, 2)), …)`) is a statement list of
   // one statement: it compiles as a `Block` of that statement, so that its
-  // per-leaf declares get the fresh names and the assignments below. It has
-  // no scope of its own (`scopeNode` is `undefined`). Without this branch
-  // the declare reached the value-position `Declare` handler, which fails
-  // closed.
+  // per-leaf declares get the fresh names and the assignments below. Without
+  // this branch the declare reached the value-position `Declare` handler,
+  // which fails closed.
   const isPatternDeclare = h === 'Declare' && isFunction(expr.ops[0], 'Tuple');
   if (h === 'Block' || isPatternDeclare) {
     const ops = isPatternDeclare ? [expr] : expr.ops;
-    const scopeNode = isPatternDeclare ? undefined : expr;
     // As in `BaseCompiler.compileLoopBody`: a statement list is where a
     // destructuring declare (`let (a, x) = (2, 3)`) lowers to per-leaf
     // declares, and a destructuring assign (`(a, b) := (b, a + b)`) lowers
     // to temporaries + writes. Every statement is in statement position, the
     // last one included: its value is discarded here, which is what makes
     // the rewrite safe (see `desugarPatternAssign`).
-    // A bare assignment of a name that nothing outside the block binds
-    // makes a local of the block, as in `compileBlock`
-    // (`withImplicitLocalDeclares`).
-    const stmts = BaseCompiler.withImplicitLocalDeclares(
-      ops
-        .flatMap((s) => BaseCompiler.desugarPatternDeclare(s, target) ?? [s])
-        .flatMap((s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]),
-      target,
-      scopeNode
-    );
+    const stmts = ops
+      .flatMap((s) => BaseCompiler.desugarPatternDeclare(s, target) ?? [s])
+      .flatMap((s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]);
     const declared = stmts.flatMap((s) =>
       isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
     );
@@ -1667,10 +1658,7 @@ function compilePythonStatements(
     //   A `Declare` with a value emits `t = <value>`. The `declare` hook of
     //   this target emits nothing for a `Declare`, so without this
     //   assignment the value was lost and a read of `t` raised `NameError`.
-    //   A `Declare` with no value emits nothing. Only
-    //   `withImplicitLocalDeclares` adds one, for a local that a first
-    //   assignment at the level of the list declares, and a read before
-    //   that assignment is the static error `read-before-declaration`.
+    //   A `Declare` with no value emits nothing.
     const compileStatements = (
       spelled?: ReadonlyMap<string, string>
     ): string => {

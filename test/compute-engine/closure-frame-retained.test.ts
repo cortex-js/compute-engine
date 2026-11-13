@@ -313,7 +313,9 @@ f(1)`
     ce.declare('a', 'real');
     const def = ce.lookupDefinition('a') as { value?: { disposed: boolean } };
     ce.box(['Function', ['Add', 'x', 'a'], 'x']).evaluate();
-    ce.popScope();
+    // Popped as an evaluation frame: `ce.popScope()` keeps the definitions
+    // of its scope in any case.
+    ce._popEvalContext();
     expect(def.value?.disposed).toBe(true);
   });
 

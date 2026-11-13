@@ -104,7 +104,12 @@ function expectCompiledValue(
   return r.code;
 }
 
-const G_LOCAL = ['Assign', 'q', ['Function', ['List', 't', ['Multiply', 2, 't']], 't']];
+const G_LOCAL = [
+  'Declare',
+  'q',
+  "'unknown'",
+  ['Function', ['List', 't', ['Multiply', 2, 't']], 't'],
+];
 
 describe('CE-712.2: `At` of a call of a function with no declared result', () => {
   test.each([

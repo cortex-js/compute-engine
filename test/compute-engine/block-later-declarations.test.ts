@@ -4,11 +4,10 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // The top-level block of a program declares all its names before it
-// canonicalizes its statements. A function body that assigns a name that
-// only a LATER statement declares makes that name a local of the body, as
-// `executeEpsil()` does when it canonicalizes one statement at a time
-// (`LATER_DECLARATIONS`, `library/control-structures.ts`). The block reads,
-// in one pass, the index of the first statement that declares each name.
+// canonicalizes its statements. A local of a function body is made only by a
+// `let` in the body, also when a LATER statement of the program declares the
+// same name; an assignment without `let` writes the name of the program, which
+// a function without a `scope` effect may not do.
 //
 // Each program is evaluated as one block (`ce.box()`), and the value is
 // compared with the value of `executeEpsil()`.
@@ -25,23 +24,36 @@ function bothRoutes(source: string): { block: unknown; epsil: unknown } {
 describe('A PROGRAM READ AS ONE BLOCK: NAMES DECLARED LATER', () => {
   test('one statement declares two names', () => {
     const source =
-      'function g(k) { t = k + 1; u = k; [t, u] }\n' +
+      'function g(k) { let t = k + 1; let u = k; [t, u] }\n' +
       'let (t, u) = (0, 5)\n[g(1), g(2), t, u]';
     const value = ['List', ['List', 2, 1], ['List', 3, 2], 0, 5];
     expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
   });
 
+  test('an assignment without let in a function with no scope effect', () => {
+    // In the block, the function statement declares a local, a variable
+    // that holds a function, and a write of a local of the block by the
+    // function is not held to the `scope` specifier of a definition.
+    const source =
+      'function g(k) { t = k + 1; u = k; [t, u] }\n' +
+      'let (t, u) = (0, 5)\n[g(1), g(2), t, u]';
+    const block = new ComputeEngine()
+      .box(parseEpsil(source)[0] as never)
+      .evaluate().json as unknown[];
+    expect(block).toEqual(['List', ['List', 2, 1], ['List', 3, 2], 3, 2]);
+  });
+
   test('names declared at different statements', () => {
     const source =
-      'function g(k) { t = k + 1; t }\nlet t = 0\n' +
-      'function h(k) { v = k; v }\nlet v = 9\n[g(1), h(2), t, v]';
+      'function g(k) { let t = k + 1; t }\nlet t = 0\n' +
+      'function h(k) { let v = k; v }\nlet v = 9\n[g(1), h(2), t, v]';
     const value = ['List', 2, 2, 0, 9];
     expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
   });
 
   test('a function after the declaration writes the declared name', () => {
     const source =
-      'function g(k) { t = k + 1; t }\nlet t = 0\n' +
+      'function g(k) { let t = k + 1; t }\nlet t = 0\n' +
       'function h(k) scope { t = k; t }\n[g(1), h(4), t]';
     const value = ['List', 2, 4, 4];
     expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
@@ -85,7 +97,7 @@ describe('A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER', () =>
     const value = ce
       .box([
         'Block',
-        ['Assign', 'h', ['Function', ['Power', 'i', 2]]],
+        ['Declare', 'h', "'unknown'", ['Function', ['Power', 'i', 2]]],
         ['Declare', 'i', 'integer', 2],
         ['List', ['h'], ['Power', 'i', 2]],
       ] as never)

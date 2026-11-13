@@ -168,28 +168,25 @@ let c2 = counter()
 `bump` itself. Writing to a binding outside the function is the `scope`
 effect, and it must be declared — without the specifier the definition is
 rejected and `counter()` never produces a callable. See
-[Effect specifiers](/epsil/control-flow#effect-specifiers). An assignment to
-a name that no enclosing scope declares when the function is defined makes a
-local of the function body instead, also when the assignment is in a branch
-of an `if`, a loop body or a `do` block of the body: each call gets its own
-binding, a later
-declaration of the same name is not written, and it is not the `scope`
-effect (see
+[Effect specifiers](/epsil/control-flow#effect-specifiers). A local of the
+function body is declared with `let`: each call gets its own binding, a later
+declaration of the same name is not written, and it is not the `scope` effect
+(see
 [Reassignment vs. declaration](/epsil/declarations/#reassignment-vs-declaration)):
 
 ```epsil
-function step(k) { s = k * 2; s + 1 }
-s = 10
+function step(k) { let s = k * 2; s + 1 }
+let s = 10
 (step(1), step(2), s)
 // ➔ (3, 5, 10)
 ```
 
-A read of such a local before its first assignment in the function body
-(`function step(k) { r = s; s = k; r }`) is the `read-before-declaration`
-error, which `epsil check` reports before the program runs. A first
-assignment in a branch (`function g(c) { if c { t = 1 }; t }`) is the
-`first-assignment-in-branch` error: declare the local with a value before
-the branch.
+A read of such a local before its declaration in the function body
+(`function step(k) { let r = s; let s = k; r }`) is the
+`read-before-declaration` error, and an assignment to a name that is not
+declared (`function g(c) { if c { t = 1 }; t }`) is the
+`assignment-to-undeclared-variable` error; `epsil check` reports both before
+the program runs.
 
 Reach for `const` when a name should not move at all. Constness is a property
 of the *binding*, not of the value it holds — every value is immutable
@@ -269,28 +266,32 @@ xs = filter(xs, c => c > 2)
 Two lazy collections stay lazy when they are assigned: one with no last
 element (`filter(1..oo, p)`), which cannot be listed, and one that reads no
 variable (`map(f, 1..1000000)`), which nothing can change. A `filter` over a
-dictionary also stays lazy. When such a collection reads a variable, also
-in an inline function, the statement stores it with the value that the
-variable has at that statement, so a later assignment of the variable does
-not change it:
+dictionary also stays lazy. Such a collection is made as a call is: a
+variable that is one of its operands (`xs` in `filter(xs, p)`, `f` in
+`map(f, xs)`) gives the value that it holds at that statement, and its inline
+function is a closure. The closure reads a local of the block or the
+function that made the collection, and a global, when an element is
+computed, so a later assignment of the variable is seen:
 
 ```epsil
 let k = 3
 let big = filter(1..oo, c => c > k)
 k = 10
 first(big)
-// ➔ 4
+// ➔ 11
 ```
 
-A variable that the collection assigns, in its callback or through a
-function with the `scope` effect that it calls, is not replaced: the
-collection reads and writes that variable when its elements are read. A
-variable that holds a function is replaced with that function, and the
-function is a closure: it reads the later values of its own variables. With
-`let p = c => c > k` and `let big = filter(1..oo, p)`, `first(big)` gives
-`11` after `k = 10`. A finite collection made from such a stored collection
-(`take(big, 2)`) reads no variable, so it also stays lazy when it is
-assigned, and its callback runs each time its elements are read.
+To keep the elements that the collection has at a statement, list them
+there: a finite part of it is listed by `listFrom`.
+
+```epsil
+let k = 3
+let big = filter(1..oo, c => c > k)
+let firsts = listFrom(take(big, 3))
+k = 10
+firsts
+// ➔ [4, 5, 6]
+```
 
 A lazy collection that is not assigned (an argument, an operand) still reads
 program state **at materialization time**, like a generator in Python.
@@ -302,7 +303,7 @@ flowchart TD
   lit -- "no: a lazy collection" --> reads{"reads a variable, as written?<br/>(an inline function counts;<br/>a named function is not inspected)"}
   reads -- "no, as map(f, 1..1000000)" --> lazy["stays lazy: enumerated when materialized"]
   reads -- yes --> fin{"has a last element?"}
-  fin -- "no, as filter(1..oo, c => c > k)" --> bound["stays lazy, with the values<br/>of its variables at this statement"]
+  fin -- "no, as filter(1..oo, c => c > k)" --> bound["stays lazy: its variable operands<br/>are read now, its function<br/>when an element is computed"]
   fin -- yes --> snap2["stored as the list of its elements,<br/>computed with the values at this statement"]
 ```
 
@@ -481,7 +482,7 @@ evaluates afterwards, so that a lazy collection the program returns can be
 read in full.
 
 ```epsil
-total = 0
+let total = 0
 for i in 1..5000 { total = total + i * 2 }
 total
 // ➔ 25005000

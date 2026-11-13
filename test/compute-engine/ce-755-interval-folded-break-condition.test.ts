@@ -18,7 +18,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 function breakLoop(cond: unknown) {
   return [
     'Block',
-    ['Assign', 's', 0],
+    ['Declare', 's', "'unknown'", 0],
     [
       'Loop',
       ['Block', ['If', cond, ['Break']], ['Assign', 's', ['Add', 's', 'k']]],

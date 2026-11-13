@@ -1,3 +1,4 @@
+import { withHiddenValues } from './hidden-values.js';
 import { negatedArgument } from './negated-argument.js';
 import {
   CancellationError,
@@ -19,7 +20,6 @@ import { isKindType } from './value-kinds.js';
 import { withOperandsWrittenBefore } from './kind-dispatch.js';
 import { isApplySiteCall } from './apply-site.js';
 import {
-  rebindEscaping,
   hasAssignedVariable,
   assignedVariableNames,
   isOperatorDef,
@@ -29,10 +29,8 @@ import {
   hasCallableHome,
   markBorrowedOperator,
   markCallableHome,
-  markShieldDeclaration,
   withCallableBinding,
 } from './binders.js';
-import { withScratchScope } from '../scratch-scopes.js';
 import {
   isLibraryOperator,
   isShadowedSymbol,
@@ -411,17 +409,15 @@ function expandedTermBound(expr: Expression): number {
  * > in-scope ASSUMPTIONS, but NOT from its ASSIGNED VALUE. An assigned value is
  * > treated as if the symbol were merely declared with that value's type.
  *
- * The seam: before running `simplify`, shadow-declare every assigned,
- * non-constant free symbol of `expr` as VALUELESS (keeping its declared type)
- * in a fresh scope. With no value, `BoxedSymbol.sgn`/`isOdd`/`isEven` fall back
- * to type + assumptions (the shadow scope preserves outer assumptions), so no
+ * The seam: while `simplify` runs, every assigned, non-constant free symbol
+ * of `expr` has no value (keeping its declared type). With no value,
+ * `BoxedSymbol.sgn`/`isOdd`/`isEven` fall back to type + assumptions, so no
  * value leaks into a sign/parity-driven rewrite. `.evaluate()`/`.N()`/type
  * inference are untouched — only `simplify()`'s VIEW is blinded.
  *
  * Re-entrancy is automatically safe: a rule that recursively calls
- * `.simplify()` on a sub-expression re-enters here, but the symbols are already
- * shadowed valueless, so `assignedVariableNames` returns nothing and no scope
- * is pushed.
+ * `.simplify()` on a sub-expression re-enters here, but the symbols have no
+ * value then, so `assignedVariableNames` returns nothing.
  */
 /** The pattern rules of each rule set (see `isPatternRule()`), computed once
  *  per rule set object. The standard rule set is cached by the engine and
@@ -454,88 +450,18 @@ export function simplifyValueBlind(
   );
   if (shadow.length === 0) return simplify(expr, options);
 
-  // Capture each symbol's declared type as a STRING; passing the BoxedType
-  // object to `declare` throws "type invalid".
-  const types = shadow.map((n) => ce.box(n).type.toString());
-
-  ce.pushScope();
-  const shadowScope = ce.context.lexicalScope;
-  let steps: RuleSteps;
-  try {
-    // Two arrangements keep the shield from retiring the caches of the whole
-    // engine. (1) The shield scope is registered as a SCRATCH scope
-    // (`scratch-scopes.ts`) while the shield declarations below are made, so
-    // they advance no engine-wide cache version and the pop that discards
-    // them is clean. The registration ends before the simplification runs,
-    // for the reasons given in `withValueShield` (`utils.ts`): a name the
-    // simplification declares with a value after a cache was filled inside
-    // the shield must retire that cache, and a scope created inside the
-    // shield can escape with the result. (A scoped expression evaluated
-    // inside the shield chains its persistent local scope onto the shield
-    // scope for the call; a declaration made in that scope is not scratch
-    // even during the registration, because `scratchRootOf` follows the
-    // link the scope had before it was chained.) (2) The
-    // shield declarations and the simplification run under a cache key of
-    // their own (`ce._withValueShieldKey`): a symbol reads its VALUE by name
-    // through the current scope chain, so an expression that existed before
-    // the shield — `expr` itself, which is passed to `simplify()` as it is —
-    // reads no value for the shielded symbol inside the shield. A `_sgn`
-    // answer derived outside the shield from the assigned value, or a
-    // `_type` answer that depends on such a sign, must therefore not be
-    // served inside it (`|x+1|` with `x := 5` and a cached positive sign of
-    // `x+1` simplified to `x+1`, a value-dependent rewrite that is wrong once
-    // `x := -5`), and an answer derived inside, blind to the value, must not
-    // be served after the pop (the sign of that same `x+1` stayed
-    // `undefined`). The shield key separates the two sides, and the pop
-    // restores the outer key, so what was cached outside stays valid.
-    //
-    // Before both, every `simplify()` of an expression that mentions an
-    // assigned variable advanced the `any` axis twice (one declaration, one
-    // dirty pop), which retired the `_type` and `_sgn` cache of every
-    // expression in the engine. A sign check inside a type derivation
-    // reaches `simplify()` through `exactOrder()` (`isProvedEqual`,
-    // `compare.ts`), and the retired caches made the derivation re-type its
-    // operands once per read, exponentially in the depth of the body: with
-    // `f_b2full50(x)` calling `f_b2(x)`, whose body ranges over
-    // `Floor(Log(Max(x, 1), 2))`, one application made more than six
-    // thousand sign reads and did not finish in a minute (Tycho ledger row
-    // 381, `art/mavxszbvzk`, 2026-10-17); it takes about 15 ms now. The
-    // escaping result is re-bound to the caller's symbols below
-    // (`rebindEscaping`).
-    steps = ce._withValueShieldKey(() => {
-      withScratchScope(ce, shadowScope, () => {
-        shadow.forEach((n, i) => {
-          // If an exotic type fails to round-trip through `declare`, skip
-          // shadowing THAT symbol rather than aborting the whole simplify: a
-          // rare value leak is better than a thrown simplify.
-          try {
-            ce.declare(n, { type: types[i] });
-            // Mark it as a SHIELD — see `withValueShield`, the other site.
-            markShieldDeclaration(shadowScope, n);
-          } catch {
-            /* leave this symbol unshadowed */
-          }
-        });
-      });
-      return simplify(expr, options);
-    });
-  } finally {
-    ce.popScope();
+  // The values are hidden for the simplification (`withHiddenValues()`),
+  // under a cache key of its own (`ce._withValueShieldKey`): a sign derived
+  // from a value outside is not served inside, and a sign derived inside,
+  // blind to the value, is not served after it.
+  const defs: object[] = [];
+  for (const n of shadow) {
+    const def = ce.lookupDefinition(n);
+    if (isValueDef(def)) defs.push(def.value);
   }
-  // The shadow bindings are dead now that the scope is popped, but a result
-  // that could not fully reduce still mentions the shielded symbols and would
-  // carry those dead bindings out to the caller — where they compare unequal
-  // to the caller's own symbols. Same fix as `withValueShield`; this is the
-  // second site of the same pattern, reached by the public `.simplify()`.
-  //
-  // Only the FINAL step's value escapes as the caller's result; the
-  // intermediate steps exist for `explain()`, which serializes them by name.
-  // Rebinding only the last value keeps the fix off the O(steps × tree) path.
-  const last = steps.at(-1);
-  if (last === undefined) return steps;
-  const rebound = rebindEscaping(last.value, shadowScope);
-  if (rebound === last.value) return steps;
-  return [...steps.slice(0, -1), { ...last, value: rebound }] as RuleSteps;
+  return withHiddenValues(defs, () =>
+    ce._withValueShieldKey(() => simplify(expr, options))
+  );
 }
 
 export function simplify(

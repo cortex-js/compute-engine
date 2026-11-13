@@ -788,7 +788,11 @@ describe('COMPILED PIPE', () => {
       'gc',
       ce.box([
         'Function',
-        ['Block', ['Assign', 'w', ['Add', 'u', 'ImaginaryUnit']], 'w'],
+        [
+          'Block',
+          ['Declare', 'w', "'unknown'", ['Add', 'u', 'ImaginaryUnit']],
+          'w',
+        ],
         'u',
       ])
     );

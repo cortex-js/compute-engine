@@ -677,17 +677,17 @@ describe('a comparison that reads a block local', () => {
 
   const straight = [
     'Block',
-    ['Assign', 'a2', ['Add', 'n', 1]],
+    ['Declare', 'a2', "'unknown'", ['Add', 'n', 1]],
     ['Less', 'a2', 'm'],
   ];
   const straightIf = [
     'Block',
-    ['Assign', 'a2', ['Add', 'n', 1]],
+    ['Declare', 'a2', "'unknown'", ['Add', 'n', 1]],
     ['If', ['Less', 'a2', 'm'], 1, 2],
   ];
   const loop = (body: unknown) => [
     'Block',
-    ['Assign', 'a2', 0],
+    ['Declare', 'a2', "'unknown'", 0],
     [
       'Loop',
       ['Assign', 'a2', ['Add', 'a2', 'n']],
@@ -697,7 +697,7 @@ describe('a comparison that reads a block local', () => {
   ];
   const branch = [
     'Block',
-    ['Assign', 'a2', 1],
+    ['Declare', 'a2', "'unknown'", 1],
     ['If', ['Greater', 'm', 0], ['Assign', 'a2', 'n']],
     ['Less', 'a2', 'm'],
   ];
@@ -789,8 +789,13 @@ describe('block locals matched by definition', () => {
     // there.
     const json = [
       'Block',
-      ['Assign', 't', ['Add', 'n', 1]],
-      ['Assign', 'gg', ['Function', ['If', ['Less', 't', 1], 0, 1], 't']],
+      ['Declare', 't', "'unknown'", ['Add', 'n', 1]],
+      [
+        'Declare',
+        'gg',
+        "'unknown'",
+        ['Function', ['If', ['Less', 't', 1], 0, 1], 't'],
+      ],
       ['gg', 0],
     ];
     const ce = fresh();
@@ -830,12 +835,16 @@ describe('block locals matched by definition', () => {
     for (const json of [
       [
         'Block',
-        ['Assign', 'a', 0],
-        ['Assign', 'b', 0],
+        ['Declare', 'a', "'unknown'", 0],
+        ['Declare', 'b', "'unknown'", 0],
         ['If', ['Less', 'a', 'm'], ['Assign', 'b', 1], ['Assign', 'b', 2]],
         'b',
       ],
-      ['Block', ['Assign', 'a', ['Add', 'n', 1]], ['Less', 'a', 'm']],
+      [
+        'Block',
+        ['Declare', 'a', "'unknown'", ['Add', 'n', 1]],
+        ['Less', 'a', 'm'],
+      ],
       ['If', ['Less', 'x', 1], 1, 2],
     ]) {
       const code = compile(ce.box(json as never), { fallback: false }).code;

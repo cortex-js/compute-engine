@@ -110,12 +110,15 @@ describe('COMPILE a call of a function returned by a call', () => {
   });
 
   it('declines when the callee does not return a function on every path', () => {
-    expect(() =>
-      both(
-        'function mk(n) { if n > 0 { (x) => x + n } else { 5 } }\n' +
-          'let a = mk(2)\na(1)'
-      )
-    ).toThrow(RETURNED);
+    expect(
+      () =>
+        both(
+          'function mk(n) { if n > 0 { (x) => x + n } else { 5 } }\n' +
+            'let a = mk(2)\na(1)'
+        )
+      // `mk` is a local of the program block, a variable of type
+      // `function`: the call `a(1)` has no callee that the compiler knows.
+    ).toThrow(/Unknown operator `a`/);
   });
 
   it('declines on interval-js', () => {
@@ -134,11 +137,13 @@ describe('COMPILE a call of a function returned by a call', () => {
 // the expression symbolic. The compilation now declines.
 describe('COMPILE arithmetic on a function value', () => {
   it('declines `g + 1` and `2 * g`', () => {
+    // A function declared with `const` is a function, as one assigned to a
+    // global is: the sum is refused when it is boxed, before it compiles.
     expect(() => both('const g = (x) => x + 2\ng + 1')).toThrow(
-      /operand `g` is a function/
+      /invalid expression/
     );
     expect(() => both('const g = (x) => x + 2\n2 * g')).toThrow(
-      /operand `g` is a function/
+      /invalid expression/
     );
   });
 

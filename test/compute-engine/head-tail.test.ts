@@ -57,6 +57,7 @@ describe('Head/Tail on a symbol operand', () => {
 
   test('the binding is looked up, not evaluated', () => {
     const ce2 = new ComputeEngine();
+    ce2.declare('y', 'unknown');
     const run = (src: string) => executeEpsil(ce2, src).value?.json;
     // `x` is bound to the EXPRESSION `y + 1`; giving `y` a value afterwards
     // does not change what `x` is bound to, so its head is still `Add`

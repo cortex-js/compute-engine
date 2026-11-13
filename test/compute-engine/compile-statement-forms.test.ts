@@ -69,7 +69,7 @@ const ASSIGNING: [string, any][] = [
     'If in a block',
     [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       ['If', ['Greater', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 2]],
       't',
     ],
@@ -78,7 +78,7 @@ const ASSIGNING: [string, any][] = [
     'If in a loop body',
     [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'Loop',
         [
@@ -96,7 +96,7 @@ const ASSIGNING: [string, any][] = [
     'Which with three clauses',
     [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'Which',
         ['Greater', 'x', 1],
@@ -113,7 +113,7 @@ const ASSIGNING: [string, any][] = [
     'Which with no default clause',
     [
       'Block',
-      ['Assign', 't', 7],
+      ['Declare', 't', "'unknown'", 7],
       ['Which', ['Greater', 'x', 1], ['Assign', 't', 1]],
       't',
     ],
@@ -122,7 +122,7 @@ const ASSIGNING: [string, any][] = [
     'restriction',
     [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       ['If', ['Greater', 'x', 0], ['Assign', 't', ['Multiply', 2, 'x']]],
       't',
     ],
@@ -131,7 +131,7 @@ const ASSIGNING: [string, any][] = [
     'an else-less If',
     [
       'Block',
-      ['Assign', 't', 4],
+      ['Declare', 't', "'unknown'", 4],
       ['If', ['Greater', 'x', 0], ['Assign', 't', ['Add', 't', 'x']]],
       't',
     ],
@@ -140,7 +140,7 @@ const ASSIGNING: [string, any][] = [
     'a nested If in a block branch',
     [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'If',
         ['Greater', 'x', 0],
@@ -158,7 +158,7 @@ const ASSIGNING: [string, any][] = [
     'a branch whose value is discarded',
     [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       ['If', ['Greater', 'x', 0], ['Assign', 't', 1], ['Add', 'x', 1]],
       't',
     ],
@@ -196,24 +196,37 @@ const SUMS: [string, any][] = [
     'a block with a local',
     [
       'Sum',
-      ['Block', ['Assign', 't', ['Add', 'k', 1]], ['Multiply', 't', 't']],
+      [
+        'Block',
+        ['Declare', 't', "'unknown'", ['Add', 'k', 1]],
+        ['Multiply', 't', 't'],
+      ],
       limits,
     ],
   ],
   [
     'a Product whose block has a local',
-    ['Product', ['Block', ['Assign', 't', ['Add', 'k', 1]], 't'], limits],
+    [
+      'Product',
+      ['Block', ['Declare', 't', "'unknown'", ['Add', 'k', 1]], 't'],
+      limits,
+    ],
   ],
   [
     'a Sum assigned in a block',
     [
       'Block',
       [
-        'Assign',
+        'Declare',
         's',
+        "'unknown'",
         [
           'Sum',
-          ['Block', ['Assign', 't', ['Add', 'k', 'x']], ['Multiply', 't', 't']],
+          [
+            'Block',
+            ['Declare', 't', "'unknown'", ['Add', 'k', 'x']],
+            ['Multiply', 't', 't'],
+          ],
           limits,
         ],
       ],
@@ -224,10 +237,14 @@ const SUMS: [string, any][] = [
     'a Sum that is the value of a block',
     [
       'Block',
-      ['Assign', 'a', 2],
+      ['Declare', 'a', "'unknown'", 2],
       [
         'Sum',
-        ['Block', ['Assign', 't', ['Add', 'k', 'a']], ['Multiply', 't', 't']],
+        [
+          'Block',
+          ['Declare', 't', "'unknown'", ['Add', 'k', 'a']],
+          ['Multiply', 't', 't'],
+        ],
         limits,
       ],
     ],
@@ -239,11 +256,16 @@ const SUMS: [string, any][] = [
       [
         'Block',
         [
-          'Assign',
+          'Declare',
           't',
+          "'unknown'",
           [
             'Sum',
-            ['Block', ['Assign', 'w', ['Multiply', 'j', 'k']], 'w'],
+            [
+              'Block',
+              ['Declare', 'w', "'unknown'", ['Multiply', 'j', 'k']],
+              'w',
+            ],
             ['Limits', 'j', 1, 'k'],
           ],
         ],
@@ -256,7 +278,7 @@ const SUMS: [string, any][] = [
     'two indices',
     [
       'Sum',
-      ['Block', ['Assign', 't', ['Multiply', 'k', 'j']], 't'],
+      ['Block', ['Declare', 't', "'unknown'", ['Multiply', 'k', 'j']], 't'],
       limits,
       ['Limits', 'j', 1, 2],
     ],
@@ -265,13 +287,18 @@ const SUMS: [string, any][] = [
     'an index name that the enclosing block uses',
     [
       'Block',
-      ['Assign', 'k', 10],
+      ['Declare', 'k', "'unknown'", 10],
       [
-        'Assign',
+        'Declare',
         's',
+        "'unknown'",
         [
           'Sum',
-          ['Block', ['Assign', 't', ['Add', 'k', 1]], ['Multiply', 't', 't']],
+          [
+            'Block',
+            ['Declare', 't', "'unknown'", ['Add', 'k', 1]],
+            ['Multiply', 't', 't'],
+          ],
           limits,
         ],
       ],
@@ -284,7 +311,7 @@ const SUMS: [string, any][] = [
       'Sum',
       [
         'Block',
-        ['Assign', 'v', 0],
+        ['Declare', 'v', "'unknown'", 0],
         [
           'If',
           ['Greater', 'k', 1],
@@ -300,7 +327,7 @@ const SUMS: [string, any][] = [
     'an empty range',
     [
       'Sum',
-      ['Block', ['Assign', 'v', ['Add', 'x', 'k']], 'v'],
+      ['Block', ['Declare', 'v', "'unknown'", ['Add', 'x', 'k']], 'v'],
       ['Limits', 'k', 3, 1],
     ],
   ],
@@ -358,7 +385,11 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
       py.compile(
         pythonEngine().box([
           'Product',
-          ['Block', ['Assign', 't', ['Add', 'k', 1]]],
+          [
+            'Block',
+            ['Declare', 't', "'unknown'", 0],
+            ['Assign', 't', ['Add', 'k', 1]],
+          ],
           limits,
         ])
       )
@@ -422,7 +453,7 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
   test('a Sum in another position still declines', () => {
     const body = [
       'Block',
-      ['Assign', 't', ['Add', 'k', 1]],
+      ['Declare', 't', "'unknown'", ['Add', 'k', 1]],
       ['Multiply', 't', 't'],
     ];
     const sum = ['Sum', body, limits];
@@ -446,7 +477,7 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
       'Sum',
       [
         'Block',
-        ['Assign', 't', 0],
+        ['Declare', 't', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 't', ['Add', 't', 'i']],
@@ -459,7 +490,7 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
     expect(() => py.compile(ce.box(loop))).toThrow();
     const ret = [
       'Sum',
-      ['Block', ['Assign', 't', 'k'], ['Return', 't']],
+      ['Block', ['Declare', 't', "'unknown'", 'k'], ['Return', 't']],
       limits,
     ];
     expect(() => py.compile(ce.box(ret))).toThrow();
@@ -478,14 +509,14 @@ describe('AN ASSIGNMENT THAT IS AN OPERAND', () => {
   // is the static error `assignment-in-operand`, so every target declines.
   const operand: any = [
     'Block',
-    ['Assign', 't', 0],
-    ['Assign', 'w', ['Add', ['Assign', 't', 1], 2]],
+    ['Declare', 't', "'unknown'", 0],
+    ['Declare', 'w', "'unknown'", ['Add', ['Assign', 't', 1], 2]],
     ['Add', 't', 'w'],
   ];
   const argument: any = [
     'Block',
-    ['Assign', 't', 0],
-    ['Assign', 'w', ['Sin', ['Assign', 't', 1]]],
+    ['Declare', 't', "'unknown'", 0],
+    ['Declare', 'w', "'unknown'", ['Sin', ['Assign', 't', 1]]],
     ['Add', 't', 'w'],
   ];
 
@@ -568,7 +599,7 @@ describe('PYTHON: THE LOOP FORM KEEPS THE SCOPE OF THE BODY', () => {
       // of the body.
       const nested: any = [
         'Block',
-        ['Assign', 'w', 100],
+        ['Declare', 'w', "'unknown'", 100],
         [
           'Assign',
           's',
@@ -576,7 +607,7 @@ describe('PYTHON: THE LOOP FORM KEEPS THE SCOPE OF THE BODY', () => {
             'Sum',
             [
               'Block',
-              ['Assign', 'q', ['Add', 'k', 1]],
+              ['Declare', 'q', "'unknown'", ['Add', 'k', 1]],
               ['Block', ['Declare', 'w', 'real', ['Multiply', 'q', 2]], 'w'],
             ],
             limits,
@@ -608,7 +639,11 @@ describe('PYTHON: A ROOT ASSIGNMENT OF A SUM WITH A STATEMENT BODY', () => {
   const py = new PythonTarget();
   const sum = [
     'Sum',
-    ['Block', ['Assign', 'q', ['Add', 'k', 1]], ['Multiply', 'q', 'q']],
+    [
+      'Block',
+      ['Declare', 'q', "'unknown'", ['Add', 'k', 1]],
+      ['Multiply', 'q', 'q'],
+    ],
     limits,
   ];
 
@@ -624,7 +659,11 @@ describe('PYTHON: A ROOT ASSIGNMENT OF A SUM WITH A STATEMENT BODY', () => {
     'the code runs, and a block that reads the assigned name returns it',
     () => {
       const block = py.compile(
-        new ComputeEngine().box(['Block', ['Assign', 's', sum], 's'])
+        new ComputeEngine().box([
+          'Block',
+          ['Declare', 's', "'unknown'", sum],
+          's',
+        ])
       ).code;
       const out = runPython(
         `import json\ndef h():\n${indentPython(block)}\n` +
@@ -645,7 +684,7 @@ describe('AN ASSIGNMENT IN A CONDITION', () => {
       compile(
         ce.box([
           'Block',
-          ['Assign', 't', 0],
+          ['Declare', 't', "'unknown'", 0],
           [
             'If',
             ['Greater', 'x', 0],
@@ -676,7 +715,7 @@ describe('PYTHON: A SUM WITH A BOUND THAT IS NOT AN INTEGER', () => {
   ];
   const loop: any = [
     'Sum',
-    ['Block', ['Assign', 'q', ['Multiply', 'k', 10]], 'q'],
+    ['Block', ['Declare', 'q', "'unknown'", ['Multiply', 'k', 10]], 'q'],
     ['Limits', 'k', 'y', 'x'],
   ];
 

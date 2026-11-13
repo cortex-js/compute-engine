@@ -207,10 +207,11 @@ describe('A call argument declared without a value in an inner scope', () => {
 
   test('a newer declaration above the argument hides it in the call as in the caller', () => {
     // `g(c)` is boxed with `c` bound to the first pushed scope. A second
-    // pushed scope declares `c` again and gives it a value. A direct read of
-    // the first `c` answers the newer declaration (the "Symbol identity" rule
-    // of docs/SCOPING-MODEL.md), and the call must read the same: `7x`, not
-    // the first `c` (`c * x`) and not the global `c := 5` (`5x`).
+    // pushed scope declares `c` again and gives it a value. Bound again in
+    // that scope (`ce.rebind()`), a direct read of `c` answers the newer
+    // declaration, and the call must read the same: `7x`, not the first `c`
+    // (`c * x`) and not the global `c := 5` (`5x`). Not bound again, both
+    // read the first `c`.
     const ce = engine();
     ce.assign('c', 5);
     ce.pushScope();
@@ -220,8 +221,10 @@ describe('A call argument declared without a value in an inner scope', () => {
     ce.pushScope();
     ce.declare('c', 'real');
     ce.assign('c', 7);
-    expect(direct.evaluate().toString()).toBe('7');
-    expect(call.evaluate().toString()).toBe('7x');
+    expect(ce.rebind(direct).evaluate().toString()).toBe('7');
+    expect(ce.rebind(call).evaluate().toString()).toBe('7x');
+    expect(direct.evaluate().toString()).toBe('c');
+    expect(call.evaluate().toString()).toBe('c * x');
   });
 });
 

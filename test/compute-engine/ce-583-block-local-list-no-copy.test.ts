@@ -315,7 +315,7 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
       'a read',
       [
         'Block',
-        ['Assign', 'y', ['Add', 'U', 1]],
+        ['Declare', 'y', "'unknown'", ['Add', 'U', 1]],
         ['Declare', 'U', "'real'", 3],
         ['Add', 'U', 'y'],
       ],
@@ -347,8 +347,8 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
 
   test('a use in a nested scope that declares the name again compiles', () => {
     const ce = new ComputeEngine();
-    // `y` is declared first: an assignment is a first assignment only at the
-    // own level of a block, and a block with a declaration is not an operand.
+    // `y` is declared first: an assignment writes a name that is in scope,
+    // and a block with a declaration is not an operand.
     const expr = ce.box([
       'Block',
       ['Declare', 'y', "'real'", 0],
@@ -529,15 +529,14 @@ describe('CE-583: a Python block local has no value from a previous pass', () =>
   });
 
   test('a name assigned in a nested block does not reach the outer read', () => {
-    // `W` is a local of the nested block (a bare assignment of a name that
-    // nothing outside binds), so the read after the block is not that
-    // local: it is the free symbol `W`. Python wrote `W` in the scope of the
+    // `W` is a local of the nested block (its `Declare` is there), so the
+    // read after the block is not that local: it is the free symbol `W`. Python wrote `W` in the scope of the
     // function and gave 9.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
       ['Declare', 's', "'number'", 0],
-      ['Block', ['Assign', 'W', ['Add', 'x', 1]]],
+      ['Block', ['Declare', 'W', "'unknown'", ['Add', 'x', 1]]],
       ['Assign', 's', ['Add', 's', 'W']],
       's',
     ] as any);

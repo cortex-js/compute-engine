@@ -20,10 +20,6 @@ import {
 import { functionLiteralDeclaredEffects } from '../boxed-expression/function-literal.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
-  assignmentLocalsOf,
-  laterDeclarationLocalsOf,
-} from '../assignment-locals.js';
-import {
   EffectContractError,
   inferFunctionLiteralEffects,
 } from '../boxed-expression/effects-inference.js';
@@ -371,127 +367,6 @@ export function bindingStatesEffects(
 }
 
 /**
- * Prepend the `Declare` statements a statement list is MISSING: one per
- * block-local that the block introduces by bare ASSIGNMENT.
- *
- * `canonicalBlock` hoists a top-level `Assign(w, …)` whose target is not
- * visible in the enclosing scope chain into the block's OWN scope — that is
- * the interpreter's block-local, and it is why `{ w ⩴ 2t; w + 1 }` answers
- * `2t+1` rather than leaking a `w`. No `Declare` statement records it, so
- * the locals harvest below never saw it and the two halves of the local
- * disagreed: the write emitted a bare `w = …` (a stray global in sloppy JS,
- * an undeclared identifier no shader compiler accepts) while every read
- * resolved to the free-variable spelling `_.w`, which nothing ever wrote.
- * The block then answered `NaN` behind `success: true` — and since a
- * canonical `Function`-literal body IS such a block, so did every emitted
- * user-function definition with a multi-statement body (`_fn_a(_.u)`).
- *
- * Synthesizing the declaration — rather than special-casing the emission —
- * routes the implicit local through the machinery the declared one already
- * has: the `let`/`float` declaration, the bare-name reads, and the
- * complex-ness / vector-width inference the shader targets need to give it
- * a type.
- *
- * Three shapes are deliberately left alone, each because it is NOT a
- * block-local: a name the enclosing compilation already binds (a parameter,
- * an outer block's local, a loop index — `boundVars`), a name this list
- * declares explicitly, and a name the canonicalizer did not hoist, which
- * means the assignment writes an OUTER binding (that shape has its own
- * pre-existing asymmetry, tracked separately).
- */
-export function withImplicitLocalDeclares(
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  node: Expression | undefined
-): ReadonlyArray<Expression> {
-  const scope = node?.localScope;
-  if (!scope) return args;
-
-  const implicit: Expression[] = [];
-  const seen = new Set<string>();
-  for (const arg of args) {
-    if (!isFunction(arg, 'Assign')) continue;
-    const lhs = arg.ops[0];
-    if (!isSymbol(lhs)) continue;
-    const name = lhs.symbol;
-    if (seen.has(name)) continue;
-    // A name that an enclosing compiled block or function binds is written
-    // there. The exception is a function defined in the top-level block of
-    // a program before the statement that declares the same name: the
-    // canonicalization made the name a local of the function body
-    // (`recordLaterDeclarationLocals()`, `assignment-locals.ts`), and the
-    // interpreter gives each call of the function its own local, so the
-    // compiled function declares its own variable too.
-    if (
-      target.boundVars?.has(name) &&
-      laterDeclarationLocalsOf(scope)?.includes(name) !== true
-    )
-      continue;
-    // The canonicalizer hoists a top-level assignment into the block's
-    // scope. A name that the scope of the block does not bind is a write of
-    // an enclosing binding.
-    if (!scope.bindings.has(name)) continue;
-    if (
-      args.some(
-        (a) =>
-          isFunction(a, 'Declare') &&
-          isSymbol(a.ops[0]) &&
-          a.ops[0].symbol === name
-      )
-    )
-      continue;
-    seen.add(name);
-    // Raw (unbound): this is a synthetic statement, and canonicalizing a
-    // `Declare` would register the name in whatever scope the compilation
-    // happens to run under. Nothing below does arithmetic on it — the
-    // emission paths read `ops[0]` (the name) and `declareValueOperand`
-    // (none here) only.
-    implicit.push(
-      lhs.engine._fn('Declare', [lhs, lhs.engine.string('unknown')], {
-        canonical: false,
-      })
-    );
-  }
-
-  // The canonicalization records the assignment locals of the block
-  // (`recordAssignmentLocals()`, `library/control-structures.ts`). A first
-  // assignment of a name in a nested block (a branch of an `if`, a loop
-  // body) is a static error (`first-assignment-in-branch`), so each
-  // recorded name is assigned first by a statement of this list, which
-  // the loop above declares. Each name that is left is declared here, at
-  // the level of the body, so that the writes in nested blocks and the
-  // reads after them use the same variable, and each call has its own.
-  const ce = node!.engine;
-  for (const name of assignmentLocalsOf(scope) ?? []) {
-    if (seen.has(name) || !scope.bindings.has(name)) continue;
-    if (
-      args.some(
-        (a) =>
-          (isFunction(a, 'Assign') || isFunction(a, 'Declare')) &&
-          isSymbol(a.ops[0]) &&
-          a.ops[0].symbol === name
-      )
-    )
-      continue;
-    if (
-      target.boundVars?.has(name) &&
-      laterDeclarationLocalsOf(scope)?.includes(name) !== true
-    )
-      continue;
-    seen.add(name);
-    implicit.push(
-      ce._fn(
-        'Declare',
-        [ce.symbol(name, { canonical: false }), ce.string('unknown')],
-        { canonical: false }
-      )
-    );
-  }
-
-  return implicit.length === 0 ? args : [...implicit, ...args];
-}
-
-/**
  * The locals of a block and the values assigned to each of them, for the
  * callback analysis that reads the element type of a local collection
  * (`untrustedCallbackSource` in `compile-callbacks.ts`).
@@ -648,9 +523,8 @@ export function nestedAssignmentsTo(
 
 /**
  * Fail closed when the first value of a local of a block reads the name of
- * the local: `Block(x ≔ x + 1, 2x)` where no enclosing scope binds `x`, or
- * `Declare(x, "unknown", x + 1)`, which the parse of `x \coloneq x+1; 2x`
- * gives. The interpreter reads the enclosing binding of `x` in that value
+ * the local: `Declare(x, "unknown", x + 1)`, which the parse of
+ * `x \coloneq x+1; 2x` gives. The interpreter reads the enclosing binding of `x` in that value
  * (the symbol `x`, left symbolic), and the compiled code has no value for
  * it: JavaScript read `undefined` and answered `NaN`, GLSL read an uninitialized variable, and Python read
  * a parameter of the same name.
@@ -658,8 +532,8 @@ export function nestedAssignmentsTo(
  * The first value of a local is the value of the first statement of the
  * list that declares it with a value or assigns it. A read of the local in
  * an earlier statement is the static error `read-before-declaration`, and
- * a first assignment in a branch or a loop body is the static error
- * `first-assignment-in-branch`, so this test looks at that one value only.
+ * a `Declare` below a statement is the static error
+ * `declaration-below-statement`, so this test looks at that one value only.
  * A read inside a function literal is not counted, since it happens when
  * the function is called, nor is a read in a nested scope that declares
  * the same name again.

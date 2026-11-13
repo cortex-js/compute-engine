@@ -3,18 +3,15 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { checkSource } from '../../src/cli/check';
 
 //
-// The `let` and `const` locals of a block get their bindings when a run of
-// the block starts (each iteration of a loop body, each run of an `if` or
-// `do` block, each call of a function body), as in JavaScript
-// (`createBlockLocals`, `src/compute-engine/function-utils.ts`; user
-// decision 2026-10-17).
+// Each run of a block (each iteration of a loop body, each run of an `if` or
+// `do` block, each call of a function body) has its own values of the `let`
+// and `const` locals of the block, as in JavaScript: the run writes them in
+// its activation.
 //
-// A closure created in the body BEFORE the `let` of a local it reads then
-// captures the binding of its own run, and the `let` writes the value into
-// that binding. Before, the binding was created only when the `let` ran: the
-// closure of the first iteration read the bare symbol and the closure of a
-// later iteration read the binding of the previous iteration, so
-// `for i in [1, 2] { fs = [...fs, () => k]; let k = i }` gave `[k, 1]`.
+// A closure created in the body BEFORE the `let` of a local it reads captures
+// the local of its own run, and the `let` writes the value that the closure
+// reads: `for i in [1, 2] { fs = [...fs, () => k]; let k = i }` gives
+// closures that read `1` and `2`.
 //
 // A read of the local before its `let` has run in this run of the block is
 // an error, `read-before-declaration` (the temporal dead zone of
@@ -68,10 +65,12 @@ describe('what does not change', () => {
     ).toEqual(6);
   });
 
-  test('a top-level read before a later `let` stays symbolic', () => {
-    // Top-level statements do not run as a block: each one runs in the
-    // session scope, so `a` holds the symbol `k`, which later reads 2.
-    expect(run('let a = k\nlet k = 2\na')).toEqual(2);
+  test('a top-level read before a later `let` is a use before the declaration', () => {
+    // The top level of a program is a block.
+    const r = executeEpsil(new ComputeEngine(), 'let a = k\nlet k = 2\na');
+    expect(r.diagnostics.map((d) => d.message[3])).toEqual([
+      'read-before-declaration',
+    ]);
   });
 
   test('each call of a counter factory counts separately', () => {
@@ -94,11 +93,15 @@ let c2 = mk()
 //
 describe('a `const` function declared after a reference to its name', () => {
   test('it is declared, and it is a constant', () => {
+    // The reference is a use before the declaration (the top level of a
+    // program is a block); the declaration still runs.
     const r = executeEpsil(
       new ComputeEngine(),
       'g(1)\nconst g = (x) => 2 * x\ng(3)'
     );
-    expect(r.diagnostics).toEqual([]);
+    expect(r.diagnostics.map((d) => d.message[3])).toEqual([
+      'read-before-declaration',
+    ]);
     expect(r.value.json).toEqual(6);
     expect(run('g(1)\nconst g = (x) => 2 * x\ng = 5')).toEqual([
       'Error',

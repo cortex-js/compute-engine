@@ -1017,7 +1017,10 @@ describe('row 426 fourth review: every store of a plain value copies it', () => 
 
   test('a destructuring assignment', () => {
     expect(
-      inCall(['Assign', ['Tuple', 'r', 's'], ['Tuple', iff('x'), 1]], 'r')
+      inCall(
+        ['Declare', ['Tuple', 'r', 's'], "'unknown'", ['Tuple', iff('x'), 1]],
+        'r'
+      )
     ).toBe('If(y < 3, 3, 0)');
   });
 
@@ -1039,23 +1042,42 @@ describe('row 426 fourth review: every store of a plain value copies it', () => 
     // The upper bound `x` of `Limits(x, 1, x)` is the parameter, 3.
     expect(
       inCall(
-        ['Assign', 'r', ['If', 'c', ['Sum', 'x', ['Limits', 'x', 1, 'x']], 0]],
+        [
+          'Declare',
+          'r',
+          "'unknown'",
+          ['If', 'c', ['Sum', 'x', ['Limits', 'x', 1, 'x']], 0],
+        ],
         'r'
       )
     ).toBe('If(c, sum_(x=1)^(3)(x), 0)');
   });
 
   test('the values of a dictionary', () => {
-    expect(
-      inCall(
-        [
-          'Assign',
-          'r',
-          ['Dictionary', ['KeyValuePair', "'a'", ['If', 'c', 'x', 0]]],
-        ],
-        'r'
+    // A third operand of `Declare` that is a dictionary is its attributes,
+    // so the local is declared first and the dictionary is assigned to it.
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.assign(
+      'f',
+      ce.box(
+        F(
+          [
+            'Block',
+            ['Declare', 'r', "'any'", 0],
+            [
+              'Assign',
+              'r',
+              ['Dictionary', ['KeyValuePair', "'a'", ['If', 'c', 'x', 0]]],
+            ],
+            ['Assign', 'x', 100],
+            'r',
+          ],
+          'x'
+        )
       )
-    ).toBe('{"a" -> If(c, 3, 0)}');
+    );
+    expect(ce.box(['f', 3]).evaluate().toString()).toBe('{"a" -> If(c, 3, 0)}');
   });
 
   test('the target of a held assignment stays a name', () => {
@@ -1085,6 +1107,7 @@ describe('row 426 fifth review: the copy at assignment', () => {
         F(
           [
             'Block',
+            ['Declare', 'r', "'unknown'", 0],
             [
               'Assign',
               ['Tuple', 'x', 'r'],
@@ -1123,19 +1146,20 @@ describe('row 426 fifth review: the copy at assignment', () => {
   });
 
   test('a rebuilt call keeps the function its head was bound to', () => {
-    // `Hold(h(b))` is built where `h` is the outer function `u ↦ 2u`. Stored
-    // in a block that declares its own `h` and `b`, the `b` is replaced by
-    // its value, 3, and the call still applies the outer `h`: 6, not 1000.
+    // `Hold(h(b))` is written where `h` is the outer function `u ↦ 2u`: the
+    // block declares its own `h` after it. The `b` is the local of the
+    // block, replaced by its value, 3, and the call still applies the outer
+    // `h`: 6, not 1000.
     const ce = new ComputeEngine();
     ce.declare('h', 'function');
     ce.assign('h', ce.box(F(['Multiply', 2, 'u'], 'u')));
-    const held = ce.function('Hold', [ce.function('h', [ce.symbol('b')])]);
-    const block = ce.function('Block', [
-      ce.box(['Declare', 'b', "'unknown'", 3]),
-      ce.box(['Declare', 'h', "'unknown'", F(1000, 'u')]),
-      ce.function('Assign', [ce.symbol('r'), held]),
-      ce.box(['Assign', 'b', 100]),
-      ce.symbol('r'),
+    const block = ce.box([
+      'Block',
+      ['Declare', 'b', "'unknown'", 3],
+      ['Declare', 'r', "'unknown'", ['Hold', ['h', 'b']]],
+      ['Declare', 'h', "'unknown'", F(1000, 'u')],
+      ['Assign', 'b', 100],
+      'r',
     ]);
     const r = block.evaluate();
     expect(r.toString()).toBe('Hold(h(3))');
@@ -1151,13 +1175,13 @@ describe('row 426 sixth review: the copy at assignment', () => {
     const ce = new ComputeEngine();
     ce.declare('h', 'function');
     ce.assign('h', ce.box(F(['Multiply', 2, 'u'], 'u')));
-    const held = ce.function('Hold', [ce.function('h', [ce.symbol('b')])]);
-    const block = ce.function('Block', [
-      ce.box(['Declare', 'b', "'unknown'", 3]),
-      ce.box(['Declare', 'h', "'(real) -> real'", F(1000, 'u')]),
-      ce.function('Assign', [ce.symbol('r'), held]),
-      ce.box(['Assign', 'b', 100]),
-      ce.symbol('r'),
+    const block = ce.box([
+      'Block',
+      ['Declare', 'b', "'unknown'", 3],
+      ['Declare', 'r', "'unknown'", ['Hold', ['h', 'b']]],
+      ['Declare', 'h', "'(real) -> real'", F(1000, 'u')],
+      ['Assign', 'b', 100],
+      'r',
     ]);
     const r = block.evaluate();
     expect(r.toString()).toBe('Hold(h(3))');
@@ -1168,6 +1192,9 @@ describe('row 426 sixth review: the copy at assignment', () => {
     // Each level holds the previous dictionary under two keys: 31 distinct
     // nodes, 2^30 paths. A walk that unfolds it does not finish.
     const ce = new ComputeEngine();
+    // The operands are boxed before the block: `r` and the `x` of the leaf
+    // are global names, not locals of the block (`docs/plans/2026-11-11-bound-once-spec.md`, section 11).
+    ce.declare('r', 'unknown');
     let d = ce.box(['Dictionary', ['KeyValuePair', "'a'", 'x']]);
     for (let i = 0; i < 30; i++)
       d = ce.function('Dictionary', [
@@ -1183,8 +1210,7 @@ describe('row 426 sixth review: the copy at assignment', () => {
       ])
       .evaluate();
     expect(r.operator).toBe('Hold');
-    // The copy keeps the sharing, and its leaf holds the value of `x` at
-    // the assignment.
+    // The copy keeps the sharing, and its leaf keeps the global `x`.
     let cur = isFunction(r) ? r.op1 : r;
     let depth = 0;
     while (isDictionary(cur) && cur.get('p') !== undefined) {
@@ -1193,6 +1219,6 @@ describe('row 426 sixth review: the copy at assignment', () => {
       depth += 1;
     }
     expect(depth).toBe(30);
-    expect(cur.toString()).toBe('{"a" -> 3}');
+    expect(cur.toString()).toBe('{"a" -> x}');
   });
 });

@@ -9,7 +9,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // its `evaluate` handler runs.
 
 const ASSIGNMENT_IN_OPERAND = 'ErrorCode("assignment-in-operand"';
-const FIRST_ASSIGNMENT_IN_BRANCH = 'ErrorCode("first-assignment-in-branch"';
+const UNDECLARED = 'ErrorCode("assignment-to-undeclared-variable"';
 
 /** An engine with the host operators of these tests:
  * - `Do(body, n)` runs `body` `n` times. It is not lazy: `n` is a value,
@@ -61,7 +61,7 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
     const { ce } = engine();
     const e = ce.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Do', ['Assign', 's', ['Add', 's', 1]], 5],
       's',
     ]);
@@ -69,21 +69,21 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
     expect(e.evaluate().toString()).toBe('5');
   });
 
-  test('a first assignment in the body of `Do` is an error', () => {
+  test('an assignment of an undeclared name in the body of `Do` is an error', () => {
     const { ce } = engine();
     expect(
       canonical(ce, ['Do', ['Assign', 's', ['Add', 's', 1]], 5])
-    ).toContain(`${FIRST_ASSIGNMENT_IN_BRANCH}, "s")`);
+    ).toContain(`${UNDECLARED}, "s")`);
   });
 
-  test('a first assignment in a lazy operator without a `canonical` handler', () => {
+  test('an assignment in a lazy operator without a `canonical` handler', () => {
     const { ce } = engine();
     expect(canonical(ce, ['Cell', ['Assign', 'a', 5]])).toContain(
-      `${FIRST_ASSIGNMENT_IN_BRANCH}, "a")`
+      `${UNDECLARED}, "a")`
     );
     const e = ce.box([
       'Block',
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       ['Cell', ['Assign', 'a', 5]],
       'a',
     ]);
@@ -95,7 +95,7 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
     const { ce } = engine();
     const e = ce.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Do2', ['Assign', 's', ['Add', 's', 1]], 5],
       's',
     ]);
@@ -113,7 +113,7 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
     const { ce, received } = engine();
     const e = ce.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Do', ['Assign', 's', ['Add', 's', 2]], ['Add', 1, 2]],
       's',
     ]);
@@ -125,7 +125,7 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
     const { ce, received } = engine();
     const e = ce.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Do', ['Assign', 's', ['Add', 's', 1]], 2],
       's',
     ]);
@@ -137,7 +137,7 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
     const { ce, received } = engine();
     const e = ce.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Do', ['Assign', 's', ['Add', 's', 1]], 4],
       's',
     ]);
@@ -171,7 +171,7 @@ describe('A STATEMENT OPERAND OF A HOST OPERATOR', () => {
 
     const strict = ce.box([
       'Block',
-      ['Assign', 'b', 0],
+      ['Declare', 'b', "'unknown'", 0],
       ['KeepStrict', ['Assign', 'b', 2]],
       'b',
     ]);
@@ -213,7 +213,7 @@ describe('AN ASSIGNMENT AT A VALUE OPERAND', () => {
       const ce = new ComputeEngine();
       const e = ce.box([
         'Block',
-        ['Assign', 'a', 0],
+        ['Declare', 'a', "'unknown'", 0],
         [
           'Match',
           x,
@@ -291,7 +291,7 @@ describe('THE ROLES OF A DEFINITION', () => {
     });
     const e = ce.box([
       'Block',
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       ['ReadsSymbol', ['Assign', 'a', 5]],
       'a',
     ]);
@@ -708,9 +708,9 @@ describe('A HOST BINDER DECLARED WITH OPERAND ROLES', () => {
     expect(e.evaluate().toString()).toBe('5');
     // The variable of the operator is not the global `x`.
     expect(ce.box('x').evaluate().toString()).toBe('10');
-    // A first assignment of another name is the error of a branch.
+    // An assignment of a name that is not in scope is an error.
     expect(canonical(ce, ['Let', 'x', ['Assign', 'y', 5]])).toContain(
-      `${FIRST_ASSIGNMENT_IN_BRANCH}, "y")`
+      `${UNDECLARED}, "y")`
     );
   });
 

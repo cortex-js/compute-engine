@@ -13,7 +13,7 @@ type Json = MathJsonExpression;
 const CX: Json = ['Multiply', 'c', 'x'];
 const UNIT: Json = ['Limits', 'x', 0, 1];
 const BRANCH: Json[] = [
-  ['Assign', 'c', 0],
+  ['Declare', 'c', { str: 'unknown' }, 0],
   ['If', ['Greater', 'x', 0.5], ['Assign', 'c', 1], ['Assign', 'c', 2]],
 ];
 
@@ -27,7 +27,12 @@ const numeric = (e: Expression): number => e.re;
 
 describe('Integrate of a block of local assignments', () => {
   test.each<[string, Json[], string, number]>([
-    ['an assignment', [['Assign', 'c', 2], CX], '1', 1],
+    [
+      'an assignment',
+      [['Declare', 'c', { str: 'unknown' }, 0], ['Assign', 'c', 2], CX],
+      '1',
+      1,
+    ],
     [
       'a declaration with no written type',
       [['Declare', 'c', { str: 'unknown' }, 2], CX],
@@ -43,7 +48,7 @@ describe('Integrate of a block of local assignments', () => {
     [
       'a value that reads the variable',
       [
-        ['Assign', 'c', ['Multiply', 'x', 'x']],
+        ['Declare', 'c', { str: 'unknown' }, ['Multiply', 'x', 'x']],
         ['Add', 'c', 1],
       ],
       '4/3',
@@ -52,8 +57,8 @@ describe('Integrate of a block of local assignments', () => {
     [
       'a local that gets a new value after another local read it',
       [
-        ['Assign', 'a', 1],
-        ['Assign', 'b', ['Add', 'a', 1]],
+        ['Declare', 'a', { str: 'unknown' }, 1],
+        ['Declare', 'b', { str: 'unknown' }, ['Add', 'a', 1]],
         ['Assign', 'a', 3],
         ['Multiply', 'a', 'b', 'x'],
       ],
@@ -63,7 +68,7 @@ describe('Integrate of a block of local assignments', () => {
     [
       'a value with an inner sum',
       [
-        ['Assign', 'c', 2],
+        ['Declare', 'c', { str: 'unknown' }, 2],
         ['Sum', ['Multiply', 'c', 'k', 'x'], ['Limits', 'k', 1, 3]],
       ],
       '6',
@@ -77,14 +82,18 @@ describe('Integrate of a block of local assignments', () => {
 
   test('a list integrand is integrated element by element', () => {
     const ce = new ComputeEngine();
-    const e = integral(ce, ['Assign', 'c', 2], ['List', CX, 'x']);
+    const e = integral(
+      ce,
+      ['Declare', 'c', { str: 'unknown' }, 2],
+      ['List', CX, 'x']
+    );
     expect(e.evaluate().toString()).toBe('[1,1/2]');
   });
 
   test('every route gives the same value', () => {
     const ce = new ComputeEngine();
     const viaFunction = ce.function('Integrate', [
-      ce.box(block(['Assign', 'c', 2], CX)),
+      ce.box(block(['Declare', 'c', { str: 'unknown' }, 2], CX)),
       ce.box(UNIT),
     ]);
     expect(viaFunction.evaluate().toString()).toBe('1');
@@ -97,7 +106,7 @@ describe('Integrate of a block of local assignments', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
       'Integrate',
-      block(['Assign', 'c', 2], CX),
+      block(['Declare', 'c', { str: 'unknown' }, 2], CX),
       ['Limits', 'x', 'Nothing', 'Nothing'],
     ] as Json);
     expect(e.evaluate().toString()).toBe('x^2');
@@ -108,7 +117,10 @@ describe('Integrate of a block of local assignments', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
       'Integrate',
-      block(['Assign', 'c', 2], ['Multiply', 'c', 'x', 'y']),
+      block(
+        ['Declare', 'c', { str: 'unknown' }, 2],
+        ['Multiply', 'c', 'x', 'y']
+      ),
       UNIT,
       ['Limits', 'y', 0, 1],
     ] as Json);
@@ -119,7 +131,7 @@ describe('Integrate of a block of local assignments', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
       'Integrate',
-      ['Function', block(['Assign', 'c', 2], CX), 'x'],
+      ['Function', block(['Declare', 'c', { str: 'unknown' }, 2], CX), 'x'],
       UNIT,
     ] as Json);
     expect(e.evaluate().toString()).toBe('1');
@@ -127,7 +139,11 @@ describe('Integrate of a block of local assignments', () => {
 
   test('a free symbol of the value stays in the result, in the scope of the caller', () => {
     const ce = new ComputeEngine();
-    const value = integral(ce, ['Assign', 'c', 'a'], CX).evaluate();
+    const value = integral(
+      ce,
+      ['Declare', 'c', { str: 'unknown' }, 'a'],
+      CX
+    ).evaluate();
     const written = ce
       .box(['Integrate', ['Multiply', 'a', 'x'], UNIT] as Json)
       .evaluate();
@@ -148,7 +164,7 @@ describe('Integrate of a block of local assignments', () => {
 
   test('the block declares nothing outside the integral', () => {
     const ce = new ComputeEngine();
-    integral(ce, ['Assign', 'c', 2], CX).evaluate();
+    integral(ce, ['Declare', 'c', { str: 'unknown' }, 2], CX).evaluate();
     expect(ce.lookupDefinition('c')).toBeUndefined();
   });
 
@@ -158,7 +174,11 @@ describe('Integrate of a block of local assignments', () => {
       'g',
       ce.box([
         'Function',
-        ['Integrate', block(['Assign', 'c', 'f'], CX), UNIT],
+        [
+          'Integrate',
+          block(['Declare', 'c', { str: 'unknown' }, 'f'], CX),
+          UNIT,
+        ],
         'f',
       ] as Json)
     );
@@ -172,7 +192,10 @@ describe('Integrate of a block of local assignments', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
       'Integrate',
-      block(['Assign', 'c', 2], ['Divide', 'c', ['Add', 1, ['Square', 'x']]]),
+      block(
+        ['Declare', 'c', { str: 'unknown' }, 2],
+        ['Divide', 'c', ['Add', 1, ['Square', 'x']]]
+      ),
       ['Limits', 'x', 'NegativeInfinity', 'PositiveInfinity'],
     ] as Json);
     expect(e.evaluate().toString()).toBe('2pi');
@@ -226,7 +249,7 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
   test('a value that is not pure is not substituted in each use', () => {
     const e = integral(
       new ComputeEngine(),
-      ['Assign', 'c', ['Random']],
+      ['Declare', 'c', { str: 'unknown' }, ['Random']],
       ['Add', CX, 'c']
     );
     expect(e.evaluate().operator).toBe('Integrate');
@@ -265,16 +288,24 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
   test('a value that fails and that no statement reads', () => {
     const ce = new ComputeEngine();
     const failing: Json = ['AssertPresent', 'Missing'];
-    expect(integral(ce, ['Assign', 'c', failing], 'x').evaluate().operator).toBe(
-      'Integrate'
-    );
     expect(
-      integral(ce, ['Assign', 'c', failing], ['Assign', 'c', 2], CX).evaluate()
-        .operator
+      integral(
+        ce,
+        ['Declare', 'c', { str: 'unknown' }, failing],
+        'x'
+      ).evaluate().operator
+    ).toBe('Integrate');
+    expect(
+      integral(
+        ce,
+        ['Declare', 'c', { str: 'unknown' }, failing],
+        ['Assign', 'c', 2],
+        CX
+      ).evaluate().operator
     ).toBe('Integrate');
     const unread = ce.box([
       'D',
-      block(['Assign', 'c', failing], 'x'),
+      block(['Declare', 'c', { str: 'unknown' }, failing], 'x'),
       'x',
     ] as Json);
     expect(unread.evaluate().operator).toBe('D');
@@ -283,7 +314,7 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
   test('a value that fails and that only a branch reads', () => {
     const ce = new ComputeEngine();
     const statements: Json[] = [
-      ['Assign', 'c', ['AssertPresent', 'Missing']],
+      ['Declare', 'c', { str: 'unknown' }, ['AssertPresent', 'Missing']],
       ['If', 'False', 'c', 'x'],
     ];
     expect(integral(ce, ...statements).evaluate().operator).toBe('Integrate');
@@ -294,7 +325,9 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
   test('a literal that no statement reads is dropped', () => {
     const ce = new ComputeEngine();
     expect(
-      integral(ce, ['Assign', 'c', 2], 'x').evaluate().toString()
+      integral(ce, ['Declare', 'c', { str: 'unknown' }, 2], 'x')
+        .evaluate()
+        .toString()
     ).toBe('1/2');
   });
 
@@ -306,7 +339,12 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
     expectDeclined(
       integral(
         new ComputeEngine(),
-        ['Assign', 'c', ['Function', ['Add', 't', 1], 't']],
+        [
+          'Declare',
+          'c',
+          { str: 'unknown' },
+          ['Function', ['Add', 't', 1], 't'],
+        ],
         ['Apply', 'c', 'x']
       ),
       3 / 2
@@ -317,7 +355,7 @@ describe('Integrate of any other block stays unevaluated under evaluate()', () =
     expectDeclined(
       integral(
         new ComputeEngine(),
-        ['Assign', 'k', 2],
+        ['Declare', 'k', { str: 'unknown' }, 2],
         ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 3]]
       ),
       3
@@ -340,7 +378,7 @@ describe('a block inside the integrand', () => {
   test('the antiderivative takes the value of the block', () => {
     const e = new ComputeEngine().box([
       'Integrate',
-      ['Add', 1, block(['Assign', 'c', 2], CX)],
+      ['Add', 1, block(['Declare', 'c', { str: 'unknown' }, 2], CX)],
       UNIT,
     ] as Json);
     expect(e.evaluate().toString()).toBe('2');
@@ -351,7 +389,7 @@ describe('a block inside the integrand', () => {
     const value = ce
       .box([
         'Integrate',
-        ['Add', 1, block(['Assign', 'c', 'a'], CX)],
+        ['Add', 1, block(['Declare', 'c', { str: 'unknown' }, 'a'], CX)],
         UNIT,
       ] as Json)
       .evaluate();
@@ -375,10 +413,10 @@ describe('the text form of an integral', () => {
   test('shows every statement of a block', () => {
     const text = integral(
       new ComputeEngine(),
-      ['Assign', 'c', 2],
+      ['Declare', 'c', { str: 'unknown' }, 2],
       CX
     ).toString();
-    expect(text).toContain('Assign(c, 2)');
+    expect(text).toContain('Declare(c, "unknown", 2)');
     expect(text).toContain('c * x');
   });
 

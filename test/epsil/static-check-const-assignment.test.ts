@@ -126,7 +126,7 @@ describe('EPSIL CHECK: AN ASSIGNMENT TO A CONST BINDING', () => {
   });
 
   test('a leaf of a destructuring assignment', () => {
-    const d = check('const c = 1\n(a, c) := (3, 4)\nc');
+    const d = check('const c = 1\nlet a = 0\n(a, c) := (3, 4)\nc');
     expect(d.map((x) => [x.message[3], x.at])).toEqual([
       ['constant-assignment', '(a, c) := (3, 4)'],
     ]);
@@ -181,7 +181,7 @@ describe('EPSIL CHECK: NO REPORT', () => {
   });
 
   test('a const of another name', () => {
-    expect(check('const d = 1\nc = 2\nc + d')).toEqual([]);
+    expect(check('const d = 1\nlet c = 2\nc + d')).toEqual([]);
   });
 
   test('a `let` in a function body shadows the constant', () => {
@@ -450,19 +450,27 @@ const RUN = (source: string, ce = new ComputeEngine()) => {
 
 describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
   test('a function defined before a top-level `const` does not write it', () => {
-    // The assignment `c = 2` makes a local of the body of `f`: no enclosing
-    // scope declared `c` when `f` was defined. The constant keeps its value.
+    // No enclosing scope declares `c` when `f` is defined, so the assignment
+    // `c = 2` in its body is an assignment to an undeclared variable. The
+    // constant keeps its value.
     const source =
       'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nf()\nc';
-    expect(CHECK(source)).toEqual([]);
-    expect(RUN(source)).toEqual({ value: '1', diagnostics: [] });
+    const expected = [
+      ['static-type-error', 'assignment-to-undeclared-variable', 1, 'c = 2'],
+    ];
+    expect(CHECK(source)).toEqual(expected);
+    expect(RUN(source)).toEqual({ value: '1', diagnostics: expected });
   });
 
   test('two assignments to the same name', () => {
-    // Only the top-level assignment writes the constant.
+    // Only the top-level assignment writes the constant. The assignment in
+    // the body of `f` has no `c` in scope.
     const source =
       'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nc = 3\nf()\n4';
-    const expected = [['static-type-error', 'constant-assignment', 3, 'c = 3']];
+    const expected = [
+      ['static-type-error', 'assignment-to-undeclared-variable', 1, 'c = 2'],
+      ['static-type-error', 'constant-assignment', 3, 'c = 3'],
+    ];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
   });
@@ -472,7 +480,10 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
       'function g() { const c = 5; c = 6 }\n' +
       'function f() scope -> integer { c = 2; 0 }\n' +
       'const c = 1\nf()\n4';
-    const expected = [['static-type-error', 'constant-assignment', 1, 'c = 6']];
+    const expected = [
+      ['static-type-error', 'constant-assignment', 1, 'c = 6'],
+      ['static-type-error', 'assignment-to-undeclared-variable', 2, 'c = 2'],
+    ];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
   });
@@ -498,7 +509,8 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
   test('a write to a constant of an earlier program is reported by the run', () => {
     // The static check reports the write to the local `c` of `g`. The write
     // in `f` is to the constant of the earlier program, which the static
-    // check cannot see: the run reports it.
+    // check cannot see: the run reports it. `checkSource()` does not see the
+    // earlier program, so for it the write in `f` has no `c` in scope.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'const c = 1');
     const source =
@@ -506,6 +518,7 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
       'function f() scope -> integer { c = 2; 0 }\nf()\n4';
     expect(CHECK(source)).toEqual([
       ['static-type-error', 'constant-assignment', 1, 'c = 6'],
+      ['static-type-error', 'assignment-to-undeclared-variable', 2, 'c = 2'],
     ]);
     expect(RUN(source, ce)).toEqual({
       value: '4',
@@ -519,22 +532,35 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
 
 describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
   // A top-level `const` is not declared when an earlier statement defines a
-  // function, so an assignment to the name in the body makes a local of the
-  // body, with a new binding at each call: the constant is not written, and
-  // nothing is reported. A `const` of a block is declared before the
+  // function or runs a block, so an assignment to the name there has no
+  // variable in scope: it is `assignment-to-undeclared-variable`, and the
+  // constant is not written. A `const` of a block is declared before the
   // functions of the block are defined, so a function defined before it in
   // the block writes it (the next test).
   test.each([
     // Each assignment of the body, in a block too.
-    'function f() scope -> integer { c = 3; if true { c = 2 }; 0 }\n' +
-      'const c = 1\nf()\nc',
+    [
+      'function f() scope -> integer { c = 3; if true { c = 2 }; 0 }\n' +
+        'const c = 1\nf()\nc',
+      '1',
+      'c = 3',
+    ],
     // A function literal.
-    'let g = () => do { c = 2 }\nconst c = 1\ng()\nc',
+    ['let g = () => do { c = 2 }\nconst c = 1\ng()\nc', '1', 'c = 2'],
     // A function called only before the `const`.
-    'function f() scope -> integer { c = 2; 0 }\nf()\nconst c = 1\nc',
-  ])('no report for a top-level const: %j', (source) => {
-    expect(CHECK(source)).toEqual([]);
-    expect(RUN(source)).toEqual({ value: '1', diagnostics: [] });
+    [
+      'function f() scope -> integer { c = 2; 0 }\nf()\nconst c = 1\nc',
+      '1',
+      'c = 2',
+    ],
+    // A block of the top level runs before the `const`.
+    ['do { c = 2 }\nconst c = 1\n4', '4', 'c = 2'],
+  ])('the top-level const is not written: %j', (source, value, at) => {
+    const expected = [
+      ['static-type-error', 'assignment-to-undeclared-variable', 1, at],
+    ];
+    expect(CHECK(source)).toEqual(expected);
+    expect(RUN(source)).toEqual({ value, diagnostics: expected });
   });
 
   test('a local const of a function, written by a function defined before it', () => {
@@ -556,8 +582,6 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
     // A `let` of an enclosing function.
     'function o() scope -> integer { let c = 0; let g = () => do { c = 2; 0 }; g(); c }\n' +
       'const c = 1\no()\n4',
-    // A block of the top level runs before the `const`.
-    'do { c = 2 }\nconst c = 1\n4',
   ])('no report when another binding takes the write: %j', (source) => {
     expect(CHECK(source)).toEqual([]);
     expect(RUN(source)).toEqual({ value: '4', diagnostics: [] });

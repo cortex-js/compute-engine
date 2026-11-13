@@ -404,7 +404,7 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
     // `w ≔ exp(x)` assigns `+∞` (in f32) to the local `w` for x > 88.7:
     // the declared type of `x` says nothing about the value of `w`. (A
     // compiled block does not write the input `x` itself.)
-    const WRITE = ['Assign', 'w', ['Exp', 'x']];
+    const WRITE = ['Declare', 'w', "'unknown'", ['Exp', 'x']];
 
     it('keeps the guard at the root', () => {
       const ce = new ComputeEngine();

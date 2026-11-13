@@ -2,14 +2,7 @@
  * The number of the top-level evaluation that runs now: an evaluation that
  * is not nested in another evaluation.
  *
- * A `Block` reads it to tell a new evaluation from a new run of the block
- * inside the same evaluation (an iteration of a loop body). A local that an
- * assignment makes in the block (`x ≔ x + 1` with `x` not declared) starts
- * with no value in each new evaluation, and keeps its value from one run of
- * the block to the next inside one evaluation, as a variable of a JavaScript
- * or Python function keeps its value across the iterations of a loop
- * (`sweepCanonicalizationBindings`, `library/control-structures.ts`). The
- * sticky rule of a call whose head had no value reads it too
+ * The sticky rule of a call whose head had no value reads it
  * (`EVALUATED_UNRESOLVED_CALLS`, `boxed-function.ts`).
  *
  * A synchronous evaluation reads the number of its engine.

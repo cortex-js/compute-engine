@@ -263,7 +263,7 @@ describe('BLOCK: subs() READS THE LOCALS AS THE FREE-VARIABLE WALK DOES', () => 
   test('each leaf of a destructuring target is a local', () => {
     const e = ce.expr([
       'Block',
-      ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 1, 2]],
+      ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 1, 2]],
       ['Add', 'a', 'b'],
     ]);
     expect(e.unknowns).toEqual([]);

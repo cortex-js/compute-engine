@@ -865,4 +865,140 @@ three structured-route tests "a shadowed function name declines"
 (`-functions`, `-functions2`) and "a shadowed Comprehension or ReplaceAt
 declines" (`-heat`) now compile the user function through its copy, and the
 value equals the interpreter's (`Abs(a) = a + 1`, `f(-5)` = `-4` on both);
-the tests expect a decline. Left to the owner of the route.
+the tests expected a decline. By the owner's decision they are value tests
+against the interpreter at -5, 0.5 and 2 ("… compiles as the user
+function"): `Abs`, `Tanh`, `Ln`, `Arctan2` (`-functions`), `Tan`, `Erf`,
+`Sign` (`-functions2`) and `ReplaceAt` (`-heat`) equal the interpreter at
+each point, -4 at -5. A user `Comprehension` still declines ("unsupported
+bound head Comprehension"); its test is kept as a decline, split from the
+`ReplaceAt` one.
+
+### Third review round (2026-11-12, commits `41f4ce500` to `ddb044159`)
+
+- P1: a binder of a hold body whose variable a `bind` argument renames
+  (`Sum(body, (i, 1, n))` with `i` → `k`) gets a copy of its scope in each
+  call (`invokeWithBoundVariables`, `function-utils.ts`). The shared scope
+  declared `k` at the first call with `integer<1..n>`, and a later call
+  read that declaration. `(mySum(k, k, 2), mySum(k, k, 3))` is `(3, 6)`.
+- P2 (ruling: a `let g = <function literal>` is a variable that holds a
+  function value everywhere, at the top level too; a `function` statement
+  stays a global function definition): `declareOne` takes the
+  `assignsFunction` route only for a declared function type, so an untyped
+  `let` makes a value definition, as on main. The static pass
+  (`registerPinnedSignature`, `static-diagnostics.ts`) is back to main's
+  `firstWins`: a `let`/`const` pin is replaced by a reassignment of a `let`
+  and kept for a `const` or an `Assign`. Tests that had been moved to the
+  reversed D10 are back to main's versions (7 in
+  `static-lambda-callee-arguments`, `epsil doc` in
+  `parameter-default-values`); the two `execute` tests whose subject is a
+  refused reassignment declare the variable with its signature
+  (`let f: (x: number, y: string) -> number = …`), the spelling that has
+  main's first-wins now that `:=` makes no variable. `let old = g`, `[g]`,
+  an alias passed to a function, `Apply`, `map` give main's values; with a
+  `function g` statement `let old = g` gives 100 and `g = (x) => old(x) * 2`
+  `recursion-depth-exceeded`, on both trees. Host `ce.assign('old',
+  ce.symbol('g'))` then a new `g`: `old(1)` is 100 on both trees.
+  Four more tests moved to the reversed D10 are back to main's versions
+  (`call-follows-function-reassignment` "a call boxed before the
+  reassignment of a `let`" and its program, `lambda-param-element-inference`
+  "one literal used over two differently-typed collections",
+  `protocol-effects` CE-62.2, and `lambda-param-collection-inference` "held
+  as a value", a `test.failing` for CE-1244 that now passes).
+- P3: an asynchronous evaluation records a lazy collection with its own
+  context stack in place (`runWithEvaluationEffects` around
+  `recordLazyViewContext` in the `.then` of `evaluateAsync`), so the
+  variables that the collection reads are read in its activation.
+  `function F(p) { let c = p * 10; Total(map((x) => x + c, [1, 2])) }` with
+  `Add(F(1), F(2))` stays wrong on both trees (`Total` is not evaluated;
+  main throws `Not canonical`), not a regression.
+- P4: `inlineFrameLocals` also replaces a caller-frame name in call
+  position (`g(k)` → `Apply(value, k)`).
+- `hold rs(body, bind i, n) = if n <= 0 { 0 } else { Sum(body, (i, n, n)) +
+  rs(body, i, n - 1) }; rs(k, k, 2)` gives `k + k` (3 by the rules; main
+  gives an unevaluated `Apply`): not a regression, to be filed.
+
+### Fourth review round (2026-11-12, commits `04c694e94`, `104c7f55f`)
+
+- Q1: `inlineFrameLocals` keeps in `visited` only the definitions being
+  inlined on the current path, so a second occurrence of a caller-frame
+  local is inlined too (`ev(q * q)` with `q = 3` is 9).
+- Q2: the compile fallback resolves a name that occurs only in a held
+  operand from the scope that `compile()` is called in (`buildScope`), and
+  `run` evaluates `expr` in that scope (`ce._inScope`). No home scope is
+  recorded for a function expression; a held operand is bound when it is
+  evaluated, so an evaluation in that scope is what the interpreter does
+  there.
+- Q3, unchanged by decision: a top-level `let g` with no value and no type
+  is refused and declares nothing, so `g = (x) => x * 3` is an assignment to
+  an undeclared name that is not reported a second time
+  (`declaredByEarlierStatement()`, `static-diagnostics.ts`), and `g(2)`
+  stays `g(2)` (main: 6). In a `do` block the same statements give the
+  error value `declaration-without-value`, on both trees.
+- Wrong on main, here: `mySum(j*k + j, k, 2)` in a loop over `j` gives
+  `[5,10,15]` after Q1 (main `[7,12,2j + 9]`); `let (a, (b, c)) = …; b = 5`
+  in a function and a `scope` closure writing `a` give `f()` / `w()` with an
+  `incompatible-type` diagnostic, as on main.
+
+## On main 43db9f4e6, for landing (2026-11-12)
+
+Worktree `/tmp/wt-compute-engine-06-land3`, detached on main `43db9f4e6`:
+the change of `c22d678d9` (everything but `docs/plans`) applied with
+`git apply --3way`, no conflict (main's `ac2fc87a8` touches only
+`compilation/ir/`, `numerics/inverse-hyperbolic.ts` and
+`boxed-expression/trigonometry.ts`, which the change does not touch).
+Commits: `5ded3a526` (the change), `4fcb22e25` (CHANGELOG, two tests),
+`9b74213df` (inlining memo), `019a0f3cd` (`npm run doc`), and the one that
+holds this section.
+
+### Tests moved (class b)
+
+Two tests still asserted the reversed D10 (a `let` of a literal is a
+function definition) and were not restored with the others in the third
+review round:
+
+- `ce-1163-pool-loop` "a user function that calls a function of the engine
+  held as a value runs in order": main's version (route
+  `in-order:function-value`).
+- `ce-473-captured-free-symbol` "a captured symbol declared by a later let
+  makes the call an error": main's assertions (a type error), with `let y`
+  in place of `y =`, which is now an assignment to an undeclared name.
+
+### The inlining of caller-frame locals
+
+`inlineFrameLocals` (`function-utils.ts`) re-inlined a definition at each
+occurrence, so a chain of local functions that each call the previous one
+twice was exponential (13 locals: 23.5 s, 16: over 120 s; main 0.11 s and
+0.14 s). A memo per top-level call keeps the inlined value of each
+definition; a value whose computation stopped at a definition of the
+current path (a cycle) is not kept. `shadowed` only decides whether an
+occurrence is replaced, before the memo is read, and the recursive call
+starts a new rewrite, so the value does not depend on the position. After
+the memo the time was in the effects walk, which walked an applied literal
+node again at each place the DAG applies it: `Apply(Function(…), …)` now
+uses the `expandedLiterals` rule of the stored literals
+(`effects-inference.ts`). Times: 13 locals 0.31 s, 16 locals 1.43 s,
+20 locals 20.8 s (still about ×1.8 per local: type and purity walks of
+the DAG elsewhere). Test: `bound-once` "a chain of local functions that
+each call the previous one twice is inlined once per local" (16 locals,
+32768, 5 s timeout).
+
+### Completion checks
+
+Type check, `npm run lint`, `npm run check:deps` clean; `bound-once` 72
+pass. Full suite at `5ded3a526` (before the two moved tests and the memo;
+load 2.2 at acquire): 2052 files, 92329 tests, 22 failed in 14 files: the
+20 known ones and the two moved tests above. The 14 files pass at main
+`43db9f4e6` (662 tests). After the memo, the affected files (`bound-once`,
+the names with `hold`, `bind`, `closure`, `lambda`, `function`, `local`,
+and `test/epsil`: 289 files, 10650 tests) fail 9, all known. Nightly suites
+(7 files, 602 tests) pass. `npm run doc` and `npm run build` pass.
+
+Timing at `9b74213df` (one worker, under the lock, 1-minute load 2.7 to
+4.2): calculus 10.80/10.88/10.79 s against 10.66/10.66/10.75 s at main,
+simplify 1.97/2.04/1.99 against 2.19/1.98/2.00, integrate-symbolic-pole
+17.48/18.07/17.25 against 17.37/17.34/17.53.
+
+Build for the host: `npm run build`, then `npm pack --ignore-scripts
+--pack-destination /Users/arno/dev/compute-engine-recovery/`:
+`/Users/arno/dev/compute-engine-recovery/cortex-js-compute-engine-0.187.1.tgz`
+(the version string is 0.187.1, the same as the release on npm).

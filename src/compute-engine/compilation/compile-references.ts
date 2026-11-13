@@ -1,9 +1,16 @@
 // Reference analysis of a compilation unit, free symbol types, reports, and
 // the interpreter fallback.
 
-import type { Expression, FunctionInterface, Scope } from '../global-types.js';
+import type {
+  BoxedDefinition,
+  Expression,
+  FunctionInterface,
+  Scope,
+} from '../global-types.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
+import { rewriteWithBinders } from '../boxed-expression/binders.js';
+import { withBindingValuesFn } from '../engine-declarations.js';
 import { isTupleShapedType } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -40,10 +47,8 @@ import {
 } from './diagnostics.js';
 import { protocolOfSymbol } from '../engine-protocols.js';
 import { planProtocolDispatch } from './protocol-dispatch.js';
-import {
-  buildCaseClosure,
-  matchPatternReferences,
-} from '../boxed-expression/match-dispatch.js';
+import { buildCaseClosure } from '../boxed-expression/match-dispatch.js';
+import { matchPatternReferences } from '../boxed-expression/pattern-utils.js';
 import type {
   CompileDiagnostic,
   CompileTarget,
@@ -90,7 +95,6 @@ import { declareValueOperand } from './compile-declarations.js';
 import { core } from './compiler-core-hooks.js';
 import { CompilerState } from './compiler-state.js';
 import { implicitIntegrationVariable } from '../boxed-expression/integration-variables.js';
-import { assignmentLocalsOf } from '../assignment-locals.js';
 import { bodyWithParallelHeadsLowered } from './parallel-lowering.js';
 
 /**
@@ -1087,28 +1091,7 @@ export function analyzeReferences(
           // supplies; without this the program's own function name was
           // reported as a free symbol.
           if (isSymbol(stmt.ops[0])) locals.push(stmt.ops[0].symbol);
-        } else if (
-          isFunction(stmt, 'Assign') &&
-          isSymbol(stmt.ops[0]) &&
-          e.localScope?.bindings.has(stmt.ops[0].symbol)
-        ) {
-          // An assignment that the canonical form hoisted into the scope
-          // of the block (`v ≔ 2` with no outer `v`) declares a local of
-          // the block, which the generated code declares too
-          // (`withImplicitLocalDeclares`). It was reported as a free
-          // symbol: `Block(v ≔ 2; v·x)` reported `v` and `x`.
-          locals.push(stmt.ops[0].symbol);
         }
-      // A name that only an assignment in a nested block assigns (a loop
-      // body, a branch of an `if`) is a local of a function body when the
-      // canonical form recorded it as an assignment local of the body's
-      // scope (`assignmentLocalsOf()`). The generated code declares it at
-      // the level of the body (`withImplicitLocalDeclares`). It was
-      // reported as a free symbol: in a function declared with the `scope`
-      // effect whose loop body assigns `p ≔ (t, 2t)`, `p` was an input.
-      if (e.localScope !== undefined)
-        for (const name of assignmentLocalsOf(e.localScope) ?? [])
-          if (e.localScope.bindings.has(name)) locals.push(name);
       const inner = locals.length ? union(bound, locals) : bound;
       // Typed block locals extend the declared-type frame (the mirror of
       // the `compileBlock` / `loopBodyTempTarget` merge), so a protocol
@@ -1855,11 +1838,95 @@ export function buildInterpreterFallback<T extends string>(
     }
     return ce.expr(v as never);
   };
-  // The declared type of a free symbol of `expr`, when it has one in the
-  // scope the fallback was built in — the shadow declared by `run` below
-  // must admit the argument value under that declaration's shape.
+  // An occurrence of each name that `expr` reads from outside itself (not
+  // a variable of a binder of `expr`), and of each name that the value of a
+  // symbol it reads, or the body of a function it calls, reads in turn
+  // (`f15 := f14 + f14`, `g := t ↦ t + a` with `a := 3t + 1`). An occurrence
+  // in `expr` comes first. The inputs of `run` below are given to the
+  // definitions that these occurrences are bound to. An occurrence in a
+  // held operand (not canonical) is bound to nothing yet: a canonical
+  // occurrence of the same name is preferred to it.
+  const freeOccurrences = new Map<string, Expression & { symbol: string }>();
+  const followed = new Set<object>();
+  const pending: Expression[] = [];
+  const follow = (def: object | undefined, source: () => unknown): void => {
+    if (def === undefined || followed.has(def)) return;
+    followed.add(def);
+    const e = source();
+    if (e !== undefined && e !== null) pending.push(e as Expression);
+  };
+  const collect = (e: Expression): void => {
+    rewriteWithBinders(
+      e,
+      (sym, shadowed) => {
+        if (shadowed?.has(sym.symbol)) return sym;
+        const seen = freeOccurrences.get(sym.symbol);
+        if (seen === undefined || (!seen.isCanonical && sym.isCanonical))
+          freeOccurrences.set(sym.symbol, sym);
+        const def = sym.valueDefinition;
+        if (def !== undefined && !def.isConstant) follow(def, () => def.value);
+        return sym;
+      },
+      undefined,
+      false,
+      new Map(),
+      (app, _ops, shadowed) => {
+        if (shadowed?.has(app.operator)) return undefined;
+        const op = app.operatorDefinition;
+        follow(op, () => op?._lambdaLiteral);
+        const value = app.valueDefinition;
+        if (value !== undefined && !value.isConstant)
+          follow(value, () => value.value);
+        return undefined;
+      }
+    );
+  };
+  collect(expr);
+  while (pending.length > 0) collect(pending.shift()!);
+  // The scope that a name of a held operand resolves from: a held operand
+  // is bound when it is evaluated, and `run` evaluates `expr` in the scope
+  // that is current when the fallback is built, the scope `compile()` is
+  // called in. An expression boxed in a pushed scope and compiled after its
+  // pop reads its canonical names from their own definitions, and its held
+  // names from this scope, as an evaluation after the pop does.
+  const buildScope = ce.context.lexicalScope;
+  // The binding record that the occurrence of `k` reads, or `undefined`.
+  // With `declare`, a name with no definition is declared in the scope that
+  // it resolves from: the home scope of a free name, `buildScope` for a
+  // name of a held operand.
+  const bindingOf = (
+    k: string,
+    declare: boolean
+  ): BoxedDefinition | undefined => {
+    const sym = freeOccurrences.get(k) as
+      | (Expression & {
+          symbol: string;
+          _resolvedDefinition(): BoxedDefinition | undefined;
+          _homeScope?: Scope;
+        })
+      | undefined;
+    if (sym === undefined) return undefined;
+    const resolve = (): BoxedDefinition | undefined => {
+      if (sym.isCanonical) return sym._resolvedDefinition();
+      for (let s: Scope | null | undefined = buildScope; s; s = s.parent) {
+        const found = s.bindings.get(k);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const found = resolve();
+    const home = sym.isCanonical ? sym._homeScope : buildScope;
+    if (found !== undefined || !declare || home === undefined) return found;
+    let scope: Scope = home;
+    while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
+    ce._declareSymbolValue(k, { type: 'unknown', inferred: true }, scope);
+    return resolve();
+  };
+  // The declared type of a free symbol of `expr`, when it has one — the
+  // value given by `run` below must admit the argument value under that
+  // declaration's shape.
   const declaredTypeOf = (k: string): Type | undefined => {
-    const def = ce.lookupDefinition(k);
+    const def = bindingOf(k, false);
     if (!isValueDef(def)) return undefined;
     const t = def.value.type.type;
     return t === 'unknown' || t === 'any' ? undefined : t;
@@ -2002,56 +2069,38 @@ export function buildInterpreterFallback<T extends string>(
   // Otherwise the expression uses the `expression` calling convention:
   // `run({ x, y, ... })` with a variables object.
   const fallbackRun = ((vars: Record<string, unknown>) => {
-    ce.pushScope();
-    try {
-      if (vars && typeof vars === 'object') {
-        for (const [k, v] of Object.entries(vars)) {
-          // Declare a fresh local shadow before assigning so `popScope` fully
-          // restores the previous state (a bare `assign` would mutate an
-          // outer/global binding and leak the argument value engine-wide).
-          // The shadow's type is the value's RUNTIME shape: a `{re, im}`
-          // object is a complex number (declaring it `number` would reject
-          // the assignment and run the expression against an unbound
-          // symbol), a string is a string, a boolean a boolean, and a
-          // number is a number.
-          if (isComplexArg(v)) {
-            ce.declare(k, 'complex');
-            ce.assign(k, ce.number(ce.complex(v.re, v.im)));
-          } else if (isColorArg(v)) {
-            // A COLOR argument: the shadow takes the boxed color's own type
-            // (`color`), which is what a color position admits. Declaring it
-            // `number` below would reject the assignment and run the
-            // expression against an unbound symbol.
-            const boxed = boxArg(v);
-            ce.declare(k, boxed.type.type);
-            ce.assign(k, boxed);
-          } else if (Array.isArray(v)) {
-            // A collection argument: the shadow takes the value's own
-            // type (a `List` of points types `list<tuple<…>>`), which is
-            // what the expression's typing of the parameter admits.
-            const boxed = boxArg(v, declaredTypeOf(k));
-            ce.declare(k, boxed.type.type);
-            ce.assign(k, boxed);
-          } else if (typeof v === 'string') {
-            // A string argument is a string. Declaring it `number` below
-            // rejected the assignment, and a string that is a valid
-            // identifier was read as a symbol.
-            ce.declare(k, 'string');
-            ce.assign(k, ce.string(v));
-          } else if (typeof v === 'boolean') {
-            // A boolean argument is a boolean, which `number` rejects too.
-            ce.declare(k, 'boolean');
-            ce.assign(k, v ? ce.True : ce.False);
-          } else {
-            ce.declare(k, 'number');
-            ce.assign(k, v as number);
-          }
-        }
+    // The arguments are the values of the inputs while the expression is
+    // evaluated, given to the definitions that the expression reads
+    // (`withBindingValuesFn()`): a `{re, im}` object is a complex number,
+    // a color, a list, a string and a boolean are boxed as such, and any
+    // other argument is a number. An input that the expression does not
+    // read is ignored.
+    const values: Record<string, Expression> = {};
+    const bindings: { name: string; record: BoxedDefinition }[] = [];
+    if (vars && typeof vars === 'object')
+      for (const [k, v] of Object.entries(vars)) {
+        const record = bindingOf(k, true);
+        if (record === undefined) continue;
+        bindings.push({ name: k, record });
+        values[k] = isComplexArg(v)
+          ? ce.number(ce.complex(v.re, v.im))
+          : isColorArg(v)
+            ? boxArg(v)
+            : Array.isArray(v)
+              ? boxArg(v, declaredTypeOf(k))
+              : typeof v === 'string'
+                ? ce.string(v)
+                : typeof v === 'boolean'
+                  ? v
+                    ? ce.True
+                    : ce.False
+                  : ce.number(v as number);
       }
-      return interpretedRunValue(expr.evaluate(), expr.type.type);
-    } finally {
-      ce.popScope();
-    }
+    return ce._inScope(buildScope, () =>
+      withBindingValuesFn(ce, bindings, values, () =>
+        interpretedRunValue(expr.evaluate(), expr.type.type)
+      )
+    );
   }) as unknown as CompiledRunner;
   return {
     target: targetName,

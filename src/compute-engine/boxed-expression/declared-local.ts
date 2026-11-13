@@ -54,6 +54,21 @@ export function isLocalBinding(def: object): boolean {
   return LOCAL_BINDING_DEFINITIONS.has(def);
 }
 
+/** The bindings that `markAssignedLocal()` recorded. */
+const ASSIGNED_LOCALS = new WeakSet<object>();
+
+/** Record that an `Assign` writes the binding `target`: an `Assign` to
+ * the name was canonicalized against it, at any depth of the block that
+ * declares it (a loop body, a nested function). */
+export function markAssignedLocal(target: object): void {
+  ASSIGNED_LOCALS.add(target);
+}
+
+/** Whether `markAssignedLocal()` recorded `target`. */
+export function isAssignedLocal(target: object): boolean {
+  return ASSIGNED_LOCALS.has(target);
+}
+
 /** The bindings for which `isFirstValue()` was called. */
 const FIRST_VALUE_SEEN = new WeakSet<object>();
 /** The bindings whose first value had the type `unknown` when
@@ -103,56 +118,4 @@ export function markOpenLocal(target: object): void {
 /** Whether `markOpenLocal()` recorded the block local `target`. */
 export function isOpenLocal(target: object): boolean {
   return OPEN_LOCALS.has(target);
-}
-
-/**
- * For each block scope, the binding that the canonicalization of the block
- * made for each of its locals, by name. The first run of the block removes
- * these bindings from the scope (`sweepCanonicalizationBindings`,
- * `library/control-structures.ts`), and each run makes its own bindings,
- * which stay in the scope after the run. The type of the canonical binding
- * is the static type of the local: the join of the types of its initializer
- * and of every assignment to it in the block (`joinAssignmentEvidence`,
- * `library/core.ts`).
- *
- * The `Declare` handler reads it (`canonicalLocalType()`) to give the
- * binding of a run the static type of the local, not the type of the value
- * of the run. The block scope is shared by every copy of the block (a copy
- * made by `subs()` keeps the scope), and the compiler reads the type of a
- * local from the binding in that scope (`localComplexDefault`,
- * `compilation/compile-complexness.ts`). If the binding of a run took the
- * type of its value, then with `x: real` and
- * `e = Block(Declare(k, "unknown", Sqrt(x)), k + 1)`, a run of
- * `e.subs({x: 4})` would give `k` the type `integer`, and the compiled code
- * of `e` in the mode `complex` would put `k` on the real lane and give `NaN`
- * at `x = -4`, where the interpreter gives `1 + 2i`.
- */
-const CANONICAL_LOCALS = new WeakMap<object, Map<string, object>>();
-
-/**
- * Record that `def` is the binding that the canonicalization of the block
- * with the scope `scope` made for the name `name`.
- */
-export function recordCanonicalLocal(
-  scope: object,
-  name: string,
-  def: object
-): void {
-  let byName = CANONICAL_LOCALS.get(scope);
-  if (byName === undefined) {
-    byName = new Map();
-    CANONICAL_LOCALS.set(scope, byName);
-  }
-  byName.set(name, def);
-}
-
-/**
- * The binding that `recordCanonicalLocal()` recorded for `name` in the
- * block scope `scope`, or `undefined`.
- */
-export function canonicalLocalOf(
-  scope: object,
-  name: string
-): object | undefined {
-  return CANONICAL_LOCALS.get(scope)?.get(name);
 }

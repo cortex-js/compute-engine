@@ -25,6 +25,74 @@
   `_fn_GammaUser`), and is now named by `ce.temporaryName()`, `Gamma_tmp1`
   (emitted as `_fn_Gamma_tmp1`). The values are the same. A host that
   compares emitted code, or that reads the helper name, sees the new name.
+- **A local of a block is made only by a `Declare`, and an `Assign` never
+  makes one.** An `Assign` writes the variable that is in scope. In a block,
+  a function body, a binder body, a branch or a loop body, an `Assign` to a
+  name that no scope declares is the error `assignment-to-undeclared-variable`:
+  `["Block", ["Assign", "c", 5], ["Multiply", 2, "c"]]` with no `c` in scope
+  was `10` and is now that error. Declare the local:
+  `["Block", ["Declare", "c", "'unknown'", 5], ["Multiply", 2, "c"]]` is `10`.
+  In Epsil a local is written with `let`, also at the top level of a program:
+  `c = 5; 2c` is the error, `let c = 5; 2c` is `10`. In LaTeX, the first `:=`
+  of a name in a `;` block is already a `Declare`, so `c := 5; 2c` is still
+  `10`. Outside every block (`ce.assign()`, an `Assign` that the host
+  evaluates), an assignment declares the variable in the current scope, as
+  before.
+- **A `Declare` is allowed only at the top level of a block.** A `Declare` in
+  a branch of an `If` or in a loop body is the error
+  `declaration-below-statement`: `["Block", ["If", "True", ["Declare", "t",
+  "'integer'", 3]], "t"]` was `3`. The error `first-assignment-in-branch` is
+  removed: a first assignment in a branch is now
+  `assignment-to-undeclared-variable`.
+- **A function statement in a block or a function body declares a local
+  variable that holds a function, and the errors of a block local apply to
+  it.** A call before the statement is `read-before-declaration`: in Epsil,
+  `do { let a = g(2); function g(x) { x + 1 }; a }` was `3`. A second
+  function statement of the same name, or a `let` or `Declare` of that name
+  in the same block, is `variable-redeclaration`:
+  `do { function g(x) { x + 1 }; function g(x) { x + 2 }; g(2) }` was the
+  error `function-redefinition`, and `["Block", ["Declare", "g", "'unknown'",
+  1], ["DefineFunction", "g", …], ["g", 2]]` was `invalid-clause-definition`.
+  The type of the local is the signature that the statement writes, and
+  `function` when it writes none: `do { function g(x) { x + 1 }; type(g) }`
+  was `(x: unknown) -> number` and is `function`. A function statement at
+  the top level of a program, and a `let` of a function literal anywhere,
+  are unchanged.
+- **The top level of an Epsil program follows the rules of a block.** A
+  read before a `let` is `read-before-declaration`: `let a = q + 1; let q = 2;
+  a` was `3`. An assignment in a value operand to a name that is not declared
+  (`["Sum", ["Assign", "s", ["Add", "s", "i"]], ["Limits", "i", 1, 3]]`) is
+  `assignment-in-operand`, as before.
+- **An expression reads its names from the scope it was boxed in.** A
+  declaration or an assignment in a scope pushed after the expression was
+  boxed is not read: with `e = ce.parse('x+1')`, then `ce.pushScope()` and
+  `ce.assign('x', 3)`, `e.evaluate()` was `4` and is `x + 1`, and with
+  `ce.declare('x', 'integer')` in the pushed scope `e.type` was `integer`
+  and is `number`. A declaration made later in the scope the expression was
+  boxed in, or in one of its parents, is read, as before: without the
+  `pushScope()`, `e.evaluate()` is `4`. To read the current scope, bind the
+  expression again: `ce.rebind(e).evaluate()` is `4`. A scope that was
+  popped keeps its definitions for the expressions boxed in it: with
+  `ce.pushScope()`, `ce.declare('x', 'integer')`, `ce.assign('x', 5)`,
+  `e = ce.parse('x+1')` and `ce.popScope()`, `e.evaluate()` was `x + 1` and
+  is `6`.
+- **`Type(x)` of a name with no declared type is the type of the value it
+  holds, and of a declared name its declared type, in a block as at the top
+  level.** `do { let v = [1, 2, 3]; v = [4]; type(v) }` was
+  `vector<integer>` and is `vector<integer^1>`, as at the top level.
+  `function f(x: list) { type(x) }; f([1, 2])` was `list<integer>` and is
+  `list`. An untyped parameter gives the type of its argument, as before:
+  `function f(x) { type(x) }; f(1)` is `integer`.
+- **A lazy list stored in a variable is a closure.** A lazy collection that
+  stays lazy when it is assigned (a `filter` or a `map` of an endless range,
+  a lazy comprehension) reads the variables of its callback when an element
+  is computed, as a function does; it no longer stores their values at the
+  assignment. With `let k = 3; let big = filter(1..oo, c => c > k); k = 10`,
+  `first(big)` was `4` and is now `11`. To keep the elements at a statement,
+  list them there: `let firsts = listFrom(take(big, 3))` before `k = 10`
+  gives `[4, 5, 6]`. A variable that is an operand of the collection
+  (`xs` in `xs = filter(xs, p)`) still gives the value it holds at the
+  assignment.
 
 ### New Features
 

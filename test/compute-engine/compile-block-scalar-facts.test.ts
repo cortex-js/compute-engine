@@ -91,26 +91,27 @@ describe('scalar facts through retained helper locals', () => {
   });
 
   test('a local of type unknown admits a value of any type', () => {
-    for (const first of [
-      ['Declare', 'q', "'unknown'", 't'],
-      ['Assign', 'q', 't'],
-    ] as MathJsonExpression[]) {
-      const ce = new ComputeEngine();
-      const fn = ce.box([
-        'Function',
-        [
-          'Block',
-          first,
-          ['If', ['Greater', 't', 0], ['Assign', 'q', "'s'"]],
-          ['Assign', 'q', ['List', 1]],
-          'q',
-        ],
-        't',
-      ]);
-      expect(fn.isValid).toBe(true);
-      expect(fn.type.toString()).toBe('(t: unknown) -> unknown');
-      expect(ce.box(['Apply', fn, 3]).evaluate().toString()).toBe('[1]');
-    }
+    const body = (first: MathJsonExpression): MathJsonExpression => [
+      'Function',
+      [
+        'Block',
+        first,
+        ['If', ['Greater', 't', 0], ['Assign', 'q', "'s'"]],
+        ['Assign', 'q', ['List', 1]],
+        'q',
+      ],
+      't',
+    ];
+    const ce = new ComputeEngine();
+    const fn = ce.box(body(['Declare', 'q', "'unknown'", 't']));
+    expect(fn.isValid).toBe(true);
+    expect(fn.type.toString()).toBe('(t: unknown) -> unknown');
+    expect(ce.box(['Apply', fn, 3]).evaluate().toString()).toBe('[1]');
+    // A local is made only by a `Declare`: an `Assign` to a name that is not
+    // in scope is the static error `assignment-to-undeclared-variable`.
+    const assigned = new ComputeEngine().box(body(['Assign', 'q', 't']));
+    expect(assigned.isValid).toBe(false);
+    expect(assigned.toString()).toContain('assignment-to-undeclared-variable');
   });
 
   test('a nested block shadows an enclosing scalar local', () => {

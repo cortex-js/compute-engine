@@ -10,15 +10,12 @@ import {
  * Regression tests for the nested-`Block` scope-capture defect
  * (docs/plans/2026-07-07-block-scope-capture-investigation.md).
  *
- * A nested `Block` resolved symbols against the scope chain captured at
- * canonicalization time: a reference to an enclosing block's local — whose
- * `Declare`/`Assign` only register at *evaluation* time — auto-declared a
- * valueless shadow binding in the nested scope, permanently hiding the
- * enclosing block's runtime value. Fixed by hoisting `Declare`/`Assign`
- * targets into the block scope during canonicalization (`canonicalBlock`),
- * evaluating Element-loop bodies in the loop's own lexical scope
- * (`runNestedElements`), and letting a `Declare` statement reset the binding
- * it created on a previous evaluation of the same scope (re-entered Block).
+ * A nested `Block` resolves symbols against the scope chain of its
+ * canonicalization. A local of a block is made by a `Declare` statement of
+ * that block when the block is canonicalized (`canonicalBlock`), so a nested
+ * block reads the enclosing block's local, and an `Assign` in a nested block
+ * writes it. An Element-loop body is evaluated in the loop's own lexical
+ * scope (`runNestedElements`).
  */
 
 describe('nested Block reads enclosing Block locals', () => {
@@ -248,10 +245,13 @@ describe('block-local semantics preserved', () => {
     expect(result.toString()).toEqual('5');
   });
 
-  test('Assign without a Declare stays block-local (no leak)', () => {
-    ce.expr(['Block', ['Assign', 'zzlocal', 5]]).evaluate();
-    // zzlocal must not be visible (with a value) outside the block:
-    // it evaluates to itself, not to 5.
+  test('an Assign to an undeclared name in a Block is an error', () => {
+    const block = ce.expr(['Block', ['Assign', 'zzlocal', 5]]);
+    expect(block.isValid).toBe(false);
+    expect(JSON.stringify(block.evaluate().json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
+    // zzlocal is not given a value outside the block: it evaluates to itself.
     expect(ce.symbol('zzlocal').evaluate().symbol).toEqual('zzlocal');
   });
 
@@ -263,18 +263,12 @@ describe('block-local semantics preserved', () => {
 });
 
 //
-// ANNOTATED PARAMETER read from a nested Block (2026-08-06).
+// ANNOTATED PARAMETER read from a nested Block.
 //
-// `evaluateBlock` sweeps stale canonicalization bookkeeping from the block's
-// scope, and the keep-test used to be "is its type inferred". An auto-declared
-// shadow inherits the DECLARED type of the outer binding it shadows, so an
-// annotated parameter produced an explicitly-typed valueless shadow that
-// survived the sweep and hid the call value in the lambda's fresh scope. The
-// keep-test is now "was this created by a `Declare` STATEMENT".
-//
-// Surfaced through Epsil, which wraps each `if` branch in a `Block`:
-//   function s(k: number) { if 1 > 0 { k } else { 0 } };  s(100)   ⇒ `k`
-// The same function with a bare `k` returned `100`.
+// A parameter with a declared type, read from a `Block` nested in the body,
+// resolves to the value of the call. Epsil wraps each `if` branch in a
+// `Block`:
+//   function s(k: number) { if 1 > 0 { k } else { 0 } };  s(100)   ⇒ 100
 //
 describe('annotated parameter read from a nested Block', () => {
   const ifBody = [
@@ -317,8 +311,7 @@ describe('annotated parameter read from a nested Block', () => {
     expect(ce.box(['s', 100]).evaluate().toString()).toBe('100');
   });
 
-  // The sweep must still KEEP a genuine block-local: a `Declare` statement
-  // marks its binding, and re-entering the block resets rather than sweeps it.
+  // A local made by a `Declare` statement has the value of each call.
   test('a block-local declared with an explicit type survives', () => {
     const ce = new ComputeEngine();
     ce.box([

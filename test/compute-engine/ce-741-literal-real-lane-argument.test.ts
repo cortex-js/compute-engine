@@ -46,7 +46,7 @@ const AT_16: Record<string, number> = {
 function local(body: MathJsonExpression, arg: MathJsonExpression) {
   return [
     'Block',
-    ['Assign', 'f', ['Function', body, 'x']],
+    ['Declare', 'f', "'unknown'", ['Function', body, 'x']],
     ['f', arg],
   ] as MathJsonExpression;
 }
@@ -110,8 +110,9 @@ describe('CE-741: a complex argument at a real-lane parameter of a literal', () 
     const expr = ce.box([
       'Block',
       [
-        'Assign',
+        'Declare',
         'g',
+        "'unknown'",
         ['Function', ['Add', ['Mod', 'x', 3], 'z'], 'x', 'z'],
       ],
       ['g', ['Sqrt', 'y'], ['Sqrt', 'y']],
@@ -128,8 +129,8 @@ describe('CE-741: a complex argument at a real-lane parameter of a literal', () 
     const ce = engine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'f', ['Function', ['Mod', 'x', 3], 'x']],
-      ['Assign', 'h', ['Function', ['f', ['Sqrt', 'u']], 'u']],
+      ['Declare', 'f', "'unknown'", ['Function', ['Mod', 'x', 3], 'x']],
+      ['Declare', 'h', "'unknown'", ['Function', ['f', ['Sqrt', 'u']], 'u']],
       ['h', 'y'],
     ]);
     const r = compile(expr, CX);
@@ -138,13 +139,13 @@ describe('CE-741: a complex argument at a real-lane parameter of a literal', () 
   });
 
   it('a call of a local defined later in the block', () => {
-    // The body of `g` compiles before the `Assign` of `f`, so the call
+    // The body of `g` compiles before the `Declare` of `f`, so the call
     // cannot read anything recorded when `f` compiles.
     const ce = engine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'g', ['Function', ['f', ['Sqrt', 'u']], 'u']],
-      ['Assign', 'f', ['Function', ['Mod', 'x', 3], 'x']],
+      ['Declare', 'g', "'unknown'", ['Function', ['f', ['Sqrt', 'u']], 'u']],
+      ['Declare', 'f', "'unknown'", ['Function', ['Mod', 'x', 3], 'x']],
       ['g', 'y'],
     ]);
     const r = compile(expr, CX);
@@ -158,8 +159,8 @@ describe('CE-741: a complex argument at a real-lane parameter of a literal', () 
     const ce = engine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'g', ['Function', ['f', ['Sqrt', 'u']], 'u']],
-      ['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']],
+      ['Declare', 'g', "'unknown'", ['Function', ['f', ['Sqrt', 'u']], 'u']],
+      ['Declare', 'f', "'unknown'", ['Function', ['Add', 'x', 1], 'x']],
       ['g', 'y'],
     ]);
     compile(expr, { to: 'javascript', fallback: false });

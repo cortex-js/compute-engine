@@ -21,7 +21,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const LOOP = [
   'Block',
-  ['Assign', 'c', 5],
+  ['Declare', 'c', "'unknown'", 5],
   ['Loop', ['Assign', 'c', ['Add', 'c', 'k']], ['Element', 'k', 'L']],
   'c',
 ];
@@ -99,7 +99,7 @@ describe('interval-js: a loop over a list input', () => {
   test('a loop over a Range still wraps its plain-number counter', () => {
     const json = [
       'Block',
-      ['Assign', 'c', 0],
+      ['Declare', 'c', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 'c', ['Add', 'c', 'k']],
@@ -115,7 +115,7 @@ describe('interval-js: a loop over a list input', () => {
 function sumLoop(body: unknown, ...clauses: unknown[]) {
   return [
     'Block',
-    ['Assign', 'c', 0],
+    ['Declare', 'c', "'unknown'", 0],
     ['Loop', ['Assign', 'c', ['Add', 'c', body]], ...clauses],
     'c',
   ];

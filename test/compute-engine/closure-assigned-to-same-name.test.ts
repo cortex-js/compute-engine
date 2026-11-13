@@ -11,6 +11,8 @@ const fn = (body: SemiBoxedExpression, ...params: string[]) =>
   ['Function', body, ...params] as SemiBoxedExpression;
 const assign = (name: string, value: SemiBoxedExpression) =>
   ['Assign', name, value] as SemiBoxedExpression;
+const declare = (name: string, value: SemiBoxedExpression) =>
+  ['Declare', name, "'unknown'", value] as SemiBoxedExpression;
 
 // The value of the last statement. Every statement before it must not give an
 // error, so that a failed assignment does not pass unnoticed.
@@ -39,7 +41,7 @@ function lastValue(...statements: SemiBoxedExpression[]) {
 const h = assign(
   'h',
   fn(
-    ['Block', assign('g', fn(0, 'z')), fn(['Add', ['g', 'z'], 'n'], 'z')],
+    ['Block', declare('g', fn(0, 'z')), fn(['Add', ['g', 'z'], 'n'], 'z')],
     'n'
   )
 );
@@ -48,7 +50,11 @@ const makeK = (argument: SemiBoxedExpression) =>
   assign(
     'k',
     fn(
-      ['Block', assign('g', ['h', argument]), fn(['Add', ['g', 'z'], 'n'], 'z')],
+      [
+        'Block',
+        declare('g', ['h', argument]),
+        fn(['Add', ['g', 'z'], 'n'], 'z'),
+      ],
       'n'
     )
   );
@@ -82,7 +88,7 @@ describe('a closure assigned to a name that it reads as another binding', () => 
       run(
         assign(
           'h',
-          fn(['Block', assign('g', 10), fn(['Add', 'g', 'n'], 'z')], 'n')
+          fn(['Block', declare('g', 10), fn(['Add', 'g', 'n'], 'z')], 'n')
         ),
         makeK('n'),
         ['Apply', ['k', 1], 0]
@@ -102,7 +108,7 @@ describe('a closure assigned to a name that it reads as another binding', () => 
           fn(
             [
               'Block',
-              assign('g', [
+              declare('g', [
                 'If',
                 ['Greater', 'n', 0],
                 ['h', ['Subtract', 'n', 1]],
@@ -137,8 +143,8 @@ describe('a closure assigned to a name that it reads as another binding', () => 
     expect(
       run([
         'Block',
-        assign('g', fn(0, 'z')),
-        assign('f', fn(['Add', ['g', 'z'], 1], 'z')),
+        declare('g', fn(0, 'z')),
+        declare('f', fn(['Add', ['g', 'z'], 1], 'z')),
         [
           'Block',
           ['Declare', 'g', 'unknown', fn(9, 't')],
@@ -157,7 +163,7 @@ describe('a closure assigned to a name that it reads as another binding', () => 
           fn(
             [
               'Block',
-              assign(
+              declare(
                 'f',
                 fn(
                   [
@@ -212,7 +218,7 @@ describe('a mention of the assigned binding stays a recursive call', () => {
     ce.popScope();
   });
 
-  const localRecursion = assign(
+  const localRecursion = declare(
     'f',
     fn(
       [
@@ -320,7 +326,7 @@ describe('a closure stored under a declared signature', () => {
           fn(
             [
               'Block',
-              assign('g', fn(['Length', 'L'], typedList)),
+              declare('g', fn(['Length', 'L'], typedList)),
               fn(['Add', ['g', 'L'], 'n'], 'L'),
             ],
             'n'

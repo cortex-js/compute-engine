@@ -52,8 +52,13 @@ import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-co
 // the conversion, `isSingleGraphemeCluster` decides which literals qualify.
 import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
-import { withPairedFunctionNames } from '../compute-engine/assignment-locals.js';
+import {
+  enterBody,
+  exitBody,
+  withPairedFunctionNames,
+} from '../compute-engine/statement-position.js';
 import { isLibraryDefinition } from '../compute-engine/boxed-expression/implicit-variable-rule.js';
+import { useBeforeDeclarationCheck } from '../compute-engine/library/control-structures.js';
 import { tuplePatternNames } from '../compute-engine/boxed-expression/tuple-pattern.js';
 import {
   functionLiteralDeclaredSignature,
@@ -178,17 +183,20 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   'function-redefinition',
   // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
   // value (`declaration-without-value`, minted by the `Declare` canonical
-  // handler), a first assignment of a name is at the own level of a block
-  // and not in a branch or a loop body (`first-assignment-in-branch`), a
-  // local is not used before the statement that declares it
-  // (`read-before-declaration`), both minted by `canonicalBlock`, an
+  // handler), a declaration is a statement of a block and not in a branch
+  // or a loop body (`declaration-below-statement`, minted by the `Declare`
+  // canonical handler), an assignment writes a declared name
+  // (`assignment-to-undeclared-variable`, minted by the `Assign` canonical
+  // handler), a local is not used before the statement that declares it
+  // (`read-before-declaration`, minted by `canonicalBlock`), an
   // assignment is a statement and not an operand (`assignment-in-operand`,
   // minted when the enclosing expression is built), and an assignment to a
   // local gives a value of the local's type (`assignment-type-mismatch`,
   // minted by the `Assign` canonical handler). All are settled before
   // anything runs.
   'declaration-without-value',
-  'first-assignment-in-branch',
+  'declaration-below-statement',
+  'assignment-to-undeclared-variable',
   'read-before-declaration',
   'assignment-in-operand',
   'assignment-type-mismatch',
@@ -436,6 +444,21 @@ function declarationAnnotatesEffects(
         text = stringValue(operand(pair, 2));
     }
   return text !== null && typeTextDeclaresEffects(ce, text);
+}
+
+/** The `[start, end)` source offsets that the engine recorded on the boxed
+ * expression `expr`, if any. */
+function sourceOffsetsOfBoxed(
+  expr: ReturnType<ComputeEngine['box']> | undefined
+): [number, number] | undefined {
+  const offsets = (expr as { sourceOffsets?: unknown } | undefined)
+    ?.sourceOffsets;
+  return Array.isArray(offsets) &&
+    offsets.length === 2 &&
+    typeof offsets[0] === 'number' &&
+    typeof offsets[1] === 'number'
+    ? [offsets[0], offsets[1]]
+    : undefined;
 }
 
 /** The `[start, end)` source offsets the parser stamped on a node, if any. */
@@ -1104,8 +1127,12 @@ function canonicalizationDiagnostics(
       // show the wrapper (`narrowedStatement`, read by `epsilSnippet`).
       const narrowed = narrowGuardedReads(statement);
       narrowedStatement = narrowed !== statement;
-      boxed = boxTopLevelStatement(statements, narrowed, () =>
-        ce.box(narrowed)
+      boxed = boxTopLevelStatement(
+        ce,
+        statements,
+        statementIndex,
+        narrowed,
+        () => ce.box(narrowed)
       );
       canonical = boxed.json;
     } catch (e) {
@@ -1308,6 +1335,15 @@ function canonicalizationDiagnostics(
     for (const error of errors) {
       const code = errorCode(error);
       if (!isCanonicalizationError(code)) continue;
+      if (
+        code === 'assignment-to-undeclared-variable' &&
+        declaredByEarlierStatement(
+          statements,
+          stringValue(operand(operand(error, 1), 2)) ?? '',
+          statementIndex
+        )
+      )
+        continue;
       const description = describeError(error);
       // Dedup and authored-subtraction key on the SITE-LESS description
       // (`dedupKey`): the site operand the engine now attaches names WHERE,
@@ -1358,7 +1394,14 @@ function canonicalizationDiagnostics(
         // the error names tells which one made it.
         offendingValue(error)
       );
-      const [from, to] = located.range;
+      // When the locator falls back to the whole statement (two calls match
+      // the frame: two equal errors in one function body), the source range
+      // that the engine recorded on the error names the site.
+      const recorded =
+        located.range[0] === start && located.range[1] === end
+          ? sourceOffsetsOfBoxed(boxedErrorByJson.get(JSON.stringify(error)))
+          : undefined;
+      const [from, to] = recorded ?? located.range;
       // The problem is already reported as a rule at a function slot. The
       // error on a key is recognized by its frame and its operand too, for
       // the case where the locator cannot find the pair (two pairs in one
@@ -1561,27 +1604,129 @@ export function isDeclarationStatement(statement: MathJsonExpression): boolean {
 }
 
 /**
- * Box `statement`, a statement of the top level of a program whose
- * statements are `statements`, with `box`. A `let f: (integer) -> integer`
- * without a value is the signature of a function only when a `function f`
- * statement (`DefineFunction`) of the same name is in the same statement
- * list (`withPairedFunctionNames()`, `assignment-locals.ts`). The top level
- * of a program is boxed one statement at a time, so the names of its
- * function statements are given here.
+ * Box `statement`, the statement at index `index` of the top level of a
+ * program whose statements are `statements`, with `box`. A `let f: (integer)
+ * -> integer` without a value is the signature of a function only when a
+ * `function f` statement (`DefineFunction`) of the same name is in the same
+ * statement list (`withPairedFunctionNames()`, `statement-position.ts`). The
+ * top level of a program is boxed one statement at a time, so the names of
+ * its function statements are given here.
+ *
+ * The top level of a program is a block (`enterBody()`): an assignment to a
+ * name that no `let`, `const` or earlier program declares is an error, and a
+ * statement that uses a name before the `let` or `const` of the name is the
+ * error `read-before-declaration` (`useBeforeDeclarationCheck()`).
  */
-export function boxTopLevelStatement<T>(
+export function boxTopLevelStatement(
+  ce: ComputeEngine,
   statements: ReadonlyArray<MathJsonExpression>,
+  index: number,
   statement: MathJsonExpression,
-  box: () => T
-): T {
-  if (operator(statement) !== 'Declare') return box();
-  const names = new Set<string>();
-  for (const s of statements) {
-    if (operator(s) !== 'DefineFunction') continue;
-    const name = symbol(operand(s, 1));
-    if (name) names.add(name);
+  box: () => BoxedStatement
+): BoxedStatement {
+  enterBody();
+  let boxed: BoxedStatement;
+  try {
+    if (operator(statement) !== 'Declare') boxed = box();
+    else {
+      const names = new Set<string>();
+      for (const s of statements) {
+        if (operator(s) !== 'DefineFunction') continue;
+        const name = symbol(operand(s, 1));
+        if (name) names.add(name);
+      }
+      boxed = withPairedFunctionNames(names, box);
+    }
+  } finally {
+    exitBody();
   }
-  return withPairedFunctionNames(names, box);
+  return topLevelUseCheck(ce, statements)?.(boxed, index) ?? boxed;
+}
+
+/** The check of `useBeforeDeclarationCheck()` for the top level of each
+ * program, for each engine: the raw statements are boxed once. */
+const TOP_LEVEL_USE_CHECKS = new WeakMap<
+  ComputeEngine,
+  WeakMap<ReadonlyArray<MathJsonExpression>, TopLevelUseCheck | null>
+>();
+type BoxedStatement = ReturnType<ComputeEngine['box']>;
+type TopLevelUseCheck = (
+  statement: BoxedStatement,
+  i: number
+) => BoxedStatement | undefined;
+
+/** The index of the first `let` or `const` of each name at the top level of
+ * the program `statements`, without the names of its `function` statements,
+ * which have their value from the start of the program (as the block reads
+ * them, `withUseBeforeDeclarationErrors()`). */
+function topLevelDeclarationIndexes(
+  statements: ReadonlyArray<MathJsonExpression>
+): Map<string, number> {
+  const declaredAt = new Map<string, number>();
+  const names = (pattern: MathJsonExpression | null): string[] => {
+    if (operator(pattern) === 'Tuple') return operands(pattern).flatMap(names);
+    const name = symbol(pattern);
+    return !name || name === '_' || name === 'Nothing' ? [] : [name];
+  };
+  statements.forEach((s, i) => {
+    const statement = operator(s) === 'Typed' ? operand(s, 1) : s;
+    if (operator(statement) !== 'Declare') return;
+    for (const name of names(operand(statement, 1)))
+      if (!declaredAt.has(name)) declaredAt.set(name, i);
+  });
+  for (const s of statements) {
+    const statement = operator(s) === 'Typed' ? operand(s, 1) : s;
+    if (operator(statement) !== 'DefineFunction') continue;
+    const name = symbol(operand(statement, 1));
+    if (name) declaredAt.delete(name);
+  }
+  return declaredAt;
+}
+
+const TOP_LEVEL_DECLARATIONS = new WeakMap<
+  ReadonlyArray<MathJsonExpression>,
+  Map<string, number>
+>();
+
+/**
+ * Whether a `let` or `const` before the statement at index `i` of the
+ * program `statements` declares `name`. An assignment to such a name that
+ * the engine refuses as `assignment-to-undeclared-variable` was made after
+ * a declaration that was refused itself (`let g: integer`, which has no
+ * value): that declaration is the one problem, and it is reported once, as
+ * in a block.
+ */
+export function declaredByEarlierStatement(
+  statements: ReadonlyArray<MathJsonExpression>,
+  name: string,
+  i: number
+): boolean {
+  let declaredAt = TOP_LEVEL_DECLARATIONS.get(statements);
+  if (declaredAt === undefined)
+    TOP_LEVEL_DECLARATIONS.set(
+      statements,
+      (declaredAt = topLevelDeclarationIndexes(statements))
+    );
+  const at = declaredAt.get(name);
+  return at !== undefined && at < i;
+}
+
+function topLevelUseCheck(
+  ce: ComputeEngine,
+  statements: ReadonlyArray<MathJsonExpression>
+): TopLevelUseCheck | undefined {
+  let checks = TOP_LEVEL_USE_CHECKS.get(ce);
+  if (checks === undefined)
+    TOP_LEVEL_USE_CHECKS.set(ce, (checks = new WeakMap()));
+  let check = checks.get(statements);
+  if (check === undefined) {
+    const declaredAt = topLevelDeclarationIndexes(statements);
+    TOP_LEVEL_DECLARATIONS.set(statements, declaredAt);
+    check =
+      declaredAt.size === 0 ? null : useBeforeDeclarationCheck(ce, declaredAt);
+    checks.set(statements, check);
+  }
+  return check ?? undefined;
 }
 
 /** The engine error codes that mean a declaration statement DID NOT declare.
@@ -2222,7 +2367,7 @@ function clauseRedefinitionDiagnostic(
  *   expression's static type is an upper bound, not the signature the
  *   assignment will pin, and permuting a call against a guessed signature
  *   could silently reorder arguments.
- * - A `:=` pin is FIRST-wins per name (`PinnedSignature.firstWins`),
+ * - An `Assign` pin is FIRST-wins per name (`PinnedSignature.firstWins`),
  *   mirroring the runtime: reassigning such a binding to an incompatible
  *   signature is a runtime error that leaves the original binding in force,
  *   and a compatible reassignment of an annotated literal leaves the
@@ -2260,9 +2405,9 @@ function registerPinnedSignature(
 ): void {
   let name: string | null = null;
   let type: Type | undefined = undefined;
-  // Whether a later assignment in this program KEEPS this signature (the
-  // `:=` spelling) or REPLACES the binding (a `let`/`const` declaration);
-  // see `PinnedSignature`.
+  // Whether a later assignment in this program KEEPS this signature (an
+  // `Assign`, or a `const` declaration) or REPLACES the binding (a `let`
+  // declaration, a variable that holds a function); see `PinnedSignature`.
   let firstWins = true;
   // A function LITERAL this statement binds to the name, when it does. Only
   // such a pin asks boxing to validate the arguments of later calls (the
@@ -2276,8 +2421,8 @@ function registerPinnedSignature(
     const already = name === null ? undefined : pinned.get(name);
     if (already !== undefined) {
       // ANY assignment to an already-pinned name may just have run the
-      // recursion-knot retype and blanked the definition. For a `:=` pin,
-      // re-assert the first-registered signature (see the doc comment)
+      // recursion-knot retype and blanked the definition. For a first-wins
+      // pin, re-assert the first-registered signature (see the doc comment)
       // whatever this statement's right-hand side is.
       if (already.firstWins) {
         // An assignment of a function literal over a pin that an
@@ -2320,12 +2465,12 @@ function registerPinnedSignature(
         ce.box(name!)._infer(() => already.type, 'narrow');
         return;
       }
-      // A `let` binding is REPLACED by the assignment at run time. A
-      // function-literal right-hand side re-pins the name with the
-      // literal's own signature (see `replacePin`); anything else un-pins
-      // it, and the assignment's type effect (`applyAssignmentTypeEffect`)
-      // then owns the type. Either way the old signature must stop
-      // validating calls.
+      // A variable that holds a function (a `let`) is REPLACED by the
+      // assignment at run time. A function-literal right-hand side re-pins
+      // the name with the literal's own signature (see `replacePin`);
+      // anything else un-pins it, and the assignment's type effect
+      // (`applyAssignmentTypeEffect`) then owns the type. Either way the old
+      // signature must stop validating calls.
       pinned.delete(name!);
       const sym = ce.box(name!);
       const def = sym.valueDefinition;
@@ -2399,19 +2544,19 @@ function registerPinnedSignature(
         init !== undefined && isSymbol(init)
           ? pinnedAliasOf(ce, init.symbol, pinned)
           : undefined;
+      // A `let` binding is a variable that holds the function: a later
+      // assignment replaces it. A `const` binding refuses it (the
+      // assignment is a runtime error that leaves the binding in force), so
+      // its first signature keeps checking the calls that follow.
+      const constant = isDictionary(last) ? last.get('constant') : undefined;
+      const isConstant = constant !== undefined && isSymbol(constant, 'True');
       if (alias !== undefined) {
         type = alias.type;
-        const constant = isDictionary(last) ? last.get('constant') : undefined;
-        firstWins = constant !== undefined && isSymbol(constant, 'True');
+        firstWins = isConstant;
         literalCallee = alias.literal;
       } else if (init !== undefined && init.operator === 'Function') {
         type = init.type.type;
-        // A `let` binding is replaced by a later assignment; a `const`
-        // binding refuses it (the assignment is a runtime error that leaves
-        // the binding in force), so its first signature keeps checking the
-        // calls that follow.
-        const constant = isDictionary(last) ? last.get('constant') : undefined;
-        firstWins = constant !== undefined && isSymbol(constant, 'True');
+        firstWins = isConstant;
         literalCallee = init;
       }
     }
@@ -3178,11 +3323,11 @@ function constantDeclarationName(
 
 /** A function signature the pass registered for a name (see
  * `registerPinnedSignature`). `firstWins` mirrors what a LATER assignment to
- * the name does at run time: a `:=`-pinned or `const` binding keeps the
+ * the name does at run time: an `Assign`-pinned or `const` binding keeps the
  * types of its first signature (an incompatible reassignment is a runtime
  * error that leaves the original binding in force), while a `let`
- * declaration is REPLACED by the assignment, so its pin is replaced or
- * dropped along with it — once.
+ * declaration, a variable that holds a function, is REPLACED by the
+ * assignment, so its pin is replaced or dropped along with it — once.
  *
  * `assigned` is true when an assignment of a function literal made the pin,
  * and `annotated` when that literal has an annotation
@@ -4240,8 +4385,7 @@ export function describeError(error: MathJsonExpression): string {
     }
     case 'read-before-declaration':
       // Payload: [name]. A statement of a block uses a local of the block
-      // before the statement that declares it: a `let`, a `const`, or the
-      // first assignment of the name at the own level of the block.
+      // before the statement that declares it: a `let` or a `const`.
       detail =
         payload.length === 0
           ? 'a local is used before its declaration'
@@ -4258,13 +4402,20 @@ export function describeError(error: MathJsonExpression): string {
             ? `\`${payload[0]}\` is declared without a value: define \`${payload[0]}\` with a function statement in the same block, or give the declaration a value`
             : `\`${payload[0]}\` is declared without a value: write \`let ${payload[0]} = …\``;
       break;
-    case 'first-assignment-in-branch':
-      // Payload: [name]. The first assignment of a name is in a branch of a
-      // conditional or in a loop body.
+    case 'declaration-below-statement':
+      // Payload: [name]. A `let` or a `const` in a branch of a conditional
+      // or in a loop body that is not a block.
       detail =
         payload.length === 0
-          ? 'a name is assigned for the first time in a branch or a loop body'
-          : `\`${payload[0]}\` is assigned for the first time in a branch or a loop body: declare \`${payload[0]}\` with a value before the branch`;
+          ? 'a declaration is a statement of a block'
+          : `\`${payload[0]}\` is declared in a branch or a loop body: declare \`${payload[0]}\` in a statement of the block`;
+      break;
+    case 'assignment-to-undeclared-variable':
+      // Payload: [name]. An assignment to a name that no scope declares.
+      detail =
+        payload.length === 0
+          ? 'a variable is assigned before it is declared'
+          : `\`${payload[0]}\` is not declared: write \`let ${payload[0]} = …\``;
       break;
     case 'assignment-in-operand':
       // Payload: [name] or []. An assignment or a declaration is an operand

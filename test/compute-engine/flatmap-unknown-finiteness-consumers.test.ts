@@ -398,7 +398,7 @@ describe('a FlatMap whose callback symbol holds an error value', () => {
 test('async Reduce over a listed FlatMap reads a reducer local to a Block', async () => {
   const block = ce.box([
     'Block',
-    ['Assign', 'f', ['Function', ['Add', 'a', 'b'], 'a', 'b']],
+    ['Declare', 'f', "'unknown'", ['Function', ['Add', 'a', 'b'], 'a', 'b']],
     [
       'Reduce',
       ['FlatMap', SOURCE, ['Function', ['Range', 1, 'x'], 'x']],

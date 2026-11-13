@@ -30,7 +30,7 @@ function callback(
 function inClosure(json: MathJsonExpression): MathJsonExpression {
   // The callback reads `c`, a local of the enclosing block. This takes the
   // other branch of the numeric rebuild, which applies the callback as it is.
-  return ['Block', ['Assign', 'c', 2], json];
+  return ['Block', ['Declare', 'c', "'unknown'", 2], json];
 }
 
 describe('CE-445: an inferred callback parameter type under the numeric routes', () => {

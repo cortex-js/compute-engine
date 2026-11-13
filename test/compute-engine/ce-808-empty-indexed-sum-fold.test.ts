@@ -60,19 +60,19 @@ const S2 = ['Multiply', 2, S];
 
 describe('A FOLD OR AN EXTREMUM OF AN EMPTY INDEXED SUM (CE-808)', () => {
   const witnesses: unknown[] = [
-    ['Block', ['Assign', 'K', S], ['Sum', 'K']],
+    ['Block', ['Declare', 'K', "'unknown'", S], ['Sum', 'K']],
     ['Sum', S],
     ['Sum', S2],
     ['Product', S],
     ['Product', P],
-    ['Block', ['Assign', 'K', S], ['Max', 'K']],
+    ['Block', ['Declare', 'K', "'unknown'", S], ['Max', 'K']],
     ['Max', S],
     ['Min', S],
     ['Max', S2],
     ['Max', S2, 1],
     ['Min', S2, 1],
     ['Max', S, S2],
-    ['Block', ['Assign', 'K', S], ['Max', 'K', -1]],
+    ['Block', ['Declare', 'K', "'unknown'", S], ['Max', 'K', -1]],
   ];
   test.each(witnesses.flatMap((w) => [0, 2].map((n) => [w, n] as const)))(
     '%j at n = %d has the interpreter value',

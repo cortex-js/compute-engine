@@ -332,8 +332,8 @@ describe('a Loop with no index set', () => {
 
   test('the iteration budget stops a loop with no Break, as on the existing compiler', () => {
     for (const budget of [1, 10])
-      check(['Block', ['Assign', 's', 0], ['Loop', ['Assign', 's', ['Add', 's', 1]]], 's'], { inputs: [{}], extra: { iterationBudget: budget }, interpreter: false });
-    check(['Block', ['Assign', 's', 0], ['Loop', ['Block', ['Assign', 's', ['Add', 's', 1]], ['If', ['Equal', 's', 3], ['Break']]]], 's'], {
+      check(['Block', declare('s', 'unknown', 0), ['Loop', ['Assign', 's', ['Add', 's', 1]]], 's'], { inputs: [{}], extra: { iterationBudget: budget }, interpreter: false });
+    check(['Block', declare('s', 'unknown', 0), ['Loop', ['Block', ['Assign', 's', ['Add', 's', 1]], ['If', ['Equal', 's', 3], ['Break']]]], 's'], {
       inputs: [{}],
       extra: { iterationBudget: 3 },
       interpreter: false,
@@ -461,7 +461,8 @@ describe('a destructuring declaration or write', () => {
   });
 
   test('a write to a name that is not a declared local declines', () => {
-    declines(['Block', ['Assign', ['Tuple', 'xs', 'm'], ['Tuple', ['List', 1, 2, 3], 2]], ['Length', 'xs']], /only writes to a declared local are supported/);
+    // The block is invalid: the `Assign` is an `Error` statement.
+    declines(['Block', ['Assign', ['Tuple', 'xs', 'm'], ['Tuple', ['List', 1, 2, 3], 2]], ['Length', 'xs']], /admits no statement Error/);
   });
 
   test('a declaration with a declared type declines', () => {

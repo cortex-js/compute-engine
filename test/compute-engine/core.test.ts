@@ -1252,7 +1252,7 @@ describe('N(x, [p, a]): limits of a goal, impure operands, and closures', () => 
     // when an element is read, after the `Block` returned.
     const local = (name: string, body: unknown) => [
       'Block',
-      ['Assign', name, 5],
+      ['Declare', name, "'unknown'", 5],
       ['Map', ['Function', body, 'x'], ['Range', 1, 300]],
     ];
     const m = ce.box(local('cLocal1', ['Divide', 'x', 'cLocal1'])).evaluate();
@@ -1266,7 +1266,7 @@ describe('N(x, [p, a]): limits of a goal, impure operands, and closures', () => 
     const halves = ce
       .box([
         'Block',
-        ['Assign', 'cLocal3', 5],
+        ['Declare', 'cLocal3', "'unknown'", 5],
         [
           'Map',
           ['Function', ['Multiply', 'x', 'cLocal3'], 'x'],
@@ -1294,7 +1294,12 @@ describe('N(x, [p, a]): limits of a goal, impure operands, and closures', () => 
     const m = ce
       .box([
         'Block',
-        ['Assign', 'hLocal', ['Function', ['Multiply', 'z', 2], 'z']],
+        [
+          'Declare',
+          'hLocal',
+          "'unknown'",
+          ['Function', ['Multiply', 'z', 2], 'z'],
+        ],
         [
           'Map',
           ['Function', ['Divide', ['hLocal', 'x'], 3], 'x'],

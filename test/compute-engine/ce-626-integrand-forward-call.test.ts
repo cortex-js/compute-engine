@@ -137,6 +137,9 @@ describe('CE-626: a call in an integrand made before its function exists', () =>
     });
   }
 
+  // CE-1234: the integral is boxed before `g` is defined. A call of `g` and
+  // the callback `g` of `Map`, boxed before the definition, read it from
+  // their home scope.
   test('a compiled integrand that calls g and passes g as a callback', () => {
     // The call `g(x)` and the callback `g` of `Map` share the placeholder of
     // the `Block`. Under a scope that declares another `g`, a compilation

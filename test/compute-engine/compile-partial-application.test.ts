@@ -170,10 +170,11 @@ describe('PARTIAL APPLICATION — the interpreter', () => {
     // was read as 3 (9 for u = 5).
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'c', 3],
+      ['Declare', 'c', "'unknown'", 3],
       [
-        'Assign',
+        'Declare',
         'g',
+        "'unknown'",
         ['Apply', ['Function', ['Add', 'x', 'y', 'c'], 'x', 'y'], 1],
       ],
       ['Assign', 'c', 10],
@@ -187,8 +188,8 @@ describe('PARTIAL APPLICATION — the interpreter', () => {
     // assigned (3), and the full call `g(5)` adds 5: 8.
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'c', 3],
-      ['Assign', 'g', ['Apply', PURE_ADD, 'c']],
+      ['Declare', 'c', "'unknown'", 3],
+      ['Declare', 'g', "'unknown'", ['Apply', PURE_ADD, 'c']],
       ['Assign', 'c', 10],
       ['g', 5],
     ];
@@ -235,7 +236,11 @@ describe('PARTIAL APPLICATION — compiled code declines', () => {
     ],
     [
       'a partial application held by a block local',
-      ['Block', ['Assign', 'g', ['Apply', PURE_ADD, 1]], ['g', 'u']],
+      [
+        'Block',
+        ['Declare', 'g', "'unknown'", ['Apply', PURE_ADD, 1]],
+        ['g', 'u'],
+      ],
     ],
   ])('%s declines on every target', (_, json) => {
     expectDeclines(json, REFUSAL);

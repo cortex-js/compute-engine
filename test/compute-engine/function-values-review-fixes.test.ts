@@ -95,8 +95,9 @@ describe('A default that names a constant of the host', () => {
     const json = [
       'Block',
       [
-        'Assign',
+        'Declare',
         'g',
+        "'unknown'",
         ['Function', ['Add', 'x', 'k'], 'x', ['Optional', 'k', 'W0']],
       ],
       ['Block', ['Declare', 'W0', "'integer'", 7], ['Map', 'g', ['List', 1]]],

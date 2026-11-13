@@ -45,11 +45,10 @@ import { reduceType } from '../common/type/reduce.js';
 import {
   closedLiteralType,
   isHoistedFunctionDefinition,
-  laterDeclarationReached,
-  markLaterDeclarations,
   staticDeclarations,
 } from '../compute-engine/library/control-structures.js';
 import { statementDeclaredNames } from '../compute-engine/boxed-expression/tuple-pattern.js';
+import { resolveEscapingLambda } from '../compute-engine/function-utils.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { epsilNameOf } from './library-names.js';
@@ -69,6 +68,7 @@ import {
   frameOrderOf,
   isDeclarationStatement,
   boxTopLevelStatement,
+  declaredByEarlierStatement,
   staticDiagnostics,
   declaredVariableNames,
 } from './static-diagnostics.js';
@@ -329,16 +329,6 @@ function* executeEpsilRun(
   // restores it too when the run ends with an exception. Restored rather
   // than cleared, so a nested run leaves the outer run's hook in place.
   const enclosingStatementHook = ce._epsilStatementResultHook;
-  // The names that the preparation step declared in the program scope ahead
-  // of the statements that declare them (`LaterDeclarations`). The statement
-  // loop removes each name when it reaches its statement. The names that are
-  // left when the run ends (a program that its time budget stopped, or an
-  // exception) are removed here, so that a later canonicalization in that
-  // scope counts their bindings as declared again.
-  const laterDeclarations: LaterDeclarations = {
-    scope: undefined,
-    firstAt: new Map(),
-  };
   // The deadline frame of the run. The statement loop removes it from the
   // engine when a statement ends with an expired time or step budget (see
   // the `catch` of the statement loop); it is put back when the run ends.
@@ -350,57 +340,18 @@ function* executeEpsilRun(
     // the lifted limit after the run, so that a lazy collection the program
     // returns can be enumerated by the host in full.
     ce._liftDefaultIterationLimit();
-    return yield* executeEpsilSteps(ce, source, options, laterDeclarations);
+    return yield* executeEpsilSteps(ce, source, options);
   } finally {
     ce._deadlineFrame = runFrame;
     ce._epsilBatchId = enclosingBatch;
     ce._epsilStatementResultHook = enclosingStatementHook;
-    reachLaterDeclarations(laterDeclarations, Infinity);
-  }
-}
-
-/**
- * The names that `prepareFunctionDeclarations()` declared in the program
- * scope `scope` before the statement that declares them, and that it kept
- * there: each name with the index of the first statement of the program
- * that declares or writes it.
- *
- * Until that statement is reached, a function body canonicalized in the
- * program scope does not count the binding as declared
- * (`markLaterDeclarations()`, `library/control-structures.ts`), as when the
- * program runs in order and the name has no binding yet. So in
- * `function f() { t = 1; t }`, `let a = String(g())`, `let t = 0`,
- * `function g() { 5 }`, `[f(), t]`, where the preparation of `g` declares
- * `t`, the assignment in `f` makes a local of `f`, and the program answers
- * `[1, 0]`. Without this, the assignment was a write to the program
- * variable `t`, and `f` was refused because it does not declare the `scope`
- * effect.
- */
-type LaterDeclarations = {
-  scope: ComputeEngine['context']['lexicalScope'] | undefined;
-  firstAt: Map<string, number>;
-};
-
-/**
- * Remove from `later` the names whose first declaring statement is at index
- * `i` or before (`laterDeclarationReached()`): their bindings count as
- * declared from statement `i` on.
- */
-function reachLaterDeclarations(later: LaterDeclarations, i: number): void {
-  const scope = later.scope;
-  if (scope === undefined) return;
-  for (const [name, at] of later.firstAt) {
-    if (at > i) continue;
-    laterDeclarationReached(scope, name);
-    later.firstAt.delete(name);
   }
 }
 
 function* executeEpsilSteps(
   ce: ComputeEngine,
   source: string,
-  options: ExecuteEpsilOptions | undefined,
-  laterDeclarations: LaterDeclarations
+  options: ExecuteEpsilOptions | undefined
 ): Generator<Expression, ExecuteEpsilResult, Expression> {
   const diagnostics: ParsingDiagnostic[] = [];
 
@@ -569,8 +520,7 @@ function* executeEpsilSteps(
         statements,
         source,
         reportedUnknowns,
-        diagnostics,
-        laterDeclarations
+        diagnostics
       );
 
   // A NESTED statement (in a loop body, a function body, an `if` branch)
@@ -595,10 +545,6 @@ function* executeEpsilSteps(
   for (let i = 0; i < statements.length; i++) {
     const stmt = statements[i];
     nestedFailures.clear();
-    // The names that the preparation step declared ahead of this statement,
-    // and that this statement declares first, count as declared from here
-    // on (`LaterDeclarations`).
-    reachLaterDeclarations(laterDeclarations, i);
     // "Errors are values": a runtime problem becomes an `["Error", …]` value.
     // Most engine problems already flow back as `["Error", …]` boxed values;
     // the try/catch is the backstop for the few paths that throw (e.g.
@@ -669,10 +615,16 @@ function* executeEpsilSteps(
         // own turn.
         boxedStmt =
           prepared.preboxed.get(i) ??
-          boxTopLevelStatement(statements, stmt, () => ce.box(stmt));
+          boxTopLevelStatement(ce, statements, i, stmt, () => ce.box(stmt));
         // The driver evaluates the statement: `evaluate()` in
         // `executeEpsil`, `evaluateAsync()` in `executeEpsilAsync`.
         value = yield boxedStmt;
+        // A program of several statements is a `Block`: a result that names a
+        // user function is the function literal, as at the end of a `Block`
+        // (`resolveEscapingLambda`). A program of one statement is that
+        // statement, whose value is read as it is.
+        if (i > 0 && i === statements.length - 1 && isSymbol(value))
+          value = resolveEscapingLambda(ce, value);
         // The result of the program is a value: a finite comprehension is
         // listed, as it is when it is an element of a list literal
         // (`listedElement`, the same rules and the same budget of
@@ -843,6 +795,19 @@ function* executeEpsilSteps(
             d.message[1] === describeError(markerError.json) &&
             d.range[0] === constantSite?.[0] &&
             d.range[1] === constantSite?.[1]
+        )) ||
+      // An assignment to a name that an earlier `let` declares, refused
+      // because that declaration was refused: the declaration is the one
+      // problem (`declaredByEarlierStatement()`).
+      (isFunction(markerError, 'Error') &&
+        isFunction(markerError.op1, 'ErrorCode') &&
+        isString(markerError.op1.op1) &&
+        markerError.op1.op1.string === 'assignment-to-undeclared-variable' &&
+        isString(markerError.op1.op2) &&
+        declaredByEarlierStatement(
+          statements,
+          markerError.op1.op2.string,
+          i
         )) ||
       // A use of a local before it has a value: see
       // `reportedAsBlockLocalError()`.
@@ -1228,16 +1193,6 @@ function topLevelRedeclaration(
  *    `let` runs reads the outer definition in the body, where the block
  *    route gives the `read-before-declaration` error: the top level of this
  *    runner has no binding that is declared and not yet initialized.
- * 4. When all the statements are prepared, the bindings that step 1 made
- *    and step 3 kept are marked as later declarations of the program scope
- *    (`LaterDeclarations`, `markLaterDeclarations()`), until the statement
- *    loop reaches the first statement that declares each name. A function
- *    body boxed in a statement before that one does not count the binding
- *    as declared, so an assignment to the name in the body makes a local of
- *    the body, as when the program runs in order: in
- *    `function f() { t = 1; t }`, `let a = String(g())`, `let t = 0`,
- *    `function g() { 5 }`, `[f(), t]`, the value is `[1, 0]`. A read of the
- *    name still finds the binding, which has no value.
  *
  * `scanProtocolPropertyCalls` runs on a prepared statement before it is
  * boxed, for the reason the statement loop gives, and the loop does not scan
@@ -1253,8 +1208,7 @@ function prepareFunctionDeclarations(
   statements: ReadonlyArray<MathJsonExpression>,
   source: string,
   reportedUnknowns: Set<string>,
-  diagnostics: ParsingDiagnostic[],
-  laterDeclarations: LaterDeclarations
+  diagnostics: ParsingDiagnostic[]
 ): {
   /** The boxed `function` statements, keyed by statement index. */
   preboxed: Map<number, Expression>;
@@ -1430,9 +1384,6 @@ function prepareFunctionDeclarations(
   if (prepared.size === 0) return { preboxed, scanned };
   const isOwnClause = (k: number, name: string) =>
     clauses.get(name)!.includes(k);
-  // The bindings that step 1 made and step 3 did not remove, each with the
-  // index of the first statement that declares or writes the name.
-  const kept = new Map<string, number>();
   // The names of the prepared functions whose binding in the program scope
   // a statement of an earlier program on the same engine made. Step 1
   // declares such a name again at the first prepared statement that comes
@@ -1464,8 +1415,8 @@ function prepareFunctionDeclarations(
     // Step 1: the names that the statements before `j` declare. A name that
     // a `let`/`const` declares has the static type of the last such
     // statement that gives one (as `staticDeclarations()` reads a list of
-    // statements); a name that only assignments write has the static type
-    // of the first assignment, which declares it when it runs.
+    // statements); a name that only assignments write and that no scope
+    // defines gets the static type of the first assignment.
     const made: string[] = [];
     const bound = new Set<string>();
     // The bindings of an earlier program that this step replaces, by name.
@@ -1579,21 +1530,8 @@ function prepareFunctionDeclarations(
         if (replacedHere.has(n) && !preboxed.has(j)) continue;
         else if (!replaced.has(n) && hasOuterDefinition(scope, n))
           ce.undeclare(n);
-        else kept.set(n, writes.get(n)![0].index);
     }
     if (expired) break;
-  }
-  // Step 4: the bindings that step 1 made and step 3 kept are later
-  // declarations for the statements before the first statement that
-  // declares each name (`LaterDeclarations`): a function body boxed in such
-  // a statement does not count the binding as declared, so an assignment to
-  // the name in the body makes a local of the body, as in a program that
-  // runs in order. They are marked only now: the statements prepared above
-  // come after these statements, and their bodies must see the bindings.
-  if (kept.size > 0) {
-    laterDeclarations.scope = scope;
-    for (const [n, at] of kept) laterDeclarations.firstAt.set(n, at);
-    markLaterDeclarations(scope, kept.keys());
   }
   return { preboxed, scanned };
 }
@@ -2888,7 +2826,8 @@ function constantAssignmentName(e: unknown): string | undefined {
 const BLOCK_LOCAL_ERROR_CODES = [
   'read-before-declaration',
   'declaration-without-value',
-  'first-assignment-in-branch',
+  'declaration-below-statement',
+  'assignment-to-undeclared-variable',
   'assignment-in-operand',
   'assignment-type-mismatch',
 ];

@@ -14,8 +14,12 @@ describe('CONTROL STRUCTURES', () => {
       expect(result.latex).toMatchInlineSnapshot(`20`);
     });
 
-    it('should evaluate the block with an assignment', () => {
-      const expr = ce.expr(['Block', ['Assign', 'c', 5], ['Multiply', 'c', 2]]);
+    it('should evaluate the block with a declaration', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'c', "'unknown'", 5],
+        ['Multiply', 'c', 2],
+      ]);
       const result = expr.evaluate();
       expect(result.json).toMatchInlineSnapshot(`10`);
     });

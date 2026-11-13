@@ -90,7 +90,7 @@ describe('a block local assigned a vector, then a matrix', () => {
     const ce = new ComputeEngine();
     const e = ce.box([
       'Block',
-      ['Assign', 'L', values[0]],
+      ['Declare', 'L', "'unknown'", values[0]],
       ['Assign', 'L', values[1]],
       'L',
     ]);

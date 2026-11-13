@@ -488,8 +488,9 @@ describe('EPSIL WHILE LET — compilation', () => {
     const returning = ce.box([
       'Block',
       [
-        'Assign',
+        'Declare',
         'y',
+        "'unknown'",
         [
           'Match',
           'x',
@@ -513,8 +514,8 @@ describe('EPSIL WHILE LET — compilation', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'k', 0],
-      ['Assign', 'n', 0],
+      ['Declare', 'k', "'unknown'", 0],
+      ['Declare', 'n', "'unknown'", 0],
       [
         'Loop',
         [

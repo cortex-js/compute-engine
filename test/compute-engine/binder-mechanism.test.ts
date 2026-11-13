@@ -1116,20 +1116,11 @@ describe('Function literal: the body Block is the single authority for a paramet
 });
 
 /**
- * Stage 11 — `makeLambda` call frames, as ACTIVATION RECORDS (§2.1).
- *
- * A call cannot store its argument in the literal's own binding — two
- * simultaneous calls would overwrite each other — so the per-call definition
- * in `freshScope` and the literal's static binding are, and remain, two
- * objects. What stage 11 adds is that they are no longer UNRELATED: the frame's
- * definition records the static binding it is an activation of, and
- * `sameBindingDef` resolves both to it.
- *
- * Activations are deliberately INDISTINGUISHABLE from one another. `sameBinding`
- * already compares an occurrence enclosed by its binder by NAME, so telling
- * activations apart could only change the answer for an occurrence that has
- * ESCAPED its frame — and an escaped occurrence must be re-bound, not
- * distinguished.
+ * `makeLambda` call frames are activations of the body scope of the literal:
+ * the frame holds the literal's own (static) definition of each parameter,
+ * and the value of the parameter in this call is in the activation of the
+ * frame (`holdBodyLocals()` in `function-utils.ts`). Two calls in progress
+ * share the definition and keep their values apart.
  */
 describe('Function call frames are activations of the literal binding', () => {
   /** Capture the call frame's binding for `name` from inside the body, by
@@ -1151,7 +1142,7 @@ describe('Function call frames are activations of the literal binding', () => {
     return { frames, probe: 'BmProbe' };
   };
 
-  test('the frame binding is a DISTINCT definition that resolves to the literal', () => {
+  test('the frame holds the definition of the literal', () => {
     const ce = new ComputeEngine();
     const { frames } = framesOf(ce, 'x');
     const f = ce.box(['Function', ['Add', 'x', ['BmProbe']], 'x']);
@@ -1160,17 +1151,14 @@ describe('Function call frames are activations of the literal binding', () => {
 
     expect(ce.box(['Apply', f, 5]).evaluate().re).toEqual(5);
     expect(frames.length).toBe(1);
-    // Two objects — the frame cannot write into the literal's binding...
-    expect(frames[0]).not.toBe(staticDef);
-    // ...but it says which binding it is an activation of.
-    expect(frames[0]._activationOf).toBe(staticDef);
+    expect(frames[0]).toBe(staticDef);
     expect(sameBindingDef(frames[0], staticDef)).toBe(true);
     expect(sameBindingDef(staticDef, frames[0])).toBe(true);
   });
 
-  test('N nested activations compare equal to each other and to the binder', () => {
-    // The recursion question left open by the 2026-07-24 doc (§Open questions):
-    // several simultaneous activations of one binder need no distinguishing.
+  test('N nested activations hold one definition', () => {
+    // Several simultaneous calls of one literal share its definition; each
+    // keeps its value in its own activation.
     const ce = new ComputeEngine();
     const { frames } = framesOf(ce, 'n');
     ce.box([
@@ -1196,13 +1184,8 @@ describe('Function call frames are activations of the literal binding', () => {
 
     // Four frames were live simultaneously (n = 5, 4, 3, 2).
     expect(frames.length).toBe(4);
-    expect(new Set(frames).size).toBe(4); // all distinct objects
-    const statics = frames.map((f) => f._activationOf);
-    expect(statics.every((s) => s !== undefined)).toBe(true);
-    expect(new Set(statics).size).toBe(1); // ...all activating ONE binding
-    for (const a of frames)
-      for (const b of frames) expect(sameBindingDef(a, b)).toBe(true);
-    expect(sameBindingDef(frames[0], statics[0])).toBe(true);
+    expect(new Set(frames).size).toBe(1);
+    expect(frames[0]).toBeDefined();
   });
 
   test('a recursive lambda still evaluates through `Apply`', () => {
@@ -1222,10 +1205,8 @@ describe('Function call frames are activations of the literal binding', () => {
   });
 
   test('two closures from one factory stay distinct', () => {
-    // The design's named risk: the two captured `p` activations DO compare
-    // equal under `sameBindingDef` (they activate one binder). Closure
-    // distinctness does not live in binding equality — it lives in scope
-    // re-parenting (`captureClosures`) — so this must be unaffected.
+    // The two closures share the definition of `p`; each keeps the
+    // activation of the call that made it, which holds its value of `p`.
     const ce = new ComputeEngine();
     ce.declare('bm_mk', 'function');
     ce.assign(
@@ -1250,8 +1231,8 @@ describe('Function call frames are activations of the literal binding', () => {
     // `canonicalFunctionLiteral` as the intended parameter list, so a
     // shorthand integrand's literal is built by
     // `canonicalFunctionLiteralArguments` — the parameter operand comes back
-    // BOUND to the body Block's own binding, and the activation must link to
-    // that same binding. (An earlier version of the handler rebuilt the
+    // BOUND to the body Block's own binding, and the frame holds that same
+    // binding. (An earlier version of the handler rebuilt the
     // literal with `ce._fn('Function', [f.op1, ...vars])`, leaving the
     // parameter operand raw; that route is gone — the raw-parameter fallback
     // is covered by the hand-built test below.)
@@ -1286,15 +1267,14 @@ describe('Function call frames are activations of the literal binding', () => {
 
     integral.N();
     expect(frames.length).toBeGreaterThan(0);
-    expect(frames[0]._activationOf).toBe(blockDef);
-    expect(sameBindingDef(frames[0], blockDef)).toBe(true);
+    expect(frames[0]).toBe(blockDef);
   });
 
-  test('a HAND-BUILT literal activates its own Block binding', () => {
+  test('a HAND-BUILT literal holds its own Block binding', () => {
     // A literal assembled directly from canonical parts —
     // `ce._fn('Function', [canonicalBlock, rawSymbol])` — never runs
     // `bindParameterOperands`, so the parameter operand is a RAW symbol
-    // carrying no binding at all. The activation must still link to the
+    // carrying no binding at all. The frame must still hold the
     // literal's OWN Block binding (via the body-scope fallback in
     // `staticParameterBinding`), NOT to whatever an enclosing node binds for
     // the same name.
@@ -1336,7 +1316,6 @@ describe('Function call frames are activations of the literal binding', () => {
 
     integral.N();
     expect(frames.length).toBeGreaterThan(0);
-    expect(frames[0]._activationOf).toBe(blockDef);
-    expect(sameBindingDef(frames[0], blockDef)).toBe(true);
+    expect(frames[0]).toBe(blockDef);
   });
 });

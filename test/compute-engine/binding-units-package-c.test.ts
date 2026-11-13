@@ -79,7 +79,7 @@ describe('BINDING UNITS: an occurrence whose definition is not on the scope chai
     expect(fn.type.toString()).toBe('(a: real) -> number');
   });
 
-  test('a declaration in a pushed scope still hides a definition of the chain', () => {
+  test('a declaration in a pushed scope hides a definition of the chain only after rebind', () => {
     const ce = engine();
     ce.declare('x', 'real');
     const a = ce.parse('x + 1');
@@ -87,8 +87,14 @@ describe('BINDING UNITS: an occurrence whose definition is not on the scope chai
     try {
       ce.declare('x', 'integer');
       expect(a.ops!.find((op) => op.symbol === 'x')!.type.toString()).toBe(
-        'integer'
+        'real'
       );
+      expect(
+        ce
+          .rebind(a)
+          .ops!.find((op) => op.symbol === 'x')!
+          .type.toString()
+      ).toBe('integer');
     } finally {
       ce.popScope();
     }

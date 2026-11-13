@@ -460,14 +460,14 @@ s`,
   });
 
   test('a destructuring assignment from a union of tuple types joins the leaf types of the arms', () => {
-    // The first assignment of `a` and `b` is at the level of the block: a
-    // first assignment in a loop body is a static error.
+    // `a` and `b` are declared at the level of the block: a declaration in a
+    // loop body is a static error.
     expect(
       operandTypeInSum(
         `let ps: list<tuple<integer, integer> | tuple<string, real>> = [(1, 2)]
 let s = 0
 let n = 0
-(a, b) := ps[1]
+let (a, b) = ps[1]
 while n < 2 {
   (a, b) := ps[1]
   s = s + b
@@ -487,7 +487,7 @@ s`,
 let s = 0
 let n = 0
 let y: any = (3, 4)
-(a, b) := ps[1]
+let (a, b) = ps[1]
 while n < 2 {
   (a, b) := ps[1]
   s = s + b

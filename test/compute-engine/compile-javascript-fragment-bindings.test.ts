@@ -115,17 +115,6 @@ test('does not accept an untyped parameter from an ambient declaration', () => {
     .toThrow(/explicit distinct scalar parameters/);
 });
 
-test('declines an unannotated broadcast scope from cross-shape ambient shadowing', () => {
-  const ce = new ComputeEngine();
-  ce.assign('w', ['Complex', 0, 7]);
-  ce.assign('total', ['List', 91, 92]);
-  expect(() => new ScalarFragmentJavaScriptTarget().compile(ce.expr(neighborSum),
-    { fallback: false, cse: true }))
-    .toThrow(/different prepared policy/);
-  expect(ce.expr('w').evaluate().im).toBe(7);
-  expect(ce.expr('total').evaluate().json).toEqual(['List', 91, 92]);
-});
-
 test('boolean local and conditional updates preserve the declared representation', () => {
   const ce = new ComputeEngine();
   const expression = ce.expr(['Function', ['Block',

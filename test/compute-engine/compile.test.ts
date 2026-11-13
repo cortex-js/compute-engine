@@ -4769,22 +4769,18 @@ describe('COMPILE built-in operator name as a callback', () => {
   });
 });
 
-// A block-local introduced by bare ASSIGNMENT rather than by `Declare`.
-// `canonicalBlock` hoists such a name into the block's OWN scope (that is why
-// `{ w ⩴ 2t; w + 1 }` answers `2t+1` in the interpreter and leaks no `w`), but
-// no `Declare` statement records it — so the compiler's locals harvest missed
-// it entirely and the two halves of the local disagreed: the write emitted a
-// bare `w = …` while every read emitted the free-variable spelling `_.w`,
-// which nothing ever wrote. A canonical `Function`-literal body IS such a
-// block, so every emitted user-function definition with a multi-statement body
-// ran to `NaN` behind `success: true`.
-describe('block-locals bound by bare assignment (no `Declare`)', () => {
+// A block-local of a function body, declared with `Declare` and no type. The
+// write and every read of the local must use one spelling: a bare `w = …`
+// write with `_.w` reads (the free-variable spelling, which nothing writes)
+// runs to `NaN` behind `success: true`. An `Assign` of a name that is not in
+// scope makes no local: it is the static error
+// `assignment-to-undeclared-variable`.
+describe('block-locals of a function body declared with no type', () => {
   /** An engine with `a` assigned the one-parameter literal `t ↦ <body>`. */
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    // `scope` declared: the body binds locals by bare assignment, which the
-    // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
-    // "Scope is opt-in").
+    // `scope` declared: the contract admits a write of a name outside the
+    // body (docs/EFFECTS-MODEL.md, "Scope is opt-in").
     e.declare('a', { signature: '(number) scope -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
@@ -4793,18 +4789,18 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
 
   const WITNESS: MathJsonExpression = [
     'Block',
-    ['Assign', 'w', ['Multiply', 2, 't']],
+    ['Declare', 'w', "'unknown'", ['Multiply', 2, 't']],
     ['Add', 'w', 1],
   ];
   const TWO_ASSIGNS: MathJsonExpression = [
     'Block',
-    ['Assign', 'w', ['Multiply', 2, 't']],
-    ['Assign', 'v', ['Add', 'w', 1]],
+    ['Declare', 'w', "'unknown'", ['Multiply', 2, 't']],
+    ['Declare', 'v', "'unknown'", ['Add', 'w', 1]],
     ['Multiply', 'v', 'v'],
   ];
   const LOCAL_IN_EXPRESSION: MathJsonExpression = [
     'Block',
-    ['Assign', 'w', ['Multiply', 2, 't']],
+    ['Declare', 'w', "'unknown'", ['Multiply', 2, 't']],
     ['Add', ['Multiply', 'w', 'w'], 't'],
   ];
   const DECLARE_THEN_ASSIGN: MathJsonExpression = [
@@ -4829,11 +4825,24 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
     expect(r.run!({ u: 3 })).toBe(expected);
   };
 
+  it('an Assign of an undeclared name in the body is an error', () => {
+    const e = new ComputeEngine();
+    const fn = e.box([
+      'Function',
+      ['Block', ['Assign', 'w', ['Multiply', 2, 't']], ['Add', 'w', 1]],
+      't',
+    ]);
+    expect(fn.isValid).toBe(false);
+    expect(JSON.stringify(fn.json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
+  });
+
   it('JS: the witness body runs to the interpreter value (was NaN)', () => {
     expectJsAgreesWithInterpreter(WITNESS, 8);
   });
 
-  it('JS: a body with TWO assigned locals runs correctly', () => {
+  it('JS: a body with TWO locals runs correctly', () => {
     expectJsAgreesWithInterpreter(TWO_ASSIGNS, 50);
   });
 
@@ -4845,12 +4854,12 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
     expectJsAgreesWithInterpreter(DECLARE_THEN_ASSIGN, 8);
   });
 
-  it('JS: a top-level (non-lambda) block declares its assigned local', () => {
+  it('JS: a top-level (non-lambda) block declares its local', () => {
     const e = new ComputeEngine();
     e.declare('t', 'number');
     const expr = e.box([
       'Block',
-      ['Assign', 'w', ['Multiply', 2, 't']],
+      ['Declare', 'w', "'unknown'", ['Multiply', 2, 't']],
       ['Add', 'w', 1],
     ]);
     const r = compile(expr);
@@ -4865,12 +4874,12 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
 
   it('JS: a loop body binding a scratch local runs correctly', () => {
     const e = new ComputeEngine();
-    // The first assignment of `q` is at the level of the block: a first
-    // assignment in a loop body is a static error.
+    // `q` is declared at the level of the outer block, and the loop body
+    // writes it.
     const expr = e.box([
       'Block',
       ['Declare', 's', 'number', 0],
-      ['Assign', 'q', 0],
+      ['Declare', 'q', "'unknown'", 0],
       [
         'Loop',
         [
@@ -4898,13 +4907,7 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
       { str: t },
     ];
     e.box(['DefineFunction', 'g', ['Function', 0, p('z', '0')]]).evaluate();
-    // The `scope` row is required, not decoration: a bare `Assign` to a name
-    // the body never declared is not PROVABLY confined — the analysis cannot
-    // tell a fresh temp from a write to an enclosing literal's local — so the
-    // default-`!scope` ceiling refuses such a clause unless the definition
-    // opts in with `scope` (or declares the local with `Declare`, which is the
-    // one shape this suite is deliberately not using). See
-    // `docs/EFFECTS-MODEL.md`, "Scope is opt-in".
+    // The local `w` of the clause is declared with `Declare`.
     e.box([
       'DefineFunction',
       'g',
@@ -4912,7 +4915,11 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
         'Function',
         [
           'Typed',
-          ['Block', ['Assign', 'w', ['Multiply', 2, 'n']], ['Add', 'w', 1]],
+          [
+            'Block',
+            ['Declare', 'w', "'unknown'", ['Multiply', 2, 'n']],
+            ['Add', 'w', 1],
+          ],
           { str: '(n: integer) scope -> integer' },
         ],
         'n',
@@ -4925,7 +4932,7 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
     expect(r!.run!({ y: 0 })).toBe(0);
   });
 
-  it('GLSL: the emitted definition DECLARES the assigned local', () => {
+  it('GLSL: the emitted definition DECLARES the local', () => {
     const glsl = new GLSLTarget();
     const e = engineWithA(WITNESS);
     const r = glsl.compile(e.box(['Add', ['a', 'u'], 1]));
@@ -4936,15 +4943,15 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
     expect(r.preamble).toContain('return w + 1.0;');
   });
 
-  it('GLSL: the `Declare`+`Assign` body emits the same definition', () => {
+  it('GLSL: the typed `Declare` body emits the same definition', () => {
     const glsl = new GLSLTarget();
-    const implicit = glsl.compile(
+    const untyped = glsl.compile(
       engineWithA(WITNESS).box(['a', 'u'])
     ).preamble;
     const declared = glsl.compile(
       engineWithA(DECLARE_THEN_ASSIGN).box(['a', 'u'])
     ).preamble;
-    expect(implicit).toBe(declared);
+    expect(untyped).toBe(declared);
   });
 
   it('Python: user-defined functions decline outright (unchanged)', () => {
@@ -4980,13 +4987,10 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
   });
 });
 
-// A block-local bound by bare assignment inside a LOOP BODY, on a shader
-// target. `withImplicitLocalDeclares` runs from two places — `compileBlock`
-// and `compileLoopBody` — and only the first pushes the complex-ness /
-// vector-width frames that give a local its shader type. That does NOT leave a
-// GPU loop-body local untyped, because the GPU targets never reach
-// `compileLoopBody`: their own `Loop` handler (`GPU_FUNCTIONS.Loop`) routes the
-// body through `compileStatementList`, which hands a `Block` body straight to
+// A block-local of a function body that its LOOP BODY writes, on a shader
+// target. The GPU targets never reach `compileLoopBody`: their own `Loop`
+// handler (`GPU_FUNCTIONS.Loop`) routes the body through
+// `compileStatementList`, which hands a `Block` body straight to
 // `compileBlock` — the same statement-list compiler, inference included.
 // (`compileForLoop`/`compileLoopBody` is the JavaScript-family path, and is
 // reached only when the target declares no `Loop` function.)
@@ -5000,21 +5004,20 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
   /** An engine with `a` assigned the one-parameter literal `t ↦ <body>`. */
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    // `scope` declared: the body binds locals by bare assignment, which the
-    // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
-    // "Scope is opt-in").
+    // `scope` declared: the contract admits a write of a name outside the
+    // body (docs/EFFECTS-MODEL.md, "Scope is opt-in").
     e.declare('a', { signature: '(number) scope -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
     return e;
   };
 
-  /** `<first>; s ⩴ 0; for k ∈ 1..3 { <stmts> }; s`. The first assignment
-   * of the local `p` (`first`) is at the level of the function body: a first
-   * assignment in a loop body is a static error. */
+  /** `<first>; s ⩴ 0; for k ∈ 1..3 { <stmts> }; s`. The local `p` is
+   * declared (`first`) at the level of the function body, and the loop body
+   * writes it. */
   const accumulate = (
     stmts: MathJsonExpression[],
-    first: MathJsonExpression = ['Assign', 'p', ['Tuple', 0, 0]]
+    first: MathJsonExpression = ['Declare', 'p', "'unknown'", ['Tuple', 0, 0]]
   ): MathJsonExpression => [
     'Block',
     first,
@@ -5027,25 +5030,15 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
     's',
   ];
 
-  /** The local `p` is bound to a 2-tuple by bare assignment. */
-  const IMPLICIT_VEC2 = accumulate([
+  /** The loop body writes a 2-tuple to the local `p`. */
+  const VEC2 = accumulate([
     ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
     ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
   ]);
-  /** …and the `Declare`+`Assign` sibling of the same body. The function
-   * body owns a name that an assignment in its loop body writes, so the
-   * sibling declares `p` in the function body. */
-  const DECLARED_VEC2 = accumulate(
-    [
-      ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
-      ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
-    ],
-    ['Declare', 'p', "'unknown'", ['Tuple', 0, 0]]
-  );
 
   it('GLSL: a vector-valued loop-body local is declared `vec2`', () => {
     const glsl = new GLSLTarget();
-    const r = glsl.compile(engineWithA(IMPLICIT_VEC2).box(['a', 'u']));
+    const r = glsl.compile(engineWithA(VEC2).box(['a', 'u']));
     expect(r.success).toBe(true);
     expect(r.preamble).toContain('vec2 p;');
     expect(r.preamble).toContain('p = vec2(t, 2.0 * t);');
@@ -5056,13 +5049,6 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
     expect(r.preamble!.indexOf('vec2 p;')).toBeLessThan(
       r.preamble!.indexOf('for (int k')
     );
-  });
-
-  it('GLSL: the `Declare`+`Assign` sibling emits the same definition', () => {
-    const glsl = new GLSLTarget();
-    expect(
-      glsl.compile(engineWithA(IMPLICIT_VEC2).box(['a', 'u'])).preamble
-    ).toBe(glsl.compile(engineWithA(DECLARED_VEC2).box(['a', 'u'])).preamble);
   });
 
   it('GLSL: an aggregate wider than 4 gets the array type', () => {
@@ -5076,12 +5062,12 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
               ['Assign', 'p', ['List', 1, 2, 3, 4, 5]],
               ['Assign', 's', ['Add', 's', ['At', 'p', 2]]],
             ],
-            ['Assign', 'p', ['List', 0, 0, 0, 0, 0]]
+            ['Declare', 'p', "'unknown'", ['List', 0, 0, 0, 0, 0]]
           )
         ).box(['a', 'u'])
       )
     ).toThrow(
-      /The local `p` is a list: a block of the GLSL fragment has scalar, complex or point locals/
+      /The local `p` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
     );
   });
 
@@ -5103,7 +5089,7 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
     // The JavaScript control for the shapes above: this IS the
     // `compileLoopBody` path, and its locals are untyped, so the vector local
     // needs no inference to be correct.
-    const e = engineWithA(IMPLICIT_VEC2);
+    const e = engineWithA(VEC2);
     expect(e.box(['a', 3]).evaluate().re).toBe(9);
     const r = compile(e.box(['a', 'u']));
     expect(r?.success).toBe(true);
@@ -5151,13 +5137,12 @@ describe('a COMPLEX loop-body block-local (JavaScript)', () => {
     ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
     ['Assign', 's', ['Add', 's', ['Abs', 'z']]],
   ];
-  // A first assignment in a loop body is a static error. The implicit local
-  // is first assigned at the level of the block, with a complex value: a
-  // local first bound to a real value is shaped real, and the complex
-  // assignment then declines. The declared local is declared with its value
-  // in the loop body.
-  const IMPLICIT_COMPLEX = accumulate(COMPLEX_STMTS, [
-    ['Assign', 'z', 'ImaginaryUnit'],
+  // The local `z` is declared at the level of the block, with a complex
+  // value (a local declared with a real value is shaped real, and the complex
+  // assignment then declines), and the loop body writes it. The sibling
+  // declares `z` with its value in the loop body.
+  const OUTER_COMPLEX = accumulate(COMPLEX_STMTS, [
+    ['Declare', 'z', "'unknown'", 'ImaginaryUnit'],
   ]);
   const DECLARED_COMPLEX = accumulate([
     ['Declare', 'z', "'unknown'", ['Add', 't', 'ImaginaryUnit']],
@@ -5179,8 +5164,8 @@ describe('a COMPLEX loop-body block-local (JavaScript)', () => {
     expect(r!.run!({ t: 3 })).toBeCloseTo(3 * Math.sqrt(10), 12);
   };
 
-  it('JS: an implicit complex loop-body local runs to 3√10 (was NaN)', () => {
-    expectComplexLoopLocal(IMPLICIT_COMPLEX);
+  it('JS: a complex local that the loop body writes runs to 3√10 (was NaN)', () => {
+    expectComplexLoopLocal(OUTER_COMPLEX);
   });
 
   it('JS: the `Declare`d sibling runs to 3√10 too (was NaN)', () => {
@@ -5210,20 +5195,13 @@ describe('a COMPLEX loop-body block-local (JavaScript)', () => {
 });
 
 // The sibling of the describe above, which differs from it in ONE statement:
-// it drops the `Declare(s, "number")`. That is enough to change what `s` IS.
-//
-// `canonicalBlock` makes a bare-assigned name a block-local only when the
-// enclosing scope chain does not already bind it — and the library scope
-// PRE-DECLARES `e`, `i`, `m` and `s`. So `s` here is not hoisted: the
-// interpreter writes the OUTER binding and reads it back (`3√10`), while the
-// compiler emitted a bare `s = …` write against `_.s` reads — a stray sloppy
-// global on one side, `undefined` on the other. Both routes ran to `undefined`
-// behind `success: true`.
-//
-// The fix (`BaseCompiler.assignLValue`) makes a write use the SAME spelling a
-// read of that name compiles to. A write to a symbol declared in the engine
-// now declines (the TOP LEVEL test below).
-describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => {
+// it drops the `Declare(s, "number")`, and the engine declares `s`. An
+// `Assign` writes the variable that is in scope, so the interpreter writes the
+// OUTER binding and reads it back (`3√10`). Compiled code writes only the
+// locals that it declares (`BaseCompiler.assignLValue`): a write to a symbol
+// declared in the engine declines on every route, and the interpreter
+// evaluates the expression.
+describe('an Assign to an outer name', () => {
   // `z` is declared with its value in the loop body: a first assignment in a
   // loop body is a static error.
   const LOOP: MathJsonExpression = [
@@ -5239,16 +5217,16 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
   const BODY: MathJsonExpression = ['Block', ['Assign', 's', 0], LOOP, 's'];
   const EXPECTED = 3 * Math.sqrt(10);
 
-  // `s`/`z` have no `Declare`, so the inference conservatively judges the
-  // writes escaping and the default-`!scope` ceiling refuses a bare install —
-  // the `effects: ['scope']` flag states the contract without declaring a
-  // signature (this suite's UNDECLARED route needs the signature absent).
+  // The body writes the outer `s`, so the default-`!scope` ceiling refuses
+  // a bare install — the `effects: ['scope']` flag states the contract
+  // without declaring a signature (this suite's UNDECLARED route needs the
+  // signature absent).
   const engineWithA = (declared: boolean): ComputeEngine => {
     const e = new ComputeEngine();
+    e.declare('s', 'number');
     if (declared) {
-      // `scope` declared: the body binds locals by bare assignment, which the
-      // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
-      // "Scope is opt-in").
+      // `scope` declared: the contract admits a write of a name outside the
+      // body (docs/EFFECTS-MODEL.md, "Scope is opt-in").
       e.declare('a', { signature: '(number) scope -> number' });
       e.assign('a', e.box(['Function', BODY, 't']));
     } else {
@@ -5260,38 +5238,35 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
     return e;
   };
 
-  it('the interpreter answers 3√10 (the reference)', () => {
-    const e = new ComputeEngine();
-    e.declare('a', {
-      effects: ['scope'],
-      evaluate: e.box(['Function', BODY, 't']),
-    });
+  it('the interpreter answers 3√10 and writes the outer s (the reference)', () => {
+    const e = engineWithA(false);
     expect(e.box(['a', 3]).evaluate().N().re).toBeCloseTo(EXPECTED, 12);
+    expect(e.box('s').evaluate().N().re).toBeCloseTo(EXPECTED, 12);
   });
 
-  it('JS: the DECLARED user-function route runs to 3√10 (was undefined)', () => {
+  it('JS: the DECLARED user-function route declines', () => {
     const r = compile(engineWithA(true).box(['a', 'u']));
-    expect(r?.success).toBe(true);
-    expect(r!.code).toBe('_fn_a(_.u)');
-    expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
+    expect(r?.success).toBe(false);
+    expect(r?.error).toMatch(/"s" is not a local of the compiled expression/);
   });
 
-  it('JS: the UNDECLARED (broadcast-wrapper) route runs to 3√10 too', () => {
+  it('JS: the UNDECLARED (broadcast-wrapper) route declines too', () => {
     // The function `a` has no signature; its input `u` is declared, since an
     // input with no type is refused (ROADMAP CE-712.1).
     const e = engineWithA(false);
     e.declare('u', 'number');
     const r = compile(e.box(['a', 'u']));
-    expect(r?.success).toBe(true);
-    expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
+    expect(r?.success).toBe(false);
+    expect(r?.error).toMatch(/"s" is not a local of the compiled expression/);
   });
 
   it('JS: the same Loop at the TOP LEVEL of a block declines', () => {
     const e = new ComputeEngine();
     e.declare('t', 'number');
     // The test declares the outer name `s` itself, in the engine scope that
-    // encloses the block. Without that declaration the block owns `s` as a
-    // local. A write to a symbol declared in the engine declines.
+    // encloses the block. Without that declaration the assignment is the
+    // error `assignment-to-undeclared-variable`. A write to a symbol declared
+    // in the engine declines.
     e.declare('s', 'number');
     const r = compile(e.box(BODY));
     expect(r?.success).toBe(false);
@@ -5319,17 +5294,13 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
     expect(r!.run!({ t: 3 })).toBeCloseTo(EXPECTED, 12);
   });
 
-  it('GLSL: the shape is unchanged (a shader spells a free symbol bare)', () => {
-    // The shader targets resolve a free symbol to its own bare identifier, so
-    // reads and writes already agreed there — pinned so the JS fix stays JS's.
+  it('GLSL: the write of the outer s declines', () => {
     const e = new ComputeEngine();
     e.declare('t', 'number');
-    const r = new GLSLTarget().compile(e.box(BODY));
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('s = 0.0;');
-    expect(r.code).toContain('s = s + length(z);');
-    expect(r.code).toContain('float _tv1 = s;');
-    expect(r.code).toContain('return _gpu_passes > 10000 ? _gpu_nan() : _tv1;');
+    e.declare('s', 'number');
+    expect(() => new GLSLTarget().compile(e.box(BODY))).toThrow(
+      /`Assign` writes `s`, which is not a local of the function/
+    );
   });
 
   it('a write to a symbol whose value every read BAKES fails closed', () => {
@@ -5371,9 +5342,8 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
 describe('GPU user-function return type comes from the body VALUE', () => {
   const engineWithA = (body: MathJsonExpression): ComputeEngine => {
     const e = new ComputeEngine();
-    // `scope` declared: the body binds locals by bare assignment, which the
-    // default-`!scope` ceiling otherwise refuses (docs/EFFECTS-MODEL.md,
-    // "Scope is opt-in").
+    // `scope` declared: the contract admits a write of a name outside the
+    // body (docs/EFFECTS-MODEL.md, "Scope is opt-in").
     e.declare('a', { signature: '(number) scope -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
@@ -5384,14 +5354,14 @@ describe('GPU user-function return type comes from the body VALUE', () => {
   const REAL_VALUE_COMPLEX_LOCAL: MathJsonExpression = [
     'Block',
     ['Declare', 's', 'number', 0],
-    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Declare', 'z', "'unknown'", ['Add', 't', 'ImaginaryUnit']],
     ['Assign', 's', ['Add', 's', ['Abs', 'z']]],
     's',
   ];
   /** …and the control: `z ⩴ t + i; z²` genuinely RETURNS a complex value. */
   const COMPLEX_VALUE: MathJsonExpression = [
     'Block',
-    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Declare', 'z', "'unknown'", ['Add', 't', 'ImaginaryUnit']],
     ['Multiply', 'z', 'z'],
   ];
 
@@ -5458,10 +5428,7 @@ describe('a GPU user-function body with an early `Return`', () => {
     // `any` declared: every body here contains `Return`, which the effects
     // walk sees as an unresolved head (`Return` has no operator definition —
     // it is handled structurally by the Block evaluator), so each body
-    // infers effects `any`; and RETURN_COMPLEX_LOCAL additionally binds `z`
-    // by bare assignment, which the default-`!scope` ceiling refuses on a
-    // bare declaration. The `any` contract covers both (`scope` alone would
-    // not: `any ⊄ {scope}`).
+    // infers effects `any`, and the `any` contract covers it.
     e.declare('a', { signature: '(number) any -> number' });
     e.assign('a', e.box(['Function', body, 't']));
     e.declare('u', 'number');
@@ -5479,7 +5446,7 @@ describe('a GPU user-function body with an early `Return`', () => {
   const RETURN_COMPLEX_LOCAL: MathJsonExpression = [
     'Block',
     ['Declare', 's', 'number', 0],
-    ['Assign', 'z', ['Add', 't', 'ImaginaryUnit']],
+    ['Declare', 'z', "'unknown'", ['Add', 't', 'ImaginaryUnit']],
     ['Return', 'z'],
     's',
   ];
@@ -5591,8 +5558,8 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   const engineWithX = (): ComputeEngine => {
     const e = new ComputeEngine();
     e.declare('x', 'number');
-    // `s` is not declared: the bodies below assign it, and a write to a
-    // symbol declared in the engine declines.
+    // `s` is not declared in the engine: the bodies below declare it, and a
+    // write to a symbol declared in the engine declines.
     return e;
   };
 
@@ -5605,7 +5572,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   /** `s = x;\nreturn s;` before the gate — a statement sequence, no `Return`. */
   const ASSIGN_THEN_VALUE: MathJsonExpression = [
     'Block',
-    ['Assign', 's', 'x'],
+    ['Declare', 's', "'unknown'", 'x'],
     's',
   ];
   /** `return x` before the gate — a bare statement, not an expression. */
@@ -5615,7 +5582,11 @@ describe('the expression-only GPU routes decline statement bodies', () => {
    * body emits `s = x` — one line, no `return` token. GLSL assignment is an
    * OPERATOR, so `fragColor = s = x;` is valid there.
    */
-  const ASSIGN_ONLY: MathJsonExpression = ['Block', ['Assign', 's', 'x']];
+  const ASSIGN_ONLY: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', "'unknown'", 0],
+    ['Assign', 's', 'x'],
+  ];
   /**
    * The other single-line hole the emitted-source scan cannot see: a ROOT
    * `Declare` emits one bare declaration — `float s`. A declaration is a
@@ -5630,7 +5601,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
 
   /** The decline of a block whose last statement is an assignment or a
    * declaration, where the value of the block is used. */
-  const VALUE_USED = /The block ends with an assignment, so it has no value/;
+  const VALUE_USED = /is a statement, and it stands where a value is expected/;
 
   const shaderFor = (
     target: GLSLTarget,
@@ -5689,11 +5660,6 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     // whose value is an expression lowers to a compound statement there (the
     // block's locals scoped by the braces) and the assignment reads the
     // temporary. `compileToSource()` has no sink and still declines above.
-    //
-    // The local is DECLARED here. `ASSIGN_THEN_VALUE` assigns `s`, a name the
-    // library scope pre-declares, so it is a free symbol on the shader
-    // targets — spelled bare for the caller to declare, like every free
-    // symbol — and no `float s;` is synthesized for it.
     const body: MathJsonExpression = [
       'Block',
       ['Declare', 'q', 'number', 'x'],
@@ -5800,7 +5766,8 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     // value `Nothing`, which has no compiled representation.
     const ASSIGN_ASSIGN: MathJsonExpression = [
       'Block',
-      ['Assign', 's', 'x'],
+      ['Declare', 's', "'unknown'", 'x'],
+      ['Declare', 't', "'unknown'", 0],
       ['Assign', 't', 's'],
     ];
     for (const target of gpuTargets()) {
@@ -5869,7 +5836,8 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       glsl.compileFunction(
         engineWithX().box([
           'Block',
-          ['Assign', 's', 'x'],
+          ['Declare', 's', "'unknown'", 'x'],
+          ['Declare', 't', "'unknown'", 0],
           ['Assign', 't', 's'],
         ]),
         'f',
@@ -5894,15 +5862,15 @@ describe('the expression-only Python route declines statement bodies', () => {
   const engineWithX = (): ComputeEngine => {
     const e = new ComputeEngine();
     e.declare('x', 'number');
-    // `s` is not declared: the bodies below assign it, and a write to a
-    // symbol declared in the engine declines.
+    // `s` is not declared in the engine: the bodies below declare it, and a
+    // write to a symbol declared in the engine declines.
     return e;
   };
 
   /** `s = x\nreturn s` before the gate. */
   const ASSIGN_THEN_VALUE: MathJsonExpression = [
     'Block',
-    ['Assign', 's', 'x'],
+    ['Declare', 's', "'unknown'", 'x'],
     's',
   ];
   /** `s = x\nreturn return s` before the gate — the doubled `return`. */
@@ -5920,7 +5888,11 @@ describe('the expression-only Python route declines statement bodies', () => {
    * `Declare` emits the EMPTY string: Python has no declaration statement, so
    * the name and its initializer both vanish.
    */
-  const ASSIGN_ONLY: MathJsonExpression = ['Block', ['Assign', 's', 'x']];
+  const ASSIGN_ONLY: MathJsonExpression = [
+    'Block',
+    ['Declare', 's', "'unknown'", 0],
+    ['Assign', 's', 'x'],
+  ];
   const DECLARE_ONLY: MathJsonExpression = ['Declare', 's', 'number', 'x'];
 
   /** The decline of a block whose last statement is an assignment or a
@@ -6067,7 +6039,12 @@ describe('the expression-only Python route declines statement bodies', () => {
     // `Nothing`: the function body declines, with one statement or more.
     for (const body of [
       ASSIGN_ONLY,
-      ['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']],
+      [
+        'Block',
+        ['Declare', 's', "'unknown'", 'x'],
+        ['Declare', 't', "'unknown'", 0],
+        ['Assign', 't', 's'],
+      ],
     ] as MathJsonExpression[])
       expect(() =>
         python.compileFunction(engineWithX().box(body), 'f', ['x'])
@@ -6082,7 +6059,8 @@ describe('the expression-only Python route declines statement bodies', () => {
       python.compileFunction(
         engineWithX().box([
           'Block',
-          ['Assign', 's', 'x'],
+          ['Declare', 's', "'unknown'", 'x'],
+          ['Declare', 't', "'unknown'", 0],
           ['Block', ['Assign', 't', 's']],
         ]),
         'f',
@@ -6096,7 +6074,7 @@ describe('the expression-only Python route declines statement bodies', () => {
       python.compileFunction(
         engineWithX().box([
           'Block',
-          ['Assign', 's', 'x'],
+          ['Declare', 's', "'unknown'", 'x'],
           ['Declare', 't', 'number'],
         ]),
         'f',
@@ -6127,11 +6105,16 @@ describe('the expression-only Python route declines statement bodies', () => {
       python.compileFunction(
         engineWithX().box([
           'Block',
-          ['Assign', 's', 'x'],
+          ['Declare', 's', "'unknown'", 'x'],
+          ['Declare', 't', "'unknown'", 0],
           [
             'Assign',
             't',
-            ['Block', ['Assign', 'u', 's'], ['Multiply', 'u', 2]],
+            [
+              'Block',
+              ['Declare', 'u', "'unknown'", 's'],
+              ['Multiply', 'u', 2],
+            ],
           ],
         ]),
         'f',
@@ -6673,7 +6656,7 @@ describe('COMPILE a `Return` as the last statement of a block', () => {
   test.each([
     [
       'at the compilation root',
-      ['Block', ['Assign', 'z', 1], ['Return', 'x']],
+      ['Block', ['Declare', 'z', "'unknown'", 1], ['Return', 'x']],
       3,
     ],
     ['alone at the compilation root', ['Block', ['Return', 'x']], 3],
@@ -6683,7 +6666,11 @@ describe('COMPILE a `Return` as the last statement of a block', () => {
         'Apply',
         [
           'Function',
-          ['Block', ['Assign', 'z', 1], ['Return', ['Add', 'y', 1]]],
+          [
+            'Block',
+            ['Declare', 'z', "'unknown'", 1],
+            ['Return', ['Add', 'y', 1]],
+          ],
           'y',
         ],
         'x',
@@ -6726,13 +6713,13 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
   const BODIES: [string, MathJsonExpression][] = [
     [
       'a block ending with a Return',
-      ['Block', ['Assign', 'z', 1], ['Return', Y1]],
+      ['Block', ['Declare', 'z', "'unknown'", 1], ['Return', Y1]],
     ],
     ['a block of one Return', ['Block', ['Return', Y1]]],
     ['a bare Return', ['Return', Y1]],
     [
       'a block ending with an If whose branches return',
-      ['Block', ['Assign', 'z', 1], IF],
+      ['Block', ['Declare', 'z', "'unknown'", 1], IF],
     ],
     ['a block of one If whose branches return', ['Block', IF]],
     ['a bare If whose branches return', IF],
@@ -6740,14 +6727,19 @@ describe('COMPILE a `Return` in a tail position gives its value, on every statem
       'a block ending with an If with one returning branch',
       [
         'Block',
-        ['Assign', 'z', 1],
+        ['Declare', 'z', "'unknown'", 1],
         ['If', ['Greater', 'y', 0], ['Return', 1], 5],
       ],
     ],
   ];
   // An `If` whose branches return, before the last statement: an early
   // return, in statement form.
-  const EARLY: MathJsonExpression = ['Block', ['Assign', 'z', 1], IF, 7];
+  const EARLY: MathJsonExpression = [
+    'Block',
+    ['Declare', 'z', "'unknown'", 1],
+    IF,
+    7,
+  ];
   const SAMPLES = [3, -2];
 
   const engine = () => {

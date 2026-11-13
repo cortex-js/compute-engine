@@ -829,14 +829,20 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     }
     // CONTROL — statement APPLICATIONS are untouched: their effects reach the
     // block through the `effectsOf` recursion, not the latent term.
-    expect(eff(ce.box(['Block', ['Assign', 'x', 1], ['Random']]))).toEqual([
+    expect(
+      eff(ce.box(['Block', ['Declare', 'x', "'unknown'", 1], ['Random']]))
+    ).toEqual([
       'random',
       'scope',
     ]);
     // …and the frame still absorbs the draws but not the scope write.
     expect(
       eff(
-        ce.box(['WithRandomSeed', 42, ['Block', ['Assign', 'x', 1], ['Random']]])
+        ce.box([
+          'WithRandomSeed',
+          42,
+          ['Block', ['Declare', 'x', "'unknown'", 1], ['Random']],
+        ])
       )
     ).toEqual(['scope']);
   });
@@ -963,9 +969,9 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     // EVALUATES an application operand under itself, so that draw IS pending.
     const ce = engine();
     expect(survivor(ce, ['If', 'True', ['Random'], 0])).toBe('WithRandomSeed');
-    expect(survivor(ce, ['Block', ['Assign', 'z', 1], ['Random']])).toBe(
-      'WithRandomSeed'
-    );
+    expect(
+      survivor(ce, ['Block', ['Declare', 'z', "'unknown'", 1], ['Random']])
+    ).toBe('WithRandomSeed');
     expect(survivor(ce, ['List', ['Random']])).toBe('WithRandomSeed');
   });
 });
@@ -1044,6 +1050,7 @@ describe('6 — discharge', () => {
 
   it('a `{scope}` write PASSES THROUGH — the frame absorbs draws, not writes', () => {
     const ce = new ComputeEngine();
+    ce.declare('ctr6', 'integer');
     for (const [route, e] of Object.entries({
       box: ce.box([
         'WithRandomSeed',
@@ -1742,6 +1749,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
 
     it('a wide result declares effects ONLY; the return stays inferred', () => {
       const ce = new ComputeEngine();
+      ce.declare('w3', 'unknown');
       const f = ce.box([
         'Function',
         [
@@ -1962,6 +1970,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       // Wide result, no annotated parameter: nothing a return-type ascription
       // or an annotated param would catch, yet it IS an annotation.
       const ce = new ComputeEngine();
+      ce.declare('ctr3', 'unknown');
       ce.box([
         'Assign',
         'tick3',

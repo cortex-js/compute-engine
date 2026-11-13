@@ -552,7 +552,7 @@ describe('CONTRACT 4: re-binding of a cached boxed expression', () => {
     expect(ce.box(json as any).evaluate().toString()).toBe('100');
   });
 
-  test('cached boxed (in parent scope) sees a nested-scope shadow of k', () => {
+  test('cached boxed (in parent scope) reads its own scope; rebind reads a nested-scope shadow of k', () => {
     const ce = new ComputeEngine();
     ce.declare('k', { type: 'integer', value: 3 } as any);
     const json = ['Add', ['Multiply', 2, 'k'], 1];
@@ -561,7 +561,8 @@ describe('CONTRACT 4: re-binding of a cached boxed expression', () => {
     ce.pushScope();
     ce.declare('k', { type: 'real', value: 0.5 } as any);
     expect(ce.box(json as any).evaluate().toString()).toBe('2'); // re-boxed
-    expect(cached.evaluate().toString()).toBe('2'); // cached shadows too
+    expect(cached.evaluate().toString()).toBe('7'); // reads the scope it was boxed in
+    expect(ce.rebind(cached).evaluate().toString()).toBe('2'); // bound again
     ce.popScope();
   });
 

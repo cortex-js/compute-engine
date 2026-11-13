@@ -10,7 +10,6 @@ import type {
 } from '../global-types.js';
 import { markForwardCallReference } from './forward-call-reference.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
-import { assignmentLocalsOf } from '../assignment-locals.js';
 import {
   isFunction,
   isSymbol,
@@ -1559,8 +1558,7 @@ export function markBodyCopyAsForwardCall(
       !value.type.isUnknown ||
       value._blockLocal ||
       isFunctionLiteralParameter(value) ||
-      s.binderNames?.has(name) === true ||
-      assignmentLocalsOf(s)?.includes(name) === true
+      s.binderNames?.has(name) === true
     )
       return;
     markForwardCallReference(binding, s);

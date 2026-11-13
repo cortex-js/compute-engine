@@ -31,35 +31,35 @@ describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
   test.each([
     // The domain of a comprehension, read later by `Length`, `Count`, `Sum`
     // or an index.
-    ['r = [x * 2 for x in t]', 'n = Length(r)'],
-    ['r = [x * 2 for x in t]', 'n = Count(r)'],
-    ['r = [x * 2 for x in t]', 'n = Sum(r)'],
-    ['r = [x * 2 for x in t]', 'n = r[1]'],
+    ['let r = [x * 2 for x in t]', 'let n = Length(r)'],
+    ['let r = [x * 2 for x in t]', 'let n = Count(r)'],
+    ['let r = [x * 2 for x in t]', 'let n = Sum(r)'],
+    ['let r = [x * 2 for x in t]', 'let n = r[1]'],
     // A read of the list after the declaration does not change the rule.
-    ['r = [x * 2 for x in t]', 'n = [Length(r), r[1]]'],
+    ['let r = [x * 2 for x in t]', 'let n = [Length(r), r[1]]'],
     // The domain of a second clause.
-    ['n = Length([[x, y] for x in [1, 2], y in t])', 'n = n'],
+    ['let n = Length([[x, y] for x in [1, 2], y in t])', 'n = n'],
     // The collection of a `for` loop.
-    ['for x in t { x }', 'n = 3'],
+    ['for x in t { x }', 'let n = 3'],
     // The source of a lazy view.
-    ['n = Length(Map((x) => x * 2, t))', 'n = n'],
-    ['n = Sum(Map((x) => x * 2, t))', 'n = n'],
-    ['n = Map((x) => x * 2, t)[1]', 'n = n'],
-    ['n = Count(Filter(t, (x) => x > 0))', 'n = n'],
-    ['r = Map((x) => x * 2, t)', 'n = Length(r)'],
+    ['let n = Length(Map((x) => x * 2, t))', 'n = n'],
+    ['let n = Sum(Map((x) => x * 2, t))', 'n = n'],
+    ['let n = Map((x) => x * 2, t)[1]', 'n = n'],
+    ['let n = Count(Filter(t, (x) => x > 0))', 'n = n'],
+    ['let r = Map((x) => x * 2, t)', 'let n = Length(r)'],
     // The initializer of a `let`.
-    ['let z = t', 'n = z'],
-  ])('`%s`, then `t = [1]`', (use, read) => {
-    const source = `function f() { ${use}; ${read}; t = [1]; n }\nf()`;
+    ['let z = t', 'let n = z'],
+  ])('`%s`, then `let t = [1]`', (use, read) => {
+    const source = `function f() { ${use}; ${read}; let t = [1]; n }\nf()`;
     expect(run(source).diagnostics).toEqual([
       ['read-before-declaration', use],
     ]);
   });
 
   test('an assignment in a `do` block of a `let` initializer', () => {
-    // `t = t + 1` at the own level of the function body declares `t`. The
+    // `let t = 2` at the own level of the function body declares `t`. The
     // assignment in the `do` block, before it, is a use of that local.
-    const source = 'function g() { let z = do { t = 1 }; t = t + 1; t }\ng()';
+    const source = 'function g() { let z = do { t = 1 }; let t = 2; t }\ng()';
     expect(run(source).diagnostics).toEqual([
       ['read-before-declaration', 'let z = do { t = 1 }'],
     ]);
@@ -68,8 +68,8 @@ describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
 
 describe('A USE AFTER THE DECLARATION, OR IN A FUNCTION LITERAL', () => {
   test.each([
-    ['t = [1]', 'r = [x * 2 for x in t]'],
-    ['t = [1]', 'r = Map((x) => x * 2, t)'],
+    ['let t = [1]', 'let r = [x * 2 for x in t]'],
+    ['let t = [1]', 'let r = Map((x) => x * 2, t)'],
   ])('`%s` then `%s`', (declaration, use) => {
     const source = `function f() { ${declaration}; ${use}; [Length(r), r[1]] }\nf()`;
     expect(run(source)).toEqual({ value: ['List', 1, 2], diagnostics: [] });
@@ -77,7 +77,7 @@ describe('A USE AFTER THE DECLARATION, OR IN A FUNCTION LITERAL', () => {
 
   test('a comprehension in the body of a function literal', () => {
     const source =
-      'function f() { let r = () => [x * 2 for x in t]; t = [1]; Length(r()) }\nf()';
+      'function f() { let r = () => [x * 2 for x in t]; let t = [1]; Length(r()) }\nf()';
     expect(run(source)).toEqual({ value: 1, diagnostics: [] });
   });
 });

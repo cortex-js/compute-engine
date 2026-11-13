@@ -52,7 +52,6 @@ import type {
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
-  Scope,
 } from '../global-types.js';
 
 import {
@@ -71,7 +70,6 @@ import {
   protocolAccessorEffects,
 } from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
-import { assignmentLocalsOf } from '../assignment-locals.js';
 import {
   declaredTypeError,
   failedElementRefusedBy,
@@ -101,6 +99,7 @@ import {
   signatureArgumentsOfSlots,
 } from './function-literal.js';
 import { signatureResultType } from './callee-type-derivation.js';
+import { matchPatternReferences } from './pattern-utils.js';
 
 /**
  * # The `Function`-literal construction seam (`docs/EFFECTS-MODEL.md`, "Inference")
@@ -2342,70 +2341,6 @@ interface WalkContext {
 }
 
 /**
- * The context `ctx` with the assignment locals of the canonical `Block`
- * `block` added to its confinement frontier.
- *
- * An assignment statement of a block to a name that no enclosing scope
- * declares when the block is canonicalized makes a local of the block
- * (`canonicalBlock()`, `library/control-structures.ts`, which records the
- * names: `assignmentLocalsOf()`, `assignment-locals.ts`). Each run of the
- * block gives the local a new binding (`declareAssignmentLocals()`,
- * `function-utils.ts`), so a write to it does not leave the run, also when
- * a binding of the same name is made later. So
- * `function g(k) { t = k + 1; t }` writes no outer variable, as with
- * `let t = k + 1`. A name that an enclosing scope declares (a top-level
- * `let t` written before the function, a parameter or a local of an
- * enclosing function, a global) is not an assignment local, and a write to
- * it stays a `scope` write.
- *
- * A raw block has no scope, and adds nothing.
- */
-function withBlockLocals(block: Expression, ctx: WalkContext): WalkContext {
-  const scope = block.localScope;
-  const names =
-    scope === undefined
-      ? rawBlockAssignmentLocals(block, ctx)
-      : assignmentLocalsOf(scope);
-  if (names === undefined || names.every((name) => ctx.declared.has(name)))
-    return ctx;
-  return { declared: new Set([...ctx.declared, ...names]) };
-}
-
-/**
- * The assignment locals of a block that is not canonical, so that it has no
- * scope to record them. Such a block is the body of a function literal that
- * an operator holds unbound: the stage of a `Pipe`, as in
- * `xs |> map((k) => do { t = k * 2; t })`. When the literal is canonicalized,
- * its body owns each name that one of its statements assigns and that no
- * enclosing scope declares (`canonicalBlock()`); the walk applies the same
- * rule to the statements of the block, and to the scope that is current now.
- * Only an assignment that is a statement of the block itself is read.
- */
-function rawBlockAssignmentLocals(
-  block: Expression,
-  ctx: WalkContext
-): string[] | undefined {
-  if (!isFunction(block) || block.isCanonical) return undefined;
-  const ce = block.engine;
-  const names: string[] = [];
-  for (const statement of block.ops) {
-    if (!isFunction(statement, 'Assign')) continue;
-    const target = statement.ops[0];
-    const name = isSymbol(target) ? target.symbol : undefined;
-    if (name === undefined || name === 'Nothing' || ctx.declared.has(name))
-      continue;
-    let declared = false;
-    for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent)
-      if (s.bindings.has(name)) {
-        declared = true;
-        break;
-      }
-    if (!declared) names.push(name);
-  }
-  return names;
-}
-
-/**
  * The context `ctx` with the index names of the scoped operator `expr` (a
  * `Loop`, a `Sum`, a comprehension: the `binderNames` of its scope) added to
  * its confinement frontier. Each such name is a binding of the scope of the
@@ -3012,7 +2947,7 @@ class Walker {
     // A sequence: `Block` is the only straight-line construct the confinement
     // analysis reasons about.
     if (head === 'Block') {
-      this.sequence(expr.ops, withBlockLocals(expr, ctx));
+      this.sequence(expr.ops, ctx);
       return;
     }
 
@@ -3023,17 +2958,29 @@ class Walker {
       const callee = expr.ops[0];
       if (callee !== undefined) {
         // An immediately-applied literal: its latent effects DO flow into the
-        // enclosing body.
-        if (isFunction(callee, 'Function'))
-          walkLiteral(
-            this.ce,
-            callee,
-            this.state,
-            this.selfName,
-            this.depth + 1,
-            this.expanding
-          );
-        else this.applyNamed(sym(callee));
+        // enclosing body. A literal node already walked into this accumulator
+        // at this depth or a smaller one adds nothing (`expandedLiterals`): a
+        // held argument with its caller's local functions inlined is a DAG
+        // that applies one literal node at many places.
+        if (isFunction(callee, 'Function')) {
+          let walked = expandedLiterals.get(this.state);
+          if (walked === undefined) {
+            walked = new Map();
+            expandedLiterals.set(this.state, walked);
+          }
+          const prior = walked.get(callee);
+          if (prior === undefined || prior > this.depth + 1) {
+            walked.set(callee, this.depth + 1);
+            walkLiteral(
+              this.ce,
+              callee,
+              this.state,
+              this.selfName,
+              this.depth + 1,
+              this.expanding
+            );
+          }
+        } else this.applyNamed(sym(callee));
       }
       // The callee is handled above; the remaining operands are ordinary
       // invoking positions (`Apply(hof, callback)`).
@@ -3170,6 +3117,19 @@ class Walker {
         );
       }
       for (const op of expr.ops) this.visit(op, ctx);
+      return;
+    }
+
+    if (head === 'MatchCase') {
+      // The captures of the pattern of a case are bindings of the case: a
+      // write to one in the guard or the body does not leave the case.
+      const { captures } = matchPatternReferences(expr.ops[0]);
+      const inner =
+        captures.length === 0
+          ? ctx
+          : { declared: new Set([...ctx.declared, ...captures]) };
+      this.visit(expr.ops[0], ctx);
+      for (const op of expr.ops.slice(1)) this.visit(op, inner);
       return;
     }
 

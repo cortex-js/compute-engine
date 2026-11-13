@@ -194,7 +194,11 @@ function expectAgreement(
 
 const ELEMENT = ['At', ['g', 'x'], 1];
 
-const BLOCK_LOCAL = ['Block', ['Assign', 'y', ELEMENT], ['Add', 'y', 1]];
+const BLOCK_LOCAL = [
+  'Block',
+  ['Declare', 'y', "'unknown'", ELEMENT],
+  ['Add', 'y', 1],
+];
 
 /** A Block local `y` that holds the element, used inside a cell function
  * or a comparison. The type of `Sin(y)` must hold a list too, or the
@@ -207,7 +211,7 @@ const BLOCK_CASES: [string, unknown][] = [
   ['Sin(y) < 1', ['Less', ['Sin', 'y'], 1]],
 ].map(([name, body]) => [
   name as string,
-  ['Block', ['Assign', 'y', ELEMENT], body],
+  ['Block', ['Declare', 'y', "'unknown'", ELEMENT], body],
 ]);
 
 const CASES: [string, unknown][] = [

@@ -112,9 +112,13 @@ class _InspectableScope implements InspectableScope {
     // `createScope()` records those names in `_borrowed` and they are skipped
     // here. A name declared through the normal path (a `Type`/`TypeString`
     // initializer entry, or an auto-declare during a contained parse) is owned
-    // and is disposed.
+    // and stops listening to configuration changes. It stays a live
+    // definition: an expression boxed in the scope reads it.
     for (const [name, def] of this.bindings)
-      if (isValueDef(def) && !this._borrowed?.has(name)) def.value.dispose();
+      if (isValueDef(def) && !this._borrowed?.has(name))
+        (
+          def.value as { _releaseConfigurationChange?: () => boolean }
+        )._releaseConfigurationChange?.();
   }
 
   /**

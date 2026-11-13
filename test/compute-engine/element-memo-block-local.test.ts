@@ -15,18 +15,24 @@ import {
 // have since language 3.4.4) had no memo entry.
 
 describe('the snapshot of a block with a local', () => {
-  const statements: [string, unknown][] = [
-    ['Declare with a string type', ['Declare', 'c', "'unknown'", 'P']],
-    ['Declare with a symbol type', ['Declare', 'c', 'unknown', 'P']],
-    ['a first Assign', ['Assign', 'c', 'P']],
+  const statements: [string, unknown[]][] = [
+    ['Declare with a string type', [['Declare', 'c', "'unknown'", 'P']]],
+    ['Declare with a symbol type', [['Declare', 'c', 'unknown', 'P']]],
+    [
+      'an Assign of a declared local',
+      [
+        ['Declare', 'c', "'unknown'", 0],
+        ['Assign', 'c', 'P'],
+      ],
+    ],
   ];
 
-  test.each(statements)('%s', (_label, statement) => {
+  test.each(statements)('%s', (_label, statements) => {
     const ce = new ComputeEngine();
     ce.declare('P', { type: 'real', value: 2 });
     const literal = ce.box([
       'Function',
-      ['Block', statement, ['Add', 'c', 't']],
+      ['Block', ...statements, ['Add', 'c', 't']],
       't',
     ] as never);
     const deps = snapshotMemoDeps(literal);

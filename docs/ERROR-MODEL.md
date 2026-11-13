@@ -325,19 +325,24 @@ local: each case below is a static error, put in place by the
 canonicalization, so the expression is invalid, `epsil check` reports it
 before the program runs, and a compilation declines it.
 
-| Code                         | Example                                         | Replacement                         |
-| ---------------------------- | ----------------------------------------------- | ----------------------------------- |
-| `declaration-without-value`  | `Declare(x, "integer")` then `Assign(x, 5)`     | `Declare(x, "integer", 5)`          |
-| `first-assignment-in-branch` | `Block(If(c, Assign(a, 1)), a)`                 | `Block(Assign(a, 0), If(c, Assign(a, 1)), a)` |
-| `read-before-declaration`    | `Block(Assign(b, k), Declare(k, "integer", 2))` | declare `k` before the first use    |
-| `assignment-in-operand`      | `f(Assign(a, 2))`, `Assign(t, Assign(u, v))`    | `Block(Assign(a, 2), f(a))`         |
-| `assignment-type-mismatch`   | `Block(Assign(a, 1), Assign(a, "x"), a)`        | use another name                    |
+| Code                                | Example                                              | Replacement                                         |
+| ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+| `declaration-without-value`         | `Declare(x, "integer")` then `Assign(x, 5)`          | `Declare(x, "integer", 5)`                          |
+| `declaration-below-statement`       | `Block(If(c, Declare(t, "unknown", 1)), t)`          | `Block(Declare(t, "unknown", 0), If(c, Assign(t, 1)), t)` |
+| `assignment-to-undeclared-variable` | `Block(Assign(a, 1), a)`, `If(c, Assign(a, 1))`      | `Block(Declare(a, "unknown", 1), a)`                |
+| `read-before-declaration`           | `Block(Declare(b, "unknown", k), Declare(k, "integer", 2))` | declare `k` before the first use             |
+| `assignment-in-operand`             | `f(Assign(a, 2))`, `Assign(t, Assign(u, v))`         | `Block(Declare(a, "unknown", 2), f(a))`             |
+| `assignment-type-mismatch`          | `Block(Declare(a, "unknown", 1), Assign(a, "x"), a)` | use another name                                    |
 
-- A declaration is `Declare(x, type, v)`, a `Declare` whose attributes
-  dictionary has a `value` entry, or a first `Assign(x, v)` at the own level
-  of a block. The three-operand `Declare(x, "unknown", v)` of the `where`
-  clause and of the `;` parse is a declaration. `ce.declare()` and
-  `ce.assign()` do not change.
+- A declaration is `Declare(x, type, v)`, or a `Declare` whose attributes
+  dictionary has a `value` entry. The three-operand `Declare(x, "unknown",
+  v)` of the `where` clause and of the `;` parse is a declaration. Only a
+  `Declare` that is a statement of a block or a function body declares a
+  local. An `Assign` writes the variable that is in scope and never makes
+  one: in a block, a function body or a branch, an `Assign` to a name that
+  no scope declares is an error. Outside every block (`ce.assign()`, an
+  `Assign` that the host evaluates alone) it declares the variable in the
+  current scope. `ce.declare()` and `ce.assign()` do not change.
 - An `Assign` or a `Declare` is valid only at a statement position: an
   operand that the operator's definition declares as a statement (the
   `operands` handler gives it the role `statement`), or the expression of
@@ -346,13 +351,13 @@ before the program runs, and a compilation declines it.
   other statement position is a branch: a branch of an `If`, a value of a
   `Which`, the body of a `Loop`, the body of a `MatchCase`, a statement
   operand of a host operator (`Do(body, n)`).
-- A first assignment in a branch is an error, also in a block of the
-  branch, and also at the top level, outside every block
-  (`If(c, Assign(a, 1))` boxed alone). An assignment to a name that the
-  engine declares (`ce.declare()`, an earlier top-level `Assign`) or to a
-  parameter is not a first assignment: it writes that name. The term of a
-  `Comprehension` is a value, not a branch: a block there declares its own
-  locals.
+- A `Declare` in a branch is an error, also at the top level, outside
+  every block (`If(c, Declare(t, "unknown", 1))` boxed alone); a `Declare`
+  that is a statement of a block in the branch declares a local of that
+  block. An assignment to a name that the engine declares (`ce.declare()`,
+  an earlier top-level `Assign`) or to a parameter writes that name. The
+  term of a `Comprehension` is a value, not a branch: a block there
+  declares its own locals.
 - A use of a local in a function literal is not checked: it runs when the
   function is called.
 - The type of a local is its declared type, or else the type of its first

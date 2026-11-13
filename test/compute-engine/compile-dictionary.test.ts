@@ -116,7 +116,7 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
 
     const local = [
       'Block',
-      ['Assign', 'q', ['Multiply', 2, 'x']],
+      ['Declare', 'q', "'unknown'", ['Multiply', 2, 'x']],
       ['Dictionary', entry('a', 'q'), entry('b', ['Add', 'q', 1])],
     ];
     expect(compiled(local, 'javascript').run({ x: 1 })).toEqual(
@@ -168,7 +168,7 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
   test('a call of a block-local function has the result type of its literal', () => {
     const expr = [
       'Block',
-      ['Assign', 'f', ['Function', ['Add', 'u', 1], 'u']],
+      ['Declare', 'f', "'unknown'", ['Function', ['Add', 'u', 1], 'u']],
       ['Dictionary', entry('a', ['f', 'x'])],
     ];
     expect(compiled(expr, 'javascript').run({ x: 1 })).toEqual(
@@ -195,7 +195,7 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
     // declines on every target.
     const expr = [
       'Block',
-      ['Assign', 'q', 1],
+      ['Declare', 'q', "'unknown'", 1],
       [
         'List',
         'q',
@@ -261,8 +261,9 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
     const expr = [
       'Block',
       [
-        'Assign',
+        'Declare',
         'f',
+        "'unknown'",
         [
           'Function',
           ['Dictionary', entry('re', 'u'), entry('im', 0)],
@@ -281,8 +282,9 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
     const expr = [
       'Block',
       [
-        'Assign',
+        'Declare',
         'f',
+        "'unknown'",
         [
           'Function',
           ['Dictionary', entry('re', 'u'), entry('im', 0)],

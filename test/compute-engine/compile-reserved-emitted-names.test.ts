@@ -146,8 +146,9 @@ describe('Other user names equal to an emitted identifier', () => {
     expect(r.run!()).toBe(6);
   });
 
-  // A `Declare` that is the body of a loop, with no block around it, is not
-  // a local of a block. Its declaration must not use the name `_SYS` either.
+  // A `Declare` that is the body of a loop, with no block around it, is the
+  // static error `declaration-below-statement`, so no code declares `_SYS`:
+  // the compilation declines.
   const loopBodyDeclare = [
     'Block',
     [
@@ -158,21 +159,25 @@ describe('Other user names equal to an emitted identifier', () => {
     5,
   ];
 
-  test('a Declare of _SYS that is the body of a Loop', () => {
-    const expected = ce.box(loopBodyDeclare as any).evaluate().re;
-    expect(expected).toBe(5);
-    const r = compiled(loopBodyDeclare);
-    expect(r.code).not.toContain('let _SYS');
-    expect(r.run!()).toBe(expected);
+  test('a Declare of _SYS that is the body of a Loop is an error', () => {
+    const expr = ce.box(loopBodyDeclare as any);
+    expect(expr.isValid).toBe(false);
+    expect(JSON.stringify(expr.evaluate().json)).toContain(
+      'declaration-below-statement'
+    );
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /declaration-below-statement/
+    );
   });
 
-  test('a Declare of _SYS that is the body of a Loop, in a Function', () => {
+  test('a Declare of _SYS that is the body of a Loop, in a Function, is an error', () => {
     const fn = ['Function', loopBodyDeclare, ['Typed', 'n', "'integer'"]];
-    const expected = ce.box(['Apply', fn, 1] as any).evaluate().re;
-    expect(expected).toBe(5);
-    const r = compiled(fn);
-    expect(r.code).not.toContain('let _SYS');
-    expect(r.run!(1)).toBe(expected);
+    expect(
+      JSON.stringify(ce.box(['Apply', fn, 1] as any).evaluate().json)
+    ).toContain('declaration-below-statement');
+    expect(() => compile(ce.box(fn as any), { fallback: false })).toThrow(
+      /declaration-below-statement/
+    );
   });
 
   test('a Sum index named _SYS with a symbolic bound', () => {

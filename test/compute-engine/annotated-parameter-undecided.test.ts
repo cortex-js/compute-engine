@@ -20,6 +20,15 @@ function run(source: string): unknown {
   return executeEpsil(new ComputeEngine(), source).value.json;
 }
 
+/** The value of the Epsil program `source` on a new engine that declares each
+ * name of `names` with the type `unknown` and no value, as MathJSON. A later
+ * statement of the program assigns it. */
+function runWith(names: string[], source: string): unknown {
+  const ce = new ComputeEngine();
+  for (const name of names) ce.declare(name, 'unknown');
+  return executeEpsil(ce, source).value.json;
+}
+
 /** The literal `k ↦ 2k` with `k` annotated `integer`, as MathJSON. */
 const DOUBLE_INTEGER = [
   'Function',
@@ -31,8 +40,9 @@ describe('a parameter annotated in the function is checked when a later value de
   test('a function statement gives the error for a later value', () => {
     expect(
       errorCode(
-        run(
-          'function h(k: integer) { 2*k }\nlet m\nlet r = g(h(m))\nm = 1.5\nr'
+        runWith(
+          ['m'],
+          'function h(k: integer) { 2*k }\nlet r = g(h(m))\nm = 1.5\nr'
         )
       )
     ).toBe(INCOMPATIBLE);
@@ -40,14 +50,20 @@ describe('a parameter annotated in the function is checked when a later value de
 
   test('a function statement gives the value for a later value that fits', () => {
     expect(
-      run('function h(k: integer) { 2*k }\nlet m\nlet r = g(h(m))\nm = 2\nr')
+      runWith(
+        ['m'],
+        'function h(k: integer) { 2*k }\nlet r = g(h(m))\nm = 2\nr'
+      )
     ).toEqual(['g', 4]);
   });
 
   test('a literal held by a variable gives the error for a later value', () => {
     expect(
       errorCode(
-        run('let h = (k: integer) => 2*k\nlet m\nlet r = g(h(m))\nm = 1.5\nr')
+        runWith(
+          ['m'],
+          'let h = (k: integer) => 2*k\nlet r = g(h(m))\nm = 1.5\nr'
+        )
       )
     ).toBe(INCOMPATIBLE);
   });
@@ -55,7 +71,7 @@ describe('a parameter annotated in the function is checked when a later value de
   test('a literal applied directly gives the error for a later value', () => {
     expect(
       errorCode(
-        run('let m\nlet r = g(((k: integer) => 2*k)(m))\nm = 1.5\nr')
+        runWith(['m'], 'let r = g(((k: integer) => 2*k)(m))\nm = 1.5\nr')
       )
     ).toBe(INCOMPATIBLE);
   });
@@ -132,13 +148,14 @@ describe('a parameter annotated in the function is checked when a later value de
 
   test('an inert application with a rest parameter collects it once', () => {
     expect(
-      run(
-        'function f(a: integer, ...r) { Length(r) }\nlet q\nlet z = f(q, 1, 2)\nq = 2\nz'
+      runWith(
+        ['q'],
+        'function f(a: integer, ...r) { Length(r) }\nlet z = f(q, 1, 2)\nq = 2\nz'
       )
     ).toBe(2);
     const anonymous =
-      'let q\nlet z = ((a: integer, ...r) => Length(r))(q, 1, 2)\nq = 2\nz';
-    expect(run(anonymous)).toBe(2);
+      'let z = ((a: integer, ...r) => Length(r))(q, 1, 2)\nq = 2\nz';
+    expect(runWith(['q'], anonymous)).toBe(2);
   });
 });
 
@@ -306,14 +323,17 @@ describe('the application that waits belongs to the literal that answered', () =
     const held = run('let w = (x) => ((k: integer) => 2*k)(x)\nlet m\nw(m)');
     expect((held as unknown[])[0]).toBe('Apply');
     expect(
-      run('let w = (x) => ((k: integer) => 2*k)(x)\nlet m\nlet r = w(m)\nm = 3\nr')
+      runWith(
+        ['m'],
+        'let w = (x) => ((k: integer) => 2*k)(x)\nlet r = w(m)\nm = 3\nr'
+      )
     ).toBe(6);
   });
 
   test('a local annotated function resolves after the call returns', () => {
     const w = 'function w(x) { let h = (k: integer) => 2*k\n h(x) + 1 }\n';
-    expect(run(w + 'let m\nlet r = w(m)\nm = 2\nr')).toBe(5);
-    expect(errorCode(run(w + 'let m\nlet r = w(m)\nm = 1.5\nr'))).toBe(
+    expect(runWith(['m'], w + 'let r = w(m)\nm = 2\nr')).toBe(5);
+    expect(errorCode(runWith(['m'], w + 'let r = w(m)\nm = 1.5\nr'))).toBe(
       INCOMPATIBLE
     );
   });

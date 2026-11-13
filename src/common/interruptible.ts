@@ -517,10 +517,7 @@ export function run<T>(
 /**
  * Close a generator when a driver stops, so that the `finally` blocks of the
  * generator run also when the driver throws between two steps (a timeout, an
- * abort, a rejected promise). The iteration of a `Sum` puts back the value
- * of its index in such a block (`saveLoopIndexes()`,
- * `compute-engine/library/utils.ts`); without the close, the index kept the
- * last value of a cancelled iteration.
+ * abort, a rejected promise).
  *
  * A generator that is done ignores the close. An error that a `finally`
  * block of the generator throws during the close is ignored, so that the

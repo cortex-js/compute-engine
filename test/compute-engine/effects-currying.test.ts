@@ -101,7 +101,7 @@ describe('`random`: zero draws at partial application, exactly one at saturation
         42,
         [
           'Block',
-          ['Assign', 'half', ['Apply', DRAWING_LAMBDA, 1]],
+          ['Declare', 'half', "'unknown'", ['Apply', DRAWING_LAMBDA, 1]],
           ['List', ['Apply', 'half', 2], ['Apply', 'half', 2]],
         ],
       ])

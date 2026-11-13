@@ -2819,13 +2819,7 @@ function walkDeclare<R>(
 /** `Block`, in the body of a user function or at the root of the expression
  * (the spec, decision 13). First the names of the `Declare` statements, then
  * the statements in order. The value of the block is the value of its last
- * statement.
- *
- * An `Assign` statement of the block to a name that the scope of the block
- * binds, with no `Declare` of the name in the block and no binding of it in
- * an enclosing scope of the function, declares the name: the compiler
- * declares such a local (`withImplicitLocalDeclares()`), with the type of the
- * value of the first such assignment. */
+ * statement. */
 export function walkBlock<R>(
   node: Expression,
   scope: FragmentScope<R>,
@@ -2840,20 +2834,7 @@ export function walkBlock<R>(
       for (const n of declaredNames(s) ?? [])
         names.push((n as Expression & { symbol: string }).symbol);
   const blockScope = node.localScope;
-  const implicit = new Set<string>();
-  for (const s of statements)
-    if (
-      isFunction(s, 'Assign') &&
-      isSymbol(s.op1) &&
-      blockScope?.bindings.has(s.op1.symbol) === true &&
-      !names.includes(s.op1.symbol) &&
-      w.binding(scope, s.op1.symbol) === undefined
-    )
-      implicit.add(s.op1.symbol);
-  // An implicit local is collected too: a read of it before its first
-  // assignment, also in the value of that assignment (`x ≔ x + 1`), reads
-  // a local that has no value yet, and is refused.
-  w.collect(inner, [...names, ...implicit]);
+  w.collect(inner, names);
   if (names.length > 0)
     ENFORCED_LOCALS.set(
       inner as FragmentScope<unknown>,
@@ -2867,47 +2848,6 @@ export function walkBlock<R>(
     if (place === 'statement' && w.definition.localFunction?.(s) === true) {
       inner.statements.add(s);
       last = { type: { kind: 'statement' } };
-      return;
-    }
-    if (
-      isFunction(s, 'Assign') &&
-      isSymbol(s.op1) &&
-      implicit.has(s.op1.symbol)
-    ) {
-      // The first assignment of an implicit local declares it.
-      const name = s.op1.symbol;
-      implicit.delete(name);
-      const value = w.value(s.op2, inner, { ...context, place: 'value' });
-      // The rule of the definition for a local with no declared type, as
-      // for `Declare(t, {value: …})`.
-      const definition = blockScope?.bindings.get(name);
-      const type =
-        w.definition.localType?.({
-          name,
-          value: value.type,
-          declared: undefined,
-          inferred:
-            definition !== undefined && 'value' in definition
-              ? definition.value.type.type
-              : undefined,
-        }) ?? localType(value.type);
-      if (type.kind === 'list' && w.definition.listLocals !== true)
-        return void w.refuse(
-          s,
-          'signature',
-          `The local \`${name}\` is a list: a block of the ` +
-            `${w.definition.name} fragment has scalar, complex or point locals`,
-          name
-        );
-      w.bind(s.op1, inner, name, type, 'local');
-      inner.statements.add(s);
-      last = { type: { kind: 'statement' } };
-      if (place !== 'statement')
-        w.refuse(
-          s,
-          'place',
-          `The block ends with an assignment, so it has no value`
-        );
       return;
     }
     if (isFunction(s, 'Declare')) {

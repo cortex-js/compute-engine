@@ -291,33 +291,33 @@ describe('a local declared unknown', () => {
 
 describe('a first write to a local of a block', () => {
   test.each<[string, MathJsonExpression]>([
-    ['a real value', ['Block', ['Assign', 's', ['Power', 'x', 2]], ['Add', 's', 1]]],
-    ['an integer, then a real', ['Block', ['Assign', 's', 1], ['Assign', 's', ['Multiply', 0.5, 'x']], ['Add', 's', 1]]],
-    ['an integer', ['Block', ['Assign', 's', 'k'], ['Assign', 's', ['Add', 's', 1]], ['Add', 's', 1]]],
-    ['two names', ['Block', ['Assign', 'p', ['Multiply', 2, 'x']], ['Assign', 'q', ['Add', 'p', 1]], ['Multiply', 'p', 'q']]],
-    ['a boolean', ['Block', ['Assign', 's', ['Greater', 'x', 1]], ['If', 's', 1, 2]]],
-    ['then a loop', ['Block', ['Assign', 's', 0], ['Loop', ['Assign', 's', ['Add', 's', 'i']], ['Element', 'i', ['Range', 1, 3]]], ['Add', 's', 'x']]],
+    ['a real value', ['Block', letLocal('s', ['Power', 'x', 2]), ['Add', 's', 1]]],
+    ['an integer, then a real', ['Block', letLocal('s', 1), ['Assign', 's', ['Multiply', 0.5, 'x']], ['Add', 's', 1]]],
+    ['an integer', ['Block', letLocal('s', 'k'), ['Assign', 's', ['Add', 's', 1]], ['Add', 's', 1]]],
+    ['two names', ['Block', letLocal('p', ['Multiply', 2, 'x']), letLocal('q', ['Add', 'p', 1]), ['Multiply', 'p', 'q']]],
+    ['a boolean', ['Block', letLocal('s', ['Greater', 'x', 1]), ['If', 's', 1, 2]]],
+    ['then a loop', ['Block', letLocal('s', 0), ['Loop', ['Assign', 's', ['Add', 's', 'i']], ['Element', 'i', ['Range', 1, 3]]], ['Add', 's', 'x']]],
     [
       'an integer loop bound',
-      ['Block', ['Assign', 'm', ['Add', 'k', 1]], declare('t', 'real', 0), ['Loop', ['Assign', 't', ['Add', 't', 'i']], ['Element', 'i', ['Range', 1, 'm']]], 't'],
+      ['Block', letLocal('m', ['Add', 'k', 1]), declare('t', 'real', 0), ['Loop', ['Assign', 't', ['Add', 't', 'i']], ['Element', 'i', ['Range', 1, 'm']]], 't'],
     ],
-    ['in an inner block', ['Block', ['Block', ['Assign', 's', ['Add', 'x', 1]], ['Multiply', 2, 's']]]],
-    ['in a block statement', ['Block', declare('a', 'real', 'x'), ['Block', ['Assign', 's', ['Add', 'a', 1]], ['Assign', 'a', 's']], ['Multiply', 2, 'a']]],
+    ['in an inner block', ['Block', ['Block', letLocal('s', ['Add', 'x', 1]), ['Multiply', 2, 's']]]],
+    ['in a block statement', ['Block', declare('a', 'real', 'x'), ['Block', letLocal('s', ['Add', 'a', 1]), ['Assign', 'a', 's']], ['Multiply', 2, 'a']]],
   ])('%s', (_name, json) => {
     check(json);
   });
 
   test('in the strict mode, a square root', () => {
-    check(['Block', ['Assign', 's', ['Sqrt', 'x']], ['Add', 's', 1]], INPUTS, ['strict']);
+    check(['Block', letLocal('s', ['Sqrt', 'x']), ['Add', 's', 1]], INPUTS, ['strict']);
   });
 
   test('in the body of a Function', () => {
-    check(fn(['Block', ['Assign', 'q', ['Add', 't', 1]], ['Multiply', 2, 'q']], real('t')), [[1.5], [-2]]);
+    check(fn(['Block', letLocal('q', ['Add', 't', 1]), ['Multiply', 2, 'q']], real('t')), [[1.5], [-2]]);
   });
 
   test('in the strict mode, a real and a complex value declines, as on the existing route', () => {
     declines(
-      ['Block', ['Assign', 'a', 1], ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Sqrt', ['Multiply', -1, 'x']]]], 'a'],
+      ['Block', letLocal('a', 1), ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Sqrt', ['Multiply', -1, 'x']]]], 'a'],
       /the local a is written a real value and a complex value/,
       engine(),
       ['strict']
@@ -328,12 +328,14 @@ describe('a first write to a local of a block', () => {
     declines(['Block', ['Assign', 'y', ['Add', 'x', 1]], ['Add', 'y', 1]], /y is not a local of the block: it is a name of the engine or an input/);
   });
 
-  test('a first write that reads the name declines', () => {
-    declines(['Block', ['Assign', 'q', ['Add', 'q', 1]], 'q'], /the first write to the local q of the block reads q, which has no value yet/);
+  test('a write that declares nothing makes the block invalid', () => {
+    // A local is made only by a `Declare`: the `Assign` is an `Error`
+    // statement, and the compilation declines.
+    declines(['Block', ['Assign', 'q', ['Add', 'q', 1]], 'q'], /admits no statement Error/);
   });
 
   test('a local of an inner block read after it declines', () => {
-    declines(['Block', ['Block', ['Assign', 'q', 'x']], 'q'], /unsupported capture q/);
+    declines(['Block', ['Block', letLocal('q', 'x')], 'q'], /unsupported capture q/);
   });
 });
 
@@ -761,9 +763,13 @@ describe('a local function or a helper in degrees', () => {
     ['Declare(g, function, F)', ['Block', declare('g', 'function', SIN), ['g', 'x']]],
     ['Declare(g, unknown, F)', ['Block', declare('g', 'unknown', SIN), ['g', 'x']]],
     ['DefineFunction(g, F)', ['Block', ['DefineFunction', 'g', SIN], ['g', 'x']]],
-    ['Assign(g, F)', ['Block', ['Assign', 'g', SIN], ['g', 'x']]],
   ] as [string, MathJsonExpression][])('%s gives sin(30°)', (_name, json) => {
     expect(at30(json, degrees())).toBeCloseTo(0.5, 15);
+  });
+
+  test('Assign(g, F) makes the block invalid', () => {
+    // A local is made only by a `Declare`.
+    declines(['Block', ['Assign', 'g', SIN], ['g', 'x']], /admits no statement Error/, degrees(), ['strict']);
   });
 
   test('Declare(g, {value: F}) declines', () => {
@@ -798,17 +804,22 @@ describe('a first write in degrees', () => {
     ce.angularUnit = 'deg';
     return ce;
   }
-  const ARCTAN: MathJsonExpression = ['Block', ['Assign', 't', 'x'], ['Arctan', 't']];
+  const ARCTAN: MathJsonExpression = ['Block', declare('t', 'unknown', 'x'), ['Arctan', 't']];
 
-  test('in the complex mode it declines', () => {
+  test('in the complex mode it gives the value of the interpreter', () => {
     // The existing compiler gives `NaN` (`57.29… * _SYS.catan(_SYS.cplx(t))`)
-    // where the interpreter gives 45 at x = 1.
-    declines(
-      ARCTAN,
-      /the first write to t declares a local of the block, and in the complex mode with the angular unit deg/,
-      degrees(),
-      ['complex']
-    );
+    // where the interpreter gives 45 at x = 1, so only the profile is
+    // compared.
+    const ce = degrees();
+    const expr = ce.expr(ARCTAN);
+    const profile = compile(expr, { ...PROFILE, mode: 'complex' } as never) as CompilationResult<'javascript'>;
+    expect(profile.success).toBe(true);
+    for (const x of [1, -1, 0.5]) {
+      const input = { x, y: 2.5, k: 3 };
+      const value = run(profile, input);
+      expect(typeof value).toBe('number');
+      expect(interpret(ce, expr, input)).toBeCloseTo(value as number, 10);
+    }
   });
 
   test('in the strict mode it is admitted', () => {

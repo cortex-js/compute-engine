@@ -59,16 +59,19 @@ describe('CE-827: THE TYPE OF A BLOCK LOCAL IGNORES A GLOBAL OF THE SAME NAME', 
     expect(e.type.toString()).toBe('real');
   });
 
-  test('a local that a first assignment makes', () => {
+  test('an assignment to a name with no binding is an error', () => {
     const ce = new ComputeEngine();
-    // `q` has no binding when the block is boxed, so the assignment makes a
-    // local. The global `q` is made after.
+    // `q` has no binding when the block is boxed, so the assignment is the
+    // error `assignment-to-undeclared-variable`. The global `q` is made after.
     const e = ce.box(['Block', ['Assign', 'q', 2], ['Add', 'q', 1]]);
     ce.assign('q', ce.box(['List', 1, 2]));
-    expect(e.type.toString()).toBe('integer');
-    expect(e.evaluate().json).toBe(3);
-    expect(e.type.toString()).toBe('integer');
-    // The run wrote the local, not the global.
+    expect(e.isValid).toBe(false);
+    expect(e.type.toString()).toBe('error');
+    expect(JSON.stringify(e.evaluate().json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
+    expect(e.type.toString()).toBe('error');
+    // The run did not write the global.
     expect(ce.box('q').evaluate().json).toEqual(['List', 1, 2]);
   });
 
@@ -315,19 +318,25 @@ describe('CE-834: AN ASYNCHRONOUS RUN OF A BLOCK READS ITS LOCAL, NOT A GLOBAL O
     }
   );
 
-  test('a local that a first assignment makes', async () => {
+  test('an assignment to a name with no binding is an error', async () => {
     const run = async (async: boolean): Promise<unknown> => {
       const ce = new ComputeEngine();
-      // `q` has no binding when the block is boxed, so the assignment makes
-      // a local. The global `q` is made after.
+      // `q` has no binding when the block is boxed, so the assignment is the
+      // error `assignment-to-undeclared-variable`. The global `q` is made
+      // after.
       const e = ce.box(['Block', ['Assign', 'q', 2], ['Add', 'q', 1]]);
       ce.assign('q', ce.box(['List', 1, 2]));
       const value = async ? await evaluateAsyncWithin(ce, e) : e.evaluate();
-      // The run wrote the local, not the global.
+      // The run did not write the global.
       expect(ce.box('q').evaluate().json).toEqual(['List', 1, 2]);
       return value.json;
     };
-    expect([await run(false), await run(true)]).toEqual([3, 3]);
+    const error = [
+      'Error',
+      ['ErrorCode', "'assignment-to-undeclared-variable'", "'q'"],
+      ['ErrorTrace', ['ErrorFrame', "'Block'", 1]],
+    ];
+    expect([await run(false), await run(true)]).toEqual([error, error]);
   });
 
   test('a local of the body of a function literal', async () => {

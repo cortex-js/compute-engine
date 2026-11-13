@@ -72,15 +72,11 @@ describe('Comprehension element memo', () => {
     expect(c).toBe(20); // cold refill under the new binding
   });
 
-  it('is invalidated by a caller-scope shadow, which the walk now reads', () => {
+  it('is not invalidated by a caller-scope shadow, which the walk does not read', () => {
     // A scoped comprehension evaluated in a child scope that shadows one of
-    // its free names reads the child's binding (ruled 2026-09-15, Tycho item
-    // 295: a directly evaluated expression reads the environment it is
-    // evaluated in — `binder-scope-ambient-shadow.test.ts`). The memo's
-    // resolution axis resolves through the same chain the walk reads
-    // (`withAmbientChain`), so the entry filled under the root binding is
-    // refilled under the shadow, and refilled again outside it: the memo
-    // holds one entry, and each environment change is a semantic one.
+    // its free names reads the binding of the scope it was boxed in, so the
+    // entry filled under the root binding is served under the shadow and
+    // after it.
     ce.assign('kshadow', 2);
     ce.assign(
       'gshadow',
@@ -97,13 +93,13 @@ describe('Comprehension element memo', () => {
     ce.pushScope();
     ce.declare('kshadow', { value: 99 });
     const [v2, c2] = counting(() => walkSum('gshadow'));
-    expect(v2).toBe(99 * 10); // the shadow is read
-    expect(c2).toBe(4); // …so the memo refills under it
+    expect(v2).toBe(2 * 10); // the shadow is not read
+    expect(c2).toBe(0); // …so the memo serves the entry
     ce.popScope();
 
     const [v3, c3] = counting(() => walkSum('gshadow'));
-    expect(v3).toBe(2 * 10); // the root binding again
-    expect(c3).toBe(4); // refilled once more outside the shadow
+    expect(v3).toBe(2 * 10);
+    expect(c3).toBe(0);
   });
 
   it('is invalidated by a transitive dependency (helper body)', () => {

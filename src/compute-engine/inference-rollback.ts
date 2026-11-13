@@ -70,6 +70,11 @@ export class InferenceRollbackFrame {
     (this._journal ??= []).push(entry);
   }
 
+  /** True when the frame has journaled a mutation. */
+  get hasEntries(): boolean {
+    return (this._journal?.length ?? 0) > 0;
+  }
+
   /**
    * Replay the journal in reverse order.
    *

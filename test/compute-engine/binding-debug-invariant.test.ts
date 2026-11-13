@@ -10,13 +10,15 @@ import { ComputeEngine } from '../../src/compute-engine';
  * `ce._debugBindings`, which is off by default.
  */
 
-/** A symbol whose binding outlives the scope that owns it. */
+/** A symbol whose binding outlives the scope that owns it. The scope is
+ * popped as the engine pops an evaluation frame; `ce.popScope()` keeps the
+ * definitions of its scope (see the last test). */
 function leakBinding(ce: ComputeEngine) {
   ce.pushScope();
   ce.declare('leaked', 'integer');
   ce.assign('leaked', 42);
   const escaped = ce.symbol('leaked');
-  ce.popScope();
+  ce._popEvalContext();
   return escaped;
 }
 
@@ -53,10 +55,22 @@ describe('popScope debug invariant', () => {
 
     const escaped = leakBinding(ce);
 
-    // The name lookup finds nothing once the scope is gone, so the symbol
-    // stays itself — quietly, which is exactly what the flag makes loud.
-    expect(escaped.evaluate().toString()).toEqual('"leaked"');
-    expect(escaped.N().toString()).toEqual('"leaked"');
+    // The symbol reads its definition from the scope it was boxed in —
+    // quietly, which is exactly what the flag makes loud.
+    expect(escaped.evaluate().toString()).toEqual('42');
+    expect(escaped.N().toString()).toEqual('42');
+  });
+
+  it('a scope popped by ce.popScope() keeps its definitions (flag on)', () => {
+    const ce = new ComputeEngine();
+    ce._debugBindings = true;
+    ce.pushScope();
+    ce.declare('kept', 'integer');
+    ce.assign('kept', 42);
+    const e = ce.box(['Add', 'kept', 1]);
+    ce.popScope();
+    expect(e.evaluate().toString()).toEqual('43');
+    expect(e.N().toString()).toEqual('43');
   });
 
   it('a binder scope popped at canonicalization is dormant, not dead', () => {

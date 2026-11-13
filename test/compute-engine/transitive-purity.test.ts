@@ -59,6 +59,7 @@ describe('TRANSITIVE PURITY', () => {
     // the body, and the values that the body reads, are not discharged.
     const ce = new ComputeEngine();
     ce.declare('r', { value: ce.box(['Random'], { form: 'raw' }) });
+    ce.declare('z', 'unknown');
     expect(isTransitivelyPure(ce.box(['WithRandomSeed', 1, ['Random']]))).toBe(
       true
     );

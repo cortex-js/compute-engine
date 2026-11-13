@@ -329,8 +329,16 @@ describe('CSE HARVEST — G1b emission purity', () => {
 
 describe('CSE HARVEST — G3 mutation', () => {
   it('drops a candidate whose symbol is assigned anywhere in its region subtree', () => {
+    const engine = new ComputeEngine();
+    engine.declare('u', 'real');
     const harvest = harvestCse(
-      box(['Add', ['Block', ['Assign', 'u', 2], 1], SIN6U, SIN6U, SIN6U])
+      engine.box([
+        'Add',
+        ['Block', ['Assign', 'u', 2], 1],
+        SIN6U,
+        SIN6U,
+        SIN6U,
+      ])
     );
     expect(allReps(harvest)).toEqual([]);
     expect(harvest.diagnostics.droppedByMutation).toBe(1);
@@ -461,7 +469,7 @@ describe('CSE HARVEST — regions', () => {
 
   it('keeps a Block statement list inert but binds within one statement RHS', () => {
     const rhs = ['Add', SIN6U, SIN6U, SIN6U] as any;
-    const harvest = harvestCse(box(['Block', ['Assign', 'y', rhs], 'y']));
+    const harvest = harvestCse(box(['Block', ['Declare', 'y', "'unknown'", rhs], 'y']));
 
     const lists = regionsOfKind(harvest, 'statement-list');
     expect(lists).toHaveLength(1);
@@ -482,8 +490,8 @@ describe('CSE HARVEST — regions', () => {
     const harvest = harvestCse(
       box([
         'Block',
-        ['Assign', 'y', ['Add', SQRT6U, SQRT6U]],
-        ['Assign', 'z', SQRT6U],
+        ['Declare', 'y', "'unknown'", ['Add', SQRT6U, SQRT6U]],
+        ['Declare', 'z', "'unknown'", SQRT6U],
         'y',
       ])
     );

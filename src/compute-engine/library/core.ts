@@ -37,7 +37,11 @@ import {
   collectTuplePattern,
   tuplePatternNames,
 } from '../boxed-expression/tuple-pattern.js';
-import { isInBranch, takePairedFunctionNames } from '../assignment-locals.js';
+import {
+  isInBodyOrBranch,
+  isInBranch,
+  takePairedFunctionNames,
+} from '../statement-position.js';
 import {
   everyOperand,
   OPAQUE_ROLE,
@@ -72,7 +76,6 @@ import {
   addSequenceBaseCase,
   addSequenceRecurrence,
   addMultiIndexBaseCase,
-  sequenceDefinitionScope,
   addMultiIndexRecurrence,
   containsSelfReference,
   extractIndexVariable,
@@ -80,8 +83,6 @@ import {
 
 import {
   apply,
-  bindOutlivedLocalsOfLazyValue,
-  bindReadVariablesOfLazyCollection,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
@@ -89,18 +90,24 @@ import {
   callFrameReceivedCollection,
   exactArgumentSources,
   inlineCallParameters,
-  isStatementListScope,
   literalArgumentsWithDefaults,
   shadowsQualifiedName,
   snapshotRunVariables,
   type ApplyOptions,
 } from '../function-utils.js';
-import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
 import {
-  canonicalLocalOf,
+  activationRecordOf,
+  scopeActivationTemplate,
+} from '../boxed-expression/ambient-chain.js';
+import {
+  isAssignedLocal,
+  markAssignedLocal,
   markLocalBinding,
 } from '../boxed-expression/declared-local.js';
-import { isNodeScope } from '../boxed-expression/lazy-view-context.js';
+import {
+  isNodeScope,
+  shareLazyViewRecord,
+} from '../boxed-expression/lazy-view-context.js';
 import {
   freeAnonymousSlots,
   functionLiteralArity,
@@ -159,6 +166,7 @@ import {
   throwIfCallerCancellation,
 } from '../../common/interruptible.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { widenValueTypes } from '../../common/type/widen-value.js';
 
 import { randomExpression } from './random-expression.js';
 import {
@@ -292,6 +300,7 @@ import {
 import {
   ascribeDeclaredParameterTypes,
   assertAssignable,
+  assignFn,
   assignValueAsOperatorDef,
   declareSumType,
   // Called directly rather than through `ce.declareType()`: the redefinition
@@ -390,6 +399,7 @@ import {
   isCharacter,
   isMissingValue,
   isAbsentSymbol,
+  hasInferredType,
   sym,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -398,8 +408,10 @@ import {
 } from '../boxed-expression/boxed-character.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { splitByPattern, replaceByPattern } from './regexp.js';
-import { noteScratchBinding, scratchRootOfBinding } from '../scratch-scopes.js';
-import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
+import {
+  inferTypeFromValue,
+  widenAssignedType,
+} from '../boxed-expression/boxed-value-definition.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import { isEngineSubscriptHandler } from '../boxed-expression/host-handler-changes.js';
@@ -779,49 +791,56 @@ function moduleBindingError(
 }
 
 /**
- * Make `local`, the binding that a block created for one of its locals when
- * its run started (`createBlockLocals`, `function-utils.ts`), the binding of
- * `name` in the block scope (`bindings`), with the definition that the
- * `Declare` statement of that local has just made (`declared`).
- *
- * The `Declare` statement declares the name as for a binding of a previous
- * run, so the new definition is the same as without `local`: a value
- * definition or an operator definition, with the declared type and constant
- * flag. But a closure created in the block before the statement ran
- * captured `local` (`captureNestedLocals`, `function-utils.ts`). So `local`
- * takes the definition half of `declared` and replaces `declared` in the
- * scope: there is one binding record, and a read or a write through the
- * closure reaches the same binding as a read or a write in the block. This
- * includes an assignment that replaces the half (`k = (x) => 2 * x` after
- * `let k = 1` makes the value binding an operator binding): it changes the
- * one record, which the closure holds. Then `local` is no longer marked
- * `_uninitialized`: the mark tells the `Declare` handler which binding the
- * run of the block made when it started.
- *
- * When `declared` was declared under a scratch scope, `local` is recorded as
- * a scratch binding too (`noteScratchBinding`), as the declaration recorded
- * `declared`.
+ * `build()` run in a scope that binds each name that the `Declare` target
+ * `target` declares to its binding in the scopes that enclose the current
+ * one, when the current scope holds a local of that name (the local that the
+ * block hoisted for the declaration, `canonicalBlock()`,
+ * `library/control-structures.ts`). The initial value of a declaration is
+ * boxed with it, so that it reads the name of the enclosing scope.
  */
-function initializeBlockLocal(
+function withOuterNames<T>(
   ce: ComputeEngine,
-  bindings: Map<string, BoxedDefinition>,
-  name: string,
-  local: BoxedDefinition,
-  declared: BoxedDefinition
-): void {
-  const target = local as {
-    value?: BoxedValueDefinition;
-    operator?: BoxedOperatorDefinition;
-    _uninitialized?: boolean;
-  };
-  delete target.value;
-  delete target.operator;
-  if (isValueDef(declared)) target.value = declared.value;
-  else target.operator = declared.operator;
-  target._uninitialized = false;
-  bindings.set(name, local);
-  const scratchRoot = scratchRootOfBinding(ce, declared);
-  if (scratchRoot !== undefined) noteScratchBinding(scratchRoot, [local]);
+  target: Expression,
+  build: () => T
+): T {
+  const scope = ce.context.lexicalScope;
+  const names = isFunction(target, 'Tuple')
+    ? tuplePatternNames(target)
+    : [sym(target)];
+  const outer = new Map<string, BoxedDefinition>();
+  for (const name of names) {
+    if (name === undefined) continue;
+    const local = scope.bindings.get(name);
+    if (local === undefined || !isValueDef(local) || !local.value._blockLocal)
+      continue;
+    for (let s = scope.parent; s; s = s.parent) {
+      const found = s.bindings.get(name);
+      if (found === undefined) continue;
+      outer.set(name, found);
+      break;
+    }
+  }
+  if (outer.size === 0) return build();
+  // The names are shadowed in the block (`canonicalBlock()`): a frame of the
+  // same names, with the outer binding of each, comes first.
+  return ce._inScope(
+    { parent: scope, bindings: outer, noAutoDeclare: true },
+    () => {
+      ce._pushShadowedParameters(
+        [...outer.keys()],
+        undefined,
+        undefined,
+        scope
+      );
+      try {
+        for (const [name, binding] of outer)
+          ce._setShadowedParameterDef(name, binding);
+        return build();
+      } finally {
+        ce._popShadowedParameters();
+      }
+    }
+  );
 }
 
 /**
@@ -3889,23 +3908,23 @@ function randomListType(
  * million elements would cost memory for no gain.
  *
  * A lazy collection that reads a variable but cannot be listed stays lazy,
- * and each variable that it reads, also in the body of its callback, is
- * replaced with the value that the variable holds now
- * (`bindReadVariablesOfLazyCollection`). So a later assignment of the
- * variable does not change the stored value. These are:
+ * as a call that keeps the activation it was made in
+ * (`boxed-expression/lazy-view-context.ts`): an operand that is a variable
+ * is replaced with the value it holds now (`withOperandValues`), and the
+ * callback, a function value, reads a local through that activation and a
+ * global when an element is computed. With `k = 3`,
+ * `let big = filter(1..oo, c => c > k)`, then `k = 10`, `first(big)` is
+ * `11`; `xs = filter(xs, c => c > k)` filters the collection that `xs`
+ * held before the statement. A program that wants the elements of the
+ * statement's time lists the collection then. These collections are:
  *
- * - a collection that is not known to be finite: with `k = 3`,
- *   `let big = filter(1..oo, c => c > k)` stores
- *   `filter(1..oo, c => c > 3)`, and `first(big)` stays `4` after `k = 10`;
+ * - a collection that is not known to be finite;
  * - a lazy collection that is neither indexed (a list) nor typed as a set:
  *   a `Filter` over a dictionary is a dictionary, and listing it would
  *   store a list of key-value pairs, which no keyed read understands;
  * - a collection whose elements could not be listed: the enumeration threw
  *   (a predicate that does not answer a boolean) or did not answer a list or
  *   a set. The failure is reported when the collection is read, as before.
- *
- * A collection that writes a variable that it reads (a callback that
- * assigns it) stays a live view of that variable.
  *
  * A lazy collection that is an element of a list or tuple literal
  * (`let r = [Map(h, xs)]`) is replaced in the same way, at every depth of
@@ -3938,21 +3957,8 @@ function randomListType(
  * run) that the stored value still names is read when the value is stored
  * (`snapshotRunVariables`): a plain value is copied at the assignment.
  */
-function assignedValue(
-  ce: ComputeEngine,
-  value: Expression,
-  /** The variable that stores the value. A lazy collection of the value
-   * then reads the locals of the loops and blocks that the variable
-   * outlives with their values now (`bindOutlivedLocalsOfLazyValue`).
-   * Omitted for a store in the current scope (`Declare`), or when the
-   * caller applies the rule for each target itself (a destructuring
-   * `Assign`). */
-  target?: string
-): Expression {
-  const stored = snapshotRunVariables(ce, listedAssignedValue(ce, value));
-  return target === undefined
-    ? stored
-    : bindOutlivedLocalsOfLazyValue(ce, target, stored);
+function assignedValue(ce: ComputeEngine, value: Expression): Expression {
+  return snapshotRunVariables(ce, listedAssignedValue(ce, value));
 }
 
 /** `assignedValue` without the copy of the variables of the run: the lazy
@@ -4008,8 +4014,8 @@ function listedAssignedValueUncached(
   }
   if (!value.isValid || !value.isLazyCollection) return value;
   if (!readsVariable(ce, value)) return value;
-  // A collection that stays lazy reads the values its variables hold now.
-  const kept = () => bindReadVariablesOfLazyCollection(ce, value);
+  // A collection that stays lazy holds the values of its variable operands.
+  const kept = () => withOperandValues(ce, value);
   if (!isWalkableFiniteCollection(value)) return kept();
   // The kind of the stored value: a list for an indexed collection, read
   // from the VALUE (the type of a `Filter` over a local whose type was
@@ -4032,11 +4038,64 @@ function listedAssignedValueUncached(
 }
 
 /**
+ * The lazy collection `e` with each operand that is a variable replaced with
+ * the value it holds now, as the arguments of a call are: the source of a
+ * `Filter`, the function value of a `Map` callback held by a variable. An
+ * operand that is itself a lazy collection gets the same replacement. A name
+ * that the scope of `e` binds (the index of a comprehension) is not an
+ * operand value, and a constant or a user function defined with `function`
+ * is not a variable. A function that a `let` gives a name is
+ * (`readsVariable`): its value is its literal.
+ * The rebuilt collection keeps the activation of `e`.
+ */
+function withOperandValues(ce: ComputeEngine, e: Expression): Expression {
+  if (!isFunction(e) || !e.isLazyCollection) return e;
+  const ops = e.ops.map((op) => {
+    if (isFunction(op)) return withOperandValues(ce, op);
+    if (!isSymbol(op) || e.localScope?.bindings.has(op.symbol)) return op;
+    // A free name (boxed before its declaration) reads the binding it has
+    // now.
+    let def = op.valueDefinition;
+    if (def === undefined) {
+      const binding = ce.lookupDefinition(op.symbol);
+      if (binding !== undefined && isValueDef(binding)) def = binding.value;
+    }
+    if (def === undefined) return letFunctionLiteral(ce, op.symbol) ?? op;
+    if (def.isConstant) return op;
+    const value = op.evaluate();
+    return value.isValid ? value : op;
+  });
+  if (ops.every((op, i) => op === e.ops[i])) return e;
+  const rebuilt = ce._fn(e.operator, ops, { scope: e.localScope });
+  shareLazyViewRecord(e, rebuilt);
+  return rebuilt;
+}
+
+/** The function literal that a `let` gives the name `name` when the name is
+ * bound to it (an operator definition that the statement made), or
+ * `undefined`. */
+function letFunctionLiteral(
+  ce: ComputeEngine,
+  name: string
+): Expression | undefined {
+  const binding = ce.lookupDefinition(name);
+  if (
+    binding === undefined ||
+    !('operator' in binding) ||
+    (binding as { _declaredByStatement?: boolean })._declaredByStatement !==
+      true
+  )
+    return undefined;
+  return binding.operator._lambdaLiteral;
+}
+
+/**
  * Whether `expr` reads a VARIABLE: a name with a value definition that is
  * not a constant (a `let`, a parameter of the function being applied, a loop
- * variable, a function held as a value), as an operand or as the head of a
- * call (`c => f(c)` with `f` a variable). A library operator and a constant
- * do not count.
+ * variable, a function held as a value), or a function that a `let` declares
+ * (`_declaredByStatement`), as an operand or as the head of a call
+ * (`c => f(c)` with `f` a variable). A library operator and a constant do
+ * not count.
  *
  * A user function defined with `function` does not count either. A program
  * cannot define it twice (the second definition is a `function-redefinition`
@@ -4054,7 +4113,11 @@ function listedAssignedValueUncached(
 function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
   const isVariable = (name: string): boolean => {
     const def = ce.lookupDefinition(name);
-    return def !== undefined && isValueDef(def) && !def.value.isConstant;
+    if (def === undefined) return false;
+    if (isValueDef(def)) return !def.value.isConstant;
+    return (
+      (def as { _declaredByStatement?: boolean })._declaredByStatement === true
+    );
   };
   if (isSymbol(expr)) return isVariable(expr.symbol);
   if (!isFunction(expr)) return false;
@@ -4187,40 +4250,186 @@ function joinAssignmentEvidence(
  * `string`, a boolean type to `boolean`, and the element types of a list, a
  * set and a tuple the same way (a list loses its dimensions). Any other type
  * is kept.
+ *
+ * With `tiers`, a numeric type widens to its tier instead
+ * (`widenAssignedType()`: `5` to `integer`, `0.5` to `real`), an element
+ * type loses only its literal cargo (`widenValueTypes()`: `complex` stays
+ * `complex`), and a character type is kept. That is the
+ * type of a `let` with no declared type (see `Declare`): `let c = [(1, 2)]`
+ * is a `list<tuple<integer, integer>>` of any length.
  */
-function widenLocalType(ce: ComputeEngine, t: Type): Type {
+function widenLocalType(
+  ce: ComputeEngine,
+  t: Type,
+  tiers: boolean | 'nested' = false
+): Type {
   if (t === 'never') return t;
   if (typeof t === 'object') {
     if (t.kind === 'list') {
       // A list with n dimensions (a matrix `matrix<integer^(2x2)>` has two)
       // widens to n nested lists: `list<list<number>>`. The lengths are not
       // kept, so a local can hold a longer list later.
-      let widened: Type = widenLocalType(ce, t.elements);
+      let widened: Type = widenLocalType(ce, t.elements, tiers && 'nested');
       const rank = Math.max(1, t.dimensions?.length ?? 1);
       for (let i = 0; i < rank; i++)
         widened = { kind: 'list', elements: widened };
       return widened;
     }
     if (t.kind === 'set')
-      return { kind: 'set', elements: widenLocalType(ce, t.elements) };
+      return {
+        kind: 'set',
+        elements: widenLocalType(ce, t.elements, tiers && 'nested'),
+      };
     if (t.kind === 'tuple')
       return {
         kind: 'tuple',
         elements: t.elements.map((e) => ({
           ...e,
-          type: widenLocalType(ce, e.type),
+          type: widenLocalType(ce, e.type, tiers && 'nested'),
         })),
       };
     if (t.kind === 'union') return t;
   }
   const bt = ce.type(t);
-  if (bt.matches('number')) return 'number';
+  if (bt.matches('number')) {
+    if (tiers === 'nested') return widenValueTypes(t);
+    return tiers ? widenAssignedType(ce, t) : 'number';
+  }
   // A character is a string of one character in a value, but the type
   // `character` is not a subtype of `string`: both widen to `string`, so
-  // that `let prev = ""` then `prev = ch` is valid.
+  // that `let prev = ""` then `prev = ch` is valid. A type of a local keeps
+  // `character`: a `list<string>` does not hold the characters of a word.
+  if (tiers && bt.matches('character')) return t;
   if (bt.matches('string') || bt.matches('character')) return 'string';
   if (bt.matches('boolean')) return 'boolean';
   return t;
+}
+
+/**
+ * Type the variable `name`, which a statement gives a function literal, as a
+ * function before the literal is canonicalized, declaring it when no scope
+ * does. A self-reference in the body (`f(n) = n * f(n-1)`) then resolves to
+ * this variable, and a later `2f(x)` parses as a product with a call. Used by
+ * `Assign` and by `Declare`, so that a local declared with a function literal
+ * is typed as a variable that is assigned the same literal.
+ *
+ * A recorded type that already admits a function (a signature that a
+ * `Declare` gives, or the wildcard `function`) is kept: replacing it with the
+ * wildcard would erase the declared signature. Only an inferred type that is
+ * not callable (`unknown`, or the type of an earlier scalar value) is
+ * replaced.
+ */
+function typeFunctionTarget(ce: ComputeEngine, name: string): void {
+  if (!ce.lookupDefinition(name)) ce.symbol(name);
+  const def = ce.lookupDefinition(name);
+  if (
+    !def ||
+    !isValueDef(def) ||
+    !def.value.inferredType ||
+    def.value.type.matches('function')
+  )
+    return;
+  // The binding may be older than the rollback frame (an inferred symbol of
+  // an outer scope): the static check must be able to undo the write.
+  const frame = activeRollbackFrame(ce);
+  if (frame !== undefined) {
+    const target = def.value;
+    const slots = target._typeSlotSnapshot();
+    frame.record({ undo: () => target._restoreTypeSlots(slots) });
+  }
+  const wasCallable = containsSignatureArm(def.value.type.type);
+  def.value._setType(() => ce.type('function'));
+  // The `_type` caches of expressions key on the engine's `any` axis, which
+  // a `_setType()` write does not advance: without the event, an expression
+  // typed before this write keeps its stale type.
+  ce._noteStateEvent({
+    kind: 'type-write',
+    callableBefore: wasCallable,
+    callableAfter: true,
+  });
+}
+
+/**
+ * The static definition of the local `name` of the block whose scope is
+ * the current lexical scope (or an activation of it) when a function
+ * statement of the block declares it (`localFunctionName()`,
+ * `canonicalBlock()`), else `undefined`.
+ */
+function functionLocalOf(
+  ce: ComputeEngine,
+  name: string | undefined
+): BoxedValueDefinition | undefined {
+  if (name === undefined) return undefined;
+  const binding = ce.context.lexicalScope.bindings.get(name);
+  return binding !== undefined &&
+    isValueDef(binding) &&
+    binding.value._blockLocal === true
+    ? binding.value
+    : undefined;
+}
+
+/** True when the attributes dictionary `attributes` of a `Declare` holds
+ * `constant -> True`. */
+function hasConstantAttribute(attributes: Expression | undefined): boolean {
+  if (!isDictionary(attributes)) return false;
+  const flag = attributes.get('constant');
+  return (
+    flag !== undefined && (isString(flag) ? flag.string : sym(flag)) === 'True'
+  );
+}
+
+/**
+ * At the boxing of a `Declare` statement of a block with the attribute
+ * `constant` (`attributes`): the static definition of the local `target`,
+ * or of each name of a destructuring target (`const (a, (b, c)) = …`), is a
+ * constant.
+ */
+function markConstantLocal(
+  ce: ComputeEngine,
+  target: Expression,
+  attributes: Expression | undefined
+): void {
+  if (!hasConstantAttribute(attributes)) return;
+  if (isFunction(target, 'Tuple')) {
+    for (const op of target.ops) markConstantLocal(ce, op, attributes);
+    return;
+  }
+  if (!isSymbol(target)) return;
+  const binding = ce.context.lexicalScope.bindings.get(target.symbol);
+  if (
+    binding === undefined ||
+    !isValueDef(binding) ||
+    binding.value._blockLocal !== true
+  )
+    return;
+  (binding.value as unknown as { _isConstant: boolean })._isConstant = true;
+}
+
+/**
+ * The initial value of the `Declare` with the operands `args` (not
+ * canonical) when the declaration states no type: the positional value
+ * (`Declare(f, "unknown", v)`) or the `value` entry of an attributes
+ * dictionary read from its raw pairs (`let f = v`). Otherwise `undefined`.
+ */
+function rawDeclaredValue(
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  const statesNoType = (op: Expression | undefined): boolean =>
+    op === undefined ||
+    (isString(op) && op.string === 'unknown') ||
+    isSymbol(op, 'unknown');
+  if (args.length >= 3) return statesNoType(args[1]) ? args[2] : undefined;
+  const dict = args[1];
+  if (!isFunction(dict, 'Dictionary')) return undefined;
+  let value: Expression | undefined;
+  let type: Expression | undefined;
+  for (const pair of dict.ops) {
+    if (!isFunction(pair) || pair.ops.length !== 2) continue;
+    const key = isString(pair.ops[0]) ? pair.ops[0].string : sym(pair.ops[0]);
+    if (key === 'value') value = pair.ops[1];
+    else if (key === 'type') type = pair.ops[1];
+  }
+  return statesNoType(type) ? value : undefined;
 }
 
 /**
@@ -4520,13 +4729,16 @@ function tuplePatternLeafTypes(
  * the value type does not fit the pattern. Each site reads the value type
  * again when the enclosing block re-runs the sites, so a leaf that is no
  * longer found in a later read loses its evidence (`joinAssignmentEvidence`).
- * `options` is passed to `joinAssignmentEvidence` for each leaf.
+ * `options` is passed to `joinAssignmentEvidence` for each leaf. With
+ * `leafType`, the evidence of each leaf is `leafType(name, type)` of the
+ * type that the value type gives that leaf.
  */
 function recordPatternEvidence(
   ce: ComputeEngine,
   pattern: Expression,
   valueType: () => Type,
-  options?: { currentScopeOnly?: boolean }
+  options?: { currentScopeOnly?: boolean },
+  leafType?: (name: string, type: Type) => Type
 ): void {
   const first = tuplePatternLeafTypes(pattern, valueType());
   if (first === undefined) return;
@@ -4534,7 +4746,12 @@ function recordPatternEvidence(
     joinAssignmentEvidence(
       ce,
       name,
-      () => tuplePatternLeafTypes(pattern, valueType())?.get(name),
+      () => {
+        const t = tuplePatternLeafTypes(pattern, valueType())?.get(name);
+        return t === undefined || leafType === undefined
+          ? t
+          : leafType(name, t);
+      },
       options
     );
 }
@@ -4568,17 +4785,11 @@ function bindTuplePattern(
   pattern: Expression,
   v: Expression,
   bindOne: (name: string, value: Expression) => Expression | null,
-  validateOne?: (name: string, value: Expression) => Expression | null,
-  /** The value to store for each leaf, computed for every leaf before any
-   * leaf is validated or written, so that the assignment stays
-   * simultaneous. */
-  prepareOne?: (name: string, value: Expression) => Expression
+  validateOne?: (name: string, value: Expression) => Expression | null
 ): Expression | null {
   const pairs: [name: string, value: Expression][] = [];
   const err = collectTuplePattern(pattern, v, pairs);
   if (err) return err;
-  if (prepareOne)
-    for (const pair of pairs) pair[1] = prepareOne(pair[0], pair[1]);
   if (validateOne) {
     for (const [name, value] of pairs) {
       const e = validateOne(name, value);
@@ -4801,57 +5012,10 @@ function installsOfThisRun(
 }
 
 /**
- * The installs that `reinstallClausesAhead()` made in the scope of a list of
- * statements, by name, weakly keyed on the scope. On the asynchronous
- * route, a run of the list evaluates in an activation of the scope, a copy
- * with its own bindings (`scopeActivationTemplate()`,
- * `boxed-expression/ambient-chain.ts`), and the key is the scope that the
- * activation copies, which is the same for every run.
- *
- * A block canonicalizes its statements once, so the `DefineFunction`
- * canonical handler installs a clause ahead only before the first run of the
- * block. On a later run (the next iteration of a loop body, a block
- * evaluated again), the run starts by giving each local of a `Declare`
- * statement a new binding with no value (`createBlockLocals()`,
- * `function-utils.ts`), and the clause of that run is installed only when
- * its `DefineFunction` statement runs. The `Declare` statement of the name
- * then reads the installs here and makes them again, so a call between the
- * two statements finds the clause on every run, as on the first one. The
- * installs are those of the `DefineFunction` statements of the same block,
- * which run again later in the same run.
- *
- * Only the scopes where a list of statements runs (`isStatementListScope()`,
- * `function-utils.ts`) get an entry. The top level of the Epsil runner does
- * not: a program that runs again boxes its `function` statements again, and
- * the `Declare` statement reads those installs on the binding itself.
- *
- * A known limit: the body of a function runs its statements in a new scope
- * for each call, so no entry is found for the next call. There, the
- * `Declare` statement never finds the binding that holds the clause
- * installed ahead (that binding is in the scope of the body, and the
- * statements run in the scope of the call), so it installs nothing, and a
- * call in the body reads the clause installed ahead, without the declared
- * signature: in `function h(x) { let g: (integer) -> integer; function g(k)
- * { 2k }; g(x) }`, `h(1.5)` gives `3`, before and after this change.
- */
-const BLOCK_REINSTALLS = new WeakMap<
-  Scope,
-  Map<string, ReadonlyArray<ClauseInstalledAhead>>
->();
-
-/** The key of the current lexical scope in `BLOCK_REINSTALLS`. */
-function reinstallScopeKey(ce: ComputeEngine): Scope {
-  const scope = ce.context.lexicalScope;
-  return scopeActivationTemplate(scope) ?? scope;
-}
-
-/**
  * Make again, in order, the `installs` that the `DefineFunction` canonical
  * handler made ahead of their statements onto a binding of `name` that a
  * `Declare` statement with no value has just replaced. Each install now runs
  * under the signature that the declaration gives, which checks the clause.
- * In the scope of a list of statements, the installs are also recorded for
- * the next run of the list (`BLOCK_REINSTALLS`).
  *
  * The new binding is not marked as holding clauses installed ahead
  * (`CLAUSE_INSTALLED_AHEAD`): the clauses now have the declared signature,
@@ -4896,15 +5060,6 @@ function reinstallClausesAhead(
         throw e;
       // Reported by the `DefineFunction` statement when it runs.
     }
-  }
-  if (isStatementListScope(ce.context.lexicalScope)) {
-    const key = reinstallScopeKey(ce);
-    let byName = BLOCK_REINSTALLS.get(key);
-    if (byName === undefined) {
-      byName = new Map();
-      BLOCK_REINSTALLS.set(key, byName);
-    }
-    byName.set(name, installs);
   }
 }
 
@@ -7655,6 +7810,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const isAliasTarget =
           ctorType?.def !== undefined && ctorType.alias === true;
 
+        // A function statement of a block makes a local of the block, a
+        // variable (`localFunctionName()`): no clause is installed, and the
+        // statement writes the function value when it runs.
+        if (functionLocalOf(ce, symbolName) !== undefined)
+          return ce._fn('DefineFunction', [
+            symbol,
+            args[1].canonical,
+            ...attrs,
+          ]);
+
         // §4.3a, PARAMETER half — capture the author-DECLARED signature while
         // it is still readable, so a BARE clause parameter can be ascribed
         // before the body canonicalizes below.
@@ -8001,6 +8166,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             ce.string('invalid-clause-definition'),
             op1 ?? ce.Nothing,
           ]);
+        const local = functionLocalOf(ce, name);
+        if (local !== undefined) {
+          local.value = op2.evaluate();
+          return ce.Nothing;
+        }
         try {
           // A definition evaluated inside a call frame or a block binds
           // THERE: it shadows a same-named outer function instead of
@@ -8139,19 +8309,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // function (e.g., `2f(x)` parses as `2 * f(x)`). Mirrors what an
         // explicit `Declare`/`let f` does.
         const symbolName = sym(symbol);
-        // In a branch of a conditional or in a loop body, in a block or at
-        // the top level (`isInBranch()`), an assignment to a name that no scope declares
-        // is a first assignment, which is a static error: the name must be
-        // declared with a value before the branch. An assignment that is a
-        // statement of a block in the branch is refused by
-        // `canonicalBlock()`; this is the assignment that is the branch
-        // itself (`If(c, Assign(a, 1))`).
-        if (isInBranch()) {
-          const targets = isFunction(symbol, 'Tuple')
-            ? tuplePatternNames(symbol)
-            : symbolName !== undefined
-              ? [symbolName]
-              : [];
+        // In a block, a function body, a branch of a conditional or a loop
+        // body (`isInBodyOrBranch()`), an assignment writes a variable that a
+        // scope declares: an assignment to a name that no scope declares is
+        // a static error. Outside them, it declares the variable in the
+        // current scope.
+        const targets = isFunction(symbol, 'Tuple')
+          ? tuplePatternNames(symbol)
+          : symbolName !== undefined
+            ? [symbolName]
+            : [];
+        if (isInBodyOrBranch()) {
           const undeclared = targets.find(
             (name) =>
               name !== 'Nothing' &&
@@ -8159,7 +8327,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               !ce._isShadowedParameter(name)
           );
           if (undeclared !== undefined)
-            return ce.error(['first-assignment-in-branch', undeclared]);
+            return ce.error(['assignment-to-undeclared-variable', undeclared]);
+        }
+        // The local that the assignment writes is an assigned local: a `let`
+        // of it takes the widened type of its value (see `Declare`).
+        for (const name of targets) {
+          const def = ce.lookupDefinition(name);
+          if (def !== undefined && isValueDef(def))
+            markAssignedLocal(def.value);
         }
         // A function value is checked against the type of the local BEFORE
         // the retype below writes the type `function` on the local:
@@ -8173,46 +8348,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           );
           if (mismatch !== undefined) return mismatch;
         }
-        if (symbolName && isFunction(args[1], 'Function')) {
-          // Trigger auto-declaration if the symbol isn't declared yet
-          if (!ce.lookupDefinition(symbolName)) ce.symbol(symbolName);
-          const def = ce.lookupDefinition(symbolName);
-          // A recorded type that already admits a function — a signature the
-          // block's `Declare` hoisted (`let f: (integer) -> integer`), or the
-          // wildcard `function` itself — already ties the recursion knot, and
-          // replacing it with the wildcard would ERASE the declared signature
-          // for every read on the canonical routes. Only a non-callable
-          // recorded type (unknown, or stale scalar evidence from an earlier
-          // assignment) is retyped.
-          if (
-            def &&
-            isValueDef(def) &&
-            def.value.inferredType &&
-            !def.value.type.matches('function')
-          ) {
-            // Rollback journal (family 1): same as `DefineFunction`'s
-            // recursion-knot retype above — the binding may pre-exist the
-            // rollback frame (an outer scope's inferred symbol), and the
-            // static checking pass must be able to undo the write.
-            const frame = activeRollbackFrame(ce);
-            if (frame !== undefined) {
-              const target = def.value;
-              const slots = target._typeSlotSnapshot();
-              frame.record({ undo: () => target._restoreTypeSlots(slots) });
-            }
-            const wasCallable = containsSignatureArm(def.value.type.type);
-            def.value._setType(() => ce.type('function'));
-            // The `_type` expression caches key on the engine's `any` axis,
-            // which a `_setType()` write does not advance: without
-            // the event, an expression typed before this write keeps its
-            // stale type for the rest of the generation.
-            ce._noteStateEvent({
-              kind: 'type-write',
-              callableBefore: wasCallable,
-              callableAfter: true,
-            });
-          }
-        }
+        if (symbolName && isFunction(args[1], 'Function'))
+          typeFunctionTarget(ce, symbolName);
 
         // §4.5b D13/D15: loosen a minted constructor while the literal body
         // canonicalizes — a constructor-function body's SELF-call must not
@@ -8418,6 +8555,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           symbolExpr = checkType(ce, args[0], 'symbol');
         }
 
+        // A local is declared by a statement of a block or of a function
+        // body: a `Declare` in a branch of a conditional or in a loop body
+        // is a static error.
+        if (isInBranch())
+          return ce.error([
+            'declaration-below-statement',
+            (isFunction(symbolExpr, 'Tuple')
+              ? tuplePatternNames(symbolExpr)[0]
+              : sym(symbolExpr)) ?? 'Nothing',
+          ]);
+
         // A declaration has a value: `Declare(x)` and `Declare(x, "integer")`
         // are static errors, as is a `let x: integer` with no value. The
         // name is declared with its value in one statement,
@@ -8448,6 +8596,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             );
         }
 
+        // A local declared with a function literal and no type is typed as
+        // a variable that is assigned the same literal (see `Assign`).
+        if (
+          isSymbol(symbolExpr) &&
+          isFunction(rawDeclaredValue(args), 'Function')
+        )
+          typeFunctionTarget(ce, symbolExpr.symbol);
+
         // A `let` with an initial value and no declared type is an
         // assignment for typing purposes: the initializer's static type is
         // recorded on the hoisted binding as assignment evidence
@@ -8466,9 +8622,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `(a, b) := v` does (`recordPatternEvidence`). The target of each
         // write is the binding in the CURRENT scope only, the one the `let`
         // creates at run time (see `joinAssignmentEvidence`).
+        //
+        // A local of a `let` that an `Assign` of the block writes, at any
+        // depth (`isAssignedLocal()`), has the widened type of its value
+        // (`widenLocalType()` with tiers): no literal type, no length, so a
+        // later value of the same kind is admitted (`let c = [(1, 2)]` is a
+        // list of pairs of any length). A local that is never assigned, and
+        // a `const`, keep the type of the value (`let v = [1, 2]` is a
+        // `vector<integer^2>`). The type is read again when every statement
+        // of the block is canonicalized (`withEvidenceSession`), after the
+        // assignments that follow the declaration.
         const recordInitializerEvidence = (
           typeOp: Expression | undefined,
-          value: Expression | undefined
+          value: Expression | undefined,
+          constant = false
         ): void => {
           // A type operand `"unknown"` declares no type (the parse of an
           // untyped `let k = v`), so it is read as no type operand.
@@ -8488,18 +8655,46 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (declaresType || value === undefined) return;
           if (!value.isValid) return;
           if (isFunction(value, 'Function')) return;
+          // The bindings of the declared names, read now: the type is read
+          // again later, outside the scope of the block. Each local is
+          // widened only when that local is assigned.
+          const locals = new Map(
+            (isFunction(symbolExpr, 'Tuple')
+              ? tuplePatternNames(symbolExpr)
+              : isSymbol(symbolExpr)
+                ? [symbolExpr.symbol]
+                : []
+            ).map((name) => [name, ce.context.lexicalScope.bindings.get(name)])
+          );
+          const widened = (name: string, t: Type): Type => {
+            const def = locals.get(name);
+            return !constant &&
+              def !== undefined &&
+              isValueDef(def) &&
+              isAssignedLocal(def.value)
+              ? widenLocalType(ce, t, true)
+              : t;
+          };
           if (isFunction(symbolExpr, 'Tuple')) {
-            recordPatternEvidence(ce, symbolExpr, () => value.type.type, {
-              currentScopeOnly: true,
-            });
+            recordPatternEvidence(
+              ce,
+              symbolExpr,
+              () => value.type.type,
+              { currentScopeOnly: true },
+              widened
+            );
             recordPatternAliases(symbolExpr, value);
             return;
           }
           if (!isSymbol(symbolExpr)) return;
+          const local = symbolExpr.symbol;
           joinAssignmentEvidence(
             ce,
-            symbolExpr.symbol,
-            () => assignedEvidenceType(value),
+            local,
+            () => {
+              const t = assignedEvidenceType(value);
+              return t === undefined ? undefined : widened(local, t);
+            },
             { currentScopeOnly: true }
           );
           recordAlias(symbolExpr.symbol, value);
@@ -8588,29 +8783,47 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           else markVariables(symbolExpr);
         };
 
+        // The initial value reads each declared name in the scope that
+        // encloses the declaration: `let t = t * 2` reads the outer `t`. A
+        // function literal reads no name when it is evaluated: its body
+        // reads the declared name when it is called, after the declaration
+        // ran.
+        const initialValue = (value: Expression): Expression =>
+          isFunction(args.length >= 3 ? args[2] : undefined, 'Function') ||
+          isFunction(rawDeclaredValue(args), 'Function')
+            ? value.canonical
+            : withOuterNames(ce, symbolExpr, () => value.canonical);
+
         if (args.length === 2) {
           // The second operand is either a type (kept raw, so that a
           // type-name symbol such as `real` is not auto-declared as a
           // variable) or a trailing attributes dictionary (canonicalized so
           // that its `.get(...)` accessor works during evaluation).
           const op =
-            args[1].operator === 'Dictionary' ? args[1].canonical : args[1];
+            args[1].operator === 'Dictionary' ? initialValue(args[1]) : args[1];
           if (isDictionary(op) && op.get('type') === undefined)
-            recordInitializerEvidence(undefined, op.get('value'));
+            recordInitializerEvidence(
+              undefined,
+              op.get('value'),
+              hasConstantAttribute(op)
+            );
+          if (isDictionary(op)) markConstantLocal(ce, symbolExpr, op);
           noteDeclaration(isDictionary(op) ? op : undefined);
           return ce._fn('Declare', [symbolExpr, op]);
         }
 
         if (args.length === 3) {
-          const value = args[2].canonical;
+          const value = initialValue(args[2]);
           recordInitializerEvidence(args[1], value);
+          if (isDictionary(value)) markConstantLocal(ce, symbolExpr, value);
           noteDeclaration(isDictionary(value) ? value : undefined);
           return ce._fn('Declare', [symbolExpr, args[1], value]);
         }
 
         if (args.length === 4) {
-          const attributes = args[3].canonical;
-          const initializer = args[2].canonical;
+          const attributes = initialValue(args[3]);
+          const initializer = initialValue(args[2]);
+          markConstantLocal(ce, symbolExpr, attributes);
           noteDeclaration(
             isDictionary(attributes) ? attributes : undefined,
             initializer
@@ -8929,7 +9142,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'The STATIC type of an expression, as a type value: ' +
         '`Type(3)` is `TypeFrom("integer")`. The observer does not ' +
-        'evaluate its operand. Recover the text with `StringFrom(Type(x))`; ' +
+        'evaluate its operand, except a name with no declared type, which ' +
+        'gives the widened type of the value it holds. Recover the text with `StringFrom(Type(x))`; ' +
         'in a string interpolation a type value renders as its text ' +
         'directly. BREAKING (2026-08-19, ruling R3 of ' +
         '`docs/TYPE-SYSTEM.md`): the result used to ' +
@@ -8974,8 +9188,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // evaluating), but a *non-canonical* expression has no type — a lazy
       // operand is not canonicalized, so `Type(y)` reported "unknown" even
       // for a symbol bound to an integer. Canonicalize, don't evaluate.
+      //
+      // A name with no declared type (an untyped parameter or local, a
+      // `match` capture) gives the type of the value it holds now, widened
+      // as for a value assigned to an untyped global (`inferTypeFromValue()`):
+      // `f(x) = type(x); f(1)` is `integer`. A name with a declared type
+      // gives that type.
       evaluate: ([x], { engine: ce }) => {
-        const text = x.canonical.type.toString() ?? 'unknown';
+        const operand = x.canonical;
+        let type = operand.type;
+        if (isSymbol(operand) && hasInferredType(operand)) {
+          const value = operand.evaluate();
+          if (!isSymbol(value, operand.symbol))
+            type = inferTypeFromValue(ce, value);
+        }
+        const text = type.toString() ?? 'unknown';
         // Settle the observed text like any other construction. The text
         // came from the engine's own serializer, so a parse failure here is
         // an engine bug — surfaced, not hidden. A generic function's
@@ -14278,28 +14505,6 @@ async function evaluateNAsync(
 }
 
 /**
- * The value of a base case of the sequence `name` (`L_0 := v`,
- * `P_{0,0} := v`), as it is stored. The sequence is stored in a scope of the
- * chain (`sequenceDefinitionScope`), and a lazy collection of the value
- * reads the locals of the loops and blocks between the current scope and
- * that scope with their values now (`bindOutlivedLocalsOfLazyValue`), as a
- * value assigned to a variable of that scope does: with
- * `for d in [3, 6] { if d == 3 { L_0 := Map(x => x + d, R) } }`, the
- * elements of `L_0` are `4, 5, …`, not those of the last `d`.
- */
-function baseCaseValue(
-  ce: ComputeEngine,
-  name: string,
-  value: Expression
-): Expression {
-  return bindOutlivedLocalsOfLazyValue(
-    ce,
-    sequenceDefinitionScope(ce, name),
-    value
-  );
-}
-
-/**
  * The evaluation of `Assign(target, value)`, as a generator that yields the
  * held value operand each time it needs it evaluated (`OperandSteps`). The
  * `evaluate` and `evaluateAsync` handlers of `Assign` drive it.
@@ -14358,7 +14563,7 @@ function* assignSteps(
       // (`assignedValue`): a lazy collection of the value reads the locals
       // of the loops and blocks that `joinedName` outlives with their
       // values now.
-      const val = assignedValue(ce, yield op2, joinedName);
+      const val = assignedValue(ce, yield op2);
       // Errors surface as VALUES on this route, exactly as on the
       // regular symbol-assignment path below.
       try {
@@ -14420,12 +14625,7 @@ function* assignSteps(
       // e.g., P_{0,0} := 1
       if (indices.every((op) => isNumber(op) && Number.isInteger(op.re))) {
         const key = indices.map((op) => op.re).join(',');
-        addMultiIndexBaseCase(
-          ce,
-          seqName,
-          key,
-          baseCaseValue(ce, seqName, yield op2)
-        );
+        addMultiIndexBaseCase(ce, seqName, key, yield op2);
         return ce.Nothing;
       }
 
@@ -14473,12 +14673,7 @@ function* assignSteps(
           // Case M3: Pattern base case (no self-reference)
           // e.g., P_{n,0} := 1 or P_{n,n} := 1
           const key = indexVars.join(',');
-          addMultiIndexBaseCase(
-            ce,
-            seqName,
-            key,
-            baseCaseValue(ce, seqName, yield op2)
-          );
+          addMultiIndexBaseCase(ce, seqName, key, yield op2);
           return ce.Nothing;
         }
       }
@@ -14490,7 +14685,7 @@ function* assignSteps(
     // e.g., L_0 := 1, F_1 := 1
     if (isNumber(subscript) && Number.isInteger(subscript.re)) {
       const index = subscript.re;
-      const value = baseCaseValue(ce, seqName, yield op2);
+      const value = yield op2;
       addSequenceBaseCase(ce, seqName, index, value);
       return ce.Nothing;
     }
@@ -14585,11 +14780,7 @@ function* assignSteps(
           throw e;
         }
         return null;
-      },
-      // A lazy collection of a leaf reads the locals that its target
-      // outlives with their values before any leaf is written
-      // (`bindOutlivedLocalsOfLazyValue`).
-      (name, el) => bindOutlivedLocalsOfLazyValue(ce, name, el)
+      }
     );
     return err ?? val;
   }
@@ -14657,21 +14848,7 @@ function* assignSteps(
     // (`undefined`) costs the RHS nothing and leaves the protocol route below
     // to evaluate it exactly once itself.
     const target = objectFieldStoreTarget(op1, receiver);
-    // A lazy collection stored in a field reads the locals of every loop
-    // and block of the chain with their values now
-    // (`bindOutlivedLocalsOfLazyValue` with no variable name). The name of
-    // the receiver does not tell how long the object lives: an alias in an
-    // inner scope (`let p = o; p.v = Map(x => x + i, R)` in a loop, or a
-    // parameter of a call) names the same object as `o` outside, and a view
-    // bound only to the scopes outside `p` would read a discarded `i` when
-    // `o.v` is read after the loop. The cost: a view in a field of an object
-    // of the same block reads the locals of that block by value.
-    if (target !== undefined)
-      return storeObjectField(
-        ce,
-        target,
-        bindOutlivedLocalsOfLazyValue(ce, undefined, yield op2)
-      );
+    if (target !== undefined) return storeObjectField(ce, target, yield op2);
 
     // REFUSE BEFORE EVALUATING THE VALUE where the refusal is already
     // certain. The store route has declined, so the only remaining
@@ -14710,7 +14887,7 @@ function* assignSteps(
     // property), and the false refusal it produced was DISCARDED in
     // statement position — a silent no-op write, diverging from the
     // compiled tier, which performs it.
-    const rhs = bindOutlivedLocalsOfLazyValue(ce, undefined, yield op2);
+    const rhs = yield op2;
     if (!rhs.isValid) return rhs;
     if (fieldName !== undefined && receiver !== undefined) {
       const set = protocolPropertyStore(ce, receiver, fieldName, rhs, {
@@ -14751,7 +14928,7 @@ function* assignSteps(
   const val =
     (isString(op2)
       ? narrowDeclaredCharacter(ce, declaredTypeOfSymbol(ce, symbolName), op2)
-      : undefined) ?? assignedValue(ce, yield op2, symbolName);
+      : undefined) ?? assignedValue(ce, yield op2);
   // A property write in VALUE position — `x = ProtocolProperty(P, "n",
   // p, v)`, which a hand-built expression can spell — that was REFUSED
   // (a readonly property, a non-object receiver, a missing
@@ -14801,46 +14978,6 @@ function isElementRebinding(value: Expression, name: string): boolean {
     node = node.op1;
   }
   return false;
-}
-
-/**
- * The static type of the block local `name` that a `Declare` statement with
- * no declared type gives the value `value`, when the statement runs in the
- * scope `scope`, or `undefined` to infer the type from the value.
- *
- * The static type is the type of the binding that the canonicalization of
- * the block made for the local (`canonicalLocalOf()`,
- * `boxed-expression/declared-local.ts`): the join of the types of the
- * initializer and of every assignment to the local in the block. The binding
- * of a run stays in the block scope after the run, and an analysis that
- * reads the type of the local from that scope (the compiler,
- * `localComplexDefault`) must read the static type, which does not depend on
- * the values of earlier runs. With `x: real`,
- * `Block(Declare(k, "unknown", Sqrt(x)), k + 1)` keeps `k: number` after a
- * run at `x = 4`, where `k` is `2`.
- *
- * `undefined` when there is no such binding (a function body runs in a call
- * frame, not in the block scope), when its type is `unknown`, when the value
- * is a function literal (its type is its signature), or when the type of
- * the value is not a subtype of the static type. In the last case the value
- * shows that the static type was not sound, and the binding takes the
- * type of the value.
- */
-function canonicalLocalType(
-  ce: ComputeEngine,
-  scope: Scope,
-  name: string,
-  value: Expression
-): Type | undefined {
-  if (isFunction(value, 'Function')) return undefined;
-  const canonical = canonicalLocalOf(
-    scopeActivationTemplate(scope) ?? scope,
-    name
-  ) as BoxedDefinition | undefined;
-  if (canonical === undefined || !isValueDef(canonical)) return undefined;
-  const type = canonical.value.type;
-  if (type.isUnknown || !value.type.matches(type)) return undefined;
-  return type.type;
 }
 
 /**
@@ -14942,14 +15079,18 @@ function* declareSteps(
     currentScopeBindings.delete(symbolName);
     hiddenStatementBindings.push([symbolName, existing]);
   };
-  if (isFunction(ops[0], 'Tuple'))
-    for (const leaf of tuplePatternNames(ops[0]))
-      hideStaleStatementBinding(leaf);
-  else if (isSymbol(ops[0])) hideStaleStatementBinding(ops[0].symbol);
-
   // Resolve the effective value: a positional value wins over the
   // attributes `value`.
   const valueSource = valueOp ?? attrs?.get('value');
+  // A function literal reads no variable when it is evaluated: its body
+  // reads the name of the declaration when it is called, after the
+  // declaration ran, and the closure keeps the binding of this run.
+  if (!isFunction(valueSource, 'Function')) {
+    if (isFunction(ops[0], 'Tuple'))
+      for (const leaf of tuplePatternNames(ops[0]))
+        hideStaleStatementBinding(leaf);
+    else if (isSymbol(ops[0])) hideStaleStatementBinding(ops[0].symbol);
+  }
   const hasValue = valueSource !== undefined;
   // `let c: character = "a"` — see `narrowDeclaredCharacter`. The
   // narrowed character IS the declared value, so it replaces the
@@ -15010,17 +15151,58 @@ function* declareSteps(
     const boundHasValue = boundValue !== undefined;
     const currentScope = ce.context.lexicalScope;
     let existing = currentScope.bindings.get(symbolName);
-    // The binding that the block created for this local when its run
-    // started (`createBlockLocals`, `function-utils.ts`). It is
-    // replaced below like the binding of a previous run, and once the
-    // declaration succeeds it takes the new definition and is put
-    // back in the scope (`initializeBlockLocal`), because a closure
-    // created earlier in the run may hold it.
-    const uninitialized =
+    // A local of the block (or of the function body) that runs now: the
+    // run writes the value of its static definition in its activation, and
+    // makes no definition.
+    if (
       existing !== undefined &&
-      (existing as { _uninitialized?: boolean })._uninitialized === true
-        ? existing
-        : undefined;
+      isValueDef(existing) &&
+      existing.value._blockLocal === true &&
+      activationRecordOf(existing.value, currentScope) !== undefined
+    ) {
+      const local = existing.value;
+      if (boundHasValue && hasType) {
+        const declaredType = ce.type(type!);
+        if (
+          !declaredType.isUnknown &&
+          !isFunction(boundValue, 'Function') &&
+          storeAdmission(
+            ce,
+            boundValue!,
+            declaredType,
+            effectsDeclared,
+            symbolName
+          ) === 'refuse'
+        )
+          throw declaredTypeError(symbolName, boundValue!, declaredType);
+      }
+      if (holdUntil) local.holdUntil = holdUntil;
+      // A function value under a declared type is assigned as an `Assign`
+      // of the variable assigns it (`assignFn()`): it is checked against the
+      // declared signature and written in the activation. For a constant,
+      // this write is its initialization, which `assignFn()` would refuse as
+      // a write to a constant: the definition is writable for that write
+      // only, while its slot in the activation is empty.
+      if (
+        boundHasValue &&
+        hasType &&
+        !ce.type(type!).isUnknown &&
+        isFunction(boundValue, 'Function')
+      ) {
+        const flags = local as unknown as { _isConstant: boolean };
+        const initializes =
+          flags._isConstant &&
+          activationRecordOf(local, currentScope)!.get(local) === undefined;
+        if (initializes) flags._isConstant = false;
+        try {
+          assignFn(ce, symbolName, boundValue!, { bindsLocal: true });
+        } finally {
+          if (initializes) flags._isConstant = true;
+        }
+      } else local.value = boundValue;
+      forgetConstantDeclaration(ce, symbolName, currentScope);
+      return;
+    }
     // The installs of clauses that the `DefineFunction` canonical
     // handler made ahead onto the binding dropped below, if any.
     let installsAhead: ReadonlyArray<ClauseInstalledAhead> | undefined;
@@ -15036,16 +15218,11 @@ function* declareSteps(
       // canonical handler installed the clause of a later statement
       // ahead onto the binding of the previous run. Install it again
       // under this declaration, as on the first run, unless it comes
-      // from another program (`installsOfThisRun()`). On a later run
-      // of a list of statements, the binding is the new local of the
-      // run (`uninitialized`), and the installs are those that this
-      // statement made on an earlier run (`BLOCK_REINSTALLS`).
+      // from another program (`installsOfThisRun()`).
       const aheadOnExisting = CLAUSE_INSTALLED_AHEAD.has(existing);
       installsAhead = aheadOnExisting
         ? installsOfThisRun(ce, CLAUSE_INSTALLED_AHEAD.get(existing))
-        : uninitialized !== undefined
-          ? BLOCK_REINSTALLS.get(reinstallScopeKey(ce))?.get(symbolName)
-          : undefined;
+        : undefined;
       currentScope.bindings.delete(symbolName);
       // The dropped binding holds a clause installed ahead, which an
       // expression boxed before this declaration holds by identity (a
@@ -15053,9 +15230,9 @@ function* declareSteps(
       // in the branch below, so that such a call reads the clause
       // installed under this declaration, and not the clause checked
       // against the signature that the previous run declared.
-      if (uninitialized === undefined && aheadOnExisting)
+      if (aheadOnExisting)
         retireBindingRecord(ce, currentScope, symbolName, existing);
-      else if (uninitialized === undefined) previousRun = existing;
+      else previousRun = existing;
       existing = undefined;
     } else if (
       existing &&
@@ -15184,17 +15361,22 @@ function* declareSteps(
     } else {
       // Fresh declaration.
       const def: Partial<ValueDefinition> = {};
-      const staticType =
-        boundHasValue && !(hasType && !ce.type(type!).isUnknown)
-          ? canonicalLocalType(ce, currentScope, symbolName, boundValue!)
-          : undefined;
-      if (staticType !== undefined) {
-        // A local with no declared type gets the static type that the
-        // canonicalization of its block gave it, not the type of the
-        // value of this run (`canonicalLocalType()`).
-        def.type = staticType;
-        def.inferred = true;
-      } else if (hasType) {
+      const untyped = !(hasType && !ce.type(type!).isUnknown);
+      // A variable declared with a function type and a function value is
+      // declared with its type and no value, and then assigned the value, as
+      // a variable declared with the same type and assigned the same value:
+      // the value is checked against the signature. An untyped variable
+      // holds its function value as any other value (`let old = g` copies
+      // that value). As for any other value (see below), only a literal
+      // written in the statement, outside a local, is held to the
+      // default-`!scope` ceiling.
+      const assignsFunction =
+        boundHasValue &&
+        !isConstant &&
+        isFunction(boundValue, 'Function') &&
+        !untyped &&
+        ce.type(type!).matches('function');
+      if (hasType) {
         def.type = type;
         // Only ever set it TRUE: `ce.declare` reads a non-empty
         // specifier off the type itself, and an explicit `false` here
@@ -15208,7 +15390,7 @@ function* declareSteps(
         def.inferred = true;
         def.type = 'unknown';
       }
-      if (boundHasValue) def.value = boundValue;
+      if (boundHasValue && !assignsFunction) def.value = boundValue;
       if (holdUntil) def.holdUntil = holdUntil;
       if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
       // A function literal written in this statement, in a scope that outlives
@@ -15257,6 +15439,21 @@ function* declareSteps(
       if (created)
         (created as { _declaredByStatement?: boolean })._declaredByStatement =
           true;
+      if (assignsFunction) {
+        try {
+          assignFn(ce, symbolName, boundValue!, {
+            bindsLocal: valueSource?.operator !== 'Function' || bindsLocal(ce),
+          });
+        } catch (e) {
+          // A refused value declares nothing, as when `ce.declare()` refuses
+          // it: the binding of a previous run, if any, is put back.
+          if (previousRun !== undefined)
+            currentScope.bindings.set(symbolName, previousRun);
+          else currentScope.bindings.delete(symbolName);
+          forgetConstantDeclaration(ce, symbolName, currentScope);
+          throw e;
+        }
+      }
     }
     // The declaration has run: its binding now decides whether the name is
     // a constant default, on both branches above, and the mark that the
@@ -15264,15 +15461,6 @@ function* declareSteps(
     // mark of a `const W` of an earlier run hid a later binding of `W`
     // (`forgetConstantDeclaration()`).
     forgetConstantDeclaration(ce, symbolName, currentScope);
-    const declared = currentScope.bindings.get(symbolName);
-    if (uninitialized !== undefined && declared !== undefined)
-      initializeBlockLocal(
-        ce,
-        currentScope.bindings,
-        symbolName,
-        uninitialized,
-        declared
-      );
     // Install again, under the signature declared above, the clauses
     // that were installed ahead onto the dropped binding, so that a
     // call in a statement between this declaration and the

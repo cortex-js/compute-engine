@@ -177,9 +177,9 @@ describe('what stays lazy', () => {
     const held = ce.box('evens').evaluate();
     expect(held.operator).toBe('Filter');
     expect(ce.box(['First', 'evens']).evaluate().toString()).toBe('4');
-    // The stored filter holds the value of `k` at the assignment.
+    // The callback reads the global `k` when an element is computed.
     ce.assign('k', 10);
-    expect(ce.box(['First', 'evens']).evaluate().toString()).toBe('4');
+    expect(ce.box(['First', 'evens']).evaluate().toString()).toBe('11');
   });
 
   test('a lazy collection that reads no variable', () => {
@@ -213,9 +213,9 @@ describe('what stays lazy', () => {
     const held = ce.box('z').evaluate();
     expect(held.operator).toBe(before.operator);
     expect(held.operator).not.toBe('List');
-    // The stored filter holds the value of `k` at the assignment.
+    // The callback reads the global `k` when an element is computed.
     ce.assign('k', 10);
-    expect(ce.box(['Length', 'z']).evaluate().toString()).toBe('1');
+    expect(ce.box(['Length', 'z']).evaluate().toString()).toBe('0');
   });
 
   test('a very large collection is listed, not left as a live view', () => {
@@ -245,74 +245,72 @@ describe('what stays lazy', () => {
   });
 });
 
-// A lazy collection that an assignment cannot list stays lazy, and each
-// variable that it reads, also in the body of its callback, is replaced with
-// the value that the variable holds at the assignment
-// (`bindReadVariablesOfLazyCollection`, `function-utils.ts`). Before, the
-// collection read the variables by name, and a later assignment of one of
-// them changed the stored value: in the first test, `first(big)` gave `11`
-// after `k = 10`.
-describe('a lazy collection that stays lazy reads its variables at the assignment', () => {
+// A lazy collection that an assignment cannot list stays lazy, as a call
+// that keeps the activation it was made in: an operand that is a variable is
+// replaced with the value it holds then, and the callback, a function value,
+// reads a local through that activation and a global when an element is
+// computed (`withOperandValues`, `library/core.ts`;
+// `boxed-expression/lazy-view-context.ts`).
+describe('a lazy collection that stays lazy reads its variables when an element is computed', () => {
   test.each([
     [
       'a filter over an infinite range',
-      'k = 3\nlet big = filter(1..oo, c => c > k)\nlet a = first(big)\nk = 10\n[a, first(big)]',
-      '[4,4]',
+      'let k = 3\nlet big = filter(1..oo, c => c > k)\nlet a = first(big)\nk = 10\n[a, first(big)]',
+      '[4,11]',
     ],
     [
       'a filter over a set held by a local typed collection<any>',
       'let k = 1\nlet s: collection<any> = {1, 2, 3}\nlet z = filter(s, c => c > k)\nlet a = length(z)\nk = 2\n[a, length(z)]',
-      '[2,2]',
+      '[2,1]',
     ],
     [
       'a local of a block',
       'do { let k = 3; let big = filter(1..oo, c => c > k); k = 10; first(big) }',
-      '4',
+      '11',
     ],
     [
       'a parameter that the function body assigns later',
       'function h(k) { let big = filter(1..oo, c => c > k)\n k = 10\n first(big) }\nh(3)',
-      '4',
+      '11',
     ],
+    // The source operand is the collection that `xs` held before the
+    // statement.
     [
       'a variable assigned a filter over itself',
-      'k = 3\nlet xs = 1..oo\nxs = filter(xs, c => c > k)\nk = 10\nfirst(xs)',
-      '4',
+      'let k = 3\nlet xs = 1..oo\nxs = filter(xs, c => c > k)\nk = 10\nfirst(xs)',
+      '11',
     ],
     [
       'a variable that holds the source view',
-      'k = 3\nlet v = filter(1..oo, c => c > k)\nlet w = map(c => c * k, v)\nk = 10\nfirst(w)',
-      '12',
+      'let k = 3\nlet v = filter(1..oo, c => c > k)\nlet w = map(c => c * k, v)\nk = 10\nfirst(w)',
+      '110',
     ],
-    // The call `g(c)` becomes an application of the function that `g` holds
-    // at the assignment.
+    // The callback reads `g` when an element is computed.
     [
       'a variable called in the callback',
-      'k = 3\nlet g = (c) => c > k\nlet big = filter(1..oo, c => g(c))\ng = (c) => c > 100\nfirst(big)',
-      '4',
+      'let k = 3\nlet g = (c) => c > k\nlet big = filter(1..oo, c => g(c))\ng = (c) => c > 100\nfirst(big)',
+      '101',
     ],
   ])('%s', (_label, src, expected) => {
     expect(run(src)).toBe(expected);
   });
 
   // The parameter `c` of the callback and the index `j` of a comprehension
-  // are bound in the collection: a variable with the same name does not
-  // replace them.
-  test('a name bound in the collection is not replaced', () => {
+  // are bound in the collection: a variable with the same name is not read.
+  test('a name bound in the collection is not the variable', () => {
     expect(
       run(
-        'c = 50\nk = 3\nlet big = filter(1..oo, c => c > k)\nk = 10\nc = 0\nfirst(big)'
+        'let c = 50\nlet k = 3\nlet big = filter(1..oo, c => c > k)\nk = 10\nc = 0\nfirst(big)'
       )
-    ).toBe('4');
+    ).toBe('11');
     expect(
       run(
-        'k = 3\nlet j = 100\nlet big = filter(1..oo, c => c > sum([j for j in 1..k]))\nk = 10\nj = 0\nfirst(big)'
+        'let k = 3\nlet j = 100\nlet big = filter(1..oo, c => c > sum([j for j in 1..k]))\nk = 10\nj = 0\nfirst(big)'
       )
-    ).toBe('7');
+    ).toBe('56');
   });
 
-  // A callback that assigns a variable must write the variable itself, so
-  // the collection keeps it by name.
+  // A callback that assigns a variable writes the variable itself.
   test('a collection that writes a variable keeps it', () => {
     const ce = new ComputeEngine();
     ce.assign('n', 0);
@@ -332,18 +330,16 @@ describe('a lazy collection that stays lazy reads its variables at the assignmen
     expect(ce.box('big').evaluate().has('n')).toBe(true);
   });
 
-  // Only the written variable stays live: `k` is still replaced.
-  test('a collection that writes one variable replaces the others', () => {
+  // The callback reads `k` when an element is computed.
+  test('a collection that writes one variable and reads another', () => {
     expect(
       run(
-        'n = 0\nk = 3\nlet big = map(c => do { n = n + 1; c + k }, 1..oo)\nk = 100\nfirst(big)'
+        'let n = 0\nlet k = 3\nlet big = map(c => do { n = n + 1; c + k }, 1..oo)\nk = 100\nfirst(big)'
       )
-    ).toBe('4');
+    ).toBe('101');
   });
 
-  // `bump` writes `n`, and the callback reads `n` after the call: the
-  // collection keeps `n` by name. With `n` replaced by `0`, the element
-  // was `0`.
+  // `bump` writes `n`, and the callback reads `n` after the call.
   test('a collection that writes a variable through a call keeps it', () => {
     expect(
       run(
@@ -352,8 +348,8 @@ describe('a lazy collection that stays lazy reads its variables at the assignmen
     ).toBe('1');
   });
 
-  // The parameter `f` of the value of `f` is bound in that value, so the
-  // value does not name the variable `f`, and `f` is replaced.
+  // The callback operand `f` is a variable: the collection holds the
+  // function value that `f` holds at the statement.
   test('a function value whose parameter has the name of the variable', () => {
     expect(
       run(
@@ -381,8 +377,9 @@ describe('a cancellation while the collection is listed', () => {
         .box([
           'Block',
           [
-            'Assign',
+            'Declare',
             'ys',
+            "'unknown'",
             [
               'Map',
               ['Function', ['Multiply', ['zap', 'c'], 'k'], 'c'],
@@ -406,9 +403,14 @@ describe('an assigned value that shares a tuple in several operands', () => {
   const DEPTH = 40;
 
   function sharedTuples(a0: unknown): any {
-    const statements: unknown[] = [['Assign', 'a0', a0]];
+    const statements: unknown[] = [['Declare', 'a0', "'unknown'", a0]];
     for (let i = 1; i <= DEPTH; i++)
-      statements.push(['Assign', `a${i}`, ['Tuple', `a${i - 1}`, `a${i - 1}`]]);
+      statements.push([
+        'Declare',
+        `a${i}`,
+        "'unknown'",
+        ['Tuple', `a${i - 1}`, `a${i - 1}`],
+      ]);
     statements.push(`a${DEPTH}`);
     return ['Block', ...statements];
   }
@@ -471,7 +473,7 @@ describe('an assigned value that shares a tuple in several operands', () => {
     ];
     ce.assign('p', ce.box(view));
     ce.assign('q', ce.box(view));
-    const value = ce.box(['Block', ['Assign', 'r', rhs], 'r']).evaluate();
+    const value = ce.box(['Block', ['Declare', 'r', "'unknown'", rhs], 'r']).evaluate();
     expect(value.json).toEqual([
       'Tuple',
       ['List', 11, 12, 13],

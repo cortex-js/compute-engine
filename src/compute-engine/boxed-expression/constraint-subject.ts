@@ -168,7 +168,7 @@ export function exactRealValueOf(
     const def = original.engine.lookupDefinition(original.symbol);
     const source =
       def !== undefined && 'value' in def
-        ? exactArgumentSourceOf(def.value)
+        ? exactArgumentSourceOf(def.value, original.engine.context.lexicalScope)
         : undefined;
     if (source !== undefined) {
       const value = source.evaluate();
@@ -203,7 +203,7 @@ export function readsRecordedParameter(expr: Expression): boolean {
   return expr.symbols.some((name) => {
     const def = ce.lookupDefinition(name);
     if (def === undefined || !('value' in def)) return false;
-    const source = exactArgumentSourceOf(def.value);
+    const source = exactArgumentSourceOf(def.value, ce.context.lexicalScope);
     if (source === undefined) return false;
     return !boundValueIsExactSource(def.value.value, source);
   });

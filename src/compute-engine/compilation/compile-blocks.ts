@@ -30,7 +30,6 @@ import {
   withDefineFunctionDeclares,
   withFreshBlockLocals,
   nestedAssignmentsTo,
-  withImplicitLocalDeclares,
 } from './compile-locals.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import {
@@ -208,11 +207,6 @@ export function compileBlock(
   // first.
   refuseEffectContractViolations(args, node?.localScope);
   args = withDefineFunctionDeclares(args, target, valueUsed);
-
-  // …then the block-locals introduced by bare ASSIGNMENT, which carry no
-  // `Declare` statement of their own. Synthesize the missing declaration so
-  // everything below treats them exactly like a declared local.
-  args = withImplicitLocalDeclares(args, target, node);
 
   // Get all the Declare statements
   const locals: string[] = [];

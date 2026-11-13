@@ -65,10 +65,10 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
     expect(literal.map(strip)).toEqual(clause.map(strip));
   });
 
-  test('`const` and `:=` bindings of a literal are checked the same way', () => {
+  test('a `const` binding and a `:=` assignment of a literal are checked the same way', () => {
     for (const src of [
       'const k = (n: integer) => n + 1\nk(1.5)',
-      'k := (n: integer) => n + 1\nk(1.5)',
+      'let k = 0\nk := (n: integer) => n + 1\nk(1.5)',
     ])
       expect(check(src).map((d) => d[1])).toEqual(['incompatible-type']);
   });
@@ -237,13 +237,20 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
       expect(value.operator).toBe('Error');
     });
 
-    test('a `:=` binding keeps its FIRST signature', () => {
-      // The run time refuses the incompatible reassignment and keeps the
-      // original binding, so the static line against the first signature is
-      // a true prediction.
+    test('a `:=` to an undeclared name is an error at each assignment', () => {
+      // `:=` writes a variable that is in scope and never makes one: with no
+      // `let k`, neither assignment binds `k`, and the call stays unevaluated.
       const src = 'k := (n: integer) => n + 1\nk := (s: string) => s\nk("a")';
-      expect(check(src).map((d) => d[1])).toEqual(['incompatible-type']);
-      expect(run(src).value.operator).toBe('Error');
+      expect(check(src).map((d) => d[1])).toEqual([
+        'assignment-to-undeclared-variable',
+        'assignment-to-undeclared-variable',
+      ]);
+      const { value, diagnostics } = run(src);
+      expect(diagnostics.map((d) => d.message[3])).toEqual([
+        'assignment-to-undeclared-variable',
+        'assignment-to-undeclared-variable',
+      ]);
+      expect(value.operator).toBe('k');
     });
 
     test('a `let` binding reassigned to a non-literal is no longer checked', () => {
@@ -311,11 +318,17 @@ describe('AN ALIAS OF A BINDING THAT HOLDS A FUNCTION LITERAL', () => {
   test.each([
     ['let k = (n: integer) => n + 1\nlet g = k\ng(1.5)'],
     ['let k = (n: integer) => n + 1\nconst g = k\ng(1.5)'],
-    ['let k = (n: integer) => n + 1\ng := k\ng(1.5)'],
   ])('%s is reported', (source) => {
     expect(check(source).map((d) => d[1])).toEqual(['incompatible-type']);
     // The run time refuses the argument too, with an error value.
     expect(run(source).value.operator).toBe('Error');
+  });
+
+  test('an alias assigned with `:=` to an undeclared name is an error', () => {
+    const source = 'let k = (n: integer) => n + 1\ng := k\ng(1.5)';
+    expect(check(source).map((d) => d[1])).toEqual([
+      'assignment-to-undeclared-variable',
+    ]);
   });
 
   test('a valid call of the alias is not reported', () => {

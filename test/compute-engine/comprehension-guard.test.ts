@@ -158,8 +158,8 @@ describe('COMPREHENSION GUARD — compiled', () => {
 
   test('Python: a guarded Loop statement declines', () => {
     const python = new PythonTarget();
-    // `s` has a value before the loop, so the loop body is not its first
-    // assignment (that would be the static error `first-assignment-in-branch`).
+    // `s` is declared before the loop, so the assignment in the loop body
+    // writes it (otherwise it is the error `assignment-to-undeclared-variable`).
     ce.declare('s', 'integer');
     expect(() =>
       python.compileFunction(

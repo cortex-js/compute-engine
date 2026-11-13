@@ -108,7 +108,7 @@ describe('CE-446 engine API route', () => {
 
 describe('CE-446 Function-literal callback', () => {
   const PROGRAM =
-    'h(x) = sin(x) + 1.5\nm = map((x) -> N(h(x)), 1..2000)\ndo { h(x) = sin(x) + 2.5; sum(m) }';
+    'h(x) = sin(x) + 1.5\nlet m = map((x) -> N(h(x)), 1..2000)\ndo { h(x) = sin(x) + 2.5; sum(m) }';
 
   test('Epsil: a shadowing function in the drain scope is not called', () => {
     const r = epsilBoth(PROGRAM);

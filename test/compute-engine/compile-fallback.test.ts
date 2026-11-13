@@ -12,6 +12,7 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 // Using an unregistered target deterministically forces the fallback path,
 // independent of which built-ins happen to lack a compiler handler.
@@ -322,5 +323,63 @@ describe('Compilation fallback — interval-js declines still provide `run`', ()
     const r = compile(e, { to: 'interval-js', fallback: false });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/not a finite number/);
+  });
+});
+
+describe('Compilation fallback — the inputs are the definitions the expression reads', () => {
+  test('an expression boxed in a popped scope reads its own x', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('x', 'real');
+    const e = ce.box(['Add', ['Gamma', 'x'], 0]);
+    const r = compile(e, FORCE as any);
+    ce.popScope();
+    expect(r.success).toBe(false);
+    expect(r.run!({ x: 5 })).toBe(24);
+    expect(ce.lookupDefinition('x')).toBeUndefined();
+  });
+
+  test('a run in a scope that declares another x gives the value to the x of the expression', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const e = ce.box(['Gamma', 'x']);
+    const r = compile(e, FORCE as any);
+    ce.pushScope();
+    ce.declare('x', 'real');
+    try {
+      expect(r.run!({ x: 5 })).toBe(24);
+    } finally {
+      ce.popScope();
+    }
+  });
+});
+
+describe('Compilation fallback — an input read in a held operand', () => {
+  function engineWithHolds(): ComputeEngine {
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'hold ev(e) = e + 1\nhold mySum(body, bind i, n) = Sum(body, (i, 1, n))'
+    );
+    ce.declare('x', 'real');
+    ce.declare('Tw', {
+      signature: '(any) -> real',
+      lazy: true,
+      evaluate: (ops, { engine }) =>
+        engine.box(['Multiply', 2, ops[0]]).evaluate(),
+    });
+    return ce;
+  }
+  test.each([
+    [['ev', ['Multiply', 'x', 'x']], 5, 10],
+    [['mySum', ['Multiply', 'k', 'x'], 'k', 3], 12, 18],
+    [['Tw', ['Multiply', 'x', 'x']], 8, 18],
+    [['Add', ['ReleaseHold', ['Hold', ['Totient', 'x']]], 0], 1, 2],
+  ])('%j', (input, at2, at3) => {
+    const ce = engineWithHolds();
+    const r = compile(ce.box(input as any), FORCE as any);
+    expect(r.success).toBe(false);
+    expect(r.run!({ x: 2 })).toBe(at2);
+    expect(r.run!({ x: 3 })).toBe(at3);
   });
 });

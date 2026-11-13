@@ -2717,8 +2717,7 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
 
   /** Snapshot EVERY mutable field of this record, so that a restore can put
    * them back IN PLACE: `ce.withValues()` (`withValuesFn`,
-   * `engine-declarations.ts`) and the copy of a definition for an
-   * activation (`_cloneForActivation`). Wider than
+   * `engine-declarations.ts`). Wider than
    * {@link _typeSlotSnapshot}, which covers only the slots an inference
    * re-derivation moves. Opaque, for the same reason.
    * @internal */
@@ -2796,14 +2795,15 @@ export type BroadcastExemption =
  *   operand unevaluated (`raw`).
  * - `statement`: the operand is a statement that the operator runs, zero,
  *   one or several times (the body of a loop, a branch of a conditional). An
- *   `Assign` or a `Declare` there is valid. The operand is not evaluated
+ *   `Assign` there is valid. The operand is not evaluated
  *   before the `evaluate` handler runs: the handler evaluates it when and as
  *   often as it needs to. The engine canonicalizes the operand as a branch,
  *   except in a `lazy` operator with a `canonical` handler, which receives
- *   it as written and canonicalizes it itself. In a branch, a first
- *   assignment of a name that no enclosing scope declares is the error
- *   `first-assignment-in-branch`, an assignment of a declared name writes
- *   that name, and a bare `Break` or `Continue` symbol is an error.
+ *   it as written and canonicalizes it itself. In a branch, a `Declare` is
+ *   the error `declaration-below-statement`, an assignment of a name that
+ *   no enclosing scope declares is the error
+ *   `assignment-to-undeclared-variable`, an assignment of a declared name
+ *   writes that name, and a bare `Break` or `Continue` symbol is an error.
  * - `raw`: the operand is kept as written, not canonicalized and not
  *   evaluated. The default of a `lazy` operator. Valid only on a `lazy`
  *   operator.

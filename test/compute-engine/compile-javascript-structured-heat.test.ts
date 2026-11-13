@@ -962,20 +962,30 @@ describe('the verifier, build and replace-at', () => {
 //
 
 describe('refusals', () => {
-  test('a shadowed Comprehension or ReplaceAt (a user function of that name) declines', () => {
-    for (const [name, call] of [
-      ['Comprehension', "Comprehension(0, 1)"],
-      ['ReplaceAt', 'ReplaceAt(H, 1, 2)'],
-    ]) {
+  test('a shadowed Comprehension (a user function of that name) declines', () => {
+    const ce = engineWith(`function Comprehension(a: real, b: real) -> real { a + b }
+function f(H: real) -> real { Comprehension(0, 1) }`);
+    const fn = literal(ce, 'f');
+    expect(JSON.stringify(fn.json)).toContain(`["Comprehension"`);
+    expect(() => structured().compile(fn, OPTIONS)).toThrow(
+      /unsupported (bound )?head Comprehension/
+    );
+  });
+
+  test('a shadowed ReplaceAt (a user function of that name) compiles as the user function', () => {
+    for (const [name, call] of [['ReplaceAt', 'ReplaceAt(H, 1, 2)']]) {
       const ce = engineWith(`function ${name}(a: real, b: real) -> real { a + b }
 function f(H: real) -> real { ${call.replace('H, 1, 2', 'H, 1')} }`);
       const fn = literal(ce, 'f');
       expect(JSON.stringify(fn.json)).toContain(`["${name}"`);
-      // The head is not the operator of the library: the rule of the
-      // operator does not apply, and the head is refused.
-      expect(() => structured().compile(fn, OPTIONS)).toThrow(
-        new RegExp(`unsupported (bound )?head ${name}`)
-      );
+      // The head is the user function, not the operator of the library:
+      // `f(H)` is `H + 1`.
+      const result = structured().compile(fn, OPTIONS);
+      for (const h of [-5, 0.5, 2]) {
+        const want = ce.function('Apply', [fn, ce.number(h)]).N().re;
+        expect([name, h, run(result, [h])]).toEqual([name, h, want]);
+      }
+      expect(run(result, [-5])).toBe(-4);
     }
   });
 

@@ -434,7 +434,7 @@ describe('A LIST VALUE COMPUTED THROUGH AN INDEXED SUM KEEPS ITS TEST (CE-806)',
       'Max of a Block local',
       [
         'Block',
-        ['Assign', 'K', ['Add', 'L', 'L']],
+        ['Declare', 'K', "'unknown'", ['Add', 'L', 'L']],
         ['Max', ['Multiply', 2, 'K']],
       ],
     ],
@@ -447,7 +447,7 @@ describe('A LIST VALUE COMPUTED THROUGH AN INDEXED SUM KEEPS ITS TEST (CE-806)',
     // sum, a number at `n = 0`, and not the input.
     const expr = [
       'Block',
-      ['Assign', 'K', innerSum],
+      ['Declare', 'K', "'unknown'", innerSum],
       ['Max', ['Multiply', 2, 'K']],
     ];
     const r = compile(enginePL().box(expr as any), {

@@ -1576,8 +1576,7 @@ export function reboundLocalNames(
  * Record statement `stmt`'s function-valued local in `scope`, if it binds
  * one: a `Declare` whose value is a function literal (`const g = (k) => …`),
  * or an `Assign` of a function literal to a name (`Declare(g, "function")`
- * followed by `Assign(g, Function(…))`, or an `Assign` whose `Declare` was
- * synthesized by `withImplicitLocalDeclares`).
+ * followed by `Assign(g, Function(…))`).
  *
  * A binding whose value is NOT a function literal REMOVES the entry it
  * shadows or replaces (`let g = 5` over an outer function-valued `g` must

@@ -279,19 +279,20 @@ describe('COMPILE a `function` definition', () => {
     expect(interpreted).toBe('120');
   });
 
-  it('is HOISTED, so a call may precede the definition', () => {
-    // `DefineFunction` declares its name as the program canonicalizes, which
-    // is what lets the interpreter answer 4 here. Emitted in source position
-    // the same program compiled to `let a = g(3); let g = …`, reading `g`
-    // inside its own temporal dead zone — a runtime `ReferenceError` for a
-    // program that interprets fine. The definition is a pure literal with no
-    // side effects, so moving it to the front reorders nothing observable.
-    const { compiled, interpreted, code } = both(
-      'let a = g(3)\nfunction g(k) { k + 1 }\na'
+  it('is a local: a call before the definition reads it before its declaration', () => {
+    // A function statement of a block declares a variable, which has its
+    // value when the statement runs. A call before it is the static error
+    // `read-before-declaration`, and the compilation refuses the block.
+    const src = 'let a = g(3)\nfunction g(k) { k + 1 }\na';
+    expect(program(src).json).toMatchObject(
+      expect.arrayContaining([
+        expect.arrayContaining([
+          'Error',
+          expect.arrayContaining(["'read-before-declaration'"]),
+        ]),
+      ])
     );
-    expect(compiled).toBe(4);
-    expect(interpreted).toBe('4');
-    expect(code.indexOf('let g =')).toBeLessThan(code.indexOf('let a ='));
+    expect(() => both(src)).toThrow();
   });
 
   it('MUTUALLY recursive definitions compile', () => {
@@ -396,25 +397,22 @@ describe('COMPILE a `function` definition', () => {
   });
 
   it('is usable as a VALUE — passed as a callback', () => {
-    const { compiled, interpreted } = both(
-      'function sq(k) { k^2 }\nSum(Take(Map(sq, 1..oo), 4))'
-    );
-    expect(compiled).toBe(30); // 1 + 4 + 9 + 16
-    expect(interpreted).toBe('30');
+    // The local is a variable of type `function`: the interpreter applies
+    // its value, and the compilation declines, since the type of the
+    // elements of the `Map` is not known.
+    const src = 'function sq(k) { k^2 }\nSum(Take(Map(sq, 1..oo), 4))';
+    expect(program(src).evaluate().toString()).toBe('30');
+    expect(() => both(src)).toThrow(/does not test the shape/);
   });
 
-  it('fails closed on a MULTI-CLAUSE set', () => {
-    // `DefineFunction` accumulates clauses and the call dispatches on the
-    // argument types; a single value binding would keep only the last clause
-    // and answer `2` here, where the interpreter answers `1`.
+  it('a second function statement of a name is a second declaration', () => {
+    // Each function statement of a block declares a variable, so two of one
+    // name are the error `variable-redeclaration`, as two `let`.
     expect(
       program('function f(n: integer) { 1 }\nfunction f(s: string) { 2 }\nf(3)')
         .evaluate()
         .toString()
-    ).toBe('1');
-    expect(() =>
-      both('function f(n: integer) { 1 }\nfunction f(s: string) { 2 }\nf(3)')
-    ).toThrow(/DefineFunction/);
+    ).toBe('Error(ErrorCode("variable-redeclaration", "f"))');
   });
 });
 
@@ -507,12 +505,16 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     expect(r.code).toContain('return 6');
   });
 
-  it('compiles an `Assign` with no `Declare`', () => {
-    const r = compareJson(['Block', ['Assign', 'k', twice], ['k', 'x']], {
-      x: 3,
-    });
-    expect(r.compiled).toBe(6);
-    expect(r.interpreted).toBe('6');
+  // A local of a block is made only by a `Declare`: an `Assign` to a name
+  // that is not in scope is the static error
+  // `assignment-to-undeclared-variable`, and the compilation declines.
+  it('an `Assign` with no `Declare` is a static error', () => {
+    const expr = ce.box(['Block', ['Assign', 'k', twice], ['k', 'x']]);
+    expect(expr.isValid).toBe(false);
+    expect(expr.toString()).toContain('assignment-to-undeclared-variable');
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /invalid expression/
+    );
   });
 
   it('compiles with a declared signature', () => {
@@ -702,7 +704,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const outer = (inner: unknown[]) => [
       'Block',
       ['Declare', 'k', "'function'", twice],
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       ['Block', ...inner],
       ['Add', 'a', ['k', 'x']],
     ];
@@ -779,17 +781,18 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
         { x: 3 }
       ).compiled
     ).toBe(DECLINED);
-    expect(
-      compareJson(
-        [
-          'Block',
-          ['Declare', 'k', "'unknown'", twice],
-          ['If', ['Greater', 'x', 0], ['Assign', 'k', 5]],
-          ['k', 'x'],
-        ],
-        { x: -3 }
-      ).compiled
-    ).toBe(DECLINED);
+    // A local declared with a function literal has a function type, so the
+    // assignment of a number is a static error, and the block declines.
+    const mixed = ce.box([
+      'Block',
+      ['Declare', 'k', "'unknown'", twice],
+      ['If', ['Greater', 'x', 0], ['Assign', 'k', 5]],
+      ['k', 'x'],
+    ]);
+    expect(mixed.toString()).toContain('assignment-type-mismatch');
+    expect(() => compile(mixed, { fallback: false })).toThrow(
+      /invalid expression/
+    );
   });
 
   it('the interval target declines a rebound function with the reason', () => {

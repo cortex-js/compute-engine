@@ -55,6 +55,29 @@ describe('Declare with a Tuple pattern', () => {
     expect(ce.symbol('x').evaluate().isSame(3)).toBe(true);
   });
 
+  test('constant attribute freezes every local of a block, nested patterns included', () => {
+    const ce = new ComputeEngine();
+    const block = (target: string) =>
+      ce.box([
+        'Block',
+        [
+          'Declare',
+          ['Tuple', ['Tuple', 'a', 'c'], '_', 'b'],
+          attrs(['Tuple', ['Tuple', 1, 3], 99, 2], true),
+        ],
+        ['Assign', target, 5],
+        target,
+      ]);
+    for (const target of ['a', 'b', 'c'])
+      expect(() => block(target).evaluate()).toThrow(/constant/);
+    const read = ce.box([
+      'Block',
+      ['Declare', ['Tuple', 'a', 'b'], attrs(['Tuple', 1, 2], true)],
+      ['Add', 'a', 'b'],
+    ]);
+    expect(read.evaluate().json).toBe(3);
+  });
+
   test('a length mismatch is an error value', () => {
     const ce = new ComputeEngine();
     const r = ce

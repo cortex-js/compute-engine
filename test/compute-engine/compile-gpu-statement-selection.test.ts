@@ -212,7 +212,7 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       compile(
         ce.box([
           'Block',
-          ['Assign', 'w_local', 0],
+          ['Declare', 'w_local', "'unknown'", 0],
           [
             'If',
             ['Greater', 'x', 0],

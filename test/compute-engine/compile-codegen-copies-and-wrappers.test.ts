@@ -728,11 +728,29 @@ describe('a block local replaced element by element is written in place (CE-329)
     });
   });
 
-  test('a local that is not provably an indexed list keeps the copying form and its check', () => {
+  test('a local declared with a union that admits a set is not compiled', () => {
+    // A declared type that admits a set is a contract: the compilation
+    // declines (`admitsRuntimeCheckedArray()`), and the interpreter
+    // evaluates the block.
     ce.declare('LS', 'list<real> | set<real>');
     const json = [
       'Block',
       ['Declare', 'xs', "'list<real> | set<real>'", 'LS'],
+      ['Loop', ['Assign', 'xs', ['ReplaceAt', 'xs', 'i', 0]], range],
+      'xs',
+    ];
+    expect(() => compile(ce.box(json as never), { fallback: false })).toThrow(
+      /ReplaceAt/
+    );
+  });
+
+  test('a local that is not provably an indexed list keeps the copying form and its check', () => {
+    // The local has no declared type: it takes the union type of its
+    // initial value, and the copy is checked at run time.
+    ce.declare('LU', 'list<real> | set<real>');
+    const json = [
+      'Block',
+      ['Declare', 'xs', "'unknown'", 'LU'],
       ['Loop', ['Assign', 'xs', ['ReplaceAt', 'xs', 'i', 0]], range],
       'xs',
     ];

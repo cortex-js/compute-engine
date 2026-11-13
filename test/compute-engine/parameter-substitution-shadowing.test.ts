@@ -33,14 +33,15 @@ const json = (ce: ComputeEngine, expr: unknown) =>
 // (y, w) ↦ (x ↦ y^x)
 const F2 = ['Function', ['Function', ['Power', 'y', 'x'], 'x'], 'y', 'w'];
 
-// y ↦ (x ↦ Block(s := 0, Block(Declare(t, integer), t := 1, s := t + y), s))
+// y ↦ (x ↦ Block(Declare(s, 0),
+//   Block(Declare(t, integer), t := 1, s := t + y), s))
 const B = [
   'Function',
   [
     'Function',
     [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Block',
         ['Declare', 't', "'integer'", 1],
@@ -300,13 +301,18 @@ describe('a write or a declaration below a nested block', () => {
   });
 
   test('a read before a write of the parameter: the partial application gives the full-call value', () => {
-    // (y, w) ↦ (x ↦ Block(Block(s := y, y := 2, s + x))): the read of y
-    // must give the value of the argument, and the write cannot be
+    // (y, w) ↦ (x ↦ Block(Block(Declare(s, y), y := 2, s + x))): the read of
+    // y must give the value of the argument, and the write cannot be
     // substituted. The partial application is the deferred residual, whose
     // full call keeps the binding of y.
     const P2 = curriedLiteral([
       'Block',
-      ['Block', ['Assign', 's', 'y'], ['Assign', 'y', 2], ['Add', 's', 'x']],
+      [
+        'Block',
+        ['Declare', 's', "'unknown'", 'y'],
+        ['Assign', 'y', 2],
+        ['Add', 's', 'x'],
+      ],
     ]);
     const [curried, saturated] = curriedAndSaturated(P2);
     expect(saturated).toEqual(['Add', 'q', 5]);
@@ -320,7 +326,12 @@ describe('a write or a declaration below a nested block', () => {
     const ce = new ComputeEngine();
     const P2 = curriedLiteral([
       'Block',
-      ['Block', ['Assign', 's', 'y'], ['Assign', 'y', 2], ['Add', 's', 'x']],
+      [
+        'Block',
+        ['Declare', 's', "'unknown'", 'y'],
+        ['Assign', 'y', 2],
+        ['Add', 's', 'x'],
+      ],
     ]);
     const g = ce.box([P2, 'q', 1] as any).evaluate();
     expect(json(ce, [g, 5])).toEqual(['Add', 'q', 5]);
@@ -329,12 +340,12 @@ describe('a write or a declaration below a nested block', () => {
   });
 
   test('a write in a dictionary value: the partial application gives the full-call value', () => {
-    // (y, w) ↦ (x ↦ Block(Block(s := y, {a: Block(y := 2)}, s + x)))
+    // (y, w) ↦ (x ↦ Block(Block(Declare(s, y), {a: Block(y := 2)}, s + x)))
     const P = curriedLiteral([
       'Block',
       [
         'Block',
-        ['Assign', 's', 'y'],
+        ['Declare', 's', "'unknown'", 'y'],
         ['Dictionary', ['KeyValuePair', "'a'", ['Block', ['Assign', 'y', 2]]]],
         ['Add', 's', 'x'],
       ],
@@ -348,14 +359,14 @@ describe('a write or a declaration below a nested block', () => {
   });
 
   test('a write in the bound of a Sum over y: the partial application gives the full-call value', () => {
-    // (y, w) ↦ (x ↦ Block(Block(s := y, Sum(x, y = 1..Block(y := 2, 2)),
-    // s + y + x))): the bound of the clause is outside the scope of the
+    // (y, w) ↦ (x ↦ Block(Block(Declare(s, y),
+    // Sum(x, y = 1..Block(y := 2, 2)), s + y + x))): the bound of the clause is outside the scope of the
     // index y, so its y is the parameter.
     const P = curriedLiteral([
       'Block',
       [
         'Block',
-        ['Assign', 's', 'y'],
+        ['Declare', 's', "'unknown'", 'y'],
         ['Sum', 'x', ['Limits', 'y', 1, ['Block', ['Assign', 'y', 2], 2]]],
         ['Add', 's', 'y', 'x'],
       ],
@@ -372,20 +383,20 @@ describe('a write or a declaration below a nested block', () => {
   });
 
   test('a write of y in the body block of the result: the saturated call keeps y', () => {
-    // (y, w) ↦ (x ↦ Block(s := y, y := 2, s + x)), and
-    // (y, w) ↦ (x ↦ Block(s := y, Block(y := 2), s + y + x)): the result
-    // of the saturated call keeps the binding of y, and each application
+    // (y, w) ↦ (x ↦ Block(Declare(s, y), y := 2, s + x)), and
+    // (y, w) ↦ (x ↦ Block(Declare(s, y), Block(y := 2), s + y + x)): the
+    // result of the saturated call keeps the binding of y, and each application
     // reads the value that the previous one wrote. The result of the
     // partial application applied to 1 does the same.
     const P2n = curriedLiteral([
       'Block',
-      ['Assign', 's', 'y'],
+      ['Declare', 's', "'unknown'", 'y'],
       ['Assign', 'y', 2],
       ['Add', 's', 'x'],
     ]);
     const P4 = curriedLiteral([
       'Block',
-      ['Assign', 's', 'y'],
+      ['Declare', 's', "'unknown'", 'y'],
       ['Block', ['Assign', 'y', 2]],
       ['Add', 's', 'y', 'x'],
     ]);

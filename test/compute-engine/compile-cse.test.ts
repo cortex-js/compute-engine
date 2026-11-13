@@ -811,7 +811,7 @@ describe('COMPILE CSE — statement regions', () => {
   const loopBlock = () =>
     ce.box([
       'Block',
-      ['Assign', 'acc', 0],
+      ['Declare', 'acc', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 'acc', ['Add', 'acc', probe3('u')]],
@@ -844,8 +844,8 @@ describe('COMPILE CSE — statement regions', () => {
     // bound, one temporary would serve both; it must be two.
     const expr = ce.box([
       'Block',
-      ['Assign', 'y', probe3('u')],
-      ['Assign', 'z', probe3('u')],
+      ['Declare', 'y', "'unknown'", probe3('u')],
+      ['Declare', 'z', "'unknown'", probe3('u')],
       ['Add', 'y', 'z'],
     ]);
     const result = compile(expr, { fallback: false });
@@ -866,7 +866,7 @@ describe('COMPILE CSE — statement regions', () => {
     // declines, because it gives `Nothing` when it ends with no `Return`.
     const expr = ce.box([
       'Block',
-      ['Assign', 'acc', 0],
+      ['Declare', 'acc', "'unknown'", 0],
       [
         'Loop',
         [
@@ -2219,7 +2219,7 @@ pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
   it('emits a per-statement binding that parses and runs inside a def', () => {
     const expr = ce.box([
       'Block',
-      ['Assign', 'acc', 0],
+      ['Declare', 'acc', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 'acc', ['Add', 'acc', probe3('u')]],

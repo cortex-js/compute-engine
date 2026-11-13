@@ -1735,7 +1735,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     ce.declare('w', 'real');
     const expr = ce.box([
       'Block',
-      ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
+      ['Declare', 'f', "'unknown'", ['Function', ['Multiply', 2, 'w']]],
       ['Add', ['Sqrt', 'x'], ['f']],
     ]);
     const result = compile(expr, {
@@ -1758,7 +1758,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     ce.declare('w', 'real');
     const expr = ce.box([
       'Block',
-      ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
+      ['Declare', 'f', "'unknown'", ['Function', ['Multiply', 2, 'w']]],
       ['Add', ['Sqrt', 'x'], ['Apply', 'f']],
     ]);
     const result = compile(expr, {
@@ -1784,7 +1784,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     ce.declare('w', 'real');
     const expr = ce.box([
       'Block',
-      ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
+      ['Declare', 'f', "'unknown'", ['Function', ['Multiply', 2, 'w']]],
       ['Max', ['Sqrt', 'x'], ['f']],
     ]);
     expect(() =>
@@ -2177,7 +2177,7 @@ describe('a chained comparison evaluates caller code once, in operand order', ()
     ce.declare('W', 'real');
     const body = [
       'Block',
-      ['Assign', 't', ['Multiply', 2, 'k']],
+      ['Declare', 't', "'unknown'", ['Multiply', 2, 'k']],
       ['Boole', ['Less', 't', 'W', 30]],
     ];
     const code = compile(ce.box(['Sum', body, ['Tuple', 'k', 1, 3]]), {

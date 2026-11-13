@@ -1557,19 +1557,6 @@ function pendingScopeOf(ce: ComputeEngine, name: string): Scope {
 }
 
 /**
- * The scope that a base case of the sequence `name` defined now is stored
- * in (`pendingScopeOf`). The `Assign` of a base case (`L_0 := v`) gives it
- * to `bindOutlivedLocalsOfLazyValue` (`function-utils.ts`): the scope can
- * hold only a pending definition of `name` and no binding of it.
- */
-export function sequenceDefinitionScope(
-  ce: ComputeEngine,
-  name: string
-): Scope {
-  return pendingScopeOf(ce, name);
-}
-
-/**
  * The scopes whose evaluation context was discarded
  * (`_discardPendingSequencesOfScope()`). A scope object can be pushed again
  * after it is discarded (a canonical `Sum` or `Block` pushes its local scope

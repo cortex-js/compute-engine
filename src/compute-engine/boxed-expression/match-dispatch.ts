@@ -16,6 +16,7 @@ import {
   sym,
 } from './type-guards.js';
 import {
+  collectCaptures,
   isWildcard,
   NUMBER_LITERAL_SYMBOLS,
   numberPatternMatches,
@@ -94,13 +95,6 @@ import {
 type HandlerOptions = Partial<EvaluateOptions> & { engine: ComputeEngine };
 
 type Substitution = Record<string, Expression>;
-
-/** A capture: the wildcard substitution key (`_a`, `__terms`, `___rest`) and
- * the bare parameter name it lowers to in a case body (`a`, `terms`, `rest`). */
-interface Capture {
-  key: string;
-  name: string;
-}
 
 //
 // ─── Compiled plan types ──────────────────────────────────────────────────
@@ -1422,66 +1416,6 @@ function resolvePins(ce: ComputeEngine, pattern: Expression): Expression {
       { canonical: false }
     );
   return pattern;
-}
-
-/**
- * Collect the named wildcards of `pattern` in first-occurrence order, deduped
- * by bare name. Anonymous wildcards (`_`, `__`, `___`) capture nothing and are
- * skipped. An operator-position wildcard (`["_f", …]`) is captured too.
- */
-function collectCaptures(pattern: Expression): Capture[] {
-  const seen = new Set<string>();
-  const result: Capture[] = [];
-
-  const push = (key: string | null): void => {
-    if (key === null) return;
-    const name = key.replace(/^_+/, '');
-    if (name.length === 0 || seen.has(name)) return;
-    seen.add(name);
-    result.push({ key, name });
-  };
-
-  const walk = (expr: Expression): void => {
-    if (isWildcard(expr)) {
-      push(wildcardName(expr));
-      return;
-    }
-    if (isFunction(expr)) {
-      // Pinned expressions are resolved values by now, but be defensive and do
-      // not descend into a Pin marker (its content never binds).
-      if (expr.operator === 'Pin') return;
-      if (expr.operator.startsWith('_')) push(expr.operator);
-      for (const op of expr.ops) walk(op);
-    }
-  };
-
-  walk(pattern);
-  return result;
-}
-
-/**
- * The external references a `Match` case pattern contributes, for the compiler's
- * reference analysis (`analyzeReferences`):
- * - `captures`: bare names the pattern binds (they shadow the guard/body's free
- *   symbols; not themselves free).
- * - `pinExprs`: the operand of every `["Pin", e]` node — `e` is evaluated in the
- *   enclosing scope at match time, so its free symbols ARE external references.
- */
-export function matchPatternReferences(pattern: Expression): {
-  captures: string[];
-  pinExprs: Expression[];
-} {
-  const captures = collectCaptures(pattern).map((c) => c.name);
-  const pinExprs: Expression[] = [];
-  const walk = (e: Expression): void => {
-    if (isFunction(e, 'Pin')) {
-      if (e.op1 !== undefined) pinExprs.push(e.op1);
-      return;
-    }
-    if (isFunction(e)) for (const op of e.ops) walk(op);
-  };
-  walk(pattern);
-  return { captures, pinExprs };
 }
 
 /** Testing hooks (not part of the public API). */

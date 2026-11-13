@@ -22,12 +22,12 @@ function engine(): ComputeEngine {
   return ce;
 }
 
-/** `Block(a ≔ 0; n ≔ 0; Loop(Block(<first>; a ≔ a + p; n ≔ n + 1), k ∈ 1..8); n)` */
+/** `Block(let a ≔ 0; let n ≔ 0; Loop(Block(<first>; a ≔ a + p; n ≔ n + 1), k ∈ 1..8); n)` */
 function counter(ce: ComputeEngine, first: unknown): Expression {
   return ce.box([
     'Block',
-    ['Assign', 'a', 0],
-    ['Assign', 'n', 0],
+    ['Declare', 'a', "'unknown'", 0],
+    ['Declare', 'n', "'unknown'", 0],
     [
       'Loop',
       [
@@ -90,7 +90,7 @@ describe('a jump in a selection with one clause, in a Loop body', () => {
     const ce = engine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       [
         'Loop',
         ['If', ['Greater', 'k', 'x'], ['Break']],
@@ -154,7 +154,7 @@ describe('a jump in a selection with one clause, in a Loop body', () => {
     ];
     const expr = ce.box([
       'Block',
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       ['Loop', inner, ['Element', 'k', ['Range', 1, 3]]],
       'a',
     ] as any);
@@ -217,7 +217,7 @@ describe('a jump declines everywhere else', () => {
   const gt = ['Greater', 'x', 1];
   const inLoop = (body: unknown) => [
     'Block',
-    ['Assign', 's', 0],
+    ['Declare', 's', "'unknown'", 0],
     ['Loop', body, ['Element', 'k', ['Range', 1, 3]]],
     's',
   ];
@@ -311,7 +311,7 @@ describe('a jump declines everywhere else', () => {
     );
     const expr = ce.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', ['f', 'k']]],

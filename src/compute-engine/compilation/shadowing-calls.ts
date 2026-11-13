@@ -1,8 +1,7 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import {
-  markCallableFrame,
-  markCallableHome,
+  rebindToBindings,
   withCallableBinding,
 } from '../boxed-expression/binders.js';
 import { withScratchScope } from '../scratch-scopes.js';
@@ -350,7 +349,6 @@ export function withShadowingCallsRenamed<T>(
         rename(fn.literal),
       ]);
       renamedExpr = rename(expr);
-      const outerScope = ce.context.lexicalScope;
       ce.pushScope();
       innerScopePushed = true;
       withScratchScope(ce, ce.context.lexicalScope, () => {
@@ -364,20 +362,20 @@ export function withShadowingCallsRenamed<T>(
             literal
           );
       });
-      // A renamed call is bound to the valueless declaration of the outer
+      // A renamed call was bound to the valueless declaration of the outer
       // scope. A part of the engine that reads the function of a call from
       // the binding of the call, not from its name (the derivative of a
-      // call, `callableBindingInContext()`), must read the copy with its
-      // value, as the compiler does. The inner scope is marked as a runtime
-      // copy of the outer one, and each valueless declaration as a callable
-      // with its home in the outer scope: the declaration of the same name
-      // in the inner scope then stands for it.
+      // call), must read the copy with its value, as the compiler does: the
+      // calls are bound again to the copies of the inner scope.
+      const inner = ce.context.lexicalScope;
+      const copiesByName = new Map<string, Expression>();
       for (const fn of renamed) {
-        const placeholder = outerScope.bindings.get(fn.privateName!);
-        if (placeholder !== undefined)
-          markCallableHome(placeholder, outerScope);
+        const copy = ce._bindingSymbol(fn.privateName!, inner);
+        if (copy !== undefined) copiesByName.set(fn.privateName!, copy);
       }
-      markCallableFrame(ce.context.lexicalScope, outerScope);
+      renamedExpr = rebindToBindings(renamedExpr, inner, copiesByName, {
+        calls: true,
+      });
     });
     try {
       return compile(renamedExpr);

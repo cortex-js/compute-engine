@@ -905,7 +905,7 @@ describe('refusals', () => {
     }
   });
 
-  test('a shadowed function name (a user function of that name) declines', () => {
+  test('a shadowed function name (a user function of that name) compiles as the user function', () => {
     for (const name of ['Tan', 'Erf', 'Sign']) {
       const ce = new ComputeEngine();
       ce.precision = 'machine';
@@ -916,9 +916,14 @@ function f(x: real) -> real { ${name}(x) }`
       );
       expect(diagnostics).toEqual([]);
       const fn = literal(ce, 'f');
-      expect(() => structured().compile(fn, OPTIONS)).toThrow(
-        new RegExp(`unsupported (bound )?head ${name}`)
-      );
+      // The head is the user function, not the operator of the library: at
+      // -5 the two differ (`a + 1` is -4).
+      const result = structured().compile(fn, OPTIONS);
+      for (const x of [-5, 0.5, 2]) {
+        const want = ce.function('Apply', [fn, ce.number(x)]).N().re;
+        expect([name, x, runArgs(result, [x])]).toEqual([name, x, want]);
+      }
+      expect(runArgs(result, [-5])).toBe(-4);
     }
   });
 });

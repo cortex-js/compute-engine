@@ -389,7 +389,12 @@ describe('GLSL expression routes', () => {
             variable: 'fragColor.r',
             expression: ce.expr([
               'Add',
-              ['Block', ['Assign', 'q', 2], 'q'],
+              [
+                'Block',
+                ['Declare', 'q', "'unknown'", 0],
+                ['Assign', 'q', 2],
+                'q',
+              ],
               'x',
             ]),
           },

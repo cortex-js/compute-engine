@@ -16,7 +16,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 function sumLoop(body: unknown, ...clauses: unknown[]) {
   return [
     'Block',
-    ['Assign', 'c', 0],
+    ['Declare', 'c', "'unknown'", 0],
     ['Loop', ['Assign', 'c', ['Add', 'c', body]], ...clauses],
     'c',
   ];

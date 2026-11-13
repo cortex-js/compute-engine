@@ -54,6 +54,7 @@ import {
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
 import { literalRealLaneArguments } from './compile-function-literals.js';
+import { declareValueOperand } from './compile-declarations.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   provenPointWidth,
@@ -10749,9 +10750,9 @@ function keyedResult(body: Expression): 'keyed' | false {
  * The static type of the value of `body`. The engine types a call of a
  * block-local function `unknown`, so a `Block` whose last statement is such
  * a call (`Block(f ≔ (u) ↦ {re -> u, im -> 0}, f(x))`) has the result type
- * of the literal that the block assigns to the function's name, when the
- * literal has a signature. The block must bind the name once: when it is
- * assigned or declared again, the call reads the last binding, whose result
+ * of the literal that the block declares or assigns to the function's name,
+ * when the literal has a signature. The block must bind the name once: when
+ * it is assigned or declared again, the call reads the last binding, whose result
  * type can differ, so the type stays as it is. Any other `unknown` or `any`
  * stays as it is.
  */
@@ -10768,10 +10769,13 @@ function resultTypeOf(body: Expression): Type {
       isSymbol(s.ops[0]) &&
       s.ops[0].symbol === last.operator
   );
-  if (bindings.length !== 1 || !isFunction(bindings[0], 'Assign')) return t;
-  const signature = resolveTypeAlias(
-    bindings[0].ops[1]?.type.type ?? 'unknown'
-  );
+  const binding = bindings[0];
+  if (bindings.length !== 1 || !isFunction(binding)) return t;
+  const literal =
+    binding.operator === 'Assign'
+      ? binding.ops[1]
+      : declareValueOperand(binding.ops);
+  const signature = resolveTypeAlias(literal?.type.type ?? 'unknown');
   if (typeof signature === 'object' && signature.kind === 'signature')
     return signature.result;
   return t;

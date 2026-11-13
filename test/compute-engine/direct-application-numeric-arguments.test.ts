@@ -181,7 +181,7 @@ describe('DIRECT APPLICATION UNDER .N() — ARGUMENTS AS WRITTEN', () => {
     const fn = ce
       .box([
         'Block',
-        ['Assign', 'cLoc', 2],
+        ['Declare', 'cLoc', "'unknown'", 2],
         ['Function', ['Multiply', 'cLoc', ['Sin', 'x']], 'x'],
       ])
       .evaluate();

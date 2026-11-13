@@ -268,8 +268,9 @@ describe('an inferred scalar result is kept when the arguments fit it', () => {
         [
           'Block',
           [
-            'Assign',
+            'Declare',
             'h',
+            "'unknown'",
             ['Function', ['Tuple', ['Negate', 'x'], 'x'], 'x'],
           ],
           ['h', 'L'],

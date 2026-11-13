@@ -154,7 +154,7 @@ describe('TUPLE PATTERN INDEX — Epsil loop bodies', () => {
     const { value, diagnostics } = executeEpsil(
       new ComputeEngine(),
       [
-        'acc := 0',
+        'let acc = 0',
         'for (p, _) in [(1, 2), (3, 4)] {',
         '  acc := acc + ([10, 20] |> Map(_ + p, _) |> Sum)',
         '}',
@@ -169,7 +169,7 @@ describe('TUPLE PATTERN INDEX — Epsil loop bodies', () => {
     const { value, diagnostics } = executeEpsil(
       new ComputeEngine(),
       [
-        'acc := 0',
+        'let acc = 0',
         'for (p, q) in [(1, 2), (3, 4)] {',
         '  acc := acc + p * q',
         '}',

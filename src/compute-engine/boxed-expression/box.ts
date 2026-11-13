@@ -1494,12 +1494,8 @@ function withDevolveRepair(
   // persistent but not on the engine's chain). Scopes created DURING the
   // construction (a binder body's scope) are parented onto these chains but
   // never members of them. Walking at query time sees the same chains that
-  // existed at capture time: scopes created during canonicalization never
-  // reparent, and the engine's one reparenting site (nullary-closure
-  // invocation in `function-utils.ts`, which swaps a stored closure body
-  // scope's parent around an evaluation call and restores it in a `finally`)
-  // targets closure-owned scopes, not the pre-existing lexical chains
-  // captured here.
+  // existed at capture time: the engine never changes the parent of a
+  // scope.
   const bases: Scope[] = [ce.context.lexicalScope];
   if (scope !== undefined) bases.push(scope);
   return ce._boxingState.withRootRepair(
@@ -4506,8 +4502,8 @@ function devolveValueOperands(
 
 /** `xs`, the operands of an operator without a `canonical` handler, where
  * each operand whose role in `roles` is `statement` is canonicalized as a
- * branch (`canonicalBranch()`): a first assignment of a name that no scope
- * declares is the error `first-assignment-in-branch`, and a bare `Break` or
+ * branch (`canonicalBranch()`): a `Declare` is the error
+ * `declaration-below-statement`, and a bare `Break` or
  * `Continue` symbol is an error. */
 function canonicalStatementOperands(
   ce: ComputeEngine,
@@ -5323,7 +5319,7 @@ function canonicalizeBinder(
       // operand is before the first clause, every index is declared here:
       // an assignment of the index of a later clause in the body
       // (`MyLoop(Assign(y, 5), Limits(k, 1, 3), Limits(y, 1, 3))`) writes
-      // that index, and is not a first assignment in a branch. A statement
+      // that index, and is not an assignment to an undeclared name. A statement
       // after a clause must not see the index of a later clause, so then
       // only the first clause's index is declared, as for a handler.
       let everyClause = false;

@@ -242,12 +242,12 @@ World
 ```
 
 ```epsil
-hello2 = """
+let hello2 = """
 Hello
 World
 """ // Same as "Hello\nWorld"
 
-hello3 = """
+let hello3 = """
     Hello
     World
     """ // Same as "Hello\nWorld"

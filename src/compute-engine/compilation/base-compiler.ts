@@ -477,7 +477,6 @@ import {
   unassignedLocalRead,
   withDefineFunctionDeclares,
   withFreshBlockLocals,
-  withImplicitLocalDeclares,
   withWritableLoopIndices,
 } from './compile-locals.js';
 import {
@@ -1334,7 +1333,6 @@ export class BaseCompiler {
   static readonly refuseEffectContractViolations =
     refuseEffectContractViolations;
   static readonly bindingStatesEffects = bindingStatesEffects;
-  static readonly withImplicitLocalDeclares = withImplicitLocalDeclares;
   static readonly _localValueFrames = _localValueFrames;
   static readonly blockLocalValueFrame = blockLocalValueFrame;
   static readonly _localNameKeys = _localNameKeys;

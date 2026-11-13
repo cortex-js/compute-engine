@@ -352,6 +352,8 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
   // local (`Declare` then `Assign`) is written `s\\coloneq2`.
   test('a bare Assign block round trips without a Declare', () => {
     const ce = new ComputeEngine();
+    // The `Assign` writes the `s` declared outside the block.
+    ce.declare('s', 'unknown');
     const e = ce.box(['Block', ['Assign', 's', 2]] as any);
     expect(e.latex).toMatchInlineSnapshot(`\\mathrm{Assign}(s, 2);`);
     expect(ce.parse(e.latex).json).toEqual(['Block', ['Assign', 's', 2]]);

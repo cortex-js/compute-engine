@@ -256,7 +256,8 @@ describe('BINDING UNITS: CACHES', () => {
     ce.pushScope();
     try {
       ce.declare('x', 'string');
-      expect(a.type.toString()).toBe('tuple<string>');
+      expect(a.type.toString()).toBe('tuple<unknown>');
+      expect(ce.rebind(a).type.toString()).toBe('tuple<string>');
     } finally {
       ce.popScope();
     }

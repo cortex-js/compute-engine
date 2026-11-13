@@ -341,7 +341,7 @@ describe('PARAMETER DEFAULTS: A SYMBOL DECLARED CONSTANT (GITHUB ISSUE #490)', (
     expect(
       value(ce, [
         'Block',
-        ['Assign', 'fl', literal],
+        ['Declare', 'fl', "'unknown'", literal],
         ['Block', local, ['fl']],
       ])
     ).toBe('6');

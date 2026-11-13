@@ -387,8 +387,10 @@ describe('InspectableScope.dispose()', () => {
     const before = def.value!._writeVersion;
 
     scope.dispose();
+    // The definition stays live: an expression boxed in the scope reads it.
     const afterFirst = def.value!._writeVersion;
-    expect(afterFirst).toBe(before + 1);
+    expect(afterFirst).toBe(before);
+    expect(def.value!.disposed).toBe(false);
 
     scope.dispose();
     expect(def.value!._writeVersion).toBe(afterFirst);
@@ -421,8 +423,10 @@ describe('InspectableScope.dispose()', () => {
     expect(w.valueDefinition).toBe(borrowed.value);
     expect(origin.declarations()[0].def).toBe(borrowed);
 
-    // The receiving scope's OWN definition was disposed.
-    expect(owned.value!._writeVersion).toBe(ownedWriteVersion + 1);
+    // The receiving scope's OWN definition stays live too: it only stops
+    // listening to configuration changes.
+    expect(owned.value!._writeVersion).toBe(ownedWriteVersion);
+    expect(owned.value!.disposed).toBe(false);
   });
 });
 

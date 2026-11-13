@@ -1,4 +1,4 @@
-import { scopeActivationTemplate } from './ambient-chain.js';
+import { activationOnLinks, scopeActivationTemplate } from './ambient-chain.js';
 import {
   externalFactScope,
   forwardCallScope,
@@ -37,13 +37,10 @@ import {
 } from './binding-sites.js';
 import { isInvalidNonCollection } from './error-value.js';
 import { copyContextStack } from './evaluation-epoch.js';
-import { chainedScopeOf } from '../scope-chaining.js';
 import { isPendingCallScope } from '../pending-call-scopes.js';
 import { isQualifiedName } from '../library-shadowing.js';
 import {
-  inStaticTypingView,
   noteCallFrame,
-  noteParameterReadByName,
   staticBindingIn,
   staticParentOf,
 } from '../static-typing-view.js';
@@ -125,77 +122,24 @@ export function boundVariableNamesInOperand(
 }
 
 /**
- * The activation-record link, as carried by `_BoxedValueDefinition`.
- *
- * Written structurally (rather than as a field of the public
- * `BoxedValueDefinition` interface) for the same reason as the debug
- * tombstone: it is an internal detail of the binder machinery, not part of the
- * definition contract.
- */
-type Activated = {
-  _activationOf?: BoxedValueDefinition;
-  _scopeActivationOf?: BoxedValueDefinition;
-};
-
-/**
- * Record that `activation` — the per-call definition a `Function` literal's
- * call frame declares for a parameter — is an ACTIVATION of `staticBinding`,
- * the binding the literal's body `Block` declares for that same parameter
- * (`docs/SCOPING-MODEL.md`).
- *
- * A binder with several simultaneous activations (recursion) produces N
- * definitions all pointing at ONE static binding. They are deliberately
- * indistinguishable: `sameBinding` already compares an occurrence enclosed by
- * its binder by NAME, so distinguishing activations would only change the
- * answer for an occurrence that has ESCAPED its frame — and an escaped
- * occurrence must be re-bound (`rebindEscaping`), not distinguished.
- */
-export function markActivation(
-  activation: BoxedValueDefinition,
-  staticBinding: BoxedValueDefinition
-): void {
-  (activation as Activated)._activationOf = staticBinding;
-}
-
-/**
- * Whether `def` is the definition that a call frame declares for a parameter
- * of a `Function` literal (`markActivation`). A `let` local of the body, a
- * binder index and a top-level symbol are not.
+ * Whether `def` is a parameter of a `Function` literal, whose value a call
+ * frame holds. A `let` local of the body, a binder index and a top-level
+ * symbol are not.
  */
 export function isParameterActivation(def: BoxedValueDefinition): boolean {
-  return (def as Activated)._activationOf !== undefined;
+  return isActivation(def);
 }
 
 /**
- * The static binding `def` denotes: itself, or — for a call frame's parameter
- * definition — the literal's own binding for that parameter.
- *
- * ONE hop, non-recursive: an activation's target is always a static binding
- * (a body `Block`'s canonicalization-time declaration), never another
- * activation.
- */
-function staticBindingOf(def: BoxedBaseDefinition): BoxedBaseDefinition {
-  const activated = def as Activated;
-  return activated._activationOf ?? activated._scopeActivationOf ?? def;
-}
-
-/**
- * Do two definitions denote the same binding — identically, or because one is
- * an ACTIVATION of the other (or both activate the same binder)?
- *
- * The newly-equal pairs are exactly (static binding, its activation) and
- * (activation, activation of the same binder). A stored value's free `x` (a
- * global definition) and a frame's `x` stay unequal: neither activates the
- * other. Names are still compared separately everywhere — this does not make
- * equality rename-invariant.
+ * Do two definitions denote the same binding? A parameter, a binder variable
+ * and a block local have one definition, whatever activation holds their
+ * value, so this is identity.
  */
 export function sameBindingDef(
   a: BoxedBaseDefinition | undefined,
   b: BoxedBaseDefinition | undefined
 ): boolean {
-  if (a === b) return true;
-  if (a === undefined || b === undefined) return false;
-  return staticBindingOf(a) === staticBindingOf(b);
+  return a === b;
 }
 
 // Static block locals can change representation from a value placeholder to
@@ -340,11 +284,7 @@ export function callableBindingInContext(
 ): BoxedDefinition | undefined {
   if (own === undefined) return ce.lookupDefinition(name);
   const half = 'value' in own ? own.value : own.operator;
-  const activated = half as Activated;
-  const isActivation =
-    activated._activationOf !== undefined ||
-    activated._scopeActivationOf !== undefined;
-  const home = isActivation ? undefined : callableHomes.get(half);
+  const home = callableHomes.get(half);
   const start = ce.context.lexicalScope;
   // Inside a type computation, the static view of the bindings
   // (`static-typing-view.ts`): a call frame does not answer.
@@ -354,7 +294,6 @@ export function callableBindingInContext(
     const candidate = 'value' in found ? found.value : found.operator;
     if (
       candidate === half ||
-      (!isActivation && sameBindingDef(candidate, half)) ||
       (home !== undefined && scopeStandsFor(scope, home))
     ) {
       if (!('value' in found) || !isForwardCallReference(found.value))
@@ -363,18 +302,14 @@ export function callableBindingInContext(
     }
   }
   // Forward calls wait for a definition in their original lexical chain.
-  // A type/evaluation read never binds them to an unrelated caller's scope.
-  // The walk follows the link each scope was created with: while a node that
-  // owns the scope (a `Block`, the body of an integrand) is evaluated, the
-  // scope is chained onto the ambient scope (`scope-chaining.ts`), and a
-  // declaration of the same name in a scope pushed later would capture the
-  // call. With `∫₀¹ g(x) dx` made before `g(t) := t`, a scope that declares
-  // `g := t ↦ 100` made the integral 100, not 1/2.
+  // A type/evaluation read never binds them to an unrelated caller's scope:
+  // with `∫₀¹ g(x) dx` made before `g(t) := t`, a scope that declares
+  // `g := t ↦ 100` does not make the integral 100.
   if ('value' in own) {
     for (
       let scope = forwardCallScope(own.value);
       scope;
-      scope = creationParentOf(scope)
+      scope = scope.parent ?? undefined
     ) {
       const found = scope.bindings.get(name);
       if (
@@ -431,115 +366,27 @@ export function callableBindingInContext(
   return own;
 }
 
-/** The parent link `scope` was created with. A live evaluation frame can
- * re-point the link onto the ambient scope; the registry of chained scopes
- * keeps the link the scope had before (`chainedScopeOf`,
- * `scope-chaining.ts`). */
-function creationParentOf(scope: Scope): Scope | undefined {
-  const chained = chainedScopeOf(scope);
-  const parent = (chained !== undefined ? chained.parent : scope.parent) as
-    Scope | null | undefined;
-  return parent ?? undefined;
-}
-
 /**
  * The value definition a symbol OCCURRENCE reads its value from in the
- * current runtime context. The scope chain is walked for the innermost
- * binding of `name`, as a name lookup would — with BINDER bindings of a
- * binding OTHER than `own` skipped. `own` is the definition the occurrence
- * is bound to, and `sameBindingDef` recognizes an activation of `own`
- * itself. A binder binding is one of two things: a call frame's parameter
- * activation (`markActivation`), or a name a binder operator declares in its
- * own scope — a `Sum` or `Product` index, a comprehension or loop index, a
- * `D` variable (`markBinderVariable`, written by `bindBindingSites` in
- * `box.ts`). Such a binding belongs to another expression's variable that
- * merely shares the name, and reading its value through this occurrence is a
- * capture.
+ * current runtime context (`bindingInContext()`).
  *
- * Ruled 2026-09-21: a binder of the CALLER never intercepts a read of a
- * global inside the body of the function it calls, whether or not the global
- * holds a value. With `w` declared and valueless and `W := x ↦ [w x, x]`,
- * `[W(w)[1] for w in [1, 2, 3]]` answers `[w, 2w, 3w]` — exactly what the
- * spelling `[W(k)[1] for k in [1, 2, 3]]` answers — where a by-name reading
- * of the comprehension index gave `[1, 4, 9]`. The same decision removes the
- * capture of a stored value's free name: with `a := n + 1`,
- * `Sum(a, n, 1, 3)` is `3n + 3`, not `9`. Before this date the binder case
- * was restricted to the parameter activation and every other binder read by
- * name, as a compatibility hatch.
+ * An occurrence of a parameter, of the variable of a binder or of a local of
+ * a block (`readsActivation()`) reads its own definition `own`: the first
+ * binding of the chain that holds it, whose value is in the activation of its
+ * scope found on the links. When the chain does not hold it, the occurrence
+ * is read outside its activation and has no value; a binding of the same
+ * name is another variable. With `n := [1, 2]`, the operand `n` of
+ * `n ↦ n + 1` read outside a call has no value, so the literal is typed
+ * `(n) -> number`, not `(n) -> list<number>`.
  *
- * Why only binder bindings, and not every same-named binding: a declaration
- * made in a scope pushed after the occurrence was bound is ALSO a different
- * binding, but re-pointing earlier-boxed expressions that way is relied
- * upon — a document manager re-pushes a saved, populated scope around
- * evaluations and expects the expressions to read it (the lazy-collection
- * memo stamps the ambient scope for exactly this; see "a memoized view
- * re-resolves inside a re-pushed populated scope" in
- * `test/compute-engine/lazy-collection-regimes.test.ts`). That is the
- * compatibility reading `docs/SCOPING-MODEL.md` §"Symbol identity" allows,
- * and it stays. A shield (`markShieldDeclaration`) intercepts for the same
- * reason every ordinary declaration does — including a shield that sits on a
- * binder's own name, which is how `D`, `Integrate`, `Limit` and `Solve` hide
- * an assigned value of their variable.
- *
- * Why the parameter case must be skipped: a call frame captures whenever an
- * expression bound OUTSIDE it is evaluated INSIDE it. With `G(x) := cos(x)`
- * applied as `G(3x)`, the frame binds its parameter `x` to `3x`, whose `x` is
- * the caller's. Dereferencing the parameter answers `3x`, correctly, through
- * `evaluateInOwnBindings`; but the `Cos` handler then evaluates that `3x`
- * once more inside the frame, and by-name resolution read the caller's `x`
- * as the parameter again — `9x`, then `27x` on the next re-evaluation.
- * Every re-evaluation substituted the parameter's value into itself once
- * more, so it terminated only because handlers re-evaluate a bounded number
- * of times, answered wrong where a handler used the re-evaluation
- * (`f(x) := Σ_{k=1}^{3} x·k` gave `f(2x) = 24x`), and did not terminate at
- * all once the parameter's value contained an application that re-evaluates
- * its operand: `f(f(x))` for `f(x) := cos x`, and a twice-recursive
- * `R(i,x,y)` with free `x`, `y` at depth 3, overflowed the stack. Skipping
- * the foreign activation makes a second evaluation of an evaluated value a
- * fixed point again.
- *
- * A call frame is the one place where the chain does not reach a scope that
- * is still live: its parent is the scope that DEFINED the function, not the
- * scope of the caller (`callerBinding` below). An argument is evaluated, and
- * its symbols are bound, in the caller's scope; the frame then holds that
- * value as the value of a parameter, and the body reads it in the frame.
- * When `own` is not in the chain but is in the chain of the caller of a call
- * frame on the evaluation stack, `own` answers, whatever binding of the same
- * name the chain holds. Without this, with `c := 5` global, `c` declared
- * real (and valueless) in a pushed scope, and `g := a ↦ a·x` defined
- * globally, `g(c)` read the global `c` and gave `5x`, and with `i` declared
- * real in a pushed scope `g(i)` gave `ImaginaryUnit·x`. (Tycho ledger row
- * 403, 2026-10-19.)
- *
- * A run of a `Block` removes `own` from the scope of the block and makes a
- * new local for each `Declare` statement, so an occurrence boxed in the block
- * is bound to a definition that no scope holds. Inside a call frame, such an
- * occurrence reads its name in the chain of the caller that holds the block
- * (`sweptCallerBinding` below).
- *
- * When `own` is reachable from nowhere otherwise (an occurrence bound in a
- * scope that has since been popped, or an unbound one), the innermost binding
- * by name answers, foreign activation included — what the name lookup
- * answered before.
- *
- * One exception: inside a type computation, a parameter of a function literal
- * that is reachable from nowhere has no binding. The type of a literal is read
- * after the scope of its body was left, and the parameter has a value only
- * in a call. A binding of the same name is another variable: with
- * `n := [1, 2]`, the operand `n` of `n ↦ n + 1` does not hold a list, so the
- * literal is typed `(n) -> number`, not `(n) -> list<number>`.
- *
- * A local of a block (a `Declare` statement or a first assignment) has the
- * same exception: the type of a block is read after the scope of the block
- * was left, and the local has a value only in a run of the block. With
- * `n := [1, 2]`, the operand `n` of `Block(Declare(n, "real", 2), n + 1)`
- * does not hold a list, so the block is typed `real`, not `list<real>`. The
- * binding that a run of the block made for the local is the same variable,
- * and a type computation in the run reads it
- * (`isOutsideBindingOfBlockLocal()`). In a call of a function literal whose
- * body is the block, a type computation reads the binding that the
- * canonicalization made, which has no value (`staticBindingIn()`,
- * `static-typing-view.ts`).
+ * Any other occurrence reads the innermost binding of its name, except the
+ * variable of a binder and the parameter activation of a call frame that are
+ * not `own`: they belong to another expression's variable that shares the
+ * name (ruled 2026-09-21: with `w` declared and valueless and
+ * `W := x ↦ [w x, x]`, `[W(w)[1] for w in [1, 2, 3]]` is `[w, 2w, 3w]`). When
+ * no other binding is found, such a skipped binding answers, except for a
+ * free name of the body of a function literal (rule 3 of
+ * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
  */
 export function valueDefinitionInContext(
   ce: ComputeEngine,
@@ -563,6 +410,10 @@ export function bindingInContext(
   own: BoxedBaseDefinition | undefined,
   scope: Scope | null = ce.context.lexicalScope
 ): BoxedDefinition | undefined {
+  // A parameter, a binder variable and a local of a block read their own
+  // definition, in the activation of their scope found on the chain. None
+  // found: the occurrence is read outside its activation, and has no value.
+  const local = own !== undefined && readsActivationHalf(own);
   const start = scope;
   let skippedBinder: BoxedDefinition | undefined;
   while (scope) {
@@ -573,54 +424,96 @@ export function bindingInContext(
       found !== undefined &&
       !(BORROWED_OPERATOR_SCOPES.get(scope)?.has(name) === true)
     ) {
-      if ('value' in found && isForeignBinderBinding(found.value, own)) {
-        skippedBinder ??= found;
-      } else if (
-        'value' in found &&
-        isOutsideBindingOfBinderVariable(ce, scope, found.value, own)
-      ) {
-        // Skip this binding: it is not the variable of the binder.
-      } else {
+      if (local) {
         if (
-          own === undefined ||
           sameBindingDef('value' in found ? found.value : found.operator, own)
         )
           return found;
-        // The local of this run of the block (or of the call of the body)
-        // that the occurrence was written in: no caller reads it in its place.
-        const home = sweptHomeOf(own);
-        if (home !== undefined && scopeStandsFor(scope, home)) return found;
-        const caller = callerBinding(
-          ce,
-          name,
-          own,
-          start,
-          staticParentOf(scope)
-        );
-        if (caller !== undefined) return caller;
-        const other = sweptHomeBinding(name, own, scope, found);
-        return readsNoOtherBinding(ce, name, own, other, start)
-          ? undefined
-          : other;
-      }
+      } else if ('value' in found && isForeignBinderBinding(found.value, own)) {
+        skippedBinder ??= found;
+      } else return found;
     }
-    scope = staticParentOf(scope);
+    // The parent of a scope reads in the activation of that parent on the
+    // links from the current lexical scope (`activationOnLinks()`), as the
+    // variable of a binder reads its value there.
+    const parent = staticParentOf(scope);
+    scope = parent && activationOnLinks(ce.context.lexicalScope, parent);
   }
-  if (own !== undefined) {
-    const caller = callerBinding(ce, name, own, start, null);
-    if (caller !== undefined) return caller;
-    // A free name of the body of a function literal does not read the
-    // variable of a binder or the
-    // parameter activation of a call frame (rule 3 of
-    // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
-    if (skippedBinder !== undefined && BODY_FREE_NAMES.has(own))
-      return undefined;
-    return skippedBinder !== undefined &&
-      readsNoOtherBinding(ce, name, own, skippedBinder, start)
-      ? undefined
-      : skippedBinder;
-  }
+  if (local) return undefined;
+  // A free name of the body of a function literal does not read the
+  // variable of a binder or the parameter activation of a call frame (rule 3
+  // of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`).
+  if (own !== undefined && BODY_FREE_NAMES.has(own)) return undefined;
   return skippedBinder;
+}
+
+/**
+ * True when an occurrence bound to `def` reads its value in an activation:
+ * `def` is a parameter of a function literal or a call frame's activation of
+ * one, the variable of a binder, or a local of a block or of the body of a
+ * function literal. Such an occurrence reads the activation that the
+ * evaluation in progress is in (`bindingInContext()`). Every other occurrence
+ * reads the definition that its home chain gives (`homeChainBinding()`).
+ */
+export function readsActivation(def: BoxedDefinition): boolean {
+  if (isBlockLocalBinding(def)) return true;
+  return 'value' in def && readsActivationHalf(def.value);
+}
+
+/** `readsActivation()` for the value definition `def`. */
+function readsActivationHalf(def: BoxedBaseDefinition): boolean {
+  if (isActivation(def)) return true;
+  const own = def as BoxedValueDefinition;
+  return (
+    isFunctionLiteralParameter(own) ||
+    isBinderVariable(own) ||
+    own._blockLocal === true ||
+    (isBodyFreeName(own) &&
+      (own as { _assignmentEvidence?: boolean })._assignmentEvidence === true)
+  );
+}
+
+/**
+ * The definition that an occurrence of `name`, bound to `own` when it was
+ * boxed in the scope `home`, reads: the first binding of `name` up the chain
+ * of `home`. That binding is `own`, or a declaration made later in `home` or
+ * in an ancestor of `home` below the scope of `own`, which hides `own`, or,
+ * when no scope of the chain holds `own` any more (a removed declaration), a
+ * binding of the name by which `own` was replaced. With no binding of the
+ * name on the chain, `own`. The current scope plays no part. The walk skips the
+ * variable of a binder, a parameter and a call frame's activation, as a free
+ * name does (`freeNameBindingAndScope()`), and an operator definition that a
+ * temporary scope lends (`markBorrowedOperator()`).
+ *
+ * The result holds the scope of the definition found, `undefined` for
+ * `own` when no scope holds it.
+ *
+ * Only a declaration changes the answer, and a declaration moves the type
+ * version of the engine, so a caller can keep the answer under that version.
+ */
+export function homeChainBinding(
+  name: string,
+  own: BoxedDefinition,
+  home: Scope
+): { def: BoxedDefinition; scope: Scope | undefined } {
+  let first: { def: BoxedDefinition; scope: Scope } | undefined;
+  for (let s: Scope | null | undefined = home; s; s = s.parent) {
+    const found = s.bindings.get(name);
+    if (found === undefined) continue;
+    if (found === own) return first ?? { def: own, scope: s };
+    if (
+      first === undefined &&
+      !(BORROWED_OPERATOR_SCOPES.get(s)?.has(name) === true) &&
+      !(
+        'value' in found &&
+        (isBinderVariable(found.value) ||
+          isFunctionLiteralParameter(found.value) ||
+          isActivation(found.value))
+      )
+    )
+      first = { def: found, scope: s };
+  }
+  return first ?? { def: own, scope: undefined };
 }
 
 /**
@@ -811,10 +704,10 @@ export function freeNameBindingAndScope(
 
 /**
  * True when `found` is a local of a `Block`: a binding that the
- * canonicalization of the block made for a `Declare` statement or a first
- * assignment (`_blockLocal`), or that a run of the block made for a `Declare`
- * statement (`_declaredByStatement`, `createBlockLocals()`,
- * `function-utils.ts`).
+ * canonicalization of the block made for a `Declare` statement
+ * (`_blockLocal`), or that a run of a `Declare` statement outside an
+ * activation made (`_declaredByStatement`, `declareSteps()`,
+ * `library/core.ts`).
  */
 export function isBlockLocalBinding(found: BoxedDefinition): boolean {
   if ((found as { _declaredByStatement?: boolean })._declaredByStatement)
@@ -834,397 +727,17 @@ function isScopeOrAncestor(scope: Scope, home: Scope): boolean {
 }
 
 /**
- * True when an occurrence of `name` bound to `own`, about to read `other`, a
- * binding of the same name that is not its own, reads no binding: a type
- * computation reads a parameter of a function literal, or a local of a block
- * in a binding that is not a local of that block. See the exceptions in the
- * comment of `valueDefinitionInContext()`. `start` is the scope where the
- * walk of `bindingInContext()` started.
- *
- * Any other read of such a parameter or local keeps the read by name. When
- * `other` holds a value, it gives another answer than the type computation,
- * so it is recorded, and the caches keep the two answers under different keys
- * from now on (`noteParameterReadByName()`). A binding with no value answers
- * as the type computation does, and a later assignment to it moves the keys
- * of the caches, so the next read comes back here.
- *
- * The record is for the life of the engine, and it costs cache hits in every
- * later type computation. A program reaches it when a function literal that
- * reads a local of its block is called after the run of the block ended, and
- * a binding of the same name outside the block holds a value: with `x := 5`,
- * a call of the result of `Block(Declare(x, "real", 2), y ↦ x + y)`.
- */
-function readsNoOtherBinding(
-  ce: ComputeEngine,
-  name: string,
-  own: BoxedBaseDefinition,
-  other: BoxedDefinition,
-  start: Scope | null
-): boolean {
-  const inView = inStaticTypingView(ce);
-  // Outside a type computation, only a binding with a value is recorded:
-  // answer before the walk of the chain in `isOutsideBindingOfBlockLocal()`.
-  if (!inView && !('value' in other && other.value.value !== undefined))
-    return false;
-  if (
-    !isFunctionLiteralParameter(own) &&
-    !isOutsideBindingOfBlockLocal(name, own, other, start)
-  )
-    return false;
-  if (inView) return true;
-  noteParameterReadByName(ce);
-  return false;
-}
-
-/**
- * True when `own` is a local of a block (`_blockLocal`: the binding that the
- * canonicalization of the block made for a `Declare` statement or for a
- * first assignment), and `other`, a binding of the name `name`, is not a
- * local of that block: it is another variable with the same name, for
- * example a global.
- *
- * A run of the block removes `own` from the scope of the block and makes a
- * new binding for the local (`sweepCanonicalizationBindings()`,
- * `library/control-structures.ts`; `createBlockLocals()` and
- * `declareAssignmentLocals()`, `function-utils.ts`): in the scope of the
- * block, or, when the block is the body of a function literal, in the call
- * frame, which is a runtime copy of that scope. That binding is the same
- * variable. So `other` is a local of the block when a scope of the chain
- * that starts at `start` is the scope of the block, or a runtime copy of it
- * (`scopeStandsFor()`), and holds `other` for `name`.
- *
- * The scope of the block is the scope where the canonicalization declared
- * the local (`markCallableHome()`), and the scope that a run removed it from
- * (`markSweptBinding()`); a scope of the chain that stands for one of the
- * two counts. A local for which neither is recorded gives `false`: it keeps
- * the read by name.
- *
- * `other` can also be the record of `own` that the run kept
- * (`_sweptRecord`, which `sweptHomeBinding()` answers when no binding of the
- * name is left): it is the local itself, with no value, not another variable.
- */
-function isOutsideBindingOfBlockLocal(
-  name: string,
-  own: BoxedBaseDefinition,
-  other: BoxedDefinition,
-  start: Scope | null
-): boolean {
-  const local = staticBindingOf(own);
-  if ((local as { _blockLocal?: boolean })._blockLocal !== true) return false;
-  if ('value' in other && sameBindingDef(other.value, own)) return false;
-  const declaredIn = callableHomes.get(local);
-  const sweptFrom = (local as Swept)._sweptHome;
-  if (declaredIn === undefined && sweptFrom === undefined) return false;
-  for (let scope = start; scope; scope = staticParentOf(scope)) {
-    if (
-      !(declaredIn !== undefined && scopeStandsFor(scope, declaredIn)) &&
-      !(sweptFrom !== undefined && scopeStandsFor(scope, sweptFrom))
-    )
-      continue;
-    if (staticBindingIn(scope, name, scope === start) === other) return false;
-  }
-  return true;
-}
-
-/**
- * The binding of `own` in the scope of a caller, when the occurrence bound
- * to `own` is read inside a call frame that cannot see that scope, or
- * `undefined`.
- *
- * The evaluation stack holds one context named `call` for each user-function
- * application in progress (`makeLambda`, `function-utils.ts`). The scope of
- * that context is the call frame, whose parent is the scope that defined the
- * function, and the context just below it is the context of the caller. An
- * argument is evaluated in the caller's context, so its symbols are bound to
- * the caller's definitions, and the frame keeps the evaluated argument as
- * the value of a parameter. When the body reads the parameter, the argument
- * is read inside the frame, where the walk of `bindingInContext` follows the
- * definition scope and never reaches the caller's scope. If the definition
- * scope has a binding of the same name, that walk reads it: a symbol that
- * the caller declared without a value in an inner scope then reads the value
- * of an outer definition of its name.
- *
- * This answers the binding `own` has in the chain of the caller of any call
- * frame on the stack (a nested call reaches the caller of an outer call:
- * `f` can pass its argument on to `g`). Four conditions keep it narrow:
- *
- * - `own` is not a binder's variable (`markBinderVariable`). An index reads
- *   by name (see `isForeignBinderBinding`), and a `bind` parameter of a
- *   `hold` function relies on it: in `mySum(k^2, k, 3)` with `mySum(body,
- *   bind i, n) = Sum(body, (i, 1, n))`, the `k` of the held `k^2` is the
- *   call node's index, and the `Sum` of the body must read it as its own
- *   index (`test/epsil/hold-functions.test.ts`).
- * - The walk started at the current scope (`start`). A consumer that walks
- *   from another scope (`bindLazyArgumentLocals` asks what the callee would
- *   find) gets the plain walk.
- * - `own` is not further up the current chain (`rest`, the part of the chain
- *   after the binding that was found). There, a newer declaration of the
- *   same name hides `own` on purpose: a document manager pushes a populated
- *   scope again around an evaluation, and an expression boxed earlier must
- *   read the new declaration (see `docs/SCOPING-MODEL.md`, "Symbol
- *   identity").
- * - A scope that has been popped is in no chain of the stack, so an
- *   occurrence bound there still reads by name.
- */
-function callerBinding(
-  ce: ComputeEngine,
-  name: string,
-  own: BoxedBaseDefinition,
-  start: Scope | null,
-  rest: Scope | null
-): BoxedDefinition | undefined {
-  if (start !== ce.context?.lexicalScope || isBinderVariable(own))
-    return undefined;
-  const stack = ce._evalContextStack;
-  // Most reads happen outside any call frame: nothing to do then.
-  let hasCall = false;
-  for (let i = stack.length - 1; i > 0; i--)
-    if (stack[i].name === 'call') {
-      hasCall = true;
-      break;
-    }
-  if (!hasCall) return undefined;
-  if (ownBindingInChain(name, own, rest, false) !== undefined) return undefined;
-  for (let i = stack.length - 1; i > 0; i--) {
-    if (stack[i].name !== 'call') continue;
-    const found = ownBindingInChain(name, own, stack[i - 1].lexicalScope, true);
-    if (found !== undefined) return found;
-  }
-  return sweptCallerBinding(name, own, start, stack);
-}
-
-/**
- * The fields of a value definition that `markSweptBinding` sets (declared on
- * `_BoxedValueDefinition`): `_sweptHome`, the scope of the block or of the
- * body (the template of a runtime copy of it), and `_sweptRecord`, a binding
- * record that holds the definition. They are set on the static binding
- * (`staticBindingOf`): the definition that an occurrence boxed in the block
- * is bound to.
- */
-type Swept = { _sweptHome?: Scope; _sweptRecord?: BoxedDefinition };
-
-/** The scope that `own` was removed from (`markSweptBinding`), or
- * `undefined`. */
-function sweptHomeOf(own: BoxedBaseDefinition): Scope | undefined {
-  return (staticBindingOf(own) as Swept)._sweptHome;
-}
-
-/**
- * Record that `def` was removed from `home` while the statements of `home`
- * run: by the start of a run of a `Block` (`sweepCanonicalizationBindings`,
- * `library/control-structures.ts`), or by an application of a function
- * literal, which hides the valueless bindings of its body scope
- * (`hideBodyScopeParams`, `function-utils.ts`). `home` is the scope of the
- * block or of the body itself: the template scope when the run is in a
- * runtime copy of it (an asynchronous activation, a call frame).
- *
- * The run then declares a new binding for each `Declare` statement, or none
- * (a reference that canonicalization declared, which reads the enclosing
- * scopes by name). An occurrence boxed in the block is still bound to the
- * removed definition, so it is in no chain: `sweptCallerBinding()` reads it
- * in the scope of the caller.
- */
-export function markSweptBinding(def: BoxedDefinition, home: Scope): void {
-  // An occurrence that reads a value is bound to a value definition.
-  if (!('value' in def)) return;
-  const key = staticBindingOf(def.value) as Swept;
-  if (key._sweptHome === home) return;
-  key._sweptHome = home;
-  key._sweptRecord =
-    key === (def.value as Swept) ? def : { value: key as BoxedValueDefinition };
-}
-
-/**
- * The binding that the occurrence bound to `own` reads inside a call frame,
- * when the start of a run of a `Block` removed `own` from the scope of the
- * block (`markSweptBinding`), or `undefined`.
- *
- * A run of a block makes its own bindings, so `own` is in no chain, and
- * `ownBindingInChain()` cannot find it. In the block, the occurrence reads
- * its name: the innermost binding of the name, which is the local that a
- * `Declare` statement of this run made. An argument of a call made in the
- * block holds the occurrence and is read inside the call frame, whose chain
- * goes through the scope that defined the function, not through the block.
- * There, the name found a binding of the defining scope: with a global
- * `y := 5` and a global `g := x ↦ x + 0.5`, the block
- * `Block(Declare(y, 'real'), g(y))` gave `5.5`, not `y + 0.5`.
- *
- * So when the scope of the block (or a runtime copy of it) is in the chain
- * of the caller of a call frame on the stack, the occurrence reads its name
- * from that scope up, as it does in the block. The read starts at the scope
- * of the block, not at the innermost scope of the caller: a lazy view made
- * in the block and read in a block nested in it reads the local of its own
- * block, not a local of the same name that the nested block declares. When
- * no binding of the name is left from that scope up (the run removed a
- * reference and declared nothing in its place), the occurrence reads the
- * removed binding, which has no value, and not a binding of the name in the
- * chain of the call frame: a function that closes over a private `y` does
- * not give its `y` to the `y` of the caller.
- *
- * When the scope of the block is in the current chain (`start`), the walk of
- * `bindingInContext()` already reads the name there: a function defined in
- * the block and called from a scope nested in it reads the local of the
- * block, not a local of the nested scope.
- */
-function sweptCallerBinding(
-  name: string,
-  own: BoxedBaseDefinition,
-  start: Scope | null,
-  stack: ComputeEngine['_evalContextStack']
-): BoxedDefinition | undefined {
-  const key = staticBindingOf(own) as Swept;
-  const home = key._sweptHome;
-  if (home === undefined || homeInChain(start, home) !== undefined)
-    return undefined;
-  for (let i = stack.length - 1; i > 0; i--) {
-    if (stack[i].name !== 'call') continue;
-    const callerScope = stack[i - 1].lexicalScope;
-    const from = homeInChain(callerScope, home);
-    if (from === undefined) continue;
-    // A shield of the name between the caller and the block intercepts the
-    // read, as it does in the caller (`markShieldDeclaration`): with
-    // `y := 3` in the block, `HoldValues(g(y), y)` gives `g(y)` evaluated
-    // with `y` and no value.
-    for (let s: Scope | null = callerScope; s && s !== from;) {
-      const found = staticBindingIn(s, name, s === callerScope);
-      if (found !== undefined && 'value' in found && isShield(found.value))
-        return found;
-      s = staticParentOf(s);
-    }
-    for (let scope: Scope | null = from; scope; scope = staticParentOf(scope)) {
-      const found = staticBindingIn(scope, name, scope === callerScope);
-      if (
-        found !== undefined &&
-        !('value' in found && isForeignBinderBinding(found.value, own))
-      )
-        return found;
-    }
-    return key._sweptRecord;
-  }
-  return undefined;
-}
-
-/**
- * The binding that the occurrence bound to `own` reads when the walk of
- * `bindingInContext()` found `found`, another binding of the same name, in
- * `scope`, and no call frame changes the read (`callerBinding`).
- *
- * When `own` was removed from the scope of its block (`markSweptBinding`)
- * and that scope is further up the chain than `scope`, `found` is a local of
- * a block nested in the block of the occurrence. The occurrence was not
- * written in that nested block: a value carries it there, such as a lazy
- * view made in the outer block and read in the nested one. It reads its name
- * from the scope of its own block up, as it does in that block, or the
- * removed binding (no value) when no binding of the name is left there. With
- * `L := Map(g, [y])` made in a block that declares `y`, a nested block that
- * declares `y := 7` and reads `L[1]` gave `g(7)`.
- *
- * Otherwise `found` answers: the local of this run of the block of the
- * occurrence, or a binding of a scope that the walk reaches when the block
- * of the occurrence is not in the chain.
- */
-function sweptHomeBinding(
-  name: string,
-  own: BoxedBaseDefinition,
-  scope: Scope,
-  found: BoxedDefinition
-): BoxedDefinition {
-  // A shield intercepts a read of its name whatever binding the occurrence
-  // denotes (`markShieldDeclaration`): `HoldValues(y + 1, y)` in a block
-  // where `y := 3` gives `y + 1`.
-  if ('value' in found && isShield(found.value)) return found;
-  const key = staticBindingOf(own) as Swept;
-  const home = key._sweptHome;
-  if (home === undefined || scopeStandsFor(scope, home)) return found;
-  const from = homeInChain(staticParentOf(scope), home);
-  if (from === undefined) return found;
-  for (let s: Scope | null = from; s; s = staticParentOf(s)) {
-    const binding = staticBindingIn(s, name, false);
-    if (
-      binding !== undefined &&
-      !('value' in binding && isForeignBinderBinding(binding.value, own))
-    )
-      return binding;
-  }
-  return key._sweptRecord ?? found;
-}
-
-/** The first scope of the chain that starts at `scope` that is `home`, or a
- * runtime copy of it (`scopeStandsFor`), or `undefined`. */
-function homeInChain(scope: Scope | null, home: Scope): Scope | undefined {
-  for (; scope; scope = staticParentOf(scope))
-    if (scopeStandsFor(scope, home)) return scope;
-  return undefined;
-}
-
-/**
- * What a read of the occurrence bound to `own` answers in the chain that
- * starts at `scope`, when `own` is in that chain; `undefined` when it is not.
- *
- * The answer is the innermost binding of `name` in the chain that is not a
- * foreign binder's variable: `own` itself, or a declaration of the same name
- * pushed above it, which hides `own` there exactly as it does for a read in
- * that scope (the "Symbol identity" rule of `docs/SCOPING-MODEL.md`). So an
- * argument read inside a call frame answers what the same expression
- * answers in the caller's scope: with `c` declared in a pushed scope, `g(c)`
- * boxed there, then `c` declared again and assigned 7 in a scope pushed
- * above it, both `c` and `g(c)` read the 7.
- */
-function ownBindingInChain(
-  name: string,
-  own: BoxedBaseDefinition,
-  scope: Scope | null,
-  isWalkStart: boolean
-): BoxedDefinition | undefined {
-  let innermost: BoxedDefinition | undefined;
-  const start = scope;
-  while (scope) {
-    // Inside a type computation, the static view (`static-typing-view.ts`).
-    // `scope` starts a walk when it is the scope of a caller, and continues
-    // the walk of `bindingInContext()` when it is the rest of its chain.
-    const found = staticBindingIn(scope, name, isWalkStart && scope === start);
-    if (
-      found !== undefined &&
-      !('value' in found && isForeignBinderBinding(found.value, own))
-    ) {
-      innermost ??= found;
-      if (sameBindingDef('value' in found ? found.value : found.operator, own))
-        return innermost;
-    }
-    scope = staticParentOf(scope);
-  }
-  return undefined;
-}
-
-/**
  * Is the binding `scope` holds for `name` a BINDER's variable that the
  * occurrence bound to `own` does not denote?
  *
  * A call frame's parameter activation qualifies even when the occurrence
- * carries no binding at all (`own` is `undefined`), which is what the reading
- * before 2026-09-21 did. A binder operator's index (`markBinderVariable`)
- * qualifies under two further conditions.
- *
- * The occurrence must HAVE a binding. One with no binding names nothing in
- * particular, so the innermost binding by name is still the best answer for
- * it, and a raw index symbol handed to a binder from outside keeps reading
- * that binder's variable.
- *
- * And the occurrence's own binding must not itself be a binder's variable.
- * Two big operators that use the same index name can be evaluated at once —
- * the asynchronous lane suspends one mid-loop and runs the other — and then
- * both the loop's per-term ASSIGNMENT and the body's read resolve the name
- * through the ambient chain. They must resolve it the same way or the two
- * evaluations answer each other's terms, so an index reads by name, as it
- * did before. What the decision of 2026-09-21 removes is a caller's index
- * intercepting a read of a GLOBAL, which no assignment of the loop was ever
- * meant to reach.
- *
- * A shield never qualifies. A shield is a valueless shadow declared for the
- * sole purpose of hiding an enclosing value (`markShieldDeclaration`), and
- * `D`, `Integrate`, `Limit` and `Solve` put one on their own binding site —
- * so a shield sits on a binder's variable, and skipping it would read the
- * very value it hides.
+ * carries no binding at all (`own` is `undefined`). A binder operator's index
+ * (`markBinderVariable`) qualifies when the occurrence has a binding: one
+ * with no binding names nothing in particular, so the innermost binding by
+ * name is still the best answer for it, and a raw index symbol handed to a
+ * binder from outside keeps reading that binder's variable. An occurrence of
+ * a binder's own variable reads its definition (`bindingInContext()`) and
+ * does not come here.
  */
 function isForeignBinderBinding(
   def: BoxedValueDefinition,
@@ -1232,49 +745,14 @@ function isForeignBinderBinding(
 ): boolean {
   if (sameBindingDef(def, own)) return false;
   if (isActivation(def)) return true;
-  if (own === undefined || isShield(def)) return false;
-  return isBinderVariable(def) && !isBinderVariable(own);
+  if (own === undefined) return false;
+  return isBinderVariable(def);
 }
 
-/**
- * True when `own` is the variable of a binder operator (a loop index, a
- * `Sum` index, a comprehension variable), and `def` is an ordinary binding
- * of the same name in the global scope or in the system scope (`scope` holds
- * `def`): not `own`, not the variable of a binder, not a parameter
- * activation and not a shield.
- *
- * An occurrence of a binder's variable has a value only inside a run of its
- * binder. When such an occurrence is evaluated outside its binder (a part of
- * a loop body that is taken out of its `Loop`), a global or library
- * definition of the same name is a different symbol. Reading its value gave
- * a wrong result: with a loop index `i`, the detached part
- * `ReplaceAt([1, 2, 3], i, 9)` read the imaginary unit and evaluated to an
- * `incompatible-type` error. The occurrence now has no value there and stays
- * symbolic.
- *
- * A binding in a scope below the global scope is still read by name. Some
- * evaluations of a binder run in a scope that holds a copy of the index
- * binding, not the binding the occurrence is bound to: a `Sum` in the body
- * of a function literal that `Map` applies writes the value of its index in
- * such a scope (`assignLoopIndex`, `library/utils.ts`), and the occurrence
- * must read it.
- */
-function isOutsideBindingOfBinderVariable(
-  ce: ComputeEngine,
-  scope: Scope,
-  def: BoxedValueDefinition,
-  own: BoxedBaseDefinition | undefined
-): boolean {
-  if (own === undefined || !isBinderVariable(own)) return false;
-  const globalScope = ce._evalContextStack[1]?.lexicalScope;
-  if (scope !== globalScope && scope !== globalScope?.parent) return false;
-  if (sameBindingDef(def, own)) return false;
-  return !isBinderVariable(def) && !isActivation(def) && !isShield(def);
-}
-
-/** Is `def` a call frame's parameter activation (see `markActivation`)? */
+/** Is `def` a parameter of a function literal, whose value a call frame
+ * holds? */
 function isActivation(def: BoxedBaseDefinition): boolean {
-  return (def as Activated)._activationOf !== undefined;
+  return isFunctionLiteralParameter(def);
 }
 
 /**
@@ -1354,8 +832,8 @@ export function calledParameterValue(
  * the value `x^2` of `f` in `g(x^2)` varies with `x`.
  *
  * Call this inside the evaluation of the binder: the binding of `name`
- * outside the binder is the first binding on the scope chain that is not a
- * shield and not the variable of a binder.
+ * outside the binder is the first binding on the scope chain that is not the
+ * variable of a binder.
  */
 export function parameterValueVariesWith(
   ce: ComputeEngine,
@@ -1372,7 +850,7 @@ export function parameterValueVariesWith(
     const found = scope.bindings.get(name);
     if (found === undefined) continue;
     if (!('value' in found)) break;
-    if (isShield(found.value) || isBinderVariable(found.value)) continue;
+    if (isBinderVariable(found.value)) continue;
     outer = found.value;
     break;
   }
@@ -1440,7 +918,7 @@ type BinderVariable = { _isBinderVariable?: true };
  * of the same name (ruled 2026-09-21).
  *
  * A no-op for a name the scope does not bind, or binds to an operator
- * definition — the same two cases `markShieldDeclaration` leaves alone.
+ * definition.
  */
 export function markBinderVariable(scope: Scope, name: string): void {
   const def = scope.bindings.get(name);
@@ -1451,39 +929,6 @@ export function markBinderVariable(scope: Scope, name: string): void {
 /** Is `def` a binder's variable (see `markBinderVariable`)? */
 function isBinderVariable(def: BoxedBaseDefinition | undefined): boolean {
   return (def as BinderVariable | undefined)?._isBinderVariable === true;
-}
-
-/** @see markShieldDeclaration */
-type Shielded = { _isShield?: true };
-
-/**
- * Mark the binding `scope` holds for `name` as a SHIELD.
- *
- * A shield is a valueless shadow declared for no reason other than to hide an
- * enclosing binding's VALUE for the duration of some work: `withValueShield`
- * (`utils.ts` — `D`, `Integrate`, `Limit`, `JacobianMatrix`, `Solve`) and
- * `simplifyValueBlind` (`simplify.ts` — the public `.simplify()`) are the two
- * sites, and between them every shield in the engine.
- *
- * `evaluateInOwnBindings`' restriction 2 used to infer this from "the
- * shadowing binding holds no value", which is a proxy, not the property: an
- * ordinary inner `Declare(x, 'real')` shields nothing yet intercepted a stored
- * value's free `x` all the same. The marker states it instead
- * (`docs/SCOPING-MODEL.md`).
- *
- * A no-op for a name the scope does not bind, or binds to an operator
- * definition: `declare` may legitimately have declined (an exotic type that
- * does not round-trip), and the caller leaves that symbol unshielded.
- */
-export function markShieldDeclaration(scope: Scope, name: string): void {
-  const def = scope.bindings.get(name);
-  if (def !== undefined && 'value' in def)
-    (def.value as unknown as Shielded)._isShield = true;
-}
-
-/** Is `def` a shield (see `markShieldDeclaration`)? */
-export function isShield(def: BoxedValueDefinition): boolean {
-  return (def as unknown as Shielded)._isShield === true;
 }
 
 /**
@@ -1858,6 +1303,9 @@ export function shadowedKey(shadowed: ReadonlySet<string> | undefined): string {
  * denotes the ENCLOSING binding. `skipRootBinds` ignores what the ROOT itself
  * binds, for a caller whose whole purpose is to rewrite occurrences of the
  * root's own bound variables (the body `Block` of a `Function` literal).
+ * With `calls`, a canonical application whose operator is a name of
+ * `replacements` is boxed again in the current scope, which must be `scope`,
+ * so that its operator is bound to the definition of that name in `scope`.
  */
 export function rebindToBindings(
   expr: Expression,
@@ -1866,6 +1314,7 @@ export function rebindToBindings(
   options?: {
     skipRootBinds?: boolean;
     accept?: (name: string) => boolean;
+    calls?: boolean;
   }
 ): Expression {
   if (replacements.size === 0) return expr;
@@ -1891,7 +1340,23 @@ export function rebindToBindings(
       return target;
     },
     undefined,
-    options?.skipRootBinds ?? false
+    options?.skipRootBinds ?? false,
+    new Map(),
+    options?.calls
+      ? (app, ops, shadowed) => {
+          const name = app.operator;
+          if (
+            !app.isCanonical ||
+            !replacements.has(name) ||
+            shadowed?.has(name) ||
+            options.accept?.(name) === false
+          )
+            return undefined;
+          return app.engine.function(name, [...ops], {
+            scope: app.localScope,
+          });
+        }
+      : undefined
   );
 }
 
@@ -1920,7 +1385,7 @@ export function rebindToBindings(
  * a global `x = 100` → 101) and stays symbolic for what it does not (an unbound
  * `x` stays `x`, whatever a frame names its parameter).
  *
- * Two restrictions keep this confined to dereference, each one measured:
+ * One restriction keeps this confined to dereference, measured:
  *
  * - **The occurrence's definition must be reachable** in the current chain —
  *   it refuses to re-point a free symbol at a definition that is not in the
@@ -1929,27 +1394,10 @@ export function rebindToBindings(
  *   beta-reduction and the cached-expression re-binding contract (CONTRACT 4,
  *   `pipeline-contracts.test.ts`) — measured at 100+ failures.
  *
- *   "Reachable" is `sameBindingDef`, not identity: a call frame parks a
- *   parameter's value in a fresh definition and hides the body's own
- *   (`hideBodyScopeParams` in `function-utils.ts`), so a body occurrence used
- *   to be unreachable BY DESIGN — the restriction looked conditional on that
- *   arrangement. The frame's definition is an ACTIVATION of the body's
- *   binding, so the walk now finds it and the restriction is left doing only
- *   its own, unrelated job.
- * - **The shadowing binding must not be a SHIELD.** Shadowing a name valueless
- *   is how every shield in the engine works: `Solve` blinds its unknown at the
- *   source, so `Solve(Simplify(s) = 2, w)` resolves `s` to `(9-w²)/4` yet keeps
- *   `w` symbolic even though `w` has a global value (`solve.test.ts`), and
- *   `withValueShield`/`simplifyValueBlind` do the same for `simplify`. Honoring
- *   the occurrence's own binding there would resolve precisely what the shield
- *   exists to hide.
- *
- *   The restriction used to read "the shadowing binding must hold a VALUE",
- *   which is a PROXY for that and one the shields do not have a monopoly on: an
- *   ordinary `Block(Declare(x, 'real'), a + 5)` intercepted a stored `a = x + 1`
- *   too, and left it symbolic in a variable it does not refer to — while the
- *   same block with a VALUED shadow already did not intercept. Shields are now
- *   marked (`markShieldDeclaration`) and only they defer.
+ *   "Reachable" is `sameBindingDef`, not identity: a call frame holds the
+ *   body's own definition of a parameter (`holdBodyLocals()` in
+ *   `function-utils.ts`), or a fresh definition that is an ACTIVATION of it,
+ *   so the walk finds a body occurrence.
  *
  * (The value-definition checks are inlined rather than using `isValueDef`:
  * `utils.ts` imports this module, so this module cannot import it back.)
@@ -2044,20 +1492,13 @@ export function evaluateInOwnBindings(
  * occurrence was bound to at canonicalization, uses a binding of a
  * discarded scope.
  *
- * When `def` carries a tombstone, the read can still be live. An
- * asynchronous evaluation of a scoped node (a `Sum`, a `Product`) pushes an
- * activation, a copy of the local scope of the node with its own
- * definitions (`asyncScopeActivation`, `boxed-function.ts`), not the local
- * scope itself. The symbols of the body stay bound to the definitions of the
- * local scope, and the pop of any other evaluation of the node (a
- * synchronous one, or an asynchronous one on its own copy of the context
- * stack) tombstones them, also while this evaluation is suspended. The read
- * then finds the definition of the activation in the context
- * (`bindingInContext`), and that definition is the one checked. This
- * applies to a constant too: the activation holds a copy of it. A binding
- * found in the context that is not a copy of `def` (a definition of the
- * same name in an enclosing scope) does not stand for `def`, and `def` is
- * checked.
+ * When `def` carries a tombstone, the read can still be live: the context
+ * can hold another definition of the same binding (`sameBindingDef`, found
+ * by `bindingInContext`), or a definition in an activation of the scope that
+ * holds `def` (`activationBindingOf()`), and that definition is the one
+ * checked. A binding found in the context that does not stand for `def` (a
+ * definition of the same name in an enclosing scope) is not used, and `def`
+ * is checked.
  */
 export function assertLiveRead(
   ce: ComputeEngine,
@@ -2151,23 +1592,16 @@ function ownBindingEnvironment(
           reachable = true;
           break;
         }
-        // A shield between here and the occurrence's own binding intercepts
-        // the name for every occurrence beneath it; borrowing the own binding
-        // past it would read the very value the shield hides. Leave the
-        // occurrence to the ambient resolution, which stops at the shield
-        // (`bindingInContext`).
-        if ('value' in found && isShield(found.value)) return sym;
       }
       scope = scope.parent;
     }
     if (!reachable || innermost === undefined) return sym;
-    // Already the innermost binding, or shadowed by a SHIELD: the ambient
-    // lookup answers correctly on its own.
+    // Already the innermost binding: the ambient lookup answers correctly on
+    // its own.
     if ('value' in innermost && sameBindingDef(innermost.value, own))
       return sym;
     // An operator definition is not ours to shadow with a value binding.
     if (!('value' in innermost)) return sym;
-    if (isShield(innermost.value)) return sym;
     (env ??= new Map()).set(name, {
       value: own,
     } satisfies TaggedValueDefinition);

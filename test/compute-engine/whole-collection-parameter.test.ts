@@ -508,9 +508,9 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     14 / 3,
   ],
   ['mean(xs^2) over a scalar', 'function h(xs) { mean(xs^2) }', [A5], '25', 25],
-  // A helper that the body assigns a function literal (`let g = …` or
-  // `g = …`) and then calls with the parameter gives the slot of its own
-  // parameter, as a helper declared with `function g(t) { … }` does.
+  // A helper that the body assigns a function literal (`let g = …`, or
+  // `g = …` after it) and then calls with the parameter gives the slot of its
+  // own parameter, as a helper declared with `function g(t) { … }` does.
   [
     'a let helper over a list',
     'function h(xs) { let g = (t) => mean(t)\ng(xs) }',
@@ -518,12 +518,14 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     '2',
     2,
   ],
+  // A block-local function assigned more than once is a function value known
+  // only at run time: the JavaScript target declines the call.
   [
     'an assigned helper over a list',
-    'function h(xs) { g = (t) => mean(t)\ng(xs) }',
+    'function h(xs) { let g = (t) => t\ng = (t) => mean(t)\ng(xs) }',
     [L123],
     '2',
-    2,
+    'decline',
   ],
   [
     'a let helper over a scalar',
@@ -652,11 +654,10 @@ describe('Limitations of the rule, as they behave today', () => {
     );
   });
 
-  test('a call to a helper that the body assigns a function literal is a whole use', () => {
-    // The signature of `f` is derived when `f` is defined, before its body
-    // runs, so the call `h(xs)` is bound to the body-local placeholder of
-    // `h`, which has no definition. The walk of the body records the slot of
-    // the literal assigned to `h` and reads it at the call.
+  test('a call to a helper that the body assigns a function literal', () => {
+    // A local declared with a function literal is a variable of type
+    // `function`: the call `h(xs)` applies its value to the list, and the
+    // signature of `f` does not read the literal.
     const value = (source: string): [string, string] => {
       const ce = new ComputeEngine();
       return [epsilValue(ce, source), ce.symbol('f').type.toString()];
@@ -665,19 +666,14 @@ describe('Limitations of the rule, as they behave today', () => {
       value('function f(xs) { let h = (t) => count(t)\nh(xs) }\nf([1, 2])')
     ).toEqual(['2', '(xs: collection<any> | value) -> unknown']);
     expect(
-      value('function f(xs) { h = (t) => count(t)\nh(xs) }\nf([1, 2])')
+      value(
+        'function f(xs) { let h = (t) => t\nh = (t) => count(t)\nh(xs) }\nf([1, 2])'
+      )
     ).toEqual(['2', '(xs: collection<any> | value) -> unknown']);
     // Through an alias of the parameter.
     expect(
       value(
         'function f(xs) { let ys = xs\nlet h = (t) => count(t)\nh(ys) }\nf([1, 2])'
-      )[0]
-    ).toBe('2');
-    // A chain of two assigned helpers: the slot of `q` reads the record of
-    // `h`.
-    expect(
-      value(
-        'function f(xs) { h = (t) => count(t)\nq = (a) => h(a)\nq(xs) }\nf([1, 2])'
       )[0]
     ).toBe('2');
     // The last literal assigned before the call is read: an element-wise
@@ -703,7 +699,7 @@ describe('Limitations of the rule, as they behave today', () => {
     ).toBe('2');
     expect(
       value(
-        'function f(xs) { h = (t) => t + 1\nif xs == 0 { let h = (w) => count(w)\n0 }\nlet r = [h(xs)]\nr }\nf([1, 2])'
+        'function f(xs) { let h = (t) => t + 1\nif xs == 0 { let h = (w) => count(w)\n0 }\nlet r = [h(xs)]\nr }\nf([1, 2])'
       )[0]
     ).toBe('[[2],[3]]');
     // A function that a nested block declares with `function` is the callee
@@ -718,14 +714,27 @@ describe('Limitations of the rule, as they behave today', () => {
     // replace the helper with an element-wise one.
     expect(
       value(
-        'function f(xs) { h = (t) => t * 2\nif xs == 0 { h = (t) => count(t) }\nh(xs) }\nf([1, 2])'
+        'function f(xs) { let h = (t) => t * 2\nif xs == 0 { h = (t) => count(t) }\nh(xs) }\nf([1, 2])'
       )
     ).toEqual(['[2,4]', '(xs: unknown) -> unknown']);
     expect(
       value(
-        'function f(xs) { h = (t) => count(t)\nif xs == 0 { h = (t) => [t] }\nh(xs) }\nf([1, 2])'
+        'function f(xs) { let h = (t) => count(t)\nif xs == 0 { h = (t) => [t] }\nh(xs) }\nf([1, 2])'
       )[1]
     ).toBe('(xs: unknown) -> unknown');
+  });
+
+  test('a chain of two local helpers whose parameters are declared lists applies the list whole', () => {
+    // A local function is a variable: nothing is derived for its parameters
+    // from its body or its callees. A parameter declared as a list takes the
+    // list whole; an untyped one maps the call over the list.
+    const ce = new ComputeEngine();
+    expect(
+      epsilValue(
+        ce,
+        'function f(xs) { let h = (t: list) => count(t)\nlet q = (a: list) => h(a)\nq(xs) }\nf([1, 2])'
+      )
+    ).toBe('2');
   });
 
   test('a use through a local assigned AFTER the use is not followed', () => {
@@ -761,96 +770,140 @@ describe('Limitations of the rule, as they behave today', () => {
     ).toBe('2');
   });
 
-  test('a call to a lifted function that the same block assigns is a whole use', () => {
-    // The body of `q` is boxed while `h` has no definition: the call `h(a)`
-    // is bound to the block-local placeholder of `h`. The signature of `q`
-    // reads the definition that `Assign(h, …)` installed when it ran.
+  test('a call to a local function whose parameter is a declared list is a whole use', () => {
+    // A local of a block is a variable that holds a function: the signature
+    // of `q` does not read `h`. A parameter declared as a list takes the
+    // list whole.
     const ce = new ComputeEngine();
-    const fn = (body: MathJsonExpression, p: string): MathJsonExpression => [
-      'Function',
-      body,
-      p,
-    ];
+    const fn = (
+      body: MathJsonExpression,
+      p: MathJsonExpression
+    ): MathJsonExpression => ['Function', body, p];
     const block = (...stmts: MathJsonExpression[]): string =>
       ce
         .box(['Block', ...stmts])
         .evaluate()
         .toString();
-    const count = ['Assign', 'h', fn(['Count', 't'], 't')] as const;
-    const caller = ['Assign', 'q', fn(['h', 'a'], 'a')] as const;
+    const list = (p: string): MathJsonExpression => ['Typed', p, "'list'"];
+    const count = [
+      'Declare',
+      'h',
+      "'unknown'",
+      fn(['Count', 't'], list('t')),
+    ] as const;
+    const caller = [
+      'Declare',
+      'q',
+      "'unknown'",
+      fn(['h', 'a'], list('a')),
+    ] as const;
     expect(block(count, caller, ['q', ['List', 1, 2]])).toBe('2');
     expect(block(count, caller, ['Apply', 'q', ['List', 1, 2]])).toBe('2');
     // A chain of three functions.
     expect(
-      block(count, caller, ['Assign', 'k', fn(['q', 'b'], 'b')], [
-        'k',
-        ['List', 1, 2, 3],
-      ])
+      block(
+        count,
+        caller,
+        ['Declare', 'k', "'unknown'", fn(['q', 'b'], list('b'))],
+        ['k', ['List', 1, 2, 3]]
+      )
     ).toBe('3');
     // The caller `r` puts the value of `h` in a list, so the two bindings
     // give different values: applied to each element, `r([-1, 2])` is
     // `[[h(-1)], [h(2)]]`; bound whole, it is `[h([-1, 2])]`.
-    const wrapper = ['Assign', 'r', fn(['List', ['h', 'a']], 'a')] as const;
+    const wholeWrapper = [
+      'Declare',
+      'r',
+      "'unknown'",
+      fn(['List', ['h', 'a']], list('a')),
+    ] as const;
+    const wrapper = [
+      'Declare',
+      'r',
+      "'unknown'",
+      fn(['List', ['h', 'a']], 'a'),
+    ] as const;
     const callR = ['r', ['List', -1, 2]] as const;
-    expect(block(count, wrapper, callR)).toBe('[2]');
-    // A callee that reads its parameter element-wise keeps the map.
+    expect(block(count, wholeWrapper, callR)).toBe('[2]');
+    // An untyped parameter maps the call over the list.
     expect(
-      block(['Assign', 'h', fn(['Add', 't', 1], 't')], wrapper, callR)
+      block(
+        ['Declare', 'h', "'unknown'", fn(['Add', 't', 1], 't')],
+        wrapper,
+        callR
+      )
     ).toBe('[[0],[3]]');
     // A use with more than one operand is not a whole use.
     expect(
-      block(['Assign', 'h', fn(['Max', 't', 0], 't')], wrapper, callR)
+      block(
+        ['Declare', 'h', "'unknown'", fn(['Max', 't', 0], 't')],
+        wrapper,
+        callR
+      )
     ).toBe('[[0],[2]]');
   });
 
   test('a callee that the block assigns AFTER the caller is read', () => {
-    // The signature of `q` is derived when `Assign(q, …)` runs, before `h`
-    // has a definition. The `Assign` of `h` derives it again
-    // (`afterFunctionAssignment()`, `function-utils.ts`), so the list is
-    // bound whole, as with the two `Assign` in the other order.
+    // A call of a local function applies the value that the local holds when
+    // the call runs, so the order of the two `Declare` statements does not
+    // matter. The parameters are declared lists, so the list is taken whole.
     const ce = new ComputeEngine();
-    const fn = (body: MathJsonExpression, p: string): MathJsonExpression => [
-      'Function',
-      body,
-      p,
-    ];
-    const count = ['Assign', 'h', fn(['Count', 't'], 't')] as const;
-    const caller = ['Assign', 'q', fn(['h', 'a'], 'a')] as const;
+    const fn = (
+      body: MathJsonExpression,
+      p: MathJsonExpression
+    ): MathJsonExpression => ['Function', body, p];
+    const list = (p: string): MathJsonExpression => ['Typed', p, "'list'"];
+    const count = [
+      'Declare',
+      'h',
+      "'unknown'",
+      fn(['Count', 't'], list('t')),
+    ] as const;
+    const caller = [
+      'Declare',
+      'q',
+      "'unknown'",
+      fn(['h', 'a'], list('a')),
+    ] as const;
     const block = (...stmts: MathJsonExpression[]): string =>
       ce
         .box(['Block', ...stmts])
         .evaluate()
         .toString();
     expect(block(caller, count, ['q', ['List', 1, 2]])).toBe('2');
-    // A chain of three functions, each assigned before its callee: the new
-    // signature of `q` derives the signature of `k` again.
-    expect(
-      block(['Assign', 'k', fn(['q', 'b'], 'b')], caller, count, [
-        'k',
-        ['List', 1, 2, 3],
-      ])
-    ).toBe('3');
-    // `top` calls `left` and `right`, and `right` calls `left`: the
-    // signature of `top` is derived again when `left` changes, and again
-    // in a later pass when `right` changes.
+    // A chain of three functions, each assigned before its callee.
     expect(
       block(
-        ['Assign', 'top', fn(['List', ['left', 'a'], ['right', 'a']], 'a')],
-        ['Assign', 'right', fn(['left', 'b'], 'b')],
-        ['Assign', 'left', fn(['base', 'c'], 'c')],
-        ['Assign', 'base', fn(['Count', 't'], 't')],
+        ['Declare', 'k', "'unknown'", fn(['q', 'b'], list('b'))],
+        caller,
+        count,
+        ['k', ['List', 1, 2, 3]]
+      )
+    ).toBe('3');
+    // `top` calls `left` and `right`, and `right` calls `left`.
+    expect(
+      block(
+        [
+          'Declare',
+          'top',
+          "'unknown'",
+          fn(['List', ['left', 'a'], ['right', 'a']], list('a')),
+        ],
+        ['Declare', 'right', "'unknown'", fn(['left', 'b'], list('b'))],
+        ['Declare', 'left', "'unknown'", fn(['base', 'c'], list('c'))],
+        ['Declare', 'base', "'unknown'", fn(['Count', 't'], list('t'))],
         ['top', ['List', 1, 2, 3]]
       )
     ).toBe('[3,3]');
-    // A callee that reads its parameter element-wise keeps the map.
+    // A callee that reads its parameter element-wise gives the same value.
     expect(
-      block(caller, ['Assign', 'h', fn(['Multiply', 2, 't'], 't')], [
-        'q',
-        ['List', 1, 2],
-      ])
+      block(
+        caller,
+        ['Declare', 'h', "'unknown'", fn(['Multiply', 2, 't'], 't')],
+        ['q', ['List', 1, 2]]
+      )
     ).toBe('[2,4]');
-    // The block is the body of a function: each call gives the locals new
-    // bindings, and each call derives the signature of its `q` again.
+    // The block is the body of a function: each call runs it.
     ce.assign(
       'outer',
       ce.box(fn(['Block', caller, count, ['q', ['List', 1, 2, 'x']]], 'x'))
@@ -859,25 +912,32 @@ describe('Limitations of the rule, as they behave today', () => {
     expect(ce.box(['outer', 6]).evaluate().toString()).toBe('3');
   });
 
-  test('a caller derived again with a callee that has a scope effect gives the error of the other order', () => {
-    // The new definition of `q` writes outside a function and does not
-    // declare `scope`: `q` keeps its previous definition, and the error is
-    // the value of the block, with the two `Assign` in either order.
+  test('a callee that has a scope effect gives the same value in either order', () => {
+    // `q` calls a function with a `scope` effect. A local that a `Declare`
+    // initializes is not held to the default-`!scope` ceiling
+    // (`docs/EFFECTS-MODEL.md`, "Scope is opt-in"), so `q` takes the list
+    // whole, with the two `Declare` in either order.
     const ce = new ComputeEngine();
-    const caller = ['Assign', 'q', ['Function', ['h', 'a'], 'a']] as const;
+    const caller = [
+      'Declare',
+      'q',
+      "'unknown'",
+      ['Function', ['h', 'a'], ['Typed', 'a', "'list'"]],
+    ] as const;
     const callee = [
-      'Assign',
+      'Declare',
       'h',
+      "'unknown'",
       [
         'Function',
         ['Typed', ['Count', 't'], "'(unknown) scope -> unknown'"],
-        't',
+        ['Typed', 't', "'list'"],
       ],
     ] as const;
     const call = ['q', ['List', 1, 2]] as const;
     const qFirst = ce.box(['Block', caller, callee, call]).evaluate();
     const hFirst = ce.box(['Block', callee, caller, call]).evaluate();
-    expect(qFirst.operator).toBe('Error');
+    expect(qFirst.toString()).toBe('2');
     expect(qFirst.toString()).toBe(hFirst.toString());
   });
 
@@ -886,8 +946,18 @@ describe('Limitations of the rule, as they behave today', () => {
     const value = await ce
       .box([
         'Block',
-        ['Assign', 'q', ['Function', ['h', 'a'], 'a']],
-        ['Assign', 'h', ['Function', ['Count', 't'], 't']],
+        [
+          'Declare',
+          'q',
+          "'unknown'",
+          ['Function', ['h', 'a'], ['Typed', 'a', "'list'"]],
+        ],
+        [
+          'Declare',
+          'h',
+          "'unknown'",
+          ['Function', ['Count', 't'], ['Typed', 't', "'list'"]],
+        ],
         ['q', ['List', 1, 2]],
       ])
       .evaluateAsync();

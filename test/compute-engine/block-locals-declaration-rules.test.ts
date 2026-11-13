@@ -4,9 +4,10 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { explainErrorCode } from '../../src/epsil/error-explanations';
 
 // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
-// value, a first assignment is at the own level of a block, an assignment is
-// a statement and not an operand, and a reassignment keeps the type of the
-// local. Each broken rule is a static error in place in the canonical form.
+// value, a local is declared at the own level of a block and an assignment
+// writes a declared variable, an assignment is a statement and not an
+// operand, and a reassignment keeps the type of the local. Each broken rule
+// is a static error in place in the canonical form.
 
 function run(expr: MathJsonExpression): {
   canonical: string;
@@ -27,7 +28,7 @@ describe('A DECLARATION HAS A VALUE', () => {
     const r = run([
       'Block',
       ['Declare', 'a', "'integer'", 1],
-      ['Assign', 'b', ['Add', 'a', 1]],
+      ['Declare', 'b', "'unknown'", ['Add', 'a', 1]],
       'b',
     ]);
     expect(r.value).toBe('2');
@@ -53,14 +54,16 @@ describe('A DECLARATION HAS A VALUE', () => {
     );
   });
 
-  test('the signature of a function defined in the same block needs no value', () => {
+  test('the signature of a function defined at the top level of a program needs no value', () => {
+    // In a block, the function statement declares the local a second time.
     const r = run([
       'Block',
       ['Declare', 'f', "'(integer) -> integer'"],
       ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], 'x']],
       ['f', 2],
     ]);
-    expect(r.value).toBe('3');
+    expect(r.type).toBe('error');
+    expect(r.canonical).toContain('variable-redeclaration');
     expect(
       executeEpsil(
         new ComputeEngine(),
@@ -126,11 +129,11 @@ describe('A DECLARATION HAS A VALUE', () => {
   });
 });
 
-describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
+describe('A LOCAL IS DECLARED AT THE OWN LEVEL OF A BLOCK', () => {
   test('an accumulator declared before a loop', () => {
     const r = run([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', 'i']],
@@ -144,17 +147,26 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
   test('a reassignment in a branch', () => {
     const r = run([
       'Block',
-      ['Assign', 'a', 1],
+      ['Declare', 'a', "'unknown'", 1],
       ['If', 'True', ['Assign', 'a', 2]],
       'a',
     ]);
     expect(r.value).toBe('2');
   });
 
-  test('a first assignment in a branch', () => {
+  test('an assignment in a branch to a name that is not declared', () => {
     const r = run(['Block', ['If', 'True', ['Assign', 'a', 1]], 'a']);
     expect(r.canonical).toContain(
-      'Error(ErrorCode("first-assignment-in-branch", "a"))'
+      'Error(ErrorCode("assignment-to-undeclared-variable", "a"))'
+    );
+    // A declaration in a branch is below a statement.
+    const d = run([
+      'Block',
+      ['If', 'True', ['Declare', 'a', "'unknown'", 1]],
+      'a',
+    ]);
+    expect(d.canonical).toContain(
+      'Error(ErrorCode("declaration-below-statement", "a"))'
     );
   });
 
@@ -163,10 +175,10 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
       executeEpsil(new ComputeEngine(), source).diagnostics.map(
         (d) => d.message[3]
       );
-    // A first assignment in a case.
+    // An assignment in a case to a name that is not declared.
     expect(
       run('function f(v) {\n match v {\n 1 => do { t = 1 }\n _ => 0\n }\n t\n}\nf(1)')
-    ).toEqual(['first-assignment-in-branch']);
+    ).toEqual(['assignment-to-undeclared-variable']);
     // A reassignment of a local declared before the `Match`, a `let` local
     // of the case, a capture of the pattern, and a local of a function
     // literal in the case are valid.
@@ -174,24 +186,32 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
       'function f(v) {\n let t = 0\n match v {\n 1 => do { t = 1 }\n _ => 0\n }\n t\n}\nf(1)',
       'function f(v) {\n match v {\n 1 => do { let u = 2\n u = u + 1\n u }\n _ => 0\n }\n}\nf(1)',
       'function f(v) {\n match v {\n n => do { n = n + 1\n n }\n }\n}\nf(4)',
-      'function f(v) {\n let g = (x) => x\n match v {\n 1 => do { g = (x) => do { w = x\n w }\n g(2) }\n _ => 0\n }\n}\nf(1)',
+      'function f(v) {\n let g = (x) => x\n match v {\n 1 => do { g = (x) => do { let w = x\n w }\n g(2) }\n _ => 0\n }\n}\nf(1)',
     ])
       expect(run(source)).toEqual([]);
   });
 
-  test('a first assignment in a block of a branch', () => {
+  test('an assignment in a block of a branch to a name that is not declared', () => {
     const r = run([
       'Block',
       ['If', 'True', ['Block', ['Assign', 'a', 1]]],
       'a',
     ]);
     expect(r.canonical).toContain(
-      'Error(ErrorCode("first-assignment-in-branch", "a"))'
+      'Error(ErrorCode("assignment-to-undeclared-variable", "a"))'
     );
+    // A declaration at the own level of a block of a branch is valid.
+    expect(
+      run([
+        'Block',
+        ['If', 'True', ['Block', ['Declare', 'a', "'unknown'", 1]]],
+        'a',
+      ]).canonical
+    ).not.toContain('Error');
   });
 
-  test('a first assignment in a branch at the top level, in MathJSON', () => {
-    const error = 'Error(ErrorCode("first-assignment-in-branch", "a"))';
+  test('an assignment in a branch at the top level, in MathJSON', () => {
+    const error = 'Error(ErrorCode("assignment-to-undeclared-variable", "a"))';
     for (const expr of [
       ['If', 'True', ['Assign', 'a', 1]],
       ['Which', 'True', ['Assign', 'a', 1]],
@@ -203,8 +223,7 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
       expect(r.canonical).toContain(error);
       expect(r.value).toBe(error);
     }
-    // A name that the engine declares is not a first assignment: the
-    // assignment writes it.
+    // An assignment in a branch writes a name that the engine declares.
     for (const declare of [
       (ce: ComputeEngine) => ce.declare('a', 'integer'),
       (ce: ComputeEngine) => ce.assign('a', 5),
@@ -217,7 +236,7 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
       e.evaluate();
       expect(ce.box('a').evaluate().toString()).toBe('1');
     }
-    // A parameter of a function literal is not a first assignment.
+    // An assignment in a function literal writes its parameter.
     expect(
       run([
         'Function',
@@ -227,7 +246,7 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
     ).not.toContain('Error');
   });
 
-  test('a first assignment in a branch at the top level, in Epsil', () => {
+  test('an assignment in a branch at the top level, in Epsil', () => {
     const codes = (source: string) =>
       executeEpsil(new ComputeEngine(), source).diagnostics.map(
         (d) => d.message[3]
@@ -238,14 +257,14 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
       'while false { w = 1 }\n0',
       'match 1 {\n 1 => do { t = 1 }\n _ => 0\n}\nt',
     ])
-      expect(codes(source)).toEqual(['first-assignment-in-branch']);
-    // A name of the session, assigned by an earlier top-level statement,
-    // is written by an assignment in a branch. A reassignment at the top
-    // level keeps the interpreter rules and can change the type.
+      expect(codes(source)).toEqual(['assignment-to-undeclared-variable']);
+    // A name declared by an earlier top-level statement is written by an
+    // assignment in a branch. A reassignment at the top level keeps the
+    // interpreter rules and can change the type.
     for (const [source, value] of [
-      ['let c = true\na = 1\nif c { a = 2 }\na', '2'],
-      ['let c = false\na = 1\nif c { a = 2 }\na', '1'],
-      ['a = 1\na = "x"\na', '"x"'],
+      ['let c = true\nlet a = 1\nif c { a = 2 }\na', '2'],
+      ['let c = false\nlet a = 1\nif c { a = 2 }\na', '1'],
+      ['let a = 1\na = "x"\na', '"x"'],
     ]) {
       const r = executeEpsil(new ComputeEngine(), source);
       expect(r.diagnostics).toEqual([]);
@@ -256,7 +275,7 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
   test('a read before the declaration', () => {
     const r = run([
       'Block',
-      ['Assign', 'b', 'k'],
+      ['Declare', 'b', "'unknown'", 'k'],
       ['Declare', 'k', "'integer'", 2],
       'b',
     ]);
@@ -264,8 +283,9 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
   });
 
   test('the value of a declaration reads the name outside the block', () => {
-    // A first `Assign` at the level of the block is the declaration, so its
-    // value reads the name as the value of a `Declare` does.
+    // An `Assign` does not declare a local: with no `x` in scope it is an
+    // error. The first `:=` of a LaTeX block is a `Declare`, so its value
+    // reads the name outside the block.
     const assign = run([
       'Block',
       ['Assign', 'x', ['Add', 'x', 1]],
@@ -276,19 +296,25 @@ describe('A FIRST ASSIGNMENT IS AT THE OWN LEVEL OF A BLOCK', () => {
       ['Declare', 'x', "'unknown'", ['Add', 'x', 1]],
       ['Multiply', 2, 'x'],
     ]);
-    expect(assign.canonical).not.toContain('Error');
-    expect(assign.value).toBe(declare.value);
-    expect(assign.type).toBe(declare.type);
+    expect(assign.canonical).toContain(
+      'Error(ErrorCode("assignment-to-undeclared-variable", "x"))'
+    );
+    expect(declare.canonical).not.toContain('Error');
     const ce = new ComputeEngine();
     expect(ce.parse('x \\coloneq x+1; 2x').evaluate().toString()).toBe(
       declare.value
     );
   });
 
-  test('a read in a function body before the first assignment', () => {
+  test('a read in a function body before the declaration', () => {
     const r = run([
       'Function',
-      ['Block', ['Assign', 'u', 't'], ['Assign', 't', 'k'], 'u'],
+      [
+        'Block',
+        ['Declare', 'u', "'unknown'", 't'],
+        ['Declare', 't', "'unknown'", 'k'],
+        'u',
+      ],
       'k',
     ]);
     expect(r.canonical).toContain(
@@ -301,7 +327,8 @@ describe('AN ASSIGNMENT IS A STATEMENT', () => {
   test('an assignment as an operand', () => {
     const r = run([
       'Block',
-      ['Assign', 'a', ['Add', 'q', ['Assign', 'w', 2]]],
+      ['Declare', 'w', "'unknown'", 0],
+      ['Declare', 'a', "'unknown'", ['Add', 'q', ['Assign', 'w', 2]]],
       'a',
     ]);
     expect(r.value).toBe('Error(ErrorCode("assignment-in-operand", "w"))');
@@ -317,7 +344,7 @@ describe('AN ASSIGNMENT IS A STATEMENT', () => {
   test('an assignment as the condition of an `If` or a `Which`', () => {
     const ifCondition = run([
       'Block',
-      ['Assign', 'flag', 'False'],
+      ['Declare', 'flag', "'unknown'", 'False'],
       ['If', ['Assign', 'flag', ['Greater', 'x', 0]], 1, 2],
     ]);
     expect(ifCondition.canonical).toContain(
@@ -325,7 +352,7 @@ describe('AN ASSIGNMENT IS A STATEMENT', () => {
     );
     const whichCondition = run([
       'Block',
-      ['Assign', 'a', 'False'],
+      ['Declare', 'a', "'unknown'", 'False'],
       ['Which', ['Assign', 'a', ['Greater', 'x', 0]], 1, 'True', 2],
     ]);
     expect(whichCondition.canonical).toContain(
@@ -335,7 +362,7 @@ describe('AN ASSIGNMENT IS A STATEMENT', () => {
     expect(
       run([
         'Block',
-        ['Assign', 'a', 0],
+        ['Declare', 'a', "'unknown'", 0],
         ['If', ['Greater', 'x', 0], ['Assign', 'a', 1], ['Assign', 'a', 2]],
         ['Which', ['Greater', 'x', 1], ['Assign', 'a', 3], 'True', 0],
         'a',
@@ -346,8 +373,8 @@ describe('AN ASSIGNMENT IS A STATEMENT', () => {
   test('an assignment as the indexing set of a `Loop`', () => {
     const r = run([
       'Block',
-      ['Assign', 's', 0],
-      ['Assign', 'r', ['Range', 1, 2]],
+      ['Declare', 's', "'unknown'", 0],
+      ['Declare', 'r', "'unknown'", ['Range', 1, 2]],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', 'i']],
@@ -368,15 +395,23 @@ describe('AN ASSIGNMENT IS A STATEMENT', () => {
   });
 
   test('a block whose last statement is an assignment is `Nothing`', () => {
-    const r = run(['Block', ['Assign', 'b', 2]]);
+    const r = run([
+      'Block',
+      ['Declare', 'b', "'unknown'", 0],
+      ['Assign', 'b', 2],
+    ]);
     expect(r.type).toBe('nothing');
     expect(r.value).toBe('"Nothing"');
   });
 
   test('the value `Nothing` is kept in a list', () => {
-    expect(run(['List', 1, ['Block', ['Assign', 'b', 2]]]).value).toBe(
-      '[1,"Nothing"]'
-    );
+    expect(
+      run([
+        'List',
+        1,
+        ['Block', ['Declare', 'b', "'unknown'", 0], ['Assign', 'b', 2]],
+      ]).value
+    ).toBe('[1,"Nothing"]');
   });
 
   test('a top-level assignment keeps its value', () => {
@@ -388,7 +423,7 @@ describe('A REASSIGNMENT KEEPS THE TYPE OF THE LOCAL', () => {
   test('a value of another type is a static error', () => {
     const r = run([
       'Block',
-      ['Assign', 'a', 1],
+      ['Declare', 'a', "'unknown'", 1],
       ['Assign', 'a', "'x'"],
       'a',
     ]);
@@ -400,13 +435,18 @@ describe('A REASSIGNMENT KEEPS THE TYPE OF THE LOCAL', () => {
 
   test('a number local accepts a real and an expression of type number', () => {
     expect(
-      run(['Block', ['Assign', 's', 0], ['Assign', 's', ['Add', 's', 0.5]], 's'])
+      run([
+        'Block',
+        ['Declare', 's', "'unknown'", 0],
+        ['Assign', 's', ['Add', 's', 0.5]],
+        's',
+      ])
         .value
     ).toBe('0.5');
     expect(
       run([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         ['Assign', 's', ['Add', 's', ['Sqrt', 'x']]],
         's',
       ]).type
@@ -449,7 +489,12 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
       epsil('function h3(n: integer) { let m: integer = n; m = m / 2; m }\nh3(4)')
     ).toEqual({ value: '2', codes: [] });
     expect(
-      run(['Block', ['Assign', 'a', 1], ['Assign', 'a', "'x'"], 'a']).type
+      run([
+        'Block',
+        ['Declare', 'a', "'unknown'", 1],
+        ['Assign', 'a', "'x'"],
+        'a',
+      ]).type
     ).toBe('error');
   });
 
@@ -486,7 +531,12 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
 
   test('a function value is checked against the type of the local', () => {
     expect(
-      run(['Block', ['Assign', 'a', 1], ['Assign', 'a', ['Function', 'x', 'x']], 'a'])
+      run([
+        'Block',
+        ['Declare', 'a', "'unknown'", 1],
+        ['Assign', 'a', ['Function', 'x', 'x']],
+        'a',
+      ])
         .canonical
     ).toContain(
       'Error(ErrorCode("assignment-type-mismatch", "a", "number", "function"))'
@@ -510,7 +560,11 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
             'ys',
             [
               'Comprehension',
-              ['Block', ['Assign', 't', ['Power', 'x', 2]], ['Add', 't', 1]],
+              [
+                'Block',
+                ['Declare', 't', "'unknown'", ['Power', 'x', 2]],
+                ['Add', 't', 1],
+              ],
               ['Element', 'x', ['List', 1, 2, 3]],
             ],
           ],
@@ -533,7 +587,11 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
             's',
             [
               'Sum',
-              ['Block', ['Assign', 't', ['Power', 'k', 2]], ['Add', 't', 1]],
+              [
+                'Block',
+                ['Declare', 't', "'unknown'", ['Power', 'k', 2]],
+                ['Add', 't', 1],
+              ],
               ['Limits', 'k', 1, 3],
             ],
           ],
@@ -553,26 +611,31 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
         1,
       ]).type
     ).toBe('nothing');
-    expect(
-      run([
-        'Apply',
-        ['Function', ['Block', ['Assign', 'y', ['Add', 'k', 1]]], 'k'],
-        1,
-      ]).type
-    ).toBe('nothing');
+    // An assignment does not declare a local of the body.
+    const assigned = run([
+      'Apply',
+      ['Function', ['Block', ['Assign', 'y', ['Add', 'k', 1]]], 'k'],
+      1,
+    ]);
+    expect(assigned.type).toBe('error');
+    expect(assigned.canonical).toContain(
+      'Error(ErrorCode("assignment-to-undeclared-variable", "y"))'
+    );
   });
 
-  test('the explanation keeps the value of a first assignment valid', () => {
+  test('the explanation keeps the initial value of a declaration valid', () => {
     const text = explainErrorCode('read-before-declaration') ?? '';
     expect(text).not.toContain('before it has a value');
-    expect(text).toContain('The value of a first assignment is not such a use');
-    expect(epsil('function g(k) { t = t + 1; t }\ng(1)').codes).toEqual([]);
+    expect(text).toContain('The initializer of a `let` is not such a use');
+    expect(epsil('function g(k) { let t = t + 1; t }\ng(1)').codes).toEqual(
+      []
+    );
   });
 
   test('a static error does not hide a run-time error with the same code in another statement', () => {
     expect(
       epsil(
-        'do { a = 1; a = "x"; a }\nError(ErrorCode("assignment-type-mismatch", "b", "number", "string"))\n1'
+        'do { let a = 1; a = "x"; a }\nError(ErrorCode("assignment-type-mismatch", "b", "number", "string"))\n1'
       ).codes
     ).toEqual(['assignment-type-mismatch', 'runtime-error']);
   });

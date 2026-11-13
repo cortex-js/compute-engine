@@ -111,9 +111,9 @@ describe('BINDING UNITS: A NAME DOES NOT READ THE LOCAL OF A BLOCK IT WAS NOT WR
     expect(r.isSame(ce.parse('x + 6'))).toBe(true);
   });
 
-  test('a free name that is an operand of a Block reads its local', () => {
-    // The host builds the block from boxed operands: the `b` of `h(b)` is
-    // in the block, and reads the local `b`.
+  test('a free name boxed before a Block does not read its local', () => {
+    // The host builds the block from boxed operands: the `b` of `h(b)` was
+    // boxed outside the block and keeps that meaning (`docs/plans/2026-11-11-bound-once-spec.md`, section 11).
     const ce = engine();
     ce.declare('h', 'function');
     ce.assign('h', ce.box(['Function', ['Multiply', 2, 'u'], 'u']));
@@ -121,7 +121,7 @@ describe('BINDING UNITS: A NAME DOES NOT READ THE LOCAL OF A BLOCK IT WAS NOT WR
       ce.box(['Declare', 'b', "'unknown'", 3]),
       ce.function('h', [ce.symbol('b')]),
     ]);
-    expect(block.evaluate().json).toBe(6);
+    expect(block.evaluate().json).toEqual(['Multiply', 2, 'b']);
   });
 
   test('the type of a free name of a stored value is not the type of a Block local', () => {

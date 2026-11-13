@@ -387,7 +387,11 @@ describe('COMPILED PARAMETER DEFAULTS: INTERVAL AND GLSL', () => {
     const values = run(ce, map, 'interval-js', { y: 3 }).value as unknown[];
     expect(values.map(point)).toEqual([6, 4]);
     expect(interpreted(ce, map, { y: 3 })).toEqual(['List', 6, 4]);
-    const local = ['Block', ['Assign', 'g', defaulted(2)], ['g', 'y']];
+    const local = [
+      'Block',
+      ['Declare', 'g', "'unknown'", defaulted(2)],
+      ['g', 'y'],
+    ];
     expect(point(run(ce, local, 'interval-js', { y: 3 }).value)).toBe(6);
   });
 

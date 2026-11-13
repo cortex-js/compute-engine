@@ -206,9 +206,7 @@ describe('definition order does not change semantics', () => {
     test('a definition in a local scope is repaired in that scope', () => {
       const ce = new ComputeEngine();
       const result = ce
-        .parse(
-          '\\operatorname{Block}(g(t)\\coloneq 2a(t), a(t)\\coloneq t^2, g(3))'
-        )
+        .parse('g(t)\\coloneq 2a(t); a(t)\\coloneq t^2; g(3)')
         .evaluate();
       expect(result.toString()).toEqual('18');
     });
@@ -466,25 +464,24 @@ describe('definition order does not change semantics', () => {
   });
 
   //
-  // 9/ A rebuilt literal keeps its assignment locals. An assignment in a
-  //    function body to a name that no enclosing scope declares makes a local
-  //    of the block, and the decision does not change when a global of the
-  //    same name is made later.
+  // 9/ A rebuilt literal keeps its locals. A `Declare` in a function body
+  //    makes a local of the block, and a rebuild after a global of the same
+  //    name is made keeps it a local.
   //
-  describe('a rebuilt literal keeps its assignment locals', () => {
+  describe('a rebuilt literal keeps its locals', () => {
     const fn = (body: unknown, ...params: string[]): unknown => [
       'Function',
       body,
       ...params,
     ];
-    /** `h = n ↦ { g := z ↦ 0; z ↦ g(z) + n }` */
+    /** `h = n ↦ { let g = z ↦ 0; z ↦ g(z) + n }` */
     const H = [
       'Assign',
       'h',
       fn(
         [
           'Block',
-          ['Assign', 'g', fn(0, 'z')],
+          ['Declare', 'g', "'unknown'", fn(0, 'z')],
           fn(['Add', ['g', 'z'], 'n'], 'z'),
         ],
         'n'
@@ -532,8 +529,7 @@ describe('definition order does not change semantics', () => {
 
     test('a rebuild for another name keeps the local', () => {
       // `other` starts the rebuild. By then the global `g` exists, and the
-      // rebuild still reads the assignment to `g` as the declaration of a
-      // local.
+      // rebuild still reads the declaration of `g` as a local.
       const results = values(
         [
           'Assign',
@@ -541,7 +537,7 @@ describe('definition order does not change semantics', () => {
           fn(
             [
               'Block',
-              ['Assign', 'g', fn(0, 'z')],
+              ['Declare', 'g', "'unknown'", fn(0, 'z')],
               ['Add', ['g', 'n'], ['other', 'n']],
             ],
             'n'
@@ -570,10 +566,15 @@ describe('definition order does not change semantics', () => {
             [
               'Block',
               [
-                'Assign',
+                'Declare',
                 'k',
+                "'unknown'",
                 fn(
-                  ['Block', ['Assign', 'g', fn('m', 'z')], ['g', 'm']],
+                  [
+                    'Block',
+                    ['Declare', 'g', "'unknown'", fn('m', 'z')],
+                    ['g', 'm'],
+                  ],
                   'm'
                 ),
               ],
@@ -602,7 +603,7 @@ describe('definition order does not change semantics', () => {
           fn(
             [
               'Block',
-              ['Assign', 'a', 1],
+              ['Declare', 'a', "'unknown'", 1],
               ['Block', ['Assign', 'a', 2]],
               ['Add', 'a', ['other', 'n']],
             ],
@@ -619,7 +620,18 @@ describe('definition order does not change semantics', () => {
     });
 
     test('a global that exists when the function is written is an outer write', () => {
-      const [, assign] = values(['Assign', 'g', fn(9, 't')], H);
+      const [, assign] = values(['Assign', 'g', fn(9, 't')], [
+        'Assign',
+        'h',
+        fn(
+          [
+            'Block',
+            ['Assign', 'g', fn(0, 'z')],
+            fn(['Add', ['g', 'z'], 'n'], 'z'),
+          ],
+          'n'
+        ),
+      ]);
       expect(JSON.stringify(assign)).toContain(
         'writes outside a function require a declared `scope` effect'
       );
@@ -630,7 +642,7 @@ describe('definition order does not change semantics', () => {
       ce.box([
         'Assign',
         'h',
-        fn(['Block', ['Assign', 't', ['Add', 'n', 1]], ['Add', 't', ['other', 'n']]], 'n'),
+        fn(['Block', ['Declare', 't', "'unknown'", ['Add', 'n', 1]], ['Add', 't', ['other', 'n']]], 'n'),
       ] as never).evaluate();
       ce.assign('t', 10);
       ce.box(['Assign', 'other', fn(['Multiply', 2, 'u'], 'u')] as never).evaluate();

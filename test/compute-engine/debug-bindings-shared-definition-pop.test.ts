@@ -96,6 +96,9 @@ function detachedScope(ce: ComputeEngine) {
   return { x, def, copy };
 }
 
+// The frames below are popped as the engine pops an evaluation frame (a
+// block, a loop): such a pop disposes the definitions that no other live
+// context holds. `ce.popScope()` keeps the definitions of its scope.
 describe('A pop leaves a definition that another live context holds', () => {
   for (const debug of [true, false]) {
     const flag = debug ? 'debug check on' : 'debug check off';
@@ -106,11 +109,11 @@ describe('A pop leaves a definition that another live context holds', () => {
       expect(def.disposed).toBe(false);
       ce.pushScope(copy());
       ce.pushScope(copy());
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(false);
       expect(x.evaluate().toString()).toBe('5');
       // The pop of the last context that holds the definition ends it.
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(true);
       if (debug) expect(() => x.evaluate()).toThrow(/discarded scope/);
     });
@@ -125,10 +128,10 @@ describe('A pop leaves a definition that another live context holds', () => {
       const def = x.valueDefinition!;
       const S = ce.context.lexicalScope;
       ce.pushScope({ parent: S, bindings: new Map(S.bindings) });
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(false);
       expect(x.evaluate().toString()).toBe('5');
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(true);
       if (debug) expect(() => x.evaluate()).toThrow(/discarded scope/);
     });
@@ -139,12 +142,12 @@ describe('A pop leaves a definition that another live context holds', () => {
       ce.pushScope(copy());
       expect(holders(def)).toBe(1);
       ce.context.lexicalScope.bindings.delete('x');
-      ce.popScope();
+      ce._popEvalContext();
       expect(holders(def)).toBe(0);
       // The pop does not dispose a definition that its scope no longer holds.
       expect(def.disposed).toBe(false);
       ce.pushScope(copy());
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(true);
     });
 
@@ -161,7 +164,7 @@ describe('A pop leaves a definition that another live context holds', () => {
         'x',
         second.copy().bindings.get('x')!
       );
-      ce.popScope();
+      ce._popEvalContext();
       expect([holders(old), holders(replacement)]).toEqual([0, 0]);
       // The pop disposes the definition that its scope holds, not the one
       // that was replaced.
@@ -175,7 +178,7 @@ describe('A pop leaves a definition that another live context holds', () => {
       const below = ce.contextStack;
       ce.pushScope(copy());
       ce.pushScope(copy());
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(false);
       ce.contextStack = below;
       expect(holders(def)).toBe(0);
@@ -188,7 +191,7 @@ describe('A pop leaves a definition that another live context holds', () => {
       const { def, copy } = detachedScope(ce);
       ce.pushScope(copy());
       const saved = ce.contextStack;
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(true);
       ce.contextStack = saved;
       expect(holders(def)).toBe(0);
@@ -215,7 +218,7 @@ describe('A pop leaves a definition that another live context holds', () => {
       scope.bindings.set('y', scope.bindings.get('x')!);
       ce.pushScope(scope);
       expect(holders(def)).toBe(1);
-      ce.popScope();
+      ce._popEvalContext();
       expect(holders(def)).toBe(0);
       expect(def.disposed).toBe(true);
     });
@@ -245,7 +248,7 @@ describe('A pop leaves a definition that another live context holds', () => {
       // nothing, and the pop of the upper frame ends the definition.
       ce.contextStack = [...below, top];
       expect(def.disposed).toBe(false);
-      ce.popScope();
+      ce._popEvalContext();
       expect(def.disposed).toBe(true);
     });
 
@@ -254,7 +257,7 @@ describe('A pop leaves a definition that another live context holds', () => {
       const { def, copy } = detachedScope(ce);
       ce._inScope(copy(), () => {
         ce.pushScope(copy());
-        ce.popScope();
+        ce._popEvalContext();
       });
       // `inScope` pops its context without disposing anything, so the pop
       // inside it disposes the definition.
@@ -312,9 +315,36 @@ describe('A pop leaves a definition that another live context holds', () => {
       expect(seen.every((held) => held)).toBe(true);
     });
   }
+
+  test.each([false, true])(
+    'a host scope that keeps its definitions, popped after another frame of the same scope (debug %s)',
+    (debug) => {
+      const ce = new ComputeEngine();
+      (ce as unknown as { _debugBindings: boolean })._debugBindings = debug;
+      const scope: Scope = {
+        parent: ce.context.lexicalScope,
+        bindings: new Map(),
+      };
+      ce.pushScope(scope);
+      ce.declare('x', { type: 'integer', value: 5 });
+      const e = ce.box(['Add', 'x', 1]);
+      // A frame of the same scope that does not keep its definitions: its
+      // pop leaves the definition to the host scope, which still holds it.
+      ce._pushEvalContext(scope);
+      ce._popEvalContext();
+      ce.popScope();
+      const def = (scope.bindings.get('x') as { value: { disposed: boolean } })
+        .value;
+      expect(def.disposed).toBe(false);
+      expect(e.evaluate().json).toBe(6);
+    }
+  );
 });
 
-describe('The pop of an asynchronous Sum puts the tombstones back', () => {
+// The index of a `Sum` is a static definition; its value belongs to one
+// evaluation of the sum (an activation). Read after the sum, it has no
+// value, and the pop of the activation does not tombstone it (`docs/plans/2026-11-11-bound-once-spec.md`, section 11).
+describe('An index read after its Sum has no value', () => {
   /** A `Sum` and the symbol `k` of its body. */
   function sumAndIndex(ce: ComputeEngine) {
     const e = ce.box(['Sum', ['Multiply', 'k', 2], ['Limits', 'k', 1, 3]]);
@@ -322,18 +352,18 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
     return { e, k };
   }
 
-  test('a read of the index after evaluate() is reported', () => {
+  test('a read of the index after evaluate()', () => {
     const ce = engine();
     const { e, k } = sumAndIndex(ce);
     expect(e.evaluate().toString()).toBe('12');
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
-  test('a read of the index after evaluateAsync() is reported', async () => {
+  test('a read of the index after evaluateAsync()', async () => {
     const ce = engine();
     const { e, k } = sumAndIndex(ce);
     expect((await e.evaluateAsync()).toString()).toBe('12');
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
   test('evaluate(), then evaluateAsync(), then evaluate()', async () => {
@@ -342,7 +372,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
     expect(e.evaluate().toString()).toBe('12');
     expect((await e.evaluateAsync()).toString()).toBe('12');
     expect(e.evaluate().toString()).toBe('12');
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
   test('two asynchronous evaluations at the same time, then evaluate()', async () => {
@@ -351,14 +381,14 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
     const [a, b] = await Promise.all([e.evaluateAsync(), e.evaluateAsync()]);
     expect([a.toString(), b.toString()]).toEqual(['12', '12']);
     expect(e.evaluate().toString()).toBe('12');
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
   test('a Sum with a Block body, evaluated, then evaluated asynchronously', async () => {
     const ce = engine();
     const e = ce.box([
       'Sum',
-      ['Block', ['Assign', 't', ['Multiply', 2, 'k']], 't'],
+      ['Block', ['Declare', 't', "'unknown'", ['Multiply', 2, 'k']], 't'],
       ['Tuple', 'k', 1, 3],
     ]);
     expect(e.evaluate().toString()).toBe('12');
@@ -383,14 +413,14 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
     // The synchronous evaluation ends while the asynchronous one is
     // suspended: a read of the index after it is reported.
     e.evaluate();
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
     // The suspended evaluation reads its own index: no report.
     release();
     expect((await pending).toString()).toBe('6');
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
-  test('an asynchronous evaluation that never ends does not turn the check off', () => {
+  test('an asynchronous evaluation that never ends', () => {
     const ce = engine();
     ce.declare('never', {
       signature: '(integer) -> integer',
@@ -400,7 +430,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
     const k = e.op1.ops!.find((x) => x.symbol === 'k')!;
     void e.evaluateAsync();
     e.evaluate();
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
   test('a nested Sum evaluated asynchronously, twice at the same time', async () => {
@@ -417,7 +447,7 @@ describe('The pop of an asynchronous Sum puts the tombstones back', () => {
 });
 
 describe('The debug check and overlapping asynchronous evaluations', () => {
-  test('evaluate(), then a pending evaluateAsync(): a dead read is reported', () => {
+  test('evaluate(), then a pending evaluateAsync(): the index has no value', () => {
     const ce = engine();
     ce.declare('never', {
       signature: '(integer) -> integer',
@@ -427,7 +457,7 @@ describe('The debug check and overlapping asynchronous evaluations', () => {
     const k = e.op1.ops!.find((x) => x.symbol === 'k')!;
     e.evaluate();
     void e.evaluateAsync();
-    expect(() => k.evaluate()).toThrow(/discarded scope/);
+    expect(k.evaluate().toString()).toBe('k');
   });
 
   test('two overlapping evaluateAsync() of a node that reads a constant', async () => {

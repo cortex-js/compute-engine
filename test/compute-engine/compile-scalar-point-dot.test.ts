@@ -23,8 +23,8 @@ function fixture(value: MathJsonExpression = ['Add', 'u', 1]) {
       'Function',
       [
         'Block',
-        // The local is assigned first at the level of the block.
-        ['Assign', 'q', ['angle', 'u']],
+        // The local is declared at the level of the block.
+        ['Declare', 'q', "'unknown'", ['angle', 'u']],
         ['Tuple', ['Cos', 'q'], ['Sin', 'q']],
       ],
       'u',
@@ -132,8 +132,8 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
         'Function',
         [
           'Block',
-          // The local is assigned first at the level of the block.
-          ['Assign', 'q', ['angle', 'P']],
+          // The local is declared at the level of the block.
+          ['Declare', 'q', "'unknown'", ['angle', 'P']],
           ['Tuple', ['Cos', 'q'], ['Sin', 'q']],
         ],
         'P',

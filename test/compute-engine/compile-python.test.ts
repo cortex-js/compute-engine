@@ -253,11 +253,14 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
-        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Declare', 't', "'unknown'", 'x'],
+        ['Assign', 't', ['Multiply', 't', 'x']],
         ['Add', 't', 1],
       ]);
       const code = python.compileFunction(expr, 'g', ['x']);
-      expect(code).toBe('def g(x):\n    t = x * x\n    return t + 1\n');
+      expect(code).toBe(
+        'def g(x):\n    t = x\n    t = t * x\n    return t + 1\n'
+      );
     });
 
     it('fails closed when a Block is used as a sub-expression', () => {
@@ -266,7 +269,7 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const block = ce.box([
         'Block',
-        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Declare', 't', "'unknown'", ['Multiply', 'x', 'x']],
         ['Add', 't', 1],
       ]);
       expect(() => python.compile(ce.box(['Add', 1, block]))).toThrow(/Block/);
@@ -278,7 +281,7 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const block = ce.box([
         'Block',
-        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Declare', 't', "'unknown'", ['Multiply', 'x', 'x']],
         ['Add', 't', 1],
       ]);
       expect(() => python.compile(ce.box(['Sin', block]))).toThrow(/Block/);
@@ -290,7 +293,7 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const block = ce.box([
         'Block',
-        ['Assign', 't', ['Multiply', 'x', 'x']],
+        ['Declare', 't', "'unknown'", ['Multiply', 'x', 'x']],
         ['Add', 't', 1],
       ]);
       expect(() => python.compileLambda(block, ['x'])).toThrow(/lambda/);
@@ -1621,7 +1624,7 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
-        ['Assign', 'acc', 0],
+        ['Declare', 'acc', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 'acc', ['Add', 'acc', 'i']],
@@ -1647,7 +1650,7 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           [
@@ -1693,7 +1696,7 @@ describe('PYTHON TARGET', () => {
       // `return None` before.)
       const expr = ce.box([
         'Block',
-        ['Assign', 'acc', 0],
+        ['Declare', 'acc', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 'acc', ['Add', 'acc', 'i']],
@@ -1722,11 +1725,11 @@ describe('PYTHON TARGET', () => {
       // A fresh engine: the shared engine knows `acc` from other tests,
       // and a write to a symbol of the engine declines.
       const ce = new ComputeEngine();
-      // The first assignment of `acc` is at the level of the block: a first
-      // assignment in a loop body is a static error.
+      // `acc` is declared at the level of the block: a declaration in a loop
+      // body is a static error.
       const loop = ce.box([
         'Block',
-        ['Assign', 'acc', 0],
+        ['Declare', 'acc', "'unknown'", 0],
         ['Loop', ['Assign', 'acc', 'i'], ['Element', 'i', ['Range', 1, 5]]],
         'acc',
       ]);
@@ -1745,8 +1748,8 @@ describe('PYTHON TARGET', () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
-        ['Assign', 's', 0],
-        ['Assign', 'k', 1],
+        ['Declare', 's', "'unknown'", 0],
+        ['Declare', 'k', "'unknown'", 1],
         [
           'Loop',
           [

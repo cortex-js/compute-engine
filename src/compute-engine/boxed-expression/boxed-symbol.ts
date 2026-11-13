@@ -1,3 +1,4 @@
+import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { isDeclaredLocal } from './declared-local.js';
 import { isScratchBinding, scratchRootOf } from '../scratch-scopes.js';
 import { noteKindTypeDeclaration } from './residue-class.js';
@@ -63,7 +64,6 @@ import {
   definitionHome,
   noteDefinitionHome,
   noteFreeNameMade,
-  noteResolutionRead,
   operationInput,
   substitutionInput,
   readUnitEntry,
@@ -129,8 +129,6 @@ import {
   mergeObjectDeps,
   objectDepsValid,
   type ObjectDeps,
-  countObjectRead,
-  noObjectDepsCollector,
 } from './object-deps.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -139,8 +137,10 @@ import {
   evaluateInOwnBindings,
   evaluateInOwnBindingsAsync,
   bindingInContext,
-  freeNameBindingInContext,
+  bodyFreeNameHome,
   freeNameBindingAndScope,
+  homeChainBinding,
+  readsActivation,
   isBodyFreeName,
   isBlockLocalBinding,
   rebindBodyFreeNames,
@@ -157,13 +157,8 @@ import {
   staticBindingIn,
   staticParentOf,
   withStaticTypingView,
-  enterStaticTypingView,
-  leaveStaticTypingView,
 } from '../static-typing-view.js';
-import {
-  assignmentLocalsOf,
-  markFreeSymbolDeclaration,
-} from '../assignment-locals.js';
+import { markFreeSymbolDeclaration } from '../statement-position.js';
 import { isProvisionalHead } from './provisional-application.js';
 import {
   asyncEvaluationOf,
@@ -338,33 +333,6 @@ function inferenceCauseMaps(ce: ComputeEngine): boolean {
   return def !== undefined && isOperatorDef(def) && def.operator.broadcastable;
 }
 
-/** A number for each home scope of a free name, for the key of
- * `noteResolutionRead()`. */
-const HOME_SCOPE_KEYS = new WeakMap<Scope, number>();
-let nextHomeScopeKey = 0;
-function homeScopeKey(home: Scope): number {
-  let key = HOME_SCOPE_KEYS.get(home);
-  if (key === undefined) HOME_SCOPE_KEYS.set(home, (key = nextHomeScopeKey++));
-  return key;
-}
-
-/** The definition that the free name `name`, of home scope `home`, resolves
- * to in the current context, in the static view of the bindings
- * (`BoxedSymbol._unitType()`). */
-function resolveFreeNameForType(
-  ce: ComputeEngine,
-  name: string,
-  asVariable: boolean,
-  home: Scope
-): BoxedDefinition | undefined {
-  const outer = enterStaticTypingView(ce);
-  try {
-    return freeNameBindingInContext(ce, name, undefined, asVariable, home);
-  } finally {
-    leaveStaticTypingView(outer);
-  }
-}
-
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override readonly _kind = 'symbol';
 
@@ -417,6 +385,46 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   declare _homeScope?: Scope;
 
+  /**
+   * For a symbol with a definition: the scope whose chain gave the definition
+   * when the symbol was made. The symbol resolves its name from this scope
+   * (`homeChainBinding()`), so a declaration made later in this scope or in an
+   * ancestor of it is read, and a declaration in any other scope is not.
+   */
+  private _defHome?: Scope;
+
+  /** The definition that the last resolution found, the scope that holds
+   * it, and the type version it was found under (`_freeNameBinding()`,
+   * `_homeBinding()`). */
+  private _resolution?: {
+    version: number;
+    variable: boolean;
+    def: BoxedDefinition | undefined;
+    scope: Scope | undefined;
+  };
+
+  /** The cached resolution, when it was found under the type version
+   * `version` and its scope still holds it (an inference rollback removes a
+   * declaration and does not move the type version). */
+  private _cachedResolution(
+    version: number,
+    variable: boolean
+  ): { def: BoxedDefinition | undefined } | undefined {
+    const cached = this._resolution;
+    if (
+      cached === undefined ||
+      cached.version !== version ||
+      cached.variable !== variable
+    )
+      return undefined;
+    if (
+      cached.scope !== undefined &&
+      cached.scope.bindings.get(this._id) !== cached.def
+    )
+      return undefined;
+    return cached;
+  }
+
   /** Note: to indicate that the symbol should be canonical, pass a def, or
    * a `homeScope` for a free name. */
   constructor(
@@ -429,6 +437,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
        * canonical and has no definition. Read only when `def` is
        * undefined. */
       homeScope?: Scope;
+      /** With `def`: the scope whose chain gave `def`. The current scope by
+       * default. */
+      defHome?: Scope;
     }
   ) {
     super(ce, options?.metadata);
@@ -439,6 +450,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
     this._id = name;
     this._def = options?.def;
+    if (options?.def !== undefined)
+      this._defHome = options.defHome ?? ce.context?.lexicalScope;
     const env = ce._boxingState.unitEnvironment();
     if (env !== undefined) this._env = env;
     if (options?.def === undefined && options?.homeScope !== undefined) {
@@ -500,6 +513,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         sourceOffsets: this.sourceOffsets,
       },
       def: this._def,
+      defHome: this._defHome,
     });
     // A copy is the same occurrence: it keeps the unit and the home scope.
     result._env = this._env;
@@ -1206,36 +1220,28 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (def === undefined) {
       if (!this._isFreeName) return undefined;
       const entry = this._unitEntry(this._homeScope!);
-      const ce = this.engine;
-      const name = this._id;
-      const home = this._homeScope!;
-      const asVariable = this._readsAsVariable(home);
       // The type and the value read the same definition
-      // (`_freeNameBinding()`): in the evaluation of a stored value, both
-      // skip the local of a block that is not around the home scope.
-      // A type cached on a compound expression is computed again when the
-      // name resolves to another definition (a declaration in a pushed
-      // scope, or the pop of that scope). The resolution depends on the home
-      // scope, so the home scope is in the key. With no cache being
-      // computed there is nothing to record, and the read makes no closure:
-      // this is the common case of the most frequent read of the engine.
-      let resolved: BoxedDefinition | undefined;
-      if (noObjectDepsCollector()) {
-        countObjectRead();
-        resolved = resolveFreeNameForType(ce, name, asVariable, home);
-      } else
-        resolved = noteResolutionRead(
-          ce,
-          name,
-          `${asVariable ? 'variable' : 'name'}:${homeScopeKey(home)}`,
-          () => resolveFreeNameForType(ce, name, asVariable, home)
-        );
+      // (`_freeNameBinding()`).
+      const resolved = this._freeNameBinding();
       if (resolved === undefined) return entry ?? BoxedType.unknown;
       if (isOperatorDef(resolved)) return resolved.operator.signature;
       return this._typeOfDefinitionInUnit(resolved.value, entry);
     }
     if (!isValueDef(def)) return undefined;
     const v = def.value;
+    if (!readsActivation(def)) {
+      // A declaration made after the boxing on the home chain hides the
+      // definition of the occurrence (`_homeBinding()`).
+      const found = this._homeBinding(def);
+      if (found !== undefined && found !== def) {
+        if (isOperatorDef(found)) return found.operator.signature;
+        return this._typeOfDefinitionInUnit(found.value, this._unitEntry(v));
+      }
+      if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
+      const entry = this._unitEntry(v);
+      if (entry === undefined) return undefined;
+      return this._typeOfDefinitionInUnit(v, entry);
+    }
     const resolved = withStaticTypingView(this.engine, () =>
       this._contextBinding()
     );
@@ -1334,7 +1340,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   private _resolvedFreeSymbol(): BoxedSymbol | undefined {
     const resolved = this._freeNameBinding();
     if (resolved === undefined || !isValueDef(resolved)) return undefined;
-    return new BoxedSymbol(this.engine, this._id, { def: resolved });
+    return new BoxedSymbol(this.engine, this._id, {
+      def: resolved,
+      defHome: this._homeScope,
+    });
   }
 
   /**
@@ -1388,13 +1397,61 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * around the home scope.
    */
   private _freeNameBinding(): BoxedDefinition | undefined {
-    return freeNameBindingInContext(
+    const home = this._homeScope!;
+    const variable = this._readsAsVariable(home);
+    const version = this.engine._typeVersion;
+    // The resolution from the home chain changes only at a declaration, and
+    // a declaration moves the type version. The type version is in the key
+    // of every type cache (`ce._typeCacheGeneration()`), so a cached type
+    // needs no record of this read.
+    const cached = this._cachedResolution(version, variable);
+    if (cached !== undefined) return cached.def;
+    const found = freeNameBindingAndScope(
       this.engine,
       this._id,
-      undefined,
-      this._readsAsVariable(this._homeScope!),
-      this._homeScope
+      home,
+      variable,
+      home
     );
+    this._resolution = {
+      version,
+      variable,
+      def: found?.def,
+      scope: found?.scope,
+    };
+    return found?.def;
+  }
+
+  /**
+   * For a symbol bound to `def`, a definition that is not read in an
+   * activation (`readsActivation()`): the definition that its name resolves
+   * to from its home chain (`homeChainBinding()`). A copy of a free name of
+   * the body of a function literal (`markBodyFreeName()`) resolves as that
+   * free name does, from the scope that the literal is written in, and reads
+   * `def`, which has no value, when the name has no definition there.
+   */
+  private _homeBinding(def: BoxedDefinition): BoxedDefinition | undefined {
+    const home = this._defHome;
+    if (home === undefined) return def;
+    const version = this.engine._typeVersion;
+    // As for a free name (`_freeNameBinding()`), the type version is the key.
+    const cached = this._cachedResolution(version, false);
+    if (cached !== undefined) return cached.def;
+    const bodyHome = isValueDef(def)
+      ? (bodyFreeNameHome(def.value) as Scope | undefined)
+      : undefined;
+    const found =
+      bodyHome !== undefined
+        ? (freeNameBindingAndScope(
+            this.engine,
+            this._id,
+            bodyHome,
+            isValueDef(def) && def.value._isDevolvedShadow === true,
+            bodyHome
+          ) ?? { def, scope: undefined })
+        : homeChainBinding(this._id, def, home);
+    this._resolution = { version, variable: false, ...found };
+    return found.def;
   }
 
   /**
@@ -1419,7 +1476,22 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * is the key in that case.
    */
   private _cycleKey(): object {
-    return this._resolvedDefinition() ?? this;
+    const def = this._resolvedDefinition();
+    return def === undefined ? this : this._activationKey(def);
+  }
+
+  /**
+   * The key of the cycle guard for a query that reads the value of `def`:
+   * for a definition whose value an activation holds (a parameter, a binder
+   * variable, a block local), the values of the activation that the read
+   * finds, so that a read of the same definition in another activation (a
+   * recursive call reading the argument that its caller made) is not a
+   * cycle; `def` otherwise.
+   */
+  private _activationKey(def: object): object {
+    const half = (def as { value?: object }).value;
+    if (half === undefined || !isActivatedDefinition(half)) return def;
+    return activationRecordOf(half, this.engine.context?.lexicalScope) ?? def;
   }
 
   /**
@@ -1588,7 +1660,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
     if (home === undefined) return;
     if (home.binderNames?.has(name) === true) return;
-    if (assignmentLocalsOf(home)?.includes(name) === true) return;
     let outerScope = boundary;
     while (outerScope.noAutoDeclare && outerScope.parent)
       outerScope = outerScope.parent;
@@ -1619,7 +1690,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return;
     }
     // The binding is marked: it is not a declaration for an assignment in
-    // the body (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+    // the body (`isFreeSymbolDeclarationInBody()`, `statement-position.ts`).
     markFreeSymbolDeclaration(
       ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope)
     );
@@ -2010,6 +2081,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   private _contextBinding(): BoxedDefinition | undefined {
     const def = this._def;
+    if (def !== undefined && !readsActivation(def))
+      return this._homeBinding(def);
+    // A parameter, a binder variable or a local of a block reads its own
+    // definition. Its value is held by the activation of its scope found on
+    // the links from the activation of the evaluation in progress.
+    if (def !== undefined && 'value' in def && isActivatedDefinition(def.value))
+      return def;
     return bindingInContext(
       this.engine,
       this._id,
@@ -3276,7 +3354,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (value === undefined) return this;
     const def = this._def;
     if (def === undefined) return value;
-    const guard = enterCycleQuery(def, CycleQuery.Dereference);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.Dereference);
     if (guard === CYCLE_DETECTED) {
       // Name the definition whose dereference must be abandoned, and stay
       // symbolic here so nothing of the cycle is substituted in the meantime.
@@ -3304,7 +3383,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return _dereferenceCycle === undefined ? result : this;
     } finally {
       _dereferenceDepth -= 1;
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
       // Safety net: a cycle whose definition never gets its own frame back (its
       // guard was already exited) must not leave the flag set for unrelated
       // later work. The frame that opened the chain clears it.
@@ -3474,12 +3553,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._asCollection?.iterator !== undefined) return true;
     const def = this._def;
     if (def === undefined) return false;
-    const guard = enterCycleQuery(def, CycleQuery.IsCollection);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IsCollection);
     if (guard === CYCLE_DETECTED) return false;
     try {
       return this._value?.isCollection ?? false;
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3489,12 +3569,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._asCollection?.at !== undefined) return true;
     const def = this._def;
     if (def === undefined) return false;
-    const guard = enterCycleQuery(def, CycleQuery.IsIndexedCollection);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IsIndexedCollection);
     if (guard === CYCLE_DETECTED) return false;
     try {
       return this._value?.isIndexedCollection ?? false;
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3503,7 +3584,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return this._resolvedFreeSymbol()?.isLazyCollection ?? false;
     const def = this._def;
     if (def === undefined) return false;
-    const guard = enterCycleQuery(def, CycleQuery.IsLazyCollection);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IsLazyCollection);
     if (guard === CYCLE_DETECTED) return false;
     try {
       return (
@@ -3512,7 +3594,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         false
       );
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3520,7 +3602,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._isFreeName) return this._resolvedFreeSymbol()?.contains(rhs);
     const def = this._def;
     if (def === undefined) return undefined;
-    const guard = enterCycleQuery(def, CycleQuery.Contains);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.Contains);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       return (
@@ -3528,7 +3611,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this._value?.contains?.(rhs)
       );
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3544,7 +3627,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._isFreeName) return this._resolvedFreeSymbol()?.count ?? fromType;
     const def = this._def;
     if (def === undefined) return fromType;
-    const guard = enterCycleQuery(def, CycleQuery.Count);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.Count);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       const count =
@@ -3552,7 +3636,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this._value?.count;
       return count ?? fromType;
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3574,7 +3658,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._isFreeName) return this._resolvedFreeSymbol()?.isEmptyCollection;
     const def = this._def;
     if (def === undefined) return undefined;
-    const guard = enterCycleQuery(def, CycleQuery.IsEmptyCollection);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IsEmptyCollection);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       // Deliberately NO type-derived fallback here, unlike `count` above: see
@@ -3588,7 +3673,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this._value?.isEmptyCollection;
       return empty;
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3596,7 +3681,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._isFreeName) return this._resolvedFreeSymbol()?.isFiniteCollection;
     const def = this._def;
     if (def === undefined) return undefined;
-    const guard = enterCycleQuery(def, CycleQuery.IsFiniteCollection);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IsFiniteCollection);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       const finite =
@@ -3604,7 +3690,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this._value?.isFiniteCollection;
       return finite;
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3633,7 +3719,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
     const def = this._def;
     if (def === undefined) return false;
-    const guard = enterCycleQuery(def, CycleQuery.IsEnumerableCollection);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IsEnumerableCollection);
     // Fail closed: a binding that re-enters its own enumerability query
     // cannot be walked to a conclusion either.
     if (guard === CYCLE_DETECTED) return false;
@@ -3648,7 +3735,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (value === undefined) return false;
       return value.isEnumerableCollection;
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3661,12 +3748,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // would otherwise stay "in progress" for as long as the caller holds it.
     const def = this._def;
     if (def === undefined) return (function* () {})();
-    const guard = enterCycleQuery(def, CycleQuery.Each);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.Each);
     if (guard === CYCLE_DETECTED) return (function* () {})();
     try {
       return this._each();
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3734,12 +3822,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._isFreeName) return this._resolvedFreeSymbol()?.get(index);
     const def = this._def;
     if (def === undefined) return undefined;
-    const guard = enterCycleQuery(def, CycleQuery.Get);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.Get);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       return this._value?.get?.(index);
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3748,14 +3837,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return this._resolvedFreeSymbol()?.indexWhere(predicate);
     const def = this._def;
     if (def === undefined) return undefined;
-    const guard = enterCycleQuery(def, CycleQuery.IndexWhere);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.IndexWhere);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       if (this._asCollection?.indexWhere)
         return this._asCollection.indexWhere(this._value ?? this, predicate);
       return this._value?.indexWhere(predicate);
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 
@@ -3766,7 +3856,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // — an undeclared symbol may still be assigned a collection later.
     const def = this._def;
     if (def === undefined) return undefined;
-    const guard = enterCycleQuery(def, CycleQuery.SubsetOf);
+    const key = this._activationKey(def);
+    const guard = enterCycleQuery(key, CycleQuery.SubsetOf);
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       return (
@@ -3774,7 +3865,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this._value?.subsetOf?.(rhs, strict)
       );
     } finally {
-      exitCycleQuery(def, guard);
+      exitCycleQuery(key, guard);
     }
   }
 }

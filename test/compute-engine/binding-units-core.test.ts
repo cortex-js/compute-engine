@@ -102,7 +102,7 @@ describe('BINDING UNITS: TYPES', () => {
     expect(ce.lookupDefinition('x')).toBeDefined();
   });
 
-  test('an occurrence reads a declaration of its name in a pushed scope', () => {
+  test('an occurrence reads a declaration of its name in a pushed scope after rebind', () => {
     const ce = engine();
     ce.declare('x', 'unknown');
     const a = ce.parse('x + 1');
@@ -111,7 +111,8 @@ describe('BINDING UNITS: TYPES', () => {
     try {
       ce.declare('x', 'string');
       ce.assign('x', ce.string('ab'));
-      expect(a.op1.type.toString()).toBe('string');
+      expect(a.op1.type.toString()).toBe('number');
+      expect(ce.rebind(a.op1).type.toString()).toBe('string');
     } finally {
       ce.popScope();
     }
@@ -314,13 +315,14 @@ describe('BINDING UNITS: EVALUATION', () => {
     expect(a.evaluate().json).toEqual(4);
   });
 
-  test('a free name reads an assignment in a pushed scope', () => {
+  test('a free name reads an assignment in a pushed scope after rebind', () => {
     const ce = engine();
     const a = ce.parse('x + 1');
     ce.pushScope();
     try {
       ce.assign('x', 3);
-      expect(a.evaluate().json).toEqual(4);
+      expect(a.evaluate().json).toEqual(['Add', 'x', 1]);
+      expect(ce.rebind(a).evaluate().json).toEqual(4);
     } finally {
       ce.popScope();
     }
@@ -754,9 +756,9 @@ describe('BINDING UNITS: FREE CALL HEADS AND HOST WRITES', () => {
     expect(result.json).toEqual(['f', 1]);
   });
 
-  // The call boxed again selects the overload by the type of `x` in the
-  // current scope: the memo of the call boxed again is not used in another
-  // scope.
+  // The call bound again in another scope (`ce.rebind()`) selects the
+  // overload by the type of `x` in that scope: the memo of the call is not
+  // used for it.
   test('a free call head is boxed again in another scope', () => {
     const ce = engine();
     ce.declare('x', 'integer');
@@ -766,7 +768,10 @@ describe('BINDING UNITS: FREE CALL HEADS AND HOST WRITES', () => {
     ce.pushScope();
     try {
       ce.declare('x', 'string');
-      expect(call.type.toString()).toBe(ce.box(['f', 'x']).type.toString());
+      expect(call.type.toString()).toBe('integer');
+      expect(ce.rebind(call).type.toString()).toBe(
+        ce.box(['f', 'x']).type.toString()
+      );
     } finally {
       ce.popScope();
     }
@@ -840,10 +845,9 @@ describe('BINDING UNITS: FREE CALL HEADS AND HOST WRITES', () => {
     expect(() => ce.box('a').evaluate()).not.toThrow();
   });
 
-  // An assignment of a lazy collection captures the values of the variables
-  // that it reads (`bindReadVariablesOfLazyCollection()`), also of a free
-  // name boxed before its assignment: a later assignment of the name does
-  // not change the stored collection.
+  // An assignment of a lazy collection replaces each operand that is a
+  // variable with its value, also a free name boxed before its assignment:
+  // a later assignment of the name does not change the stored collection.
   test('a lazy collection keeps the value of a free name that it captured', () => {
     const ce = engine();
     const lazy = ce.box(['Filter', 'xs', ['Function', ['Greater', 'c', 3], 'c']]);

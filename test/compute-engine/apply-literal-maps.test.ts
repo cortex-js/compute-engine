@@ -1290,8 +1290,9 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
     // interval-js and Python for other reasons, so these tests are on JS.
     describe('a block-local function used as a callback', () => {
       const G = [
-        'Assign',
+        'Declare',
         'g',
+        "'unknown'",
         ['Function', ['Multiply', 2, 't'], ['Typed', 't', "'expression'"]],
       ];
       const run = (e: unknown) => {
@@ -1312,12 +1313,13 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       });
 
       test('with a call and a callback use, the sum of the map declines', () => {
-        // The elements of `Map(g, L)` are of unknown type (the parameter of
-        // `g` is declared `expression`): the shape is not settled, and the
-        // `Sum` declines (ROADMAP CE-805). The fallback gives the value.
+        // With `g` declared `function`, the elements of `Map(g, L)` are of
+        // unknown type (the parameter of `g` is declared `expression`): the
+        // shape is not settled, and the `Sum` declines (ROADMAP CE-805). The
+        // fallback gives the value.
         const { result, value } = run([
           'Block',
-          G,
+          ['Declare', 'g', "'function'", G[3]],
           ['Add', ['Sum', ['Map', 'g', 'L']], ['g', 3]],
         ]);
         expect(result.success).toBe(false);
@@ -1499,7 +1501,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
         'a block-local function',
         [
           'Block',
-          ['Assign', 'g', LITERAL],
+          ['Declare', 'g', "'unknown'", LITERAL],
           ['Declare', 'M', "'list<integer | list<integer>>'", ['List', 1, 2]],
           ['Assign', 'M', ['List', ['List', 1, 2]]],
           ['Map', 'g', 'M'],
@@ -1995,7 +1997,7 @@ describe('A PARAMETER DECLARED UNKNOWN IS A PARAMETER WITH NO DECLARATION', () =
       const results = [BARE, UNKNOWN].map((param) => {
         const call = new ComputeEngine().box([
           'Block',
-          ['Assign', name, ['Function', body, param]],
+          ['Declare', name, "'unknown'", ['Function', body, param]],
           [name, arg],
         ] as never);
         return [call.evaluate().toString(), call.type.toString()];

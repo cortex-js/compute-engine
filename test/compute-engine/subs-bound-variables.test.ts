@@ -50,7 +50,7 @@ describe('SUBS LEAVES A BOUND VARIABLE AND ITS BINDER UNCHANGED', () => {
     expect(result.isValid).toBe(true);
   });
 
-  test('a local of a Block, declared or assigned', () => {
+  test('a local of a Block, and an assignment to it', () => {
     const declared: Json = [
       'Block',
       ['Declare', 'j', 'integer', 2],
@@ -60,7 +60,12 @@ describe('SUBS LEAVES A BOUND VARIABLE AND ITS BINDER UNCHANGED', () => {
     expect(r1.json).toEqual(declared);
     expect(r1.evaluate().json).toEqual(3);
 
-    const assigned: Json = ['Block', ['Assign', 'q', 2], ['Add', 'q', 1]];
+    const assigned: Json = [
+      'Block',
+      ['Declare', 'q', "'unknown'", 0],
+      ['Assign', 'q', 2],
+      ['Add', 'q', 1],
+    ];
     const r2 = subs(assigned, { q: 5 });
     expect(r2.json).toEqual(assigned);
     expect(r2.evaluate().json).toEqual(3);
@@ -68,7 +73,11 @@ describe('SUBS LEAVES A BOUND VARIABLE AND ITS BINDER UNCHANGED', () => {
 
   test('a free symbol read in a Block is still replaced', () => {
     const result = subs(
-      ['Block', ['Assign', 't', ['Add', 'k', 1]], ['Multiply', 2, 't']],
+      [
+        'Block',
+        ['Declare', 't', "'unknown'", ['Add', 'k', 1]],
+        ['Multiply', 2, 't'],
+      ],
       { k: 3 }
     );
     expect(result.evaluate().json).toEqual(8);

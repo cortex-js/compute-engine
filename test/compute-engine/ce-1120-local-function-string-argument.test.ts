@@ -96,10 +96,10 @@ const lengthOf = ['Function', ['Length', 's'], 's'];
 const longerThanOne = ['Function', ['Greater', ['Length', 's'], 1], 's'];
 const strings = ['xy', 'z', 'a😀b', ''];
 
-/** `g := fn` local to a block whose value is `use`. */
+/** `g` declared with the value `fn` local to a block whose value is `use`. */
 const withLocal = (fn: unknown, use: unknown) => [
   'Block',
-  ['Assign', 'g', fn],
+  ['Declare', 'g', "'unknown'", fn],
   use,
 ];
 
@@ -252,15 +252,20 @@ describe('uses that decline', () => {
   // reads and that is bound at the use could be another binding there.
   test('the body reads another local of the block', () => {
     const fn = ['Function', ['Add', ['Length', 's'], 'k'], 's'];
-    const json = ['Block', ['Assign', 'k', 2], ['Assign', 'g', fn], ['g', 't']];
+    const json = [
+      'Block',
+      ['Declare', 'k', "'unknown'", 2],
+      ['Declare', 'g', "'unknown'", fn],
+      ['g', 't'],
+    ];
     expect(declineReason(json)).toMatch(/its body reads or calls `k`/);
   });
 
   test('the body calls another function of the block', () => {
     const json = [
       'Block',
-      ['Assign', 'k', ['Function', ['Multiply', 2, 'x'], 'x']],
-      ['Assign', 'g', ['Function', ['k', ['Length', 's']], 's']],
+      ['Declare', 'k', "'unknown'", ['Function', ['Multiply', 2, 'x'], 'x']],
+      ['Declare', 'g', "'unknown'", ['Function', ['k', ['Length', 's']], 's']],
       ['g', 't'],
     ];
     expect(declineReason(json)).toMatch(/its body reads or calls `k`/);
@@ -290,15 +295,15 @@ describe('uses that decline', () => {
   test.each([['(list<real>) -> integer'], ['(list) -> integer']])(
     'a Declare statement whose parameter type no string has: %s',
     (signature) => {
-      // The interpreter gives an `incompatible-type` error for `g(t)`.
+      // The declared signature is the type of `g` from the boxing of the
+      // block, so the call `g(t)` is an `incompatible-type` error of the
+      // boxing: the block is invalid, and the interpreter gives the error.
       const json = [
         'Block',
         ['Declare', 'g', { str: signature }, lengthOf],
         ['g', 't'],
       ];
-      expect(declineReason(json)).toMatch(
-        /a `Declare` statement declares with the type `list(<real>)?`/
-      );
+      expect(declineReason(json)).toMatch(/Could not compile invalid expression/);
       const ce = engine();
       ce.assign('t', ce.string('abc'));
       const value = ce.box(json as never).evaluate();
@@ -309,7 +314,12 @@ describe('uses that decline', () => {
 
   test('a declined compilation falls back to the interpreter', () => {
     const fn = ['Function', ['Add', ['Length', 's'], 'k'], 's'];
-    const json = ['Block', ['Assign', 'k', 2], ['Assign', 'g', fn], ['g', 't']];
+    const json = [
+      'Block',
+      ['Declare', 'k', "'unknown'", 2],
+      ['Declare', 'g', "'unknown'", fn],
+      ['g', 't'],
+    ];
     const ce = engine();
     const r = compile(ce.box(json as never), { to: 'javascript' });
     expect(r.success).toBe(false);

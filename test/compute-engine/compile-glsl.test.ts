@@ -365,15 +365,15 @@ describe('GLSL COMPILATION', () => {
     it('should compile a block with multiple locals', () => {
       const expr = ce.expr([
         'Block',
-        ['Assign', 'a', ['Sin', 'x']],
-        ['Assign', 'b', ['Cos', 'x']],
+        ['Declare', 'a', "'unknown'", ['Sin', 'x']],
+        ['Declare', 'b', "'unknown'", ['Cos', 'x']],
         ['Add', 'a', 'b'],
       ]);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`
         float a;
-        float b;
         a = _gpu_sin(x);
+        float b;
         b = _gpu_cos(x);
         return a + b;
       `);

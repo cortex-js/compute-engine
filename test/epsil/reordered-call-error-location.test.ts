@@ -94,12 +94,25 @@ describe('an error in an operand of a sum or product', () => {
   });
 
   test('a variable that holds an expression that fails when it is read', () => {
-    // `w2` holds `Sin(q)`, which fails after `q` changed. The frame names
+    // `w2` holds `Sin(q)`, which fails once `q` holds a string. The frame names
     // `w2`, not `Cos(x)`, the operand at the same position of the result of
-    // the evaluation.
+    // the evaluation. `q` is a variable of the host with no value yet.
     const src = 'let w2: any = Sin(q)\nq = "a"\n';
-    expect(underlines(`${src}let v = w2 * Cos(x)\n0`)).toEqual(['w2']);
-    expect(underlines(`${src}let v = Cos(x) * w2\n0`)).toEqual(['w2']);
+    for (const [stmt, marker] of [
+      ['let v = w2 * Cos(x)', 'let v'],
+      ['let v = Cos(x) * w2', 'let v'],
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('q', 'any');
+      const full = `${src}${stmt}\n0`;
+      const at = full.indexOf(marker);
+      const underlined = executeEpsil(ce, full)
+        .diagnostics.filter(
+          (d) => d.message[0] === 'runtime-error' && d.range[0] >= at
+        )
+        .map((d) => full.slice(d.range[0], d.range[1]));
+      expect(underlined).toEqual(['w2']);
+    }
   });
 
   test('a second product inside an operand does not hide the argument', () => {

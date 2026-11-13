@@ -1,4 +1,5 @@
-import type { Expression } from '../global-types.js';
+import type { Expression, Scope } from '../global-types.js';
+import { activationValuesOf } from './ambient-chain.js';
 
 /**
  * The written argument behind the activation of a user function's
@@ -18,23 +19,35 @@ import type { Expression } from '../global-types.js';
  * function (`exactArgumentSources`), so the re-read repeats no effect and
  * reads no parameter of the caller by name.
  *
- * A `WeakMap` keyed on the value half of the activation's definition, so
- * a discarded activation takes its entry with it. This module imports
- * nothing but a type, so every module that binds or reads can import it.
+ * Recorded on the call frame, for the static definition of the parameter:
+ * the frame is the activation that holds the value of the parameter in the
+ * call (`activationRecordOf()`, `ambient-chain.ts`), so a discarded frame
+ * takes its entry with it.
  */
-const EXACT_ARGUMENT_SOURCES = new WeakMap<object, Expression>();
+const EXACT_ARGUMENT_SOURCES = new WeakMap<Scope, Map<object, Expression>>();
 
-/** Record `source` as the written argument behind the activation `value`. */
+/** Record `source` as the written argument behind the parameter `def` in
+ * the call frame `frame`. */
 export function setExactArgumentSource(
-  value: object,
+  frame: Scope,
+  def: object,
   source: Expression
 ): void {
-  EXACT_ARGUMENT_SOURCES.set(value, source);
+  let sources = EXACT_ARGUMENT_SOURCES.get(frame);
+  if (sources === undefined)
+    EXACT_ARGUMENT_SOURCES.set(frame, (sources = new Map()));
+  sources.set(def, source);
 }
 
-/** The written argument behind the activation `value`, or `undefined`. */
+/** The written argument behind the parameter `def` in the call frame that
+ * the scope `from` is in, or `undefined`. */
 export function exactArgumentSourceOf(
-  value: object | undefined
+  def: object | undefined,
+  from: Scope | null | undefined
 ): Expression | undefined {
-  return value === undefined ? undefined : EXACT_ARGUMENT_SOURCES.get(value);
+  if (def === undefined) return undefined;
+  for (let s = from; s != null; s = s.parent)
+    if (activationValuesOf(s)?.has(def))
+      return EXACT_ARGUMENT_SOURCES.get(s)?.get(def);
+  return undefined;
 }

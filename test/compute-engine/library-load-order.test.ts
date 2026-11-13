@@ -121,7 +121,7 @@ describe('a caller library listed after the standard libraries', () => {
     expect(ce.parse('x + 1').evaluate().toString()).toBe('3');
     expect(
       ce
-        .box(['Block', ['Assign', 'y', 3], ['Add', 'y', 1]])
+        .box(['Block', ['Declare', 'y', "'unknown'", 3], ['Add', 'y', 1]])
         .evaluate()
         .toString()
     ).toBe('4');
@@ -364,7 +364,7 @@ describe('a library list without control-structures', () => {
         }
         expect(
           ce
-            .box(['Block', ['Assign', 'y', 3], 'y'])
+            .box(['Block', ['Declare', 'y', "'unknown'", 3], 'y'])
             .evaluate()
             .toString()
         ).toBe('3');

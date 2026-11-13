@@ -185,9 +185,15 @@ describe('CE-473 (c): A CALL CHECKS THE CAPTURED VALUES', () => {
 });
 
 describe('CE-473: THE EPSIL ROUTE', () => {
-  test('a later assignment to the captured symbol makes the call an error', () => {
+  // A `let` of a function literal is a variable that holds the function, as a
+  // global assigned the literal: the call checks the captured values, as in
+  // CE-473 (c) above. The variable `y` is declared by a later `let`.
+  test('a captured symbol declared by a later let makes the call an error', () => {
     const ce = new ComputeEngine();
-    const result = executeEpsil(ce, 'let g = (x) => [-x, y]\ny = "abc"\ng(3)');
+    const result = executeEpsil(
+      ce,
+      'let g = (x) => [-x, y]\nlet y = "abc"\ng(3)'
+    );
     expect(result.diagnostics).toEqual([]);
     expect(isTypeError(result.value!)).toBe(true);
     expect(isTypeError(sound(ce.box(['g', 3])))).toBe(true);

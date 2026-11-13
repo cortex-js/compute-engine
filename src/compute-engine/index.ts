@@ -246,7 +246,6 @@ import {
   pushEvalContext as pushEvalContextImpl,
   popEvalContext as popEvalContextImpl,
   removeEvalContext as removeEvalContextImpl,
-  releaseChainingFrame,
   countHolders,
   uncountHolders,
   inScope as inScopeImpl,
@@ -667,9 +666,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   set contextStack(stack: ReadonlyArray<EvalContext>) {
-    // A frame that the new stack does not keep is dropped without a pop. If
-    // it chains its scope onto an ambient scope, release it, so that the
-    // scope gets its parent link back when no other live frame chains it.
+    // A frame that the new stack does not keep is dropped without a pop.
     // A frame that the new stack adds holds the definitions of its scope,
     // unless it was discarded (`countHolders`). A dropped frame no longer
     // holds them, so the pop of another frame that holds one of them
@@ -680,10 +677,7 @@ export class ComputeEngine implements IComputeEngine {
     const kept = new Set(stack);
     for (const frame of stack) countHolders(frame);
     for (const frame of this._evalContextStack)
-      if (!kept.has(frame)) {
-        releaseChainingFrame(frame);
-        uncountHolders(this, frame);
-      }
+      if (!kept.has(frame)) uncountHolders(this, frame);
     this._evalContextStack = [...stack];
   }
 
@@ -1074,7 +1068,17 @@ export class ComputeEngine implements IComputeEngine {
       console.assert(popped === frame, 'Unbalanced inference rollback frame');
       // Undo BEFORE the containment scan: the journal replay is what makes
       // any still-open repair frame's state consistent to inspect.
+      const undid = frame.hasEntries;
       const undoFailure = frame.rollback();
+      // An undone declaration changes what a name resolves to: the type
+      // version moves, as for a declaration (`_freeNameBinding()`,
+      // `boxed-symbol.ts`).
+      if (undid)
+        this._noteStateEvent({
+          kind: 'declare',
+          callable: false,
+          shadowsCallable: false,
+        });
       // Every repair (devolve-shadow) frame pushed at or above the depth
       // recorded at open and still live must have consumed its rebuild
       // request: a request consumed by its own rebuild loop ran INSIDE this
@@ -3453,12 +3457,8 @@ export class ComputeEngine implements IComputeEngine {
   _narrowingSink: NarrowingSink | undefined = undefined;
 
   /** @internal */
-  _pushEvalContext(
-    scope: Scope,
-    name?: string,
-    options?: { ambient?: boolean }
-  ): void {
-    pushEvalContextImpl(this, scope, name, options);
+  _pushEvalContext(scope: Scope, name?: string): void {
+    pushEvalContextImpl(this, scope, name);
   }
 
   /** @internal */

@@ -16,7 +16,7 @@ import {
   isInvalidNonCollection,
 } from '../boxed-expression/error-value.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
-import { liveScopeOf } from '../boxed-expression/ambient-chain.js';
+import { activationOnLinks } from '../boxed-expression/ambient-chain.js';
 
 // The broadcast-shape walk moved to `map-broadcast-shape.js` (a leaf shared
 // with `map-auto-compile.js`, which cannot import this module — it is imported
@@ -32,7 +32,7 @@ export type { Slot, LoweredLevel } from './map-broadcast-shape.js';
  * item-103 witness `1 + Mod(Range(0,899) + 29, 900)` canonicalizes to THREE
  * nested `Map`s, so a 900-element drain performs 2,700 full `makeLambda`
  * applications. None of the invoke machinery (fresh `Scope`,
- * `declareParameterActivation`, `hideBodyScopeParams`, `captureClosures`,
+ * `declareParameterActivation`, `holdBodyLocals`, `captureClosures`,
  * binding-keyed substitution, own-bindings numeric pass) is needed when the
  * mapping function is the shape `lazyBroadcastMap` builds: ONE operator
  * application whose operands are the parameters and closed scalars.
@@ -326,11 +326,9 @@ export function makeSpineRunner(
             // `makeLambda`'s lookup path for a non-parameter name either.
             //
             // Read at DRAIN time, not when the level was lowered: the spine is
-            // memoized on the `Map` instance, while `invoke` re-parents a body
-            // scope for the duration of each call (`bodyScope.parent =
-            // freshScope`, restored in its `finally`). A parent captured at
-            // lowering time would be a stale link into a frame that has since
-            // returned.
+            // memoized on the `Map` instance, and the activation that holds
+            // the values is the one on the links from the current lexical
+            // scope at the drain (see below).
             //
             // The frame is a NEW empty scope whose parent is the closure's
             // parent, not the closure's parent itself: popping a frame
@@ -341,14 +339,14 @@ export function makeSpineRunner(
             // at the top level, which dropped their assumptions and made
             // every memo that reads a global symbol outdated.
             //
-            // An asynchronous evaluation of a scoped node runs with an
-            // activation of the node's local scope in place of the scope
-            // itself, and the activation holds the values of the current
-            // iteration: the chain starts at that activation when the
-            // closure's parent is such a scope (`liveScopeOf`).
+            // An evaluation of a scoped node runs with an activation of the
+            // node's local scope in place of the scope itself, and the
+            // activation holds the values of the current iteration: the
+            // chain starts at that activation when the closure's parent is
+            // such a scope (`activationOnLinks`).
             const templateParent = level.closureScope?.parent;
             const closureParent = templateParent
-              ? liveScopeOf(ce._evalContextStack, templateParent)
+              ? activationOnLinks(ce.context.lexicalScope, templateParent)
               : templateParent;
             if (closureParent) {
               ce.pushScope({ parent: closureParent, bindings: new Map() });

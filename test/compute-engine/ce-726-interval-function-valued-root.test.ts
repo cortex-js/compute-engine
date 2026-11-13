@@ -53,7 +53,11 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
     ],
     [
       'a block whose value is a function literal',
-      ['Block', ['Assign', 'k', 2], ['Function', ['Multiply', 'k', 'x'], 'x']],
+      [
+        'Block',
+        ['Declare', 'k', "'unknown'", 2],
+        ['Function', ['Multiply', 'k', 'x'], 'x'],
+      ],
       [3],
     ],
     ['a symbol whose value is a function', 'f726', [3]],

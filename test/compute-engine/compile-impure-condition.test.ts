@@ -93,7 +93,7 @@ describe('an impure branch condition is lowered three-valued', () => {
     expect(w.run({ x: -1 })).toBe(1);
     const s = js([
       'Block',
-      ['Assign', 'k', 0],
+      ['Declare', 'k', "'unknown'", 0],
       [
         'If',
         ['Greater', ['Random'], 'x'],

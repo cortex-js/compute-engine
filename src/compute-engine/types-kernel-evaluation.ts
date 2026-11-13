@@ -599,13 +599,6 @@ export type EvalContext<
    */
   _bindsValues?: boolean;
   /**
-   * The parent link of `lexicalScope` as it was before this frame chained
-   * the scope onto the ambient scope (`pushEvalContext` with `ambient`),
-   * restored when the frame is discarded. Absent when the frame changed
-   * nothing.
-   */
-  _restoreParentOnPop?: Scope<Binding> | null;
-  /**
    * The value definitions that this frame counts as a holder of
    * (`_holders` of the definition, `countHolders` in `engine-scope.ts`): the
    * ones its scope held at the push, and the ones declared into its scope

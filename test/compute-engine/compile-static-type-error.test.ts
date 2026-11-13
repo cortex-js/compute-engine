@@ -240,7 +240,7 @@ describe('An error next to a bound name still declines', () => {
     const ce = engine();
     const expr = ce.box([
       'Block',
-      ['Assign', 'y', ['G']],
+      ['Declare', 'y', "'unknown'", ['G']],
       ['Assign', 'G', ['Function', 1]],
       ['Add', 'y', 'u'],
     ]);
@@ -292,7 +292,10 @@ describe('An error next to a bound name still declines', () => {
     ce.box([
       'Assign',
       'H',
-      ['Function', ['Block', ['Assign', 't', ['ADD', "'ab'", 'u']], 1]],
+      [
+        'Function',
+        ['Block', ['Declare', 't', "'unknown'", ['ADD', "'ab'", 'u']], 1],
+      ],
     ]).evaluate();
     const expr = ce.box(['Multiply', 2, ['H']]);
     expect(expr.type.toString()).not.toBe('error');

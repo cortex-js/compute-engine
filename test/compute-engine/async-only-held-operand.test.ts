@@ -177,7 +177,11 @@ describe('an asynchronous-only operator inside a held operand', () => {
     // asynchronous handler evaluates its statements in order and awaits.
     const ce = withAsyncOnly();
     const block = await ce
-      .box(['Block', ['Assign', 'x', 1], ['AsyncOnly', 'x']] as never)
+      .box([
+        'Block',
+        ['Declare', 'x', "'unknown'", 1],
+        ['AsyncOnly', 'x'],
+      ] as never)
       .evaluateAsync();
     expect(block.json).toBe(6);
     expect(ce.calls).toBe(1);

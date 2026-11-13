@@ -72,7 +72,7 @@ for (const to of ['glsl'] as const) {
       const c = compile(
         ce.box([
           'Block',
-          ['Assign', 'v', ['Add', 'x', 1]],
+          ['Declare', 'v', "'unknown'", ['Add', 'x', 1]],
           ['Multiply', 2, 'v'],
         ]),
         { to, fallback: false }
@@ -91,7 +91,7 @@ describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
       'If in a block',
       [
         'Block',
-        ['Assign', 't', 0],
+        ['Declare', 't', "'unknown'", 0],
         ['If', ['Greater', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 2]],
         't',
       ],
@@ -100,7 +100,7 @@ describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
       'If in a loop body',
       [
         'Block',
-        ['Assign', 't', 0],
+        ['Declare', 't', "'unknown'", 0],
         [
           'Loop',
           ['If', ['Greater', 'i', 1], ['Assign', 't', 1], ['Assign', 't', 2]],

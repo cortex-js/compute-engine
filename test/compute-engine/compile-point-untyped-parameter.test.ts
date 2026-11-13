@@ -250,7 +250,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       'g := p ↦ Max(p) + 1; g(q)',
       [
         'Block',
-        ['Assign', 'g', ['Function', ['Add', ['Max', 'p'], 1], 'p']],
+        [
+          'Declare',
+          'g',
+          "'unknown'",
+          ['Function', ['Add', ['Max', 'p'], 1], 'p'],
+        ],
         ['g', 'q'],
       ],
       3,
@@ -259,7 +264,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       'g := p ↦ Max(p) + 1; g(P[1])',
       [
         'Block',
-        ['Assign', 'g', ['Function', ['Add', ['Max', 'p'], 1], 'p']],
+        [
+          'Declare',
+          'g',
+          "'unknown'",
+          ['Function', ['Add', ['Max', 'p'], 1], 'p'],
+        ],
         ['g', ['At', 'P', 1]],
       ],
       3,
@@ -288,7 +298,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       'g := p ↦ Max(p) + 1; Map(g, P)',
       [
         'Block',
-        ['Assign', 'g', ['Function', ['Add', ['Max', 'p'], 1], 'p']],
+        [
+          'Declare',
+          'g',
+          "'unknown'",
+          ['Function', ['Add', ['Max', 'p'], 1], 'p'],
+        ],
         ['Map', 'g', 'P'],
       ],
       /function local to the block is compiled for a scalar/,
@@ -317,7 +332,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     lane.declare('z', 'complex');
     const json = [
       'Block',
-      ['Assign', 'g', ['Function', ['Add', ['Max', 'p'], 'x'], 'p', 'x']],
+      [
+        'Declare',
+        'g',
+        "'unknown'",
+        ['Function', ['Add', ['Max', 'p'], 'x'], 'p', 'x'],
+      ],
       ['g', 'q', 'z'],
     ];
     test("the interpreter's value", () => {
@@ -357,7 +377,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     test('g := p ↦ 7; g(qm) (strict)', () => {
       const json = [
         'Block',
-        ['Assign', 'g', ['Function', 7, 'p']],
+        ['Declare', 'g', "'unknown'", ['Function', 7, 'p']],
         ['g', 'qm'],
       ];
       const expected = cx
@@ -375,7 +395,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     test('g := t ↦ 2t; g(r) with r of a nominal complex point (strict)', () => {
       const json = [
         'Block',
-        ['Assign', 'g', ['Function', ['Multiply', 2, 't'], 't']],
+        ['Declare', 'g', "'unknown'", ['Function', ['Multiply', 2, 't'], 't']],
         ['g', 'r'],
       ];
       const v = cx
@@ -462,7 +482,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     const r = compile(
       ce.box([
         'Block',
-        ['Assign', 'g', ['Function', ['Add', ['Max', 'p'], 1], 'p']],
+        [
+          'Declare',
+          'g',
+          "'unknown'",
+          ['Function', ['Add', ['Max', 'p'], 1], 'p'],
+        ],
         ['g', ['Tuple', 1, 2]],
       ]),
       { to: 'python', fallback: false }
@@ -475,7 +500,12 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       compile(
         ce.box([
           'Block',
-          ['Assign', 'g', ['Function', ['Add', ['Max', 'p'], 1], 'p']],
+          [
+            'Declare',
+            'g',
+            "'unknown'",
+            ['Function', ['Add', ['Max', 'p'], 1], 'p'],
+          ],
           ['g', 'q'],
         ]),
         { to: 'python', fallback: false }

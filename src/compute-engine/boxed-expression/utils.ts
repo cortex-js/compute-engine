@@ -1,3 +1,4 @@
+import { withHiddenValues } from './hidden-values.js';
 import { isOperatorDef, isValueDef } from './definition-guards.js';
 import { implicitVariableCandidates } from './implicit-variable-rule.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
@@ -22,7 +23,6 @@ import {
   noteScratchBinding,
   scratchRootOf,
   scratchRootOfBinding,
-  withScratchScope,
 } from '../scratch-scopes.js';
 import { tombstoneBinding } from './binding-tombstone.js';
 import {
@@ -51,11 +51,10 @@ import {
 } from './provisional-application.js';
 import { outsideDefinitions } from './declared-parameter-result.js';
 import {
-  binderBindingOf,
   boundVariableNames,
   boundVariableNamesInOperand,
+  binderBindingOf,
   callableBindingInContext,
-  markShieldDeclaration,
   rebindBodyFreeNames,
   rewriteWithBinders,
   withCallableBinding,
@@ -1419,42 +1418,12 @@ function isAssignedVariableName(
 ): boolean {
   const def = ce.lookupDefinition(name);
   if (!isValueDef(def)) return false;
-  if (def.value.value === undefined || def.value.value === null) return false;
+  // A value that a value shield hides (`withHiddenValues()`) is still an
+  // assigned value.
+  const value = def.value.value ?? def.value.storedValue;
+  if (value === undefined || value === null) return false;
   if (def.value.isConstant === true) return false;
   return true;
-}
-
-/**
- * Is the value of an assigned symbol named `name` hidden only by the
- * valueless variable of an enclosing binder?
- *
- * Inside the evaluate handler of a binder such as `Integrate`, the innermost
- * binding of the integration variable is the binder's own variable, which
- * has no value, so `isAssignedVariableName` answers `false`. But a read of
- * that name by an occurrence the binder does not own skips the binder's
- * variable and reads the next binding outward (`bindingInContext`,
- * `binders.ts`). A function literal's parameter read outside a call is such
- * an occurrence: compiling `x ↦ |x|` inside `Integrate` with `x := 5` read
- * `x` as positive and dropped the `Abs`. When this function answers `true`,
- * the name needs a shield as much as a directly assigned one does.
- */
-function binderHidesAssignedValue(
-  ce: Expression['engine'],
-  name: string
-): boolean {
-  let scope: Scope | null = ce.context.lexicalScope;
-  while (scope) {
-    const found = scope.bindings.get(name);
-    if (found !== undefined) {
-      if (!('value' in found)) return false;
-      const value = found.value.value;
-      if (value !== undefined && value !== null)
-        return found.value.isConstant !== true;
-      if (binderBindingOf(ce, name, scope) === undefined) return false;
-    }
-    scope = scope.parent;
-  }
-  return false;
 }
 
 /**
@@ -1542,111 +1511,64 @@ export function withDrawRollback<T>(ce: ComputeEngine, fn: () => T): T {
 
 /**
  * Run `fn` with each name in `names` shielded from its assigned value: for the
- * duration of the call, the symbol is shadow-declared VALUELESS (keeping its
- * declared type; in-scope assumptions survive) in a temporary scope.
+ * duration of the call, a read of the value of the definition that the name
+ * has finds none (`withHiddenValues()`); nothing is written on the
+ * definition, and its declared type and the assumptions in scope are kept.
  *
  * This is the shared mechanism behind the binder convention (ARCHITECTURE.md,
  * "Bound variables, free symbols, and assigned values"): a variable a binder
  * owns (`Solve`/`Integrate`/`Limit`/`D`/`Sum`/…) is a pure symbol, so a
  * same-named global assignment must not leak into the operation OR its result.
  *
- * A name is shielded in two cases:
- * - its visible binding carries a user-assigned, non-constant value
- *   (`isAssignedVariableName`);
- * - its visible binding is the valueless variable of an enclosing binder, and
- *   that binder variable hides an outer binding with an assigned value
- *   (`binderHidesAssignedValue`). An occurrence of the name that the binder
- *   does not own, such as a function literal's parameter read outside a
- *   call, skips the binder's variable and reads the outer value.
+ * The definition of a name is the first binding up the current scope chain
+ * that is not the valueless variable of an enclosing binder: inside the
+ * handler of `Integrate`, the binding of the integration variable is the
+ * binder's own, and an occurrence that the binder does not own (a function
+ * literal's parameter read outside a call, a free name of a function body)
+ * reads the next binding outward. A name is shielded when that definition
+ * carries a user-assigned, non-constant value. A valueless name, or a
+ * built-in constant, is not shielded (a constant must not be stripped). When
+ * no name is shielded, `fn` runs directly, so the common case (no
+ * contradictory assignment) has no overhead and cannot change behavior.
  *
- * A valueless name that hides no value, or a built-in constant, is not
- * shielded (a constant must not be stripped). When no name is shielded, `fn`
- * runs directly with no scope push, so the common case (no contradictory
- * assignment) has no overhead and cannot change behavior.
- *
- * Re-entrancy is safe: inside the shield, the visible binding of a shielded
- * name is the valueless shield declaration. A shield declaration is not a
- * binder's variable, so neither test above passes for it, and a nested
- * `withValueShield` over the same name finds nothing more to shield.
+ * `fn` runs under a cache key of its own (`ce._withValueShieldKey`): a sign
+ * or a type derived inside the shield is blind to the hidden value, and is
+ * not served after it, nor an answer derived from the value inside it.
  */
 export function withValueShield<T>(
   ce: ComputeEngine,
   names: Iterable<string>,
   fn: () => T
 ): T {
-  const shielded: { name: string; type: string }[] = [];
-  const seen = new Set<string>();
+  const found = new Map<string, object>();
   for (const name of names) {
-    if (seen.has(name)) continue;
-    seen.add(name);
-    if (
-      !isAssignedVariableName(ce, name) &&
-      !binderHidesAssignedValue(ce, name)
-    )
-      continue;
-    // Capture the declared type as a STRING; passing the BoxedType object to
-    // `declare` throws "type invalid".
-    shielded.push({ name, type: ce.box(name).type.toString() });
+    if (found.has(name)) continue;
+    const def = assignedBindingOutsideBinders(ce, name);
+    if (def !== undefined && 'value' in def) found.set(name, def.value);
   }
-  if (shielded.length === 0) return fn();
+  if (found.size === 0) return fn();
+  return withHiddenValues([...found.values()], () =>
+    ce._withValueShieldKey(fn)
+  );
+}
 
-  ce.pushScope();
-  const shieldScope = ce.context.lexicalScope;
-  let result: T;
-  try {
-    // The shield scope is a SCRATCH scope (`scratch-scopes.ts`) while the
-    // shield declarations are made, so they advance no engine-wide cache
-    // version and the pop is clean — and only while they are made, for two
-    // reasons. A name that `fn` declares with a value after a cache was
-    // filled inside the shield must retire that cache: with `y := 1`, a
-    // sign of `y + 1` read inside the shield, then `y` declared `-3` into
-    // the shield scope, the sign read again must not be the cached positive
-    // one, and a scratch declaration retires nothing. And a scope created
-    // inside the shield (the local scope of a function literal boxed by
-    // `fn`) can escape with the result, so a declaration into it must keep
-    // its axis advance too. (A scoped expression evaluated by `fn` chains
-    // its persistent local scope onto the shield scope for the call; a
-    // declaration made there is not scratch even during the registration,
-    // because `scratchRootOf` follows the link the scope had before it was
-    // chained.) And the declarations and `fn` run under a cache key of
-    // their own (`ce._withValueShieldKey`), because the expressions
-    // that existed before the shield read their VALUES by name, so a sign
-    // derived from the hidden value, or a type that depends on it, must not
-    // be served inside the shield, nor a value-blind one after it. Together
-    // they keep a shielded evaluation from retiring the `_type`/`_sgn`
-    // caches of every other expression in the engine. The bindings are
-    // discarded by the pop and the escaping result is re-bound below; see
-    // the same arrangement, and the measurement that motivated it, in
-    // `simplifyValueBlind` (`simplify.ts`).
-    result = ce._withValueShieldKey(() => {
-      withScratchScope(ce, shieldScope, () => {
-        for (const { name, type } of shielded) {
-          // Skip an exotic type that fails to round-trip through `declare`
-          // rather than aborting the whole operation: a rare value leak is
-          // better than a thrown evaluation.
-          try {
-            ce.declare(name, { type });
-            // Mark it as a SHIELD: the dereference defers to the ambient
-            // lookup for a shielded name (`evaluateInOwnBindings`,
-            // `binders.ts`), which is what makes the shadow actually hide
-            // the value.
-            markShieldDeclaration(shieldScope, name);
-          } catch {
-            /* leave this symbol unshadowed */
-          }
-        }
-      });
-      return fn();
-    });
-  } finally {
-    ce.popScope();
+/** The first binding of `name` up the current scope chain that is not the
+ * valueless variable of a binder, when it holds a user-assigned, non-constant
+ * value; otherwise `undefined`. */
+function assignedBindingOutsideBinders(
+  ce: ComputeEngine,
+  name: string
+): BoxedDefinition | undefined {
+  for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent) {
+    const found = s.bindings.get(name);
+    if (found === undefined) continue;
+    if (!('value' in found)) return undefined;
+    const value = found.value.value;
+    if (value !== undefined && value !== null)
+      return found.value.isConstant === true ? undefined : found;
+    if (binderBindingOf(ce, name, s) === undefined) return undefined;
   }
-  // The shadow bindings are dead now that the scope is popped: re-bind any the
-  // result still points at, so it denotes the caller's symbols (see
-  // `rebindEscaping`). Done AFTER the pop so `ce.symbol()` resolves outward.
-  return isExpression(result)
-    ? (rebindEscaping(result, shieldScope) as T)
-    : result;
+  return undefined;
 }
 
 /**
@@ -1934,7 +1856,7 @@ export function updateDef(
   // Rollback journal (family 3, binding-half swaps): re-install the
   // previous half objects on the SAME record, by identity, via the same
   // delete/assign mechanism the swap above used — `sameBindingDef` is
-  // object identity (plus one `_activationOf` hop), so restoring fields on
+  // object identity, so restoring fields on
   // the same object is the only identity-safe rollback. Recorded AFTER the
   // swap so a throwing definition constructor journals nothing (a failed
   // update leaves the previous definition in place on its own). The

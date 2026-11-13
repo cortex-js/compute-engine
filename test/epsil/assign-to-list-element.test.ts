@@ -254,10 +254,10 @@ describe('a write that does not give a list is an error, and the variable keeps 
     expect(chainDepth(value)).toBeLessThanOrEqual(32);
   });
 
-  test('an undeclared list is assignment-to-list-element', () => {
+  test('a write to an element of an undeclared list is assignment-to-undeclared-variable', () => {
     const { value, diagnostics } = run('ys[1] = 9\nys');
     expect(diagnostics.map((d) => d.message[3])).toEqual([
-      'assignment-to-list-element',
+      'assignment-to-undeclared-variable',
     ]);
     expect(value.json).toBe('ys');
   });

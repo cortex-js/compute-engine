@@ -97,7 +97,7 @@ describe('A COMPREHENSION OVER A DOMAIN THAT IS AN ERROR VALUE', () => {
 });
 
 describe('A LAZY VIEW OVER A LOCAL OF A FUNCTION BODY READ BEFORE ITS ASSIGNMENT', () => {
-  // `n = <read>; t = [1]; n` in the body of a function literal: `t` has no
+  // `let n = <read>; let t = [1]; n` in the body of a function literal: `t` has no
   // value when the view is read. The error is the value of the read, on the
   // synchronous and the asynchronous route.
   const lambda = ['Function', ['Multiply', 2, 'x'], 'x'];
@@ -115,7 +115,12 @@ describe('A LAZY VIEW OVER A LOCAL OF A FUNCTION BODY READ BEFORE ITS ASSIGNMENT
   ])('%s', async (_name, read) => {
     const fn = ce.box([
       'Function',
-      ['Block', ['Assign', 'n', read], ['Assign', 't', ['List', 1]], 'n'],
+      [
+        'Block',
+        ['Declare', 'n', "'unknown'", read],
+        ['Declare', 't', "'unknown'", ['List', 1]],
+        'n',
+      ],
     ] as never);
     expect(isReadBefore(ce.function('Apply', [fn]).evaluate())).toBe(true);
     expect(isReadBefore(await ce.function('Apply', [fn]).evaluateAsync())).toBe(

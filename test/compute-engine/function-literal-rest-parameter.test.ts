@@ -45,6 +45,14 @@ function epsilValue(source: string): string {
     .toString();
 }
 
+/** The value of the Epsil program `source` run statement by statement: its
+ * function statements define functions of the engine. A program boxed as one
+ * block (`epsilValue()`) makes each function statement a local variable, which
+ * has one clause. */
+function programValue(source: string): string {
+  return executeEpsil(new ComputeEngine(), source).value.toString();
+}
+
 /** Apply `fn` to `args` (numbers), evaluated. */
 function applyNumbers(
   ce: ComputeEngine,
@@ -175,7 +183,7 @@ describe('Rest parameter — splicing it back into a call', () => {
   test('Epsil: `(...args) => Conjugate(g(...args))` computes through', () => {
     const ce = new ComputeEngine();
     const [ast, diagnostics] = parseEpsil(
-      'g(x, y) = x + y; f = (...args) => Conjugate(g(...args)); f(1, 2)'
+      'g(x, y) = x + y; let f = (...args) => Conjugate(g(...args)); f(1, 2)'
     );
     expect(diagnostics).toEqual([]);
     expect(
@@ -551,7 +559,7 @@ describe('Rest parameter — named definitions', () => {
 
   test('Epsil: a definition with a rest parameter and literal clauses dispatches', () => {
     expect(
-      epsilValue(
+      programValue(
         'h(0, ...rest) = 0\nh(n, ...rest) = Length(rest)\n(h(0, 9, 9), h(5, 9, 9), h(5))'
       )
     ).toBe('(0, 2, 0)');
@@ -735,27 +743,25 @@ describe('Rest parameter — declared signatures', () => {
     // definition, and it stamps SCALAR declared types too, so the body reads
     // `a` as an integer here.
     expect(
-      epsilValue(
+      programValue(
         'let f: (integer, any*) -> integer\nf(a, ...rest) = a + Length(rest)\n(f(1), f(1, 2, 3))'
       )
     ).toBe('(1, 3)');
     expect(
-      epsilValue(
+      programValue(
         'let f: (any*) -> integer\nf(...rest) = Length(rest)\n(f(), f(1, 2))'
       )
     ).toBe('(0, 2)');
   });
 
   test('the clause route still refuses a fixed declaration', () => {
-    const [ast] = parseEpsil(
+    const r = executeEpsil(
+      new ComputeEngine(),
       'let f: (integer, integer) -> integer\nf(a, ...rest) = a\nf(1, 2)'
     );
-    expect(
-      new ComputeEngine()
-        .box(ast as MathJsonExpression)
-        .evaluate()
-        .toString()
-    ).toContain('invalid-clause-definition');
+    expect(JSON.stringify(r.diagnostics)).toContain(
+      'invalid-clause-definition'
+    );
   });
 });
 

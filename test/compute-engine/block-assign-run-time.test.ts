@@ -3,17 +3,15 @@ import type { Expression } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
-// An assignment to a name that has no binding in the scope chain makes an
-// implicit local of the block. The local keeps its value from one run of the
-// block to the next inside one evaluation and one function call, and starts
-// with no value in a new evaluation and in a new call
-// (`sweepCanonicalizationBindings`,
-// `src/compute-engine/library/control-structures.ts`).
+// A local of a block is made by a `Declare` at the top level of the block. A
+// nested block that runs several times (the body of a `Sum`) writes the local
+// of the enclosing block with `Assign`: the value that one run writes is read
+// by the next run inside one evaluation and one function call, and a new
+// evaluation or a new call starts again from the declaration.
 //
 // On the asynchronous route each run of a block runs in a copy of the block
-// scope (an activation). Before, the local that a run made stayed in the copy,
-// so the next run started with no value for it, and `evaluateAsync()` and
-// `evaluate()` gave different values (`beginAsyncRun`, `endAsyncRun`).
+// scope (an activation), and `evaluateAsync()` gives the value that
+// `evaluate()` gives (`beginAsyncRun`, `endAsyncRun`).
 //
 
 function box(ce: ComputeEngine, json: unknown): Expression {
@@ -41,7 +39,7 @@ function engineWithTick(): ComputeEngine {
 /** `Σ_{k=1}^{3} (t ≔ t + 1; Tick(); t)`: the terms are `t + 1`, `t + 2`, `t + 3`. */
 const SUM_OF_INCREMENTS: unknown = [
   'Block',
-  ['Assign', 't', 0],
+  ['Declare', 't', "'unknown'", 0],
   [
     'Sum',
     ['Block', ['Assign', 't', ['Add', 't', 1]], ['Tick'], 't'],
@@ -64,7 +62,7 @@ function defineCounter(ce: ComputeEngine): void {
         'Typed',
         [
           'Block',
-          ['Assign', 't', 0],
+          ['Declare', 't', "'unknown'", 0],
           [
             'Sum',
             [
@@ -88,7 +86,7 @@ function defineCounter(ce: ComputeEngine): void {
   ]).evaluate();
 }
 
-describe('an implicit local made in an asynchronous run', () => {
+describe('a local of the enclosing block written in an asynchronous run', () => {
   test('keeps its value for the next run in the same evaluation', async () => {
     const ce = engineWithTick();
     const sum = box(ce, SUM_OF_INCREMENTS);
@@ -110,7 +108,7 @@ describe('an implicit local made in an asynchronous run', () => {
     const ce = engineWithTick();
     const sum = box(ce, [
       'Block',
-      ['Assign', 'q', 0],
+      ['Declare', 'q', "'unknown'", 0],
       [
         'Sum',
         [
@@ -174,7 +172,7 @@ describe('asynchronous evaluations that run at the same time', () => {
     const ce = new ComputeEngine();
     const sum = box(ce, [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'Sum',
         ['Block', ['Assign', 't', ['Add', 't', 1]], 't'],
@@ -213,7 +211,7 @@ describe('asynchronous evaluations that run at the same time', () => {
     } as never);
     const sum = box(ce, [
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'Sum',
         ['Block', ['Assign', 't', ['Add', 't', 1]], ['Wait'], 't'],
@@ -278,7 +276,7 @@ describe('asynchronous evaluations that run at the same time', () => {
 //
 
 /** `f(n) = if n ≥ 0 then { <inner> } else 0`, declared with the `scope`
- * effect, so that an implicit local in its body is allowed. */
+ * effect. */
 function defineRecursive(ce: ComputeEngine, inner: unknown): void {
   box(ce, [
     'DefineFunction',
@@ -303,14 +301,14 @@ const RECURSE: unknown = [
 ];
 
 describe('a recursive call that runs the same nested block', () => {
-  test('an implicit local assigned before the call, read after it', async () => {
+  test('a local declared before the call, read after it', async () => {
     const ce = engineWithTick();
     defineRecursive(ce, ['Block', ['Declare', 't', "'unknown'", 'n'], RECURSE, 't']);
     expect(box(ce, ['f', 3]).evaluate().toString()).toBe('3');
     expect((await box(ce, ['f', 3]).evaluateAsync()).toString()).toBe('3');
   });
 
-  test('an implicit local, with an asynchronous-only operator in the block', async () => {
+  test('a local, with an asynchronous-only operator in the block', async () => {
     const ce = engineWithTick();
     defineRecursive(ce, [
       'Block',

@@ -395,8 +395,8 @@ describe('local and outer assignments in a block', () => {
   // block, is written `\mathrm{Assign}(k, v)`.
   test.each([
     [['Block', ['Declare', 'k', "'unknown'", 2], ['Multiply', 'k', 'x']]],
-    [['Block', ['Assign', 'k', 2], ['Multiply', 'k', 'x']]],
-    [['Block', ['Assign', 'k', 2]]],
+    [['Block', ['Assign', 'k', 2], ['Multiply', 'k', 'x']], ['k']],
+    [['Block', ['Assign', 'k', 2]], ['k']],
     [
       [
         'Block',
@@ -441,9 +441,12 @@ describe('local and outer assignments in a block', () => {
         ['k', 2],
       ],
     ],
-    [['Assign', 'f', ['Function', ['Block', ['Assign', 'k', 'x']], 'x']]],
-  ])('%j round-trips', (json) => {
+    [['Assign', 'f', ['Function', ['Block', ['Assign', 'k', 'x']], 'x']], ['k']],
+  ])('%j round-trips', (json, outer: string[] = []) => {
+    // An `Assign` writes a variable that is in scope: `outer` names the
+    // variables declared outside the block.
     const engine = new ComputeEngine();
+    for (const name of outer) engine.declare(name, 'unknown');
     const e = engine.box(json as any);
     for (const prettify of [false, true]) {
       const latex = e.toLatex({ prettify });

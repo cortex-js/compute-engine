@@ -110,6 +110,21 @@ describe('Sum and Product with a bound that depends on another index', () => {
     expect(e.N().toString()).toBe('13');
   });
 
+  test('a block of the body reads both indexes', () => {
+    // The body is boxed in the scope of the operator, which assigns both
+    // indexes: the block that assigns `h` reads the inner index `j`.
+    const ce = new ComputeEngine();
+    ce.declare('h', 'any');
+    ce.assign('h', ce.box(['List']));
+    ce.box([
+      'Sum',
+      ['Block', ['Assign', 'h', ['Append', 'h', 'j']], 'j'],
+      ['Limits', 'i', 1, 2],
+      ['Limits', 'j', 1, 'i'],
+    ]).evaluate();
+    expect(ce.box('h').evaluate().json).toEqual(['List', 1, 1, 2]);
+  });
+
   test('async evaluation agrees', async () => {
     const e = ce.box([
       'Sum',

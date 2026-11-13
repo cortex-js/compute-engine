@@ -117,6 +117,7 @@ import {
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
+import { isLocalBinding } from './declared-local.js';
 import { isInstallingStandardLibrary } from './host-handler-changes.js';
 import {
   noteHostCollectionSource,
@@ -677,6 +678,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   /** See `OperatorDefinition._validationSignature`. */
   _validationSignature: Type | undefined = undefined;
+
+  /** True when the definition binds a local that a `Declare` statement
+   * initializes (`markLocalBinding()`): the default-`!scope` ceiling does
+   * not apply to it, as to a local declared with a value.
+   * @internal */
+  _bindsLocal = false;
 
   /** True if this operator definition was created from a user-defined
    * function literal (e.g. via `ce.assign('f', ce.parse('x \\mapsto x^2'))`).
@@ -1927,6 +1934,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   _update(def: OperatorDefinition): void {
     this._writeVersion += 1;
+    this._bindsLocal = isLocalBinding(def);
 
     if (this.engine.strict) {
       for (const key in def) {
@@ -2626,7 +2634,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           // literals are not gated — they have no annotation surface (the
           // lambda specifier slot is deferred) and are never installed here;
           // their arrows still carry the inferred `scope` honestly.
-          if (inferred.escapingWrite)
+          if (inferred.escapingWrite && !this._bindsLocal)
             throw new EffectContractError(
               this.name,
               undefined,
@@ -2793,18 +2801,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           if (!capturedCheck()) return run();
           return checkedCall(
             (options as { expression?: Expression }).expression,
-            () =>
-              runWithEvaluationEffects(
-                engine,
-                effects,
-                () =>
-                  fn(
-                    xs,
-                    this.lazy ? { ...carried, holdArguments: true } : carried
-                  ),
-                stack,
-                options._precisionWindow
-              )
+            run
           );
         },
       });

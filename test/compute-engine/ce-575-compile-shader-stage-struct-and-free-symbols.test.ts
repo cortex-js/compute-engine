@@ -78,7 +78,7 @@ describe('CE-575 a body that reads an undeclared symbol is refused', () => {
         [
           ce.box([
             'Block',
-            ['Assign', 'w', ['Multiply', 2, 'uv']],
+            ['Declare', 'w', "'unknown'", ['Multiply', 2, 'uv']],
             ['Add', 'w', 1],
           ]),
           '_tv1',

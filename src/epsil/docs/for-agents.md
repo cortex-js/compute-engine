@@ -52,7 +52,7 @@ let x = 5                 // mutable declaration
 const tau = 6.28          // immutable; reassigning yields an Error value
 x = x + 3                 // assignment: a bare `=` assigns only as a STATEMENT
 f(x) = x^2                // function definition, math style
-square = x => x^2        // anonymous function ("=>" is the lambda arrow)
+let square = x => x^2    // anonymous function ("=>" is the lambda arrow)
 cube : (x: number) -> number = x^3   // a named function-type annotation binds x
 function g(n) {           // function definition, block style
   let t = n + 1           // blocks are lexically scoped
@@ -305,8 +305,10 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
   immediately, and so does an **assignment**: `let ys = filter(xs, p)` and
   `xs = filter(xs, p)` store the list of the elements when the generator is
   finite and reads a variable. A generator with no last element
-  (`filter(1..oo, p)`) stays lazy when it is assigned, and stores the values
-  that the variables it reads have at the assignment.
+  (`filter(1..oo, p)`) stays lazy when it is assigned: a variable operand
+  gives its value at the assignment, and the inline function reads its
+  variables when an element is computed. List a finite part with `listFrom`
+  to keep the elements of that time.
 - **Output is the engine's textual form**: strings and booleans print
   *quoted* (`"True"`, `"florb"`) — that quoted `"True"` is a boolean, not a
   string. Derived collections (`Range`, `map`/`filter` results, loop-built

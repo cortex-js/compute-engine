@@ -1,3 +1,4 @@
+import { activationRecordOf } from './boxed-expression/ambient-chain.js';
 import { isPendingCallScope } from './pending-call-scopes.js';
 import { freeNameWasMade } from './binding-unit.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
@@ -75,7 +76,10 @@ import {
   whileDefining,
   withSignatureResult,
 } from './boxed-expression/declared-parameter-result.js';
-import { isLocalBinding } from './boxed-expression/declared-local.js';
+import {
+  isLocalBinding,
+  markLocalBinding,
+} from './boxed-expression/declared-local.js';
 import {
   assertSingleArmPolytype,
   EffectContractError,
@@ -619,7 +623,6 @@ export function declareSymbolValue(
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
 
-
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
   const fresh = !scope.bindings.has(name);
@@ -823,7 +826,6 @@ export function declareSymbolOperator(
   const rollbackFrame = activeRollbackFrame(ce);
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
-
 
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
@@ -3243,6 +3245,13 @@ export type AssignFnOptions = {
    * correct for a plain re-assignment to a declared name.
    */
   effectContract?: { declared: boolean; effects: EffectSet | undefined };
+  /**
+   * The name is a local that a `Declare` statement initializes with a
+   * function value (`declareSteps()`, `library/core.ts`): as for a local
+   * declared with a value, the definition is not held to the default-`!scope`
+   * ceiling (`markLocalBinding()`).
+   */
+  bindsLocal?: boolean;
 };
 
 /**
@@ -3634,7 +3643,7 @@ function assignNamedValue(
         declaredType.type,
         effectsDeclared,
         latestDeclaredEffectsSite(def.value),
-        { ce }
+        options?.bindsLocal ? undefined : { ce }
       );
       if (
         !matchesDeclaredTypeAxes(
@@ -4148,8 +4157,24 @@ function assignNamedValue(
   //
   // 2/ We were given an operator definition
   //
+  // A definition whose value an activation holds (a local of a block, a
+  // parameter, the variable of a binder) keeps its identity: the function is
+  // its value in the activation of the evaluation in progress.
+  if (
+    def !== undefined &&
+    isValueDef(def) &&
+    !def.value.isConstant &&
+    activationRecordOf(def.value, ce.context.lexicalScope) !== undefined
+  ) {
+    const literal = canonicalFunctionLiteral(ce.expr(arg2 as Expression));
+    if (literal !== undefined) {
+      ce._setSymbolValue(id, literal);
+      return ce;
+    }
+  }
   const fnDef = assignValueAsOperatorDef(ce, arg2);
   if (fnDef === undefined) throw Error(`Invalid definition for symbol "${id}"`);
+  if (options?.bindsLocal) markLocalBinding(fnDef);
 
   if (def) {
     // If we get here, the previous definition was a value definition.
@@ -4306,13 +4331,97 @@ export function withValuesFn<T>(
       snapshot: record.value._checkpointSnapshot(),
     });
   }
+  return runWithBindingValues(
+    ce,
+    saved,
+    values,
+    (name, _def, value) => ce.assign(name, value),
+    fn
+  );
+}
 
+/**
+ * `withValuesFn()` for the bindings `bindings`, which the caller found: each
+ * value of `values` is given to the value definition of the binding record
+ * of its name, wherever that record is, and no name is looked up or declared.
+ * The interpreter fallback of a compilation gives its inputs to the
+ * definitions that the expression is bound to (`buildInterpreterFallback()`,
+ * `compilation/compile-references.ts`). The checks and the restore are those
+ * of `withValuesFn()`.
+ */
+export function withBindingValuesFn<T>(
+  ce: IComputeEngine,
+  bindings: ReadonlyArray<{
+    readonly name: string;
+    readonly record: BoxedDefinition;
+  }>,
+  values: { readonly [id: string]: AssignValue },
+  fn: () => T
+): T {
+  if (bindings.length === 0) return fn();
+  const saved: WithValuesBinding[] = [];
+  for (const { name, record } of bindings) {
+    if (!isValueDef(record))
+      throw new Error(
+        `withValues(): "${name}" is bound to a function definition. withValues() gives a value to a variable only`
+      );
+    if (record.value.isConstant) throw new ConstantAssignmentError(name);
+    if (hasProvisionalDependents(ce, name))
+      throw new Error(
+        `withValues(): the body of a function applies "${name}" as a function, and a value would change that body for good. Declare "${name}" first`
+      );
+    const input = values[name];
+    if (
+      input !== undefined &&
+      adoptsForeignEngineObject([input as Expression], ce)
+    )
+      throw new Error(
+        `object-foreign-engine: cannot assign an object that belongs to a different engine to "${name}"`
+      );
+    saved.push({
+      name,
+      record,
+      def: record.value,
+      snapshot: record.value._checkpointSnapshot(),
+    });
+  }
+  return runWithBindingValues(
+    ce,
+    saved,
+    values,
+    (_name, def, value, verdict) => {
+      ce._withoutFacts(() => deriveAndWriteAssignedType(ce, def, value));
+      if (verdict === 'overlap') noteOverlapAdmitted(value);
+      def.value = value;
+    },
+    fn
+  );
+}
+
+/**
+ * The part of `withValuesFn()` after the copies of the bindings `saved`: box
+ * and check every value, write them with `write`, run `fn`, and put back the
+ * copies when `fn` returns or throws.
+ */
+function runWithBindingValues<T>(
+  ce: IComputeEngine,
+  saved: ReadonlyArray<WithValuesBinding>,
+  values: { readonly [id: string]: AssignValue },
+  write: (
+    name: string,
+    def: BoxedValueDefinition,
+    value: Expression,
+    verdict: ReturnType<typeof assertAssignableValueDef>
+  ) => void,
+  fn: () => T
+): T {
   let threw: { error: unknown } | undefined;
   try {
     const writes: {
       name: string;
       def: BoxedValueDefinition;
       value: Expression | undefined;
+      verdict?: ReturnType<typeof assertAssignableValueDef>;
     }[] = [];
     for (const { name, def } of saved) {
       const input = values[name];
@@ -4325,12 +4434,12 @@ export function withValuesFn<T>(
         throw new Error(
           `withValues(): the value of "${name}" is a function. withValues() gives a value to a variable only`
         );
-      assertAssignableValueDef(ce, name, def, value);
-      writes.push({ name, def, value });
+      const verdict = assertAssignableValueDef(ce, name, def, value);
+      writes.push({ name, def, value, verdict });
     }
-    for (const { name, def, value } of writes) {
+    for (const { name, def, value, verdict } of writes) {
       if (value === undefined) def.value = undefined;
-      else ce.assign(name, value);
+      else write(name, def, value, verdict!);
     }
     return fn();
   } catch (error) {
@@ -5480,8 +5589,8 @@ function rawBodyForRebox(
  *
  * A literal that a call returned is a closure: its body `Block` holds the
  * scope of that call (`captureClosures()`, `function-utils.ts`), and a symbol
- * of the body that the call bound, a parameter or an assignment local of the
- * call, is found through that scope. The MathJSON of the body has no scope,
+ * of the body that the call bound, a parameter or a local of the call, is
+ * found through that scope. The MathJSON of the body has no scope,
  * so a literal built from it in the current scope would read those symbols
  * in the scope of the declaration that stores it. With
  * `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `Declare(q, "(real) -> real",

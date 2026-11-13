@@ -527,7 +527,10 @@ describe('route parity', () => {
   });
 
   test('Epsil: inside a function body', () => {
-    const r = executeEpsil(engine(), 'f := (t) => bob.S(t, factor: 5)\nf(3)');
+    const r = executeEpsil(
+      engine(),
+      'let f = (t) => bob.S(t, factor: 5)\nf(3)'
+    );
     expect(r.diagnostics).toEqual([]);
     expect(String(r.value)).toBe('15');
   });
@@ -654,10 +657,13 @@ describe('a bound receiver inside an unboxed Field', () => {
         value: ['Dictionary', ['Tuple', "'S'", 'swap_S']],
       } as any);
       const args = [N('x', 3), N('factor', 5)];
-      const mixed = ce.box(['Apply', ['Field', outer, "'S'"], ...args] as any);
+      // The symbol boxed outside reads the outer `rec`: bound again in this
+      // scope, it reads the inner one.
+      const inner = ce.rebind(outer);
+      const mixed = ce.box(['Apply', ['Field', inner, "'S'"], ...args] as any);
       const boxed = ce.box([
         'Apply',
-        ce.function('Field', [outer, ce.string('S')]),
+        ce.function('Field', [inner, ce.string('S')]),
         ...args,
       ] as any);
       // x - factor

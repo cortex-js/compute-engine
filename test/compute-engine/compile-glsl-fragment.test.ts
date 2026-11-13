@@ -1230,12 +1230,12 @@ describe('decisions 11 to 14', () => {
   });
 
   test('13: the row root takes the block forms of a function body', () => {
-    // `acc` is not a symbol of the engine, so the assignment declares a
-    // local of the block.
-    expectIn(['Block', ['Assign', 'acc', 'x'], 'acc']);
-    const code = compile(ce.box(['Block', ['Assign', 'acc', 'x'], 'acc']), {
-      to: 'glsl',
-    }).code;
+    // `acc` is a local of the block, declared with a value.
+    expectIn(['Block', ['Declare', 'acc', "'unknown'", 'x'], 'acc']);
+    const code = compile(
+      ce.box(['Block', ['Declare', 'acc', "'unknown'", 'x'], 'acc']),
+      { to: 'glsl' }
+    ).code;
     expect(code).toContain('acc = x;');
   });
 
@@ -1644,7 +1644,7 @@ describe('phase C, review fixes', () => {
   test('a `parallel for` at the root is typed in its lowered form, and its value is the value of the interpreter', () => {
     const json = [
       'Block',
-      ['Assign', 'acc3', 0],
+      ['Declare', 'acc3', "'unknown'", 0],
       [
         'ParallelLoop',
         ['AddTo', 'acc3', ['Multiply', 'k', 'x']],
@@ -1664,7 +1664,7 @@ describe('phase C, review fixes', () => {
     const r = expectOut(
       [
         'Block',
-        ['Assign', 'acc4', 0],
+        ['Declare', 'acc4', "'unknown'", 0],
         [
           'ParallelLoop',
           ['Assign', 'acc4', ['Add', 'acc4', 'x']],
@@ -1765,7 +1765,7 @@ describe('phase C, second review fixes', () => {
     // At the root of the expression.
     const loop = (statement: unknown) => [
       'Block',
-      ['Assign', 'acc6', 0],
+      ['Declare', 'acc6', "'unknown'", 0],
       ['ParallelLoop', statement, ['Element', 'k', ['Range', 1, 10]]],
       'acc6',
     ];
@@ -1863,7 +1863,11 @@ describe('phase C2: canCompile() and compile() agree', () => {
     // A block with an assignment is not an operand.
     outOn(
       e,
-      ['Add', ['Block', ['Assign', 'q', 2], 'q'], 1],
+      [
+        'Add',
+        ['Block', ['Declare', 'q', "'unknown'", 0], ['Assign', 'q', 2], 'q'],
+        1,
+      ],
       /a block with a statement other than/,
       {},
       'unsettled-shape'
@@ -1872,8 +1876,18 @@ describe('phase C2: canCompile() and compile() agree', () => {
       e,
       [
         'Block',
-        ['Assign', 's', 'x'],
-        ['Assign', 't', ['Block', ['Assign', 'u', 's'], ['Multiply', 2, 'u']]],
+        ['Declare', 's', "'unknown'", 'x'],
+        ['Declare', 't', "'unknown'", 0],
+        [
+          'Assign',
+          't',
+          [
+            'Block',
+            ['Declare', 'u', "'unknown'", 0],
+            ['Assign', 'u', 's'],
+            ['Multiply', 2, 'u'],
+          ],
+        ],
         ['Add', 't', 1],
       ],
       /a block with a statement other than/,
@@ -1895,7 +1909,7 @@ describe('phase C2: canCompile() and compile() agree', () => {
       e,
       [
         'Block',
-        ['Assign', 'a', 1],
+        ['Declare', 'a', "'unknown'", 1],
         ['If', ['Less', 0, 'c'], ['Assign', 'a', ['Sqrt', ['Negate', 'x']]]],
         'a',
       ],
@@ -1910,7 +1924,7 @@ describe('phase C2: canCompile() and compile() agree', () => {
     e.declare('x', 'real');
     const loop = (body: unknown) => [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop', body, ['Element', 'k', ['Range', 1, 3]]],
       's',
     ];
@@ -2090,22 +2104,45 @@ describe('phase C2: canCompile() and compile() agree', () => {
       'Q',
       '(real) -> list<tuple<number, number>> | tuple<number, number>'
     );
+    // A body whose value is a point has a settled shape, whatever the
+    // declared result: the local `r` has the type of its point literal.
+    const e5 = new ComputeEngine();
+    e5.declare('x', 'real');
+    e5.declare(
+      'Q',
+      '(real) -> list<tuple<number, number>> | tuple<number, number>'
+    );
+    e5.assign(
+      'Q',
+      e5.box([
+        'Function',
+        ['Block', ['Declare', 'r', "'unknown'", ['Tuple', 'x', 1]], 'r'],
+        'x',
+      ])
+    );
+    expect(inOn(e5, ['Norm', ['Q', 'x']])).toContain('length(');
+    // A body whose value is a point or a list of points has no settled shape.
     e3.assign(
       'Q',
       e3.box([
         'Function',
-        ['Block', ['Assign', 'r', ['Tuple', 'x', 1]], 'r'],
+        [
+          'If',
+          ['Greater', 'x', 0],
+          ['Tuple', 'x', 1],
+          ['List', ['Tuple', 'x', 1]],
+        ],
         'x',
       ])
     );
-    outOn(e3, ['Norm', ['Q', 'x']], /admits more than one shape/);
+    outOn(e3, ['Norm', ['Q', 'x']], /must have one type/);
     e3.declare('PU', 'list<tuple<number, number>> | tuple<number, number>');
     e3.assign('PU', e3.box(['Tuple', 3, 4]));
     outOn(
       e3,
       [
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         ['Assign', 's', ['Add', 's', ['Multiply', ['At', 'PU', 1], 'x']]],
         's',
       ],
@@ -2185,7 +2222,11 @@ describe('phase C2, review fixes', () => {
     e.declare('x', 'real');
     outOn(
       e,
-      ['Add', ['Block', ['Assign', 'q', 2], 'q'], ['F', 'x']],
+      [
+        'Add',
+        ['Block', ['Declare', 'q', "'unknown'", 0], ['Assign', 'q', 2], 'q'],
+        ['F', 'x'],
+      ],
       /a block with a statement other than/,
       { functions: { F: 'external_f' } }
     );
@@ -2216,7 +2257,7 @@ describe('phase C2, review fixes', () => {
       glsl.compileFunction(
         e.box([
           'Block',
-          ['Assign', 'q', ['Tuple', 'u', 'u']],
+          ['Declare', 'q', "'unknown'", ['Tuple', 'u', 'u']],
           ['Add', 'v', 'q', 1],
         ]),
         'f',
@@ -2351,7 +2392,7 @@ describe('phase C2, third review fixes', () => {
       glsl.compileFunction(
         e.box([
           'Block',
-          ['Assign', 'q', ['Tuple', 'u', 'u']],
+          ['Declare', 'q', "'unknown'", ['Tuple', 'u', 'u']],
           ['Add', ['Multiply', 2, 'q'], 1],
         ]),
         'f',

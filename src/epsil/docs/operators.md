@@ -224,7 +224,7 @@ operators (Elixir-style). It is left-associative, so `a |> f |> g` is `g(f(a))`:
 ```epsil
 a + b |> f       // (a + b) |> f
 a || b |> f      // (a || b) |> f
-x = a |> f       // x = (a |> f)
+let x = a |> f   // let x = (a |> f)
 ```
 
 <ReadMore path="/epsil/control-flow/#pipelines">
@@ -842,7 +842,8 @@ Three spellings, two meanings:
 So a statement assigns:
 
 ```epsil
-x = 5
+let count = 0
+count = 5
 count = count + 1
 ```
 
@@ -874,6 +875,7 @@ line is the equation, because `x^2` is not a name. A bare name always assigns,
 so write `==` when you mean the equation:
 
 ```epsil
+let y = 0
 y == 2 * x + 1           // the equation
 y = 2 * x + 1            // assigns to y
 ```

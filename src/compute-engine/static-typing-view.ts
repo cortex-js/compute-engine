@@ -1,7 +1,7 @@
 /**
  * Type computations read declared bindings, not a call's parameter values.
- * Lookup restores hidden body bindings and skips the corresponding active
- * call frame. Captured frames reached through other chains remain visible.
+ * Lookup skips the active call frame of a body scope. Captured frames
+ * reached through other chains remain visible.
  * The view belongs to one engine and follows its evaluation-context stack,
  * including suspended applications.
  *
@@ -34,45 +34,21 @@ export function withStaticTypingView<T>(ce: ViewEngine, f: () => T): T {
   }
 }
 
-/** Enter the static view of the bindings of `ce` and return what
- * {@link leaveStaticTypingView} needs to leave it. The pair does what
- * {@link withStaticTypingView} does, with no closure: the type of a symbol
- * is read often. The caller leaves in a `finally`. */
-export function enterStaticTypingView(ce: ViewEngine): ViewEngine | undefined {
-  const outer = viewEngine;
-  viewEngine = ce;
-  return outer;
-}
-
-/** Leave the view that {@link enterStaticTypingView} entered; `outer` is
- * its result. */
-export function leaveStaticTypingView(outer: ViewEngine | undefined): void {
-  viewEngine = outer;
-}
-
 /** For each call frame of a function literal, the body scope of the
  * literal (`noteCallFrame()`). */
 const frameBodyScopes = new WeakMap<object, object>();
 
 /** For the body scope of a function literal that is being applied, the
- * engine of the applications, and the bindings that the applications took
- * out of it, by name: the binding that the first application took out
- * (`noteHiddenBodyBindings()`). The entry lives from the start of the first
- * application to the end of the last one, so also while an application is
- * suspended at an `await`. The parent of the body scope is the frame of an
- * application only while the entry lives (`hideBodyScopeParams()`,
- * `function-utils.ts`). */
-const hiddenBodyBindings = new WeakMap<
-  object,
-  { readonly engine: ViewEngine; readonly byName: Map<string, unknown> }
->();
+ * engine of the applications (`noteBodyScopeApplied()`). The entry lives
+ * from the start of the first application to the end of the last one, so
+ * also while an application is suspended at an `await`. */
+const appliedBodyScopes = new WeakMap<object, ViewEngine>();
 
 /** For each engine, the number of body scopes that have an entry in
- * `hiddenBodyBindings`: the static view of the engine can differ from the
+ * `appliedBodyScopes`: the static view of the engine can differ from the
  * bindings while it is not 0 (`staticViewDiverges()` has the other case). An
- * exception thrown by an application after it hid the parameters and before
- * its `try` (`pushScope()`, the declaration of its assignment locals) leaves the count
- * above 0, as it leaves the body scope re-parented. The view is then counted
+ * exception thrown by an application after `noteBodyScopeApplied()` and
+ * before its `try` leaves the count above 0. The view is then counted
  * as different for every later type computation of the engine: the caches
  * keyed on `_cacheGeneration()` use keys of their own inside type
  * computations, which costs cache hits, not correctness. */
@@ -81,7 +57,7 @@ const appliedBodyScopeCount = new WeakMap<ViewEngine, number>();
 /** The engine of the applications of the body scope `bodyScope` that are in
  * progress, or `undefined`. */
 function applyingEngine(bodyScope: object): ViewEngine | undefined {
-  return hiddenBodyBindings.get(bodyScope)?.engine;
+  return appliedBodyScopes.get(bodyScope);
 }
 
 /** Record that `frame` is the call frame of an application of the function
@@ -91,31 +67,19 @@ export function noteCallFrame(frame: object, bodyScope: object): void {
 }
 
 /** An application by `ce` of the literal whose body scope is `bodyScope`
- * took the `entries` out of it. A name that an earlier application still
- * running took out keeps the binding it took out. */
-export function noteHiddenBodyBindings(
-  ce: ViewEngine,
-  bodyScope: object,
-  entries: ReadonlyArray<readonly [string, unknown]>
-): void {
-  let record = hiddenBodyBindings.get(bodyScope);
-  if (record === undefined) {
-    record = { engine: ce, byName: new Map() };
-    hiddenBodyBindings.set(bodyScope, record);
-    appliedBodyScopeCount.set(ce, (appliedBodyScopeCount.get(ce) ?? 0) + 1);
-  }
-  const byName = record.byName;
-  for (const [name, binding] of entries)
-    if (!byName.has(name)) byName.set(name, binding);
+ * started. */
+export function noteBodyScopeApplied(ce: ViewEngine, bodyScope: object): void {
+  if (appliedBodyScopes.has(bodyScope)) return;
+  appliedBodyScopes.set(bodyScope, ce);
+  appliedBodyScopeCount.set(ce, (appliedBodyScopeCount.get(ce) ?? 0) + 1);
 }
 
 /** The last application of the literal whose body scope is `bodyScope`
- * ended and put its bindings back. */
-export function forgetHiddenBodyBindings(bodyScope: object): void {
-  const record = hiddenBodyBindings.get(bodyScope);
-  if (record === undefined) return;
-  hiddenBodyBindings.delete(bodyScope);
-  const ce = record.engine;
+ * ended. */
+export function forgetBodyScopeApplied(bodyScope: object): void {
+  const ce = appliedBodyScopes.get(bodyScope);
+  if (ce === undefined) return;
+  appliedBodyScopes.delete(bodyScope);
   appliedBodyScopeCount.set(ce, (appliedBodyScopeCount.get(ce) ?? 1) - 1);
 }
 
@@ -193,48 +157,20 @@ export function inStaticTypingView(ce: ViewEngine): boolean {
   return viewEngine === ce;
 }
 
-/** The engines that have read a parameter of a function literal by name, in
- * another binding of that name, outside a type computation
- * (`noteParameterReadByName()`). */
-const parameterReadsByName = new WeakSet<ViewEngine>();
-
-/**
- * Record that a read outside a type computation of `ce` found a value in
- * another binding with the name of a parameter whose own binding is not
- * reachable. A type computation reads no binding there (`bindingInContext()`,
- * `binders.ts`), so the two can answer differently from now on. The record
- * stays for the life of the engine: an answer of that read can stay in a cache
- * of a node, whatever happens to the binding. This costs cache hits, not
- * correctness: each later type computation of `ce` also skips the memos that
- * test `staticViewDiverges()`. An engine that makes no such read does not pay.
- */
-export function noteParameterReadByName(ce: ViewEngine): void {
-  parameterReadsByName.add(ce);
-}
-
 /**
  * Can a read in the static view answer something else than the same read
- * outside it? Only while a type computation of `ce` runs, and in one of two
- * cases.
- *
- * - An application of a function literal by `ce` is in progress: the static
- *   view differs at the body scope of a literal that is being applied and at
- *   its frame. An application suspended at an `await` counts too: its body
- *   scope keeps the frame as parent and its bindings taken out, and a read of
- *   a node of its body from any stack goes through them. A frame on the
- *   current stack also counts.
- * - `ce` has read a parameter of a function literal by name
- *   (`noteParameterReadByName()`). With `n := 2`, the sign of the body node
- *   `n + 1` of `(n: real) ↦ Sqrt(n + 1)` is positive outside the view, and is
- *   not known inside it. Read from the cache, that sign would type the literal
- *   `(n: real) -> real`, where the result can be complex.
+ * outside it? Only while a type computation of `ce` runs and an application
+ * of a function literal by `ce` is in progress: the static view differs at
+ * the frame of the application, whose values it does not read. An
+ * application suspended at an `await` counts too. A frame on the current
+ * stack also counts. A parameter read outside every application of its
+ * literal has no value in either view.
  *
  * A cache that is not keyed on the type version keeps an answer computed then
  * under a key of its own.
  */
 export function staticViewDiverges(ce: ViewEngine): boolean {
   if (viewEngine !== ce) return false;
-  if (parameterReadsByName.has(ce)) return true;
   if ((appliedBodyScopeCount.get(ce) ?? 0) > 0) return true;
   return innermostFrame(ce._evalContextStack) !== undefined;
 }
@@ -264,13 +200,7 @@ export function staticBindingIn<B>(
     )
       own = body;
   }
-  const found = own.bindings.get(name);
-  if (found !== undefined) return found;
-  // The bindings taken out of a body scope by an application of the engine
-  // of the view. An application of another engine is read as it is.
-  const record = hiddenBodyBindings.get(own);
-  if (record === undefined || record.engine !== ce) return undefined;
-  return record.byName.get(name) as B | undefined;
+  return own.bindings.get(name);
 }
 
 /** The scope after `scope` in a walk of the chain: see `staticBindingIn()`. */
@@ -280,7 +210,7 @@ export function staticParentOf<B>(scope: Scope<B>): Scope<B> | null {
   // The frame of an application of the literal whose body scope is `scope`
   // is skipped, when the engine of the view made the application. The body
   // scope has this frame as parent only while the application runs
-  // (`hideBodyScopeParams()`, `function-utils.ts`), also while it is
+  // (`makeLambda()`, `function-utils.ts`), also while it is
   // suspended on a stack of its own.
   if (
     frameBodyScopes.get(parent) === scope &&

@@ -119,11 +119,6 @@ describe('the definitions that stay valid', () => {
       ['List', 7, 5],
     ],
     [
-      'in a function body',
-      'function g() {\n  function N(y) { 1 }\n  N(0) := 3\n  [N(0), N(1)]\n}\ng()',
-      ['List', 3, 1],
-    ],
-    [
       'in a nested block, a local function',
       'function Sin(x) { 5 }\nfunction g() {\n  Sin(x) := 6\n  Sin(0)\n}\n[g(), Sin(0)]',
       ['List', 6, 5],
@@ -139,6 +134,15 @@ describe('the definitions that stay valid', () => {
       expect(run(source)).toEqual({ value, codes: [] });
     }
   );
+
+  test('a second definition of a function statement of a function body', () => {
+    // In a body, a function statement declares a local: a second definition
+    // of the name is a second declaration.
+    const codes = run(
+      'function g() {\n  function N(y) { 1 }\n  N(0) := 3\n  [N(0), N(1)]\n}\ng()'
+    ).codes.map((m) => (m as unknown[])[3]);
+    expect(codes).toContain('variable-redeclaration');
+  });
 
   test.each([
     ['no parameter list', 'function Sin x { 5 }\nSin(x) := 5\nSin(0)'],

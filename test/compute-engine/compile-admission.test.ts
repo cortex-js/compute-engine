@@ -126,9 +126,9 @@ describe('An input with no type is refused (R1)', () => {
     const body: MathJsonExpression = [
       'Block',
       ['Declare', 's', 'number', 0],
-      // A first assignment in a loop body is a static error: `p` is first
-      // assigned at the level of the block.
-      ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
+      // A declaration in a loop body is a static error: `p` is declared at
+      // the level of the block.
+      ['Declare', 'p', "'unknown'", ['Tuple', 't', ['Multiply', 2, 't']]],
       [
         'Loop',
         [
@@ -265,7 +265,7 @@ describe('An input with no type is refused (R1)', () => {
     const r = compile(
       ce.box([
         'Block',
-        ['Assign', 'p', 1],
+        ['Declare', 'p', "'unknown'", 1],
         ['Loop', ['Assign', 'q', 'n'], ['Element', 'n', ['Range', 1, 3]]],
         'p',
       ])
@@ -838,7 +838,12 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     body,
     y,
   ];
-  const z: MathJsonExpression = ['Assign', 'z', ['Multiply', 2, 'y']];
+  const z: MathJsonExpression = [
+    'Declare',
+    'z',
+    "'unknown'",
+    ['Multiply', 2, 'y'],
+  ];
 
   const UNSETTLED: [string, MathJsonExpression][] = [
     [
@@ -901,7 +906,7 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     const r = compile(
       ce.box([
         'Block',
-        ['Assign', 'z', ['Multiply', 2, 'x']],
+        ['Declare', 'z', "'unknown'", ['Multiply', 2, 'x']],
         [
           'If',
           ['Greater', 'x', 1],
@@ -967,8 +972,9 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
           fn([
             'Block',
             [
-              'Assign',
+              'Declare',
               'w',
+              "'unknown'",
               [
                 'Apply',
                 [
@@ -1047,8 +1053,8 @@ describe('A conditional in a statement position (R3)', () => {
     ['Assign', 'n', 3],
   ];
   const INIT: MathJsonExpression[] = [
-    ['Assign', 'p', ['Tuple', 0, 0]],
-    ['Assign', 'n', 0],
+    ['Declare', 'p', "'unknown'", ['Tuple', 0, 0]],
+    ['Declare', 'n', "'unknown'", 0],
   ];
   const STATEMENTS: [string, MathJsonExpression][] = [
     ['a statement of a block', ['Block', ...INIT, IF, 'n']],
@@ -1115,7 +1121,12 @@ describe('A conditional in a statement position (R3)', () => {
     const r = compile(
       engine().box([
         'Block',
-        ['Assign', 'q', ['If', ['Greater', 'x', 0], ['List', 1, 2], 3]],
+        [
+          'Declare',
+          'q',
+          "'unknown'",
+          ['If', ['Greater', 'x', 0], ['List', 1, 2], 3],
+        ],
         'x',
       ])
     );
@@ -1265,8 +1276,9 @@ describe('The admission checks of round 2 of the review', () => {
   ): unknown => ce.box(json).subs(vars).evaluate().json;
 
   // The branches of a conditional in a statement position assign values of
-  // different shapes to `p`, which is read later. A first assignment in a
-  // branch is a static error, so the expression is invalid and declines.
+  // different shapes to `p`, which is read later. An assignment to a name
+  // that is not declared is a static error, so the expression is invalid
+  // and declines.
   test.each(TARGETS)(
     'values of different shapes assigned to one name decline on %s',
     (to) => {
@@ -1293,7 +1305,7 @@ describe('The admission checks of round 2 of the review', () => {
     const ce = engine();
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', ['Tuple', 0, 0]],
+      ['Declare', 'p', "'unknown'", ['Tuple', 0, 0]],
       [
         'If',
         ['Greater', 'x', 0],
@@ -1312,7 +1324,7 @@ describe('The admission checks of round 2 of the review', () => {
     const ce = engine();
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Loop',
         ['If', ['Greater', 'k', 1], ['Assign', 'p', ['List', 'k', 2]]],
@@ -1363,7 +1375,7 @@ describe('The admission checks of round 2 of the review', () => {
     }
   });
 
-  // A first assignment of `p` in a branch is a static error, so the
+  // An assignment to `p`, which is not declared, is a static error, so the
   // expression is invalid. When the engine declares `p`, the branches write
   // a symbol of the engine, and a write to a symbol that the compiled code
   // does not declare declines.
@@ -1486,8 +1498,8 @@ describe('Assigned names and the shapes of their values', () => {
     expect(r.error).toMatch(/assigns the loop index/);
   });
 
-  // A first assignment of `acc` in a loop body is a static error, so the
-  // expression is invalid and declines.
+  // An assignment to `acc`, which is not declared, is a static error, so
+  // the expression is invalid and declines.
   test('a name that only a loop body assigns declines', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -1508,8 +1520,13 @@ describe('Assigned names and the shapes of their values', () => {
   test('the placeholder of a destructuring target is not an input', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', ['Tuple', 'a', '_'], ['Tuple', 'x', ['List', 1, 2]]],
-      ['Assign', ['Tuple', 'b', '_'], ['Tuple', 2, 3]],
+      [
+        'Declare',
+        ['Tuple', 'a', '_'],
+        "'unknown'",
+        ['Tuple', 'x', ['List', 1, 2]],
+      ],
+      ['Declare', ['Tuple', 'b', '_'], "'unknown'", ['Tuple', 2, 3]],
       ['Add', 'a', 'b'],
     ];
     const r = compile(engine().box(json), { fallback: false });
@@ -1553,13 +1570,13 @@ describe('Assigned names and the shapes of their values', () => {
   );
 
   // In a function body, `p` is a local of the body, which both branches
-  // assign. The compiled code gives the interpreter's values. A first
-  // assignment in a branch is a static error: `p` is first assigned at the
-  // level of the block.
+  // assign. The compiled code gives the interpreter's values. A
+  // declaration in a branch is a static error: `p` is declared at the level
+  // of the block.
   test('a local that both branches assign lists compiles', () => {
     const body: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', ['List', 0, 0]],
+      ['Declare', 'p', "'unknown'", ['List', 0, 0]],
       [
         'If',
         ['Greater', 't', 0],
@@ -1584,8 +1601,8 @@ describe('Assigned names and the shapes of their values', () => {
   });
 
   // The branches give the local `p` a list and a number.
-  // A first assignment of `p` in a branch is a static error: the function
-  // literal is invalid, and its compilation declines.
+  // An assignment to `p`, which is not declared, is a static error: the
+  // function literal is invalid, and its compilation declines.
   test.each(SHAPE_TARGETS)(
     'a local that the branches give different shapes declines on %s',
     (to) => {
@@ -1607,8 +1624,8 @@ describe('Assigned names and the shapes of their values', () => {
     }
   );
 
-  // Only one branch assigns the local `p`, and nothing assigns it before. A
-  // first assignment in a branch is a static error: the function literal is
+  // Only one branch assigns `p`, and nothing declares it. An assignment to
+  // a name that is not declared is a static error: the function literal is
   // invalid, and its compilation declines on every target.
   test('a local that one branch assigns declines', () => {
     const body: MathJsonExpression = [
@@ -1632,7 +1649,7 @@ describe('Assigned names and the shapes of their values', () => {
     (to) => {
       const json: MathJsonExpression = [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['If', gt, ['Assign', 'p', ['List', 1, 2]]],
         ['Multiply', 2, 'p'],
       ];
@@ -1651,7 +1668,7 @@ describe('Assigned names and the shapes of their values', () => {
   test('a local assigned a list, then a list of lists, compiles', () => {
     const body: MathJsonExpression = [
       'Block',
-      ['Assign', 'q', ['List', 't', 2]],
+      ['Declare', 'q', "'unknown'", ['List', 't', 2]],
       ['Assign', 'q', ['List', ['List', 't', 2]]],
       'q',
     ];
@@ -1669,7 +1686,7 @@ describe('Assigned names and the shapes of their values', () => {
   test('a local assigned a list of numbers, then a list of lists, declines', () => {
     const body: MathJsonExpression = [
       'Block',
-      ['Assign', 'q', ['List', 't', 2]],
+      ['Declare', 'q', "'unknown'", ['List', 't', 2]],
       ['Assign', 'q', ['List', ['List', 't', 2]]],
       'q',
     ];
@@ -1688,7 +1705,7 @@ describe('Assigned names and the shapes of their values', () => {
     (to) => {
       const json: MathJsonExpression = [
         'Block',
-        ['Assign', 'p', ['List', 1, 2]],
+        ['Declare', 'p', "'unknown'", ['List', 1, 2]],
         [
           'Block',
           ['Declare', 'p', "'real'", 0],
@@ -1701,7 +1718,9 @@ describe('Assigned names and the shapes of their values', () => {
         // The shader fragment has no list local, so the shader declines.
         expect(() =>
           compile(engine().box(json), { to, fallback: false })
-        ).toThrow(/a block of the GLSL fragment has scalar, complex or point locals/);
+        ).toThrow(
+          /The local `p` is a list: .* GLSL fragment has scalar, complex or point locals/
+        );
         return;
       }
       const r = compile(engine().box(json), { to, fallback: false });
@@ -1743,9 +1762,10 @@ describe('The paths of the code that meet after a node (R3)', () => {
   };
 
   /** A local that gets a value of another type than its first value is the
-   * static error `assignment-type-mismatch`, and a first assignment in a
-   * branch or a loop body is the static error `first-assignment-in-branch`:
-   * the expression is invalid and the compilation declines. */
+   * static error `assignment-type-mismatch`, and an assignment to a name
+   * that is not declared is the static error
+   * `assignment-to-undeclared-variable`: the expression is invalid and the
+   * compilation declines. */
   const declinesInvalid = (json: MathJsonExpression, to: string): void => {
     const r = compile(engine().box(json), { to: to as any });
     expect(r.success).toBe(false);
@@ -1760,7 +1780,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['Loop', ['Assign', 'p', list], range],
         ['Multiply', 2, 'p'],
       ],
@@ -1769,7 +1789,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', list],
+        ['Declare', 'p', "'unknown'", list],
         ['Loop', ['Assign', 'p', 0], range],
         ['Multiply', 2, 'p'],
       ],
@@ -1781,7 +1801,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['Loop', ['Assign', 'p', list], ['Element', 'i', 'L']],
         ['Multiply', 2, 'p'],
       ],
@@ -1794,10 +1814,11 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         [
-          'Assign',
+          'Declare',
           's',
+          "'unknown'",
           ['Sum', ['Block', ['Assign', 'p', list], 'i'], ['Limits', 'i', 1, 3]],
         ],
         ['Add', 's', ['Multiply', 2, 'p']],
@@ -1809,10 +1830,11 @@ describe('The paths of the code that meet after a node (R3)', () => {
   test.each(SHAPE_TARGETS)('a loop body that keeps the shape on %s', (to) => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
-        'Assign',
+        'Declare',
         's',
+        "'unknown'",
         ['Sum', ['Block', ['Assign', 'p', 'i'], 'i'], ['Limits', 'i', 1, 3]],
       ],
       ['Loop', ['Assign', 'p', ['Add', 'p', 'i']], range],
@@ -1832,7 +1854,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'q', 0],
+        ['Declare', 'q', "'unknown'", 0],
         [
           'Loop',
           [
@@ -1854,7 +1876,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         [
           'Loop',
           [
@@ -1878,7 +1900,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
       declinesInvalid(
         [
           'Block',
-          ['Assign', 'p', 0],
+          ['Declare', 'p', "'unknown'", 0],
           ['Which', gt, 0, ['Block', ['Assign', 'p', list], lt], 0],
           ['Multiply', 2, 'p'],
         ],
@@ -1891,7 +1913,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         [
           'Match',
           'x',
@@ -1909,7 +1931,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   test('a Match body that assigns a local of the block', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       [
         'Match',
         'x',
@@ -1941,7 +1963,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     const r = compile(
       engine().box([
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         [
           'Match',
           ['Tuple', 'x', 1],
@@ -1964,7 +1986,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   test('a Match guard that keeps the shape declines', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Match',
         'x',
@@ -1985,7 +2007,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
     declinesInvalid(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['Or', gt, ['Block', ['Assign', 'p', list], 'True']],
         ['Multiply', 2, 'p'],
       ],
@@ -2003,7 +2025,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
         'Function',
         [
           'Block',
-          ['Assign', 'p', 0],
+          ['Declare', 'p', "'unknown'", 0],
           [
             'If',
             ['Greater', 't', 0],
@@ -2024,7 +2046,12 @@ describe('The paths of the code that meet after a node (R3)', () => {
     let nested: MathJsonExpression = ['Assign', 'q', ['Add', 'q', 1]];
     for (let k = 0; k < 12; k++)
       nested = ['Loop', nested, ['Element', `i${k}`, ['Range', 1, 2]]];
-    const json: MathJsonExpression = ['Block', ['Assign', 'q', 0], nested, 'q'];
+    const json: MathJsonExpression = [
+      'Block',
+      ['Declare', 'q', "'unknown'", 0],
+      nested,
+      'q',
+    ];
     const r = compile(engine().box(json), { fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(4096);
@@ -2052,7 +2079,7 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
   test('a Return in the guard of a case of a Match', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Match',
         'x',
@@ -2077,7 +2104,7 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
   test('a Return in the body of a case of a Match', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Match',
         'x',
@@ -2096,7 +2123,7 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
   test('a wildcard case that reassigns another shape declines', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['Match', 'x', ['MatchCase', '_', ['Assign', 'p', list]]],
       ['Multiply', 2, 'p'],
     ];
@@ -2112,7 +2139,7 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
   test.each(TARGETS)('an element-wise If whose branch assigns on %s', (to) => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['If', ['Greater', 'L', 0], ['Assign', 'p', 5]],
       ['Multiply', 2, 'p'],
     ];
@@ -2153,10 +2180,11 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
     ce.declare('M', 'list<integer>');
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
-        'Assign',
+        'Declare',
         'c',
+        "'unknown'",
         [
           'Comprehension',
           'i',
@@ -2215,7 +2243,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test('an assignment in the body of a Comprehension', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Comprehension',
         ['Block', ['Assign', 'p', 5], 'i'],
@@ -2245,7 +2273,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     ] as MathJsonExpression[]) {
       const json: MathJsonExpression = [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['Comprehension', body, ['Element', 'i', ['List', 1]]],
         'p',
       ];
@@ -2259,7 +2287,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test('an assignment in a guard and in a later clause of a Comprehension', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Comprehension',
         'i',
@@ -2281,7 +2309,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test('an assignment in the source of the first clause of a Comprehension', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Comprehension',
         'i',
@@ -2309,13 +2337,13 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test.each(['Sum', 'Product'])('an assignment in a bound of a %s', (op) => {
     const first: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [op, 'i', ['Limits', 'i', 1, ['Block', ['Assign', 'p', 4], 2]]],
       'p',
     ];
     const later: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         op,
         ['Add', 'i', 'j'],
@@ -2338,7 +2366,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test.each(['Sum', 'Product'])('an assignment in the body of a %s', (op) => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         op,
         ['Block', ['Assign', 'p', ['Add', 'p', 'i']], 'i'],
@@ -2363,13 +2391,13 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     ];
     const body: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       integral,
       'p',
     ];
     const bound: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['Integrate', 't', ['Limits', 't', 0, ['Block', ['Assign', 'p', 4], 1]]],
       'p',
     ];
@@ -2378,7 +2406,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     // and `p` keeps 0. The compiled code declines both forms.
     expect(
       engine()
-        .box(['Block', ['Assign', 'p', 0], integral])
+        .box(['Block', ['Declare', 'p', "'unknown'", 0], integral])
         .evaluate().operator
     ).toBe('Integrate');
     expect(interpret(engine(), body, {})).toBe(0);
@@ -2392,7 +2420,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test('a Loop whose pass can end after each guard and clause', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Loop',
         'j',
@@ -2415,7 +2443,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
   test('a condition of type any whose branch assigns', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['If', ['At', 'M', 1], ['Assign', 'p', 5]],
       ['Multiply', 2, 'p'],
     ];
@@ -2437,7 +2465,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     ce.declare('M', 'list<any>');
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['If', ['At', 'M', 1], ['Assign', 'p', list], ['Assign', 'p', 3]],
       ['Multiply', 2, 'p'],
     ];
@@ -2463,7 +2491,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
         'Function',
         [
           'Block',
-          ['Assign', 'p', 0],
+          ['Declare', 'p', "'unknown'", 0],
           ['If', 'c', ['Assign', 'p', list], ['Assign', 'p', 3]],
           ['Multiply', 2, 'p'],
         ],
@@ -2486,7 +2514,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
         'Function',
         [
           'Block',
-          ['Assign', 'p', 0],
+          ['Declare', 'p', "'unknown'", 0],
           ['If', 'c', ['Assign', 'p', 5], ['Assign', 'p', 3]],
           ['Multiply', 2, 'p'],
         ],
@@ -2594,7 +2622,12 @@ describe('Assignments in a function literal (R3)', () => {
       5,
     ],
   ])('a callback of %s that assigns an outer name', (op, call, value) => {
-    const json: MathJsonExpression = ['Block', ['Assign', 'p', 0], call, 'p'];
+    const json: MathJsonExpression = [
+      'Block',
+      ['Declare', 'p', "'unknown'", 0],
+      call,
+      'p',
+    ];
     expect(interpret(json)).toBe(value);
     const r = compile(engine().box(json));
     expect(r.success).toBe(false);
@@ -2611,7 +2644,7 @@ describe('Assignments in a function literal (R3)', () => {
   test('a callback that gives an outer name another shape', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Filter',
         L3,
@@ -2636,7 +2669,10 @@ describe('Assignments in a function literal (R3)', () => {
     expectCompiled(
       [
         'Tabulate',
-        fn(['Block', ['Assign', 'y', ['Multiply', 2, 'u']], 'y'], 'u'),
+        fn(
+          ['Block', ['Declare', 'y', "'unknown'", ['Multiply', 2, 'u']], 'y'],
+          'u'
+        ),
         3,
       ],
       [2, 4, 6]
@@ -2651,7 +2687,7 @@ describe('Assignments in a function literal (R3)', () => {
   test('an applied function literal that gives an outer name another shape', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'If',
         ['Greater', 'x', 0],
@@ -2666,7 +2702,7 @@ describe('Assignments in a function literal (R3)', () => {
     expectCompiled(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['Apply', fn(['Block', ['Assign', 'p', 5], 'u'], 'u'), 1],
         'p',
       ],
@@ -2698,7 +2734,7 @@ describe('Assignments in a function literal (R3)', () => {
   // error `assignment-type-mismatch`.
   test('an applied function literal that maps over a list and assigns an outer name', () => {
     const json: MathJsonExpression = B(
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Apply',
         [
@@ -2755,8 +2791,9 @@ describe('Assignments in a function literal (R3)', () => {
       'a guard',
       B(
         [
-          'Assign',
+          'Declare',
           'r',
+          "'unknown'",
           [
             'Comprehension',
             'i',
@@ -2776,8 +2813,9 @@ describe('Assignments in a function literal (R3)', () => {
       'a body',
       B(
         [
-          'Assign',
+          'Declare',
           'r',
+          "'unknown'",
           [
             'Comprehension',
             B(['Assign', 'p', ['List', 'i', 'i']], 'p'),
@@ -2835,14 +2873,14 @@ describe('Assignments in a function literal (R3)', () => {
       ['Dictionary', ['KeyValuePair', "'value'", value]],
     ];
     const json = B(
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       D('g', fn(B(['Assign', 'p', ['List', 1, 2]], ['Greater', 'k', 1]), 'k')),
       ['Assign', 'r', ['Filter', 'L', 'g']],
       ['Add', ['Multiply', 2, 'p'], 1]
     );
     expect(declined(json).error).toMatch(/invalid expression/);
     const kept = B(
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       D('g', fn(B(['Assign', 'p', ['Add', 'k', 1]], 'p'), 'k')),
       ['List', ['g', 1], 'p']
     );
@@ -2855,16 +2893,18 @@ describe('Assignments in a function literal (R3)', () => {
   // 5, the compiled code gave 107.
   test('a Return inside a Loop that has code after it', () => {
     const body = B(
-      ['Assign', 'q', 0],
+      ['Declare', 'q', "'unknown'", 0],
       loop(['If', ['Greater', 'i', 1], B(['Assign', 'q', 7], ['Return', 5])]),
       ['Add', 100, 'q']
     );
     expect(interpret(['Apply', fn(body, 'p'), 1])).toBe(5);
-    expect(interpret(B(['Assign', 'f', fn(body, 'p')], ['f', 1]))).toBe(5);
+    expect(
+      interpret(B(['Declare', 'f', "'unknown'", fn(body, 'p')], ['f', 1]))
+    ).toBe(5);
     for (const json of [
       ['Apply', fn(body, 'p'), 'x'],
       body,
-      B(['Assign', 'f', fn(body, 'p')], ['f', 'x']),
+      B(['Declare', 'f', "'unknown'", fn(body, 'p')], ['f', 'x']),
     ] as MathJsonExpression[]) {
       const d = declined(json);
       expect(d.code).toBe('unsettled-shape');
@@ -2878,7 +2918,10 @@ describe('Assignments in a function literal (R3)', () => {
     const tail: MathJsonExpression = [
       'Apply',
       fn(
-        B(['Assign', 'q', 0], loop(['If', ['Greater', 'i', 1], ['Return', 5]])),
+        B(
+          ['Declare', 'q', "'unknown'", 0],
+          loop(['If', ['Greater', 'i', 1], ['Return', 5]])
+        ),
         'p'
       ),
       1,
@@ -2895,7 +2938,7 @@ describe('Assignments in a function literal (R3)', () => {
   // `Return` ends it in the interpreter. The case compiles there.
   test('a Return inside a Loop that has code after it compiles on Python', () => {
     const json = B(
-      ['Assign', 'q', 0],
+      ['Declare', 'q', "'unknown'", 0],
       [
         'Loop',
         ['If', ['Greater', 'i', 1], B(['Assign', 'q', 7], ['Return', 5])],
@@ -2972,7 +3015,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('a sequential reassignment to another shape declines', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['Assign', 'p', ['List', 1, 2]],
       'p',
     ];
@@ -2983,7 +3026,7 @@ describe('The simple rule for assignments (R3)', () => {
     const r = compile(
       engine().box([
         'Block',
-        ['Assign', 'p', ['List', 1, 2]],
+        ['Declare', 'p', "'unknown'", ['List', 1, 2]],
         ['Assign', 'p', ['List', 1, 2, 3]],
         'p',
       ]),
@@ -2996,7 +3039,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('a list, then a matrix, declines', () => {
     declinesInvalid([
       'Block',
-      ['Assign', 'q', ['List', 'x', 2]],
+      ['Declare', 'q', "'unknown'", ['List', 'x', 2]],
       ['Assign', 'q', ['List', ['List', 'x', 2]]],
       'q',
     ]);
@@ -3005,7 +3048,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('a number, then a string, declines', () => {
     declinesInvalid([
       'Block',
-      ['Assign', 'p', 1],
+      ['Declare', 'p', "'unknown'", 1],
       ['Assign', 'p', "'ab'"],
       'p',
     ]);
@@ -3019,7 +3062,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('a real, then a complex number, compiles only in the complex mode', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 1],
+      ['Declare', 'p', "'unknown'", 1],
       ['Assign', 'p', ['Complex', 0, 2]],
       'p',
     ];
@@ -3049,7 +3092,7 @@ describe('The simple rule for assignments (R3)', () => {
     compilesTo(
       [
         'Block',
-        ['Assign', 'p', 1],
+        ['Declare', 'p', "'unknown'", 1],
         [
           'Block',
           ['Declare', 'p', "'list<real>'", ['List', 'x', 2]],
@@ -3066,7 +3109,7 @@ describe('The simple rule for assignments (R3)', () => {
     compilesTo(
       [
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['If', ['Greater', 'x', 0], ['Assign', 'p', 1], ['Assign', 'p', 2]],
         ['Multiply', 2, 'p'],
       ],
@@ -3083,7 +3126,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('a stored function that writes an outer name, with a later reassignment, declines', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Declare',
         'g',
@@ -3109,7 +3152,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('an assignment of the index of an enclosing Loop in a function literal declines', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'n', 0],
+      ['Declare', 'n', "'unknown'", 0],
       [
         'Loop',
         [
@@ -3139,7 +3182,10 @@ describe('The simple rule for assignments (R3)', () => {
       'Function',
       [
         'Function',
-        ['Block', ['Block', ['Assign', 'y', 2], ['Add', 'y', 'x']]],
+        [
+          'Block',
+          ['Block', ['Declare', 'y', "'unknown'", 2], ['Add', 'y', 'x']],
+        ],
         'x',
       ],
       'y',
@@ -3181,7 +3227,12 @@ describe('The admission checks of the review of the simple rule (R3)', () => {
   ] as [string, MathJsonExpression][])(
     'a callback in a branch of an %s declines',
     (_, callback) => {
-      declines(['Block', ['Assign', 'p', 0], ['Filter', 'L', callback], 'p']);
+      declines([
+        'Block',
+        ['Declare', 'p', "'unknown'", 0],
+        ['Filter', 'L', callback],
+        'p',
+      ]);
     }
   );
 
@@ -3193,7 +3244,7 @@ describe('The admission checks of the review of the simple rule (R3)', () => {
     ];
     declines([
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['Limit', ['If', ['Greater', 'x', 0], w, ['Function', 'u', 'u']], 0],
       'p',
     ]);
@@ -3203,7 +3254,7 @@ describe('The admission checks of the review of the simple rule (R3)', () => {
   test('a stored literal that writes an outer name, passed by name, declines', () => {
     declines([
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       ['Declare', 'g', ['Dictionary', ['KeyValuePair', "'value'", writer]]],
       ['Filter', 'L', 'g'],
       'p',
@@ -3216,7 +3267,7 @@ describe('The admission checks of the review of the simple rule (R3)', () => {
   test('a stored literal that writes an outer name, called by name, declines', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       [
         'Declare',
         'g',
@@ -3356,7 +3407,7 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
   test('a callback that calls a stored function that writes an outer name declines', () => {
     declines([
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       stored('g', writer),
       ['Filter', 'L', ['Function', ['g', 'u'], 'u']],
       'p',
@@ -3371,7 +3422,7 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
     const r = compile(
       engine().box([
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         ['Filter', 'L', ['Apply', ['Function', writer, 'y'], 0]],
         'p',
       ])
@@ -3380,7 +3431,7 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
     expect(r.diagnostic?.message).toMatch(/does not return a function/);
     declines([
       'Block',
-      ['Assign', 'p', 0],
+      ['Declare', 'p', "'unknown'", 0],
       stored('g', ['Function', writer, 'y']),
       ['Filter', 'L', ['g', 0]],
       'p',
@@ -3395,7 +3446,7 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
     const r = compile(
       engine().box([
         'Block',
-        ['Assign', 'p', 0],
+        ['Declare', 'p', "'unknown'", 0],
         stored('g', [
           'If',
           ['Greater', 'x', 0],
@@ -3541,7 +3592,7 @@ describe('The admission checks of the review of the simple decline (R3)', () => 
     ce.declare('pairs', 'list<tuple<real, real>>');
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'n', 0],
+      ['Declare', 'n', "'unknown'", 0],
       [
         'Loop',
         [
@@ -3582,7 +3633,7 @@ describe('The admission checks of the review of the simple decline (R3)', () => 
       'f',
       ce.box([
         'Function',
-        ['Block', ['Assign', 't', ['Multiply', 2, 'x']], 't'],
+        ['Block', ['Declare', 't', "'unknown'", ['Multiply', 2, 'x']], 't'],
         'x',
       ])
     );
@@ -3590,7 +3641,7 @@ describe('The admission checks of the review of the simple decline (R3)', () => 
       'g',
       ce.box([
         'Function',
-        ['Block', ['Assign', 't', ['Multiply', 3, 'y']], 't'],
+        ['Block', ['Declare', 't', "'unknown'", ['Multiply', 3, 'y']], 't'],
         'y',
       ])
     );
@@ -3607,8 +3658,9 @@ describe('The admission checks of the review of the simple decline (R3)', () => 
     const json: MathJsonExpression = [
       'Block',
       [
-        'Assign',
+        'Declare',
         'r',
+        "'unknown'",
         [
           'Match',
           'x',
@@ -3619,7 +3671,11 @@ describe('The admission checks of the review of the simple decline (R3)', () => 
               'Map',
               [
                 'Function',
-                ['Block', ['Assign', 'q', ['Multiply', 2, 'v']], 'q'],
+                [
+                  'Block',
+                  ['Declare', 'q', "'unknown'", ['Multiply', 2, 'v']],
+                  'q',
+                ],
                 'v',
               ],
               'L',

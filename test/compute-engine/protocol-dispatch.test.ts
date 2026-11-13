@@ -993,12 +993,10 @@ const r = Map(Negatable.negated, [1, 2])`
   test('a pre-boxed protocol symbol in an unboxed `Field`: both spellings agree', () => {
     // `outer` is the symbol `Comparable` boxed at the top level, where it
     // names the protocol and has no value. An inner scope declares a
-    // constant `Comparable` that holds a dictionary. A symbol whose binding
-    // has no value reads the innermost binding of its name when it is
-    // evaluated (docs/SCOPING-MODEL.md, ruling of 2026-08-22), so in that
-    // scope the call reaches the inner `compare`. The named-argument check
-    // looks the name up for the same reason, and the raw `Field` that holds
-    // `outer` and the pre-boxed `Field` give the same call.
+    // constant `Comparable` that holds a dictionary. `outer`, bound again in
+    // that scope (`ce.rebind()`), reads the inner binding, so the call
+    // reaches the inner `compare`. The raw `Field` that holds it and the
+    // pre-boxed `Field` give the same call.
     const e = ce();
     const named = (n: string, v: unknown) => ['NamedArgument', { str: n }, v];
     const outer = e.symbol('Comparable');
@@ -1011,15 +1009,16 @@ const r = Map(Negatable.negated, [1, 2])`
           ['Tuple', "'compare'", ['Function', { str: 'inner' }, 'x', 'y']],
         ],
       } as any);
+      const inner = e.rebind(outer);
       const both = (args: unknown[]) => {
         const mixed = e.box([
           'Apply',
-          ['Field', outer, { str: 'compare' }],
+          ['Field', inner, { str: 'compare' }],
           ...args,
         ] as any);
         const boxed = e.box([
           'Apply',
-          e.function('Field', [outer, e.string('compare')]),
+          e.function('Field', [inner, e.string('compare')]),
           ...args,
         ] as any);
         expect(mixed.toString()).toBe(boxed.toString());

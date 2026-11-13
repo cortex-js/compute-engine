@@ -23,7 +23,7 @@ const third = ['Divide', 'n', 3];
 function sumLoop(range: unknown) {
   return [
     'Block',
-    ['Assign', 'c', 0],
+    ['Declare', 'c', "'unknown'", 0],
     ['Loop', ['Assign', 'c', ['Add', 'c', 'k']], ['Element', 'k', range]],
     'c',
   ];

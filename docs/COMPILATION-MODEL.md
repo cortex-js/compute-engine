@@ -1325,12 +1325,13 @@ effect:
 **Block locals.** The rules of the language (`src/epsil/docs/declarations.md`)
 make a local simple to compile, and compiled code adds three declines:
 
-- A declaration has a value: `Declare(x, type, v)`, or a first
-  `Assign(x, v)` at the block's own level, which is the declaration. A
-  `Declare` with no value, a first assignment inside a branch, a loop body or
-  a `Match` case, and a use of a local before its declaration are static
-  errors (`declaration-without-value`, `first-assignment-in-branch`,
-  `read-before-declaration`), so the compilation declines. No compiled code
+- A declaration has a value: `Declare(x, type, v)` at the block's own
+  level. A `Declare` with no value, a `Declare` inside a branch, a loop body
+  or a `Match` case, an `Assign` to a name that no scope declares, and a use
+  of a local before its declaration are static errors
+  (`declaration-without-value`, `declaration-below-statement`,
+  `assignment-to-undeclared-variable`, `read-before-declaration`), so the
+  compilation declines. No compiled code
   reads a local that has no value.
 - A local can be assigned again anywhere after its declaration (a branch, a
   loop body, a nested block) with a value whose static type is a subtype of

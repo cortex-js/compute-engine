@@ -1673,28 +1673,27 @@ type:
 
 ## Static binding view
 
-A function call temporarily parents its body scope onto a fresh activation
-frame and hides the body's canonical parameter and inferred valueless bindings.
-Ordinary evaluation therefore reads argument values and assignment locals from
-that frame. During type computation, `withStaticTypingView` changes lookup:
+A function call makes a frame that is an activation of the body scope: it
+holds the static definition of each parameter and of each local of the body,
+with the values of this call (`docs/SCOPING-MODEL.md`, "Activations").
+Ordinary evaluation therefore reads argument values and the values of locals
+from that frame. During type computation, `withStaticTypingView` changes
+lookup:
 
-- An applied body's scope exposes its own bindings, including hidden bindings.
-- Its activation frame is skipped when reached as that body's parent.
+- A type computation reads no value from the activation of a call.
+- An activation frame is skipped when reached as the parent of its body.
 - A lookup starting in an activation frame on the current stack reads the
   body's static bindings instead.
 - An occurrence of a function-literal parameter whose binding is not reachable
   reads no binding, not another binding of the same name. A read outside a type
   computation still reads the name. The first such read of an engine gives its
   type computations cache keys of their own (`staticViewDiverges()`).
-- An occurrence of a block local (a `Declare` statement or a first assignment)
-  follows the same rule when the only binding of its name that the lookup
-  reaches is not a local of that block. With `n := [1, 2]`,
-  `Block(Declare(n, "real", 2), n + 1)` is typed `real`, not `list<real>`. The
-  binding that a run of the block makes for the local, in the scope of the
-  block, is the same variable, and a type computation in the run reads it.
-  When the block is the body of a function literal, the run makes that binding
-  in the call frame, and a type computation in the call reads the hidden
-  binding of the body scope, as the first item says.
+- An occurrence of a block local (a `Declare` statement) follows the same
+  rule when the only binding of its name that the lookup reaches is not a
+  local of that block. With `n := [1, 2]`,
+  `Block(Declare(n, "real", 2), n + 1)` is typed `real`, not `list<real>`. A
+  run of the block writes the value of the local in its activation and makes
+  no binding, so a type computation in the run reads the static definition.
 
 A captured frame reached through a different scope chain, or no longer on the
 current stack, remains visible. Such a frame belongs to the closure made by the

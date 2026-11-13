@@ -6,13 +6,102 @@ import type { Scope } from '../global-types.js';
 const scopeTemplates = new WeakMap<Scope, Scope>();
 
 // The scopes that have had at least one activation. A scope that is not in
-// this set cannot have an activation on a context stack, so `liveScopeOf`
-// answers it without a walk of the stack.
+// this set cannot have an activation on a chain, so `activationOnLinks`
+// answers it without a walk of the links.
 const activatedTemplates = new WeakSet<Scope>();
 
-export function registerScopeActivation(scope: Scope, template: Scope): void {
-  scopeTemplates.set(scope, template);
-  activatedTemplates.add(template);
+// The values of an activation: for each static definition of its template,
+// its value in this evaluation of the node.
+const activationValues = new WeakMap<Scope, Map<object, unknown>>();
+
+// The static definitions of the scopes that have had an activation: their
+// value is read and written in an activation (`activationRecordOf()`).
+const activatedDefinitions = new WeakSet<object>();
+
+/**
+ * Record that `scope` is an activation of `template`, or holds the values
+ * of an evaluation with no template (a call frame). `values` holds the
+ * value of each static definition in this evaluation.
+ */
+function registerScopeActivation(
+  scope: Scope,
+  template: Scope | undefined,
+  values?: Map<object, unknown>
+): void {
+  if (template !== undefined) {
+    scopeTemplates.set(scope, template);
+    activatedTemplates.add(template);
+  }
+  if (values === undefined) return;
+  activationValues.set(scope, values);
+  for (const def of values.keys()) activatedDefinitions.add(def);
+}
+
+// The body scope of the function literal that each call frame applies
+// (`registerCallFrame()`).
+const frameBodies = new WeakMap<Scope, Scope>();
+
+/**
+ * Record that `frame` is the call frame of an application of the function
+ * literal whose body scope is `bodyScope`: an activation of that scope,
+ * whose `values` hold the parameters and the locals of the body in this
+ * call. Its parent is the activation that the function value keeps.
+ */
+export function registerCallFrame(
+  frame: Scope,
+  bodyScope: Scope,
+  values: Map<object, unknown>
+): void {
+  frameBodies.set(frame, bodyScope);
+  activatedTemplates.add(bodyScope);
+  registerScopeActivation(frame, undefined, values);
+}
+
+/** The body scope that the call frame `scope` applies, or `undefined` when
+ * `scope` is not a call frame. */
+export function callFrameBodyOf(scope: Scope): Scope | undefined {
+  return frameBodies.get(scope);
+}
+
+/** True when the chain of parents of `scope` holds an activation. */
+export function holdsActivation(scope: Scope | null | undefined): boolean {
+  for (let s = scope; s != null; s = s.parent)
+    if (activationValues.has(s)) return true;
+  return false;
+}
+
+/** True when the value of the static definition `def` is held by the
+ * activations of its scope. */
+export function isActivatedDefinition(def: object): boolean {
+  return activatedDefinitions.has(def);
+}
+
+/**
+ * The values of the first activation on the links from `from` (the parents
+ * of the scopes) that holds the static definition `def`, or `undefined`
+ * when there is none: the definition is read outside any evaluation of its
+ * node, and it has no value. With `skipCallFrames`, the activation of a
+ * call (registered with no template) does not answer.
+ */
+export function activationRecordOf(
+  def: object,
+  from: Scope | null | undefined,
+  skipCallFrames = false
+): Map<object, unknown> | undefined {
+  for (let s = from; s != null; s = s.parent) {
+    if (skipCallFrames && !scopeTemplates.has(s)) continue;
+    const values = activationValues.get(s);
+    if (values?.has(def)) return values;
+  }
+  return undefined;
+}
+
+/** The values that the activation `scope` holds, or `undefined` when
+ * `scope` is not an activation. */
+export function activationValuesOf(
+  scope: Scope
+): Map<object, unknown> | undefined {
+  return activationValues.get(scope);
 }
 
 export function scopeActivationTemplate(scope: Scope): Scope | undefined {
@@ -20,33 +109,23 @@ export function scopeActivationTemplate(scope: Scope): Scope | undefined {
 }
 
 /**
- * The scope that stands for `scope` in the evaluation whose context stack is
- * `stack`: the innermost runtime activation of `scope` on the stack, or
- * `scope` itself when the stack holds no activation of it, or holds `scope`
- * itself above every activation of it.
- *
- * An asynchronous evaluation of a scoped node (a `Sum`, a `Product`) does not
- * push the node's local scope. It pushes an activation: a copy with its own
- * value definitions, so that two evaluations of the node that run at the same
- * time do not write the index of each other. A function literal created in
- * the body of the node has the local scope (the template) as its defining
- * scope, and a call frame of the literal chains to its defining scope. With
- * the template in the chain, the body of the literal reads the index in the
- * template, which holds the value that an earlier synchronous evaluation
- * assigned last, not the value of the current iteration:
- * `Sum(Reduce(Map(x ↦ k·x, [1, 1]), Add, 0), k ∈ 1..2)` gave 8 with
- * `evaluateAsync()` after a synchronous `evaluate()` had given 6.
+ * The activation of `scope` on the links from `from` (the parents of the
+ * scopes, `from` included): an activation of `scope`, the frame of a call
+ * that applies it, or `scope` itself, whichever the links reach first;
+ * `scope` when they reach none of them.
  */
-export function liveScopeOf(
-  stack: ReadonlyArray<{ lexicalScope: Scope }>,
+export function activationOnLinks(
+  from: Scope | null | undefined,
   scope: Scope
 ): Scope {
   if (!activatedTemplates.has(scope)) return scope;
-  for (let i = stack.length - 1; i >= 0; i--) {
-    const active = stack[i].lexicalScope;
-    if (active === scope) return scope;
-    if (scopeTemplates.get(active) === scope) return active;
-  }
+  for (let s = from; s != null; s = s.parent)
+    if (
+      s === scope ||
+      scopeTemplates.get(s) === scope ||
+      frameBodies.get(s) === scope
+    )
+      return s;
   return scope;
 }
 
@@ -66,61 +145,66 @@ export function chainContains(
 }
 
 /**
- * The scope a node's local scope is chained onto while the node evaluates
- * in the ambient scope `ambient`, or `undefined` when the local scope keeps
- * its own parent link.
- *
- * A node that owns a local scope — a comprehension, a sum, a block — pushes
- * that scope again on every evaluation. Its parent link is the scope it was
- * canonicalized in, so a declaration made later in a scope pushed on top of
- * that one (a child scope that shadows `n` with a value) is not on the
- * chain, and the node's free symbols never see it, while a plain symbol
- * evaluated beside it does (`bindingInContext` walks the ambient chain).
- * Ruled 2026-09-15: a directly evaluated expression reads the environment it
- * is evaluated in, so the local scope is chained onto the ambient scope —
- * only when the ambient chain descends from the scope's own parent, so an
- * unrelated chain captures nothing, and never onto the scope itself (a
- * re-entrant evaluation). A call frame is NOT chained: a stored function
- * value is a closure and evaluates in its own environment
- * (`docs/SCOPING-MODEL.md`).
+ * An activation of `scope` for one evaluation of the node that holds it:
+ * the bindings of `scope` (the static definitions) and the value of each of
+ * its locals in this evaluation: a local of a block and a variable of a
+ * binder (`markBinderVariable()`), each of which starts with no value. A
+ * binding of another kind that the
+ * scope holds (a parameter of an enclosing function literal, a name that
+ * the boxing declared there) is not a local of the node, and its value is
+ * held elsewhere. Its parent is `parent`, the activation in which the node
+ * is evaluated (the current lexical scope).
  */
-export function ambientChainParent(
-  ambient: Scope | null | undefined,
+export function scopeActivation(
+  parent: Scope | null | undefined,
   scope: Scope
-): Scope | undefined {
-  if (
-    ambient != null &&
-    ambient !== scope &&
-    scope.parent != null &&
-    scope.parent !== ambient &&
-    !chainContains(ambient, scope) &&
-    chainContains(ambient, scope.parent)
-  )
-    return ambient;
-  return undefined;
+): Scope {
+  const result: Scope = {
+    ...scope,
+    parent: parent ?? scope.parent,
+    bindings: new Map(scope.bindings),
+  };
+  const values = new Map<object, unknown>();
+  for (const [name, binding] of scope.bindings) {
+    if (!('value' in binding)) continue;
+    const def = binding.value as unknown as {
+      isConstant: boolean;
+      _blockLocal?: boolean;
+      _isBinderVariable?: boolean;
+    };
+    if (
+      def._blockLocal === true ||
+      (!def.isConstant &&
+        (def._isBinderVariable === true ||
+          scope.binderNames?.has(name) === true))
+    )
+      values.set(def, undefined);
+  }
+  registerScopeActivation(result, scope, values);
+  return result;
 }
 
 /**
- * Run `fn` with `scope` chained onto `ambient` exactly as an evaluation of
- * the node that owns `scope` would chain it (`ambientChainParent`), and the
- * parent link restored afterwards. A memo that resolves the node's free
- * names must resolve them through this chain — the one the node's walk
- * reads — or a value computed under one ambient scope is served under
- * another.
+ * Give the iteration that is about to write the binder variable `name` an
+ * activation of its own. When the top frame of `stack` is an activation
+ * that holds the value of `name`, the frame gets a new activation of the
+ * same template, with the same parent, whose values start as a copy of the
+ * previous ones. A function value made in the previous iteration keeps the
+ * previous activation, and so the value of `name` in that iteration.
  */
-export function withAmbientChain<T>(
-  ambient: Scope | null | undefined,
-  scope: Scope | undefined,
-  fn: () => T
-): T {
-  const parent =
-    scope === undefined ? undefined : ambientChainParent(ambient, scope);
-  if (scope === undefined || parent === undefined) return fn();
-  const saved = scope.parent;
-  scope.parent = parent;
-  try {
-    return fn();
-  } finally {
-    scope.parent = saved;
-  }
+export function renewIterationActivation(
+  stack: ReadonlyArray<{ lexicalScope: Scope }>,
+  name: string
+): void {
+  const top = stack[stack.length - 1];
+  const scope = top?.lexicalScope;
+  if (scope === undefined) return;
+  const template = scopeTemplates.get(scope);
+  const values = activationValues.get(scope);
+  if (template === undefined || values === undefined) return;
+  const binding = template.bindings.get(name) as { value?: object } | undefined;
+  if (binding?.value === undefined || !values.has(binding.value)) return;
+  const fresh: Scope = { ...scope, bindings: new Map(scope.bindings) };
+  registerScopeActivation(fresh, template, new Map(values));
+  (top as { lexicalScope: Scope }).lexicalScope = fresh;
 }

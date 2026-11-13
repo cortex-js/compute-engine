@@ -1,3 +1,6 @@
+import { inStaticTypingView } from '../static-typing-view.js';
+import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
+import { valueIsHidden } from './hidden-values.js';
 import type {
   Expression,
   ExpressionInput,
@@ -6,8 +9,6 @@ import type {
   CollectionHandlers,
   IComputeEngine as ComputeEngine,
   TypeProvenanceEntry,
-  BoxedDefinition,
-  Scope,
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
 import {
@@ -66,7 +67,8 @@ import {
 import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { isDictionary, isFunction, isNumber, isSymbol } from './type-guards.js';
+import { lazyViewActivationOf } from './lazy-view-context.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import {
   type MemoDeps,
@@ -100,7 +102,6 @@ import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
 import { noteSymbolValue } from './residue-class-value-hook.js';
-
 
 /**
  * ### THEORY OF OPERATIONS
@@ -395,36 +396,6 @@ export class _BoxedValueDefinition
   // definition only when no other live context holds it.
   // It counts frames, not a state of the record.
   _holders = 0;
-
-  // The STATIC binding this definition is a per-call activation of, when it is
-  // a `Function` call frame's parameter binding (`markActivation`,
-  // `binders.ts`; `docs/SCOPING-MODEL.md`).
-  // Declared here — rather than assigned on demand — so a call frame's
-  // definition keeps the same object shape as every other one.
-  _activationOf: BoxedValueDefinition | undefined = undefined;
-
-  // A runtime copy of an ordinary scoped binding. Unlike a parameter
-  // activation, this binding can escape in a lazy collection's result.
-  _scopeActivationOf: BoxedValueDefinition | undefined = undefined;
-
-  // When a run of a `Block` removed this binding from the scope of the block,
-  // or an application of a function literal hid it in the scope of its body:
-  // that scope, and a binding record that holds this definition
-  // (`markSweptBinding`, `binders.ts`). An occurrence bound to this
-  // definition then reads its name from that scope up. Declared here —
-  // rather than assigned on demand — so every definition keeps the same
-  // object shape.
-  _sweptHome: Scope | undefined = undefined;
-  _sweptRecord: BoxedDefinition | undefined = undefined;
-
-  // True when this binding is a SHIELD: a valueless shadow declared solely to
-  // hide an enclosing binding's value (`withValueShield` in `utils.ts`,
-  // `simplifyValueBlind` in `simplify.ts`). Read by `evaluateInOwnBindings`'s
-  // restriction 2 (`markShieldDeclaration`, `binders.ts`;
-  // `docs/SCOPING-MODEL.md`). Declared here —
-  // rather than assigned on demand — so a shield keeps the same object shape
-  // as every other definition.
-  _isShield: true | undefined = undefined;
 
   // True when this binding was created to shadow a standard-library operator
   // used as a bare value (`N + 1`, `S / D`). This provenance belongs to the
@@ -766,6 +737,17 @@ export class _BoxedValueDefinition
       this._engine._atTransientConfiguration
     )
       return this._regeneratedValue();
+    // The value of a definition of a scope that has activations is held by
+    // the activation of the evaluation in progress (`activationRecordOf()`).
+    // A type computation reads it as outside every call, where a parameter
+    // and a local of the body of a function have no value
+    // (`static-typing-view.ts`).
+    if (isActivatedDefinition(this)) {
+      const view = inStaticTypingView(this._engine);
+      const from = this._engine.context?.lexicalScope;
+      return activationRecordOf(this, from, view)?.get(this) as
+        Expression | undefined;
+    }
     if (this._value === null) this._value = this._regeneratedValue();
     return this._value;
   }
@@ -810,21 +792,39 @@ export class _BoxedValueDefinition
   }
 
   get value(): Expression | undefined {
+    // A value shield hides the value, not the type (`withHiddenValues()`).
+    if (valueIsHidden(this)) return undefined;
     return this._effectiveValue();
   }
 
   set value(v: Expression | undefined) {
-    if (this._isConstant)
+    // The value of a definition of a scope that has activations is written
+    // in the activation of the evaluation in progress, when there is one. A
+    // constant local of a block is written once in each activation.
+    const record = isActivatedDefinition(this)
+      ? activationRecordOf(this, this._engine.context?.lexicalScope)
+      : undefined;
+    if (
+      this._isConstant &&
+      (record === undefined || record.get(this) !== undefined)
+    )
       throw new Error(`Cannot set value of constant "${this.name}"`);
+    // An activated definition has no value outside its activations, as its
+    // read gives: a write with no activation on the links changes nothing.
+    if (record === undefined && isActivatedDefinition(this)) return;
     // No-op dispatch guard (design §4, step 5): re-writing the IDENTICAL
     // value object is a state-identical write, and suppression is TOTAL —
     // no event, no axis advance, no `_writeVersion` (a spurious local bump
     // would cold the element memo's per-dependency entries). Object
     // identity ONLY: structural equality (`.isSame`) is syntactic, not
     // binding-identity, and must not suppress (design §4's predicate table).
-    if (v !== undefined && v === this._value) return;
-    const prev = this._value;
-    this._value = v;
+    const prev =
+      record !== undefined
+        ? (record.get(this) as Expression | undefined)
+        : this._value;
+    if (v !== undefined && v === prev) return;
+    if (record !== undefined) record.set(this, v);
+    else this._value = v;
     // The type of a definition that holds a function literal is inferred
     // from the literal now: record the types of the bindings that its body
     // reads from outside it, so that a call after one of them changed type
@@ -973,9 +973,19 @@ export class _BoxedValueDefinition
    * fields and states no public setter can express — `_type === null` means
    * "type derived from the value" — so constructing or peeking at one outside
    * this class is meaningless.
+   *
+   * The value of an activated definition (a parameter, a local of a block, a
+   * variable of a binder) is held by an activation, not by this record: the
+   * snapshot also holds the activation that the current scope reads it from
+   * and its entry there.
    * @internal */
   _checkpointSnapshot(): unknown {
+    const activation = isActivatedDefinition(this)
+      ? activationRecordOf(this, this._engine.context?.lexicalScope)
+      : undefined;
     return {
+      activation,
+      activationValue: activation?.get(this),
       wikidata: this.wikidata,
       description: this.description,
       keywords: this.keywords,
@@ -1000,11 +1010,6 @@ export class _BoxedValueDefinition
       _isConstant: this._isConstant,
       _deadStack: this._deadStack,
       _deadScope: this._deadScope,
-      _activationOf: this._activationOf,
-      _scopeActivationOf: this._scopeActivationOf,
-      _sweptHome: this._sweptHome,
-      _sweptRecord: this._sweptRecord,
-      _isShield: this._isShield,
       _isDevolvedShadow: this._isDevolvedShadow,
       disposed: this.disposed,
       holdUntil: this.holdUntil,
@@ -1014,26 +1019,6 @@ export class _BoxedValueDefinition
       collection: this.collection,
       subscriptEvaluate: this.subscriptEvaluate,
     };
-  }
-
-  /** A private runtime binding for an asynchronous activation of a binder.
-   * Copy the definition's state without sharing its subscription handle or
-   * re-inferring its type. The template remains alive for later evaluations. */
-  _cloneForActivation(): _BoxedValueDefinition {
-    const result = new _BoxedValueDefinition(this._engine, this.name, {});
-    result._restoreCheckpointSnapshot(this._checkpointSnapshot());
-    result.disposed = false;
-    result._deadStack = undefined;
-    result._deadScope = undefined;
-    result._scopeActivationOf = this._scopeActivationOf ?? this;
-    if (
-      (this as unknown as { _isBinderVariable?: true })._isBinderVariable ===
-      true
-    )
-      (
-        result as _BoxedValueDefinition & { _isBinderVariable?: true }
-      )._isBinderVariable = true;
-    return result;
   }
 
   /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim and
@@ -1070,12 +1055,6 @@ export class _BoxedValueDefinition
     this._isConstant = s._isConstant as boolean;
     this._deadStack = s._deadStack as string | undefined;
     this._deadScope = s._deadScope as string | undefined;
-    this._activationOf = s._activationOf as BoxedValueDefinition | undefined;
-    this._scopeActivationOf = s._scopeActivationOf as
-      BoxedValueDefinition | undefined;
-    this._sweptHome = s._sweptHome as Scope | undefined;
-    this._sweptRecord = s._sweptRecord as BoxedDefinition | undefined;
-    this._isShield = s._isShield as true | undefined;
     this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
     this.disposed = s.disposed as boolean;
     this.holdUntil = s.holdUntil as 'never' | 'evaluate' | 'N';
@@ -1085,6 +1064,8 @@ export class _BoxedValueDefinition
     this.collection = s.collection as CollectionHandlers | undefined;
     this.subscriptEvaluate =
       s.subscriptEvaluate as typeof this.subscriptEvaluate;
+    const activation = s.activation as Map<object, unknown> | undefined;
+    if (activation?.has(this)) activation.set(this, s.activationValue);
     this._writeVersion += 1;
   }
 
@@ -1851,7 +1832,6 @@ export class _BoxedValueDefinition
         `The type of the constant "${this.name}" cannot be changed`
       );
 
-
     this._type =
       t instanceof BoxedType ? t : new BoxedType(t, this._engine._typeResolver);
     this._writeVersion += 1;
@@ -1995,7 +1975,25 @@ function isSelfReferentialValue(
   name: string,
   value: Expression | undefined | null
 ): boolean {
-  return !!value && value.symbols.includes(name);
+  if (!value || !value.symbols.includes(name)) return false;
+  return mentionsOutsideActivations(name, value);
+}
+
+/** Whether `value` mentions `name` outside the lazy collections of `value`
+ * that keep an activation: such a collection reads the name in its own
+ * activation (`lazy-view-context.ts`), which is not the one being written. */
+function mentionsOutsideActivations(name: string, value: Expression): boolean {
+  const visited = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (visited.has(e)) return false;
+    visited.add(e);
+    if (lazyViewActivationOf(e) !== undefined) return false;
+    if (isSymbol(e, name)) return true;
+    if (!e.symbols.includes(name)) return false;
+    if (isDictionary(e)) return e.values.some(visit);
+    return isFunction(e) && e.ops.some(visit);
+  };
+  return visit(value);
 }
 
 /**

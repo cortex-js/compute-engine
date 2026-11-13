@@ -73,11 +73,12 @@ describe('CE-620: a change between each() and the first pull', () => {
     expect(m.at(1)?.re).toBe(7);
   });
 
-  it('a scope pushed between each() and the first pull prevents the commit', () => {
-    // A shadowing declaration in a pushed scope changes what a free symbol
-    // of the instance reads. The iterator was built outside the scope, from
-    // the outer `a`. Its elements must not be committed under the
-    // dependencies read inside the scope, where `a` is the inner one.
+  it('a scope pushed between each() and the first pull keeps the outer elements', () => {
+    // A shadowing declaration in a pushed scope does not change what the
+    // instance reads: it was boxed outside the scope, so it reads the outer
+    // `a`, also inside the scope. The instance bound again in the scope
+    // (`ce.rebind()`) reads the inner `a`, and the memo of one instance is
+    // not served for the other.
     const ce = new ComputeEngine();
     ce.assign('a', ce.box(['List', 1, 2, 3]));
     const j = ce.box(['Join', 'a', ['List', 9]]);
@@ -87,8 +88,10 @@ describe('CE-620: a change between each() and the first pull', () => {
       ce.declare('a', 'list<integer>');
       ce.assign('a', ce.box(['List', 5]));
       expect(values(it)).toEqual([1, 2, 3, 9]);
-      expect(values(j.each())).toEqual([5, 9]);
-      expect(j.at(1)?.re).toBe(5);
+      expect(values(j.each())).toEqual([1, 2, 3, 9]);
+      const k = ce.rebind(j);
+      expect(values(k.each())).toEqual([5, 9]);
+      expect(k.at(1)?.re).toBe(5);
     } finally {
       ce.popScope();
     }

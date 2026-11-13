@@ -96,7 +96,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // The loop is a statement: a loop whose value is used declines.
       const expr = ce.expr([
         'Block',
-        ['Assign', 'acc', 0],
+        ['Declare', 'acc', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 'acc', ['Add', 'acc', 'i']],
@@ -120,7 +120,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     // where the interpreter gives 18.
     const multiClause = [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', ['Multiply', 10, 's'], 'j']],
@@ -146,7 +146,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // `Range(1, i)` changes on each turn of the loop over `i`.
       const expr = ce.expr([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'j']],
@@ -165,7 +165,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // the innermost of the nested for-loops.
       const expr = ce.expr([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Block', ['If', ['Greater', 'j', 1], ['Break']], ['Assign', 's', 'j']],
@@ -185,7 +185,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('should test the guard of a single Element clause', () => {
       const expr = ce.expr([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'i']],
@@ -216,7 +216,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // the shader gave 12.
       const expr = ce.expr([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'j']],
@@ -236,7 +236,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       engine.declare('x', 'real');
       const expr = engine.expr([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'i']],
@@ -273,14 +273,14 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       engine.assign('N', 2);
       const assigned = engine.expr([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         loop('N'),
         's',
       ]);
       const local = engine.expr([
         'Block',
-        ['Assign', 'M', 2],
-        ['Assign', 's', 0],
+        ['Declare', 'M', "'unknown'", 2],
+        ['Declare', 's', "'unknown'", 0],
         loop('M'),
         's',
       ]);
@@ -599,7 +599,12 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('a Block with an assignment as an operand declines', () => {
       // A block with an assignment compiles only as a statement, not as the
       // operand of an operator.
-      const blk = ['Block', ['Assign', 'q', 2], 'q'];
+      const blk = [
+        'Block',
+        ['Declare', 'q', "'unknown'", 0],
+        ['Assign', 'q', 2],
+        'q',
+      ];
       expect(() =>
         glsl.compile(ce.box(['Add', blk, 1] as any), NO_FOLD)
       ).toThrow(/a block with a statement other than a declaration with a value is an operand/);
@@ -695,7 +700,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('rejects a trailing Loop (no value to return, no `return None` analog)', () => {
       const expr = ce.box([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'a']],
@@ -710,7 +715,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('accepts a Loop followed by a value-producing statement', () => {
       const expr = ce.box([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'a']],

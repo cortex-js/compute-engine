@@ -224,10 +224,10 @@ describe('Anonymous functions, parameters with no \\mapsto notation', () => {
     [
       [
         'Function',
-        ['Block', ['Assign', 'a', 'x'], ['Multiply', 'a', 'y']],
+        ['Block', ['Declare', 'a', "'unknown'", 'x'], ['Multiply', 'a', 'y']],
         ['Tuple', 'x', 'y'],
       ],
-      '\\mathrm{Function}(\\mathrm{Block}(\\mathrm{Assign}(a, x), ay), \\mathrm{Tuple}(x, y))',
+      '\\mathrm{Function}(\\mathrm{Block}(\\mathrm{Declare}(a, \\text{unknown}, x), ay), \\mathrm{Tuple}(x, y))',
     ],
     // An assigned function value keeps the type of its parameter: the
     // shorthand `g(t)\coloneq t` would drop it.
@@ -236,12 +236,17 @@ describe('Anonymous functions, parameters with no \\mapsto notation', () => {
         'Function',
         [
           'Block',
-          ['Assign', 'g', ['Function', 't', ['Typed', 't', "'integer'"]]],
+          [
+            'Declare',
+            'g',
+            "'unknown'",
+            ['Function', 't', ['Typed', 't', "'integer'"]],
+          ],
           ['g', 'r'],
         ],
         ['Spread', 'r'],
       ],
-      '\\mathrm{Function}(\\mathrm{Block}(\\mathrm{Assign}(g, (t\\colon integer)\\mapsto t), g(r)), \\mathrm{Spread}(r))',
+      '\\mathrm{Function}(\\mathrm{Block}(\\mathrm{Declare}(g, \\text{unknown}, (t\\colon integer)\\mapsto t), g(r)), \\mathrm{Spread}(r))',
     ],
   ];
   test.each(cases)('%j', (json, latex) => {

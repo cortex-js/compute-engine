@@ -4,7 +4,6 @@ import type {
   FunctionInterface,
   Scope,
 } from '../global-types.js';
-import { assignmentLocalsOf } from '../assignment-locals.js';
 import type {
   EffectSet,
   FunctionSignature,
@@ -322,8 +321,7 @@ export function functionLiteralParameterNames(param: Expression): string[] {
  * the parameter has no type and no value yet, and also from a nested
  * literal that captures the parameter. The scope of the body cannot answer
  * this: an inferred binding with no value there may be an auto-declared
- * local, and while the literal is applied the parameter bindings are
- * removed from that scope (`hideBodyScopeParams()`). The reader that needs
+ * local. The reader that needs
  * it is the reading of a call named `Return`: a call of a parameter named
  * `Return` is not the `Return` statement (`hasEscapingReturn()` in
  * `library/utils.ts`, `earlyReturnTypes()` in `effects-inference.ts`).
@@ -355,7 +353,7 @@ export function isFunctionLiteralParameter(def: object | undefined): boolean {
  * read a symbol from outside the literal (`y` in `t ↦ g(y)`): the symbol is
  * not a parameter of the literal or of a nested literal, not the variable of
  * a binder of the body (a `Sum` index), and not a local of a block of the
- * body (a `let` local or an assignment local). The definition of the symbol
+ * body (a `let` local). The definition of the symbol
  * can be in any scope: a binding that the canonicalization of the body
  * declared in a scope of the body, or the binding of an outer scope that
  * existed before the literal. When the body is evaluated, the occurrence
@@ -396,18 +394,11 @@ export function markFunctionLiteralCaptures(body: Expression): void {
     }
     if (!isFunction(e) || e._numericStore !== undefined) return;
     const scope = e.isScoped ? e.localScope : undefined;
-    if (scope !== undefined) {
-      const locals =
-        e.operator === 'Block' ? assignmentLocalsOf(scope) : undefined;
-      for (const [name, b] of scope.bindings) {
-        if (!('value' in b)) continue;
-        // A binding of a block that is not a local is the valueless copy
-        // that the canonicalization declared for a symbol read from
-        // outside: it is not bound here.
-        if (e.operator === 'Block' && locals?.includes(name) !== true) continue;
-        bound.add(b.value);
-      }
-    }
+    // The bindings of a block are not bound here: a local of a block is
+    // read in the activation of its run.
+    if (scope !== undefined && e.operator !== 'Block')
+      for (const b of scope.bindings.values())
+        if ('value' in b) bound.add(b.value);
     for (const op of e.ops) visit(op);
   };
   visit(body);
@@ -957,11 +948,10 @@ const CAPTURED_SYMBOLS = new WeakMap<object, readonly CapturedSymbol[]>();
  * a call reads from the scope the literal is defined in, one entry for each
  * name. An occurrence is captured when it is bound to a binding outside the
  * literal, or to the valueless copy that the body scope declared for a free
- * symbol (a call frame hides that copy, and the call reads the outer binding
- * of the name). These are not captured: a constant, a parameter of a
- * function literal, a binding of a nested scope of the body (the index of a
- * `Sum`, a local of a nested block), and a local of the body scope (a `let`
- * local, an assignment local).
+ * symbol (the call reads the outer binding of the name). These are not
+ * captured: a constant, a parameter of a function literal, a binding of a
+ * nested scope of the body (the index of a `Sum`, a local of a nested
+ * block), and a local of the body scope (a `let` local).
  *
  * The walk reads each node of the body one time, so a body that shares its
  * operands is not unfolded.
@@ -992,8 +982,6 @@ export function capturedSymbols(
     for (const op of e.ops) visit(op);
   };
   visit(body);
-  const assignmentLocals =
-    bodyScope === undefined ? undefined : assignmentLocalsOf(bodyScope);
   for (const [name, occurrence] of occurrences) {
     const def = occurrence.valueDefinition;
     if (def === undefined || def.isConstant || def._blockLocal === true)
@@ -1004,7 +992,6 @@ export function capturedSymbols(
       // A binding of the body scope is captured only when it is the
       // valueless copy that the body scope declared for a free symbol.
       if (!def.inferredType || def.value !== undefined) continue;
-      if (assignmentLocals?.includes(name) === true) continue;
     }
     result.push({ name, occurrence });
   }

@@ -33,18 +33,30 @@ import { ComputeEngine } from '../../../src/compute-engine';
  * and that inference persists in an engine.
  */
 
-const ce = () => new ComputeEngine();
+/**
+ * A fresh engine. An `Assign` in a block writes a variable that is in scope,
+ * so a probe whose block assigns `q`, `s` or `t` passes these names in
+ * `outer`: they are declared in the engine, outside the block.
+ */
+const ce = (outer: string[] = []) => {
+  const engine = new ComputeEngine();
+  for (const name of outer) engine.declare(name, 'unknown');
+  return engine;
+};
 const json = (s: string) => ce().parse(s).json;
 
 /** Canonical-JSON round trip: box → toLatex → parse → canonical json. */
-function roundtrip(mathjson: any): {
+function roundtrip(
+  mathjson: any,
+  outer: string[] = []
+): {
   latex: string;
   before: string;
   after: string;
 } {
-  const e = ce().box(mathjson);
+  const e = ce(outer).box(mathjson);
   const latex = e.toLatex();
-  const back = ce().parse(latex);
+  const back = ce(outer).parse(latex);
   return {
     latex,
     before: JSON.stringify(e.json),
@@ -107,7 +119,7 @@ describe('Block → one-column `cases` (serializer)', () => {
       'Block',
       ['Block', ['Assign', 't', 2], ['Add', 't', 1]],
       ['Add', 'u', 1],
-    ]);
+    ], ['t']);
     // A nested `;`-spelled Block fences itself (Tycho ledger row 389); the
     // row separator would have closed it here, so the fence is not needed in
     // this position, but it re-parses to the same block.
@@ -136,7 +148,7 @@ describe('Block spellings left byte-identical', () => {
     expect(local.after).toBe(
       JSON.stringify(['Block', ['Declare', 's', "'unknown'", 2], ['Add', 's', 1]])
     );
-    const r = roundtrip(['Block', ['Assign', 's', 2], ['Add', 's', 1]]);
+    const r = roundtrip(['Block', ['Assign', 's', 2], ['Add', 's', 1]], ['s']);
     expect(r.latex).toBe('\\mathrm{Assign}(s, 2); s+1');
     expect(r.after).toBe(r.before);
   });
@@ -279,7 +291,7 @@ describe('fence interplay — the cases block in operand/body position', () => {
         ['Assign', 'q', ['Block', ['Add', 'c', 1], ['Add', 'c', 2]]],
       ],
       3,
-    ]);
+    ], ['q']);
     expect(r.latex.startsWith('\\mathrm{Repeat}(\\left(')).toBe(true);
     // The reparse keeps `3` as Repeat's second operand — nothing swallowed.
     expect(JSON.parse(r.after)[0]).toBe('Repeat');
@@ -375,23 +387,22 @@ describe('fence skip requires the WHOLE string to be the environment', () => {
   test('the mixed sibling: cases block + an Assign statement', () => {
     // `startsWith` true, `endsWith` false — at top level nothing follows, so
     // the `; ` list is already faithful.
-    const r = roundtrip(mixed);
+    const r = roundtrip(mixed, ['q']);
     expect(r.latex).toBe('\\begin{cases}s+1\\\\s+2\\end{cases}; \\mathrm{Assign}(q, 2)');
     expect(r.after).toBe(r.before);
   });
 
   test('the mixed sibling in operand and body position IS fenced', () => {
-    const r1 = roundtrip(['Repeat', mixed, 3]);
+    const r1 = roundtrip(['Repeat', mixed, 3], ['q']);
     expect(r1.latex).toBe(
       '\\mathrm{Repeat}(\\left(\\begin{cases}s+1\\\\s+2\\end{cases}; \\mathrm{Assign}(q, 2)\\right), 3)'
     );
     expect(r1.after).toBe(r1.before);
 
-    const r2 = roundtrip([
-      'Comprehension',
-      mixed,
-      ['Element', 'n', ['Range', 1, 3]],
-    ]);
+    const r2 = roundtrip(
+      ['Comprehension', mixed, ['Element', 'n', ['Range', 1, 3]]],
+      ['q']
+    );
     expect(r2.latex).toBe(
       '\\left[\\left(\\begin{cases}s+1\\\\s+2\\end{cases}; \\mathrm{Assign}(q, 2)\\right) \\operatorname{for} n = 1..3\\right]'
     );
@@ -478,7 +489,7 @@ describe('all-relation Block → `\\operatorname{Block}(…)` (USER RULING 2026-
   });
 
   test('CONTROL (with an Assign): relations + an Assign keep the `; ` list', () => {
-    const r = roundtrip(['Block', ['Assign', 'q', 2], ['Equal', 'x', 1]]);
+    const r = roundtrip(['Block', ['Assign', 'q', 2], ['Equal', 'x', 1]], ['q']);
     expect(r.latex).toBe('\\mathrm{Assign}(q, 2); x=1');
     expect(r.after).toBe(r.before);
   });
@@ -537,7 +548,7 @@ describe('all-relation Block → `\\operatorname{Block}(…)` (USER RULING 2026-
     // with the prefix AND
     // ends with `)`, yet the paren the prefix opened closed long before.
     const mixed = ['Block', B2, ['Assign', 'q', ['Sin', 2]]] as any;
-    const r = roundtrip(['Repeat', mixed, 3]);
+    const r = roundtrip(['Repeat', mixed, 3], ['q']);
     expect(r.latex).toBe(
       '\\mathrm{Repeat}(\\left(\\operatorname{Block}(x=1, y=2); \\mathrm{Assign}(q, \\sin(2))\\right), 3)'
     );

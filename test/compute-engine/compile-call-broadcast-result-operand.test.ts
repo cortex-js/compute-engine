@@ -114,7 +114,7 @@ const CASES: [string, Json][] = [
   ['Sum(k q(u), k = 1..3)', ['Sum', ['Multiply', 'k', ['q', 'u']], ['Limits', 'k', 1, 3]]],
   [
     'Block(z := q(u); 1 + z)',
-    ['Block', ['Assign', 'z', ['q', 'u']], ['Add', 1, 'z']],
+    ['Block', ['Declare', 'z', "'unknown'", ['q', 'u']], ['Add', 1, 'z']],
   ],
   // The value of a `Declare` in its attributes. A block of declarations is a
   // value expression, so it compiles as an operand.
@@ -134,18 +134,30 @@ const CASES: [string, Json][] = [
 
 // A block with an assignment as the operand of an operator declines: such a
 // block compiles only as a statement, or as the body of a function or of
-// the compiled expression.
+// the compiled expression. The outer block declares the names that the
+// inner block assigns.
 const BLOCK_OPERAND_CASES: [string, Json][] = [
-  ['1 + Block(z := q(u); z)', ['Add', 1, ['Block', ['Assign', 'z', ['q', 'u']], 'z']]],
+  [
+    '1 + Block(z := q(u); z)',
+    [
+      'Block',
+      ['Declare', 'z', "'unknown'", ['q', 'u']],
+      ['Add', 1, ['Block', ['Assign', 'z', ['q', 'u']], 'z']],
+    ],
+  ],
   [
     '1 + Block((z, y) := (q(u), 0); z)',
     [
-      'Add',
-      1,
+      'Block',
+      ['Declare', ['Tuple', 'z', 'y'], "'unknown'", ['Tuple', ['q', 'u'], 0]],
       [
-        'Block',
-        ['Assign', ['Tuple', 'z', 'y'], ['Tuple', ['q', 'u'], 0]],
-        'z',
+        'Add',
+        1,
+        [
+          'Block',
+          ['Assign', ['Tuple', 'z', 'y'], ['Tuple', ['q', 'u'], 0]],
+          'z',
+        ],
       ],
     ],
   ],
@@ -241,8 +253,8 @@ describe('an operator over a call that maps over a list argument', () => {
     // `deep` in the engine, and the block would then write an engine symbol.
     const json = ce.box([
       'Block',
-      ['Assign', 'deep', t],
-      ['Assign', 'z', ['q', 'u']],
+      ['Declare', 'deep', "'unknown'", t],
+      ['Declare', 'z', "'unknown'", ['q', 'u']],
       ['Add', 1, 'z'],
     ] as any);
     const result = compile(json, {
@@ -269,7 +281,7 @@ describe('an operator over a call that maps over a list argument', () => {
       1,
       [
         'Block',
-        ['Assign', 'z', ['q', 'u']],
+        ['Declare', 'z', "'unknown'", ['q', 'u']],
         ['If', ['Greater', 'w', 0], ['Return', 'z']],
         0,
       ],

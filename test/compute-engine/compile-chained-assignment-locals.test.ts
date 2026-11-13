@@ -20,7 +20,7 @@ const range = ['Element', 'i', ['Range', 1, 3]];
 const chained = ['Assign', 't', ['Assign', 'u', ['Add', 't', 'i']]];
 const program = (body: any, result: any) => [
   'Block',
-  ['Assign', 't', 0],
+  ['Declare', 't', "'unknown'", 0],
   ['Loop', body, range],
   result,
 ];
@@ -30,7 +30,8 @@ describe('A CHAINED ASSIGNMENT IS A STATIC ERROR', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Assign', 't', 0],
+      ['Declare', 't', "'unknown'", 0],
+      ['Declare', 'u', "'unknown'", 0],
       ['Assign', 't', ['Assign', 'u', 1]],
       't',
     ] as any);
@@ -50,8 +51,8 @@ describe('A CHAINED ASSIGNMENT IS A STATIC ERROR', () => {
 });
 
 describe('JAVASCRIPT: TWO ASSIGNMENTS IN A LOOP BODY', () => {
-  // The chain written as two statements. `u` is first assigned at the
-  // level of the outer block, so the loop body can assign it again.
+  // The chain written as two statements. `u` is declared at the level of
+  // the outer block, so the loop body can assign it.
   const body = [
     'Block',
     ['Assign', 'u', ['Add', 't', 'i']],
@@ -59,8 +60,8 @@ describe('JAVASCRIPT: TWO ASSIGNMENTS IN A LOOP BODY', () => {
   ];
   const twoStatements = (result: any) => [
     'Block',
-    ['Assign', 't', 0],
-    ['Assign', 'u', 0],
+    ['Declare', 't', "'unknown'", 0],
+    ['Declare', 'u', "'unknown'", 0],
     ['Loop', body, range],
     result,
   ];
@@ -99,8 +100,8 @@ describe('GLSL compileFunction(): A NESTED BLOCK WITH A TAIL ASSIGNMENT', () => 
   const ce = new ComputeEngine();
   const nested = ce.box([
     'Block',
-    ['Assign', 's', 'x'],
-    ['Block', ['Assign', 't', ['Add', 's', 1]], 't'],
+    ['Declare', 's', "'unknown'", 'x'],
+    ['Block', ['Declare', 't', "'unknown'", ['Add', 's', 1]], 't'],
   ]);
 
   test('the value is the value of the last assignment', () => {
@@ -118,13 +119,16 @@ describe('GLSL compileFunction(): A NESTED BLOCK WITH A TAIL ASSIGNMENT', () => 
     // it.
     const tail = ce.box([
       'Block',
-      ['Assign', 's', 'x'],
+      ['Declare', 's', "'unknown'", 'x'],
+      ['Declare', 't', "'unknown'", 0],
       ['Block', ['Assign', 't', ['Add', 's', 1]]],
     ]);
     expect(tail.subs({ x: 3 }).evaluate().symbol).toBe('Nothing');
     for (const target of [new GLSLTarget()])
       expect(() =>
         target.compileFunction(tail, 'f', 'float', [['x', 'float']])
-      ).toThrow(/The block ends with an assignment, so it has no value/);
+      ).toThrow(
+        /`Assign\(t, s \+ 1\)` is a statement, and it stands where a value is expected/
+      );
   });
 });

@@ -595,15 +595,15 @@ describe('arithmetic over a read proved to find no row', () => {
     [['At', ['At', rows, 7], 1], 'NaN'],
     [['At', ['List', 7, 8], 5], 'NaN'],
   ])('a block local bound to %j gives %s in a sum', (read, value) => {
-    for (const json of [
-      ['Block', ['Assign', 'r', read], ['Add', 'r', 1]],
-      ['Block', ['Declare', 'r', "'unknown'", read], ['Add', 'r', 1]],
-    ]) {
-      const expr = ce.box(json as any);
-      const v = expr.evaluate();
-      expect(v.toString().replace(/"/g, '')).toBe(value);
-      expect(v.type.matches(expr.type)).toBe(true);
-    }
+    const json = [
+      'Block',
+      ['Declare', 'r', "'unknown'", read],
+      ['Add', 'r', 1],
+    ];
+    const expr = ce.box(json as any);
+    const v = expr.evaluate();
+    expect(v.toString().replace(/"/g, '')).toBe(value);
+    expect(v.type.matches(expr.type)).toBe(true);
   });
 
   test('the compiled code declines an absent row, and keeps an absent number', () => {

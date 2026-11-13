@@ -322,7 +322,7 @@ describe('CE-604: the list route keeps the call', () => {
     const value = ce
       .box([
         'Block',
-        ['Assign', 'a', 0.5],
+        ['Declare', 'a', "'unknown'", 0.5],
         [
           'Integrate',
           ['Function', ['Multiply', 'y', ['c', 'y', 'a', 'E']], 'y'],

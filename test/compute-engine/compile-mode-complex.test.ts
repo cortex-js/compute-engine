@@ -174,7 +174,7 @@ describe('complex mode â€” one emission per user function, lift at use (design Â
     const r = compile(
       ce.box([
         'Block',
-        ['Assign', 'k', 1],
+        ['Declare', 'k', "'unknown'", 1],
         ['Assign', 'k', ['Add', 'k', ['Multiply', 2, 'ImaginaryUnit']]],
         ['Add', ['Abs', 'k'], 2],
       ]),

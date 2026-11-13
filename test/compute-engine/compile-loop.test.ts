@@ -87,7 +87,7 @@ describe('COMPILE Loop', () => {
     // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', ['Square', 'i']]],
@@ -107,7 +107,7 @@ describe('COMPILE Break / Continue', () => {
     // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         [
@@ -129,7 +129,7 @@ describe('COMPILE Break / Continue', () => {
     // body writes a local, so the loop is not removed as dead code.
     const expr = ce.expr([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         [
@@ -259,17 +259,22 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     ];
     // The imperative loop runs but doesn't collect.
     const result = compile(
-      ce.expr(['Block', ['Assign', 'sEffect', 0], loop, 'sEffect'] as any)
+      ce.expr([
+        'Block',
+        ['Declare', 'sEffect', "'unknown'", 0],
+        loop,
+        'sEffect',
+      ] as any)
     );
     expect(result.success).toBe(true);
     expect(result.run!()).toBe(12);
     expect(result.code).not.toContain('result.push');
     expect(result.code).toContain('for (let i = 1; i <= 3; i++)');
-    // The loop alone declines: its body is the first assignment of `sEffect`,
-    // which is the static error `first-assignment-in-branch`.
+    // The loop alone declines: its body assigns `sEffect`, which no scope
+    // declares, the static error `assignment-to-undeclared-variable`.
     expect(() => compile(ce.expr(loop as any), { fallback: false })).toThrow();
     expect(JSON.stringify(ce.expr(loop as any).json)).toContain(
-      'first-assignment-in-branch'
+      'assignment-to-undeclared-variable'
     );
   });
 
@@ -439,7 +444,7 @@ describe('COMPILE Loop / single-Element Range routing', () => {
     // engine declines.
     const expr = ce.expr([
       'Block',
-      ['Assign', 'sLegacy', 0],
+      ['Declare', 'sLegacy', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 'sLegacy', ['Add', 'sLegacy', ['Square', 'i']]],

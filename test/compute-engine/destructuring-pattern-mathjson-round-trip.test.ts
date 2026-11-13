@@ -68,11 +68,15 @@ describe('DESTRUCTURING PATTERN: MathJSON round trip', () => {
     const ce = new ComputeEngine();
     const { expr, pretty, reboxed } = roundTrip(ce, [
       'Block',
+      ['Declare', 'a', "'unknown'", 0],
+      ['Declare', 'b', "'unknown'", 0],
       ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 1, 2]],
       ['Add', 'a', 'b'],
     ]);
     expect(pretty).toEqual([
       'Block',
+      ['Declare', 'a', "'unknown'", 0],
+      ['Declare', 'b', "'unknown'", 0],
       ['Assign', ['Tuple', 'a', 'b'], ['Pair', 1, 2]],
       ['Add', 'a', 'b'],
     ]);

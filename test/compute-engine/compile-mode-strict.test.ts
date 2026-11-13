@@ -145,7 +145,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     const ce = engineWith();
     const d = declineOf(ce, [
       'Block',
-      ['Assign', 'k', 1],
+      ['Declare', 'k', "'unknown'", 1],
       ['Assign', 'k', ['Add', 'k', ['Multiply', 2, 'ImaginaryUnit']]],
       ['Add', ['Abs', 'k'], 2],
     ]);
@@ -154,7 +154,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     // …including one nested in a conditional statement.
     const nested = declineOf(ce, [
       'Block',
-      ['Assign', 'k', 't'],
+      ['Declare', 'k', "'unknown'", 't'],
       [
         'If',
         ['Less', 't', 0],
@@ -167,7 +167,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     expect(
       declineOf(ce, [
         'Block',
-        ['Assign', 'k', ['Multiply', 2, 'ImaginaryUnit']],
+        ['Declare', 'k', "'unknown'", ['Multiply', 2, 'ImaginaryUnit']],
         ['Add', ['Abs', 'k'], 2],
       ])
     ).toBeUndefined();

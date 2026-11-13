@@ -150,9 +150,10 @@ sum(m)
 ```
 
 An assigned generator with no last element (`filter(1..oo, k => k > n)`)
-stays a generator, and stores the value that `n` has at the assignment. A
-generator that is not assigned (an argument, an operand) reads variables at
-*materialization* time.
+stays a generator, and its function reads `n` when an element is computed,
+as a Python generator does. A generator that is not assigned (an argument,
+an operand) also reads variables at *materialization* time. To keep the
+elements of a given time, list them then (`listFrom(take(g, 3))`).
 
 ## Control Flow
 

@@ -32,8 +32,8 @@ describe('GLSL: a tuple assignment of locals as a loop body', () => {
   test('two locals: each value is computed before either local is written', () => {
     const expr = ce.box([
       'Block',
-      ['Assign', 'a', 'x'],
-      ['Assign', 'b', 'y'],
+      ['Declare', 'a', "'unknown'", 'x'],
+      ['Declare', 'b', "'unknown'", 'y'],
       [
         'Loop',
         ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', ['Add', 'a', 'b']]],
@@ -62,9 +62,9 @@ describe('GLSL: a tuple assignment of locals as a loop body', () => {
   test('three locals: a rotation reads only the old values', () => {
     const expr = ce.box([
       'Block',
-      ['Assign', 'a', 'x'],
-      ['Assign', 'b', 'y'],
-      ['Assign', 'c', 0],
+      ['Declare', 'a', "'unknown'", 'x'],
+      ['Declare', 'b', "'unknown'", 'y'],
+      ['Declare', 'c', "'unknown'", 0],
       [
         'Loop',
         ['Assign', ['Tuple', 'a', 'b', 'c'], ['Tuple', 'b', 'c', 'a']],

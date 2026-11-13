@@ -179,7 +179,11 @@ const JS_CASES: [string, Json][] = [
   // A function local to a block, used as a value.
   [
     'Block(q ≔ s ↦ 3s, Map(q, M))',
-    ['Block', ['Assign', 'q', ['Function', ['Multiply', 3, 's'], 's']], ['Map', 'q', 'M']],
+    [
+      'Block',
+      ['Declare', 'q', "'unknown'", ['Function', ['Multiply', 3, 's'], 's']],
+      ['Map', 'q', 'M'],
+    ],
   ],
   // Filter.
   ['Filter(L, t ↦ t > 0)', ['Filter', 'L', ['Function', ['Greater', 't', 0], 't']]],

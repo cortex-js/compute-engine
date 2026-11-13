@@ -16,7 +16,7 @@ import {
 } from './type-guards';
 import { isValueDef, isOperatorDef } from './definition-guards';
 import { bindingInContext } from './binders';
-import { withAmbientChain } from './ambient-chain';
+import { activationRecordOf, isActivatedDefinition } from './ambient-chain';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats';
 import {
   accumulateObjectDeps,
@@ -117,6 +117,10 @@ interface ElementMemoDep {
    * must be unwritten since.
    */
   shadow?: true;
+  /** For a definition whose value an activation holds, the record of its
+   * value at fill time (`activationRecordOf()`): another evaluation of its
+   * node holds another value. */
+  record?: object;
   /** Set on an OPERATOR dependency — a walked user-lambda head, or a
    * FORWARD REFERENCE (the occurrence's pinned binding is a valueless
    * auto-declared value definition because the name was used before it was
@@ -349,22 +353,6 @@ function depResolutionScope(expr: Expression): Scope | undefined {
   return isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
 }
 
-/**
- * Run `fn` with a scoped instance's `localScope` chained onto the ambient
- * scope the way its walk chains it (`withAmbientChain`): a comprehension
- * evaluated in a child scope that shadows one of its free names reads the
- * child's binding, so its dependencies must be snapshotted and re-checked
- * through that same chain, or a count computed under one scope is served
- * under another.
- */
-function underWalkChain<T>(expr: Expression, fn: () => T): T {
-  return withAmbientChain(
-    expr.engine.context?.lexicalScope,
-    depResolutionScope(expr),
-    fn
-  );
-}
-
 /** The binding `scope`'s chain — or, when `scope` is `undefined`, the
  * engine's CURRENT chain — resolves `name` to; the same resolution
  * `_getSymbolValue` performs for a non-constant symbol's value. Inline
@@ -409,9 +397,15 @@ function snapshotDeps(
   rawOperands = false,
   bindingSites = false
 ): ElementMemoDep[] | undefined {
-  return underWalkChain(expr, () =>
-    snapshotDepsUnderChain(expr, rawOperands, bindingSites)
-  );
+  const deps = snapshotDepsUnderChain(expr, rawOperands, bindingSites);
+  // A definition whose value an activation holds has a value for each
+  // evaluation of its node: the record read now is a dependency too.
+  const from = expr.engine.context?.lexicalScope;
+  if (deps !== undefined)
+    for (const d of deps)
+      if (d.valueDef !== undefined && isActivatedDefinition(d.valueDef))
+        d.record = activationRecordOf(d.valueDef, from);
+  return deps;
 }
 
 /**
@@ -716,7 +710,7 @@ function snapshotDepsUnderChain(
     });
     // The chain resolves the name to a DIFFERENT value binding than the
     // occurrence's own — a shadowing declaration in the scope the instance
-    // is evaluated in (`withAmbientChain`). The walk reads that binding, so
+    // is evaluated in. The walk reads that binding, so
     // it is a dependency of its own: its write version, and the free
     // symbols of its stored value.
     if (
@@ -1053,7 +1047,7 @@ export type MemoDeps = ElementMemoDep[];
  * function's job.
  */
 export function memoDepsStillValid(expr: Expression, deps: MemoDeps): boolean {
-  return underWalkChain(expr, () => memoDepsStillValidUnderChain(expr, deps));
+  return memoDepsStillValidUnderChain(expr, deps);
 }
 
 function memoDepsStillValidUnderChain(
@@ -1062,7 +1056,14 @@ function memoDepsStillValidUnderChain(
 ): boolean {
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
+  const from = ce.context?.lexicalScope;
   for (const d of deps) {
+    if (
+      d.valueDef !== undefined &&
+      isActivatedDefinition(d.valueDef) &&
+      activationRecordOf(d.valueDef, from) !== d.record
+    )
+      return false;
     if (d.site !== undefined) {
       // A binding-site dependency: the name of the bound variable must
       // resolve from the current scope to the same binding as at fill time,
@@ -1443,8 +1444,8 @@ function* recordingStream(
   let suspendedEpochChange = false;
   /** The consumer changed the ambient scope while the generator was
    * suspended (a scope popped or pushed between two pulls). A scoped
-   * instance reads a shadowing declaration of that scope
-   * (`withAmbientChain`), so the elements pulled before and after the
+   * instance reads a shadowing declaration of that scope, so the elements
+   * pulled before and after the
    * change may come from two environments; such a buffer is never
    * committed. Neither engine version moves for an ordinary scope change. */
   let suspendedScopeChange = false;

@@ -143,6 +143,7 @@ import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isWildcard } from './pattern-utils.js';
 import { isScratchBinding } from '../scratch-scopes.js';
+import { markBodyFreeName } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
@@ -1132,6 +1133,13 @@ function devolveUnappliedOperator(
     if (shadowScope && shadow && isValueDef(shadow)) {
       shadow.value._isDevolvedShadow = true;
       ce._boxingState.noteDevolvedShadow(shadowScope);
+      // The shadow stands for a free name of the scope that the boxing is
+      // written in, the first persistent scope up the chain.
+      let home: Scope | null | undefined = declareScope.parent;
+      while (home && ce._boxingState.isPersistentScope(home) === false)
+        home = home.parent;
+      while (home?.noAutoDeclare && home.parent) home = home.parent;
+      if (home) markBodyFreeName(shadow.value, home);
     }
     return ce.box(name);
   }

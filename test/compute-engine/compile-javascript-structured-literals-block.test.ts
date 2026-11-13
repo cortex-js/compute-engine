@@ -730,7 +730,8 @@ describe('a Block as the root', () => {
         ['DefineFunction', 'g', ['Function', ['Block', ['Add', 'q', 1]], 'q']],
         'a',
       ],
-      /the call g\(3\) does not reach a local function g defined before it in the body/,
+      // The read before the definition is an error when the block is boxed.
+      /admits no statement Error/,
     ],
     [
       'an empty Block',
@@ -771,9 +772,7 @@ describe('a Block as the root', () => {
     for (const mode of MODES)
       expect(() =>
         structured().compile(expr, { ...OPTIONS, mode })
-      ).toThrow(
-        /the call g\(3\) does not reach a local function g defined before it in the body/
-      );
+      ).toThrow(/admits no statement Error/);
     expect(() =>
       compile(expr, {
         ...OPTIONS,
@@ -781,7 +780,7 @@ describe('a Block as the root', () => {
         fallback: false,
       } as never)
     ).toThrow(
-      /^Could not compile with the profile 'numeric-kernel': the call g\(3\) does not reach a local function g/
+      /^Could not compile with the profile 'numeric-kernel': the profile admits no statement Error/
     );
   });
 

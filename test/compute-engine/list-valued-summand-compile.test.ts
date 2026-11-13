@@ -1265,7 +1265,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
 // The fix judges the LAST statement of any non-empty block — the block's VALUE —
 // unwrapping the declaration's `Typed` ascription exactly as the single-statement
 // path already did (the ascription wraps the LAST statement:
-// `Block(Assign(…), Typed(List(…), 'number'))`).
+// `Block(Declare(…), Typed(List(…), 'number'))`).
 //
 // A `Return` anywhere in an EARLIER statement DISQUALIFIES the block: control may
 // never reach the last statement, so it is not provably the value. This predicate
@@ -1290,16 +1290,18 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
    */
   const withDeclaration = (signature: string) => {
     const ce = new ComputeEngine();
-    // `scope` spliced into the declared signature: the body binds `w` by
-    // bare assignment, which the default-`!scope` ceiling otherwise refuses
-    // on a bare declaration (docs/EFFECTS-MODEL.md, "Scope is opt-in"). The
-    // scalar-vs-collection contradiction under test is unaffected.
+    // `scope` spliced into the declared signature. The scalar-vs-collection
+    // contradiction under test is unaffected.
     ce.declare('a', { signature: signature.replace('->', 'scope ->') });
     ce.assign(
       'a',
       ce.box([
         'Function',
-        ['Block', ['Assign', 'w', ['Cos', 't']], ['List', 'w', ['Sin', 't']]],
+        [
+          'Block',
+          ['Declare', 'w', "'unknown'", ['Cos', 't']],
+          ['List', 'w', ['Sin', 't']],
+        ],
         't',
       ])
     );
@@ -1329,7 +1331,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       'a',
       ce.box([
         'Function',
-        ['Block', ['Assign', 'w', ['Cos', 't']], ['h', 'w']],
+        ['Block', ['Declare', 'w', "'unknown'", ['Cos', 't']], ['h', 'w']],
         't',
       ])
     );
@@ -1450,14 +1452,17 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
     '%s still compiles a TRUTHFUL multi-statement scalar body',
     (to) => {
       const ce = new ComputeEngine();
-      // `scope` declared: `w` is bound by bare assignment (see
-      // `withDeclaration` above).
+      // `scope` declared, as in `withDeclaration` above.
       ce.declare('a', { signature: '(number) scope -> number' });
       ce.assign(
         'a',
         ce.box([
           'Function',
-          ['Block', ['Assign', 'w', ['Multiply', 2, 't']], ['Add', 'w', 1]],
+          [
+            'Block',
+            ['Declare', 'w', "'unknown'", ['Multiply', 2, 't']],
+            ['Add', 'w', 1],
+          ],
           't',
         ])
       );

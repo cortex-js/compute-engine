@@ -266,8 +266,11 @@ describe('CE-535: an operand boxed before the scope of a binder', () => {
       ce3.function('MyBinder535', [outer, ce3.symbol('x')]);
     else if (route === 'ce.box') ce3.box(['MyBinder535', ['Add', 'x', 1], 'x']);
     else ce3.parse('\\operatorname{MyBinder535}(x+1, x)');
-    // Inside the binder, `x` has no value.
-    expect(seen).toEqual(['undefined']);
+    // Inside the binder, `x` has no value. An operand boxed before the
+    // binder is bound to the binder's `x` after the handler runs (the
+    // post-phase of the binder hook, `docs/plans/2026-11-11-bound-once-spec.md`, section 11): the handler reads the
+    // outer `x`.
+    expect(seen).toEqual([route === 'ce.function' ? 'positive' : 'undefined']);
     // Outside, `x` is 3 again.
     expect(outer.sgn).toBe('positive');
     expect(ce3.box(['Add', 'x', 1]).sgn).toBe('positive');
@@ -347,8 +350,9 @@ describe('CE-543: a partial application', () => {
 
 // A binder whose operand is a symbol whose stored value is an expression:
 // `a := x + 1` with `x := 3`. The sign of `a` is the sign of its stored value,
-// a node that existed before the binder. Inside the binder, `x` is the
-// binder's variable and has no value; outside, `x` is 3 again.
+// a node that existed before the binder. The stored value reads the scope it
+// was boxed in, where `x` is 3, also inside the binder, whose variable `x`
+// is another variable; the cached sign is the same inside and outside.
 describe('CE-535: an operand symbol whose value is an expression', () => {
   test.each([true, false])('sign of `a` read before the binder: %s', (warm) => {
     const ce5 = new ComputeEngine();
@@ -368,8 +372,8 @@ describe('CE-535: an operand symbol whose value is an expression', () => {
     ce5.assign('a', ce5.box(['Add', 'x', 1], { form: 'raw' }));
     if (warm) expect(ce5.symbol('a').sgn).toBe('positive');
     ce5.box(['MyBinder535b', 'a', 'x']);
-    // Inside the binder, `x` has no value.
-    expect(seen).toEqual(['undefined']);
+    // The stored value does not read the variable of the binder.
+    expect(seen).toEqual(['positive']);
     // After the binder, `x` is 3 again.
     expect(ce5.symbol('a').sgn).toBe('positive');
   });

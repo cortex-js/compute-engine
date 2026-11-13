@@ -489,11 +489,11 @@ describe('refusals', () => {
     ],
     // A declaration in a block of a branch is admitted
     // (compile-javascript-structured-loops.test.ts); a branch that is a
-    // declaration has no block to declare in.
+    // declaration is an error when the expression is boxed.
     [
       'a branch that is a declaration',
       fn(declare('t', 'real', 'w'), ['If', 'C', declare('s', 'real', 1)], 't'),
-      /the structured route admits no statement Declare in a branch of an If/,
+      /the structured route admits no statement Error in a branch of an If/,
     ],
   ];
   test.each(refusals)('%s', (_name, json, reason) => {

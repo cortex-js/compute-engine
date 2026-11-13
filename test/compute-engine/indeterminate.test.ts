@@ -177,7 +177,7 @@ describe('INDETERMINATE FORMS — the producers: the arithmetic forms', () => {
       '0^i',
       'fract(oo)',
       'Mod(5, 0)',
-      'x = 0; x/x',
+      'let x = 0; x/x',
     ])
       expect([source, epsil(source).toString()]).toEqual([
         source,

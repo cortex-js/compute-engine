@@ -5,7 +5,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // `isTransitivelyPure()` reads the canonical form of a value that is not
 // canonical. When that canonical form is not canonical either, `.canonical`
 // gives a new object at each read, so the walk never ended: the read of `r`
-// after `r = …` did not return. Such a value is now read as impure (not
+// after `let r = …` did not return. Such a value is now read as impure (not
 // memoized), and the read gives what the same expression written in place
 // gives.
 //
@@ -35,7 +35,7 @@ describe('A STORED VALUE WHOSE CANONICAL FORM IS NOT CANONICAL', () => {
     const start = Date.now();
     const held = executeEpsil(
       engineWithDecliningOperator(),
-      'r = Raw(1)\nLength(r)'
+      'let r = Raw(1)\nLength(r)'
     ).value.json;
     const inPlace = executeEpsil(
       engineWithDecliningOperator(),

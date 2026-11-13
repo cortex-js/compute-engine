@@ -37,10 +37,9 @@ describe('expr.effects — the runtime channel, publicly', () => {
   });
 
   it('reports several labels, alphabetically sorted', () => {
-    expect(ce.box(['Block', ['Assign', 'q', 1], ['Random']]).effects).toEqual([
-      'random',
-      'scope',
-    ]);
+    expect(
+      ce.box(['Block', ['Declare', 'q', "'unknown'", 1], ['Random']]).effects
+    ).toEqual(['random', 'scope']);
   });
 
   it('is `undefined` for everything that is not an application', () => {

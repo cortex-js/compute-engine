@@ -58,14 +58,12 @@ export type ProvisionalDependent =
   BoxedOperatorDefinition | BoxedValueDefinition;
 
 /** What a `Function` literal needs to be re-derived: the raw operands it was
- * canonicalized from, the scope it was canonicalized in, the symbols whose
- * juxtaposition reading was provisional, and the names that the blocks of the
- * literal made assignment locals (`noteAssignmentLocal()`). */
+ * canonicalized from, the scope it was canonicalized in, and the symbols whose
+ * juxtaposition reading was provisional. */
 export type ProvisionalLiteral = {
   ops: ReadonlyArray<Expression>;
   heads: ReadonlySet<string>;
   scope: Scope | undefined;
-  assignmentLocals?: ReadonlySet<string>;
 };
 
 //
@@ -75,7 +73,6 @@ export type ProvisionalLiteral = {
 /** What the canonicalization of one `Function` literal body noted. */
 export type ProvisionalCapture = {
   heads?: Set<string>;
-  assignmentLocals?: Set<string>;
 };
 
 // A frame stays `undefined` until something is actually noted in it: every
@@ -103,11 +100,6 @@ export function endProvisionalCapture(): ProvisionalCapture | undefined {
       parent.heads ??= new Set();
       for (const name of frame.heads) parent.heads.add(name);
     }
-    if (frame.assignmentLocals !== undefined) {
-      parent.assignmentLocals ??= new Set();
-      for (const name of frame.assignmentLocals)
-        parent.assignmentLocals.add(name);
-    }
   }
   return frame;
 }
@@ -134,17 +126,6 @@ export function noteProvisionalApplication(name: string): void {
   const depth = FRAMES.length;
   if (depth === 0) return;
   ((FRAMES[depth - 1] ??= {}).heads ??= new Set()).add(name);
-}
-
-/** Record that a block of the body that is canonicalized now made `name` an
- * assignment local (`canonicalBlock()`, `library/control-structures.ts`). A
- * re-derivation of the literal keeps this decision, also when a binding of
- * `name` was made in an enclosing scope after the literal was written
- * (`withKeptAssignmentLocals()`, `assignment-locals.ts`). */
-export function noteAssignmentLocal(name: string): void {
-  const depth = FRAMES.length;
-  if (depth === 0) return;
-  ((FRAMES[depth - 1] ??= {}).assignmentLocals ??= new Set()).add(name);
 }
 
 /** Record that `name` was APPLIED while it had no definition (or only a

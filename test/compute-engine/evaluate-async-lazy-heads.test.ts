@@ -478,28 +478,3 @@ describe('the evaluation context after an await', () => {
     expect(less.symbol).toBe('True');
   });
 });
-
-// A frame that chains its scope onto the ambient scope gives the scope its
-// parent link back when the frame leaves the stack. The public
-// `ce.contextStack` setter drops frames without a pop: it must release them
-// too. Before, the dropped frame stayed registered as live, the scope kept
-// the ambient parent, and a later push and pop of the same scope did not
-// restore the link either.
-test('the contextStack setter restores the parent link of a dropped frame', () => {
-  const ce = new ComputeEngine();
-  const scope = ce.box(['Sum', 'k', ['Limits', 'k', 1, 3]]).localScope!;
-  const original = scope.parent;
-  ce.pushScope();
-  try {
-    const saved = ce.contextStack;
-    ce._pushEvalContext(scope, undefined, { ambient: true });
-    expect(scope.parent).not.toBe(original);
-    ce.contextStack = saved;
-    expect(scope.parent).toBe(original);
-    ce._pushEvalContext(scope, undefined, { ambient: true });
-    ce._popEvalContext();
-    expect(scope.parent).toBe(original);
-  } finally {
-    ce.popScope();
-  }
-});

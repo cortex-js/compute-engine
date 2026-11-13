@@ -34,7 +34,7 @@ describe('CE-1063: subs() into a block that reads a name and then assigns it', (
     ce.declare('a', 'real');
     const block = ce.box([
       'Block',
-      ['Assign', 'q', ['Multiply', 2, 'a']],
+      ['Declare', 'q', "'unknown'", ['Multiply', 2, 'a']],
       ['Assign', 'a', 1],
       ['Add', 'a', 'q'],
     ]);
@@ -49,7 +49,7 @@ describe('CE-1063: subs() into a block that reads a name and then assigns it', (
     ce.declare('a', 'real');
     const block = ce.box([
       'Block',
-      ['Assign', 'g', ['Function', ['Add', 'a', 'x'], 'x']],
+      ['Declare', 'g', "'unknown'", ['Function', ['Add', 'a', 'x'], 'x']],
       ['Assign', 'a', 5],
       ['g', 1],
     ]);
@@ -87,12 +87,19 @@ describe('CE-1063: subs() into a block that reads a name and then assigns it', (
     // No read before the first write: `y` is a local, and `subs()` does not
     // replace it.
     const ce = new ComputeEngine();
-    const block = ce.box(['Block', ['Assign', 'y', 5], ['Add', 'x', 'y']]);
+    const block = ce.box([
+      'Block',
+      ['Declare', 'y', "'unknown'", 5],
+      ['Add', 'x', 'y'],
+    ]);
     expect(block.subs({ y: 3 })).toBe(block);
-    // No scope declares `q`, so the canonical block makes a local for it.
+    // No scope declares `q`, so the `Assign` is an error: an assignment makes
+    // no local.
     const local = ce.box(['Block', ['Assign', 'q', ['Add', 'q', 1]], 'q']);
-    expect(local.unknowns).toEqual([]);
-    expect(local.subs({ q: 3 })).toBe(local);
+    expect(local.isValid).toBe(false);
+    expect(JSON.stringify(local.json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
   });
 
   it('assigns several names at the same time', () => {
@@ -141,12 +148,12 @@ describe('CE-1063: subs() into a block that reads a name and then assigns it', (
 
   it('keeps the name of a call', () => {
     // `subs()` does not replace the name of a call, so the call `f(1)` is
-    // not a read of `f`, and `f` stays a local of the block.
+    // not a read of `f`: the block reads no value of `f` from outside it.
     const ce = new ComputeEngine();
     ce.declare('f', 'function');
     const block = ce.box([
       'Block',
-      ['Assign', 'y', ['f', 1]],
+      ['Declare', 'y', "'unknown'", ['f', 1]],
       ['Assign', 'f', ['Function', ['Multiply', 2, 'x'], 'x']],
       ['Add', 'y', ['f', 3]],
     ]);
@@ -160,7 +167,7 @@ describe('CE-1063: subs() into a block that reads a name and then assigns it', (
     ce.declare('a', 'real');
     const block = ce.box([
       'Block',
-      ['Assign', 'c', 1],
+      ['Declare', 'c', "'unknown'", 1],
       ['Assign', 'a', ['Add', 'a', 'c']],
       'a',
     ]);
@@ -168,7 +175,7 @@ describe('CE-1063: subs() into a block that reads a name and then assigns it', (
     expect(result.json).toEqual([
       'Block',
       ['Assign', 'a', 'c'],
-      ['Assign', 'c_1', 1],
+      ['Declare', 'c_1', "'unknown'", 1],
       ['Assign', 'a', ['Add', 'a', 'c_1']],
       'a',
     ]);

@@ -161,7 +161,7 @@ fact(10)`);
   // to a name that a LATER statement defines registers a forward reference
   // (`engine-declarations.ts`), which the later definition fulfils in place.
   // The three spellings — `function`, math-style `f(n) = …`, and a `=>`
-  // lambda assigned to a bare name — are pinned separately because each
+  // lambda bound by `let` — are pinned separately because each
   // reaches the definition through a different canonical head.
   const MUTUAL_FORMS: [string, string][] = [
     [
@@ -179,10 +179,10 @@ odd(n) = false if n == 0 else even(n - 1)
 [even(4), even(7), odd(7)]`,
     ],
     [
-      'lambda assigned to a bare name',
+      'lambda bound by `let`',
       `
-even = n => true if n == 0 else odd(n - 1)
-odd = n => false if n == 0 else even(n - 1)
+let even = n => true if n == 0 else odd(n - 1)
+let odd = n => false if n == 0 else even(n - 1)
 [even(4), even(7), odd(7)]`,
     ],
   ];
@@ -212,11 +212,11 @@ function outer(k) -> boolean {
     const ce = new ComputeEngine();
     const first = executeEpsil(
       ce,
-      'even = n => true if n == 0 else odd(n - 1)'
+      'let even = n => true if n == 0 else odd(n - 1)'
     );
     const second = executeEpsil(
       ce,
-      'odd = n => false if n == 0 else even(n - 1)'
+      'let odd = n => false if n == 0 else even(n - 1)'
     );
     const call = executeEpsil(ce, 'even(4)');
     expect([

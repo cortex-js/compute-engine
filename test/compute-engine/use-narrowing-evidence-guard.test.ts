@@ -36,7 +36,7 @@ describe('use-narrowing evidence guard', () => {
   test('PROGRAM persona: a use of an ASSIGNED symbol checks, not narrows', () => {
     const ce = engineWith(FGK);
     const run = (src: string) => executeEpsil(ce, src);
-    run(['x = f()', 'x = g()'].join('\n'));
+    run(['let x = f()', 'x = g()'].join('\n'));
     expect(ce.box('x').type.toString()).toBe('number');
 
     const r = run('k(x)');
@@ -86,20 +86,20 @@ describe('use-narrowing evidence guard', () => {
       lines: string[],
       signatures: Record<string, string> = FGK
     ) => executeEpsil(engineWith(signatures), lines.join('\n')).diagnostics;
-    expect(JSON.stringify(one(['x = f()', 'x = g()', 'k(x)']))).toContain(
+    expect(JSON.stringify(one(['let x = f()', 'x = g()', 'k(x)']))).toContain(
       'static-type-error'
     );
     // The possibly-incompatible refinement (user-ruled 2026-08-23): a
     // symbolic-evidence overlap mismatch carries a suggestion note to
     // annotate the declaration; a DEFINITE mismatch (disjoint literal
     // evidence, pinned elsewhere in this file) does not.
-    expect(JSON.stringify(one(['x = f()', 'x = g()', 'k(x)']))).toContain(
+    expect(JSON.stringify(one(['let x = f()', 'x = g()', 'k(x)']))).toContain(
       'annotate the declaration'
     );
 
     // Assignment is LAST-WRITE-WINS: the reverse order is a correct program
     // and must stay clean (a join-of-assignments model would wrongly flag it).
-    expect(one(['x = g()', 'x = f()', 'k(x)'])).toEqual([]);
+    expect(one(['let x = g()', 'x = f()', 'k(x)'])).toEqual([]);
 
     // The evidence recorded is the RAW right-hand-side type: `v = 1 - i`
     // stores widened `number`, which `⊄ complex` — but the raw
@@ -118,7 +118,7 @@ describe('use-narrowing evidence guard', () => {
     // The stricter check reads `ce._staticAssignmentEvidence`, which is
     // non-undefined only while the static pre-pass runs, so it cannot
     // change what the program computes. Here `y` is declared `number` and
-    // `x = y` therefore records `number` as `x`'s assignment evidence,
+    // `let x = y` therefore records `number` as `x`'s assignment evidence,
     // which does not fit `k`'s `integer` parameter: the pre-pass flags the
     // call. Executing the same program then evaluates `k(x)` to 6, because
     // by the time the call boxes during execution `x` HOLDS 5 and a
@@ -128,7 +128,7 @@ describe('use-narrowing evidence guard', () => {
       [
         'k(n: integer) = n + 1',
         'let y: number = 5',
-        'x = y',
+        'let x = y',
         'k(x)',
       ].join('\n')
     );
@@ -148,7 +148,10 @@ describe('use-narrowing evidence guard', () => {
         lines.join('\n')
       ).diagnostics;
     expect(
-      one(['x = g()', 'p(x)'], '((integer) -> integer) & ((number) -> number)')
+      one(
+        ['let x = g()', 'p(x)'],
+        '((integer) -> integer) & ((number) -> number)'
+      )
     ).toEqual([]);
 
     // When NO arm fits, the call flags and the error names the union of the
@@ -156,7 +159,7 @@ describe('use-narrowing evidence guard', () => {
     expect(
       JSON.stringify(
         one(
-          ['x = g()', 'p(x)'],
+          ['let x = g()', 'p(x)'],
           '((integer) -> integer) & ((string) -> string)'
         )
       )
@@ -208,7 +211,7 @@ describe('use-narrowing evidence guard', () => {
   test('an assigned symbol whose type already fits is admitted without a write (pre-existing matches branch)', () => {
     const ce = engineWith({ f: '() -> integer', k: '(number) -> number' });
     const run = (src: string) => executeEpsil(ce, src);
-    run('y = f()');
+    run('let y = f()');
     expect(ce.box('y').type.toString()).toBe('integer');
     const r = run('k(y)');
     expect(JSON.stringify(r.diagnostics)).toBe('[]');
@@ -231,7 +234,7 @@ describe('use-narrowing evidence guard', () => {
       varfn: '(integer+) -> integer',
     });
     const run = (src: string) => executeEpsil(ce, src);
-    run('x = g()');
+    run('let x = g()');
     // Re-read under R1 overlap admission (§4.4): the `number` evidence
     // OVERLAPS `integer`, so both calls now box and stay inert instead of
     // erroring. The Epsil linter's stricter evidence check does not reach

@@ -581,20 +581,20 @@ describe('Map fusion — the identity level under the numeric marker', () => {
 });
 
 describe('Map fusion — a scope-writing body is NOT lowered', () => {
-  test('an `Assign` body leaves the ambient scope untouched', () => {
+  test('a `Declare` body leaves the ambient scope untouched', () => {
     // The general path runs the body in a FRESH function frame; the lowered
     // path would evaluate the application in the AMBIENT scope and leak the
-    // mutation engine-wide. The gate is the head's definition purity.
+    // local engine-wide. The gate is the head's definition purity.
     const ce = new ComputeEngine();
     const m = ce.box([
       'Map',
-      ['Function', ['Assign', 'leaked', '_1'], '_1'],
+      ['Function', ['Block', ['Declare', 'leaked', "'unknown'", '_1']], '_1'],
       ['Range', 1, 3],
     ]);
     expect(lowerMapSpine(m)).toBeUndefined();
     expect(ce.lookupDefinition('leaked')).toBeUndefined();
 
-    // The body is an `Assign`, so each call has the value `Nothing`.
+    // The value of the body is the value of a `Declare`, `Nothing`.
     expect(drainRe(m)).toEqual([NaN, NaN, NaN]);
 
     // Nothing escaped the per-call frame.

@@ -634,115 +634,6 @@ recomputed at each precision change.
 
 <MemberCard>
 
-##### ComputeEngine.~~checkpoint()~~ {#checkpoint-1}
-
-```ts
-checkpoint(label?): EngineCheckpoint
-```
-
-Take a checkpoint of the engine's state at a quiescent point — between
-statements, at any scope depth — so a later [restore](#restore) can rewind
-to it. Legal on a freshly constructed engine, which is how a client gets
-a `cp[0]` covering an edit of the first cell, and inside a host-pushed
-scope, which is how a notebook takes per-cell checkpoints within a pass.
-A checkpoint taken inside a scope dies when that scope pops. Throws a
-`CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
-[restore](#restore) additionally requires the same scope stack the
-checkpoint was taken on.
-
-####### label?
-
-`string`
-
-###### Deprecated
-
-Checkpoints are removed in a later release. To give names
-values for one computation, use `ce.withValues()`; to make declarations
-that are undone together, declare them in a scope pushed with
-`ce.pushScope()` and remove them with `ce.popScope()`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### ComputeEngine.~~restore()~~ {#restore-1}
-
-```ts
-restore(cp): void
-```
-
-Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
-stays live and can be restored again.
-
-The definitions that existed when `cp` was taken are rewritten in place,
-and the version counters advance, so every expression that reads them,
-whether it was built before or during the rewound window, reads the
-restored state afterwards and its cached answers are computed again.
-The structure of an expression (`ops`, `json`, `digest`, `hash`) is not
-affected, with one exception: the fields of a mutable object are
-rewound in place, so the `json` and `digest` of that object, and of
-every expression that holds it, can change.
-
-The definitions CREATED during the window are removed from their scope
-and disposed. This includes a symbol that was declared or assigned for
-the first time there, and a free symbol that was boxed for the first
-time there (boxing declares it). An expression built during the window
-that names such a symbol keeps the disposed definition, and the symbol
-is inert: it reads no value and counts as unknown (`unknowns`, a
-compile reads it as an input), also after a later declaration or
-assignment of the same name, and its type is the one its record had
-before the declaration (usually `unknown`). The index of a `Sum` and the
-locals of a `Block` built during the window are not affected: they
-still take their values when the expression runs. Nor is a symbol
-declared in a scope that is not on the scope chain when `restore()`
-runs (a scope pushed and popped during the window): it still resolves
-by name, so it reads a later declaration of the same name in that scope
-with its old type (ROADMAP CE-590). `isSame` with the
-same expression built after the
-restore is false. Do not keep such an expression: build it again to
-read the new definition, and cache a cell output as a serialized
-artifact rather than as a live boxed node.
-
-####### cp
-
-[`EngineCheckpoint`](#enginecheckpoint)
-
-###### Deprecated
-
-Checkpoints are removed in a later release. To give names
-values for one computation, use `ce.withValues()`; to make declarations
-that are undone together, declare them in a scope pushed with
-`ce.pushScope()` and remove them with `ce.popScope()`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### ComputeEngine.~~discard()~~ {#discard-1}
-
-```ts
-discard(cp): void
-```
-
-Release `cp`'s restore capability. Restoring past a discarded INTERIOR
-checkpoint stays possible through any earlier live one; discarding the
-OLDEST makes the state before the next-younger one unreachable.
-
-####### cp
-
-[`EngineCheckpoint`](#enginecheckpoint)
-
-###### Deprecated
-
-Checkpoints are removed in a later release. To give names
-values for one computation, use `ce.withValues()`; to make declarations
-that are undone together, declare them in a scope pushed with
-`ce.pushScope()` and remove them with `ce.popScope()`.
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ComputeEngine.declareProtocol() {#declareprotocol-1}
 
 ```ts
@@ -2350,9 +2241,6 @@ A library name used as a value (`N` in `N + 1`) is declared as a
 variable, which shadows the library definition in the home scope. A
 call head (`f` in `f(x)`) is declared with a function type.
 
-A checkpoint (`ce.checkpoint()`) records the declarations, as it records
-those of `ce.declare()`.
-
 ####### exprs
 
 readonly [`Expression`](#expression-5)[]
@@ -2460,8 +2348,7 @@ Check if a symbol is a defined sequence.
 The answer is for the definition that the name has in the current
 scope. A sequence declared in an enclosing scope is a sequence. A
 sequence is no longer one after the scope that declared it is popped,
-after `undeclare()`, or after a checkpoint restore that removes its
-declaration.
+or after `undeclare()`.
 
 ####### name
 
@@ -2717,8 +2604,6 @@ Assumptions about the name are not removed: an assumption applies to
 the name, and so to a new declaration of it. Use `forget()` to remove
 them.
 
-A checkpoint taken before the call (`ce.checkpoint()`) undoes it.
-
 ####### names
 
 `string` \| readonly `string`[]
@@ -2917,6 +2802,63 @@ ce.suggestOperatorName('foo');      // → undefined
 ####### name
 
 `string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ComputeEngine.temporaryName() {#temporaryname-1}
+
+```ts
+temporaryName(hint, ...avoid): string
+```
+
+Return a name for a temporary symbol: `<hint>_tmp<n>`, with `n` the
+smallest integer from 1 such that the name
+- has no definition that `ce.lookupDefinition()` finds from the current
+  scope, and
+- is not a name of `avoid`, and does not occur in an expression of
+  `avoid`, as a symbol (free or bound) or as the operator of a call.
+
+Each item of `avoid` is a boxed expression, a string (one name, not text
+to search) or a set of names. An array throws: an array of strings is
+also a MathJSON call, so box it or pass the set of its names. An
+expression is walked as it is written, each shared subtree once; the
+walk does not enter the values or the bodies of the names it reads.
+
+Pass in `avoid` every expression that the name will be put in or
+combined with, the bodies and stored values that the computation reads,
+and the names returned by earlier calls that are not declared yet: two
+calls in a row with the same hint return the same name otherwise. A name
+that an expression uses with no definition is not seen by the lookup.
+
+The hint is cleaned: the `_` at its start and at its end are removed and
+each `__` becomes `_`; `tmp` is used if nothing is left. A hint that is
+not a valid symbol name, or for which `<hint>_tmp1` is not one (an
+emoji), throws.
+
+The function keeps no state and declares nothing: the same call in the
+same state returns the same name. The caller declares the name if it
+needs a definition, and the definition ends with its scope.
+
+A name that ends with `_tmp` and a positive integer is reserved for this
+function. The engine does not enforce it. A host can remove
+`/_tmp[1-9]\d*$/` from the name to get the hint.
+
+```ts
+ce.temporaryName('t');                                // → 't_tmp1'
+ce.temporaryName('t', ce.box(['Add', 't_tmp1', 'x'])); // → 't_tmp2'
+ce.temporaryName('s', new Set(['s_tmp1']));           // → 's_tmp2'
+ce.temporaryName('_x');                               // → 'x_tmp1'
+```
+
+####### hint
+
+`string`
+
+####### avoid
+
+...(`string` \| `ReadonlySet`\<`string`\> \| [`Expression`](#expression-5))[]
 
 </MemberCard>
 
@@ -6724,14 +6666,15 @@ of the operator runs.
   operand unevaluated (`raw`).
 - `statement`: the operand is a statement that the operator runs, zero,
   one or several times (the body of a loop, a branch of a conditional). An
-  `Assign` or a `Declare` there is valid. The operand is not evaluated
+  `Assign` there is valid. The operand is not evaluated
   before the `evaluate` handler runs: the handler evaluates it when and as
   often as it needs to. The engine canonicalizes the operand as a branch,
   except in a `lazy` operator with a `canonical` handler, which receives
-  it as written and canonicalizes it itself. In a branch, a first
-  assignment of a name that no enclosing scope declares is the error
-  `first-assignment-in-branch`, an assignment of a declared name writes
-  that name, and a bare `Break` or `Continue` symbol is an error.
+  it as written and canonicalizes it itself. In a branch, a `Declare` is
+  the error `declaration-below-statement`, an assignment of a name that
+  no enclosing scope declares is the error
+  `assignment-to-undeclared-variable`, an assignment of a declared name
+  writes that name, and a bare `Break` or `Continue` symbol is an error.
 - `raw`: the operand is kept as written, not canonicalized and not
   evaluated. The default of a `lazy` operator. Valid only on a `lazy`
   operator.
@@ -7476,15 +7419,24 @@ The result of `ce.infer()`.
 
 - `declared`: each name that `ce.infer()` declared in its home scope, or
   whose inferred definition it narrowed there, with the type it has now.
-- `skipped`: each name that it did not change, with the reason:
+- `skipped`: each symbol of the expressions that it did not change, with
+  the reason:
   - `'conflict'`: the expressions require types that have no common
     subtype (`x + 1` and `x(3)`), or a type that has none in common with
     the inferred definition of the name;
-  - `'untyped'`: the requirements give the type `unknown`;
-  - `'defined'`: the home scope holds a definition of the name that is not
-    inferred (a `ce.declare()`, for example);
+  - `'untyped'`: no use requires a type of the name (`q` in `[q]`), or the
+    requirements give the type `unknown`;
+  - `'defined'`: the home scope holds a definition of the name with a
+    declared type (`ce.declare('x', 'real')`). A definition with the
+    declared type `unknown` states no type: `ce.infer()` gives it the type
+    that the uses require;
   - `'out-of-scope'`: the home scope is not the current scope or one of its
     ancestors (it was popped).
+
+A symbol whose type is already the type that the uses require, a symbol
+of the library (`Pi`), a parameter of a function literal, the variable of
+a binder (the index of a `Sum`) and a symbol declared in a scope that was
+popped are in neither list.
 
 Each list is sorted by name, then by the depth of the scope.
 
@@ -12828,40 +12780,6 @@ implementation detail, not part of the public surface).
 
 </MemberCard>
 
-### EngineCheckpoint {#enginecheckpoint}
-
-A handle on a saved engine state, from [IComputeEngine.checkpoint](#checkpoint).
-Deliberately opaque: `id` is for logging and `live` is the only state a
-client can act on. Declared here rather than in `checkpoint.ts` because it
-is part of the engine's public type surface — and because importing it from
-the implementation would make this file depend on it, closing a cycle
-through the sequence registry.
-
-<MemberCard>
-
-##### EngineCheckpoint.id {#id-4}
-
-```ts
-readonly id: number;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### EngineCheckpoint.live {#live}
-
-```ts
-readonly live: boolean;
-```
-
-False once invalidated — by a restore to an EARLIER checkpoint, by
-`discard()`, or by popping a scope this checkpoint was taken inside
-(the pop disposes the scope's bindings, so there is no world left to
-restore). A dead checkpoint can never be restored again.
-
-</MemberCard>
-
 ### IComputeEngine {#icomputeengine}
 
 #### Extended by
@@ -13403,115 +13321,6 @@ set tolerance(v: number | "auto"): void
 The absolute tolerance of the comparisons that involve a float, and of
 `chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
 recomputed at each precision change.
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.~~checkpoint()~~ {#checkpoint}
-
-```ts
-checkpoint(label?): EngineCheckpoint
-```
-
-Take a checkpoint of the engine's state at a quiescent point — between
-statements, at any scope depth — so a later [restore](#restore) can rewind
-to it. Legal on a freshly constructed engine, which is how a client gets
-a `cp[0]` covering an edit of the first cell, and inside a host-pushed
-scope, which is how a notebook takes per-cell checkpoints within a pass.
-A checkpoint taken inside a scope dies when that scope pops. Throws a
-`CheckpointError` when the engine is mid-evaluation or mid-pre-pass;
-[restore](#restore) additionally requires the same scope stack the
-checkpoint was taken on.
-
-####### label?
-
-`string`
-
-###### Deprecated
-
-Checkpoints are removed in a later release. To give names
-values for one computation, use `ce.withValues()`; to make declarations
-that are undone together, declare them in a scope pushed with
-`ce.pushScope()` and remove them with `ce.popScope()`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.~~restore()~~ {#restore}
-
-```ts
-restore(cp): void
-```
-
-Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
-stays live and can be restored again.
-
-The definitions that existed when `cp` was taken are rewritten in place,
-and the version counters advance, so every expression that reads them,
-whether it was built before or during the rewound window, reads the
-restored state afterwards and its cached answers are computed again.
-The structure of an expression (`ops`, `json`, `digest`, `hash`) is not
-affected, with one exception: the fields of a mutable object are
-rewound in place, so the `json` and `digest` of that object, and of
-every expression that holds it, can change.
-
-The definitions CREATED during the window are removed from their scope
-and disposed. This includes a symbol that was declared or assigned for
-the first time there, and a free symbol that was boxed for the first
-time there (boxing declares it). An expression built during the window
-that names such a symbol keeps the disposed definition, and the symbol
-is inert: it reads no value and counts as unknown (`unknowns`, a
-compile reads it as an input), also after a later declaration or
-assignment of the same name, and its type is the one its record had
-before the declaration (usually `unknown`). The index of a `Sum` and the
-locals of a `Block` built during the window are not affected: they
-still take their values when the expression runs. Nor is a symbol
-declared in a scope that is not on the scope chain when `restore()`
-runs (a scope pushed and popped during the window): it still resolves
-by name, so it reads a later declaration of the same name in that scope
-with its old type (ROADMAP CE-590). `isSame` with the
-same expression built after the
-restore is false. Do not keep such an expression: build it again to
-read the new definition, and cache a cell output as a serialized
-artifact rather than as a live boxed node.
-
-####### cp
-
-[`EngineCheckpoint`](#enginecheckpoint)
-
-###### Deprecated
-
-Checkpoints are removed in a later release. To give names
-values for one computation, use `ce.withValues()`; to make declarations
-that are undone together, declare them in a scope pushed with
-`ce.pushScope()` and remove them with `ce.popScope()`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.~~discard()~~ {#discard}
-
-```ts
-discard(cp): void
-```
-
-Release `cp`'s restore capability. Restoring past a discarded INTERIOR
-checkpoint stays possible through any earlier live one; discarding the
-OLDEST makes the state before the next-younger one unreachable.
-
-####### cp
-
-[`EngineCheckpoint`](#enginecheckpoint)
-
-###### Deprecated
-
-Checkpoints are removed in a later release. To give names
-values for one computation, use `ce.withValues()`; to make declarations
-that are undone together, declare them in a scope pushed with
-`ce.pushScope()` and remove them with `ce.popScope()`.
 
 </MemberCard>
 
@@ -15124,9 +14933,6 @@ A library name used as a value (`N` in `N + 1`) is declared as a
 variable, which shadows the library definition in the home scope. A
 call head (`f` in `f(x)`) is declared with a function type.
 
-A checkpoint (`ce.checkpoint()`) records the declarations, as it records
-those of `ce.declare()`.
-
 ####### exprs
 
 readonly [`Expression`](#expression-5)[]
@@ -15234,8 +15040,7 @@ Check if a symbol is a defined sequence.
 The answer is for the definition that the name has in the current
 scope. A sequence declared in an enclosing scope is a sequence. A
 sequence is no longer one after the scope that declared it is popped,
-after `undeclare()`, or after a checkpoint restore that removes its
-declaration.
+or after `undeclare()`.
 
 ####### name
 
@@ -15491,8 +15296,6 @@ Assumptions about the name are not removed: an assumption applies to
 the name, and so to a new declaration of it. Use `forget()` to remove
 them.
 
-A checkpoint taken before the call (`ce.checkpoint()`) undoes it.
-
 ####### names
 
 `string` \| readonly `string`[]
@@ -15691,6 +15494,63 @@ ce.suggestOperatorName('foo');      // → undefined
 ####### name
 
 `string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.temporaryName() {#temporaryname}
+
+```ts
+temporaryName(hint, ...avoid): string
+```
+
+Return a name for a temporary symbol: `<hint>_tmp<n>`, with `n` the
+smallest integer from 1 such that the name
+- has no definition that `ce.lookupDefinition()` finds from the current
+  scope, and
+- is not a name of `avoid`, and does not occur in an expression of
+  `avoid`, as a symbol (free or bound) or as the operator of a call.
+
+Each item of `avoid` is a boxed expression, a string (one name, not text
+to search) or a set of names. An array throws: an array of strings is
+also a MathJSON call, so box it or pass the set of its names. An
+expression is walked as it is written, each shared subtree once; the
+walk does not enter the values or the bodies of the names it reads.
+
+Pass in `avoid` every expression that the name will be put in or
+combined with, the bodies and stored values that the computation reads,
+and the names returned by earlier calls that are not declared yet: two
+calls in a row with the same hint return the same name otherwise. A name
+that an expression uses with no definition is not seen by the lookup.
+
+The hint is cleaned: the `_` at its start and at its end are removed and
+each `__` becomes `_`; `tmp` is used if nothing is left. A hint that is
+not a valid symbol name, or for which `<hint>_tmp1` is not one (an
+emoji), throws.
+
+The function keeps no state and declares nothing: the same call in the
+same state returns the same name. The caller declares the name if it
+needs a definition, and the definition ends with its scope.
+
+A name that ends with `_tmp` and a positive integer is reserved for this
+function. The engine does not enforce it. A host can remove
+`/_tmp[1-9]\d*$/` from the name to get the hint.
+
+```ts
+ce.temporaryName('t');                                // → 't_tmp1'
+ce.temporaryName('t', ce.box(['Add', 't_tmp1', 'x'])); // → 't_tmp2'
+ce.temporaryName('s', new Set(['s_tmp1']));           // → 's_tmp2'
+ce.temporaryName('_x');                               // → 'x_tmp1'
+```
+
+####### hint
+
+`string`
+
+####### avoid
+
+...(`string` \| `ReadonlySet`\<`string`\> \| [`Expression`](#expression-5))[]
 
 </MemberCard>
 

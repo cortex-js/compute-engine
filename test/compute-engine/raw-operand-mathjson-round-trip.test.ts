@@ -133,12 +133,12 @@ describe('RAW OPERAND: MathJSON round trip', () => {
     const ce = new ComputeEngine();
     const { pretty } = roundTrip(ce, [
       'Block',
-      ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 1, 2]],
+      ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 1, 2]],
       ['Add', 'a', 'b'],
     ]);
     expect(pretty).toEqual([
       'Block',
-      ['Assign', ['Tuple', 'a', 'b'], ['Pair', 1, 2]],
+      ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Pair', 1, 2]],
       ['Add', 'a', 'b'],
     ]);
   });

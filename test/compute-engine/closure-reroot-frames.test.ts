@@ -74,7 +74,11 @@ const counter = [
 // mk = n ↦ Block(k := 1, x ↦ x + k)
 const withLocal = [
   'Function',
-  ['Block', ['Assign', 'k', 1], ['Function', ['Add', 'x', 'k'], 'x']],
+  [
+    'Block',
+    ['Declare', 'k', "'unknown'", 1],
+    ['Function', ['Add', 'x', 'k'], 'x'],
+  ],
   'n',
 ];
 
@@ -89,7 +93,7 @@ const twoParameters = (body: unknown) => [
 // Block(s := y, y := 2, s + x)
 const writesParameter = [
   'Block',
-  ['Assign', 's', 'y'],
+  ['Declare', 's', "'unknown'", 'y'],
   ['Assign', 'y', 2],
   ['Add', 's', 'x'],
 ];
@@ -98,7 +102,7 @@ const writesParameter = [
 // the branch is a local of the branch.
 const declaresInBranch = [
   'Block',
-  ['Assign', 's', 'y'],
+  ['Declare', 's', "'unknown'", 'y'],
   [
     'If',
     ['Equal', 'w', 1],
@@ -300,7 +304,7 @@ const cases: [
           'Function',
           [
             'Block',
-            ['Assign', 'k', 'n'],
+            ['Declare', 'k', "'unknown'", 'n'],
             [
               'DefineFunction',
               'g',
@@ -464,8 +468,9 @@ describe('a closure of a local function that reads a parameter of the call', () 
     [
       'Block',
       [
-        'Assign',
+        'Declare',
         'h',
+        "'unknown'",
         ['Function', ['Function', ['Add', 'y', 'm', 'n'], 'y'], 'm'],
       ],
       ['List', ['h', 1], 'n'],
@@ -496,8 +501,9 @@ describe('a closure of a recursive call inside a closure of a deeper call', () =
     [
       'Block',
       [
-        'Assign',
+        'Declare',
         'h',
+        "'unknown'",
         ['Function', ['Function', ['Add', 'n', ['m', 'y']], 'y'], 'm'],
       ],
       [
@@ -557,7 +563,7 @@ describe('a local that holds a function, passed by name to a recursive call', ()
     'Function',
     [
       'Block',
-      ['Assign', 'q', literal],
+      ['Declare', 'q', "'unknown'", literal],
       ['If', ['Equal', 'n', 0], 'q', ['f', ['Subtract', 'n', 1], 'q']],
     ],
     'n',
@@ -617,7 +623,7 @@ describe('a local that holds a function, passed by name to a recursive call', ()
       'Function',
       [
         'Block',
-        ['Assign', 'q', ['Function', 'y', 'y']],
+        ['Declare', 'q', "'unknown'", ['Function', 'y', 'y']],
         ['If', ['Equal', 'n', 0], 7, ['f', ['Subtract', 'n', 1], 'q']],
       ],
       'n',

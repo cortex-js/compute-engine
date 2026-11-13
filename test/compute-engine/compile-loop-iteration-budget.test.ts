@@ -16,9 +16,14 @@ ce.declare('m', 'integer');
 
 const inc = ['Assign', 's', ['Add', 's', 1]];
 
-/** `s := 0; Loop(<loop>); s`: a local that counts the passes of the body. */
+/** `let s = 0; Loop(<loop>); s`: a local that counts the passes of the body. */
 const counting = (...loop: unknown[]) =>
-  ce.box(['Block', ['Assign', 's', 0], ['Loop', ...loop], 's'] as any);
+  ce.box([
+    'Block',
+    ['Declare', 's', "'unknown'", 0],
+    ['Loop', ...loop],
+    's',
+  ] as any);
 
 const bareLoop = () => counting(inc);
 /** The break test never succeeds: `s` only grows. */
@@ -67,7 +72,7 @@ ce.assign(
     'Function',
     [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop', inc, ['Element', 'i', ['Range', 1, 'n']]],
       's',
     ],
@@ -81,7 +86,7 @@ const lambda = () =>
     'Function',
     [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop', inc, ['Element', 'i', ['Range', 1, 'n']]],
       's',
     ],
@@ -251,9 +256,10 @@ describe('COMPILE Loop - iterationBudget on the JavaScript target', () => {
         ce.box([
           'Block',
           [
-            'Assign',
+            'Declare',
             'f',
-            ['Function', ['Block', ['Assign', 's', 0], ['Loop', inc], 's'], 'n'],
+            "'unknown'",
+            ['Function', ['Block', ['Declare', 's', "'unknown'", 0], ['Loop', inc], 's'], 'n'],
           ],
           'f',
         ] as any),
@@ -271,9 +277,10 @@ describe('COMPILE Loop - iterationBudget on the JavaScript target', () => {
     const block = ce.box([
       'Block',
       [
-        'Assign',
+        'Declare',
         'f',
-        ['Function', ['Block', ['Assign', 's', 0], ['Loop', inc], 's'], 'n'],
+        "'unknown'",
+        ['Function', ['Block', ['Declare', 's', "'unknown'", 0], ['Loop', inc], 's'], 'n'],
       ],
       'f',
     ] as any);
@@ -284,7 +291,7 @@ describe('COMPILE Loop - iterationBudget on the JavaScript target', () => {
   test('a function literal whose body gives a function declines', () => {
     const curried = ce.box([
       'Function',
-      ['Function', ['Block', ['Assign', 's', 0], ['Loop', inc], 's'], 'y'],
+      ['Function', ['Block', ['Declare', 's', "'unknown'", 0], ['Loop', inc], 's'], 'y'],
       'x',
     ] as any);
     expect(() => js(curried, { iterationBudget: 5 })).toThrow(/iterationBudget/);
@@ -305,7 +312,7 @@ describe('COMPILE Loop - iterationBudget and the ladder of `Limit`', () => {
         'Function',
         [
           'Block',
-          ['Assign', 's', 0],
+          ['Declare', 's', "'unknown'", 0],
           [
             'Loop',
             ['Assign', 's', ['Add', 's', ['Power', 'k', -3]]],
@@ -338,7 +345,7 @@ describe('COMPILE Loop - with no iterationBudget', () => {
   test('the emitted text holds no check', () => {
     const result = js(bareLoop());
     expect(result.code).toBe(
-      '(() => {\nlet s;\ns = 0;\n{\nwhile (true) {\ns = s + 1\n}\n};\nreturn s\n})()'
+      '(() => {\nlet s = 0;\n{\nwhile (true) {\ns = s + 1\n}\n};\nreturn s\n})()'
     );
     expect(result.preamble).toBeUndefined();
   });
@@ -470,7 +477,7 @@ describe('COMPILE Loop - iterationBudget in stored code', () => {
       'held',
       ce.box([
         'Block',
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         ['Loop', inc, ['Element', 'i', ['Range', 1, 3]]],
         's',
       ] as any)
@@ -521,7 +528,7 @@ describe('COMPILE Loop - iterationBudget in a batch', () => {
     local.declare('L', 'list<real>');
     const body = local.box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', ['At', 'L', 'i']]],

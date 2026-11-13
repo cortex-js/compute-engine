@@ -3,22 +3,17 @@ import type { Expression } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
-// An assignment to a name that has no binding in the scope chain (`x ≔ x + 1`
-// with `x` not declared) makes an implicit local of the block. As a variable
-// of a JavaScript or Python function, the local starts with no value in each
-// top-level evaluation and in each function call, and keeps its value from
-// one run of the block to the next inside one evaluation: across the
-// iterations of a loop whose body is the block
-// (`sweepCanonicalizationBindings`,
-// `src/compute-engine/library/control-structures.ts`).
-//
-// Before, the local also kept its value from one top-level evaluation to the
-// next: `Block(x ≔ x + 1; 2x)` gave `2(x + 1)`, then `2(x + 2)`.
+// A local of a block is made by a `Declare` at the top level of the block; an
+// `Assign` writes a variable that is in scope and, inside a block, is an
+// error for a name that is not declared. As a variable of a JavaScript or
+// Python function, a local starts from its declaration in each top-level
+// evaluation and in each function call, and keeps its value inside one
+// evaluation: across the iterations of a loop in the block.
 //
 
 const INCREMENT: unknown = [
   'Block',
-  ['Assign', 'x', 0],
+  ['Declare', 'x', "'unknown'", 0],
   ['Assign', 'x', ['Add', 'x', 1]],
   ['Multiply', 2, 'x'],
 ];
@@ -27,13 +22,24 @@ function box(ce: ComputeEngine, json: unknown): Expression {
   return ce.box(json as Parameters<ComputeEngine['box']>[0]);
 }
 
-describe('an implicit local is fresh in each top-level evaluation', () => {
+describe('a local of a block is fresh in each top-level evaluation', () => {
   test('box route', () => {
     const ce = new ComputeEngine();
     const block = box(ce, INCREMENT);
     expect(block.evaluate().toString()).toBe('2');
     expect(block.evaluate().toString()).toBe('2');
     expect(block.evaluate().toString()).toBe('2');
+    // An assignment to a name that is not declared is an error.
+    const undeclared = box(ce, [
+      'Block',
+      ['Assign', 'x', 0],
+      ['Assign', 'x', ['Add', 'x', 1]],
+      ['Multiply', 2, 'x'],
+    ]);
+    expect(undeclared.isValid).toBe(false);
+    expect(undeclared.evaluate().toString()).toBe(
+      'Error(ErrorCode("assignment-to-undeclared-variable", "x"))'
+    );
   });
 
   test('parse route', () => {
@@ -52,8 +58,8 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
 
   test('an asynchronous evaluation after a synchronous one', async () => {
     // The asynchronous route runs the block in a copy of the block scope,
-    // made when the run starts. The copy must not hold the local that the
-    // synchronous run made.
+    // made when the run starts. The copy must not hold the value that the
+    // synchronous run wrote.
     const ce = new ComputeEngine();
     const block = box(ce, INCREMENT);
     expect(block.evaluate().toString()).toBe('2');
@@ -70,41 +76,61 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
   });
 
   test('an assignment in a branch of a later run does not see the earlier run', () => {
-    // `g` and `h` are locals of the block. On each run `g` has no value when
-    // the condition is read, so the branch is not taken and `h` stays a
-    // symbol. Before, the second run read the `g ≔ 1` of the first run, took
-    // the branch, and gave `1`.
+    // `g` and `h` are locals of the block. On each run `g` is `0` when the
+    // condition is read, so the branch is not taken and `h` stays `0`.
     const ce = new ComputeEngine();
     const block = box(ce, [
+      'Block',
+      ['Declare', 'g', "'unknown'", 0],
+      ['Declare', 'h', "'unknown'", 0],
+      ['If', ['Greater', 'g', 0], ['Assign', 'h', 1], 'Nothing'],
+      ['Assign', 'g', 1],
+      'h',
+    ]);
+    expect(block.evaluate().toString()).toBe('0');
+    expect(block.evaluate().toString()).toBe('0');
+    // An assignment in a branch to a name that is not declared is an error.
+    const undeclared = box(ce, [
       'Block',
       ['If', ['Greater', 'g', 0], ['Assign', 'h', 1], 'Nothing'],
       ['Assign', 'g', 1],
       'h',
     ]);
-    expect(block.evaluate().toString()).toBe('h');
-    expect(block.evaluate().toString()).toBe('h');
+    expect(undeclared.isValid).toBe(false);
+    expect(undeclared.toString()).toContain(
+      'ErrorCode("assignment-to-undeclared-variable", "h")'
+    );
   });
 
   test('a block that assigns a function gives the same result on each run', () => {
-    // The first assignment of `fn` declares the local `fn`, so the call
-    // `fn(3)` in an earlier statement is a use of the local before its
-    // declaration: a static error. A `DefineFunction` statement, which is a
-    // declaration, is installed before the first statement runs, so the
-    // call before it is valid and the block gives `(6, 6)` on each run.
+    // `fn` is a local of the block, so the call `fn(3)` in an earlier
+    // statement is a use of the local before its declaration: a static
+    // error. A `DefineFunction` statement declares a local too, so the
+    // same holds for it; called after it, the block gives `(6, 6)` on each
+    // run.
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',
-      ['Assign', 'r', ['fn', 3]],
-      ['Assign', 'fn', ['Function', ['Multiply', 'z', 2], 'z']],
+      ['Declare', 'r', "'unknown'", ['fn', 3]],
+      ['Declare', 'fn', "'unknown'", ['Function', ['Multiply', 'z', 2], 'z']],
       ['Tuple', 'r', ['fn', 3]],
     ]);
     expect(block.evaluate().toString()).toBe(
       'Error(ErrorCode("read-before-declaration", "fn"))'
     );
+    const early = box(ce, [
+      'Block',
+      ['Declare', 'r', "'unknown'", ['fe', 3]],
+      ['DefineFunction', 'fe', ['Function', ['Multiply', 'z', 2], 'z']],
+      ['Tuple', 'r', ['fe', 3]],
+    ]);
+    expect(early.evaluate().toString()).toBe(
+      'Error(ErrorCode("read-before-declaration", "fe"))'
+    );
     const declared = box(ce, [
       'Block',
-      ['Assign', 'r', ['fd', 3]],
       ['DefineFunction', 'fd', ['Function', ['Multiply', 'z', 2], 'z']],
+      ['Declare', 'r', "'unknown'", ['fd', 3]],
       ['Tuple', 'r', ['fd', 3]],
     ]);
     expect(declared.evaluate().toString()).toBe('(6, 6)');
@@ -127,7 +153,7 @@ describe('what does not change', () => {
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Block', ['Assign', 's', ['Add', 's', 'i']]],
@@ -143,7 +169,7 @@ describe('what does not change', () => {
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Block', ['Assign', 's', ['Add', 's', 'i']]],
@@ -165,8 +191,8 @@ describe('what does not change', () => {
 
 const LOOP_BODY_LOCAL: unknown = [
   'Block',
-  ['Assign', 'last', 0],
-  ['Assign', 't', 0],
+  ['Declare', 'last', "'unknown'", 0],
+  ['Declare', 't', "'unknown'", 0],
   [
     'Loop',
     ['Block', ['Assign', 't', ['Add', 't', 1]], ['Assign', 'last', 't']],
@@ -175,11 +201,11 @@ const LOOP_BODY_LOCAL: unknown = [
   'last',
 ];
 
-describe('an implicit local keeps its value inside one evaluation', () => {
+describe('a local of a block keeps its value inside one evaluation', () => {
   test('across the iterations of a loop', () => {
-    // `t` is assigned only in the loop body, so it is a local of the body
-    // block. It keeps its value from one iteration to the next, and starts
-    // again with no value in the next evaluation.
+    // `t` is a local of the enclosing block, written in the loop body. It
+    // keeps its value from one iteration to the next, and starts again from
+    // its declaration in the next evaluation.
     const ce = new ComputeEngine();
     const block = box(ce, LOOP_BODY_LOCAL);
     expect(block.evaluate().toString()).toBe('3');
@@ -198,8 +224,8 @@ describe('an implicit local keeps its value inside one evaluation', () => {
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',
-      ['Assign', 'last', 0],
-      ['Assign', 'w', 0],
+      ['Declare', 'last', "'unknown'", 0],
+      ['Declare', 'w', "'unknown'", 0],
       [
         'Loop',
         [
@@ -261,7 +287,7 @@ describe('the evaluation that a run of a block is part of', () => {
     } as never);
     const pending = box(ce, [
       'Block',
-      ['Assign', 'y', ['Gate']],
+      ['Declare', 'y', "'unknown'", ['Gate']],
       ['Add', 'y', 1],
     ]).evaluateAsync();
     const block = box(ce, INCREMENT);
@@ -292,8 +318,8 @@ describe('the evaluation that a run of a block is part of', () => {
     });
     const loop = box(ce, [
       'Block',
-      ['Assign', 'last', 0],
-      ['Assign', 't', 0],
+      ['Declare', 'last', "'unknown'", 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'Loop',
         [
@@ -330,8 +356,8 @@ describe('the evaluation that a run of a block is part of', () => {
     });
     const block = box(ce, [
       'Block',
-      ['Assign', 'last', 0],
-      ['Assign', 't', 0],
+      ['Declare', 'last', "'unknown'", 0],
+      ['Declare', 't', "'unknown'", 0],
       [
         'Loop',
         [

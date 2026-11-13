@@ -23,7 +23,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
       ce
         .box([
           'Block',
-          ['Assign', 'w', ['Which', ['Greater', 'x', 5], 1]],
+          ['Declare', 'w', "'unknown'", ['Which', ['Greater', 'x', 5], 1]],
           ['Greater', 'w', 0],
         ])
         .evaluate()
@@ -33,7 +33,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
       ce
         .box([
           'Block',
-          ['Assign', 'w', ['Which', ['Greater', 'x', 5], 1]],
+          ['Declare', 'w', "'unknown'", ['Which', ['Greater', 'x', 5], 1]],
           ['If', ['Greater', 'w', 0], 1, 0],
         ])
         .evaluate()

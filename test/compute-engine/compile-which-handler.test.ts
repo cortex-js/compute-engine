@@ -145,7 +145,7 @@ describe('Which compile handler (Tycho item 180)', () => {
     });
     const e = ce.box([
       'Block',
-      ['Assign', 'a', 'x'],
+      ['Declare', 'a', "'unknown'", 'x'],
       ['Which', ['Greater', 'a', 0], 0, 'True', ['List', 1, 2]],
     ]);
     const r = compile(e);

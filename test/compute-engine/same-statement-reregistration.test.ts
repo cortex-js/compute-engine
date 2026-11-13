@@ -311,7 +311,7 @@ describe('the Epsil route still declares, redeclares and refuses', () => {
     expect(diagnosticCodes(`type pt = object{x: integer, y: integer}`)).toEqual(
       []
     );
-    expect(result(`p = pt(x: 1, y: 2)\np.x`)).toBe('1');
+    expect(result(`let p = pt(x: 1, y: 2)\np.x`)).toBe('1');
   });
 
   test('a NOTEBOOK re-run in a later batch replaces the layout', () => {
@@ -354,7 +354,7 @@ protocol Dup { }`)
       diagnosticCodes(`type shape = circle(r: number) | square(s: number)`)
     ).toEqual([]);
     expect(
-      result(`c = circle(2.5)
+      result(`let c = circle(2.5)
 match c {
   circle(r) => r
   square(s) => s

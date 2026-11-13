@@ -19,7 +19,7 @@ function box(json: unknown) {
 // The loop example of CE-636, with the declaration as it was written then.
 const LOOP = [
   'Block',
-  ['Assign', 's', 0],
+  ['Declare', 's', "'unknown'", 0],
   [
     'Loop',
     [
@@ -56,7 +56,7 @@ describe('CE-636: A DECLARATION WITHOUT A VALUE', () => {
   test('a declaration with a value, assigned on some paths, compiles', () => {
     const e = box([
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         [

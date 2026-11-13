@@ -100,7 +100,12 @@ function pythonValue(code: string, names: string[]): Value {
   );
 }
 
-const Q = ['Assign', 'q', ['Function', ['Multiply', 3, 's'], 's']];
+const Q = [
+  'Declare',
+  'q',
+  "'unknown'",
+  ['Function', ['Multiply', 3, 's'], 's'],
+];
 
 // Rows of design §4 for phase B: label, MathJSON, the code expected on
 // javascript, the targets that compile it.

@@ -95,8 +95,10 @@ s`,
   });
 
   test('for loop, destructuring let of a tuple-valued call', () => {
+    // `f` is a local of the program block: its declared type gives the
+    // type of the call.
     expectParity(
-      `function f(k) { (k, k + 1) }
+      `let f: (number) -> tuple<number, number> = (k) => (k, k + 1)
 let s = 0
 for k in [1, 2, 3] { let (a, b) = f(k); s = s + a * b }
 s`,
@@ -123,7 +125,7 @@ s + a`,
     );
   });
 
-  test('a bare destructuring declare as the whole loop body (MathJSON)', () => {
+  test('a bare destructuring declare as the whole loop body is a declaration below a statement (MathJSON)', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
@@ -135,10 +137,11 @@ s + a`,
       ],
       's',
     ]);
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toBe(0);
-    expect(expr.evaluate().re).toBe(0);
+    expect(expr.isValid).toBe(false);
+    expect(JSON.stringify(expr.json)).toContain('declaration-below-statement');
+    expect(() =>
+      compile(expr, { to: 'javascript', fallback: false })
+    ).toThrow(/invalid expression/);
   });
 });
 
@@ -150,7 +153,9 @@ s + a`,
  * destructuring declaration as the whole loop body, and on Python one in a
  * `Block` body too, reached the value-position `Declare` lowering and the
  * program declined with "Could not compile a destructuring declaration in
- * value position".
+ * value position". A destructuring declaration that is the whole loop body,
+ * not a statement of a `Block`, is the error `declaration-below-statement`,
+ * and every target declines it.
  */
 describe('Destructuring let in a loop body on Python and GLSL', () => {
   const loop = (body: unknown): unknown => [
@@ -158,7 +163,7 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
     body,
     ['Element', 'k', ['Range', 1, 3]],
   ];
-  const CASES: Array<{ name: string; json: unknown; expected: number }> = [
+  const BARE_CASES: Array<{ name: string; json: unknown }> = [
     {
       name: 'a bare two-position declare',
       json: [
@@ -166,7 +171,6 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
         loop(['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'k', 2]]),
         0,
       ],
-      expected: 0,
     },
     {
       name: 'a bare three-position declare',
@@ -180,7 +184,6 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
         ]),
         0,
       ],
-      expected: 0,
     },
     {
       name: 'a bare nested pattern',
@@ -194,7 +197,6 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
         ]),
         0,
       ],
-      expected: 0,
     },
     {
       name: 'a bare declare whose leaf shadows an outer local',
@@ -204,8 +206,9 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
         loop(['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'k', 1]]),
         'a',
       ],
-      expected: 100,
     },
+  ];
+  const CASES: Array<{ name: string; json: unknown; expected: number }> = [
     {
       name: 'the last statement of a block body',
       json: [
@@ -242,22 +245,30 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
     },
   ];
 
+  test.each(BARE_CASES)(
+    '$name: is the error declaration-below-statement',
+    ({ json }) => {
+      const ce = new ComputeEngine();
+      const expr = ce.box(json as any);
+      expect(expr.isValid).toBe(false);
+      expect(JSON.stringify(expr.json)).toContain(
+        'declaration-below-statement'
+      );
+      for (const to of ['javascript', 'python'] as const)
+        expect(() => compile(expr, { to, fallback: false })).toThrow(
+          /invalid expression/
+        );
+    }
+  );
+
   test.each(CASES)('$name: the interpreter value', ({ json, expected }) => {
     const ce = new ComputeEngine();
     expect(ce.box(json as any).evaluate().re).toBe(expected);
   });
 
   for (const to of ['python', 'glsl'] as const)
-    test.each(CASES)(`$name: compiles on ${to}`, ({ name, json }) => {
+    test.each(CASES)(`$name: compiles on ${to}`, ({ json }) => {
       const ce = new ComputeEngine();
-      // The GLSL fragment takes a `Declare` only as a statement of a block, so
-      // it declines a bare declare in the loop body.
-      if (to === 'glsl' && name.startsWith('a bare')) {
-        expect(() =>
-          compile(ce.box(json as any), { to, fallback: false })
-        ).toThrow(/GLSL fragment/);
-        return;
-      }
       const result = compile(ce.box(json as any), { to, fallback: false });
       expect(result.success).toBe(true);
     });
@@ -265,8 +276,11 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
   test('GLSL declines a bare declare in the loop body', () => {
     const ce = new ComputeEngine();
     expect(() =>
-      compile(ce.box(CASES[1].json as any), { to: 'glsl', fallback: false })
-    ).toThrow(/`Declare` is in the GLSL fragment only as a statement/);
+      compile(ce.box(BARE_CASES[1].json as any), {
+        to: 'glsl',
+        fallback: false,
+      })
+    ).toThrow(/GLSL fragment/);
   });
 
   // The emitted Python runs only with `CE_TEST_PYTHON=1` (`test-python.ts`).
@@ -398,7 +412,15 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       ['Declare', 'a', 'integer', 100],
       ['Declare', 's', 'integer', 0],
       loop(
-        ['Declare', ['Tuple', 'a', '_'], 'unknown', ['Tuple', 'k', ['Assign', 's', 'a']]],
+        [
+          'Block',
+          [
+            'Declare',
+            ['Tuple', 'a', '_'],
+            'unknown',
+            ['Tuple', 'k', ['Assign', 's', 'a']],
+          ],
+        ],
         1
       ),
       's',

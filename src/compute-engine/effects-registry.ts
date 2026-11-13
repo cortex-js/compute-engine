@@ -302,9 +302,8 @@ export function* withEvaluationEffects<T, R, N, C>(
   } finally {
     // The driver closes this generator when it stops before the end (a
     // timeout, an abort). The close goes on to `gen`, in the same context
-    // as its steps, so that its `finally` blocks run: the iteration of a
-    // `Sum` puts back the value of its index there (`saveLoopIndexes()`,
-    // `library/utils.ts`). A `gen` that threw is done, and ignores it.
+    // as its steps, so that its `finally` blocks run. A `gen` that threw is
+    // done, and ignores it.
     if (!done)
       runWithEvaluationEffects(
         engine,

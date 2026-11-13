@@ -387,10 +387,6 @@ import type {
 } from '../types-definitions.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { parseType } from '../../common/type/parse.js';
-import {
-  enterNestedBodyScopes,
-  exitNestedBodyScopes,
-} from '../function-utils.js';
 
 /** The carrier of the integer-membership predicates (`IsPrime`,
  * `IsComposite`, `IsOdd`, `IsEven`): all of `number` except the infinities.
@@ -7118,71 +7114,6 @@ function evaluateGamma(
         )
       )
     : undefined;
-}
-
-/**
- * The `evaluate` handler `handler` of a `Sum` or a `Product`, run with the
- * scope of the index of the operator, and the scopes nested in its body,
- * marked as in use (`enterNestedBodyScopes`, `function-utils.ts`), as a
- * `Loop` and a `Comprehension` mark theirs.
- *
- * A function literal that the body evaluates is then a closure that holds a
- * copy of the index with the value of the iteration where it is made
- * (`captureNestedLocals`, `function-utils.ts`). Without the mark, the
- * closure read the index in the scope of the operator, and the iteration
- * puts back in that scope the value that the index had before it
- * (`saveLoopIndexes`, `library/utils.ts`). With
- * `Sum(Block(Assign(g, x ↦ x + i), i), Limits(i, 1, 3))`, the call `g(1)`
- * after the sum gave `1 + i`, not `4`. A closure made at `i = 1` gives `2`,
- * as it does in a `Loop`.
- *
- * The scopes are only marked, not saved: the iteration puts back the values
- * of the index itself.
- */
-function withIndexScopeInUse(
-  handler: (
-    ops: ReadonlyArray<Expression>,
-    options: EvaluateHandlerOptions
-  ) => Expression | undefined
-): (
-  ops: ReadonlyArray<Expression>,
-  options: EvaluateHandlerOptions
-) => Expression | undefined {
-  return (ops, options) => {
-    const nested = enterNestedBodyScopes(options.expression, {
-      includeRoot: true,
-      save: false,
-    });
-    try {
-      return handler(ops, options);
-    } finally {
-      exitNestedBodyScopes(options.engine, nested);
-    }
-  };
-}
-
-/** The asynchronous form of `withIndexScopeInUse()`. The scopes stay marked
- * until the promise of the handler settles. */
-function withIndexScopeInUseAsync(
-  handler: (
-    ops: ReadonlyArray<Expression>,
-    options: EvaluateHandlerOptions
-  ) => Promise<Expression | undefined>
-): (
-  ops: ReadonlyArray<Expression>,
-  options: EvaluateHandlerOptions
-) => Promise<Expression | undefined> {
-  return async (ops, options) => {
-    const nested = enterNestedBodyScopes(options.expression, {
-      includeRoot: true,
-      save: false,
-    });
-    try {
-      return await handler(ops, options);
-    } finally {
-      exitNestedBodyScopes(options.engine, nested);
-    }
-  };
 }
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
@@ -14314,7 +14245,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               scope
             ),
 
-      evaluate: withIndexScopeInUse((ops, options) => {
+      evaluate: (ops, options) => {
         const ce = options.engine;
         // One-operand form over an operand that can be absent as a whole
         // (`missing | list<…>`, a restricted list or a row read): as in
@@ -14465,9 +14396,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `∞ · 0` is NaN. The float of the exact product is used then.
         if (!numeric) return product;
         return numericOfFold(ce, options.expression, product, nonFinite);
-      }),
+      },
 
-      evaluateAsync: withIndexScopeInUseAsync(async (ops, options) => {
+      evaluateAsync: async (ops, options) => {
         const ce = options.engine;
         // As in the synchronous handler: a one-operand form over an operand
         // that can be absent as a whole. The operand is awaited, and it is
@@ -14682,7 +14613,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           _contextStack: options._contextStack,
           _precisionWindow: options._precisionWindow,
         });
-      }),
+      },
     },
 
     Sum: {
@@ -14729,7 +14660,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
       },
 
-      evaluate: withIndexScopeInUse((ops, options) => {
+      evaluate: (ops, options) => {
         let [first, ...rest] = ops;
         const {
           engine,
@@ -14982,9 +14913,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const sum = finishSum(engine, result, numeric);
         if (!numeric) return sum;
         return numericOfFold(engine, expression, sum, nonFinite);
-      }),
+      },
 
-      evaluateAsync: withIndexScopeInUseAsync(async (ops, options) => {
+      evaluateAsync: async (ops, options) => {
         let [first, ...rest] = ops;
         const {
           engine,
@@ -15338,7 +15269,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           _contextStack,
           _precisionWindow,
         });
-      }),
+      },
     },
 
     Interpret: {

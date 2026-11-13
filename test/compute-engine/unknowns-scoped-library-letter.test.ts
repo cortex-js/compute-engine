@@ -20,7 +20,7 @@ describe('unknowns of a library letter parsed in a created scope', () => {
     expect(scoped.freeVariables).toEqual(expected);
   });
 
-  test('a value given to the letter in the scope is not read outside it', () => {
+  test('a value given to the letter in the scope is read by the expression parsed in it', () => {
     const ce = new ComputeEngine();
     const scope = ce.createScope();
     const expr = ce.parse('x+N', { scope });
@@ -37,10 +37,10 @@ describe('unknowns of a library letter parsed in a created scope', () => {
       'x',
       3,
     ]);
-    // `evaluate()` reads the binding of `N` from the current scope (the
-    // library operator), not the scope's value.
-    expect(expr.evaluate().json).toEqual(['Add', 'N', 'x']);
-    expect(expr.unknowns).toEqual(['N', 'x']);
+    // The expression reads `N` from the scope it was parsed in, also when
+    // that scope is not current.
+    expect(expr.evaluate().json).toEqual(['Add', 'x', 3]);
+    expect(expr.unknowns).toEqual(['x']);
   });
 
   test('an applied library operator is still not a free variable', () => {

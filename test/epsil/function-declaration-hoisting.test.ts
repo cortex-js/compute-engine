@@ -10,15 +10,17 @@ import type { Expression } from '../../src/compute-engine/global-types';
 import type { Type } from '../../src/common/type/types';
 
 //
-// A `function` statement (`DefineFunction` with a `Function` literal) is
-// available in its whole statement list, before the first statement runs, on
-// every route. The Epsil runner boxes one statement at a time, so it installs
-// the `function` statements of the program before the statement loop
-// (`prepareFunctionDeclarations()`, `src/epsil/execute-epsil.ts`); the
-// whole-block interpreter installs them when the block is canonicalized, and
-// the compiler moves them to the front of the statement list. Which
-// statements are declarations is the shared rule
-// `isHoistedFunctionDefinition()` (`library/control-structures.ts`).
+// A `function` statement (`DefineFunction` with a `Function` literal) at the
+// top level of an Epsil program defines a function of the engine, available
+// in the whole program, before the first statement runs. The Epsil runner
+// boxes one statement at a time, so it installs the `function` statements of
+// the program before the statement loop (`prepareFunctionDeclarations()`,
+// `src/epsil/execute-epsil.ts`).
+//
+// The same program boxed as one block (`block()`) is not the top level of a
+// program: there a function statement declares a local, a variable that has
+// its value when the statement runs, so a call before it is the error
+// `read-before-declaration` (`blockErrors()`).
 //
 // The probe `let a = String(g(3))` stores the result of the call as a
 // string, which is a value and is never resolved again, so the test sees
@@ -52,6 +54,17 @@ function block(source: string): unknown {
   return plain(ce.box(parseEpsil(source)[0] as never).evaluate());
 }
 
+/** The codes of the static errors of `source` boxed as one block. In a
+ * block, a function statement declares a variable: a call before it is a
+ * read before the declaration, and a `let` or a second function statement of
+ * the same name is a second declaration. */
+function blockErrors(source: string): string[] {
+  const json = JSON.stringify(
+    new ComputeEngine().box(parseEpsil(source)[0] as never).json
+  );
+  return [...json.matchAll(/"ErrorCode","'([a-z-]+)'"/g)].map((m) => m[1]);
+}
+
 const SCOPE_ERROR =
   'writes outside a function require a declared `scope` effect';
 
@@ -60,7 +73,7 @@ describe('A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS', 
     // Before: the Epsil runner answered "g(3)".
     const src = 'let a = String(g(3))\nfunction g(k) { k^2 }\na';
     expect(epsil(src)).toEqual({ value: '9', diagnostics: [] });
-    expect(block(src)).toEqual('9');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a multi-clause definition, called before both clauses', () => {
@@ -68,7 +81,7 @@ describe('A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS', 
     const src =
       'let a = String(foo(0))\nlet b = String(foo(4))\nfoo(0) = 1\nfoo(n: integer) = n + 1\n[a, b]';
     expect(epsil(src)).toEqual({ value: ['1', '5'], diagnostics: [] });
-    expect(block(src)).toEqual(['1', '5']);
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a recursive multi-clause definition', () => {
@@ -76,7 +89,7 @@ describe('A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS', 
     const src =
       'let a = String(fact(5))\nfact(0) = 1\nfact(n: integer) = n * fact(n - 1)\na';
     expect(epsil(src)).toEqual({ value: '120', diagnostics: [] });
-    expect(block(src)).toEqual('120');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a function that a prepared function calls is prepared too', () => {
@@ -85,14 +98,14 @@ describe('A CALL BEFORE A FUNCTION STATEMENT RESOLVES WHEN ITS STATEMENT RUNS', 
     const src =
       'let a = String(f())\nfunction g() { 7 }\nfunction f() { g() }\na';
     expect(epsil(src)).toEqual({ value: '7', diagnostics: [] });
-    expect(block(src)).toEqual('7');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a hold function', () => {
     // Before: the Epsil runner answered "f(q + 1)".
     const src = 'let a = String(f(q + 1))\nhold f(e) = Head(e)\na';
     expect(epsil(src)).toEqual({ value: '"Add"', diagnostics: [] });
-    expect(block(src)).toEqual('"Add"');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 });
 
@@ -110,7 +123,7 @@ describe('THE DECLARED SIGNATURE IS KEPT', () => {
   test('a call in the declared signature', () => {
     const src = 'let g: (integer) -> integer\nfunction g(k) { 2 * k }\ng(2)';
     expect(epsil(src)).toEqual({ value: 4, diagnostics: [] });
-    expect(block(src)).toEqual(4);
+    expect(blockErrors(src)).toContain('variable-redeclaration');
   });
 
   test('a call before both statements', () => {
@@ -118,7 +131,7 @@ describe('THE DECLARED SIGNATURE IS KEPT', () => {
     const src =
       'let a = String(g(2))\nlet g: (integer) -> integer\nfunction g(k) { 2 * k }\na';
     expect(epsil(src)).toEqual({ value: '4', diagnostics: [] });
-    expect(block(src)).toEqual('4');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('the declared signature does not apply before its `let` runs', () => {
@@ -127,7 +140,7 @@ describe('THE DECLARED SIGNATURE IS KEPT', () => {
     const src =
       'let a = String(g(1.5))\nlet g: (integer) -> integer\nfunction g(k) { 2 * k }\na';
     expect(epsil(src)).toEqual({ value: '3', diagnostics: [] });
-    expect(block(src)).toEqual('3');
+    expect(blockErrors(src)).toContain('variable-redeclaration');
   });
 });
 
@@ -138,33 +151,32 @@ describe('THE BINDINGS OF EARLIER STATEMENTS ARE KEPT', () => {
     expect(block(src)).toEqual(10);
   });
 
-  test('a body reads a variable that an earlier assignment makes', () => {
+  test('an earlier assignment with no `let` does not declare the variable', () => {
+    // A variable of the top level of a program is introduced by `let`.
     const src = 'c = 5\nfunction g(k) { c * k }\ng(2)';
-    expect(epsil(src)).toEqual({ value: 10, diagnostics: [] });
-    expect(block(src)).toEqual(10);
+    const { value, diagnostics } = epsil(src);
+    expect(value).toEqual(['Multiply', 2, 'c']);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('assignment-to-undeclared-variable');
+    expect(JSON.stringify(block(src))).toContain(
+      "'assignment-to-undeclared-variable'"
+    );
   });
 
   test('a call between the `let` and the function statement', () => {
-    // Before: the Epsil runner answered "g(2)" for both programs.
-    for (const src of [
-      'let c = 5\nlet a = String(g(2))\nfunction g(k) { c * k }\na',
-      'c = 5\nlet a = String(g(2))\nfunction g(k) { c * k }\na',
-    ]) {
-      expect(epsil(src)).toEqual({ value: '10', diagnostics: [] });
-      expect(block(src)).toEqual('10');
-    }
+    // Before: the Epsil runner answered "g(2)".
+    const src = 'let c = 5\nlet a = String(g(2))\nfunction g(k) { c * k }\na';
+    expect(epsil(src)).toEqual({ value: '10', diagnostics: [] });
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a write to an earlier `let` stays a `scope` write', () => {
-    for (const src of [
-      'let t = 0\nfunction g(k) { t = k + 1; t }\n[g(1), t]',
-      't = 3\nfunction g(k) { t = k + 1; t }\n[g(1), t]',
-    ]) {
-      const { diagnostics } = epsil(src);
-      expect(diagnostics).toHaveLength(1);
-      expect(diagnostics[0]).toContain('runtime-error');
-      expect(diagnostics[0]).toContain(SCOPE_ERROR);
-    }
+    const { diagnostics } = epsil(
+      'let t = 0\nfunction g(k) { t = k + 1; t }\n[g(1), t]'
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('runtime-error');
+    expect(diagnostics[0]).toContain(SCOPE_ERROR);
   });
 
   test('a write to an earlier `let` with the `scope` specifier', () => {
@@ -179,7 +191,6 @@ describe('THE BINDINGS OF EARLIER STATEMENTS ARE KEPT', () => {
     for (const src of [
       'let a = String(g(1))\nlet t = 0\nfunction g(k) { t = k + 1; t }\n[a, t]',
       'let t = 0\nlet a = String(g(1))\nfunction g(k) { t = k + 1; t }\n[a, t]',
-      't = 3\nlet a = String(g(1))\nfunction g(k) { t = k + 1; t }\n[a, t]',
     ]) {
       const { value, diagnostics } = epsil(src);
       expect((value as unknown[])[0]).toBe('g(1)');
@@ -191,42 +202,53 @@ describe('THE BINDINGS OF EARLIER STATEMENTS ARE KEPT', () => {
     const src =
       'let t = 0\nlet a = String(g(1))\nfunction g(k) scope { t = k + 1; t }\n[a, t]';
     expect(epsil(src)).toEqual({ value: ['2', 2], diagnostics: [] });
-    expect(block(src)).toEqual(['2', 2]);
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
-  test('a write in a function before the `let` of the name makes a local', () => {
-    // The preparation of `g` declares `t`, which `let t = 0` declares before
-    // `g`. The function `f` comes before that `let`: its assignment to `t`
-    // makes a local of `f`, as when the program runs in order. Before the
-    // fix, `f` was refused because it does not declare the `scope` effect,
-    // and the value was [f(), 0].
+  // In a program, a function can assign a variable only if the `let` of the
+  // variable comes before the function: the statements are read one at a
+  // time, and an assignment never declares a name. A `Block` evaluated as a
+  // whole declares its locals for the whole block, so there `f` writes the
+  // `t` of the block.
+  test('a write in a function before the `let` of the name is an error', () => {
     const src =
       'function f() { t = 1; t }\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t]';
-    expect(epsil(src)).toEqual({ value: [1, 0], diagnostics: [] });
-    expect(block(src)).toEqual([1, 0]);
-    // A read of `t` before its `let` gives the symbol.
-    expect(
-      epsil(
-        'function f() { t = 1; t }\nlet b = String(t)\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t, b]'
-      )
-    ).toEqual({ value: [1, 0, 't'], diagnostics: [] });
+    expect(epsil(src).diagnostics[0]).toContain(
+      'assignment-to-undeclared-variable'
+    );
+    // In the block, the write to the `t` of the block is the `scope` effect,
+    // which `f` does not declare.
+    expect(blockErrors(src)).toContain('read-before-declaration');
+    // A read of `t` before its `let` is an error too.
+    const read =
+      'function f() { t = 1; t }\nlet b = String(t)\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t, b]';
+    const { diagnostics } = epsil(read);
+    expect(diagnostics[0]).toContain('assignment-to-undeclared-variable');
+    expect(diagnostics[1]).toContain('read-before-declaration');
+    expect(JSON.stringify(block(read))).toContain('read-before-declaration');
   });
 
-  test('a `scope` write in a function before the `let` of the name', () => {
-    // With the `scope` effect, an assignment to a name that no statement
-    // before the function declares still makes a local of the function.
-    // Before the fix, the Epsil runner answered [1, 1].
+  test('a `scope` write in a function before the `let` of the name is an error', () => {
     const src =
       'function f() scope { t = 1; t }\nlet a = String(g())\nlet t = 0\nfunction g() { 5 }\n[f(), t]';
-    expect(epsil(src)).toEqual({ value: [1, 0], diagnostics: [] });
-    expect(block(src)).toEqual([1, 0]);
+    expect(epsil(src).diagnostics).toHaveLength(1);
+    expect(epsil(src).diagnostics[0]).toContain(
+      'assignment-to-undeclared-variable'
+    );
+    expect(blockErrors(src)).toContain('read-before-declaration');
+    const late = 'function g(k) scope { t = k + 1; t }\nlet t = 0\n[g(1), t]';
+    expect(epsil(late).diagnostics).toHaveLength(1);
+    expect(epsil(late).diagnostics[0]).toContain(
+      'assignment-to-undeclared-variable'
+    );
+    expect(block(late)).toEqual([2, 2]);
   });
 
   test('a `scope` write in a function after the `let` of the name', () => {
     const src =
       'let t = 0\nfunction f() scope { t = 1; t }\nlet a = String(g())\nfunction g() { 5 }\n[f(), t, a]';
     expect(epsil(src)).toEqual({ value: [1, 1, '5'], diagnostics: [] });
-    expect(block(src)).toEqual([1, 1, '5']);
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 });
 
@@ -237,14 +259,14 @@ describe('THE NAMES THAT A FUNCTION BINDS FOR ITS BODY', () => {
     const src =
       'let k = {I -> 1}\nlet a = String(g(3))\nfunction g(k) { k^2 }\na';
     expect(epsil(src)).toEqual({ value: '9', diagnostics: [] });
-    expect(block(src)).toEqual('9');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a local `let` with the name of an earlier variable', () => {
     const src =
       'let k = {I -> 1}\nlet a = String(g(3))\nfunction g(x) { let k = 2 * x; k^2 }\na';
     expect(epsil(src)).toEqual({ value: '36', diagnostics: [] });
-    expect(block(src)).toEqual('36');
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 });
 
@@ -284,10 +306,10 @@ describe('A LIBRARY CONSTANT AND A VARIABLE OF THE SAME NAME', () => {
 
 describe('A HOST BINDING AND A VARIABLE OF THE SAME NAME', () => {
   // The host binds `c` in a scope around the program scope. The program
-  // declares its own `c` later. A statement before that `let` reads the
-  // host binding, as when the program runs in order; the body of the
-  // prepared function reads the variable of the program once its `let` has
-  // run.
+  // declares its own `c` later. The top level of a program is a block, so a
+  // statement before that `let` is a use of the variable before its
+  // declaration; the body of a prepared function reads the variable of the
+  // program once its `let` has run.
   function withHostBinding(source: string): unknown {
     const ce = new ComputeEngine();
     ce.declare('c', 'integer');
@@ -296,22 +318,21 @@ describe('A HOST BINDING AND A VARIABLE OF THE SAME NAME', () => {
     return plain(executeEpsil(ce, source).value);
   }
 
-  test('a statement before the `let` reads the host binding', () => {
-    // In order (no call before the function statement), `a` is "10".
-    expect(
-      withHostBinding(
-        'let a = String(c)\nlet c = 2\nfunction g() { c^2 }\n[a, g()]'
-      )
-    ).toEqual(['10', 4]);
-    // With a call before the function statement, the function is prepared,
-    // and the statement before the `let` still reads the host binding.
-    // Before: `a` was "c", the valueless variable that the preparation
-    // declared.
-    expect(
-      withHostBinding(
-        'let a = String(c)\nlet c = 2\nlet b = String(g())\nfunction g() { c^2 }\n[a, b, g()]'
-      )
-    ).toEqual(['10', '4', 4]);
+  test('a statement before the `let` is a use before the declaration', () => {
+    // With a call before the function statement too, where the function is
+    // prepared.
+    for (const source of [
+      'let a = String(c)\nlet c = 2\nfunction g() { c^2 }\n[a, g()]',
+      'let a = String(c)\nlet c = 2\nlet b = String(g())\nfunction g() { c^2 }\n[a, b, g()]',
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('c', 'integer');
+      ce.assign('c', 10);
+      ce.pushScope();
+      expect(
+        executeEpsil(ce, source).diagnostics.map((d) => d.message[3])
+      ).toEqual(['read-before-declaration']);
+    }
   });
 
   test('a call before the `let` reads the host binding in the body', () => {
@@ -465,11 +486,11 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     expect(diagnostics[0]).toContain('invalid-clause-definition');
   });
 
-  test('a function statement for a name that an earlier assignment writes', () => {
-    // The definition adds a clause to the function that the assignment
+  test('a function statement for a name that an earlier `let` binds', () => {
+    // The definition adds a clause to the function that the `let`
     // installs, so it runs in order. The same answer as before.
     const { value, diagnostics } = epsil(
-      'let a = String(g(2))\ng = (k: integer) => 10 * k\nfunction g(k: string) { k }\n[a, String(g(2)), g("s")]'
+      'let a = String(g(2))\nlet g = (k: integer) => 10 * k\nfunction g(k: string) { k }\n[a, String(g(2)), g("s")]'
     );
     expect(diagnostics).toEqual([]);
     expect(value).toEqual(['g(2)', '20', 's']);
@@ -519,11 +540,11 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     const probed =
       'let v = {I -> 1}\nlet a = String(g(3))\nfunction g(k) { v["I"] + k }\na';
     expect(epsil(probed)).toEqual({ value: 'g(3)', diagnostics: [] });
-    expect(block(probed)).toEqual('4');
+    expect(blockErrors(probed)).toContain('read-before-declaration');
     const src =
       'let v = {I -> 1}\nlet a = g(3)\nfunction g(k) { v["I"] + k }\na';
     expect(epsil(src)).toEqual({ value: 4, diagnostics: [] });
-    expect(block(src)).toEqual(4);
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a body that uses a variable that two earlier statements write', () => {
@@ -536,13 +557,13 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     expect(epsil(src)).toEqual({ value: ['g()', 4], diagnostics: [] });
   });
 
-  test('an earlier assignment of a literal gives its type to the body', () => {
-    // The preparation declares `c` with the type of the assigned literal,
-    // as the assignment does when it runs, so the body `c^2` is refused as
+  test('an earlier `let` of a literal gives its type to the body', () => {
+    // The preparation declares `c` with the type of the literal, as the
+    // `let` does when it runs, so the body `c^2` is refused as
     // it is in order. Before: `c` was declared `unknown`, the body narrowed
     // it to a number, and the program reported errors at other places.
     const { value, diagnostics } = epsil(
-      'c = "s"\nlet a = String(g())\nfunction g() { c^2 }\n[a, g()]'
+      'let c = "s"\nlet a = String(g())\nfunction g() { c^2 }\n[a, g()]'
     );
     expect((value as unknown[])[0]).toBe('g()');
     expect(diagnostics).toHaveLength(2);
@@ -573,10 +594,10 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     const probed =
       'let h = (x) => 3 * x\nlet a = String(g(2))\nfunction g(k) { h(k) }\na';
     expect(epsil(probed)).toEqual({ value: 'g(2)', diagnostics: [] });
-    expect(block(probed)).toEqual('6');
+    expect(blockErrors(probed)).toContain('read-before-declaration');
     const src = 'let h = (x) => 3 * x\nlet a = g(2)\nfunction g(k) { h(k) }\na';
     expect(epsil(src)).toEqual({ value: 6, diagnostics: [] });
-    expect(block(src)).toEqual(6);
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('a generic function', () => {
@@ -585,10 +606,10 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     // statement runs, on both routes.
     const probed = 'let a = String(f(3))\nfunction f<T>(x: T) -> T { x }\na';
     expect(epsil(probed)).toEqual({ value: 'f(3)', diagnostics: [] });
-    expect(block(probed)).toEqual('f(3)');
+    expect(blockErrors(probed)).toContain('read-before-declaration');
     const src = 'let a = f(3)\nfunction f<T>(x: T) -> T { x }\na';
     expect(epsil(src)).toEqual({ value: 3, diagnostics: [] });
-    expect(block(src)).toEqual(3);
+    expect(blockErrors(src)).toContain('read-before-declaration');
   });
 
   test('an ordinary clause after a generic function of the same name', () => {
@@ -606,16 +627,16 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     expect(diagnostics[0]).toContain('generic-clause-unsupported');
     // The whole-block route refuses the same statement: a block stops at the
     // error of its third statement.
-    expect(JSON.stringify(block(src))).toContain('generic-clause-unsupported');
+    expect(blockErrors(src)).toContain('variable-redeclaration');
   });
 
-  test('an assignment of a function literal takes effect when it runs', () => {
-    const src = 'let a = String(g(3))\ng = (k) => k^2\na';
-    // The statements of the top level of a program run one at a time: `g`
-    // is a free symbol when the first statement runs.
-    expect(epsil(src)).toEqual({ value: 'g(3)', diagnostics: [] });
-    // In one block, the assignment declares the local `g`, and the call
-    // before it is a use before the declaration.
+  test('a `let` of a function literal takes effect when it runs', () => {
+    const src = 'let a = String(g(3))\nlet g = (k) => k^2\na';
+    // The top level of a program is a block: the `let` declares the
+    // variable `g`, and the call before it is a use before the declaration.
+    const { diagnostics } = epsil(src);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain('read-before-declaration');
     expect(JSON.stringify(block(src))).toContain("'read-before-declaration'");
   });
 });
@@ -761,15 +782,14 @@ describe('A PROGRAM RUN AGAIN ON THE SAME ENGINE WITH ANOTHER SIGNATURE', () => 
 
 describe('THE COMPILER', () => {
   test('a call before a function statement', () => {
+    // In a block the call reads the local before its declaration: the block
+    // is invalid, and the compilation refuses it.
     const ce = new ComputeEngine();
     const expr = ce.box(
       parseEpsil('let a = g(3)\nfunction g(k) { k^2 }\na')[0] as never
     );
-    const result = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-    } as never)!;
-    expect(result.success).toBe(true);
-    expect(result.run!({} as never)).toBe(9);
+    expect(() =>
+      compile(expr, { to: 'javascript', fallback: false } as never)
+    ).toThrow();
   });
 });

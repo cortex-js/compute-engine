@@ -153,12 +153,11 @@ describe('a capture under a scoped operator', () => {
 });
 
 describe('a capture by a local of a block', () => {
-  // A local that an `Assign` or a `Declare` statement makes is bound by the
-  // block, although the scope of the block does not hold its binding when
+  // A local that a `Declare` statement makes is bound by the block, although the scope of the block does not hold its binding when
   // the block is not running. Each test uses a new engine: once `t` is
   // declared at the top level, `t ≔ 1` in a block canonicalized after it
   // writes that `t` and makes no local.
-  test('a local made by an assignment is renamed', () => {
+  test('an assignment to an undeclared name makes no local: it is an error', () => {
     const L = [
       'Function',
       [
@@ -168,15 +167,11 @@ describe('a capture by a local of a block', () => {
       ],
       'y',
     ];
-    expect(new ComputeEngine().box([L, 't'] as any).evaluate().json).toEqual([
-      'Function',
-      ['Block', ['Assign', 't_1', 1], ['Add', 't', 't_1', 'x']],
-      'x',
-    ]);
-    // 1 + t + 5, not 1 + 1 + 5.
-    expect(
-      new ComputeEngine().box([[L, 't'], 5] as any).evaluate().json
-    ).toEqual(['Add', 't', 6]);
+    const e = new ComputeEngine().box([L, 't'] as any);
+    expect(e.isValid).toBe(false);
+    expect(JSON.stringify(e.evaluate().json)).toContain(
+      'assignment-to-undeclared-variable'
+    );
   });
 
   test('a local made by a declaration is renamed', () => {
@@ -346,8 +341,7 @@ describe('the interpreter and the compiled code agree', () => {
 
 describe('a renamed binder with nested scopes', () => {
   // Each test uses a new engine: a free `t` that an earlier test boxed is
-  // declared in the engine, and an assignment to a declared name writes it
-  // instead of making a local of the block.
+  // declared in the engine.
   const run = (expr: unknown, engine = new ComputeEngine()) =>
     engine.box(expr as any).evaluate();
 
@@ -359,7 +353,7 @@ describe('a renamed binder with nested scopes', () => {
       'Function',
       [
         'Block',
-        ['Assign', 't', 1],
+        ['Declare', 't', "'unknown'", 1],
         ['Block', ['Assign', 't', 2], ['Add', 't', 'y']],
         ['Add', 't', 'y', 'x'],
       ],
@@ -367,17 +361,16 @@ describe('a renamed binder with nested scopes', () => {
     ],
     'y',
   ];
-  // The same with no assignment in the body block: the assignment of the
-  // inner block is a first assignment at the own level of that block, so
-  // it makes a local of the inner block. The `t` of the body is a free
-  // symbol, the same symbol as the argument `t`.
+  // The same with no declaration in the body block: the inner block declares
+  // its own local `t`. The `t` of the body is a free symbol, the same symbol
+  // as the argument `t`.
   const N2 = [
     'Function',
     [
       'Function',
       [
         'Block',
-        ['Block', ['Assign', 't', 2], ['Add', 't', 'y']],
+        ['Block', ['Declare', 't', "'unknown'", 2], ['Add', 't', 'y']],
         ['Add', 't', 'y', 'x'],
       ],
       'x',
@@ -408,7 +401,7 @@ describe('a renamed binder with nested scopes', () => {
       'Function',
       [
         'Block',
-        ['Block', ['Assign', 't_1', 2], ['Add', 't', 't_1']],
+        ['Block', ['Declare', 't_1', "'unknown'", 2], ['Add', 't', 't_1']],
         ['Add', 't', 't', 'x'],
       ],
       'x',
@@ -738,12 +731,12 @@ describe('a nested literal below a renamed binder', () => {
     ).toEqual(['Add', ['Multiply', 3, 'j'], 6]);
   });
 
-  test('a closure that captured the locals of a branch declines', () => {
+  test('a closure that captured the locals of a branch keeps them', () => {
     // `mk(1)` is a closure made in a branch of `If` in the body of `mk`: the
     // parent of its body scope holds the local `k` it captured. Applying
-    // h ↦ (y ↦ (x ↦ [y^x, h])) to it and then to x renames x, and the body
-    // scope of the closure cannot be copied onto the renamed literal without
-    // losing the captured `k`: the application stays unevaluated.
+    // h ↦ (y ↦ (x ↦ [y^x, h])) to it and then to x renames x. The closure
+    // is a value that is not below the renamed binder: it is kept as it is,
+    // with its captured `k` (`docs/plans/2026-11-11-bound-once-spec.md`, section 11).
     const engine = new ComputeEngine();
     const mk = [
       'Function',
@@ -772,7 +765,15 @@ describe('a nested literal below a renamed binder', () => {
           .box(['Apply', ['Apply', H, closure], 'x'] as any)
           .evaluate())
     ).not.toThrow();
-    expect((result as { operator: string }).operator).toBe('Apply');
+    const value = engine
+      .function('Apply', [result as Expression, engine.number(2)])
+      .evaluate();
+    expect(value.json).toEqual([
+      'List',
+      ['Power', 'x', 2],
+      ['Function', ['Block', 'k']],
+    ]);
+    expect(engine.function('Apply', [value.ops![1]]).evaluate().json).toBe(10);
   });
 
   test('in a curried application', () => {

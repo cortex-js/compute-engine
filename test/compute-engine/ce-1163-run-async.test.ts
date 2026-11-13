@@ -356,7 +356,7 @@ describe('the positions where a loop can wait', () => {
     ],
     [
       'a function of a block that is also called as an operand',
-      'do { function g(m: integer) { let s = 0; parallel for k in 1..m { s += k }; s }; let a = g(4); a + max(g(2), 1) }',
+      'do { function g(m: integer) -> integer { let s = 0; parallel for k in 1..m { s += k }; s }; let a = g(4); a + max(g(2), 1) }',
     ],
     [
       'the body of another `parallel for`',

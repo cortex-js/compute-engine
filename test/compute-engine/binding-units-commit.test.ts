@@ -494,7 +494,12 @@ describe('RULES 3 AND 4: a stored literal and a name declared unknown', () => {
     ce.declare('m', 'unknown');
     const expr = ce.box([
       'Tuple',
-      ['Block', ['Assign', 'r', ['g', ['h', 'm']]], ['Assign', 'm', 1.5], 'r'],
+      [
+        'Block',
+        ['Declare', 'r', "'unknown'", ['g', ['h', 'm']]],
+        ['Assign', 'm', 1.5],
+        'r',
+      ],
     ]);
     const value = expr.evaluate().op1;
     expect(value.operator).toBe('Error');

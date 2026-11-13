@@ -290,7 +290,11 @@ describe('CE-580 a value whose type is not certain is not checked', () => {
     );
     expect(
       glsl.compileFunction(
-        ce.box(['Block', ['Assign', 'q', ['Multiply', 2, 'v']], 'q']),
+        ce.box([
+          'Block',
+          ['Declare', 'q', "'unknown'", ['Multiply', 2, 'v']],
+          'q',
+        ]),
         'f',
         'vec2',
         [['v', 'vec2']]
@@ -505,7 +509,11 @@ describe('CE-580 the width of a Block local', () => {
 
   it('Abs of a point is its length, a scalar', () => {
     // `Abs` of a point compiles to `Norm`, so the local is not a vector.
-    const json = ['Block', ['Assign', 'q', ['Abs', ['Tuple', 'x', 1]]], 'q'];
+    const json = [
+      'Block',
+      ['Declare', 'q', "'unknown'", ['Abs', ['Tuple', 'x', 1]]],
+      'q',
+    ];
     expect(code(glsl, json)).toBe(
       'float q;\nq = length(vec2(x, 1.0));\nreturn q;'
     );
@@ -514,7 +522,7 @@ describe('CE-580 the width of a Block local', () => {
   it('Abs of a vector input stays element-wise', () => {
     expect(
       glsl.compileFunction(
-        ce.box(['Block', ['Assign', 'q', ['Abs', 'v']], 'q']),
+        ce.box(['Block', ['Declare', 'q', "'unknown'", ['Abs', 'v']], 'q']),
         'f',
         'vec2',
         [['v', 'vec2']]
@@ -526,7 +534,7 @@ describe('CE-580 the width of a Block local', () => {
     const json = [
       'Block',
       ['Declare', 'p', "'any'", ['List', 1, 2]],
-      ['Assign', 'q', ['Sin', 'p']],
+      ['Declare', 'q', "'unknown'", ['Sin', 'p']],
       'q',
     ];
     // The fragment gives a local a scalar, complex or point type.
@@ -542,7 +550,7 @@ describe('CE-580 the width of a Block local', () => {
     const json = [
       'Block',
       ['Declare', 'p', "'real'", ['List', 'x', 2]],
-      ['Assign', 'q', ['Add', 'p', 1]],
+      ['Declare', 'q', "'unknown'", ['Add', 'p', 1]],
       'q',
     ];
     expect(() => code(glsl, json)).toThrow(
@@ -633,7 +641,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
   const withVector = (value: unknown) => [
     'Block',
     ['Declare', 'p', "'real'", ['List', 'x', 2]],
-    ['Assign', 'q', ['Add', 'p', 1]],
+    ['Declare', 'q', "'unknown'", ['Add', 'p', 1]],
     value,
   ];
   // The fragment refuses the local `p`, which is declared `real` and holds a

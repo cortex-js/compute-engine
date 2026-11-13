@@ -280,9 +280,6 @@ export class LatexSyntax {
    * not modified. If the same `LatexSyntax` instance was given to several
    * `ComputeEngine` instances, the entries apply to all of them.
    *
-   * The entries are not recorded by engine checkpoints: `ce.restore()` does
-   * not remove them, because the instance can be shared by several engines.
-   *
    * ```ts
    * // `operand` is exported by `@cortex-js/compute-engine/math-json`
    * const ce = new ComputeEngine();

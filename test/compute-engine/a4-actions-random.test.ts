@@ -4,7 +4,12 @@ describe('A4.1 — Block is sequential (regression)', () => {
   test('Assign sees prior Assign\'s value within the same Block', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .expr(['Block', ['Assign', 'a', 1], ['Assign', 'b', ['Add', 'a', 1]], 'b'])
+      .expr([
+        'Block',
+        ['Declare', 'a', "'unknown'", 1],
+        ['Declare', 'b', "'unknown'", ['Add', 'a', 1]],
+        'b',
+      ])
       .evaluate();
     expect(r.re).toEqual(2);
   });
@@ -14,7 +19,7 @@ describe('A4.1 — Block is sequential (regression)', () => {
     const r = ce
       .expr([
         'Block',
-        ['Assign', 'a', 1],
+        ['Declare', 'a', "'unknown'", 1],
         ['Assign', 'a', ['Add', 'a', 1]],
         ['Assign', 'a', ['Add', 'a', 1]],
         'a',
@@ -31,8 +36,8 @@ describe('A4.1 — Block is sequential (regression)', () => {
     ce.assign('b', 20);
     ce.expr([
       'Block',
-      ['Assign', '_t_a', 'b'],
-      ['Assign', '_t_b', 'a'],
+      ['Declare', '_t_a', "'unknown'", 'b'],
+      ['Declare', '_t_b', "'unknown'", 'a'],
       ['Assign', 'a', '_t_a'],
       ['Assign', 'b', '_t_b'],
     ]).evaluate();
@@ -124,8 +129,8 @@ describe('A4.2 — Random draws from a domain (no seed argument)', () => {
         11,
         [
           'Block',
-          ['Assign', 'a', ['Random', ['Range', 1, 100]]],
-          ['Assign', 'b', ['Random', ['Range', 1, 100]]],
+          ['Declare', 'a', "'unknown'", ['Random', ['Range', 1, 100]]],
+          ['Declare', 'b', "'unknown'", ['Random', ['Range', 1, 100]]],
           ['List', 'a', 'b'],
         ],
       ])

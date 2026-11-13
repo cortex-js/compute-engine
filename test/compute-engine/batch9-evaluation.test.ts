@@ -349,7 +349,7 @@ describe('an If with no else branch round-trips through LaTeX', () => {
     ]);
     const block = engine.box([
       'Block',
-      ['Assign', 'a', 0],
+      ['Declare', 'a', "'unknown'", 0],
       ['If', ['Equal', 'k', 2], ['Assign', 'a', 5]],
       'a',
     ]);

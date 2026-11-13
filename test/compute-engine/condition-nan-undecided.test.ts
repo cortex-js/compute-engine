@@ -233,7 +233,7 @@ describe('a NaN operand of a branch condition', () => {
       new ComputeEngine()
         .box([
           'Block',
-          ['Assign', 'k', 0],
+          ['Declare', 'k', "'unknown'", 0],
           ['If', cond, ['Assign', 'k', 1], ['Assign', 'k', 2]],
           'k',
         ])

@@ -62,6 +62,8 @@
  *   Monte Carlo estimate (`NIntegrate`) is pure but reads its substreams
  *   from the seed frame in force, so a shared estimate under two seeds has
  *   two values.
+ * - the value shield in force (`hiddenValuesKey()`), by identity: a shield
+ *   hides values with no event.
  * - whether a `verify()` runs (`isVerifying`): the comparisons answer with
  *   three values while it runs.
  * - the registry of host capabilities of the evaluation
@@ -147,6 +149,7 @@ import {
 } from '../../common/debug-hook.js';
 import { noteUncachedHostCall } from './host-handler-changes.js';
 import { cacheOff } from '../../common/cache-switches.js';
+import { hiddenValuesKey } from './hidden-values.js';
 
 /** The parts of the engine that the memo reads. */
 type MemoEngine = {
@@ -171,6 +174,7 @@ type Entry<T> = {
   factsHidden: boolean;
   angularUnit: string;
   randomFrame: object | undefined;
+  hidden: object | undefined;
   verifying: boolean;
   effects: object;
 };
@@ -595,6 +599,7 @@ export function rememberedEvaluation<T>(
     entry.factsHidden !== engine._factsHidden() ||
     entry.angularUnit !== engine.angularUnit ||
     entry.randomFrame !== engine._randomFrame ||
+    entry.hidden !== hiddenValuesKey() ||
     entry.verifying !== engine.isVerifying ||
     entry.effects !== (engine._evaluationEffects ?? engine.effects)
   )
@@ -638,6 +643,7 @@ export function rememberEvaluation<T>(
     factsHidden: engine._factsHidden(),
     angularUnit: engine.angularUnit,
     randomFrame: engine._randomFrame,
+    hidden: hiddenValuesKey(),
     verifying: engine.isVerifying,
     effects: engine._evaluationEffects ?? engine.effects,
   });

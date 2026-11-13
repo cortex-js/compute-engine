@@ -64,7 +64,9 @@ describe('an assignment whose value is a block', () => {
   // `t ≔ Block(u ≔ s; 2u)`: the value of the inner block is `2u`.
   const json: MathJsonExpression = [
     'Block',
-    ['Assign', 's', 'x'],
+    ['Declare', 's', "'unknown'", 'x'],
+    ['Declare', 'u', "'unknown'", 0],
+    ['Declare', 't', "'unknown'", 0],
     ['Assign', 't', ['Block', ['Assign', 'u', 's'], ['Multiply', 2, 'u']]],
     ['Add', 't', 1],
   ];
@@ -107,7 +109,9 @@ describe('an assignment whose value is another assignment', () => {
   // statements.
   const json: MathJsonExpression = [
     'Block',
-    ['Assign', 's', 'x'],
+    ['Declare', 's', "'unknown'", 'x'],
+    ['Declare', 'u', "'unknown'", 0],
+    ['Declare', 't', "'unknown'", 0],
     ['Assign', 't', ['Assign', 'u', 's']],
     ['Add', 't', 1],
   ];
@@ -133,13 +137,21 @@ describe('an assignment whose value is another assignment', () => {
 describe('a block whose last statement is a declaration', () => {
   // The value of such a block is `Nothing`, which has no compiled form.
   const shapes: MathJsonExpression[] = [
-    ['Block', ['Assign', 's', 'x'], ['Declare', 't', "'real'", ['Add', 's', 1]]],
     [
       'Block',
-      ['Assign', 's', 'x'],
+      ['Declare', 's', "'unknown'", 'x'],
+      ['Declare', 't', "'real'", ['Add', 's', 1]],
+    ],
+    [
+      'Block',
+      ['Declare', 's', "'unknown'", 'x'],
       ['Declare', 't', "'unknown'", ['Add', 's', 1]],
     ],
-    ['Block', ['Assign', 's', 'x'], ['Block', ['Declare', 't', "'real'", 1]]],
+    [
+      'Block',
+      ['Declare', 's', "'unknown'", 'x'],
+      ['Block', ['Declare', 't', "'real'", 1]],
+    ],
   ];
 
   test.each(shapes.map((s) => [s]))(
@@ -163,8 +175,8 @@ describe('a block whose last statement is a declaration', () => {
     // `Declare(t)` and `Declare(t, 'real')` have no value: the static error
     // `declaration-without-value`.
     for (const json of [
-      ['Block', ['Assign', 's', 'x'], ['Declare', 't', "'real'"]],
-      ['Block', ['Assign', 's', 'x'], ['Declare', 't']],
+      ['Block', ['Declare', 's', "'unknown'", 'x'], ['Declare', 't', "'real'"]],
+      ['Block', ['Declare', 's', "'unknown'", 'x'], ['Declare', 't']],
     ] as MathJsonExpression[]) {
       const expr = engine().box(json);
       expect(expr.isValid).toBe(false);
@@ -180,7 +192,8 @@ describe('a nested block whose last statement is an assignment', () => {
   // which has no compiled form.
   const json: MathJsonExpression = [
     'Block',
-    ['Assign', 's', 'x'],
+    ['Declare', 's', "'unknown'", 'x'],
+    ['Declare', 't', "'unknown'", 0],
     ['Block', ['Assign', 't', ['Add', 's', 1]]],
   ];
 
@@ -195,7 +208,7 @@ describe('a nested block whose last statement is an assignment', () => {
         compile(engine().box(json), { to, fallback: false })
       ).toThrow(
         to === 'glsl'
-          ? /The block ends with an assignment, so it has no value/
+          ? /`Assign\(t, s \+ 1\)` is a statement, and it stands where a value is expected/
           : /an assignment or a declaration is a statement, and its value/
       );
     }
@@ -206,14 +219,16 @@ describe('a nested block whose last statement is an assignment', () => {
       new GLSLTarget().compileFunction(engine().box(json), 'f', 'float', [
         ['x', 'float'],
       ])
-    ).toThrow(/The block ends with an assignment, so it has no value/);
+    ).toThrow(
+      /`Assign\(t, s \+ 1\)` is a statement, and it stands where a value is expected/
+    );
   });
 
   test('a nested block that ends with the name compiles', () => {
     const named: MathJsonExpression = [
       'Block',
-      ['Assign', 's', 'x'],
-      ['Block', ['Assign', 't', ['Add', 's', 1]], 't'],
+      ['Declare', 's', "'unknown'", 'x'],
+      ['Block', ['Declare', 't', "'unknown'", ['Add', 's', 1]], 't'],
     ];
     expect(interpreterAt3(named)).toBe('4');
     expect(compile(engine().box(named)).run!({ x: 3 })).toBe(4);
@@ -227,8 +242,8 @@ describe('a nested block whose last statement is an assignment', () => {
   itPython('the Python code gives the value of the interpreter', () => {
     const named: MathJsonExpression = [
       'Block',
-      ['Assign', 's', 'x'],
-      ['Block', ['Assign', 't', ['Add', 's', 1]], 't'],
+      ['Declare', 's', "'unknown'", 'x'],
+      ['Block', ['Declare', 't', "'unknown'", ['Add', 's', 1]], 't'],
     ];
     const r = compile(engine().box(named), { to: 'python' });
     expect(r.success).toBe(true);
@@ -243,12 +258,20 @@ describe('a nested block whose last statement is an assignment', () => {
 });
 
 describe('a block local that is read before it has a value', () => {
-  // `x` has no declaration, so the first assignment declares it as a local
-  // of the block. Its value `x + 1` reads `x` as the value of a `Declare`
-  // does: the parse route makes the statement `Declare(x, 'unknown', x +
-  // 1)`, and the two routes give the same result. The interpreter leaves
-  // the read symbolic, and every target declines.
+  // The block declares the local `x` with the value `x + 1`, which reads
+  // the outer `x`, and the outer `x` has no declaration. The parse route
+  // makes the same statement `Declare(x, 'unknown', x + 1)`, and the two
+  // routes give the same result. The interpreter leaves the read symbolic,
+  // and every target declines.
   const boxRoute: MathJsonExpression = [
+    'Block',
+    ['Declare', 'x', "'unknown'", ['Add', 'x', 1]],
+    ['Multiply', 2, 'x'],
+  ];
+  // With no `x` in scope, an assignment to `x` in a block is the static
+  // error `assignment-to-undeclared-variable`. With `x` declared outside
+  // the block, it writes the outer `x`.
+  const assignRoute: MathJsonExpression = [
     'Block',
     ['Assign', 'x', ['Add', 'x', 1]],
     ['Multiply', 2, 'x'],
@@ -261,6 +284,9 @@ describe('a block local that is read before it has a value', () => {
     expect(
       new ComputeEngine().parse('x \\coloneq x+1; 2x').evaluate().toString()
     ).toBe('2(x + 1)');
+    expect(new ComputeEngine().box(assignRoute).toString()).toContain(
+      'assignment-to-undeclared-variable'
+    );
   });
 
   test.each(['javascript', 'python', 'glsl', 'interval-js'] as const)(
@@ -291,7 +317,7 @@ describe('a block local that is read before it has a value', () => {
     const ce = new ComputeEngine();
     const json: MathJsonExpression = [
       'Block',
-      ['Assign', 'y', 0],
+      ['Declare', 'y', "'unknown'", 0],
       ['If', ['Greater', 'x', 0], ['Assign', 'y', 1], ['Assign', 'y', 2]],
       ['Assign', 'y', ['Add', 'y', 'x']],
       'y',
@@ -305,7 +331,7 @@ describe('a block local that is read before it has a value', () => {
   test('a write to an outer variable declines', () => {
     // With `x` declared outside the block, the interpreter writes the outer
     // `x`. A write to a symbol declared in the engine declines.
-    const json: MathJsonExpression = boxRoute;
+    const json: MathJsonExpression = assignRoute;
     expect(interpreterAt3(json)).toBe('8');
     expect(() => compile(engine().box(json), { fallback: false })).toThrow(
       /"x" is not a local of the compiled expression/
@@ -324,7 +350,7 @@ describe('a block local that is read before it has a value', () => {
           body: [
             {
               variable: 'o',
-              expression: engine().box(boxRoute),
+              expression: engine().box(assignRoute),
             },
           ],
         } as never)

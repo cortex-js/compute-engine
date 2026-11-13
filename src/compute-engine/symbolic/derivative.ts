@@ -928,7 +928,7 @@ function symbolDependencies(
  * call of a user function when the node is a parameter of that function: the
  * read goes to the call frame's parameter ACTIVATION, a separate definition
  * that each call declares anew and writes without bumping any
- * `_writeVersion` (see `valueDefinitionInContext` and `markActivation` in
+ * `_writeVersion` (see `valueDefinitionInContext` in
  * `boxed-expression/binders.ts`). It also does not when the scope chain
  * holds another binding of the name that intercepts the read.
  */
@@ -1030,13 +1030,14 @@ function finishedDerivative(
  * The `Derivative` handler declares the hole `_` in a scope that it pushes
  * for each request and discards after it. So each request differentiates
  * with respect to a new definition of `_`, and a result recorded by an
- * earlier request depends on a definition that is disposed now. The check of
+ * earlier request depends on a definition whose scope is popped. The check of
  * its dependencies fails, and without this function each order computed
  * every lower order again: `Derivative(f, 3)` after `Derivative(f, 2)` took
  * about twice as long as one more differentiation step.
  *
  * The result is used when its only invalid dependencies are the nodes of
- * `variable`, these nodes are bound to one definition that is disposed, and
+ * `variable`, these nodes are bound to one definition that no scope of the
+ * current chain holds (the scope of its request was popped), and
  * the definition that `variable` reads now has no stored value and the type
  * that the old definition had at the start of the request that computed the
  * result (`variableType`). The other dependencies are the state that the
@@ -1060,6 +1061,22 @@ function finishedDerivative(
  *
  * The returned record is a copy: the record in the cache is not changed.
  */
+/** True when a scope of the current chain binds `name` to the value
+ * definition `def`. */
+function inScope(ce: Expression['engine'], name: string, def: object): boolean {
+  for (
+    let s: typeof ce.context.lexicalScope | null | undefined =
+      ce.context.lexicalScope;
+    s;
+    s = s.parent
+  ) {
+    const binding = s.bindings.get(name);
+    if (binding !== undefined && 'value' in binding && binding.value === def)
+      return true;
+  }
+  return false;
+}
+
 function finishedOverNewVariable(
   ce: Expression['engine'],
   finished: FinishedDerivative,
@@ -1082,8 +1099,7 @@ function finishedOverNewVariable(
     else if (old === undefined) old = def;
     else if (old !== def) return undefined;
   }
-  if (old === undefined || (old as { disposed?: boolean }).disposed !== true)
-    return undefined;
+  if (old === undefined || inScope(ce, variable, old)) return undefined;
   if (!symbolDependenciesValid(others)) return undefined;
   // Read the definition before `ce.symbol()`, which would declare the name
   // when no definition is in scope.

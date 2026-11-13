@@ -53,10 +53,13 @@ describe('A Loop whose value is used declines', () => {
       ['javascript', 'python', 'glsl'],
     ],
     [
-      'a loop whose body is a destructuring declaration',
+      'a loop whose body is a block with a destructuring declaration',
       [
         'Loop',
-        ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 'k', 2]],
+        [
+          'Block',
+          ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 'k', 2]],
+        ],
         ['Element', 'k', range(1, 3)],
       ],
       ['javascript'],
@@ -65,7 +68,7 @@ describe('A Loop whose value is used declines', () => {
       'a loop that is the last statement of a block',
       [
         'Block',
-        ['Assign', 's', 'x'],
+        ['Declare', 's', "'unknown'", 'x'],
         ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', range(1, 3)]],
       ],
       ['javascript', 'python'],
@@ -83,7 +86,7 @@ describe('A Loop whose value is used declines', () => {
       'a loop with a Break with no value and no indexing set',
       [
         'Block',
-        ['Assign', 's', 'x'],
+        ['Declare', 's', "'unknown'", 'x'],
         [
           'Loop',
           [
@@ -100,8 +103,9 @@ describe('A Loop whose value is used declines', () => {
       [
         'Block',
         [
-          'Assign',
+          'Declare',
           'f',
+          "'unknown'",
           [
             'Function',
             ['Block', ['Loop', ['Add', 'y', 'k'], ['Element', 'k', range(1, 3)]]],
@@ -151,7 +155,7 @@ describe('A Loop whose value is used declines', () => {
 describe('A Loop that is a statement compiles', () => {
   const json = [
     'Block',
-    ['Assign', 's', 0],
+    ['Declare', 's', "'unknown'", 0],
     ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', range(1, 3)]],
     ['Add', 's', 'x'],
   ];
@@ -172,7 +176,7 @@ describe('A Loop that is a statement compiles', () => {
   test('a loop in the body of a loop', () => {
     const nested = [
       'Block',
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', range(1, 3)]],
@@ -289,7 +293,15 @@ describe('A used Loop with a Return that is not in tail position', () => {
   // (`returnInLoopIn()`) does not run on Python: the check of the value of
   // the loop declines there.
   test.each([
-    ['the value of an Assign', ['Block', ['Assign', 'z', loop], ['Add', 'z', 1]]],
+    [
+      'the value of an Assign',
+      [
+        'Block',
+        ['Declare', 'z', "'real'", 0],
+        ['Assign', 'z', loop],
+        ['Add', 'z', 1],
+      ],
+    ],
     ['the value of a Declare', ['Block', ['Declare', 'z', "'real'", loop], 'z']],
     ['an operand', ['Add', loop, 1]],
   ])('%s declines on Python and JavaScript', (_label, json) => {
@@ -300,7 +312,7 @@ describe('A used Loop with a Return that is not in tail position', () => {
   test('a loop in a statement branch compiles on Python', () => {
     const json = [
       'Block',
-      ['Assign', 'z', 0],
+      ['Declare', 'z', "'unknown'", 0],
       ['If', ['Greater', 'x', 0], loop, ['Assign', 'z', 1]],
       'z',
     ];
@@ -348,7 +360,7 @@ describe('A tail loop with an indexing set and a Return declines', () => {
     // the local, as the interpreter does.
     const json = [
       'Block',
-      ['Assign', 'r', 0],
+      ['Declare', 'r', "'unknown'", 0],
       [
         'Loop',
         ['If', ['Greater', 'k', 'x'], ['Block', ['Assign', 'r', 'k'], ['Break']]],

@@ -455,9 +455,10 @@ describe('THE TYPE OF A LITERAL WITH A PARAMETER NAMED LIKE A GLOBAL', () => {
     expect(literal.type.toString()).toBe('(n: unknown) -> number');
   });
 
-  // `n + 1` has no sign for every real `n`, so `Sqrt(n + 1)` can be complex. A
-  // read of the global `n := 2` makes the sum positive, and the sign is cached
-  // on the node: the type of the literal must not read that answer.
+  // `n + 1` has no sign for every real `n`, so `Sqrt(n + 1)` can be complex.
+  // Outside a call the parameter `n` has no value, whatever the global `n`
+  // holds: a node of the body has no sign there, and the type of the literal
+  // reads no value of the global.
   const sqrtOfSum = (ce: ComputeEngine) => {
     const literal = ce.box([
       'Function',
@@ -470,7 +471,7 @@ describe('THE TYPE OF A LITERAL WITH A PARAMETER NAMED LIKE A GLOBAL', () => {
 
   test('a read of the sign of a body node before the type', () => {
     const { literal, sum } = sqrtOfSum(withGlobal(2));
-    expect(sum.sgn).toBe('positive');
+    expect(sum.sgn).toBeUndefined();
     expect(literal.type.toString()).toBe('(n: real) -> complex');
   });
 
@@ -481,23 +482,26 @@ describe('THE TYPE OF A LITERAL WITH A PARAMETER NAMED LIKE A GLOBAL', () => {
     expect(sum.sgn).toBeUndefined();
   });
 
-  test('a read of the sign of another literal after a read by name', () => {
+  test('a read of the sign of a body node of another literal', () => {
     const ce = withGlobal(2);
-    expect(sqrtOfSum(ce).sum.sgn).toBe('positive');
+    expect(sqrtOfSum(ce).sum.sgn).toBeUndefined();
     const { literal, sum } = sqrtOfSum(ce);
     expect(literal.type.toString()).toBe('(n: real) -> complex');
-    expect(sum.sgn).toBe('positive');
+    expect(sum.sgn).toBeUndefined();
     expect(literal.type.toString()).toBe('(n: real) -> complex');
   });
 
-  test('a body node evaluated outside a call reads the name', () => {
+  test('a body node evaluated outside a call: the parameter has no value', () => {
     const ce = withGlobal(2);
     const body = ce.box(['Function', ['Add', 'n', 1], 'n']).ops![0];
-    expect(body.evaluate().toString()).toBe('3');
+    expect(body.evaluate().toString()).toBe('n + 1');
     ce.pushScope();
     ce.declare('n', 'number');
     ce.assign('n', 5);
-    expect(body.evaluate().toString()).toBe('6');
+    // The body reads the scope it was boxed in; bound again in this scope,
+    // it reads the new `n`.
+    expect(body.evaluate().toString()).toBe('n + 1');
+    expect(ce.rebind(body).evaluate().toString()).toBe('6');
     ce.popScope();
   });
 
@@ -505,7 +509,7 @@ describe('THE TYPE OF A LITERAL WITH A PARAMETER NAMED LIKE A GLOBAL', () => {
     const ce = withGlobal(2);
     const literal = ce.box(['Function', ['Add', 'n', 1], 'n']);
     expect(literal.type.toString()).toBe('(n: unknown) -> number');
-    expect(literal.ops![0].evaluate().toString()).toBe('3');
+    expect(literal.ops![0].evaluate().toString()).toBe('n + 1');
     expect(literal.type.toString()).toBe('(n: unknown) -> number');
   });
 
@@ -515,10 +519,9 @@ describe('THE TYPE OF A LITERAL WITH A PARAMETER NAMED LIKE A GLOBAL', () => {
     const { literal, sum } = sqrtOfSum(ce);
     expect(sum.sgn).toBeUndefined();
     expect(literal.type.toString()).toBe('(n: real) -> complex');
-    // The assignment comes after the read of the sign: the next read of the
-    // sign finds the value by name, and the type still does not read it.
+    // The assignment of the global gives the parameter no value.
     ce.assign('n', 2);
-    expect(sum.sgn).toBe('positive');
+    expect(sum.sgn).toBeUndefined();
     expect(literal.type.toString()).toBe('(n: real) -> complex');
   });
 

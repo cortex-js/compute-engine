@@ -213,7 +213,8 @@ describe('the LaTeX round trip', () => {
     ['AddTo', ['At', 'L', 2, 'j'], 'x'],
   ])('%j', (...json) => {
     const ce = new ComputeEngine();
-    // `L` is declared: a first assignment in a loop body is a static error.
+    // `L` is declared: an assignment to an undeclared name in a loop body is
+    // a static error.
     ce.declare('L', 'list');
     const expr = ce.box(json as never);
     const latex = expr.latex;
@@ -1256,9 +1257,9 @@ describe('`+=` errors, the reference analysis, and an empty parallel loop', () =
     );
   });
 
-  test('an undeclared `+=` target in a loop body is a first assignment', () => {
+  test('an undeclared `+=` target in a loop body is an error', () => {
     expect(checkErrors('for k in 1..3 { t += k }')).toEqual([
-      'static-type-error:first-assignment-in-branch',
+      'static-type-error:assignment-to-undeclared-variable',
     ]);
   });
 
@@ -1290,7 +1291,7 @@ describe('`+=` errors, the reference analysis, and an empty parallel loop', () =
     for (const [short, long, name] of cases) {
       const error = [
         'Error',
-        ['ErrorCode', "'first-assignment-in-branch'", `'${name}'`],
+        ['ErrorCode', "'assignment-to-undeclared-variable'", `'${name}'`],
       ];
       for (const body of [short, long]) {
         const loop = new ComputeEngine().box([
@@ -1302,7 +1303,7 @@ describe('`+=` errors, the reference analysis, and an empty parallel loop', () =
       }
     }
     expect(checkErrors('for k in 1..3 { t += t }')).toEqual([
-      'static-type-error:first-assignment-in-branch',
+      'static-type-error:assignment-to-undeclared-variable',
     ]);
   });
 
@@ -1314,7 +1315,12 @@ describe('`+=` errors, the reference analysis, and an empty parallel loop', () =
       checkCodes('let L = [0, 0, 0]\nparallel for k in 1..3 { L[k] += k }\nL')
     ).toEqual([]);
     const ce = new ComputeEngine();
-    const expr = ce.box(['Block', ['Assign', 't', 0], ['AddTo', 't', 1], 't']);
+    const expr = ce.box([
+      'Block',
+      ['Declare', 't', "'unknown'", 0],
+      ['AddTo', 't', 1],
+      't',
+    ]);
     expect(expr.isValid).toBe(true);
     expect(JSON.stringify(expr.json)).toContain('AddTo');
   });
@@ -1493,8 +1499,8 @@ describe('rule 2: programs that the checker accepts', () => {
       9,
     ],
     [
-      'a first assignment in a function of the pass, then `+=` on it',
-      'let s = 0\nparallel for k in 1..3 {\n function h(x) { t = x; t += 1; t }\n s += h(k)\n}',
+      'a local of a function of the pass, then `+=` on it',
+      'let s = 0\nparallel for k in 1..3 {\n function h(x) { let t = x; t += 1; t }\n s += h(k)\n}',
       9,
     ],
   ])('%s', (_name, source, expected) => {
@@ -1504,7 +1510,7 @@ describe('rule 2: programs that the checker accepts', () => {
     expect(result.value.json).toEqual(expected);
   });
 
-  test('a first assignment to a name declared before the loop is an outer write', () => {
+  test('an assignment in a function of the pass to a name declared before the loop is an outer write', () => {
     expect(
       messages(
         'let s = 0\nlet t = 0\nparallel for k in 1..3 {\n function h(x) { t = x + 1; t }\n s += h(k)\n}'

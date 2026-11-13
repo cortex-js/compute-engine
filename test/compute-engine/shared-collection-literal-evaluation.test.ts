@@ -104,9 +104,9 @@ describe('the entry of a tuple does not serve a read after a write', () => {
     ).toBe('[[4,5],[6,7],3]');
   });
 
-  // With an inline function, the assignment stores `d` with its value at
-  // the statement, so a later write of `d` does not change `t`.
-  test('a stored tuple whose inline function reads a variable keeps its value', () => {
+  // With an inline function too: the function keeps the activation it was
+  // made in and reads `d` when an element is computed.
+  test('a stored tuple whose inline function reads a variable reads it when an element is computed', () => {
     const ce = new ComputeEngine();
     expect(
       run(
@@ -119,7 +119,7 @@ describe('the entry of a tuple does not serve a read after a write', () => {
           '[before, take(t[1], 2), t[2]]',
         ].join('\n')
       )
-    ).toBe('[[4,5],[4,5],3]');
+    ).toBe('[[4,5],[6,7],3]');
   });
 
   test('the same tuple node evaluated before and after a write', () => {

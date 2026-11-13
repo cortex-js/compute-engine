@@ -20,7 +20,7 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (BOX ROUTE)', () => {
   test('Floor reads the exact argument', () => {
     const expr = ce.box([
       'Block',
-      ['Assign', 'hF', ['Function', ['Floor', 'x'], 'x']],
+      ['Declare', 'hF', "'unknown'", ['Function', ['Floor', 'x'], 'x']],
       ['hF', FLOOR_ARG],
     ]);
     expect(expr.N().toString()).toBe('24');
@@ -31,8 +31,9 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (BOX ROUTE)', () => {
     const expr = ce.box([
       'Block',
       [
-        'Assign',
+        'Declare',
         'hLoc',
+        "'unknown'",
         ['Function', ['Multiply', 2, ['Numerator', 'x']], 'x'],
       ],
       ['hLoc', ['Rational', 3, 7]],
@@ -45,8 +46,9 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (BOX ROUTE)', () => {
     const expr = ce.box([
       'Block',
       [
-        'Assign',
+        'Declare',
         'hLoc2',
+        "'unknown'",
         ['Function', ['Multiply', 2, ['Numerator', 'x']], 'x'],
       ],
       ['Map', 'hLoc2', ['List', ['Rational', 3, 7], ['Rational', 5, 9]]],
@@ -58,7 +60,7 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (BOX ROUTE)', () => {
   test('the asynchronous route reads the exact argument', async () => {
     const expr = ce.box([
       'Block',
-      ['Assign', 'hA', ['Function', ['Floor', 'x'], 'x']],
+      ['Declare', 'hA', "'unknown'", ['Function', ['Floor', 'x'], 'x']],
       ['hA', FLOOR_ARG],
     ]);
     const result = await expr.evaluateAsync({ numericApproximation: true });
@@ -70,7 +72,7 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (BOX ROUTE)', () => {
 describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (PARSE ROUTE)', () => {
   test('Floor reads the exact argument', () => {
     const expr = ce.parse(
-      '\\operatorname{Block}(h \\coloneq x \\mapsto \\lfloor x \\rfloor, h(\\frac{25!-1}{24!}))'
+      'h \\coloneq x \\mapsto \\lfloor x \\rfloor; h(\\frac{25!-1}{24!})'
     );
     expect(expr.N().toString()).toBe('24');
     expect(expr.evaluate().toString()).toBe('24');
@@ -78,7 +80,7 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (PARSE ROUTE)', () => {
 
   test('Numerator reads the exact argument', () => {
     const expr = ce.parse(
-      '\\operatorname{Block}(g \\coloneq x \\mapsto 2\\cdot\\operatorname{Numerator}(x), g(\\frac{3}{7}))'
+      'g \\coloneq x \\mapsto 2\\cdot\\operatorname{Numerator}(x); g(\\frac{3}{7})'
     );
     expect(expr.N().toString()).toBe('6');
     expect(expr.evaluate().toString()).toBe('6');
@@ -86,7 +88,7 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (PARSE ROUTE)', () => {
 
   test('Map with the name of the local as its callback', () => {
     const expr = ce.parse(
-      '\\operatorname{Block}(k \\coloneq x \\mapsto 2\\cdot\\operatorname{Numerator}(x), \\operatorname{Map}(k, [\\frac{3}{7}]))'
+      'k \\coloneq x \\mapsto 2\\cdot\\operatorname{Numerator}(x); \\operatorname{Map}(k, [\\frac{3}{7}])'
     );
     expect(expr.N().toString()).toBe('[6]');
     expect(expr.evaluate().toString()).toBe('[6]');

@@ -437,7 +437,6 @@ import {
   _reservedDeclareNames,
   reservedLoopLocals,
   withDefineFunctionDeclares,
-  withImplicitLocalDeclares,
 } from './compile-locals.js';
 import {
   _shapeFrameOwner,
@@ -4940,17 +4939,12 @@ export function compileLoopBody(
     // too, or the pair-carrying loop step this feature exists for
     // (`(a, b) := (b, a + b)`) would fail closed. A body's value is
     // discarded, so no trailing value tuple (`isLast: false`).
-    // For the same reason the implicit-block-local desugar runs here too: a
-    // loop body that binds a scratch variable by bare assignment
-    // (`q ⩴ 2i; s ⩴ s + q`) has no `Declare` for it either, so the write
-    // emitted a bare `q` while every read emitted `_.q` — `NaN`.
     //
-    // …and so does the COMPLEX-ness inference `compileBlock` runs over its
-    // locals: without the frame, a loop-body local bound to a complex value
-    // (`z ⩴ t + i; s ⩴ s + |z|`) was written as a `{re, im}` object but read
-    // back as a real — `Abs(z)` lowered to `Math.abs` on an object, i.e.
-    // `NaN` behind `success: true` — and an explicitly declared local
-    // behaved identically.
+    // The COMPLEX-ness inference that `compileBlock` runs over its locals
+    // runs here too: a loop-body local bound to a complex value
+    // (`let z = t + i; s = s + |z|`) is written as a `{re, im}` object, so
+    // every read of it must read it as complex (`Abs(z)` is not
+    // `Math.abs` of an object).
     //
     // The VECTOR-width frame is deliberately NOT pushed here. Its only
     // consumer is the shader declaration type hint, and no shader target
@@ -4976,11 +4970,7 @@ export function compileLoopBody(
     // statement position. A definition that the interpreter refuses for
     // its effects is refused first, as in `compileBlock`.
     refuseEffectContractViolations(stmts, expr.localScope);
-    const withDecls = withImplicitLocalDeclares(
-      withDefineFunctionDeclares(stmts, target, false),
-      target,
-      expr
-    );
+    const withDecls = withDefineFunctionDeclares(stmts, target, false);
     // The checks of `compileBlock` on the order of the statements: no use
     // of a local before its `Declare`, and no first value of a local that
     // reads the name of the local.
@@ -5045,11 +5035,8 @@ export function compileLoopBody(
             noteLocalFunction(s, bodyLocalFunctions, bodyRebound);
             const code = core.compileLoopBody(s, bodyTarget);
             // A nested block is a JavaScript block statement (`{ … }`), so
-            // that a `let` of it, written or implicit (a bare assignment of
-            // a name that nothing outside binds), does not hide a variable
-            // of the same name in the rest of the loop body. Without the
-            // braces, `let V` of the nested block made every later `V` of
-            // the loop body the local.
+            // that a `let` of it does not hide a variable of the same name in
+            // the rest of the loop body.
             return isFunction(s, 'Block') && code !== '' ? `{ ${code} }` : code;
           })
           .join('; ')

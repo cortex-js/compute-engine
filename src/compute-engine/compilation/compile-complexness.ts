@@ -470,7 +470,7 @@ export function _setLocalComplex(
  *
  * Under the complex discipline, a local whose STATIC type in the block's
  * scope `scope` is real is real-shaped from its declaration too. The
- * `Declare` of a local made by `where`, `\coloneq` or a bare assignment
+ * `Declare` of a local made by `where`, `\coloneq` or an untyped `let`
  * says `unknown`, but the engine infers the type of the local from its
  * bindings (`k ⩴ ⌊x⌋` gives `k` the type `integer`), and every node that
  * reads the local is typed from that type. The analysis of a parent reads
@@ -1274,10 +1274,8 @@ export function _isComplexValuedFunction(
  * so the locals' complex-ness has to be inferred first, exactly as
  * `compileBlock` infers it before compiling the statements (`{ z ⩴ t + i;
  * z² }` is complex through the local `z`, whose declared type is real). The
- * set of locals mirrors `withImplicitLocalDeclares`: the explicit `Declare`s
- * plus the bare assignments `canonicalBlock` hoisted into the block's OWN
- * scope. A name the enclosing compilation already binds is NOT a local of
- * this block, so it keeps whatever the enclosing analysis says.
+ * locals are the targets of the `Declare` statements. Any other name keeps
+ * whatever the enclosing analysis says.
  */
 export function isBlockValueComplexValued(
   expr: Expression & { ops: ReadonlyArray<Expression> }
@@ -1292,18 +1290,6 @@ export function isBlockValueComplexValued(
         arg.ops[0].symbol,
         localComplexDefault(expr.localScope, arg.ops[0].symbol)
       );
-  const scope = expr.localScope;
-  if (scope)
-    for (const arg of args)
-      if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
-        const name = arg.ops[0].symbol;
-        if (
-          !frame.has(name) &&
-          scope.bindings.has(name) &&
-          !CompilerState._boundVarsCtx?.has(name)
-        )
-          frame.set(name, localComplexDefault(scope, name));
-      }
 
   _pushLocalComplex(frame);
   try {

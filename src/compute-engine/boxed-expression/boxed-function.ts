@@ -57,11 +57,7 @@ import {
   hasAsyncOnlyApplication,
 } from './async-only-descendants.js';
 import { callbackSlots } from './callback-slots.js';
-import {
-  ambientChainParent,
-  registerScopeActivation,
-  scopeActivationTemplate,
-} from './ambient-chain.js';
+import { scopeActivation } from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import {
   bindsWholeAtInferredPointParameter,
@@ -2043,8 +2039,8 @@ export class BoxedFunction
       store !== undefined && !!options?.numericStoreFloats;
     this._opsStorage = ops;
     this._localScope = options?.scope;
-    // A closure made in the node can keep the definitions of its scope
-    // (`retainScopesReachedByLiteral`, `function-utils.ts`).
+    // A lazy collection made in the node reads the scope of the node
+    // (`noteNodeScope()`, `lazy-view-context.ts`).
     if (options?.scope !== undefined) noteNodeScope(options.scope);
 
     this._isStructural = options?.structural ?? false;
@@ -5243,7 +5239,7 @@ export class BoxedFunction
             // with a new stamp, as the evaluation would make it
             // (`_deferredErrorFrame()` compares the stamp).
             recordEvaluatedError(this, hit);
-            return hit;
+            return recordLazyViewContext(this, hit, engine._evalContextStack);
           }
           remember = true;
           memo.pending += 1;
@@ -5286,17 +5282,10 @@ export class BoxedFunction
               ? this._memoizedLazyCollectionValue(options, takeProbeGuard())
               : this._computeValue(options)();
       };
-      // A lazy callback view made during a function call is evaluated again
-      // in the context of that call, as it is read there
-      // (`lazy-view-context.ts`): the numeric pass of an outer call rewrites
-      // the callback of `Map(f, xs)` and fills the default of a parameter of
-      // `f` by its name, which must give the value of the call that made the
-      // view, not the value of the outer call. The result takes the record of
-      // this node (`recordLazyViewContext` below).
-      const result =
-        this.operatorDefinition?.collection?.callsCallbackOnRead === true
-          ? inLazyViewContext(this, evaluateHere)
-          : evaluateHere();
+      // A lazy collection is evaluated again in the activation it was made
+      // in, as it is read there (`lazy-view-context.ts`). The result takes
+      // the record of this node (`recordLazyViewContext` below).
+      const result = inLazyViewContext(this, evaluateHere);
       // An evaluation whose result is a value takes back the incomplete
       // walks that it recorded: a read in it that met an inner collection
       // that it cannot walk stayed unevaluated, which is a correct result,
@@ -5310,13 +5299,14 @@ export class BoxedFunction
       )
         takeBackIncompleteWalks(walksBefore);
       recordEvaluatedError(this, result);
-      const value = result;
-      // A lazy callback view created by this evaluation records the context
-      // of the function call in progress, so that its callback is called
-      // there when the view is read later (`lazy-view-context.ts`). Before
-      // the memo store below, so that a memo hit returns a view that has its
-      // record.
-      recordLazyViewContext(this, value, engine._evalContextStack);
+      // A lazy collection made by this evaluation keeps the activation of
+      // the evaluation (`lazy-view-context.ts`). Before the memo store below,
+      // so that a memo hit returns a collection that has its record.
+      const value = recordLazyViewContext(
+        this,
+        result,
+        engine._evalContextStack
+      );
       // A result is kept only when it is final: no read in the evaluation
       // stayed incomplete (the walks it recorded were taken back above), the
       // store guard allows it (`store-guard.ts`: no host code ran, no answer
@@ -6539,18 +6529,12 @@ export class BoxedFunction
         contextStack
       ));
     else contextStack = joinAsyncEvaluation(this.engine, contextStack!);
-    // A lazy callback view made during a function call is evaluated in the
-    // context of that call, as in `evaluate()` (`lazy-view-context.ts`): the
-    // numeric pass of an outer call rewrites the callback of `Map(f, xs)`
-    // and fills the default of a parameter of `f` by its name, which must
-    // give the value of the call that made the view. The creation context
-    // is chosen against the stack of this evaluation, and the new stack
-    // stays a part of this evaluation.
-    if (this.operatorDefinition?.collection?.callsCallbackOnRead === true) {
-      const recorded = lazyViewContextStack(this, contextStack!);
-      if (recorded !== undefined)
-        contextStack = contextStackLike(contextStack!, recorded);
-    }
+    // A lazy collection is evaluated in the activation it was made in, as
+    // in `evaluate()` (`lazy-view-context.ts`). The new stack stays a part
+    // of this evaluation.
+    const recorded = lazyViewContextStack(this, contextStack!);
+    if (recorded !== undefined)
+      contextStack = contextStackLike(contextStack!, recorded);
     const effects =
       options?._effects ??
       this.engine._evaluationEffects ??
@@ -6622,10 +6606,17 @@ export class BoxedFunction
     return promise
       .then((result) => {
         recordEvaluatedError(this, result);
-        const value = result;
-        // As in `evaluate()`, on the stack of this evaluation.
-        recordLazyViewContext(this, value, contextStackAtStart);
-        return value;
+        // As in `evaluate()`, on the stack of this evaluation, put in place:
+        // a variable of the activation that the collection reads is read
+        // there (`withActivatedOperandValues()`), not in the context of the
+        // code that settles the promise.
+        return runWithEvaluationEffects(
+          this.engine,
+          effects,
+          () => recordLazyViewContext(this, result, contextStackAtStart),
+          contextStackAtStart,
+          options._precisionWindow
+        );
       })
       .finally(() => {
         this.engine._inFlightAsyncEvaluations -= 1;
@@ -7247,7 +7238,18 @@ export class BoxedFunction
    * deadline/timeout cancellation THROWS through this helper, so nothing
    * partial is ever stored.
    */
+  /** The memo of a facet runs in the activation of a lazy collection
+   * (`lazy-view-context.ts`): its dependencies are read there. */
   private _memoizedFacet<T extends number | bigint | boolean | undefined>(
+    facet: 'count' | 'isEmpty' | 'isFinite',
+    compute: () => T
+  ): T {
+    return inLazyViewContext(this, () =>
+      this._memoizedFacetHere(facet, compute)
+    );
+  }
+
+  private _memoizedFacetHere<T extends number | bigint | boolean | undefined>(
     facet: 'count' | 'isEmpty' | 'isFinite',
     compute: () => T
   ): T {
@@ -7369,8 +7371,7 @@ export class BoxedFunction
       // to a `number`, so a `bigint` reaches readers only for a count that a
       // `number` cannot hold exactly.
       const handler = this.operatorDefinition?.collection?.count;
-      if (handler !== undefined)
-        return normalizeCount(inLazyViewContext(this, () => handler(this)));
+      if (handler !== undefined) return normalizeCount(handler(this));
       // An EAGER producer with no collection handlers may still know its own
       // length without evaluating (`Sort` preserves its source's, `Chunk`
       // answers `k`) — the `count` twin of `canEnumerate`. It owns the answer,
@@ -7806,9 +7807,7 @@ export class BoxedFunction
     if (!this.isCollection) return undefined;
     const handler = this.operatorDefinition?.collection?.isEmpty;
     if (handler === undefined) return undefined;
-    return this._memoizedFacet('isEmpty', () =>
-      inLazyViewContext(this, () => handler(this))
-    );
+    return this._memoizedFacet('isEmpty', () => handler(this));
   }
 
   get isFiniteCollection(): boolean | undefined {
@@ -7820,9 +7819,7 @@ export class BoxedFunction
     if (this._operator !== 'Error' && this._isLiteralData()) return true;
     const handler = this.operatorDefinition?.collection?.isFinite;
     if (handler === undefined) return undefined;
-    return this._memoizedFacet('isFinite', () =>
-      inLazyViewContext(this, () => handler(this))
-    );
+    return this._memoizedFacet('isFinite', () => handler(this));
   }
 
   get isEnumerableCollection(): boolean | undefined {
@@ -7835,7 +7832,7 @@ export class BoxedFunction
       // A DECLARED handler owns all three states — its `undefined` means
       // "cannot tell cheaply" and must not collapse to the default.
       if (handler === undefined) return true;
-      return handler(this);
+      return inLazyViewContext(this, () => handler(this));
     }
 
     // No collection handlers: an *eager* collection operator (`Characters`,
@@ -7926,8 +7923,6 @@ export class BoxedFunction
         }
       })();
     }
-    if (this.operatorDefinition?.collection?.callsCallbackOnRead !== true)
-      return this._eachInReadingContext();
     return eachInLazyViewContext(this, () => this._eachInReadingContext());
   }
 
@@ -8058,14 +8053,11 @@ export class BoxedFunction
     return source as Generator<Expression>;
   }
 
-  /** A lazy callback view is read in the context where it was created
-   * (`lazy-view-context.ts`); any other node is read where it is read. The
-   * flag of the operator is tested first, as in `each()`. */
+  /** A lazy collection is read in the activation it was made in
+   * (`lazy-view-context.ts`); any other node is read where it is read. */
   at(index: number): Expression | undefined {
     if (this.engine._opensOperation(false))
       return this.engine._withOperation(this, () => this.at(index));
-    if (this.operatorDefinition?.collection?.callsCallbackOnRead !== true)
-      return this._atInReadingContext(index);
     return inLazyViewContext(this, () => this._atInReadingContext(index));
   }
 
@@ -8315,17 +8307,19 @@ export class BoxedFunction
 
   get(index: Expression | string): Expression | undefined {
     if (this._optedOutOfCollection) return undefined;
+    const at = this.operatorDefinition?.collection?.at;
+    if (at === undefined) return undefined;
     if (typeof index === 'string')
-      return this.operatorDefinition?.collection?.at?.(this, index);
-
+      return inLazyViewContext(this, () => at(this, index));
     if (!isString(index)) return undefined;
-    return this.operatorDefinition?.collection?.at?.(this, index.string);
+    return inLazyViewContext(this, () => at(this, index.string));
   }
 
   indexWhere(predicate: (element: Expression) => boolean): number | undefined {
     if (this._optedOutOfCollection) return undefined;
-    if (this.operatorDefinition?.collection?.indexWhere)
-      return this.operatorDefinition.collection.indexWhere(this, predicate);
+    const indexWhere = this.operatorDefinition?.collection?.indexWhere;
+    if (indexWhere)
+      return inLazyViewContext(this, () => indexWhere(this, predicate));
     if (!this.isIndexedCollection) return undefined;
     if (!this.isFiniteCollection) return undefined;
     // 1-based, matching the `indexWhere` collection handlers and `IndexOf`.
@@ -10474,11 +10468,12 @@ export class BoxedFunction
       //
       const isScoped = this._localScope !== undefined;
 
-      if (isScoped) {
-        this.engine._pushEvalContext(this._localScope!, undefined, {
-          ambient: true,
-        });
-      }
+      // Each evaluation of a scoped node is made in an activation of its
+      // scope (`scopeActivation()`).
+      if (isScoped)
+        this.engine._pushEvalContext(
+          scopeActivation(this.engine.context?.lexicalScope, this._localScope!)
+        );
 
       //
       // 6/ Call the `evaluate` handler
@@ -12018,7 +12013,7 @@ export class BoxedFunction
           effects,
           () =>
             engine._pushEvalContext(
-              asyncScopeActivation(engine, this._localScope!),
+              scopeActivation(engine.context?.lexicalScope, this._localScope!),
               undefined
             ),
           contextStack,
@@ -22985,15 +22980,10 @@ function previewRunsEffect(expr: BoxedFunction): boolean {
  * the block locals of `f` are not counted (`blockLocalParameters`).
  *
  * The inference counts a write as confined after a `Declare` of the name,
- * or when the name is a local that the canonicalization of a `Block` made
- * for an assignment statement of the block (`withBlockLocals()`,
- * `effects-inference.ts`). An assignment in a `Block` to a name that no
- * outer scope declares makes a LOCAL of the block, also when the assignment
- * is not a statement of the block, but then the binding has no mark that
- * the inference reads, and the inference does not resolve a call of a
- * local. So in `k ↦ Block(If(k = 2, h := (z ↦ 2z)), h(k))` the write to `h`
- * and the call of `h` have no effect outside the call, but the inference
- * reports a write to an outer `h` and a call of an unknown function.
+ * and does not resolve a call of a local. So in
+ * `k ↦ Block(Declare(h, "unknown", z ↦ z), If(k = 2, h := (z ↦ 2z)), h(k))`
+ * the call of `h` has no effect outside the call, but the inference reports
+ * a call of an unknown function.
  */
 function isPreviewPureLiteral(f: Expression): boolean {
   const ce = f.engine;
@@ -24521,37 +24511,6 @@ function capturedPrecisionWindow(
   return { working, requested };
 }
 
-function asyncScopeActivation(ce: ComputeEngine, scope: Scope): Scope {
-  const ambient = ambientChainParent(ce.context?.lexicalScope, scope);
-  let parent = ambient ?? scope.parent;
-  // An ambient descendant can carry intervening locals. Only look for the
-  // parent's activation when the ambient chain cannot be used, such as a
-  // re-entrant evaluation of this same scoped node.
-  if (ambient === undefined) {
-    for (let i = ce._evalContextStack.length - 1; i >= 0; i--) {
-      const active = ce._evalContextStack[i].lexicalScope;
-      if (scopeActivationTemplate(active) === scope.parent) {
-        parent = active;
-        break;
-      }
-    }
-  }
-  const result: Scope = { ...scope, parent, bindings: new Map() };
-  for (const [name, binding] of scope.bindings) {
-    if (isValueDef(binding)) {
-      const value = binding.value as BoxedValueDefinition & {
-        _cloneForActivation(): BoxedValueDefinition;
-      };
-      result.bindings.set(name, {
-        ...binding,
-        value: value._cloneForActivation(),
-      });
-    } else result.bindings.set(name, binding);
-  }
-  registerScopeActivation(result, scope);
-  return result;
-}
-
 /**
  * `present`, with the present type of each operand at a position that
  * strips `missing` (`strips`) that is an access proved to find nothing
@@ -25206,6 +25165,20 @@ async function evaluateAsyncOverListedFlatMaps(
  * operator), where an assignment is an error. The same array when no
  * operand is replaced.
  */
+/** The target of the assignment that `op` is the error of, when `op` is the
+ * error `assignment-to-undeclared-variable`, else `undefined`. */
+function undeclaredAssignmentName(op: Expression): string | undefined {
+  if (!isFunction(op, 'Error')) return undefined;
+  const code = op.op1;
+  if (
+    !isFunction(code, 'ErrorCode') ||
+    !isString(code.op1) ||
+    code.op1.string !== 'assignment-to-undeclared-variable'
+  )
+    return undefined;
+  return isString(code.op2) ? code.op2.string : undefined;
+}
+
 function withoutStatementOperands(
   ce: ComputeEngine,
   def: BoxedDefinition | undefined | null,
@@ -25216,12 +25189,23 @@ function withoutStatementOperands(
   let roles: ReadonlyArray<string> | undefined | null = null;
   ops.forEach((op, i) => {
     const head = op.operator;
-    if (head !== 'Assign' && head !== 'Declare' && head !== 'AddTo') return;
+    // An assignment to a name that no scope declares is canonicalized to
+    // that error (`assignment-to-undeclared-variable`): at a value position,
+    // the error of the position is reported in its place.
+    const undeclared = undeclaredAssignmentName(op);
+    if (
+      undeclared === undefined &&
+      head !== 'Assign' &&
+      head !== 'Declare' &&
+      head !== 'AddTo'
+    )
+      return;
     // The name is only a pre-filter. A call of a user function named
     // `Assign`, `Declare` or `AddTo` is bound to another definition: it is a
     // value, and is valid at any position. An operand with no definition is
     // read by its name.
     if (
+      undeclared === undefined &&
       (op.operatorDefinition !== undefined ||
         op.valueDefinition !== undefined) &&
       !isLibraryOperator(op, head)
@@ -25236,7 +25220,7 @@ function withoutStatementOperands(
     // name is then that of the list.
     let target = isFunction(op) ? op.ops[0] : undefined;
     if (head === 'AddTo' && isFunction(target, 'At')) target = target.op1;
-    const name = isSymbol(target) ? target.symbol : undefined;
+    const name = undeclared ?? (isSymbol(target) ? target.symbol : undefined);
     result ??= [...ops];
     result[i] = ce.error(
       name === undefined

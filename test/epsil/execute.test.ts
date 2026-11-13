@@ -700,7 +700,7 @@ describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
     });
     const { value, diagnostics, valueRange } = ce.withTimeLimit(
       { ms: 60_000, label: 'test:epsil-spend' },
-      () => executeEpsil(ce, 'a = 1\nSpendBudget()\nb = 2\nb')
+      () => executeEpsil(ce, 'let a = 1\nSpendBudget()\nlet b = 2\nb')
     );
     // The handler ran exactly once, at evaluation time (had canonicalization
     // folded the call, the static pass would have tripped and the program
@@ -708,12 +708,13 @@ describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
     expect(spends).toBe(1);
     expect(value.operator).toBe('Error');
     expect(value.op2?.string).toBe('timeout');
-    // Anchored on `b = 2`, the statement the check stopped.
-    expect(valueRange).toEqual([20, 25]);
+    // Anchored on `let b = 2`, the statement the check stopped.
+    expect(valueRange).toEqual([24, 33]);
     expect(diagnostics.map((d) => d.message.slice(0, 2))).toEqual([
       ['evaluation-canceled', 'timeout'],
     ]);
-    // `a = 1` ran before the budget was spent; `b = 2` after it did not.
+    // `let a = 1` ran before the budget was spent; `let b = 2` after it did
+    // not.
     expect(ce.box('a').evaluate().re).toBe(1);
     expect(ce.box('b').value).toBeUndefined();
   });
@@ -726,7 +727,7 @@ describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
     ce.iterationLimit = 100;
     const { value, diagnostics } = executeEpsil(
       ce,
-      'let c = 0\nwhile c >= 0 { c = c + 1 }\nb = 2\nb'
+      'let c = 0\nwhile c >= 0 { c = c + 1 }\nlet b = 2\nb'
     );
     expect(diagnostics.map((d) => d.message.slice(0, 2))).toEqual([
       ['evaluation-canceled', 'iteration-limit-exceeded'],
@@ -773,15 +774,15 @@ describe('EPSIL EXECUTE — an expired time budget ends the program', () => {
     // that used to swallow EVERY throw, an expired budget included. A direct
     // caller (`epsil check`) armed with a span must see the cancellation.
     const ce = new ComputeEngine();
-    const [ast] = parseEpsil('x = 1\ny = 2');
+    const [ast] = parseEpsil('let x = 1\nlet y = 2');
     expect(() =>
       ce.withTimeLimit({ ms: 0, label: 'test:epsil-static' }, () =>
-        staticDiagnostics(ce, ast!, 'x = 1\ny = 2')
+        staticDiagnostics(ce, ast!, 'let x = 1\nlet y = 2')
       )
     ).toThrow(/Timeout exceeded/);
     // …and it left the engine clean (scope popped, depth restored): a
     // following unbudgeted pass over the same engine still works.
-    expect(staticDiagnostics(ce, ast!, 'x = 1\ny = 2')).toEqual([]);
+    expect(staticDiagnostics(ce, ast!, 'let x = 1\nlet y = 2')).toEqual([]);
   });
 });
 
@@ -1663,7 +1664,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
 
   test('named call to a `:=`-assigned annotated literal is statically clean', () => {
     const { value, diagnostics } = run(
-      'f := (x: number, y: string) => x + 3\nf(y: "ok", x: 1)'
+      'let f = (x: number, y: string) => x + 3\nf(y: "ok", x: 1)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
@@ -1690,7 +1691,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
 
   test('positional-call control: unchanged, statically clean', () => {
     const { value, diagnostics } = run(
-      'f := (x: number, y: string) => x + 3\nf(1, "ok")'
+      'let f = (x: number, y: string) => x + 3\nf(1, "ok")'
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
@@ -1700,7 +1701,9 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // An inferred signature keeps the parameter names of the literal
     // (`(x: unknown, y: unknown) -> number`), so the named call finds each
     // slot, at run time and in the static tier (user decision 2026-10-25).
-    const { value, diagnostics } = run('h := (x, y) => x + 3\nh(y: 2, x: 1)');
+    const { value, diagnostics } = run(
+      'let h = (x, y) => x + 3\nh(y: 2, x: 1)'
+    );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(4);
   });
@@ -1711,7 +1714,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // two static diagnostics plus statement 1's runtime-error, and none for
     // statement 3, which computes 12.
     const src =
-      'f(y: "ok", x: 1)\nf := (x: number, y: string) => x + 3\nf(y: "no", x: 9)';
+      'f(y: "ok", x: 1)\nlet f = (x: number, y: string) => x + 3\nf(y: "no", x: 9)';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => d.message[3])).toEqual([
       'argument-names-unavailable',
@@ -1731,7 +1734,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // names of the literal that runs. The names of the first literal are
     // then unknown, at runtime and in the static tier.
     const head =
-      'f := (x: number, y: number) => x + 3\nf := (a: number, b: number) => a * b\n';
+      'let f = (x: number, y: number) => x + 3\nf := (a: number, b: number) => a * b\n';
     const latest = run(head + 'f(a: 2, b: 5)');
     expect(latest.diagnostics).toEqual([]);
     expect(latest.value.re).toBe(10);
@@ -1748,7 +1751,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // contract: the run time accepts a second literal with another result,
     // and the static tier takes its names and its result.
     const head =
-      'h := (x: integer, y: integer) => x - y\nh := (a: integer, b: integer) => (a - b) / 2\n';
+      'let h = (x: integer, y: integer) => x - y\nh := (a: integer, b: integer) => (a - b) / 2\n';
     const latest = run(head + 'h(a: 3, b: 5)');
     expect(latest.diagnostics).toEqual([]);
     expect(latest.value.re).toBe(-1);
@@ -1759,7 +1762,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     expect(first.value.errors.length).toBeGreaterThan(0);
 
     const text = run(
-      'h := (x: real, y: real) => x - y\nh := (a: real, b: real) => "s"\nh(a: 3, b: 5)'
+      'let h = (x: real, y: real) => x - y\nh := (a: real, b: real) => "s"\nh(a: 3, b: 5)'
     );
     expect(text.diagnostics).toEqual([]);
     expect(text.value.toString()).toBe('"s"');
@@ -1769,7 +1772,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // The signature of a partly annotated literal names all its parameters,
     // the bare ones too, at run time and in the static tier.
     const head =
-      'h := (x: real, y: real) => x - y\nh := (y, x: real) => x - y\n';
+      'let h = (x: real, y: real) => x - y\nh := (y, x: real) => x - y\n';
     const named = run(head + 'h(y: 5, x: 3)');
     expect(named.diagnostics).toEqual([]);
     expect(named.value.re).toBe(-2);
@@ -1794,7 +1797,9 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     ce.assign('h', ce.box(['Function', 'x', ['Typed', 'x', 'integer']]));
     expect(() => ce.assign('h', ce.box(literal))).toThrow(/not compatible/);
 
-    const source = 'h := (x: integer) => x\nh := (u) => "s"\nh(x: 3)';
+    // `h` is declared with its signature, which a later value must match.
+    const source =
+      'let h: (x: integer) -> integer = (x: integer) => x\nh := (u) => "s"\nh(x: 3)';
     const [ast] = parseEpsil(source);
     const statements = (ast as { fn: MathJsonExpression[] }).fn;
     const assign = statements[2] as { fn: MathJsonExpression[] };
@@ -1812,7 +1817,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
   test('a `function` statement over an assigned literal adds a clause', () => {
     // At run time the assigned literal is the first clause of `h`, and the
     // `function` statement with another parameter domain adds a clause.
-    const head = 'h := (x: integer) => x\nfunction h(u) -> string { "s" }\n';
+    const head = 'let h = (x: integer) => x\nfunction h(u) -> string { "s" }\n';
     const first = run(head + 'h(x: 3)');
     expect(first.diagnostics).toEqual([]);
     expect(first.value.re).toBe(3);
@@ -1829,7 +1834,8 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
   });
 
   test('a `function` statement with the same parameter domain replaces the assigned literal', () => {
-    const head = 'h := (x: integer) => x\nfunction h(u: integer) { u + 1 }\n';
+    const head =
+      'let h = (x: integer) => x\nfunction h(u: integer) { u + 1 }\n';
     const latest = run(head + 'h(u: 3)');
     expect(latest.diagnostics).toEqual([]);
     expect(latest.value.re).toBe(4);
@@ -2014,7 +2020,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // the run time accepts a literal that annotates the parameter with
     // another type, and takes its names.
     const head =
-      'h := (p, n: number) => p[1] + n\nh := (q: string, m: number) => m\n';
+      'let h = (p, n: number) => p[1] + n\nh := (q: string, m: number) => m\n';
     const latest = run(head + 'h(q: "s", m: 1)');
     expect(latest.diagnostics).toEqual([]);
     expect(latest.value.re).toBe(1);
@@ -2029,7 +2035,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'h := (p, n: number) => p[1] + n\nh := (q, m: number) => q[1] * m\nh(q: [5], m: 2)'
+      'let h = (p, n: number) => p[1] + n\nh := (q, m: number) => q[1] * m\nh(q: [5], m: 2)'
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.re).toBe(10);
@@ -2044,7 +2050,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // literal. The static tier replaces the pin too, and reports the same
     // error.
     const head =
-      'f := (x: number, y: number) => x + 3\nf := (a, b) => a * b\n';
+      'let f = (x: number, y: number) => x + 3\nf := (a, b) => a * b\n';
     const named = run(head + 'f(x: 2, y: 5)');
     expect(
       named.diagnostics.map((d) => [d.message[0], d.message[3]])
@@ -2071,8 +2077,9 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     // statement 2's runtime-error) and leaves the original binding in force,
     // so the final call computes 4 with the FIRST signature's names — and
     // draws no static diagnostic.
+    // `f` is declared with its signature, which a later value must match.
     const src =
-      'f := (x: number, y: string) => x + 3\nf := (a: number, b: number) => a * b\nf(x: 1, y: "ok")';
+      'let f: (x: number, y: string) -> number = (x: number, y: string) => x + 3\nf := (a: number, b: number) => a * b\nf(x: 1, y: "ok")';
     const { value, diagnostics } = run(src);
     expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
       ['runtime-error', 'incompatible-type'],

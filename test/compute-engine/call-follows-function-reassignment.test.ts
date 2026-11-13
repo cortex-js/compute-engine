@@ -390,7 +390,7 @@ describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () =
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'h := (x: real, factor: real) => x - factor\n' +
+      'let h = (x: real, factor: real) => x - factor\n' +
         'function g() { h(factor: 5, x: 3) }\nlet a = g()\n' +
         'h := (factor: real, x: real) => x - factor\n' +
         '[a, g(), h(factor: 5, x: 3)]'
@@ -399,7 +399,7 @@ describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () =
     expect(r.value.toString()).toBe('[-2,-2,-2]');
     // A call boxed before the redefinition, evaluated after it.
     const before = new ComputeEngine();
-    executeEpsil(before, 'h := (x: real, factor: real) => x - factor');
+    executeEpsil(before, 'let h = (x: real, factor: real) => x - factor');
     const call = before.box(['h', N('factor', 5), N('x', 3)]);
     expect(await observe(call)).toEqual(MINUS_2);
     expect(

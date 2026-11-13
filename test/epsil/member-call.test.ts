@@ -36,9 +36,9 @@ type Box = object{w: number, h: number} is Shape {
 }
 protocol Named { function name(self: Self) -> string }
 type integer is Named { function name(self) -> string { "int" } }
-c := Circle(1)
-b := Box(w: 2, h: 3)
-n := 5
+let c = Circle(1)
+let b = Box(w: 2, h: 3)
+let n = 5
 `;
 
 /** An engine with the fixture run. */
@@ -261,19 +261,19 @@ describe('what the dot does NOT do', () => {
   });
 
   test('a library function is not reached: `xs.Sort()`', () => {
-    const r = run('xs := [3, 1, 2]; xs.Sort()');
+    const r = run('let xs = [3, 1, 2]; xs.Sort()');
     expect(r.value).toContain(
       'ErrorCode("dot-call-not-a-protocol-function", "Sort", "vector<integer^3>")'
     );
     // The refusal is a canonicalization error, so the static check reports
     // it with the two spellings that work.
     expect(r.codes).toContain('static-type-error');
-    expect(run('xs := [3, 1, 2]; xs |> Sort').value).toBe('[1,2,3]');
+    expect(run('let xs = [3, 1, 2]; xs |> Sort').value).toBe('[1,2,3]');
   });
 
   test('a plain user function is not reached either', () => {
     expect(
-      run('function double(x: number) { 2 * x }; y := 3; y.double()').value
+      run('function double(x: number) { 2 * x }; let y = 3; y.double()').value
     ).toContain('dot-call-not-a-protocol-function');
   });
 
@@ -284,9 +284,9 @@ describe('what the dot does NOT do', () => {
   });
 
   test('a stored function keeps winning: `d.f(2)` calls the stored value', () => {
-    expect(run('d := {f -> (x => x + 1)}; d.f(2)').value).toBe('3');
+    expect(run('let d = {f -> (x => x + 1)}; d.f(2)').value).toBe('3');
     expect(
-      run('type pt = tuple<x: number, y: number>; p := pt(1, 2); p.x').value
+      run('type pt = tuple<x: number, y: number>; let p = pt(1, 2); p.x').value
     ).toBe('1');
   });
 
@@ -299,7 +299,7 @@ type Wrap = object{area: (number) -> number, r: number} is Shape {
   function area(self: Wrap) -> number { self.r }
   function scale(self: Wrap, k: number) -> Wrap { self }
 }
-w := Wrap(area: x => 10 * x, r: 7)
+let w = Wrap(area: x => 10 * x, r: 7)
 `;
     expect(run('w.area(2)', setup).value).toBe('20');
     expect(run('area(w)', setup).value).toBe('7');
@@ -376,7 +376,7 @@ function h(d: D) { d.area(2) }
   test('a plain value binding of the member name is not "a known function"', () => {
     // `foo := 3` is a value with no applicable definition behind it, so the
     // refusal must not recommend `foo(x)`. The ordinary field error stands.
-    const r = run('xs := [3, 1, 2]; foo := 3; xs.foo()');
+    const r = run('let xs = [3, 1, 2]; let foo = 3; xs.foo()');
     expect(r.value).not.toContain('dot-call-not-a-protocol-function');
     expect(r.value).toContain('incompatible-type');
   });
@@ -385,7 +385,7 @@ function h(d: D) { d.area(2) }
     const setup = `${SHAPES}
 protocol Handler { readonly step: (number) -> number }
 type integer is Handler { get step(self) -> ((number) -> number) { x => x + self } }
-k := 5
+let k = 5
 `;
     expect(run('k.step(1)', setup).value).toBe('6');
   });
