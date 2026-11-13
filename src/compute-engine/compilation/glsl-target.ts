@@ -182,7 +182,14 @@ export class GLSLTarget extends GPUShaderTarget {
     functionName: string,
     returnType: string,
     parameters: Array<[name: string, type: string]>,
-    options?: { constantFold?: boolean }
+    options?: {
+      constantFold?: boolean;
+      /** The names of the symbols that are locals of the code that calls
+       * the function, as the `callerLocals` option of `compile()`. A
+       * declared parameter of the function in this list is passed by its
+       * parameter name to each shader function that reads it. */
+      callerLocals?: readonly string[];
+    }
   ): string {
     // Called directly, this method is an operation (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see

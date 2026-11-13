@@ -151,6 +151,22 @@
 
 ### New Features
 
+- **The GLSL target passes the inputs that are locals of the caller to the
+  shader functions that read them.** A host that runs the code inside a
+  function of its own, `float userFn(float x, float y) { … }`, names those
+  inputs in the new compile option `callerLocals`. A user function that
+  reads one of them, directly or through another user function, takes it as
+  a trailing parameter, in the sorted order of the names. With
+  `g(u) := u + x` and `callerLocals: ['x']`, `g(1)` was `_fn_g(1.0)`, with
+  the definition `float _fn_g(float u) { return u + x; }`, which reads a
+  global `x`; it is now `_fn_g(1.0, x)`, with
+  `float _fn_g(float u, float _in_x) { return u + _in_x; }`. A call passes
+  the `vars` source of the name when it has one, and in
+  `GLSLTarget.compileFunction()`, which takes the option too, a declared
+  parameter by its name. A name with no GLSL value type that a function
+  reads declines. Without the option, the code is unchanged; the other
+  targets ignore it.
+
 - **Two operators stand for the arbitrary constants of a result.**
   `["ArbitraryConstant", k]` is any number (a constant of integration, the
   free parameter of an identity) and `["ArbitraryInteger", k]` is any integer

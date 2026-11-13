@@ -2036,7 +2036,10 @@ and `compile()` gives the diagnostic of the preparation (here
 `unsettled-shape`). Emission does not decline an expression that the pass
 accepts, except in the cases of the known limitations below; any other such
 decline is a defect. A compile that succeeds keeps its warnings, such as
-`float32-unsafe-argument`.
+`float32-unsafe-argument`. The declines of the `callerLocals` option
+(`caller-local-type`, `caller-local-source`; "Caller locals on GLSL" below)
+are found only while the code is written, so with a non-empty `callerLocals`
+`canCompile()` also writes the code, drops it, and answers such a decline.
 
 **The pass cap.** `compile()` to `glsl` counts the passes of the loops that
 the shader runs: each pass of a `Sum`, a `Product`, a `Loop` and a
@@ -2649,6 +2652,69 @@ Each other position declines, with a diagnostic of `canCompile()`:
 On a NaN operand, the shader and the interpreter take the same action: a
 relation is `false`, so `If(v > 4, Break())` does not jump, and `≠` is `true`,
 so `If(v ≠ 4, Break())` jumps.
+
+### Caller locals on GLSL: the `callerLocals` option
+
+A host can run the GLSL code inside a function of its own, where some inputs
+are parameters of that function: `float userFn(float x, float y) { … }`. A
+user function is emitted as a shader function at file scope (`_fn_g`), which
+does not see them. The option `callerLocals` names those symbols. A shader
+function that reads one of them, directly or through a shader function it
+calls, takes it as a trailing parameter, after its own parameters and after
+the extra parameters of an invariant-prefix variant, in the sorted order of
+the names. With `g(u) := u + x`, `h(x) := g(x) · y` and
+`callerLocals: ['x', 'y']`, `h(3)` compiles to:
+
+```glsl
+float _fn_g(float u, float _in_x) {
+  return u + _in_x;
+}
+
+float _fn_h(float x, float _in_x, float _in_y) {
+  return _in_y * _fn_g(x, _in_x);
+}
+
+_fn_h(3.0, x, y)   // the code
+```
+
+The parameter list depends only on the function and the option, so two
+compilations with the same option write the same text for the same function.
+The parameter is named `_in_` and the symbol name, with a suffix when the
+function or the functions it reaches use that name, so a parameter of the
+function spelled like the caller local (the `x` of `h`) does not hide it.
+The element-wise wrapper of a call with a list argument (`_fn_g_each3_1`)
+takes the same parameters and passes them on. A call in the code passes the
+`vars` source of the name when there is one, else the name; in
+`compileFunction()`, a declared parameter is passed by its name. A call in
+a shader function passes that function's own parameter.
+
+A binder of the same name does not reach into the body of a function, so in
+`\sum_{x=1}^{300} (x + g(x))` the `x` of `g` is the input. The loop of the
+shader declares `int x`, so the code holds the input in a temporary declared
+at its start, and passes it:
+
+```glsl
+float _tv2 = x;
+float _tv1 = 0.0;
+for (int x = 1; x <= 300; x++) {
+  _tv1 += float(x) + _fn_g(float(x), _tv2);
+}
+```
+
+A call under any binder of the same name passes the temporary, also where
+no shader variable hides the name (an unrolled `Sum`). A name that is not in
+the option (a uniform, a sampler) is read by its name, as without the option;
+absent or empty, the option changes no text. The other targets ignore it.
+
+A compilation declines when a shader function reads a caller local that has
+no GLSL value type (only scalars, booleans, complex values and 2–4 component
+vectors have one): with `storage: { H: 'sampler2D' }` and
+`callerLocals: ['H']`, a call `gh(H, x)` whose variant reads the texture `H`.
+It also declines when a caller local that a call passes has a `vars` source
+that is not a read of a variable (`vars: { x: 'next()' }`): the code would
+run once per call instead of once per read. The codes are
+`caller-local-type` and `caller-local-source`, and `canCompile()` with the
+option gives the same answer.
 
 ### NaN-safe helpers on the shader targets
 

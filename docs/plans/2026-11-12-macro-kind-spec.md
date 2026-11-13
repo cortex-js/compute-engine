@@ -575,3 +575,54 @@ The values of `art/hyvhlz4chj` agree with the switch on (`tycho-desk`,
 independent JavaScript model passes in both modes (tolerance 1e-6), and the
 3 changed records differ only by the inlined helpers of the value rows and
 renumbered temporaries. The emitted code of the records was not run.
+
+**M7, as built** (implementer under `compute-engine-67`, 2026-11-13, on
+main `9fb18f1b0a2d1d08086fc08f09a80770f36992ff`). The GLSL compile option
+`callerLocals` (symbol names) and the same option of
+`GLSLTarget.compileFunction()`. A shader function that reads a name of the
+option, directly or through a function it calls, takes it as a trailing
+parameter, after its own parameters and the extra parameters of an
+invariant-prefix variant, in the sorted order of the names; the element-wise
+wrapper takes the same parameters and passes them on. While a definition body
+compiles, the `var` hook of the compilation root answers the parameter for a
+read of such a name and records it in the definition on top of a stack; a
+call appends the callee's names, resolved in the same way
+(`gpu-caller-locals.ts`). `g(1)` with `g(u) := u + x` is
+`float _fn_g(float u, float _in_x) { return u + _in_x; }` and
+`_fn_g(1.0, x)`; `h(3)` with `h(x) := g(x) · y` is
+`float _fn_h(float x, float _in_x, float _in_y) { return _in_y * _fn_g(x, _in_x); }`
+and `_fn_h(3.0, x, y)`. Differences from the brief of the task:
+
+- The parameter name is `_in_` and the name, with a suffix `_2`, `_3` when
+  a symbol reachable from the function's literal (`reachableSymbolNames()`)
+  or a parameter has that name. It is not taken from `registryLocalName()`,
+  whose names depend on the names of the root expression, so the text of a
+  function would differ between two compilations.
+- Under a binder of the same name, a call in the code passes a temporary
+  declared at the start of the code (`float _tv2 = x;`), for every binder,
+  also an unrolled `Sum` whose code declares no `x`. In
+  `compileFunction()`, any binder at all makes a declared parameter go
+  through the temporary (the test compares the set of bound names with the
+  one of the root). Both are sound and add one temporary.
+- A `vars` source of a passed name that is not a read of a variable
+  (`next()`) declines: as an argument it would run once per call, not once
+  per read. A name of the option that has a value with no `vars` entry (it
+  is written as its value) or that the target spells as a constant stays as
+  without the option.
+- `compileShader()` does not take the option. `compile()` and
+  `canCompile()` of `compile-expression.ts` forward it. The two declines are
+  found only while the code is written, so `canCompile()` with a non-empty
+  option writes the code, drops it, and answers either decline (review
+  finding).
+- What can be at file scope and read an input: the ordinary definitions, the
+  complex copies, the call-shape specializations, the invariant-prefix
+  variants and the variants that read a list input (`f#bind…`) go through
+  the `define` hook and follow the rule; the element-wise wrapper follows it;
+  the shared calls of `gpu-shared-calls.ts`, the calls written in place
+  (reserved parameter names, list-valued calls, point calls, applied
+  derivatives) and a stored value are written into the code that reads them,
+  so their reads are reads of that code (a stored value read in a function
+  body reads the parameter); a function literal, and so a block local
+  function, is outside the GLSL fragment; the pass counter and the `_gpu_*`
+  helpers read no input; the multi-clause dispatch and the declared union
+  dispatch are emitted on JavaScript only.

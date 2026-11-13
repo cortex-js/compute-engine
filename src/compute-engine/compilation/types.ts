@@ -2403,6 +2403,42 @@ export interface CompilationOptions<Expr = unknown> {
    */
   vars?: Record<MathJsonSymbol, TargetSource>;
 
+  /**
+   * GLSL target only: the names of the symbols that are locals of the code
+   * that calls the compiled code, such as the parameters of the function
+   * that the host wraps the code in (`float userFn(float x, float y) { … }`).
+   * Each is a symbol name, not GLSL text. The other targets ignore it.
+   *
+   * An emitted shader function (`_fn_g`) is declared at file scope, where
+   * such a local is not visible. So a shader function that reads one of
+   * these names, directly or through a shader function it calls, takes it as
+   * a trailing parameter, after its own parameters, in the sorted order of
+   * the names. The parameter list depends only on the function and this
+   * option, so two compilations with the same option write the same text for
+   * the same function:
+   *
+   * ```glsl
+   * // g(u) := u + x, callerLocals: ['x']
+   * float _fn_g(float u, float _in_x) {   // preamble
+   *   return u + _in_x;
+   * }
+   * _fn_g(1.0, x)                         // code
+   * ```
+   *
+   * A call in the compiled code passes the text of the name there: its
+   * `vars` source when it has one, else its name. Under a binder of the same
+   * name (`\sum_{x=1}^{3} (x + g(x))`), the shader function still reads the
+   * input, and the code passes a temporary that holds it, declared at the
+   * start of the code.
+   *
+   * A name that a shader function reads declines when it has no GLSL value
+   * type (only scalars, booleans, complex values and 2–4 component vectors
+   * have one), or when its `vars` source is not a read of a variable. A name
+   * that is not in this list (a uniform, a sampler) is read by its name, as
+   * without the option. Absent or empty, the option changes nothing.
+   */
+  callerLocals?: readonly MathJsonSymbol[];
+
   /** Additional imports/libraries to include */
   imports?: unknown[];
 

@@ -125,6 +125,16 @@ import type {
 } from './gpu-declared-types.js';
 import { gpuColorOperand } from './gpu-color.js';
 import {
+  beginCallerLocalsDefinition,
+  CALLER_LOCAL_SOURCE_CODE,
+  callerLocalsArguments,
+  callerLocalsParameters,
+  installCallerLocals,
+  isCallerLocalsDecline,
+  withCallerLocalAliases,
+  wrapperCallerLocals,
+} from './gpu-caller-locals.js';
+import {
   compileGPUConditionalArm,
   gpuAssertExpressionBody,
   gpuAssertExpressionOnly,
@@ -1014,23 +1024,37 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           `a${i}`,
           mapped[i] ? vecType! : sig.params[i],
         ]);
+        // The wrapper takes the caller locals that `name` reads
+        // (`callerLocals` option) and passes them on.
+        const trailing = wrapperCallerLocals(
+          registry,
+          wrapper,
+          name,
+          id,
+          params.map(([p]) => p)
+        );
         const components = ['x', 'y', 'z', 'w'].slice(0, width);
         const body = `${vecType}(${components
           .map(
             (c) =>
-              `${name}(${args
-                .map((_, i) => (mapped[i] ? `a${i}.${c}` : `a${i}`))
-                .join(', ')})`
+              `${name}(${[
+                ...args.map((_, i) => (mapped[i] ? `a${i}.${c}` : `a${i}`)),
+                ...trailing.map(([p]) => p),
+              ].join(', ')})`
           )
           .join(', ')})`;
-        registry.defs.set(wrapper, declareFn(wrapper, vecType, params, body));
+        registry.defs.set(
+          wrapper,
+          declareFn(wrapper, vecType, [...params, ...trailing], body)
+        );
       }
-      return `${wrapper}(${args
-        .map((arg) => BaseCompiler.compileValueOperand(arg, target))
-        .join(', ')})`;
+      return `${wrapper}(${[
+        ...args.map((arg) => BaseCompiler.compileValueOperand(arg, target)),
+        ...callerLocalsArguments(registry, wrapper, target),
+      ].join(', ')})`;
     };
 
-    return {
+    const registry: NonNullable<CompileTarget<Expression>['userFunctions']> = {
       defs: new Map<string, string>(),
       compiling: new Set<string>(),
       lowering: {
@@ -1339,6 +1363,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
           const allNames = [...params, ...extras.map((x) => x.name)];
           const allTypes = [...paramTypes, ...extraTypes.map((x) => x.shader)];
+          // The caller locals that the body read (`callerLocals` option):
+          // trailing parameters of the declaration, which `call` passes after
+          // the arguments, so they are not in the signature it checks.
+          const trailing = callerLocalsParameters(registry, name, id);
           // An extra parameter is never a colour SLOT: a colour-typed formal
           // parameter has its argument converted at the call site
           // (`gpuColorOperand`), because the argument is written by the
@@ -1356,7 +1384,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           return declareFn(
             name,
             ret,
-            allNames.map((p, i): [string, string] => [p, allTypes[i]]),
+            [
+              ...allNames.map((p, i): [string, string] => [p, allTypes[i]]),
+              ...trailing,
+            ],
             code
           );
         },
@@ -1442,7 +1473,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 )
               : BaseCompiler.compileValueOperand(arg, target);
           });
-          return `${name}(${code.join(', ')})`;
+          // The caller locals that the function reads (`callerLocals`
+          // option) follow its own arguments.
+          return `${name}(${[
+            ...code,
+            ...callerLocalsArguments(registry, name, target),
+          ].join(', ')})`;
         },
 
         value: ({ id }) => {
@@ -1455,6 +1491,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         },
       },
     };
+    // While the body of a definition compiles, a read of a caller local is
+    // the parameter of that definition (`gpu-caller-locals.ts`).
+    const lowering = registry.lowering!;
+    const define = lowering.define;
+    lowering.define = (ctx) => {
+      const end = beginCallerLocalsDefinition(registry, ctx.name, ctx.literal, [
+        ...ctx.params,
+        ...(ctx.extraParams ?? []).map((x) => x.name),
+      ]);
+      try {
+        return define(ctx);
+      } finally {
+        end?.();
+      }
+    };
+    return registry;
   }
 
   /**
@@ -1583,7 +1635,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   protected compileDeclaredFunctionBody(
     expr: Expression,
     parameters: ReadonlyArray<[name: string, type: string]>,
-    options?: { constantFold?: boolean }
+    options?: { constantFold?: boolean; callerLocals?: readonly string[] }
   ): string {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry.
@@ -1598,6 +1650,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const naming = BaseCompiler.namingContext(bodyTarget);
     for (const [name] of parameters) naming.usedNames.add(name);
     const target = gpuDeclaredBodyTarget(bodyTarget, declarations);
+    // A caller local that is a declared parameter is passed by its
+    // parameter name (`gpu-caller-locals.ts`); the definitions read the
+    // `var` hook of `bodyTarget`, the root of their registry, which does not
+    // know the parameters.
+    installCallerLocals(bodyTarget, options?.callerLocals, expr.engine, {
+      rootText: (name) =>
+        target.var(name) ?? (target.mangleId ? target.mangleId(name) : name),
+      typeOf: (name) =>
+        BaseCompiler.withLocalShapeFrame(
+          new Map(),
+          gpuDeclaredShapeFrame(declarations),
+          () => gpuTypeOfValue(expr.engine.symbol(name), target),
+          true
+        ),
+      rootBound: target.boundVars,
+    });
     BaseCompiler.beginRootPreprocessing(expr, target);
     // A point value is written in place of its symbol, as in `compile()`
     // (`inlinePointValues`). The declared parameters are bound, so they are
@@ -1645,7 +1713,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           BaseCompiler.compileFunctionBody(prepared, target)
       )
     );
-    return body;
+    return withCallerLocalAliases(bodyTarget.userFunctions, body);
   }
 
   compile(
@@ -1717,7 +1785,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   /**
    * Whether `compile()` gives code for `expr` with `options`, by the fragment
    * of the target: the prepare stage (`prepareRoot()`) and the typing pass
-   * (`typeFragment()` with `glslFragmentDefinition()`). It writes no code.
+   * (`typeFragment()` with `glslFragmentDefinition()`). It writes no code,
+   * except with a non-empty `callerLocals` option: the declines of that
+   * option are found while the code is written, so the code is then written
+   * and dropped, and such a decline is the answer.
    *
    * It never throws. An error of an option (an unknown storage kind, a mode
    * that the target does not offer), and a decline of the prepare stage (the
@@ -1736,10 +1807,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         this.canCompile(expr, options)
       );
     try {
-      return this.preparedAndTypedForCheck(
+      const answer: CanCompileResult = this.preparedAndTypedForCheck(
         expr,
         options,
-        ({ prepared, annotation, handlerCode }) => {
+        ({ prepared, annotation, handlerCode }): CanCompileResult => {
           if (annotation.refusal !== undefined)
             return {
               ok: false as const,
@@ -1821,6 +1892,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           };
         }
       );
+      // The declines of the `callerLocals` option (`gpu-caller-locals.ts`)
+      // are found while the definitions are written: which caller locals a
+      // shader function reads, and which calls pass them, is known only
+      // then. With the option, the code is written and dropped, so that the
+      // answer is the one of `compile()` for those declines.
+      if (!answer.ok || (options.callerLocals?.length ?? 0) === 0)
+        return answer;
+      try {
+        this.compile(expr, { ...options, fallback: false });
+      } catch (e) {
+        if (e instanceof CompileDeclineError && isCallerLocalsDecline(e))
+          return { ok: false, diagnostic: e.diagnostic };
+        throwIfCallerCancellation(e, expr.engine._deadlineFrame);
+      }
+      return answer;
     } catch (e) {
       return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
     }
@@ -2158,6 +2244,37 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
+    // The names that are locals of the caller's code: an emitted function
+    // that reads one takes it as a parameter (`gpu-caller-locals.ts`). A
+    // call in the code passes the text of the name there; caller code (a
+    // `vars` source that is not a plain read) would then run once per call
+    // instead of once per read, so it declines.
+    installCallerLocals(target, options.callerLocals, expr.engine, {
+      rootText: (name) => {
+        if (opaqueVar(name))
+          throw new CompileDeclineError({
+            code: CALLER_LOCAL_SOURCE_CODE,
+            kind: 'capability',
+            binding: name,
+            message:
+              `Could not compile: the caller local "${name}" (the ` +
+              `\`callerLocals\` option) has a \`vars\` source that is not ` +
+              `a read of a variable, so it cannot be passed to the shader ` +
+              `functions that read it.`,
+          });
+        return (
+          target.var(name) ?? (target.mangleId ? target.mangleId(name) : name)
+        );
+      },
+      typeOf: (name) =>
+        BaseCompiler.withLocalShapeFrame(
+          new Map(),
+          new Map(),
+          () => gpuTypeOfValue(expr.engine.symbol(name), target),
+          true
+        ),
+      rootBound: target.boundVars,
+    });
     // A helper whose value is a LIST has no by-reference lowering here (a
     // shader function cannot return a run-time list), and the fixed-width
     // unroll cannot see the list's width through the call. Substituting the
@@ -2331,8 +2448,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // emitted definitions that every call of the shader passes a finite
     // value (`gpuRecordCallSiteFacts`).
     gpuRecordCallSiteFacts(expr, target);
-    let code = BaseCompiler.compileCseRoot(expr, target, 0, () =>
-      BaseCompiler.compileFunctionBody(expr, target)
+    let code = withCallerLocalAliases(
+      target.userFunctions,
+      BaseCompiler.compileCseRoot(expr, target, 0, () =>
+        BaseCompiler.compileFunctionBody(expr, target)
+      )
     );
     // The pass cap: when a loop of the root or of a user function that it
     // calls counts its passes, the root sets the counter to zero, computes

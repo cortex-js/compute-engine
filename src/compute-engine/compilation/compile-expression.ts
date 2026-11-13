@@ -586,6 +586,7 @@ function compileExpression<
       operators: options?.operators,
       functions: options?.functions,
       vars: options?.vars,
+      callerLocals: options?.callerLocals,
       imports: options?.imports,
       preamble: options?.preamble,
       mode: options?.mode,
@@ -776,6 +777,7 @@ export function canCompile(
     return check.call(languageTarget, expr, {
       functions: options?.functions,
       vars: options?.vars,
+      callerLocals: options?.callerLocals,
       preamble: options?.preamble,
       mode: options?.mode,
       iterationBudget: options?.iterationBudget,
