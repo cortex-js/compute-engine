@@ -3118,8 +3118,13 @@ export interface Expression {
   isCollection: boolean;
 
   /**
-   * The collection shape that this expression promises, read without
-   * evaluating it, or `undefined` when it promises no collection.
+   * The collection shape that this expression promises, or `undefined` when
+   * it promises no collection.
+   *
+   * It does not evaluate an application or a symbol. For a collection value
+   * it reads the collection facets, and the `count` of a lazy view over an
+   * eager source (`Join(f(1), [4])`, a `Filter`) evaluates that source: it
+   * calls `f`, or runs the filter's function once per element.
    *
    * `staticShape` answers the SHAPE question: "what does this expression
    * promise to be?". `isCollection` answers the CAPABILITY question: "is a

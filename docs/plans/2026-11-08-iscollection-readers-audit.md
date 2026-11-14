@@ -4,10 +4,10 @@ Date: 2026-11-08. Scope: `src/compute-engine/**/*.ts`, every read of `.isCollect
 
 ## Summary
 
-1. Total 214 sites: C 137, K 4, S 59, M 14. Two of the C rows are not reads of an expression (the handler field `isCollection:` at `boxed-operator-definition.ts:2537` and `collection-utils.ts:6332`); they are listed for completeness.
-2. Per directory: library 98 (C 84, K 0, S 8, M 6); boxed-expression 59 (C 38, K 0, S 18, M 3); compilation 42 (C 4, K 4, S 30, M 4); other 15 (C 11, K 0, S 3, M 1).
+1. Total 214 sites: C 139, K 4, S 58, M 13 (after the two reclassifications of 2026-11-14; C 137, S 59, M 14 before). Two of the C rows are not reads of an expression (the handler field `isCollection:` at `boxed-operator-definition.ts:2537` and `collection-utils.ts:6332`); they are listed for completeness.
+2. Per directory: library 98 (C 84, K 0, S 8, M 6); boxed-expression 59 (C 39, K 0, S 18, M 2); compilation 42 (C 4, K 4, S 30, M 4); other 15 (C 12, K 0, S 2, M 1).
 3. 52 sites already pair `isCollection` with a type test (S 50, C 2, K 0, M 0); the type test shows that the author wanted the shape, and the answer of the paired S sites would not change.
-4. Result would change for 83 C or K sites (51 expected, 32 possible), and for 18 S or M sites.
+4. Result would change for 85 C or K sites (51 expected, 34 possible), and for 16 S or M sites.
 5. Facets that depend on `isCollection` in their own definition (`isEnumerableCollection`, `isFiniteCollection`, `isEmptyCollection`, `staticShape`) and the predicate `isValuelessCollectionTyped` would change as well; their readers are not in this count.
 
 ## Table: library (98 sites)
@@ -135,7 +135,7 @@ Date: 2026-11-08. Scope: `src/compute-engine/**/*.ts`, every read of `.isCollect
 | validate.ts:1965 | S | absent scalar beside no collection operand | yes | paired |
 | validate.ts:2156 | C | settled absentable value must be a collection | no | then reads a type. Change: (possible)  |
 | solve-domain.ts:292 | C | last spec is a usable domain | no | domain is enumerated or filtered. Change: an inert `g(x)` domain is accepted |
-| solve-domain.ts:676 | M | equation is a collection: type error | partly: an error message about the shape | excludes literal heads and strings. Change: (possible) a list-typed application equation gets the error |
+| solve-domain.ts:676 | C (was M; reclassified 2026-11-14, see the follow-up) | equation is a collection: type error | partly: an error message about the shape | excludes literal heads and strings. Change: (possible) a list-typed application equation gets the error |
 | solve-domain.ts:737 | C | `Element` domain is enumerable | no | domain is walked. Change:  |
 | solve-domain.ts:1293 | C | domain is usable (the comment says an unbound symbol is not) | no | same. Change:  |
 | rules.ts:243 | M | rule condition `collection` | unclear: a user rule predicate can mean either | public predicate in rules. Change: (possible)  |
@@ -242,7 +242,7 @@ Date: 2026-11-08. Scope: `src/compute-engine/**/*.ts`, every read of `.isCollect
 | collection-utils.ts:6332 | C | N/A: copies the `isCollection` handler field of a definition, not an expression read | n/a | listed for completeness |
 | function-utils.ts:11096 | C | an argument is a collection value, so mark the frame | no | arguments are evaluated. Change: (possible)  |
 | symbolic/simplify-rules.ts:885 | C | operand is not a collection | yes | `type.matches('number')` follows |
-| symbolic/trig-rewrite.ts:542 | S | node is a collection operator: reduce operands, keep operator | partly | canonical node, not a value. Change: (possible)  |
+| symbolic/trig-rewrite.ts:542 | C (was S; reclassified 2026-11-14, see the follow-up) | node is a collection operator: reduce operands, keep operator | partly | canonical node, not a value. Change: (possible)  |
 
 ## Readers that would change under a shape-valued isCollection
 
@@ -358,11 +358,11 @@ Class C and K sites whose result changes. The consequence is the expected one.
 - library/relational-operator.ts:2406 (M): an application `g(x)` would count as the present collection
 - library/utils.ts:4439 (M): possible: 
 - library/calculus.ts:7518 (M): possible: an entry `g(x)` typed as a list would be refused
-- boxed-expression/solve-domain.ts:676 (M): possible: a list-typed application equation gets the error
+- boxed-expression/solve-domain.ts:676 (C since 2026-11-14, was M): possible: a list-typed application equation gets the error
 - boxed-expression/rules.ts:243 (M): possible: 
 - boxed-expression/boxed-function.ts:13933 (M): `g(x)` typed as a list would thread
 - collection-utils.ts:3779 (M): an unevaluated collection-typed call stops being valueless, so every caller of this predicate changes
-- symbolic/trig-rewrite.ts:542 (S): possible: 
+- symbolic/trig-rewrite.ts:542 (C since 2026-11-14, was S): possible: 
 
 ### Predicates and facets that would change with the getter
 
@@ -374,7 +374,7 @@ Class C and K sites whose result changes. The consequence is the expected one.
 
 ## Counts
 
-Sites: 214. C 137, K 4, S 59, M 14. Paired with a type test: 52. Result changes: C or K 83, S or M 18. Not an expression read (listed for completeness): 2.
+Sites: 214. C 139, K 4, S 58, M 13. Paired with a type test: 52. Result changes: C or K 85, S or M 16. Not an expression read (listed for completeness): 2.
 
 ## Follow-up 2026-11-14: what each unpaired shape reader reads now
 

@@ -215,8 +215,12 @@ The user decided five rules on 2026-09-29:
 Two questions about a collection have two names:
 
 - `staticShape` answers the SHAPE question: what does this expression promise
-  to be, read without evaluating it? It is `undefined` when the expression
-  promises no collection, else `{ indexed, count, elementType }`.
+  to be? It is `undefined` when the expression promises no collection, else
+  `{ indexed, count, elementType }`. It does not evaluate an application or a
+  symbol. For a collection value it reads the collection facets, and the
+  `count` of a lazy view over an eager source (`Join(f(1), [4])`, a `Filter`)
+  evaluates that source: it calls `f`, or runs the filter's function once per
+  element.
 - `isCollection` (with `isIndexedCollection`, `count`, `isFiniteCollection`
   and `isEmptyCollection`) answers the CAPABILITY question: is a collection
   value present that I can walk now? The lazy operators of the library read
