@@ -1241,3 +1241,45 @@ Tycho's statement of the larger gain: the scopes that remain no longer
 carry correctness (today a missing scratch scope is a type that leaks with
 no message).
 
+### C6 as built, and the design of `inputs` (2026-11-13)
+
+**`symbolic` is in release 0.188.1** (with later corrections on main), in a
+wider form than C6 states: a name in it is an input wherever the
+compilation reads its name, and its type is the one that the scope of the
+compilation declares. It came with the fix of CE-1273 (a compilation reads
+each name from the scope the expression was boxed in,
+`docs/COMPILATION-MODEL.md`, "The scope a compilation reads"). Tycho keeps
+its pushed scopes and names in `symbolic` every name that they declare with
+no value; its gates pass on 0.188.1.
+
+**`inputs: { name: type }` is not built.** It is what lets Tycho delete the
+second declarations at its 13 compile sites (its census:
+`~/dev/compute-engine-recovery/ce1273/tycho-census-pushed-scope-declarations.md`,
+nine kinds). A version made by hand with the public API
+(`~/dev/compute-engine-recovery/ce1273/inputs-proto.mts`, run on main at
+`23235c7446406c44b60b30d0ff4da49a43833157`):
+
+1. push a scope of the compilation's own and declare each name of `inputs`
+   there with its type and no value;
+2. replace, in the expression, each occurrence of such a name by an
+   occurrence bound to that declaration (`expr.subs()`); the other names
+   keep the definitions they were boxed with, which a `rebind()` of the
+   whole expression would not do;
+3. compile with the names in `symbolic`, then pop the scope.
+
+| Kind of Tycho's census | Program | Result |
+|---|---|---|
+| 1, an axis with no declaration, read in a body | `g(t) := t x`, `g(2) + x`, `inputs: { x: 'real' }` | `_.x + _fn_g(2)`, 9 for `x = 3` |
+| 2, the complex variable | `z^2 + 1`, `inputs: { z: 'complex' }` | compiles on the complex lane |
+| 6, a document collection used as a scalar parameter | `n := [1, 2, 3]`, `n x`, `inputs: { n: 'real' }` | `_.n * _.x`; without it, a broadcast over the stored list |
+
+Not settled: a called BODY that reads a document definition of an input
+name with another declared type (kind 3: a slider declared
+`real<-10..10>`, given as `real`). Step 2 does not reach a body, so its
+occurrence keeps the document's type and its value is hidden: the code of
+the body is typed with the range. Options: (a) accept it and document it
+(the host gave a wider type than the declaration, and the body was written
+against the declaration); (b) give the definition the type of `inputs` for
+the time of the compilation, as its value is hidden, at the cost of two
+moves of the type version for each such compilation; (c) decline. Tycho was
+asked how often its documents meet it.
