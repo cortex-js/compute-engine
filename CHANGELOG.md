@@ -2,6 +2,15 @@
 
 ### Breaking Changes
 
+- **`AlgebraicGenerator(List(c₀, …, cₙ))` is deprecated: it is
+  `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root with no
+  embedding.** It stays for one release as an alias that canonicalizes to
+  `PolynomialRoot`, so `AlgebraicGenerator(List(-2, 0, 1))` is now
+  `PolynomialRoot(t² − 2, t)` and `Factor(x² − 2, x, AlgebraicGenerator(List(-2,
+  0, 1)))` prints its factors on `PolynomialRoot(t² − 2, t)`. `PolynomialRoot(p,
+  x, k)` is still the `k`-th root, an embedding. (#492, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`ContinuedFraction` of a quadratic irrational is its periodic form, and
   every term it gives for an exact real is correct.**
   `ContinuedFraction(Sqrt(2))` was twenty terms `[1, 2, 2, …]`; it is
@@ -15,6 +24,46 @@
   `FromContinuedFraction([1, [2]])` reads the period back and is `Sqrt(2)`.
   (PR #571, contributed by [enumeratio](https://github.com/enumeratio),
   fixes [#570](https://github.com/cortex-js/compute-engine/issues/570))
+
+### New Features
+
+- **Algebraic numbers: minimal polynomials and the ring of integers of the
+  field a number generates** (#492, contributed by
+  [enumeratio](https://github.com/enumeratio)). `MinimalPolynomial(1 + ∛2, x)`
+  is `x³ − 3x² + 3x − 3`, `MinimalPolynomial(1/(1 + √2), x)` is `x² + 2x − 1`,
+  `IsAlgebraicInteger((1 + √−5)/2)` is `False`,
+  `AlgebraicNumberNorm(1 + √2)` is `−1` and `AlgebraicNumberTrace(1 + √2)` is
+  `2`. `NumberFieldDiscriminant(∛19)` is `−1083`,
+  `NumberFieldIntegralBasis(∛19)` is `[1, ∛19, (1 + ∛19 + ∛19²)/3]` and
+  `NumberFieldSignature(∛2)` is `[1, 1]`; the discriminant of the field of a
+  number that lies in a proper subfield is that subfield's
+  (`NumberFieldDiscriminant(∜2²)` is `8`), and a rational generates ℚ.
+
+  `PolynomialRoot(p, x, k)` is Mathematica's `Root[Function[x, p], k]`: the
+  `k`-th root of the polynomial `p` in `x`, a bound variable, real roots first
+  in increasing order and then complex roots by real and imaginary part. It
+  is a numbered embedding, one particular complex number (`N()` gives it, for
+  any degree); `PolynomialRoot(p, x)` with no index is the abstract root of
+  an irreducible `p`, with no embedding. The roots are numbered only when
+  disks around them prove their separation and the order of their real
+  parts; otherwise the call stays unevaluated. The root of a quadratic is a
+  radical, and the root of a cubic or higher stays `PolynomialRoot` until
+  `N()` (`Root` is the n-th root and keeps its meaning).
+
+  An argument is read as a polynomial in one generator: a radical of a
+  rational (`Root(-2, 3)` is the real cube root, as everywhere in the engine,
+  and `Root(-2, 6)` the principal sixth root), `i`, the golden ratio or a
+  `PolynomialRoot`, with sums, products, powers and quotients. Several roots of
+  one irreducible polynomial are read in its splitting field:
+  `MinimalPolynomial(PolynomialRoot(x³ − 2, x, 1) + PolynomialRoot(x³ − 2, x,
+  2), x)` is `x³ + 2`. Anything else, such as `√2 + √3` or `π`, a field of
+  degree above 12, or a polynomial whose irreducibility the factorization does
+  not certify, stays unevaluated, with its argument as written. The
+  arithmetic, characteristic polynomials and discriminants are those of the
+  number-field code of `Factor`; the ring of integers comes from Eisenstein's
+  criterion and Round 2 (Cohen, _A Course in Computational Algebraic Number
+  Theory_, §6.1-6.2), under the engine's deadline, and the answers agree
+  with Mathematica and Sage.
 
 ### Improvements
 

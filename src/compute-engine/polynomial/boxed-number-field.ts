@@ -3,6 +3,7 @@ import {
   checkDeadlineEvery,
 } from '../../common/interruptible.js';
 import type { Expression } from '../global-types.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { bigint } from '../numerics/bigint.js';
@@ -31,22 +32,79 @@ function rational(e: Expression): RationalCoefficient | undefined {
   return n === null || d === null ? undefined : q(n, d);
 }
 
+/**
+ * `e` as a polynomial in `x` with rational coefficients, ascending, or `undefined`. It reads the
+ * sums, products, negations and small integer powers of a canonical polynomial.
+ */
+function polynomialIn(
+  e: Expression,
+  x: string,
+  depth = 0
+): RationalCoefficient[] | undefined {
+  const P = new FieldPolynomials(Q);
+  if (depth > 256) return undefined;
+  const r = rational(e);
+  if (r) return P.trim([r]);
+  if (sym(e) === x) return [Q.zero, Q.one];
+  if (!isFunction(e)) return undefined;
+  const ops = e.ops.map((o) => polynomialIn(o, x, depth + 1));
+  if (ops.some((o) => o === undefined)) return undefined;
+  const cs = ops as RationalCoefficient[][];
+  if (e.operator === 'Add') return cs.reduce((s, c) => P.add(s, c), []);
+  if (e.operator === 'Negate') return P.scale(cs[0]!, q(-1n));
+  if (e.operator === 'Multiply') {
+    let product: RationalCoefficient[] = [Q.one];
+    for (const c of cs) {
+      product = P.mul(product, c);
+      if (product.length > 129) return undefined;
+    }
+    return product;
+  }
+  if (e.operator === 'Power') {
+    const n = rational(e.op2);
+    if (!n || n.denominator !== 1n || n.numerator < 0n || n.numerator > 128n)
+      return undefined;
+    let power: RationalCoefficient[] = [Q.one];
+    for (let i = 0; i < Number(n.numerator); i++) {
+      power = P.mul(power, cs[0]!);
+      if (power.length > 129) return undefined;
+    }
+    return power;
+  }
+  return undefined;
+}
+
+/** The ascending coefficients of an abstract root `PolynomialRoot(p, x)`: `p` rational in `x`. */
+function rootCoefficients(g: Expression): RationalCoefficient[] | undefined {
+  if (!isFunction(g, 'PolynomialRoot') || g.ops.length !== 2) return undefined;
+  // The operands of a held operator can still be as written (parse route): the
+  // canonical form removes delimiters and keeps the entries exact.
+  const x = sym(g.op2.canonical);
+  if (x === undefined) return undefined;
+  const list = polynomialIn(g.op1.canonical, x);
+  return list && list.length >= 2 && list.length <= 129 ? list : undefined;
+}
+
+/**
+ * The ascending coefficients of the list of a deprecated `AlgebraicGenerator(List(c₀, …, cₙ))`
+ * that is not yet a `PolynomialRoot` (its entries are not all exact rationals).
+ */
+function listCoefficients(g: Expression): RationalCoefficient[] | undefined {
+  if (!isFunction(g, 'AlgebraicGenerator') || g.ops.length !== 1)
+    return undefined;
+  const list = g.op1.canonical;
+  if (!isFunction(list, 'List')) return undefined;
+  if (list.ops.length < 2 || list.ops.length > 129) return undefined;
+  const coefficients = list.ops.map((c) => rational(c.canonical));
+  return coefficients.some((c) => c === undefined)
+    ? undefined
+    : (coefficients as RationalCoefficient[]);
+}
+
 /** An explicit abstract generator, or a root of a rational binomial. */
 function definingPolynomial(g: Expression): RationalCoefficient[] | undefined {
-  if (isFunction(g, 'AlgebraicGenerator')) {
-    if (g.ops.length !== 1) return undefined;
-    // The operand of a lazy operator arrives unbound on the parse route:
-    // `AlgebraicGenerator([-2, 0, 1])` holds `Delimiter(List(…))`. The
-    // canonical form removes the delimiter and keeps the entries exact.
-    const list = g.op1.canonical;
-    if (!isFunction(list, 'List')) return undefined;
-    if (list.ops.length < 2 || list.ops.length > 129) return undefined;
-    // Lazy operands can still contain Rational/Divide function nodes. Their
-    // canonical form is exact; numerical evaluation would lose the relation.
-    const coefficients = list.ops.map((c) => rational(c.canonical));
-    if (coefficients.some((c) => c === undefined)) return undefined;
-    return coefficients as RationalCoefficient[];
-  }
+  if (isFunction(g, 'PolynomialRoot')) return rootCoefficients(g);
+  if (isFunction(g, 'AlgebraicGenerator')) return listCoefficients(g);
   const r = rational(g);
   if (r) return [Q.neg(r), Q.one];
   // Canonical exact square roots and i can be boxed numbers rather than
@@ -80,7 +138,7 @@ function definingPolynomial(g: Expression): RationalCoefficient[] | undefined {
 /**
  * The fields whose defining polynomial was proved irreducible, by the text of
  * that polynomial made monic (so `2t² - 4` and `t² - 2` share an entry). Each
- * `AlgebraicGenerator` evaluation, each reduced power of a generator and each
+ * abstract-root evaluation, each reduced power of a generator and each
  * `Factor` call with a field argument needs the field, and the proof is a
  * complete rational factorization of the polynomial. A `RationalNumberField`
  * is immutable and does not depend on an engine, so one instance serves every
@@ -92,7 +150,12 @@ function definingPolynomial(g: Expression): RationalCoefficient[] | undefined {
 const certifiedFields = new Map<string, RationalNumberField>();
 const MAX_CERTIFIED_FIELDS = 64;
 
-function certifiedField(
+/**
+ * The field of an irreducible rational polynomial. Throws `RangeError` when
+ * it is reducible, and `PolynomialBudgetExceeded` when the proof does not
+ * finish within the budget.
+ */
+export function certifiedField(
   polynomial: readonly RationalCoefficient[],
   options: NumberFieldFactorOptions
 ): RationalNumberField {
@@ -110,15 +173,17 @@ function certifiedField(
 }
 
 /**
- * The field of an `AlgebraicGenerator` whose defining polynomial is proved
- * irreducible, or `undefined`: the descriptor is malformed or reducible, or
- * the proof does not finish within the default budget. A cancellation by the
- * deadline is not caught.
+ * The field of an abstract root `PolynomialRoot(p, x)` (or the deprecated
+ * `AlgebraicGenerator`) whose defining polynomial is proved irreducible, or
+ * `undefined`: the descriptor is malformed or reducible, or the proof does not
+ * finish within the default budget. A cancellation by the deadline is not
+ * caught.
  */
 export function certifiedGeneratorField(
   g: Expression
 ): RationalNumberField | undefined {
-  if (!isFunction(g, 'AlgebraicGenerator')) return undefined;
+  if (!isFunction(g, 'PolynomialRoot') && !isFunction(g, 'AlgebraicGenerator'))
+    return undefined;
   const polynomial = definingPolynomial(g);
   if (!polynomial) return undefined;
   const ce = g.engine;
@@ -131,6 +196,27 @@ export function certifiedGeneratorField(
       return undefined;
     throw e;
   }
+}
+
+/**
+ * `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)` for a deprecated `AlgebraicGenerator(List(c₀, …, cₙ))`
+ * whose entries are all exact rationals, or `undefined`.
+ */
+export function rootOfGeneratorList(g: Expression): Expression | undefined {
+  const coefficients = listCoefficients(g);
+  if (!coefficients) return undefined;
+  const number = (n: bigint): MathJsonExpression => ({ num: n.toString() });
+  const terms = coefficients.flatMap((c, i): MathJsonExpression[] => {
+    if (c.numerator === 0n) return [];
+    const value =
+      c.denominator === 1n
+        ? number(c.numerator)
+        : (['Rational', number(c.numerator), number(c.denominator)] as const);
+    return [
+      i === 0 ? value : ['Multiply', value, i === 1 ? 't' : ['Power', 't', i]],
+    ];
+  });
+  return g.engine.expr(['PolynomialRoot', ['Add', ...terms], 't']);
 }
 
 /** Validate the abstract generator without choosing a complex embedding. */

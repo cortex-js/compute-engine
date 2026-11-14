@@ -172,7 +172,7 @@ describe('Factor over an explicit number field', () => {
     test('below the degree, negative and large powers are kept', () => {
       for (const k of [1, -2, 200])
         expect(ce.box(['Power', b, k]).operator).toBe(
-          k === 1 ? 'AlgebraicGenerator' : 'Power'
+          k === 1 ? 'PolynomialRoot' : 'Power'
         );
     });
     test('a reducible or malformed generator is not reduced', () => {
@@ -201,6 +201,23 @@ describe('Factor over an explicit number field', () => {
           .isSame(2)
       ).toBe(true);
     });
+  });
+
+  test('the deprecated AlgebraicGenerator is the abstract PolynomialRoot', () => {
+    const g = ce.box(alpha([-2, 0, 1]));
+    expect(g.operator).toBe('PolynomialRoot');
+    expect(
+      g.isSame(ce.box(['PolynomialRoot', ['Add', ['Power', 't', 2], -2], 't']))
+    ).toBe(true);
+    // Written as a PolynomialRoot, it is a field generator all the same.
+    const root: MathJsonExpression = [
+      'PolynomialRoot',
+      ['Add', ['Power', 't', 2], -2],
+      't',
+    ];
+    const result = request(['Add', square, -2], root).evaluate();
+    expect(result.operator).toBe('Multiply');
+    expect(JSON.stringify(result.json)).toContain('PolynomialRoot');
   });
 
   test('supports Apply and resolves stored polynomial operands', () => {
@@ -293,7 +310,8 @@ describe('Factor over an explicit number field', () => {
       const result = request(f, g).evaluate();
       expect(result.isValid).toBe(true);
       expect(result.operator).toBe('Multiply');
-      expect(JSON.stringify(result.json)).toContain('AlgebraicGenerator');
+      expect(JSON.stringify(result.json)).toContain('PolynomialRoot');
+      expect(JSON.stringify(result.json)).not.toContain('AlgebraicGenerator');
       const difference: MathJsonExpression = [
         'Subtract',
         ['Expand', result.json],
@@ -308,7 +326,7 @@ describe('Factor over an explicit number field', () => {
           .box(['Factor', ['Subtract', ['Expand', restored.json], f], 'x', g])
           .evaluate().json
       ).toEqual(0);
-      expect(JSON.stringify(restored.N().json)).toContain('AlgebraicGenerator');
+      expect(JSON.stringify(restored.N().json)).toContain('PolynomialRoot');
     }
   );
 
