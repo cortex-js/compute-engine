@@ -26,7 +26,10 @@ worktree, `git apply --check` then `git apply` of your own patch onto the main
 tree, staging your own files only with `~/.claude/scripts/stage-helper.mjs`,
 and `git commit` of what you staged. Owner name: `{{NAME}}`. Commit message:
 `{{ID}}: <what the change does, in one line>`, with no trailer that names a
-tool (the commit-msg hook refuses one).
+tool (the commit-msg hook refuses one). Delete an issue file with `rm` and
+stage the deletion with `stage-helper.mjs`; run no other git command that
+writes the index (such as `git rm --cached`), because the index is shared with
+the other sessions.
 
 After you write or change an issue file, run `node scripts/issues.mjs lint`
 and fix each error before you commit, because the backlog and the board leave
