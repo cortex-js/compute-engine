@@ -1285,6 +1285,13 @@ describe('COMPILE Equal/NotEqual is exact', () => {
     expect(r.run!({ x: 1e-5 })).toBe(1e-5);
     expect(loose.box(['Chop', 1e-7]).evaluate().isSame(0)).toBe(true);
   });
+
+  it('compiled Chop takes an explicit tolerance, matching the interpreter', () => {
+    const r = compile(ce.box(['Chop', 'x', 0.01]), { fallback: false });
+    expect(r.run!({ x: 0.004 })).toBe(0);
+    expect(r.run!({ x: 0.5 })).toBe(0.5);
+    expect(ce.box(['Chop', 0.004, 0.01]).evaluate().isSame(0)).toBe(true);
+  });
 });
 
 // CO-P1-3: a complex-typed argument into a real-only helper (`_SYS.erf`)

@@ -7514,34 +7514,48 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Chop: {
       description: 'Replace tiny numeric values with zero.',
-      associative: true,
       broadcastable: true,
       idempotent: true,
       complexity: 1200,
 
-      signature: '(T) -> T where T: number',
-      examples: ['Chop([1e-20, 0.5, 3 + 1e-15i])'],
+      // The optional second operand is the tolerance (Wolfram's `Chop[x, tol]`):
+      // a part whose magnitude is at most `tol` becomes 0. Without it the
+      // engine's `ce.tolerance` applies.
+      signature: '(T, real<0..>?) -> T where T: number',
+      examples: [
+        'Chop([1e-20, 0.5, 3 + 1e-15i])',
+        'Chop([0.004, 0.5, 3 + 0.002i], 0.01)',
+      ],
       evaluate: (ops, { numericApproximation }) => {
         const op = ops[0];
         const ce = op.engine;
+        let tol: number | undefined = undefined;
+        if (ops.length > 1) {
+          const t = ops[1].N();
+          // A symbolic tolerance has no value yet.
+          if (!isNumber(t) || t.isComplex || !Number.isFinite(t.re))
+            return undefined;
+          tol = t.re;
+        }
+        const chopNumber = (x: number): number =>
+          tol === undefined ? ce.chop(x) : Math.abs(x) <= tol ? 0 : x;
+        const chopBig = (x: BigDecimal): BigDecimal | number =>
+          tol === undefined ? ce.chop(x) : x.abs().lte(ce.bignum(tol)) ? 0 : x;
         // Exactness contract: an exact operand keeps its exact form under
         // `evaluate` unless something actually chops. A mixed exact complex
         // (one tiny component, one not — `1/3 + 10⁻²⁰i`) has no exact way to
         // drop a single component, so it falls through to the numeric chop,
         // matching the float path's component-wise behavior.
         if (!numericApproximation && isNumber(op) && op.isExact) {
-          const reChops = ce.chop(op.re) === 0;
-          const imChops = ce.chop(op.im ?? 0) === 0;
+          const reChops = chopNumber(op.re) === 0;
+          const imChops = chopNumber(op.im ?? 0) === 0;
           if (reChops && imChops) return ce.Zero;
           const tinyRe = op.re !== 0 && reChops;
           const tinyIm = (op.im ?? 0) !== 0 && imChops;
           if (!tinyRe && !tinyIm) return op;
         }
-        return apply(
-          op,
-          (x) => ce.chop(x),
-          (x) => ce.chop(x),
-          (x) => ce.complex(ce.chop(x.re), ce.chop(x.im))
+        return apply(op, chopNumber, chopBig, (x) =>
+          ce.complex(chopNumber(x.re), chopNumber(x.im))
         );
       },
     },

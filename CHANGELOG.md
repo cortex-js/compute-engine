@@ -14,6 +14,17 @@
 
 ### New Features
 
+- **`Chop` takes a tolerance.** `Chop(0.004, 0.01)` was an
+  `unexpected-argument` error; the second operand is now the tolerance, as
+  in Wolfram's `Chop[x, tol]`: a real or imaginary part whose magnitude is at
+  most the tolerance becomes 0. `Chop(0.004, 0.01)` is `0`,
+  `Chop(3 + 0.002i, 0.01)` is `3` and `Chop([0.004, 0.5], 0.01)` is
+  `[0, 0.5]`. Without it the engine's `tolerance` applies, as before. The
+  JavaScript target compiles the tolerance; the interval target compiles a
+  numeric tolerance and declines a symbolic one. (PR #541, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#540](https://github.com/cortex-js/compute-engine/issues/540))
+
 - **`EulerE(n)` is the Euler number Eₙ and `EulerE(n, x)` the Euler
   polynomial Eₙ(x).** They are Mathematica's `EulerE`. `EulerE(n)` is an exact
   integer for a non-negative integer `n` (`EulerE(4)` is `5`, an odd `n` gives

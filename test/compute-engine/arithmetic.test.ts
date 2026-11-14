@@ -3428,6 +3428,54 @@ describe('Chop preserves exact operands', () => {
   });
 });
 
+describe('Chop with a tolerance', () => {
+  const cases: [MathJsonExpression, string][] = [
+    [['Chop', 0.004, 0.01], '0'],
+    [['Chop', 0.5, 0.01], '0.5'],
+    [['Chop', 1e-5, 1e-3], '0'],
+    [['Chop', 0.01, 0.01], '0'], // a magnitude equal to the tolerance chops
+    [['Chop', -0.004, 0.01], '0'],
+    [['Chop', ['Rational', 1, 1000], 0.01], '0'],
+    [['Chop', ['Rational', 2, 3], 0.01], '2/3'],
+    [['Chop', ['List', 0.004, 0.5, -0.009], 0.01], '[0,0.5,0]'],
+    [['Chop', ['Complex', 0.002, 3], 0.01], '3i'],
+    [['Chop', ['Complex', 0.002, 0.004], 0.01], '0'],
+    [['Chop', 0.0001, 0], '0.0001'], // a zero tolerance chops only 0
+  ];
+  for (const [expr, expected] of cases)
+    test(`${JSON.stringify(expr)} = ${expected} (evaluate)`, () => {
+      expect(ce.expr(expr).evaluate().toString()).toBe(expected);
+    });
+  test('Chop(x, tol) numericizes under N() and chops', () => {
+    expect(ce.expr(['Chop', 0.004, 0.01]).N().toString()).toBe('0');
+    expect(ce.expr(['Chop', ['Rational', 2, 3], 0.01]).N().re).toBeCloseTo(
+      2 / 3,
+      12
+    );
+  });
+  test('a nested Chop is not flattened into its tolerance slot', () => {
+    expect(ce.expr(['Chop', ['Chop', 'x', 0.001], 0.01]).json).toEqual([
+      'Chop',
+      ['Chop', 'x', 0.001],
+      0.01,
+    ]);
+    expect(ce.expr(['Chop', ['Chop', 0.005, 0.001], 0.01]).evaluate().re).toBe(
+      0
+    );
+    expect(ce.expr(['Chop', ['Chop', 'x']]).json).toEqual(['Chop', 'x']);
+  });
+  test('a symbolic tolerance leaves the call unevaluated', () => {
+    expect(ce.expr(['Chop', 0.004, 't']).evaluate().operator).toBe('Chop');
+  });
+  test('the tolerance is a non-negative real', () => {
+    expect(ce.expr(['Chop', 0.004, -1]).isValid).toBe(false);
+  });
+  test('Chop(x) keeps the engine tolerance', () => {
+    expect(ce.expr(['Chop', 1e-15]).evaluate().toString()).toBe('0');
+    expect(ce.expr(['Chop', 1e-5]).evaluate().toString()).toBe('0.00001');
+  });
+});
+
 describe('Factorial above the exact digit cap', () => {
   // `Factorial(10^400)` — about 4·10^402 digits — never returned: the bigint
   // product grows with every step, so no step cap bounds it. Above

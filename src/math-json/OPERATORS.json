@@ -1265,16 +1265,17 @@
     {
       "name": "Chop",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(T) -> T where T: number",
-      "associative": true,
+      "arity": "optional",
+      "signature": "(T, real<0..>?) -> T where T: number",
+      "associative": false,
       "commutative": false,
       "idempotent": true,
       "lazy": false,
       "broadcastable": true,
       "description": "Replace tiny numeric values with zero.",
       "examples": [
-        "Chop([1e-20, 0.5, 3 + 1e-15i])"
+        "Chop([1e-20, 0.5, 3 + 1e-15i])",
+        "Chop([0.004, 0.5, 3 + 0.002i], 0.01)"
       ]
     },
     {
