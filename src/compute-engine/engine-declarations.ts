@@ -4643,16 +4643,17 @@ function deriveAndWriteAssignedType(
     // the guess is genuinely incompatible with the value — widening yields a
     // union, e.g. a symbol heuristically auto-declared `function` by the
     // juxtaposition parser now given a scalar value (`number | function`) —
-    // the guess was simply wrong: adopt the value's own type instead (D11).
+    // the guess was simply wrong: adopt the value's own type instead (D11),
+    // promoted as a fresh declaration would be (below).
     const widened = widen(current, vt);
     const d11 = typeof widened === 'object' && widened.kind === 'union';
-    let adopted = d11 ? vt : widened;
     // The same promotion a FRESH `v := 5` declaration applies
     // (`inferTypeFromValue`, boxed-value-definition.ts): a value's narrow
     // literal type promotes to the natural variable type. Shared by the
     // unknown-incumbent branch just below and the narrowing branch further
-    // down. The last two arms carry an infinite value and NaN to their own
-    // tiers: both are disjoint from `real` and from `complex`, so they reach
+    // down, and by the D11 adopt: a storage position widens a literal type
+    // back to its tier (`docs/TYPE-SYSTEM.md`). The last two arms carry an
+    // infinite value and NaN to their own tiers: both are disjoint from `real` and from `complex`, so they reach
     // none of the finite arms, and `v := oo` must stay reassignable to `-oo`
     // without a retype.
     const promotedValueType = () =>
@@ -4667,6 +4668,7 @@ function deriveAndWriteAssignedType(
               : value.type.matches('nan')
                 ? 'nan'
                 : vt;
+    let adopted = d11 ? promotedValueType() : widened;
     // An `unknown` incumbent is an auto-declare that recorded no type
     // evidence (the symbol's uses were all type-vacuous — a bare `List`
     // sibling, a binder-body occurrence). Treat the assignment as the
@@ -4675,9 +4677,8 @@ function deriveAndWriteAssignedType(
     // auto-declared `y_r` beforehand. Without this the widen above installs
     // the value's RAW type (`integer`), and the settled type
     // depended on the boxing-vs-assignment order (observed by the Tycho
-    // team's order-matrix probe at their 0.106.0 adoption). Skipped when
-    // D11 fired: adopting the raw type for an incompatible guess is
-    // established semantics.
+    // team's order-matrix probe at their 0.106.0 adoption). When D11 fired,
+    // `adopted` is already the promoted type.
     if (!d11 && current === 'unknown') adopted = promotedValueType();
     // Assignment NARROWING (user-ruled 2026-08-13; the phase-3 question of
     // docs/TYPE-SYSTEM.md): when the
@@ -4698,9 +4699,8 @@ function deriveAndWriteAssignedType(
     //     was only ever set by an assignment has no `'inferred'` entry at
     //     all. (This block records `'value-derived'` after it moves a
     //     type, so a second assignment after a narrow no longer narrows.)
-    // (b) The D11 union-adopt above must not have fired: adopting the
-    //     value's raw type when the guess is incompatible is established
-    //     semantics, and re-promoting that result would change it.
+    // (b) The D11 union-adopt above must not have fired: it has already
+    //     installed the promoted type.
     // (c) The promoted type is installed only when it is itself below the
     //     incumbent; otherwise the value's raw type is (which is always
     //     sound, having just passed the strict-subtype test). Promotion

@@ -16,6 +16,12 @@
 
 ### Resolved Issues
 
+- **A variable that held a list and is given a number has the type
+  `integer`.** After `L := [1, 2]` and then `L := 7`, the type of `L` was the
+  literal type `7`, so `L = 7` was typed `true` and code compiled in that
+  state returned the branch for `7` for any input value. It is `integer`, as
+  after a first `L := 7` (CE-1304).
+
 - **`.N()` of an exact sum whose terms cancel gives the correct digits.** When
   the terms of a sum are exact (`\pi`, `e^{20}`, `\sqrt{2}`, a large integer)
   and their sum is much smaller than the largest term, the sum is computed again

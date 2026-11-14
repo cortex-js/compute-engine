@@ -632,8 +632,15 @@ Not decided, each with the choice:
    keeps the engine's answer, because one rule covers it.
 5. **Lists of different lengths.** Desmos pairs them to the shorter one;
    the engine refuses. Kept: Tycho's importer writes the pairing.
-6. **A worked-out type set once and enforced** (the user's direction,
-   2026-11-13). The type of a variable that is not a constant is taken
+6. **A worked-out type set once and enforced.** DECIDED 2026-11-14: not
+   adopted, in any variant. The type of a variable that is not a constant
+   widens to hold every value assigned to it (0.189.0), and a storage
+   position widens a literal type to its tier (CE-1304, fixed). Reason: as
+   measured the rule deleted no code, refused ordinary Epsil programs and
+   made compiled code decline; the narrower kind-only variant below would
+   catch mistakes but remove little. The record of the measurement follows.
+
+   The rule as proposed (the user's direction, 2026-11-13): The type of a variable that is not a constant is taken
    broadly from its first value (sizes dropped, a number typed
    `nan | real | signed_infinity`) and then enforced, so `let a = 1`
    followed by `a = "hello"` is an error and no type ever changes; a

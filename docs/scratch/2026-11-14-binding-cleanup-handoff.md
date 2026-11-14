@@ -80,8 +80,9 @@ What waits, and what unlocks it (about 3,300 lines, estimated):
   `shadowing-calls.ts` exist because the compiler looks a name up by its
   spelling from the current scope (116 lookups in 45 files). Not a named
   item of the spec; ask the user before starting it.
-- `deriveAndWriteAssignedType` (183 lines) waits for the user's decision on
-  the set-once rule.
+- `deriveAndWriteAssignedType` stays: the user decided on 2026-11-14 not to
+  adopt the set-once rule (section 7, point 6, of the names-and-types
+  document).
 
 Not examined by the audit: the 356 `lookupDefinition(` calls one by one,
 the 51 readers of `_anyVersion`, the call-head declarations of
@@ -115,10 +116,6 @@ item):
 
 Waiting for the user:
 
-- The set-once rule for a worked-out type (point 6 of section 7): measured,
-  not landed. A narrower variant was proposed and is not measured: enforce
-  the kind of a variable, drop sizes, let the number type inside the kind
-  widen. Patches: `~/dev/compute-engine-recovery/fc-d16/r6-experiment-*.patch`.
 - Points 1 to 5 of section 7.
 - `issues/CE-1271.md` (needs-decision).
 - `Tan` of a real variable is typed `real` also on a pole (`ce-desk`'s
@@ -130,8 +127,8 @@ Waiting for the user:
 
 Filed: CE-1270, CE-1271, CE-1277 (`Map` over a `Composition` reads the
 current scope), CE-1280, CE-1290 (one signature line left), CE-1303 (P2, an
-Epsil `while` with an undecided condition never returns), CE-1304 (P3,
-`L := 7` after a list records the literal type `7`), CE-1210 (performance;
+Epsil `while` with an undecided condition never returns), CE-1304 (fixed
+2026-11-14), CE-1210 (performance;
 the othello call and the audit are now faster than the 0.187.1 baseline,
 the `turing-patterns` run step is still 8 to 9% slower than 0.187.1, cause
 not determined: narrow the issue to that, or close it with the board).
