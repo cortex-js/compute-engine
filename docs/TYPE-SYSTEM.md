@@ -991,6 +991,12 @@ subtype of `list<integer | list>`, and it can be wider than that type, for
 example `list<integer | list<unknown>>`. Each of these types holds every
 value.
 
+Known limitation: the type of an aggregate (`Sum`, `Max`, `Min`, `Mean`)
+of a declared `list<T>` assumes a finite list. An endless producer is
+admitted where `list<T>` is declared, so with `f := xs ↦ Max(xs)` and
+`xs: list<integer>`, `f(Range(1, +oo))` is typed `integer | nan` and evaluates
+to `+oo` (CE-1271, closed by user decision 2026-11-14).
+
 Known limitation: in a mutual recursion, the type of a call of the second
 function can leave out a value when the call of the first function was typed
 first. With `f` and `g` declared `(unknown) -> unknown` and `m: integer`,

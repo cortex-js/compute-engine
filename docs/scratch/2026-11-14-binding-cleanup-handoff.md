@@ -101,8 +101,12 @@ item):
 1. Parameter uses collected before the body is boxed, so that the
    whole-or-mapped choice does not depend on the order of the uses
    (`issues/CE-1270.md`; measured earlier as mode `two`:
-   `~/dev/compute-engine-recovery/fc-bit/report.md`). It needs the user's
-   answer to points 1 and 2 of section 7 of the names-and-types document.
+   `~/dev/compute-engine-recovery/fc-bit/report.md`). Points 1 and 2 of
+   section 7 of the names-and-types document were decided on 2026-11-14: a
+   copy into a local does not count as a use, and an indexed parameter takes
+   its argument whole (Tycho does not rely on the mapping; when the change
+   is built, ask `tycho-desk` for a CORE render audit through
+   `scripts/repros/ce-alt-hook.mjs`).
 2. `issues/CE-1280.md` (P2): a canonical rewrite reads a type or a sign
    inferred from a variable's value. A declared type remedies the
    integer-exponent fold only. Recommended fix: a canonical rewrite reads
@@ -116,8 +120,6 @@ item):
 
 Waiting for the user:
 
-- Points 1 to 5 of section 7.
-- `issues/CE-1271.md` (needs-decision).
 - `Tan` of a real variable is typed `real` also on a pole (`ce-desk`'s
   choice; the alternative is `fc-d16/r5/tan-experiment.patch`).
 - Pull requests #493 and the `Rationalize` half of #541 (session
@@ -125,7 +127,7 @@ Waiting for the user:
 
 ## Part 3: issues collected on the way
 
-Filed: CE-1270, CE-1271, CE-1277 (`Map` over a `Composition` reads the
+Filed: CE-1270, CE-1271 (closed 2026-11-14), CE-1277 (`Map` over a `Composition` reads the
 current scope), CE-1280, CE-1290 (one signature line left), CE-1303 (P2, an
 Epsil `while` with an undecided condition never returns), CE-1304 (fixed
 2026-11-14), CE-1210 (performance;

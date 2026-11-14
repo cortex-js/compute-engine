@@ -606,31 +606,41 @@ Differences between this document and 0.188.0:
 
 | Topic | This document | 0.188.0 | State |
 |---|---|---|---|
-| Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | proposed, not decided |
-| Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | proposed (box the body after the uses are known), not decided |
-| Rule 7 | An indexed parameter with no type takes a list of points whole | One call for each point | proposed, not decided; it changes results |
+| Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | to be fixed by CE-1270 |
+| Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | to be fixed by CE-1270 (box the body after the uses are known) |
+| Rule 7 | An indexed parameter with no type takes a list of points whole | One call for each point | decided (point 2 below); it changes results; not landed |
 | Rule 6 | A type follows the types of the names, never their values | The type of an expression is revised from the values its names hold | decided (D16); since 0.189.0 |
 | Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); since 0.189.0 |
 
-Not decided, each with the choice:
+The points below were open; the user decided points 1 to 6 on 2026-11-14.
+Each point states its decision after the word DECIDED.
 
-1. **Rule 7, "copied to a local".** 0.188.0 follows `let q = s`. Keeping it
+1. **Rule 7, "copied to a local".** DECIDED: dropped. Only a direct use
+   of a parameter counts; `function f(s) { let q = s; take(q, 2) }` maps
+   over a list, and the user writes `f(s: list)`. 0.188.0 follows `let q = s`. Keeping it
    makes Epsil functions with a local copy work with no annotation; dropping
    it makes the rule shorter. Tycho does not need it.
-2. **Rule 7 for a tuple of two numbers.** Today `h(v) = v[1] + v[2]` types
+2. **Rule 7 for a tuple of two numbers.** DECIDED: the model. An indexed
+   parameter takes its argument whole; Tycho does not rely on the mapping
+   (`tycho-desk`, 2026-11-14): its importer declares a parameter with point
+   evidence `tuple<number, number>`, and Desmos passes a whole list to a
+   parameter indexed by position (41 such definitions in 23 documents of
+   the extended corpus, none in CORE). A CORE render audit runs when the
+   change is built. Today `h(v) = v[1] + v[2]` types
    `v` as a point, and a list of points is then mapped. In the model the
    parameter is "indexed, so whole", and a user who wants the mapping writes
    the point type. The model is simpler; 10 tests of the yardstick change
    their value.
 3. **What the engine still works out for a parameter beyond whole-or-element**
-   (the `tuple<number, number>` above, `collection`, `matrix`). The model
+   (the `tuple<number, number>` above, `collection`, `matrix`). DECIDED: as
+   written here. The model
    keeps these types for what they are good for: the printed signature, an
    error in a body, compilation. They decide no value other than through
    rule 7 and the matrix case.
 4. **A function that ignores its parameter** (`five(s) = 5` gives
-   `[5, 5]`). Desmos gives `5` (measured by Tycho, 2026-11-13). The model
+   `[5, 5]`). DECIDED: kept. Desmos gives `5` (measured by Tycho, 2026-11-13). The model
    keeps the engine's answer, because one rule covers it.
-5. **Lists of different lengths.** Desmos pairs them to the shorter one;
+5. **Lists of different lengths.** DECIDED: the error is kept. Desmos pairs them to the shorter one;
    the engine refuses. Kept: Tycho's importer writes the pairing.
 6. **A worked-out type set once and enforced.** DECIDED 2026-11-14: not
    adopted, in any variant. The type of a variable that is not a constant
