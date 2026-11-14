@@ -262,7 +262,8 @@
   [#551](https://github.com/cortex-js/compute-engine/issues/551))
 
 - **`Beta(a, b)` has a value at a complex operand under `N()`.**
-  `Beta(1+i, 2).N()` stayed `Beta(1+i, 2)`; it is `0.1 - 0.3i`, the value of
+  `Beta(1+i, 2).N()` stayed `Beta(1+i, 2)`; it is
+  `0.10000000000000012 - 0.3000000000000001i` (exactly `0.1 - 0.3i`), the value of
   `Γ(a)Γ(b)/Γ(a+b)`. It is `0` where `a + b` is a non-positive integer, and
   `~oo` at a non-positive integer `a` or `b` with a complex partner, as with a
   real one. Measured against mpmath, the relative error is at most 3e-13
