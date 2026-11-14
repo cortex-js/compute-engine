@@ -163,10 +163,11 @@ describe('BetaRegularized(z0, z1, a, b)', () => {
     expect(e.N().toString()).toBe('0.5067');
   });
 
-  test('endpoints outside the unit interval stay unevaluated', () => {
-    expect(
-      ce.expr(['BetaRegularized', 0.5, 1.5, 2, 3]).evaluate().operator
-    ).toBe('BetaRegularized');
+  test('an endpoint outside the unit interval takes the continuation', () => {
+    // I_{1.5}(2, 3) - I_{0.5}(2, 3) = 1.6875 - 0.6875
+    const v = ce.expr(['BetaRegularized', 0.5, 1.5, 2, 3]).evaluate();
+    expect(v.re).toBe(1);
+    expect(v.isExact).toBe(false);
   });
 });
 

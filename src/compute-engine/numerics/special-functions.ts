@@ -5,6 +5,10 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { bigStieltjesGamma, STIELTJES_MAX_ORDER } from './stieltjes.js';
 import { erf, erfc } from './error-functions.js';
+import {
+  betaRegularizedOutside,
+  bigBetaRegularizedOutside,
+} from './beta-continuation.js';
 import { lambertWNearBranchPoint } from './lambert-w-complex.js';
 
 // The machine kernels of the error functions live in their own module; they
@@ -1046,12 +1050,14 @@ const BETA_SYMMETRIC_FALLBACK_MIN = 1e-6;
 
 /**
  * Regularized incomplete beta I_x(a,b) (Mathematica's BetaRegularized[x,a,b]),
- * for real a > 0, b > 0 and 0 ≤ x ≤ 1. Returns NaN outside that domain, and
- * the exact endpoints 0 (x=0) and 1 (x=1).
+ * for real a > 0, b > 0 and 0 ≤ x ≤ 1, and for an x outside it where the value
+ * is real and a finite sum (`betaRegularizedOutside`). Returns NaN elsewhere,
+ * and the exact endpoints 0 (x=0) and 1 (x=1).
  */
 export function betaRegularized(x: number, a: number, b: number): number {
   if (Number.isNaN(x) || Number.isNaN(a) || Number.isNaN(b)) return NaN;
-  if (a <= 0 || b <= 0 || x < 0 || x > 1) return NaN;
+  if (a <= 0 || b <= 0) return NaN;
+  if (x < 0 || x > 1) return betaRegularizedOutside(x, a, b);
   if (x === 0) return 0;
   if (x === 1) return 1;
   const bt = Math.exp(
@@ -2681,7 +2687,8 @@ export function bigBetaRegularized(
   if (x.isNaN() || a.isNaN() || b.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite() || !a.isFinite() || !b.isFinite()) return BigDecimal.NAN;
   if (!a.isPositive() || !b.isPositive()) return BigDecimal.NAN;
-  if (x.isNegative() || x.gt(BigDecimal.ONE)) return BigDecimal.NAN;
+  if (x.isNegative() || x.gt(BigDecimal.ONE))
+    return bigBetaRegularizedOutside(x, a, b);
   if (x.isZero()) return BigDecimal.ZERO;
   if (x.eq(BigDecimal.ONE)) return BigDecimal.ONE;
   return withGuardDigits(SPECIAL_FN_GUARD, () => {

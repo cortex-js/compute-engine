@@ -421,8 +421,9 @@ function gammaRegularizedSeries(
  * independent high-precision computation.
  *
  * The head answers on the region the incomplete beta integral converges on —
- * `x ∈ [0, 1]`, `a > 0`, `b > 0` — and stays symbolic outside it at finite
- * points as well, so only the `+∞` limits of `a` and `b` get a value here:
+ * `x ∈ [0, 1]`, `a > 0`, `b > 0` — and at a finite real `x` outside [0, 1]
+ * where the value is a finite sum (`betaRegularizedOutside`). Only the `+∞`
+ * limits of `a` and `b` get a value here:
  *
  * - `I_x(a, +∞) = 1` for `0 < x ≤ 1` (`I_{0.001}(2, 10⁶) = 1`) and `0` at
  *   `x = 0`: the mass of the Beta(a, b) law concentrates at 0.

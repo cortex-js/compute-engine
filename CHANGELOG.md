@@ -169,6 +169,30 @@
 
 ### Resolved Issues
 
+- **`BetaRegularized(x, a, b)` has a value at a real `x` outside `[0, 1]`
+  where that value is real and a finite sum.** `BetaRegularized(2, 2, 3).N()`
+  stayed unevaluated; it is `8`. For positive integers `a` and `b` the
+  function is the polynomial `Σ_{j=a}^{a+b-1} C(a+b-1, j) xʲ (1-x)^(a+b-1-j)`,
+  for any real `x` (`I_3(2, 3)` is `81`, `I_{-1/2}(2, 2)` is `1`); for `x > 1`,
+  a real `a > 0` and an integer `b` up to 30 it is `B_x(a, b)/B(a, b)`
+  (`BetaRegularized(2, 5/2, 3).N()` is `16.2634559672905930612…`). Both are
+  computed at the working precision. A non-integer `b` with `x > 1`, a
+  non-integer `a` with `x < 0`, a degree `a + b - 1` above 200, and a value
+  that cancels to `0` stay unevaluated. `evaluate()` of an exact operand is
+  unchanged. (PR #558, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#551](https://github.com/cortex-js/compute-engine/issues/551))
+
+- **`Beta(a, b)` has a value at a complex operand under `N()`.**
+  `Beta(1+i, 2).N()` stayed `Beta(1+i, 2)`; it is `0.1 - 0.3i`, the value of
+  `Γ(a)Γ(b)/Γ(a+b)`. It is `0` where `a + b` is a non-positive integer, and
+  `~oo` at a non-positive integer `a` or `b` with a complex partner, as with a
+  real one. Measured against mpmath, the relative error is at most 3e-13
+  for `|Im a|` and `|Im b|` up to 300, and grows with them (2e-10 at
+  `Beta(1 + 10⁵i, 1/2)`). The result is a double at every precision, as for the other complex
+  special functions. `evaluate()` of an exact operand stays symbolic.
+  (PR #558, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`EllipticF(φ, m)`, `EllipticE(φ, m)`, `EllipticPi(n, φ, m)` and
   `EllipticPi(n, m)` give `N()` at the working precision for real operands
   with a real value.** At a precision of 30, `EllipticE(0.5, 0.3).N()` was
