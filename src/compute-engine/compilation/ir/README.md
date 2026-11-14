@@ -96,12 +96,11 @@ real. An integer value of 2^53 or more is a double and its low digits are
 unspecified (`Mod(2^60 + n, 3)`; rule 3 of
 `docs/plans/2026-11-12-js-route-course-correction.md`): the compiler makes no
 analysis of integer ranges. A closed node keeps the interpreter's value
-(`Mod(2^60 + 1, 3)` is 2). At run time, `Mod` (`_rt.mod`, `floorMod()`) throws a
-`RangeError` for an operand beyond ±(2^53 − 1) or infinite, as the existing
-compiler does (`docs/COMPILATION-MODEL.md`, "Integer operations beyond the safe
-integer range"): `Mod(n!, 7)` at n = 25 is 0, and the remainder of the double
-is 6. So `Mod` is `may-fail`. GLSL has no error channel: there `mod()` of a
-value beyond 2^24 is the remainder of the float, unspecified.
+(`Mod(2^60 + 1, 3)` is 2). At run time there is no guard of any kind for an
+integer of 2^53 or more: `Mod(n!, 7)` at n = 25 is 0, and the compiled code
+gives 6, the remainder of the double (the existing compiler throws a
+`RangeError` there). The remedy for the host is the `bigint` mode. On GLSL
+`mod()` of a value beyond 2^24 is the remainder of the float, unspecified.
 
 The real functions (`Erf`, `Gamma`, `Root`, the inverse trigonometric and
 hyperbolic functions, ...) are rows whose operation the JavaScript runtime calls

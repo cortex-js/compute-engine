@@ -2558,12 +2558,11 @@ option `profile: 'ir'`, `compile()` to `javascript` uses the IR compiler of
 under "Selecting the pipeline", the options it maps or declines). A program
 or an option outside it declines with `outside-profile`, and `fallback`
 applies as for the `numeric-kernel` profile; an internal error is a
-`compile-error`. It reads an undeclared scalar input as a `real`, and it
-declines `iterationBudget` for a program with a counted loop (a `Sum`, a
-`Product` or a reduction of a list). Its `Mod` throws a `RangeError` for an
-operand beyond the safe integer range, as "Integer operations beyond the safe
-integer range" says. Its
-code reads a runtime of its own and cannot be stored: the result has no
+`compile-error`. It reads an undeclared scalar input as a `real`. It has no
+guard for an integer of 2^53 or more: its `Mod` of such an operand is the
+remainder of the double, an unspecified value, where the existing compiler
+throws a `RangeError` ("Integer operations beyond the safe integer range").
+Its code reads a runtime of its own and cannot be stored: the result has no
 `runtimeVersion`, and `shippable` is `false`.
 
 ### Interval results

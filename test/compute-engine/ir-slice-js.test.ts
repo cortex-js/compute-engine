@@ -210,36 +210,14 @@ describe('IR slice: the real functions at edge inputs', () => {
 });
 
 describe('IR slice: Mod beyond the safe integer range', () => {
-  // The double is the rounding of the value that made it: its remainder is
-  // another number (docs/COMPILATION-MODEL.md, "Integer operations beyond
-  // the safe integer range").
-  test('throws a RangeError at run time', () => {
-    for (const [json, n] of [
-      [['Mod', ['Factorial', 'n'], 7], 23],
-      [['Mod', ['Factorial', 'n'], 7], 25],
-      [['Mod', ['Factorial', 'n'], 16777216], 25],
-      [['Mod', ['Power', 3, 'n'], 7], 40],
-      [['Mod', ['Multiply', 'n', 'n', 'n'], 7], 1000003],
-    ] as [unknown, number][]) {
-      const r = js(json);
-      expect(() => r.run({ n })).toThrow(
-        /Mod: .* is beyond the safe integer range/
-      );
-    }
-    expect(js(['Mod', ['Factorial', 'n'], 7]).run({ n: 6 })).toBe(6);
+  // No guard for an integer of 2^53 or more: the value is the remainder of
+  // the double, unspecified (README, "The contracts").
+  test('does not throw', () => {
+    const r = js(['Mod', ['Factorial', 'n'], 7]);
+    expect(typeof r.run({ n: 25 })).toBe('number');
+    expect(r.run({ n: 6 })).toBe(6);
     expect(Number.isNaN(js(['Mod', 'x', 3]).run({ x: NaN }))).toBe(true);
   });
-  test('is not evaluated in an arm that is not taken', () =>
-    expect(
-      js([
-        'If',
-        ['Less', 'n', 1000],
-        ['Mod', ['Multiply', 'n', 'n', 'n'], 7],
-        0,
-      ]).run({
-        n: 1000003,
-      })
-    ).toBe(0));
 });
 
 describe('IR slice: a chain with a list', () => {

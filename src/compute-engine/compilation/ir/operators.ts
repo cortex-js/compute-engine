@@ -93,18 +93,10 @@ export type OperatorRow = {
 };
 
 /** The modulo of the interpreter: the sign of the divisor (`Mod(-7, 3)` is
- *  2). Exact for integers: `%` is exact in IEEE 754. An operand beyond the
- *  safe integer range, or infinite, throws a `RangeError`: the double is the
- *  rounding of the value that made it, and its remainder is another number
- *  (`Mod(25!, 7)` is 0, the remainder of the double 6;
- *  docs/COMPILATION-MODEL.md, "Integer operations beyond the safe integer
- *  range"). A NaN propagates. */
+ *  2). Exact for integers below 2^53: `%` is exact in IEEE 754. There is no
+ *  guard: for an operand of 2^53 or more the value is the remainder of the
+ *  double, unspecified (`Mod(25!, 7)` is 0, the remainder of the double 6). */
 export function floorMod(a: number, b: number): number {
-  for (const x of [a, b])
-    if (Math.abs(x) > Number.MAX_SAFE_INTEGER)
-      throw new RangeError(
-        `Mod: ${x} is beyond the safe integer range of compiled code`
-      );
   const r = a % b;
   return r !== 0 && r < 0 !== b < 0 ? r + b : r;
 }
@@ -317,7 +309,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Floor',        1,          [[[R], I, 'floor']],           { fold: Math.floor }),
   row('Ceil',         1,          [[[R], I, 'ceil']],            { fold: Math.ceil }),
   row('Round',        1,          [[[R], I, 'round']],           { fold: roundHalfAway, settings: ['roundingTies'] }),
-  row('Mod',          2,          arith('mod', 2),               { fold: floorMod, effect: 'may-fail' }),
+  row('Mod',          2,          arith('mod', 2),               { fold: floorMod }),
   row('Truncate',     1,          [[[R], I, 'trunc']],           { fold: Math.trunc }),
   row('Sign',         1,          [[[R], I, 'sign']],            { fold: Math.sign }),
   row('Fract',        1,          [[[R], R, 'fract']],           { fold: F.fract }),

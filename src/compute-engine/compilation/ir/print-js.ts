@@ -11,9 +11,9 @@
  * is a `{ re, im }` object) call the runtime `_rt`: the engine's own
  * `makeRandomHelpers()` (over the engine's frame slot, `ce._random()`),
  * `realPow()` (the interpreter's real root of a negative base),
- * `floorMod()` (which throws beyond the safe integer range) and
- * `rangeCount()`, so these are the interpreter's by construction. Each loop and build checks the engine's deadline every
- * 1024 iterations (`_rt.tick()`).
+ * `floorMod()` and `rangeCount()`, so these are the interpreter's by
+ * construction. Each loop and build checks the engine's deadline every 1024
+ * iterations (`_rt.tick()`).
  *
  * The entry is `(_) => …` of an inputs object; for a root function literal
  * it is `(a0, a1, …, _ = {}) => …`: the parameters by position, then the

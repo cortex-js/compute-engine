@@ -1171,7 +1171,8 @@ stays under 10,000 lines.
 
 Other user decisions of 2026-11-12, after batch 3:
 
-- The run-time `RangeError` of `Mod` beyond the safe integer range is to be
-  removed ("a slippery slope"): no guard at all for integers of 2^53 or more.
+- The run-time `RangeError` of `Mod` beyond the safe integer range is
+  removed ("a slippery slope"; done 2026-11-14): no guard at all for integers
+  of 2^53 or more. `Mod` is a pure row.
 - The shape of a complex result: whatever is simplest. A result is reduced
   to a number only where that is trivial; no machinery for it.
