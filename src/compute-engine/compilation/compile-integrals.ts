@@ -23,6 +23,7 @@ import {
   unusedVariableName,
 } from '../boxed-expression/integration-variables.js';
 import { multiClauseState } from '../multi-clause.js';
+import { unstableClosedForms } from '../symbolic/antiderivative.js';
 import { UNIT_DEPENDENT_HEADS } from './angular-unit.js';
 import type { CompileTarget } from './types.js';
 import {
@@ -614,6 +615,7 @@ export function closedFormIntegral(
   let elapsedMs = 0;
   // eslint-disable-next-line no-restricted-globals
   const attemptStart = performance.now();
+  const unstableBefore = unstableClosedForms.count;
   engine.pushScope();
   try {
     // A local binding in the operands (a function parameter named `e`, `i`
@@ -678,7 +680,10 @@ export function closedFormIntegral(
     (grantedMs === ANTIDERIVATIVE_ATTEMPT_HANG_MS &&
       elapsedMs >= 0.9 * grantedMs);
 
+  // A closed form that cancels in double precision is not compiled: the
+  // numeric route gives the value (`unstableClosedForms`).
   const usable =
+    unstableClosedForms.count === unstableBefore &&
     closed !== undefined &&
     !closed.has('Integrate') &&
     closed.isValid &&

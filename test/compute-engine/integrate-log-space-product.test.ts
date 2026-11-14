@@ -45,6 +45,70 @@ describe('an integrand that is a product overflowing against itself', () => {
     expect(Math.abs(compiled.run() / exact - 1)).toBeLessThan(1e-9);
   });
 
+  test('∫₀^y x¹⁰⁰·e⁻ˣ dx compiles to its value, not to the closed form that cancels', () => {
+    // The closed form n! − e⁻ʸ·Σ n!/k!·yᵏ (CE-1282) gave −1.2·10¹⁴² at
+    // y = 20 and NaN at y = 1500 in double precision (CE-1310).
+    // The reference is the series e⁻ʸ·yⁿ⁺¹·Σₖ yᵏ/((n+1)…(n+1+k)).
+    const lowerGamma = (n: number, y: number): number => {
+      let term = 1 / (n + 1);
+      let sum = term;
+      for (let k = 1; k < 2000; k++) {
+        term *= y / (n + 1 + k);
+        sum += term;
+      }
+      return Math.exp(-y + (n + 1) * Math.log(y)) * sum;
+    };
+    const f = compile(
+      ce.box([
+        'Function',
+        ['Integrate', integrand(100), ['Limits', 'x', 0, 'y']],
+        ['Typed', 'y', "'real'"],
+      ])
+    ) as unknown as { success: boolean; run: (y: number) => number };
+    expect(f.success).toBe(true);
+    for (const y of [1, 20, 120]) {
+      const expected = lowerGamma(100, y);
+      expect(Math.abs(f.run(y) / expected - 1)).toBeLessThan(1e-9);
+    }
+    expect(Math.abs(f.run(1500) / factorial(100) - 1)).toBeLessThan(1e-9);
+
+    // The same product through a user function: in its body, split across
+    // a call, or with the degree as an argument. `evaluate()` inlines the
+    // calls, and the closed form is not compiled either.
+    const ce2 = new ComputeEngine();
+    const define = (name: string, body: unknown, ...params: string[]) =>
+      ce2
+        .box(['Assign', name, ['Function', body, ...params]] as never)
+        .evaluate();
+    define('g', [
+      'Multiply',
+      ['Power', 't', 100],
+      ['Exp', ['Negate', 't']],
+    ], 't');
+    define('w', ['Exp', ['Negate', 't']], 't');
+    define(
+      'G',
+      ['Multiply', ['Power', 't', 'n'], ['Exp', ['Negate', 't']]],
+      't',
+      'n'
+    );
+    for (const body of [
+      ['g', 'x'],
+      ['Multiply', ['Power', 'x', 100], ['w', 'x']],
+      ['G', 'x', 100],
+    ]) {
+      const g = compile(
+        ce2.box([
+          'Function',
+          ['Integrate', body, ['Limits', 'x', 0, 'y']],
+          ['Typed', 'y', "'real'"],
+        ] as never)
+      ) as unknown as { success: boolean; run: (y: number) => number };
+      expect(g.success).toBe(true);
+      expect(Math.abs(g.run(20) / lowerGamma(100, 20) - 1)).toBeLessThan(1e-9);
+    }
+  });
+
   test('an integral larger than the doubles can hold is NaN, not a random value', () => {
     // `170! ≈ 7·10³⁰⁶`: the change of variable of the quadrature overflows.
     const N = ce

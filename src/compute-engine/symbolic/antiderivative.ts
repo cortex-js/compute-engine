@@ -876,6 +876,27 @@ function tryPolyExpTrigIntegral(
 const MAX_POLY_TIMES_LINEAR_KERNEL_DEGREE = 200;
 
 /**
+ * The largest degree of `p` for which a definite integral of `p(x)·f(a·x +
+ * b)` compiles from the closed form of `tryPolyTimesLinearExpTrig()`. The
+ * terms of `F(b) − F(a)` reach about `n!/|a|ⁿ⁺¹`, so in double precision the
+ * difference cancels: for `∫₀^y x¹⁰⁰·e⁻ˣ dx` it is negative at `y = 20`, and
+ * `∞ − ∞` at `y = 1500` (CE-1310). At degree 8 the absolute error stays under
+ * `10⁻¹¹` for `|a| ≥ 1`. Above it, the closed form counts in
+ * {@link unstableClosedForms}, and the compilation that sees the count
+ * change takes its numeric route, as it did before the closed form existed.
+ */
+const MAX_COMPILED_POLY_KERNEL_DEGREE = 8;
+
+/**
+ * The number of closed forms that `tryPolyTimesLinearExpTrig()` gave for a
+ * polynomial of degree above {@link MAX_COMPILED_POLY_KERNEL_DEGREE}. The
+ * compile route reads it before and after its attempt (`closedFormIntegral`):
+ * the rule fires on the integrand as `evaluate()` sees it, after the calls of
+ * user functions are inlined.
+ */
+export const unstableClosedForms = { count: 0 };
+
+/**
  * ∫ p(x)·f(a·x + b) dx for a polynomial `p` and `f` one of exp, sin and cos,
  * with `a` a non-zero constant: integration by parts repeated until the
  * derivative of `p` is 0, in closed form,
@@ -955,6 +976,7 @@ function tryPolyTimesLinearExpTrig(
     );
     derivative = differentiate(derivative, index)?.evaluate();
   }
+  if (n > MAX_COMPILED_POLY_KERNEL_DEGREE) unstableClosedForms.count += 1;
   return add(...terms).evaluate();
 }
 

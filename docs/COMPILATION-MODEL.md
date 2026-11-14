@@ -512,6 +512,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   (`hasRows()` trusts the declared type of a name), so `Sum(S)` of it gives
   `[]` where the existing compiler gives `0` (the sum of no row); the
   interpreter keeps `Sum(Transpose([[]]))` unevaluated.
+- `plausible?` — `javascript`, `y: real`, `g(t) := t^{100} e^{-t}`:
+  `\int_0^y g(x)\,dx` at `y = 1500` gives `NaN` (the quadrature meets
+  `∞·0` in the integrand, and the log-space fallback `_SYS.finiteOr` is not
+  applied through a call of a user function); the interpreter's
+  `evaluate().N()` gives about `100!`, and its `.N()` also gives `NaN`.
+  With the integrand written inline, the fallback gives the value.
 
 ## The worker pool and `parallel for`: `runAsync()`
 
