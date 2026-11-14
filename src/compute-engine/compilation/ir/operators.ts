@@ -93,7 +93,9 @@ export type OperatorRow = {
   readonly alias?: 'operand';
   /** The row can leave the reals: in `mode: 'complex'` it takes its
    *  complex signature unless the operand `nonnegative` is proved `>= 0`
-   *  or the operand `integer` is on the integer lane. */
+   *  or the operand `integer` is on the integer lane; in `mode: 'strict'`
+   *  when the engine proves the operand `nonnegative` negative (`leaves()`
+   *  of `lower.ts`). */
   readonly leaves?: {
     readonly nonnegative?: number;
     readonly integer?: number;

@@ -82,6 +82,7 @@ import {
 } from './operators.js';
 import {
   decline,
+  hasOwnLowering,
   text,
   TUPLE_RULES,
   type Fn,
@@ -156,6 +157,9 @@ export type LowerOptions = {
   readonly iterationBudget?: number;
   /** The `vars` option: a name read as the host's text (`hostVarOp()`). */
   readonly vars?: readonly string[];
+  /** The names of `vars` whose text reads the inputs object
+   *  (`readsVarsObject()`): a function body reads one as an input. */
+  readonly objectVars?: readonly string[];
 };
 
 /** The IR operation of the read of the `vars` name of index `k` on the
@@ -247,10 +251,12 @@ export function lower(
   /** Whether `r` takes its complex signature on `args`: in every mode when
    *  the operands are finite constants on which the row's real function is
    *  NaN (`Ln(-2)`, a complex-shaped value of the `strict` mode); in
-   *  `mode: 'complex'` when its row can leave the reals and no operand
-   *  proves a real value (an operand `nonnegative()`, an integer exponent
-   *  where the row says so). */
-  const leaves = (r: OperatorRow, args: V[]): boolean => {
+   *  `mode: 'strict'` when the node's operand `nonnegative` is proved
+   *  negative (`isNegative`), the others are constants and the real
+   *  function is NaN at -1 there; in `mode: 'complex'` when its row can
+   *  leave the reals and no operand proves a real value (an operand
+   *  `nonnegative()`, an integer exponent where the row says so). */
+  const leaves = (r: OperatorRow, args: V[], node: Expression): boolean => {
     if (r.leaves === undefined) return false;
     const c = args.map(constant);
     if (
@@ -259,8 +265,21 @@ export function lower(
       Number.isNaN(r.fold(...c))
     )
       return true;
-    if (options.mode !== 'complex') return false;
     const { nonnegative: k, integer: j } = r.leaves;
+    // Strict: the operand `k` of the node is proved negative, and the real
+    // function is NaN at -1 there with the other operands constant (not
+    // the real root `Root(-8, 3)`).
+    if (options.mode !== 'complex')
+      return (
+        options.mode !== 'bigint' &&
+        k !== undefined &&
+        r.fold !== undefined &&
+        isFunction(node, r.head) &&
+        node.nops === args.length &&
+        node.ops[k].isNegative === true &&
+        c.every((x, i) => i === k || x !== undefined) &&
+        Number.isNaN(r.fold(...c.map((x, i) => (i === k ? -1 : x!))))
+      );
     if (j !== undefined && type(args[j]).lane === 'integer') return false;
     return k === undefined || !nonnegative(args[k]);
   };
@@ -358,7 +377,7 @@ export function lower(
         row(c.head),
         args.filter((_, i) => i !== c.index)
       );
-    const complex = leaves(r, args);
+    const complex = leaves(r, args, node);
     const operation = (given: V[]): V => {
       // A tuple operand: only a row whose value on a tuple is its value on
       // the list of the same elements (`TUPLE_RULES`).
@@ -482,6 +501,11 @@ export function lower(
         e.operatorDefinition === undefined && e.valueDefinition === undefined
           ? `${e.operator} is an unknown operator (no definition)`
           : `${e.operator} is not the library operator here (a user definition)`
+      );
+    if (hasOwnLowering(e.operator, e.operatorDefinition))
+      decline(
+        e,
+        `the definition of ${e.operator} has its own lowering (compile or compileHelpers), which the profile does not call`
       );
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
@@ -762,16 +786,24 @@ export function lower(
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
       // The host's text, in the scope of the entry, read at each use.
-      // A function body and a root function literal have no such scope.
-      if (cx.inFunction !== undefined || b.literal)
+      // A function body and a root function literal have no such scope:
+      // a read of the inputs object there is an input that each call
+      // passes, read at the call in the entry (`free()`).
+      const read =
+        cx.inFunction !== undefined &&
+        !b.literal &&
+        options.objectVars?.includes(name) === true;
+      if ((cx.inFunction !== undefined || b.literal) && !read)
         decline(e, `the vars name ${name} in a function`);
       // A wide type (an assigned name is `any`) is a real.
-      const t = inputType(e.type.type === 'any' ? 'real' : e.type.type);
+      const engineType = e.type.type === 'any' ? 'real' : e.type.type;
+      const t = inputType(engineType);
       if (t === undefined || t.lane === 'complex' || t.shape.length > 0)
         decline(
           e,
           `the vars name ${name} of type ${engineTypeToString(e.type.type)}`
         );
+      if (read) return fns.capture(e, name, engineType);
       return b.op(hostVarOp(k, t.lane), [], scalarType(t.lane));
     }
     if (name === 'True' || name === 'False')
@@ -814,6 +846,13 @@ export function lower(
         `a call of ${e.operator}, which reads the input ${name}, where ${name} is a local or a parameter`
       );
     if (known !== undefined) return known.binding.v;
+    const k = options.vars?.indexOf(name) ?? -1;
+    // A `vars` name (`symbol()`): its text, read here at the entry.
+    if (k >= 0) {
+      if (cx.inFunction !== undefined) return fns.capture(e, name, t);
+      const lane = inputType(t)!.lane;
+      return b.op(hostVarOp(k, lane), [], scalarType(lane));
+    }
     if (held(name)?.value !== undefined)
       decline(
         e,

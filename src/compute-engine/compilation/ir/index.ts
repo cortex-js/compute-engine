@@ -15,6 +15,7 @@
 
 import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
+import { readsVarsObject } from '../vars-inputs.js';
 import { SliceInternalError, verify } from './verify.js';
 import { ALL_PASSES, runPasses, type PassOptions } from './passes.js';
 import {
@@ -340,6 +341,9 @@ export function sliceProgram(
     mode: options.mode,
     iterationBudget: options.iterationBudget,
     vars: Object.keys(options.vars ?? {}),
+    objectVars: Object.keys(options.vars ?? {}).filter((n) =>
+      readsVarsObject(options.vars![n])
+    ),
   });
   verify(p, rows);
   const warnings = seededWarnings(p, rows);

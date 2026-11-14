@@ -34,15 +34,22 @@ and helpers with the `extend` option.
 
 The head decides first: a head bound to a user function (by its definition, not
 its name) is a call, also when it is named `At` or `Sin`; a library head is
-compiled only when `isLibraryOperator()` holds; anything else declines. Then a
+compiled only when `isLibraryOperator()` holds; anything else declines. A
+library head whose operator definition has a `compile` handler other than the
+standard library's, or `compileHelpers`, declines (`hasOwnLowering()`, also for
+a `Range` read as a list source): the definition has a lowering of its own,
+which the profile does not call. A host that sets
+`ce.lookupDefinition('At').operator.compile` changes what `At` computes, and the
+row of `At` would give the stock value. The standard handler of `PointList` is
+not such a change (the identity of the function in the library table). Then a
 sub-expression that the slice would lower and that has no free name, no name
 bound by the walk, no effectful operation and no loop is evaluated once with
 `N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Sinh(3)` is
 not folded, because `Sinh` is not in the slice. A sub-expression whose static
 type is `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A
 throw of `N()` means "not folded": the node is lowered as written, except a
-`CancellationError`, which propagates. A row that depends on an engine setting declines when the setting is
-not the default.
+`CancellationError`, which propagates. A row that depends on an engine setting
+declines when the setting is not the default.
 
 A root `Function` literal compiles to a function of positional parameters, then
 the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
@@ -163,13 +170,20 @@ The mode. A row with `leaves` (`Sqrt`, `Ln`, `Log`, `Power`, `Root`, `Arcsin`,
 complex signature in both modes when its operands are finite constants on which
 its real function is NaN: `Ln(-2)·x` is complex, with and without
 `constantFold`, as the `strict` contract says of a logarithm or a radical of a
-provably negative operand. Otherwise, in the default `mode: 'strict'` a row
+provably negative operand. In the default `mode: 'strict'` a row with
+`leaves.nonnegative` (`Sqrt`, `Ln`, `Log`, `Root`, `Power`) also takes it when
+the engine proves that operand negative (`isNegative`), its other operands are
+constants and its real function is NaN at -1 there: `Sqrt(-x^2 - 1)` and
+`Sqrt(x)` for `x: real<..-1>` are complex, `Root(-x^2 - 1, 3)` stays the real
+root. This holds whatever an assumption becomes after the compilation: on a real
+that turns out nonnegative the complex function has imaginary part 0, and the
+result is that number. No sign fact selects the real signature. Otherwise a row
 takes the signature of its operands' lanes: a real operation outside its real
-domain is NaN (`Sqrt(x)` at `x = -4`). In `mode: 'complex'` a row with `leaves`
-takes its complex signature unless an operand proves the real value by what
-cannot change after the compilation: an exponent on the integer lane (`x^2`,
-`x^n`), or a base or radicand that is a nonnegative constant, or a value of
-`Abs`, `Exp`, an even power, or a sum or a product of such values
+domain is NaN (`Sqrt(x)` at `x = -4` for `x: real`). In `mode: 'complex'` a row
+with `leaves` takes its complex signature unless an operand proves the real
+value by what cannot change after the compilation: an exponent on the integer
+lane (`x^2`, `x^n`), or a base or radicand that is a nonnegative constant, or a
+value of `Abs`, `Exp`, an even power, or a sum or a product of such values
 (`Sqrt(x^2 + 1)`). The type of an input is not read: an assumption narrows it
 (`assume(s >= 0)` makes it `real<0..>`) and `forget()` widens it again after the
 compilation. `Sqrt(x)` at `x = -4` is then `{re: 0, im: 2}`.
@@ -404,17 +418,19 @@ parameter after the function's own, in the order of its first read in the body
 the entry or, in another function, a parameter of the same kind, so the input is
 in `freeSymbols` and a chain of calls passes it down. At the entry the input has
 the type that the scope of the compilation gives the name, whichever occurrence
-reads it first, and the call checks it against the parameter: with
-`f(t) := a·t` and `inputs: {a: 'complex'}`, `f(2)` declines (an integer input
-for a real parameter is admitted). An occurrence of an input of another type
-than the input's declines. Declined: a recursive call of a function that reads
-an input, also through a cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
+reads it first, and the call checks it against the parameter: with `f(t) := a·t`
+and `inputs: {a: 'complex'}`, `f(2)` declines (an integer input for a real
+parameter is admitted). An occurrence of an input of another type than the
+input's declines. A `vars` name whose text reads the inputs object
+(`readsVarsObject()`: `_.P`, `_['Q']`) is passed the same way: each call in the
+entry reads the text. Declined: a recursive call of a function that reads an
+input, also through a cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
 `Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
 parameter, or has a value; an input of a list type; a name with a value read in
-the body; a `vars` name. A recursive function that reads no input compiles. A
-function value other than the literal of a `Map` or `Filter` or the root, and a
-list argument for a scalar parameter (the interpreter maps the function over the
-list) decline.
+the body; another `vars` name. A recursive function that reads no input
+compiles. A function value other than the literal of a `Map` or `Filter` or the
+root, and a list argument for a scalar parameter (the interpreter maps the
+function over the list) decline.
 
 A parameter declared a list of reals or integers
 (`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
@@ -498,9 +514,10 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   twice), in the scope of the entry, where `_` is the inputs object. The mapping
   wins over the engine's value of the name and is never folded; a local of the
   same name shadows it. Its lane is the name's type (a wide or `any` type is a
-  real). A read in a user function or a root function literal (no such scope), a
-  call of a mapped name, a list or complex type, and a text with `$` and a digit
-  decline. A mapped name is not an input (`freeSymbols`).
+  real). A read in a root function literal (no such scope), or in a user
+  function of a text other than a read of the inputs object (see "User
+  functions"), a call of a mapped name, a list or complex type, and a text with
+  `$` and a digit decline. A mapped name is not an input (`freeSymbols`).
 - **Calling convention.** The result is `calling: 'expression'`, `run(inputs)`,
   or, for a root `Function` literal, `calling: 'lambda'`, `run(a0, a1, …)`, as
   the existing compiler's result is called by `implicitCompile()`; a literal of

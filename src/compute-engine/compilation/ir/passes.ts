@@ -11,7 +11,9 @@
  *   with no input is a literal already, `lower.ts`); an element of a list
  *   literal is that element; an element of an element-wise operation is the
  *   operation on elements; the `At` of `scalarize`; a conditional with no
- *   effect whose condition is a constant is the arm it takes.
+ *   effect whose condition is a constant is the arm it takes. A value
+ *   replaces another only on its lane (an integer arm of a real result
+ *   stays an arm).
  * - `hoist`: the operands of `And` and `Or` are lowered in an arm (only
  *   evaluated when needed); a pure operand is moved out of its arm, and the
  *   conditional becomes the `and` or `or` it is.
@@ -256,6 +258,12 @@ const scalarize: Pass = (p, rows) => {
   });
 };
 
+/** A value of `a` replaces `b` only on the same lane: an integer that
+ *  stands for a real result (an arm, a list cell, `pow`) would narrow the
+ *  types computed from `b` (a `build` of it). */
+const sameLane = (p: Program, a: V, b: V) =>
+  p.types[a].lane === p.types[b].lane;
+
 const fold: Pass = (p, rows) => {
   const fx = effects(p, rows);
   const constants = new Map<V, Literal>();
@@ -274,7 +282,7 @@ const fold: Pass = (p, rows) => {
       const [a, index] = i.args;
       const k = constants.get(index)!.value as number;
       const list = defs.get(a);
-      if (list?.k === 'list') {
+      if (list?.k === 'list' && sameLane(p, list.args[k], i.out)) {
         subst.set(i.out, list.args[k]);
         return [];
       }
@@ -309,6 +317,8 @@ const fold: Pass = (p, rows) => {
     }
     if (i.k === 'if' && constants.has(i.cond) && fx.of(i) !== 'effectful') {
       const taken = constants.get(i.cond)!.value ? i.then : i.else;
+      if (!taken.yields.every((y, j) => sameLane(p, y, i.outs[j])))
+        return undefined;
       taken.yields.forEach((y, j) => subst.set(i.outs[j], y));
       return taken.body;
     }
@@ -356,7 +366,7 @@ const strength: Pass = (p) => {
     const [base, exponent] = i.args;
     const n = constants.get(exponent);
     const t = p.types[i.out];
-    if (n === 1) {
+    if (n === 1 && sameLane(p, base, i.out)) {
       subst.set(i.out, base);
       return [];
     }

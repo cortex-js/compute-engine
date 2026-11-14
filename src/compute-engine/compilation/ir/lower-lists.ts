@@ -23,6 +23,7 @@ import {
 } from './operators.js';
 import {
   decline,
+  hasOwnLowering,
   type Fn,
   type Lowering,
   type Source,
@@ -61,7 +62,12 @@ export function listLowering(cx: Lowering) {
   function source(e: Expression, scalars?: false, tuple?: boolean): Source;
   function source(e: Expression, scalars: true, tuple: true): Source | V;
   function source(e: Expression, scalars = false, tuple = false): Source | V {
-    if (!isFunction(e, 'Range') || !cx.isLibrary(e)) {
+    // A host's `Range` (`hasOwnLowering()`) declines in `cx.value()`.
+    if (
+      !isFunction(e, 'Range') ||
+      !cx.isLibrary(e) ||
+      hasOwnLowering('Range', e.operatorDefinition)
+    ) {
       const l = cx.value(e)!;
       if (cx.tuples.get(l) === 0 && !tuple)
         decline(e, 'a tuple where a list is read');

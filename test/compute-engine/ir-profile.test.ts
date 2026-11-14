@@ -21,6 +21,7 @@ import {
 } from '../../src/compute-engine/compilation/javascript-runtime';
 import { JS } from '../../src/compute-engine/compilation/ir/print-js';
 import { compileSlice } from '../../src/compute-engine/compilation/ir';
+import { hasOwnLowering } from '../../src/compute-engine/compilation/ir/lower-context';
 import { rangeCount } from '../../src/compute-engine/numerics/range-count';
 import {
   agrees,
@@ -1171,5 +1172,318 @@ describe('a lifted input: its type, the other modes and targets', () => {
     const code = compileSlice(box(['g', 'x'], e), { target: 'glsl' }).code;
     expect(code).toMatch(/float u0_g\(float \w+, float \w+\)/);
     expect(code).toMatch(/u0_g\(in0_x, in1_n\)/);
+  });
+});
+
+describe('a Sum with iterationBudget whose arm narrows the type (Tycho corpus run 2)', () => {
+  const S3 = ['Sum', 'k', ['Limits', 'k', 1, 3]];
+  const Sn = ['Sum', 'k', ['Limits', 'k', 1, 'n']];
+  // The witness: a lambda whose body rebinds its parameter `k` as the index
+  // of the `Sum`; the fold of the budget test gave the build an integer
+  // body where its result was a real list (an internal error).
+  const WITNESS = [
+    'Min',
+    ['Map', ['Function', ['Block', S3], 'k'], ['List', 10, 20]],
+  ];
+  test.each(['parse', 'canonical', 'raw', 'structural'])(
+    'the witness in the box form %s, with and without the budget',
+    (form) => {
+      for (const iterationBudget of [1000000, undefined]) {
+        const e = new ComputeEngine();
+        e.declare('x', 'real');
+        const expr =
+          form === 'parse'
+            ? e.parse(
+                String.raw`\min\left(\mathrm{Map}\left(k\mapsto \sum_{k=1}^{3}k, \left[10,20\right]\right)\right)`
+              )
+            : e.box(
+                WITNESS as never,
+                form === 'canonical' ? {} : { form: form as never }
+              );
+        const o = outcome(expr, {
+          mode: 'strict',
+          inputs: { x: 'real' },
+          iterationBudget,
+        });
+        expect('result' in o && o.result.run!({ x: 0 })).toBe(6);
+      }
+    }
+  );
+  test('next to it: a Map body, a Filter predicate, an If arm, a List element', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('n', 'integer');
+    for (const json of [
+      ['Min', ['Map', ['Function', ['Add', 'j', Sn], 'j'], ['List', 10, 20]]],
+      ['At', ['Map', ['Function', ['Add', 'j', S3], 'j'], ['List', 10, 20]], 2],
+      [
+        'Length',
+        [
+          'Filter',
+          ['List', 1, 2, 3, 4],
+          ['Function', ['Greater', ['Add', 'j', S3], 8], 'j'],
+        ],
+      ],
+      ['If', ['Greater', 'x', 0], S3, 2],
+      ['Add', 'x', ['If', 'True', S3, 2]],
+      ['Min', ['List', S3, 2]],
+      ['At', ['List', S3, 2, 'n'], 1],
+      [
+        'Max',
+        ['Map', ['Function', ['Multiply', 'j', 2], 'j'], ['List', S3, 2]],
+      ],
+    ])
+      for (const iterationBudget of [1000000, undefined]) {
+        const r = againstInterpreter(e, json, [{ x: 0.5, n: 4 }], {
+          iterationBudget,
+        });
+        expect(r.success).toBe(true);
+      }
+  });
+  test('a fold keeps the lane: an integer list cell and a pow of exponent 1 in a real result', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('K', 'list<integer^3>');
+    for (const json of [
+      ['Map', ['Function', ['At', ['List', 'j', 'x'], 1], 'j'], 'K'],
+      [
+        'Map',
+        [
+          'Function',
+          ['Power', 'j', ['Multiply', 2, ['If', 'True', 0.5, 'x']]],
+          'j',
+        ],
+        'K',
+      ],
+    ]) {
+      const r = compile(box(json, e), { ...IR, fallback: false });
+      expect(r.run!({ x: 0.25, K: [1, 2, 3] })).toEqual([1, 2, 3]);
+    }
+  });
+  test('next to it: an integer local and a function declared -> integer decline', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'integer');
+    e.declare('f', '(integer) -> integer');
+    e.assign(
+      'f',
+      box(['Function', ['Sum', 'k', ['Limits', 'k', 1, 'm']], 'm'], e)
+    );
+    for (const json of [
+      ['Block', ['Declare', 't', 'integer', Sn], ['Add', 't', 1]],
+      ['Add', ['f', 3], 1],
+    ]) {
+      const o = outcome(box(json, e), { iterationBudget: 1000000 });
+      expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
+      expect(outcome(box(json, e)).hasOwnProperty('result')).toBe(true);
+    }
+  });
+});
+
+describe('a library operator whose definition the host changed in place', () => {
+  // `0 < At(S, x + N·Floor(y) + 1)`: Tycho's `At` reads a list at the floor
+  // of a real index; the profile's row would give the stock value.
+  const PROGRAM = [
+    'Less',
+    0,
+    ['At', 'S', ['Add', 'x', ['Multiply', 'N', ['Floor', 'y']], 1]],
+  ];
+  const engine = () => {
+    const e = new ComputeEngine();
+    e.declare('S', 'list<real>');
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    e.declare('N', 'integer');
+    return e;
+  };
+  test('a compile handler or compileHelpers set on the definition of At declines', () => {
+    const plain = outcome(box(PROGRAM, engine()));
+    expect('result' in plain).toBe(true);
+    for (const change of [
+      (d: Record<string, unknown>) => (d.compile = () => '0'),
+      (d: Record<string, unknown>) => (d.compileHelpers = { h: () => 1 }),
+    ]) {
+      const e = engine();
+      change(e.lookupDefinition('At')!.operator as never);
+      const o = outcome(box(PROGRAM, e));
+      expect('message' in o && o.message).toMatch(
+        /the definition of At has its own lowering/
+      );
+    }
+  });
+  test('a Range read as a list source with a host compile handler declines', () => {
+    const programs = [
+      ['Sum', ['Range', 1, 'n']],
+      ['Length', ['Range', 1, 'n']],
+      [
+        'Max',
+        ['Map', ['Function', ['Multiply', 'j', 'x'], 'j'], ['Range', 1, 'n']],
+      ],
+    ];
+    const ranged = () => {
+      const e = engine();
+      e.declare('n', 'integer');
+      return e;
+    };
+    for (const json of programs) {
+      expect('result' in outcome(box(json, ranged()))).toBe(true);
+      const e = ranged();
+      (e.lookupDefinition('Range')!.operator as { compile?: unknown }).compile =
+        () => '(-777)';
+      const o = outcome(box(json, e));
+      expect('message' in o && o.message).toMatch(
+        /the definition of Range has its own lowering/
+      );
+    }
+  });
+  test('PointList in the pipeline: its standard handler compiles, a host handler declines', () => {
+    const json = [
+      'PointList',
+      'D',
+      ['Map', ['Function', ['Sin', 'z'], 'z'], 'D'],
+    ];
+    const points = () => {
+      const e = new ComputeEngine();
+      e.declare('D', 'list<real>');
+      return e;
+    };
+    const o = outcome(box(json, points()));
+    expect('result' in o && o.result.run!({ D: [1, 2] } as never)).toEqual([
+      [1, Math.sin(1)],
+      [2, Math.sin(2)],
+    ]);
+    const e = points();
+    (
+      e.lookupDefinition('PointList')!.operator as { compile?: unknown }
+    ).compile = () => '0';
+    const h = outcome(box(json, e));
+    expect('message' in h && h.message).toMatch(
+      /the definition of PointList has its own lowering/
+    );
+  });
+  test('a host Range declines under Comprehension and PointList too', () => {
+    for (const json of [
+      [
+        'Length',
+        [
+          'Comprehension',
+          ['Multiply', 2, 'k'],
+          ['Element', 'k', ['Range', 1, 'n']],
+        ],
+      ],
+      ['PointList', ['Range', 1, 3], ['Range', 1, 3]],
+    ]) {
+      const make = () => {
+        const e = new ComputeEngine();
+        e.declare('n', 'integer');
+        return e;
+      };
+      expect('result' in outcome(box(json, make()))).toBe(true);
+      const e = make();
+      (e.lookupDefinition('Range')!.operator as { compile?: unknown }).compile =
+        () => '(-777)';
+      const o = outcome(box(json, e));
+      expect('message' in o && o.message).toMatch(
+        /the definition of Range has its own lowering/
+      );
+    }
+  });
+  test("the standard compile handler of PointList (and Field, ListFrom) is not the host's", () => {
+    const e = new ComputeEngine();
+    for (const name of ['PointList', 'Field', 'ListFrom']) {
+      const def = e.lookupDefinition(name)!.operator as { compile?: unknown };
+      expect(typeof def.compile).toBe('function');
+      expect(hasOwnLowering(name, def)).toBe(false);
+    }
+    expect(hasOwnLowering('PointList', { compile: () => '0' })).toBe(true);
+    expect(hasOwnLowering('At', e.lookupDefinition('At')!.operator)).toBe(
+      false
+    );
+  });
+});
+
+describe('mode strict: a radical or a logarithm of an operand proved negative', () => {
+  const NEG = ['Subtract', ['Negate', ['Square', 'x']], 1];
+  const check = (type: string, json: Json, xs: number[], complex: boolean) => {
+    const e = new ComputeEngine();
+    e.declare('x', type);
+    const expr = box(json, e);
+    const r = compile(expr, {
+      ...IR,
+      fallback: false,
+    }) as CompilationResult<'javascript'>;
+    for (const x of xs) {
+      const v = r.run!({ x });
+      expect([json, x, agrees(v, interpret(e, expr, { x }))]).toEqual([
+        json,
+        x,
+        true,
+      ]);
+      expect(typeof v === 'object').toBe(complex);
+    }
+  };
+  test('Sqrt, Ln, Log, Power and Root of -x^2 - 1 are complex', () => {
+    for (const json of [
+      ['Sqrt', NEG],
+      ['Ln', NEG],
+      ['Log', NEG],
+      ['Power', NEG, ['Rational', 1, 2]],
+      ['Power', NEG, 0.3],
+      ['Root', NEG, 2],
+      ['Multiply', 2, ['Sqrt', NEG]],
+    ])
+      check('real', json, [0, 1.5], true);
+  });
+  test('a real root of odd index stays real; Sqrt(x) by the declared type', () => {
+    check('real', ['Root', NEG, 3], [0, 1.5], false);
+    check('real', ['Power', NEG, ['Rational', 1, 3]], [0, 1.5], false);
+    check('real<..-1>', ['Sqrt', 'x'], [-4, -1], true);
+    // `x: real` is the real lane: NaN at -4.
+    const r = compile(box(['Sqrt', 'x']), { ...IR, fallback: false });
+    expect(r.run!({ x: -4 })).toBeNaN();
+    expect(r.run!({ x: 4 })).toBe(2);
+  });
+});
+
+describe('a vars name that reads the inputs object, in a function body', () => {
+  const engine = () => {
+    const e = new ComputeEngine();
+    for (const name of ['P', 'Q', 'x']) e.declare(name, 'real');
+    e.assign(
+      'TychoCertificate18',
+      box(['Function', ['Add', ['Multiply', 2, 'P'], 'Q']], e)
+    );
+    return e;
+  };
+  const WITNESS = [
+    'Add',
+    ['TychoCertificate18'],
+    ['Multiply', 'x', ['TychoCertificate18']],
+  ];
+  test('the witness: a function of no parameter reads two vars names, called twice', () => {
+    const e = engine();
+    const r = againstInterpreter(
+      e,
+      WITNESS,
+      [
+        { P: 1.5, Q: -0.25, x: 3 },
+        { P: -2, Q: 7, x: 0.5 },
+      ],
+      {
+        vars: { P: '_.P', Q: "_['Q']" },
+        inputs: { P: 'real', Q: 'real', x: 'real' },
+      }
+    );
+    expect(r.shippable).toBe(true);
+    expect(r.freeSymbols).toEqual(['x']);
+    // Each call reads the texts at the call.
+    expect(r.code.match(/_\.P/g)).toHaveLength(2);
+  });
+  test('another vars text in a function declines', () => {
+    const o = outcome(box(WITNESS, engine()), {
+      vars: { P: 'Math.PI', Q: '_.Q' },
+    });
+    expect('message' in o && o.message).toMatch(
+      /the vars name P in a function/
+    );
   });
 });

@@ -9,6 +9,7 @@ import type { Type } from '../../../common/type/types.js';
 import { isFunction } from '../../boxed-expression/type-guards.js';
 import type { Builder, IRType, Lane, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
+import { STANDARD_LIBRARIES } from '../../library/library.js';
 
 export type Fn = Expression & FunctionInterface;
 
@@ -23,6 +24,22 @@ export class Decline extends Error {
     super(`${node}: ${cause}`);
     this.name = 'Decline';
   }
+}
+
+/** The definition `def` of the operator `name` has a lowering of its own,
+ *  which the slice does not call: `compileHelpers`, or a `compile` handler
+ *  other than the one of the standard library's definition of `name` (a
+ *  host that sets `ce.lookupDefinition('At').operator.compile`). */
+export function hasOwnLowering(
+  name: string,
+  def: { compile?: unknown; compileHelpers?: unknown } | undefined
+): boolean {
+  if (def?.compileHelpers !== undefined) return true;
+  if (def?.compile === undefined) return false;
+  const standard = STANDARD_LIBRARIES.flatMap((l) => [l.definitions].flat())
+    .map((t) => t?.[name] as { compile?: unknown } | undefined)
+    .find((d) => d !== undefined);
+  return def.compile !== standard?.compile;
 }
 
 /** The text of `e`, at most about 120 characters (a shared tree can have

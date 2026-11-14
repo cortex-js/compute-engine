@@ -41,6 +41,15 @@
   refused, as with the default compiler. A result with a `vars` text that
   reads the inputs object (`vars: { E: '_.E' }`) is now shippable, as with
   the default compiler.
+- **In the experimental profile `'ir'`, a square root or a logarithm of an
+  operand that the engine proves negative is complex in the default mode.**
+  With `x: real`, `compile(Sqrt(-x^2 - 1), { profile: 'ir' })` gives
+  `{ re: 0, im: 1.8027756377319946 }` at `x = 1.5`, where it gave `NaN`, as
+  the interpreter and the default compiler do; `Sqrt(x)` stays `NaN` at
+  `x = -4`. An operator whose library definition a host gave a `compile`
+  handler or `compileHelpers` (`ce.lookupDefinition('At').operator.compile =
+  …`) now declines with `outside-profile`, since the profile does not call
+  that handler: before, it compiled the operator's stock value.
 
 ### Resolved Issues
 
