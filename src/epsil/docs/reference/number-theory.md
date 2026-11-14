@@ -78,24 +78,34 @@ continuedFraction(43/19)
 
 ### digitCount
 
-MathJSON `DigitCount` · `(integer, integer?, integer?) -> integer | list<integer>`
+MathJSON `DigitCount` · `(integer, integer?, integer?, integer?) -> integer | list<integer>`
 
-Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.
+Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`. With a fourth argument `length`, the digits are first zero-padded on the left (or cut to their last `length`), so `DigitCount(5, 2, 0, 8)` is 6.
 
 ```epsil
 digitCount(122, 10, 2)
 // ➔ 2
 ```
 
+```epsil
+digitCount(5, 2, 0, 8)
+// ➔ 6
+```
+
 ### digitSum
 
-MathJSON `DigitSum` · `(integer, integer?) -> integer`
+MathJSON `DigitSum` · `(integer, integer?, integer?) -> integer`
 
-Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.
+Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored. With a third argument `k`, sum only the first `k` digits (most-significant first), or the last `|k|` when `k` is negative; `k` past the digit count sums them all.
 
 ```epsil
 digitSum(1234)
 // ➔ 10
+```
+
+```epsil
+digitSum(1234, 10, 2)
+// ➔ 3
 ```
 
 ### dirichletCharacter
@@ -225,13 +235,23 @@ fromContinuedFraction([2, 3, 1, 4])
 
 ### fromDigits
 
-MathJSON `FromDigits` · `(collection<any>, integer?) -> integer`
+MathJSON `FromDigits` · `(collection<any>, number?) -> number`
 
-Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).
+Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `FromDigits([1, 1, 0], -2)` is 2 and `FromDigits([a, b, c], x)` is `a x^2 + b x + c`.
 
 ```epsil
 fromDigits([1, 2, 3, 4])
 // ➔ 1234
+```
+
+```epsil
+fromDigits([1, 1, 0], -2)
+// ➔ 2
+```
+
+```epsil
+fromDigits([a, b, c], x)
+// ➔ a * x^2 + b * x + c
 ```
 
 ### integerDigits

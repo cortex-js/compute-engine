@@ -31,6 +31,26 @@
 
 ### Resolved Issues
 
+- **`FromDigits` takes any base, and `IntegerString`, `DigitCount` and
+  `DigitSum` take a length or a position.** The base of `FromDigits` was an
+  integer of at least 2: `FromDigits([1, 1, 0], -2)` is now `2`,
+  `FromDigits([1, 2, 3], 1/2)` is `17/4` and `FromDigits([a, b, c], x)` is
+  `a x^2 + b x + c` (all three stayed unevaluated). A digit or a base that is
+  not an integer gives the sum of `d * base^k`, exact under `evaluate()` and
+  numeric under `N()`, so `FromDigits([1.5, 2])` is now `17.0` instead of
+  staying unevaluated, and the result type of `FromDigits` is `number` unless
+  the digits are integers and the base is an integer. `IntegerString(5, 2, 8)`
+  is `"00000101"`: with a length, the digits of `|n|` are padded with zeros
+  or cut to the last digits. `DigitCount(5, 2, 0, 8)` is `6`: the digits are
+  padded first. `DigitSum(1234, 10, 2)` is `3`, the sum of the first two
+  digits, and `DigitSum(1234, 10, -2)` is `7`, the sum of the last two (these
+  three calls were `unexpected-argument` errors). The length of
+  `IntegerString`, `IntegerDigits` and `DigitCount` is at most 1,000,000:
+  `IntegerDigits(5, 2, 10^9)` used to run until it ran out of memory, and
+  now stays unevaluated. (PR #583, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#582](https://github.com/cortex-js/compute-engine/issues/582))
+
 - **`Transpose` with axes is written as a call, so its LaTeX reads back.**
   `["Transpose", "a", 2, 1]` was written `a^T`, which reads back as
   `["Transpose", "a"]`; it is `\operatorname{Transpose}(a, 2, 1)`. Only the
