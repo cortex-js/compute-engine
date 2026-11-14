@@ -116,7 +116,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
       '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T: any)'
     );
     expect(sig(ce, 'Unique')).toBe(
-      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)'
+      '((T) -> T where T: string) & ((T, test: (character, character) any -> boolean) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)'
     );
     // Promoted with `DeleteAt` in Strings Phase 2: a permutation of a
     // string's own characters is a string. The `random` effect label sits on

@@ -74,6 +74,26 @@
 
 ### Resolved Issues
 
+- **`First` and `Last` take the value of an empty collection, `Flatten` takes
+  an infinite depth, `Fold` needs no seed, `Count` takes levels and `Unique`
+  takes a test.** These are the call forms of Wolfram's `First[expr, def]`,
+  `Flatten[list, Infinity]`, `Fold[f, list]`,
+  `Count[expr, pattern, levelspec]` and `DeleteDuplicates[list, test]`; each
+  was an error (`unexpected-argument`, `incompatible-type` or `missing`).
+  `First([], 0)` is `0` and `First([1, 2], 9)` is `1`; the type of the call is
+  the type of the element or of the default. `Flatten(xs, +oo)` flattens
+  completely. `Fold(Add, [1, 2, 3])` is `Reduce([1, 2, 3], Add)`, `6`.
+  `Count([[1, 1], 1], 1, 2)` counts the parts at levels 1 to 2, `3`; `[n]`
+  names one level and `[from, to]` a range. A level specification that is
+  not a positive integer, `+oo` or such a list, a predicate, or a lazy
+  collection such as `Reverse(xs)` leaves the call unevaluated.
+  `Unique([1, 2, 3, 4], (a, b) => a mod 2 == b mod 2)` is `[1, 2]`, and
+  `Unique` of a string with a test is a string. The JavaScript and Python
+  targets do not compile the new forms of `First`, `Last`, `Count` and
+  `Unique`, and fall back to the interpreter. (PR #539, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#538](https://github.com/cortex-js/compute-engine/issues/538))
+
 - **`PowerMod` and `PowerModList` take a rational base and a list, and
   `ChineseRemainder` takes a lower bound.** `PowerMod(1/2, 2, 7)` was an
   `incompatible-type` error and is now `2`: the base `p/q` is `p` times the

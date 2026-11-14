@@ -463,7 +463,7 @@ fill(7, 2, 3)
 
 ### flatten
 
-MathJSON `Flatten` · `(value, integer?) -> list`
+MathJSON `Flatten` · `(value, (+oo | integer)?) -> list`
 
 Flatten a tensor or collection into a list.
 

@@ -246,7 +246,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `complexNumbers` | `ComplexNumbers` | constant `set<complex>` | The set of all finite complex numbers. |
 | `contains` | `Contains` | `(collection<any>, element: any) -> boolean` | Return True if the collection contains the given element (structural identity, like `===`), False otherwise. |
 | `containsSequence` | `ContainsSequence` | `(indexed_collection<T>, indexed_collection<T>) -> boolean where T` | Return `True` when `needle` occurs as a contiguous subsequence of the indexed collection. |
-| `count` | `Count` | `(collection<any>, any?) -> infinity \| integer` | `Count(xs)`: the number of elements in the collection. |
+| `count` | `Count` | `(collection<any>, any?, any?) -> infinity \| integer` | `Count(xs)`: the number of elements in the collection. |
 | `countIf` | `CountIf` | `(collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the number of elements in the collection satisfying the predicate. |
 | `cycle` | `Cycle` | `(list<any>) -> list` | Produce an infinite sequence by cycling through the elements of a finite collection. |
 | `dedup` | `Dedup` | `(collection<any>) -> collection` | Return the collection with consecutive duplicate elements collapsed to a single element. |
@@ -266,7 +266,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `field` | `Field` | `(value: any, field: string) -> unknown` | Access a named field of a value: `p.x` in Epsil. |
 | `filter` | `Filter` | `(collection<T>, predicate: (T) any -> boolean) -> collection where T` | Return the elements of the collection for which the predicate function returns True. |
 | `find` | `Find` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any` | Return the first element of the collection satisfying the predicate. |
-| `first` | `First` | `(xs: indexed_collection<any>) -> any` | The first element of a collection. |
+| `first` | `First` | `(xs: indexed_collection<any>, default: any?) -> any` | The first element of a collection. |
 | `flatMap` | `FlatMap` | `(collection<T>, mapping: (T) any -> U) -> list where T, U` | Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements. |
 | `fold` | `Fold` | `(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T` | Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value. |
 | `groupBy` | `GroupBy` | `(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T` | Partition the collection into a dictionary of lists based on the key returned by the function. |
@@ -282,7 +282,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `join` | `Join` | `((T+) -> T where T: string) & ((collection<any>*) -> collection)` | Join the elements of some collections into a flat collection. |
 | — | `KeyValuePair` | `(key: string, value: T) -> tuple<string, T> where T` | A key/value pair |
 | `keys` | `Keys` | `(dictionary<any>) -> list<string>` | Return a list of the keys of a dictionary. |
-| `last` | `Last` | `(xs: indexed_collection<any>) -> any` | The last element of a collection. |
+| `last` | `Last` | `(xs: indexed_collection<any>, default: any?) -> any` | The last element of a collection. |
 | `length` | `Length` | `(any) -> infinity \| integer` | Number of elements in a collection. |
 | `linspace` | `Linspace` | `(start: number, end: number?, count: number?) -> list<number>` | A sequence of evenly spaced numbers between a start and end value, both endpoints included. |
 | — | `List` | `(any*) -> list` | An ordered collection of elements (a list). |
@@ -354,7 +354,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | — | `Tuple` | `(any*) -> tuple` | A fixed number of heterogeneous elements. |
 | `tupleFrom` | `TupleFrom` | `(value*) -> tuple` | Create a tuple from the elements of a collection. |
 | `union` | `Union` | `(any+) -> set` | Return the union of two or more collections as a set. |
-| `unique` | `Unique` | `((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)` | Return a list of the unique elements of the collection. |
+| `unique` | `Unique` | `((T) -> T where T: string) & ((T, test: (character, character) any -> boolean) -> T where T: string) & ((collection<T>) -> list<T> where T: any) & ((collection<T>, test: (T, T) any -> boolean) -> list<T> where T: any)` | Return a list of the unique elements of the collection. |
 | `values` | `Values` | `(dictionary<any>) -> list` | Return a list of the values of a dictionary. |
 | `zip` | `Zip` | `(indexed_collection<any>+) -> list` | Combine multiple collections element-wise into a list of tuples. |
 
@@ -793,7 +793,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `eigenvalues` | `Eigenvalues` | `(matrix) -> list` | Eigenvalues of a square matrix. |
 | `eigenvectors` | `Eigenvectors` | `(matrix) -> list` | Eigenvectors of a square matrix. |
 | `fill` | `Fill` | `(value: any, integer+) -> list` | List or tensor with each element equal to a value. |
-| `flatten` | `Flatten` | `(value, integer?) -> list` | Flatten a tensor or collection into a list. |
+| `flatten` | `Flatten` | `(value, (+oo \| integer)?) -> list` | Flatten a tensor or collection into a list. |
 | `hadamardProduct` | `HadamardProduct` | `(matrix \| vector, matrix \| vector) -> matrix \| vector` | Hadamard (element-wise) product of two vectors or matrices of the same shape. |
 | `hom` | `Hom` | `(value*) -> value` | Hom-set of morphisms between objects |
 | `identityMatrix` | `IdentityMatrix` | `(integer) -> matrix` | n-by-n identity matrix. |

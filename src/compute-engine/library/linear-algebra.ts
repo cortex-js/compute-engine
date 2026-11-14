@@ -3093,7 +3093,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       examples: ['Flatten([[1, 2], [3, 4]])'],
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
-      signature: '(value, integer?) -> list',
+      // The depth is a non-negative integer or `+oo` (Wolfram's
+      // `Flatten[list, Infinity]`), which flattens completely.
+      signature: '(value, integer | +oo?) -> list',
       // When the type of the operand settles which elements are lists, the
       // result is a list of the leaf type: `Flatten(xs)` with `xs` a
       // `list<list<integer>>` is a `list<integer>`, and `Flatten(xs, 1)` with
@@ -3154,7 +3156,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // presence of the second argument, so the no-depth behavior below is
         // unchanged.
         if (ops.length >= 2) {
-          const depth = toInteger(ops[1]);
+          const depth = ops[1].isSame(ce.PositiveInfinity)
+            ? Infinity
+            : toInteger(ops[1]);
           if (depth === null || depth < 0) return undefined;
           if (op1.isNumber) return ce.expr(['List', op1]);
           // A string operand is a LEAF, like a scalar: it is an indexed
