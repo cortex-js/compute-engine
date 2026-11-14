@@ -1292,6 +1292,173 @@ function exactBaseIntegerPower(
   return ce.number(ce._numericValue(value.toPrecision(working)));
 }
 
+/**
+ * The number of digits that a sum can lose by cancellation before
+ * `cancelledSumAtRaisedPrecision()` computes it again. A loss of one or two
+ * digits is within the caveat of the last digits of a numeric value.
+ */
+const CANCELLATION_DIGITS = 3;
+
+/** The digits added to the precision that the cancellation needs. */
+const CANCELLATION_GUARD_DIGITS = 10;
+
+/**
+ * The largest number of digits that `cancelledSumAtRaisedPrecision()` adds
+ * to the working precision: it bounds the cost of a sum whose terms are
+ * very large compared with their difference.
+ */
+const MAX_CANCELLATION_EXTRA_DIGITS = 200;
+
+/**
+ * Under `.N()`, the value of the sum of `ops` computed again at a raised
+ * precision, when `sum`, its value at the working precision, lost digits by
+ * cancellation. Otherwise `sum`.
+ *
+ * `ops` are the operands before their evaluation, `evaluated` their numeric
+ * values. The sum is computed again only when every operand is an exact real
+ * number or an exact constant expression (`isExactConstantExpression()`)
+ * that is transitively pure: their values are known to any precision. A
+ * float operand is known only to its precision, so a higher precision does
+ * not give more correct digits. A `Sum` or an `Integrate` is not an exact
+ * constant expression (its bound variable is not a constant), so it is not
+ * evaluated again.
+ *
+ * The digits lost are the difference of the decimal magnitudes of the
+ * largest term and of the sum (all of them when the sum is 0). The sum is
+ * computed at the working precision plus the digits lost plus guard digits
+ * (twice the working precision plus guard digits when the sum is 0). When
+ * that value keeps fewer digits than the working precision but at least
+ * `CANCELLATION_DIGITS`, its loss is measured, and the sum is computed one
+ * more time at a precision that covers it. Otherwise the precision is not
+ * raised again: a sum that still cancels (an identity whose value is 0, or a
+ * sum that loses more than about twice the working precision) gives `sum`,
+ * the value at the working precision, which then has no correct digit
+ * (CE-1313). The precision is never
+ * raised by more than `MAX_CANCELLATION_EXTRA_DIGITS`. The result is rounded
+ * to the working precision.
+ *
+ * A function whose result jumps (`Floor`, `Sign`, `Mod`) decides its result
+ * from its exact operand under `.N()` (`exactRoundingOperand()`,
+ * `roundExactConstant()`), not from this value: the double of
+ * `√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `5·10⁹`, and its floor is `4999999999`.
+ *
+ * The exact remainder of `Mod(a, √2)` for `a = (2⁵³ − 1)²` is
+ * `a − k·√2`, with two terms of about `8·10³¹` and a value of about `1.05`:
+ * at 21 digits, its value was `9500000000` (CE-1249).
+ */
+function cancelledSumAtRaisedPrecision(
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  sum: Expression | undefined,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!numericApproximation || sum === undefined || ops.length < 2)
+    return sum;
+  if (!isNumber(sum) || sum.isComplex || sum.isFinite !== true) return sum;
+  // A step of `N(x, [p, a])` (`evaluateToGoal()`, `library/core.ts`) is the
+  // one evaluation whose requested digits equal the working precision
+  // (`N(x, p)` adds guard digits). The goal run raises the precision
+  // itself and compares the values, which finds a cancellation.
+  const ce = sum.engine;
+  if (ce._requestedPrecision === ce.precision) return sum;
+  // The test of the cancellation comes first: it is cheap, and the test of
+  // exactness walks each operand.
+  const lost = cancelledDigits(evaluated, sum);
+  if (lost === undefined || lost < CANCELLATION_DIGITS) return sum;
+  // A sum of rational literals is computed exactly. A literal with a radical
+  // (`k·√2`) is not.
+  if (ops.every((x) => isNumber(x) && x.isRational === true)) return sum;
+  // A constant whose value is impure (`K := 10^6 + Random()`) would run its
+  // effect again (`isTransitivelyPure()`).
+  if (
+    !ops.every(
+      (x) =>
+        isExactRealLiteral(x) ||
+        (isExactConstantExpression(x) && isTransitivelyPure(x))
+    )
+  )
+    return sum;
+  const working = ce.precision;
+  const limit = working + MAX_CANCELLATION_EXTRA_DIGITS;
+  const sumAt = (digits: number) =>
+    ce._withTransientPrecision(digits, () => {
+      const terms = ops.map((x) => x.N());
+      const s = addNEvaluated(
+        terms,
+        terms.map(() => true)
+      );
+      if (!isNumber(s) || s.isComplex || s.isFinite !== true) return undefined;
+      return {
+        value: s.bignumRe ?? new BigDecimal(s.re),
+        lost: cancelledDigits(terms, s),
+      };
+    });
+  // When the sum is 0, the loss is not known: start at twice the working
+  // precision.
+  let digits = Math.min(
+    limit,
+    working + Math.min(lost, working) + CANCELLATION_GUARD_DIGITS
+  );
+  let result = sumAt(digits);
+  if (result === undefined || result.lost === undefined) return sum;
+  // When the first raise kept some digits but not enough (a sum that was 0
+  // at the working precision), its loss is now measured: one more raise
+  // covers it. A sum that kept fewer than `CANCELLATION_DIGITS` digits is
+  // taken to be 0 or noise (an identity), and it is not raised again.
+  if (
+    digits - result.lost < working &&
+    digits - result.lost >= CANCELLATION_DIGITS &&
+    digits < limit
+  ) {
+    digits = Math.min(
+      limit,
+      working + result.lost + CANCELLATION_GUARD_DIGITS
+    );
+    result = sumAt(digits);
+    if (result === undefined || result.lost === undefined) return sum;
+  }
+  if (digits - result.lost < working) return sum;
+  const value = result.value;
+  // The value is a float, also when its double is an integer: a rounding
+  // function (`Floor`) takes an exact operand as the exact value, and the
+  // double of `4999999999.99999999998…` is `5·10⁹`.
+  if (working <= MACHINE_PRECISION)
+    return ce.number(ce._inexactNumericValue(value.toNumber()));
+  return ce.number(ce._numericValue(value.toPrecision(working)));
+}
+
+/**
+ * The number of decimal digits that the sum `sum` of `terms` lost by
+ * cancellation: the decimal magnitude of the largest term minus the one of
+ * the sum, `Infinity` when the sum is 0 and a term is not, or `undefined`
+ * when a term is not a finite real number.
+ */
+function cancelledDigits(
+  terms: ReadonlyArray<Expression>,
+  sum: Expression
+): number | undefined {
+  let largest = -Infinity;
+  for (const t of terms) {
+    if (!isNumber(t) || t.isComplex || t.isFinite !== true) return undefined;
+    const m = decimalMagnitude(t);
+    if (m !== undefined && m > largest) largest = m;
+  }
+  if (largest === -Infinity) return 0;
+  const m = decimalMagnitude(sum as NumberLiteralInterface & Expression);
+  if (m === undefined) return Infinity;
+  return largest - m;
+}
+
+/** The decimal magnitude of a finite real number literal (`3` for `123.4`),
+ * or `undefined` for `0`. */
+function decimalMagnitude(
+  x: NumberLiteralInterface & Expression
+): number | undefined {
+  const b = x.bignumRe ?? new BigDecimal(x.re);
+  if (b.isZero()) return undefined;
+  return b.exponent + b._digitCount();
+}
+
 /** The operand at `index` of the expression that an `evaluate` handler
  * receives in its options, before the operands were evaluated. */
 function originalOperand(
@@ -7967,11 +8134,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A type error that names the value of an operand records that
         // operand, for the frame of the error (`recordRefusedOperand()`).
         return recordRefusedOperand(
-          addEvaluatedOperands(ops, evaluated, {
-            numericApproximation,
-            engine,
-            expression,
-          }),
+          cancelledSumAtRaisedPrecision(
+            ops,
+            evaluated,
+            addEvaluatedOperands(ops, evaluated, {
+              numericApproximation,
+              engine,
+              expression,
+            }),
+            numericApproximation
+          ),
           ops,
           evaluated
         );
@@ -8023,11 +8195,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           effects,
           () =>
             recordRefusedOperand(
-              addEvaluatedOperands(ops, evaluated, {
-                numericApproximation,
-                engine,
-                expression,
-              }),
+              cancelledSumAtRaisedPrecision(
+                ops,
+                evaluated,
+                addEvaluatedOperands(ops, evaluated, {
+                  numericApproximation,
+                  engine,
+                  expression,
+                }),
+                numericApproximation
+              ),
               ops,
               evaluated
             ),

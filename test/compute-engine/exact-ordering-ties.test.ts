@@ -40,9 +40,9 @@ const PYTHAGORAS: MathJsonExpression = [
 ];
 const ZERO_SUM: MathJsonExpression = ['Subtract', LN2_LN3, ['Ln', 6]];
 const SQRT2_PLUS: MathJsonExpression = ['Sqrt', ['Add', 2, ['Power', 10, -30]]];
-// cos(10⁻²⁰) − 1 = −5·10⁻⁴¹
+// cos(10⁻²⁰) − 1 = −5·10⁻⁴¹ + 10⁻⁸⁰/24 − …
 const COS_20: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -20]], 1];
-// cos(10⁻⁷⁰) − 1 = −5·10⁻¹⁴¹: not decided at 50 digits, nor by the
+// cos(10⁻⁷⁰) − 1 = −5·10⁻¹⁴¹ + 10⁻²⁸⁰/24 − …: not decided at 50 digits, nor by the
 // enclosures of `cmp`, which stop at 121 digits at the default precision.
 const COS_70: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -70]], 1];
 
@@ -116,7 +116,11 @@ describe('STEP 1: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
   });
 
   test('cos(10⁻²⁰) − 1 is negative', () => {
-    expect(valueAt(60, COS_20)).toBe('-5e-41');
+    // Under `.N()`, the difference is computed again at a raised precision,
+    // so the term `10⁻⁸⁰/24` shows.
+    expect(valueAt(60, COS_20)).toBe(
+      '-4.99999999999999999999999999999999999999995833333333333333333e-41'
+    );
     expect(exactOrder(evaluate(COS_20), ce.Zero)).toBe(-1);
     expect(evaluate(['Max', COS_20, 0]).toString()).toBe('0');
     expect(evaluate(['Max', 0, COS_20]).toString()).toBe('0');
@@ -356,7 +360,9 @@ describe('STEP 1 DOES NOT RESET THE ENGINE', () => {
 
 describe('STEP 3: A TIE WITHIN THE TOLERANCE, NEVER AN ORDER', () => {
   test('cos(10⁻⁷⁰) − 1 and 0', () => {
-    expect(valueAt(160, COS_70)).toBe('-5e-141');
+    expect(valueAt(160, COS_70)).toBe(
+      `-4.${'9'.repeat(140)}5833333333333333333e-141`
+    );
     const x = evaluate(COS_70);
     // Not decided at 121 digits, and not proved equal
     expect(exactOrder(x, ce.Zero)).toBeUndefined();

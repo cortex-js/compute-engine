@@ -6,11 +6,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 // under `.N()`. Before 2026-10-17, each of these was an
 // `incompatible-type` error, because `~oo` was outside the carrier.
 //
-// Under `.N()`, the float of an operand whose exact value is finite can be
-// `~oo` when its terms cancel: the float of `1/(√(10⁴⁰ + 1) − 10²⁰)` is
-// `~oo` at 21 digits, but the exact value is `√(10⁴⁰ + 1) + 10²⁰`, which is
-// `2·10²⁰ + 5·10⁻²¹` to 40 digits. A function whose result jumps uses the
-// exact value of an exact operand under `.N()`, so these are finite.
+// Under `.N()`, the terms of `√(10⁴⁰ + 1) − 10²⁰` cancel at 21 digits, and
+// the difference is computed again at a raised precision, so the float of
+// `1/(√(10⁴⁰ + 1) − 10²⁰)` is finite: the exact value is
+// `√(10⁴⁰ + 1) + 10²⁰`, which is `2·10²⁰ + 5·10⁻²¹` to 40 digits. A
+// function whose result jumps uses the exact value of an exact operand
+// under `.N()`.
 
 const ce = new ComputeEngine();
 
@@ -137,9 +138,9 @@ describe('an operand whose type has the member infinity', () => {
   });
 });
 
-describe('under .N(), an operand whose float is ~oo but whose exact value is finite', () => {
-  test('its float is ~oo', () => {
-    expect(box(CANCELLATION).N().toString()).toBe('~oo');
+describe('under .N(), an operand whose terms cancel and whose exact value is finite', () => {
+  test('its float is finite', () => {
+    expect(box(CANCELLATION).N().toString()).toBe('200000000000000000000');
   });
 
   const expected: [string, string][] = [

@@ -16,12 +16,13 @@ describe('a rounded float is never an exact result', () => {
     expect(p('2\\sqrt{1+10^{-30}}-2').evaluate().isSame(0)).toBe(false);
     expect(p('2\\sqrt{1+10^{-30}}-2').evaluate().operator).toBe('Add');
     expect(p('\\sqrt{1+10^{-30}}-1').evaluate().operator).toBe('Add');
-    // At a precision that resolves the difference, the value is 1e-30.
+    // The value is `10⁻³⁰ − 2.5·10⁻⁶¹ + …`: the difference is computed again
+    // at a raised precision, so its last digits are correct too.
     const fine = new ComputeEngine();
     fine.precision = 50;
-    expect(
-      fine.parse('2\\sqrt{1+10^{-30}}-2').N().toString().startsWith('1e-30')
-    ).toBe(true);
+    expect(fine.parse('2\\sqrt{1+10^{-30}}-2').N().toString()).toBe(
+      '9.9999999999999999999999999999975e-31'
+    );
   });
 
   test('a perfect square is still extracted', () => {

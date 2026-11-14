@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`.N()` of an exact sum whose terms cancel gives the correct digits.** When
+  the terms of a sum are exact (`\pi`, `e^{20}`, `\sqrt{2}`, a large integer)
+  and their sum is much smaller than the largest term, the sum is computed again
+  at a higher precision. The remainder
+  `81129638414606663681390495662081 \bmod \sqrt{2}` evaluates to
+  `81129638414606663681390495662081 - 57367317478180994538678159693372\sqrt{2}`,
+  whose numeric value was `9500000000`; it is `1.05464095093706286692`.
+  `\pi\cdot10^{30} - 3141592653589793238462643383279` was `2643000000`; it is
+  `0.502884197169399375106`. The float of `1/(\sqrt{10^{40}+1} - 10^{20})` was
+  `~oo`; it is `200000000000000000000`. `\lfloor x \rfloor`, `\lceil x \rceil`,
+  `\operatorname{sign}(x)` and the other functions whose result jumps still use
+  the exact value of `x` under `.N()`.
+
 ## 0.190.0 _2026-11-14_
 
 ### Breaking Changes
