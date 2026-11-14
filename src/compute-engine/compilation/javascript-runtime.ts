@@ -128,8 +128,14 @@ import {
 } from '../numerics/divergent-tail.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
+import {
+  arcothReal,
+  arcschReal,
+  arsechReal,
+} from '../numerics/inverse-hyperbolic.js';
 import type { Rational } from '../numerics/types.js';
 import type { RoundingTies } from '../types-definitions.js';
+import type { IComputeEngine } from '../global-types.js';
 import {
   complexAcos,
   complexAcosh,
@@ -181,6 +187,7 @@ import {
 } from '../numerics/linear-algebra.js';
 import {
   checkDeadline,
+  checkDeadlineEvery,
   DEFAULT_ITERATION_LIMIT,
   makeLoopPassCounter,
   type DeadlineFrame,
@@ -6599,7 +6606,11 @@ export type LazyStreamSysHelpers = {
 export type SysHelpers = typeof SYS_HELPERS &
   RandomSysHelpers &
   LazyStreamSysHelpers &
-  ReturnType<typeof makeLoopPassCounter>;
+  ReturnType<typeof makeLoopPassCounter> & {
+    /** The functions of the profile `ir` (`IR_FUNCTIONS`). */
+    ir: typeof IR_FUNCTIONS;
+    tick: () => void;
+  };
 
 /**
  * The state the engine-bound helpers of `_SYS` read each time they run, never
@@ -6626,6 +6637,25 @@ export type RuntimeSource = {
   /** The deadline the shuffle/choice loops check, if any. */
   deadline: () => DeadlineFrame | number | undefined;
 };
+
+/**
+ * What the engine-bound helpers of `_SYS` read from `ce` each time they run:
+ * the same helpers as a standalone runtime (`createJavaScriptRuntime`), over
+ * the engine's own random frame, entropy handler, iteration limit and
+ * deadline.
+ */
+export function engineRuntimeSource(ce: IComputeEngine): RuntimeSource {
+  return {
+    random: () => ce._liveRandom(),
+    draw: () => ce._random(),
+    frame: () => ce._randomFrame,
+    setFrame: (frame) => {
+      ce._randomFrame = frame;
+    },
+    iterationLimit: () => ce.iterationLimit,
+    deadline: () => ce._deadlineFrame,
+  };
+}
 
 /**
  * The random family of `_SYS`, bound to a `RuntimeSource`.
@@ -7021,6 +7051,132 @@ export function makeLazyStreamHelpers(
   };
 }
 
+/** The modulo of the interpreter: the sign of the divisor (`Mod(-7, 3)` is
+ *  2). Exact for integers below 2^53: `%` is exact in IEEE 754. There is no
+ *  guard: for an operand of 2^53 or more the value is the remainder of the
+ *  double, unspecified (`Mod(25!, 7)` is 0, the remainder of the double 6). */
+export function floorMod(a: number, b: number): number {
+  const r = a % b;
+  return r !== 0 && r < 0 !== b < 0 ? r + b : r;
+}
+
+/** The largest exponent that `pow` computes by multiplications. */
+export const MAX_PRODUCT_EXPONENT = 16;
+
+/**
+ * The real power of the profile `ir` (`_SYS.ir.pow`, and the fold): an
+ * integer exponent 1 to 16 by multiplications from the left (exact on
+ * integers in range); the exponent 0 gives 1 for a finite base other than
+ * 0, and NaN for 0, NaN and an infinity (the interpreter's values); a
+ * negative base with a non-integer exponent gives the interpreter's real
+ * root when the exponent is `p/q` with an odd `q`
+ * (`negativeBaseRealPow()`, the rule of `Power` on machine numbers, read to
+ * the digits of the running code as `cpow` reads them), NaN otherwise.
+ */
+export function realPow(a: number, b: number): number {
+  if (Number.isInteger(b) && b >= 1 && b <= MAX_PRODUCT_EXPONENT) {
+    let r = a;
+    for (let i = 1; i < b; i++) r *= a;
+    return r;
+  }
+  if (b === 0) return a !== 0 && Number.isFinite(a) ? 1 : NaN;
+  if (a < 0 && !Number.isInteger(b))
+    return negativeBaseRealPow(a, undefined, b) ?? NaN;
+  return Math.pow(a, b);
+}
+
+/**
+ * The real functions of the profile `ir`, by the name of their IR
+ * operation (`_SYS.ir.<name>`); the fold of their row computes them. Each
+ * one gives the interpreter's real value within the precision of a double
+ * (but see docs/COMPILATION-MODEL.md for `Zeta` below -171); a pole
+ * (`Gamma(-2)`, `Coth(0)`) is +∞ or -∞, and a value that is not real is
+ * NaN (the caveats of compiled code). `root(x, n)` of a negative `x` is the
+ * real root when `n` is an odd integer, or when `1/n` is a rational of odd
+ * denominator, as `realPow`.
+ */
+export const REAL_FUNCTIONS = Object.freeze({
+  root: (x: number, n: number): number => {
+    if (n === 0) return NaN;
+    if (x < 0 && Number.isInteger(n) && n % 2 !== 0)
+      return -Math.pow(-x, 1 / n);
+    return negativeBaseRealPow(x, undefined, 1 / n) ?? Math.pow(x, 1 / n);
+  },
+  erf: (x: number): number => erf(x),
+  erfc: (x: number): number => erfc(x),
+  gamma: (x: number): number =>
+    Number.isInteger(x) && x <= 0 ? Infinity : gamma(x),
+  gammaln: (x: number): number => lnAbsGamma(x),
+  factorial: (x: number): number =>
+    Number.isInteger(x) ? (x < 0 ? Infinity : factorial(x)) : gamma(x + 1),
+  factorial2: (x: number): number =>
+    Number.isInteger(x) && x < 0 && x % 2 === 0 ? Infinity : factorial2(x),
+  zeta: (x: number): number => zeta(x),
+  // The interpreter has no -0: `Arctan2(-0, -1)` is π.
+  atan2: (y: number, x: number): number => Math.atan2(y + 0, x + 0),
+  // The interpreter's `Arccot` is in (0, π).
+  acot: (x: number): number =>
+    x > 0 ? Math.atan(1 / x) : Math.PI / 2 - Math.atan(x),
+  asec: (x: number): number => Math.acos(1 / x),
+  acsc: (x: number): number => Math.asin(1 / x),
+  acoth: arcothReal,
+  asech: arsechReal,
+  acsch: arcschReal,
+  coth: (x: number): number => 1 / Math.tanh(x),
+  fract: (x: number): number => x - Math.floor(x),
+  hav: (x: number): number => Math.sin(x / 2) ** 2,
+});
+
+// prettier-ignore
+const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'catan',
+  'casin', 'cacos', 'cacot', 'casec', 'cacsc', 'ccoth', 'casinh', 'cacosh', 'catanh', 'cacoth',
+  'casech', 'cacsch', 'cconj', 'cabs', 'carg'] as const;
+
+type Cx = ComplexResult;
+
+/**
+ * The complex functions of the profile `ir`, by the name of their IR
+ * operation (`_SYS.ir.<name>`); the fold computes them: the machine complex
+ * functions of `SYS_HELPERS` (complex.js and the kernels of
+ * `numerics/numeric-complex.ts`), and the ring operations part by part.
+ * `cplx` is the conversion of a real.
+ */
+export const COMPLEX_FUNCTIONS = Object.freeze({
+  cplx: (x: number): Cx => ({ re: x, im: 0 }),
+  cadd: (a: Cx, b: Cx): Cx => ({ re: a.re + b.re, im: a.im + b.im }),
+  csub: (a: Cx, b: Cx): Cx => ({ re: a.re - b.re, im: a.im - b.im }),
+  cmul: (a: Cx, b: Cx): Cx => ({
+    re: a.re * b.re - a.im * b.im,
+    im: a.re * b.im + a.im * b.re,
+  }),
+  cdiv: (a: Cx, b: Cx): Cx => SYS_HELPERS.cdivedge(a.re, a.im, b.re, b.im),
+  cpow: (a: Cx, b: Cx): Cx => SYS_HELPERS.cpow(a, b),
+  croot: (a: Cx, b: Cx): Cx => SYS_HELPERS.croot(a, b),
+  ...(Object.fromEntries(IR_KERNELS.map((f) => [f, SYS_HELPERS[f]])) as Pick<
+    typeof SYS_HELPERS,
+    (typeof IR_KERNELS)[number]
+  >),
+  cre: (z: Cx): number => z.re,
+  cim: (z: Cx): number => z.im,
+  ceq: (a: Cx, b: Cx): boolean => a.re === b.re && a.im === b.im,
+  cne: (a: Cx, b: Cx): boolean => a.re !== b.re || a.im !== b.im,
+});
+
+/**
+ * The functions that the code of the profile `ir` calls as `_SYS.ir.<name>`
+ * (`ir/print-js.ts`). They are under one member so that no name of the IR
+ * meets a member of `SYS_HELPERS` of another meaning (`pow`, `fract`, `cmul`
+ * and others are both). The other members that the profile calls are those
+ * of the existing compiler: `drawNextRandomNumber`, `withRandomSeed`,
+ * `integrate`, `rangeCount`, `countLoopPass`, `resetLoopPasses`, `tick`.
+ */
+export const IR_FUNCTIONS = Object.freeze({
+  ...REAL_FUNCTIONS,
+  ...COMPLEX_FUNCTIONS,
+  pow: realPow,
+  mod: floorMod,
+});
+
 /**
  * Build the `_SYS` bundle for ONE compiled function.
  *
@@ -7044,10 +7200,21 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
   // code follow. The draw is live inside a `WithRandomSeed` frame too —
   // compiled integrals sample live by ruling (`docs/RANDOMNESS-MODEL.md`).
   const draw = (): number => source.random();
+  let ticks = 0;
   const own: Partial<SysHelpers> = {
     ...makeRandomHelpers(source),
     ...makeLazyStreamHelpers(source),
     ...makeLoopPassCounter(),
+    ir: IR_FUNCTIONS,
+    // The start of each pass of a loop of the profile `ir`: the deadline is
+    // checked every 1024 passes, counted on the deadline frame when there
+    // is one, so the steps charged to a step budget do not depend on
+    // earlier calls.
+    tick: (): void => {
+      const d = source.deadline();
+      if (typeof d === 'object') checkDeadlineEvery(d, 0x3ff);
+      else if (d !== undefined && (++ticks & 0x3ff) === 0) checkDeadline(d);
+    },
     integrate: (fn, a, b, initialPanels) =>
       SYS_HELPERS.integrate(fn, a, b, initialPanels, draw),
     integrateMC: (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw),
@@ -7908,12 +8075,9 @@ export type StoredJavaScript = {
    * batch runs on the calling thread (`reason: 'not-shippable'`). */
   shippable?: boolean;
   /** **Experimental.** The `profile` field of the compilation result: the
-   * profile the code was compiled with. `'numeric-kernel'` records how the
-   * code was made, for a host that keeps stored code with its compile
-   * options; the loaders run the code the same way with or without it.
-   * The loaders refuse code of the profile `'ir'`: it reads a runtime of
-   * the engine that compiled it. Run it with the `run()` of the compilation
-   * result. */
+   * profile the code was compiled with. It records how the code was made,
+   * for a host that keeps stored code with its compile options; the
+   * loaders run the code the same way with or without it. */
   profile?: 'numeric-kernel' | 'ir';
 };
 
@@ -8065,7 +8229,6 @@ export function createSysRuntime(
     },
     load: {
       value: (stored: StoredJavaScript): ((...args: unknown[]) => unknown) => {
-        refuseIrProfile(stored);
         refuseStoredValueKinds(stored, false);
         if (stored.runtimeVersion === undefined)
           throw new Error(
@@ -8332,19 +8495,6 @@ export function bigintBroadcastError(): Error {
 }
 
 /**
- * Throw for stored code of the profile `'ir'`. Its code reads `_rt`, a
- * runtime that closes over the engine that compiled it (`ir/print-js.ts`),
- * and no loader has it. Such code has no `runtimeVersion`; this check also
- * holds for a host copy that sets one.
- */
-function refuseIrProfile(stored: StoredJavaScript): void {
-  if (stored.profile === 'ir')
-    throw new Error(
-      "The stored code was compiled with the profile 'ir', whose code reads a runtime of the engine that compiled it: it cannot be loaded. Run it with the `run()` of the compilation result."
-    );
-}
-
-/**
  * Throw for stored code compiled with the compile contract of a value kind
  * (`valueKinds`). The run-time checks of a kind are functions of the host
  * that compiled the code (`ArithmeticCompile`), and stored code does not
@@ -8395,7 +8545,6 @@ function storedExpressionRunner(
     throw new Error(
       'The stored code is a lambda (positional arguments): it has no broadcast'
     );
-  refuseIrProfile(stored);
   refuseStoredValueKinds(stored, true);
   if (stored.runtimeVersion === undefined)
     throw new Error(

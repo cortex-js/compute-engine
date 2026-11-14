@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Improvements
+
+- **The code of the experimental profile `'ir'` can be stored, loaded and
+  sent to a worker.** A result of `compile(expr, { profile: 'ir' })` now has
+  `runtimeVersion`, `preambleOnce` and `entryPlan`, as a result of the
+  default compiler has: `createJavaScriptRuntime().load()` and
+  `loadBroadcast()` run a copy of it, and a kernel pool runs it on its
+  workers (`FindFit.evaluateAsync()` scans on the pool). In 0.190.0 the
+  loaders refused such code. `shippable` is `false` for code that draws a
+  random number or computes an integral, as for the default compiler. The
+  `run()` of the result checks its inputs and returns its value as a loaded
+  copy does: `Multiply(Z, 2)` with `Z: complex` at `Z = 1.5` gives `3`, where
+  it gave `{ re: 3, im: 0 }`.
+
 ### Resolved Issues
 
 - **`.N()` of an exact sum whose terms cancel gives the correct digits.** When

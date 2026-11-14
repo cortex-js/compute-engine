@@ -2801,7 +2801,9 @@ export interface CompilationOptions<Expr = unknown> {
    * `mode` other than `'strict'`, and `iterationBudget` for a program with
    * a counted loop (a `Sum`, a `Product` or a reduction of a list); an
    * internal error is a `'compile-error'`. The result reports
-   * `profile: 'ir'` and `shippable: false`, and no `pure`.
+   * `profile: 'ir'`, the fields of stored code (`runtimeVersion`,
+   * `preambleOnce`, `entryPlan`) and `shippable` (false for code that
+   * draws or integrates), and no `pure`.
    */
   profile?: 'numeric-kernel' | 'ir';
 }
@@ -3889,6 +3891,10 @@ export type CompilationResult<
    * operation with an unknown effect can call a closure of the host, which
    * a worker does not have). It does not say that the arguments can be sent
    * to a worker at a low cost.
+   *
+   * With the `ir` profile, it is present on every result, which has no
+   * `broadcastAsync`: it says whether the stored code can run on a worker
+   * (a kernel pool loads it), `false` for code that draws or integrates.
    */
   shippable?: boolean;
 

@@ -21,7 +21,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 import type { ComputeEngine } from '../../src/compute-engine';
 import {
   JS,
-  javascriptRuntime,
+  runtimeOf,
 } from '../../src/compute-engine/compilation/ir/print-js';
 import {
   printProgram,
@@ -206,7 +206,7 @@ function instrumented(
     ...JS.ops,
     sqrt: { text: '_cx(Math.sqrt($0), $0)', helpers: ['_cx'] },
     ln: { text: '_cx(Math.log($0), $0)', helpers: ['_cx'] },
-    pow: { text: '_cx(_rt.pow($0, $1), $0, $1)', helpers: ['_cx'] },
+    pow: { text: '_cx(_SYS.ir.pow($0, $1), $0, $1)', helpers: ['_cx'] },
     div: { text: '_dz($0, $1)', helpers: ['_dz'] },
     tan: { text: '_tp(Math.tan($0))', helpers: ['_tp'] },
   };
@@ -246,14 +246,14 @@ function instrumented(
     OPERATORS
   );
   flags.value = new Function(
-    '_rt',
+    '_SYS',
     '_flags',
     '_replace',
     '_perturb',
     '_',
     [...printed.helpers, ...printed.functions, ...printed.body].join('\n')
   )(
-    javascriptRuntime(expr.engine as never),
+    runtimeOf(expr.engine as never),
     flags,
     replace,
     perturb,

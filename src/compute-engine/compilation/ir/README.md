@@ -23,7 +23,7 @@ the target profile. A failure of the verifier or of the effect-trace check is a
 | `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls   | Re-derive a type rule                    |
 | `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `cse`, `dce`                         | Change the effect trace                  |
 | `print.ts`                     | The shared statement printer, the inline policy, the copy of a result          | Decide anything that depends on a target |
-| `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the JavaScript runtime          | Analyse the program                      |
+| `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`        | Analyse the program                      |
 | `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings       |                                          |
 
 Every table (`OPERATORS`, `REGION_ROWS`, `REDUCTIONS`, `JS`, `GLSL`, `TARGETS`)
@@ -87,13 +87,13 @@ inputs object is not read for that name (the existing compiler also writes
    options and the definitions it reads.
 
 `Power` is on the real lane. On JavaScript it calls the engine's real-power
-function (`realPow` in `operators.ts`, through `_rt.pow`), which the fold also
-uses: a negative base with a rational exponent of odd denominator gives the
-interpreter's real root (`(-8)^(1/3)` is -2), also for a run-time exponent. On
-GLSL it is `pow()`, whose value for a negative base is undefined in GLSL ES
-3.00: the driver gives NaN, 0 or any value. A real literal at or above 2^53 is a
-real. An integer value of 2^53 or more is a double and its low digits are
-unspecified (`Mod(2^60 + n, 3)`; rule 3 of
+function (`realPow` of `javascript-runtime.ts`, through `_SYS.ir.pow`), which
+the fold also uses: a negative base with a rational exponent of odd denominator
+gives the interpreter's real root (`(-8)^(1/3)` is -2), also for a run-time
+exponent. On GLSL it is `pow()`, whose value for a negative base is undefined in
+GLSL ES 3.00: the driver gives NaN, 0 or any value. A real literal at or above
+2^53 is a real. An integer value of 2^53 or more is a double and its low digits
+are unspecified (`Mod(2^60 + n, 3)`; rule 3 of
 `docs/plans/2026-11-12-js-route-course-correction.md`): the compiler makes no
 analysis of integer ranges. A closed node keeps the interpreter's value
 (`Mod(2^60 + 1, 3)` is 2). At run time there is no guard of any kind for an
@@ -103,13 +103,13 @@ gives 6, the remainder of the double (the existing compiler throws a
 `mod()` of a value beyond 2^24 is the remainder of the float, unspecified.
 
 The real functions (`Erf`, `Gamma`, `Root`, the inverse trigonometric and
-hyperbolic functions, ...) are rows whose operation the JavaScript runtime calls
-by name from `REAL_FUNCTIONS` in `operators.ts`, which the fold of the row calls
-too. Each gives the interpreter's real value within the precision of a double
-(`Zeta` below about -171 is a known limitation, `docs/COMPILATION-MODEL.md`); a
-pole is ±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). On
-GLSL a row has a spelling only where GLSL ES 3.00 has a builtin defined on every
-real (`atan`, `asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
+hyperbolic functions, ...) are rows whose operation the JavaScript code calls by
+name from `REAL_FUNCTIONS` (`_SYS.ir`), which the fold of the row calls too.
+Each gives the interpreter's real value within the precision of a double (`Zeta`
+below about -171 is a known limitation, `docs/COMPILATION-MODEL.md`); a pole is
+±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). On GLSL a
+row has a spelling only where GLSL ES 3.00 has a builtin defined on every real
+(`atan`, `asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
 
 Inputs: a scalar with no declared type, or of type `unknown` or `number`, is a
 real in the `strict` mode (a deliberate difference from the existing compiler)
@@ -141,15 +141,14 @@ of every value is settled at compile time and no code tests a value. The rows
 `Exp`, `Ln`, `Log`, the trigonometric and hyperbolic rows, `Abs` (real), `Real`,
 `Imaginary`, `Conjugate`, `Argument` (real), `Equal` and `NotEqual` have a
 complex signature; another row (a comparison, `Floor`, `Mod`, `Max`, ...)
-declines a complex operand. The JavaScript runtime calls `COMPLEX_FUNCTIONS`
-(`operators.ts`), which the fold calls too: the engine's machine complex
-functions (`SYS_HELPERS` of the existing runtime), and the ring operations part
-by part. GLSL declines the lane. In the `strict` mode a program whose root is
-complex returns a `{re, im}` object, also when its imaginary part is 0. In the
-`complex` mode the adapter returns a complex root of imaginary part exactly 0 as
-the number, as the ABI of the mode says (`CompileMode`); it states no such rule
-for the elements of a list, which stay `{re, im}`. A program whose root is real
-returns a number.
+declines a complex operand. The JavaScript code calls `COMPLEX_FUNCTIONS`
+(`_SYS.ir`), which the fold calls too: the engine's machine complex functions
+(`SYS_HELPERS` of the existing runtime), and the ring operations part by part.
+GLSL declines the lane. The result of `compile()` follows the result convention
+of every stored kernel (`normalizeRunResult()`), in both modes: a complex value
+of imaginary part exactly 0 is returned as the number, at the root and in the
+cells of a list; another complex value is a `{re, im}` object. A program whose
+root is real returns a number.
 
 The mode. A row with `leaves` (`Sqrt`, `Ln`, `Log`, `Power`, `Root`, `Arcsin`,
 `Arccos`, `Arcsec`, `Arccsc`, `Arcosh`, `Artanh`, `Arcoth`, `Arsech`) takes its
@@ -183,8 +182,8 @@ function's value at an argument within a few ulps of the given one, which can
 differ from the interpreter by more than 1e-12 or be ±∞ or NaN where the
 interpreter is finite (`Arctan(Ln(x))` at `x = 0` is NaN, the interpreter gives
 `-π/2`; `Ln(x)·y` at `x = 0` is `-∞ + NaN·i`). On a branch cut the side follows
-the sign of the zero part, IEEE style (`Argument(-Z)` at `Z = 0` is π); the
-adapter makes a `-0` part of a complex input `+0`.
+the sign of the zero part, IEEE style (`Argument(-Z)` at `Z = 0` is π), also for
+a `-0` part of a complex input (no fidelity is owed at a signed zero).
 
 ## Lists
 
@@ -232,16 +231,23 @@ the engine's frame slot): a compiled draw reads the frame it runs in.
 
 ## Loops and the runtime
 
-On JavaScript each pass of a loop or a build begins with `_rt.tick()`, which
-checks the engine's deadline (`ce.withTimeLimit()`) every 1024 passes. The
-`iterationBudget` option follows the rule of `compile()`
+On JavaScript the code reads the runtime `_SYS` of the existing compiler
+(`makeSysHelpers()` of `javascript-runtime.ts`): the functions of the folds are
+its member `ir` (`IR_FUNCTIONS`: `REAL_FUNCTIONS`, `COMPLEX_FUNCTIONS`, `pow`,
+`mod`), under one name so that no IR name meets a member of another meaning; a
+draw, a random frame, an integral and the length of a `Range` are its members
+`drawNextRandomNumber`, `withRandomSeed`, `integrate` and `rangeCount`. Each
+pass of a loop or a build begins with `_SYS.tick()`, which checks the deadline
+(`ce.withTimeLimit()`, or the `deadline` of a runtime without an engine) every
+1024 passes. The `iterationBudget` option follows the rule of `compile()`
 (`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop` instruction
-with `passes`) begins with `_rt.pass()`, which also adds one to one count for a
-call of `run()`, nested loops and the loops of user functions included; over the
-budget, `run()` throws a `CancellationError` with the cause
+with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds one to one
+count for a call, nested loops and the loops of user functions included; over
+the budget, the call throws a `CancellationError` with the cause
 `iteration-limit-exceeded` (`docs/COMPILATION-MODEL.md`, "A limit on `Loop`
-passes"). The count is in the runtime, reset when `run()` starts. A `Sum` or a
-`Product` with `Limits` whose count of passes is more than the budget is NaN
+passes"). The count is in the runtime; the entry starts with
+`_SYS.resetLoopPasses()` when the code counts passes. A `Sum` or a `Product`
+with `Limits` whose count of passes is more than the budget is NaN
 (`hi - lo < budget` is false), each loop by its own count: the lowering writes
 that test as an `if`. A `Loop` in an integrand counts its passes once per sample
 of the quadrature, whose number of samples is unspecified. A build, a `Filter`
@@ -324,17 +330,20 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   `adapter.ts`; `compile-expression.ts` fails the type check when an option has
   no class). Mapped: `iterationBudget` ("Loops and the runtime"), `vars`
   (below), `quadrature` (`'adaptive'`; `'monte-carlo'` declines), `entryChecks`
-  (a `{re, im}` value for a scalar real or integer input or parameter, and a
-  value that is not an array for a list input, throw a `TypeError` that names
-  it; a number for a scalar complex input or parameter is lifted to
-  `{re, im: 0}` and a `-0` part made `+0`, in any case), `mode: 'complex'`
-  (reported in the result's `mode`), `cse: false` (the passes without `cse`),
-  `constantFold: false` (the lowering evaluates no closed sub-expression with
-  `N()`, and the `fold` pass is off), `symbolDeps` (the user functions compiled
-  in and the names whose value the code holds, `captures`) and `varsObjectRefs`
-  (the inputs read from the inputs object, filled also when a literal declines
-  for a free name). Admitted with no effect: `storage` (the JavaScript target
-  ignores it, `CompilationOptions.storage`), `mode: 'strict'`,
+  (the entry plan of the existing runtime, `checkEntry()`: a `{re, im}` value
+  for a scalar real or integer input or parameter, and a string or a typed array
+  for a list input, throw a `TypeError` that names it; another value outside the
+  declared type gives an unspecified result; a number for a scalar complex input
+  or parameter is converted to `{re, im: 0}`, also with `entryChecks: false`; a
+  conversion copies the own properties of the inputs object, so an inherited
+  input or a getter is then lost, a known limitation of the existing runtime),
+  `mode: 'complex'` (reported in the result's `mode`), `cse: false` (the passes
+  without `cse`), `constantFold: false` (the lowering evaluates no closed
+  sub-expression with `N()`, and the `fold` pass is off), `symbolDeps` (the user
+  functions compiled in and the names whose value the code holds, `captures`)
+  and `varsObjectRefs` (the inputs read from the inputs object, filled also when
+  a literal declines for a free name). Admitted with no effect: `storage` (the
+  JavaScript target ignores it, `CompilationOptions.storage`), `mode: 'strict'`,
   `broadcast: false` (the result has no `broadcast()`), and an empty
   `functions`, `operators`, `imports` or blank `preamble`. Declined by name:
   `functions`, `operators` (both forms), `imports`, `preamble`, the `mode`
@@ -354,11 +363,29 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   free name declines: that convention has no object for it (`compileSlice()`
   itself takes one after the arguments). The inputs of an expression are in
   `freeSymbols` and `varsObjectRefs`. A warning of a random frame is in
-  `warnings` (`kind: 'correctness'`). `profile` is `'ir'`, `shippable` is
-  `false` and `preamble` is empty: the code holds its helpers and reads the
-  runtime `_rt`, so it cannot be stored or sent to a worker (no
-  `runtimeVersion`). There is no `pure`, `freeSymbolTypes`, `broadcast()`,
-  `runAsync()` or `entryPlan`.
+  `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
+- **Stored code.** The result has the fields of the stored code of the existing
+  compiler (`StoredJavaScript`), with the same meaning: `preambleOnce` (and
+  `preamble`, the same text) holds the helpers and the user functions, `code` is
+  the body (an expression of the inputs object `_`, or the function of a
+  literal), `runtimeVersion` is `RUNTIME_VERSION`, and `entryPlan` holds the
+  inputs that a loader checks (`checkEntry()`: the conversion of a number for a
+  complex input, and with `entryChecks` the refusals of the existing compiler;
+  `lists` and the scalar `booleans` tell a batch loader which inputs are shared
+  lists and boolean columns). For a literal with helpers, `code` evaluates them
+  and gives the function, and `callCode` is the function alone, so a lambda
+  loads from `code` alone, as one of the existing compiler.
+  `reconstructionDigits` is the count of digits to which the exponent of a
+  negative base is read; a loader sets it around each call, and `run()` reads
+  the engine's current count, the same unless the precision changes between the
+  compilation and the call. `createJavaScriptRuntime().load()` and a worker of
+  the kernel pool load it; `run()` is built as `load()` builds it: the same
+  two-stage runner (`twoStageRunner()`, over the engine's runtime source), the
+  same entry plan (`checkEntry()`) and the same result convention
+  (`normalizeRunResult()`), so `run()` and loaded code agree by construction.
+  `shippable` is the rule of the existing compiler: false for code that draws or
+  integrates (`isShippableCode()`) and for a `vars` name (the host's text).
+  There is no `pure`, `freeSymbolTypes`, `broadcast()` or `runAsync()`.
 - **The measures.** `CE_JS_PROFILE=ir` makes the engine's own compilations
   (`implicitCompile()`) try the profile first and fall back to the existing
   compiler; `CE_JS_PROFILE_SHADOW=ir` also compiles every JavaScript `compile()`

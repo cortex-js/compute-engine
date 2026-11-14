@@ -20,6 +20,9 @@ function(params){perCall; return code}')`. The worker (`src/kernel-worker.ts`
 
 ## Option A: print for `_SYS` (recommended)
 
+Done 2026-11-14: the functions are one member `_SYS.ir` (`IR_FUNCTIONS`),
+not one member per name; see "Selecting the pipeline" in `ir/README.md`.
+
 The printer spells the runtime as `_SYS.<member>` and splits its output into
 `preambleOnce` (helpers, user functions) and the body; the adapter sets
 `runtimeVersion = RUNTIME_VERSION`, `shippable = isShippableCode(code)`, and

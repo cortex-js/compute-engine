@@ -23,7 +23,7 @@ import {
   setNestedQuadratureBudget,
   setReconstructionDigits,
   RUNTIME_VERSION,
-  type RuntimeSource,
+  engineRuntimeSource,
   type SysHelpers,
   kindBroadcastError,
   bigintBroadcastError,
@@ -10731,25 +10731,6 @@ function splitAroundDefaultFill(
   return {
     before: join(names.filter((n) => needed.has(n))),
     after: join(names.filter((n) => !needed.has(n))),
-  };
-}
-
-/**
- * What the engine-bound helpers of `_SYS` read from `ce` each time they run:
- * the same helpers as a standalone runtime (`createJavaScriptRuntime`), over
- * the engine's own random frame, entropy handler, iteration limit and
- * deadline.
- */
-function engineRuntimeSource(ce: ComputeEngine): RuntimeSource {
-  return {
-    random: () => ce._liveRandom(),
-    draw: () => ce._random(),
-    frame: () => ce._randomFrame,
-    setFrame: (frame) => {
-      ce._randomFrame = frame;
-    },
-    iterationLimit: () => ce.iterationLimit,
-    deadline: () => ce._deadlineFrame,
   };
 }
 

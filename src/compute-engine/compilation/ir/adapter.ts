@@ -13,7 +13,16 @@
 
 import type { Expression } from '../../global-types.js';
 import type { CompilationResult, CompileDiagnostic } from '../types.js';
+import {
+  checkEntry,
+  normalizeRunResult,
+  storeEntryPlan,
+  type EntryPlan,
+} from '../javascript-runtime.js';
 import { CompileDeclineError } from '../diagnostics.js';
+import { RUNTIME_VERSION } from '../../../common/runtime-versions.js';
+import { isShippableCode } from '../../kernel-pool.js';
+import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
 import { Decline } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
@@ -212,105 +221,90 @@ export function compileWithIrProfile(
   // A name whose engine value the code holds as a literal.
   for (const name of p.captures ?? []) options?.symbolDeps?.add(name);
 
-  // The entry check of `entryChecks` (docs/COMPILATION-MODEL.md, R6): a
-  // `{re, im}` value for a scalar real or integer input, and a value that
-  // is not an array for an input that the code reads as an array, throw a
-  // `TypeError` that names the input. A number for a scalar complex input
-  // is lifted to `{re, im: 0}`, and a zero part of a complex input is +0
-  // (the interpreter has no -0: `Ln` of `-4 - 0i` is on the upper side of
-  // the cut), also with `entryChecks: false`: the code reads its parts.
-  type Shape = 'array' | 'real' | 'complex';
-  type Checked = readonly [string, number, Shape];
-  const checked = entry.paramNames.flatMap((name, k): Checked[] => {
+  // The entry plan of a loader of stored code (`checkEntry()` of
+  // `javascript-runtime.ts`), which `run()` applies too: a number for a
+  // complex input is converted to `{re, im: 0}`, also with `entryChecks:
+  // false`; with `entryChecks`, a `{re, im}` value for a real input, and a
+  // string or a typed array for a list input, throw a `TypeError`.
+  type Key = string | number;
+  const plan = {
+    kind: literal ? 'args' : 'vars',
+    real: [] as Key[],
+    complex: [] as Key[],
+    lists: [] as Key[],
+    strings: new Map<Key, string>(),
+    // The scalar boolean inputs (also in `real`), which `broadcast()` reads
+    // as columns, as `varsEntryPlan()` of the existing compiler.
+    booleans: [] as Key[],
+  };
+  const checks = options?.entryChecks !== false;
+  entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);
-    if (entry.lengthOf[k]) return [];
-    if (t.shape.length > 0) return [[name, i, 'array'] as const];
-    if (t.lane === 'complex') return [[name, i, 'complex'] as const];
-    return t.lane === 'boolean' ? [] : [[name, i, 'real'] as const];
-  });
-  /** The value `value` of the input `name`, lifted to `{re, im}`. */
-  const check = (value: unknown, name: string, shape: Shape): unknown => {
-    if (shape === 'complex') {
-      const z =
-        typeof value === 'number'
-          ? { re: value, im: 0 }
-          : (value as { re: number; im: number });
-      return Object.is(z.re, -0) || Object.is(z.im, -0)
-        ? { re: z.re + 0, im: z.im + 0 }
-        : z;
+    const key = literal ? i : name;
+    if (entry.lengthOf[k]) return;
+    if (t.shape.length > 0) {
+      if (!checks) return;
+      plan.lists.push(key);
+      plan.strings.set(key, literal ? `argument ${i + 1}` : `"${name}"`);
+    } else if (t.lane === 'complex') plan.complex.push(key);
+    else if (checks) {
+      plan.real.push(key);
+      if (t.lane === 'boolean' && !literal) plan.booleans.push(key);
     }
-    if (shape === 'array' && !Array.isArray(value))
-      throw new TypeError(
-        `The input \`${name}\` is not an array: the code reads it as an array`
-      );
-    if (
-      shape === 'real' &&
-      typeof value === 'object' &&
-      value !== null &&
-      !Array.isArray(value)
-    )
-      throw new TypeError(
-        `The input \`${name}\` is not a real number: the code reads it as a real`
-      );
-    return value;
-  };
-  const checks = options?.entryChecks !== false && checked.length > 0;
-  const lifted = checked.filter(([, , shape]) => shape === 'complex');
-  const toCheck = checks ? checked : lifted;
-  // The ABI of `mode: 'complex'` (`CompileMode`): a complex value of
-  // imaginary part 0 is returned as the number, at the root only (the ABI
-  // states no rule for the elements of a list).
-  const project =
-    mode === 'complex' && p.types[entry.body.yields[0]].shape.length === 0
-      ? (v: unknown) =>
-          typeof v === 'object' && v !== null && (v as { im: number }).im === 0
-            ? (v as { re: number }).re
-            : v
-      : (v: unknown) => v;
+  });
+  const entryPlan = plan as EntryPlan;
   const f = slice.run as (...args: unknown[]) => unknown;
+  // The construction of `load()`: the entry plan, then the result
+  // convention of every stored kernel (`normalizeRunResult()`). A call
+  // with no input to check skips the check.
+  const unchecked =
+    plan.real.length + plan.complex.length + plan.lists.length === 0;
   const run = literal
-    ? (...args: unknown[]) => {
-        args = args.slice(0, argumentIndex(entry, positional));
-        for (const [name, k, shape] of toCheck)
-          args[k] = check(args[k], name, shape);
-        return project(f(...args));
-      }
-    : (vars: Record<string, unknown> = {}) => {
-        // A lifted value goes in a view of the inputs that the code reads,
-        // each read once by name (an inherited or a non-enumerable input
-        // stays readable); the host's object is not changed.
-        let view = vars;
-        for (const [name, , shape] of toCheck) {
-          const given = vars[name];
-          const v = check(given, name, shape);
-          if (v === given) continue;
-          if (view === vars)
-            view = Object.fromEntries(inputs.map((n) => [n, vars[n]]));
-          view[name] = v;
-        }
-        return project(f(view));
-      };
+    ? (...args: unknown[]) =>
+        normalizeRunResult(
+          f(...(unchecked ? args : checkEntry(entryPlan, args)))
+        )
+    : unchecked
+      ? (vars: unknown) => normalizeRunResult(f(vars))
+      : (vars: unknown) =>
+          normalizeRunResult(f(checkEntry(entryPlan, [vars])[0]));
 
   const warnings: CompileDiagnostic[] = slice.warnings.map((w) => ({
     code: w.code,
     kind: 'correctness',
     message: w.message,
   }));
+  // A name of `vars` is read as the host's text, which a worker does not
+  // have (`CompileTarget.hostNames` of the existing compiler).
+  const code = [slice.preambleOnce, slice.code].join('\n');
+  const shippable = Object.keys(vars).length === 0 && isShippableCode(code);
+  const once = slice.preambleOnce;
   return {
     target: 'javascript',
     success: true,
-    code: slice.code,
+    runtimeVersion: RUNTIME_VERSION,
+    // A lambda loads from `code` alone, as one of the existing compiler: its
+    // `code` evaluates the definitions and gives the function, and
+    // `callCode` is the function without them (`StoredJavaScript.callCode`).
+    code:
+      literal && once !== ''
+        ? `(() => {\n${once}\nreturn ${slice.code};\n})()`
+        : slice.code,
+    ...(literal && once !== '' ? { callCode: slice.code } : {}),
+    // The helpers and the user functions, which read no input: a loader
+    // evaluates them once (`StoredJavaScript.preambleOnce`).
+    preamble: once,
+    ...(once === '' ? {} : { preambleOnce: once }),
+    reconstructionDigits: realPowerReconstructionDigits(),
     calling: literal ? 'lambda' : 'expression',
+    entryPlan: storeEntryPlan(entryPlan),
     run: run as CompilationResult<'javascript'>['run'],
     freeSymbols: inputs,
     unsupported: [],
-    // The code holds its helpers; it reads the runtime `_rt`, so it cannot
-    // be stored and run elsewhere (no `runtimeVersion`).
-    preamble: '',
     mode,
     profile: 'ir',
-    shippable: false,
+    shippable,
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

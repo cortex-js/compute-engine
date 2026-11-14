@@ -21,7 +21,6 @@ import {
 } from '../../src/compute-engine/compilation/ir';
 import {
   JS,
-  javascriptRuntime,
   printJavaScript,
 } from '../../src/compute-engine/compilation/ir/print-js';
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
@@ -31,7 +30,6 @@ import {
 } from '../../src/compute-engine/compilation/ir/effects';
 import {
   CONSTANTS,
-  REAL_FUNCTIONS,
   REDUCTIONS,
 } from '../../src/compute-engine/compilation/ir/operators';
 import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
@@ -194,11 +192,6 @@ describe('IR slice: the real functions at edge inputs', () => {
     expect(
       interpret(ce, ce.box(['Root', 'x', 'y'] as never), { x: 0.5, y: 0 })
     ).toBe('none');
-  });
-  test('the runtime members of REAL_FUNCTIONS are not replaced by another member', () => {
-    const rt = javascriptRuntime(undefined) as Record<string, unknown>;
-    for (const [k, f] of Object.entries(REAL_FUNCTIONS))
-      expect([k, rt[k] === f]).toEqual([k, true]);
   });
   test('an inverse trigonometric function declines with degrees', () => {
     const deg = makeEngine();
@@ -1404,10 +1397,10 @@ describe('IR slice: runtime', () => {
       /Timeout/
     );
   });
-  test('a NaN seed is a range error that names the seed', () => {
+  test('a NaN seed is an error that names the seed', () => {
     expect(() =>
       js(['WithRandomSeed', 'x', ['Random']]).run({ x: NaN })
-    ).toThrow(/WithRandomSeed: the seed is NaN/);
+    ).toThrow(/`WithRandomSeed`: expected a finite real number .*got NaN/);
   });
   test('a decline keeps its node and head; a target refusal its head', () => {
     const d = declineOf(() => js(['Digamma', 'x']));
@@ -1635,7 +1628,7 @@ describe('IR slice: Loop', () => {
 });
 
 describe('IR slice: integrals', () => {
-  // The engine's machine quadrature (`_rt.integrate`); its stated tolerance
+  // The engine's machine quadrature (`_SYS.integrate`); its stated tolerance
   // is 1e-10 relative, and these smooth integrands meet the oracle's 1e-12.
   const programs: Json[] = [
     [

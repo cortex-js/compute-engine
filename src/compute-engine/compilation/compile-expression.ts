@@ -855,8 +855,8 @@ function compileInScope<
  * the code of another decline), or a `'compile-error'` with the message of
  * an invalid option. It runs the whole compilation, emission included, so
  * it costs as much as `compile()`. With `profile: 'ir'` (experimental too),
- * it answers in the same way for that profile; its positive answer has
- * `shippable: false` and no `pure`.
+ * it answers in the same way for that profile; its positive answer has no
+ * `pure`.
  *
  * It never throws: an invalid expression, an invalid option or an error of
  * the preparation of the tree gives `ok: false` with the message of the

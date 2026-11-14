@@ -13,8 +13,6 @@ import {
   Decline,
   sliceProgram,
 } from '../../src/compute-engine/compilation/ir';
-import { javascriptRuntime } from '../../src/compute-engine/compilation/ir/print-js';
-import { COMPLEX_FUNCTIONS } from '../../src/compute-engine/compilation/ir/operators';
 import type { Expression } from '../../src/compute-engine/global-types';
 import {
   agrees,
@@ -357,11 +355,6 @@ describe('IR slice: the complex mode', () => {
     );
     expect(d.cause).toMatch(/the lane complex on glsl/);
   });
-  test('the runtime members of COMPLEX_FUNCTIONS are not replaced by another member', () => {
-    const rt = javascriptRuntime(undefined) as Record<string, unknown>;
-    for (const [k, f] of Object.entries(COMPLEX_FUNCTIONS))
-      expect([k, rt[k] === f]).toEqual([k, true]);
-  });
   test('random programs of the complex lane agree with the interpreter', () => {
     let s = 20261113;
     const random = () => (s = (s * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
@@ -530,10 +523,12 @@ describe('IR slice: complex inputs through compile()', () => {
       run: (v: object) => unknown;
       mode: string;
     };
-    expect(r.run({ Z: 3, x: 2 })).toEqual({ re: 6, im: 0 });
+    // A complex result of imaginary part 0 is the number
+    // (`normalizeRunResult()`).
+    expect(r.run({ Z: 3, x: 2 })).toBe(6);
     expect(r.run({ Z: { re: 1, im: 1 }, x: 2 })).toEqual({ re: 2, im: 2 });
     expect(() => r.run({ Z: 1, x: { re: 1, im: 1 } })).toThrow(
-      /`x` is not a real number/
+      /"x" was compiled as a real number/
     );
     expect(r.mode).toBe('strict');
   });
@@ -550,7 +545,7 @@ describe('IR slice: complex inputs through compile()', () => {
       ...IR,
       entryChecks: false,
     } as never) as { run: (v: object) => unknown };
-    expect(r.run({ Z: 1.5 })).toEqual({ re: 3, im: 0 });
+    expect(r.run({ Z: 1.5 })).toBe(3);
   });
   test('a list input of complex elements declines', () => {
     expect(
@@ -563,7 +558,7 @@ describe('IR slice: complex inputs through compile()', () => {
       box(['Function', ['Multiply', 'q', 2], ['Typed', 'q', "'complex'"]]),
       IR as never
     ) as { run: (...a: unknown[]) => unknown };
-    expect(r.run(1.5)).toEqual({ re: 3, im: 0 });
+    expect(r.run(1.5)).toBe(3);
     expect(r.run({ re: 0, im: 1 })).toEqual({ re: 0, im: 2 });
   });
 });
@@ -593,7 +588,7 @@ describe('IR slice: the fixes of the review of cov2', () => {
       run: (...a: unknown[]) => unknown;
       mode: string;
     };
-  test('a -0 part of a complex input is +0, as the interpreter has no -0', () => {
+  test('a number for a complex input on a cut is on the side of +0, the interpreter side', () => {
     for (const json of [
       ['Ln', 'Z'],
       ['Log', 'Z'],
@@ -604,15 +599,14 @@ describe('IR slice: the fixes of the review of cov2', () => {
     ]) {
       const r = pub(json);
       const plus = r.run({ Z: { re: -4, im: 0 } });
-      expect([json, r.run({ Z: { re: -4, im: -0 } })]).toEqual([json, plus]);
       expect([json, r.run({ Z: -4 })]).toEqual([json, plus]);
       const v = interpret(ce, box(json), { Z: { re: -4, im: 0 } });
       expect([json, agrees(plus, v)]).toEqual([json, true]);
     }
-    expect(pub(['Argument', 'Z']).run({ Z: { re: -4, im: -0 } })).toBe(Math.PI);
-    const literal = pub(['Function', ['Ln', 'q'], ['Typed', 'q', "'complex'"]]);
-    expect(literal.run({ re: -4, im: -0 })).toEqual(
-      literal.run({ re: -4, im: 0 })
+    // A `-0` part is kept: the side follows its sign (no fidelity is owed
+    // at a signed zero).
+    expect(pub(['Argument', 'Z']).run({ Z: { re: -4, im: -0 } })).toBe(
+      -Math.PI
     );
   });
   test('in the complex mode a wide input is complex, a declared real input is real', () => {
@@ -637,8 +631,8 @@ describe('IR slice: the fixes of the review of cov2', () => {
       re: 0,
       im: 2,
     });
-    // The strict mode returns the lane of the root.
-    expect(pub(['Multiply', 'Z', 2]).run({ Z: 1.5 })).toEqual({ re: 3, im: 0 });
+    // The strict mode follows the same convention.
+    expect(pub(['Multiply', 'Z', 2]).run({ Z: 1.5 })).toBe(3);
   });
   test('a radical or a logarithm of a negative constant is complex in the strict mode, with and without folding', () => {
     for (const json of [

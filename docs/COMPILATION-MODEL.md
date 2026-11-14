@@ -255,6 +255,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   comprehension in the function literal as one instance, so the two calls read
   one draw set (`docs/RANDOMNESS-MODEL.md` §6, "One instance, one draw set");
   the compiled code draws at each call.
+- `plausible?` — `javascript` (both profiles), `Z: complex`, `x: real`: the
+  entry check copies the inputs object with its own properties when it
+  converts a value, so an inherited input or a getter of a class instance is
+  lost. `Z + x` with the inputs `Object.create({ Z: 1.5, x: 2 })` gives
+  `NaN`; the interpreter gives `3.5`. `If(B, 2Z, 3)` with `B: true` on the
+  prototype and `Z: 3` gives `3`, not `6`.
 - `plausible?` — `javascript`, `b: boolean`, `u: list<real>`, a non-canonical
   box: `ce.box(['Not', ['And', 'b', ['Greater', 'u', 0]]], { form: 'raw' })` at
   `b = true`, `u = [1, 2, 3]` gives `true`, and the same box of
@@ -2562,8 +2568,11 @@ applies as for the `numeric-kernel` profile; an internal error is a
 guard for an integer of 2^53 or more: its `Mod` of such an operand is the
 remainder of the double, an unspecified value, where the existing compiler
 throws a `RangeError` ("Integer operations beyond the safe integer range").
-Its code reads a runtime of its own and cannot be stored: the result has no
-`runtimeVersion`, and `shippable` is `false`.
+Its code reads the runtime `_SYS` of the existing compiler, and the result
+has the fields of stored code (`runtimeVersion`, `preambleOnce`,
+`entryPlan`): `createJavaScriptRuntime().load()` and a worker of the kernel
+pool load it, and `run()` is built by the same loader. `shippable` follows
+the rule of the default route: `false` for code that draws or integrates.
 
 ### Interval results
 

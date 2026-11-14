@@ -25,23 +25,26 @@
 import {
   elementType,
   widensTo,
-  type Cx,
   type IRType,
   type Lane,
   type Length,
   type V,
 } from './ir.js';
 import { rangeCount } from '../../numerics/range-count.js';
-import { negativeBaseRealPowFromRational } from '../../numerics/real-power.js';
-import { erf, erfc } from '../../numerics/error-functions.js';
-import { factorial, factorial2 } from '../../numerics/numeric.js';
-import { gamma, lnAbsGamma, zeta } from '../../numerics/special-functions.js';
+// The functions that the runtime `_SYS.ir` holds (`javascript-runtime.ts`),
+// which the folds compute.
 import {
-  arcothReal,
-  arcschReal,
-  arsechReal,
-} from '../../numerics/inverse-hyperbolic.js';
-import { SYS_HELPERS as SYS } from '../javascript-runtime.js';
+  COMPLEX_FUNCTIONS,
+  floorMod,
+  realPow,
+  REAL_FUNCTIONS,
+} from '../javascript-runtime.js';
+
+export {
+  COMPLEX_FUNCTIONS,
+  MAX_PRODUCT_EXPONENT,
+  REAL_FUNCTIONS,
+} from '../javascript-runtime.js';
 
 export type Effect = 'pure' | 'may-fail' | 'effectful';
 
@@ -92,122 +95,11 @@ export type OperatorRow = {
   };
 };
 
-/** The modulo of the interpreter: the sign of the divisor (`Mod(-7, 3)` is
- *  2). Exact for integers below 2^53: `%` is exact in IEEE 754. There is no
- *  guard: for an operand of 2^53 or more the value is the remainder of the
- *  double, unspecified (`Mod(25!, 7)` is 0, the remainder of the double 6). */
-export function floorMod(a: number, b: number): number {
-  const r = a % b;
-  return r !== 0 && r < 0 !== b < 0 ? r + b : r;
-}
-
 /** The rounding of the interpreter (default `roundingTies`): half away
  *  from zero (`Round(-2.5)` is -3). */
 export function roundHalfAway(x: number): number {
   return x < 0 ? -Math.round(-x) : Math.round(x);
 }
-
-/** The largest exponent that `pow` computes by multiplications. */
-export const MAX_PRODUCT_EXPONENT = 16;
-
-/**
- * The real power of the JavaScript target (its runtime calls this, and the
- * fold): an integer exponent 1 to 16 by multiplications from the left
- * (exact on integers in range); the exponent 0 gives 1 for a finite base
- * other than 0, and NaN for 0, NaN and an infinity (the interpreter's
- * values); a negative base with a non-integer exponent gives the
- * interpreter's real root when the exponent is `p/q` with an odd `q`
- * (`negativeBaseRealPowFromRational()`, the rule of `Power` on machine
- * numbers), NaN otherwise.
- */
-export function realPow(a: number, b: number): number {
-  if (Number.isInteger(b) && b >= 1 && b <= MAX_PRODUCT_EXPONENT) {
-    let r = a;
-    for (let i = 1; i < b; i++) r *= a;
-    return r;
-  }
-  if (b === 0) return a !== 0 && Number.isFinite(a) ? 1 : NaN;
-  if (a < 0 && !Number.isInteger(b))
-    return negativeBaseRealPowFromRational(a, undefined, b) ?? NaN;
-  return Math.pow(a, b);
-}
-
-/**
- * The real functions that the JavaScript runtime `_rt` calls by the name
- * of their IR operation, and that the fold of their row computes. Each one
- * gives the interpreter's real value within the precision of a double (but
- * see docs/COMPILATION-MODEL.md for `Zeta` below -171); a pole (`Gamma(-2)`, `Coth(0)`) is
- * +∞ or -∞, and a value that is not real is NaN (the caveats of compiled
- * code). `root(x, n)` of a negative `x` is the real root when `n` is an odd
- * integer, or when `1/n` is a rational of odd denominator, as `realPow`.
- */
-export const REAL_FUNCTIONS = Object.freeze({
-  root: (x: number, n: number): number => {
-    if (n === 0) return NaN;
-    if (x < 0 && Number.isInteger(n) && n % 2 !== 0)
-      return -Math.pow(-x, 1 / n);
-    return (
-      negativeBaseRealPowFromRational(x, undefined, 1 / n) ?? Math.pow(x, 1 / n)
-    );
-  },
-  erf: (x: number): number => erf(x),
-  erfc: (x: number): number => erfc(x),
-  gamma: (x: number): number =>
-    Number.isInteger(x) && x <= 0 ? Infinity : gamma(x),
-  gammaln: (x: number): number => lnAbsGamma(x),
-  factorial: (x: number): number =>
-    Number.isInteger(x) ? (x < 0 ? Infinity : factorial(x)) : gamma(x + 1),
-  factorial2: (x: number): number =>
-    Number.isInteger(x) && x < 0 && x % 2 === 0 ? Infinity : factorial2(x),
-  zeta: (x: number): number => zeta(x),
-  // The interpreter has no -0: `Arctan2(-0, -1)` is π.
-  atan2: (y: number, x: number): number => Math.atan2(y + 0, x + 0),
-  // The interpreter's `Arccot` is in (0, π).
-  acot: (x: number): number =>
-    x > 0 ? Math.atan(1 / x) : Math.PI / 2 - Math.atan(x),
-  asec: (x: number): number => Math.acos(1 / x),
-  acsc: (x: number): number => Math.asin(1 / x),
-  acoth: arcothReal,
-  asech: arsechReal,
-  acsch: arcschReal,
-  coth: (x: number): number => 1 / Math.tanh(x),
-  fract: (x: number): number => x - Math.floor(x),
-  hav: (x: number): number => Math.sin(x / 2) ** 2,
-});
-
-// prettier-ignore
-const KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'catan',
-  'casin', 'cacos', 'cacot', 'casec', 'cacsc', 'ccoth', 'casinh', 'cacosh', 'catanh', 'cacoth',
-  'casech', 'cacsch', 'cconj', 'cabs', 'carg'] as const;
-
-/**
- * The complex functions that the JavaScript runtime `_rt` calls by the name
- * of their IR operation, and that the fold computes (`foldOf()`): the
- * engine's machine complex functions (`SYS_HELPERS` of the existing
- * runtime: complex.js and the kernels of `numerics/numeric-complex.ts`),
- * and the ring operations part by part. `cplx` is the conversion of a
- * real.
- */
-export const COMPLEX_FUNCTIONS = Object.freeze({
-  cplx: (x: number): Cx => ({ re: x, im: 0 }),
-  cadd: (a: Cx, b: Cx): Cx => ({ re: a.re + b.re, im: a.im + b.im }),
-  csub: (a: Cx, b: Cx): Cx => ({ re: a.re - b.re, im: a.im - b.im }),
-  cmul: (a: Cx, b: Cx): Cx => ({
-    re: a.re * b.re - a.im * b.im,
-    im: a.re * b.im + a.im * b.re,
-  }),
-  cdiv: (a: Cx, b: Cx): Cx => SYS.cdivedge(a.re, a.im, b.re, b.im),
-  cpow: (a: Cx, b: Cx): Cx => SYS.cpow(a, b),
-  croot: (a: Cx, b: Cx): Cx => SYS.croot(a, b),
-  ...(Object.fromEntries(KERNELS.map((f) => [f, SYS[f]])) as Pick<
-    typeof SYS,
-    (typeof KERNELS)[number]
-  >),
-  cre: (z: Cx): number => z.re,
-  cim: (z: Cx): number => z.im,
-  ceq: (a: Cx, b: Cx): boolean => a.re === b.re && a.im === b.im,
-  cne: (a: Cx, b: Cx): boolean => a.re !== b.re || a.im !== b.im,
-});
 
 /** The value of the IR operation `op` on constants: its function of
  *  `COMPLEX_FUNCTIONS`, or the `fold` of its row. */

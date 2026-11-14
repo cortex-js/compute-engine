@@ -1157,9 +1157,37 @@ condition); a symbol with a value that is not a number or a list of numbers
 function that is not a one-parameter literal 234; `Tuple` 233; `Reduce`
 forms 213; the `functions` option 212.
 
-Next step: code that can be stored and sent to a worker
-(`docs/plans/2026-11-12-ir-profile-shippable-code.md`, option A recommended),
-then a `bigint` lane.
+Fourth batch, 2026-11-14 (code that can be stored and sent to a worker,
+option A of `docs/plans/2026-11-12-ir-profile-shippable-code.md`). The
+printer spells the runtime as `_SYS`; the result has `preambleOnce`,
+`callCode`, `runtimeVersion`, `entryPlan`, `reconstructionDigits` and
+`shippable`; the function tables of the pipeline moved to
+`javascript-runtime.ts` under the one member `_SYS.ir` (most of their names
+exist in `SYS_HELPERS` with another meaning), with a `tick()` member; the
+local `run()` applies the `checkEntry()` and `normalizeRunResult()` of
+`load()`, so a complex result with imaginary part 0 is the number in both
+modes, at the root and in list cells. With the switch on, the 20 worker-pool
+tests pass. One test fails with the switch on: the nested integral of
+`compile-javascript-structured-calculus2.test.ts`, where the profile gives
+0.0804194546574510 and the existing compiler and the frozen route give `NaN`
+(CE-1267). No test fails in the shadow run and there is no internal error.
+Measured in the worktree at `e51916c167ce04902a5775ec46df5887cfedf208` plus
+the patch; 4,942 lines in `ir/`, and about 165 lines of the tables are now
+in `javascript-runtime.ts`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,384 of 10,850 (95.7%) |
+| Every JavaScript compile | 22,634 of 38,918 (58.2%) |
+| Public `compile()` calls | 12,239 of 28,057 (43.6%) |
+
+The batch adds no coverage: the counts differ from the third batch because
+the suite changed. Largest causes of a decline: `mode: 'bigint'` 1,029; input
+type `any` 233; the `functions` option 212; an input of type `tensor` 144, of
+type `matrix` 121; a symbol with a value that is not a number or a list of
+numbers 98.
+
+Next step: a `bigint` lane, then a scratch build for Tycho's audit.
 
 Definition of done (user, 2026-11-12): the profile is the default for
 JavaScript and GLSL with a decline falling back to the interpreter; Tycho's
