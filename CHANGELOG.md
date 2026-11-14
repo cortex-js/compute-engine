@@ -31,6 +31,29 @@
 
 ### Resolved Issues
 
+- **`D` gives a closed form for the derivatives of `ErfInv`, `Beta`,
+  `BarnesG`, `LogBarnesG`, the complete `EllipticK` and `EllipticE`,
+  `HurwitzZeta` and `LerchPhi` in `a`, `LerchPhi` in `z`, and `ClausenCl` of
+  a literal order.** Each was the inert `Apply(Derivative(f, …), …)`.
+  `D(ErfInv(x), x)` is `½√π·e^(ErfInv(x)²)`, `D(HurwitzZeta(s, x), x)` is
+  `−s·HurwitzZeta(s + 1, x)`, `D(Beta(a, b), a)` is
+  `Beta(a, b)(ψ(a) − ψ(a + b))`, and `D(EllipticK(m), m)` is
+  `(E(m) − (1 − m)K(m))/(2m(1 − m))`. An operand with no closed form keeps
+  the inert form (`HurwitzZeta`, `LerchPhi` and `ClausenCl` in `s` or `n`).
+  The coefficients of a `Series` follow: `Series(ErfInv(x), x, 0, 5)` is
+  `½√π x + π^(3/2) x³/24 + 7π^(5/2) x⁵/960 + O(x⁷)`, and the error of
+  `Beta(2.5 ± 0.1, 3)` is propagated. (PR #575, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#574](https://github.com/cortex-js/compute-engine/issues/574))
+
+- **`D(f, [x, n])` is the `n`-th derivative of `f` in `x`, as
+  `D(f, {x, n})` is.** `D(x^5, [x, 3])` is `60x²`; it stayed unevaluated. A
+  pair of a variable and a number is read as an order: a negative order is
+  an error, and a fractional or symbolic order, or an order above 1000,
+  leaves the derivative inert. (PR #575, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#574](https://github.com/cortex-js/compute-engine/issues/574))
+
 - **`FromDigits` takes any base, and `IntegerString`, `DigitCount` and
   `DigitSum` take a length or a position.** The base of `FromDigits` was an
   integer of at least 2: `FromDigits([1, 1, 0], -2)` is now `2`,

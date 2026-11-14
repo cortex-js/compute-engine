@@ -188,12 +188,20 @@ describe('MEASUREMENT APPLY: the general first-order rule (A3, A11)', () => {
 
   test('an operator with no known derivative stays unevaluated (decision 7)', () => {
     for (const e of [
-      ['Beta', M(2.5, 0.1), 3],
       ['BesselJ', M(2, 0.1), 2.5],
       ['HurwitzZeta', M(3, 0.1), 2.5],
       ['Zeta', M(2.5, 0.1)],
     ])
       expectUnevaluated(e, e[0] as string);
+  });
+});
+
+describe('MEASUREMENT APPLY: a head with a derivative rule', () => {
+  // `Beta` had no derivative, and stayed unevaluated.
+  test('Beta of a measurement propagates its error through the partials', () => {
+    const r = ce.box(['Beta', M(2.5, 0.1), 3]);
+    expect(r.evaluate().operator).toBe('Measurement');
+    expect(r.N().operator).toBe('Measurement');
   });
 });
 

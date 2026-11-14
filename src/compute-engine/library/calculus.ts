@@ -6071,6 +6071,23 @@ export function derivativeValueShape(
 }
 
 /**
+ * Whether `o` is the order pair of a higher-order `D`: Mathematica's
+ * `{x, n}` (a `Set`), or the same pair written as a list, `[x, n]`, which is
+ * a variable and a number and so cannot be a list of variables.
+ */
+function isOrderSpec(
+  o: Expression
+): o is Expression & import('../global-types.js').FunctionInterface {
+  if (isFunction(o, 'Set')) return true;
+  return (
+    isFunction(o, 'List') &&
+    o.nops === 2 &&
+    isSymbol(o.op1) &&
+    isNumber(o.op2.canonical)
+  );
+}
+
+/**
  * Does `e` hold an application of the `D` operator anywhere below it? The
  * symbolic differentiator leaves a `D(body, v)` where it has no rule
  * (`symbolic/derivative.ts`), so one inside a closed form marks it
@@ -7057,8 +7074,9 @@ volumes
         const returnError = canonicalWithEscapingReturn(ce, 'D', ops);
         if (returnError) return returnError;
 
-        // Mathematica-style higher-order spec: `D(f, {x, n})` → the n-th
-        // derivative with respect to `x` (`D(f, x, x, …, x)`, n repetitions).
+        // Mathematica-style higher-order spec: `D(f, {x, n})`, or
+        // `D(f, [x, n])` (`isOrderSpec()`) → the n-th derivative with respect
+        // to `x` (`D(f, x, x, …, x)`, n repetitions).
         // POSITIONAL — only a raw held `{symbol, integer}` pair in the
         // variable slot is read; any other `Set` shape is left untouched.
         // - An order of 0 is no differentiation in `x`: the pair is removed,
@@ -7074,10 +7092,10 @@ volumes
         // pair for good, and a later assignment to the symbol could not bring
         // it back. A double approximation of the order is not used either:
         // it underflows an exact nonzero order such as `1/10^400` to `0`.
-        if (ops.length > 1 && ops.slice(1).some((o) => isFunction(o, 'Set'))) {
+        if (ops.length > 1 && ops.slice(1).some(isOrderSpec)) {
           const expanded: Expression[] = [ops[0]];
           for (const o of ops.slice(1)) {
-            if (isFunction(o, 'Set') && o.nops === 2 && isSymbol(o.op1)) {
+            if (isOrderSpec(o) && o.nops === 2 && isSymbol(o.op1)) {
               const order = o.op2.canonical;
               if (isNumber(order) && order.isInteger === true) {
                 if (order.isSame(0)) continue;
@@ -7180,11 +7198,7 @@ volumes
         // need a symbol for each variable: a function symbol `f` was made a
         // function literal with the pair as a parameter, an
         // `expected-a-symbol` error.
-        if (
-          ops
-            .slice(1)
-            .some((o) => isFunction(o, 'Set') || o.operator === 'Error')
-        )
+        if (ops.slice(1).some((o) => isOrderSpec(o) || o.operator === 'Error'))
           return ce._fn('D', [ops[0].canonical, ...ops.slice(1)], { scope });
 
         // If the first argument is a function symbol (e.g., f where f(x):=2x),

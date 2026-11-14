@@ -564,6 +564,152 @@ const DERIVATIVES_TABLE = {
 };
 
 /**
+ * The partial derivatives of the special functions whose derivative is not a
+ * unary formula (`DERIVATIVES_TABLE`): one entry per operand, `undefined` for
+ * an operand with no closed form (`∂ₛζ(s, a)`), which keeps the inert
+ * `Apply(Derivative(f, …), …)` of that slot, as Wolfram's `Zeta'[s]` does.
+ * A rule answers only for the shapes it states.
+ *
+ * - `ErfInv`: `erf⁻¹′(x) = (√π/2)·e^(erf⁻¹(x)²)`, the inverse-function rule on
+ *   `erf′(y) = (2/√π)e^(−y²)` (DLMF 7.2.1).
+ * - `HurwitzZeta`, `LerchPhi` in `a`: `∂ₐΦ(z, s, a) = −s·Φ(z, s + 1, a)`, and
+ *   `z·∂_zΦ = Φ(z, s − 1, a) − a·Φ(z, s, a)` (DLMF 25.11.17, 25.14.1).
+ * - `Beta`: `∂ₐB(a, b) = B(a, b)(ψ(a) − ψ(a + b))`, symmetric in `b`.
+ * - `LogBarnesG`, `BarnesG`: `(ln G)′(z) = (z − 1)ψ(z) − z + ½(1 + ln 2π)`.
+ * - `EllipticK`, `EllipticE` (one operand, the parameter `m`):
+ *   `E′ = (E − K)/(2m)` and `K′ = (E − (1 − m)K)/(2m(1 − m))` (DLMF 19.4.1).
+ * - `ClausenCl(n, θ)` for a literal order (`θ` in radians in every angular
+ *   unit): `Cl₁′ = −½cot(θ/2)`, and
+ *   `Clₙ′ = Clₙ₋₁` for an even `n`, `−Clₙ₋₁` for an odd one.
+ */
+const SPECIAL_FUNCTION_PARTIALS: Record<
+  string,
+  (
+    ce: Expression['engine'],
+    ops: readonly Expression[]
+  ) => (Expression | undefined)[] | undefined
+> = {
+  ErfInv: (ce, ops) =>
+    ops.length !== 1
+      ? undefined
+      : [
+          ce.expr([
+            'Multiply',
+            ['Divide', ['Sqrt', 'Pi'], 2],
+            ['Exp', ['Square', ['ErfInv', ops[0]]]],
+          ]),
+        ],
+  HurwitzZeta: (ce, ops) =>
+    ops.length !== 2
+      ? undefined
+      : [
+          undefined,
+          ce.expr([
+            'Negate',
+            ['Multiply', ops[0], ['HurwitzZeta', ['Add', ops[0], 1], ops[1]]],
+          ]),
+        ],
+  LerchPhi: (ce, ops) => {
+    if (ops.length !== 3) return undefined;
+    const [z, s, a] = ops;
+    return [
+      ce.expr([
+        'Divide',
+        [
+          'Subtract',
+          ['LerchPhi', z, ['Subtract', s, 1], a],
+          ['Multiply', a, ['LerchPhi', z, s, a]],
+        ],
+        z,
+      ]),
+      undefined,
+      ce.expr(['Negate', ['Multiply', s, ['LerchPhi', z, ['Add', s, 1], a]]]),
+    ];
+  },
+  Beta: (ce, ops) => {
+    if (ops.length !== 2) return undefined;
+    const [a, b] = ops;
+    return [
+      ce.expr([
+        'Multiply',
+        ['Beta', a, b],
+        ['Subtract', ['Digamma', a], ['Digamma', ['Add', a, b]]],
+      ]),
+      ce.expr([
+        'Multiply',
+        ['Beta', a, b],
+        ['Subtract', ['Digamma', b], ['Digamma', ['Add', a, b]]],
+      ]),
+    ];
+  },
+  LogBarnesG: (ce, ops) =>
+    ops.length !== 1 ? undefined : [logBarnesGPrime(ce, ops[0])],
+  BarnesG: (ce, ops) =>
+    ops.length !== 1
+      ? undefined
+      : [
+          ce.expr([
+            'Multiply',
+            ['BarnesG', ops[0]],
+            logBarnesGPrime(ce, ops[0]),
+          ]),
+        ],
+  EllipticK: (ce, ops) => {
+    if (ops.length !== 1) return undefined;
+    const m = ops[0];
+    return [
+      ce.expr([
+        'Divide',
+        [
+          'Subtract',
+          ['EllipticE', m],
+          ['Multiply', ['Subtract', 1, m], ['EllipticK', m]],
+        ],
+        ['Multiply', 2, m, ['Subtract', 1, m]],
+      ]),
+    ];
+  },
+  EllipticE: (ce, ops) => {
+    if (ops.length !== 1) return undefined;
+    const m = ops[0];
+    return [
+      ce.expr([
+        'Divide',
+        ['Subtract', ['EllipticE', m], ['EllipticK', m]],
+        ['Multiply', 2, m],
+      ]),
+    ];
+  },
+  ClausenCl: (ce, ops) => {
+    if (ops.length !== 2) return undefined;
+    const [n, theta] = ops;
+    const order = isNumber(n) ? n.re : NaN;
+    if (!Number.isInteger(order) || order < 1) return undefined;
+    if (order === 1) {
+      // `θ` is in radians whatever the angular unit; `Cot` reads its
+      // argument in that unit, so the half angle is converted to it.
+      const half: ExpressionInput =
+        ce.angularUnit === 'rad'
+          ? ['Divide', theta, 2]
+          : ['Divide', ['Divide', theta, 2], angularChainFactor(ce)];
+      return [undefined, ce.expr(['Negate', ['Divide', ['Cot', half], 2]])];
+    }
+    const lower: ExpressionInput = ['ClausenCl', order - 1, theta];
+    return [undefined, ce.expr(order % 2 === 0 ? lower : ['Negate', lower])];
+  },
+};
+
+/** `(ln G)′(z) = (z − 1)ψ(z) − z + ½(1 + ln 2π)`, the derivative of `LogBarnesG`. */
+function logBarnesGPrime(ce: Expression['engine'], z: Expression): Expression {
+  return ce.expr([
+    'Add',
+    ['Multiply', ['Subtract', z, 1], ['Digamma', z]],
+    ['Negate', z],
+    ['Divide', ['Add', 1, ['Ln', ['Multiply', 2, 'Pi']]], 2],
+  ]);
+}
+
+/**
  * Scale a `DERIVATIVES_TABLE` formula for the engine's `angularUnit`.
  *
  * The table holds the RADIAN derivatives. In a non-radian unit, `Sin(x)`
@@ -4071,6 +4217,34 @@ function differentiateNode(
     return simplifyDerivative(
       ce.function('Divide', [add(...terms), expr]) as Expression
     );
+  }
+
+  // The special functions of `SPECIAL_FUNCTION_PARTIALS`: the chain rule over
+  // the operands, each partial a closed form or, where none exists, the inert
+  // `Apply(Derivative(f, eᵢ), …)` of that slot.
+  const partials = SPECIAL_FUNCTION_PARTIALS[expr.operator]?.(ce, expr.ops);
+  if (partials !== undefined) {
+    const terms: Expression[] = [];
+    for (let i = 0; i < expr.nops; i++) {
+      const arg = expr.ops[i];
+      if (!dependsOnVariable(arg, v)) continue;
+      const partial =
+        partials[i] ??
+        ce._fn('Apply', [
+          ce._fn('Derivative', [
+            ce.symbol(expr.operator),
+            ...expr.ops.map((_, j) => (j === i ? ce.One : ce.Zero)),
+          ]),
+          ...expr.ops,
+        ]);
+      const argPrime =
+        differentiate(arg, v, depth + 1, trace) ??
+        ce._fn('D', [arg, ce.symbol(v)]);
+      terms.push(partial.mul(argPrime));
+    }
+    if (terms.length === 0) return ce.Zero;
+    recordD(trace, expr, v, 'derivative.known-derivative', () => add(...terms));
+    return simplifyDerivative(add(...terms));
   }
 
   const h = DERIVATIVES_TABLE[
