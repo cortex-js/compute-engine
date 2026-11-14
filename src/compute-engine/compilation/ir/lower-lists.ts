@@ -3,7 +3,7 @@
  * the element at an index from 0), a `Range` read through its count and
  * the arithmetic of its elements (no list is made unless its value is
  * read), the reductions (`Sum`, `Product`, `Max`, `Min`, `Reduce`) as
- * counted loops, and `Map` and `Filter` as builds.
+ * counted loops, and `Map`, `Filter` and `Comprehension` as builds.
  */
 
 import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
@@ -42,19 +42,29 @@ export function listLowering(cx: Lowering) {
 
   const listSource = (l: V): Source => {
     const n = type(l).shape[0];
+    // An element of a list of tuples is a tuple.
+    const axis = cx.tuples.get(l);
     return {
       length: typeof n === 'number' ? integer(n) : n.v,
-      at: (k) => b.op('elem', [l, k], elementType(type(l))),
+      at: (k) => {
+        const x = b.op('elem', [l, k], elementType(type(l)));
+        if (axis !== undefined && axis > 0) cx.tuples.set(x, axis - 1);
+        return x;
+      },
       value: () => l,
     };
   };
 
-  /** The list `e` as a source; with `scalars`, a scalar is its value. */
-  function source(e: Expression): Source;
-  function source(e: Expression, scalars: true): Source | V;
-  function source(e: Expression, scalars = false): Source | V {
+  /** The list `e` as a source; with `scalars`, a scalar is its value. A
+   *  tuple is a source only with `tuple` (`Length`, `Sum`, `Max`: the
+   *  value on a tuple is the value on the list of its elements). */
+  function source(e: Expression, scalars?: false, tuple?: boolean): Source;
+  function source(e: Expression, scalars: true, tuple: true): Source | V;
+  function source(e: Expression, scalars = false, tuple = false): Source | V {
     if (!isFunction(e, 'Range') || !cx.isLibrary(e)) {
       const l = cx.value(e)!;
+      if (cx.tuples.get(l) === 0 && !tuple)
+        decline(e, 'a tuple where a list is read');
       if (type(l).shape.length > 0) return listSource(l);
       if (scalars) return l;
       decline(e, 'a scalar where a list is required');
@@ -198,7 +208,7 @@ export function listLowering(cx: Lowering) {
     const red = REDUCTIONS.get(e.operator)!;
     if (red.indexed && e.nops === 2 && isFunction(e.ops[1], 'Limits'))
       return aggregate(e, r);
-    const items = e.ops.map((x) => source(x, true));
+    const items = e.ops.map((x) => source(x, true, true));
     if (!red.indexed && items.every((x) => typeof x === 'number'))
       return cx.apply(e, r, items as V[]);
     const lane = Number.isFinite(red.identity) ? 'integer' : 'real';
@@ -216,7 +226,19 @@ export function listLowering(cx: Lowering) {
         e,
         `${e.operator} of a function that is not a literal of one parameter`
       );
-    const s = source(l);
+    return over(e, source(l), param, f.ops[0], filter, f);
+  };
+
+  /** A build (with `filter`, a filter) over `s` of `body`, which reads the
+   *  element as `name`. */
+  const over = (
+    e: Fn,
+    s: Source,
+    name: string,
+    body: Expression,
+    filter: boolean,
+    site: Expression
+  ): V => {
     const k = b.newValue(scalarType('integer'));
     const outs = cx.region(
       filter ? 'filter' : 'build',
@@ -225,13 +247,13 @@ export function listLowering(cx: Lowering) {
       () =>
         cx.withFrame(true, (frame) => {
           const x = s.at(k);
-          frame.names.set(param, { v: x, role: 'index' });
-          const v = cx.value(f.ops[0])!;
+          frame.names.set(name, { v: x, role: 'index' });
+          const v = cx.value(body)!;
           if (lengthValues(type(v)).length > 0)
             decline(e, 'a list of lists of run-time length');
           if (!filter) return [v];
           if (type(v).lane !== 'boolean' || type(v).shape.length > 0)
-            decline(f, 'a predicate that is not a boolean');
+            decline(site, 'a predicate that is not a boolean');
           return [v, x];
         }),
       e
@@ -239,5 +261,37 @@ export function listLowering(cx: Lowering) {
     return outs[outs.length - 1];
   };
 
-  return { source, reduce, reduction, build };
+  /** `Comprehension(body, Element(i, L))`, and with a condition
+   *  `Element(i, L, cond)`: a filter of `L` by `cond`, then a build of
+   *  `body` over the elements kept. The interpreter's list is lazy: it
+   *  evaluates the condition and the body of an element only when the
+   *  element is read (`Length` reads none), so a condition or a body with
+   *  an effect declines. */
+  const comprehension = (e: Fn): V => {
+    const c = e.ops[1];
+    if (
+      e.nops !== 2 ||
+      !isFunction(c, 'Element') ||
+      c.nops < 2 ||
+      c.nops > 3 ||
+      !isSymbol(c.ops[0])
+    )
+      decline(
+        e,
+        'a Comprehension that is not of one clause Element(i, L) or Element(i, L, condition)'
+      );
+    const name = c.ops[0].symbol;
+    let s = source(c.ops[1]);
+    const before = b.effects;
+    if (c.nops === 3) s = listSource(over(e, s, name, c.ops[2], true, c));
+    const v = over(e, s, name, e.ops[0], false, e);
+    if (b.effects > before)
+      decline(
+        e,
+        'a Comprehension with an effect (the interpreter evaluates its elements lazily)'
+      );
+    return v;
+  };
+
+  return { source, reduce, reduction, build, comprehension };
 }

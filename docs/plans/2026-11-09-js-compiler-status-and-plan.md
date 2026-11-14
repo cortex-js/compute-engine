@@ -1311,6 +1311,44 @@ and `Which` (the Desmos index floor) the profile did not call, so a head
 whose definition has a `compile` handler or `compileHelpers` must decline;
 `Sqrt(-x² - 1)` in the strict mode was NaN where the interpreter gives `i`.
 
+Eighth batch, 2026-11-14 (`Tuple`, `PointList`, `Comprehension`, list
+parameters). A tuple is the fixed-length list of its elements in the
+representation; the lowering records which values are tuples, and
+`TUPLE_RULES` names the operators that read a tuple with the interpreter's
+value (any other reader declines). `PointList` is the tuple of scalar
+components or a build of tuples over list components. A `Comprehension` of
+one `Element` clause over a list or a `Range`, with an optional condition,
+is a build, or a filter then a build; one with an effect declines (the
+interpreter's is lazy). A list parameter of a user function compiles, a
+run-time length being a hidden parameter before the list; a list result of a
+user function declines. A sub-expression of the static type `error`
+declines (review finding).
+
+Ninth batch, 2026-11-14 (the findings of Tycho's second run). The `fold` and
+`strength` passes replace a value only by one of the same lane (the internal
+error). A head whose definition has `compileHelpers`, or a `compile` handler
+that is not the standard library's own function for that name, declines
+(`hasOwnLowering()`), also a `Range` read as a list source. In the strict
+mode `Sqrt`, `Ln`, `Log`, and `Root` and `Power` where the real function is
+NaN, of an operand the engine proves negative take the complex signature. A
+`vars` name whose text reads the inputs object and that a function body
+reads is passed as a parameter. Measured on batches 8 and 9 together, in a
+worktree at `06801243de79925cd9b0804d45404aa26fea2a8a` plus batches 6 to 9;
+5,678 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,441 of 10,858 (96.2%) |
+| Every JavaScript compile | 23,627 of 38,928 (60.7%) |
+| Public `compile()` calls | 13,187 of 28,069 (47.0%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267
+fails as before. Largest causes of a decline in the suite: input type `any`
+233; the `functions` option 212; an input of type `tensor` 144, of type
+`matrix` 121; a symbol with a value that is not a number or a list of
+numbers 102; a rational literal in the bigint mode 94; a complex infinity
+87; an input of type `list<list<real>>` 128.
+
 Open with the user: how a host changes the lowering of an operator when the
 existing compiler is deleted (a definition's `compile` handler returns text
 for it); whether a loop whose result is not read may be removed, counting no

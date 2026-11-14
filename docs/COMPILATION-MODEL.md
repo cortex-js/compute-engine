@@ -164,6 +164,16 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
+- `plausible?` — `javascript`, profile `ir`, `k: integer`:
+  `Comprehension(2k, Element(k, Range(1, k)))`, whose index shadows a name
+  that its own range reads, gives `[2, 4, 6]` at `k = 3`; the interpreter
+  leaves the form unevaluated.
+- `javascript`, profile `ir` (crafted), `D: list<real>`:
+  `WithRandomSeed(1, Tuple(Length(Map(Function(Random(), z), D)), Random()))`
+  at `D = [1, 2, 3]` gives `[3, 0.4613875814927787]`; the interpreter gives
+  `(3, 0.9834569781146947)`. Its `Map` is a lazy view and `Length` draws
+  nothing, where the compiled `Map` builds every element. The result carries
+  the warning `seeded-draw-order`. A `Comprehension` with an effect declines.
 - `javascript`: a list whose length is random, then another draw:
   `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
   applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives

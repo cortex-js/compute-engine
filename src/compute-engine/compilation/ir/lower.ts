@@ -8,8 +8,8 @@
  *   (by its definition, `lower-functions.ts`), or the library operator of
  *   its name; any other head declines. Only then is it a construct of the
  *   walk (`If`, `Which`, `Block` with `Declare` and `Assign`, `List`, `At`,
- *   `Length`, `Range`, `Map`, `Filter`, `Reduce`, `WithRandomSeed`, `And`,
- *   `Or`), a reduction (`REDUCTIONS`) or a row of `operators.ts`. A name
+ *   `Length`, `Range`, `Map`, `Filter`, `Reduce`, `Tuple`, `PointList`,
+ *   `Comprehension`, `WithRandomSeed`, `And`, `Or`), a reduction (`REDUCTIONS`) or a row of `operators.ts`. A name
  *   bound in the walk's frames is that value, also when it is the name of
  *   a library constant.
  * - A sub-expression whose heads are all rows that are not effectful
@@ -83,6 +83,7 @@ import {
 import {
   decline,
   text,
+  TUPLE_RULES,
   type Fn,
   type Frame,
   type Lowering,
@@ -110,8 +111,18 @@ const CONSTRUCTS = new Set([
   'Typed',
   'Limits',
   'Loop',
+  'Tuple',
+  'PointList',
+  'Comprehension',
 ]);
-const LOOPS = new Set(['Map', 'Filter', 'Reduce', 'Range', 'Loop']);
+const LOOPS = new Set([
+  'Map',
+  'Filter',
+  'Reduce',
+  'Range',
+  'Loop',
+  'Comprehension',
+]);
 
 /** What the memo and `closedValue()` read of a node: the names it reads
  *  and writes (outside it), whether it has a loop, whether every head
@@ -172,6 +183,14 @@ export function lower(
   >();
   const known = new WeakMap<Expression, Facts>();
   const inputLengths = new Set<V>();
+  const tuples = new Map<V, number>();
+  /** `to`, marked a tuple where `from` is one, with the axis `from` has
+   *  plus `shift`. */
+  const keep = (from: V, to: V, shift = 0): V => {
+    const a = tuples.get(from);
+    if (a !== undefined && a + shift >= 0) tuples.set(to, a + shift);
+    return to;
+  };
   const type = (v: V) => b.typeOf(v);
   const constant = (v: V) => {
     const c = b.constants.get(v);
@@ -341,6 +360,28 @@ export function lower(
       );
     const complex = leaves(r, args);
     const operation = (given: V[]): V => {
+      // A tuple operand: only a row whose value on a tuple is its value on
+      // the list of the same elements (`TUPLE_RULES`).
+      const tuple = given.find((v) => tuples.has(v));
+      if (tuple !== undefined) {
+        const rule =
+          TUPLE_RULES[r.head!] ??
+          (r.arity === 1 && r.threads && r.head !== 'Abs' ? 'each' : undefined);
+        const lists = given.filter((v) => type(v).shape.length > 0);
+        if (
+          r.head !== 'At' &&
+          (rule === undefined ||
+            lists.some((v) => tuples.get(v) !== tuples.get(tuple)) ||
+            (rule === 'all' && lists.length < given.length) ||
+            (rule === 'scale' &&
+              (lists.length > 1 ||
+                (r.head === 'Divide' && lists[0] !== given[0]))))
+        )
+          decline(
+            node,
+            `${r.head} of a tuple: its value on a tuple is not its value on a list`
+          );
+      }
       const types = given.map(type);
       const signature = signatureOf(r, types, complex, bigint);
       if (signature === undefined)
@@ -371,7 +412,10 @@ export function lower(
             ? 'lists of run-time lengths that are not one length by construction (the same list, or a Map of it)'
             : 'lists of different lengths'
         );
-      return b.op(signature[2], operands, t);
+      const out = b.op(signature[2], operands, t);
+      return tuple === undefined
+        ? out
+        : keep(tuple, out, t.shape.length - type(tuple).shape.length);
     };
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
@@ -421,6 +465,13 @@ export function lower(
       return number(e) ?? decline(e, 'a complex number with an infinite part');
     if (isSymbol(e)) return symbol(e, want);
     if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
+    // An invalid sub-expression (`Sin(Tuple(w))` of a vector `w`): the
+    // interpreter has no value for it.
+    if (e.operator !== 'Error' && e.type.type === 'error')
+      decline(
+        e,
+        'a sub-expression of the static type error (an error of the canonical form)'
+      );
     if (options.vars?.includes(e.operator) === true)
       decline(e, `a call of the vars name ${e.operator}`);
     const user = userBinding(e);
@@ -451,7 +502,19 @@ export function lower(
       case 'Block':
         return block(e, want);
       case 'List':
-        return list(e);
+        return list(
+          e,
+          e.ops.map((op) => value(op)!)
+        );
+      case 'Tuple':
+        return tuple(
+          e,
+          e.ops.map((op) => value(op)!)
+        );
+      case 'PointList':
+        return pointList(e);
+      case 'Comprehension':
+        return lists.comprehension(e);
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
         const [l, i] = [value(e.ops[0])!, scalar(e.ops[1])];
@@ -480,7 +543,7 @@ export function lower(
         return apply(e, row('At'), [l, i]);
       }
       case 'Length':
-        return lists.source(e.ops[0]).length;
+        return lists.source(e.ops[0], false, true).length;
       case 'Range':
         return lists.source(e).value();
       case 'Map':
@@ -841,10 +904,11 @@ export function lower(
     const outs: V[] = [];
     const join = (x: V, y: V, cause: string): V => {
       const t = joinType(type(x), type(y));
-      if (t === undefined) decline(node, cause);
+      if (t === undefined || tuples.get(x) !== tuples.get(y))
+        decline(node, t === undefined ? cause : 'arms of a tuple and a list');
       a.region.yields.push(widenIn(a.region, x, t));
       c.region.yields.push(widenIn(c.region, y, t));
-      outs.push(b.newValue(t));
+      outs.push(keep(x, b.newValue(t)));
       return outs[outs.length - 1];
     };
     const changed = bindings.filter(
@@ -881,6 +945,8 @@ export function lower(
       .results(args, ys, [])!
       .map(() => b.newValue(scalarType('real')));
     r.results(args, ys, outs)!.forEach((t, k) => (b.types[outs[k]] = t));
+    // A build of tuples is a list of tuples.
+    keep(body.yields[body.yields.length - 1], outs[outs.length - 1], 1);
     b.emit({ k: 'region', outs, op, args, regions: [body], site: text(site) });
     return outs;
   };
@@ -907,7 +973,7 @@ export function lower(
       decline(node, 'a list of run-time length made in a random frame');
     region.yields.push(...changed.map((x) => after[bindings.indexOf(x)]));
     if (want) region.yields.push(result!);
-    const outs = region.yields.map((y) => b.newValue(type(y)));
+    const outs = region.yields.map((y) => keep(y, b.newValue(type(y))));
     b.emit({
       k: 'region',
       outs,
@@ -946,9 +1012,12 @@ export function lower(
     );
   };
 
-  const list = (e: Fn): V => {
-    if (e.nops === 0) decline(e, 'an empty list');
-    const elements = e.ops.map((op) => value(op)!);
+  /** The list `e` of the values `elements`; a list of tuples when they are
+   *  tuples. */
+  const list = (e: Fn, elements: V[]): V => {
+    if (elements.length === 0) decline(e, 'an empty list');
+    if (elements.some((v) => tuples.get(v) !== tuples.get(elements[0])))
+      decline(e, 'a list of tuples and lists');
     let t: IRType | undefined = type(elements[0]);
     for (const v of elements) {
       t = joinType(t, type(v));
@@ -956,13 +1025,54 @@ export function lower(
     }
     if (lengthValues(t).length > 0)
       decline(e, 'a list of lists of run-time length');
-    return b.list(
+    const v = b.list(
       elements.map((v) => widen(v, t!.lane)),
       {
         lane: t.lane,
         shape: [elements.length, ...t.shape],
       }
     );
+    return keep(elements[0], v, 1);
+  };
+
+  /** A `Tuple`: the list of its elements, marked a tuple (a tuple of
+   *  tuples declines). */
+  const tuple = (e: Fn, elements: V[]): V => {
+    if (elements.some((v) => tuples.has(v))) decline(e, 'a tuple of tuples');
+    const v = list(e, elements);
+    tuples.set(v, 0);
+    return v;
+  };
+
+  /** `PointList`: the tuple of its components when none is a list;
+   *  otherwise the list of the tuples of the elements of its list
+   *  components at each index (a scalar is in every tuple), as long as the
+   *  shortest component (static lengths), or of one length value. */
+  const pointList = (e: Fn): V => {
+    const parts = e.ops.map((op) => value(op)!);
+    if (parts.some((v) => tuples.has(v) || type(v).shape.length > 1))
+      decline(e, 'a component that is a point or a list of lists');
+    const n = parts.flatMap((v) => type(v).shape);
+    if (n.length === 0) return tuple(e, parts);
+    const fixed = n.every((x): x is number => typeof x === 'number');
+    if (!fixed && !n.every((x) => same([x], [n[0]])))
+      decline(e, 'lists of run-time lengths that are not one length');
+    const length =
+      typeof n[0] === 'number'
+        ? b.constant(fixed ? Math.min(...n) : n[0], 'integer')
+        : n[0].v;
+    const k = b.newValue(scalarType('integer'));
+    const at = (v: V) =>
+      type(v).shape.length === 0
+        ? v
+        : b.op('elem', [v, k], scalarType(type(v).lane));
+    return region(
+      'build',
+      [length],
+      [k],
+      () => [tuple(e, parts.map(at))],
+      e
+    )[0];
   };
 
   const local = (s: Expression, v: V, lane: Lane): V => {
@@ -1166,6 +1276,7 @@ export function lower(
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     budget: options.iterationBudget,
+    tuples,
   };
   const lists = listLowering(cx);
   const fns = functionLowering(cx);

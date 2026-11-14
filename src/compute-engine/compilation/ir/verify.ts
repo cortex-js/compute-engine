@@ -15,6 +15,7 @@ import {
   isSubLane,
   isSubType,
   lengthValues,
+  mapLengths,
   outsOf,
   regionsOf,
   sameShape,
@@ -202,8 +203,16 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         const f = fn(i.fn);
         if (i.args.length !== f.body.params.length)
           fail(`call ${i.fn}: ${i.args.length} arguments`);
+        // A length parameter is the length of the argument after it.
+        const lengths = new Map(
+          f.body.params.map((q, k) => [q, f.lengthOf[k] ? i.args[k] : q])
+        );
         i.args.forEach((a, k) =>
-          sub(a, type(f.body.params[k]), `call ${i.fn}`)
+          sub(
+            a,
+            mapLengths(type(f.body.params[k]), (v) => lengths.get(v) ?? v),
+            `call ${i.fn}`
+          )
         );
         if (i.outs.length !== f.results.length)
           fail(`call ${i.fn}: ${i.outs.length} results`);

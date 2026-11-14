@@ -38,9 +38,10 @@ compiled only when `isLibraryOperator()` holds; anything else declines. Then a
 sub-expression that the slice would lower and that has no free name, no name
 bound by the walk, no effectful operation and no loop is evaluated once with
 `N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Sinh(3)` is
-not folded, because `Sinh` is not in the slice. A throw of `N()` means "not
-folded": the node is lowered as written, except a `CancellationError`, which
-propagates. A row that depends on an engine setting declines when the setting is
+not folded, because `Sinh` is not in the slice. A sub-expression whose static
+type is `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A
+throw of `N()` means "not folded": the node is lowered as written, except a
+`CancellationError`, which propagates. A row that depends on an engine setting declines when the setting is
 not the default.
 
 A root `Function` literal compiles to a function of positional parameters, then
@@ -276,6 +277,49 @@ when the total count of elements and scalars is 0. Whether a list result can
 hold an input is read from the rows (`alias`): such a result is returned as a
 copy.
 
+`Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
+(a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
+of `L` by `cond`, then a build of `body` over the elements kept. The
+interpreter's list is lazy: it evaluates the condition and the body of an
+element only when the element is read (`Length` reads none), so a condition or
+a body with an effect declines (`Length(Comprehension(Random(), Element(z, D)))`
+draws nothing in the interpreter). Two clauses or more (a Cartesian product,
+flattened) decline.
+
+## Tuples
+
+A `Tuple` is a list of fixed length in the representation, with no type of its
+own: a tuple of scalars of one lane (an integer among reals is widened; a
+boolean among numbers declines) is the list of its elements, an array on
+JavaScript (`Tuple(Cos(t), Sin(t))` is `[0.54, 0.84]` at `t = 1`) and a
+`float[n]` on GLSL. A tuple of lists is a list of rows (`Tuple(L)` of a list of
+stated length); a tuple of tuples declines. `PointList` with no list component
+is the tuple of its components; with list components it is the list of the
+tuples of their elements at each index, a scalar component in every tuple, as
+long as the shortest component when the lengths are stated, or of one length
+value (`PointList(D, Map(f, D))`); other lengths decline. A list of tuples, a
+build of tuples (`Comprehension(Tuple(f(k), g(k)), Element(k, R))`) and the
+element of a list of tuples are tuples at their axis.
+
+The lowering keeps the set of the values that are tuples (`Lowering.tuples`,
+with the axis of the tuple in the shape), and an operator reads a tuple only
+where its value on a tuple is its value on the list of the same elements, as
+probed in the interpreter (`TUPLE_RULES`): a threading row of one operand other
+than `Abs` (`Sin(Tuple(1, 2))`), `Power`, `Mod`, `Root` and `Arctan2` element by
+element; `Add` of tuples only (a difference is an `Add` of a negated tuple);
+`Multiply` of one tuple and scalars (`2·Tuple(x, 1)`) and `Divide` of a tuple
+by a scalar; `At`; and `Length`, `Sum`, `Max` and `Min`. Any other reader
+declines a tuple
+operand: `Abs(Tuple(3, 4))` is the norm 5, `Equal(Tuple(1, 2), List(1, 2))` is
+`False`, a comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`,
+`Loop` and `Comprehension` over a tuple, and the arms of a conditional of which
+one is a tuple and the other a list. The positions that hold a value (the root,
+an element of a `List` or a `Tuple`, the result of a `Block`, an arm of `If` or
+`Which`, a build body, a random frame) keep it. A tuple result of the root has
+`broadcastOutputs` of its type (`broadcastStrideOfType()`), so a batch with
+`outputs` gives its elements per cell. An input of a type with a tuple
+(`list<tuple<real, real>>`) declines.
+
 ## Effects
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
@@ -368,8 +412,19 @@ an input, also through a cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
 `Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
 parameter, or has a value; an input of a list type; a name with a value read in
 the body; a `vars` name. A recursive function that reads no input compiles. A
-function value other than the literal of a `Map` or `Filter` or the root, a list
-argument, and a list parameter decline.
+function value other than the literal of a `Map` or `Filter` or the root, and a
+list argument for a scalar parameter (the interpreter maps the function over the
+list) decline.
+
+A parameter declared a list of reals or integers
+(`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
+argument must have, or of a run-time length, a hidden integer parameter before
+it that each call passes (the length of the argument), as the root function
+literal does: `f(D) + f([1, 2])` calls one function with lengths `D.length`
+and 2. A tuple argument, a list of lists, of booleans or of complex numbers, and
+a list result (`legal(B, p) := Comprehension(k, Element(k, Range(1, 64), …))`)
+decline. On GLSL a parameter of stated length is an array parameter
+(`float B[3]`); one of run-time length declines with the target's rule.
 
 ## How to add
 

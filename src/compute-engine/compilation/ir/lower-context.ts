@@ -55,6 +55,24 @@ export type Frame = { names: Map<string, Binding>; loop: boolean };
  *  value (a `Range` is a list only when its value is read). */
 export type Source = { length: V; at: (k: V) => V; value: () => V };
 
+/** The heads whose value on a tuple is their value on the list of the same
+ *  elements, by how they read a tuple operand: `each`, element by element
+ *  with scalars (`2^Tuple(1, 2)`); `all`, every operand a tuple (`Add`);
+ *  `scale`, one tuple and scalars (`Multiply`), the tuple first for
+ *  `Divide` (`2/Tuple(1, 2)` is an error). A difference of tuples is an
+ *  `Add` of a negated tuple in the canonical form. A threading row of one operand
+ *  other than `Abs` (the norm of a point) is `each`. */
+export const TUPLE_RULES: Readonly<Record<string, 'each' | 'all' | 'scale'>> =
+  Object.freeze({
+    Power: 'each',
+    Mod: 'each',
+    Root: 'each',
+    Arctan2: 'each',
+    Add: 'all',
+    Multiply: 'scale',
+    Divide: 'scale',
+  });
+
 /** The operations of the walk (`lower.ts`) that the other parts call. */
 export type Lowering = {
   readonly ce: Expression['engine'];
@@ -100,4 +118,9 @@ export type Lowering = {
   inFunction?: string;
   /** The `iterationBudget`: a `Sum` or a `Product` of more passes is NaN. */
   readonly budget?: number;
+  /** The values that are a tuple, or hold tuples: the index in the shape
+   *  of the axis that is a tuple (0 for a `Tuple`, 1 for a list of them).
+   *  An operator whose value on a tuple differs from its value on a list
+   *  declines such an operand (`README.md`, "Tuples"). */
+  readonly tuples: Map<V, number>;
 };

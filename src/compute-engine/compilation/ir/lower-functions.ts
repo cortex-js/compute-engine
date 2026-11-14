@@ -5,7 +5,9 @@
  * inputs that its body reads (`capture()`) as its only names. The
  * parameter and result types come from the binding's signature; the
  * effects of the functions are their least fixed point
- * (`functionEffects()`), settled when no function is being lowered.
+ * (`functionEffects()`), computed when a function is lowered: a call of a
+ * function still being lowered is effectful until then, so an effect is
+ * never below the final one.
  */
 
 import { isForwardCallReference } from '../../boxed-expression/forward-call-reference.js';
@@ -120,13 +122,21 @@ function signatureTypes(e: Fn, literal: Fn) {
       decline(literal, `a parameter of ${e.operator} that is not a name`);
     return n;
   });
-  const params = names.map((p, i) =>
-    scalarOf(
-      literal,
-      signature?.args?.[i]?.type ?? 'unknown',
-      `the parameter ${p} of ${e.operator}`
-    )
-  );
+  // A list of reals or integers, of a stated or a run-time length (`'run-time'`,
+  // a hidden length parameter before it).
+  const params = names.map((p, i) => {
+    const t = signature?.args?.[i]?.type ?? 'unknown';
+    const list = inputType(t);
+    return list !== undefined &&
+      list.shape.length === 1 &&
+      (list.lane === 'real' || list.lane === 'integer')
+      ? list
+      : {
+          lane: scalarOf(literal, t, `the parameter ${p} of ${e.operator}`)
+            .lane,
+          shape: [],
+        };
+  });
   const r = signature?.result;
   const result =
     r === undefined || r === 'unknown' || r === 'number' || r === 'any'
@@ -142,7 +152,9 @@ function signatureTypes(e: Fn, literal: Fn) {
  *  a call of it was made while its body is lowered. */
 type UserFunction = {
   key: object;
-  params: IRType[];
+  params: { lane: Lane; shape: readonly (number | 'run-time')[] }[];
+  /** The number of parameters of `ir` for `params` (with the lengths). */
+  own: number;
   result?: IRType;
   ir: IRFunction;
   inputs: Type[];
@@ -161,18 +173,33 @@ export function functionLowering(cx: Lowering) {
   /** The IR function of the user function of `key`, lowered once. */
   const define = (e: Fn, key: object, literal: Fn): UserFunction => {
     const { names, params, result } = signatureTypes(e, literal);
-    const values = params.map((t) => b.newValue(t));
     const ir: IRFunction = {
       name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
-      paramNames: [...names],
-      lengthOf: names.map(() => false),
-      body: { params: values, body: [], yields: [] },
+      paramNames: [],
+      lengthOf: [],
+      body: { params: [], body: [], yields: [] },
       results: [],
     };
+    const param = (name: string, t: IRType, length = false): V => {
+      const v = b.newValue(t);
+      ir.body.params.push(v);
+      ir.paramNames.push(name);
+      ir.lengthOf.push(length);
+      return v;
+    };
+    const values = params.map((t, i) => {
+      const shape = t.shape.map((n) =>
+        n === 'run-time'
+          ? { v: param(names[i], { lane: 'integer', shape: [] }, true) }
+          : n
+      );
+      return param(names[i], { lane: t.lane, shape });
+    });
     const fn: UserFunction = {
       key,
       params,
+      own: ir.body.params.length,
       result,
       ir,
       inputs: [],
@@ -207,7 +234,9 @@ export function functionLowering(cx: Lowering) {
     fn.result ??= type(ir.body.yields[0]);
     ir.results.push(fn.result);
     pending.delete(e.operator);
-    if (pending.size === 0) settled = functionEffects(cx.rows, b.functions);
+    // A `Comprehension` in the body of a function being lowered reads the
+    // effect of a function it calls (`flips` in `moves`).
+    settled = functionEffects(cx.rows, b.functions);
     return fn;
   };
 
@@ -219,19 +248,31 @@ export function functionLowering(cx: Lowering) {
       : pending.get(e.operator)!;
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
-    const args = e.ops.map((op, i) => {
-      const v = cx.widen(cx.value(op)!, fn.params[i].lane);
-      if (type(v).shape.length > 0)
+    const args = e.ops.flatMap((op, i) => {
+      const p = fn.params[i];
+      const v = cx.widen(cx.value(op)!, p.lane);
+      const t = type(v);
+      // A list parameter of a run-time length reads the argument's length.
+      const n = t.shape[0];
+      const length =
+        p.shape[0] !== 'run-time' || n === undefined
+          ? []
+          : [typeof n === 'number' ? b.constant(n, 'integer') : n.v];
+      const declared = {
+        lane: p.lane,
+        shape: p.shape.map((m) => (m === 'run-time' ? n : m)),
+      } as IRType;
+      if (p.shape.length === 0 && t.shape.length > 0)
         decline(
           op,
           `a list argument of ${e.operator} (the interpreter maps the function over the list)`
         );
-      if (!isSubType(type(v), fn.params[i]))
+      if (cx.tuples.has(v) || !isSubType(t, declared, cx.constant))
         decline(
           op,
-          `an argument of ${e.operator} that is not ${typeToString(fn.params[i])}`
+          `an argument of ${e.operator} that is not ${typeToString(declared)}`
         );
-      return v;
+      return [...length, v];
     });
     if (fn.result === undefined)
       decline(
@@ -244,13 +285,13 @@ export function functionLowering(cx: Lowering) {
       if (fn.inputs.length > 0)
         decline(
           e,
-          `a recursive call of ${e.operator}, which reads the input ${fn.ir.paramNames[fn.params.length]} (a function on a cycle of calls reads no input)`
+          `a recursive call of ${e.operator}, which reads the input ${fn.ir.paramNames[fn.own]} (a function on a cycle of calls reads no input)`
         );
       fn.called = true;
     }
     // The inputs that the body reads, read here (`free()`).
     const inputs = fn.inputs.map((t, j) => {
-      const k = fn.params.length + j;
+      const k = fn.own + j;
       const p = type(fn.ir.body.params[k]);
       const v = cx.widen(cx.free(e, fn.ir.paramNames[k], t), p.lane);
       if (!isSubType(type(v), p))
@@ -325,7 +366,7 @@ export function functionLowering(cx: Lowering) {
       );
     },
     /** The effect of the IR function `name`: effectful while it is not
-     *  settled (a function being lowered). */
+     *  lowered (a function being lowered). */
     effect: (name: string): Effect => settled.get(name) ?? 'effectful',
   };
 }
