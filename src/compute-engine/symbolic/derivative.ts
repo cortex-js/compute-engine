@@ -520,6 +520,8 @@ const DERIVATIVES_TABLE = {
   // d/dx ψ(x) = ψ₁(x) (trigamma function)
   // https://en.wikipedia.org/wiki/Trigamma_function
   Digamma: ['Trigamma', '_'],
+  // d/dn H_n = ψ₁(n+1), the derivative of ψ(n+1) + γ (one-argument form)
+  HarmonicNumber: ['Trigamma', ['Add', '_', 1]],
   // d/dx ψ₁(x) = ψ⁽²⁾(x) — the polygamma ladder continues past Trigamma
   Trigamma: ['PolyGamma', 2, '_'],
   // d/dx W(x) = W(x)/(x·(1+W(x))) where W is the Lambert W function

@@ -129,7 +129,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 86,
+  "declaredShells": 85,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -1019,7 +1019,7 @@
     {
       "id": "d316bc",
       "reason": "unorientable",
-      "detail": "canonical match collapses to \"Indeterminate\""
+      "detail": "canonical match collapses to \"NaN\""
     },
     {
       "id": "d3cfc2",

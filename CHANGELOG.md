@@ -14,6 +14,17 @@
 
 ### New Features
 
+- **`HarmonicNumber(n)` is the harmonic number Hₙ = Σ 1/k, and
+  `HarmonicNumber(n, r)` the generalized harmonic number Σ 1/kʳ.** They are
+  Wolfram's `HarmonicNumber`. A non-negative integer `n` with an integer `r`
+  gives an exact rational (`HarmonicNumber(10)` is `7381/2520`), left
+  unevaluated past a work limit. Under `N()` or with an inexact operand, the
+  value is the continuation ψ(n + 1) + γ, or ζ(r) − ζ(r, n + 1) for `r` other
+  than 1, for a real or complex `n` (`N(HarmonicNumber(1/2))` is
+  `0.6137056388…`). A negative integer `n` is the pole `~oo`. It compiles to
+  JavaScript and GLSL, and its derivative in `n` is `Trigamma(n + 1)`.
+  (PR #519, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`IntegerPartitions(n, kspec, parts, m)` lists the partitions of an
   integer.** As in Mathematica, each partition is a list of positive parts in
   non-increasing order, and the partitions are in reverse lexicographic order:

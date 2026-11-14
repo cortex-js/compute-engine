@@ -1194,6 +1194,9 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   PolyGamma: real(2),
   Beta: real(2),
   Zeta: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real')] },
+  HarmonicNumber: {
+    signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real')],
+  },
   HurwitzZeta: realValued(2),
   PolyLog: realValued(2),
   LerchPhi: realValued(3),

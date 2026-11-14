@@ -143,3 +143,34 @@ export function complexContinuation(
   }
   return 'real';
 }
+
+/**
+ * `HarmonicNumber(n)` and `HarmonicNumber(n, r)` as the heads the
+ * interpreter evaluates them through: ψ(n+1) + γ, and ζ(r) − ζ(r, n+1) for
+ * r ≠ 1 (a run-time `r` is tested against 1, where ζ is a pole). The
+ * lowerings of those heads then carry the realness and pole rules; a value
+ * that is provably complex (negative non-integer n with a non-integer r)
+ * has no real lowering, so it throws.
+ */
+export function harmonicNumberDesugared(
+  args: ReadonlyArray<Expression>
+): Expression {
+  const [n, r] = args;
+  const ce = n.engine;
+  const shifted = ce.function('Add', [n, ce.One]);
+  const plain = ce.function('Add', [
+    ce.function('Digamma', [shifted]),
+    ce.symbol('EulerGamma'),
+  ]);
+  if (r === undefined) return plain;
+  if (complexContinuation('HurwitzZeta', [r, shifted]) === 'complex')
+    throw new Error(
+      `Could not compile \`HarmonicNumber\`: its value at ${n.toString()} is not real`
+    );
+  const general = ce.function('Subtract', [
+    ce.function('Zeta', [r]),
+    ce.function('HurwitzZeta', [r, shifted]),
+  ]);
+  if (isNumber(r)) return r.isSame(1) ? plain : general;
+  return ce.function('If', [ce.function('Equal', [r, ce.One]), plain, general]);
+}

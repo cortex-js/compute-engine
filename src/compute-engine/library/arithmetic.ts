@@ -6413,6 +6413,134 @@ export function hurwitzOperand(
 }
 
 /**
+ * Above this much estimated work — terms times digits of the common
+ * denominator — an exact harmonic number stays symbolic (under `N()` it
+ * continues through `Digamma`/`HurwitzZeta`). Each term is one big-integer
+ * operation on a value of up to that many digits, so the product is the
+ * running time; 10⁹ digit-steps is under a second (the budget of
+ * `MAX_EXACT_RECURRENCE_WORK` in `number-theory.ts`).
+ */
+const MAX_EXACT_HARMONIC_WORK = 1e9;
+
+function bigGcd(a: bigint, b: bigint): bigint {
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a < 0n ? -a : a;
+}
+
+/**
+ * The exact `H_n^(r) = Σ_{k=1}^n k^(−r)` for integers n ≥ 1 and r, as a
+ * reduced `[numerator, denominator]`, or `undefined` past the work cap. The
+ * terms share the denominator `lcm(1..n)^r` (`lcm(1..n) ≈ eⁿ`), so the work
+ * is about n·(0.43·n·r) digit-steps; a negative r is a plain integer sum.
+ */
+function harmonicNumberExact(
+  ce: ComputeEngine,
+  n: number,
+  r: number
+): [bigint, bigint] | undefined {
+  const digits =
+    r >= 0 ? r * n * Math.LOG10E + 1 : -r * Math.log10(n) + Math.log10(n) + 1;
+  if (!Number.isFinite(digits) || n * digits > MAX_EXACT_HARMONIC_WORK)
+    return undefined;
+  let steps = 0;
+  const tick = () => {
+    if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+  };
+  const bn = BigInt(n);
+  if (r < 0) {
+    let sum = 0n;
+    for (let k = 1n; k <= bn; k++) {
+      tick();
+      sum += k ** BigInt(-r);
+    }
+    return [sum, 1n];
+  }
+  let lcm = 1n;
+  for (let k = 2n; k <= bn; k++) {
+    tick();
+    lcm = (lcm / bigGcd(lcm, k)) * k;
+  }
+  let sum = 0n;
+  const br = BigInt(r);
+  for (let k = 1n; k <= bn; k++) {
+    tick();
+    sum += (lcm / k) ** br;
+  }
+  const den = lcm ** br;
+  const g = bigGcd(sum, den);
+  return [sum / g, den / g];
+}
+
+/**
+ * Evaluate HarmonicNumber(n) = Σ_{k=1}^n 1/k and HarmonicNumber(n, r) =
+ * Σ_{k=1}^n 1/k^r.
+ *
+ * - A non-negative integer n with an integer (or no) r is the exact sum,
+ *   declined past `MAX_EXACT_HARMONIC_WORK`; n = 0 is the empty sum, 0.
+ * - A negative integer n is a pole (`~∞`, as Wolfram) in the one-argument
+ *   form and for Re(r) > 0; for another r the value is left symbolic.
+ * - Elsewhere, under `N()` or with an inexact operand, the analytic
+ *   continuation: H_z = ψ(z+1) + γ (DLMF 5.15.2) and, for r ≠ 1,
+ *   H_z^(r) = ζ(r) − ζ(r, z+1) (DLMF 25.11.1), through `Digamma` and
+ *   `HurwitzZeta` so every route and precision is theirs. A non-finite
+ *   answer declines.
+ */
+function evaluateHarmonicNumber(
+  engine: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const [n, r] = ops;
+  if (n === undefined || ops.length > 2) return undefined;
+  const numeric = (expr: Expression) =>
+    numericApproximation ? expr.N() : expr.evaluate();
+
+  if (isNumber(n)) {
+    const point = infinitePoint(n);
+    if (point === '+oo') {
+      if (r === undefined) return engine.PositiveInfinity;
+      // H_∞^(r) = ζ(r) for Re(r) > 1, and diverges for r = 1.
+      if (isNumber(r) && !r.isComplex && !r.isNaN && r.re > 1)
+        return numeric(engine.function('Zeta', [r]));
+      return undefined;
+    }
+    if (point !== undefined) return engine.NaN;
+  }
+
+  const nInt = isNumber(n) && !n.isComplex ? asSmallInteger(n) : null;
+  const rInt = r === undefined ? 1 : asSmallInteger(r);
+
+  if (nInt !== null && nInt < 0) {
+    const pole = r === undefined || (isNumber(r) && !r.isNaN && r.re > 0);
+    return pole ? engine.ComplexInfinity : undefined;
+  }
+  if (nInt === 0) return engine.Zero;
+  if (nInt !== null && rInt !== null) {
+    const exact = harmonicNumberExact(engine, nInt, rInt);
+    if (exact !== undefined) return numeric(engine.number(exact));
+  }
+
+  if (!shouldNumericize(numericApproximation, n, r)) return undefined;
+  if (!isNumber(n) || (r !== undefined && !isNumber(r))) return undefined;
+
+  const one = r === undefined || (!r.isComplex && r.re === 1);
+  const shifted = engine.function('Add', [n, engine.One]);
+  const value = one
+    ? engine.function('Add', [
+        engine.function('Digamma', [shifted]),
+        engine.symbol('EulerGamma'),
+      ])
+    : engine.function('Subtract', [
+        engine.function('Zeta', [r!]),
+        engine.function('HurwitzZeta', [r!, shifted]),
+      ]);
+  const result = value.N();
+  // A pole or an unevaluated kernel is not an answer.
+  if (!isNumber(result) || result.isNaN) return undefined;
+  return result;
+}
+
+/**
  * Evaluate Zeta(s,a), Wolfram's generalized zeta: identical to HurwitzZeta
  * for Re(a) > 0 or symbolic a; at a = 0, -1, -2, … it uses a different,
  * always-finite convention instead (`zetaGeneralizedComplex`), so
@@ -9021,6 +9149,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             numericApproximation
           );
         })
+      ),
+    },
+
+    // Harmonic number H_n = Σ_{k=1}^n 1/k and H_n^(r) = Σ_{k=1}^n 1/k^r,
+    // Wolfram's `HarmonicNumber`; see `evaluateHarmonicNumber`.
+    HarmonicNumber: {
+      description:
+        'Harmonic number H_n = Σ_{k=1}^n 1/k, exact at a non-negative integer and continued by ψ(n+1) + γ; with a second argument r, the generalized H_n^(r) = Σ_{k=1}^n 1/k^r = ζ(r) − ζ(r, n+1).',
+      complexity: 8500,
+      broadcastable: true,
+      // The carrier of `Digamma` and `HurwitzZeta`; the poles at the negative
+      // integers are `~oo`, so the result claims `number`.
+      signature: '(complex | infinity, (complex | infinity)?) -> number',
+      examples: [
+        '[HarmonicNumber(10), HarmonicNumber(10, 2), N(HarmonicNumber(1/2))]',
+      ],
+      nanBehavior: 'propagate',
+      // A float operand gives a float result, also for the exact sum
+      // (`HarmonicNumber(3.0)` is the float `1.8333…`, not `11/6`).
+      evaluate: floatResultIfFloatOperand(
+        guardDigitsN((ops, { numericApproximation, engine }) =>
+          evaluateHarmonicNumber(engine, ops, numericApproximation)
+        )
       ),
     },
 
