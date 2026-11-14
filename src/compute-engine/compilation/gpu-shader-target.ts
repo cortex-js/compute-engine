@@ -3035,14 +3035,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             target
           );
           inlined[i] = expression;
-          // The statement is in the fragment, with the declarations of the
-          // shader as its inputs, before its code is written.
-          const annotation = this.typeDeclaredBody(
-            expression,
-            target,
-            framed,
-            `the body statement "${assignment.variable}" of \`compileShader()\``
-          );
+          // The size is checked before the fragment pass, which walks the
+          // expression as a tree: a deep shared graph would take a time that
+          // doubles per level before the check.
           inlinedSize += gpuWrittenSize(expression, {
             ...cseRecordingRules(expression),
             share: false,
@@ -3057,6 +3052,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `each path in a body statement. Assign the subexpression to ` +
                 `a variable of its own (\`Block\`).`
             );
+          // The statement is in the fragment, with the declarations of the
+          // shader as its inputs, before its code is written.
+          const annotation = this.typeDeclaredBody(
+            expression,
+            target,
+            framed,
+            `the body statement "${assignment.variable}" of \`compileShader()\``
+          );
           // The one target of the body carries the scope of the statement
           // that it compiles.
           Object.assign(target, {

@@ -16,6 +16,14 @@
   (PR #571, contributed by [enumeratio](https://github.com/enumeratio),
   fixes [#570](https://github.com/cortex-js/compute-engine/issues/570))
 
+### Performance
+
+- **`compileShader()` refuses a body whose code would be too large before it
+  analyzes the body.** A body statement that reads a point whose value is a deep
+  graph of shared subexpressions (`u = u + sin(u)` repeated 24 times) took about
+  14 s to report that the code would have more than 50,000 nodes; it reports it
+  in about 20 ms.
+
 ## 0.189.0 _2026-11-14_
 
 ### Breaking Changes

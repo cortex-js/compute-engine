@@ -723,11 +723,8 @@ describe('CE-593: the substituted value is checked', () => {
     return ce;
   }
 
-  // 16 levels: `compileShader()` walks the shared graph as a tree before
-  // its size check, a time that doubles per level (CE-1284). 16 levels are
-  // already over the limit.
   test('compileShader()', () => {
-    const ce = deepValue(16);
+    const ce = deepValue();
     expect(() =>
       new GLSLTarget().compileShader({
         type: 'fragment',
@@ -796,9 +793,6 @@ describe('CE-593: degree mode keeps a shared value shared', () => {
     expect(distinctNodes(rewritten)).toBeLessThan(500);
   });
 
-  // `compileShader()` reads a value of 16 levels: it walks the shared graph
-  // as a tree before its size check, a time that doubles per level
-  // (CE-1284). 16 levels are already over the limit.
   test('glsl: compile() and compileShader()', () => {
     const { ce } = deepValue();
     expect(
@@ -808,13 +802,12 @@ describe('CE-593: degree mode keeps a shared value shared', () => {
         constantFold: false,
       }).success
     ).toBe(true);
-    const shallow = deepValue(16).ce;
     expect(() =>
       new GLSLTarget().compileShader({
         type: 'fragment',
         inputs: [{ name: 'x', type: 'float' }],
         outputs: [{ name: 'o', type: 'float' }],
-        body: [{ variable: 'o', expression: shallow.parse('P.x') }],
+        body: [{ variable: 'o', expression: ce.parse('P.x') }],
         constantFold: false,
       })
     ).toThrow(/body statements would have more than 50,000 nodes/);
