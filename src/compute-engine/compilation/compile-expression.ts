@@ -355,10 +355,7 @@ function compileExpression<
     return ce._withOperation(expr, () => compile<T, R>(expr, options));
   // The option `inputs`: the compilation of the expression with the names
   // bound to typed declarations of its own (`withCompileInputs()`).
-  if (
-    options?.inputs !== undefined &&
-    Object.keys(options.inputs).length > 0
-  ) {
+  if (options?.inputs !== undefined && Object.keys(options.inputs).length > 0) {
     // The interpreter fallback is the one of `expr` as it was given, built
     // for the scope of the call: a run gives each input its value on the
     // definition of that scope, which the bodies of the functions that

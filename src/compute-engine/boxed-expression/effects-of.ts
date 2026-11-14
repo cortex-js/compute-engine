@@ -173,7 +173,10 @@ export function homeBinding(
   name: string,
   home: Scope
 ):
-  | { def: NonNullable<ReturnType<ComputeEngine['lookupDefinition']>>; scope: Scope }
+  | {
+      def: NonNullable<ReturnType<ComputeEngine['lookupDefinition']>>;
+      scope: Scope;
+    }
   | undefined {
   let s: Scope | null | undefined = home;
   while (s != null) {

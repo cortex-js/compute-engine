@@ -2577,16 +2577,7 @@ function walkLiteral(
   // (`params`).
   walkHome = home ?? literalHome(literal) ?? outerHome;
   try {
-    walkBody(
-      ce,
-      body,
-      state,
-      params,
-      paramTypes,
-      selfName,
-      depth,
-      expanding
-    );
+    walkBody(ce, body, state, params, paramTypes, selfName, depth, expanding);
   } finally {
     walkHome = outerHome;
   }

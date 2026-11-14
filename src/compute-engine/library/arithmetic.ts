@@ -10011,9 +10011,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           isNumber(a) &&
           isNumber(b) &&
           (a.isComplex || b.isComplex) &&
-          [a, b].some(
-            (x) => !x.isComplex && x.isInteger === true && x.re <= 0
-          )
+          [a, b].some((x) => !x.isComplex && x.isInteger === true && x.re <= 0)
         )
           return engine.ComplexInfinity;
         return shouldNumericize(numericApproximation, a, b)
