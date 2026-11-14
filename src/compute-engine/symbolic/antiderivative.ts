@@ -872,6 +872,92 @@ function tryPolyExpTrigIntegral(
   return result;
 }
 
+/** The largest degree of `p` that `tryPolyTimesLinearExpTrig()` accepts. */
+const MAX_POLY_TIMES_LINEAR_KERNEL_DEGREE = 200;
+
+/**
+ * ∫ p(x)·f(a·x + b) dx for a polynomial `p` and `f` one of exp, sin and cos,
+ * with `a` a non-zero constant: integration by parts repeated until the
+ * derivative of `p` is 0, in closed form,
+ *
+ *   ∫ p·f(u) dx = Σₖ (−1)ᵏ p⁽ᵏ⁾(x)·Fₖ₊₁(x),   k = 0 … deg p,
+ *
+ * where Fⱼ is the j-th antiderivative of f(u): e^u/aʲ, and for sin and cos
+ * the cycle −cos, −sin, cos, sin (sin, −cos, −sin, cos) over aʲ. It takes
+ * deg p derivatives; the by-parts search grows faster than linearly in the
+ * degree and spent its whole step budget on `x¹⁰·e⁻ˣ` (CE-1282).
+ * Returns null unless the factors are exactly one such f and a polynomial.
+ */
+function tryPolyTimesLinearExpTrig(
+  factors: ReadonlyArray<Expression>,
+  index: string
+): Expression | null {
+  if (factors.length < 2) return null;
+  const ce = factors[0].engine;
+
+  let kernel: Expression | null = null;
+  let arg: Expression | null = null;
+  const polyFactors: Expression[] = [];
+  for (const f of factors) {
+    if (!kernel && isFunction(f)) {
+      const u =
+        f.operator === 'Exp' || f.operator === 'Sin' || f.operator === 'Cos'
+          ? f.op1
+          : f.operator === 'Power' && sym(f.op1) === 'ExponentialE'
+            ? f.op2
+            : null;
+      if (u) {
+        kernel = f;
+        arg = u;
+        continue;
+      }
+    }
+    polyFactors.push(f);
+  }
+  if (!kernel || !arg) return null;
+  const a = linearIndexCoefficient(arg, index);
+  if (!a) return null;
+
+  const p = polyFactors.length === 1 ? polyFactors[0] : mul(...polyFactors);
+  // The degree, read without expanding `p`: `(x^65536 + 1)^65536` has a
+  // degree too large for an array of coefficients. Above the bound, the rule
+  // declines (n derivatives and n + 1 terms).
+  const n = polynomialDegree(p, index);
+  if (n < 1 || n > MAX_POLY_TIMES_LINEAR_KERNEL_DEGREE) return null;
+
+  // Fⱼ, the j-th antiderivative of the kernel
+  const op = kernel.operator;
+  const cycle =
+    op === 'Sin'
+      ? [
+          ce.function('Cos', [arg]).neg(),
+          ce.function('Sin', [arg]).neg(),
+          ce.function('Cos', [arg]),
+          ce.function('Sin', [arg]),
+        ]
+      : op === 'Cos'
+        ? [
+            ce.function('Sin', [arg]),
+            ce.function('Cos', [arg]).neg(),
+            ce.function('Sin', [arg]).neg(),
+            ce.function('Cos', [arg]),
+          ]
+        : [kernel];
+
+  const terms: Expression[] = [];
+  let derivative: Expression | undefined = p;
+  for (let k = 0; k <= n; k++) {
+    if (!derivative) return null;
+    if (derivative.isSame(0)) break;
+    const sign = k % 2 === 0 ? ce.One : ce.NegativeOne;
+    terms.push(
+      mul(sign.div(a.pow(k + 1)), derivative, cycle[k % cycle.length])
+    );
+    derivative = differentiate(derivative, index)?.evaluate();
+  }
+  return add(...terms).evaluate();
+}
+
 /**
  * Replace each product of two or more constant factors that multiplies the
  * integration variable (`2·π·x`, `a·b·x`) by one fresh symbol, so that the
@@ -3738,6 +3824,12 @@ function establishedAntiderivativeInRadians(
     // unbounded by-parts/cyclic recursion. Must precede integration by parts.
     const polyExpTrig = tryPolyExpTrigIntegral(fn.ops, index);
     if (polyExpTrig) return polyExpTrig;
+
+    // Polynomial × exp, sin or cos of a linear argument, in closed form.
+    // Must precede integration by parts, whose search for a polynomial of
+    // high degree spends the step budget.
+    const polyLinear = tryPolyTimesLinearExpTrig(fn.ops, index);
+    if (polyLinear) return polyLinear;
 
     // Products of powers of the index fold to a single power:
     // x^m·x^(2m+2) → x^(3m+2), which the power rule integrates directly

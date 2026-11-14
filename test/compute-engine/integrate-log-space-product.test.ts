@@ -1,10 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { logSpaceProduct } from '../../src/compute-engine/symbolic/log-space-product';
-import {
-  ANTIDERIVATIVE_STEP_BUDGET,
-  antiderivativeBudget,
-} from '../../src/compute-engine/symbolic/antiderivative';
 
 // ROADMAP CE-394. `∫₀^∞ xⁿ·e⁻ˣ dx = n!`. The integrand `xⁿ·e⁻ˣ` is
 // `∞·0 = NaN` in double precision past `x ≈ 1200` (n = 100), the quadrature
@@ -13,17 +9,6 @@ import {
 // log space, `exp(n·ln x − x)`, on the interpreter and in compiled code.
 
 const ce = new ComputeEngine();
-
-// The symbolic antiderivative of xⁿ·e⁻ˣ (n ≥ 10) is not found: each
-// `evaluate()` and `compile()` of the integral spends the whole step budget
-// before the numeric route (CE-1282). A small budget gives the same results
-// sooner. Remove this override when CE-1282 is fixed.
-beforeAll(() => {
-  antiderivativeBudget.steps = 2000;
-});
-afterAll(() => {
-  antiderivativeBudget.steps = ANTIDERIVATIVE_STEP_BUDGET;
-});
 
 function factorial(n: number): number {
   let r = 1;
@@ -91,7 +76,9 @@ describe('an integrand that is a product overflowing against itself', () => {
   });
 
   test('the fallback is not used for an integrand with an effect, or with a caller mapping', () => {
-    const latex = '\\int_0^\\infty x^{100} e^{-x}\\,dx';
+    // `x^{100.5}`, not `x^{100}`: `∫ xⁿ·e⁻ˣ dx` has a closed form for an
+    // integer n, and its definite integral compiles to a constant.
+    const latex = '\\int_0^\\infty x^{100.5} e^{-x}\\,dx';
     // Compiled with the built-in operators: the fallback is emitted.
     const plain = compile(ce.parse(latex)) as unknown as { code: string };
     expect(plain.code).toContain('_SYS.finiteOr');
@@ -103,10 +90,9 @@ describe('an integrand that is a product overflowing against itself', () => {
     expect(mapped.code).not.toContain('_SYS.finiteOr');
     // A nested integral takes the fallback at its innermost level.
     const nested = compile(
-      ce.parse('\\int_0^1 \\int_0^\\infty x^{100} e^{-x} y\\, dx\\, dy')
+      ce.parse('\\int_0^1 \\int_0^\\infty x^{100.5} e^{-x} y\\, dx\\, dy')
     ) as unknown as { run: () => number };
-    expect(Math.abs(nested.run() / (factorial(100) / 2) - 1)).toBeLessThan(
-      1e-9
-    );
+    const gamma = ce.box(['Gamma', 101.5]).N().re;
+    expect(Math.abs(nested.run() / (gamma / 2) - 1)).toBeLessThan(1e-9);
   });
 });

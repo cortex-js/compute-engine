@@ -3321,6 +3321,50 @@ describe('INTEGRATE: sine and cosine of a linear argument under integration by p
   });
 });
 
+describe('INTEGRATE: a polynomial times exp, sin or cos of a linear argument (CE-1282)', () => {
+  const ce = new ComputeEngine();
+  // Integration by parts spent its whole step budget on `x¹⁰·e⁻ˣ` and gave up.
+  // Each result is checked by differentiating it back to the integrand at a
+  // few sample points, with `a` set where it occurs.
+  test.each([
+    'x^{10}e^{-x}',
+    'x^{20}e^{-x}',
+    'x^{20}e^{2x}',
+    'x^{10}e^{ax}',
+    'x^{10}e^{ax+b}',
+    '(x^3-2x+5)e^{\\frac{x}{2}-3}',
+    'x^{10}\\sin(x)',
+    'x^{10}\\cos(ax+1)',
+    '(x^2+x)\\sin(2x-1)',
+  ])('∫ %s dx', (integrand) => {
+    const F = ce.parse(`\\int ${integrand}\\,dx`).evaluate();
+    expect(F.has('Integrate')).toBe(false);
+    const dF = ce.box(['D', F, 'x']).evaluate();
+    const f = ce.parse(integrand);
+    for (const [x, a] of [
+      [0.3, 1.5],
+      [-1.2, -0.5],
+      [2.5, 0.75],
+    ]) {
+      const at = { x: ce.number(x), a: ce.number(a), b: ce.number(0.25) };
+      const expected = f.subs(at).N().re;
+      const actual = dF.subs(at).N().re;
+      expect(Math.abs(actual - expected)).toBeLessThan(
+        1e-9 * Math.max(1, Math.abs(expected))
+      );
+    }
+  });
+
+  test('∫₀^∞ xⁿ e⁻ˣ dx = n!', () => {
+    expect(
+      ce.parse('\\int_0^\\infty x^{10} e^{-x}\\,dx').evaluate().toString()
+    ).toBe('3628800');
+    expect(
+      ce.parse('\\int_0^\\infty x^{20} e^{-x}\\,dx').evaluate().toString()
+    ).toBe('2432902008176640000');
+  });
+});
+
 describe('INTEGRATE: a pole at a constant such as π', () => {
   const ce = new ComputeEngine();
   const integral = (body: unknown, lo: unknown, hi: unknown) =>

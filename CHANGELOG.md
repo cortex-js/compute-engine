@@ -16,6 +16,15 @@
   (PR #571, contributed by [enumeratio](https://github.com/enumeratio),
   fixes [#570](https://github.com/cortex-js/compute-engine/issues/570))
 
+### Improvements
+
+- **`Integrate` gives a closed form for a polynomial of degree up to 200
+  times `e^{ax+b}`, `\sin(ax+b)` or `\cos(ax+b)`.** `\int x^{10} e^{-x}\,dx`
+  was left unevaluated after about 1.5 s; it is
+  `-x^{10}e^{-x} - 10x^9e^{-x} - \cdots - 3628800e^{-x}`, and
+  `\int_0^\infty x^{10} e^{-x}\,dx` evaluates to `3628800`. The same holds for
+  `\int x^{10}\sin(x)\,dx` and for a symbolic coefficient `a`.
+
 ### Performance
 
 - **`compileShader()` refuses a body whose code would be too large before it
