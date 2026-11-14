@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.190.0 _2026-11-14_
 
 ### Breaking Changes
 
