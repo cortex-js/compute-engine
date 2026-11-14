@@ -31,6 +31,17 @@
 
 ### Resolved Issues
 
+- **`\triangle` (`SymmetricDifference`) binds as tightly as `\cup` and
+  `\cap`.** It had the precedence of `=`, so `a \triangle b = c` was read as
+  `a \triangle (b = c)`, an `incompatible-type` error once canonical. It is
+  now `Equal(SymmetricDifference(a, b), c)`, and a set identity such as
+  `A \triangle B = (A \setminus B) \cup (B \setminus A)` parses as an
+  equation. A mix with `\cup` or `\cap` without parentheses now nests to the
+  right, as `\cup` and `\cap` do with each other: `A \cup B \triangle C` is
+  `Union(A, SymmetricDifference(B, C))` (PR #587, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#586](https://github.com/cortex-js/compute-engine/issues/586)).
+
 - **`ExtendedGCD` takes any number of integers, and `Fibonacci` and
   `BellNumber` take a second operand, the variable of their polynomial.**
   `ExtendedGCD(12, 18, 27)` was an `unexpected-argument` error; it is
