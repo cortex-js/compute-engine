@@ -94,7 +94,11 @@ import { readsAsScalarThroughFreeInputs } from './compile-user-calls.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
 import { possibleNothingDecline } from './diagnostics.js';
 import { multiClauseState } from '../multi-clause.js';
-import { _reservedDeclareNames, assignLValue } from './compile-locals.js';
+import {
+  _outerReadValues,
+  _reservedDeclareNames,
+  assignLValue,
+} from './compile-locals.js';
 import {
   mayHoldComplexElement,
   realLaneLocalBinding,
@@ -383,19 +387,21 @@ export function compileExprDeclare(
     // (`_reservedDeclareNames`), so the reads in its scope use the same
     // name. A `Declare` that has no such record is not compiled: its reads
     // would not use the fresh name.
-    let name = symbol;
-    if (target.reservedEmittedNames?.has(symbol) === true) {
-      const fresh =
-        node !== undefined ? _reservedDeclareNames.get(node) : undefined;
-      if (fresh === undefined)
-        throw new Error(
-          `Could not compile the declaration of '${symbol}': the code of ` +
-            `the ${target.language ?? 'unknown'} target uses this name, ` +
-            `and a local with this name can be compiled only as a ` +
-            `statement of a block or of a loop body.`
-        );
-      name = fresh;
-    }
+    // A local whose value reads the enclosing binding of its name has a
+    // record too (`_outerReadValues`).
+    const fresh =
+      node !== undefined ? _reservedDeclareNames.get(node) : undefined;
+    if (
+      target.reservedEmittedNames?.has(symbol) === true &&
+      fresh === undefined
+    )
+      throw new Error(
+        `Could not compile the declaration of '${symbol}': the code of ` +
+          `the ${target.language ?? 'unknown'} target uses this name, ` +
+          `and a local with this name can be compiled only as a ` +
+          `statement of a block or of a loop body.`
+      );
+    const name = fresh ?? symbol;
     // Targets with a `declare` hook handle any initial value at the block
     // level (as a separate assignment statement — see `compileBlock`). For
     // the default path (no hook), emit a combined initializer so a
@@ -407,14 +413,22 @@ export function compileExprDeclare(
     // trailing attributes dictionary), and `-1` is the WHOLE-NODE region
     // sentinel — compile it plainly rather than open the wrong region.
     const valueIndex = args.indexOf(value);
+    const compileValue = (t: CompileTarget<Expression>) =>
+      valueIndex < 0
+        ? core.compile(value, t)
+        : compileOp(node, valueIndex, t, 0, value);
+    // A value that reads the enclosing binding of the name of the local is
+    // compiled against that binding (`_outerReadValues`).
+    const outerRead =
+      node !== undefined ? _outerReadValues.get(node) : undefined;
     // A value computed on the complex lane is converted for a local on the
     // real lane (`realLaneLocalBinding`).
     const valueCode = realLaneLocalBinding(
       symbol,
       value,
-      valueIndex < 0
-        ? core.compile(value, target)
-        : compileOp(node, valueIndex, target, 0, value),
+      outerRead !== undefined
+        ? outerRead(compileValue, target)
+        : compileValue(target),
       target
     );
     // A local whose updates write its list in place with no test copies the

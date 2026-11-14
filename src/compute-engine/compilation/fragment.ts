@@ -375,6 +375,10 @@ export type FragmentWalker<R> = {
   /** Collect `names` in `scope` before their declaration: a read of one of
    *  them is refused until `bind()` reaches it. */
   collect(scope: FragmentScope<R>, names: readonly string[]): void;
+  /** Run `f` with `name` not collected in `scope`, so that a read of it
+   *  in `f` is a read of the binding of an enclosing scope: the value of
+   *  the `Declare` of `name` (`3z with z = z + Z`). */
+  outside<T>(scope: FragmentScope<R>, name: string, f: () => T): T;
   /** The binding of `name` that a statement of the current function can
    *  write, with its role, or `undefined`. */
   binding(
@@ -1403,6 +1407,15 @@ function makeWalker<R>(
     bind: (node, scope, name, type, role) =>
       bind(node, scope, name, type, role),
     collect,
+    outside(scope, name, f) {
+      const pending = state.pending.get(scope);
+      if (pending?.delete(name) !== true) return f();
+      try {
+        return f();
+      } finally {
+        pending.add(name);
+      }
+    },
     binding,
     signatures: (node, scope, context, signatures) =>
       signatureFacts(node, scope, context, signatures),
@@ -2702,7 +2715,12 @@ function walkDeclare<R>(
     }
     return;
   }
-  const facts = w.value(value, scope, context);
+  // The value of the declaration of one name reads the enclosing binding
+  // of that name: the local exists after the value is evaluated.
+  const facts =
+    names.length === 1 && isSymbol(names[0])
+      ? w.outside(scope, names[0].symbol, () => w.value(value, scope, context))
+      : w.value(value, scope, context);
   if (names.length === 1) {
     const name = names[0] as Expression & { symbol: string };
     let type: FragmentValueType | FragmentListType = localType(facts.type);

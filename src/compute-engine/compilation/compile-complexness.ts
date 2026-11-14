@@ -57,6 +57,7 @@ import {
 import { CompilerState } from './compiler-state.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { core } from './compiler-core-hooks.js';
+import { assertLocalsAssignedBeforeRead } from './compile-locals.js';
 import {
   compilationType,
   isBoundPossiblyCollectionTyped,
@@ -1268,6 +1269,29 @@ export function _isComplexValuedFunction(
 }
 
 /**
+ * Run `f` with no entry for `name` in the complex frame `frame` (the
+ * innermost one), so that a read of `name` in `f` finds the lane of the
+ * enclosing binding: the value of a `Declare` that reads the name of its
+ * local (`outerReads` of `assertLocalsAssignedBeforeRead`). An entry that
+ * `f` does not set is put back when `f` ends.
+ */
+export function withComplexEntryHidden<T>(
+  frame: Map<string, boolean>,
+  name: string,
+  f: () => T
+): T {
+  const lane = frame.get(name);
+  frame.delete(name);
+  _resetComplexMemoTop();
+  try {
+    return f();
+  } finally {
+    if (lane !== undefined && !frame.has(name)) frame.set(name, lane);
+    _resetComplexMemoTop();
+  }
+}
+
+/**
  * Is the VALUE of the `Block` `expr` complex-valued?
  *
  * A block's value is its last statement, evaluated under its own locals —
@@ -1291,9 +1315,28 @@ export function isBlockValueComplexValued(
         localComplexDefault(expr.localScope, arg.ops[0].symbol)
       );
 
+  // The value of a `Declare` that reads the name of its local reads the
+  // enclosing binding of the name, as in `compileBlock` (`outerReads`). A
+  // block that `assertLocalsAssignedBeforeRead` refuses declines when it
+  // compiles, so its locals are inferred as before.
+  const outerReads = new Map<Expression, string>();
+  try {
+    assertLocalsAssignedBeforeRead(args, [...frame.keys()], outerReads);
+  } catch {
+    outerReads.clear();
+  }
   _pushLocalComplex(frame);
   try {
-    for (const arg of args) core.noteLocalComplex(arg, frame);
+    for (const arg of args) {
+      const name = outerReads.get(arg);
+      if (name === undefined) {
+        core.noteLocalComplex(arg, frame);
+        continue;
+      }
+      withComplexEntryHidden(frame, name, () =>
+        core.noteLocalComplex(arg, frame)
+      );
+    }
     // The value statement, skipping the `Nothing` no-ops `compileBlock`
     // filters out. A trailing `Assign` yields the value it wrote; a trailing
     // `Declare` yields no value at all.

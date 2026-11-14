@@ -257,12 +257,12 @@ describe('a nested block whose last statement is an assignment', () => {
   });
 });
 
-describe('a block local that is read before it has a value', () => {
+describe('a block local whose value reads the outer name', () => {
   // The block declares the local `x` with the value `x + 1`, which reads
   // the outer `x`, and the outer `x` has no declaration. The parse route
   // makes the same statement `Declare(x, 'unknown', x + 1)`, and the two
   // routes give the same result. The interpreter leaves the read symbolic,
-  // and every target declines.
+  // and every target compiles the outer `x` as an input (CE-1229).
   const boxRoute: MathJsonExpression = [
     'Block',
     ['Declare', 'x', "'unknown'", ['Add', 'x', 1]],
@@ -290,26 +290,19 @@ describe('a block local that is read before it has a value', () => {
   });
 
   test.each(['javascript', 'python', 'glsl', 'interval-js'] as const)(
-    '%s declines on the box route and on the parse route',
+    '%s compiles the box route and the parse route',
     (to) => {
       const boxed = compile(new ComputeEngine().box(boxRoute), { to });
-      expect(boxed.success).toBe(false);
-      // The GLSL fragment refuses a read of a local before its declaration.
-      expect(boxed.error ?? '').toMatch(
-        to === 'glsl'
-          ? /The local `x` is read before its declaration/
-          : /reads the block local "x" before any statement gives it a value/
-      );
+      expect(boxed.success).toBe(true);
       const parsed = compile(
         new ComputeEngine().parse('x \\coloneq x+1; 2x'),
         { to }
       );
-      expect(parsed.success).toBe(false);
-      expect(parsed.error ?? '').toMatch(
-        to === 'glsl'
-          ? /The local `x` is read before its declaration/
-          : /reads the block local "x" before any statement gives it a value/
-      );
+      expect(parsed.success).toBe(true);
+      if (to === 'javascript') {
+        expect(boxed.run!({ x: 3 })).toBe(8);
+        expect(parsed.run!({ x: 3 })).toBe(8);
+      }
     }
   );
 

@@ -5,7 +5,10 @@ import {
   scalarFragmentUnwrappedBlock,
 } from './javascript-fragment-facts.js';
 import type { Expression } from '../global-types.js';
-import { recordBlockScalarLocals } from './javascript-value-facts.js';
+import {
+  recordBlockScalarLocals,
+  recordScopeParent,
+} from './javascript-value-facts.js';
 import { discardedValueStatement } from './javascript-statements.js';
 import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -21,6 +24,7 @@ import {
 import {
   _freshLocalNames,
   _localValueFrames,
+  _outerReadValues,
   assertLocalsAssignedBeforeRead,
   assertNoUseBeforeDeclare,
   blockLocalValueFrame,
@@ -64,6 +68,7 @@ import { LOCAL_UNSET, localShapeFrameOf } from './compile-shapes.js';
 import {
   localComplexDefault,
   realLaneLocalBinding,
+  withComplexEntryHidden,
 } from './compile-complexness.js';
 import {
   _popLocalComplex,
@@ -237,7 +242,13 @@ export function compileBlock(
     );
 
   assertNoUseBeforeDeclare(args);
-  assertLocalsAssignedBeforeRead(args, locals);
+  // A `Declare` whose value reads the enclosing binding of the name of its
+  // local (`3z with z = z + Z`, a `Declare` of `z` whose value is `z + Z`):
+  // the interpreter evaluates the value before the local exists. Its local
+  // gets an emitted name of its own (see `spelled` below), and its value is
+  // compiled against the enclosing binding (`outerReadTarget`).
+  const outerReads = new Map<Expression, string>();
+  assertLocalsAssignedBeforeRead(args, locals, outerReads);
 
   // A lone EMPTY block in a statement list evaluated for effect (a shader
   // loop body reaching `compileStatementList`) is an empty statement.
@@ -357,18 +368,24 @@ export function compileBlock(
     args,
     target.declaredVarTypes
   );
-  const noteVectorWidth = (name: string, value: Expression) => {
+  const noteVectorWidth = (
+    name: string,
+    value: Expression,
+    /** The value reads the enclosing binding of `name` (`outerReads`). */
+    outerRead = false
+  ) => {
     // Only declared locals get a declaration (and hence a type hint).
     const prev = vectorFrame.get(name);
     if (prev === undefined) return;
     // A shader color occupies three channels, even though its language
     // type is atomic and its JavaScript representation is an object.
-    const count =
+    const width = () =>
       isGPUTarget &&
       (!isSymbol(value) || !localShapeFrameOf(value.symbol)) &&
       isSubtype(compilationType(value), 'color')
         ? 3
         : core.aggregateComponentCount(value);
+    const count = outerRead ? withLocalHidden(name, width) : width();
     if (isGPUTarget) {
       // The first binding also records a scalar local as `LOCAL_SCALAR`:
       // the frame stays pushed while the statements of the block compile,
@@ -400,6 +417,20 @@ export function compileBlock(
         : LOCAL_UNSET
     );
   }
+  // Run `f` with no entry for `name` in the frames of this block, so that
+  // a read of `name` in `f` finds the facts of the enclosing binding: the
+  // value of a `Declare` of `outerReads`. An entry that `f` does not set
+  // is put back when `f` ends.
+  const withLocalHidden = <T>(name: string, f: () => T): T => {
+    const width = vectorFrame.get(name);
+    vectorFrame.delete(name);
+    try {
+      return withComplexEntryHidden(complexFrame, name, f);
+    } finally {
+      if (width !== undefined && !vectorFrame.has(name))
+        vectorFrame.set(name, width);
+    }
+  };
   _pushLocalComplex(complexFrame);
   // Pushed before inference AND kept for the compilation of the statements,
   // so a later local's RHS that merely references an earlier one (`q ⩴ p`)
@@ -429,9 +460,26 @@ export function compileBlock(
   // bound outside it on a shader target (see `spelled` below). They are
   // removed from `_freshLocalNames` in the `finally` below.
   const shadowSpellings: string[] = [];
+  // The records of `_outerReadValues` that this block replaced, put back in
+  // the `finally` below.
+  const previousOuterReads = new Map<
+    Expression,
+    ReturnType<typeof _outerReadValues.get>
+  >();
   let localValueFrame: LocalValueFrame | undefined;
   try {
     for (const arg of args) {
+      // The value of a `Declare` of `outerReads` reads the enclosing
+      // binding of its name.
+      const outerRead = outerReads.get(arg);
+      if (outerRead !== undefined && isFunction(arg)) {
+        withLocalHidden(outerRead, () =>
+          core.noteLocalComplex(arg, complexFrame)
+        );
+        const value = declareValueOperand(arg.ops);
+        if (value !== undefined) noteVectorWidth(outerRead, value, true);
+        continue;
+      }
       // Complex-ness first, then width — the width of a complex value is
       // read THROUGH the complex frame (`aggregateComponentCount`).
       core.noteLocalComplex(arg, complexFrame);
@@ -527,9 +575,27 @@ export function compileBlock(
     // fresh name too. Otherwise its declaration hides that identifier in
     // the block, and each helper call in the block fails at run time.
     spellReservedLocals(locals, target, spelled, shadowSpellings);
+    // A local whose `Declare` value reads the enclosing binding of its name
+    // (`outerReads`) gets a fresh name too, so that the code of the value
+    // reads the enclosing binding (JavaScript: `let z = z + Z` reads its
+    // own uninitialized `z`).
+    for (const local of outerReads.values()) {
+      if (spelled.has(local)) continue;
+      const fresh = tempVar(target);
+      spelled.set(local, fresh);
+      if (!_freshLocalNames.has(fresh)) {
+        _freshLocalNames.add(fresh);
+        shadowSpellings.push(fresh);
+      }
+    }
     const spellLocal = (name: string): string => spelled.get(name) ?? name;
     // The `Declare` of such a local declares its fresh name.
-    unnoteReserved = noteReservedDeclares(args, target, spellLocal);
+    unnoteReserved = noteReservedDeclares(
+      args,
+      target,
+      spellLocal,
+      outerReads
+    );
     const localTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => {
@@ -542,6 +608,15 @@ export function compileBlock(
       lexicalFunctions,
       reboundFunctions: reboundFunctionScope(args, target, reboundLocals),
     };
+    for (const [declaration, name] of outerReads) {
+      if (!previousOuterReads.has(declaration))
+        previousOuterReads.set(declaration, _outerReadValues.get(declaration));
+      _outerReadValues.set(declaration, (compileValue, t) =>
+        withLocalHidden(name, () =>
+          compileValue(outerReadTarget(t, target, name, locals))
+        )
+      );
+    }
     bindScalarFragmentBlock(target, localTarget, node, args);
     if (target.language === 'javascript')
       recordBlockScalarLocals(args, localTarget);
@@ -755,12 +830,17 @@ export function compileBlock(
                 // NOT one of `arg`'s operands (it may come from a trailing
                 // attributes dictionary) compiles plainly.
                 const valueIndex = arg.ops.indexOf(value);
+                const compileValue = (t: CompileTarget<Expression>) =>
+                  valueIndex < 0
+                    ? core.compile(value, t)
+                    : compileOp(arg, valueIndex, t, 0, value);
+                const outerRead = _outerReadValues.get(arg);
                 const valueCode = realLaneLocalBinding(
                   name,
                   value,
-                  valueIndex < 0
-                    ? core.compile(value, stmtTarget)
-                    : compileOp(arg, valueIndex, stmtTarget, 0, value),
+                  outerRead !== undefined
+                    ? outerRead(compileValue, stmtTarget)
+                    : compileValue(stmtTarget),
                   stmtTarget
                 );
                 assertExpressionValue(valueCode, stmtTarget, 'Declare', name);
@@ -1066,7 +1146,86 @@ export function compileBlock(
     for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
     for (const d of ownedDeclarations) OWNED_LOCAL_DECLARATIONS.delete(d);
     for (const name of shadowSpellings) _freshLocalNames.delete(name);
+    // A record that a statement had before is put back, as
+    // `noteReservedDeclares` does.
+    for (const [declaration, previous] of previousOuterReads)
+      if (previous === undefined) _outerReadValues.delete(declaration);
+      else _outerReadValues.set(declaration, previous);
   }
+}
+
+/**
+ * The target `t` of a statement of a block, with the name `name` read as
+ * the enclosing target `enclosing` reads it: the target of the value of a
+ * `Declare` of `name` that reads the enclosing binding of `name`
+ * (`outerReads` in `compileBlock`). The other locals of the block keep
+ * their binding in `t`.
+ */
+function outerReadTarget(
+  t: CompileTarget<Expression>,
+  enclosing: CompileTarget<Expression>,
+  name: string,
+  /** The locals of the block. */
+  locals: ReadonlyArray<string>
+): CompileTarget<Expression> {
+  // A new set of bound names: a fact keyed on the set of the block is about
+  // the local. The set is linked to the enclosing set, so a fact of the
+  // enclosing binding of `name` (a loop index range) stays readable. Every
+  // other local of the block is a name that this set binds again, also one
+  // that shadows an enclosing binding, so it does not read the facts of the
+  // enclosing binding.
+  const boundVars = new Set(t.boundVars);
+  if (enclosing.boundVars?.has(name) === true) boundVars.add(name);
+  else boundVars.delete(name);
+  recordScopeParent(
+    boundVars,
+    enclosing.boundVars,
+    [...boundVars].filter(
+      (n) =>
+        enclosing.boundVars?.has(n) !== true ||
+        (n !== name && locals.includes(n))
+    )
+  );
+  const declaredVarTypes = t.declaredVarTypes && { ...t.declaredVarTypes };
+  if (declaredVarTypes !== undefined) {
+    delete declaredVarTypes[name];
+    const outer = enclosing.declaredVarTypes?.[name];
+    if (outer !== undefined) declaredVarTypes[name] = outer;
+  }
+  // The function scopes of the block, with the entry of `name` of the
+  // enclosing target.
+  const withOuterEntry = <V>(
+    inner: ReadonlyMap<string, V> | undefined,
+    outer: ReadonlyMap<string, V> | undefined
+  ): ReadonlyMap<string, V> | undefined => {
+    if (inner === undefined || !inner.has(name)) return inner;
+    const entries = new Map(inner);
+    const entry = outer?.get(name);
+    if (entry === undefined) entries.delete(name);
+    else entries.set(name, entry);
+    return entries;
+  };
+  const rebound = new Set(t.reboundFunctions);
+  if (enclosing.reboundFunctions?.has(name) === true) rebound.add(name);
+  else rebound.delete(name);
+  return {
+    ...t,
+    var: (id) => (id === name ? enclosing.var(id) : t.var(id)),
+    boundVars,
+    declaredVarTypes,
+    localFunctions: withOuterEntry(
+      t.localFunctions,
+      enclosing.localFunctions
+    ),
+    lexicalFunctions: withOuterEntry(
+      t.lexicalFunctions,
+      enclosing.lexicalFunctions
+    ),
+    reboundFunctions:
+      t.reboundFunctions === undefined && rebound.size === 0
+        ? undefined
+        : rebound,
+  };
 }
 
 /**

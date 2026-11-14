@@ -25,6 +25,14 @@
   `\int_0^\infty x^{10} e^{-x}\,dx` evaluates to `3628800`. The same holds for
   `\int x^{10}\sin(x)\,dx` and for a symbolic coefficient `a`.
 
+- **A block local whose value reads the outer variable of the same name
+  compiles.** `compile()` of `Block(Declare(z, 'unknown', z + Z), 3z)`, the
+  form of `z \coloneq z + Z; 3z`, declined with "reads the block local "z"
+  before any statement gives it a value", and the expression ran in the
+  interpreter. It compiles on the JavaScript, GLSL, Python and interval
+  targets, and the value reads the outer `z`, as in the interpreter: with
+  `z = 2` and `Z = 10` the compiled function gives `36`.
+
 ### Behavior Changes
 
 - **A static error of an Epsil program has its engine error code in a `code`

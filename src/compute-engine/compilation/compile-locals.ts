@@ -537,10 +537,19 @@ export function nestedAssignmentsTo(
  * A read inside a function literal is not counted, since it happens when
  * the function is called, nor is a read in a nested scope that declares
  * the same name again.
+ *
+ * When `outerReads` is given, a `Declare` whose value reads the name is
+ * not declined: the read is of the enclosing binding (`3z with z = z + Z`),
+ * and the caller compiles the value against that binding and gives the
+ * local an emitted name of its own (`compileBlock`). The `Declare` is
+ * added to `outerReads`, with the name. Such a `Declare` still declines
+ * when a function literal in its value has the name, since the binding
+ * that the literal reads when it is called is not settled by this test.
  */
 export function assertLocalsAssignedBeforeRead(
   stmts: ReadonlyArray<Expression>,
-  locals: ReadonlyArray<string>
+  locals: ReadonlyArray<string>,
+  outerReads?: Map<Expression, string>
 ): void {
   if (locals.length === 0) return;
   const pending = new Set(locals);
@@ -580,10 +589,35 @@ export function assertLocalsAssignedBeforeRead(
     if (!pending.has(name)) continue;
     const value = isDeclare ? declareValueOperand(stmt.ops) : stmt.ops[1];
     if (value === undefined) continue;
-    if (reads(value, name)) unassignedLocalRead(name);
+    if (reads(value, name)) {
+      if (
+        outerReads === undefined ||
+        !isDeclare ||
+        functionLiteralHasName(value, name)
+      )
+        unassignedLocalRead(name);
+      outerReads.set(stmt, name);
+    }
     pending.delete(name);
     if (pending.size === 0) return;
   }
+}
+
+/** Whether a function literal in `root` has a symbol `name`, as a parameter
+ * or in its body. */
+function functionLiteralHasName(root: Expression, name: string): boolean {
+  // A node shared by several operands (a DAG) is visited once outside and
+  // once inside a literal at most.
+  const seen = [new Set<Expression>(), new Set<Expression>()];
+  const walk = (e: Expression, inLiteral: boolean): boolean => {
+    if (isSymbol(e)) return inLiteral && e.symbol === name;
+    const visited = seen[inLiteral ? 1 : 0];
+    if (!isFunction(e) || visited.has(e)) return false;
+    visited.add(e);
+    const literal = inLiteral || e.operator === 'Function';
+    return e.ops.some((op) => walk(op, literal));
+  };
+  return walk(root, false);
 }
 
 /**
@@ -673,7 +707,9 @@ export function unassignedLocalRead(name: string): never {
  * spelling of a write. Cleared when the outermost call ends. */
 export const _freshLocalNames = new Set<string>();
 /** The emitted name of a `Declare` statement whose local has the name of an
- * identifier that the emitted code uses (`_SYS`). The routine that compiles
+ * identifier that the emitted code uses (`_SYS`), or whose value reads the
+ * enclosing binding of the same name (`outerReads` of
+ * `assertLocalsAssignedBeforeRead`). The routine that compiles
  * the statement list of the `Declare` (`compileBlock`, or `compileLoopBody`
  * for a loop body) gives such a local a fresh name and records it here,
  * keyed by the `Declare` node, before it compiles the statements
@@ -681,6 +717,19 @@ export const _freshLocalNames = new Set<string>();
  * compiled. The `Declare` handler reads it, so the declaration and the
  * reads in the list use the same name. */
 export const _reservedDeclareNames = new WeakMap<object, string>();
+/** The compilation of the value of a `Declare` statement whose value reads
+ * the enclosing binding of the name of its local (`outerReads` of
+ * `assertLocalsAssignedBeforeRead`): `compileValue` is called with a target
+ * on which the name is that binding. `compileBlock` sets it, keyed by the
+ * `Declare` node, while the statements of its list compile; the `Declare`
+ * handler reads it. */
+export const _outerReadValues = new WeakMap<
+  object,
+  (
+    compileValue: (target: CompileTarget<Expression>) => string,
+    target: CompileTarget<Expression>
+  ) => string
+>();
 
 /**
  * Give a fresh name to each local in `locals` that has the name of an
@@ -714,20 +763,26 @@ export function spellReservedLocals(
 /**
  * Record in `_reservedDeclareNames` the emitted name (`spell`) of each
  * `Declare` statement in `stmts` whose local has the name of an identifier
- * that the emitted code uses. Returns the function that removes the
+ * that the emitted code uses, or that is a key of `outerReads`. Returns the
+ * function that removes the
  * records (and puts back a record that a statement had before). Call it
  * when the statements are compiled, also when the compilation fails.
  */
 export function noteReservedDeclares(
   stmts: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  spell: (name: string) => string
+  spell: (name: string) => string,
+  outerReads?: ReadonlyMap<Expression, string>
 ): () => void {
   const previous = new Map<object, string | undefined>();
   for (const s of stmts) {
     if (!isFunction(s, 'Declare') || !isSymbol(s.ops[0])) continue;
     const name = s.ops[0].symbol;
-    if (target.reservedEmittedNames?.has(name) !== true) continue;
+    if (
+      target.reservedEmittedNames?.has(name) !== true &&
+      outerReads?.has(s) !== true
+    )
+      continue;
     if (!previous.has(s)) previous.set(s, _reservedDeclareNames.get(s));
     _reservedDeclareNames.set(s, spell(name));
   }

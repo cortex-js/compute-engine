@@ -882,11 +882,16 @@ directly does not take it.
 and declines when the body of a function it emits reads a name that the
 current scope defines differently.
 
-Known decline: the initializer of a `Declare` that reads an outer variable
-with the name of the local (`Block(Declare(k, 'real', k + 1), 2k)` with an
-outer `k`). The interpreter gives 8 for `k = 3`; the block compiler finds a
-local by its name and declines ("reads the block local before any statement
-gives it a value").
+The value of a `Declare` that reads the name of its own local reads the
+enclosing binding of that name, as in the interpreter: with an outer `k`,
+`Block(Declare(k, 'real', k + 1), 2k)` gives 8 for `k = 3`. The block
+compiler gives the local an emitted name of its own and compiles the value
+against the enclosing binding (`3z with z = z + Z` compiles to
+`let _tv1 = _.Z + _.z; return 3 * _tv1`). Known declines ("reads the block
+local before any statement gives it a value"): such a `Declare` in the
+statement list of a loop body on every target except GLSL, a value with a
+function literal that has the name, and a first value given by an `Assign`
+that reads the name.
 
 ## Shapes are settled at compile time
 
