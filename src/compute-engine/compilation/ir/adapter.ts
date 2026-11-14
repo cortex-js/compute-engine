@@ -47,6 +47,7 @@ export const IR_OPTIONS = {
   functions: 'declined',
   vars: 'mapped',
   symbolic: 'mapped',
+  inputs: 'mapped',
   operators: 'declined',
   imports: 'declined',
   preamble: 'declined',

@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### New Features
+
+- **The compile option `inputs` gives the types of the inputs at the call.**
+  `compile(expr, { inputs: { x: 'real', P: 'tuple<real, real>' } })` reads
+  `x` and `P` as inputs of these types, whatever the scopes declare for them
+  and whatever values they hold, in the expression and in the functions it
+  calls. No declaration and no pushed scope are needed, and nothing is
+  declared after the call. With `g(t) := t x` and no declaration of `x`,
+  `compile(g(2) + x, { inputs: { x: 'real' } })` is `_.x + _fn_g(2)`. With
+  `n := [1, 2, 3]`, `n x` compiles to a broadcast over the stored list, and
+  to `_.n * _.x` with `inputs: { n: 'real' }`. The other names of the
+  expression keep the definitions they were boxed with. `canCompile()`
+  takes the option too.
+
 ### Resolved Issues
 
 - **The value of a `vars` or `symbolic` input is hidden in a function body

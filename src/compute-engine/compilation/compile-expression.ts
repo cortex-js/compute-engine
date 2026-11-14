@@ -20,7 +20,7 @@ import {
   compileDiagnosticOf,
   isCompileDeclineError,
   isKindDeclineError,
-  type CompileDeclineError,
+  CompileDeclineError,
 } from './diagnostics.js';
 import { compilationScope, inCallerScope } from './compile-scope.js';
 import { rawTargetCheck } from './raw-target-check.js';
@@ -59,6 +59,26 @@ export type CompileExpressionOptions<T extends string = string> = {
   >;
   vars?: Record<MathJsonSymbol, JSSource>;
   symbolic?: readonly MathJsonSymbol[];
+  /**
+   * The inputs of the compiled code, each with its type (a type string):
+   * `compile(expr, { inputs: { x: 'real', P: 'tuple<real, real>' } })`.
+   *
+   * A name of `inputs` is an input with the given type, whatever the scopes
+   * declare for it and whatever value it holds: the compilation declares
+   * the name with that type in a scope of its own, binds the occurrences of
+   * the name in the expression to that declaration, and reads the name as
+   * an input wherever else it reads it, as a name of `symbolic`. The other
+   * names of the expression keep the definitions they were boxed with. No
+   * scope has to be pushed around the compilation.
+   *
+   * The body of a function that the expression calls reads the input too.
+   * When that body was written with a declaration of the name, it keeps the
+   * type of that declaration.
+   *
+   * The rules of a declared input apply to the given type
+   * (`docs/COMPILATION-MODEL.md`). A type string that is not a type throws.
+   */
+  inputs?: Readonly<Record<MathJsonSymbol, string>>;
   imports?: unknown[];
   preamble?: string;
   fallback?: boolean;
@@ -332,6 +352,35 @@ function compileExpression<
   const ce = expr.engine;
   if (ce._opensOperation(false))
     return ce._withOperation(expr, () => compile<T, R>(expr, options));
+  // The option `inputs`: the compilation of the expression with the names
+  // bound to typed declarations of its own (`withCompileInputs()`).
+  if (
+    options?.inputs !== undefined &&
+    Object.keys(options.inputs).length > 0
+  ) {
+    // The interpreter fallback is the one of `expr` as it was given, built
+    // for the scope of the call: a run gives each input its value on the
+    // definition of that scope, which the bodies of the functions that
+    // `expr` calls read too. The expression bound to the declarations of
+    // the compilation would give the value to its own occurrences only.
+    const fallback = (decline: CompileDeclineError): CompilationResult<T, R> =>
+      inCallerScope(expr, () =>
+        compileInScope<T, R>(expr, { ...options, inputs: undefined }, decline)
+      );
+    const result = withCompileInputs(expr, options, fallback, (bound, rest) =>
+      compile<T, R>(bound, rest)
+    );
+    if (result.success !== false) return result;
+    return fallback(
+      new CompileDeclineError(
+        result.diagnostic ?? {
+          code: 'compile-error',
+          kind: 'capability',
+          message: result.error ?? 'Could not compile',
+        }
+      )
+    );
+  }
   // The compiler looks a name up by its spelling from the current scope, and
   // the expression reads each name from the scope it was boxed in: the
   // compilation runs in a scope that gives each name of `expr` the
@@ -357,6 +406,53 @@ function compileExpression<
       return compileInScope<T, R>(expr, options, scope);
     return ce._inScope(scope, run);
   });
+}
+
+/**
+ * Run `fn` with the option `inputs` applied: each name of `inputs` is
+ * declared, with its type and no value, in a scope that is pushed for the
+ * time of `fn`; the occurrences of the name in `expr` are replaced by
+ * occurrences bound to that declaration (`subs()` leaves the occurrences
+ * that a binder, a block or a function literal of `expr` binds, and the
+ * other names keep their definitions); and the names are added to
+ * `symbolic`, so that the bodies and the values that the compilation reads
+ * take them as inputs too. `fn` gets that expression and the options
+ * without `inputs`.
+ *
+ * The scope is a child of the scope that the other names of `expr` are read
+ * from (`compilationScope()`): the names of `inputs` take no part in that
+ * choice. When there is no such scope, `onDecline` gives the result.
+ */
+function withCompileInputs<O extends CompileExpressionOptions, X>(
+  expr: Expression,
+  options: O,
+  onDecline: (decline: CompileDeclineError) => X,
+  fn: (bound: Expression, rest: O) => X
+): X {
+  const ce = expr.engine;
+  const inputs = options.inputs ?? {};
+  const names = Object.keys(inputs);
+  const rest: O = {
+    ...options,
+    inputs: undefined,
+    symbolic: [...(options.symbolic ?? []), ...names],
+  };
+  const scope = compilationScope(expr, compileInputNames(rest));
+  if (isCompileDeclineError(scope)) return onDecline(scope);
+  const run = (): X => {
+    ce.pushScope();
+    try {
+      const occurrences: Record<string, Expression> = {};
+      for (const name of names) {
+        ce.declare(name, inputs[name]);
+        occurrences[name] = ce.symbol(name);
+      }
+      return fn(expr.subs(occurrences), rest);
+    } finally {
+      ce.popScope();
+    }
+  };
+  return scope === undefined ? run() : ce._inScope(scope, run);
 }
 
 /**
@@ -764,6 +860,18 @@ export function canCompile(
   expr: Expression,
   options?: CompileExpressionOptions
 ): CanCompileResult {
+  if (options?.inputs !== undefined && Object.keys(options.inputs).length > 0)
+    try {
+      return withCompileInputs(
+        expr,
+        options,
+        (decline) => ({ ok: false, diagnostic: decline.diagnostic }),
+        (bound, rest) => canCompile(bound, rest)
+      );
+    } catch (e) {
+      // A type string that is not a type: the predicate does not throw.
+      return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
+    }
   if (options?.profile !== undefined) {
     try {
       // The sets `symbolDeps` and `varsObjectRefs` are filled by a

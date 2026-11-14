@@ -831,8 +831,31 @@ from an assigned value) makes the compilation decline
 option that the compilation does not read (in the expression, in the bodies
 it calls, in the values it reads) has no effect: it is not refused, and it
 takes no part in the choice of the scope. A host can list every name that
-its scopes declare with no value. The option `inputs` of the bound-once spec
-(a type given at the call, with no scope) is not built.
+its scopes declare with no value.
+
+The option `inputs` gives the type of an input at the call, with no scope:
+`compile(expr, { inputs: { x: 'real', n: 'real' } })`. The compilation
+pushes a scope of its own, as a child of the scope that the other names of
+the expression are read from, declares each name there with its type and no
+value, replaces the occurrences of the name in the expression by
+occurrences bound to that declaration (`subs()`: an occurrence that a
+binder, a block or a function literal of the expression binds is left), and
+compiles with the names in `symbolic` (`withCompileInputs()`,
+`compilation/compile-expression.ts`). So the given type wins over a
+declaration and over a stored value, for that compilation only: with
+`n := [1, 2, 3]`, `n x` compiles to a broadcast over the stored list, and
+to `_.n * _.x` with `inputs: { n: 'real' }`. The other names keep the
+definitions they were boxed with. A body that the expression calls reads
+the input too; when the body was written with a declaration of the name, it
+keeps the type of that declaration (a slider declared `real<-10..10>` and
+given as `real` is typed with the range inside the body). The interpreter
+fallback of the result evaluates the expression as it was given, in the
+scope of the call, where a run gives each input its value: the bodies that
+the expression calls read that value too (with `a` holding 4 and
+`f(t) := a t`, the fallback of `f(2) + h(a)` run with `a = 3` gives `f` the
+3). `canCompile()` takes the option, and gives `ok: false` for a type
+string that is not a type, where `compile()` throws; a target called
+directly does not take it.
 
 `compileShader()` does not make this choice: it reads the current scope,
 and declines when the body of a function it emits reads a name that the
