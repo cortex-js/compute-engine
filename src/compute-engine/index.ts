@@ -13,7 +13,6 @@ import { BoxedType } from '../common/type/boxed-type.js';
 import { isMacroDef } from './boxed-expression/macro.js';
 import {
   activationViewDiverges,
-  innermostCallFrameBody,
   staticViewDiverges,
 } from './static-typing-view.js';
 import { dropSpacingOperands } from './latex-syntax/drop-spacing-operands.js';
@@ -1438,28 +1437,11 @@ export class ComputeEngine implements IComputeEngine {
   _typeCacheGeneration(): number {
     if (this._valueShieldKeys.length > 0) return this._baseCacheGeneration();
     const facts = this._factsHidden() ? 1 : 0;
-    const typeVersion = this._configurationLifecycle.typeVersion;
-    // Outside every call of a function literal, the key is the type version,
-    // times four: a key of `_typeCacheFallbackGeneration()` is two more.
-    const body = innermostCallFrameBody(this);
-    if (body === undefined) return typeVersion * 4 + facts;
-    // Inside a call, one key for each body scope of the innermost frame and
-    // each type version (`innermostCallFrameBody()`), minted as a shield key
-    // is, so that it never equals another key.
-    let entry = this._typeFrameKeys.get(body);
-    if (entry === undefined || entry.typeVersion !== typeVersion) {
-      entry = { typeVersion, key: this._nextValueShieldKey() };
-      this._typeFrameKeys.set(body, entry);
-    }
-    return entry.key * 2 + facts;
+    // The key is the type version, times four: a key of
+    // `_typeCacheFallbackGeneration()` is two more. A type does not depend
+    // on the scope of its reader, so a call frame has no key of its own.
+    return this._configurationLifecycle.typeVersion * 4 + facts;
   }
-
-  /** For each body scope of a function literal, the key of the type cache
-   * inside its calls, and the type version that key was minted for. */
-  private readonly _typeFrameKeys = new WeakMap<
-    object,
-    { typeVersion: number; key: number }
-  >();
 
   /** See `IComputeEngine._typeCacheFallbackGeneration()`.
    * @internal */

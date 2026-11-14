@@ -5514,10 +5514,21 @@ function parameterSubVisitors(subs: ReadonlyArray<ParameterSub>): {
     }
     return undefined;
   };
+  // A symbol value is inserted as a copy (the same occurrence: its home
+  // scope and its unit are kept, `_unshared()`). The node of the argument
+  // is also an operand of the call, and the boxing of a closure in the
+  // result marks its occurrences (`markFunctionLiteralCaptures()`): a mark
+  // on the shared node changed the type of the call after its evaluation.
   const visitSymbol = (
     sym: Expression & { symbol: string },
     shadowed: ReadonlySet<string> | undefined
-  ): Expression => symbolValue(sym, shadowed) ?? sym;
+  ): Expression => {
+    const value = symbolValue(sym, shadowed);
+    if (value === undefined) return sym;
+    return isSymbol(value)
+      ? (value as unknown as { _unshared(): Expression })._unshared()
+      : value;
+  };
   const visitApplication = (
     app: Expression,
     ops: ReadonlyArray<Expression>,

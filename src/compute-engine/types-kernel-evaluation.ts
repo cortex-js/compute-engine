@@ -581,9 +581,6 @@ export type EvalContext<
    * and 1.85M wasted type recomputes).
    */
   _anyVersionAtPush?: number;
-  /** See `_anyVersionAtPush` — the type version (`typeVersion`,
-   * `engine-configuration-lifecycle.ts`) at the push. */
-  _typeVersionAtPush?: number;
   /** See `_anyVersionAtPush` — the `semantic` half of the same stamp. */
   _semanticVersionAtPush?: number;
   /** See `_anyVersionAtPush` — the `world` half of the same stamp. */

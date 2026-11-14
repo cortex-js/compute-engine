@@ -1,5 +1,6 @@
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { isDeclaredLocal } from './declared-local.js';
+import { isBeingDefined } from './declared-parameter-result.js';
 import { anyMacroDeclared, expandMacro } from './macro.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import { noteKindTypeDeclaration } from './residue-class.js';
@@ -181,6 +182,14 @@ import {
   isTestedAtRead,
   overlapReadError,
 } from './store-admission.js';
+
+/** With `CE_TYPE_PARANOID` set, a cached name resolution (`_resolution`) is
+ * compared with a new resolution, and a difference is reported. */
+const RESOLUTION_PARANOID: boolean = (() => {
+  if (typeof process === 'undefined') return false;
+  const flag = process.env?.CE_TYPE_PARANOID;
+  return flag !== undefined && flag !== '0';
+})();
 
 /**
  * The definition whose dereference a cycle has invalidated (`a = b + 1;
@@ -1453,7 +1462,25 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // of every type cache (`ce._typeCacheGeneration()`), so a cached type
     // needs no record of this read.
     const cached = this._cachedResolution(version, variable);
-    if (cached !== undefined) return cached.def;
+    if (cached !== undefined) {
+      if (RESOLUTION_PARANOID) {
+        const fresh = freeNameBindingAndScope(
+          this.engine,
+          this._id,
+          home,
+          variable,
+          home
+        );
+        // A declaration of the name in flight can install its binding
+        // before it sends its state event: the resolution is then
+        // provisional, and the event retires it.
+        if (fresh?.def !== cached.def && !isBeingDefined(this.engine, this._id))
+          throw new Error(
+            `CE_TYPE_PARANOID: outdated resolution served for free name "${this._id}"`
+          );
+      }
+      return cached.def;
+    }
     const found = freeNameBindingAndScope(
       this.engine,
       this._id,
@@ -1481,7 +1508,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const version = this.engine._typeVersion;
     // As for a free name (`_freeNameBinding()`), the type version is the key.
     const cached = this._cachedResolution(version, false);
-    if (cached !== undefined) return cached.def;
+    if (cached !== undefined) {
+      if (
+        RESOLUTION_PARANOID &&
+        homeChainBinding(this._id, def, home).def !== cached.def &&
+        !isBeingDefined(this.engine, this._id)
+      )
+        throw new Error(
+          `CE_TYPE_PARANOID: outdated resolution served for name "${this._id}"`
+        );
+      return cached.def;
+    }
     const found = homeChainBinding(this._id, def, home);
     this._resolution = { version, variable: false, ...found };
     return found.def;

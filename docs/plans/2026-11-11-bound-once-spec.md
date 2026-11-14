@@ -969,6 +969,14 @@ stale answers (`CE_TYPE_PARANOID` in the probe) and with Tycho's
 instruments. The aim: types are settled before a run, and a run changes
 only values.
 
+Built 2026-11-14: a pop moves the type version only when it reverts an
+assumption, a block-local constant has no value in a type computation, the
+result of a call holds a copy of a symbol argument, and the per-frame key
+is gone; a call of a 64-cell prelude of nested functions computes 8 types
+where it computed 13,184 (about 102 ms where it took 230 ms), and the
+paranoid run of 834 test files finds no stale answer
+(`~/dev/compute-engine-recovery/d17-pop/`).
+
 ### Open: inference applied before evaluation (user's idea, 2026-11-13)
 
 In place of D15 ("nothing is inferred for a parameter"), which makes

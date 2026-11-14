@@ -4769,18 +4769,17 @@ export class BoxedFunction
 
   /** The type of the value of the function */
   get type(): BoxedType {
-    // Keyed on `_typeCacheGeneration()`, which the declarations of a call of
-    // a function literal and the pop of its frame do not move, so the nodes
-    // of a function body are not typed again at each call. That is sound
-    // because a type is computed in the static view of the bindings
+    // Keyed on `_typeCacheGeneration()`, which only a declaration, a
+    // retype, an assumption or the revert of one moves (`typeVersion` in
+    // `engine-configuration-lifecycle.ts`): the declarations of a call of a
+    // function literal and the pop of a scope do not, so the nodes of a
+    // function body are not typed again at each call. That is sound because
+    // a name resolves from the scope its node was boxed in, and a type is
+    // computed in the static view of the bindings
     // (`withStaticTypingView()` below, `static-typing-view.ts`): it never
-    // reads the bindings of a call. See `typeVersion` in
-    // `engine-configuration-lifecycle.ts`. Two exceptions: inside a call,
-    // the key is also the body scope of the innermost call frame, because
-    // some type computations read the bindings from the scope of the reader
-    // (`innermostCallFrameBody()`, `static-typing-view.ts`); and a type that
-    // read an answer that depends on the computations in progress is kept
-    // under the `any` axis (`_typeStackDependent`, below).
+    // reads the bindings of a call. One exception: a type that read
+    // an answer that depends on the computations in progress is kept under
+    // the `any` axis (`_typeStackDependent`, below).
     const typeKey = this.engine._typeCacheGeneration();
     const generation = this._typeStackDependent
       ? this.engine._typeCacheFallbackGeneration()

@@ -747,11 +747,15 @@ export class _BoxedValueDefinition
     // value. The exception is a variable that holds a function literal: the
     // signature of a user function comes from its value, and a write of such
     // a value moves the type version (`typeRead` in the `value` setter).
+    // A definition whose value an activation holds (a parameter, a local of
+    // a block) has no value there either, also a constant: its value is the
+    // value of one run, and a type computed in the run would be served
+    // after it.
     if (
       v !== undefined &&
-      !this._isConstant &&
       inStaticTypingView(this._engine) &&
-      (isActivatedDefinition(this) || !holdsFunctionLiteral(v))
+      (isActivatedDefinition(this) ||
+        (!this._isConstant && !holdsFunctionLiteral(v)))
     )
       return undefined;
     return v;
@@ -900,8 +904,9 @@ export class _BoxedValueDefinition
           containsSignatureArm(prev?.type?.type) ||
           containsSignatureArm(v?.type?.type);
     }
-    // A type computation reads the value of a constant, and the value of a
-    // variable that holds a function literal (`storedValue`). The static
+    // A type computation reads the value of a constant that no activation
+    // holds, and the value of a variable that holds a function literal
+    // (`storedValue`). The static
     // type of a variable that holds a formula is the type of the formula.
     // Only such a write can change a type. A type computation also reads
     // whether a variable holds a value at all: the assumptions refine the
@@ -914,7 +919,7 @@ export class _BoxedValueDefinition
         formulaTypeBefore.toString() !== after.toString();
     }
     const typeRead =
-      this._isConstant ||
+      (this._isConstant && !isActivatedDefinition(this)) ||
       (callable && !isActivatedDefinition(this)) ||
       formulaTypeChanged ||
       valuePresenceRefinesType(this._engine, this, prev, v);

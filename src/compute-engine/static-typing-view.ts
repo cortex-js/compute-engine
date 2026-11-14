@@ -144,43 +144,6 @@ function frameInProgress(ce: ViewEngine, frame: object): boolean {
   return false;
 }
 
-/**
- * The body scope of the function literal whose call frame is the innermost
- * one on the current evaluation-context stack of `ce`, or `undefined`
- * outside every call of a function literal.
- *
- * The type cache of a function expression (`BoxedFunction.type`) keys on
- * it, beside the type version. Some type computations read the bindings
- * from the scope of the reader, not from the scope of the node: the
- * effects of a function literal resolve the names of the functions it
- * calls with `lookupDefinition()`, and a symbol reads its binding in the
- * current context. The same node then has one type when it is read inside
- * a call of the literal that holds it, and another type when it is read
- * outside the call (a block local function is found in the first case
- * only). Two calls of the same literal have the same body scope, so they
- * share the entries.
- *
- * Only the frame of a literal that `ce` is applying counts: a lazy
- * collection made by a call that has returned pushes the frame of that call
- * again when an element is computed (`lazy-view-context.ts`), and the
- * static view reads such a frame as it reads it from outside
- * (`staticBindingIn()`, `staticParentOf()`). With a key of its own, a node
- * read at each element both from that frame and from the frame of its
- * reader was typed twice per element, each time to the same type.
- */
-export function innermostCallFrameBody(ce: ViewEngine): object | undefined {
-  const stack = ce._evalContextStack;
-  const frame = innermostFrame(stack);
-  if (frame === undefined) return undefined;
-  const body = frameBodyScopes.get(frame);
-  if (body !== undefined && applyingEngine(body) === ce) return body;
-  for (let i = stack.length - 1; i >= 0; i--) {
-    const outer = frameBodyScopes.get(stack[i].lexicalScope);
-    if (outer !== undefined && applyingEngine(outer) === ce) return outer;
-  }
-  return undefined;
-}
-
 /** True while a type computation of `ce` runs. */
 export function inStaticTypingView(ce: ViewEngine): boolean {
   return viewEngine === ce;

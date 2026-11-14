@@ -496,6 +496,13 @@ export function whileDefining<T>(
   }
 }
 
+/** True while an assignment or a declaration of `name` in `engine` is in
+ * flight ({@link whileDefining}): the binding of the name can be installed
+ * before the state event of the declaration is sent. */
+export function isBeingDefined(engine: object, name: string): boolean {
+  return definitionStack.some((e) => e.engine === engine && e.name === name);
+}
+
 /**
  * Run `thunk` with no assignment or declaration in flight for
  * {@link unknownCallMayBeRecursive}, and restore them after it.

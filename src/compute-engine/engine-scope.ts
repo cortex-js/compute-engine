@@ -87,7 +87,6 @@ export function pushEvalContext(
     // pop's clean-bracket check (see `_anyVersionAtPush` in
     // `types-kernel-evaluation.ts` for why `any` alone is not enough).
     _anyVersionAtPush: ce._anyVersion,
-    _typeVersionAtPush: ce._typeVersion,
     _semanticVersionAtPush: ce._semanticVersion,
     _worldVersionAtPush: ce._worldVersion,
   });
@@ -291,24 +290,11 @@ function discardEvalContext(
     context?._anyVersionAtPush === ce._anyVersion &&
     context?._semanticVersionAtPush === ce._semanticVersion &&
     context?._worldVersionAtPush === ce._worldVersion;
-  // The pop of the frame of a call that changed nothing but the values of
-  // its parameters advances `any` (for the sign and value caches, which read
-  // those values) but not the type version: a type that read a binding of
-  // the call was kept under the `any` version only (`typeVersion`,
-  // `engine-configuration-lifecycle.ts`).
-  const activation =
-    !clean &&
-    context?._bindsValues === true &&
-    context._assumptionsDirty !== true &&
-    context._typeVersionAtPush === ce._typeVersion &&
-    context._semanticVersionAtPush === ce._semanticVersion &&
-    context._worldVersionAtPush === ce._worldVersion;
   if (CACHE_STATS) recordScopePop(clean ? 'clean' : 'dirty');
   ce._noteStateEvent({
     kind: 'scope-pop',
     assumptionsDirty: context?._assumptionsDirty === true,
     ...(clean ? { clean: true } : {}),
-    ...(activation ? { activation: true } : {}),
   });
 }
 

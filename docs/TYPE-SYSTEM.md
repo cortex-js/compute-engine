@@ -954,12 +954,11 @@ is the same in every call, and the engine does not compute it again at each
 call (`typeVersion`, `engine-configuration-lifecycle.ts`). Evaluation still
 reads the values of the call, and so do the sign and value of a node.
 
-Two kinds of type are still computed again. A type depends on the scope it
-is read in: a block-local function or variable is found only from inside
-the block, so `x / c` with a block local `c` is `rational` when read inside
-the call that runs the block and `infinity | nan | real` at global scope.
-So the key of a cached type also names the innermost call frame, and two
-calls of the same literal share their entries. And a type computed from an
+A type does not depend on the scope it is read in either: a node resolves
+its names from the scope it was boxed in, and a block local has no value in
+a type computation, so `x / c` with a block local `c` declared `unknown` is
+`infinity | nan | real` inside the call that runs the block and at global
+scope. One kind of type is still computed again: a type computed from an
 answer that holds only while another computation is in progress (the result
 of a recursive call, read while the result of the same function is being
 derived, is the declared `unknown`) is kept only until the next call
@@ -1644,7 +1643,26 @@ invalidates no cached type: the type version (`typeVersion`,
   constant has no value (`storedValue`, `boxed-value-definition.ts`). One
   exception: a variable whose value holds a function literal, because the
   signature of a user function comes from its value; the write of such a
-  value moves the type version.
+  value moves the type version. A definition whose value an activation holds
+  (a parameter, a local of a block) has no value there either, also a
+  constant: `const h = (k) => k + 1` in a block holds a value of one run of
+  the block, so `Map(h, [1, 2])` is typed `list<unknown^2>` inside the run
+  and after it.
+- The pop of a scope changes no type, and it moves the type version only
+  when it reverts an assumption. A scope that a host pushes keeps its
+  definitions after the pop (`popScope()`, `engine-scope.ts`), and a node
+  resolves its names from the scope it was boxed in. So during a run the
+  type version moves only at a declaration, a retype, an assumption or its
+  revert, and a call of a function, a block or a loop leaves every cached
+  type in place. One call of a prelude of nested functions over a list of
+  64 cells computed 13,184 types before this rule and computes 8 now
+  (CE-1210, decision D17 of `docs/plans/2026-11-11-bound-once-spec.md`).
+- The evaluation of a call writes nothing on the nodes of the call: the
+  result of `f := y ↦ (x ↦ x + y)` applied to `q` holds a copy of the
+  argument `q` (`parameterSubVisitors`, `function-utils.ts`), so the mark that
+  the boxing of the closure puts on the occurrences it captures
+  (`markFunctionLiteralCaptures()`) is not on the operand of `f(q)`, whose
+  type stays `(x: unknown) -> number`.
 - A variable whose value is a literal keeps the type its assignment recorded.
   A variable whose value reads other names has the static type of that value
   (`declaredType`, `boxed-value-definition.ts`), read with the assumptions

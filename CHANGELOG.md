@@ -173,6 +173,12 @@
 
 ### Behavior Changes
 
+- **Inside a run, the type of an expression over a `const` local of a block
+  does not come from the value that the local holds in that run.** In
+  `do { const h = (k) => k + 1; map(h, [1, 2]) }`, the type of the `map`
+  node read during the run (by an `evaluate` handler of the host) was
+  `vector<2>` and is `list<unknown^2>`, the type it has before and after
+  the run. The value is `[2, 3]` as before.
 - **`Series` of a library function whose derivatives the engine cannot
   evaluate stays unevaluated.** `Series(Hypergeometric2F1(1, 1, 3, x), x, 1,
   3)` was a sum of `Apply(Derivative(Hypergeometric2F1, …), 1, 1, 3, 1)`
@@ -186,6 +192,11 @@
 
 ### Resolved Issues
 
+- **A call that returns a function keeps its type after it is evaluated.**
+  With `f := y ↦ (x ↦ x + y)`, the node `f(q)` of `Apply(f(q), 5)` was
+  typed `(x: unknown) -> number` before `evaluate()` and `any` after it. It
+  is `(x: unknown) -> number` in both: the evaluation no longer writes on
+  the operand `q` of the call.
 - **`Zeta(s)` at a complex `s` gives its value to the precision of a
   double, or stays unevaluated.** `Zeta(0.5 + 1000i).N()` was
   `0.35633436719464573 - 0.9319978312332674i`, 3.7e-13 off, and
@@ -551,6 +562,17 @@
   are unchanged. (PR #528, contributed by
   [enumeratio](https://github.com/enumeratio), fixes
   [#523](https://github.com/cortex-js/compute-engine/issues/523))
+
+### Performance
+
+- **A run keeps the cached types.** The end of a call, of a block or of a
+  loop step no longer makes the engine compute the types of the
+  expressions again: the pop of a scope changes no type, and only a pop
+  that reverts an assumption invalidates them. One call of a program of
+  nested functions over a list of 64 cells (the shape of a board-game
+  prelude) computed 13,184 types and took about 230 ms; it computes 8 and
+  takes about 102 ms. A loop of 200 steps, and a recursive function called
+  50 times, no longer invalidate the types at each step or call.
 
 ## 0.188.1 _2026-11-13_
 

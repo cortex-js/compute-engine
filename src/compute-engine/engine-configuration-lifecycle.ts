@@ -88,13 +88,6 @@ export type StateEvent =
       /** No cache axis advanced while this assumption-free scope was active,
        * so popping it cannot invalidate a version-keyed entry. */
       clean?: boolean;
-      /** The pop of the frame of a call of a function literal
-       * (`_bindsValues`) that would be clean but for the values of the
-       * parameters: no assumption changed, and the type version, the
-       * semantic version and the world version did not advance while the
-       * frame was on the stack. It advances the `any` version but not the
-       * type version: see `typeVersion`. */
-      activation?: boolean;
     }
   | { kind: 'assumption' } // assume / forget
   /** `valueType`: a symbol's value type was written by an inference.
@@ -463,18 +456,27 @@ export class EngineConfigurationLifecycle {
    * The version that keys the type cache of a function expression
    * (`BoxedFunction.type`). It advances with the `any` version, except for
    * the write of a value that no type computation reads (a `value-write`
-   * without `typeRead`) and for the events of a call of a function literal:
-   * the declaration of its parameters in the new scope of the call, and the
-   * pop of its frame (the `activation` flag of the `declare` and
-   * `scope-pop` events).
+   * without `typeRead`), the declaration of the parameters of a call of a
+   * function literal in the new scope of the call (the `activation` flag of
+   * the `declare` event), and the pop of a scope, unless the pop reverts an
+   * assumption (`assumptionsDirty`). So during a run the type version moves
+   * only at a declaration, a retype, an assumption or the revert of one.
    *
    * A static type does not depend on a value: in a type computation a
    * definition that is not a constant has no value, except a variable that
-   * holds a function literal (`storedValue`, `boxed-value-definition.ts`).
-   * A write that changes the TYPE of a definition reports a `type-write`
-   * of its own.
+   * holds a function literal, and a definition whose value an activation
+   * holds has no value, also a constant (`storedValue`,
+   * `boxed-value-definition.ts`). A write that changes the TYPE of a
+   * definition reports a `type-write` of its own.
    *
-   * Without this exception each call moved the key of every cached type,
+   * A pop does not change a type either: a scope that a host pushes keeps
+   * its definitions after the pop (`popScope()`, `engine-scope.ts`), and an
+   * expression resolves its names from the scope it was boxed in, not from
+   * the scope of its reader. A pop that moved the type version made one
+   * call of a prelude of nested functions over a list of 64 cells compute
+   * 13,184 types, each to the same answer (CE-1210).
+   *
+   * Without the exception for a call, each call moved the key of every cached type,
    * and all of them were computed again, with the same result. A call of
    * the issue #487 function (8 nested `Fold`s, 75 calls of function
    * literals) recomputed 6,332 types, each to the same answer, and took
@@ -704,8 +706,9 @@ export class EngineConfigurationLifecycle {
     }
     if (
       m.any &&
-      !((e.kind === 'declare' || e.kind === 'scope-pop') && e.activation) &&
-      !(e.kind === 'value-write' && !e.typeRead)
+      !(e.kind === 'declare' && e.activation) &&
+      !(e.kind === 'value-write' && !e.typeRead) &&
+      !(e.kind === 'scope-pop' && !e.assumptionsDirty)
     )
       this._typeVersion += 1;
     if (m.semantic) this._semanticVersion += 1;
