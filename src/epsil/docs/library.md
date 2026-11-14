@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 723 functions and constants of the standard library, by category.
+The 724 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -35,7 +35,7 @@ To search the library by concept rather than by name, use
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 18 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 12 definitions · [full reference](/epsil/reference/combinatorics/)
-- [Number theory](#number-theory) — 61 definitions · [full reference](/epsil/reference/number-theory/)
+- [Number theory](#number-theory) — 62 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
 - [Linear algebra](#linear-algebra) — 46 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
@@ -695,6 +695,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `divides` | `Divides` | `(integer, integer) -> boolean` | `Divides(a, b)` returns `True` if `a` divides `b` (i.e. |
 | `divisorSigma` | `DivisorSigma` | `(integer, integer) -> rational` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
 | `divisors` | `Divisors` | `(integer) -> list<integer>` | Return the sorted list of positive divisors of an integer `n`. |
+| `eulerE` | `EulerE` | `(integer, number?) -> number` | Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. |
 | `eulerPhi` | `EulerPhi` | `(integer) -> integer` | `EulerPhi` is an alias for `Totient`, which is the preferred name. |
 | `eulerian` | `Eulerian` | `(integer, integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
 | `extendedGCD` | `ExtendedGCD` | `(integer, integer, integer*) -> tuple` | Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). |

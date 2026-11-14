@@ -14,6 +14,15 @@
 
 ### New Features
 
+- **`EulerE(n)` is the Euler number Eₙ and `EulerE(n, x)` the Euler
+  polynomial Eₙ(x).** They are Mathematica's `EulerE`. `EulerE(n)` is an exact
+  integer for a non-negative integer `n` (`EulerE(4)` is `5`, an odd `n` gives
+  `0`) and stays unevaluated past the same work limit as `BernoulliB`.
+  `EulerE(n, x)` is exact at a rational `x` (`EulerE(4, 1/3)` is `22/81`), a
+  float at a float `x`, and the expanded polynomial otherwise (`EulerE(2, x)`
+  is `x^2 - x`). A negative `n` stays unevaluated. (PR #522, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`HarmonicNumber(n)` is the harmonic number Hₙ = Σ 1/k, and
   `HarmonicNumber(n, r)` the generalized harmonic number Σ 1/kʳ.** They are
   Wolfram's `HarmonicNumber`. A non-negative integer `n` with an integer `r`

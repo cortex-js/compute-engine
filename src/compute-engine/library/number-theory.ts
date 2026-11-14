@@ -1562,6 +1562,69 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       ),
     },
 
+    EulerE: {
+      description:
+        'Return the nth Euler number Eₙ (1, 0, -1, 0, 5, 0, -61, …) for `EulerE(n)`, or the Euler polynomial Eₙ(x) for `EulerE(n, x)`. Odd-index Euler numbers are 0. Eₙ = 2ⁿ·Eₙ(1/2). A negative or non-integer `n` stays symbolic.',
+      signature: '(integer, number?) -> number',
+      // An integer without the polynomial argument.
+      type: ([, x], context) =>
+        BoxedType.forResult(
+          x === undefined ? 'integer' : 'number',
+          context.engine._typeResolver
+        ),
+      broadcastable: true,
+      examples: ['EulerE(4)  // 5', 'EulerE(2, x)  // x^2 - x'],
+      evaluate: floatResultIfFloatOperand(
+        ([n, x], { engine: ce, numericApproximation }) => {
+          const k = toBigint(n);
+          if (k === null || k < 0n) return undefined;
+          // A rational or float literal `x` gives a value, an exact real
+          // literal that is not rational (`√2`) and anything but a number a
+          // polynomial in `x`; a complex or infinite literal declines.
+          let point: [bigint, bigint] | undefined;
+          if (x !== undefined && isNumber(x)) {
+            point = realLiteralAsRational(x);
+            if (
+              point === undefined &&
+              !(x.isExact && x.im === 0 && x.isFinite === true)
+            )
+              return undefined;
+          }
+          if (x === undefined && k % 2n === 1n) return ce.number(0);
+          // O(n²) bigint steps on integers of about log₁₀(n!) digits: past
+          // the work estimate the value stays symbolic.
+          const N = Number(k);
+          if (exactRecurrenceTooLarge((N * N) / 2, log10Factorial(N)))
+            return undefined;
+          const E = eulerNumbers(N, ce._deadline);
+          let result: Expression;
+          if (x === undefined) result = ce.number(E[N]);
+          else if (point !== undefined) {
+            const [num, den] = eulerPolynomialAtRational(E, N, point);
+            result = ce.number([num, den]);
+          } else {
+            const coeffs = eulerPolynomialCoefficients(E, N, ce._deadline);
+            const terms = coeffs.flatMap(([num, den], j) =>
+              num === 0n
+                ? []
+                : [
+                    j === 0
+                      ? ce.number([num, den])
+                      : ce.function('Multiply', [
+                          ce.number([num, den]),
+                          j === 1
+                            ? x!
+                            : ce.function('Power', [x!, ce.number(j)]),
+                        ]),
+                  ]
+            );
+            return ce.function('Add', terms);
+          }
+          return numericApproximation ? result.N() : result;
+        }
+      ),
+    },
+
     FromDigits: {
       description:
         'Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally, and the base may be any number or symbol: `FromDigits([1, 1, 0], -2)` is 2 and `FromDigits([a, b, c], x)` is `a x^2 + b x + c`.',
@@ -3289,6 +3352,112 @@ function bernoulliNumber(
     B.push(reduceRat(-sNum, sDen * BigInt(m + 1)));
   }
   return B[n];
+}
+
+/**
+ * The Euler numbers `[E₀, …, E_n]`. The unsigned values are the Euler zigzag
+ * numbers (OEIS A000111), the last entries of the rows of the Seidel–Entringer
+ * triangle `T(i, 0) = 0`, `T(i, k) = T(i, k-1) + T(i-1, i-k)` (boustrophedon
+ * transform of 1, 0, 0, …); `E_{2m} = (-1)^m · A_{2m}` and odd-index numbers
+ * are 0 (DLMF 24.2.6, `sec x = Σ E_{2m} (-1)^m x^{2m}/(2m)!`; OEIS A000111, A122045).
+ */
+function eulerNumbers(n: number, deadline: number | undefined): bigint[] {
+  const E: bigint[] = new Array(n + 1).fill(0n);
+  E[0] = 1n;
+  let row: bigint[] = [1n];
+  let steps = 0;
+  for (let i = 1; i <= n; i++) {
+    const next: bigint[] = [0n];
+    for (let k = 1; k <= i; k++) {
+      valueScaledStep('EulerE', ++steps, deadline);
+      next.push(next[k - 1] + row[i - k]);
+    }
+    row = next;
+    if (i % 2 === 0) E[i] = (i / 2) % 2 === 0 ? row[i] : -row[i];
+  }
+  return E;
+}
+
+/**
+ * Eₙ(p/q) as a reduced `[num, den]`, from the Euler numbers and
+ * `Eₙ(x) = Σ_k C(n,k)·(E_k/2^k)·(x - 1/2)^{n-k}` (DLMF 24.2.8), which over
+ * the common denominator `(2q)ⁿ` has the integer numerator
+ * `Σ_k C(n,k)·E_k·(2p-q)^{n-k}·q^k`.
+ */
+function eulerPolynomialAtRational(
+  E: readonly bigint[],
+  n: number,
+  [p, q]: [bigint, bigint]
+): [bigint, bigint] {
+  const u = 2n * p - q;
+  let sum = 0n;
+  let c = 1n; // C(n, k)
+  for (let k = 0; k <= n; k++) {
+    if (E[k] !== 0n) sum += c * E[k] * u ** BigInt(n - k) * q ** BigInt(k);
+    c = (c * BigInt(n - k)) / BigInt(k + 1);
+  }
+  return reduceRat(sum, (2n * q) ** BigInt(n));
+}
+
+/**
+ * The coefficients `[c₀, …, c_n]` of Eₙ(x) as reduced rationals. Euler
+ * polynomials are an Appell sequence, `Eₙ(x) = Σ_j C(n,j)·E_{n-j}(0)·x^j`, and
+ * `2^m·E_m(0) = Σ_k (-1)^{m-k} C(m,k)·E_k` (DLMF 24.2.8 at x = 0).
+ */
+function eulerPolynomialCoefficients(
+  E: readonly bigint[],
+  n: number,
+  deadline: number | undefined
+): [bigint, bigint][] {
+  // t[m] = 2^m·E_m(0), from the rows of Pascal's triangle.
+  const t: bigint[] = [];
+  let row: bigint[] = [1n];
+  let steps = 0;
+  for (let m = 0; m <= n; m++) {
+    if (m > 0) {
+      const next: bigint[] = [1n];
+      for (let k = 1; k < m; k++) next.push(row[k - 1] + row[k]);
+      next.push(1n);
+      row = next;
+    }
+    let s = 0n;
+    for (let k = 0; k <= m; k++) {
+      valueScaledStep('EulerE', ++steps, deadline);
+      const term = row[k] * E[k];
+      s += (m - k) % 2 === 0 ? term : -term;
+    }
+    t.push(s);
+  }
+  const out: [bigint, bigint][] = [];
+  let c = 1n; // C(n, j)
+  for (let j = 0; j <= n; j++) {
+    out.push(reduceRat(c * t[n - j], 2n ** BigInt(n - j)));
+    c = (c * BigInt(n - j)) / BigInt(j + 1);
+  }
+  return out;
+}
+
+/**
+ * A rational or float literal as an exact rational: a rational as it is, a
+ * float as the decimal it prints as (`0.1` is 1/10). `undefined` for an exact
+ * literal that is not rational (`√2`), and for a complex, infinite or NaN
+ * value.
+ */
+function realLiteralAsRational(x: Expression): [bigint, bigint] | undefined {
+  const r = asRational(x);
+  if (r !== undefined) return [BigInt(r[0]), BigInt(r[1])];
+  if (!isNumber(x) || x.isExact || x.im !== 0) return undefined;
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(
+    String(x.bignumRe ?? x.re)
+  );
+  if (m === null) return undefined;
+  const exp = Number(m[4] ?? 0) - (m[3]?.length ?? 0);
+  if (Math.abs(exp) > 1000) return undefined;
+  let num = BigInt(m[2] + (m[3] ?? ''));
+  if (m[1] === '-') num = -num;
+  return exp >= 0
+    ? [num * 10n ** BigInt(exp), 1n]
+    : reduceRat(num, 10n ** BigInt(-exp));
 }
 
 function sumSquareDigits(k: bigint): bigint {
