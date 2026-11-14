@@ -27,7 +27,7 @@
   algebraic operators, its series is now expanded and integrated term by term.
   A singular expansion point, or a derivative that calls another function
   (`Tan`, `Exp`, `Sin`), keeps the previous route.
-  (#NNN, contributed by [enumeratio](https://github.com/enumeratio))
+  (#588, contributed by [enumeratio](https://github.com/enumeratio))
 
 - **`Integrate` gives a closed form for a polynomial of degree up to 200
   times `e^{ax+b}`, `\sin(ax+b)` or `\cos(ax+b)`.** `\int x^{10} e^{-x}\,dx`
