@@ -382,23 +382,25 @@ export function tryCompileBroadcast(
 
   // For the boolean heads only, this fast path requires every collection-ish
   // operand to PROVABLY compile to a JS array. This is a ROUTING choice, not
-  // a soundness gate: an operand whose array-ness is unprovable — a user
-  // function application `q(L)`, a `broadcastable<T>` node — falls through to
-  // `compileJSCollectionBoolean`, which dispatches on the RUNTIME shape
-  // through `_SYS.bcast` (relaxed 2026-07-27, Tycho item 86). Both lowerings
-  // agree; this one emits the tighter code and keeps the tuple / whole-
-  // collection carve-outs above in one place.
+  // a soundness gate: an operand whose array-ness is unprovable — a call of a
+  // name that promises no collection, a `broadcastable<T>` node — falls
+  // through to `compileJSCollectionBoolean`, which dispatches on the RUNTIME
+  // shape through `_SYS.bcast` (relaxed 2026-07-27, Tycho item 86). Both
+  // lowerings agree; this one emits the tighter code and keeps the tuple /
+  // whole-collection carve-outs above in one place.
   //
   // (Historical note: this used to be a fail-closed gate, because a compiled
   // `q(L)` applied SCALAR callee code to an array and returned NaN, which a
   // comparison then turned into a plausible `false`. The application site now
   // maps over the list (`_SYS.mapFn`), so `q(L)` is an array at run time.)
   //
-  // Array-ness is provable for a concrete collection, a list-typed SYMBOL
-  // (a parameter, which the caller supplies as a JS array), and an
-  // application of a BUILT-IN `broadcastable` head over such an operand —
-  // that one re-enters this method and broadcasts through `_SYS.bcast`
-  // itself, which is what makes the Desmos mask `|L-2| > 0` sound.
+  // Array-ness is provable for an operand whose `staticShape` promises a
+  // collection (a concrete collection, a call of a function declared or
+  // assigned to return a list: `q(L)`, `g(x)` with `g := t ↦ [t, t]`), a
+  // list-typed SYMBOL (a parameter, which the caller supplies as a JS
+  // array), and an application of a BUILT-IN `broadcastable` head over such
+  // an operand — that one re-enters this method and broadcasts through
+  // `_SYS.bcast` itself, which is what makes the Desmos mask `|L-2| > 0` sound.
   if (isRelationalOperator(h) || LOGICAL_BROADCAST_HEADS.has(h)) {
     const compilesToArray = (a: Expression): boolean => {
       // A TUPLE is an atomic point/vector, never a broadcast source — the
@@ -410,17 +412,17 @@ export function tryCompileBroadcast(
       // This test MUST stay ahead of the two below, and `isTuple` must stay
       // TYPE-based: `tuple<real,real>` matches `indexed_collection`, so a
       // tuple-TYPED symbol (`p: tuple<real,real>`) would otherwise be admitted
-      // by the symbol branch, and a concrete tuple by the `isCollection`
+      // by the symbol branch, and a concrete tuple by the `staticShape`
       // branch. Reordering these reintroduces the bug.
       if (isTuple(a)) return false;
       // A STRING is an indexed collection of its grapheme clusters in the
       // type lattice, but it does NOT lower to a JS array and is atomic
       // under broadcast — it must reach the scalar path, exactly as before
       // strings became collections. Same placement rule as `isTuple` above:
-      // ahead of the `isCollection` and symbol branches, both of which a
+      // ahead of the `staticShape` and symbol branches, both of which a
       // string now matches.
       if (isProvablyStringOperand(a)) return false;
-      if (a.isCollection) return true;
+      if (a.staticShape !== undefined) return true;
       if (isSymbol(a))
         return (
           a.type.matches('list<any>') ||

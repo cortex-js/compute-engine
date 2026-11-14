@@ -119,15 +119,18 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
 
   test('a body that builds a collection declines the look-through', () => {
     // `g: t ↦ [t, t]` returns an ARRAY from a scalar argument, so the
-    // look-through must decline — and the runtime dispatch then broadcasts
-    // over the two cells, matching interpretation.
+    // look-through must decline — and the comparison is element-wise over
+    // the two cells, matching interpretation.
     const ce = make();
     ce.declare('g', { signature: '(unknown) -> unknown' });
     ce.assign('g', ce.parse('t \\mapsto \\lbrack t, t\\rbrack'));
     const r = compileJS(ce, 'g(x)<y');
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.code).toContain('_SYS.bcast');
+      // `g(x)` promises a list of 2 (`staticShape`), so the comparison is
+      // unrolled over the two cells at compile time.
+      expect(r.code).toContain('_fn_g(_.x)');
+      expect(r.code).not.toContain('_SYS.bcast');
       expect(r.run({ x: 2, y: 10 })).toEqual([true, true]);
     }
   });

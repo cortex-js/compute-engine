@@ -14337,7 +14337,7 @@ function* threadConditional(
     // `ROADMAP.md`).
     if (
       threadsAt === undefined &&
-      stripped.some((x) => x.isCollection || isTuple(x))
+      stripped.some((x) => x.staticShape !== undefined || isTuple(x))
     ) {
       const cellGuards: Expression[] = [];
       const wholeGuards: Expression[] = [];

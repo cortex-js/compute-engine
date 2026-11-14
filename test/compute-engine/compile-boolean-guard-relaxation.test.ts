@@ -63,7 +63,9 @@ describe('orderings over an operand whose shape is only known at run time', () =
     const ce = make();
     const expr = ce.parse('q(L)<5');
     const r = compile(expr, { fallback: false })!;
-    expect(r.code).toContain('_SYS.bcast');
+    // `q(L)` promises a list (`staticShape`), so the comparison is
+    // element-wise at compile time, not through the run-time dispatch.
+    expect(r.code).not.toContain('_SYS.bcast');
     expect(r.run!()).toEqual([true, false, false]); // q(L) = [3, 5, 7]
     expect(r.run!()).toEqual(interpreted(expr));
   });

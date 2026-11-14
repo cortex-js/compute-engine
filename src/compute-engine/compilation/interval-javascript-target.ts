@@ -2151,7 +2151,7 @@ function isIntervalPointOperand(
     return (
       ops.length > 0 &&
       !pointHasBroadcastComponent(literal) &&
-      ops.every((op) => hasIntervalReading(op) && !op.isCollection)
+      ops.every((op) => hasIntervalReading(op) && op.staticShape === undefined)
     );
   }
   return isIntervalPointType(compilationType(e));

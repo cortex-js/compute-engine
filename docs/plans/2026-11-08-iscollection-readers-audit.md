@@ -375,3 +375,21 @@ Class C and K sites whose result changes. The consequence is the expected one.
 ## Counts
 
 Sites: 214. C 137, K 4, S 59, M 14. Paired with a type test: 52. Result changes: C or K 83, S or M 18. Not an expression read (listed for completeness): 2.
+
+## Follow-up 2026-11-14: what each unpaired shape reader reads now
+
+Line numbers are those of 2026-11-14. Each row is the class S row with no paired type test, or a class M row whose note says that the code wants the shape.
+
+- linear-algebra.ts:4410 (S, was 4245): `Dot`'s flat row reads `x.staticShape === undefined` for each element.
+- linear-algebra.ts:4515 (S, was 4350): the width of a flat row reads `x.staticShape === undefined`.
+- arithmetic.ts:15502 (S, was 14722): no change. The reducer form that this site keeps is folded only by the evaluate handler (`rest.length === 0 && first?.isCollection`), which needs a collection value present now. With the shape here, `Sum(Join(src(1), [4]))` stays unevaluated (it was 10), and `Sum(Filter(…))` runs its callback twice per element. Reading the shape needs both sites changed together, which is more than one line.
+- arithmetic-mul-div.ts:4186 (S): no change. `x.type.matches('number')` in the same test already reads the type, and a `number` type excludes a collection.
+- broadcast-lift-type.ts:2090 (S): no change. The test reads the type first and returns `false` unless the type is a numeric scalar or a union of numeric scalars. The view has no `staticShape`.
+- interval-javascript-target.ts:874 (S, was 867): no change. `op.type.matches('number')` in the same test already reads the type.
+- interval-javascript-target.ts:2154 (S, was 2147): a point component reads `op.staticShape === undefined`.
+- compile-broadcast.ts:423 (S): `compilesToArray` reads `a.staticShape !== undefined`.
+- symbolic/trig-rewrite.ts:542 (S): no change. This site is a capability reader, and the audit was wrong. It asks whether the node is a collection value or constructor. `staticShape` also matches broadcast arithmetic, so `TrigReduce(sin(x) cos(x) [1, 2])` would no longer be reduced.
+- compile-operators.ts:486 (M, was 488): no change. The infix admission serves every target, and GLSL and WGSL read a `vec2`/`vec3` operand as an atomic infix operand. With the shape here, `If(p = q, 1, 2)` over two points stops compiling on GLSL, and swizzles and vector-factor precedence change (5 test files). Reading the shape needs a per-target rule, which is more than one line.
+- boxed-function.ts:14340 (M, was 13933): restriction guards thread when an operand has `x.staticShape !== undefined` or is a tuple.
+- python-target.ts:5150 (M, was 5161): no change. It already pairs `isCollection` with `couldBeCollectionParticipant`, a type test.
+- solve-domain.ts:686 (M, was 676): no change. This site is a capability reader, and the audit was wrong. It guards against a collection value that the solver would walk and find no root in. `Solve(g(x), x)` with `g := t ↦ [t, 2t]` evaluates to `[0]` today. Reading the shape would turn that result into an `incompatible-type` error.

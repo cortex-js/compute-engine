@@ -4407,7 +4407,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const isFlat = (op: Expression) =>
           isTuple(op) ||
           (isFunction(op, 'List') &&
-            op.ops.every((x) => x.isCollection !== true));
+            op.ops.every((x) => x.staticShape === undefined));
         if (
           ops.some(hasAbsentCell) &&
           ops.every((op) => !hasAbsentCell(op) || isFlat(op)) &&
@@ -4512,7 +4512,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             isTuple(op)
               ? pointComponents(op)?.length
               : isFunction(op, 'List') &&
-                  op.ops.every((x) => x.isCollection !== true)
+                  op.ops.every((x) => x.staticShape === undefined)
                 ? op.nops
                 : undefined
           );
