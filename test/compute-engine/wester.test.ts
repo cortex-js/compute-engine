@@ -1173,12 +1173,8 @@ describe('Statistics', () => {
       ['BinomialDistribution', 15, ['Rational', 3, 4]],
       12,
     ]);
-    expect(cdf.evaluate().json).toEqual([
-      'BetaRegularized',
-      ['Rational', 1, 4],
-      3,
-      13,
-    ]);
+    // The exact finite sum of I_x(a, b) at positive integers a and b.
+    expect(cdf.evaluate().json).toEqual(['Rational', 820244467, 1073741824]);
     expect(cdf.N().json).toEqual({ num: '0.763912188820540904999' });
   });
 

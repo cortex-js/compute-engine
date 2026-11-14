@@ -125,9 +125,13 @@ describe('A float parameter or point gives a float', () => {
         .evaluate()
         .toString()
     ).toBe('1/4');
+    // (1 + 10 + 45 + 120) / 2^10
     expect(
-      ce.box(['CDF', ['BinomialDistribution', 10, half], 3]).evaluate().operator
-    ).toBe('BetaRegularized');
+      ce
+        .box(['CDF', ['BinomialDistribution', 10, half], 3])
+        .evaluate()
+        .toString()
+    ).toBe('11/64');
     expect(
       ce
         .box(['Variance', ['NormalDistribution', f('0.0'), 1]])

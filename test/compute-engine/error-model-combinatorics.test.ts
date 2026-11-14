@@ -803,7 +803,9 @@ describe('BetaRegularized', () => {
       12
     );
     expect(
-      ce.box(['BetaRegularized', ['Rational', 3, 10], 2, 3]).evaluate().operator
+      ce
+        .box(['BetaRegularized', ['Rational', 3, 10], ['Rational', 5, 2], 3])
+        .evaluate().operator
     ).toBe('BetaRegularized');
   });
 });

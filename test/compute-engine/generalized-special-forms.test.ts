@@ -156,9 +156,10 @@ describe('BetaRegularized(z0, z1, a, b)', () => {
     ).toBe('-0.5067');
   });
 
-  test('exact operands stay unevaluated under evaluate() and number under N()', () => {
+  test('exact operands stay exact under evaluate() and number under N()', () => {
+    // I_{1/2}(2, 3) - I_{1/5}(2, 3) = 11/16 - 113/625
     const e = ce.expr(['BetaRegularized', R(1, 5), R(1, 2), 2, 3]);
-    expect(e.evaluate().operator).toBe('BetaRegularized');
+    expect(e.evaluate().toString()).toBe('5067/10000');
     expect(e.N().toString()).toBe('0.5067');
   });
 

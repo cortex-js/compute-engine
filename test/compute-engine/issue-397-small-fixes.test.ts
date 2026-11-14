@@ -432,10 +432,11 @@ describe('LerchPhi at a negative integer order', () => {
     expect(value.re).toBe(52);
   });
 
-  test('an exact radical z stays symbolic', () => {
-    expect(ce.box(['LerchPhi', ['Sqrt', 2], -2, 1]).evaluate().operator).toBe(
-      'LerchPhi'
-    );
+  test('an exact radical z at a = 1 is PolyLog(s, z)/z', () => {
+    // Li₋₂(√2)/√2 = (1 + √2)/(1 − √2)³ = −33.97056274847714058562 (mpmath)
+    const value = ce.box(['LerchPhi', ['Sqrt', 2], -2, 1]).evaluate();
+    expect(value.operator).not.toBe('LerchPhi');
+    expect(value.N().re).toBeCloseTo(-33.97056274847714, 12);
   });
 
   test('a symbolic z stays symbolic', () => {
