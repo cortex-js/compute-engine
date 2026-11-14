@@ -12,7 +12,10 @@
   `n := [1, 2, 3]`, `n x` compiles to a broadcast over the stored list, and
   to `_.n * _.x` with `inputs: { n: 'real' }`. The other names of the
   expression keep the definitions they were boxed with. `canCompile()`
-  takes the option too.
+  takes the option too. The expression keeps the canonical form it was
+  boxed with: give a type that is the type at boxing or a subtype of it, or
+  box the expression in a scope that declares the name with the wider type.
+  A name of `inputs` that a called function reads as a constant declines.
 
 ### Resolved Issues
 

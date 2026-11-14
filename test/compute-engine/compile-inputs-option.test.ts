@@ -150,6 +150,37 @@ describe('COMPILE the inputs option', () => {
     expect(ce.box('a').evaluate().re).toBe(4);
   });
 
+  test('a constant that a called body reads declines, and the message names `inputs`', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('H', {
+      type: 'list<real>',
+      value: ['List', 1, 2, 3],
+      isConstant: true,
+    });
+    ce.parse('g(u) := H_2 u').evaluate();
+    const result = compile(ce.parse('g(x)'), { inputs: { H: 'list<real>' } });
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.binding).toBe('H');
+    expect(result.diagnostic?.message).toMatch(
+      /the name "H" of the `inputs` option is a constant/
+    );
+    // The fallback reads the constant.
+    expect(run(result, { x: 5 })).toBe(10);
+    expect(
+      canCompile(ce.parse('g(x)'), { inputs: { H: 'list<real>' } }).diagnostic
+        ?.message
+    ).toMatch(/of the `inputs` option is a constant/);
+    // Without the name in `inputs`, the constant is read.
+    const plain = compile(ce.parse('g(x)'));
+    expect(plain.success).toBe(true);
+    expect(run(plain, { x: 5 })).toBe(10);
+    // In the expression alone, the name is an input.
+    const alone = compile(ce.parse('H_2 + x'), { inputs: { H: 'list<real>' } });
+    expect(alone.success).toBe(true);
+    expect(run(alone, { x: 2, H: [5, 6, 7] })).toBe(8);
+  });
+
   test('canCompile() does not throw for a type string that is not a type', () => {
     const ce = new ComputeEngine();
     expect(

@@ -222,26 +222,24 @@ export function compileInputNames(
 }
 
 /**
- * Run `fn` (one compilation) with each name of `symbolic` read as an input:
- * its stored value is hidden as the value of a `vars` name is
- * (`withVarsValuesHidden()`). A name whose value cannot be hidden (its type
- * was inferred from the value, it is a constant, or it holds a function
- * literal, which a call inlines) gives a `CompileDeclineError`, and `fn` is
- * not run.
+ * The names of `symbolic` that the compilation of `expr` reads, or the
+ * `CompileDeclineError` of the first one whose value cannot be hidden: its
+ * type was inferred from the value, it is a constant, or it holds a function
+ * literal, which a call inlines. `option` is the option that the caller of
+ * `compile()` gave the names with; the message names it.
  */
-export function withSymbolicInputs<T>(
+export function symbolicInputsRead(
   expr: Expression,
-  symbolic: readonly string[] | undefined,
-  fn: () => T
-): T | CompileDeclineError {
-  if (symbolic === undefined || symbolic.length === 0) return fn();
+  symbolic: readonly string[],
+  option: 'symbolic' | 'inputs' = 'symbolic'
+): readonly string[] | CompileDeclineError {
   // A name of the option that the compilation does not read (in `expr`, in
   // the bodies it calls, in the values it reads) has no effect: a host can
   // list the names of its scopes without a refusal for one of them.
   const read = new Set<string>();
   const definitions = reachedInputDefinitions(expr, new Set(symbolic), read);
   const names = symbolic.filter((name) => read.has(name));
-  if (names.length === 0) return fn();
+  if (names.length === 0) return names;
   for (const name of names) {
     const def = expr.engine.lookupDefinition(name);
     if (isValueDef(def) && !definitions.has(def.value))
@@ -256,7 +254,7 @@ export function withSymbolicInputs<T>(
         kind: 'correctness',
         binding: name,
         message:
-          `Could not compile: the name "${name}" of the \`symbolic\` option ` +
+          `Could not compile: the name "${name}" of the \`${option}\` option ` +
           `is a function, which compiled code cannot take as an input.`,
       });
   }
@@ -272,7 +270,7 @@ export function withSymbolicInputs<T>(
       kind: 'correctness',
       binding: name,
       message:
-        `Could not compile: the name "${name}" of the \`symbolic\` option ` +
+        `Could not compile: the name "${name}" of the \`${option}\` option ` +
         (v.isConstant
           ? `is a constant.`
           : holdsFunction
@@ -282,6 +280,24 @@ export function withSymbolicInputs<T>(
               `\`ce.declare("${name}", "real")\`.`),
     });
   }
+  return names;
+}
+
+/**
+ * Run `fn` (one compilation) with each name of `symbolic` read as an input:
+ * its stored value is hidden as the value of a `vars` name is
+ * (`withVarsValuesHidden()`). A name whose value cannot be hidden gives its
+ * `CompileDeclineError` (`symbolicInputsRead()`), and `fn` is not run.
+ */
+export function withSymbolicInputs<T>(
+  expr: Expression,
+  symbolic: readonly string[] | undefined,
+  fn: () => T
+): T | CompileDeclineError {
+  if (symbolic === undefined || symbolic.length === 0) return fn();
+  const names = symbolicInputsRead(expr, symbolic);
+  if (names instanceof CompileDeclineError) return names;
+  if (names.length === 0) return fn();
   const hidden: Record<string, unknown> = {};
   for (const name of names) hidden[name] = true;
   return withVarsValuesHidden(expr, hidden, fn);

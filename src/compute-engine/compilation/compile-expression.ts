@@ -33,6 +33,7 @@ import {
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 import {
   compileInputNames,
+  symbolicInputsRead,
   withSymbolicInputs,
   withVarsValuesHidden,
 } from './vars-inputs.js';
@@ -367,9 +368,10 @@ function compileExpression<
       inCallerScope(expr, () =>
         compileInScope<T, R>(expr, { ...options, inputs: undefined }, decline)
       );
-    const result = withCompileInputs(expr, options, fallback, (bound, rest) =>
+    const result = withCompileInputs(expr, options, (bound, rest) =>
       compile<T, R>(bound, rest)
     );
+    if (isCompileDeclineError(result)) return fallback(result);
     if (result.success !== false) return result;
     return fallback(
       new CompileDeclineError(
@@ -421,14 +423,15 @@ function compileExpression<
  *
  * The scope is a child of the scope that the other names of `expr` are read
  * from (`compilationScope()`): the names of `inputs` take no part in that
- * choice. When there is no such scope, `onDecline` gives the result.
+ * choice. When there is no such scope, or when a name of `inputs` cannot
+ * be an input of a body that `expr` calls (`symbolicInputsRead()`), the
+ * result is the `CompileDeclineError`, and `fn` is not run.
  */
 function withCompileInputs<O extends CompileExpressionOptions, X>(
   expr: Expression,
   options: O,
-  onDecline: (decline: CompileDeclineError) => X,
   fn: (bound: Expression, rest: O) => X
-): X {
+): X | CompileDeclineError {
   const ce = expr.engine;
   const inputs = options.inputs ?? {};
   const names = Object.keys(inputs);
@@ -438,8 +441,8 @@ function withCompileInputs<O extends CompileExpressionOptions, X>(
     symbolic: [...(options.symbolic ?? []), ...names],
   };
   const scope = compilationScope(expr, compileInputNames(rest));
-  if (isCompileDeclineError(scope)) return onDecline(scope);
-  const run = (): X => {
+  if (isCompileDeclineError(scope)) return scope;
+  const run = (): X | CompileDeclineError => {
     ce.pushScope();
     try {
       const occurrences: Record<string, Expression> = {};
@@ -447,7 +450,13 @@ function withCompileInputs<O extends CompileExpressionOptions, X>(
         ce.declare(name, inputs[name]);
         occurrences[name] = ce.symbol(name);
       }
-      return fn(expr.subs(occurrences), rest);
+      const bound = expr.subs(occurrences);
+      // A name that a called body reads from a definition whose value
+      // cannot be hidden (a constant, a function): the refusal names the
+      // option `inputs`, which the caller gave, not `symbolic`.
+      const refused = symbolicInputsRead(bound, names, 'inputs');
+      if (isCompileDeclineError(refused)) return refused;
+      return fn(bound, rest);
     } finally {
       ce.popScope();
     }
@@ -862,12 +871,12 @@ export function canCompile(
 ): CanCompileResult {
   if (options?.inputs !== undefined && Object.keys(options.inputs).length > 0)
     try {
-      return withCompileInputs(
-        expr,
-        options,
-        (decline) => ({ ok: false, diagnostic: decline.diagnostic }),
-        (bound, rest) => canCompile(bound, rest)
+      const result = withCompileInputs(expr, options, (bound, rest) =>
+        canCompile(bound, rest)
       );
+      return isCompileDeclineError(result)
+        ? { ok: false, diagnostic: result.diagnostic }
+        : result;
     } catch (e) {
       // A type string that is not a type: the predicate does not throw.
       return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };

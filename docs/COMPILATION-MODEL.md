@@ -848,7 +848,24 @@ to `_.n * _.x` with `inputs: { n: 'real' }`. The other names keep the
 definitions they were boxed with. A body that the expression calls reads
 the input too; when the body was written with a declaration of the name, it
 keeps the type of that declaration (a slider declared `real<-10..10>` and
-given as `real` is typed with the range inside the body). The interpreter
+given as `real` is typed with the range inside the body). A name of
+`inputs` that such a body reads as a constant, or that is a function,
+declines, as a name of `symbolic` does: a constant has no value to leave
+out. The message names the option `inputs`, and `diagnostic.binding` is the
+name; without the name in `inputs`, the compilation reads the constant.
+
+The option does not make the expression canonical again. The canonical form
+was chosen with the types that the names had when the expression was boxed,
+and a rewrite that is right for those types stays. With `k` declared
+`integer`, `(x^2)^k` is boxed as `x^(2k)`; compiled with
+`inputs: { k: 'real' }` and run with `x = -3` and `k = 0.5`, it gives -3,
+and `(x^2)^k` is 3. So the result is the interpreter's when the given type
+is the type at boxing or a subtype of it (`list<real>` for a list, a range
+for `real`). For a wider or another type it is the interpreter's only when
+no rewrite used the type (`n x` above), which a host cannot tell in
+general: box the expression in a scope that declares the name with that
+type. A pushed scope with a second boxing of the canonical tree gives the
+same code as `inputs`; only a second parse differs. The interpreter
 fallback of the result evaluates the expression as it was given, in the
 scope of the call, where a run gives each input its value: the bodies that
 the expression calls read that value too (with `a` holding 4 and
