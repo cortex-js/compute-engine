@@ -74,6 +74,25 @@
 
 ### Resolved Issues
 
+- **`Tabulate` takes any number of dimensions.** `Tabulate(Add, 2, 2, 2)`
+  was boxed as `Tabulate(Add, 2, 2)`, which dropped the third dimension; it
+  is now a `tensor<integer^(2x2x2)>`, and `Table(f, 2, 2, 2)` follows. The
+  JavaScript and Python targets compile any number of dimensions. A
+  dimension of 0 gives an empty list, as in Wolfram's `Array`:
+  `Tabulate(f, 2, 0)` is `[[], []]` once materialized.
+  (PR #530, contributed by [enumeratio](https://github.com/enumeratio),
+  fixes [#525](https://github.com/cortex-js/compute-engine/issues/525))
+- **`All` and `Any` report an operand they do not take.** `All(xs, p, 2)`
+  was boxed as `All(xs, p)` and the `2` was ignored; it is now an
+  `unexpected-argument` error, as the signature of `All` and `Any` says.
+  (PR #530, contributed by [enumeratio](https://github.com/enumeratio),
+  fixes [#525](https://github.com/cortex-js/compute-engine/issues/525))
+- **The `Shape` of a list of applications of an unknown function is read
+  from its nesting.** `Shape([[a(1), a(2)]])` was `()` and is `(1, 2)`; a
+  ragged list still has no shape. (PR #530, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#525](https://github.com/cortex-js/compute-engine/issues/525))
+
 - **`First` and `Last` take the value of an empty collection, `Flatten` takes
   an infinite depth, `Fold` needs no seed, `Count` takes levels and `Unique`
   takes a test.** These are the call forms of Wolfram's `First[expr, def]`,

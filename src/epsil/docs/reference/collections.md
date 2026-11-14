@@ -1699,7 +1699,7 @@ symmetricDifference({1, 2, 3}, {2, 3, 4})
 
 ### table
 
-MathJSON `Table` · `(function, integer, integer?) -> collection`
+MathJSON `Table` · `(function, integer+) -> collection`
 
 An alias for `Tabulate` (the preferred name) that additionally accepts Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from 1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
 
@@ -1710,7 +1710,7 @@ table(i^2, (i, 1, 5))
 
 ### tabulate
 
-MathJSON `Tabulate` · `(generator: function, integer, integer?) -> list`
+MathJSON `Tabulate` · `(generator: function, integer+) -> list`
 
 Create a collection by applying a function to each index in the specified dimensions.
 

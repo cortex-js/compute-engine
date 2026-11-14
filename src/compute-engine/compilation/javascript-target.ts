@@ -6544,10 +6544,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Tabulate: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Tabulate`: missing argument');
-    if (args.length > 3)
-      throw new Error(
-        `Could not compile \`Tabulate\`: only the 1-D and 2-D forms compile.`
-      );
     for (let i = 1; i < args.length; i++) {
       const dim = tryGetConstant(args[i]!);
       if (dim !== undefined && Math.round(dim) <= 0)
@@ -6556,26 +6552,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             `a constant empty list.`
         );
     }
-    // The emitted lowering passes 1-based integer indexes, so an annotated
-    // index parameter is admitted exactly when `integer` satisfies it.
+    // The emitted lowering passes 1-based integer indexes, one per
+    // dimension, so an annotated index parameter is admitted exactly when
+    // `integer` satisfies it.
+    const indexTypes = args.slice(1).map((): Type => 'integer');
     BaseCompiler.assertCallbackAnnotations(
       'Tabulate',
       args[0],
-      ['integer', 'integer'],
+      indexTypes,
       target
     );
     const f = BaseCompiler.withCheckedCallback(
       'Tabulate',
       args[0],
-      ['integer', 'integer'],
+      indexTypes,
       target,
       () => hoistedCallbackLambda(args[0], compile, target)
     );
-    const n = compile(args[1]);
-    if (args.length === 2)
-      return `((_f, _n) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => _f(_i + 1)))(${f}, ${n})`;
-    const m = compile(args[2]);
-    return `((_f, _n, _m) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_m)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${n}, ${m})`;
+    // The first dimension is outermost: `_f(_i1, …, _ik)` nests `k` arrays.
+    const dims = args.slice(1).map((a) => compile(a));
+    const names = dims.map((_, k) => `_n${k + 1}`);
+    const idx = dims.map((_, k) => `_i${k + 1}`);
+    let body = `_f(${idx.map((i) => `${i} + 1`).join(', ')})`;
+    for (let k = dims.length - 1; k >= 0; k--)
+      body = `Array.from({ length: Math.max(0, Math.round(${names[k]})) }, (_, ${idx[k]}) => ${body})`;
+    return `((_f, ${names.join(', ')}) => ${body})(${[f, ...dims].join(', ')})`;
   },
   // `Repeat(x, n)` → a list of n copies of x. The VALUE is hoisted into an
   // IIFE parameter so it is evaluated exactly ONCE, matching the interpreter:

@@ -6627,3 +6627,110 @@ describe('Wolfram call forms of the list heads', () => {
     expect(r.run!({ xs: [1, 2, 3] })).toBe(6);
   });
 });
+
+describe('Tabulate with any number of dimensions', () => {
+  const f3 = [
+    'Function',
+    ['Add', ['Multiply', 100, 'i'], ['Multiply', 10, 'j'], 'k'],
+    'i',
+    'j',
+    'k',
+  ] as Expression;
+  const ce = new ComputeEngine();
+  const list = (x: Expression) =>
+    ce.box(x).evaluate({ materialization: true }).json;
+
+  test('Tabulate(f, 2, 2, 3) keeps its third dimension', () => {
+    const e = ce.box(['Tabulate', f3, 2, 2, 3]);
+    expect((e.json as unknown[]).slice(2)).toEqual([2, 2, 3]);
+    expect(e.type.toString()).toBe('tensor<integer^(2x2x3)>');
+    expect(list(['Tabulate', f3, 2, 2, 3])).toEqual([
+      'List',
+      ['List', ['List', 111, 112, 113], ['List', 121, 122, 123]],
+      ['List', ['List', 211, 212, 213], ['List', 221, 222, 223]],
+    ]);
+  });
+
+  test('a count and an element of a 3-D Tabulate', () => {
+    const e = ce.box(['Tabulate', f3, 2, 2, 3]);
+    expect(e.count).toBe(2);
+    expect(ce.box(['At', e, 2, 1, 3]).evaluate().json).toBe(213);
+    expect(ce.box(['At', e, -1, -1, -1]).evaluate().json).toBe(223);
+  });
+
+  test('Tabulate(f) with no dimension is a missing error', () => {
+    const e = ce.box(['Tabulate', ['Function', 'i', 'i']]);
+    expect(e.isValid).toBe(false);
+    expect(JSON.stringify(e.json)).toContain('missing');
+  });
+
+  test('Table with three plain dimensions is the same Tabulate', () => {
+    expect(list(['Table', f3, 2, 2, 3])).toEqual(
+      list(['Tabulate', f3, 2, 2, 3])
+    );
+  });
+
+  test('a named generator is applied to every index', () => {
+    expect(list(['Tabulate', 'Add', 2, 2, 2])).toEqual(
+      list([
+        'Tabulate',
+        ['Function', ['Add', 'i', 'j', 'k'], 'i', 'j', 'k'],
+        2,
+        2,
+        2,
+      ])
+    );
+  });
+
+  // As Wolfram: `Table[f, {0}, {2}]` is `{}`, `Array[f, {2, 0}]` is `{{}, {}}`.
+  const empties: [Expression[], string][] = [
+    [[0, 2], '[]'],
+    [[0, 2, 2], '[]'],
+    [[2, 0], '[[],[]]'],
+    [[2, 0, 2], '[[],[]]'],
+    [[2, 2, 0], '[[[],[]],[[],[]]]'],
+  ];
+  for (const [dims, expected] of empties)
+    test(`Tabulate(f, ${dims.join(', ')}) is ${expected}`, () => {
+      const params = ['i', 'j', 'k'].slice(0, dims.length);
+      const f = ['Function', ['Add', ...params], ...params];
+      const e = ce.box(['Tabulate', f, ...dims] as Expression);
+      expect(e.evaluate({ materialization: true }).toString()).toBe(expected);
+    });
+});
+
+describe('All and Any take no level', () => {
+  const ce = new ComputeEngine();
+  for (const head of ['All', 'Any']) {
+    test(`${head}(xs, p, 2) reports the extra operand`, () => {
+      const e = ce.box([
+        head,
+        ['List', ['List', 1, 2], ['List', 3, 4]],
+        'IsInteger',
+        2,
+      ]);
+      expect(e.isValid).toBe(false);
+      expect((e.json as unknown[]).at(-1)).toEqual([
+        'Error',
+        "'unexpected-argument'",
+        "'2'",
+      ]);
+      expect(e.evaluate().operator).toBe('Error');
+    });
+
+    test(`${head}(xs, p, 2, 3) reports every operand past the predicate`, () => {
+      expect(ce.box([head, ['List', 'True'], 'IsInteger', 2, 3]).isValid).toBe(
+        false
+      );
+    });
+  }
+
+  test('All and Any with one or two operands are unchanged', () => {
+    const even = ['Function', ['Equal', ['Mod', 'x', 2], 0], 'x'];
+    expect(ce.box(['All', ['List', 2, 4], even]).evaluate().json).toBe('True');
+    expect(ce.box(['Any', ['List', 1, 3], even]).evaluate().json).toBe('False');
+    expect(ce.box(['Any', ['List', 'True', 'False']]).evaluate().json).toBe(
+      'True'
+    );
+  });
+});

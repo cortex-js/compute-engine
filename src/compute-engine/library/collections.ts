@@ -14381,14 +14381,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
-      if (ops[1] === undefined) return engine._fn('Any', [collection]);
+      if (ops[1] === undefined)
+        return engine._fn('Any', [
+          collection,
+          ...surplusOperands(engine, ops, 1),
+        ]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Any',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
       if (!fn) return null;
-      return engine._fn('Any', [collection, fn]);
+      return engine._fn('Any', [
+        collection,
+        fn,
+        ...surplusOperands(engine, ops, 2),
+      ]);
     },
     evaluate: ([collection, fn], { engine: ce, expression }) =>
       runWalk(
@@ -14436,14 +14444,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
-      if (ops[1] === undefined) return engine._fn('All', [collection]);
+      if (ops[1] === undefined)
+        return engine._fn('All', [
+          collection,
+          ...surplusOperands(engine, ops, 1),
+        ]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'All',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
       if (!fn) return null;
-      return engine._fn('All', [collection, fn]);
+      return engine._fn('All', [
+        collection,
+        fn,
+        ...surplusOperands(engine, ops, 2),
+      ]);
     },
     evaluate: ([collection, fn], { engine: ce, expression }) =>
       runWalk(
@@ -20718,7 +20734,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     lazy: true,
-    signature: '(generator: function, integer, integer?) -> list',
+    signature: '(generator: function, integer+) -> list',
     // Tabulate is a LIST (ordered, `at`-addressable; `list<T>` since
     // 2026-09-29, it was `indexed_collection<T>`, which a symbol declared
     // `list` refused). Report the element type so it serializes as a list
@@ -20837,16 +20853,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       if (!fn) return null;
 
-      if (!ops[2])
-        return engine._fn('Tabulate', [
-          fn,
-          checkType(engine, ops[1]?.canonical, 'integer'),
-        ]);
-
+      // At least one dimension: `Tabulate(f)` is a `missing` error.
+      const dims = ops.length > 1 ? ops.slice(1) : [undefined];
       return engine._fn('Tabulate', [
         fn,
-        checkType(engine, ops[1]?.canonical, 'integer'),
-        checkType(engine, ops[2]?.canonical, 'integer'),
+        ...dims.map((op) => checkType(engine, op?.canonical, 'integer')),
       ]);
     },
     // A lazy indexed collection (like `Range`/`Map`): `evaluate()` returns the
@@ -20887,7 +20898,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // canonicalized (which would fold `i` to the imaginary unit) before this
     // handler can reinterpret them as iterator specs.
     lazy: true,
-    signature: '(function, integer, integer?) -> collection',
+    signature: '(function, integer+) -> collection',
     canonical: (ops, { engine: ce }) => {
       const specs = ops.slice(1);
 
@@ -28047,6 +28058,24 @@ function iteratorSpecOperands(
   return undefined;
 }
 
+/**
+ * The operands of a call past the `count` its signature takes, each as an
+ * `unexpected-argument` error in strict mode, so that a `canonical` handler
+ * that rebuilds the call does not drop them silently (`All(xs, p, 2)`, a
+ * level the head does not have).
+ */
+function surplusOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  count: number
+): Expression[] {
+  return ops
+    .slice(count)
+    .map((op) =>
+      ce.strict ? ce.error('unexpected-argument', op.toString()) : op.canonical
+    );
+}
+
 /** The integer dimensions of a `Tabulate`, or `null` if any is missing or
  * non-integer. `Tabulate(fn)` (no dimensions) returns `[]`.
  *
@@ -28105,18 +28134,31 @@ function tabulateElement(
   const name = named ? generator.symbol : 'Apply';
   if (!named && binding === undefined)
     return ce.error('unknown-operator', name);
-  let parameter = '_tabulateIndex';
+  // One fresh parameter per remaining dimension.
   const used = new Set(generator.symbols);
-  while (parameter === name || used.has(parameter)) parameter += '_';
+  const parameters: string[] = [];
+  for (let k = 1; k < dims.length; k++) {
+    let parameter = `_tabulateIndex${k}`;
+    while (parameter === name || used.has(parameter)) parameter += '_';
+    used.add(parameter);
+    parameters.push(parameter);
+  }
   const bindings =
     binding === undefined ? new Map() : new Map([[name, binding]]);
   ce.pushScope({ parent: ce.context.lexicalScope, bindings });
   try {
     const body: ExpressionInput = named
-      ? [name, outerIndex, parameter]
-      : ['Apply', generator, outerIndex, parameter];
-    const row = ce.box(['Function', body, ['Typed', parameter, "'integer'"]]);
-    return ce.function('Tabulate', [row, ce.number(dims[1])]);
+      ? [name, outerIndex, ...parameters]
+      : ['Apply', generator, outerIndex, ...parameters];
+    const row = ce.box([
+      'Function',
+      body,
+      ...parameters.map((p) => ['Typed', p, "'integer'"] as ExpressionInput),
+    ]);
+    return ce.function('Tabulate', [
+      row,
+      ...dims.slice(1).map((d) => ce.number(d)),
+    ]);
   } finally {
     bindings.clear();
     ce.popScope();

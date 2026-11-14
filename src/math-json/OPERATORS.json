@@ -8713,8 +8713,8 @@
     {
       "name": "Table",
       "category": "Collections",
-      "arity": "optional",
-      "signature": "(function, integer, integer?) -> collection",
+      "arity": "variadic",
+      "signature": "(function, integer+) -> collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -8728,8 +8728,8 @@
     {
       "name": "Tabulate",
       "category": "Collections",
-      "arity": "optional",
-      "signature": "(generator: function, integer, integer?) -> list",
+      "arity": "variadic",
+      "signature": "(generator: function, integer+) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,

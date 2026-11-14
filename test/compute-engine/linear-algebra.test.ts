@@ -161,6 +161,34 @@ describe('Tensor Properties', () => {
     const result = ce.expr(['Shape', 5]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`()`);
   });
+
+  // The cells are unevaluated applications of an unknown function, whose
+  // type may be a list, so the list type carries no dimensions.
+  const unknownCells: [string, Expression, string][] = [
+    ['one row', ['List', ['List', ['a', 1], ['a', 2]]], '(1, 2)'],
+    [
+      'two rows',
+      ['List', ['List', ['a', 1], ['a', 2]], ['List', ['a', 3], ['a', 4]]],
+      '(2, 2)',
+    ],
+    ['a vector', ['List', ['a', 1], ['a', 2], ['a', 3]], '(3)'],
+    [
+      'three levels',
+      ['List', ['List', ['List', ['a', 1], ['a', 2]]]],
+      '(1, 1, 2)',
+    ],
+  ];
+  for (const [name, x, expected] of unknownCells)
+    it(`should get the shape of a list of unknown applications: ${name} is ${expected}`, () => {
+      expect(ce.expr(['Shape', x]).evaluate().toString()).toBe(expected);
+    });
+
+  it('should not claim a shape for a ragged list of unknown applications', () => {
+    const ragged = ['List', ['List', ['a', 1]], ['List', ['a', 2], ['a', 3]]];
+    expect(ce.expr(['Shape', ragged as Expression]).evaluate().toString()).toBe(
+      '()'
+    );
+  });
 });
 
 describe('Kernel/Dimension/Degree/Hom', () => {

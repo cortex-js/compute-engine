@@ -7024,10 +7024,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Tabulate: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Tabulate`: missing argument');
-    if (args.length > 3)
-      throw new Error(
-        `Could not compile \`Tabulate\`: only the 1-D and 2-D forms compile.`
-      );
     for (let i = 1; i < args.length; i++) {
       const dim = tryGetConstant(args[i]!);
       if (dim !== undefined && Math.round(dim) <= 0)
@@ -7036,12 +7032,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
             `a constant empty list.`
         );
     }
-    const f = pyFnArg('Tabulate', args[0], compile, ['integer', 'integer']);
-    const n = pyClampedCount(args[1]!, compile);
-    if (args.length === 2)
-      return `(lambda _f: [_f(_i + 1) for _i in range(${n})])(${f})`;
-    const m = pyClampedCount(args[2]!, compile);
-    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(${m})] for _i in range(${n})])(${f})`;
+    const f = pyFnArg(
+      'Tabulate',
+      args[0],
+      compile,
+      args.slice(1).map((): Type => 'integer')
+    );
+    // The first dimension is outermost: `_f(_i1, …, _ik)` nests `k` lists.
+    const counts = args.slice(1).map((a) => pyClampedCount(a, compile));
+    let body = `_f(${counts.map((_, k) => `_i${k + 1} + 1`).join(', ')})`;
+    for (let k = counts.length - 1; k >= 0; k--)
+      body = `[${body} for _i${k + 1} in range(${counts[k]})]`;
+    return `(lambda _f: ${body})(${f})`;
   },
   // --- Core scalar operators -------------------------------------------------
   Boole: (args, compile) => {
