@@ -156,6 +156,15 @@
 
 ### Resolved Issues
 
+- **A sum of `kⁿ·rᵏ/k!` over an infinite range is a closed form.**
+  `Sum(k^3/k!, k, 1, ∞)` stayed a `Sum`; it is `5e` (Dobiński's formula,
+  `e` times the Bell number). `Sum(k^2·x^k/k!, k, 0, ∞)` is `(x² + x)·eˣ`,
+  and a lower bound above 0 subtracts the terms below it. A polynomial over
+  `k!` is the sum of its terms: `Sum((k^2 + k)/k!, k, 0, ∞)` is `3e`. The
+  power `n` and the lower bound are at most 200. (PR #577, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#576](https://github.com/cortex-js/compute-engine/issues/576))
+
 - **`Integrate` of a product of powers of `sin` and `cos` of a linear
   argument is a closed form.** `∫ sin³x dx`, `∫ cos⁵x dx`,
   `∫ sin³x cos²x dx` and `∫ sin⁴x dx` stayed `Integrate`. `∫ sin³x dx` is

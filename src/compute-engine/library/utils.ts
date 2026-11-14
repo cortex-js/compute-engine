@@ -1804,6 +1804,74 @@ function isNegativeOne(expr: Expression | undefined): boolean {
   return expr !== undefined && isNumber(expr) && expr.isSame(-1);
 }
 
+/** Largest moment `n` and lower bound expanded by `touchardSeries()`. */
+const TOUCHARD_LIMIT = 200;
+
+/**
+ * `Σ_{k=a}^∞ c·kⁿ·rᵏ/k! = c·(eʳ·Tₙ(r) − Σ_{k=1}^{a−1} kⁿ·rᵏ/k!)` for an integer
+ * `n ≥ 1`: the Touchard polynomial `Tₙ(r) = Σⱼ S(n, j)·rʲ` (Stirling numbers of
+ * the second kind) is the exponential generating function of the moments, and
+ * `r = 1` is Dobiński's formula `Σ kⁿ/k! = e·Bₙ` (`Bₙ` the Bell number,
+ * `Σ k³/k! = 5e`). The `k = 0` term is 0 for `n ≥ 1`. The sum is entire in `r`,
+ * so there is no convergence guard. Past `TOUCHARD_LIMIT` the sum is not expanded.
+ */
+function touchardSeries(
+  coeff: Expression,
+  ratio: Expression | undefined,
+  n: number,
+  a: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (n > TOUCHARD_LIMIT || a > TOUCHARD_LIMIT) return undefined;
+  const r = ratio ?? ce.One;
+
+  // Stirling numbers S(n, j), j = 0..n, by S(m, j) = j·S(m−1, j) + S(m−1, j−1).
+  let row: bigint[] = [1n];
+  for (let m = 1; m <= n; m++) {
+    const next: bigint[] = new Array<bigint>(m + 1).fill(0n);
+    for (let j = 1; j <= m; j++)
+      next[j] = BigInt(j) * (row[j] ?? 0n) + (row[j - 1] ?? 0n);
+    row = next;
+  }
+  const poly = ce.function(
+    'Add',
+    row.map((s, j) =>
+      j === 0 || s === 0n
+        ? ce.Zero
+        : ce.function('Multiply', [
+            ce.number(s),
+            ce.function('Power', [r, ce.number(j)]),
+          ])
+    )
+  );
+  const terms: Expression[] = [
+    ce.function('Multiply', [ce.function('Exp', [r]), poly]),
+  ];
+  // The terms below the lower bound: k^n·r^k/k! for k = 1..a−1.
+  for (let k = 1, fact = 1n; k < a; k++) {
+    fact *= BigInt(k);
+    terms.push(
+      ce
+        .function('Divide', [
+          ce.function('Multiply', [
+            ce.number(BigInt(k) ** BigInt(n)),
+            ce.function('Power', [r, ce.number(k)]),
+          ]),
+          ce.number(fact),
+        ])
+        .evaluate()
+        .neg()
+    );
+  }
+  const value = ce.function('Add', terms).evaluate();
+  return coeff.isSame(1)
+    ? value
+    : asReadableFraction(
+        ce.function('Multiply', [coeff, value]).evaluate(),
+        ce
+      );
+}
+
 /**
  * Closed forms for the named series families beyond the plain p-series and
  * geometric entries (each identity numerically verified — see
@@ -1847,9 +1915,14 @@ function namedSeriesClosedForm(
       ? v
       : asReadableFraction(ce.function('Multiply', [coeff, v]).evaluate(), ce);
 
-  // Exponential series: c·rᵏ/k! (kPower = 0, no linear factor).
+  // Exponential series: c·rᵏ/k! (kPower = 0, no linear factor), and its
+  // moments c·kⁿ·rᵏ/k!.
   if (factorialDen) {
-    if (kPower !== 0 || linear !== undefined || a < 0) return undefined;
+    if (linear !== undefined || a < 0) return undefined;
+    if (kPower !== 0)
+      return kPower > 0
+        ? touchardSeries(coeff, ratio, kPower, a, ce)
+        : undefined;
     const r = ratio ?? ce.One;
     let value: Expression = ce.function('Exp', [r]);
     if (a > 0) {
@@ -2028,6 +2101,24 @@ export function infiniteSumClosedForm(
 
   const direct = attempt(body, lower);
   if (direct) return direct;
+
+  // A polynomial over k!, `Σ (k² + k)/k!`: each term is a moment series. The
+  // sum is entire, so the pieces add with no convergence condition.
+  if (
+    isFunction(body, 'Divide') &&
+    isFunction(body.op1, 'Add') &&
+    isFunction(body.op2, 'Factorial') &&
+    isSymbol(body.op2.op1) &&
+    body.op2.op1.symbol === index
+  ) {
+    const pieces: Expression[] = [];
+    for (const term of body.op1.ops) {
+      const piece = attempt(ce.function('Divide', [term, body.op2]), lower);
+      if (!piece) return undefined;
+      pieces.push(piece);
+    }
+    return ce.function('Add', pieces).evaluate();
+  }
 
   // The recognizers read one spelling of each body. A body spelled another
   // way is normalized to that spelling and tried once more.
