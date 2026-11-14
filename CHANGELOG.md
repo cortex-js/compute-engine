@@ -111,6 +111,22 @@
 
 ### Improvements
 
+- **`evaluate()` gives the closed form of `Gamma`, `GammaLn`, `LogGamma`,
+  `Digamma`, `Trigamma`, `PolyGamma` and `Beta` at exact arguments that have
+  a standard one.** `Gamma(1/2)` was unevaluated and is now `√π`;
+  `Gamma(-1/2)` is `-2√π`, `Digamma(1/4)` is `-γ - π/2 - 3 ln 2`,
+  `Trigamma(1/4)` is `π² + 8G`, `PolyGamma(2, 3)` is `9/4 - 2ζ(3)`,
+  `GammaLn(4)` is `ln 6`, `LogGamma(-3/2)` is `ln(4√π/3) - 2πi` and
+  `Beta(3/2, 5/2)` is `π/16`. The arguments covered: a half-integer for
+  `Gamma`, a rational with denominator 1, 2, 3 or 4 for `Digamma`, an
+  integer, a half-integer or (for order 1) a quarter for `PolyGamma` and
+  `Trigamma`, a positive integer or a half-integer for `GammaLn` and
+  `LogGamma`, two half-integers for `Beta`. Past a size limit, or when the
+  closed form would lose digits under `.N()`, the call stays unevaluated.
+  `.N()` is unchanged (PR #535, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#532](https://github.com/cortex-js/compute-engine/issues/532)).
+
 - **A circular or hyperbolic function of its own inverse folds under
   `evaluate()`, `.N()` and `simplify()`.** `Sin(Arcsin(x))` is `x` for the
   twelve pairs, and `N(Sin(Arcsin(5)))` was `5 - 3.0e-16i` and is `5`. For an

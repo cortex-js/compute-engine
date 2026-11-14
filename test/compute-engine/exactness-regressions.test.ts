@@ -1066,9 +1066,9 @@ describe('D2 — inexact arguments numericize under evaluate() (all numeric oper
       expect(num(['Gamma', 5]).isSame(24)).toBe(true);
       expect(num(['Gamma', 5]).isExact).toBe(true);
     });
-    test('Gamma(1/2) — exact rational stays symbolic', () => {
-      expect(num(['Gamma', ['Rational', 1, 2]]).operator).toEqual('Gamma');
-      expect(nStr(['Gamma', ['Rational', 1, 2]]).startsWith('1.772')).toBe(true);
+    test('Gamma(1/3) — exact rational stays symbolic', () => {
+      expect(num(['Gamma', ['Rational', 1, 3]]).operator).toEqual('Gamma');
+      expect(nStr(['Gamma', ['Rational', 1, 3]]).startsWith('2.678')).toBe(true);
     });
     test('Cos(1/3) — exact rational stays symbolic (trig unchanged by D2)', () => {
       expect(num(['Cos', ['Rational', 1, 3]]).operator).toEqual('Cos');

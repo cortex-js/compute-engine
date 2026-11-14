@@ -392,9 +392,13 @@ describe('Gamma(a, z0, z1) and GammaRegularized(a, z0, z1)', () => {
 
 describe('PolyGamma(z)', () => {
   test('is PolyGamma(0, z) (DLMF 5.15.1)', () => {
-    expect(ce.expr(['PolyGamma', 1]).evaluate().toString()).toBe(
-      'PolyGamma(0, 1)'
-    );
+    // PolyGamma(0, 1) has the closed form -EulerGamma.
+    expect(
+      ce
+        .expr(['PolyGamma', 1])
+        .evaluate()
+        .isSame(ce.expr(['PolyGamma', 0, 1]).evaluate())
+    ).toBe(true);
     expect(ce.expr(['PolyGamma', 'x']).evaluate().toString()).toBe(
       'PolyGamma(0, x)'
     );

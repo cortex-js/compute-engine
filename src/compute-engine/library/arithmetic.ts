@@ -537,7 +537,7 @@ import {
   evaluateGammaBetween,
   evaluateIncompleteBeta,
 } from './generalized-special-forms.js';
-import { isShadowedSymbol } from '../library-shadowing.js';
+import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import {
   MeasuredWalk,
   failedWalkErrorSince,
@@ -7221,6 +7221,308 @@ function isExactIntegerGammaArgument(
 }
 
 /**
+ * The largest |n| for which Γ(n + 1/2) is returned as an exact rational
+ * multiple of √π. The rational has a double factorial for its numerator or
+ * denominator, so about 2n·log10(n) digits; past this n the call stays
+ * unevaluated.
+ */
+const GAMMA_HALF_INTEGER_LIMIT = 200;
+
+/**
+ * The largest integer shift k for which ψ(f + k) is returned as the base value
+ * ψ(f) plus a rational: the rational is a sum of k reciprocals, so past this
+ * k the call stays unevaluated.
+ */
+const DIGAMMA_SHIFT_LIMIT = 1000;
+
+/**
+ * The largest order n, and the largest shift m, for which ψ⁽ⁿ⁾(a + m) is
+ * returned exactly through ζ(n + 1, a) minus m reciprocal powers: the powers
+ * are rationals with denominators up to (2m)ⁿ⁺¹.
+ */
+const POLYGAMMA_EXACT_ORDER_LIMIT = 40;
+const POLYGAMMA_EXACT_SHIFT_LIMIT = 64;
+
+/**
+ * The most decimal digits that ζ(n + 1, a) − Σ_{j<m} (a + j)^−(n+1) may cancel
+ * for ψ⁽ⁿ⁾(a + m) to be returned in that form: `.N()` of the difference loses
+ * them, about (n + 1)·log10((a + m)/a), so ψ⁽⁴⁰⁾(3).evaluate().N() would be
+ * 9% off at the default precision.
+ */
+const POLYGAMMA_CANCELLED_DIGITS_LIMIT = 6;
+
+type BigRational = [bigint, bigint];
+
+/**
+ * Whether a program binding replaces a library constant that a closed form
+ * names. The result would name the constant in its MathJSON and take the
+ * program's value when boxed again, so the call stays symbolic.
+ */
+function constantsShadowed(engine: ComputeEngine): boolean {
+  return ['Pi', 'EulerGamma', 'CatalanConstant'].some((name) =>
+    shadowsLibraryName(engine, name)
+  );
+}
+
+/** a/b + c/d, reduced, with a positive denominator. */
+function addBigRational(x: BigRational, y: BigRational): BigRational {
+  const num = x[0] * y[1] + y[0] * x[1];
+  const den = x[1] * y[1];
+  const g = bigintGcd(num < 0n ? -num : num, den);
+  return g === 0n ? [0n, 1n] : [num / g, den / g];
+}
+
+/**
+ * Γ(1/2 + n)/√π for an integer n, as a reduced fraction: for n ≥ 0 it is
+ * (2n − 1)!!/2ⁿ (DLMF §5.4(ii)) and for n < 0, with m = −n, (−2)ᵐ/(2m − 1)!!
+ * (DLMF §5.4(ii)).
+ */
+function gammaHalfIntegerOverSqrtPi(n: number): BigRational {
+  const m = BigInt(Math.abs(n));
+  let oddProduct = 1n;
+  for (let k = 1n; k <= m; k++) oddProduct *= 2n * k - 1n;
+  if (n >= 0) return [oddProduct, 2n ** m];
+  return [(m % 2n === 0n ? 1n : -1n) * 2n ** m, oddProduct];
+}
+
+/**
+ * The exact value of Γ(x) for a positive integer or a half-integer x (and a
+ * negative half-integer for `negative`), as a rational and whether it carries
+ * a factor √π; `undefined` past `GAMMA_HALF_INTEGER_LIMIT`.
+ */
+function exactGammaParts(
+  x: Expression,
+  negative = false
+): { rational: BigRational; sqrtPi: boolean } | undefined {
+  const r = asRational(x);
+  if (r === undefined || !isNumber(x) || !x.isExact) return undefined;
+  const num = BigInt(r[0]);
+  const den = BigInt(r[1]);
+  if (den === 1n) {
+    if (num < 1n || num > BigInt(GAMMA_HALF_INTEGER_LIMIT)) return undefined;
+    let f = 1n;
+    for (let k = 2n; k < num; k++) f *= k;
+    return { rational: [f, 1n], sqrtPi: false };
+  }
+  if (den !== 2n) return undefined;
+  // x = 1/2 + n
+  const n = Number((num - 1n) / 2n);
+  if (Math.abs(n) > GAMMA_HALF_INTEGER_LIMIT || (n < 0 && !negative))
+    return undefined;
+  return { rational: gammaHalfIntegerOverSqrtPi(n), sqrtPi: true };
+}
+
+/** The expression `rational` times √π when `sqrtPi`, else `rational`. */
+function boxRationalSqrtPi(
+  engine: ComputeEngine,
+  rational: BigRational,
+  sqrtPi: boolean
+): Expression {
+  const q = engine.number([rational[0], rational[1]]);
+  return sqrtPi ? q.mul(engine.function('Sqrt', [engine.Pi])) : q;
+}
+
+/**
+ * The exact value of Γ(x) at a half-integer x (Γ(1/2) = √π, DLMF §5.4(ii)),
+ * or `undefined`.
+ */
+function gammaAtHalfInteger(
+  engine: ComputeEngine,
+  x: Expression
+): Expression | undefined {
+  if (constantsShadowed(engine)) return undefined;
+  const parts = exactGammaParts(x, true);
+  if (parts === undefined || !parts.sqrtPi) return undefined;
+  return boxRationalSqrtPi(engine, parts.rational, true);
+}
+
+/**
+ * ln Γ at an exact positive integer or a half-integer: Ln of the exact |Γ(x)|.
+ * `GammaLn` of a negative real is ln|Γ(x)| (its `.N()` and compiled lanes),
+ * and `LogGamma`, the continuous branch, subtracts iπm at x = 1/2 − m, the
+ * m sign changes of Γ between x and 0.
+ */
+export function logGammaAtExactArgument(
+  engine: ComputeEngine,
+  x: Expression,
+  branch: 'principal' | 'continuous'
+): Expression | undefined {
+  const parts = exactGammaParts(x, true);
+  if (parts === undefined) return undefined;
+  if (parts.sqrtPi && constantsShadowed(engine)) return undefined;
+  const [num, den] = parts.rational;
+  const magnitude = boxRationalSqrtPi(
+    engine,
+    num < 0n ? [-num, den] : [num, den],
+    parts.sqrtPi
+  );
+  const real = engine.function('Ln', [magnitude]).evaluate();
+  if (branch === 'principal' || !parts.sqrtPi || asRational(x)![0] > 0n)
+    return real;
+  const m = Number((1n - BigInt(asRational(x)![0])) / 2n);
+  return m > 0 ? real.sub(engine.I.mul(engine.Pi).mul(engine.number(m))) : real;
+}
+
+/**
+ * ψ(x) at a rational x with denominator 1, 2, 3 or 4, as the base value at
+ * f = x − ⌊x⌋ (Gauss's digamma theorem, DLMF §5.4(iv): ψ(1) = −γ,
+ * ψ(1/2) = −γ − 2 ln 2, ψ(1/3), ψ(2/3) = −γ ∓ π/(2√3) − (3/2) ln 3,
+ * ψ(1/4), ψ(3/4) = −γ ∓ π/2 − 3 ln 2) plus a rational from the recurrence
+ * ψ(z + 1) = ψ(z) + 1/z (DLMF 5.5.2); `undefined` past `DIGAMMA_SHIFT_LIMIT`.
+ * The poles at the non-positive integers are the caller's.
+ */
+function digammaAtExactRational(
+  engine: ComputeEngine,
+  x: Expression
+): Expression | undefined {
+  if (constantsShadowed(engine)) return undefined;
+  const r = asRational(x);
+  if (r === undefined || !isNumber(x) || !x.isExact) return undefined;
+  const num = BigInt(r[0]);
+  const den = BigInt(r[1]);
+  if (den < 1n || den > 4n) return undefined;
+  // floor(num/den) with a positive denominator
+  const k = num >= 0n ? num / den : -((-num + den - 1n) / den);
+  const fnum = num - k * den;
+  if (fnum === 0n && num <= 0n) return undefined; // a pole
+  const shift = fnum === 0n ? k - 1n : k;
+  if (
+    shift > BigInt(DIGAMMA_SHIFT_LIMIT) ||
+    shift < -BigInt(DIGAMMA_SHIFT_LIMIT)
+  )
+    return undefined;
+  // The base fraction f = fnum/den (f = 1 for an integer x)
+  const f: BigRational = fnum === 0n ? [1n, 1n] : [fnum, den];
+  const gamma = engine.symbol('EulerGamma');
+  const ln2 = engine.function('Ln', [engine.number(2)]);
+  const ln3 = engine.function('Ln', [engine.number(3)]);
+  const sqrt3 = engine.function('Sqrt', [engine.number(3)]);
+  const piOverSqrt3 = engine.Pi.div(sqrt3.mul(engine.number(2)));
+  let base: Expression;
+  const key = `${f[0]}/${f[1]}`;
+  switch (key) {
+    case '1/1':
+      base = gamma.neg();
+      break;
+    case '1/2':
+      base = gamma.neg().sub(ln2.mul(engine.number(2)));
+      break;
+    case '1/3':
+      base = gamma
+        .neg()
+        .sub(piOverSqrt3)
+        .sub(ln3.mul(engine.number([3, 2])));
+      break;
+    case '2/3':
+      base = gamma
+        .neg()
+        .add(piOverSqrt3)
+        .sub(ln3.mul(engine.number([3, 2])));
+      break;
+    case '1/4':
+      base = gamma
+        .neg()
+        .sub(engine.Pi.div(engine.number(2)))
+        .sub(ln2.mul(engine.number(3)));
+      break;
+    case '3/4':
+      base = gamma
+        .neg()
+        .add(engine.Pi.div(engine.number(2)))
+        .sub(ln2.mul(engine.number(3)));
+      break;
+    default:
+      return undefined;
+  }
+  // ψ(f + shift) − ψ(f) as a sum of reciprocals
+  let sum: BigRational = [0n, 1n];
+  if (shift > 0n)
+    for (let j = 0n; j < shift; j++)
+      sum = addBigRational(sum, [f[1], f[0] + j * f[1]]);
+  else
+    for (let j = shift; j < 0n; j++)
+      sum = addBigRational(sum, [-f[1], f[0] + j * f[1]]);
+  return sum[0] === 0n ? base : base.add(engine.number([sum[0], sum[1]]));
+}
+
+/**
+ * ψ⁽ⁿ⁾(a + m) = (−1)ⁿ⁺¹ n! (ζ(n + 1, a) − Σ_{j<m} (a + j)^−(n+1))
+ * (DLMF 5.15.2, 25.11.3) for an order n ≥ 1, a positive x = a + m with
+ * a = 1, 1/2 or (for n = 1) 1/4, 3/4: ζ(n + 1, 1) = ζ(n + 1),
+ * ζ(s, 1/2) = (2ˢ − 1) ζ(s) (DLMF §25.11), and
+ * ζ(2, 1/4) = π² + 8G, ζ(2, 3/4) = π² − 8G (G the Catalan constant).
+ * `undefined` outside `POLYGAMMA_EXACT_ORDER_LIMIT`/`..._SHIFT_LIMIT`.
+ */
+function polygammaAtExactArgument(
+  engine: ComputeEngine,
+  n: number,
+  x: Expression
+): Expression | undefined {
+  if (constantsShadowed(engine)) return undefined;
+  if (n < 1 || n > POLYGAMMA_EXACT_ORDER_LIMIT) return undefined;
+  const r = asRational(x);
+  if (r === undefined || !isNumber(x) || !x.isExact) return undefined;
+  const num = BigInt(r[0]);
+  const den = BigInt(r[1]);
+  if (num < 1n || den < 1n || den > 4n) return undefined;
+  const m = num / den;
+  const fnum = num - m * den;
+  // a = fnum/den, or 1 for an integer x (peeling m − 1 terms from a = 1)
+  const peel = fnum === 0n ? m - 1n : m;
+  if (peel > BigInt(POLYGAMMA_EXACT_SHIFT_LIMIT)) return undefined;
+  const s = n + 1;
+  const base = fnum === 0n ? 1 : Number(fnum) / Number(den);
+  const cancelled = s * Math.log10(Number(num) / Number(den) / base);
+  if (cancelled > POLYGAMMA_CANCELLED_DIGITS_LIMIT) return undefined;
+  const zeta = engine.function('Zeta', [engine.number(s)]).evaluate();
+  const catalan = engine.symbol('CatalanConstant').mul(engine.number(8));
+  const key = fnum === 0n ? '1/1' : `${fnum}/${den}`;
+  let head: Expression;
+  if (key === '1/1') head = zeta;
+  else if (key === '1/2') head = zeta.mul(engine.number(2n ** BigInt(s) - 1n));
+  else if (s === 2 && key === '1/4') head = engine.Pi.pow(2).add(catalan);
+  else if (s === 2 && key === '3/4') head = engine.Pi.pow(2).sub(catalan);
+  else return undefined;
+  const a: BigRational = fnum === 0n ? [1n, 1n] : [fnum, den];
+  const power = BigInt(s);
+  let sum: BigRational = [0n, 1n];
+  for (let j = 0n; j < peel; j++)
+    sum = addBigRational(sum, [a[1] ** power, (a[0] + j * a[1]) ** power]);
+  const value =
+    sum[0] === 0n ? head : head.sub(engine.number([sum[0], sum[1]]));
+  // (−1)ⁿ⁺¹ n!
+  let factorial = 1n;
+  for (let k = 2n; k <= BigInt(n); k++) factorial *= k;
+  const sign = n % 2 === 0 ? -1n : 1n;
+  return value.mul(engine.number(sign * factorial));
+}
+
+/**
+ * B(a, b) = Γ(a)Γ(b)/Γ(a + b) (DLMF 5.12.1) for two positive half-integers: a
+ * rational multiple of π, since Γ(a + b) has no √π; `undefined` otherwise (an
+ * integer operand is `betaPositiveIntegerArg`'s).
+ */
+function betaAtHalfIntegers(
+  engine: ComputeEngine,
+  a: Expression,
+  b: Expression
+): Expression | undefined {
+  if (constantsShadowed(engine)) return undefined;
+  const ga = exactGammaParts(a);
+  const gb = exactGammaParts(b);
+  if (ga === undefined || gb === undefined || !ga.sqrtPi || !gb.sqrtPi)
+    return undefined;
+  // a = p/2 and b = q/2 with odd p and q, so a + b = (p + q)/2 is an integer
+  const [pa, pb] = [BigInt(asRational(a)![0]), BigInt(asRational(b)![0])];
+  const total = exactGammaParts(engine.number((pa + pb) / 2n));
+  if (total === undefined) return undefined;
+  const [na, da] = ga.rational;
+  const [nb, db] = gb.rational;
+  const [nt, dt] = total.rational;
+  return engine.number([na * nb * dt, da * db * nt]).mul(engine.Pi);
+}
+
+/**
  * The synchronous `evaluate` handler of `Gamma`, shared with its
  * `evaluateAsync` handler (which awaits the exact positive-integer branch
  * through `Factorial.evaluateAsync` and hands every other argument here).
@@ -7272,6 +7574,11 @@ function evaluateGamma(
       .function('Factorial', [x.sub(engine.One)])
       .evaluate();
     return isNumber(shifted) ? shifted : undefined;
+  }
+  // Γ(1/2 + n) is a rational multiple of √π (DLMF §5.4(ii)), as `Gamma(1/2)`.
+  if (!numericApproximation) {
+    const half = gammaAtHalfInteger(engine, x);
+    if (half !== undefined) return half;
   }
   // Γ at an infinite argument. Also exact, so it does not wait for
   // `numericApproximation` either.
@@ -8890,6 +9197,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // itself.
         const infinite = infiniteGammaFamilyValue(x, engine);
         if (infinite !== undefined) return infinite;
+        // ln Γ(n) = ln (n − 1)! and ln Γ(1/2 + n) at an exact argument.
+        if (!numericApproximation) {
+          const exact = logGammaAtExactArgument(engine, x, 'principal');
+          if (exact !== undefined) return exact;
+        }
         return shouldNumericize(numericApproximation, x)
           ? apply(
               x,
@@ -8926,6 +9238,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: guardDigitsN(([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(0, x, engine);
         if (special !== undefined) return special;
+        if (!numericApproximation) {
+          const exact = digammaAtExactRational(engine, x);
+          if (exact !== undefined) return exact;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         const result = apply(
           x,
@@ -8961,6 +9277,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: guardDigitsN(([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(1, x, engine);
         if (special !== undefined) return special;
+        if (!numericApproximation) {
+          const exact = polygammaAtExactArgument(engine, 1, x);
+          if (exact !== undefined) return exact;
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         const result = apply(
           x,
@@ -9060,6 +9380,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // other negative literal order is a capability gap, so the
         // application stays symbolic instead of reporting the kernel's `NaN`.
         if (order !== null && order < 0) return undefined;
+        if (!numericApproximation && order !== null) {
+          const exact =
+            order === 0
+              ? digammaAtExactRational(engine, x)
+              : polygammaAtExactArgument(engine, order, x);
+          if (exact !== undefined) return exact;
+        }
         if (!shouldNumericize(numericApproximation, n, x)) return undefined;
         const result = apply2(
           n,
@@ -9427,6 +9754,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               [a, b],
               numericApproximation ? reduced.N() : reduced
             );
+          // Two positive half-integers: B(a, b) = Γ(a)Γ(b)/Γ(a + b) is a
+          // rational multiple of π, as B(1/2, 1/2) = π (DLMF 5.12.1).
+          if (!numericApproximation) {
+            const half = betaAtHalfIntegers(engine, a, b);
+            if (half !== undefined) return half;
+          }
           // Remaining pole cases: a or b a non-positive integer with no
           // positive-integer partner to cancel it → Γ-pole (B is infinite).
           if ((ai !== null && ai <= 0) || (bi !== null && bi <= 0))

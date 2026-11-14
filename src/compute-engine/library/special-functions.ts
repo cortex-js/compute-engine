@@ -34,6 +34,7 @@ import {
   boxComplexResult,
   boxExpOfComplexLog,
   infiniteGammaFamilyValue,
+  logGammaAtExactArgument,
 } from './arithmetic.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
@@ -284,6 +285,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           // lnΓ(n) = ln((n−1)!)
           const exact = engine.expr(['Ln', ['Factorial', n - 1]]);
           return numericApproximation ? exact.N() : exact.evaluate();
+        }
+        // ln Γ(1/2 + n) at any other half-integer: Ln of the exact Γ, minus
+        // iπm for a negative half-integer (the continuous branch).
+        if (
+          !numericApproximation &&
+          n === null &&
+          !(isNumber(z) && z.isSame(0.5))
+        ) {
+          const half = logGammaAtExactArgument(engine, z, 'continuous');
+          if (half !== undefined) return half;
         }
         if (
           !numericApproximation &&

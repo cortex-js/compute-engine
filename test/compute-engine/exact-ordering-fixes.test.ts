@@ -310,7 +310,7 @@ describe('ordering an operand with unknowns against one without', () => {
 // `approximate()` had no error bound for Γ, erf, erfc, erfi, ζ, arcosh and
 // artanh, so a constant that contained one of them was never ordered:
 // `Max(Γ(1/3), 3)` stayed unevaluated. The true values, from mpmath at 30
-// digits: Γ(1/3) = 2.67893853470774763365569294097, Γ(−7/2) = 0.27008820585,
+// digits: Γ(1/3) = 2.67893853470774763365569294097, Γ(−10/3) = 0.39172697533,
 // erf(1) = 0.842700792949714869341, erfc(1) = 0.157299207050285130659,
 // erfi(1) = 1.65042575879754287603, ζ(3) = 1.20205690315959428540,
 // arsinh(1) = 0.881373587019543025232, arcosh(2) = 1.31695789692481670863,
@@ -320,7 +320,7 @@ describe('A CONSTANT WITH A SPECIAL FUNCTION IS ORDERED', () => {
   const cases: [MathJsonExpression, string][] = [
     [['Max', G3, 3], '3'],
     [['Max', G3, 2], 'Gamma(1/3)'],
-    [['Max', ['Gamma', ['Rational', -7, 2]], 0], 'Gamma(-7/2)'],
+    [['Max', ['Gamma', ['Rational', -10, 3]], 0], 'Gamma(-10/3)'],
     [['Min', ['Erf', 1], ['Rational', 1, 2]], '1/2'],
     [['Max', ['Erfc', 1], 1], '1'],
     [['Max', ['Erfi', 1], 1], 'Erfi(1)'],

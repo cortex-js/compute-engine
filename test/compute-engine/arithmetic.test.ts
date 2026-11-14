@@ -3190,8 +3190,8 @@ describe('Gamma at a positive integer evaluates to the exact factorial', () => {
     const f = ce.parse('\\Gamma(4.0)').evaluate();
     expect(f.toString()).toBe('6');
     expect(f.isExact).toBe(false);
-    // An exact non-integer has no integer value: it stays symbolic.
-    expect(value(['Gamma', ['Rational', 1, 2]])).toBe('Gamma(1/2)');
+    // An exact non-integer with no closed form stays symbolic (Γ(1/2) is √π).
+    expect(value(['Gamma', ['Rational', 1, 3]])).toBe('Gamma(1/3)');
     // The incomplete form Γ(s, z) is unchanged; Γ(s, 0) = Γ(s) now folds.
     expect(value(['Gamma', 2, 1])).toBe('Gamma(2, 1)');
     expect(value(['Gamma', 4, 0])).toBe('6');

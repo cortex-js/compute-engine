@@ -64,7 +64,8 @@ describe('DIGAMMA FUNCTION', () => {
   });
 
   test('Digamma without numericApproximation returns unevaluated', () => {
-    const result = ce.expr(['Digamma', 1]).evaluate();
+    // 1/5 has no closed form; ψ(1) = −γ does (gamma-family-exact-values.test.ts)
+    const result = ce.expr(['Digamma', ['Rational', 1, 5]]).evaluate();
     expect(result.operator).toBe('Digamma');
   });
 });
@@ -283,8 +284,10 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
     // loggamma). Exact under evaluate, not just N().
     expect(ce.expr(['GammaLn', 0]).evaluate().toString()).toBe('+oo');
     expect(ce.expr(['GammaLn', -3]).evaluate().toString()).toBe('+oo');
-    // Regular arguments unchanged: exact-symbolic, numericizes under N().
-    expect(ce.expr(['GammaLn', 4]).evaluate().toString()).toBe('GammaLn(4)');
+    // A positive integer is ln (n − 1)!; another exact argument stays symbolic
+    // and numericizes under N().
+    expect(ce.expr(['GammaLn', 4]).evaluate().toString()).toBe('ln(6)');
+    expect(ce.expr(['GammaLn', ['Rational', 1, 3]]).evaluate().operator).toBe('GammaLn');
     expectApprox(ce.expr(['GammaLn', 4]), Math.log(6));
   });
 
