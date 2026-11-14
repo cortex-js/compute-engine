@@ -51,6 +51,9 @@ An `irRuntime(source: RuntimeSource)` with `IR_RUNTIME_VERSION`, a field in
 
 ## `mode: 'bigint'` (1,029 hits)
 
+Done 2026-11-14, with every integer a `bigint` (counters and lengths too);
+see "The `bigint` mode" in `ir/README.md`.
+
 The integer lane printed as JavaScript `bigint`, no new IR lane: a second
 `Syntax` whose `.int` spellings are bigint ones (`5n`; `_SYS` bigint helpers
 for `abs`, `max`, `min`, floor division, `Mod`, integer `Power`), and an entry

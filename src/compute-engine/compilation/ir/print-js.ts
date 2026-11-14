@@ -53,6 +53,34 @@ const tick = '  _SYS.tick();';
 const number = (x: number) =>
   Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
 
+/** The regions `build` and `filter`, whose index starts at `zero`, and
+ *  whose count of the list `out` is `count(out)`. */
+const builds = (
+  zero: string,
+  count: (out: string) => string
+): Syntax['regions'] => {
+  const open = (out: string, n: string, k: string) => [
+    `const ${out} = [], ${out}_n = ${n};`,
+    guard(`${out}_n`, 'a list'),
+    `for (let ${k} = ${zero}; ${k} < ${out}_n; ${k}++) {`,
+    tick,
+  ];
+  return {
+    build: ({ outs: [out], args: [n], params: [k] }) => ({
+      open: open(out, n, k),
+      close: ([y]) => [`  ${out}.push(${y});`, '}'],
+    }),
+    filter: ({ outs: [c, out], args: [n], params: [k] }) => ({
+      open: open(out, n, k),
+      close: ([keep, y]) => [
+        `  if (${keep}) ${out}.push(${y});`,
+        '}',
+        `const ${c} = ${count(out)};`,
+      ],
+    }),
+  };
+};
+
 export const JS: Syntax = Object.freeze({
   ops: {
     add: '($0 + $1)',
@@ -106,28 +134,7 @@ export const JS: Syntax = Object.freeze({
     ),
   },
   regions: {
-    build: ({ outs: [out], args: [n], params: [k] }) => ({
-      open: [
-        `const ${out} = [], ${out}_n = ${n};`,
-        guard(`${out}_n`, 'a list'),
-        `for (let ${k} = 0; ${k} < ${out}_n; ${k}++) {`,
-        tick,
-      ],
-      close: ([y]) => [`  ${out}.push(${y});`, '}'],
-    }),
-    filter: ({ outs: [count, out], args: [n], params: [k] }) => ({
-      open: [
-        `const ${out} = [], ${out}_n = ${n};`,
-        guard(`${out}_n`, 'a list'),
-        `for (let ${k} = 0; ${k} < ${out}_n; ${k}++) {`,
-        tick,
-      ],
-      close: ([keep, y]) => [
-        `  if (${keep}) ${out}.push(${y});`,
-        '}',
-        `const ${count} = ${out}.length;`,
-      ],
-    }),
+    ...builds('0', (out) => `${out}.length`),
     integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
       open: [`const ${out} = _SYS.integrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
@@ -144,12 +151,13 @@ export const JS: Syntax = Object.freeze({
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
   },
+  // A `bigint` literal is made in the bigint mode only (`JS_BIGINT`).
   constant: ({ value: x }) =>
     typeof x === 'object'
       ? `({ re: ${number(x.re)}, im: ${number(x.im)} })`
       : typeof x === 'boolean'
         ? String(x)
-        : number(x),
+        : number(x as number),
   input: (name) =>
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
@@ -186,6 +194,69 @@ export const JS: Syntax = Object.freeze({
 });
 
 [JS.ops, JS.regions, JS.helpers].forEach((t) => Object.freeze(t));
+
+/**
+ * The syntax of `mode: 'bigint'`: every integer is a JavaScript `bigint`
+ * (`5n`), also an index and a length, converted with `Number()` where
+ * JavaScript reads a number (an element, the length of an array) and with
+ * `BigInt()` where it gives one (an input, the length of a list). The
+ * operations that it spells are exact on `bigint` values, with the helpers
+ * of the mode (`bigint-runtime.ts`, members of `_SYS`); it spells no other,
+ * so a program with another operation declines (`admits()`). A helper
+ * throws a `NonFiniteValue` at a pole, and one catch around the entry
+ * returns its number.
+ */
+export const JS_BIGINT: Syntax = Object.freeze({
+  ...JS,
+  ops: {
+    'add.int': '($0 + $1)',
+    'sub.int': '($0 - $1)',
+    'neg.int': '(-$0)',
+    'mul.int': '($0 * $1)',
+    'abs.int': '_SYS.babs($0)',
+    'mod.int': '_SYS.bfloorMod($0, $1)',
+    'max.int': '_SYS.bmax($0, $1)',
+    'min.int': '_SYS.bmin($0, $1)',
+    'pow.int': '_SYS.bpow($0, $1)',
+    'factorial.int': '_SYS.bfactorial($0)',
+    'sign': '_SYS.bsign($0)',
+    'binomial': '_SYS.bbinomial($0, $1)',
+    'gcd': '_SYS.bgcd($0, $1)',
+    'lcm': '_SYS.blcm($0, $1)',
+    ...Object.fromEntries(
+      ['lt', 'le', 'gt', 'ge', 'eq', 'ne', 'and', 'or', 'not'].map((o) => [
+        o,
+        JS.ops[o],
+      ])
+    ),
+    'elem': '$0[Number($1)]',
+    'at': '_SYS.bat($0, $1)',
+    'rangecount': '_SYS.brangeCount($0, $1, $2)',
+    'rangestep': '($1 >= $0 ? 1n : -1n)',
+  },
+  regions: builds('0n', (out) => `BigInt(${out}.length)`),
+  constant: (l) =>
+    l.lane !== 'integer'
+      ? JS.constant(l)
+      : l.value < 0
+        ? `(${BigInt(l.value)}n)`
+        : `${BigInt(l.value)}n`,
+  length: (list) => `BigInt(${list}.length)`,
+  read: (text, t) =>
+    t.lane === 'integer' && t.shape.length === 0 ? `BigInt(${text})` : text,
+  map: (lengths, body) =>
+    JS.map!(
+      lengths.map((n) => `Number(${n})`),
+      body
+    ),
+  entry: (body) => [
+    'try {',
+    ...body,
+    '} catch (_e) { if (_e instanceof _SYS.NonFiniteValue) return _e.value; throw _e; }',
+  ],
+});
+
+[JS_BIGINT.ops, JS_BIGINT.regions].forEach((t) => Object.freeze(t));
 
 export type JavaScriptResult = {
   /** The value of a call: an expression of the inputs object `_`, or for
@@ -248,7 +319,7 @@ export function printJavaScript(
   );
   const body = [
     ...(counts ? ['  _SYS.resetLoopPasses();'] : []),
-    ...printed.body,
+    ...(syntax.entry?.(printed.body) ?? printed.body),
   ].join('\n');
   const literal = entry.literal === true;
   const code = literal

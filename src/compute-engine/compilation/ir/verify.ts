@@ -108,11 +108,13 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
               ? typeof value === 'object' &&
                 typeof value.re === 'number' &&
                 typeof value.im === 'number'
-              : typeof value === 'number' &&
-                // A folded integer operation can give NaN (`Mod(1, 0)`).
-                (lane === 'real' ||
-                  !Number.isFinite(value) ||
-                  Number.isInteger(value)));
+              : typeof value === 'bigint'
+                ? lane === 'integer'
+                : typeof value === 'number' &&
+                  // A folded integer operation can give NaN (`Mod(1, 0)`).
+                  (lane === 'real' ||
+                    !Number.isFinite(value) ||
+                    Number.isInteger(value)));
         if (!ok)
           fail(`const v${i.out}: ${String(value)} is not a ${typeToString(t)}`);
         if (typeof value === 'number') constants.set(i.out, value);

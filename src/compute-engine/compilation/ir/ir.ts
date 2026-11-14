@@ -39,15 +39,21 @@ export type IRType = { readonly lane: Lane; readonly shape: readonly Length[] };
 // `{ kind: 'tuple'; elements: IRType[] }` in a union with the type above,
 // read by `elem` with a literal index and printed as an array or a struct.
 
-/** A typed literal. A bigint is another member. */
+/** A typed literal. An integer beyond the safe integers is a `bigint`
+ *  (`mode: 'bigint'` only); a safe one is always a number. */
 export type Literal =
-  | { readonly lane: 'real' | 'integer'; readonly value: number }
+  | { readonly lane: 'real'; readonly value: number }
+  | { readonly lane: 'integer'; readonly value: number | bigint }
   | { readonly lane: 'boolean'; readonly value: boolean }
   | { readonly lane: 'complex'; readonly value: Cx };
 
+/** The value of a constant. */
+export type Constant = number | bigint | boolean | Cx;
+
 /** The key of a constant: equal keys are one value (`-0` is not `0`). */
-export function literalKey(lane: Lane, value: number | boolean | Cx): string {
-  const n = (x: number | boolean) => (Object.is(x, -0) ? '-0' : String(x));
+export function literalKey(lane: Lane, value: Constant): string {
+  const n = (x: number | bigint | boolean) =>
+    Object.is(x, -0) ? '-0' : String(x);
   return typeof value === 'object'
     ? `c ${lane} ${n(value.re)} ${n(value.im)}`
     : `c ${lane} ${n(value)}`;
@@ -269,7 +275,7 @@ export function recursiveFunctions(
 export class Builder {
   readonly types: IRType[] = [];
   /** The value of each constant. */
-  readonly constants = new Map<V, number | boolean | Cx>();
+  readonly constants = new Map<V, Constant>();
   /** The names whose engine value is a literal of the program. */
   readonly captures = new Set<string>();
   /** The instruction of each `op` value. */
@@ -378,7 +384,7 @@ export class Builder {
     return v;
   }
 
-  constant(value: number | boolean | Cx, lane: Lane): V {
+  constant(value: Constant, lane: Lane): V {
     return this.once(literalKey(lane, value), () => {
       const out = this.newValue(scalarType(lane));
       this.constants.set(out, value);

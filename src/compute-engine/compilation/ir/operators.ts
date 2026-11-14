@@ -20,6 +20,11 @@
  * real operand is converted where it is read (`cplx`, which the lowering
  * adds). In `mode: 'complex'`, a row with `leaves` takes its complex
  * signature unless its operands prove a real value.
+ *
+ * The bigint mode has no lane of its own: a row takes a signature whose
+ * result is an integer, a boolean or an element (`signatureOf()`), and the
+ * bigint `Syntax` (`print-js.ts`) spells the operations whose spelling is
+ * exact on `bigint` values; it declines the others.
  */
 
 import {
@@ -184,7 +189,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Negate',       1,          arith('neg', 1, true),         { fold: (a: number) => -a }),
   row('Multiply',     'variadic', arith('mul', 1, true),         { fold: (a: number, b: number) => a * b }),
   row('Divide',       2,          rc('div', 2),                  { fold: (a: number, b: number) => a / b }),
-  row('Power',        2,          rc('pow', 2),                  { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
+  row('Power',        2,          [...rc('pow', 2), [[I, I], I, 'pow.int']], { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
   row('Sqrt',         1,          rc('sqrt', 1),                 { fold: Math.sqrt, ...cut }),
   row('Abs',          1,          [...arith('abs', 1), [[C], R, 'cabs']], { fold: Math.abs }),
   row('Exp',          1,          rc('exp', 1),                  { fold: Math.exp }),
@@ -227,7 +232,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Erfc',         1,          [[[R], R, 'erfc']],            { fold: F.erfc }),
   row('Gamma',        1,          [[[R], R, 'gamma']],           { fold: F.gamma }),
   row('GammaLn',      1,          [[[R], R, 'gammaln']],         { fold: F.gammaln }),
-  row('Factorial',    1,          [[[R], R, 'factorial']],       { fold: F.factorial }),
+  row('Factorial',    1,          [[[R], R, 'factorial'], [[I], I, 'factorial.int']], { fold: F.factorial }),
+  // Rows of the integer lane only: the bigint mode spells them.
+  row('Binomial',     2,          [[[I, I], I, 'binomial']],     list),
+  row('GCD',          'variadic', [[[I], I, 'gcd']],             list),
+  row('LCM',          'variadic', [[[I], I, 'lcm']],             list),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
   row('Zeta',         1,          [[[R], R, 'zeta']],            { fold: F.zeta }),
   // `Max` of a list is its largest element: a reduction, not threaded.
@@ -390,17 +399,21 @@ export function regionRow(op: string): RegionRow | undefined {
 /** The first signature of `row` that accepts operands of `types` (a
  *  scalar of a lane that widens to the operand's, or a list of such
  *  elements; a list where a scalar is read when the row threads), or
- *  `undefined`. With `complex`, only a signature of complex operands. */
+ *  `undefined`. With `complex`, only a signature of complex operands. With
+ *  `bigint` (`mode: 'bigint'`), only a signature whose result is not real
+ *  or complex: its operands are integers, which a `real` operand reads. */
 export function signatureOf(
   row: OperatorRow,
   types: readonly IRType[],
-  complex = false
+  complex = false,
+  bigint = false
 ): Signature | undefined {
   const operand = (args: readonly Operand[], i: number) =>
     args.length === 1 ? args[0] : args[i];
   return row.signatures.find(
-    ([args]) =>
+    ([args, result]) =>
       (!complex || args.includes('complex')) &&
+      (!bigint || (result !== 'real' && result !== 'complex')) &&
       types.every((t, i) => {
         const a = operand(args, i);
         if (a === 'list') return t.shape.length > 0;

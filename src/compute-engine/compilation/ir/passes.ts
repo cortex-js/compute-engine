@@ -38,7 +38,7 @@ import {
   outsOf,
   regionsOf,
   scalarType,
-  type Cx,
+  type Constant,
   type IRType,
   type Instr,
   type Literal,
@@ -241,7 +241,7 @@ function perElement(
 }
 
 const scalarize: Pass = (p, rows) => {
-  const constants = new Map<V, number | boolean | Cx>();
+  const constants = new Map<V, Constant>();
   return rewrite(p, (i) => {
     if (i.k === 'const') constants.set(i.out, i.value.value);
     if (i.k !== 'op') return undefined;
@@ -349,7 +349,7 @@ const hoist: Pass = (p, rows) => {
 };
 
 const strength: Pass = (p) => {
-  const constants = new Map<V, number | boolean | Cx>();
+  const constants = new Map<V, Constant>();
   return rewrite(p, (i, subst) => {
     if (i.k === 'const') constants.set(i.out, i.value.value);
     if (i.k !== 'op' || i.op !== 'pow') return undefined;

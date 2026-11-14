@@ -2,7 +2,8 @@
  * The slice compiler, GLSL ES 3.00 printer.
  *
  * - Every IR operation of the operator table has a spelling in both
- *   printers, except those that GLSL declines.
+ *   printers, except those that GLSL declines and the integer rows that
+ *   only the bigint syntax spells.
  * - Six snapshots, each guarding a rule (named at each).
  * - When a headless Chromium is installed for `playwright-core`, the
  *   shaders run in WebGL2 (SwiftShader): their `f32` values are compared
@@ -19,7 +20,10 @@ import {
   Decline,
   OPERATORS,
 } from '../../src/compute-engine/compilation/ir';
-import { JS } from '../../src/compute-engine/compilation/ir/print-js';
+import {
+  JS,
+  JS_BIGINT,
+} from '../../src/compute-engine/compilation/ir/print-js';
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
 import { spellingOf } from '../../src/compute-engine/compilation/ir/print';
 import {
@@ -53,10 +57,18 @@ describe('IR slice: GLSL text', () => {
     const jsOnly = new Set(['draw', 'rangecount', 'at', 'log10', 'hypot', 'asin', 'acos',
       'acosh', 'atanh', ...Object.keys(REAL_FUNCTIONS).filter((f) => f !== 'fract'),
       ...Object.keys(COMPLEX_FUNCTIONS)]);
+    const bigintOnly = new Set(['binomial', 'gcd', 'lcm']);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
+        if (bigintOnly.has(op)) {
+          expect(spellingOf(JS_BIGINT, op)).toBeDefined();
+          expect(spellingOf(JS, op)).toBeUndefined();
+          expect(spellingOf(GLSL, op)).toBeUndefined();
+          continue;
+        }
         expect(spellingOf(JS, op)).toBeDefined();
-        if (!jsOnly.has(op)) expect(spellingOf(GLSL, op)).toBeDefined();
+        if (!jsOnly.has(op.split('.')[0]))
+          expect(spellingOf(GLSL, op)).toBeDefined();
         else expect(spellingOf(GLSL, op)).toBeUndefined();
       }
   });

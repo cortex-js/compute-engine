@@ -150,11 +150,11 @@ export function compileWithIrProfile(
   expr: Expression,
   options: IrOptions | undefined
 ): CompilationResult<'javascript'> {
-  const given = options?.mode ?? 'strict';
-  const mode = given === 'complex' ? 'complex' : 'strict';
+  // `compile()` refuses a mode other than these three.
+  const mode = (options?.mode ?? 'strict') as 'strict' | 'complex' | 'bigint';
   const refused =
-    given !== mode
-      ? `the option \`mode\` with the value '${String(given)}'`
+    mode === 'bigint' && Object.keys(options?.vars ?? {}).length > 0
+      ? "the option `vars` in the mode 'bigint'"
       : options?.quadrature === 'monte-carlo'
         ? "the option `quadrature` with the value 'monte-carlo'"
         : optionDecline(options);
@@ -225,7 +225,11 @@ export function compileWithIrProfile(
   // `javascript-runtime.ts`), which `run()` applies too: a number for a
   // complex input is converted to `{re, im: 0}`, also with `entryChecks:
   // false`; with `entryChecks`, a `{re, im}` value for a real input, and a
-  // string or a typed array for a list input, throw a `TypeError`.
+  // string or a typed array for a list input, throw a `TypeError`. In the
+  // bigint mode, with `entryChecks`, an integer input that is not a
+  // `bigint` or a safe integer throws, and the `number` cells of a list of
+  // integers are converted (`bigints`, `bigintLists`); the code converts a
+  // scalar (`JS_BIGINT.read`).
   type Key = string | number;
   const plan = {
     kind: literal ? 'args' : 'vars',
@@ -236,7 +240,10 @@ export function compileWithIrProfile(
     // The scalar boolean inputs (also in `real`), which `broadcast()` reads
     // as columns, as `varsEntryPlan()` of the existing compiler.
     booleans: [] as Key[],
+    bigints: [] as Key[],
+    bigintLists: [] as Key[],
   };
+  const bigint = mode === 'bigint';
   const checks = options?.entryChecks !== false;
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
@@ -247,8 +254,11 @@ export function compileWithIrProfile(
       if (!checks) return;
       plan.lists.push(key);
       plan.strings.set(key, literal ? `argument ${i + 1}` : `"${name}"`);
+      if (bigint && t.lane === 'integer') plan.bigintLists.push(key);
     } else if (t.lane === 'complex') plan.complex.push(key);
-    else if (checks) {
+    else if (bigint && t.lane === 'integer') {
+      if (checks) plan.bigints.push(key);
+    } else if (checks) {
       plan.real.push(key);
       if (t.lane === 'boolean' && !literal) plan.booleans.push(key);
     }
@@ -259,7 +269,11 @@ export function compileWithIrProfile(
   // convention of every stored kernel (`normalizeRunResult()`). A call
   // with no input to check skips the check.
   const unchecked =
-    plan.real.length + plan.complex.length + plan.lists.length === 0;
+    plan.real.length +
+      plan.complex.length +
+      plan.lists.length +
+      plan.bigints.length ===
+    0;
   const run = literal
     ? (...args: unknown[]) =>
         normalizeRunResult(

@@ -1187,7 +1187,46 @@ type `any` 233; the `functions` option 212; an input of type `tensor` 144, of
 type `matrix` 121; a symbol with a value that is not a number or a list of
 numbers 98.
 
-Next step: a `bigint` lane, then a scratch build for Tycho's audit.
+Fifth batch, 2026-11-14 (`mode: 'bigint'`). Every integer is a JavaScript
+`bigint`, printed by a second syntax (`JS_BIGINT`) over the existing `_SYS`
+helpers of the mode; no new lane in the representation. Counters, lengths and
+indexes are `bigint` too, converted with `Number()` where JavaScript reads a
+number (the representation does not tell a counter from an integer value). A
+real or complex value declines, also a quotient under a rounding function, a
+comparison with a rational constant, `vars`, and a `Sum` or `Product` with
+`iterationBudget`. A closed node is folded with `evaluate()` to the exact
+integer. The mode runs with the passes `fold` and `hoist` off: its helpers
+throw at a pole, and `hoist` evaluated a guarded operation before its guard
+(review finding). A pole gives a `number` through one catch of
+`_SYS.NonFiniteValue` around the entry. A decline keeps the code
+`'outside-profile'`; the existing mode uses `'bigint-lane'`. Measured in the
+worktree (main at `878d07625287235658c859a8f8ade102c9ed8043` plus batch 4 and
+the patch); 5,119 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,394 of 10,860 (95.7%) |
+| Every JavaScript compile | 23,146 of 38,919 (59.5%) |
+| Public `compile()` calls | 12,751 of 28,057 (45.4%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267
+fails as before. Largest causes of a decline: input type `any` 233; the
+`functions` option 212; an input of type `tensor` 144, of type `matrix` 121; a
+symbol with a value that is not a number or a list of numbers 98; a rational
+literal in the bigint mode 94.
+
+Tycho's first answer (session `tycho-desk`, 2026-11-14, on a build of
+`0101917df900b4e44a3600d5070f96f94186b3e7`): its compile seam passes
+`iterationBudget`, `inputs`, `symbolic`, sometimes `vars` and `storage`, all
+mapped. Its four hot JavaScript plot paths pass `broadcast: true` and call
+`result.broadcast()` or `result.broadcastAsync()`; its Prelude calls
+`result.runAsync()` for `parallel for`. The profile declines `broadcast: true`
+and has neither method: this is the next batch. The profile is not wired for
+GLSL in `compile()`.
+
+Next step: `broadcast: true`, `broadcast()`, `broadcastAsync()` and
+`runAsync()` on the result of the profile, through the generic functions the
+existing target uses; then a second build for Tycho.
 
 Definition of done (user, 2026-11-12): the profile is the default for
 JavaScript and GLSL with a decline falling back to the interpreter; Tycho's

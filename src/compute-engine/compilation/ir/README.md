@@ -185,6 +185,73 @@ interpreter is finite (`Arctan(Ln(x))` at `x = 0` is NaN, the interpreter gives
 the sign of the zero part, IEEE style (`Argument(-Z)` at `Z = 0` is π), also for
 a `-0` part of a complex input (no fidelity is owed at a signed zero).
 
+## The `bigint` mode
+
+`mode: 'bigint'` (JavaScript only) computes every integer as a JavaScript
+`bigint`, so a program of integers is exact at any size: `Mod(n, 10)` at
+`n = 2^60 + 1` is `7n`. It is not a lane of the IR. The lowering takes, for each
+row, a signature whose result is an integer, a boolean or an element
+(`signatureOf()`), and the printer is a second `Syntax` (`JS_BIGINT` of
+`print-js.ts`) in which an integer literal is `5n` and each operation it spells
+is exact on `bigint` values, with the helpers of the existing mode
+(`bigint-runtime.ts`, members of `_SYS`): `Add`, `Subtract`, `Negate`,
+`Multiply`, `Abs` (`babs`), `Mod` (`bfloorMod`), `Max`, `Min` (`bmax`, `bmin`),
+`Sign` (`bsign`), `Power` (`bpow`), `Factorial` (`bfactorial`), `Binomial`,
+`GCD`, `LCM` (`bbinomial`, `bgcd`, `blcm`, rows of the integer lane only), the
+comparisons, `And`, `Or`, `Not`, `If`, `Which`, `Block`, `Sum` and `Product`
+with integer bounds, `List`, `Range`, `Length`, `At` (`bat`), `Map`, `Filter`,
+`Reduce`, `Loop`, user functions with integer parameters (declared, as
+`(integer) -> integer`), and a root function literal with integer parameters. A
+closed node is the exact value of `evaluate()` (`N()` of `2^70 + 1` is rounded);
+a closed node whose value is not an integer (`Mod(5, 0)`, `(−1)!`) is lowered as
+written, so its helper throws the pole where it is evaluated.
+
+Every value is an integer or a boolean, also a loop index, a list index and a
+length: a loop counts with a `bigint` counter, and the code converts with
+`Number()` where JavaScript reads a number (an element, `$0[Number($1)]`, the
+length of `Array.from`) and with `BigInt()` where it gives one (the length of an
+array, `BigInt(L.length)`). The mode runs with the passes `fold` and `hoist`
+off, also with `cse: false` or `constantFold: false`: a helper throws at a pole
+(`Mod`, `At`, `Factorial`, `Power`, `Binomial`, and so a call), so no operation
+is evaluated before it is written, and `hoist` would move a guarded arm out of
+its guard (`m != 0 ∧ Mod(n, m) = 1` at `m = 0` is `False`); the folds of the
+rows compute with doubles, and the lowering has folded the closed nodes exactly
+already. `cse` reads a value that dominates its use, and `strength` rewrites the
+real `pow` only.
+
+Declined, each with its cause: a real or complex value anywhere (an input that
+is not of a subtype of `integer`, a real literal, `Pi`, a row with no integer
+signature such as `Divide`, `Sqrt` or `Hypot`), so also a quotient under a
+rounding function (`Floor(n/3)` is `Floor(n·1/3)`, and `1/3` has no `bigint`
+value), `Floor(Sqrt(n))`, a division under an integer promise
+(`Declare(t, integer, n/m)`) and a comparison with a rational constant
+(`n < 7/2`); a `Power` whose exponent is not proved nonnegative (a constant
+`>= 0`, an `Abs`, an even power, a sum or a product of such values: `n^m` is a
+rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` (the syntax does not
+spell them); `If` with no else and `Which` with no `True` clause (their value is
+`NaN`); `Max` and `Min` of a list (their identity is `±∞`); `Factorial2`
+(`(−5)!!` is `1/3`); a `Sum` or a `Product` with an `iterationBudget` (its value
+over the budget is `NaN`); a random frame, a draw and an integral; and the
+option `vars`. A decline keeps the code `'outside-profile'` (the existing
+compiler's mode uses `'bigint-lane'`). GLSL has no such mode.
+
+The ABI is the one of the existing mode (`docs/COMPILATION-MODEL.md`, "The
+`bigint` mode"). An integer input takes a `bigint` or a safe-integer `number`;
+the code converts it with `BigInt()` at each read, also with
+`entryChecks: false`, and with the checks on, a number that is not a safe
+integer (`1.5`, `2^60`) throws a `TypeError` that names the input (the entry
+plan field `bigints`, `checkEntry()`). A list of integers is an array of
+`bigint`; with the checks on its `number` cells are converted in a copy
+(`bigintLists`), and with the checks off the host gives `bigint` cells. A result
+on the lane is a `bigint` (also a small one), a list result an array of
+`bigint`, a boolean a `boolean`. A helper at a pole throws a `NonFiniteValue`
+(`(−1)!`, `Mod(n, 0)`, an `At` out of range), and one catch around the entry
+returns its number, `Infinity` or `NaN`, as the existing mode's code does: the
+throw ends the computation, so a pole under a comparison gives the number where
+the interpreter gives a boolean. The helpers' size limit (about 1,000,000
+digits) throws a `RangeError`. The stored code holds no `bigint` (its literals
+are text), and `load()` gives the values of `run()`.
+
 ## Lists
 
 A length is a number or an integer SSA value: the length of an input is a
@@ -286,8 +353,9 @@ parameter decline.
 ## How to add
 
 - An operator: one row in `OPERATORS`; a spelling in `JS.ops` and `GLSL.ops` for
-  each new IR operation (`op.int` falls back to `op`). A target with no spelling
-  declines the operation.
+  each new IR operation (`op.int` falls back to `op`), and in `JS_BIGINT.ops`
+  when it is exact on `bigint` values. A target with no spelling declines the
+  operation.
 - A list-reading operator: a row with a `'list'` operand (as `At`), or a
   reduction in `REDUCTIONS` (it reads its list through a source).
 - A construct: one case in `lower.ts`. A construct with a body is a region row
@@ -337,17 +405,18 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   or parameter is converted to `{re, im: 0}`, also with `entryChecks: false`; a
   conversion copies the own properties of the inputs object, so an inherited
   input or a getter is then lost, a known limitation of the existing runtime),
-  `mode: 'complex'` (reported in the result's `mode`), `cse: false` (the passes
-  without `cse`), `constantFold: false` (the lowering evaluates no closed
-  sub-expression with `N()`, and the `fold` pass is off), `symbolDeps` (the user
-  functions compiled in and the names whose value the code holds, `captures`)
-  and `varsObjectRefs` (the inputs read from the inputs object, filled also when
-  a literal declines for a free name). Admitted with no effect: `storage` (the
-  JavaScript target ignores it, `CompilationOptions.storage`), `mode: 'strict'`,
+  `mode: 'complex'` and `mode: 'bigint'` (reported in the result's `mode`; "The
+  `bigint` mode"), `cse: false` (the passes without `cse`),
+  `constantFold: false` (the lowering evaluates no closed sub-expression with
+  `N()`, and the `fold` pass is off), `symbolDeps` (the user functions compiled
+  in and the names whose value the code holds, `captures`) and `varsObjectRefs`
+  (the inputs read from the inputs object, filled also when a literal declines
+  for a free name). Admitted with no effect: `storage` (the JavaScript target
+  ignores it, `CompilationOptions.storage`), `mode: 'strict'`,
   `broadcast: false` (the result has no `broadcast()`), and an empty
   `functions`, `operators`, `imports` or blank `preamble`. Declined by name:
-  `functions`, `operators` (both forms), `imports`, `preamble`, the `mode`
-  `'bigint'`, `broadcast: true`, `strictTypes: true`.
+  `functions`, `operators` (both forms), `imports`, `preamble`,
+  `broadcast: true`, `strictTypes: true`, and `vars` in the `bigint` mode.
 - **`vars`.** A mapped name is read as the host's text at each use, in program
   order (an effectful operation, so `w - w` with `w: '_.draw()'` calls `draw`
   twice), in the scope of the entry, where `_` is the inputs object. The mapping

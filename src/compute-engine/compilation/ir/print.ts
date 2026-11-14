@@ -56,6 +56,11 @@ export type Syntax = {
   positional(name: string, index: number): string;
   /** The length of the input whose read is `list`. */
   length(list: string): string;
+  /** The value of an input or a positional parameter of the entry of type
+   *  `type`, from its read `text`. Absent: the read. */
+  read?(text: string, type: IRType): string;
+  /** The statements of the entry, from the printed ones. Absent: those. */
+  entry?(body: string[]): string[];
   list(elements: string[], type: IRType): string;
   /** An operation applied to each element: `lengths` are the texts of the
    *  lengths, `body` gives the text of one element from its index
@@ -213,7 +218,12 @@ export function printProgram(
       k < positional
         ? syntax.positional(name, argumentIndex(entry, k))
         : syntax.input(name, k);
-    names.set(v, entry.lengthOf[k] ? syntax.length(input) : input);
+    names.set(
+      v,
+      entry.lengthOf[k]
+        ? syntax.length(input)
+        : (syntax.read?.(input, p.types[v]) ?? input)
+    );
   });
   const type = (v: V): IRType => p.types[v];
   const name = (v: V): string => names.get(v) ?? `v${v}`;

@@ -86,6 +86,7 @@ import {
   type Frame,
   type Lowering,
 } from './lower-context.js';
+import { toBigint } from '../../boxed-expression/numerics.js';
 import { listLowering, parameterName } from './lower-lists.js';
 import { functionLowering, inputType, userBinding } from './lower-functions.js';
 
@@ -132,11 +133,14 @@ const CLOSED_SIZE = 10_000;
 /** `fold: false` (the `constantFold: false` option of the profile `ir`):
  *  no closed sub-expression is evaluated with `N()`. `mode: 'complex'`: a
  *  row that can leave the reals takes its complex signature unless its
- *  operands prove a real value (`OperatorRow.leaves`). `iterationBudget`:
+ *  operands prove a real value (`OperatorRow.leaves`). `mode: 'bigint'`:
+ *  every number is an integer, exact at any size (a closed node is the
+ *  exact value of `evaluate()`); a real or complex value declines.
+ *  `iterationBudget`:
  *  a `Sum` or a `Product` of more passes than it is NaN. */
 export type LowerOptions = {
   readonly fold?: boolean;
-  readonly mode?: 'strict' | 'complex';
+  readonly mode?: 'strict' | 'complex' | 'bigint';
   readonly iterationBudget?: number;
   /** The `vars` option: a name read as the host's text (`hostVarOp()`). */
   readonly vars?: readonly string[];
@@ -152,6 +156,7 @@ export function lower(
   options: LowerOptions = {}
 ): Program {
   const ce = root.engine;
+  const bigint = options.mode === 'bigint';
   const b = new Builder(
     (op) => rowOfOp(rows, op)?.row.effect === 'pure',
     (i) =>
@@ -174,6 +179,11 @@ export function lower(
   const same = (x: readonly Length[], y: readonly Length[]) =>
     sameShape(x, y, constant);
   const row = (head: string) => rowOfHead(rows, head)!;
+  /** The constant of the integer `x`: a number when it is safe. */
+  const exact = (x: bigint): V => {
+    const n = Number(x);
+    return b.constant(Number.isSafeInteger(n) ? n : x, 'integer');
+  };
 
   /** `v` where a value of `lane` is read: converted to the complex lane
    *  when it is real, as it is otherwise. */
@@ -331,13 +341,21 @@ export function lower(
     const complex = leaves(r, args);
     const operation = (given: V[]): V => {
       const types = given.map(type);
-      const signature = signatureOf(r, types, complex);
+      const signature = signatureOf(r, types, complex, bigint);
       if (signature === undefined)
         decline(
           node,
           !r.threads && types.some((t) => t.shape.length > 0)
             ? `${r.head} of a list`
-            : `${r.head} of ${types.map(typeToString).join(', ')}`
+            : `${r.head} of ${types.map(typeToString).join(', ')}${bigint ? ', whose value is not an integer (the bigint mode)' : ''}`
+        );
+      // An integer power is an integer for an exponent proved `>= 0`
+      // only (`n^m` is a rational at `m < 0`).
+      const j = r.leaves?.integer;
+      if (bigint && j !== undefined && !nonnegative(given[j]))
+        decline(
+          node,
+          `${r.head} of an exponent that is not proved nonnegative, whose value can be a rational (the bigint mode)`
         );
       const [lanes] = signature;
       const operands = given.map((v, i) => {
@@ -374,6 +392,12 @@ export function lower(
     const region = b.current();
     const effects = b.effects;
     const v = node(e, want);
+    const lane = v === undefined ? undefined : type(v).lane;
+    if (bigint && (lane === 'real' || lane === 'complex'))
+      decline(
+        e,
+        `a ${lane} value: the bigint mode computes integers and booleans only`
+      );
     if (shared && v !== undefined && b.effects === effects) {
       const reads = [...facts(e).names].map((n): [string, V | undefined] => [
         n,
@@ -588,7 +612,8 @@ export function lower(
     if ([...f.names].some(valued)) return undefined;
     let n: Expression;
     try {
-      n = e.N();
+      // The bigint mode: the exact value (`N()` of `2^70 + 1` is rounded).
+      n = bigint ? e.evaluate() : e.N();
     } catch (error) {
       if (error instanceof Error && error.name === 'CancellationError')
         throw error;
@@ -596,6 +621,9 @@ export function lower(
     }
     if (isSymbol(n, 'True') || isSymbol(n, 'False'))
       return b.constant(isSymbol(n, 'True'), 'boolean');
+    // A value that is not an integer (a pole, `Mod(5, 0)`) is lowered as
+    // written: its helper throws the pole where the node is evaluated.
+    if (bigint && isNumber(n) && n.isInteger !== true) return undefined;
     return isNumber(n) ? number(n) : undefined;
   };
 
@@ -604,6 +632,12 @@ export function lower(
   const number = (
     e: Expression & { re: number; im: number }
   ): V | undefined => {
+    if (bigint) {
+      const n = e.isInteger === true ? toBigint(e) : null;
+      if (n === null)
+        decline(e, 'a number that is not an integer (the bigint mode)');
+      return exact(n);
+    }
     if (e.im === 0)
       return b.constant(e.re, Number.isSafeInteger(e.re) ? 'integer' : 'real');
     if (Number.isFinite(e.re) && Number.isFinite(e.im))
@@ -911,10 +945,13 @@ export function lower(
           const v = scalar(value);
           // With no type, a number is a real: a later write of a real to
           // `let t = 0` is valid.
+          // In the bigint mode a real write declines: an integer stays one.
           const lane: Lane =
             typeName !== 'unknown'
               ? (typeName as Lane)
-              : type(v).lane === 'boolean' || type(v).lane === 'complex'
+              : type(v).lane === 'boolean' ||
+                  type(v).lane === 'complex' ||
+                  bigint
                 ? type(v).lane
                 : 'real';
           result = local(s, v, lane);

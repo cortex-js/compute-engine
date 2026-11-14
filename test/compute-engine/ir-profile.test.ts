@@ -152,7 +152,6 @@ describe('a decline', () => {
     ['operators', { operators: () => undefined }],
     ['imports', { imports: [() => 1] }],
     ['preamble', { preamble: 'const k = 1;' }],
-    ['mode', { mode: 'bigint' }],
     ['quadrature', { quadrature: 'monte-carlo' }],
     ['broadcast', { broadcast: true }],
     ['strictTypes', { strictTypes: true }],

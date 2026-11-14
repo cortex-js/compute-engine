@@ -2796,11 +2796,12 @@ export interface CompilationOptions<Expr = unknown> {
    * `'ir'`, the expression is compiled by the IR compiler of
    * `src/compute-engine/compilation/ir` ("Selecting the pipeline" in its
    * `README.md`). It declines with `'outside-profile'` what it does not
-   * compile, and by name the options `functions`, `vars`, `operators`,
-   * `imports`, `preamble`, `broadcast: true`, `strictTypes: true` and a
-   * `mode` other than `'strict'`, and `iterationBudget` for a program with
-   * a counted loop (a `Sum`, a `Product` or a reduction of a list); an
-   * internal error is a `'compile-error'`. The result reports
+   * compile, and by name the options `functions`, `operators`, `imports`,
+   * `preamble`, `broadcast: true`, `strictTypes: true`, and `vars` in the
+   * mode `'bigint'`. It maps `vars`, `iterationBudget` and the modes
+   * `'strict'`, `'complex'` and `'bigint'` (every integer is a `bigint`,
+   * and a program with a real value declines); an internal error is a
+   * `'compile-error'`. The result reports
    * `profile: 'ir'`, the fields of stored code (`runtimeVersion`,
    * `preambleOnce`, `entryPlan`) and `shippable` (false for code that
    * draws or integrates), and no `pure`.

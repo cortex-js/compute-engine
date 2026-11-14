@@ -19,6 +19,16 @@
   `run()` of the result checks its inputs and returns its value as a loaded
   copy does: `Multiply(Z, 2)` with `Z: complex` at `Z = 1.5` gives `3`, where
   it gave `{ re: 3, im: 0 }`.
+- **The experimental profile `'ir'` compiles `mode: 'bigint'`.** Every
+  integer is a JavaScript `bigint`, so a program of integers is exact at any
+  size: with `n: integer`, `compile(Mod(n, 10), { profile: 'ir', mode:
+  'bigint' })` gives `7n` at `n = 2n ** 60n + 1n`. The inputs, the results
+  and the value at a pole (`NaN` or `Infinity`) are those of the default
+  compiler's `bigint` mode. A program with a value that is not an integer or
+  a boolean declines with `outside-profile`: a real input or literal, `n/2`,
+  `Floor(n/3)`, `Floor(Sqrt(n))`, `n < 7/2`, `n^m` (the exponent can be
+  negative), `Floor(n)`, `If` with no else, `Max` of a list, and the option
+  `vars`.
 
 ### Resolved Issues
 

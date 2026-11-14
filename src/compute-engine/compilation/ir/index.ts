@@ -17,7 +17,12 @@ import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
 import { SliceInternalError, verify } from './verify.js';
 import { ALL_PASSES, runPasses, type PassOptions } from './passes.js';
-import { JS, printJavaScript, type JavaScriptResult } from './print-js.js';
+import {
+  JS,
+  JS_BIGINT,
+  printJavaScript,
+  type JavaScriptResult,
+} from './print-js.js';
 import { GLSL, printGlsl, type GlslResult } from './print-glsl.js';
 import { spellingOf, type Spelling, type Syntax } from './print.js';
 import { effects, effectTrace } from './effects.js';
@@ -258,8 +263,10 @@ export type SliceOptions = {
   readonly constantFold?: boolean;
   /** `'complex'`: a row that can leave the reals takes its complex
    *  signature unless its operands prove a real value (README, "The
-   *  complex lane"). Default `'strict'`. */
-  readonly mode?: 'strict' | 'complex';
+   *  complex lane"). `'bigint'` (JavaScript only): every number is an
+   *  integer, a JavaScript `bigint` (README, "The `bigint` mode"). Default
+   *  `'strict'`. */
+  readonly mode?: 'strict' | 'complex' | 'bigint';
   /** The rule of `compile()`'s option: a `Sum` or a `Product` of more
    *  passes than the budget is NaN; on JavaScript, the passes of all the
    *  `Loop`s of one call of `run()`, nested ones and those of user
@@ -301,7 +308,8 @@ function tables(options: SliceOptions): {
     },
     helpers: options.extend?.helpers,
   };
-  const base = TARGETS[options.target].syntax;
+  const base =
+    options.mode === 'bigint' ? JS_BIGINT : TARGETS[options.target].syntax;
   if (options.extend === undefined && vars.length === 0)
     return { rows: OPERATORS, syntax: base };
   return {
@@ -323,6 +331,9 @@ export function sliceProgram(
   options: SliceOptions
 ): Program & { warnings: Warning[] } {
   const profile = TARGETS[options.target];
+  const bigint = options.mode === 'bigint';
+  if (bigint && options.target !== 'javascript')
+    throw new Decline('program', `the bigint mode on ${options.target}`);
   const { rows, syntax } = tables(options);
   const p = lower(expr, rows, {
     fold: options.constantFold,
@@ -333,12 +344,25 @@ export function sliceProgram(
   verify(p, rows);
   const warnings = seededWarnings(p, rows);
   const passes = options.passes === false ? {} : (options.passes ?? ALL_PASSES);
-  runPasses(p, { ...passes, scalarize: !profile.elementwise }, rows);
-  const refused = admits(p, { ...profile, syntax }, rows);
+  // The bigint mode: a helper throws at a pole (`Mod`, `At`, `Factorial`,
+  // `Power`, `Binomial`, a call), so no operation is evaluated before it is
+  // written: no `hoist` (it moves a guarded arm out of its guard), and no
+  // `fold` (the folds of the rows compute with doubles).
+  runPasses(
+    p,
+    {
+      ...passes,
+      scalarize: !profile.elementwise,
+      ...(bigint ? { fold: false, hoist: false } : {}),
+    },
+    rows
+  );
+  const lanes: Lane[] = bigint ? ['integer', 'boolean'] : [...profile.lanes];
+  const refused = admits(p, { ...profile, lanes, syntax }, rows);
   if (refused !== undefined)
     throw new Decline(
       refused.site ?? refused.head ?? 'program',
-      `${refused.cause} on ${options.target}`,
+      `${refused.cause} on ${options.target}${bigint ? ' in the bigint mode' : ''}`,
       refused.head
     );
   return Object.assign(p, { warnings });
