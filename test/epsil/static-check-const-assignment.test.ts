@@ -639,8 +639,9 @@ describe('PERFORMANCE: MANY CONSTANTS', () => {
   // pair of a statement and a constant, and took 70 times as long at
   // N = 800. The comparison with `let` does not depend much on the load of
   // the machine, because both programs are timed in the same run, each
-  // three times. The limit on the time itself is asserted only in a
-  // `CE_PERF=1` run.
+  // three times; the limit of 20 times leaves room for a burst of load
+  // during one of the measurements. The limit on the time itself is
+  // asserted only in a `CE_PERF=1` run.
   const program = (n: number, keyword: string) => {
     const lines: string[] = [];
     for (let i = 0; i < n; i++)
@@ -662,7 +663,7 @@ describe('PERFORMANCE: MANY CONSTANTS', () => {
       constantTime = Math.min(constantTime, time(constants));
       variableTime = Math.min(variableTime, time(variables));
     }
-    expect(constantTime).toBeLessThan(5 * variableTime + 50);
+    expect(constantTime).toBeLessThan(20 * variableTime);
     if (process.env.CE_PERF === '1') expect(constantTime).toBeLessThan(2000);
   }, 120_000);
 });

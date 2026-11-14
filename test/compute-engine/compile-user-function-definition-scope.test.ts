@@ -11,6 +11,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { opsReads } from '../utils';
 
 function both(
   setup: (ce: ComputeEngine) => void,
@@ -156,23 +157,30 @@ describe('COMPILE a user function against the scope of its definition', () => {
     // Each level holds the level below twice, under a `Sum` and under a
     // `Product` that both bind `k`. The body has 2·depth + 1 distinct nodes
     // but 2^depth paths to the innermost one. The check calls the private
-    // assertion directly, so that only the check is timed. The time of the
-    // full compilation is tested in `compile-shared-binder-body.test.ts`.
-    const ce = new ComputeEngine();
-    let body = ce.box(['Multiply', 'x', 'k']);
-    for (let i = 0; i < 20; i++)
-      body = ce.function('Add', [
-        ce.function('Sum', [body, ce.box(['Limits', 'k', 1, 2])]),
-        ce.function('Product', [body, ce.box(['Limits', 'k', 1, 2])]),
-      ]);
-    ce.declare('H', 'function');
-    ce.assign('H', ce.function('Function', [body, ce.symbol('x')]));
-    const start = Date.now();
-    (
-      BaseCompiler as unknown as {
-        assertUserFunctionFreeBindings: (e: unknown, t: unknown) => void;
-      }
-    ).assertUserFunctionFreeBindings(ce.box(['H', 'x']), {});
-    expect(Date.now() - start).toBeLessThan(1500);
+    // assertion directly, and counts the reads of the operands of a node
+    // (`ops`) at depths 12 and 16: a walk of each node reads about 1.6
+    // times more at depth 16, a walk of each path about 16 times more. A
+    // count does not depend on the speed of the machine, as a time would.
+    // The full compilation is tested in `compile-shared-binder-body.test.ts`.
+    const reads = (depth: number): number => {
+      const ce = new ComputeEngine();
+      let body = ce.box(['Multiply', 'x', 'k']);
+      for (let i = 0; i < depth; i++)
+        body = ce.function('Add', [
+          ce.function('Sum', [body, ce.box(['Limits', 'k', 1, 2])]),
+          ce.function('Product', [body, ce.box(['Limits', 'k', 1, 2])]),
+        ]);
+      ce.declare('H', 'function');
+      ce.assign('H', ce.function('Function', [body, ce.symbol('x')]));
+      const call = ce.box(['H', 'x']);
+      return opsReads(() =>
+        (
+          BaseCompiler as unknown as {
+            assertUserFunctionFreeBindings: (e: unknown, t: unknown) => void;
+          }
+        ).assertUserFunctionFreeBindings(call, {})
+      );
+    };
+    expect(reads(16)).toBeLessThan(4 * reads(12));
   });
 });

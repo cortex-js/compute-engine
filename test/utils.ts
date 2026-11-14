@@ -5,6 +5,7 @@ import { ComputeEngine } from '../src/compute-engine';
 import { parseEpsil } from '../src/epsil';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import { BoxedType } from '../src/common/type/boxed-type';
+import { BoxedFunction } from '../src/compute-engine/boxed-expression/boxed-function';
 import type { ExpressionInput } from '../src/compute-engine/global-types';
 
 const MAX_LINE_LENGTH = 72;
@@ -474,4 +475,26 @@ export function expectTypeBetween(
     throw new Error(
       `type \`${s}\` is over-narrow: it is a subtype of \`${bounds.above}\``
     );
+}
+
+/** The number of reads of the operands of a node (`ops`) while `f` runs. A
+ * counter, not a `jest.spyOn()`, which keeps every call and runs out of
+ * memory on a walk of each path. */
+export function opsReads(f: () => void): number {
+  const proto = BoxedFunction.prototype;
+  const original = Object.getOwnPropertyDescriptor(proto, 'ops')!;
+  let count = 0;
+  Object.defineProperty(proto, 'ops', {
+    ...original,
+    get(this: BoxedFunction) {
+      count += 1;
+      return original.get!.call(this);
+    },
+  });
+  try {
+    f();
+  } finally {
+    Object.defineProperty(proto, 'ops', original);
+  }
+  return count;
 }

@@ -464,15 +464,15 @@ describe('cancelling the task that a worker runs', () => {
     );
     await until(() => log.runs === 1);
     await sleep(50);
-    const t0 = Date.now();
     ctl.abort();
     // The caller has its answer at once.
     expect((await p).done).toBe(0);
     // The worker answered early, with the cells it did before it read the
-    // flag (the pool drops that answer).
+    // flag (the pool drops that answer). The cells are counted, not timed: a
+    // worker that reads the flag late, or never, does half of the slice or
+    // more, whatever the load of the machine.
     await until(() => log.results.length === 1);
-    expect(log.results[0].done).toBeLessThan(n);
-    expect(log.results[0].at - t0).toBeLessThan(1000);
+    expect(log.results[0].done).toBeLessThan(n / 2);
     expect(log.terminated).toBe(0);
     expect(log.created).toBe(1);
     // The same worker takes the next batch.

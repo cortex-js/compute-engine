@@ -194,18 +194,19 @@ describe('A Range row is a row of its integers', () => {
     ).toEqual(['List', ['List', ['List', 1], ['List', 2]]]);
   });
 
-  // The time of the two queries over rows of 10,000 integers is compared with
-  // their time over rows of 10 integers, not with a fixed limit, because a CI
-  // machine can be several times slower than a local one. When the queries do
-  // not list the rows, the two times are almost the same. When they list each
-  // row, the long rows take several times longer: hashing each row, which
-  // reads its elements without boxing them (`BoxedFunction.hash`), is the
-  // fastest way to list it, and it makes the long rows 4 to 7 times slower.
+  // The time of the two queries over rows of 100,000 integers is compared
+  // with their time over rows of 10 integers, not with a fixed limit, because
+  // a CI machine can be several times slower than a local one. When the
+  // queries do not list the rows, the two times are almost the same. When
+  // they list each row, the long rows take far longer: hashing each row,
+  // which reads its elements without boxing them (`BoxedFunction.hash`), is
+  // the fastest way to list it, and it makes rows of 10,000 integers 4 to 7
+  // times slower than rows of 10, so, in proportion, rows of 100,000 integers
+  // tens of times slower. The limit of 10 times leaves room for a burst of load from the
+  // other test workers during one measurement of a few tens of milliseconds.
   // Each length runs twice and the shorter time is used, so that one garbage
-  // collection does not fail the test. The comparison is made up to three
-  // times and passes when one of them is under the limit: in a full suite run,
-  // the other test workers load the machine, and a burst of load can slow one
-  // measurement of a few tens of milliseconds by more than two times. Code that
+  // collection does not fail the test, and the comparison is made up to
+  // three times and passes when one of them is under the limit. Code that
   // lists the rows is slower in every comparison, so it still fails.
   test('Shape and Rank of many long range rows do not list the rows', () => {
     const queries = (n: number) => {
@@ -218,12 +219,12 @@ describe('A Range row is a row of its integers', () => {
     };
     queries(10);
     let ratio = Infinity;
-    for (let attempt = 0; attempt < 3 && ratio >= 2; attempt++) {
+    for (let attempt = 0; attempt < 3 && ratio >= 10; attempt++) {
       const short = Math.min(queries(10), queries(10));
-      const long = Math.min(queries(10_000), queries(10_000));
+      const long = Math.min(queries(100_000), queries(100_000));
       ratio = Math.min(ratio, long / short);
     }
-    expect(ratio).toBeLessThan(2);
+    expect(ratio).toBeLessThan(10);
   });
 
   test('range rows with too many elements in total are not listed', () => {

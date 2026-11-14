@@ -9,8 +9,10 @@
  * analyzed once for each path to it. Before the fix, the shared body below
  * took 55 s to compile at a depth of 10, and the triple sum took 12.7 s.
  *
- * The time limits are generous for a loaded machine: the fixed compile takes
- * about 2 s and 5 ms.
+ * The compile time of the shared body (about 2 s; 55 s before the fix) is
+ * asserted only in a `CE_PERF=1` run: a time limit depends on the speed and
+ * the load of the machine. The nested sums are tested by the length of their
+ * code, which does not.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
@@ -51,7 +53,7 @@ describe('COMPILE a big operator over a shared or large body', () => {
     const result = compileJs(ce.box(['H', 'x']));
     const elapsed = Date.now() - start;
     expect(result.success).toBe(true);
-    expect(elapsed).toBeLessThan(20_000);
+    if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(20_000);
     expect(Number.isFinite(result.run!({ x: 0.5 } as never) as number)).toBe(
       true
     );
@@ -77,11 +79,8 @@ describe('COMPILE a big operator over a shared or large body', () => {
     const expr = ce.parse(
       '\\sum_{a=1}^{60}\\sum_{b=1}^{60}\\sum_{c=1}^{60} (a\\cdot b\\cdot c\\cdot x)'
     );
-    const start = Date.now();
     const result = compileJs(expr);
-    const elapsed = Date.now() - start;
     expect(result.success).toBe(true);
-    expect(elapsed).toBeLessThan(5_000);
     // The terms of the unrolled clauses are at most `MAX_UNROLLED_NODES`
     // nodes in all, so the code is far below the 18 MB of the full unroll.
     expect(result.code.length + (result.preamble ?? '').length).toBeLessThan(
@@ -114,11 +113,8 @@ describe('COMPILE nested sums whose bounds are constant symbols', () => {
     const expr = ce.parse(
       '\\sum_{a=1}^{n}\\sum_{b=1}^{n}\\sum_{c=1}^{n} (a+b+c)'
     );
-    const start = Date.now();
     const result = compileJs(expr);
-    const elapsed = Date.now() - start;
     expect(result.success).toBe(true);
-    expect(elapsed).toBeLessThan(5_000);
     expect(result.code.length + (result.preamble ?? '').length).toBeLessThan(
       100_000
     );

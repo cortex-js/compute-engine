@@ -47,15 +47,26 @@ import { adaptiveQuadrature } from '../../src/compute-engine/numerics/gauss-kron
 const CHI_SQUARE_TAIL =
   '\\int_{x}^{\\infty}\\frac{y^{\\frac{k}{2}-1}e^{-\\frac{y}{2}}}{2^{\\frac{k}{2}}\\Gamma(\\frac{k}{2})}dy';
 
-// Before the fix, each `NaN` value took 450 ms or more on an idle machine.
-// After the fix, it takes about 10 ms. The limit leaves a large margin for a
-// loaded machine.
-const MAX_MS = 250;
+// Before the fix, each `NaN` value took more than 30,000 evaluations of the
+// integrand in the adaptive loop, then 1e7 for the Monte-Carlo fallback.
+// After the fix, it takes a few hundred. Each compiled integrand of this file
+// calls `Math.exp` once per evaluation, so the calls of `Math.exp` count the
+// evaluations, whatever the load of the machine.
+const MAX_EVALUATIONS = 2000;
 
-function timed<T>(f: () => T): [T, number] {
-  const start = performance.now();
-  const value = f();
-  return [value, performance.now() - start];
+/** The value of `f()` and the number of calls of `Math.exp` it made. */
+function expCalls<T>(f: () => T): [T, number] {
+  const exp = Math.exp;
+  let n = 0;
+  Math.exp = (x: number) => {
+    n += 1;
+    return exp(x);
+  };
+  try {
+    return [f(), n];
+  } finally {
+    Math.exp = exp;
+  }
 }
 
 describe('TYCHO ROW 422: AN INTEGRAND THAT IS NaN ON A PART OF THE INTERVAL', () => {
@@ -105,9 +116,10 @@ describe('TYCHO ROW 422: AN INTEGRAND THAT IS NaN ON A PART OF THE INTERVAL', ()
   });
 
   test.each([-0.2, -1])('x = %p is NaN at once, compiled', (x) => {
-    const [value, ms] = timed(() => Number(compiled.run({ x })));
+    const [value, calls] = expCalls(() => Number(compiled.run({ x })));
     expect(value).toBeNaN();
-    expect(ms).toBeLessThan(MAX_MS);
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThan(MAX_EVALUATIONS);
   });
 
   test('the compiled real kernel reads a complex sample as NaN and stops at once', () => {
@@ -124,9 +136,10 @@ describe('TYCHO ROW 422: AN INTEGRAND THAT IS NaN ON A PART OF THE INTERVAL', ()
       run: (v: Record<string, number>) => unknown;
     };
     expect(out.success).toBe(true);
-    const [value, ms] = timed(() => Number(out.run({ x: -0.2 })));
+    const [value, calls] = expCalls(() => Number(out.run({ x: -0.2 })));
     expect(value).toBeNaN();
-    expect(ms).toBeLessThan(MAX_MS);
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThan(MAX_EVALUATIONS);
     expect(Number(out.run({ x: 1 }))).toBeCloseTo(0.3173105078629141, 8);
   });
 });
@@ -388,9 +401,10 @@ describe('TYCHO ROW 422: THE REVIEW CASES ON BOTH ROUTES', () => {
       run: (v: Record<string, number>) => unknown;
     };
     expect(out.success).toBe(true);
-    const [value, ms] = timed(() => Number(out.run({ t: -1 })));
+    const [value, calls] = expCalls(() => Number(out.run({ t: -1 })));
     expect(value).toBeNaN();
-    expect(ms).toBeLessThan(MAX_MS);
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThan(MAX_EVALUATIONS);
     expect(Number(out.run({ t: 0 }))).toBeGreaterThan(1);
   });
 

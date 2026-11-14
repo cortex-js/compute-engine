@@ -30,6 +30,7 @@ import type {
 import { glslFragmentDefinition } from '../../src/compute-engine/compilation/glsl-fragment';
 import type { GlslRepresentation } from '../../src/compute-engine/compilation/glsl-fragment';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
+import { opsReads } from '../utils';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 const ce = new ComputeEngine();
@@ -2421,21 +2422,24 @@ describe('phase C2, third review fixes', () => {
   });
 
   test('a block search of the operands of And visits a shared graph once per node', () => {
-    const e = new ComputeEngine();
-    e.declare('x', 'real');
-    e.declare('c', 'real');
-    // At depth 27 the graph has about 2^27 paths and 80 distinct nodes. A
-    // search of each path took about 1.3 s, and doubles at each level; the
-    // search of each node, with the rest of canCompile(), about 10 ms. The
-    // depth is kept small because the canonical form of each level takes a
-    // time that also doubles at each level (about 4 s here).
-    const expr = e.function('And', [
-      e.function('Greater', [e.symbol('x'), e.number(0)]),
-      e.function('Less', [graph(e, e.symbol('x'), 27), e.number(1)]),
-    ]);
-    const start = Date.now();
-    expect(canCompile(expr, { to: 'glsl' })).toEqual({ ok: true });
-    expect(Date.now() - start).toBeLessThan(500);
+    // The graph of depth d has 2^d paths and about 3d distinct nodes. The
+    // reads of the operands of a node (`ops`) by canCompile() are counted
+    // at depths 16 and 20: a walk of each node reads about 1.3 times more
+    // at depth 20, a walk of each path about 16 times more. A count does
+    // not depend on the speed of the machine, as a time would.
+    const reads = (depth: number): number => {
+      const e = new ComputeEngine();
+      e.declare('x', 'real');
+      e.declare('c', 'real');
+      const expr = e.function('And', [
+        e.function('Greater', [e.symbol('x'), e.number(0)]),
+        e.function('Less', [graph(e, e.symbol('x'), depth), e.number(1)]),
+      ]);
+      return opsReads(() =>
+        expect(canCompile(expr, { to: 'glsl' })).toEqual({ ok: true })
+      );
+    };
+    expect(reads(20)).toBeLessThan(4 * reads(16));
   });
 
   test('At over a list of one point compiles', () => {

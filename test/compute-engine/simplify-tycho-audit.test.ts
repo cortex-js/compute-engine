@@ -1,5 +1,6 @@
 import { compile, ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json';
+import * as interruptible from '../../src/common/interruptible';
 
 // These tests come from an audit of `simplify()` before compile over a corpus
 // of plots: each case is a form that the audit found to change a value, a shape
@@ -250,9 +251,14 @@ describe('A lazy operator over an operand that evaluates to itself', () => {
 });
 
 describe('simplify() under a time limit', () => {
-  // Without the deadline check in the pairs of a sum of squared trigonometric
-  // terms, this call ran for about 5,600 ms with a limit of 300 ms. The bound is
-  // wide so that a loaded machine does not fail the test.
+  // The loop over the pairs of terms of a sum of squared trigonometric terms
+  // (`simplifyTrig`, `symbolic/simplify-trig.ts`) checks the deadline: it does
+  // not return to the per-node check of `simplifyExpression()`. Here one pass
+  // of that loop visits the 2,145 terms of the expansion; without the check,
+  // a limit of 300 ms ends after the pass, at about 1,200 ms on the
+  // development machine. The test does not compare times, which depend on the
+  // load: the check of the deadline is spied on, and the first one that the
+  // loop makes stops the call.
   test('a large expansion ends close to the limit', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
@@ -269,11 +275,36 @@ describe('simplify() under a time limit', () => {
       ],
       ['Power', 'M', 64],
     ]);
-    const start = Date.now();
     expect(() => ce.withTimeLimit({ ms: 300 }, () => expr.simplify())).toThrow(
       'Timeout exceeded'
     );
-    expect(Date.now() - start).toBeLessThan(3000);
+
+    // The caller of each check is the first frame of the stack outside this
+    // file and outside jest's mock. The error is a cancellation, which the
+    // rule that runs the loop lets through.
+    const check = interruptible.checkDeadline;
+    const spy = jest
+      .spyOn(interruptible, 'checkDeadline')
+      .mockImplementation((...args) => {
+        const caller = (new Error().stack ?? '')
+          .split('\n')
+          .slice(1)
+          .find(
+            (line) =>
+              !line.includes('simplify-tycho-audit') &&
+              !line.includes('jest-mock')
+          );
+        if (caller?.includes('simplify-trig'))
+          throw new interruptible.CancellationError({ message: 'pair loop' });
+        return check(...args);
+      });
+    try {
+      expect(() =>
+        ce.withTimeLimit({ ms: 600_000 }, () => expr.simplify())
+      ).toThrow('pair loop');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test('the identity of a common factor still applies', () => {

@@ -394,15 +394,19 @@ describe('the --workers option: Ctrl-C in the REPL', () => {
     const ys = [4.3, 1.18, 0.01, 1.48, 3.44];
     const data = xs.map((x, i) => `(${x}, ${ys[i]})`).join(', ');
     input.write(
-      `findFit([${data}], a * cos(b * x + c) + d * logGamma(x + c), [a, b, c, d], [x], {"global" -> {"b" -> [0.1, 6], "c" -> [0, 6.28]}})\n` +
+      `let fit = findFit([${data}], a * cos(b * x + c) + d * logGamma(x + c), [a, b, c, d], [x], {"global" -> {"b" -> [0.1, 6], "c" -> [0, 6.28]}})\n` +
         'keep + 1\n'
     );
     await waitFor(() => running > 0, 5);
-    const t0 = Date.now();
     interrupts.emit('SIGINT');
-    await waitFor(() => text.includes('8'));
-    const elapsed = Date.now() - t0;
+    // The banner holds an `8` too: wait for the one that the next entry
+    // writes after the message.
+    await waitFor(() => /interrupted \(Ctrl-C\)\n[\s\S]*8/.test(text));
     const listeners = interrupts.listenerCount('SIGINT');
+    // The fit stopped before it ended: `fit` has no value. An abort that the
+    // entry reads only when the fit ends assigns `fit`; this check does not
+    // depend on the load of the machine, as a time would.
+    const fitValue = session.engine.box('fit').value;
     // Close the REPL and the pool before the assertions, so that a failed
     // assertion does not leave a worker thread that keeps jest running.
     input.write('.exit\n');
@@ -412,7 +416,7 @@ describe('the --workers option: Ctrl-C in the REPL', () => {
     expect(text).toContain('error: the entry was interrupted (Ctrl-C)');
     // The entry that waited ran, with the declaration of the session.
     expect(text).toMatch(/interrupted \(Ctrl-C\)\n[\s\S]*8/);
-    expect(elapsed).toBeLessThan(2000);
+    expect(fitValue).toBeUndefined();
     expect(listeners).toBe(0);
     expect(factory.terminated()).toBe(factory.created());
   }, 30_000);

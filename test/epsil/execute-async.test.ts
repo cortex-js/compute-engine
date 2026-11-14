@@ -155,11 +155,14 @@ describe('executeEpsilAsync: time limit and abort', () => {
       'let after = 1',
     ].join('\n');
     setTimeout(() => controller.abort('stop'), 30);
-    const t0 = Date.now();
     await expect(
       executeEpsilAsync(ce, source, { signal: controller.signal })
     ).rejects.toMatchObject({ name: 'CancellationError', cause: 'stop' });
-    expect(Date.now() - t0).toBeLessThan(2000);
+    // The fit stopped before it ended: `r` has no value. An abort that is
+    // read only between statements lets the fit end and assigns `r`, and
+    // this check does not depend on the load of the machine, as a time
+    // would.
+    expect(ce.box('r').value).toBeUndefined();
     expect(ce.box('after').value).toBeUndefined();
     // The fields of the run are restored.
     expect(ce._epsilStatementResultHook).toBeUndefined();

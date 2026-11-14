@@ -269,7 +269,9 @@ describe('the call task of the kernel pool', () => {
     const t0 = Date.now();
     ctl.abort(reason);
     await expect(long).rejects.toBe(reason);
-    expect(Date.now() - t0).toBeLessThan(500);
+    // Before a quarter of the 20 s call: a rejection that waits for the call
+    // to end fails, and the load of the machine does not.
+    expect(Date.now() - t0).toBeLessThan(5_000);
     // A call made now waits for the busy worker, then runs on its
     // replacement, which is sent the kernel again.
     expect(await calls.runCall(BUSY, [3], undefined, undefined)).toBe(3);

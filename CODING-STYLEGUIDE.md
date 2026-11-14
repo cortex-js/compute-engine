@@ -61,10 +61,25 @@ written, and propose a change to a rule rather than skip it.
   benchmark tables, and Fungrim. Sections: Breaking Changes, New Features,
   Improvements, Behavior Changes, Resolved Issues, Performance.
 - Generate derived documentation rather than editing it by hand.
-- Put a timing assertion (`expect(elapsed).toBeLessThan(…)`) only in a test that
-  runs under `CE_PERF=1` (`npm run test:perf`). In a normal run, other workers
-  and other sessions load the machine, and the assertion fails with no change to
-  the code.
+- A test that guards a performance regression asserts something that does not
+  depend on the machine. The suite runs on the development machine, on a
+  MacBook Air and on 4-core CI runners, which can be 8 times slower under load,
+  so a time bound that holds on one fails on another with no change to the
+  code. In order of preference:
+  - A count that the regression changes: the calls of a host operator, the
+    size of a result, a counter the code exposes. For a walk that must visit
+    each node of a shared graph once, the count stays the same when the depth
+    grows. `ce.withStepBudget` counts only the cancellation checks of the
+    evaluator, numeric and symbolic loops, and a walk of a shared graph spends
+    none: measure the steps before using it.
+  - A shape of the result that only the fast path produces.
+  - For a latency ("an abort rejects at once"), a comparison with the length
+    of the work that is interrupted, not a fixed number of milliseconds.
+  - A time bound in every run only as a hang guard: at least 100 times the time
+    of the timed work alone on the development machine, and far below the time
+    of the regression it guards.
+  - Otherwise, a timing assertion (`expect(elapsed).toBeLessThan(…)`, or a
+    ratio of two times) runs only under `CE_PERF=1` (`npm run test:perf`).
 - A test that pins type inference uses its own `new ComputeEngine()`. The type
   of a symbol is inferred at its first use and kept for the life of the engine,
   so in a file that uses the shared engine of `test/utils.ts`, an earlier test

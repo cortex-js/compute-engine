@@ -3,6 +3,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { inlineSharedUserFunctionCalls } from '../../src/compute-engine/compilation/gpu-shared-calls';
 import type { CompileTarget } from '../../src/compute-engine/compilation/types';
+import { opsReads } from '../utils';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../../src/math-json';
 import {
@@ -302,16 +303,26 @@ describe('the limits of the substitution', () => {
     // `f` reads its parameter three times, so the expanded chain holds about
     // 4^16 paths. The expansion stops at its size limits, and no call is
     // shared across two bodies: the code is the code by reference.
-    const ce = new ComputeEngine();
-    ce.parse('f(x) := x x + \\sin(x) + x').evaluate();
-    let chain: MathJsonExpression = 'x';
-    for (let i = 0; i < 16; i++) chain = ['f', chain];
-    const start = performance.now();
-    const r = compile(ce.box(chain), { to: 'glsl' });
-    const elapsed = performance.now() - start;
-    expect(r.success).toBe(true);
-    expect(r.code).toBe(`${'_fn_f('.repeat(16)}x${')'.repeat(16)}`);
-    expect(elapsed).toBeLessThan(1000);
+    //
+    // The reads of the operands of a node (`ops`) by the compilation are
+    // counted at depths 12 and 13: past the size limits, a level adds a
+    // constant number of reads (about 500 of 62,000), and an expansion of
+    // each path reads about 4 times more at each level. A count does not
+    // depend on the speed of the machine, as a time would.
+    const compileChain = (depth: number) => {
+      const ce = new ComputeEngine();
+      ce.parse('f(x) := x x + \\sin(x) + x').evaluate();
+      let chain: MathJsonExpression = 'x';
+      for (let i = 0; i < depth; i++) chain = ['f', chain];
+      const expr = ce.box(chain);
+      return opsReads(() => {
+        const r = compile(expr, { to: 'glsl' });
+        expect(r.success).toBe(true);
+        expect(r.code).toBe(`${'_fn_f('.repeat(depth)}x${')'.repeat(depth)}`);
+      });
+    };
+    expect(compileChain(13)).toBeLessThan(2 * compileChain(12));
+    compileChain(16);
   });
 
   test('a call shared by two exclusive arms at each level stays a call', () => {
@@ -371,21 +382,20 @@ describe('the limits of the substitution', () => {
         ]).evaluate();
       }
       ce.parse('g(x) := h_0(x) + 1').evaluate();
-      const start = performance.now();
       const r = compile(ce.box(['Add', [`h_${depth}`, 'x'], ['g', 'x']]), {
         to: 'glsl',
       });
-      const elapsed = performance.now() - start;
       expect(r.success).toBe(true);
-      return { body: r.code, elapsed };
+      return { body: r.code };
     };
     // The functions stay shader functions of their own (in the preamble),
-    // and the root calls them. At depth 10 the root used to be a body of
-    // 312 KB, with every function written out.
+    // and the root calls them. With every function written out, the root at
+    // depth 10 is a body of 312 KB: the length of the body, not the time of
+    // the compilation, is the test, so that it does not depend on the speed
+    // of the machine.
     const deep = compileChain(10);
     expect(deep.body).toMatch(/_fn_h_/);
     expect(deep.body.length).toBeLessThan(1_000);
-    expect(deep.elapsed).toBeLessThan(5_000);
   });
 
   test('an enclosing call emitted after the arms does not serve them', () => {
