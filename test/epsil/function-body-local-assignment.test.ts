@@ -1538,7 +1538,10 @@ describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
       staticCodes(
         'function g(c) { if c { t = 3 }; for k in 1..t { t = 2 }; 0 }\ng(true)'
       )
-    ).toEqual(['assignment-to-undeclared-variable']);
+    ).toEqual([
+      'assignment-to-undeclared-variable',
+      'assignment-to-undeclared-variable',
+    ]);
   });
 });
 

@@ -25,6 +25,15 @@
   `\int_0^\infty x^{10} e^{-x}\,dx` evaluates to `3628800`. The same holds for
   `\int x^{10}\sin(x)\,dx` and for a symbolic coefficient `a`.
 
+### Behavior Changes
+
+- **In an Epsil program, each assignment to an undeclared name is reported, in
+  a block as at the top level.** `checkEpsil()` and `executeEpsil()` reported
+  only the first assignment of each name in a block, a loop body or a function
+  body: `for k in 1..3 { t = 1; u = 2; t = 3 }` gave two
+  `assignment-to-undeclared-variable` diagnostics and `t = 1`, `u = 2`, `t = 3`
+  at the top level gave three. Both give three now, each at its assignment.
+
 ### Performance
 
 - **`compileShader()` refuses a body whose code would be too large before it

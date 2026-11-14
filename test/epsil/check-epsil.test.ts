@@ -77,4 +77,28 @@ describe('checkEpsil', () => {
   test('an #error directive is a diagnostic', () => {
     expect(codes('#error "stop"\nlet a = 1')).toEqual(['error-directive']);
   });
+
+  // CE-1275: each assignment to an undeclared name is reported, in a block as
+  // at the top level, also when two assignments are written the same.
+  test('each assignment to an undeclared name is reported at its site', () => {
+    const sites = (source: string) =>
+      checkEpsil(new ComputeEngine(), source)
+        .diagnostics.filter(
+          (d) => d.message[3] === 'assignment-to-undeclared-variable'
+        )
+        .map((d) => source.slice(d.range[0], d.range[1]));
+    expect(sites('t = 1\nu = 2\nt = 3')).toEqual(['t = 1', 'u = 2', 't = 3']);
+    expect(sites('for k in 1..3 { t = 1; u = 2; t = 3 }')).toEqual([
+      't = 1',
+      'u = 2',
+      't = 3',
+    ]);
+    expect(sites('while false { t = 1; t = 1 }')).toEqual(['t = 1', 't = 1']);
+    const branches = 'do { if true { t = 1 } else { t = 1 }; 0 }';
+    expect(
+      checkEpsil(new ComputeEngine(), branches).diagnostics.map(
+        (d) => d.range[0]
+      )
+    ).toEqual([15, 30]);
+  });
 });

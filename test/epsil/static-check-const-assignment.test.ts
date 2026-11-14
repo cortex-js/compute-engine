@@ -543,7 +543,7 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
       'function f() scope -> integer { c = 3; if true { c = 2 }; 0 }\n' +
         'const c = 1\nf()\nc',
       '1',
-      'c = 3',
+      ['c = 3', 'c = 2'],
     ],
     // A function literal.
     ['let g = () => do { c = 2 }\nconst c = 1\ng()\nc', '1', 'c = 2'],
@@ -556,9 +556,12 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
     // A block of the top level runs before the `const`.
     ['do { c = 2 }\nconst c = 1\n4', '4', 'c = 2'],
   ])('the top-level const is not written: %j', (source, value, at) => {
-    const expected = [
-      ['static-type-error', 'assignment-to-undeclared-variable', 1, at],
-    ];
+    const expected = (Array.isArray(at) ? at : [at]).map((site) => [
+      'static-type-error',
+      'assignment-to-undeclared-variable',
+      1,
+      site,
+    ]);
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value, diagnostics: expected });
   });

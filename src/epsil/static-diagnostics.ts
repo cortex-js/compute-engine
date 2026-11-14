@@ -1288,12 +1288,18 @@ function canonicalizationDiagnostics(
     // `collectErrors`' traversal (operands AND dictionary values), so the
     // JSON walk stays authoritative and the map is a lookup aside. Two
     // byte-identical errors in one statement collide on the key — they also
-    // dedup to one diagnostic below, so first-wins is sufficient.
-    const boxedErrorByJson = new Map<
+    // dedup to one diagnostic below, so the first twin is sufficient. The one
+    // exception is an assignment to an undeclared name, reported at each
+    // assignment: the map keeps every twin in walk order, and the n-th JSON
+    // error of a key is the n-th boxed one.
+    const boxedErrorsByJson = new Map<
       string,
-      ReturnType<ComputeEngine['box']>
+      ReturnType<ComputeEngine['box']>[]
     >();
-    indexBoxedErrors(boxed, boxedErrorByJson);
+    indexBoxedErrors(boxed, boxedErrorsByJson);
+    const firstTwin = (error: MathJsonExpression) =>
+      boxedErrorsByJson.get(JSON.stringify(error))?.[0];
+    const occurrences = new Map<string, number>();
 
     // The errors inside the held stage of a pipe (`xs |> Filter("a")`). The
     // canonical form of a pipe does not contain them, because `Pipe` holds
@@ -1310,8 +1316,10 @@ function canonicalizationDiagnostics(
       errors.push(site.error);
       pipeStageFrames.set(site.error, site.frame);
       const key = JSON.stringify(site.error);
-      if (site.boxed !== undefined && !boxedErrorByJson.has(key))
-        boxedErrorByJson.set(key, site.boxed);
+      if (site.boxed === undefined) continue;
+      const twins = boxedErrorsByJson.get(key);
+      if (twins !== undefined) twins.push(site.boxed);
+      else boxedErrorsByJson.set(key, [site.boxed]);
     }
     if (errors.length === 0 && declMismatch === undefined) continue;
 
@@ -1335,8 +1343,21 @@ function canonicalizationDiagnostics(
     for (const error of errors) {
       const code = errorCode(error);
       if (!isCanonicalizationError(code)) continue;
+      // An assignment to an undeclared name is reported at each assignment,
+      // as at the top level, where each assignment is a statement: in
+      // `for k in 1..3 { t = 1; t = 1 }` the second `t = 1` gives the same
+      // error as the first. The source range of its own boxed twin names the
+      // assignment, and the dedup below keys on it.
+      const perSite = code === 'assignment-to-undeclared-variable';
+      let siteRange: [number, number] | undefined;
+      if (perSite) {
+        const jsonKey = JSON.stringify(error);
+        const n = occurrences.get(jsonKey) ?? 0;
+        occurrences.set(jsonKey, n + 1);
+        siteRange = sourceOffsetsOfBoxed(boxedErrorsByJson.get(jsonKey)?.[n]);
+      }
       if (
-        code === 'assignment-to-undeclared-variable' &&
+        perSite &&
         declaredByEarlierStatement(
           statements,
           stringValue(operand(operand(error, 1), 2)) ?? '',
@@ -1364,8 +1385,9 @@ function canonicalizationDiagnostics(
       // slot must not hide a different error later in the statement that has
       // the same description: `(map(x -> x + 1, [1]), f(y -> y + 1))` has
       // two errors "a key must be a string", and only the one of `map` is
-      // reported as a rule.
-      if (seen.has(key)) continue;
+      // reported as a rule. The errors reported at each site are deduped
+      // after the locator, on their range.
+      if (!perSite && seen.has(key)) continue;
 
       // Where the error sits in the canonical tree names the call it belongs
       // to — the stand-in for the `ErrorTrace` breadcrumb a runtime error
@@ -1399,9 +1421,9 @@ function canonicalizationDiagnostics(
       // that the engine recorded on the error names the site.
       const recorded =
         located.range[0] === start && located.range[1] === end
-          ? sourceOffsetsOfBoxed(boxedErrorByJson.get(JSON.stringify(error)))
+          ? sourceOffsetsOfBoxed(firstTwin(error))
           : undefined;
-      const [from, to] = recorded ?? located.range;
+      const [from, to] = siteRange ?? recorded ?? located.range;
       // The problem is already reported as a rule at a function slot. The
       // error on a key is recognized by its frame and its operand too, for
       // the case where the locator cannot find the pair (two pairs in one
@@ -1418,7 +1440,11 @@ function canonicalizationDiagnostics(
         )
       )
         continue;
-      seen.add(key);
+      if (perSite) {
+        const siteKey = `${key}@${from}:${to}`;
+        if (seen.has(siteKey)) continue;
+        seen.add(siteKey);
+      } else seen.add(key);
 
       const diagnostic: ParsingDiagnostic = {
         severity: 'error',
@@ -1444,7 +1470,7 @@ function canonicalizationDiagnostics(
         primaryRange: [from, to],
         enclosingFrame: frame,
         call: located.call,
-        boxedError: boxedErrorByJson.get(JSON.stringify(error)),
+        boxedError: firstTwin(error),
       });
       if (notes.length > 0) diagnostic.notes = notes;
       // Path-2 refinement (user-ruled 2026-08-23): when the mismatch is
@@ -1457,7 +1483,7 @@ function canonicalizationDiagnostics(
       // `1.5` initializer at `integer`) gets no such note: no annotation
       // rescues it.
       if (code === 'incompatible-type') {
-        const boxedErr = boxedErrorByJson.get(JSON.stringify(error));
+        const boxedErr = firstTwin(error);
         // Structural read of the error node's operands, matching the boxed
         // walk above: `ops` lives on a narrowed interface this module does
         // not import.
@@ -3877,22 +3903,24 @@ function collectErrors(
  * binding of the operand at fault, which the provenance note reads.
  *
  * The walk is depth-first and LEFT-TO-RIGHT, the same visit order as the
- * JSON walk of `collectErrors`: when two byte-identical errors exist, the
- * entry kept (the first one) pairs with the FIRST collected JSON error,
- * which is the one the dedup loop keeps. An entry already in `into` is not
- * replaced. Children are pushed reversed because the stack pops from the
- * end.
+ * JSON walk of `collectErrors`: the twins of one key are listed in visit
+ * order, so the n-th byte-identical JSON error pairs with the n-th entry, and
+ * the first entry with the first collected JSON error, which is the one the
+ * dedup loop keeps. Children are pushed reversed because the stack pops from
+ * the end.
  */
 function indexBoxedErrors(
   root: ReturnType<ComputeEngine['box']>,
-  into: Map<string, ReturnType<ComputeEngine['box']>>
+  into: Map<string, ReturnType<ComputeEngine['box']>[]>
 ): void {
   const stack = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
     if (node.operator === 'Error') {
       const key = JSON.stringify(node.json);
-      if (!into.has(key)) into.set(key, node);
+      const twins = into.get(key);
+      if (twins !== undefined) twins.push(node);
+      else into.set(key, [node]);
     }
     // `ops` (functions) and `values` (dictionaries — the `let` initializer
     // shape `collectErrors` descends) live on narrowed interfaces this
@@ -3960,7 +3988,7 @@ function pipeStageErrors(
     const errors: MathJsonExpression[] = [];
     collectErrors(json, errors);
     if (errors.length === 0) return;
-    const twins = new Map<string, Boxed>();
+    const twins = new Map<string, Boxed[]>();
     indexBoxedErrors(checked, twins);
     const head = operator(json);
     const args = [...operands(json)];
@@ -3991,7 +4019,7 @@ function pipeStageErrors(
             index: at < topicAt ? at + 1 : at,
           };
       }
-      result.push({ error, frame, boxed: twins.get(JSON.stringify(error)) });
+      result.push({ error, frame, boxed: twins.get(JSON.stringify(error))?.[0] });
     }
   };
 
