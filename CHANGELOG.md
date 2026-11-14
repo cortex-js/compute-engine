@@ -35,6 +35,12 @@
 
 ### Resolved Issues
 
+- **`ce.assign(name, undefined)` removes the value of a variable, as its
+  documentation says.** It threw `Invalid definition for symbol "v"`. Now
+  the declaration and the type of `v` stay, and `v + 1` evaluates to
+  `v + 1`. A name with no definition stays undeclared; a constant and a name
+  defined as a function throw an error.
+
 - **A series at −∞ of a root of a square has the right sign, and a series at
   ±∞ of a function with an absolute value or a step stays unevaluated.**
   `Series(1/(Sqrt(x^2) + 1), x, -oo, 3)` was `1/x - 1/x^2 + 1/x^3 + O(x^-4)`;

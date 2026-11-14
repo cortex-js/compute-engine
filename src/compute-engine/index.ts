@@ -4175,7 +4175,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    * Assign a value to a symbol in the current scope.
-   * Use `undefined` to reset the symbol to no value.
+   * Use `undefined` to reset the symbol to no value: the declaration and its
+   * type stay. A name with no definition stays undeclared. A constant, and a
+   * name defined as a function, throw an error.
    *
    * The symbol should be a valid MathJSON symbol not a LaTeX string.
    *

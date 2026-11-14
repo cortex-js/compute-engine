@@ -3363,6 +3363,29 @@ export function assignFn(
   );
 }
 
+/**
+ * `ce.assign(id, undefined)`: remove the value of the variable `id`. The
+ * declaration and its type stay. A name with no definition stays
+ * undeclared: there is no value to remove, and no value to infer a type
+ * from. A constant, and a name defined as a function, refuse: a constant
+ * keeps its value, and a function definition has no value to remove.
+ */
+function removeAssignedValue(ce: IComputeEngine, id: string): void {
+  // As for any other value: `Nothing` keeps its value, a macro has none.
+  if (id === 'Nothing') return;
+  const def = ce.lookupDefinition(id);
+  if (def === undefined) return;
+  if (isMacroDef(def)) throw macroWriteError('assign', id);
+  if (!isValueDef(def))
+    throw new Error(
+      `Cannot remove the value of "${id}": it is defined as a function, and a function definition has no value`
+    );
+  if (def.value.isConstant) throw new ConstantAssignmentError(id);
+  // The same setter as for any other value, so the cache versions advance as
+  // for any other write.
+  setSymbolValue(ce, id, undefined);
+}
+
 /** `assignFn()` for one name `id`. */
 function assignNamedValue(
   ce: IComputeEngine,
@@ -3385,6 +3408,14 @@ function assignNamedValue(
   // retypes the target through that path while a clause is being installed, so
   // clearing there wiped the stamp mid-definition and let a genuine duplicate
   // clause through. Only ASSIGNMENT means full replacement.
+  //
+  // `undefined` removes the value of a variable and keeps its declaration and
+  // its type (the contract of `ce.assign()`). It replaces nothing, so it comes
+  // before the clause provenance is cleared.
+  if (arg2 === undefined) {
+    removeAssignedValue(ce, id);
+    return ce;
+  }
   clearClauseProvenance(ce.lookupDefinition(id));
 
   // An object belongs to the engine that constructed it. Checked here as well
