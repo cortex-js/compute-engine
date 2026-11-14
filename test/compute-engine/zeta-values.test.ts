@@ -585,6 +585,22 @@ describe('HurwitzZeta at large s', () => {
     const z = ce.expr(['HurwitzZeta', 18.199, 4.933]).N();
     expect(Math.abs(z.re / 2.5226160559690445e-13 - 1)).toBeLessThan(1e-12);
   });
+
+  // CE-1296: ζ(21) − Σ_{k<15} k^−21 cancels about 25 digits, so evaluate()
+  // keeps the call and N() of its result is not 0.
+  test('HurwitzZeta(21, 15).evaluate().N() is the value, not 0', () => {
+    let sum = 0;
+    for (let k = 1000; k >= 15; k--) sum += k ** -21;
+    for (const op of ['HurwitzZeta', 'Zeta']) {
+      const z = ce.box([op, 21, 15]).evaluate();
+      expect(z.operator).toBe(op);
+      expect(Math.abs(z.N().re / sum - 1)).toBeLessThan(1e-12);
+    }
+    // A small cancellation keeps the closed form.
+    expect(ce.box(['HurwitzZeta', 3, 2]).evaluate().toString()).toBe(
+      '-1 + Zeta(3)'
+    );
+  });
 });
 
 // A sample of @enumeratio/analytic's Zeta.examples.yaml / HurwitzZeta.examples.yaml,

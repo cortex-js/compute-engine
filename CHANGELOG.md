@@ -35,6 +35,13 @@
 
 ### Resolved Issues
 
+- **`HurwitzZeta(s, m)` at a large order no longer evaluates to a closed form
+  whose numeric value is 0.** `HurwitzZeta(21, 15).evaluate().N()` was `0`; it
+  is `2.73172211187533517712e-25`, the value of `HurwitzZeta(21, 15).N()`.
+  When `ζ(s) − Σ_{k<m} k^−s` would lose more than 6 digits under `.N()`,
+  `evaluate()` keeps the call. The same holds for the two-operand `Zeta`.
+  `HurwitzZeta(3, 2)` is still `Zeta(3) - 1`.
+
 - **`DigitsFrom` reads a `0x` or `0b` numeral past 2^53 exactly.**
   `DigitsFrom("0x1fffffffffffffffff")` was `590295810358705700000`; it is
   `590295810358705651711`.

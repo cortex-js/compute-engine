@@ -6219,6 +6219,20 @@ function zetaAtInfiniteOperand(
 const HURWITZ_PEEL_LIMIT = 20;
 
 /**
+ * The most decimal digits that ζ(s, a) − Σ_{j<m} (a + j)^−s may cancel for
+ * ζ(s, a + m) to be returned in that form: for s > 1, `.N()` of the
+ * difference loses about s·log10((a + m)/a) digits, so ζ(21, 15) would be 0
+ * and ψ⁽⁴⁰⁾(3) 9% off at the default precision.
+ */
+const ZETA_PEEL_CANCELLED_DIGITS_LIMIT = 6;
+
+/** Whether peeling ζ(s, a + m) down to ζ(s, a) cancels too many digits,
+ * `ratio` being (a + m)/a. */
+function zetaPeelCancels(s: number, ratio: number): boolean {
+  return s * Math.log10(ratio) > ZETA_PEEL_CANCELLED_DIGITS_LIMIT;
+}
+
+/**
  * The largest order n for which ζ(−n, a) is rewritten as the Bernoulli
  * polynomial −Bₙ₊₁(a)/(n+1) (DLMF 25.11.14), in `evaluateHurwitzZeta` and
  * `evaluateGeneralizedZeta`. Bₙ₊₁'s bigint numerator and denominator grow
@@ -6554,6 +6568,8 @@ function evaluateHurwitzZeta(
       return engine.function('Zeta', [s]).evaluate({ numericApproximation });
     if (exactRoute) {
       if (m > HURWITZ_PEEL_LIMIT) return undefined; // stay symbolic
+      if (isNumber(s) && s.re > 1 && zetaPeelCancels(s.re, m))
+        return undefined;
       let tail = engine.number(1).pow(engine.function('Negate', [s]));
       for (let k = 2; k < m; k++)
         tail = tail.add(engine.number(k).pow(engine.function('Negate', [s])));
@@ -7464,14 +7480,6 @@ const DIGAMMA_SHIFT_LIMIT = 1000;
 const POLYGAMMA_EXACT_ORDER_LIMIT = 40;
 const POLYGAMMA_EXACT_SHIFT_LIMIT = 64;
 
-/**
- * The most decimal digits that ζ(n + 1, a) − Σ_{j<m} (a + j)^−(n+1) may cancel
- * for ψ⁽ⁿ⁾(a + m) to be returned in that form: `.N()` of the difference loses
- * them, about (n + 1)·log10((a + m)/a), so ψ⁽⁴⁰⁾(3).evaluate().N() would be
- * 9% off at the default precision.
- */
-const POLYGAMMA_CANCELLED_DIGITS_LIMIT = 6;
-
 type BigRational = [bigint, bigint];
 
 /**
@@ -7693,8 +7701,7 @@ function polygammaAtExactArgument(
   if (peel > BigInt(POLYGAMMA_EXACT_SHIFT_LIMIT)) return undefined;
   const s = n + 1;
   const base = fnum === 0n ? 1 : Number(fnum) / Number(den);
-  const cancelled = s * Math.log10(Number(num) / Number(den) / base);
-  if (cancelled > POLYGAMMA_CANCELLED_DIGITS_LIMIT) return undefined;
+  if (zetaPeelCancels(s, Number(num) / Number(den) / base)) return undefined;
   const zeta = engine.function('Zeta', [engine.number(s)]).evaluate();
   const catalan = engine.symbol('CatalanConstant').mul(engine.number(8));
   const key = fnum === 0n ? '1/1' : `${fnum}/${den}`;
