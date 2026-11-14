@@ -42,9 +42,10 @@ function timed<T>(f: () => T): [T, number] {
   return [value, Date.now() - start];
 }
 
-// A generous bound: a walk of 25! elements does not end, and each of these
-// reads takes a few milliseconds.
-const FAST_MS = 2000;
+// A hang guard: a walk of 25! elements does not end, and each of these
+// reads takes a few milliseconds. The bound is far above that and above a
+// stall of a worker in a full run on a loaded machine.
+const FAST_MS = 30_000;
 
 const ONE_TO_25 = ['Range', 1, 25];
 const PERMS_25 = ['Permutations', ONE_TO_25];

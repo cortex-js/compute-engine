@@ -617,9 +617,10 @@ describe('a tower of shared subtrees of depth 40 on the structured route', () =>
       }
       // The checks of the admission: at most a few per node object (a node
       // is checked again only in a new context), where a walk of each path
-      // would make 2^40.
+      // would make 2^40. The time bound is a hang guard: far above the time
+      // of the work and above a stall of a worker in a full run.
       expect(values).toBeLessThan(10 * nodes + 50);
-      expect(ms).toBeLessThan(5_000);
+      expect(ms).toBeLessThan(30_000);
     }
   );
 });

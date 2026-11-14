@@ -31,6 +31,9 @@ describe('A STORED VALUE WHOSE CANONICAL FORM IS NOT CANONICAL', () => {
     expect(value.canonical.isCanonical).toBe(false);
   });
 
+  // The time bound is a hang guard: far above the time of the work and above
+  // a stall of a worker in a full run; the walk that reads a new canonical
+  // object at each step does not end.
   test('the read returns, as the expression written in place does', () => {
     const start = Date.now();
     const held = executeEpsil(
@@ -43,8 +46,8 @@ describe('A STORED VALUE WHOSE CANONICAL FORM IS NOT CANONICAL', () => {
     ).value.json;
     expect(held).toEqual(inPlace);
     expect(held).toEqual(['Length', ['Raw', 1]]);
-    expect(Date.now() - start).toBeLessThan(4000);
-  }, 5000);
+    expect(Date.now() - start).toBeLessThan(30_000);
+  }, 60_000);
 
   test('the engine route', () => {
     const ce = engineWithDecliningOperator();

@@ -13,7 +13,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // (user decision 2026-10-17).
 
 const Q = ['Divide', ['Subtract', ['Factorial', 25], 1], ['Factorial', 24]];
-const H = ['Sum', ['Divide', 1, 'k'], ['Limits', 'k', 1, 10000]];
+const H = ['Sum', ['Divide', 1, 'k'], ['Limits', 'k', 1, 20000]];
 
 function engineWith(body: unknown): ComputeEngine {
   const ce = new ComputeEngine();
@@ -185,23 +185,25 @@ describe('a lazy operator at the top level under .N()', () => {
 
 });
 
-// The exact value of H is a rational with thousands of digits: evaluating it
-// exactly takes about 30 s (measured 2026-10-20 on an M5), while the numeric
-// route takes about 0.1 s locally and up to 4 s on a loaded continuous-
-// integration runner. A limit of 15 s separates the two routes on any of
-// these machines; a limit of 2 s failed on the Node 26 runner. Each test sets
-// a jest timeout above the limit, so a regression fails on the assertion and
-// not on the default 5 s jest timeout.
-const EXACT_ROUTE_LIMIT_MS = 15_000;
-const TEST_TIMEOUT_MS = 20_000;
+// `H = H_20000 ≈ 10.48`. The exact value of a harmonic sum is a rational
+// with thousands of digits: evaluating `H_10000` exactly takes about 30 s
+// (measured 2026-10-20 on an M5), and the time grows faster than the square
+// of the number of terms (0.5 s for 3,000 terms, 5 s for 6,000), while the
+// numeric route takes a fraction of a second. The limit is a hang guard: far
+// above the time of the numeric route and above a stall of a worker in a
+// full run on a loaded machine, and far below the time of the exact route.
+// Each test sets a jest timeout above the limit, so a regression fails on
+// the assertion and not on the default 5 s jest timeout.
+const EXACT_ROUTE_LIMIT_MS = 30_000;
+const TEST_TIMEOUT_MS = 60_000;
 
 describe('the cost of the numeric request', () => {
   test(
     'an argument far from a jump is not evaluated exactly',
     () => {
-      const ce = engineWith(['If', ['Less', 'x', 10], ['Floor', 'x'], 0]);
+      const ce = engineWith(['If', ['Less', 'x', 11], ['Floor', 'x'], 0]);
       const start = Date.now();
-      expect(n(ce, H)).toBe('9');
+      expect(n(ce, H)).toBe('10');
       expect(Date.now() - start).toBeLessThan(EXACT_ROUTE_LIMIT_MS);
     },
     TEST_TIMEOUT_MS
@@ -214,7 +216,7 @@ describe('the cost of the numeric request', () => {
       const start = Date.now();
       expect(
         ce
-          .box(['If', ['Less', H, 10], 0, 1])
+          .box(['If', ['Less', H, 11], 0, 1])
           .N()
           .toString()
       ).toBe('0');

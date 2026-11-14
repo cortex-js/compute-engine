@@ -194,38 +194,22 @@ describe('A Range row is a row of its integers', () => {
     ).toEqual(['List', ['List', ['List', 1], ['List', 2]]]);
   });
 
-  // The time of the two queries over rows of 100,000 integers is compared
-  // with their time over rows of 10 integers, not with a fixed limit, because
-  // a CI machine can be several times slower than a local one. When the
-  // queries do not list the rows, the two times are almost the same. When
-  // they list each row, the long rows take far longer: hashing each row,
-  // which reads its elements without boxing them (`BoxedFunction.hash`), is
-  // the fastest way to list it, and it makes rows of 10,000 integers 4 to 7
-  // times slower than rows of 10, so, in proportion, rows of 100,000 integers
-  // tens of times slower. The limit of 10 times leaves room for a burst of load from the
-  // other test workers during one measurement of a few tens of milliseconds.
-  // Each length runs twice and the shorter time is used, so that one garbage
-  // collection does not fail the test, and the comparison is made up to
-  // three times and passes when one of them is under the limit. Code that
-  // lists the rows is slower in every comparison, so it still fails.
+  // The two queries over 2,000 rows of 10^8 integers take about 0.1 s when
+  // they do not list the rows. Listing a row is at best hashing it, which
+  // reads its elements without boxing them (`BoxedFunction.hash`): rows of
+  // 10,000 integers took 4 to 7 times as long as rows of 10, an estimated 20 ns
+  // for each element, so the 2·10^11 elements here take about an hour. The
+  // limit of 30 s guards that regression, and a worker of a full run that
+  // stops for several seconds does not fail it.
   test('Shape and Rank of many long range rows do not list the rows', () => {
-    const queries = (n: number) => {
-      const rows: unknown[] = ['List'];
-      for (let i = 0; i < 2_000; i++) rows.push(['Range', 1, n]);
-      const start = performance.now();
-      expect(value(['Shape', rows]).json).toEqual(['Tuple', 2_000, n]);
-      expect(value(['Rank', rows]).json).toBe(2);
-      return performance.now() - start;
-    };
-    queries(10);
-    let ratio = Infinity;
-    for (let attempt = 0; attempt < 3 && ratio >= 10; attempt++) {
-      const short = Math.min(queries(10), queries(10));
-      const long = Math.min(queries(100_000), queries(100_000));
-      ratio = Math.min(ratio, long / short);
-    }
-    expect(ratio).toBeLessThan(10);
-  });
+    const n = 100_000_000;
+    const rows: unknown[] = ['List'];
+    for (let i = 0; i < 2_000; i++) rows.push(['Range', 1, n]);
+    const start = performance.now();
+    expect(value(['Shape', rows]).json).toEqual(['Tuple', 2_000, n]);
+    expect(value(['Rank', rows]).json).toBe(2);
+    expect(performance.now() - start).toBeLessThan(30_000);
+  }, 60_000);
 
   test('range rows with too many elements in total are not listed', () => {
     // Each row has 400 elements, but the 400 rows have 160,000 elements

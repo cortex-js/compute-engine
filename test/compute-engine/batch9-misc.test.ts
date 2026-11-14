@@ -230,12 +230,15 @@ describe('Commutative matching of a sum with many terms', () => {
   // A root template such as `a·x^n + b` captures all the other terms of the
   // sum with the sequence wildcard `b`. The list of the combinations of
   // `n - 1` of the `n` terms was made by a search that visited every subset
-  // of fewer terms, about `2^n` steps: this equation took 39 s.
-  test('Solve of a sum of 24 terms that is not a polynomial', () => {
-    const terms = Array.from({ length: 23 }, (_, k) => `x^{${k + 1}}`);
+  // of fewer terms, about `2^n` steps: an equation of 24 terms took 39 s.
+  // The time bound is a hang guard: far above the time of the work and
+  // above a stall of a worker in a full run, and far below the search of
+  // `2^27` subsets.
+  test('Solve of a sum of 27 terms that is not a polynomial', () => {
+    const terms = Array.from({ length: 26 }, (_, k) => `x^{${k + 1}}`);
     const start = Date.now();
     const roots = ce.parse(`${terms.join('+')}+\\sin(x)=2`).solve('x');
-    expect(Date.now() - start).toBeLessThan(4000);
+    expect(Date.now() - start).toBeLessThan(30_000);
     expect(roots).toBeNull();
   });
 

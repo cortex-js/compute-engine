@@ -217,7 +217,9 @@ describe('Compiled jump function of a closed exact operand, shared subtrees', ()
   test('the checks visit each node of a shared operand once', () => {
     // The structural code generation of such an operand has its own cost,
     // so the two checks are called directly, at a depth where a walk of
-    // every path (2⁴⁰ visits) could not finish.
+    // every path (2⁴⁰ visits) could not finish. The time bound is a hang
+    // guard: far above the time of the work and above a stall of a worker
+    // in a full run.
     const e = ce.function('Floor', [shared(nearInt, 40)], {
       form: 'structural',
     });
@@ -229,6 +231,6 @@ describe('Compiled jump function of a closed exact operand, shared subtrees', ()
     const start = Date.now();
     expect(closedExactJump(e, target)).toBe(true);
     expect(recordJumpFoldReads(e, new Set())).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 });

@@ -263,24 +263,28 @@ describe('the call task of the kernel pool', () => {
     await pool.prewarm();
     const ctl = new AbortController();
     const reason = new Error('aborted');
-    const long = calls.runCall(BUSY, [20_000], undefined, ctl.signal);
+    // A call of 10 minutes, which costs nothing when the abort works: the
+    // worker is replaced after the grace period.
+    const long = calls.runCall(BUSY, [600_000], undefined, ctl.signal);
     await until(() => log.calls.length === 1);
     await sleep(50);
     const t0 = Date.now();
     ctl.abort(reason);
     await expect(long).rejects.toBe(reason);
-    // Before a quarter of the 20 s call: a rejection that waits for the call
-    // to end fails, and the load of the machine does not.
-    expect(Date.now() - t0).toBeLessThan(5_000);
+    // Far before the end of the call: a rejection that waits for the call to
+    // end fails, and a worker of a full run that stops for several seconds
+    // does not.
+    expect(Date.now() - t0).toBeLessThan(30_000);
     // A call made now waits for the busy worker, then runs on its
-    // replacement, which is sent the kernel again.
+    // replacement, which is sent the kernel again; without the replacement
+    // it waits for the end of the call.
     expect(await calls.runCall(BUSY, [3], undefined, undefined)).toBe(3);
-    expect(Date.now() - t0).toBeLessThan(10_000);
+    expect(Date.now() - t0).toBeLessThan(60_000);
     expect(log.terminated).toBe(1);
     expect(log.created).toBe(2);
     expect(log.results.length).toBe(1);
     expect(log.results[0].worker).toBe(1);
-  }, 60_000);
+  }, 120_000);
 
   test('the iteration limit of the call reaches the worker', async () => {
     const { pool, calls } = watchedPool({ size: 1 });

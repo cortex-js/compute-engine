@@ -47,7 +47,11 @@ ce.declare('countedPositive', {
   },
 });
 
-const LIMIT = { ms: 5000, label: 'test:flatmap-unknown-finiteness' };
+// A hang guard, not a measure of speed: far above the time of the work
+// (milliseconds) and above a stall of a worker in a full run on a loaded
+// machine (stalls of several seconds were seen), so that only an endless
+// loop reaches it.
+const LIMIT = { ms: 30_000, label: 'test:flatmap-unknown-finiteness' };
 
 function limited<T>(fn: () => T): T {
   return ce.withTimeLimit(

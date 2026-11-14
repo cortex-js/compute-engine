@@ -426,18 +426,20 @@ describe('EPSIL FORMATTER — deep indentation', () => {
   });
 
   // A `/[…]+$/` regex retries from every space of a run of indentation, which
-  // is quadratic: about 18 s on this run of 100,000 spaces. A scan back from
-  // the end does not look inside the run, so the limit has a wide margin on a
-  // slow machine. The test timeout is larger than the quadratic time, so that
-  // the limit, and not the timeout, reports the failure.
+  // is quadratic: 0.5 s on a run of 40,000 spaces in Node.js, so about 6
+  // minutes on this run of 1,000,000. A scan back from the end does not look
+  // inside the run. The time bound is a hang guard: far above the time of the
+  // work and above a stall of a worker in a full run, and far below the
+  // quadratic time. The test timeout is larger than the quadratic time, so
+  // that the limit, and not the timeout, reports the failure.
   test('the trim does not look inside a run of indentation', () => {
     const fmt = new Formatter();
-    const text = 'a\n' + ' '.repeat(100_000) + 'b';
+    const text = 'a\n' + ' '.repeat(1_000_000) + 'b';
     const stack = new StackBlock(fmt, fmt.text(text + '  '));
     const start = Date.now();
     expect(stack.serialize(0)).toBe(text);
-    expect(Date.now() - start).toBeLessThan(2000);
-  }, 300_000);
+    expect(Date.now() - start).toBeLessThan(30_000);
+  }, 900_000);
 
   test('the output round-trips', () => {
     const out = serializeEpsil(chain(20));

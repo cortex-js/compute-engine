@@ -76,8 +76,10 @@ written, and propose a change to a rule rather than skip it.
   - For a latency ("an abort rejects at once"), a comparison with the length
     of the work that is interrupted, not a fixed number of milliseconds.
   - A time bound in every run only as a hang guard: at least 100 times the time
-    of the timed work alone on the development machine, and far below the time
-    of the regression it guards.
+    of the timed work alone on the development machine and at least 30 s, and
+    far below the time of the regression it guards. A worker of a full run on a
+    loaded machine can stop for several seconds, during work that takes a
+    millisecond alone.
   - Otherwise, a timing assertion (`expect(elapsed).toBeLessThan(…)`, or a
     ratio of two times) runs only under `CE_PERF=1` (`npm run test:perf`).
 - A test that pins type inference uses its own `new ComputeEngine()`. The type

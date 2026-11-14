@@ -814,6 +814,12 @@ describe('poles (§3.4): the number result', () => {
   });
 });
 
+// The time bounds of the size limit are hang guards: far above the time of
+// the work and above a stall of a worker in a full run on a loaded machine,
+// and far below the computation of a result of millions of digits, which
+// takes minutes.
+const HANG_GUARD_MS = 30_000;
+
 describe('the size limit (§3.9)', () => {
   it.each([
     ['Fibonacci(n) at 10^9', ['Fibonacci', 'n'], { n: 10n ** 9n }],
@@ -825,7 +831,7 @@ describe('the size limit (§3.9)', () => {
   ] as const)('%s throws a RangeError at once', (_, json, inputs) => {
     const start = Date.now();
     expect(() => run(json as Json, inputs as Inputs)).toThrow(RangeError);
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
   });
 });
 
@@ -1030,7 +1036,7 @@ describe('the size estimates of Power and Binomial (§3.9)', () => {
   it('Binomial(n, m) at 10^100, 10^10 throws a RangeError at once', () => {
     const start = Date.now();
     expect(() => run(['Binomial', 'n', 'm'], { n: 10n ** 100n, m: 10n ** 10n })).toThrow(RangeError);
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
   });
 
   // `Binomial(10^300, 3369)` has about 1,000,277 digits.

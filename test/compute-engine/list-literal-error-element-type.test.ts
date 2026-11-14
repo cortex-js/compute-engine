@@ -309,15 +309,17 @@ describe('A declared collection refuses a value with a failed element', () => {
   );
 
   test('a literal shared by many parents is read once per declared type', () => {
-    // `List(t, t)` repeated 26 times has 27 distinct nodes and 2^26 paths. A
-    // walk of every path would not finish in the time bound.
+    // `List(t, t)` repeated 34 times has 35 distinct nodes and 2^34 paths. A
+    // walk of every path would not finish in hours. The time bound is a hang
+    // guard: far above the time of the work and above a stall of a worker in
+    // a full run.
     const engine = new ComputeEngine();
     let t = engine.number(1);
-    for (let i = 0; i < 26; i++) t = engine._fn('List', [t, t]);
+    for (let i = 0; i < 34; i++) t = engine._fn('List', [t, t]);
     engine.declare('s', 'tensor<number>');
     const start = performance.now();
     engine.assign('s', t);
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(30_000);
   });
 });
 

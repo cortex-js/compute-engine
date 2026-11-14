@@ -321,10 +321,11 @@ describe('a pool that cannot take the batch (CE-428)', () => {
       { x: xs },
       { deadline: 200, inline: false }
     );
-    // Without the watchdog the batch never settles. The bound is 100 times
-    // the time of the test alone, so that the load of the machine does not
-    // fail it; the test's own limit is longer than the bound.
-    expect(Date.now() - start).toBeLessThan(20_000);
+    // Without the watchdog the batch never settles. The bound is at least
+    // 30 s and 100 times the time of the test alone, so that a worker of a
+    // full run that stops for several seconds does not fail it; the test's
+    // own limit is longer than the bound.
+    expect(Date.now() - start).toBeLessThan(30_000);
     expect(res.done).toBe(0);
     pool.dispose();
   }, 60_000);

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
+import { opsReads } from '../utils';
 
 // A trig function whose argument is itself a periodic function of the
 // unknown (`sin(sin(x))`) makes a periodic equation, with the period of the
@@ -274,23 +275,33 @@ describe('A TRIG FUNCTION OF AN ARGUMENT THAT IS NOT PERIODIC GIVES NO ANSWER', 
 
   // `200·sin(x)` reaches about 64 periods of `sin`: about 125 roots of `u`
   // would be added, and each one costs an inversion and its checks. The
-  // root finder does not add them, and gives no answer quickly.
+  // root finder does not add them, and gives no answer. Its work, counted
+  // as the reads of the operands of a node (`opsReads()`), is the same for
+  // `100·sin(x)` (about 32 periods); adding the roots makes it grow with the
+  // coefficient, as it does below 50, where the roots are given
+  // (`20·sin(x)` reads about twice as much as `10·sin(x)`).
   test(
-    'sin(200·sin(x)) = 1/3 gives no answer within a few seconds',
+    'sin(200·sin(x)) = 1/3 gives no answer, with work that does not grow with the coefficient',
     () => {
-      const latex = '\\sin(200\\sin(x))=\\frac13';
-      const start = Date.now();
-      expect(ce.parse(latex).solve('x')).toBeNull();
-      expect(solveLatex(latex).operator).toBe('Solve');
-      expect(solveOver(latex, -7, 7).operator).toBe('Solve');
-      expect(Date.now() - start).toBeLessThan(5000);
+      const reads = (k: number) =>
+        opsReads(() => {
+          const latex = `\\sin(${k}\\sin(x))=\\frac13`;
+          expect(ce.parse(latex).solve('x')).toBeNull();
+          expect(solveLatex(latex).operator).toBe('Solve');
+          expect(solveOver(latex, -7, 7).operator).toBe('Solve');
+        });
+      const short = reads(100);
+      expect(reads(200)).toBeLessThan(1.5 * short);
     },
     60_000
   );
 
   // The roots of `sin(u + 10^18) = 0` are near `-10^18`, and the index of
   // their shift into `[-1, 1]` is larger than 2^53, where `k + 1` is not
-  // always a different float. The root finder does not shift them.
+  // always a different float. The root finder does not shift them. A shift
+  // by `k + 1` does not end, so the limit of 30 s guards a hang: the solve
+  // takes about 50 ms alone, and a worker of a full run on a loaded machine
+  // can stop for several seconds.
   test(
     'sin(sin(x) + 10^18) = 0 finishes',
     () => {
@@ -304,7 +315,7 @@ describe('A TRIG FUNCTION OF AN ARGUMENT THAT IS NOT PERIODIC GIVES NO ANSWER', 
           ).toBeLessThan(1e-6);
       }
       solveLatex(latex);
-      expect(Date.now() - start).toBeLessThan(5000);
+      expect(Date.now() - start).toBeLessThan(30_000);
     },
     60_000
   );

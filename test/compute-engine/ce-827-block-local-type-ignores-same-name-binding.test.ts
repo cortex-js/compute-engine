@@ -260,12 +260,14 @@ describe('CE-827: THE TYPE OF A BLOCK LOCAL IGNORES A GLOBAL OF THE SAME NAME', 
 describe('CE-834: AN ASYNCHRONOUS RUN OF A BLOCK READS ITS LOCAL, NOT A GLOBAL OF THE SAME NAME', () => {
   type Boxed = ReturnType<ComputeEngine['box']>;
 
-  /** Start `expr.evaluateAsync()` inside a `withTimeLimit` span of 3
+  /** Start `expr.evaluateAsync()` inside a `withTimeLimit` span of 30
    * seconds. The span closes when the call returns its promise, and the
-   * limit stays with the evaluation. */
+   * limit stays with the evaluation. The limit is a hang guard: far above the
+   * time of the work and above a stall of a worker in a full run on a loaded
+   * machine, so that only an endless loop reaches it. */
   function evaluateAsyncWithin(ce: ComputeEngine, expr: Boxed): Promise<Boxed> {
     let p: Promise<Boxed> | undefined;
-    ce.withTimeLimit({ ms: 3000, label: 'test:ce-834' }, () => {
+    ce.withTimeLimit({ ms: 30_000, label: 'test:ce-834' }, () => {
       p = expr.evaluateAsync();
       return 0;
     });

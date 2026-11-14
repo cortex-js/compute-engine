@@ -1007,10 +1007,10 @@ describe('errors and abort', () => {
     await pool.prewarm();
     const ctl = new AbortController();
     const reason = new Error('aborted');
-    // A million passes: minutes of work, which an abort that waits for the
-    // workers would wait for.
+    // Ten million passes of 200 000 steps: more than 10 minutes of work,
+    // which an abort that waits for the workers would wait for.
     const pending = result.runAsync(
-      { n: 1_000_000 },
+      { n: 10_000_000 },
       { signal: ctl.signal, minPasses: 1 }
     );
     while (log.calls < 2) await sleep(5);
@@ -1018,9 +1018,10 @@ describe('errors and abort', () => {
     const t0 = Date.now();
     ctl.abort(reason);
     await expect(pending).rejects.toBe(reason);
-    // A bound far below the length of the work, so that the load of the
-    // machine does not fail the test.
-    expect(Date.now() - t0).toBeLessThan(10_000);
+    // A bound far below the length of the work, and long enough that a
+    // worker of a full run that stops for several seconds does not fail the
+    // test.
+    expect(Date.now() - t0).toBeLessThan(30_000);
   }, 60_000);
 
   // The program leaves the thread with the digits of its caller. When the

@@ -413,7 +413,6 @@ describe('Sum and Product (slice 3)', () => {
     for (const n of [10_000n, 100_000n]) differential(json, { inputs: [{ n }], interp: 0 });
     const ce = engine();
     const r = compile(ce.box(json), PROFILE);
-    const start = Date.now();
     expect(r.run!({ n: 100_000n } as never)).toBe(
       (() => {
         let s = 0n;
@@ -421,8 +420,11 @@ describe('Sum and Product (slice 3)', () => {
         return s;
       })()
     );
-    // The loop has a `bigint` counter and no iteration budget.
-    expect(Date.now() - start).toBeLessThan(2000);
+    // The loop has a `bigint` counter and no iteration budget: its body is
+    // the one statement that adds the term.
+    expect(r.code).toMatch(
+      /for \(let (_tv\d+) = 1n; \1 <= _tv\d+; \1\+\+\) \{ (_tv\d+) = \2 \+ _SYS\.bfloorMod\(\1 \* \1, 7n\); \}/
+    );
   });
 
   test('the code: a `for` statement with a `bigint` counter, and the facts', () => {

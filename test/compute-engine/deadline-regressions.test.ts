@@ -193,14 +193,17 @@ describe('WP-2.11 / EX-14: combinatorics magnitude guards', () => {
   // the multiplication loop built the whole integer (about 26 seconds). The
   // estimate (`estimatedBinomialDigits` in `numerics/special-functions.ts`)
   // now has no subtraction of nearly equal values for a large `n`.
-  // Outcome: stays symbolic (inert).
-  it('Binomial(10^100, 30000) stays symbolic at once', () => {
+  // Outcome: stays symbolic (inert). The test uses `k = 300000`, where the
+  // loop would take far longer than at `k = 30000`. The time bound is a hang
+  // guard: far above the time of the work and above a stall of a worker in a
+  // full run.
+  it('Binomial(10^100, 300000) stays symbolic at once', () => {
     const start = Date.now();
     const r = ce
-      .box(['Binomial', { num: '1' + '0'.repeat(100) }, 30_000])
+      .box(['Binomial', { num: '1' + '0'.repeat(100) }, 300_000])
       .evaluate();
     expect(r.operator).toBe('Binomial');
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 
   // Binomial(10^300, 3368) has 999,981 digits, under the limit: it
@@ -391,7 +394,11 @@ describe('WP-2.11 / EX-14: controls (must remain correct/fast, unaffected)', () 
     // the answer is immediate on every route, deadline or not (the
     // no-deadline route, compile-time constant folding included, used to
     // run this loop unbounded).
-    const r = ce.withTimeLimit({ ms: 2000, label: 'test:lucasl-deadline' }, () =>
+    // A hang guard, not a measure of speed: far above the time of the work
+    // (milliseconds) and above a stall of a worker in a full run on a loaded
+    // machine (stalls of several seconds were seen), so that only an endless
+    // loop reaches it.
+    const r = ce.withTimeLimit({ ms: 30_000, label: 'test:lucasl-deadline' }, () =>
       ce.box(['LucasL', 1_000_000_000]).evaluate()
     );
     expect(r.toString()).toBe('LucasL(1000000000)');

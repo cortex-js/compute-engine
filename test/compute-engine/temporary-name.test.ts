@@ -140,13 +140,16 @@ describe('AVOID', () => {
   });
 
   test('a subtree shared to a depth of 40 is walked once', () => {
+    // A walk of each of the 2^40 paths does not end. The time bound is a hang
+    // guard: far above the time of the work and above a stall of a worker in
+    // a full run.
     const ce = new ComputeEngine();
     let e: Expression = ce.box('s_tmp1');
     for (let i = 0; i < 40; i++)
       e = ce.function('Tuple', [e, e], { canonical: false });
     const start = Date.now();
     expect(ce.temporaryName('s', e)).toBe('s_tmp2');
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 });
 

@@ -694,6 +694,8 @@ describe('A SET OPERATION WITH AN UNDECIDED MEMBERSHIP IS NOT WALKED', () => {
   });
 });
 
+// The time bound is a hang guard: far above the time of the work and above
+// a stall of a worker in a full run; a walk of the operand does not end.
 describe('Count OF A UNION WITH AN OPERAND THAT CANNOT BE WALKED ENDS', () => {
   test.each([
     [['Union', ['Intersection', 'Integers', ['Interval', 0, 3]], ['Set', 1]]],
@@ -703,9 +705,9 @@ describe('Count OF A UNION WITH AN OPERAND THAT CANNOT BE WALKED ENDS', () => {
     (json) => {
       const start = Date.now();
       expect(box(['Count', json]).evaluate().json).toEqual(['Count', json]);
-      expect(Date.now() - start).toBeLessThan(5000);
+      expect(Date.now() - start).toBeLessThan(30_000);
     },
-    10000
+    60_000
   );
 
   test('the parse route', () => {

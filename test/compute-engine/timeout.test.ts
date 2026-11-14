@@ -734,9 +734,10 @@ describe('withTimeLimit', () => {
 
     it('the numeric withTimeLimit(ms, fn) form still bounds and returns', () => {
       const engine = new ComputeEngine();
-      // Returns normally when the work fits.
+      // Returns normally when the work fits. The limit is far above the time
+      // of the work and above a stall of a worker on a loaded machine.
       expect(
-        engine.withTimeLimit(5000, () => engine.parse('2+3').evaluate().re)
+        engine.withTimeLimit(30_000, () => engine.parse('2+3').evaluate().re)
       ).toBe(5);
       // And still enforces the bound.
       expect(() => engine.withTimeLimit(50, () => slowEval(engine))).toThrow(

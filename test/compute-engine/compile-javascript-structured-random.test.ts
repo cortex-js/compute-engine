@@ -805,9 +805,11 @@ describe('shared node objects and draws', () => {
       comp.localScope ? { scope: comp.localScope } : undefined
     );
     const expr = make(ce, 'Add', [make(ce, 'At', [deep, ce.number(1)]), ce.expr(['Random'])]);
+    // A hang guard: far above the time of the work and above a stall of a
+    // worker in a full run, and far below a walk of the 2^40 paths.
     const start = Date.now();
     const result = compile(expr, PROFILE);
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(30_000);
     expect(result.success).toBe(true);
     expect(draws(result.code)).toBe(1);
   });

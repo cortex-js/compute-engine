@@ -224,6 +224,12 @@ function timed(
 // machine kernel then answers, as at a precision of 15 digits (and as before
 // the bignum kernel existed). Each case below took seconds, or did not end.
 //
+// A time limit of these tests guards a hang only: it is at least 100 times
+// the time of the evaluation alone (at most 25 ms), and a worker of a full
+// run on a loaded machine can stop for several seconds. Each case is sized so
+// that the regression it guards takes far longer than the limit.
+const HANG_GUARD_MS = 30_000;
+//
 // The reference values of this test and of the tests after it are from
 // mpmath (`gammainc`, `gamma`, `digamma`, `psi(1, ·)`) at 240 digits, the
 // same as at 120 digits.
@@ -233,29 +239,35 @@ describe('Gamma(s, z) where the bignum kernel declines', () => {
     'Gamma(1e17, 1e17 + 1000) at precision 50 ends (the series loop in doubles did not)',
     () => {
       const r = timed(50, 'Gamma', '1e17', '100000000000001000');
-      expect(r.ms).toBeLessThan(2000);
+      expect(r.ms).toBeLessThan(HANG_GUARD_MS);
       expect(r.result).toBe(
         timed(15, 'Gamma', '1e17', '100000000000001000').result
       );
     },
-    30000
+    60_000
   );
 
+  // The series needed 1.8e7 terms (14 s) for Gamma(1e12, 1e12 + 1). Its
+  // terms grow as the square root of s: about 6e8 terms here, minutes.
   test(
-    'Gamma(1e12, 1e12 + 1) at precision 50 (the series needed 1.8e7 terms, 14 s)',
+    'Gamma(1e15, 1e15 + 1) at precision 50 does not run the series',
     () => {
-      const r = timed(50, 'Gamma', '1e12', '1000000000001');
-      expect(r.ms).toBeLessThan(2000);
-      expect(r.result).toBe(timed(15, 'Gamma', '1e12', '1000000000001').result);
+      const r = timed(50, 'Gamma', '1e15', '1000000000000001');
+      expect(r.ms).toBeLessThan(HANG_GUARD_MS);
+      expect(r.result).toBe(
+        timed(15, 'Gamma', '1e15', '1000000000000001').result
+      );
     },
-    30000
+    60_000
   );
 
+  // The overflow throws, which fails the value assertion; the time, a few
+  // seconds before the throw, is asserted only in a `CE_PERF=1` run.
   test(
     'Gamma(5.5, 1e-1000000000) at precision 50 (BigInt overflow after 8 s)',
     () => {
       const r = timed(50, 'Gamma', '5.5', '1e-1000000000');
-      expect(r.ms).toBeLessThan(2000);
+      if (process.env.CE_PERF === '1') expect(r.ms).toBeLessThan(2000);
       expect(r.result).toBe(timed(15, 'Gamma', '5.5', '1e-1000000000').result);
     },
     30000
@@ -271,7 +283,7 @@ describe('Gamma(s, z) for an order far below zero', () => {
     'Gamma(-100000000000000000000.5, 1) at precision 50',
     () => {
       const r = timed(50, 'Gamma', '-100000000000000000000.5', '1');
-      expect(r.ms).toBeLessThan(2000);
+      expect(r.ms).toBeLessThan(HANG_GUARD_MS);
       expect(
         correctDigits(
           r.bignum,
@@ -279,22 +291,23 @@ describe('Gamma(s, z) for an order far below zero', () => {
         )
       ).toBeGreaterThanOrEqual(49);
     },
-    30000
+    60_000
   );
 
+  // At s = −10⁹ the recurrence of |s| steps takes about 870 s.
   test(
-    'Gamma(-10000000, 1) at precision 50',
+    'Gamma(-1000000000, 1) at precision 50',
     () => {
-      const r = timed(50, 'Gamma', '-10000000', '1');
-      expect(r.ms).toBeLessThan(2000);
+      const r = timed(50, 'Gamma', '-1000000000', '1');
+      expect(r.ms).toBeLessThan(HANG_GUARD_MS);
       expect(
         correctDigits(
           r.bignum,
-          '3.678794043834982044516594900870432303808720080362205030101610065663566e-8'
+          '3.678794408035628804240814489338165388236720256171639095792539877519533e-10'
         )
       ).toBeGreaterThanOrEqual(49);
     },
-    30000
+    60_000
   );
 });
 

@@ -22,7 +22,11 @@ import type { Expression } from '../../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-const LIMIT = { ms: 3000, label: 'test:flatmap-infinite-inner' };
+// A hang guard, not a measure of speed: far above the time of the work
+// (milliseconds) and above a stall of a worker in a full run on a loaded
+// machine (stalls of several seconds were seen), so that only an endless
+// loop reaches it.
+const LIMIT = { ms: 30_000, label: 'test:flatmap-infinite-inner' };
 
 function limited<T>(fn: () => T): T {
   return ce.withTimeLimit(

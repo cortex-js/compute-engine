@@ -676,7 +676,9 @@ describe('CE-588 — interval-js', () => {
     // `If(x > k, …, Missing)` nested 24 deep. Each level probed its value
     // and then compiled it again, so the compile time grew by a factor of
     // about 3 per level (depth 8 took about a second, depth 10 overflowed
-    // the stack). Each value is now compiled once.
+    // the stack). Each value is now compiled once. The time bound is a hang
+    // guard: far above the time of the work and above a stall of a worker in
+    // a full run.
     const ce = engine();
     let json: unknown = POINT;
     for (let k = 0; k < 24; k++)
@@ -686,7 +688,7 @@ describe('CE-588 — interval-js', () => {
       to: 'interval-js',
       fallback: false,
     } as never);
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(30_000);
     expect(r.success).toBe(true);
     const at = (lo: number, hi: number) =>
       r.run!({ x: { lo, hi }, y: { lo: Y, hi: Y } } as never);

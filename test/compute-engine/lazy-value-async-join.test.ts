@@ -336,7 +336,9 @@ describe('A VIEW THAT READS A DEFINITION OF THE HOST OR A DICTIONARY', () => {
 
   test('a dictionary that holds the same dictionary under two keys is tested once per node', () => {
     // 30 levels of `{p: d, q: d}` have 2^30 paths and 31 distinct
-    // dictionaries: the test of the memo key visits each node once.
+    // dictionaries: the test of the memo key visits each node once. The time
+    // bound is a hang guard: far above the time of the work and above a
+    // stall of a worker in a full run.
     const ce = new ComputeEngine();
     let d = ce.box(['Add', 1, 2]);
     for (let i = 0; i < 30; i++)
@@ -350,7 +352,7 @@ describe('A VIEW THAT READS A DEFINITION OF THE HOST OR A DICTIONARY', () => {
     const start = Date.now();
     node.evaluate();
     node.evaluate();
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 
   test('a dictionary whose value calls a user function', () => {

@@ -589,7 +589,11 @@ describe('FindFit deadline (§ 7.9)', () => {
 
     let err: unknown;
     try {
-      ce.withTimeLimit({ ms: 5000 }, () =>
+      // A hang guard, not a measure of speed: far above the time of the work
+      // (milliseconds) and above a stall of a worker in a full run on a loaded
+      // machine (stalls of several seconds were seen), so that only an endless
+      // loop reaches it.
+      ce.withTimeLimit({ ms: 30_000 }, () =>
         ce
           .function('FindFit', [
             data,

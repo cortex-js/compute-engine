@@ -213,12 +213,15 @@ describe('AN ELEMENTARY FUNCTION OF AN EXACT OPERAND UNDER N() IS CORRECTLY ROUN
     // Each level of guard digits approximated its operand again, and that
     // operand approximated its own operand again: the cost doubled with
     // each level (18 levels of `Erf` took about 25 s). A call inside a
-    // guarded evaluation does not add guard digits again.
+    // guarded evaluation does not add guard digits again. At 22 levels the
+    // doubling cost would be about 16 times that; the time bound is a hang
+    // guard: far above the time of the work and above a stall of a worker in
+    // a full run.
     let json: unknown = ['Rational', 1, 3];
-    for (let i = 0; i < 18; i++) json = ['Erf', json];
+    for (let i = 0; i < 22; i++) json = ['Erf', json];
     const start = Date.now();
     expect(ce.box(json as any).N().isFinite).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 });
 

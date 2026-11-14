@@ -330,7 +330,9 @@ describe('the limits of the substitution', () => {
     // node that two sibling arms share once in each arm, so the expansion
     // doubles at each level. Its estimate by parent (`writtenSize`) did not
     // see it: depth 14 was accepted, and compiled to 2.5 MB of GLSL in
-    // 388 s (review of 2026-10-27, ROADMAP CE-570).
+    // 388 s (review of 2026-10-27, ROADMAP CE-570). The size of the code
+    // checks the sharing; the time bound is a hang guard: far above the time
+    // of the work and above a stall of a worker in a full run.
     const compileChain = (depth: number) => {
       const ce = new ComputeEngine();
       ce.parse('h_0(x) := \\sin(x) + x x + \\cos(x)').evaluate();
@@ -350,7 +352,7 @@ describe('the limits of the substitution', () => {
     const deep = compileChain(14);
     expect(deep.code).toMatch(/_fn_h_/);
     expect(deep.code.length).toBeLessThan(20_000);
-    expect(deep.elapsed).toBeLessThan(5_000);
+    expect(deep.elapsed).toBeLessThan(30_000);
   });
 
   test('a call shared by two later conditions of a Which stays a call', () => {
@@ -402,7 +404,8 @@ describe('the limits of the substitution', () => {
     // `h_k(x) = atan2(If(x > c_k, 2h_{k-1}(x), 3h_{k-1}(x)), h_{k-1}(x))`:
     // the third call of `h_{k-1}` encloses the two arms but is emitted after
     // them, so the arms cannot read its temporary and the expansion still
-    // doubles at each level (review of 2026-10-27).
+    // doubles at each level (review of 2026-10-27). The size of the code
+    // checks the sharing; the time bound is a hang guard, as above.
     const compileChain = (depth: number) => {
       const ce = new ComputeEngine();
       ce.parse('h_0(x) := \\sin(x) + x x + \\cos(x)').evaluate();
@@ -440,7 +443,7 @@ describe('the limits of the substitution', () => {
     const deep = compileChain(14);
     expect(deep.code).toMatch(/_fn_h_/);
     expect(deep.code.length).toBeLessThan(20_000);
-    expect(deep.elapsed).toBeLessThan(5_000);
+    expect(deep.elapsed).toBeLessThan(30_000);
   });
 
   test('an expansion above the size limits is not used', () => {

@@ -195,7 +195,9 @@ describe('A LIST OF FAILED CELLS IS WRITTEN-OUT DATA', () => {
 
   test('an error payload with shared subtrees is walked once per node', () => {
     // `t₀ = 1`, `tₙ₊₁ = Tuple(tₙ, tₙ)`: depth 60 has 2⁶⁰ paths but only 61
-    // distinct nodes. A walk of every path would not finish.
+    // distinct nodes. A walk of every path would not finish. The time bound
+    // is a hang guard: far above the time of the work and above a stall of
+    // a worker in a full run.
     let t = ce.number(1);
     for (let i = 0; i < 60; i++) t = ce._fn('Tuple', [t, t]);
     const err = ce._fn('Error', [ce.string('oops'), t]);
@@ -204,7 +206,7 @@ describe('A LIST OF FAILED CELLS IS WRITTEN-OUT DATA', () => {
     expect(xs.unknowns).toEqual([]);
     expect(xs.evaluate()).toBe(xs);
     expect(xs.isPure).toBe(true);
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(30_000);
   });
 });
 

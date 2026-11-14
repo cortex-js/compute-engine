@@ -53,6 +53,12 @@ import {
 
 const ce = makeEngine();
 
+// The time bounds are hang guards: far above the time of the work
+// (milliseconds) and above a stall of a worker in a full run on a loaded
+// machine, and far below a walk of each of 2^40 paths, a loop of 10^12
+// turns or a list of 2^40 elements.
+const HANG_GUARD_MS = 30_000;
+
 type Json = unknown;
 
 // The points of each program: the shared points, and -0 for a scalar real
@@ -619,7 +625,7 @@ describe('IR slice: the memo of the lowering', () => {
       ]);
     const start = Date.now();
     const r = compileSlice(e, { target: 'javascript' });
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     let v = 0.3;
     for (let i = 0; i < 40; i++) v = Math.sin(v) + Math.cos(v);
     expect(r.run({ x: 0.3 })).toBe(v);
@@ -648,7 +654,7 @@ describe('IR slice: the memo of the lowering', () => {
       ]);
     const start = Date.now();
     const r = compileSlice(e, { target: 'javascript' });
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     for (const x of [0.3, -0.5]) {
       let v = x < 0 ? 6 * x : x + 1;
       for (let i = 0; i < 40; i++) v = Math.sin(v) + Math.cos(v);
@@ -1060,7 +1066,7 @@ describe('IR slice: a closed value with a loop is computed by the code', () => {
   test('a closed Sum of 10^12 terms compiles at once', () => {
     const start = Date.now();
     const r = js(['Sum', 'k', ['Limits', 'k', 1, 1e12]]);
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     expect(r.code).toMatch(/for \(/);
   });
 });
@@ -1180,7 +1186,7 @@ describe('IR slice: lists', () => {
     expect(js(['Sum', ['Range', 1, 'n']]).run({ n: 1e6 })).toBe(500000500000);
     expect(js(['Length', ['Range', 'n', 1, -3]]).run({ n: 10 })).toBe(4);
     expect(js(['Length', ['Range', 'n', 1]]).run({ n: 10 })).toBe(10);
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
   });
   test('At of a constant index is an element after the fold; out of range NaN', () => {
     expect(js(['At', 'L', 2]).code).toMatch(/_\.L\[1\]/);
@@ -1287,7 +1293,7 @@ describe('IR slice: one effect model', () => {
       ]);
     const start = Date.now();
     const r = compileSlice(e, { target: 'javascript' });
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     expect(r.code.length).toBeLessThan(20000);
   });
   test('a frame that calls a pure recursive function has no warning', () => {

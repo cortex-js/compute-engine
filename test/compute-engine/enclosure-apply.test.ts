@@ -617,6 +617,8 @@ describe('A LARGE ANGLE', () => {
   // Near `10^20`, the indices of the periods are above
   // `Number.MAX_SAFE_INTEGER`: the exact route does not walk them (`k++`
   // would not change `k`), and the value is the library's on the doubles.
+  // The time bound is a hang guard: far above the time of the work and above
+  // a stall of a worker in a full run; a walk of the periods does not end.
   const BIG: Json = ['Power', 10, 20];
   const ROWS: [string, Json, (x: Interval) => IntervalResult][] = [
     ['Sin(Enclosure(10^20, 10^20))', ['Sin', E(BIG, BIG)], IA.sin],
@@ -630,7 +632,7 @@ describe('A LARGE ANGLE', () => {
   test.each(ROWS)('%s', (_, x, kernel) => {
     const start = Date.now();
     const v = viaFunction(ce, x).evaluate();
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(30_000);
     const [lo, hi] = doubles(v);
     const arg = viaFunction(ce, (x as Json[])[1]);
     const lib = mapped(kernel({ lo: arg.op1.N().re, hi: arg.op2.N().re }));

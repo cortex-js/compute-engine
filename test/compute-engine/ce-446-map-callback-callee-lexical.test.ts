@@ -168,7 +168,8 @@ describe('CE-446 calleesResolveLexically()', () => {
 
   test('a body that shares its operands at each level is walked once per node', () => {
     // Without the set of visited nodes, the walk of this body of depth 40
-    // takes 2^40 steps.
+    // takes 2^40 steps. The time bound is a hang guard: far above the time
+    // of the work and above a stall of a worker in a full run.
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
     let t = ce.box(['Sin', 'x']);
@@ -176,6 +177,6 @@ describe('CE-446 calleesResolveLexically()', () => {
     const fn = ce.function('Function', [t, ce.symbol('x')]);
     const start = Date.now();
     expect(calleesResolveLexically(ce, fn, new Set())).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 });

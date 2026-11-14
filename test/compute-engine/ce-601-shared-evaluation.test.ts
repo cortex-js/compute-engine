@@ -10,6 +10,7 @@ import {
   exactComplexParts,
   exactZeroVerdict,
 } from '../../src/compute-engine/symbolic/contour';
+import { opsReads } from '../utils';
 
 /**
  * ROADMAP CE-601: an expression that uses one node object at several places
@@ -18,8 +19,11 @@ import {
  * One top-level evaluation now remembers the result of each pure node, per
  * evaluation frame, until a state change (`shared-evaluation-memo.ts`).
  *
- * A jest time limit cannot stop a synchronous test, so the time is measured
- * with `performance.now()` and compared to a generous limit.
+ * A test counts the reads of the operands of a node (`opsReads()`) instead of
+ * timing the evaluation: a walk of each path reads the operands of a node of
+ * the tower once per path, 2^depth times, so the count multiplies by 256
+ * from depth 8 to depth 16. A walk of each node reads them a fixed number of
+ * times per level, and the count less than doubles.
  */
 
 /** `Max(t, t)` nested `depth` deep over `leaf`: every level holds the same
@@ -30,28 +34,26 @@ function tower(ce: ComputeEngine, leaf: Expression, depth: number): Expression {
   return t;
 }
 
-function timed<T>(f: () => T): [T, number] {
-  const start = performance.now();
-  const result = f();
-  return [result, performance.now() - start];
+/** Check that `f(depth)` reads the operands of each node a fixed number of
+ * times per level: the reads at depth 16 are less than 4 times those at
+ * depth 8, against 256 times for a walk of each path. */
+function expectReadsLinear(f: (depth: number) => void): void {
+  const short = opsReads(() => f(8));
+  expect(opsReads(() => f(16))).toBeLessThan(4 * short);
 }
 
 describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
-  test('A tower of 2^30 paths over x + y, exact and numeric', () => {
+  test('A tower of 2^16 paths over x + y, exact and numeric', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 2);
     ce.assign('y', 3);
-    const t = tower(
-      ce,
-      ce.function('Add', [ce.symbol('x'), ce.symbol('y')]),
-      30
+    const sum = ce.function('Add', [ce.symbol('x'), ce.symbol('y')]);
+    expectReadsLinear((depth) =>
+      expect(tower(ce, sum, depth).evaluate().json).toEqual(5)
     );
-    const [exact, exactMs] = timed(() => t.evaluate());
-    expect(exact.json).toEqual(5);
-    expect(exactMs).toBeLessThan(2000);
-    const [numeric, numericMs] = timed(() => t.N());
-    expect(numeric.re).toEqual(5);
-    expect(numericMs).toBeLessThan(2000);
+    expectReadsLinear((depth) =>
+      expect(tower(ce, sum, depth).N().re).toEqual(5)
+    );
   });
 
   test('The exact and the numeric results are kept apart', () => {
@@ -77,18 +79,17 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
   test('A recursive function whose body is a tower', () => {
     const ce = new ComputeEngine();
     const n = ce.symbol('n');
-    // r(n) = If(n < 1, 0, r(n - 1)), its body a tower of 2^30 paths.
+    // r(n) = If(n < 1, 0, r(n - 1)), its body a tower of 2^depth paths.
     const leaf = ce.function('If', [
       ce.function('Less', [n, ce.number(1)]),
       ce.number(0),
       ce.function('r', [ce.function('Subtract', [n, ce.number(1)])]),
     ]);
-    ce.assign('r', ce.function('Function', [tower(ce, leaf, 30), n]));
-    for (const arg of [0, 1, 4]) {
-      const [result, ms] = timed(() => ce.box(['r', arg]).evaluate());
-      expect(result.json).toEqual(0);
-      expect(ms).toBeLessThan(2000);
-    }
+    for (const arg of [0, 1, 4])
+      expectReadsLinear((depth) => {
+        ce.assign('r', ce.function('Function', [tower(ce, leaf, depth), n]));
+        expect(ce.box(['r', arg]).evaluate().json).toEqual(0);
+      });
   });
 
   test('A recursive call does not reuse the results of its caller', () => {
@@ -420,12 +421,12 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
           .box(['Sum', ['Multiply', a.json, 'k'], ['Limits', 'k', 1, 10]])
           .evaluate(),
     });
-    let t: Expression = ce.function('G', [ce.symbol('x')]);
-    for (let i = 0; i < 16; i++)
-      t = ce.function('Max', [t, ce.function('Add', [t, ce.number(1)])]);
-    const [result, ms] = timed(() => t.evaluate());
-    expect(result.json).toEqual(126);
-    expect(ms).toBeLessThan(1000);
+    expectReadsLinear((depth) => {
+      let t: Expression = ce.function('G', [ce.symbol('x')]);
+      for (let i = 0; i < depth; i++)
+        t = ce.function('Max', [t, ce.function('Add', [t, ce.number(1)])]);
+      expect(t.evaluate().json).toEqual(110 + depth);
+    });
   });
   test('A host operator is cached only when it states pure: true', () => {
     const ce = new ComputeEngine();
@@ -688,9 +689,10 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     }
     ce ??= new ComputeEngine();
     ce.assign('x', 0.5);
-    const t = tower(ce, ce.function('Sin', [ce.symbol('x')]), 20);
-    const [, ms] = timed(() => t.N());
-    expect(ms).toBeLessThan(1000);
+    const sin = ce.function('Sin', [ce.symbol('x')]);
+    expectReadsLinear((depth) =>
+      expect(tower(ce!, sin, depth).N().re).toBeCloseTo(Math.sin(0.5), 12)
+    );
   });
 
   test('A standard definition reused under another name stays library code', () => {
@@ -700,9 +702,10 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     // An application of `MySin` is evaluated first: it must not change the
     // classification of the shared `Sin` definition.
     ce.function('MySin', [ce.symbol('x')]).N();
-    const t = tower(ce, ce.function('Sin', [ce.symbol('x')]), 20);
-    const [, ms] = timed(() => t.N());
-    expect(ms).toBeLessThan(1000);
+    const sin = ce.function('Sin', [ce.symbol('x')]);
+    expectReadsLinear((depth) =>
+      expect(tower(ce, sin, depth).N().re).toBeCloseTo(Math.sin(0.5), 12)
+    );
   });
 
   test('The stored-value memo of a symbol: a host operator that reads a symbol by name', () => {
@@ -779,9 +782,10 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     const ce = new ComputeEngine();
     ce.declare('Sin', { description: 'the sine' }, { extend: true });
     ce.assign('x', 0.5);
-    const t = tower(ce, ce.function('Sin', [ce.symbol('x')]), 20);
-    const [, ms] = timed(() => t.N());
-    expect(ms).toBeLessThan(1000);
+    const sin = ce.function('Sin', [ce.symbol('x')]);
+    expectReadsLinear((depth) =>
+      expect(tower(ce, sin, depth).N().re).toBeCloseTo(Math.sin(0.5), 12)
+    );
   });
 
   test('An extension of a host operator keeps its statement of purity', () => {
@@ -1328,13 +1332,13 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
 
   test('The zero verdict of a tower of shared nodes', () => {
     const ce = new ComputeEngine();
-    const t = tower(ce, ce.number(2), 30);
-    const c = ce.function('Subtract', [t, ce.number(2)], {
-      form: 'structural',
+    expectReadsLinear((depth) => {
+      const t = tower(ce, ce.number(2), depth);
+      const c = ce.function('Subtract', [t, ce.number(2)], {
+        form: 'structural',
+      });
+      expect(exactZeroVerdict(c)).toBe(true);
     });
-    const [zero, ms] = timed(() => exactZeroVerdict(c));
-    expect(zero).toBe(true);
-    expect(ms).toBeLessThan(2000);
   });
 
   test('drawsRandom: false alone does not state purity', () => {

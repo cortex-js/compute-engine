@@ -14,7 +14,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 const Q = ['Divide', ['Subtract', ['Factorial', 25], 1], ['Factorial', 24]];
 const QL = '\\frac{25!-1}{24!}';
-const H = ['Sum', ['Divide', 1, 'k'], ['Limits', 'k', 1, 10000]];
+const H = ['Sum', ['Divide', 1, 'k'], ['Limits', 'k', 1, 20000]];
 
 /** An engine where `f` is `x ↦ Block(…statements)`, built on the box route. */
 function boxed(...statements: unknown[]): ComputeEngine {
@@ -142,11 +142,13 @@ describe('the statements before the last one stay exact', () => {
   test('a float argument of a block body stays cheap', () => {
     const ce = boxed(['Declare', 'z', "'unknown'", 1], ['Floor', 'x']);
     const start = Date.now();
-    expect(n(ce, H)).toBe('9');
-    // The argument is approximated once; summing 10000 exact rationals
-    // took about 27 s.
-    expect(Date.now() - start).toBeLessThan(5000);
-  });
+    expect(n(ce, H)).toBe('10');
+    // The argument is approximated once, in about 0.2 s. Summing the 20000
+    // exact rationals takes about 300 s (30 s for 10000, ten times more at
+    // each doubling), so the limit of 30 s guards that regression and leaves
+    // room for a worker of a full run that stops for several seconds.
+    expect(Date.now() - start).toBeLessThan(30_000);
+  }, 60_000);
 });
 
 describe('a stored expression read under a shadow, under a numeric request', () => {

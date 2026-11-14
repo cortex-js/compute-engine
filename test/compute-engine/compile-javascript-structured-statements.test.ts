@@ -663,7 +663,8 @@ describe('a gather of a row read', () => {
 describe('a shared tower in the new forms', () => {
   // One node object as both operands of `Arctan2`, nested 40 deep: 41
   // distinct nodes and 2^40 paths. A walk that does not visit each node once
-  // does not end.
+  // does not end. The time bounds are hang guards: far above the time of the
+  // work and above a stall of a worker in a full run.
   const tower = (ce: ComputeEngine, leaf: Expression, depth = 40): Expression => {
     let t = leaf;
     for (let i = 0; i < depth; i++) t = ce.function('Arctan2', [t, t]);
@@ -677,7 +678,7 @@ describe('a shared tower in the new forms', () => {
     const expr = ce.function('Comprehension', [tower(ce, ce.box(['Multiply', 'p', 'q', 'x'])), clause(ce, 'p', 1, 2), clause(ce, 'q', 1, 'p')]);
     const start = performance.now();
     const result = compile(expr, PROFILE as never) as CompilationResult<'javascript'>;
-    expect(performance.now() - start).toBeLessThan(1000);
+    expect(performance.now() - start).toBeLessThan(30_000);
     expect(result.run!({ x: 1.5 } as never)).toEqual([Math.PI / 4, Math.PI / 4, Math.PI / 4]);
   });
 
@@ -693,7 +694,7 @@ describe('a shared tower in the new forms', () => {
     const expr = ce.function('Block', [ce.box(declare('s', 'real', 0)), ce.function('Loop', [body, clause(ce, 'p', 1, 2), clause(ce, 'q', 1, 2)]), ce.symbol('s')]);
     const start = performance.now();
     const result = compile(expr, PROFILE as never) as CompilationResult<'javascript'>;
-    expect(performance.now() - start).toBeLessThan(1000);
+    expect(performance.now() - start).toBeLessThan(30_000);
     expect(result.run!({ x: 1.5 } as never)).toBe(Math.PI);
   });
 });

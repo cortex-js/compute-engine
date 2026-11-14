@@ -83,12 +83,14 @@ describe('walks over a shared tower are linear in distinct nodes', () => {
     // The index `k` is at the bottom of the tower, so every level is rebuilt
     // with the bound `k`. The rewrite memo rebuilds a shared node once and
     // gives the same rebuilt node to each of its mentions, so the tower
-    // stays shared, and a depth of 30 does not take 2^30 rebuilds.
+    // stays shared, and a depth of 30 does not take 2^30 rebuilds. The time
+    // bound is a hang guard: far above the time of the work and above a
+    // stall of a worker in a full run.
     let e = ce.box(['Add', 'k', 'y']);
     for (let i = 0; i < 30; i++) e = ce.function('Max', [e, e]);
     const start = performance.now();
     const sum = ce.box(['Sum', e, ['Limits', 'k', 1, 3]]);
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(30_000);
     expect(sum.operator).toBe('Sum');
     assertShared(sum.op1 as ReturnType<typeof sharedTower>);
     expect(sum.op1).not.toBe(e);

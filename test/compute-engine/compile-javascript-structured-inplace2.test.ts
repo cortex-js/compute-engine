@@ -543,10 +543,12 @@ describe('the cost of the analysis', () => {
     const M = [[1, 2], [3, 4]];
     expect(run(large.result, [M, true])).toEqual([[inLoop ? 121 : 41.5, 2], [3, 4]]);
     expect(M).toEqual([[1, 2], [3, 4]]);
-    // The answers computed grow with the program, not with its paths.
+    // The answers computed grow with the program, not with its paths. The
+    // time bound is a hang guard: far above the time of the work and above a
+    // stall of a worker in a full run.
     expect(large.evaluations).toBeLessThan(2.5 * small.evaluations);
     expect(large.evaluations).toBeLessThan(20_000);
-    expect(large.ms).toBeLessThan(5_000);
+    expect(large.ms).toBeLessThan(30_000);
   });
 });
 

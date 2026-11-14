@@ -869,18 +869,20 @@ describe('a block local replaced element by element is written in place (CE-329)
     // paths. The walk of `ownedLocalUpdateChains` keeps its answer for each
     // node in a statement position, so it visits each node once and finds
     // the one `ReplaceAt` chain once. Without that memo, the walk at depth
-    // 25 visits about 3·10⁷ nodes and finds the chain 2^25 times.
+    // 25 visits about 3·10⁷ nodes and finds the chain 2^25 times, and at
+    // depth 40 it does not end. The time bound is a hang guard: far above
+    // the time of the work and above a stall of a worker in a full run.
     const xs = ce.symbol('xs');
     const i = ce.symbol('i');
     let stmt = ce._fn('Assign', [
       xs,
       ce._fn('ReplaceAt', [xs, i, ce.number(0)]),
     ]);
-    for (let k = 0; k < 25; k++)
+    for (let k = 0; k < 40; k++)
       stmt = ce._fn('If', [ce.symbol('c'), stmt, stmt]);
     const start = performance.now();
     const chains = ownedLocalUpdateChains([stmt, xs], 'xs');
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(30_000);
     expect(chains?.length).toBe(1);
   });
 });

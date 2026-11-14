@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
+import { opsReads } from '../utils';
 
 // A function literal whose body is a raw expression built by sharing the
 // node of the level below twice at each level (`t₀ = x`,
@@ -59,19 +60,24 @@ describe('A FUNCTION LITERAL WHOSE RAW BODY SHARES ITS NODES', () => {
     expect(distinctNodes(literal)).toBeLessThan(20);
   });
 
-  test('the time is linear in the number of distinct nodes', () => {
+  test('the work is linear in the number of distinct nodes', () => {
     // Without the sharing, the canonical body of depth 24 has 2^24 nodes
     // and the test process runs out of memory: check the sharing first.
     expect(distinctNodes(ce.box(['Function', rawDag(12), 'x']))).toBeLessThan(
       20
     );
-    const body = rawDag(24);
-    const start = Date.now();
-    const boxed = ce.box(['Function', body, 'x']);
-    const built = ce.function('Function', [body, ce.symbol('x')]);
-    expect(boxed.operator).toBe('Function');
-    expect(built.operator).toBe('Function');
-    // Measured at about 2 ms; 5 s or more before the fix.
-    expect(Date.now() - start).toBeLessThan(500);
+    // The reads of the operands of a node (`ops`) by the canonicalization,
+    // at depths 12 and 16: a level adds about 16 reads, and a walk of each
+    // path would read 16 times more at depth 16 than at depth 12.
+    const reads = (depth: number): number => {
+      const body = rawDag(depth);
+      return opsReads(() => {
+        const boxed = ce.box(['Function', body, 'x']);
+        const built = ce.function('Function', [body, ce.symbol('x')]);
+        expect(boxed.operator).toBe('Function');
+        expect(built.operator).toBe('Function');
+      });
+    };
+    expect(reads(16)).toBeLessThan(2 * reads(12));
   });
 });

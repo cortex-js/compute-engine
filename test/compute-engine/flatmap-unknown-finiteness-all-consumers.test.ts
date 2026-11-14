@@ -37,7 +37,11 @@ ce.declare('slowF', {
   evaluateAsync: async (ops, { engine }) => engine.number(10 * ops[0].re),
 });
 
-const LIMIT = { ms: 5000, label: 'test:flatmap-all-consumers' };
+// A hang guard, not a measure of speed: far above the time of the work
+// (milliseconds) and above a stall of a worker in a full run on a loaded
+// machine (stalls of several seconds were seen), so that only an endless
+// loop reaches it.
+const LIMIT = { ms: 30_000, label: 'test:flatmap-all-consumers' };
 
 type Json = Parameters<typeof ce.box>[0];
 

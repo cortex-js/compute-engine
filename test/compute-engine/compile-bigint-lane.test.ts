@@ -1127,13 +1127,14 @@ describe('the fixes of the second review of step 2', () => {
 
   it('the fold test walks a shared subtree once', () => {
     // Each level wraps the previous node twice: 40 distinct nodes, 2^40
-    // paths from the root to a leaf.
+    // paths from the root to a leaf. The time bound is a hang guard: far
+    // above the time of the work and above a stall of a worker in a full run.
     let e: Expression = ce3.number(1);
     for (let i = 0; i < 40; i++) e = ce3.function('List', [e, e]);
     expect(e.ops![0]).toBe(e.ops![1]);
     const start = Date.now();
     analyzeBigintLane(ce3.function('Add', [ce3.box('n'), ce3.function('Length', [e])]));
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 });
 

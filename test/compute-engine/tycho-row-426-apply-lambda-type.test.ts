@@ -820,13 +820,13 @@ describe('row 426 third review: a fallthrough to Nothing', () => {
 });
 
 describe('row 426 third review: a shared tower in a function literal', () => {
-  // `Max(e, e)` of depth 30: 31 distinct nodes, 2^30 paths
+  // `Max(e, e)` of depth 34: 35 distinct nodes, 2^34 paths
   // (`dag-shared-walks.test.ts`). Each typing below walks the body of the
   // literal; a walk that unfolds the tree does not finish.
   const ce = new ComputeEngine();
   ce.declare('M', 'list<real>');
   let tower = ce.box(['Add', 'x', 'y']);
-  for (let i = 0; i < 30; i++) tower = ce.function('Max', [tower, tower]);
+  for (let i = 0; i < 34; i++) tower = ce.function('Max', [tower, tower]);
   const x = ce.symbol('x');
 
   test('the literal, with and without an early Return', () => {
@@ -862,14 +862,16 @@ describe('row 426 third review: a shared tower in a function literal', () => {
     ]);
     // The time is part of the test. The walk that looks for a call of a
     // running literal read each node once per path, and the typing below
-    // took about 130 s (2^30 paths); the test still passed, because a jest
-    // time limit cannot stop a synchronous test. Read once per node, it
-    // takes a few milliseconds (CE-594.1).
+    // took about 130 s at depth 30 (2^30 paths), 16 times that at depth 34;
+    // the test still passed, because a jest time limit cannot stop a
+    // synchronous test. Read once per node, it takes a few milliseconds
+    // (CE-594.1). The time bound is a hang guard: far above the time of the
+    // work and above a stall of a worker in a full run.
     const start = performance.now();
     expect(ce.function('Apply', [outer, ce.symbol('M')]).type.toString()).toBe(
       'list<number>'
     );
-    expect(performance.now() - start).toBeLessThan(2000);
+    expect(performance.now() - start).toBeLessThan(30_000);
   });
 });
 

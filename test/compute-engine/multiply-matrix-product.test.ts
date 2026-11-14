@@ -1182,19 +1182,27 @@ describe('third review round', () => {
   });
 
   describe('3. a long Range beside a matrix factor is not materialized early', () => {
-    it('Range(1, 10^6) times a number is fast and element-wise', () => {
+    it('Range(1, 10^6) times a number is lazy and element-wise', () => {
       const ce = new ComputeEngine();
-      const start = Date.now();
       ce.declare('p', 'tensor<number>');
       ce.declare('r', 'tensor<number>');
       ce.assign('p', ce.box(MJ));
       ce.assign('r', ce.box(['Range', 1, 1000000]));
-      // A product that has no matrix does not read the Range.
-      ce.box(['Multiply', 2, ['Range', 1, 1000000]]).evaluate();
+      // A product that has no matrix does not read the Range: its value is a
+      // lazy map over the Range, not the list of its elements.
+      const scaled = ce.box(['Multiply', 2, ['Range', 1, 1000000]]).evaluate();
+      expect(scaled.operator).toBe('Map');
+      expect(scaled.ops![1].json).toEqual(['Range', 1, 1000000]);
       // Neither does the dispatch of a product with a matrix symbol: the
-      // Range is longer than the limit, so it is not read as a vector.
-      ce.box(['Multiply', 'p', 'r']).evaluate();
-      expect(Date.now() - start).toBeLessThan(2000);
+      // Range is longer than the limit, so it is not read as a vector, and
+      // the product keeps it as an operand.
+      const product = ce.box(['Multiply', 'p', 'r']).evaluate();
+      expect(product.operator).toBe('Multiply');
+      expect(product.ops!.map((op) => op.json)).toContainEqual([
+        'Range',
+        1,
+        1000000,
+      ]);
     });
     it('a Filter source beside a matrix is a vector', () => {
       const ce = new ComputeEngine();

@@ -272,7 +272,9 @@ describe('CE-366: an input declared any is refused before the decline', () => {
 describe('CE-366: a shared expression is walked once', () => {
   // `t0 = p`, `tn = Beta(tn-1, tn-1)`: the expression has n + 1 nodes but
   // 2^n positions. The walk that collects the symbols declared `any` visited
-  // every position, and at depth 40 it did not end.
+  // every position, and at depth 40 it did not end. The time bound is a
+  // hang guard: far above the time of the work and above a stall of a
+  // worker in a full run.
   test('a tower of depth 40 declines quickly', () => {
     const ce = new ComputeEngine();
     let t: Expression = ce.symbol('p');
@@ -287,7 +289,7 @@ describe('CE-366: a shared expression is walked once', () => {
         { fallback: false }
       )
     ).toThrow(/declared `any` or `value`/);
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 });
 

@@ -7,6 +7,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 
+// The time bounds are hang guards: far above the time of the work
+// (milliseconds) and above a stall of a worker in a full run on a loaded
+// machine, and far below an evaluation of each of the 2^30 paths, at a
+// microsecond or more each.
+const HANG_GUARD_MS = 30_000;
+
 function pair(ce: ComputeEngine, a: Expression, b: Expression): Expression {
   return ce.function('Dictionary', [
     ce.function('KeyValuePair', [ce.string('p'), a]),
@@ -41,7 +47,7 @@ describe('EVALUATE a dictionary that shares its values', () => {
     ce.assign('x', 1);
     const start = Date.now();
     let r = ce.function('ReleaseHold', [ce.function('Hold', [d])]).evaluate();
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     for (let i = 0; i < 30; i++) {
       expect(r.operator).toBe('Dictionary');
       r = (r as unknown as { get(k: string): Expression }).get('q');
@@ -77,7 +83,7 @@ describe('EVALUATE a dictionary that shares its values', () => {
     for (let i = 0; i < 30; i++) deep = pair(ce, deep, deep);
     const start = Date.now();
     let r = ce._withTransientPrecision(5, () => deep.evaluate());
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     // The result has 2^30 leaves, so it is read along one path, as the
     // linear-time test above does.
     for (let i = 0; i < 30; i++) {
@@ -126,7 +132,7 @@ describe('EVALUATE a dictionary that shares its values', () => {
       ]);
     const start = Date.now();
     let r = d.evaluate();
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     const get = (x: Expression, k: string) =>
       (x as unknown as { get(k: string): Expression }).get(k);
     // The result has 3^30 leaves, so it is read along two paths: through
@@ -186,7 +192,7 @@ describe('EVALUATE a dictionary that shares its values', () => {
       d = pair(ce, ce.function('N', [d]), ce.function('N', [d]));
     const start = Date.now();
     let r = d.evaluate();
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(HANG_GUARD_MS);
     for (let i = 0; i < 30; i++)
       r = (r as unknown as { get(k: string): Expression }).get('q');
     expect(r.toString()).toBe('2.4142135623730950488');

@@ -462,7 +462,9 @@ describe('EVALUATEAT OF A BINDER OF A PARAMETER', () => {
 
   // The check of the value for a `D`, a `Series` or an `Integrate` reads a
   // shared node once: a value that is a DAG of depth 30 (2^30 paths) is
-  // checked at once.
+  // checked at once. The time bound is a hang guard: far above the time of
+  // the work (milliseconds) and above a stall of a worker in a full run, and
+  // far below a walk of each path, which takes minutes.
   test('a value with shared nodes', () => {
     let e = ce.number(1);
     for (let i = 0; i < 30; i++) e = ce.function('Pair', [e, e]);
@@ -474,7 +476,7 @@ describe('EVALUATEAT OF A BINDER OF A PARAMETER', () => {
       ])
       .evaluate();
     expect(result.operator).toBe('Hold');
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Date.now() - start).toBeLessThan(30_000);
   });
 
   // A `Tuple` point is spread over the parameters when the literal has more

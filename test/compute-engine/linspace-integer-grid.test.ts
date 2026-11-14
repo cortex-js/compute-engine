@@ -38,14 +38,18 @@ describe('a Linspace on an integer grid', () => {
   });
 
   test('an extremum with an NaN operand does not walk the grid', () => {
+    // A grid of 10^12 samples, which a walk does not finish. The time bound
+    // is a hang guard: far above the time of the work and above a stall of a
+    // worker in a full run.
+    const long = ['Linspace', 0, 999999999999, 1000000000000];
     const start = Date.now();
-    expect(ce.box(['Max', 'NaN', grid]).evaluate().toString()).toBe(
+    expect(ce.box(['Max', 'NaN', long]).evaluate().toString()).toBe(
       'NaN'
     );
-    expect(ce.box(['Min', 'NaN', grid]).evaluate().toString()).toBe(
+    expect(ce.box(['Min', 'NaN', long]).evaluate().toString()).toBe(
       'NaN'
     );
-    expect(Date.now() - start).toBeLessThan(500);
+    expect(Date.now() - start).toBeLessThan(30_000);
     // A grid with inexact samples still makes the result `NaN`.
     expect(
       ce
