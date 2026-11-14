@@ -92,6 +92,13 @@
 
 ### Resolved Issues
 
+- **The hyperbolic functions of `Ln(q)` for an exact rational `q`, and
+  `Arsech` of a rational above 1, evaluate exactly.** `Sinh(Ln(2))` stayed
+  unevaluated and is `3/4`, and `Tanh(Ln(3))` is `4/5`; `Arsech(2)` is
+  `iπ/3`, the value `.N()` gives (PR #537, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#534](https://github.com/cortex-js/compute-engine/issues/534)).
+
 - **A float parameter or point of a distribution gives a float under
   `evaluate()`.** `PDF(NormalDistribution(0, 1), 0.5)` was
   `0.6240… / √π`, exact on one side and a float on the other, and

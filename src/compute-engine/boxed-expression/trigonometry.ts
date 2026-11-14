@@ -1769,6 +1769,9 @@ export function isConstructible(x: string | Expression): boolean {
  *   `1`; `coth(0)` and `csch(0)` are two-sided poles, `ComplexInfinity`, as
  *   `cot(0)` and `csc(0)` are;
  * - at 1: `arcosh(1)` and `arsech(1)` are `0`;
+ * - `sinh`, `cosh`, `tanh`, `coth`, `sech` and `csch` of `ln q` for an exact
+ *   rational `q > 0` (`hyperbolicOfLogarithm`): `sinh(ln 2) = 3/4`;
+ * - for an exact rational `x > 1`, `arsech(x)` is `i·arccos(1/x)`;
  * - the literal poles of the inverse functions: `artanh(±1)` and `arcoth(±1)`
  *   are `±∞` (one-sided real poles), `arsech(0)` is `+∞` (approached from the
  *   domain `(0, 1]`), `arcsch(0)` is `ComplexInfinity` (odd, two-sided pole).
@@ -1791,6 +1794,8 @@ export function hyperbolicExactValue(
   x: Expression | undefined
 ): Expression | undefined {
   if (operator === 'Arcosh' && x !== undefined) return arcoshExactValue(x);
+  const ofLog = hyperbolicOfLogarithm(operator, x);
+  if (ofLog !== undefined) return ofLog;
   if (!isNumber(x) || x.isComplex) return undefined;
   const ce = x.engine;
   switch (operator) {
@@ -1819,12 +1824,72 @@ export function hyperbolicExactValue(
       if (x.isSame(1)) return ce.PositiveInfinity;
       if (x.isSame(-1)) return ce.NegativeInfinity;
       return undefined;
-    case 'Arsech':
+    case 'Arsech': {
       if (x.isSame(0)) return ce.PositiveInfinity;
       if (x.isSame(1)) return ce.Zero;
+      // For an exact rational x > 1 the argument 1/x is in (0, 1) and the
+      // principal value is i·arccos(1/x) (the value `.N()` gives, a pure
+      // imaginary number): arsech(2) = iπ/3.
+      const r = x.isExact ? asRational(x) : undefined;
+      if (r !== undefined && BigInt(r[0]) > BigInt(r[1]) && r[1] > 0)
+        return ce.I.mul(
+          ce
+            .function('Arccos', [ce.number([BigInt(r[1]), BigInt(r[0])])])
+            .evaluate()
+        );
       return undefined;
+    }
     case 'Arcsch':
       return x.isSame(0) ? ce.ComplexInfinity : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The largest number of digits in the numerator or denominator of the
+ * rational q for which a hyperbolic function of ln q is returned as an exact
+ * rational: the value has about twice as many digits.
+ */
+const HYPERBOLIC_OF_LOGARITHM_DIGIT_LIMIT = 100;
+
+/**
+ * The hyperbolic functions of the logarithm of an exact positive rational
+ * q = p/r (q ≠ 1, which is `Ln(1) = 0`), from e^(ln q) = q:
+ * sinh(ln q) = (q − 1/q)/2, cosh(ln q) = (q + 1/q)/2,
+ * tanh(ln q) = (q² − 1)/(q² + 1) (DLMF 4.28.1-3 with z = ln q), and the
+ * reciprocals. `Sinh(Ln 2)` is 3/4 and `Tanh(Ln 3)` is 4/5. `undefined` for
+ * another operator or operand.
+ */
+function hyperbolicOfLogarithm(
+  operator: string,
+  x: Expression | undefined
+): Expression | undefined {
+  if (!isFunction(x, 'Ln') || x.nops !== 1) return undefined;
+  const arg = x.op1;
+  const r = isNumber(arg) && arg.isExact ? asRational(arg) : undefined;
+  if (r === undefined) return undefined;
+  const p = BigInt(r[0]);
+  const d = BigInt(r[1]);
+  if (p <= 0n || d <= 0n || p === d) return undefined;
+  const limit = BigInt(HYPERBOLIC_OF_LOGARITHM_DIGIT_LIMIT);
+  if (p.toString().length > limit || d.toString().length > limit)
+    return undefined;
+  const [a, b] = [p * p, d * d]; // q² = a/b
+  const ce = x.engine;
+  switch (operator) {
+    case 'Sinh':
+      return ce.number([a - b, 2n * p * d]);
+    case 'Cosh':
+      return ce.number([a + b, 2n * p * d]);
+    case 'Tanh':
+      return ce.number([a - b, a + b]);
+    case 'Coth':
+      return ce.number([a + b, a - b]);
+    case 'Sech':
+      return ce.number([2n * p * d, a + b]);
+    case 'Csch':
+      return ce.number([2n * p * d, a - b]);
     default:
       return undefined;
   }
