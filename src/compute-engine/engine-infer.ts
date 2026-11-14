@@ -8,7 +8,6 @@ import type {
 } from './global-types.js';
 import { definitionHome, unitEnvironmentsOf } from './binding-unit.js';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol.js';
-import { markForwardCallReference } from './boxed-expression/forward-call-reference.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
 import {
   currentBoxingEpoch,
@@ -227,10 +226,6 @@ export function inferFn(
           axis: 'type',
           epoch: currentBoxingEpoch(ce),
         });
-      // A call head is a name to resolve when the call is evaluated
-      // (`markForwardCallReference()`, `box.ts`).
-      if (ce.type(type).matches('function'))
-        markForwardCallReference(def, scope);
     }
     const def = scope.bindings.get(name);
     declared.push({

@@ -27,8 +27,22 @@ import type {
   Scope,
 } from '../global-types.js';
 
-import { isDictionary, isFunction, isString, sym } from './type-guards.js';
-import { equivalentChains, isActivatedDefinition } from './ambient-chain.js';
+import {
+  isDictionary,
+  isFreeName,
+  isFunction,
+  isString,
+  sym,
+} from './type-guards.js';
+import {
+  callFrameBodyOf,
+  equivalentChains,
+  isActivatedDefinition,
+} from './ambient-chain.js';
+import {
+  forwardCallScope,
+  isForwardCallReference,
+} from './forward-call-reference.js';
 
 /**
  * # The runtime effect channel (`docs/EFFECTS-MODEL.md`, "Runtime counterpart")
@@ -98,7 +112,20 @@ import { equivalentChains, isActivatedDefinition } from './ambient-chain.js';
  * read. Two activations of one scope can hold two values of such a
  * definition, and the memos are served in every activation of a scope
  * whose chain is equivalent (`equivalentChains()`). */
-export type EffectsLookups = Map<string | BoxedValueDefinition, unknown>;
+export type EffectsLookups = Map<
+  string | BoxedValueDefinition | HomeRead,
+  unknown
+>;
+
+/** The key of a read of the name `name` of the node `node` from the scope
+ * that the node was boxed in (`nodeDefinition()`), one for each node. */
+class HomeRead {
+  constructor(
+    readonly node: Expression,
+    readonly name: string
+  ) {}
+}
+const homeReads = new WeakMap<Expression, HomeRead>();
 
 /** One lookup record for each effects
  * computation in progress, the innermost last. */
@@ -122,6 +149,163 @@ function lookupByName(
     if (top !== undefined && !top.has(name)) top.set(name, def);
   }
   return def;
+}
+
+/**
+ * The definition that the name `name` denotes for an expression boxed in
+ * the scope `home`: the first binding of `name` on the chain of `home`. The
+ * current scope plays no part. The chain is the static one: the call frame
+ * that an application of a function literal puts above the body scope of
+ * the literal while it runs is not on it. A forward-call reference
+ * (`isForwardCallReference()`), the binding that boxing makes for a call
+ * head with no definition, is not a definition: the walk goes on above it,
+ * so a definition made later in an ancestor of `home` is read.
+ */
+export function homeDefinition(
+  name: string,
+  home: Scope
+): ReturnType<ComputeEngine['lookupDefinition']> {
+  return homeBinding(name, home)?.def;
+}
+
+/** {@link homeDefinition}, with the scope that holds the definition. */
+export function homeBinding(
+  name: string,
+  home: Scope
+):
+  | { def: NonNullable<ReturnType<ComputeEngine['lookupDefinition']>>; scope: Scope }
+  | undefined {
+  let s: Scope | null | undefined = home;
+  while (s != null) {
+    const found = s.bindings.get(name);
+    if (
+      found !== undefined &&
+      !('value' in found && isForwardCallReference(found.value))
+    )
+      return { def: found, scope: s };
+    let next: Scope | null | undefined = s.parent;
+    if (next != null && callFrameBodyOf(next) === s) next = next.parent;
+    s = next;
+  }
+  return undefined;
+}
+
+/** The answer of `homeResolution()` for a node that records no scope. */
+const NO_HOME = Symbol('no-home');
+
+/**
+ * The definition that the name `name` of the canonical node `node` (a
+ * symbol, or the head of a call) reads from the scope the node was boxed
+ * in, `undefined` when there is none, or {@link NO_HOME} for a node that
+ * records no such scope (a node that is not canonical).
+ *
+ * - A symbol: the definition that its home chain gives
+ *   (`_readDefinition()`), or its own definition when it reads an
+ *   activation (a parameter, the variable of a binder, the local of a
+ *   block), whose value is the value of the activation.
+ * - A call bound to an operator definition, or to a value definition: that
+ *   definition. A call bound to a forward-call reference, or a free call
+ *   head: the definition that the chain of the scope the call was boxed in
+ *   gives now (`homeDefinition()`).
+ */
+function homeResolution(
+  node: Expression,
+  name: string
+): ReturnType<ComputeEngine['lookupDefinition']> | typeof NO_HOME {
+  if (sym(node) === name) {
+    const symbol = node as Expression & {
+      _readDefinition?: () => ReturnType<ComputeEngine['lookupDefinition']>;
+    };
+    if (typeof symbol._readDefinition !== 'function') return NO_HOME;
+    const read = symbol._readDefinition();
+    if (read !== undefined) return read;
+    const own = node.valueDefinition;
+    if (own !== undefined) return { value: own };
+    const operator = node.operatorDefinition;
+    if (operator !== undefined) return { operator };
+    return isFreeName(node) ? undefined : NO_HOME;
+  }
+  if (!isFunction(node) || node.operator !== name) return NO_HOME;
+  const operator = node.operatorDefinition;
+  if (operator !== undefined) return { operator };
+  const own = node.valueDefinition;
+  if (own !== undefined) {
+    const scope = forwardCallScope(own);
+    return scope === undefined ? { value: own } : homeDefinition(name, scope);
+  }
+  const freeHead = (node as { _freeHeadScope?: Scope })._freeHeadScope;
+  return freeHead === undefined ? NO_HOME : homeDefinition(name, freeHead);
+}
+
+/**
+ * The definition that the name `name` of the node `node` (a symbol, or the
+ * call whose head it is) denotes for the effects of the node: the
+ * definition that the scope the node was boxed in gives
+ * (`homeResolution()`), whatever scope is current. A node that records no
+ * such scope (a held operand that is not canonical) reads `name` in the
+ * current context (`lookupByName()`). A read that finds no definition is
+ * recorded in the lookup record of the effects computation in progress: a
+ * later declaration of the name is then read.
+ */
+function nodeDefinition(
+  node: Expression,
+  name: string
+): ReturnType<ComputeEngine['lookupDefinition']> {
+  const def = homeResolution(node, name);
+  if (def === NO_HOME) return lookupByName(node.engine, name);
+  if (def === undefined) {
+    const top = _effectsLookupStack[_effectsLookupStack.length - 1];
+    if (top !== undefined) {
+      let key = homeReads.get(node);
+      if (key === undefined) {
+        key = new HomeRead(node, name);
+        homeReads.set(node, key);
+      }
+      if (!top.has(key)) top.set(key, undefined);
+    }
+  }
+  return def;
+}
+
+/** The statements of each block, as written (before they are
+ * canonicalized), keyed by the scope of the block (`noteBlockStatements()`).
+ * The static walk reads the literal of a local of a block from them
+ * (`blockLocalLiteral()`, `effects-inference.ts`). A weak entry: it keeps
+ * the statements alive as long as the scope. */
+const blockStatements = new WeakMap<Scope, readonly Expression[]>();
+
+/** The entry of a scope that two blocks with different statements were
+ * canonicalized in (a rebuild that reuses the scope, `scopeForRebuild()`):
+ * the locals of the scope are shared by both texts, so neither text says
+ * what they hold, and they read as having no literal. */
+const CONFLICTING_TEXTS: readonly Expression[] = Object.freeze([]);
+
+/** Record the statements of the block whose scope is `scope`, as written.
+ * The canonicalization of a block calls it before it canonicalizes them.
+ * A block canonicalized again in the same scope with other statements
+ * makes the entry {@link CONFLICTING_TEXTS}. */
+export function noteBlockStatements(
+  scope: Scope,
+  statements: readonly Expression[]
+): void {
+  const prior = blockStatements.get(scope);
+  if (
+    prior === undefined ||
+    (prior.length === statements.length &&
+      prior.every((x, i) => x === statements[i] || x.isSame(statements[i])))
+  ) {
+    if (prior === undefined) blockStatements.set(scope, statements);
+    return;
+  }
+  blockStatements.set(scope, CONFLICTING_TEXTS);
+}
+
+/** The statements of the block whose scope is `scope`, as written, or
+ * `undefined` when `scope` is not the scope of a block. */
+export function blockStatementsOf(
+  scope: Scope
+): readonly Expression[] | undefined {
+  return blockStatements.get(scope);
 }
 
 /** Start the lookup record of an effects computation. MUST be paired with
@@ -149,6 +333,8 @@ export function effectsLookupsValid(
   for (const [key, recorded] of record) {
     if (typeof key === 'string') {
       if (ce.lookupDefinition(key) !== recorded) return false;
+    } else if (key instanceof HomeRead) {
+      if (homeResolution(key.node, key.name) !== recorded) return false;
     } else if (key.value !== recorded) return false;
   }
   return true;
@@ -822,7 +1008,7 @@ export function hasDefinedEffect(
     // values it is passed. A head with neither stated effects nor a value
     // (an unimplemented declaration, an undeclared name, a parameter) does
     // not count.
-    const def = lookupByName(expr.engine, expr.operator);
+    const def = nodeDefinition(expr, expr.operator);
     const head =
       def !== undefined && 'value' in def
         ? valueBindingEffects(def.value)
@@ -1100,7 +1286,7 @@ function layoutDeclaresField(
     t !== undefined && objectLayoutOfType(t)?.elements[name] !== undefined;
   const root = sym(receiver);
   if (root !== undefined) {
-    const def = lookupByName(receiver.engine, root);
+    const def = nodeDefinition(receiver, root);
     if (def === undefined || !('value' in def)) return false;
     return layoutOf(def.value.type.type);
   }
@@ -1303,7 +1489,7 @@ function isObjectFieldStore(target: Expression | undefined): boolean {
 
   const root = sym(receiver);
   if (root !== undefined) {
-    const def = lookupByName(target.engine, root);
+    const def = nodeDefinition(receiver, root);
     // The value-definition test is spelled inline rather than through
     // `isValueDef()` (`boxed-expression/utils.ts`) for the same layering reason
     // as the note above: importing that module here closes the cycle
@@ -1336,7 +1522,7 @@ function isObjectFieldStore(target: Expression | undefined): boolean {
 function releasedContent(op: Expression): Expression {
   const name = sym(op);
   if (name !== undefined) {
-    const def = lookupByName(op.engine, name);
+    const def = nodeDefinition(op, name);
     const value =
       def !== undefined && 'value' in def
         ? readBindingValue(def.value)
@@ -1457,7 +1643,7 @@ function hasSignatureArm(t: Type | undefined): boolean {
 function valueHeadEffects(
   expr: Expression & { operator: string }
 ): ComputedEffects | typeof NOT_CALLABLE {
-  const def = lookupByName(expr.engine, expr.operator);
+  const def = nodeDefinition(expr, expr.operator);
   if (def === undefined || !('value' in def)) return NOT_CALLABLE;
   const effects = valueBindingEffects(def.value);
   return effects === UNIMPLEMENTED ? 'any' : effects;
@@ -1486,7 +1672,7 @@ function latentEffectsOf(op: Expression): ComputedEffects {
 
   const name = sym(op);
   if (name !== undefined) {
-    const def = lookupByName(op.engine, name);
+    const def = nodeDefinition(op, name);
     if (def === undefined) return undefined;
     if ('operator' in def) return def.operator.effects;
     // A value binding: a stored literal, or an opaque function declared with a
@@ -1554,8 +1740,10 @@ function cannotHoldFunction(t: Type): boolean {
 
 /**
  * The operator definition of an application — WITHOUT binding it: the bound
- * definition when there is one, else a by-name lookup (the `isImpureHead`
- * pattern). The by-name path is load-bearing, not a fallback: on the box and
+ * definition when there is one, else the definition that its head reads
+ * (`nodeDefinition()`: from the scope the call was boxed in, or by name for
+ * an unbound node, the `isImpureHead` pattern). The by-name path is
+ * load-bearing, not a fallback: on the box and
  * parse routes a held operand arrives UNBOUND, so `operatorDefinition` is
  * `undefined` throughout such a subtree.
  */
@@ -1565,15 +1753,6 @@ export function operatorDefinitionOf(
   if (!isFunction(expr)) return undefined;
   const bound = expr.operatorDefinition;
   if (bound !== undefined) return bound;
-  return lookupOperatorDefinition(expr.engine, expr.operator);
-}
-
-/** The operator definition bound to `name`, or `undefined` when `name` is
- * undeclared or holds a value rather than an operator. */
-function lookupOperatorDefinition(
-  ce: ComputeEngine,
-  name: string
-): BoxedOperatorDefinition | undefined {
-  const def = lookupByName(ce, name);
+  const def = nodeDefinition(expr, expr.operator);
   return def && 'operator' in def ? def.operator : undefined;
 }

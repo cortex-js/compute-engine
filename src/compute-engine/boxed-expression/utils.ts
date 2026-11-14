@@ -1711,7 +1711,10 @@ export function updateDef(
   scope?: Scope,
   /** True when the caller is a declaration and the target scope held no
    * binding of `name` before it (`declareSymbolValue`,
-   * `declareSymbolOperator`). See the `binding-repair` event below. */
+   * `declareSymbolOperator`), or when no reader outside the computation in
+   * progress can have read the binding and its signature does not change
+   * (`installCopy()`, `compilation/shadowing-calls.ts`). See the
+   * `binding-repair` event below. */
   fresh?: boolean
 ): void {
   const mutableDef = def as {

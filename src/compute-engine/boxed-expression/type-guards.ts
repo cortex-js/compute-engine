@@ -76,13 +76,14 @@ export function isFreeCallHead(expr: Expression | null | undefined): boolean {
 
 /**
  * The definition that the free name (`isFreeName()`) or the call with a free
- * head (`isFreeCallHead()`) `expr` reads: the definition that its name
- * resolves to in the current context (`freeNameBindingInContext()`,
- * `binders.ts`), which skips the variable of a binder, a parameter of a
- * function literal and the parameter activation of a call frame. For a free
- * name, the resolution also skips the library operator of its name when its
- * unit reads the name as a variable (`N` in `N + 1`). `undefined` when
- * `expr` is neither, or when the name resolves to no definition.
+ * head (`isFreeCallHead()`) `expr` reads. A free name resolves from its home
+ * scope through `freeNameBindingInContext()` (`binders.ts`), which skips the
+ * variable of a binder, a parameter of a function literal and the parameter
+ * activation of a call frame, and the library operator of its name when its
+ * unit reads the name as a variable (`N` in `N + 1`). A free call head
+ * resolves from the scope it was boxed in (`_freeHeadScope`) through
+ * `homeDefinition()` (`effects-of.ts`). `undefined` when `expr` is neither,
+ * or when the name resolves to no definition.
  *
  * This is the one function that resolves a free name or a free call head:
  * `BoxedSymbol._resolvedDefinition()` and
@@ -115,8 +116,8 @@ export function resolvedValueDefinition(
 /**
  * The binding that the symbol or call `expr` reads: its own value or
  * operator definition, or, for a free name (`isFreeName()`) or a free call
- * head (`isFreeCallHead()`), the definition that its name resolves to in
- * the current context (`freeBinding()`). A call bound to a forward-call
+ * head (`isFreeCallHead()`), the definition that its name resolves to from
+ * its home scope (`freeBinding()`). A call bound to a forward-call
  * reference (a call in the
  * body of a function literal boxed before its name had a definition) reads
  * the definition that its name holds now (`_forwardCalleeBinding()`,

@@ -1,10 +1,13 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
-import {
-  rebindToBindings,
-  withCallableBinding,
-} from '../boxed-expression/binders.js';
+import { withCallableBinding } from '../boxed-expression/binders.js';
 import { withScratchScope } from '../scratch-scopes.js';
+import { updateDef } from '../boxed-expression/utils.js';
+import {
+  ascribeDeclaredParameterTypes,
+  reconcileFunctionLiteralReturn,
+} from '../engine-declarations.js';
+import { hasFunctionSignature } from '../../common/type/utils.js';
 
 /**
  * Compile a call of a user function that shadows a library operator as a
@@ -310,28 +313,27 @@ export function withShadowingCallsRenamed<T>(
     return withCallableBinding(e, () => ce.function(e.operator, ops, { form }));
   };
 
-  // Two scratch scopes, the second inside the first. The outer one holds
-  // valueless declarations of the copies while the renamed trees are built,
-  // so that a renamed call has the declared type of its function. The inner
-  // one holds the copies with their values, and the target compiles in it:
-  // the compiler resolves a call by its name, so it reads the copy. The
-  // outer scope stays on the stack until the compilation ends, so that the
-  // renamed calls stay bound to declarations that are in scope.
+  // One scratch scope. It holds a declaration of each copy, made before
+  // the renamed trees are built, so that a renamed call is bound to it and
+  // has the declared type of its function. Each copy then gets its renamed
+  // literal in that definition (`installCopy()`): every renamed call, in the
+  // expression and in the bodies of the copies, is bound to the definition
+  // that holds the value, so a read from the scope of the call finds it.
+  // The target compiles in this scope, and the compiler, which resolves a
+  // call by its name, reads the same definition. The scope stays on the
+  // stack until the compilation ends.
   //
-  // Both scopes are registered as scratch scopes while the declarations are
+  // The scope is registered as a scratch scope while the declarations are
   // made, and only then: a declaration that the compilation makes keeps its
-  // ordinary effect. The outer one is still registered while the copies are
-  // declared. A PRIVATE name then shadows only the valueless declaration of
-  // the outer scope, a scratch binding that no expression outside this
-  // computation can read: each declaration of a private name advances no
-  // cache version of the engine (the `binding-repair` case of
-  // `axisMaskOf()`, `engine-configuration-lifecycle.ts`), and when all the
-  // copies have private names, the pops of the two scopes are clean and
-  // advance nothing either. A copy kept under its own name shadows the
-  // user's function outside the computation: its declarations keep their
-  // advance, and the pops are not clean.
+  // ordinary effect. A PRIVATE name is a scratch binding that no expression
+  // outside this computation can read: its declaration advances no cache
+  // version of the engine (the `binding-repair` case of `axisMaskOf()`,
+  // `engine-configuration-lifecycle.ts`), and when all the copies have
+  // private names, the pop of the scope is clean and advances nothing
+  // either. A copy kept under its own name shadows the user's function
+  // outside the computation: its declaration keeps its advance, and the
+  // pop is not clean.
   ce.pushScope();
-  let innerScopePushed = false;
   try {
     let renamedExpr = expr;
     withScratchScope(ce, ce.context.lexicalScope, () => {
@@ -341,41 +343,15 @@ export function withShadowingCallsRenamed<T>(
           fn.privateName!,
           fn.definition,
           fn.isOperator,
-          fn.literal,
-          undefined
+          fn.literal
         );
       const copies: [UserFunction, Expression][] = [...renamed].map((fn) => [
         fn,
         rename(fn.literal),
       ]);
       renamedExpr = rename(expr);
-      ce.pushScope();
-      innerScopePushed = true;
-      withScratchScope(ce, ce.context.lexicalScope, () => {
-        for (const [fn, literal] of copies)
-          declareCopy(
-            ce,
-            fn.privateName!,
-            fn.definition,
-            fn.isOperator,
-            literal,
-            literal
-          );
-      });
-      // A renamed call was bound to the valueless declaration of the outer
-      // scope. A part of the engine that reads the function of a call from
-      // the binding of the call, not from its name (the derivative of a
-      // call), must read the copy with its value, as the compiler does: the
-      // calls are bound again to the copies of the inner scope.
-      const inner = ce.context.lexicalScope;
-      const copiesByName = new Map<string, Expression>();
-      for (const fn of renamed) {
-        const copy = ce._bindingSymbol(fn.privateName!, inner);
-        if (copy !== undefined) copiesByName.set(fn.privateName!, copy);
-      }
-      renamedExpr = rebindToBindings(renamedExpr, inner, copiesByName, {
-        calls: true,
-      });
+      for (const [fn, literal] of copies)
+        installCopy(ce, fn.privateName!, fn.isOperator, literal);
     });
     try {
       return compile(renamedExpr);
@@ -404,7 +380,6 @@ export function withShadowingCallsRenamed<T>(
           deps.delete(privateName);
           deps.add(name);
         }
-    if (innerScopePushed) ce.popScope();
     ce.popScope();
   }
 }
@@ -461,7 +436,8 @@ const CONTRACT_FIELDS = [
 
 /**
  * True when a copy of the operator definition `definition`, declared as
- * `{ signature, evaluate }` the way `declareCopy()` declares it, has the same
+ * `{ signature, evaluate }` the way `declareCopy()` and `installCopy()`
+ * declare it, has the same
  * contract (`CONTRACT_FIELDS`): a handler is present in both or absent in
  * both, and every other field has the same value.
  *
@@ -557,12 +533,14 @@ function plainLiteral(
 
 /**
  * Declare `name` in the current scope with the type of the user function
- * definition `definition`, and with the value `value` when it is given. The
+ * definition `definition`: the renamed calls are built against it, and
+ * `installCopy()` then gives it the renamed literal. An operator copy is
+ * declared with the literal of the user function, so that its flags are
+ * those of a copy (`copiesFaithfully()`); a value copy has no value. The
  * type is `function` when the type of the definition cannot be declared
  * again.
  *
- * A declaration with no value (the declaration that the renamed calls are
- * built against) must still give each call the type that a call of the
+ * The declaration must give each call the type that a call of the
  * user function has. When the definition declares no signature (`declare(
  * name, 'function')`), a call of the user function has the result type of
  * its function literal, so the declaration uses the type of the literal
@@ -582,28 +560,106 @@ function declareCopy(
   name: string,
   definition: object,
   isOperator: boolean,
-  literal: Expression,
-  value: Expression | undefined
+  literal: Expression
 ): void {
   const d = definition as {
     type?: { toString(): string };
     signature?: { toString(): string };
   };
   let type = (isOperator ? d.signature : d.type)?.toString() ?? 'function';
-  if (value === undefined && !type.includes('->'))
-    type = literal.type.toString();
+  if (!type.includes('->')) type = literal.type.toString();
   const declaration = (t: string) =>
-    isOperator
-      ? value === undefined
-        ? { signature: t }
-        : { signature: t, evaluate: value }
-      : value === undefined
-        ? { type: t }
-        : { type: t, value };
+    isOperator ? { signature: t, evaluate: literal } : { type: t };
   try {
     ce.declare(name, declaration(type));
   } catch {
     ce.declare(name, declaration('function'));
+  }
+}
+
+/**
+ * Give the copy `name`, declared in the current scope by `declareCopy()`,
+ * its renamed literal `literal`, in the definition that holds it: the
+ * calls that were bound to that definition read the literal. The
+ * declaration is the one `declareCopy()` makes, with the same type: an
+ * operator definition `{ signature, evaluate }`, or a value definition
+ * `{ type, value }`. (`ce.assign()` would not do: it derives the flags of
+ * an operator definition again, so the copy would not have the contract
+ * of the user function, `copiesFaithfully()`.)
+ */
+function installCopy(
+  ce: Expression['engine'],
+  name: string,
+  isOperator: boolean,
+  literal: Expression
+): void {
+  const scope = ce.context.lexicalScope;
+  const binding = scope.bindings.get(name);
+  if (binding === undefined) return;
+  const install = (type: string): void => {
+    // `fresh`: nothing outside this computation can have read the binding,
+    // so the update advances no version.
+    if (isOperator && 'operator' in binding)
+      updateDef(
+        ce,
+        name,
+        binding,
+        { signature: type, evaluate: literal },
+        scope,
+        true
+      );
+    else if (!isOperator && 'value' in binding)
+      updateDef(
+        ce,
+        name,
+        binding,
+        { type, value: declaredLiteral(ce, literal, type, name) },
+        scope,
+        true
+      );
+  };
+  const type =
+    'operator' in binding
+      ? binding.operator.signature.toString()
+      : binding.value.type.toString();
+  // The literal of a value copy is matched with the declared signature as
+  // `ce.declare(name, { type, value })` matches it (`declaredLiteral()`). A
+  // literal that the declared type still refuses is installed with the
+  // type `function`, as `declareCopy()` does when a type cannot be declared.
+  try {
+    install(type);
+  } catch {
+    install('function');
+  }
+}
+
+/**
+ * The literal `literal` matched with the declared type `type` of the value
+ * copy `name`, as the declaration of a value with a function type matches
+ * it (`declareSymbolValue()`, `engine-declarations.ts`): the declared
+ * parameter types are put on the bare parameters, and the body is
+ * reconciled with the declared result. `literal` itself when `type` is not
+ * a function signature, or when the match refuses it (the check of the
+ * value definition then decides).
+ */
+function declaredLiteral(
+  ce: Expression['engine'],
+  literal: Expression,
+  type: string,
+  name: string
+): Expression {
+  if (!isFunction(literal, 'Function')) return literal;
+  const declared = ce.type(type).type;
+  if (!hasFunctionSignature(declared)) return literal;
+  try {
+    return reconcileFunctionLiteralReturn(
+      ce,
+      ascribeDeclaredParameterTypes(ce, literal, declared),
+      declared,
+      name
+    );
+  } catch {
+    return literal;
   }
 }
 

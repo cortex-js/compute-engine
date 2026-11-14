@@ -275,8 +275,28 @@ describe('BINDING UNITS: SITES OF RULE 7', () => {
     try {
       const b = ce.parse('f(1)');
       expect(a.isSame(b)).toBe(false);
-      // Once the name resolves, both calls read the same definition.
+      // A declaration in the pushed scope is on the home chain of `b` only
+      // (C2 and C3 of `docs/plans/2026-11-11-bound-once-spec.md`: the head
+      // of a call follows rule 1, and the home chain is fixed): `a` still
+      // has no definition, and `b` reads the declaration.
       ce.declare('f', 'function');
+      expect(a.isSame(b)).toBe(false);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('free calls of two home scopes read a declaration of the scope above both', () => {
+    const ce = engine();
+    const a = ce.parse('f(1)');
+    ce.pushScope();
+    try {
+      const b = ce.parse('f(1)');
+      // A declaration at the top is on the home chain of both calls (C2
+      // and C3): both read it.
+      ce.popScope();
+      ce.declare('f', 'function');
+      ce.pushScope();
       expect(a.isSame(b)).toBe(true);
     } finally {
       ce.popScope();

@@ -37,7 +37,8 @@ import {
 } from '../collection-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { declaredBinders } from './binding-sites.js';
-import { callableBindingInContext } from './binders.js';
+import { callableBindingInContext, readsActivationHalf } from './binders.js';
+import { scopeActivationTemplate } from './ambient-chain.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -53,6 +54,7 @@ import type {
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
 
 import {
@@ -67,6 +69,9 @@ import {
 import { restrictionParts } from './conditional-value.js';
 import {
   effectiveDischarge,
+  blockStatementsOf,
+  homeBinding,
+  homeDefinition,
   mayStoreIntoReceiverOfType,
   protocolAccessorEffects,
 } from './effects-of.js';
@@ -1950,8 +1955,8 @@ export function namedLiteralSignatureType(
  * evaluation reads that scope: with a global `P: list<real>` and
  * `angle := t ↦ P`, the result of `angle` read inside the body of a
  * function whose parameter is named `P` is still `list<real>`. The effects
- * are those derived in the current context: a call of a parameter in the
- * body is a call of an unknown function there.
+ * are read from the scope the literal was boxed in, wherever they are
+ * computed (`walkHome`).
  */
 export function functionLiteralCallSignatureType(expr: Expression): Type {
   const ce = expr.engine;
@@ -2524,7 +2529,11 @@ function walkLiteral(
    * self-recursive value binding (`R := (i) ↦ … R(i-1) …`) would expand into
    * itself until the depth guard collapsed it to `any`, reporting a pure
    * recursive body impure. */
-  expanding: Set<string>
+  expanding: Set<string>,
+  /** The scope that the names of `literal` are read from, when it is not
+   * the scope of its body (`literalHome()`): the scope of the block that
+   * declares a local with this literal (`blockLocalLiteral()`). */
+  home?: Scope
 ): void {
   if (depth > MAX_LITERAL_DEPTH) {
     state.effects = 'any';
@@ -2559,6 +2568,77 @@ function walkLiteral(
   const body = functionLiteralBody(literal);
   if (body === undefined) return;
 
+  // The names of the literal are read from the scope it was boxed in: its
+  // body scope and the chain above it (`walkHome`).
+  const outerHome = walkHome;
+  // A literal with no scope of its own (a literal of the text of a block,
+  // `blockLocalLiteral()`, or one nested in it) reads its names from the
+  // home of the walk that encloses it; its parameters shadow them
+  // (`params`).
+  walkHome = home ?? literalHome(literal) ?? outerHome;
+  try {
+    walkBody(
+      ce,
+      body,
+      state,
+      params,
+      paramTypes,
+      selfName,
+      depth,
+      expanding
+    );
+  } finally {
+    walkHome = outerHome;
+  }
+}
+
+/**
+ * The scope that the names of the function literal `literal` are read from
+ * by the walk (`definitionOf()`): the scope of its body, whose chain holds
+ * the scope the literal was boxed in. `undefined` for a literal whose body
+ * has no scope (a literal that is not canonical): its names are then read
+ * from the current scope.
+ */
+function literalHome(literal: Expression): Scope | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  const body = literal.ops[0];
+  return isFunction(body) ? body.localScope : undefined;
+}
+
+/**
+ * The scope that the walk in progress reads names from (`literalHome()` of
+ * the literal being walked), or `undefined` to read them from the current
+ * scope.
+ */
+let walkHome: Scope | undefined = undefined;
+
+/**
+ * The definition that `name` denotes in the literal being walked: the
+ * binding that the chain of `walkHome` gives (`homeDefinition()`), not the
+ * binding of the current scope. The answer of the walk is then the same
+ * whatever scope is current when the effects of a literal are read.
+ */
+function definitionOf(
+  ce: ComputeEngine,
+  name: string
+): ReturnType<ComputeEngine['lookupDefinition']> {
+  return walkHome === undefined
+    ? ce.lookupDefinition(name)
+    : homeDefinition(name, walkHome);
+}
+
+/** The walk of the body of a literal, with the names of the literal read
+ * from `walkHome`: see {@link walkLiteral}. */
+function walkBody(
+  ce: ComputeEngine,
+  body: Expression,
+  state: WalkState,
+  params: Map<string, EffectSet | undefined | null>,
+  paramTypes: Map<string, Type>,
+  selfName: string | undefined,
+  depth: number,
+  expanding: Set<string>
+): void {
   // Closure capture: a symbol that a nested literal WRITES is shared between
   // this application and a closure that can outlive it, so a write to it is
   // never confined. A symbol that nested literals only READ is not in this
@@ -3419,7 +3499,7 @@ class Walker {
    * definition, or a value binding whose type is an arrow. A binding that is
    * not callable (`k := 5`) contributes nothing from an operand position. */
   private isFunctionValued(name: string): boolean {
-    const def = this.ce.lookupDefinition(name);
+    const def = definitionOf(this.ce, name);
     if (def === undefined) return false;
     if ('operator' in def) return true;
     const t = def.value.type?.type as Type | undefined;
@@ -3497,7 +3577,9 @@ class Walker {
       // literal this walk is inside; it is neutral, exactly as a self-call is,
       // and falls through to contribute nothing.
       if (t === undefined && !this.expanding.has(name)) {
-        const stored = storedFunctionLiteral(this.ce, name);
+        const found = storedFunctionLiteral(this.ce, name);
+        const stored = found?.literal;
+        const home = found?.home;
         if (stored !== undefined) {
           // A stored literal already walked into this accumulator at this
           // depth or a smaller one adds nothing (see `expandedLiterals`).
@@ -3517,7 +3599,8 @@ class Walker {
               this.state,
               this.selfName,
               this.depth + 1,
-              this.expanding
+              this.expanding,
+              home
             );
           } finally {
             this.expanding.delete(name);
@@ -3960,7 +4043,7 @@ function operatorDefinitionOf(
   ce: ComputeEngine,
   name: string
 ): BoxedOperatorDefinition | undefined {
-  const def = ce.lookupDefinition(name);
+  const def = definitionOf(ce, name);
   return def && 'operator' in def ? def.operator : undefined;
 }
 
@@ -3974,7 +4057,7 @@ function valueSignatureOf(
   ce: ComputeEngine,
   name: string
 ): EffectSet | undefined | 'undeclared' {
-  const def = ce.lookupDefinition(name);
+  const def = definitionOf(ce, name);
   if (def === undefined) return 'undeclared';
   if (!('value' in def)) return undefined;
   // The arrow of an INFERRED binding type that came from the `Function`
@@ -3991,7 +4074,21 @@ function valueSignatureOf(
   if (def.value.inferredType && storedFunctionLiteral(ce, name) !== undefined)
     return undefined;
   const t = def.value.type?.type;
-  return signatureEffects(t as Type | undefined);
+  const stated = signatureEffects(t as Type | undefined);
+  // The local of a block holds its value only in a run of the block, and
+  // the walk does not read it. With no effects stated by its type, the
+  // literal that the text of its block gives it is walked
+  // (`blockLocalLiteral()`); with no such literal, nothing says what it
+  // does: it is unresolved, as a name with no definition. A host
+  // declaration with no value keeps the optimistic reading
+  // (`docs/EFFECTS-MODEL.md`, "Inference").
+  if (
+    stated === undefined &&
+    def.value._blockLocal === true &&
+    storedFunctionLiteral(ce, name) === undefined
+  )
+    return 'undeclared';
+  return stated;
 }
 
 /**
@@ -4007,14 +4104,121 @@ function valueSignatureOf(
 function storedFunctionLiteral(
   ce: ComputeEngine,
   name: string
-): Expression | undefined {
-  const def = ce.lookupDefinition(name);
+): { literal: Expression; home?: Scope } | undefined {
+  // The local of a block holds a value only in a run of the block: the walk
+  // reads the literal that the text of the block gives it, and never the
+  // value of the activation that is current.
+  const found = homeBinding(name, walkHome ?? ce.context.lexicalScope);
+  if (
+    found !== undefined &&
+    'value' in found.def &&
+    found.def.value._blockLocal === true
+  ) {
+    // A node boxed in a run reads the local in the activation of the
+    // block: the text is the text of the block that it activates.
+    const block = scopeActivationTemplate(found.scope) ?? found.scope;
+    const literal = blockLocalLiteral(name, block);
+    return literal === undefined ? undefined : { literal, home: block };
+  }
+  const def = definitionOf(ce, name);
   if (def === undefined || !('value' in def)) return undefined;
+  // A parameter and the variable of a binder hold a value only in an
+  // activation: the walk reads their type, not the value of the activation
+  // that is current.
+  if (readsActivationHalf(def.value)) return undefined;
   if (!bindingCouldHoldFunction(def.value.type?.type as Type | undefined))
     return undefined;
   const value = def.value.value;
   if (value === undefined || !isFunction(value, 'Function')) return undefined;
-  return value;
+  return { literal: value };
+}
+
+/** The answers of `blockLocalLiteral()`, for each list of statements that
+ * the registry holds (`blockStatementsOf()`) and each name (`null` for
+ * none). An entry of the registry that changes is a new list, which starts
+ * with no answers. */
+const blockLocalLiterals = new WeakMap<
+  readonly Expression[],
+  Map<string, Expression | null>
+>();
+
+/**
+ * The function literal that the text of the block whose scope is `scope`
+ * gives its local `name`, or `undefined`. There is one when a statement of
+ * the block declares the local with a literal as its value
+ * (`Declare(h, Function(…))`, `Declare(h, Dictionary(value: Function(…)))`,
+ * `DefineFunction(h, Function(…))`), and no other node of the block, at any
+ * depth, writes the local (an `Assign`, an `AddTo`, a second declaration, a
+ * store through it). The statements are those written
+ * (`blockStatementsOf()`), recorded before the block is canonicalized, so
+ * the answer does not depend on when it is read. The literal is a fact of
+ * the text, not of a run: the answer is the same inside a run of the block
+ * and after it. Its walk, and the walk of a literal nested in it, reads
+ * names from the scope of the block (`walkLiteral()`).
+ */
+function blockLocalLiteral(name: string, scope: Scope): Expression | undefined {
+  const statements = blockStatementsOf(scope);
+  if (statements === undefined) return undefined;
+  let memo = blockLocalLiterals.get(statements);
+  if (memo === undefined) {
+    memo = new Map();
+    blockLocalLiterals.set(statements, memo);
+  }
+  const known = memo.get(name);
+  if (known !== undefined) return known ?? undefined;
+  let literal: Expression | undefined;
+  for (const statement of statements) {
+    if (
+      !isFunction(statement, 'Declare') &&
+      !isFunction(statement, 'DefineFunction')
+    )
+      continue;
+    if (sym(statement.ops[0]) !== name) continue;
+    const value = statement.ops[statement.ops.length - 1];
+    literal = isFunction(value, 'Function')
+      ? value
+      : isFunction(statement, 'Declare')
+        ? dictionaryEntry(value, 'value')
+        : undefined;
+  }
+  if (literal !== undefined && !isFunction(literal, 'Function'))
+    literal = undefined;
+  if (literal !== undefined && writesOf(statements, name) !== 1)
+    literal = undefined;
+  memo.set(name, literal ?? null);
+  return literal;
+}
+
+/** The number of nodes of `statements`, at any depth, that write `name`:
+ * an `Assign`, `AddTo`, `Declare` or `DefineFunction` whose target is
+ * `name`, or whose target mentions it (a store through it). */
+function writesOf(statements: readonly Expression[], name: string): number {
+  let count = 0;
+  const seen = new Set<Expression>();
+  const visit = (expr: Expression): void => {
+    const ops = walkedOperands(expr);
+    if (ops === undefined || seen.has(expr)) return;
+    seen.add(expr);
+    if (
+      isFunction(expr) &&
+      (expr.operator === 'Assign' ||
+        expr.operator === 'AddTo' ||
+        expr.operator === 'Declare' ||
+        expr.operator === 'DefineFunction')
+    ) {
+      const targets = assignTargets(expr);
+      if (
+        targets.includes(name) ||
+        (targets.includes(undefined) &&
+          expr.ops[0] !== undefined &&
+          expr.ops[0].symbols.includes(name))
+      )
+        count += 1;
+    }
+    for (const op of ops) visit(op);
+  };
+  for (const statement of statements) visit(statement);
+  return count;
 }
 
 /**

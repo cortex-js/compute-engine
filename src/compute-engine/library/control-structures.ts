@@ -87,7 +87,10 @@ import {
 } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { computedEffectsInclude } from '../../common/type/effects.js';
-import { effectsOf } from '../boxed-expression/effects-of.js';
+import {
+  effectsOf,
+  noteBlockStatements,
+} from '../boxed-expression/effects-of.js';
 import {
   cannotHoldAList,
   isSubtype,
@@ -4335,6 +4338,9 @@ function canonicalBlock(
   // `If(True, Block())` evaluated to the inert `Block()` itself, printed
   // `{}`, where the language documents `Nothing` as an empty block's value.
   if (ops.length === 0) return ce._fn('Block', [], { scope });
+  // The text of the block, which the effects of a literal that calls one of
+  // its locals read (`blockLocalLiteral()`, `effects-inference.ts`).
+  if (scope !== undefined) noteBlockStatements(scope, ops);
 
   // A `Declare(name, …)` introduces a block-local `name` that shadows any
   // same-named constant (`i`, `e`, `Pi`, …) for the rest of the block. Push

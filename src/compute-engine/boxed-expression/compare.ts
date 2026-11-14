@@ -185,8 +185,8 @@ export function sameBinding(
  * The definition that the symbol occurrence or the call `expr` reads: its
  * `baseDefinition`, or, for a free name (`isFreeName()`) or a free call head
  * (`isFreeCallHead()`), the value or operator definition that its name
- * resolves to in the current context (`freeBinding()`). `undefined` when
- * there is none.
+ * resolves to from its home scope (`freeBinding()`). `undefined` when there
+ * is none.
  */
 function resolvedBaseDefinition(
   expr: Expression
@@ -255,8 +255,9 @@ function sameCallHead(
     if (aBound) return true;
   }
   // A free call head (`isFreeCallHead()`, `binding-unit.ts`) reads the
-  // definition that its name resolves to in the current context, as a free
-  // name does (`sameBinding()`). When neither side resolves, two free
+  // definition that its name resolves to from the scope it was boxed in
+  // (`homeDefinition()` from `_freeHeadScope`), as a free name reads its
+  // home scope (`sameBinding()`). When neither side resolves, two free
   // heads are the same function only with the same home scope, and a free
   // head and a raw call are different.
   const ad = resolvedBaseDefinition(a);

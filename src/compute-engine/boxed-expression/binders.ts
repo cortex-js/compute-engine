@@ -456,8 +456,10 @@ export function readsActivation(def: BoxedDefinition): boolean {
   return 'value' in def && readsActivationHalf(def.value);
 }
 
-/** `readsActivation()` for the value definition `def`. */
-function readsActivationHalf(def: BoxedBaseDefinition): boolean {
+/** `readsActivation()` for the value definition `def`, without the local
+ * that a run of a `Declare` statement outside an activation made: the value
+ * of such a local is held by the definition, not by an activation. */
+export function readsActivationHalf(def: BoxedBaseDefinition): boolean {
   if (isActivation(def)) return true;
   const own = def as BoxedValueDefinition;
   return (

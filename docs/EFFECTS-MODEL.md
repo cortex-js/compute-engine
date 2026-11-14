@@ -1198,7 +1198,9 @@ dynamic and one static:
 - **Runtime — `effectsOf`, computed dynamically.**
   `effectsOf(Map(f, xs)) = ownEffects(Map) (= ∅) ∪ contribution(xs) ∪
   contribution(f)`. `f` is a symbol operand, so `effectsOf` resolves it
-  **through its current binding** to a function value and reads that
+  **through its current binding** (the definition that the scope the
+  node was boxed in gives, with the value it holds now) to a function
+  value and reads that
   value's signature arrow — its latent set — *at query time*. `Map`
   declares no discharge, so the latent set is re-emitted: if `f` is
   currently bound to `(x: real) random -> real`, the application computes
@@ -1474,6 +1476,41 @@ surface):
   states no effects (`() -> number`) leaves the literal in charge.
   Before the amendment the literal in the dictionary was not found, the
   application was an unresolved head, and the body inferred `any`.
+- **Names are read from the scope of the literal.** The walk resolves
+  each name of a literal (a call head, a callback operand) from the scope
+  the literal was boxed in: the scope of its body and the chain above it.
+  The scope that is current when the effects are read plays no part, so
+  the effects of a literal are the same inside a run of the block that
+  holds it and after that run. A parameter, the variable of a binder and
+  the local of a block are read as the definition that this chain gives,
+  by its type: the walk does not read the value that an activation holds.
+  A local of a block whose type states no effects is read from the text of
+  its block: when one statement of the block declares it with a function
+  literal (`Declare(h, Function(…))`, Epsil `function h(x) {…}` or
+  `let h = (x) => …`) and no other node of the block, at any depth, writes
+  it (an assignment, a second declaration, a store through it), the walk
+  walks that literal, from the scope of the block. In
+  `function g() { Random() }  function h(x) { g() + x }`, `h` is
+  `(x: unknown) random -> …`. A self-call or a mutual call between such
+  locals is neutral, as a self-call is. Every other local of a block that
+  holds a function is unresolved (`{any}`): in
+  `Block(Declare(g, 'unknown', s ↦ Length(s)), Assign(g, s ↦ Random()),
+  Map(x ↦ g(x) + 1, S))` the literal of the `Map` is `any`. The record is
+  read from the text, never from a run, so the answer is the same inside a
+  run of the block and after it. A local of a block is told from a host
+  declaration by its definition: the canonicalization of a block marks the
+  local that each of its declarations makes (and the local of the body of
+  a function literal); a name declared by the host
+  (`ce.declare('k', 'function')`), or by a statement run outside a block,
+  is not marked, and with no value it keeps the optimistic reading of the
+  next bullets. An unannotated parameter keeps ruling (c).
+  The binding that boxing makes for a call head with no definition (a
+  forward-call reference) is not a definition: the head is unresolved
+  (`{any}`, next bullets) until a definition of the name is made on the
+  chain, and that definition is then read. The runtime channel follows
+  the same rule: the definition of a symbol or a call head of a canonical
+  node is the one that the scope the node was boxed in gives; a node that
+  is not canonical (a held operand) is read by name in the current scope.
 - **Applied parameters** *(ruling (c))*: an **annotated** function
   parameter contributes its declared arrow effects to body inference and
   the boundary enforces the bound. An **unannotated** parameter (declared

@@ -317,12 +317,13 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     return undefined;
   };
 
-  test('a literal that calls a block local function is typed again inside the call', () => {
-    // The effects of the literal of `even` resolve `odd` from the scope of
-    // the reader (`lookupDefinition()`). Outside a call of `outer`, `odd` is
-    // not found and the effects are `any`. Inside the call, `odd` is found,
-    // and the literal has no effects. The read at the start of the second
-    // call served the type read outside the call.
+  test('a literal that calls a block local function has the same effects inside and outside the call', () => {
+    // The effects of the literal of `even` resolve `odd` from the scope the
+    // literal was boxed in (`docs/EFFECTS-MODEL.md`, "Inference"), the body
+    // of `outer`, where `odd` is a local. The literal has no effects, read
+    // inside a call of `outer` or outside it. (Before, `odd` was resolved
+    // from the scope of the reader: outside a call it was not found, and the
+    // effects were `any`.)
     const ce = new ComputeEngine();
     ce.declare('ReadLiteralType689', {
       signature: '() -> string',
@@ -349,12 +350,11 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     // `odd` is defined, so the call `odd(n − 1)` can be read as a value of
     // any type, not as a recursive call, and the result can be `unknown`
     // (`docs/TYPE-SYSTEM.md`, the precision loss of a mutual recursion,
-    // CE-836). The test guards the effects: none inside a call, `any`
-    // outside.
+    // CE-836). The test guards the effects: none, inside a call and outside.
     expect(executeEpsil(ce, 'outer(4)').value?.toString()).toMatch(
       /^\["True","\(n: unknown\) -> /
     );
-    expect(literal.type.toString()).toMatch(/^\(n: unknown\) any -> /);
+    expect(literal.type.toString()).toMatch(/^\(n: unknown\) -> /);
     expect(executeEpsil(ce, 'outer(7)').value?.toString()).toMatch(
       /^\["False","\(n: unknown\) -> /
     );

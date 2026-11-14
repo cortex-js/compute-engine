@@ -6,7 +6,9 @@ import type {
   Scope,
 } from '../global-types.js';
 import {
+  freeBinding,
   isDictionary,
+  isFreeCallHead,
   isFunction,
   isObject,
   isSymbol,
@@ -68,6 +70,13 @@ export function compilationScope(
     scope: Scope;
   }[] = [];
   const heads = new Map<string, Set<BoxedBaseDefinition>>();
+  // The free call heads, each with the definition its home chain gives, and
+  // their home scopes.
+  const freeHeads = new Map<string, BoxedBaseDefinition | undefined>();
+  const freeHomes = new Set<Scope>();
+  // The names that two free call heads read from two definitions: no scope
+  // gives both to a lookup by name.
+  const conflictingHeads = new Set<string>();
   // A definition is followed once (a recursive function).
   const seen = new Set<object>();
   // A node shared by several operands is visited once, with the names that
@@ -176,6 +185,26 @@ export function compilationScope(
       inner = new Set([...(bound ?? []), ...e.localScope.bindings.keys()]);
     }
     const name = e.operator;
+    // A free call head reads the definition that the chain of its home
+    // scope gives (`freeBinding()`), as its evaluation does: the scope is a
+    // candidate, and a scope that reads another definition is refused
+    // (`readsFreeHeads()`).
+    if (isFreeCallHead(e)) {
+      const free = freeBinding(e);
+      const home = (e as { _freeHeadScope?: Scope })._freeHeadScope;
+      if (home !== undefined) freeHomes.add(home);
+      if (free !== undefined) {
+        const half = halfOf(free);
+        if (freeHeads.has(name) && freeHeads.get(name) !== half)
+          conflictingHeads.add(name);
+        freeHeads.set(name, half);
+        const op = 'operator' in free ? free.operator : undefined;
+        follow(op, () => op?._lambdaLiteral);
+        followValue(name, 'value' in free ? free.value : undefined);
+      }
+      for (const x of e.ops) stack.push([x, inner]);
+      continue;
+    }
     const def = e.operatorDefinition ?? e.valueDefinition;
     if (
       def !== undefined &&
@@ -261,19 +290,30 @@ export function compilationScope(
     return true;
   };
 
-  const first = misread(current);
+  // The compiler looks a call head up by its name in the scope of the
+  // compilation: a free call head must read there what its home chain gives.
+  const misreadHead = (scope: Scope): string | undefined => {
+    for (const name of conflictingHeads) return name;
+    for (const [name, def] of freeHeads)
+      if (halfOf(lookup(name, scope)) !== def) return name;
+    return undefined;
+  };
+
+  const first = misread(current) ?? misreadHead(current);
   if (first === undefined && readsHeads(current)) return undefined;
   // A scope of `expr` itself (the body of a function literal, a `Sum`)
   // binds the names of `expr`, and the compiler binds them by itself.
-  const others = [...new Set([...named.keys(), ...free.keys()])]
+  const others = [...new Set([...named.keys(), ...free.keys(), ...freeHomes])]
     .filter((s) => s !== current && !insideAny(s, local))
     .sort((a, b) => depthOf(a) - depthOf(b));
+  const reads = (scope: Scope): boolean =>
+    misread(scope) === undefined &&
+    misreadHead(scope) === undefined &&
+    readsInputs(scope);
   for (const scope of others)
-    if (misread(scope) === undefined && readsHeads(scope) && readsInputs(scope))
-      return scope;
+    if (reads(scope) && readsHeads(scope)) return scope;
   if (first === undefined) return undefined;
-  for (const scope of others)
-    if (misread(scope) === undefined && readsInputs(scope)) return scope;
+  for (const scope of others) if (reads(scope)) return scope;
   return new CompileDeclineError({
     code: 'compile-error',
     kind: 'correctness',

@@ -11,8 +11,6 @@ import {
 } from '../binding-unit.js';
 import {
   callableBindingInContext,
-  freeNameBindingAndScope,
-  freeNameBindingInContext,
   markCallableHome,
   hasCallableHome,
   sameBindingDef,
@@ -593,6 +591,8 @@ import {
   mergeEffectsLookups,
   publicEffects,
   type EffectsLookups,
+  homeBinding,
+  homeDefinition,
 } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import {
@@ -1855,11 +1855,10 @@ export class BoxedFunction
 
   /**
    * The definition of the head of this call: its own definition, or, for a
-   * free call head (`_freeHeadScope`), the definition that its name
-   * resolves to in the current context (`freeNameBindingInContext()`). The
-   * resolution skips the variable of a binder, a parameter of a function
-   * literal and the parameter activation of a call frame: the head was not
-   * inside a binder when the call was boxed. It does not skip a library
+   * free call head (`_freeHeadScope`), the definition that the chain of
+   * the scope it was boxed in gives (`homeDefinition()`, `effects-of.ts`):
+   * the current scope plays no part, and the binding that boxing makes for
+   * a call head with no definition is skipped. It does not skip a library
    * operator: a call head is never read as a variable. `undefined` when
    * there is no definition. Read it through `freeBinding()` or
    * `readBinding()` (`type-guards.ts`).
@@ -1868,7 +1867,7 @@ export class BoxedFunction
   _resolvedDefinition(): BoxedDefinition | undefined {
     if (this._def) return this._def;
     if (this._freeHeadScope === undefined) return undefined;
-    return freeNameBindingInContext(this.engine, this._operator);
+    return homeDefinition(this._operator, this._freeHeadScope);
   }
 
   /**
@@ -1932,7 +1931,7 @@ export class BoxedFunction
   private _reboxedForFreeHead(): Expression | undefined {
     if (this._freeHeadReboxing === true) return undefined;
     const ce = this.engine;
-    const found = freeNameBindingAndScope(ce, this._operator);
+    const found = homeBinding(this._operator, this._freeHeadScope!);
     const current = found?.def;
     const half = calleeHalf(current);
     if (current === undefined || half === undefined) return undefined;

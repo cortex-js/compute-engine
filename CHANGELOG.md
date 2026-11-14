@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **An expression boxed before its function is defined calls the
+  definition of the scope it was boxed in, or of a parent of that scope.**
+  A function of that name declared in a scope pushed later is not called.
+  With `c = ce.box(['Add', ['h', 2], 1])` at the top, then
+  `h := t ↦ 10t` at the top, then a pushed scope that declares
+  `h := t ↦ t·Random()`, `c.evaluate()` called the `h` of the pushed scope
+  and drew; it is `21`, and `c.isPure` is true. The compiled code of such a
+  call calls the same `h`. To call the function of the pushed scope, box the
+  expression in that scope.
+
 ### New Features
 
 - **The compile option `inputs` gives the types of the inputs at the call.**
@@ -19,6 +31,36 @@
 
 ### Resolved Issues
 
+- **The effects of a function literal are read from the scope it was boxed
+  in.** A name that the literal calls resolves from the scope of its body
+  and the scopes around it, not from the scope that is current when the
+  effects are read, so the answer no longer changes with the reader. The
+  effect slots that change:
+  - In `Block(Declare(g, 'unknown', s ↦ Length(s)), Map(x ↦ g(x) + 1, S))`
+    the literal was `(x: string) -> …` inside a run of the block and
+    `(x: string) any -> …` after it. It is `(x: string) -> …` in both: a
+    local that its block declares once with a literal, and writes nowhere
+    else, has the effects of that literal. A local that the block writes
+    again is `any`.
+  - In the Epsil program `function g() { Random() }  function h(x) {
+    g() + x }`, `h` was `(x: unknown) any -> …`; it is
+    `(x: unknown) random -> …`.
+  - A function that calls itself, or a function of the same block that
+    calls it back, is no longer `any` for that call: `function f(n, acc) {
+    let out = acc; if n > 0 { out = [...out, n]; out = f(n - 1, out) };
+    out }` is `(n: unknown, acc: collection<any>) -> collection<any>`, and
+    `even`/`odd` defined in the body of a function are pure inside a call
+    of that function and outside it.
+  - In `Function(Function(1 + Return(), x), Return)`, the inner literal
+    was `(x: unknown) any -> …`. It is `(x: unknown) -> …`: `Return` is the
+    unannotated parameter of the enclosing literal, which is optimistically
+    pure, as for a direct call. The same holds for
+    `Function(Apply(Function(1 + Return(), x), 5), Return)`.
+  - With `h` defined in a scope that a reader pushes, a literal boxed
+    outside that scope keeps the effects of the `h` it reads: with a pure
+    global `h` and a pushed scope that declares a drawing `h`, `x ↦ h(x) +
+    1` stays `(x: unknown) -> number`, and a literal boxed in the pushed
+    scope stays `(x: unknown) random -> number` after the scope is popped.
 - **The value of a `vars` or `symbolic` input is hidden in a function body
   that was written before the input was declared.** With `f(x) := |a| x`
   defined first, then `a: real` holding 4, then a scope that declares `a`

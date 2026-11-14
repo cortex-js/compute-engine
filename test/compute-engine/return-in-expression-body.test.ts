@@ -165,7 +165,9 @@ describe('a Return in the body of an operator that takes an expression', () => {
       ce.box(['Function', ['Add', 1, ['Return']], 'Return']).type.toString()
     ).toBe('(Return: unknown) -> list<list<any> | number | tuple> | number | tuple');
     // The call is in a nested literal, and calls the parameter of the
-    // enclosing one.
+    // enclosing one. The nested literal reads `Return` from its own scope
+    // chain: an unannotated parameter, optimistically pure
+    // (`docs/EFFECTS-MODEL.md`, "Inference").
     expect(
       ce
         .box([
@@ -175,7 +177,7 @@ describe('a Return in the body of an operator that takes an expression', () => {
         ])
         .type.toString()
     ).toBe(
-      '(Return: unknown) -> (x: unknown) any -> list<list<any> | number | tuple> | number | tuple'
+      '(Return: unknown) -> (x: unknown) -> list<list<any> | number | tuple> | number | tuple'
     );
     // In an `Apply`, the type of the nested literal is computed while the
     // body of the enclosing literal is canonicalized, and is cached.
@@ -188,7 +190,7 @@ describe('a Return in the body of an operator that takes an expression', () => {
         ])
         .type.toString()
     ).toBe(
-      '(Return: unknown) any -> list<list<any> | number | tuple> | number | tuple'
+      '(Return: unknown) -> list<list<any> | number | tuple> | number | tuple'
     );
   });
 

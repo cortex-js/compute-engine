@@ -267,9 +267,17 @@ listed when it is assigned (`listedAssignedValue()`, `library/core.ts`):
 with `let k = 3`, `let t = map(x => x + k, 1..4)` and `k = 10`, `t` is
 `[4, 5, 6, 7]`.
 
-A call created before its function is defined is a forward reference. It
-waits for a definition in its original lexical environment, not an unrelated
-caller's environment. Adopting that declaration as a parameter makes it a
+A call created before its function is defined is a forward reference. Its
+head follows rule 1: an evaluation, a type read, a compilation and the
+effects of the call read the definition that the chain of the scope it was
+boxed in gives when the read happens (C2 and C3 of
+`docs/plans/2026-11-11-bound-once-spec.md`). A definition made later in that
+scope or in one of its parents is called; a function of that name declared
+in a scope pushed later is not. With `c = ce.box(['Add', ['h', 2], 1])` at
+the top, then `h := t ↦ 10t` at the top, then a pushed scope that declares
+`h := t ↦ t·Random()`, `c.evaluate()` is `21` in the pushed scope, and
+`c.isPure` is true. To call the function of the pushed scope, box the
+expression in it. Adopting that declaration as a parameter makes it a
 lexical parameter binding instead. Type inference and evaluation use the same
 resolution rule, without assigning a target as a side effect of reading a type.
 
