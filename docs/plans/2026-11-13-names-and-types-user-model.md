@@ -128,13 +128,14 @@ decided.
    // ➔ string       (no type was written: the type follows the assignment)
    ```
 
-6. **A type changes only when you declare the name or assign to it.**
-   Evaluating an expression changes values and never a type. Assigning to
-   one variable does not change the type of another. Rule 3 says that the
-   type of a variable comes from the value assigned to it; this rule says
-   that it is fixed at that assignment and that nothing else moves it.
-   **Not yet** for a variable that holds an expression of other
-   variables: see section 5.
+6. **A type changes only at a declaration or an assignment.** Evaluating
+   an expression changes values and never a type. Assigning a variable a
+   new value of the same type changes no type. An assignment that changes
+   the type of a variable (`x = [1, 2]` after `x = 1`) changes the type of
+   that variable, and of each variable whose value is a formula that reads
+   it: a formula has the type that the types of its names give it, never
+   the type that their values give it. On main since
+   `ed611a362935da6c409793ba6093a9df0fbacf67`, not released.
 
 ### Lists
 
@@ -498,16 +499,25 @@ declared `scope` effect").
 imaginary unit (`i^2` is `-1`), `pi` is π. You can use the name for
 yourself with a declaration: `let i = 3`, then `i + 1` is `4`.
 
-**Assigning to one variable does not change the type of another** (rule
-6). **Not yet**: the engine revises the type of `y` when `x` changes.
+**A variable that holds a formula follows the types of the names it
+reads, not their values** (rule 6). On main, not released; 0.188.1 reads
+the values.
 
 ```js
 ce.assign('y', ce.parse('x + 1'));
-ce.box('y').type;          // number
+ce.expr('y').type;          // number
+ce.assign('x', 2);
+ce.expr('y').type;          // integer: the type of x + 1 for an integer x
 ce.assign('x', ce.parse('[1, 2]'));
-ce.box('y').evaluate();    // [2, 3]
-ce.box('y').type;          // model: number.  today: vector<integer^2>
+ce.expr('y').evaluate();    // [2, 3]
+ce.expr('y').type;          // vector<integer^2>
+ce.assign('x', ce.parse('[5, 6]'));
+ce.expr('y').type;          // vector<integer^2>: the same type, nothing changes
 ```
+
+The type of an expression is the one that holds for every value its names
+may take: with `x` declared `real` and holding 4, `sqrt(x)` is typed
+`complex` and its value is 2.
 
 When a variable can hold values of several shapes, declare it with the type
 you need (`ce.declare('y', 'list<number> | number')`).
@@ -601,7 +611,7 @@ Differences between this document and 0.188.0:
 | Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | proposed, not decided |
 | Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | proposed (box the body after the uses are known), not decided |
 | Rule 7 | An indexed parameter with no type takes a list of points whole | One call for each point | proposed, not decided; it changes results |
-| Rule 6 | Assigning to one variable does not change the type of another | The type is revised from the value | decided (D16); built, not landed |
+| Rule 6 | A type follows the types of the names, never their values | The type of an expression is revised from the values its names hold | decided (D16); on main since `ed611a362935da6c409793ba6093a9df0fbacf67`, not released |
 | Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); built, on main, not released |
 
 Not decided, each with the choice:
@@ -624,3 +634,31 @@ Not decided, each with the choice:
    keeps the engine's answer, because one rule covers it.
 5. **Lists of different lengths.** Desmos pairs them to the shorter one;
    the engine refuses. Kept: Tycho's importer writes the pairing.
+6. **A worked-out type set once and enforced** (the user's direction,
+   2026-11-13). The type of a variable that is not a constant is taken
+   broadly from its first value (sizes dropped, a number typed
+   `nan | real | signed_infinity`) and then enforced, so `let a = 1`
+   followed by `a = "hello"` is an error and no type ever changes; a
+   `const` keeps its exact type. With it, rules 5 and 6 become one
+   sentence. Measured, not landed
+   (`~/dev/compute-engine-recovery/fc-d16/report-r6.md` and
+   `s2-investigation.md`):
+   - 494 tests change, most of them a printed type;
+   - 96 operators with an `integer`, `real` or `complex` parameter refuse
+     the broad number type in the Epsil static check (`let x = 5`,
+     `x = x + 3`, `x % 2` is an error); 68 of them take an `integer`, so
+     plain `real` does not help them;
+   - 90 assignments are refused in 84 tests; about 45 are reasonable
+     programs: 29 assign an error value or a failed cell, 10 start from a
+     placeholder (`let r = 0`, then a list or a record);
+   - four compiles decline because the size is no longer in the type; a
+     `const` or a written type gives the old code back;
+   - `1/0` evaluates to `~oo`, which the type refuses; no program of the
+     suite assigns it.
+
+   A narrower variant, not measured: fix and enforce the KIND of a
+   variable (a number, a list of numbers, a string, a point), drop the
+   sizes, and let the number type inside the kind widen (`integer` to
+   `real`). It keeps `integer` for counts and indices, and it still needs
+   a decision for an error value assigned to a typed variable and for a
+   placeholder first value.
