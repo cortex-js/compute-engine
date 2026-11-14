@@ -207,9 +207,19 @@ describe('Exactness and range', () => {
     // K_0(−1000) = K_0(1000) − iπ·I_0(1000): the imaginary part overflows
     expect(ce.box(['BesselK', 0, -1000]).N().operator).toBe('BesselK');
   });
-  test('a real value past the range is +∞', () => {
-    expect(ce.box(['BesselI', 0, 1000]).N().isSame(ce.PositiveInfinity)).toBe(
-      true
+  test('a real value past the double range is +∞ at machine precision', () => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(
+      machine.box(['BesselI', 0, 1000]).N().isSame(machine.PositiveInfinity)
+    ).toBe(true);
+  });
+  test('a real value past the double range keeps its digits above it', () => {
+    // I_0(1000) = 2.48568609607586417456...e432 (mpmath)
+    const wide = new ComputeEngine();
+    wide.precision = 21;
+    expect(wide.box(['BesselI', 0, 1000]).N().toString()).toBe(
+      '2.48568609607586417456e+432'
     );
   });
   test('a non-integer order stays symbolic', () => {

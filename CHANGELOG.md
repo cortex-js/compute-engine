@@ -192,6 +192,19 @@
 
 ### Resolved Issues
 
+- **`BesselJ`, `BesselY`, `BesselI` and `BesselK` of a real argument carry
+  the precision asked for, and a real non-integer order has a value.** At
+  `ce.precision = 30`, `BesselJ(1, 1/3)` was the double `0.16436254381427073`;
+  it is `0.164362543814270735363798698286`. `BesselJ(0.5, 2)` stayed
+  unevaluated; under `.N()` it is `0.5130161365618278` at machine precision,
+  and the same holds for `BesselY`, `BesselI` and `BesselK` at a positive
+  argument. Above machine precision a value the engine cannot compute to the
+  digits asked for stays unevaluated: `BesselI(0, 5000)` was `+∞` and is
+  `BesselI(0, 5000)`. Integer orders at machine precision and compiled code
+  are unchanged. (PR #560, contributed by
+  [enumeratio](https://github.com/enumeratio); fixes
+  [#553](https://github.com/cortex-js/compute-engine/issues/553)).
+
 - **A call that returns a function keeps its type after it is evaluated.**
   With `f := y ↦ (x ↦ x + y)`, the node `f(q)` of `Apply(f(q), 5)` was
   typed `(x: unknown) -> number` before `evaluate()` and `any` after it. It

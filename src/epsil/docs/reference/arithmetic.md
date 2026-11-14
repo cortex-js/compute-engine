@@ -408,7 +408,7 @@ Modified Bessel function of the first kind
 
 ```epsil
 N(besselI(0, 1))
-// ➔ 1.2660658777520084
+// ➔ 1.2660658777520083356
 ```
 
 ### besselJ
@@ -419,7 +419,7 @@ Bessel function of the first kind
 
 ```epsil
 N(besselJ(0, 1))
-// ➔ 0.7651976865579666
+// ➔ 0.76519768655796655145
 ```
 
 ### besselK
@@ -430,7 +430,7 @@ Modified Bessel function of the second kind (Macdonald function)
 
 ```epsil
 N(besselK(0, 1))
-// ➔ 0.42102443824070834
+// ➔ 0.421024438240708333336
 ```
 
 ### besselY
@@ -441,7 +441,7 @@ Bessel function of the second kind (Neumann function)
 
 ```epsil
 N(besselY(0, 1))
-// ➔ 0.088256964215677
+// ➔ 0.0882569642156769579829
 ```
 
 ### beta

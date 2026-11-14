@@ -106,6 +106,7 @@ import {
   complexDivide,
 } from '../numerics/numeric-complex.js';
 import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
+import { bigBessel } from '../numerics/bessel-big.js';
 import {
   betaComplex,
   logGammaComplex,
@@ -5300,10 +5301,23 @@ function evaluateBessel(
 ): Expression | undefined {
   if (!isNumber(n) || !isNumber(x)) return undefined;
   const order = asSmallInteger(n);
-  if (order === null) return undefined;
+  if (order === null)
+    return evaluateBesselRealOrder(kind, n, x, ce, numericApproximation);
   const special = besselValueAtExceptionalPoint(kind, order, x, ce);
   if (special !== undefined) return special;
   if (!shouldNumericize(numericApproximation, n, x)) return undefined;
+  // Above machine precision a real argument has the digits asked for or the
+  // head stays unevaluated (`bigBessel` declines where it cannot reach them);
+  // the argument 0 and the complex values of `Y` and `K` on the negative axis
+  // keep the double kernels.
+  if (
+    bignumPreferred(ce) &&
+    isRealLiteral(x) &&
+    !Number.isNaN(x.re) &&
+    !x.isSame(0) &&
+    !((kind === 'Y' || kind === 'K') && x.isNegative === true)
+  )
+    return bigBesselValue(kind, n, x, ce);
   if (
     isRealLiteral(x) &&
     !((kind === 'Y' || kind === 'K') && x.isNegative === true)
@@ -5356,6 +5370,55 @@ function evaluateBessel(
           ? besselIComplex
           : besselKComplex;
   return boxBesselAiryComplexValue(ce, kernel(order, [x.re, x.im]), [n, x]);
+}
+
+/** Digits the kernel computes at when the engine works at machine precision. */
+const BESSEL_MACHINE_WORKING_DIGITS = 30;
+
+/**
+ * A Bessel function of a real order and a finite real argument from
+ * `bigBessel`, at `ce.precision` digits, or at machine precision rounded from
+ * `BESSEL_MACHINE_WORKING_DIGITS`. `undefined` where the kernel declines.
+ */
+function bigBesselValue(
+  kind: 'J' | 'Y' | 'I' | 'K',
+  n: Expression,
+  x: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const machine = !bignumPreferred(ce);
+  const saved = BigDecimal.precision;
+  if (machine) BigDecimal.precision = BESSEL_MACHINE_WORKING_DIGITS;
+  let value: BigNum | undefined;
+  try {
+    value = bigBessel(ce, kind, hurwitzOperand(ce, n), hurwitzOperand(ce, x));
+  } finally {
+    BigDecimal.precision = saved;
+  }
+  if (value === undefined) return undefined;
+  if (machine)
+    return boxComplexKernelResult(ce, { re: value.toNumber(), im: 0 }, [n, x]);
+  return boxBignumApprox(ce, value);
+}
+
+/**
+ * A Bessel function of a real order that is not a small integer, at a
+ * positive real argument: the value is real, and the kernels of
+ * `evaluateBessel` (integer orders) do not apply. The argument 0, a negative
+ * argument (a complex value) and a complex order or argument stay symbolic.
+ */
+function evaluateBesselRealOrder(
+  kind: 'J' | 'Y' | 'I' | 'K',
+  n: Expression,
+  x: Expression,
+  ce: ComputeEngine,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!isRealLiteral(n) || !isRealLiteral(x)) return undefined;
+  if (!Number.isFinite(n.re) || !Number.isFinite(x.re) || !(x.re > 0))
+    return undefined;
+  if (!shouldNumericize(numericApproximation, n, x)) return undefined;
+  return bigBesselValue(kind, n, x, ce);
 }
 
 /**
