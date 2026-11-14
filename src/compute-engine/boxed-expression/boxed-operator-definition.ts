@@ -2009,17 +2009,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // there is nothing left to select. Deferred error absorption keys on the
     // flag, so setting it on a strict operator would silently stop that
     // operator's operand errors from bubbling.
-    console.assert(
-      !this.selectsOperands || this.lazy,
-      `Operator Definition "${this.name}": 'selectsOperands' requires 'lazy'`
-    );
+    // The message is built only when the condition fails: this runs for each
+    // library operator of each new engine.
+    if (this.selectsOperands && !this.lazy)
+      console.assert(
+        false,
+        `Operator Definition "${this.name}": 'selectsOperands' requires 'lazy'`
+      );
     this.evaluatesOperands = def.evaluatesOperands ?? this.evaluatesOperands;
     // A strict operator's operands are already evaluated when its handler
     // runs, so there is nothing left for the flag to do.
-    console.assert(
-      !this.evaluatesOperands || this.lazy,
-      `Operator Definition "${this.name}": 'evaluatesOperands' requires 'lazy'`
-    );
+    if (this.evaluatesOperands && !this.lazy)
+      console.assert(
+        false,
+        `Operator Definition "${this.name}": 'evaluatesOperands' requires 'lazy'`
+      );
     this.operands = def.operands ?? this.operands;
     this.namedArgumentsRequired =
       def.namedArgumentsRequired ?? this.namedArgumentsRequired;
@@ -2147,11 +2151,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       const oldSig = normalizeSignatureField(def.signature);
       const sigType = parseType(oldSig, this.engine._typeResolver);
       const newSig = this.engine.type(sigType);
-      if (oldSig && !newSig.matches(this.engine.type(oldSig))) {
-        throw new Error(
-          `Operator Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
-        );
-      }
       // Check the default values of the optional parameters and box them in
       // the declaring scope, before the signature is installed: a default
       // that is misplaced or does not fit its parameter refuses the whole
