@@ -446,13 +446,23 @@ N(besselY(0, 1))
 
 ### beta
 
-MathJSON `Beta` · `(complex | infinity, complex | infinity) -> number`
+MathJSON `Beta` · `(complex | infinity, complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number`
 
 Euler beta function
 
 ```epsil
 [beta(2, 3), N(beta(1/2, 1/2))]
 // ➔ [1/12,3.14159265358979323846]
+```
+
+```epsil
+beta(1/2, 2, 3)
+// ➔ 11/192
+```
+
+```epsil
+beta(1/4, 1/2, 2, 3)
+// ➔ 109/3072
 ```
 
 ### catalanConstant
@@ -774,9 +784,9 @@ Greatest Common Divisor
 
 ### gamma
 
-MathJSON `Gamma` · `(complex | infinity, (complex | infinity)?) -> number`
+MathJSON `Gamma` · `(complex | infinity, (complex | infinity)?, (complex | infinity)?) -> number`
 
-Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.
+Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt; with three, Γ(s, z0) − Γ(s, z1).
 
 ```epsil
 [gamma(1/2), N(gamma(1/2)), N(gamma(5))]
@@ -786,6 +796,11 @@ Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = 
 ```epsil
 N(gamma(2, 1))
 // ➔ 0.735758882342884643191
+```
+
+```epsil
+N(gamma(2, 1, 3))
+// ➔ 0.536610608871428871274
 ```
 
 ### gammaLn
@@ -1214,6 +1229,11 @@ Polygamma function, the n-th derivative of the digamma function
 ```epsil
 N(polyGamma(2, 1))
 // ➔ -2.4041138063191885708
+```
+
+```epsil
+N(polyGamma(1))
+// ➔ -0.577215664901532860607
 ```
 
 ### positiveInfinity

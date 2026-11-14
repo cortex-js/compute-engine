@@ -832,3 +832,20 @@ export const EXPENSIVE_PREFIX_HEADS: ReadonlySet<string> = new Set([
   'Erf',
   'Erfc',
 ]);
+
+/**
+ * The operand counts, `[fewest, most]`, that the lowerings of these special
+ * functions read. The incomplete and generalized call shapes
+ * (`Beta(z, a, b)`, `Erf(z0, z1)`, `Gamma(a, z0, z1)`, …) have more operands
+ * than the helpers take, and a call with more has no lowering.
+ */
+export const SPECIAL_FUNCTION_OPERAND_RANGES: Readonly<
+  Record<string, readonly [number, number]>
+> = {
+  Beta: [2, 2],
+  BetaRegularized: [3, 3],
+  Erf: [1, 1],
+  ErfInv: [1, 1],
+  Gamma: [1, 2],
+  GammaRegularized: [2, 2],
+};

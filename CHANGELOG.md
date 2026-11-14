@@ -14,6 +14,19 @@
 
 ### New Features
 
+- **`Beta`, `BetaRegularized`, `Erf`, `ErfInv`, `Gamma` and
+  `GammaRegularized` take the incomplete and generalized call forms, and
+  `PolyGamma(z)` is `PolyGamma(0, z)`.** `Beta(1/2, 2, 3)` was an
+  `unexpected-argument` error and is `11/192`, the incomplete beta function
+  `B_z(a, b)`; `Erf(z0, z1)` is `Erf(z1) - Erf(z0)`, `Gamma(a, z0, z1)` is
+  `Γ(a, z0) - Γ(a, z1)`, `BetaRegularized(z0, z1, a, b)` is
+  `I_z1(a, b) - I_z0(a, b)` and `ErfInv(z0, z)` is `ErfInv(z + Erf(z0))`.
+  A difference of close endpoints keeps its digits: `N(Erf(1, 1 + 10^-100))`
+  is `4.1510749742059470334e-101`. The new forms decline in compiled code
+  (PR #567, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#566](https://github.com/cortex-js/compute-engine/issues/566)).
+
 - **`UniformDistribution` takes Wolfram's other two forms.**
   `UniformDistribution([1, 3])` is `UniformDistribution(1, 3)` and
   `UniformDistribution()` is `UniformDistribution(0, 1)`;
