@@ -129,6 +129,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
 
 - `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
   interpreter gives `+Infinity`.
+- `plausible?` — `python`, `x: real`: `BetaRegularized(x, 2, 3)` at `x = 2`
+  calls `scipy.special.betainc`, which scipy defines for `x` in `[0, 1]`
+  only; the interpreter gives `8`. Not run: scipy is not installed on the
+  development machine.
 - `javascript` (crafted), `x: real`, `g` assigned `0.75` with no declared
   type, `angularUnit = 'deg'`, the `complex` mode: in
   `Block(Declare(t, real, x), Assign(t, Block(Declare(b0, unknown, g), Arctan(b0))), t)`
