@@ -156,6 +156,18 @@
 
 ### Resolved Issues
 
+- **`MatrixRank` of a matrix of symbols is its full rank when the rank at
+  one integer point is full.** `MatrixRank([[a, b], [c, d]])` and
+  `MatrixRank([[x, 1], [1, x]])` stayed unevaluated; they are `2`, the rank
+  for generic values of the symbols (a minor that is nonzero at one point
+  is not identically zero), as `MatrixRank([[a, b], [a, b]])` was already
+  `1`. A matrix whose rank is lower at every point tried, such as
+  `[[a, b, c], [2a, 2b, 2c], [d, p, q]]`, and a matrix of entries that are
+  not rational at integer points, such as `[[sin t, cos t], [cos t, sin t]]`,
+  stay unevaluated. (PR #581, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#580](https://github.com/cortex-js/compute-engine/issues/580))
+
 - **A sum of `kⁿ·rᵏ/k!` over an infinite range is a closed form.**
   `Sum(k^3/k!, k, 1, ∞)` stayed a `Sum`; it is `5e` (Dobiński's formula,
   `e` times the Bell number). `Sum(k^2·x^k/k!, k, 0, ∞)` is `(x² + x)·eˣ`,
