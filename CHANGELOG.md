@@ -35,6 +35,15 @@
 
 ### Resolved Issues
 
+- **A series at −∞ of a root of a square has the right sign, and a series at
+  ±∞ of a function with an absolute value or a step stays unevaluated.**
+  `Series(1/(Sqrt(x^2) + 1), x, -oo, 3)` was `1/x - 1/x^2 + 1/x^3 + O(x^-4)`;
+  it is `-1/x - 1/x^2 - 1/x^3 + O(x^-4)`, because `√(x²) = −x` for `x < 0`.
+  `√(x² + x) − x` at −∞ is `−2x − 1/2 + …`, not `1/2 − …`. `1/|x|` and
+  `1/⌊x⌋` at +∞ were `O(x^-4)`, without their term `1/x`; a series at ±∞
+  of a function with `Abs`, `Sign`, `Floor`, `Ceil`, `Round` or another step
+  of `x` stays unevaluated.
+
 - **A compiled function literal reads a number passed to a parameter whose
   uses make it `complex`.** The compiled `t ↦ LerchPhi(0.3, t, 2)` gave
   `Φ(0.3, 0, 2) ≈ 1.4286` at every `t`, so the compiled

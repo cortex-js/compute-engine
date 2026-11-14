@@ -2353,6 +2353,56 @@ function rewriteLnAtom(
   return e;
 }
 
+/** Operators that are not smooth on the real axis: a step, a kink or a
+ * choice by a condition. Their expansion at ±∞ is the one of the function
+ * `1/s` is put in, at `s = 0`, where the derivative of a step is 0 and the
+ * derivative of `|s|` is `Sign(0) = 0`: `1/|x|` at +∞ would lose its term
+ * `1/x`. */
+const NON_SMOOTH_OPERATORS = new Set([
+  'Abs',
+  'Sign',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Truncate',
+  'Fract',
+  'Re',
+  'Im',
+  'Arg',
+  'Conjugate',
+  'Max',
+  'Min',
+  'Supremum',
+  'Clamp',
+  'Chop',
+  'Rationalize',
+  'GCD',
+  'LCM',
+  'Mod',
+  'Remainder',
+  'Heaviside',
+  'Boole',
+  'KroneckerDelta',
+  'If',
+  'Which',
+]);
+
+/** Whether an operator of `NON_SMOOTH_OPERATORS` applies to an operand that
+ * depends on `x` in `e`. */
+function holdsNonSmooth(e: Expression, x: string): boolean {
+  if (!isFunction(e) || !e.has(x)) return false;
+  if (NON_SMOOTH_OPERATORS.has(e.operator)) return true;
+  return e.ops.some((op) => holdsNonSmooth(op, x));
+}
+
+/**
+ * The expansion of `f` at +∞ (`sign = 1`) or −∞ (`sign = -1`), in powers of
+ * `1/x`. It puts `x = sign/s` in `f` and expands at `s = 0⁺` in both
+ * directions, because a root, a fractional power and a logarithm of `s` are
+ * expanded for `s > 0` only: at −∞, `√(x²)` is `−x`, and `√(1/s²) = 1/s`
+ * holds for `s = −1/x` but not for `s = 1/x`. A power `s^q` is mapped back to
+ * `(−1)^q·x^{−q}` for an integer `q`, and to `(−x)^{−q}` otherwise.
+ */
 function seriesAtInfinity(
   f: Expression,
   x: string,
@@ -2362,18 +2412,27 @@ function seriesAtInfinity(
   ce: ComputeEngine,
   resolveLimit?: LimitResolver
 ): Expression | undefined {
+  if (holdsNonSmooth(f, x)) return undefined;
   const s = ce.temporaryName('s', f, x);
-  // g(s) = f(1/s); simplify to expose rational cancellations (e.g.
+  // g(s) = f(sign/s); simplify to expose rational cancellations (e.g.
   // (x+1)/x → 1 + s). Safe here (top-level verb, not a simplification rule).
-  const g = f
+  // At −∞, `f(−x)` is simplified first, so that an odd function gives
+  // `−arctan(1/s)`: the derivatives of `arctan(−1/s)` do not simplify, and
+  // their limits at 0 are not found.
+  const reflectedF =
+    sign > 0
+      ? f
+      : f.subs({ [x]: ce.function('Negate', [ce.symbol(x)]) }).simplify();
+  const g = reflectedF
     .subs({ [x]: ce.function('Divide', [ce.One, ce.symbol(s)]) })
     .simplify();
+  // The simplification can write `√(s²)` as `|s|`.
+  if (holdsNonSmooth(g, s)) return undefined;
 
   // Coefficients are evaluated at s = 0. When direct substitution is
   // non-finite, the coefficient is a one-sided limit: c_0 is lim_{x→±∞} f, and
-  // higher coefficients are limits of the substituted derivatives from the
-  // correct side (s → 0⁺ for +∞, s → 0⁻ for −∞). Without an injected limit
-  // resolver these coefficients defer.
+  // higher coefficients are limits of the substituted derivatives as s → 0⁺.
+  // Without an injected limit resolver these coefficients defer.
   const resolve = (gk: Expression, k: number): Expression | null => {
     if (!resolveLimit) return null;
     if (k === 0) {
@@ -2381,24 +2440,29 @@ function seriesAtInfinity(
       const L = resolveLimit(f, x, inf, undefined, ce);
       if (L && L.isFinite !== false && L.isValid) return L;
     }
-    const L2 = resolveLimit(gk, s, ce.Zero, sign, ce);
+    const L2 = resolveLimit(gk, s, ce.Zero, 1, ce);
     return L2 && L2.isFinite !== false && L2.isValid ? L2 : null;
   };
 
   const xExpr = ce.symbol(x);
+  // `x` at +∞, `−x` at −∞: the positive variable that `s` is the inverse of.
+  const base = sign > 0 ? xExpr : ce.function('Negate', [xExpr]);
   // Map s^{p/d} back to x^{−p/d} (a negative s-power — a pole at ∞ — becomes a
   // positive power of x, i.e. the polynomial part of the asymptotic expansion).
+  // At −∞ an integer power of `−x` is written as a power of `x`, and
+  // `reflected()` gives its coefficient the sign `(−1)^{p/d}`.
   const power = (p: number, d = 1): Expression => {
     if (p === 0) return ce.One;
-    return ce.function('Power', [
-      xExpr,
-      d === 1 ? ce.number(-p) : ce.number([-p, d]),
-    ]);
+    if (p % d === 0) return ce.function('Power', [xExpr, ce.number(-p / d)]);
+    return ce.function('Power', [base, ce.number([-p, d])]);
   };
+  const reflected = (c: Expression, p: number, d: number): Expression =>
+    sign < 0 && p % d === 0 && (p / d) % 2 !== 0 ? c.neg() : c;
 
-  const coeffs = expandByDerivative(g, s, ce.Zero, ce, W, resolve);
+  let coeffs = expandByDerivative(g, s, ce.Zero, ce, W, resolve);
   if (coeffs) {
     const exact = isPolynomialInVar(g, s) && allZeroBeyond(coeffs, n, W);
+    coeffs = coeffs.map((c, k) => reflected(c, k, 1));
     return assemble(ce, coeffs, n, W, power, exact);
   }
 
@@ -2423,6 +2487,11 @@ function seriesAtInfinity(
       if (coeffAt(ce, laurent, p).has(s)) return undefined;
   }
 
+  const { v, d } = laurent;
+  laurent = {
+    ...laurent,
+    c: laurent.c.map((c, i) => reflected(c, v + i, d)),
+  };
   return assembleLaurent(ce, laurent, n, power, f);
 }
 
