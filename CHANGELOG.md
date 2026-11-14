@@ -35,6 +35,16 @@
 
 ### Resolved Issues
 
+- **A copy of a compile result can be given to `runtime.load()` in
+  TypeScript again.** Since 0.188.0, `{ ...result }` passed to `load()` or
+  `loadBroadcast()` of `createJavaScriptRuntime()` was a type error
+  (`Types of property 'profile' are incompatible`): the `profile` of a
+  compile result admits `'ir'`, and the stored code admitted only
+  `'numeric-kernel'`. The stored code now admits both. The loaders refuse
+  code of the experimental profile `'ir'` with an error that names it, also
+  when the copy sets a `runtimeVersion`: run such code with the `run()` of
+  the compile result.
+
 - **`ce.assign(name, undefined)` removes the value of a variable, as its
   documentation says.** It threw `Invalid definition for symbol "v"`. Now
   the declaration and the type of `v` stay, and `v + 1` evaluates to

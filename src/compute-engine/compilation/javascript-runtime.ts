@@ -7908,10 +7908,13 @@ export type StoredJavaScript = {
    * batch runs on the calling thread (`reason: 'not-shippable'`). */
   shippable?: boolean;
   /** **Experimental.** The `profile` field of the compilation result: the
-   * code was compiled with `profile: 'numeric-kernel'`. It records how the
+   * profile the code was compiled with. `'numeric-kernel'` records how the
    * code was made, for a host that keeps stored code with its compile
-   * options; the loaders run the code the same way with or without it. */
-  profile?: 'numeric-kernel';
+   * options; the loaders run the code the same way with or without it.
+   * The loaders refuse code of the profile `'ir'`: it reads a runtime of
+   * the engine that compiled it. Run it with the `run()` of the compilation
+   * result. */
+  profile?: 'numeric-kernel' | 'ir';
 };
 
 /**
@@ -8062,6 +8065,7 @@ export function createSysRuntime(
     },
     load: {
       value: (stored: StoredJavaScript): ((...args: unknown[]) => unknown) => {
+        refuseIrProfile(stored);
         refuseStoredValueKinds(stored, false);
         if (stored.runtimeVersion === undefined)
           throw new Error(
@@ -8240,6 +8244,7 @@ export function createSysRuntime(
               : structuredClone(stored.batch),
           runtimeVersion: stored.runtimeVersion,
           shippable: stored.shippable,
+          profile: stored.profile,
           valueKinds:
             stored.valueKinds === undefined
               ? undefined
@@ -8327,6 +8332,19 @@ export function bigintBroadcastError(): Error {
 }
 
 /**
+ * Throw for stored code of the profile `'ir'`. Its code reads `_rt`, a
+ * runtime that closes over the engine that compiled it (`ir/print-js.ts`),
+ * and no loader has it. Such code has no `runtimeVersion`; this check also
+ * holds for a host copy that sets one.
+ */
+function refuseIrProfile(stored: StoredJavaScript): void {
+  if (stored.profile === 'ir')
+    throw new Error(
+      "The stored code was compiled with the profile 'ir', whose code reads a runtime of the engine that compiled it: it cannot be loaded. Run it with the `run()` of the compilation result."
+    );
+}
+
+/**
  * Throw for stored code compiled with the compile contract of a value kind
  * (`valueKinds`). The run-time checks of a kind are functions of the host
  * that compiled the code (`ArithmeticCompile`), and stored code does not
@@ -8377,6 +8395,7 @@ function storedExpressionRunner(
     throw new Error(
       'The stored code is a lambda (positional arguments): it has no broadcast'
     );
+  refuseIrProfile(stored);
   refuseStoredValueKinds(stored, true);
   if (stored.runtimeVersion === undefined)
     throw new Error(
