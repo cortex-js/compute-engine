@@ -1353,3 +1353,23 @@ describe('PRODUCT before a parenthesized group', () => {
     }
   });
 });
+
+describe('Factorial before = serialization round trip', () => {
+  test('a postfix ! is kept apart from the = that follows', () => {
+    expect(ce.box(['Equal', ['Factorial', 5], 5]).latex).toBe('5! =5');
+    expect(ce.box(['Equal', ['Factorial', 'n'], 'm']).latex).toBe('n! =m');
+    expect(ce.box(['Equal', 3, ['Factorial', 5]]).latex).toBe('3=5!');
+  });
+
+  test('it parses back to the same expression', () => {
+    for (const j of [
+      ['Equal', ['Factorial', 5], 5],
+      ['Equal', ['Factorial', 'n'], 'm'],
+      ['Equal', ['Factorial2', 5], 5],
+    ] as const)
+      for (const canonical of [true, false])
+        expect(
+          new ComputeEngine().parse(ce.box(j).latex, { canonical }).json
+        ).toEqual(j);
+  });
+});

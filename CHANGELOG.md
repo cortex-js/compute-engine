@@ -31,6 +31,28 @@
 
 ### Resolved Issues
 
+- **`Transpose` with axes is written as a call, so its LaTeX reads back.**
+  `["Transpose", "a", 2, 1]` was written `a^T`, which reads back as
+  `["Transpose", "a"]`; it is `\operatorname{Transpose}(a, 2, 1)`. Only the
+  one-argument form is written `a^T` (PR #518, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes item 2 of
+  [#517](https://github.com/cortex-js/compute-engine/issues/517)).
+- **A `Derivative` with a symbolic order, or with one order per argument,
+  reads back from its LaTeX.** `["Derivative", "f", "k"]` was written
+  `f^{\prime}`, a first derivative; it is `f^{(k)}`. With `f` a function,
+  `f^{(0,1)}` parses as `["Derivative", "f", 0, 1]`, the form written for that
+  expression; it was an `incompatible-type` error (PR #518, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes items 3 and 4 of
+  [#517](https://github.com/cortex-js/compute-engine/issues/517)).
+- **A factorial before `=` is written so that it does not read as `\ne`.**
+  `Equal(Factorial(5), 5)` was written `5!=5`, which reads back as
+  `NotEqual(5, 5)`; it is `5! =5` (PR #518, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **`Arcsec(x)` is written `\operatorname{arcsec}(x)`.** It was written
+  `\mathrm{arcsec}(x)`, which reads back as the arcsecond unit, or as an
+  unknown function `arcsec` once canonical (PR #518, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 - **`A \setminus B \setminus C` is `SetMinus(A, B, C)`, the difference read
   from left to right.** It was read as `SetMinus(A, SetMinus(B, C))`, a
   different set: `\{1,2,3,4\} \setminus \{2\} \setminus \{4\}` evaluated to
