@@ -31,6 +31,22 @@
 
 ### Resolved Issues
 
+- **`NextPrime`, `DivisorSigma`, `FactorInteger`, `IsSquareFree`,
+  `CatalanNumber` and `IsPerfect` take a rational or a non-positive
+  operand.** `NextPrime(7/2)` was an `incompatible-type` error and is now
+  `5`; `NextPrime(7/2, -1)` is `3`. `DivisorSigma(-1, 12)` stayed unevaluated
+  and is now `7/3`: a negative order `-j` gives `σ_j(n) / n^j`, and a huge
+  order stays unevaluated. `FactorInteger(12/35)` is
+  `[(2, 2), (3, 1), (5, -1), (7, -1)]`, the primes of the denominator with
+  negative exponents, and `IsSquareFree(6/35)` is `True` (both were
+  `incompatible-type` errors). `CatalanNumber(1/2)` is `8/(3π)`: a positive
+  half-integer is exact, and another positive real is computed from
+  `Γ(2n+1) / (Γ(n+1) Γ(n+2))` for a float or under `N()`. `IsPerfect(-6)` and
+  `IsPerfect(0)` are `False` (they stayed unevaluated). Integer operands are
+  unchanged. (PR #543, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#542](https://github.com/cortex-js/compute-engine/issues/542))
+
 - **`D` gives a closed form for the derivatives of `ErfInv`, `Beta`,
   `BarnesG`, `LogBarnesG`, the complete `EllipticK` and `EllipticE`,
   `HurwitzZeta` and `LerchPhi` in `a`, `LerchPhi` in `z`, and `ClausenCl` of

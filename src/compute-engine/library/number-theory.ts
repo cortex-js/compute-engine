@@ -8,6 +8,8 @@ import type {
 import { asRational, toBigint } from '../boxed-expression/numerics.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import type { Type } from '../../common/type/types.js';
+import { nonNegativeSign } from '../boxed-expression/sgn.js';
+import { broadcastOperandType, operandSgn } from './type-handlers.js';
 import { checkTypes } from '../boxed-expression/validate.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
@@ -354,10 +356,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {
     FactorInteger: {
       description:
-        'Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.',
-      signature: '(integer) -> list<tuple<integer, integer>>',
+        'Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign. A rational `p/q` is factored as `p` and `q`, the exponents of the primes of `q` being negative.',
+      signature: '(rational) -> list<tuple<integer, integer>>',
       broadcastable: true,
-      examples: ['FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]'],
+      examples: [
+        'FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]',
+        'FactorInteger(12/35)  // [(2, 2), (3, 1), (5, -1), (7, -1)]',
+      ],
       // Complete precondition: any integer (0 and ±1 have defined
       // degenerate factorizations) — see `canEnumerate` (types-definitions.ts).
       canEnumerate: (expr) =>
@@ -365,11 +370,33 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           ? canEnumerateOperand(expr.op1, (g) => toBigint(g) !== null)
           : undefined,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
-        const k = toBigint(n);
-        if (k === null) return undefined;
-
         const tuple = (prime: bigint, exponent: number) =>
           ce._fn('Tuple', [ce.number(prime), ce.number(exponent)]);
+
+        // A proper fraction: the numerator's primes, then the denominator's
+        // with negated exponents (the fraction is in lowest terms, so no
+        // prime is in both).
+        const q = bigRationalOf(n);
+        if (q !== undefined && q[1] !== 1n) {
+          const [p, d] = q;
+          const entries: [bigint, number][] = [];
+          if (p < 0n) entries.push([-1n, 1]);
+          const factorsOf = (m: bigint, sign: 1 | -1) => {
+            if (m === 1n) return;
+            for (const [prime, e] of bigPrimeFactors(m, ce._deadlineFrame))
+              entries.push([prime, sign * e]);
+          };
+          factorsOf(p < 0n ? -p : p, 1);
+          factorsOf(d, -1);
+          entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+          return ce.function(
+            'List',
+            entries.map(([prime, e]) => tuple(prime, e))
+          );
+        }
+
+        const k = toBigint(n);
+        if (k === null) return undefined;
 
         // Match Mathematica's conventions for the degenerate inputs:
         //   FactorInteger(0)  -> [(0, 1)]
@@ -546,15 +573,26 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     NextPrime: {
       description:
-        'Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).',
-      signature: '(integer, integer?) -> integer',
+        'Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`). A non-integer real or rational `n` is allowed: `NextPrime(7/2)` is 5.',
+      // `n` is a real, not an integer: a non-integer `n` has a next prime too.
+      signature: '(real, integer?) -> integer',
       broadcastable: true,
-      examples: ['NextPrime(10)  // 11', 'NextPrime(10, -1)  // 7'],
+      examples: [
+        'NextPrime(10)  // 11',
+        'NextPrime(10, -1)  // 7',
+        'NextPrime(7/2)  // 5',
+      ],
       evaluate: floatResultIfFloatOperand(([n, kArg], { engine: ce }) => {
-        const start = toBigint(n);
-        if (start === null) return undefined;
         const k = kArg === undefined ? 1n : toBigint(kArg);
         if (k === null || k === 0n) return undefined;
+        // `toBigint` rounds, so a non-integer `n` is anchored exactly instead.
+        const start =
+          n.isInteger === true
+            ? toBigint(n)
+            : n.isInteger === false
+              ? nonIntegerPrimeAnchor(n, k > 0n ? 1 : -1)
+              : null;
+        if (start === null || start === undefined) return undefined;
 
         let p = start;
         let steps = 0;
@@ -672,19 +710,28 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     IsSquareFree: {
       description:
-        'Return `"True"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored.',
-      signature: '(integer) -> boolean',
+        'Return `"True"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored. A rational is square-free when its numerator and denominator are.',
+      signature: '(rational) -> boolean',
       broadcastable: true,
-      examples: ['IsSquareFree(30)  // "True"'],
+      examples: [
+        'IsSquareFree(30)  // "True"',
+        'IsSquareFree(6/35)  // "True"',
+      ],
       evaluate: ([n], { engine: ce }) => {
-        const k = toBigint(n);
-        if (k === null) return undefined;
-        const m = k < 0n ? -k : k;
-        if (m === 0n) return ce.False;
-        if (m === 1n) return ce.True;
-        const factors = bigPrimeFactors(m, ce._deadlineFrame);
-        for (const e of factors.values()) if (e > 1) return ce.False;
-        return ce.True;
+        const q = bigRationalOf(n);
+        if (q === undefined) return undefined;
+        const squareFree = (k: bigint): boolean => {
+          const m = k < 0n ? -k : k;
+          if (m === 1n) return true;
+          for (const e of bigPrimeFactors(m, ce._deadlineFrame).values())
+            if (e > 1) return false;
+          return true;
+        };
+        // Every square divides 0.
+        if (q[0] === 0n) return ce.False;
+        return ce.symbol(
+          squareFree(q[0]) && squareFree(q[1]) ? 'True' : 'False'
+        );
       },
     },
 
@@ -981,27 +1028,58 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     CatalanNumber: {
       description:
-        'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.',
-      signature: '(integer) -> integer',
+        'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. A positive rational `n` is taken through the Gamma function, `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))`: `CatalanNumber(1/2)` is `8/(3π)`.',
+      signature: '(real) -> number',
+      type: ([n], context) =>
+        BoxedType.forResult(
+          n !== undefined && isSubtype(broadcastOperandType(n), 'integer')
+            ? 'integer'
+            : 'number',
+          context.engine._typeResolver
+        ),
       broadcastable: true,
-      examples: ['CatalanNumber(5)  // 42'],
-      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
-        const k = toBigint(n);
-        if (k === null || k < 0n) return undefined;
-        // C(n) ~ 4^n / n^{3/2}, so the result has ~n·log10(4) digits: for
-        // huge n the loop below would grind out an unusable number — stay
-        // symbolic instead (the `Fibonacci`/`LucasL` digit-cap convention; a
-        // step counter cannot bound a loop whose bigint operands grow with
-        // every iteration).
-        if (Number(k) * LOG10_4 > MAX_EXACT_RESULT_DIGITS) return undefined;
-        let c = 1n;
-        let steps = 0;
-        for (let i = 0n; i < k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
-          c = (c * 2n * (2n * i + 1n)) / (i + 2n);
+      examples: ['CatalanNumber(5)  // 42', 'CatalanNumber(1/2)  // 8/(3π)'],
+      evaluate: floatResultIfFloatOperand(
+        ([n], { engine: ce, numericApproximation }) => {
+          // A positive non-integer: the Gamma ratio has no pole there. The
+          // negative ones stay unevaluated (a pole at every negative
+          // half-integer).
+          if (n.isInteger === false && n.isPositive === true) {
+            const exact = bigRationalOf(n);
+            if (exact !== undefined && !numericApproximation)
+              return halfIntegerCatalan(exact, ce);
+            // An exact operand that is not a half-integer has no closed form,
+            // so only a float, or `.N()`, goes through Gamma.
+            if (!isNumber(n) || (n.isExact && !numericApproximation))
+              return undefined;
+            const gamma = (x: Expression) => ce.function('Gamma', [x]);
+            return ce
+              .function('Divide', [
+                gamma(n.mul(2).add(1)),
+                ce.function('Multiply', [gamma(n.add(1)), gamma(n.add(2))]),
+              ])
+              .N();
+          }
+          // `toBigint` rounds, so a negative non-integer (`-0.4`) is not read
+          // as `C(0)`.
+          if (n.isInteger !== true) return undefined;
+          const k = toBigint(n);
+          if (k === null || k < 0n) return undefined;
+          // C(n) ~ 4^n / n^{3/2}, so the result has ~n·log10(4) digits: for
+          // huge n the loop below would grind out an unusable number — stay
+          // symbolic instead (the `Fibonacci`/`LucasL` digit-cap convention; a
+          // step counter cannot bound a loop whose bigint operands grow with
+          // every iteration).
+          if (Number(k) * LOG10_4 > MAX_EXACT_RESULT_DIGITS) return undefined;
+          let c = 1n;
+          let steps = 0;
+          for (let i = 0n; i < k; i++) {
+            if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
+            c = (c * 2n * (2n * i + 1n)) / (i + 2n);
+          }
+          return ce.number(c);
         }
-        return ce.number(c);
-      }),
+      ),
     },
 
     IsPerfectPower: {
@@ -1487,14 +1565,22 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     DivisorSigma: {
       description:
-        'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.',
-      signature: '(integer, integer) -> integer',
+        'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. A negative `k` sums reciprocal powers, a rational: `DivisorSigma(-1, 12)` is 7/3. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.',
+      signature: '(integer, integer) -> rational',
+      // An integer for `k ≥ 0`, a rational below.
+      type: ([k], context) =>
+        BoxedType.forResult(
+          k !== undefined && nonNegativeSign(operandSgn(k)) === true
+            ? 'integer'
+            : 'rational',
+          context.engine._typeResolver
+        ),
       broadcastable: true,
-      examples: ['DivisorSigma(2, 6)  // 50'],
+      examples: ['DivisorSigma(2, 6)  // 50', 'DivisorSigma(-1, 12)  // 7/3'],
       evaluate: floatResultIfFloatOperand(([kOp, nOp], { engine: ce }) => {
         const k = toBigint(kOp);
         const signed = toBigint(nOp);
-        if (k === null || signed === null || k < 0n) return undefined;
+        if (k === null || signed === null) return undefined;
         // The positive divisors of `-n` are those of `n`, so the sign is
         // ignored, as `Divisors`, `EulerPhi`, `PrimeOmega` and `MoebiusMu` do
         // (Mathematica's `DivisorSigma[1, -12]` is 28). Zero has no finite
@@ -1502,15 +1588,25 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const n = signed < 0n ? -signed : signed;
         if (n === 0n) return undefined;
         if (n === 1n) return ce.number(1);
+        // σ_{-j}(n) = σ_j(n) / n^j. The denominator has about j·log10(n)
+        // digits, so a large j stays unevaluated rather than grind.
+        const j = k < 0n ? -k : k;
+        if (
+          k < 0n &&
+          Number(j) * Math.log10(Number(n)) > MAX_EXACT_RESULT_DIGITS
+        )
+          return undefined;
         let result = 1n;
         for (const [p, e] of bigPrimeFactors(n, ce._deadlineFrame)) {
-          if (k === 0n) result *= BigInt(e + 1);
+          if (j === 0n) result *= BigInt(e + 1);
           else {
-            const pk = p ** k;
-            result *= (pk ** BigInt(e + 1) - 1n) / (pk - 1n);
+            const pj = p ** j;
+            result *= (pj ** BigInt(e + 1) - 1n) / (pj - 1n);
           }
         }
-        return ce.number(result);
+        if (k >= 0n) return ce.number(result);
+        const [num, den] = reduceRat(result, n ** j);
+        return ce.number([num, den]);
       }),
     },
 
@@ -1831,7 +1927,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
-        if (k === null || k < 1) return undefined;
+        if (k === null) return undefined;
+        // A perfect number is positive.
+        if (k < 1n) return ce.False;
         // The proper divisors sum to σ₁(n) − n, so n is perfect iff σ₁(n) = 2n.
         return ce.symbol(
           sigma1(k, ce._deadlineFrame) === 2n * k ? 'True' : 'False'
@@ -2446,6 +2544,66 @@ function reduceRat(num: bigint, den: bigint): [bigint, bigint] {
   }
   const g = gcd(num < 0n ? -num : num, den);
   return g > 1n ? [num / g, den / g] : [num, den];
+}
+
+/** The largest `m` for which `CatalanNumber(m + 1/2)` is computed exactly. */
+const MAX_HALF_INTEGER_CATALAN = 1000n;
+
+/**
+ * `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))` at a positive half-integer `n = m + 1/2`, exactly:
+ * Γ(k + 1/2) = (2k-1)!! √π / 2^k turns the quotient into a rational over π
+ * (`C(1/2) = 8/(3π)`). Another rational has no closed form and stays unevaluated;
+ * a large `m` does too, as its factorials grow without bound.
+ */
+function halfIntegerCatalan(
+  [p, q]: [bigint, bigint],
+  ce: ComputeEngine
+): Expression | undefined {
+  if (q !== 2n || p < 1n) return undefined;
+  const m = (p - 1n) / 2n;
+  if (m > MAX_HALF_INTEGER_CATALAN) return undefined;
+  const factorial = (k: bigint): bigint =>
+    k <= 1n ? 1n : k * factorial(k - 1n);
+  // Γ(k + 1/2) / √π = (2k-1)!! / 2^k, with (2k-1)!! = (2k)! / (2^k k!).
+  const gammaHalf = (k: bigint): [bigint, bigint] => [
+    factorial(2n * k) / (2n ** k * factorial(k)),
+    2n ** k,
+  ];
+  const [a, b] = gammaHalf(m + 1n);
+  const [c, d] = gammaHalf(m + 2n);
+  const [num, den] = reduceRat(factorial(2n * m + 1n) * b * d, a * c);
+  return ce
+    .function('Divide', [ce.number([num, den]), ce.symbol('Pi')])
+    .evaluate();
+}
+
+/** An exact rational literal as a bigint pair `[p, q]` with `q > 0`, else `undefined`. */
+function bigRationalOf(
+  op: Expression | undefined
+): [bigint, bigint] | undefined {
+  if (op === undefined) return undefined;
+  const r = asRational(op);
+  return r === undefined ? undefined : [BigInt(r[0]), BigInt(r[1])];
+}
+
+/**
+ * The integer `a` such that the primes greater than a non-integer real `x` are the
+ * primes greater than `a` (`direction` 1), or the primes less than `x` are those less
+ * than `a` (`direction` -1): `NextPrime(7/2)` starts from 3, `NextPrime(7/2, -1)` from 4.
+ */
+function nonIntegerPrimeAnchor(
+  x: Expression,
+  direction: 1 | -1
+): bigint | undefined {
+  if (!isNumber(x) || x.isComplex === true || !Number.isFinite(x.re))
+    return undefined;
+  let floor: bigint;
+  const q = bigRationalOf(x);
+  if (q !== undefined) {
+    const [p, d] = q;
+    floor = p / d - (p % d < 0n ? 1n : 0n);
+  } else floor = BigInt(Math.floor(x.re));
+  return direction === 1 ? floor : floor + 1n;
 }
 
 /**

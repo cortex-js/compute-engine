@@ -1135,15 +1135,16 @@
       "name": "CatalanNumber",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(integer) -> integer",
+      "signature": "(real) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.",
+      "description": "Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. A positive rational `n` is taken through the Gamma function, `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))`: `CatalanNumber(1/2)` is `8/(3π)`.",
       "examples": [
-        "CatalanNumber(5)  // 42"
+        "CatalanNumber(5)  // 42",
+        "CatalanNumber(1/2)  // 8/(3π)"
       ]
     },
     {
@@ -2497,15 +2498,16 @@
       "name": "DivisorSigma",
       "category": "Number Theory",
       "arity": "2",
-      "signature": "(integer, integer) -> integer",
+      "signature": "(integer, integer) -> rational",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.",
+      "description": "The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. A negative `k` sums reciprocal powers, a rational: `DivisorSigma(-1, 12)` is 7/3. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.",
       "examples": [
-        "DivisorSigma(2, 6)  // 50"
+        "DivisorSigma(2, 6)  // 50",
+        "DivisorSigma(-1, 12)  // 7/3"
       ]
     },
     {
@@ -3095,15 +3097,16 @@
       "name": "FactorInteger",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(integer) -> list<tuple<integer, integer>>",
+      "signature": "(rational) -> list<tuple<integer, integer>>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.",
+      "description": "Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign. A rational `p/q` is factored as `p` and `q`, the exponents of the primes of `q` being negative.",
       "examples": [
-        "FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]"
+        "FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]",
+        "FactorInteger(12/35)  // [(2, 2), (3, 1), (5, -1), (7, -1)]"
       ]
     },
     {
@@ -4401,15 +4404,16 @@
       "name": "IsSquareFree",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(integer) -> boolean",
+      "signature": "(rational) -> boolean",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Return `\"True\"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored.",
+      "description": "Return `\"True\"` if `n` is square-free (not divisible by any perfect square > 1). The sign of `n` is ignored. A rational is square-free when its numerator and denominator are.",
       "examples": [
-        "IsSquareFree(30)  // \"True\""
+        "IsSquareFree(30)  // \"True\"",
+        "IsSquareFree(6/35)  // \"True\""
       ]
     },
     {
@@ -5571,16 +5575,17 @@
       "name": "NextPrime",
       "category": "Number Theory",
       "arity": "optional",
-      "signature": "(integer, integer?) -> integer",
+      "signature": "(real, integer?) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).",
+      "description": "Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`). A non-integer real or rational `n` is allowed: `NextPrime(7/2)` is 5.",
       "examples": [
         "NextPrime(10)  // 11",
-        "NextPrime(10, -1)  // 7"
+        "NextPrime(10, -1)  // 7",
+        "NextPrime(7/2)  // 5"
       ]
     },
     {

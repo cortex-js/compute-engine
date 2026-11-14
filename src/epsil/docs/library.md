@@ -683,7 +683,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 |:------|:---------|:----------|:--------|
 | `bernoulliB` | `BernoulliB` | `(integer) -> rational` | Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. |
 | `carmichaelLambda` | `CarmichaelLambda` | `(integer) -> integer` | Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. |
-| `catalanNumber` | `CatalanNumber` | `(integer) -> integer` | Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. |
+| `catalanNumber` | `CatalanNumber` | `(real) -> number` | Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. |
 | `chineseRemainder` | `ChineseRemainder` | `(collection<any>, collection<any>) -> integer` | Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. |
 | `continuedFraction` | `ContinuedFraction` | `(real, integer?) -> list<integer>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
 | `digitCount` | `DigitCount` | `(integer, integer?, integer?, integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
@@ -691,12 +691,12 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `dirichletCharacter` | `DirichletCharacter` | `(integer, integer, integer) -> number` | The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). |
 | `dirichletL` | `DirichletL` | `(integer, integer, number) -> number` | The Dirichlet L-function L(s, χ) = Σ χ(n)/nˢ (n ≥ 1) of the character χ_j modulo `k` (`DirichletCharacter(k, j, ·)`): `k^(−s) Σ_{r=1}^{k} χ(r) ζ(s, r/k)`. |
 | `divides` | `Divides` | `(integer, integer) -> boolean` | `Divides(a, b)` returns `True` if `a` divides `b` (i.e. |
-| `divisorSigma` | `DivisorSigma` | `(integer, integer) -> integer` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
+| `divisorSigma` | `DivisorSigma` | `(integer, integer) -> rational` | The divisor function σ_k(n) = Σ_&#123;d \| n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. |
 | `divisors` | `Divisors` | `(integer) -> list<integer>` | Return the sorted list of positive divisors of an integer `n`. |
 | `eulerPhi` | `EulerPhi` | `(integer) -> integer` | `EulerPhi` is an alias for `Totient`, which is the preferred name. |
 | `eulerian` | `Eulerian` | `(integer, integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
 | `extendedGCD` | `ExtendedGCD` | `(integer, integer, integer*) -> tuple` | Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). |
-| `factorInteger` | `FactorInteger` | `(integer) -> list<tuple<integer, integer>>` | Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. |
+| `factorInteger` | `FactorInteger` | `(rational) -> list<tuple<integer, integer>>` | Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. |
 | `fromContinuedFraction` | `FromContinuedFraction` | `(collection<any>) -> number` | Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`. |
 | `fromDigits` | `FromDigits` | `(collection<any>, number?) -> number` | Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). |
 | `integerDigits` | `IntegerDigits` | `(integer, integer?, integer?) -> list<integer>` | Return the digits of `n` in the given `base` (default 10), most-significant first. |
@@ -708,7 +708,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `isPerfect` | `IsPerfect` | `(integer) -> boolean` | Returns "True" if n is a perfect number, a positive integer which equals the sum of all its divisors. |
 | `isPerfectPower` | `IsPerfectPower` | `(integer) -> boolean` | Return `"True"` if `n` is a perfect power `a^b` for integers `a` and `b ≥ 2` (a negative `n` requires an odd exponent). |
 | `isSquare` | `IsSquare` | `(integer) -> boolean` | True if n is a perfect square. |
-| `isSquareFree` | `IsSquareFree` | `(integer) -> boolean` | Return `"True"` if `n` is square-free (not divisible by any perfect square &gt; 1). |
+| `isSquareFree` | `IsSquareFree` | `(rational) -> boolean` | Return `"True"` if `n` is square-free (not divisible by any perfect square &gt; 1). |
 | `isTriangular` | `IsTriangular` | `(integer) -> boolean` | True if n is a triangular number. |
 | `jacobiSymbol` | `JacobiSymbol` | `(integer, integer) -> integer` | The Jacobi symbol (a/n) for an odd `n > 0`. |
 | `legendreSymbol` | `LegendreSymbol` | `(integer, integer) -> integer` | The Legendre symbol (a/p) for an odd prime `p`. |
@@ -718,7 +718,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `moebiusMu` | `MoebiusMu` | `(integer) -> integer` | Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square &gt; 1, otherwise (-1) raised to the number of distinct prime factors. |
 | `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer, list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
 | `nPartition` | `NPartition` | `(integer) -> integer` | Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0. |
-| `nextPrime` | `NextPrime` | `(integer, integer?) -> integer` | Return the smallest prime greater than `n`. |
+| `nextPrime` | `NextPrime` | `(real, integer?) -> integer` | Return the smallest prime greater than `n`. |
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
 | `partitionsP` | `PartitionsP` | `(integer) -> integer` | `PartitionsP` is an alias for `NPartition`, which is the preferred name. |

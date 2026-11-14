@@ -45,13 +45,18 @@ carmichaelLambda(15)
 
 ### catalanNumber
 
-MathJSON `CatalanNumber` · `(integer) -> integer`
+MathJSON `CatalanNumber` · `(real) -> number`
 
-Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.
+Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. A positive rational `n` is taken through the Gamma function, `C(n) = Γ(2n+1) / (Γ(n+1) Γ(n+2))`: `CatalanNumber(1/2)` is `8/(3π)`.
 
 ```epsil
 catalanNumber(5)
 // ➔ 42
+```
+
+```epsil
+catalanNumber(1/2)
+// ➔ 8 / (3pi)
 ```
 
 ### chineseRemainder
@@ -158,13 +163,18 @@ divides(3, 12)
 
 ### divisorSigma
 
-MathJSON `DivisorSigma` · `(integer, integer) -> integer`
+MathJSON `DivisorSigma` · `(integer, integer) -> rational`
 
-The divisor function σ_k(n) = Σ_&#123;d | n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.
+The divisor function σ_k(n) = Σ_&#123;d | n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. A negative `k` sums reciprocal powers, a rational: `DivisorSigma(-1, 12)` is 7/3. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.
 
 ```epsil
 divisorSigma(2, 6)
 // ➔ 50
+```
+
+```epsil
+divisorSigma(-1, 12)
+// ➔ 7/3
 ```
 
 ### divisors
@@ -213,13 +223,18 @@ extendedGCD(12, 18, 27)
 
 ### factorInteger
 
-MathJSON `FactorInteger` · `(integer) -> list<tuple<integer, integer>>`
+MathJSON `FactorInteger` · `(rational) -> list<tuple<integer, integer>>`
 
-Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.
+Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign. A rational `p/q` is factored as `p` and `q`, the exponents of the primes of `q` being negative.
 
 ```epsil
 factorInteger(360)
 // ➔ [(2, 3),(3, 2),(5, 1)]
+```
+
+```epsil
+factorInteger(12/35)
+// ➔ [(2, 2),(3, 1),(5, -1),(7, -1)]
 ```
 
 ### fromContinuedFraction
@@ -325,12 +340,17 @@ True if n is a perfect square.
 
 ### isSquareFree
 
-MathJSON `IsSquareFree` · `(integer) -> boolean`
+MathJSON `IsSquareFree` · `(rational) -> boolean`
 
-Return `"True"` if `n` is square-free (not divisible by any perfect square &gt; 1). The sign of `n` is ignored.
+Return `"True"` if `n` is square-free (not divisible by any perfect square &gt; 1). The sign of `n` is ignored. A rational is square-free when its numerator and denominator are.
 
 ```epsil
 isSquareFree(30)
+// ➔ "True"
+```
+
+```epsil
+isSquareFree(6/35)
 // ➔ "True"
 ```
 
@@ -430,9 +450,9 @@ Number of integer partitions of n, for n ≥ 0; it is 0 for n &lt; 0.
 
 ### nextPrime
 
-MathJSON `NextPrime` · `(integer, integer?) -> integer`
+MathJSON `NextPrime` · `(real, integer?) -> integer`
 
-Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).
+Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`). A non-integer real or rational `n` is allowed: `NextPrime(7/2)` is 5.
 
 ```epsil
 nextPrime(10)
@@ -442,6 +462,11 @@ nextPrime(10)
 ```epsil
 nextPrime(10, -1)
 // ➔ 7
+```
+
+```epsil
+nextPrime(7/2)
+// ➔ 5
 ```
 
 ### notDivides
