@@ -840,14 +840,14 @@
     {
       "name": "BellNumber",
       "category": "Combinatorics",
-      "arity": "1",
-      "signature": "(integer) -> integer",
+      "arity": "optional",
+      "signature": "(integer, number?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Compute the Bell number B(n), the number of partitions of a set of n elements.",
+      "description": "Compute the Bell number B(n), the number of partitions of a set of n elements. With a second operand, `BellNumber(n, x)` is the Bell (Touchard) polynomial `B_n(x)`, with `B_n(1) = BellNumber(n)`.",
       "wikidata": "Q816063"
     },
     {
@@ -3033,16 +3033,17 @@
     {
       "name": "ExtendedGCD",
       "category": "Number Theory",
-      "arity": "2",
-      "signature": "(integer, integer) -> tuple<integer, integer, integer>",
+      "arity": "variadic",
+      "signature": "(integer, integer, integer*) -> tuple",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).",
+      "description": "Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). With more operands, `ExtendedGCD(a₁, …, aₙ)` is the tuple `(g, x₁, …, xₙ)` with `g = gcd(a₁, …, aₙ)` and `Σ aᵢ·xᵢ = g`.",
       "examples": [
-        "ExtendedGCD(12, 18)  // (6, -1, 1)"
+        "ExtendedGCD(12, 18)  // (6, -1, 1)",
+        "ExtendedGCD(12, 18, 27)  // (3, 4, -4, 1)"
       ]
     },
     {
@@ -3106,14 +3107,14 @@
     {
       "name": "Fibonacci",
       "category": "Combinatorics",
-      "arity": "1",
-      "signature": "(integer) -> integer",
+      "arity": "optional",
+      "signature": "(integer, number?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Compute the nth Fibonacci number.",
+      "description": "Compute the nth Fibonacci number. With a second operand, `Fibonacci(n, x)` is the Fibonacci polynomial `F_n(x)`, with `F_n(1) = Fibonacci(n)`.",
       "wikidata": "Q47577"
     },
     {

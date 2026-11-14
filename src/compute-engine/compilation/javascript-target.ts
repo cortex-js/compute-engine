@@ -9523,7 +9523,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Choose(n, k) is the binomial coefficient — same runtime helper.
   Choose: (args, compile) =>
     `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
-  Fibonacci: '_SYS.fibonacci',
+  Fibonacci: (args, compile) => {
+    // `Fibonacci(n, x)` is a polynomial in `x`, which `_SYS.fibonacci` would
+    // drop.
+    if (args.length !== 1)
+      throw new Error(
+        'Could not compile `Fibonacci`: the polynomial form `Fibonacci(n, x)` has no lowering.'
+      );
+    return `_SYS.fibonacci(${compile(args[0])})`;
+  },
   IsPrime: (args, compile) => `_SYS.isPrime(${compile(args[0])})`,
 
   // Complex-specific functions

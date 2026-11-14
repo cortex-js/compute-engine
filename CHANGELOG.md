@@ -31,6 +31,18 @@
 
 ### Resolved Issues
 
+- **`ExtendedGCD` takes any number of integers, and `Fibonacci` and
+  `BellNumber` take a second operand, the variable of their polynomial.**
+  `ExtendedGCD(12, 18, 27)` was an `unexpected-argument` error; it is
+  `(3, 4, -4, 1)`, the GCD and one Bézout coefficient per operand
+  (`12·4 + 18·(-4) + 27·1 = 3`). `Fibonacci(10, x)` is the Fibonacci
+  polynomial `x^9 + 8x^7 + 21x^5 + 20x^3 + 5x` and `BellNumber(4, x)` the Bell
+  polynomial `x^4 + 6x^3 + 7x^2 + x`; an index past 1000 stays unevaluated.
+  `Binomial(n, n)` and `Binomial(n, n - 1)` for a symbolic `n` evaluate to `1`
+  and `n`. Compiled code declines `Fibonacci(n, x)`. (PR #545, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#544](https://github.com/cortex-js/compute-engine/issues/544))
+
 - **The effects of a function literal are read from the scope it was boxed
   in.** A name that the literal calls resolves from the scope of its body
   and the scopes around it, not from the scope that is current when the

@@ -187,13 +187,18 @@ Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly
 
 ### extendedGCD
 
-MathJSON `ExtendedGCD` · `(integer, integer) -> tuple<integer, integer, integer>`
+MathJSON `ExtendedGCD` · `(integer, integer, integer*) -> tuple`
 
-Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).
+Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). With more operands, `ExtendedGCD(a₁, …, aₙ)` is the tuple `(g, x₁, …, xₙ)` with `g = gcd(a₁, …, aₙ)` and `Σ aᵢ·xᵢ = g`.
 
 ```epsil
 extendedGCD(12, 18)
 // ➔ (6, -1, 1)
+```
+
+```epsil
+extendedGCD(12, 18, 27)
+// ➔ (3, 4, -4, 1)
 ```
 
 ### factorInteger

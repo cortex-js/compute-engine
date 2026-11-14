@@ -1075,3 +1075,50 @@ describe('Stirling and Eulerian outside the triangle are 0', () => {
     expect(evalStr(json)).toEqual(expected);
   });
 });
+
+describe('ExtendedGCD of more than two integers', () => {
+  const bezout = (xs: number[]) => {
+    const t = ce.box(['ExtendedGCD', ...xs]).evaluate();
+    const [g, ...coefficients] = (t as any).ops.map((o: any) => Number(o.re));
+    return { g, sum: coefficients.reduce((s, c, i) => s + c * xs[i], 0) };
+  };
+
+  const cases: [number[], number][] = [
+    [[12, 18, 27], 3],
+    [[12, 18, 30], 6],
+    [[-12, 18, 27], 3],
+    [[6, 10, 15], 1],
+    [[5, 0, 0], 5],
+    [[0, 0, 0], 0],
+    [[7, 11, 13, 17], 1],
+  ];
+  for (const [xs, g] of cases)
+    test(`ExtendedGCD(${xs.join(', ')}) has g = ${g} and Σ aᵢxᵢ = g`, () => {
+      expect(bezout(xs)).toEqual({ g, sum: g });
+    });
+
+  test('the tuple has one entry more than there are operands', () => {
+    expect(ce.box(['ExtendedGCD', 12, 18, 27]).evaluate().toString()).toBe('(3, 4, -4, 1)');
+    expect(ce.box(['ExtendedGCD', 12, 18, 27, 5]).evaluate().nops).toBe(5);
+  });
+
+  test('`.N()`, the parse route and the two-operand form are unchanged', () => {
+    expect(ce.box(['ExtendedGCD', 12, 18, 27]).N().toString()).toBe('(3, 4, -4, 1)');
+    expect(ce.parse('\\operatorname{ExtendedGCD}(12, 18, 27)').evaluate().toString()).toBe('(3, 4, -4, 1)');
+    expect(ce.box(['ExtendedGCD', 12, 18]).evaluate().toString()).toBe('(6, -1, 1)');
+    expect(ce.box(['ExtendedGCD', 0, 0]).evaluate().toString()).toBe('(0, 1, 0)');
+  });
+
+  test('big integers stay exact', () => {
+    const a = 2n ** 80n * 3n;
+    const b = 2n ** 70n * 5n;
+    const t = ce.box(['ExtendedGCD', ce.number(a), ce.number(b), 7]).evaluate();
+    const [g, x, y, z] = (t as any).ops.map((o: any) => BigInt(o.toString()));
+    expect(g).toBe(1n);
+    expect(a * x + b * y + 7n * z).toBe(1n);
+  });
+
+  test('a symbolic operand stays unevaluated', () => {
+    expect(ce.box(['ExtendedGCD', 12, 18, 'x']).evaluate().operator).toBe('ExtendedGCD');
+  });
+});

@@ -6,6 +6,7 @@ import type {
 } from '../global-types.js';
 import { asRational, toBigint } from '../boxed-expression/numerics.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import type { Type } from '../../common/type/types.js';
 import { checkTypes } from '../boxed-expression/validate.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
@@ -819,29 +820,51 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ExtendedGCD: {
       description:
-        'Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).',
-      signature: '(integer, integer) -> tuple<integer, integer, integer>',
+        'Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). With more operands, `ExtendedGCD(a₁, …, aₙ)` is the tuple `(g, x₁, …, xₙ)` with `g = gcd(a₁, …, aₙ)` and `Σ aᵢ·xᵢ = g`.',
+      signature: '(integer, integer, integer*) -> tuple',
+      // `(g, x₁, …, xₙ)`: one entry more than there are operands.
+      type: (ops, context) =>
+        BoxedType.forResult(
+          `tuple<${Array(ops.length + 1)
+            .fill('integer')
+            .join(', ')}>` as Type,
+          context.engine._typeResolver
+        ),
       broadcastable: true,
-      examples: ['ExtendedGCD(12, 18)  // (6, -1, 1)'],
-      // Complete precondition (the evaluate guard on both ground operands):
-      // two integers always yield the Bézout tuple.
+      examples: [
+        'ExtendedGCD(12, 18)  // (6, -1, 1)',
+        'ExtendedGCD(12, 18, 27)  // (3, 4, -4, 1)',
+      ],
+      // Complete precondition (the evaluate guard on every ground operand):
+      // integers always yield the Bézout tuple.
       canEnumerate: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const a = canEnumerateOperand(expr.ops[0], (g) => toBigint(g) !== null);
-        if (a !== true) return a;
-        return canEnumerateOperand(expr.ops[1], (g) => toBigint(g) !== null);
+        for (const op of expr.ops) {
+          const ground = canEnumerateOperand(op, (g) => toBigint(g) !== null);
+          if (ground !== true) return ground;
+        }
+        return true;
       },
-      evaluate: floatResultIfFloatOperand(([aOp, bOp], { engine: ce }) => {
-        const a = toBigint(aOp);
-        const b = toBigint(bOp);
-        if (a === null || b === null) return undefined;
-        let [g, x, y] = extGcd(a, b);
+      evaluate: floatResultIfFloatOperand((ops, { engine: ce }) => {
+        const values = ops.map((op) => toBigint(op));
+        if (values.some((v) => v === null)) return undefined;
+        // Fold pairwise: after each step the gcd so far carries the
+        // coefficients of every earlier operand along.
+        let g = values[0]!;
+        let coefficients = [1n];
+        for (const v of values.slice(1)) {
+          const [ng, p, q] = extGcd(g, v!);
+          coefficients = [...coefficients.map((c) => c * p), q];
+          g = ng;
+        }
         if (g < 0n) {
           g = -g;
-          x = -x;
-          y = -y;
+          coefficients = coefficients.map((c) => -c);
         }
-        return ce._fn('Tuple', [ce.number(g), ce.number(x), ce.number(y)]);
+        return ce._fn(
+          'Tuple',
+          [g, ...coefficients].map((c) => ce.number(c))
+        );
       }),
     },
 

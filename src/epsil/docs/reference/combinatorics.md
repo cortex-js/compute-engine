@@ -23,9 +23,9 @@ category.
 
 ### bellNumber
 
-MathJSON `BellNumber` · `(integer) -> integer`
+MathJSON `BellNumber` · `(integer, number?) -> number`
 
-Compute the Bell number B(n), the number of partitions of a set of n elements.
+Compute the Bell number B(n), the number of partitions of a set of n elements. With a second operand, `BellNumber(n, x)` is the Bell (Touchard) polynomial `B_n(x)`, with `B_n(1) = BellNumber(n)`.
 
 ### binomial
 
@@ -53,9 +53,9 @@ Return all k-element combinations of a collection.
 
 ### fibonacci
 
-MathJSON `Fibonacci` · `(integer) -> integer`
+MathJSON `Fibonacci` · `(integer, number?) -> number`
 
-Compute the nth Fibonacci number.
+Compute the nth Fibonacci number. With a second operand, `Fibonacci(n, x)` is the Fibonacci polynomial `F_n(x)`, with `F_n(1) = Fibonacci(n)`.
 
 ### multinomial
 
