@@ -6,16 +6,22 @@ import { expectTypeBetween } from '../utils';
 import { parseEpsil, resolveLibraryNames } from '../../src/epsil';
 
 describe('Map result-type inference preserves the remaining data contract', () => {
-  test.each(['any', 'list<any>'])(
+  // `xs` is typed from its declaration, not from the list it holds (a
+  // static type does not depend on a value): over `any` the kind of the
+  // result is not decided.
+  test.each([
+    ['any', 'collection'],
+    ['list<any>', 'list'],
+  ])(
     '%s retains nested collections and missing data',
-    (type) => {
+    (type, kind) => {
       const ce = new ComputeEngine();
       ce.declare('xs', type);
       ce.assign('xs', ce.box(['List', ['List', 1, 'Missing'], ['List', 4]]));
       const map = ce.box(['Map', 'Sqrt', 'xs']);
       // `Sqrt(Missing)` is `Missing`, so the elements can be absent.
       expectTypeBetween(map, {
-        atMost: 'list<indexed_collection<any> | missing | number>',
+        atMost: `${kind}<indexed_collection<any> | missing | number>`,
       });
       expect(isSubtype('nothing', collectionElementType(map.type.type)!)).toBe(
         false

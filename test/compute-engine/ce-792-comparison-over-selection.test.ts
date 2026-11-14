@@ -117,14 +117,16 @@ describe('A COMPARISON OVER A SELECTION WITH A LIST CONDITION', () => {
         .type.toString()
     ).toBe('boolean | list<boolean>');
     // A mask stored in a symbol as a restriction: `ms` is `Missing` when
-    // `d` is false.
+    // `d` is false. A static type does not read the value of `ms` (decision
+    // D16), so it is the type of a list of booleans, which `ms` has.
     expect(ce.expr(['Less', ['If', 'ms', 'L'], 2]).type.toString()).toBe(
-      'boolean | list<boolean>'
+      'list<boolean>'
     );
-    // Masks that refer to each other: the walk stops, and the type keeps
-    // the scalar arm.
+    // Masks that refer to each other: a static type does not read their
+    // values (decision D16), so it is the type of a declared
+    // `list<boolean>`.
     expect(ce.expr(['Less', ['If', 'a', 'L'], 2]).type.toString()).toBe(
-      'boolean | list<boolean>'
+      'list<boolean>'
     );
     // A call of a user function can be absent whatever its operands are:
     // `f(c)` is `Missing` when `c` is false.

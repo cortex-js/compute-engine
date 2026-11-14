@@ -12,6 +12,7 @@ import {
 import { BoxedType } from '../common/type/boxed-type.js';
 import { isMacroDef } from './boxed-expression/macro.js';
 import {
+  activationViewDiverges,
   innermostCallFrameBody,
   staticViewDiverges,
 } from './static-typing-view.js';
@@ -1378,13 +1379,18 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._cacheGeneration()`.
    * @internal */
   _cacheGeneration(): number {
+    return this._viewKeyedGeneration(staticViewDiverges(this));
+  }
+
+  /** `_baseCacheGeneration()`, or inside the static view of a type
+   * computation when `diverges`, a key of its own. */
+  private _viewKeyedGeneration(diverges: boolean): number {
     const generation = this._baseCacheGeneration();
-    if (!staticViewDiverges(this)) return generation;
+    if (!diverges) return generation;
     // Inside a type computation, the bindings are read in the static view
-    // (`static-typing-view.ts`): a parameter has no value. While the view
-    // can answer something else than a read outside it, a sign, a value or
-    // an evaluation computed in the view is not the one that read gets, so
-    // it is kept under a key of its own: one key for each
+    // (`static-typing-view.ts`): a variable has no value. A sign, a value or
+    // an evaluation computed in the view is not the one a read outside it
+    // gets, so it is kept under a key of its own: one key for each
     // value of the key outside the view, minted as a shield key is, so that
     // it never equals another key. The facts bit is kept. The key outside the
     // view comes back when a value shield ends, and the same key comes back
@@ -1458,7 +1464,10 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._typeCacheFallbackGeneration()`.
    * @internal */
   _typeCacheFallbackGeneration(): number {
-    const generation = this._cacheGeneration();
+    // A type does not depend on a value: only the frame of an application
+    // in progress gives the view a key of its own here
+    // (`activationViewDiverges()`).
+    const generation = this._viewKeyedGeneration(activationViewDiverges(this));
     // A minted key (negative) is unique. A key of the `any` axis is moved
     // out of the values of `_typeCacheGeneration()`: four times the axis,
     // plus two, plus the facts bit.

@@ -15,9 +15,8 @@ import type { Type } from '../../src/common/type/types';
  * or an indexed collection of `R`, where `R` is the per-element result
  * computed from the ELEMENT type of `P`.
  *
- * A `P` that holds a value now is typed from that value, as for any symbol:
- * a list or a range gives a list type, and a set gives the scalar type of an
- * application that does not map (this was already the case). The soundness check below evaluates each
+ * A static type does not depend on a value: a `P` that holds a value is
+ * typed from its declaration, as one that holds none. The soundness check below evaluates each
  * application with `P` holding each kind of value and checks that the type
  * of the value is a subtype of the static type.
  */
@@ -126,20 +125,21 @@ describe('ELEMENT-WISE OPERATOR OVER AN ABSTRACT COLLECTION: STATIC TYPE', () =>
     }
   }
 
-  test('P holding a set is typed from its value: not mapped over', () => {
-    // A set is not mapped over, so the application is typed as a scalar
-    // application over the set (`Sin` of a set evaluates to a type error).
+  test('P holding a set is typed from its declaration, not its value', () => {
+    // `Sin` of a set evaluates to a type error, which no type describes.
     const ce = engineWith('collection<number>', ['Set', 1, 2]);
-    expect(ce.box(['Sin', 'P']).type.toString()).toBe('number');
+    expect(ce.box(['Sin', 'P']).type.toString()).toBe('broadcastable<number>');
     expect(ce.box(['Abs', 'P']).type.toString()).toBe(
-      'real<0..> | signed_infinity'
+      'broadcastable<nan | real<0..> | signed_infinity>'
     );
   });
 
-  test('P holding a list or a range is typed from its value: a list', () => {
+  test('P holding a list or a range is typed from its declaration, not its value', () => {
     for (const value of [VALUES.list, VALUES.range]) {
       const ce = engineWith('collection<number>', value);
-      expect(ce.box(['Sin', 'P']).type.toString()).toBe('list<number>');
+      expect(ce.box(['Sin', 'P']).type.toString()).toBe(
+        'broadcastable<number>'
+      );
     }
   });
 
@@ -189,13 +189,13 @@ const MAP_P = ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], 'P'];
 
 describe('ABSTRACT COLLECTION: A MAP OVER P WHOSE KIND IS NOT DECIDED', () => {
   // A `Map` over `P` declared `collection<number>` is a collection that is
-  // not known to be indexed until `P` holds a value. While `P` holds no
-  // value, the kind is not decided, so the `Map` may still be a list and
-  // `Sin` of it is `broadcastable<number>`, not the scalar `number`.
+  // not known to be indexed: the value of `P` does not decide its type. The
+  // `Map` may be a list, so `Sin` of it is `broadcastable<number>`, not the
+  // scalar `number`.
   test.each([
     ['no value', undefined, 'broadcastable<number>'],
-    ['a list', ['List', 1, 2], 'list<number>'],
-    ['a set', ['Set', 1, 2], 'number'],
+    ['a list', ['List', 1, 2], 'broadcastable<number>'],
+    ['a set', ['Set', 1, 2], 'broadcastable<number>'],
   ])('Sin(Map(x -> 2x, P)) with P holding %s', (_, value, expected) => {
     const ce = engineWith('collection<number>', value);
     const expr = ce.box(['Sin', MAP_P] as any);
@@ -206,8 +206,8 @@ describe('ABSTRACT COLLECTION: A MAP OVER P WHOSE KIND IS NOT DECIDED', () => {
 
   test.each([
     ['no value', undefined, 'broadcastable<number>'],
-    ['a list', ['List', 1, 2], 'list<number>'],
-    ['a set', ['Set', 1, 2], 'number'],
+    ['a list', ['List', 1, 2], 'broadcastable<number>'],
+    ['a set', ['Set', 1, 2], 'broadcastable<number>'],
   ])(
     'Q := Map(x -> 2x, P), then Sin(Q), with P holding %s',
     (_, value, expected) => {

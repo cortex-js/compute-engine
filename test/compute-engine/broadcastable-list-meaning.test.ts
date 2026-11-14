@@ -1776,41 +1776,49 @@ describe('a broadcast over an operand of unknown rank holds the value', () => {
     return e.type.toString();
   };
 
-  it('a broadcastable of numbers that holds a matrix gives a tensor', () => {
+  // A static type does not read the value of `b` (decision D16 of
+  // `docs/plans/2026-11-11-bound-once-spec.md`): each type below is the
+  // type of the declaration of `b`, and holds the value `b` has.
+  it('a broadcastable of numbers that holds a matrix', () => {
     const d = 'broadcastable<number>';
-    expect(typed(d, MATRIX, ['Negate', 'b'])).toBe('tensor');
-    expect(typed(d, MATRIX, ['Sin', 'b'])).toBe('tensor');
-    expect(typed(d, MATRIX, ['Add', 'b', 1])).toBe('tensor');
-    expect(typed(d, MATRIX, ['Less', 'b', 2])).toBe('tensor<boolean>');
+    expect(typed(d, MATRIX, ['Negate', 'b'])).toBe('broadcastable<number>');
+    expect(typed(d, MATRIX, ['Sin', 'b'])).toBe('broadcastable<number>');
+    expect(typed(d, MATRIX, ['Add', 'b', 1])).toBe('broadcastable<number>');
+    expect(typed(d, MATRIX, ['Less', 'b', 2])).toBe('broadcastable<boolean>');
   });
 
   it('an operand of any depth gives a list of cells or lists', () => {
-    for (const d of ['any', 'list<any>']) {
-      expect(typed(d, MATRIX, ['Negate', 'b'])).toBe('list<any>');
-      expect(typed(d, MATRIX, ['Sin', 'b'])).toBe('list<list<any> | number>');
-      expect(typed(d, MATRIX, ['Add', 'b', 1])).toBe('list<any>');
-      expect(typed(d, MATRIX, ['Less', 'b', 2])).toBe(
-        'list<boolean | list<any>>'
-      );
-    }
+    expect(typed('any', MATRIX, ['Negate', 'b'])).toBe('any');
+    expect(typed('any', MATRIX, ['Sin', 'b'])).toBe('any');
+    expect(typed('any', MATRIX, ['Add', 'b', 1])).toBe('any');
+    expect(typed('any', MATRIX, ['Less', 'b', 2])).toBe(
+      'boolean | list<boolean | list<any>>'
+    );
+    const d = 'list<any>';
+    expect(typed(d, MATRIX, ['Negate', 'b'])).toBe('list<any>');
+    expect(typed(d, MATRIX, ['Sin', 'b'])).toBe('list<list<any> | number>');
+    expect(typed(d, MATRIX, ['Add', 'b', 1])).toBe('list<any>');
+    expect(typed(d, MATRIX, ['Less', 'b', 2])).toBe(
+      'list<boolean | list<any>>'
+    );
   });
 
-  it('a broadcastable of points that holds rows of points gives a tensor', () => {
+  it('a broadcastable of points that holds rows of points', () => {
     const d = 'broadcastable<tuple<number, number>>';
     const rows = ['List', ['List', ['Tuple', 3, 4]], ['List', ['Tuple', 6, 8]]];
     const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
     for (const value of [rows, points]) {
       expect(typed(d, value, ['Negate', 'b'])).toBe(
-        'tensor<tuple<number, number>>'
+        'broadcastable<tuple<number, number>>'
       );
       expect(typed(d, value, ['Multiply', 2, 'b'])).toBe(
-        'tensor<tuple<number, number>>'
+        'broadcastable<tuple<number, number>>'
       );
       expect(typed(d, value, ['Add', 'b', 'b'])).toBe(
-        'tensor<tuple<number, number>>'
+        'broadcastable<tuple<number, number>>'
       );
       expect(typed(d, value, ['Sin', 'b'])).toBe(
-        'tensor<tuple<number, number>>'
+        'broadcastable<tuple<number, number>>'
       );
     }
     // The norm of each point. The value `[[5], [10]]` is typed with
@@ -1820,7 +1828,9 @@ describe('a broadcast over an operand of unknown rank holds the value', () => {
     ce.declare('b', d);
     ce.assign('b', ce.box(rows as any));
     const abs = ce.box(['Abs', 'b']);
-    expect(abs.type.toString()).toBe('tensor<real<0..> | signed_infinity>');
+    expect(abs.type.toString()).toBe(
+      'broadcastable<real<0..> | signed_infinity>'
+    );
     expect(abs.evaluate().toString()).toBe('[[5],[10]]');
     expect(
       isSubtype(parseType('matrix<integer<0..>^(2x1)>'), abs.type.type)
@@ -1834,21 +1844,25 @@ describe('a broadcast over an operand of unknown rank holds the value', () => {
 
   it('a generic call over a broadcastable or an operand of any depth', () => {
     expect(typed('broadcastable<integer>', MATRIX, ['g', 'b'], generic)).toBe(
-      'tensor<tuple<integer, integer>>'
+      'broadcastable<tuple<integer, integer>>'
     );
     expect(
       typed('broadcastable<integer>', ['List', 1, 2], ['g', 'b'], generic)
-    ).toBe('tensor<tuple<integer, integer>>');
-    for (const d of ['any', 'list<any>'])
-      for (const value of [MATRIX, RAGGED, ['List', 1, 2]])
-        expect(typed(d, value, ['g', 'b'], generic)).toBe(
-          'list<list<any> | tuple<any, any>>'
-        );
-    // A broadcastable whose element is a list holds a list of rank 1 or 2.
+    ).toBe('broadcastable<tuple<integer, integer>>');
+    // An operand typed `any` can hold a list with rows of different
+    // lengths (CE-1290).
+    for (const value of [MATRIX, RAGGED, ['List', 1, 2]])
+      expect(typed('any', value, ['g', 'b'], generic)).toBe(
+        'list<list<any> | tuple<any, any>> | tuple<any, any>'
+      );
+    for (const value of [MATRIX, RAGGED, ['List', 1, 2]])
+      expect(typed('list<any>', value, ['g', 'b'], generic)).toBe(
+        'list<list<any> | tuple<any, any>>'
+      );
     for (const value of [MATRIX, ['List', 1, 2]])
       expect(
         typed('broadcastable<list<integer^2>>', value, ['g', 'b'], generic)
-      ).toBe('list<list<any> | tuple<integer, integer>>');
+      ).toBe('broadcastable<tuple<integer, integer>>');
   });
 
   it('a generic call over an indexed collection of lists maps the leaves', () => {

@@ -1773,11 +1773,11 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     ce.assign('n', 4);
     const p = ce.parse(String.raw`\frac{1}{n}(2h(x)-1, 1)`);
     expect(p.operator).toBe('Multiply');
-    // The scalar `1/n` (with `n := 4`, a rational) scales BOTH components, so
-    // the literal `1` contributes a rational coordinate (`1/4`), not an
-    // integer one — the component tier follows the declared scalar factor.
+    // The scalar `1/n` scales BOTH components. A static type does not read
+    // the value of `n` (decision D16): `n` is an `integer` that can be 0,
+    // so the second coordinate is `1/n`, a real or a non-finite value.
     expect(p.type.toString()).toBe(
-      'tuple<list<list<any> | number | tuple> | number | tuple, rational>'
+      'tuple<list<list<any> | number | tuple> | number | tuple, infinity | nan | real>'
     );
     const sum = ce.parse(
       String.raw`\frac{1}{n}(\lfloor nx\rfloor,\lfloor ny\rfloor)+\frac{1}{n}(2h(x)-1, 1)`

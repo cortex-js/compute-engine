@@ -241,10 +241,12 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
     );
   }
 
+  // A static type does not read the value of `U` (decision D16): a source
+  // typed `any` gives an abstract collection, and the value is a list.
   test('a source typed `any`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'U']),
-      'list<complex | indexed_collection<any> | infinity | missing>'
+      'collection<complex | indexed_collection<any> | infinity | missing>'
     ));
 
   test('a source typed `list<any>`', () =>
@@ -259,7 +261,7 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('another broadcastable operator', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Negate', 'U']),
-      'list<indexed_collection<any> | missing | number>'
+      'collection<indexed_collection<any> | missing | number>'
     );
     expect(v.toString()).toBe('[[-1,-2],[-3]]');
   });
@@ -275,7 +277,7 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('parse route', () => {
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, U)'),
-      'list<complex | indexed_collection<any> | infinity | missing>'
+      'collection<complex | indexed_collection<any> | infinity | missing>'
     );
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, \\mathrm{La})'),

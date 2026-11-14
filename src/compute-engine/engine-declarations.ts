@@ -132,6 +132,7 @@ import {
   _BoxedValueDefinition,
   prepareValueWhenBoxed,
   refineConstructorPlaceholder,
+  valuePresenceRefinesType,
 } from './boxed-expression/boxed-value-definition.js';
 import {
   activeRollbackFrame,
@@ -4502,6 +4503,13 @@ function restoreWithValuesBindings(
       return true;
     }
   };
+  const declaredTypeOf = (def: BoxedValueDefinition): BoxedType | undefined => {
+    try {
+      return def.declaredType;
+    } catch {
+      return undefined;
+    }
+  };
   for (let i = saved.length - 1; i >= 0; i--) {
     const { name, record, def, snapshot } = saved[i];
     try {
@@ -4510,8 +4518,10 @@ function restoreWithValuesBindings(
       if (installed === def && def.disposed) continue;
       const valueBefore = def.storedValue;
       const armBefore = hasFunctionArm(def);
+      const typeBefore = declaredTypeOf(def);
       def._restoreFieldSnapshot(snapshot);
       const armAfter = hasFunctionArm(def);
+      const typeAfter = declaredTypeOf(def);
       if (installed !== def) {
         // `fn` assigned a function to the name, and maybe a value after it:
         // the record holds an operator definition or another value
@@ -4529,20 +4539,32 @@ function restoreWithValuesBindings(
           callableAfter: armAfter,
         });
       }
-      if (armBefore !== armAfter)
+      // A write of a value moves no type version, so a restore that puts
+      // another type back reports it.
+      if (
+        armBefore !== armAfter ||
+        typeBefore === undefined ||
+        typeAfter === undefined ||
+        typeChanged(typeBefore, typeAfter)
+      )
         ce._noteStateEvent({
           kind: 'type-write',
           callableBefore: armBefore,
           callableAfter: armAfter,
         });
+      const valueAfter = def.storedValue;
+      const callable =
+        armBefore ||
+        armAfter ||
+        holdsFunctionLiteral(valueBefore) ||
+        holdsFunctionLiteral(valueAfter);
       ce._noteStateEvent({
         kind: 'value-write',
         ephemeral: false,
-        callable:
-          armBefore ||
-          armAfter ||
-          holdsFunctionLiteral(valueBefore) ||
-          holdsFunctionLiteral(def.storedValue),
+        callable,
+        typeRead:
+          callable ||
+          valuePresenceRefinesType(ce, def, valueBefore, valueAfter),
       });
     } catch (error) {
       failure ??= { error };
@@ -4676,20 +4698,20 @@ function deriveAndWriteAssignedType(
       const promoted = promotedValueType();
       adopted = isSubtype(promoted, current) ? promoted : vt;
     }
-    // State event (§2c): the D11 adopt branch can REMOVE a callable arm
-    // (a `function` guess replaced by the scalar value's own type) before
-    // the value write below classifies — emit `type-write` when the
-    // arm-containment changes; the arm-preserving widen emits nothing.
-    const armBefore = containsSignatureArm(current);
-    const armAfter = containsSignatureArm(adopted);
-    if (armBefore !== armAfter)
+    const previousType = valueDef.type;
+    const declaredBefore = valueDef.declaredType;
+    valueDef._setType(() => ce.type(adopted));
+    // State event (§2c): a write of a value moves no type version, so a
+    // retype reports itself. The D11 adopt branch can also REMOVE a callable
+    // arm (a `function` guess replaced by the scalar value's own type). The
+    // declared types are compared: the type with the facts merged in can
+    // stay the same while the declared type changes.
+    if (typeChanged(declaredBefore, valueDef.declaredType))
       ce._noteStateEvent({
         kind: 'type-write',
-        callableBefore: armBefore,
-        callableAfter: armAfter,
+        callableBefore: containsSignatureArm(current),
+        callableAfter: containsSignatureArm(adopted),
       });
-    const previousType = valueDef.type;
-    valueDef._setType(() => ce.type(adopted));
     // A placeholder that has now taken a type from its value is in exactly
     // the state the no-declaration route produces, so it must carry the
     // same marker: later uses may refine it, and `assertAssignableValueDef`
@@ -4725,9 +4747,26 @@ function deriveAndWriteAssignedType(
       valueDef._placeholderSkeleton,
       value.type.type
     );
-    if (refined !== valueDef.type.type)
+    if (refined !== valueDef.type.type) {
+      const before = valueDef.declaredType;
       valueDef._setElementRefinement(ce.type(refined));
+      // As above: the refinement is a retype, and reports itself.
+      if (typeChanged(before, valueDef.declaredType)) {
+        const arm = containsSignatureArm(valueDef.type.type);
+        ce._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: arm,
+          callableAfter: arm,
+        });
+      }
+    }
   }
+}
+
+/** True when `after` is not the type `before`: compared as objects, then
+ * by their printed forms. */
+function typeChanged(before: BoxedType, after: BoxedType): boolean {
+  return before.type !== after.type && before.toString() !== after.toString();
 }
 
 /**

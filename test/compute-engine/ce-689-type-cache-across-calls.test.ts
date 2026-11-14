@@ -26,15 +26,20 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     expect(ce._typeVersion).toBe(typeVersion);
   });
 
-  test('an assignment still moves the type version', () => {
+  test('an assignment moves the type version when it changes the type', () => {
+    // A static type does not depend on a value: a write that keeps the type
+    // of `a` (the symbol `hello` is a value of `integer`'s inferred guess)
+    // moves no type version, and a write that retypes `a` reports it.
     const ce = new ComputeEngine();
     ce.assign('a', 1);
-    const typeVersion = ce._typeVersion;
+    let typeVersion = ce._typeVersion;
     ce.assign('a', 'hello');
+    expect(ce.box('a').type.toString()).toBe('integer');
+    expect(ce._typeVersion).toBe(typeVersion);
+    typeVersion = ce._typeVersion;
+    ce.assign('a', ce.string('hello'));
     expect(ce._typeVersion).toBeGreaterThan(typeVersion);
-    expect(ce.box('a').type.toString()).not.toBe(
-      ce.box(1).type.toString()
-    );
+    expect(ce.box('a').type.toString()).toBe('string');
   });
 
   test('the issue function: the value, and the types are not computed again at each call', () => {
@@ -235,8 +240,9 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     expect(inside).toBeUndefined();
     expect(generations[1]).not.toBe(generations[0]);
     expect((await first).toString()).toBe('5');
-    // No application runs any more: the view is the bindings again.
-    expect(withStaticTypingView(ce, () => ce._cacheGeneration())).toBe(
+    // No application runs any more, and the view still reads no value of a
+    // variable (decision D16): a type computation keeps a key of its own.
+    expect(withStaticTypingView(ce, () => ce._cacheGeneration())).not.toBe(
       ce._cacheGeneration()
     );
   });
@@ -360,10 +366,11 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     );
   });
 
-  test('a node that reads a local of a block is typed again inside a call', () => {
-    // `c689` is a local of the `Block`. Outside the block, the symbol does
-    // not find its value, and `x / c689` is typed from the declared types.
-    // Inside the call of the function of the `Map`, it finds the value 5.
+  test('a node that reads a local of a block is typed from the declared types inside a call', () => {
+    // `c689` is a local of the `Block`, declared `unknown`. A static type
+    // does not depend on a value: inside the call of the function of the
+    // `Map` too, `x / c689` is typed from the declared types, not from the
+    // value 5.
     const ce = new ComputeEngine();
     ce.declare('TypeOf689b', {
       signature: '(any) -> string',
@@ -382,7 +389,9 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     ]);
     const divide = find(block, (e) => e.operator === 'Divide');
     expect(divide.type.toString()).toBe('infinity | nan | real');
-    expect(block.evaluate().toString()).toBe('["rational","rational"]');
+    expect(block.evaluate().toString()).toBe(
+      '["infinity | nan | real","infinity | nan | real"]'
+    );
   });
 
   test('a type read while the same function was being derived is typed again after a call', () => {

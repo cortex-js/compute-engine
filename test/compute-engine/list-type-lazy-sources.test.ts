@@ -187,14 +187,17 @@ describe('an aggregate reads finiteness off the structure, not off the list type
     }
   });
 
-  test('a symbol that holds a producer with no last element is left to the top type', () => {
-    // The symbol has no application structure: the finiteness of its value
-    // decides. `Max(M)` evaluates to `+oo`, which `integer | nan` excludes.
+  test('a symbol that holds a producer with no last element is typed from its declaration', () => {
+    // A static type does not depend on a value: the finiteness of the value
+    // of `M` is not read, and the aggregates are typed from `list<integer>`,
+    // as for a value-less `M`. (An aggregate of a declared list assumes a
+    // finite list, so the value `+oo` is outside that type: an open defect,
+    // the same as for a parameter declared `list<integer>`.)
     const ce = new ComputeEngine();
     ce.declare('M', 'list<integer>');
     ce.assign('M', ce.box(['Range', 1, 'PositiveInfinity']));
-    for (const op of ['Sum', 'Max', 'Min', 'Mean'])
-      expect(ce.box([op, 'M']).type.toString()).toBe('number');
+    expect(ce.box(['Sum', 'M']).type.toString()).toBe('integer');
+    expect(ce.box(['Max', 'M']).type.toString()).toBe('integer | nan');
     expect(ce.box(['Max', 'M']).evaluate().toString()).toBe('+oo');
   });
 

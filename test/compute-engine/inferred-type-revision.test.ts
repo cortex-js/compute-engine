@@ -9,14 +9,13 @@ import { ComputeEngine } from '../../src/compute-engine';
  * presumption — `C = U[1]` types `boolean`, as arithmetic already presumes an
  * undeclared symbol scalar — rather than the broadest `broadcastable<boolean>`
  * (measured 2026-08-16: that widening broke every `-> boolean` predicate
- * contract; 8 tests / 6 suites). (2) The INFERRED type an assignment commits
- * from such a value is a likely guess and is REVISED when the value's own
- * live type refutes it (`_reviseInferredType`,
- * `boxed-expression/boxed-value-definition.ts`): with `C` unknown,
- * `C_0 := Σ_k Which(C = U_k, k, True, 0)` types `number`; once `C := [10, 30]`
- * the value is `[1, 3]`, and the recorded type moves to `vector<integer^2>`
- * instead of staying a `number` its value does not satisfy. A DECLARED type
- * is a contract and never moves; a guess the value still fits is kept.
+ * contract; 8 tests / 6 suites). (2) A variable whose value reads other
+ * names has the static type of that value (decision D16,
+ * `declaredType` in `boxed-expression/boxed-value-definition.ts`): it
+ * follows a change of the TYPE of those names, never their values. With `C`
+ * unknown, `C_0 := Σ_k Which(C = U_k, k, True, 0)` types `integer`; once
+ * `C := [10, 30]`, which gives `C` a type, the value is `[1, 3]` and the type
+ * is `vector<integer^2>`. A DECLARED type is a contract and never moves.
  */
 describe('an inferred type is revised when its value refutes it', () => {
   function chain() {
@@ -90,14 +89,16 @@ describe('an inferred type is revised when its value refutes it', () => {
     expect(ce.box('y').type.toString()).toBe('number');
   });
 
-  test('a guess the live value still fits is kept; a literal never moves', () => {
+  test('a formula follows the types of the names it reads; a literal never moves', () => {
     const ce = new ComputeEngine();
     ce.assign('y', ce.box(['Add', 'x', 1]));
     expect(ce.box('y').type.toString()).toBe('number');
+    // `y` has the static type of `x + 1`: it follows the TYPE of `x`, which
+    // its assignments set (decision D16).
     ce.assign('x', 2);
-    expect(ce.box('y').type.toString()).toBe('number'); // integer <: number
+    expect(ce.box('y').type.toString()).toBe('integer');
     ce.assign('x', 2.5);
-    expect(ce.box('y').type.toString()).toBe('number');
+    expect(ce.box('y').type.toString()).toBe('real');
     ce.assign('z', 5);
     ce.assign('x', ce.box(['List', 1, 2]));
     expect(ce.box('z').type.toString()).toBe('integer');

@@ -6,6 +6,7 @@ import { factsOf } from '../../common/type/facts.js';
 import {
   closeImaginaryUnderArithmetic,
   reduceType,
+  typesOverlap,
 } from '../../common/type/reduce.js';
 import {
   describeType,
@@ -4705,6 +4706,21 @@ function addTypeOnTypes(
   // the same reason as the collection branch.
   if (args.some((x) => isPossiblyCollectionTypedOperand(x)))
     return broadcastableResultTypeOfOperands(args);
+  // An operand none of whose values is a number has no sum, as the boxing of
+  // the same sum says (`incompatible-type`, `canonicalAdd`). A node boxed
+  // before its operand got such a type (`c + 1`, then `c` declared
+  // `boolean`) is typed as that boxing types it. An operand with a number
+  // arm (`boolean | integer`) is not refused, nor is a collection (a
+  // `set<number>` keeps the union below).
+  if (
+    args.some(
+      (x) =>
+        x.type !== 'unknown' &&
+        !typesOverlap(x.type, 'number') &&
+        !typesOverlap(x.type, 'collection')
+    )
+  )
+    return 'error';
   if (args.some((x) => provablyNaNOperand(x))) return 'number';
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
   const nonFinite = args.filter((x) => operandNonFiniteNumberOnTypes(x));

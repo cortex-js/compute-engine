@@ -615,7 +615,12 @@ describe('a recursive signature derived again', () => {
     ce.box(['Add', ['R', 3], 2]).evaluate();
     expect(ce.box(['R', 'n']).type.toString()).toBe('number');
     ce.assign('a', ce.box(['List', 1, 2]));
-    expect(find(literal.ops[0]).type.toString()).toBe('vector<integer^2>');
+    // A static type does not read the value of `a` (decision D16): its type
+    // inferred from the assignment is not a promise of a shape, so the sum
+    // keeps the scalar arm.
+    expect(find(literal.ops[0]).type.toString()).toBe(
+      'integer | vector<integer^2>'
+    );
     expect(ce.box(['R', 'n']).type.toString()).toBe(
       'integer | vector<integer^2>'
     );

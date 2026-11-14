@@ -592,19 +592,6 @@ function callIsInComputation(
 }
 
 /**
- * The number of re-entrant signature reads so far
- * ({@link noteReentrantSignatureRead}). A memo that is not a signature
- * derivation, and so is not on the derivation stack, compares this count
- * before and after its computation: when it moved, the computation may have
- * read a provisional signature, and its result must not be stored. It only
- * increases. The count is kept in `failClosedCounts` (`store-guard.ts`), so
- * that a store guard can read it.
- */
-export function reentrantSignatureReadCount(): number {
-  return failClosedCounts.reentrantSignature;
-}
-
-/**
  * Record a re-entrant read of the signature of `owner` while its derivation
  * runs: the read answers a provisional signature (the recorded one, or the
  * candidate of a list-hypothesis pass). Every derivation that started after

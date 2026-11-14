@@ -152,15 +152,16 @@ describe('point accessors over an empty collection — interpreter', () => {
     // A string element type is not point-shaped, so the accessors element-index
     // such a collection: `PointX(["a","b"])` is `"a"`, the First/Second/Third
     // fallback. Removing the last element cannot change that reading, so the
-    // empty one indexes as well and answers the absence marker. The type is
-    // `string`: the absence marker of an accessor is implicit in its type.
-    // Answering `[]` here would contradict both the non-empty reading and
-    // the type.
+    // empty one indexes as well and answers the absence marker, which is
+    // implicit in the type of an accessor. Answering `[]` here would
+    // contradict the non-empty reading.
     const ce = new ComputeEngine();
     ce.declare('S', 'list<string>');
     ce.assign('S', ce.box(['List']));
     const expr = ce.box(['PointX', 'S']);
-    expect(expr.type.toString()).toBe('string');
+    // A static type does not read the value of `S` (decision D16): the type
+    // is the one of a `list<string>` with no value.
+    expect(expr.type.toString()).toBe('list<number> | string');
     expect(expr.evaluate().toString()).toBe('"Missing"');
     // The non-empty reading it has to agree with.
     expect(

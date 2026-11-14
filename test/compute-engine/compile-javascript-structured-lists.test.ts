@@ -254,7 +254,15 @@ function operationsOf(region: IRRegion): IROperation[] {
 const L = typed('L', 'list<real>');
 const I = typed('i', 'integer');
 
-type Fixture = { name: string; json: MathJsonExpression; inputs: Value[][] };
+/** `refusedIn`: the modes in which the structured route refuses the
+ * program. The existing emitter still compiles it, and its value is checked
+ * against the interpreter. */
+type Fixture = {
+  name: string;
+  json: MathJsonExpression;
+  inputs: Value[][];
+  refusedIn?: readonly string[];
+};
 
 const SHORT = [10.5, -20.25, 30, 4.125, -0.5];
 
@@ -293,6 +301,10 @@ const FIXTURES: Fixture[] = [
       ['Add', ['At', 'L', ['Add', 'c', ['Multiply', 'N', 'r'], 1]], ['Multiply', 1000, ['At', 'L', ['Add', 'r', 1]]]]
     ),
     inputs: [[FIELD, 1], [FIELD, 33], [FIELD, 64], [FIELD, 1024], [FIELD, 500]],
+    // A static type does not read the value of `N` (decision D16): `N` is
+    // an `integer` that can be 0, so `r` is `infinity | integer | nan`,
+    // which the complex mode of the structured route does not take.
+    refusedIn: ['complex'],
   },
   {
     name: 'a list read in a loop at an index of the loop',
@@ -345,8 +357,18 @@ describe('differential: the interpreter decides, the existing emitter checks', (
       test(`${fixture.name} (${mode} mode)`, () => {
         const ce = engine();
         const expr = ce.expr(fixture.json);
-        const result = structured().compile(expr, { ...OPTIONS, mode });
         const existing = compile(expr, { ...OPTIONS, mode, fallback: false });
+        if (fixture.refusedIn?.includes(mode)) {
+          expect(() =>
+            structured().compile(expr, { ...OPTIONS, mode })
+          ).toThrow(/which is not real, in the complex mode/);
+          for (const inputs of fixture.inputs)
+            expect(
+              same(run(existing, inputs), interpret(ce, fixture.json, inputs))
+            ).toBe(true);
+          return;
+        }
+        const result = structured().compile(expr, { ...OPTIONS, mode });
         for (const inputs of fixture.inputs) {
           const value = run(result, inputs);
           const label = inputs.map((v) => (typeof v === 'number' ? v : `[${v.length}]`));

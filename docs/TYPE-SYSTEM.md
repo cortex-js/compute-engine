@@ -1631,6 +1631,68 @@ scope, and a call head as a `function` (`p + q(2) + 1` declares `p: number`
 and `q: function`). `ce.assume()` declares the names that it constrains, as
 it is a host statement and not a boxing.
 
+## A static type does not depend on a value
+
+The static type of a node is a function of the definitions, of their
+declared or inferred types, and of the values of constants (a constant may
+have the literal type of its value). The write of the value of a variable, a
+parameter, a binder index or a block local changes no type, and it
+invalidates no cached type: the type version (`typeVersion`,
+`engine-configuration-lifecycle.ts`) does not move.
+
+- In a type computation (`withStaticTypingView`) a definition that is not a
+  constant has no value (`storedValue`, `boxed-value-definition.ts`). One
+  exception: a variable whose value holds a function literal, because the
+  signature of a user function comes from its value; the write of such a
+  value moves the type version.
+- A variable whose value is a literal keeps the type its assignment recorded.
+  A variable whose value reads other names has the static type of that value
+  (`declaredType`, `boxed-value-definition.ts`), read with the assumptions
+  hidden and widened to its tier as an inferred declaration is: it follows a
+  change of the TYPE of those names, never their values. With `y := x + 1`,
+  `y` is `number`; after `x := [1, 2]`, which changes the type of `x`, `y` is
+  `vector<integer^2>`. A definition held by activations (a block local, a
+  parameter, the variable of a binder) keeps its recorded type. A variable
+  with no type and no inferred type is `unknown`, whatever it holds.
+- A declared type is read as declared: with `P: collection<number>` and
+  `P := [1, 2]`, `Sin(P)` is `broadcastable<number>`, the type of `Sin(P)`
+  for every value the declaration admits.
+- An assignment that changes the TYPE of a variable (the widening of an
+  inferred type, the adoption of the value's type, the element refinement of
+  a declared placeholder such as `list<unknown>`), and the restore of
+  `ce.withValues()`, report a `type-write` event of their own.
+- An assumption does not narrow the type of a symbol that holds a value: the
+  facts are merged only into the type of a symbol with no value
+  (`_typeWithFacts`).
+- A sign, a count, an evaluation or an application computed in a type
+  computation reads no value either, so a memo of such an answer never
+  serves or stores an entry across the two views (`staticViewDiverges()`):
+  the caches keyed on `_cacheGeneration()` take a key of their own inside a
+  type computation, the collection facets (`BoxedFunction._facetMemo`) are
+  keyed on the view, and the shared evaluation memo, the application memo
+  and the eager source values are bypassed in it. With `x: real` holding 4, `Sqrt(x + 1)` is `complex`,
+  also after the sign of `x + 1` was read outside a type computation. The
+  key of a type that depends on the derivations in progress
+  (`_typeCacheFallbackGeneration()`) is not one of them: a type does not
+  depend on a value, and only the frame of an application in progress gives
+  it a key of its own (`activationViewDiverges()`).
+- An assumption refines the type of a variable with no value only, so a
+  write that gives a variable a value, or takes it away, while assumptions
+  are in force moves the type version (the `typeRead` flag of the
+  `value-write` event, also at the restore of `ce.withValues()`).
+- The kind of the value of a collection operation is not its static type. A
+  `Map`, `Filter` or `Scan` whose type says nothing (`unknown`, `any`) or is an
+  abstract `collection<T>` is an indexed collection when its sources hold
+  indexed values (`BoxedFunction.isIndexedCollection`): with `fs` untyped and
+  holding a list, `Map(w ↦ w(1), fs)` is typed `unknown` and evaluates to a
+  list.
+- A type handler that narrows by the value of an operand narrows only for a
+  literal and a constant. With `z: real` holding `π/2`, `Tan(z)` is `real`,
+  the type of `Tan` at a generic real, and its value is `~oo`, which `real`
+  does not hold. The same holds for a parameter: with
+  `h: (real) -> unknown := t ↦ Tan(t)`, `h(π/2)` is `real` and its value is
+  `~oo`. `Tan(π/2)` written with the constant is `number`.
+
 ## Inference provenance and rollback
 
 Provenance belongs to definitions, not `Type` objects. Every inference write

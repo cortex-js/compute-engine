@@ -363,12 +363,15 @@ describe('alias lift: a generic call reads the leaves of an abstract collection'
       );
   });
 
+  // A static type does not read the value of `v` (decision D16): the call
+  // is typed from the declaration `broadcastable<lcyc>`. The value is an
+  // `lcyc` (a list of integers) or a list of them, so the depth is 1 or 2
+  // and the rows can differ in length: the type is a list of any depth and
+  // shape (CE-1290).
   test('a broadcastable of an alias of lists', () => {
-    // The value is an `lcyc` (a list of integers) or a list of them, so the
-    // depth is 1 or 2.
     for (const value of [ragged, matrix, ['List', 1, 2]])
       expect(typed('broadcastable<lcyc>', value)).toBe(
-        'list<list<any> | tuple<integer, integer>>'
+        'list<list<any> | tuple<integer, integer>> | tuple<integer, integer>'
       );
   });
 });

@@ -676,9 +676,10 @@ describe('10. MAP OF AN OPERATOR WHOSE DECLARED RESULT IS `any`', () => {
 
 describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => {
   // The type of `x ↦ Sqrt(x)` is computed with a scalar parameter. With
-  // `U: any` holding lists, the element type also allows a collection. An
-  // element of `U` can be `Nothing`, which `Map` passes through, so every
-  // result type here has a `nothing` arm.
+  // `U: any`, the element type also allows a collection. `U` is typed from
+  // its declaration, not from the list it holds (a static type does not
+  // depend on a value), so the kind of the result is not decided: a
+  // `collection`.
   const engine = new ComputeEngine();
   engine.declare('U', 'any');
   engine.assign('U', engine.box(['List', ['List', 1, 4], ['List', 9]]));
@@ -688,7 +689,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
       expectTypeHoldsValue(
         engine,
         engine.box(['Map', ['Function', ['Sqrt', 'x'], 'x'], 'U']),
-        'list<indexed_collection<any> | number>'
+        'collection<indexed_collection<any> | number>'
       )
     ).toBe('[[1,2],[3]]');
   });
@@ -698,7 +699,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
       expectTypeHoldsValue(
         engine,
         engine.parse('\\operatorname{Map}(x \\mapsto \\sqrt{x}, U)'),
-        'list<indexed_collection<any> | number>'
+        'collection<indexed_collection<any> | number>'
       )
     ).toBe('[[1,2],[3]]');
   });
@@ -709,7 +710,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
     [
       ['Function', 1, 'x'],
       '\\operatorname{Map}(x \\mapsto 1, U)',
-      'list<number>',
+      'collection<number>',
       '[1,1]',
     ],
     // A parameter whose type the literal states from its use (`collection`,
@@ -717,7 +718,7 @@ describe('11. MAP OF A FUNCTION LITERAL OVER ELEMENTS THAT MAY BE LISTS', () => 
     [
       ['Function', ['Length', 'x'], 'x'],
       '\\operatorname{Map}(x \\mapsto \\operatorname{Length}(x), U)',
-      'list<integer | signed_infinity>',
+      'collection<integer | signed_infinity>',
       '[2,1]',
     ],
   ] as [MathJsonExpression, string, string, string][])(

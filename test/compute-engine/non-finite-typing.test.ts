@@ -1252,16 +1252,20 @@ describe('NARROW RETURN TYPES — COMPLEX RESULTS, TUPLE CALLS, POLE SYMBOLS', (
     ).toBe('6');
   });
 
-  test('a symbol that holds a pole value is typed on the pole', () => {
+  test('the type of `Tan` of a real variable does not follow the value it holds', () => {
+    // `Tan` of a real variable is `real`: the type is the one of a generic
+    // point, and it does not read the value of the variable. A variable
+    // that holds a pole evaluates to `~oo`, which that type does not hold
+    // (`docs/TYPE-SYSTEM.md`, "A static type does not depend on a value").
     const ce = new ComputeEngine();
     ce.declare('z', 'real');
     ce.assign('z', ce.parse('\\frac{\\pi}{2}'));
     ce.declare('w', 'real');
     ce.assign('w', 3);
-    expect(ce.box(['Tan', 'z']).type.toString()).toBe('number');
+    expect(ce.box(['Tan', 'z']).type.toString()).toBe('real');
     expect(ce.box(['Tan', 'z']).evaluate().toString()).toBe('~oo');
-    // A number literal is on no pole of `Tan`.
     expect(ce.box(['Tan', 'w']).type.toString()).toBe('real');
+    // The value of a constant is read.
     expect(ce.box(['Tan', 'Pi']).type.toString()).toBe('number');
   });
 });

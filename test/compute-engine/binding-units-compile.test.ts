@@ -56,6 +56,15 @@ describe('BINDING UNITS: THE TYPE OF A COMPILED INPUT', () => {
     ce.assign('b', ce.parse('c + 1'));
     const r = compile(ce.box(['List', 'b', ['Not', 'c']]));
     expect(r.success).toBe(false);
+    // No compiled value exists: the interpreter gives an error for a
+    // boolean `c` (in `b`) and for a number `c` (in `Not(c)`).
+    for (const c of [ce.True, ce.number(2)]) {
+      const run = engine();
+      run.assign('b', run.parse('c + 1'));
+      const e = run.box(['List', 'b', ['Not', 'c']]);
+      run.assign('c', c.json as never);
+      expect(e.evaluate().toString()).toMatch(/incompatible-type/);
+    }
   });
 
   test('the variable of an indefinite integral does not type the input of its name', () => {

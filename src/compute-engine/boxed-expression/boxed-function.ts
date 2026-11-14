@@ -489,6 +489,7 @@ import { withEnclosingBindingsOfVariables } from './enclosing-binding-result-typ
 import {
   noteStackDependentAnswer,
   stackDependentAnswerCount,
+  inStaticTypingView,
   staticViewDiverges,
   withStaticTypingView,
 } from '../static-typing-view.js';
@@ -1800,6 +1801,10 @@ export class BoxedFunction
          * rather than a bit in `worldVersion`, because a suppression window
          * moves no axis. */
         factsHidden: boolean;
+        /** Whether the entries were computed in the static view of a type
+         * computation (`inStaticTypingView()`), where a variable has no
+         * value: a count read there is not the count read outside it. */
+        staticView: boolean;
         deps: MemoDeps;
         count?: FacetEntry<number | bigint | undefined>;
         isEmpty?: FacetEntry<boolean | undefined>;
@@ -7196,8 +7201,13 @@ export class BoxedFunction
     // already do for a bare symbol declared `collection<T>`. That value
     // dependence is the symbol's contract extended to the lazy nodes built
     // over it, not an oversight.
+    //
+    // A node whose type says nothing (`unknown`, `any`, `value`) does not
+    // decide the kind either: a static type does not read the value of a
+    // variable, so `Map(f, fs)` with `fs` an untyped variable that holds a
+    // list is typed `unknown`, and it materializes as the list.
     return (
-      isAbstractCollectionType(this.type) &&
+      isKindOpenOperandType(this.type.type) &&
       abstractSourcesHoldIndexedValues(this)
     );
   }
@@ -7290,12 +7300,14 @@ export class BoxedFunction
   ): T {
     const ce = this.engine;
     const factsHidden = ce._factsHidden();
+    const staticView = inStaticTypingView(ce);
     const slot = this._facetMemo;
     if (
       slot !== undefined &&
       !cacheOff('facet') &&
       slot.worldVersion === ce._worldVersion &&
-      slot.factsHidden === factsHidden
+      slot.factsHidden === factsHidden &&
+      slot.staticView === staticView
     ) {
       const entry = slot[facet] as FacetEntry<T> | undefined;
       if (entry !== undefined) {
@@ -7373,6 +7385,7 @@ export class BoxedFunction
       target === undefined ||
       target.worldVersion !== world ||
       target.factsHidden !== factsHidden ||
+      target.staticView !== staticView ||
       !memoDepsStillValid(this, target.deps)
     ) {
       const deps = snapshotMemoDeps(this);
@@ -7381,7 +7394,7 @@ export class BoxedFunction
         if (CACHE_STATS) recordCache('collectionFacet', 'declineStore');
         return value;
       }
-      target = { worldVersion: world, factsHidden, deps };
+      target = { worldVersion: world, factsHidden, staticView, deps };
       this._facetMemo = target;
     }
     // The (facet → T) pairing is maintained by the three call sites (`count`
@@ -15358,6 +15371,19 @@ function lambdaBroadcastType(
       : []
   );
   if (triggers.length > 0) {
+    // A generic literal over an operand whose value can be a list with rows
+    // of different lengths: an operand typed `any` or `value`, or a
+    // `broadcastable<T>` whose `T` can hold a list (`T` a list, or an alias
+    // such as `lcyc = lcyc | list<integer>`). The call maps such a value at
+    // its leaves, and no `broadcastable<R>` holds a ragged result
+    // (`[[1, 2], [3]]` gives `[[(1, 1), (2, 2)], [(3, 3)]]` for
+    // `x ↦ (x, x)`), so the result is `R | list<R | list<any>>`, a list of
+    // any depth and shape (CE-1290).
+    if (generic && triggers.some((i) => mayHoldRaggedList(ops[i].type)))
+      return widen(perElementResult, {
+        kind: 'list',
+        elements: widen(perElementResult, { kind: 'list', elements: 'any' }),
+      });
     // A generic literal over operands of an abstract collection type
     // (`collection<integer>`) is typed arm by arm: the call maps a value
     // that is a list or a range at its leaves, and passes a set whole, so
@@ -15654,6 +15680,38 @@ function genericLiftLevels(
   // The peel stopped at an element that may still be a list (`any` for a
   // `list<any>` operand): the call maps that element at its leaves too.
   return incomplete ? { levels, leafMayBeList: true } : undefined;
+}
+
+/** Whether a value of type `t` can be a list whose rows differ in length:
+ * `any`, `value`, or a `broadcastable<T>` whose `T` can hold a list of an
+ * open length (`list<integer>`, an alias `lcyc = lcyc | list<integer>`). A
+ * `broadcastable<list<integer^2>>` is regular: its rows have two cells. */
+function mayHoldRaggedList(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'any' || r === 'value') return true;
+  return (
+    typeof r !== 'string' &&
+    r.kind === 'broadcastable' &&
+    mayHoldOpenLengthList(r.elements, undefined)
+  );
+}
+
+/** Whether a value of the element type `t` can be a list whose length the
+ * type does not fix. Read as `mayBeListElement()`, except that a list of
+ * fixed dimensions is read through its cells. */
+function mayHoldOpenLengthList(t0: Type, seen0: AliasDescent): boolean {
+  const unfolded = unfoldAliasOnDescent(t0, seen0);
+  if (unfolded === undefined) return true;
+  const t = unfolded.type;
+  if (typeof t === 'object' && t.kind === 'list') {
+    const dims = t.dimensions;
+    if (dims !== undefined && dims !== null && dims.every((d) => d >= 0))
+      return mayHoldOpenLengthList(t.elements, unfolded.seen);
+    return true;
+  }
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.some((m) => mayHoldOpenLengthList(m, unfolded.seen));
+  return mayBeListElement(t, unfolded.seen);
 }
 
 /** Whether a value of the element type `t` may be a list: a top type, a

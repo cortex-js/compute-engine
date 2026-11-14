@@ -11,6 +11,23 @@
   and drew; it is `21`, and `c.isPure` is true. The compiled code of such a
   call calls the same `h`. To call the function of the pushed scope, box the
   expression in that scope.
+- **The type of an expression no longer depends on the values that its
+  symbols hold.** It depends on the declared or inferred types of the
+  symbols, and on the values of constants. With `x` declared `real` and
+  `x := 4`, `Sqrt(x)` was `real` and is now `complex`, the type for every
+  real `x`. With `P` declared
+  `collection<number>` and `P := [1, 2]`, `Sin(P)` was `list<number>` and
+  is now `broadcastable<number>`, as for a `P` with no value. With
+  `Q := Map(x ↦ 2x, P)`, `Sin(Q)` was `list<number>` and is now
+  `broadcastable<number>`.
+- **A symbol whose value reads other symbols has the type of that value as
+  their types give it, not as their values give it.** With `y := x + 1`,
+  then `x := 2`, `y` was `number` and is now `integer`: it follows the type
+  of `x`, which the assignment of `x` sets. With `x` declared `real`,
+  `x := 4` and `r := Sqrt(x)`, `r` was `real` and is now `number`, the type
+  of `Sqrt` of a real. A change of the type of a symbol that the value reads
+  is followed: with `L := [3, 1, 3, 2]` and `C := Map(k ↦ k + 1, L)`, `C` is
+  `vector<integer^4>`, and `vector<integer^2>` after `L := [1, 2]`.
 
 ### New Features
 

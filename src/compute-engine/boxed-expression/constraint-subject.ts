@@ -17,6 +17,7 @@ import {
 import type { Type } from '../../common/type/types.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { withoutStaticTypingView } from '../static-typing-view.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
 import { restrictionParts } from './conditional-value.js';
@@ -985,6 +986,35 @@ function soleSelfSubject(record: FactRecord): FactSubject | undefined {
   return undefined;
 }
 
+/**
+ * True when a value given to `def` or taken from it can change the subject
+ * of an active fact, and so the type of another definition: an inequality
+ * that names `def` and another variable as whole values (`x > y`), whose
+ * subject {@link soleSelfSubject} chooses by which of them have no value.
+ * The other kinds of fact name their subject by its symbol (`Element`,
+ * `Equal`, `NotEqual`, a bound on a part).
+ */
+export function presenceCanChangeFactSubject(
+  ce: ComputeEngine,
+  def: BoxedValueDefinition
+): boolean {
+  for (const [assumption, records] of contextAssumptions(ce)) {
+    const op = assumption.operator;
+    if (op !== 'Less' && op !== 'LessEqual') continue;
+    for (const record of records) {
+      let mentioned = false;
+      let variables = 0;
+      for (const s of record.subjects) {
+        if (s.part !== 'self' || s.def.isConstant === true) continue;
+        variables += 1;
+        if (s.def === def) mentioned = true;
+      }
+      if (mentioned && variables > 1) return true;
+    }
+  }
+  return false;
+}
+
 /** The subject of `record` named `symbol` with the given part, if any. */
 function subjectNamed(
   record: FactRecord,
@@ -1405,7 +1435,9 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
   // would otherwise be served to every later read of that generation.
   // `soleSelfSubject` reads `s.def.value` to decide which subject a fact is
   // about, and the shield hides exactly that, so a shielded build and a live
-  // build do not agree.
+  // build do not agree. For the same reason the index is built outside the
+  // static view, where a variable has no value: the index is not keyed on
+  // the view, and a build in a type computation was served to every read.
   //
   // A memo filled by a producer read inside this window — `BoxedFunction`'s
   // `_type`/`_sgn`/`_structural` through `cachedValue`, the `_typeGeneration`
@@ -1419,7 +1451,9 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
   _shieldedDefinitions = undefined;
   let index: FactIndex;
   try {
-    index = ce._withoutFacts(() => buildFactIndex(assumptions));
+    index = withoutStaticTypingView(() =>
+      ce._withoutFacts(() => buildFactIndex(assumptions))
+    );
   } finally {
     _shieldedDefinitions = shielded;
   }

@@ -34,6 +34,19 @@ export function withStaticTypingView<T>(ce: ViewEngine, f: () => T): T {
   }
 }
 
+/** Run `f` outside the static view, also inside a type computation. A
+ * cache that is not keyed on the view is built this way (the fact index,
+ * `getFactIndex()`). */
+export function withoutStaticTypingView<T>(f: () => T): T {
+  const outer = viewEngine;
+  viewEngine = undefined;
+  try {
+    return f();
+  } finally {
+    viewEngine = outer;
+  }
+}
+
 /** For each call frame of a function literal, the body scope of the
  * literal (`noteCallFrame()`). */
 const frameBodyScopes = new WeakMap<object, object>();
@@ -46,12 +59,12 @@ const appliedBodyScopes = new WeakMap<object, ViewEngine>();
 
 /** For each engine, the number of body scopes that have an entry in
  * `appliedBodyScopes`: the static view of the engine can differ from the
- * bindings while it is not 0 (`staticViewDiverges()` has the other case). An
- * exception thrown by an application after `noteBodyScopeApplied()` and
- * before its `try` leaves the count above 0. The view is then counted
- * as different for every later type computation of the engine: the caches
- * keyed on `_cacheGeneration()` use keys of their own inside type
- * computations, which costs cache hits, not correctness. */
+ * bindings of an application while it is not 0 (`activationViewDiverges()`
+ * has the other case). An exception thrown by an application after
+ * `noteBodyScopeApplied()` and before its `try` leaves the count above 0.
+ * The view is then counted as different for every later type computation of
+ * the engine: a type that depends on the derivations in progress is kept
+ * under a key of its own, which costs cache hits, not correctness. */
 const appliedBodyScopeCount = new WeakMap<ViewEngine, number>();
 
 /** The engine of the applications of the body scope `bodyScope` that are in
@@ -175,17 +188,34 @@ export function inStaticTypingView(ce: ViewEngine): boolean {
 
 /**
  * Can a read in the static view answer something else than the same read
- * outside it? Only while a type computation of `ce` runs and an application
- * of a function literal by `ce` is in progress: the static view differs at
- * the frame of the application, whose values it does not read. An
- * application suspended at an `await` counts too. A frame on the current
- * stack also counts. A parameter read outside every application of its
- * literal has no value in either view.
+ * outside it? Yes, in every type computation of `ce`: a static type does not
+ * depend on a value (decision D16), so in the view a variable, a parameter
+ * and a block local have no value (`storedValue`,
+ * `boxed-value-definition.ts`). A sign, a count, an evaluation or an
+ * application read there is not the one read outside it.
  *
- * A cache that is not keyed on the type version keeps an answer computed then
- * under a key of its own.
+ * A memo of such an answer (a value-dependent memo) neither serves nor
+ * stores an entry across the two views: it is keyed on the view
+ * (`_cacheGeneration()` mints a key of its own inside the view), or it is
+ * bypassed inside the view.
  */
 export function staticViewDiverges(ce: ViewEngine): boolean {
+  return viewEngine === ce;
+}
+
+/**
+ * Is a type computation of `ce` running while an application of a function
+ * literal by `ce` is in progress (or suspended at an `await`, or its frame is
+ * on the current stack)? The static view then also reads no value of the
+ * frame of that application.
+ *
+ * Only the key of a type that depends on the derivations in progress reads
+ * this (`_typeCacheFallbackGeneration()`): a type does not depend on a value,
+ * so outside an application one key serves a type computed in the view and
+ * read outside it, and a provisional answer is retired by the same key the
+ * reader outside the view uses.
+ */
+export function activationViewDiverges(ce: ViewEngine): boolean {
   if (viewEngine !== ce) return false;
   if ((appliedBodyScopeCount.get(ce) ?? 0) > 0) return true;
   return innermostFrame(ce._evalContextStack) !== undefined;

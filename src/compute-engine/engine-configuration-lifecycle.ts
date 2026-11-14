@@ -17,7 +17,16 @@ type ResetHooks = {
  * report what changed; {@link axisMaskOf} selects the affected cache axes.
  */
 export type StateEvent =
-  | { kind: 'value-write'; ephemeral: boolean; callable: boolean }
+  | {
+      kind: 'value-write';
+      ephemeral: boolean;
+      callable: boolean;
+      /** A type computation can read the value written: the definition is
+       * a constant, or the write is `callable` and the definition is not
+       * held by activations (`storedValue`). Only such a write advances the
+       * type version: see `typeVersion`. */
+      typeRead: boolean;
+    }
   | {
       kind: 'declare';
       callable: boolean;
@@ -453,9 +462,17 @@ export class EngineConfigurationLifecycle {
   /**
    * The version that keys the type cache of a function expression
    * (`BoxedFunction.type`). It advances with the `any` version, except for
-   * the events of a call of a function literal: the declaration of its
-   * parameters in the new scope of the call, and the pop of its frame (the
-   * `activation` flag of the `declare` and `scope-pop` events).
+   * the write of a value that no type computation reads (a `value-write`
+   * without `typeRead`) and for the events of a call of a function literal:
+   * the declaration of its parameters in the new scope of the call, and the
+   * pop of its frame (the `activation` flag of the `declare` and
+   * `scope-pop` events).
+   *
+   * A static type does not depend on a value: in a type computation a
+   * definition that is not a constant has no value, except a variable that
+   * holds a function literal (`storedValue`, `boxed-value-definition.ts`).
+   * A write that changes the TYPE of a definition reports a `type-write`
+   * of its own.
    *
    * Without this exception each call moved the key of every cached type,
    * and all of them were computed again, with the same result. A call of
@@ -687,7 +704,8 @@ export class EngineConfigurationLifecycle {
     }
     if (
       m.any &&
-      !((e.kind === 'declare' || e.kind === 'scope-pop') && e.activation)
+      !((e.kind === 'declare' || e.kind === 'scope-pop') && e.activation) &&
+      !(e.kind === 'value-write' && !e.typeRead)
     )
       this._typeVersion += 1;
     if (m.semantic) this._semanticVersion += 1;

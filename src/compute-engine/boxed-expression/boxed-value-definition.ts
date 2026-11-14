@@ -23,7 +23,6 @@ import {
   beginSignatureDerivation,
   endSignatureDerivation,
   noteReentrantSignatureRead,
-  reentrantSignatureReadCount,
   type SignatureDerivationFrame,
   withSignatureResult,
   type HomeScope,
@@ -61,6 +60,7 @@ import {
   exclusionsFor,
   getFactIndex,
   isDeclaredTypeOnly,
+  presenceCanChangeFactSubject,
   isValueShielded,
   typeFor,
 } from './constraint-subject.js';
@@ -69,13 +69,8 @@ import type { MathJsonExpression } from '../../math-json/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isDictionary, isFunction, isNumber, isSymbol } from './type-guards.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import { lazyViewActivationOf } from './lazy-view-context.js';
-import { cycleDetectionCount } from './cycle-guard.js';
-import {
-  type MemoDeps,
-  memoDepsStillValid,
-  snapshotMemoDeps as snapshotTypeDeps,
-} from './collection-element-memo.js';
 import {
   hasSignaturePlaceholder,
   inferFunctionLiteralEffects,
@@ -153,13 +148,43 @@ function trustedValueInhabitsDeclaredType(
   }
 }
 
-/** The definitions whose `_liveValueType()` read is running. A read of the
- * same definition from inside it (two stored values that read each other)
- * is answered without the memo, and the reads around it store nothing. */
-const LIVE_TYPE_IN_FLIGHT = new Set<object>();
-/** The number of such re-entrant reads so far. Compared before and after a
- * computation, as `cycleDetectionCount()` is. */
-let liveTypeReentries = 0;
+/** The definitions whose type is being read from the static type of their
+ * stored value (`declaredType`). */
+const STATIC_VALUE_TYPE_IN_FLIGHT = new Set<object>();
+
+/** Whether a stored value reads a name or calls a user function, keyed by
+ * the value object (a boxed value does not change). */
+const READS_A_NAME = new WeakMap<object, boolean>();
+
+/** True when `value`, stored in the variable `name`, is a formula: a symbol
+ * other than `name`, or a function expression that reads a symbol or calls
+ * a function that is not the library's (`f(1)`). The static type of such a
+ * value follows the types of the names it reads (`declaredType`). */
+function isFormulaValue(
+  name: string,
+  value: Expression | null | undefined
+): boolean {
+  if (value == null) return false;
+  if (isSymbol(value)) return value.symbol !== name;
+  if (!isFunction(value)) return false;
+  let result = READS_A_NAME.get(value);
+  if (result === undefined) {
+    const visited = new Set<Expression>();
+    const visit = (e: Expression): boolean => {
+      if (isSymbol(e)) return true;
+      if (isDictionary(e)) return e.values.some(visit);
+      if (!isFunction(e) || visited.has(e)) return false;
+      visited.add(e);
+      if (!isLibraryOperator(e)) return true;
+      if (e._numericStore !== undefined || e._isLiteralData()) return false;
+      return e.ops.some(visit);
+    };
+    result = visit(value);
+    READS_A_NAME.set(value, result);
+  }
+  return result;
+}
+
 /**
  * Preparations of the value of a value definition, keyed by the definition
  * object that is given to the constructor. See `prepareValueWhenBoxed()`.
@@ -282,7 +307,7 @@ export class _BoxedValueDefinition
    * declared with the bare `function` type. Each new assignment is checked
    * against the skeleton, not against an earlier refinement. `undefined`
    * for every other declaration. Read only while `inferredType` is false:
-   * an inferred signature is revised by `_reviseInferredType` instead. */
+   * an inferred signature is the recorded one (`declaredType`). */
   _signatureSkeleton: Type | undefined = undefined;
 
   /** The bare symbol an untyped `let` of this block local was initialized
@@ -716,6 +741,25 @@ export class _BoxedValueDefinition
    * at all (it lives in the context's assumed-value overlay, which the scope
    * that assumed it discards on its pop). */
   get storedValue(): Expression | undefined {
+    const v = this._heldValue();
+    // A static type does not depend on a value: in a type computation
+    // (`static-typing-view.ts`) a definition that is not a constant has no
+    // value. The exception is a variable that holds a function literal: the
+    // signature of a user function comes from its value, and a write of such
+    // a value moves the type version (`typeRead` in the `value` setter).
+    if (
+      v !== undefined &&
+      !this._isConstant &&
+      inStaticTypingView(this._engine) &&
+      (isActivatedDefinition(this) || !holdsFunctionLiteral(v))
+    )
+      return undefined;
+    return v;
+  }
+
+  /** The value stored on this definition, as {@link storedValue} gives it
+   * outside a type computation. */
+  private _heldValue(): Expression | undefined {
     // While `_withTransientPrecision` runs a function, the precision is not
     // the working precision of the engine. The value of a constant (`Pi`)
     // is then computed again at the current precision and not stored: the
@@ -813,6 +857,16 @@ export class _BoxedValueDefinition
         ? (record.get(this) as Expression | undefined)
         : this._value;
     if (v !== undefined && v === prev) return;
+    // The static type of an inferred variable that holds a formula is the
+    // type of the formula (`declaredType`): compared before and after the
+    // write.
+    const formulaTypeBefore =
+      this.inferredType &&
+      !this._isConstant &&
+      record === undefined &&
+      (isFormulaValue(this.name, prev) || isFormulaValue(this.name, v))
+        ? this.declaredType
+        : undefined;
     if (record !== undefined) record.set(this, v);
     else this._value = v;
     // The type of a definition that holds a function literal is inferred
@@ -838,20 +892,7 @@ export class _BoxedValueDefinition
     // O(size of the traversed type/value fragment), a couple of property
     // reads for scalar writes — is budgeted in the design's §3 ("pay for
     // precision at write sites, never at read sites").
-    const litCallable = (x0: Expression | null | undefined): boolean => {
-      if (x0 == null) return false;
-      const x = x0 as {
-        operator?: string;
-        ops?: ReadonlyArray<{ operator?: string }> | null;
-        _numericStore?: readonly number[];
-      };
-      if (x.operator === 'Function') return true;
-      // A store-backed list (`ce.list()`) holds numbers only: no `Function`
-      // literal inside, and reading its `ops` would box every element.
-      if (x._numericStore !== undefined) return false;
-      return x.ops?.some((o) => o.operator === 'Function') ?? false;
-    };
-    let callable = litCallable(prev) || litCallable(v);
+    let callable = holdsFunctionLiteral(prev) || holdsFunctionLiteral(v);
     if (!callable) {
       if (this._type != null) callable = containsSignatureArm(this._type.type);
       else
@@ -859,7 +900,30 @@ export class _BoxedValueDefinition
           containsSignatureArm(prev?.type?.type) ||
           containsSignatureArm(v?.type?.type);
     }
-    this._engine._noteStateEvent({ kind: 'value-write', ephemeral, callable });
+    // A type computation reads the value of a constant, and the value of a
+    // variable that holds a function literal (`storedValue`). The static
+    // type of a variable that holds a formula is the type of the formula.
+    // Only such a write can change a type. A type computation also reads
+    // whether a variable holds a value at all: the assumptions refine the
+    // type of a variable with no value only (`_typeWithFacts`).
+    let formulaTypeChanged = false;
+    if (formulaTypeBefore !== undefined) {
+      const after = this.declaredType;
+      formulaTypeChanged =
+        formulaTypeBefore.type !== after.type &&
+        formulaTypeBefore.toString() !== after.toString();
+    }
+    const typeRead =
+      this._isConstant ||
+      (callable && !isActivatedDefinition(this)) ||
+      formulaTypeChanged ||
+      valuePresenceRefinesType(this._engine, this, prev, v);
+    this._engine._noteStateEvent({
+      kind: 'value-write',
+      ephemeral,
+      callable,
+      typeRead,
+    });
 
     if (CACHE_STATS)
       recordBump(ephemeral ? 'ephemeralValueWrite' : 'valueWrite');
@@ -1066,11 +1130,49 @@ export class _BoxedValueDefinition
    */
   get declaredType(): BoxedType {
     const t = this._type;
+    // A static type does not depend on a value: a variable with no type is
+    // `unknown`, whatever it holds.
     if (t === undefined || t === null)
-      return this.storedValue?.type ?? BoxedType.unknown;
+      return this._isConstant
+        ? (this.storedValue?.type ?? BoxedType.unknown)
+        : BoxedType.unknown;
     if (this._signatureSkeleton !== undefined && !this.inferredType)
       return this._deriveSignature(t, this._signatureSkeleton);
-    return this._reviseInferredType(t);
+    // A variable whose value is a literal keeps the type its assignment
+    // recorded. A function literal's arrow follows the conformances that its
+    // body reads (`_reviseLiteralArrowEffects`).
+    if (this.inferredType && !this._isConstant && !this._isSelfReferential) {
+      const v = this.storedValue;
+      if (v !== undefined && isFunction(v, 'Function'))
+        return this._reviseLiteralArrowEffects(t, v);
+      // A variable whose stored value reads other names (a formula: `y :=
+      // x + 1`, `y := x`, `C := Map(k ↦ k + 1, L)`, `f(1)`; `isFormulaValue`)
+      // has the static type of that value:
+      // it follows a change of the TYPE of those names, never their values.
+      // The type of the value is computed in the static view and cached on
+      // the type version. As a stored type, it is read with the assumptions
+      // hidden and widened to its tier, as an inferred declaration is
+      // (`inferTypeFromValue`). A definition held by activations (a block
+      // local, a parameter, a binder variable) keeps its recorded type. A
+      // cycle of such variables (`a := b + 1; b := a + 1`) answers the
+      // recorded type.
+      const held = this._heldValue();
+      if (
+        isFormulaValue(this.name, held) &&
+        !isActivatedDefinition(this) &&
+        !STATIC_VALUE_TYPE_IN_FLIGHT.has(this)
+      ) {
+        STATIC_VALUE_TYPE_IN_FLIGHT.add(this);
+        try {
+          const ce = this._engine;
+          const live = ce._withoutFacts(() => inferTypeFromValue(ce, held!));
+          if (!live.isUnknown) return live;
+        } finally {
+          STATIC_VALUE_TYPE_IN_FLIGHT.delete(this);
+        }
+      }
+    }
+    return t;
   }
 
   /** The signature skeleton refined from the stored value's CURRENT type.
@@ -1494,7 +1596,9 @@ export class _BoxedValueDefinition
     // which for a precision-dependent constant such as `Pi` is a full
     // evaluation this getter has no need of.
     if (this._isConstant) return declared;
-    if (this.storedValue !== undefined) return declared;
+    // A symbol that holds a value keeps its declared type, in a type
+    // computation too, where `storedValue` hides the value.
+    if (this._heldValue() !== undefined) return declared;
     if (isDeclaredTypeOnly(this)) return declared;
 
     const index = getFactIndex(ce);
@@ -1542,176 +1646,6 @@ export class _BoxedValueDefinition
   private _effectiveType:
     { index: FactIndex; writeVersion: number; type: BoxedType } | undefined =
     undefined;
-
-  /**
-   * Revision of an INFERRED type against its own value (user-ruled
-   * 2026-08-16: "inference doesn't have to be broadest, it has to be more
-   * likely, and is subject to revision").
-   *
-   * An assignment commits the LIKELY type of the assigned value — `C_0 :=
-   * Σ_k Which(C = U_k, k, True, 0)` with `C` still `unknown` types `number`,
-   * the scalar reading — and records it here as `_type` with `inferredType`
-   * set. When the value is an EXPRESSION whose type depends on other symbols,
-   * that guess can be refuted later without any write to this definition:
-   * once `C := [10, 30]`, the same value types `vector<integer^2>`, and a
-   * frozen `number` no longer contains the value the symbol actually holds
-   * (measured 2026-08-16; `ROADMAP.md`, "An `unknown`-typed symbol compared
-   * to a SCALAR types the relation scalar"). A DECLARED type is a contract
-   * and is never touched (`inferredType` false); a literal value's type
-   * cannot move, so only a function-shaped value is re-checked — and NOT a
-   * `Function` LITERAL: a lambda's type is its signature, and when a type
-   * alias it mentions is re-declared the protocol machinery re-settles
-   * conformances over that signature itself (`engine-protocols.ts`,
-   * conformance re-activation); a read-time retype here would pre-empt that
-   * decision (measured 2026-08-16 against
-   * `test/compute-engine/protocol-type-redefinition.test.ts`: two joint-cause
-   * refusals turned into silent acceptances). Callable signatures stay on
-   * that path; this revision is for DATA values whose expression depends on
-   * other symbols.
-   *
-   * The revision is a LIVE READ WITH NO WRITE (R4 of the type-handler
-   * design, `docs/plans/2026-08-22-type-handlers-on-types.md` §4.2,
-   * re-ratified 2026-08-22): compute the value's current type — read
-   * through {@link _liveValueType}, a memo keyed on the identity of the
-   * value, `ce._worldVersion`, the facts-hidden state and a dependency
-   * snapshot of the value (each definition it reads with its write version,
-   * the binding each bound variable's name resolves to with the write
-   * version of the variable's own definition, and each applied operator
-   * with its write version), so this is cheap until one of them changes —
-   * and answer with it when it refutes the recorded guess; answer with the
-   * recorded type when the live type is unknown or still admits it.
-   * NOTHING is written: no `_type`, no `_writeVersion` bump, no journal
-   * entry, no `type-write` event. Whatever changed the value's type moved
-   * a key of that memo, so the next read computes the type again; the
-   * event this getter used to emit was a second advance for a change that
-   * was already covered — the item-219 hazard — and its generation gate was
-   * keyed on `_semanticVersion` while the value-type memo was keyed on
-   * `_anyVersion`, which is the staleness defect §2.5 records. A value whose live type is still ADMITTED by the guess (a
-   * subtype) leaves the likely type in place. Self-referential bindings
-   * (`a := a + 1`) are skipped: reading their value's type reads this
-   * type. Mutual recursion terminates through the expression type memo's
-   * in-flight window (`cache.ts`), which answers a re-entrant read with
-   * the previous value.
-   */
-  private _reviseInferredType(recorded: BoxedType): BoxedType {
-    if (!this.inferredType || this._isConstant || this._isSelfReferential)
-      return recorded;
-    const v = this.storedValue;
-    if (v === undefined || !isFunction(v)) return recorded;
-    if (v.operator === 'Function')
-      return this._reviseLiteralArrowEffects(recorded, v);
-    const live = this._liveValueType(v);
-    if (live.isUnknown || live.matches(recorded)) return recorded;
-    return live;
-  }
-
-  /** The memo of {@link _liveValueType}. */
-  private _liveTypeMemo:
-    | {
-        value: Expression;
-        worldVersion: number;
-        factsHidden: boolean;
-        deps: MemoDeps;
-        type: BoxedType;
-      }
-    | undefined = undefined;
-
-  /**
-   * The current type of `v`, the stored value of this definition, memoized
-   * on the bindings that `v` reads and not on the `any` axis.
-   *
-   * `v.type` is memoized on the `any` axis, and each call of a function
-   * literal advances that axis when its frame is popped (the frame binds
-   * the values of the parameters, `discardEvalContext` in
-   * `engine-scope.ts`). So with `X(l) := C_0[l]`, where `C_0` holds a chain
-   * such as `Sum(If(C = U[i], i, 0), i = 1..Length(U))` over lazy
-   * collections, each call `X(i)` derived the type of the whole chain again
-   * through this definition, although nothing the chain reads had changed.
-   *
-   * The entry is valid while these hold:
-   *
-   * - The stored value is the same expression object (an assignment stores
-   *   a new one).
-   * - The world version is unmoved: an assumption, a `forget()`, a scope pop
-   *   that reverts an assumption, a redefinition of a function and a change
-   *   of the configuration advance it. The facts-hidden state is the same.
-   * - The dependency snapshot of `v` still validates
-   *   (`snapshotMemoDeps`/`memoDepsStillValid`,
-   *   `collection-element-memo.ts`). It holds each value definition that
-   *   `v` reads, transitively through stored values and the bodies of user
-   *   functions, with its write version: a value write, a type write
-   *   (a declaration, an inference) and a loop-index write each advance the
-   *   version of the definition they write. It holds the binding each name
-   *   resolves to from the current scope, so a declaration that shadows a
-   *   name, or a call frame that binds it, misses. With `bindingSites` it
-   *   also holds what the name of each variable bound INSIDE `v` resolves
-   *   to, because a type read finds the value of such a variable by name
-   *   (`ElementMemoDep.site`), with the write version of the variable's own
-   *   definition, and each operator `v` applies with its write version, which
-   *   a write of the operator's signature advances.
-   *
-   * Nothing is served or stored inside a value shield (`_withValueShieldKey`,
-   * where `_cacheGeneration()` is not derived from the `any` axis): the
-   * shield hides values that existing expressions read by name, and runs
-   * under a cache key of its own for that reason. A type computed while a
-   * read of the type of this same definition was already running, or while
-   * a cycle guard cut a read short (`cycleDetectionCount`), or that read
-   * the provisional signature of a function whose derivation was running
-   * (`reentrantSignatureReadCount`), is a provisional answer and is not
-   * stored. Nor is a type computed while an inference rollback frame is
-   * open or a list-hypothesis pass runs (`inListHypothesisPass`), as for
-   * the signature memo.
-   */
-  private _liveValueType(v: Expression): BoxedType {
-    const ce = this._engine;
-    if (ce._cacheGeneration() >> 1 !== ce._anyVersion) return v.type;
-    if (LIVE_TYPE_IN_FLIGHT.has(this)) {
-      liveTypeReentries += 1;
-      return v.type;
-    }
-    const memo = this._liveTypeMemo;
-    if (
-      memo !== undefined &&
-      memo.value === v &&
-      memo.worldVersion === ce._worldVersion &&
-      memo.factsHidden === ce._factsHidden() &&
-      memoDepsStillValid(v, memo.deps)
-    ) {
-      return memo.type;
-    }
-    const reentriesBefore = liveTypeReentries;
-    const cyclesBefore = cycleDetectionCount();
-    const signatureReadsBefore = reentrantSignatureReadCount();
-    LIVE_TYPE_IN_FLIGHT.add(this);
-    let type: BoxedType;
-    try {
-      type = v.type;
-    } finally {
-      LIVE_TYPE_IN_FLIGHT.delete(this);
-    }
-    if (
-      liveTypeReentries !== reentriesBefore ||
-      cycleDetectionCount() !== cyclesBefore ||
-      reentrantSignatureReadCount() !== signatureReadsBefore
-    )
-      return type;
-    // Not stored while an inference rollback frame is open, or while a
-    // list-hypothesis pass runs: the rollback restores declarations and
-    // types by writes that advance no key of this memo, and a refuted
-    // hypothesis retires nothing, so the entry would be served after the
-    // provisional state it was computed in is gone.
-    if (ce._rollbackFrames.length !== 0 || inListHypothesisPass()) return type;
-    const deps = snapshotTypeDeps(v, { bindingSites: true });
-    if (deps !== undefined)
-      this._liveTypeMemo = {
-        value: v,
-        worldVersion: ce._worldVersion,
-        factsHidden: ce._factsHidden(),
-        deps,
-        type,
-      };
-    return type;
-  }
 
   /** The effects of a stored `Function` literal, when a walk of its body
    * reads an effect set that is derived from the conformance registry (a
@@ -2382,4 +2316,43 @@ function callsItselfDirectly(v: Expression, name: string): boolean {
   const visit = (e: Expression): boolean =>
     (isFunction(e) && (e.operator === name || e.ops.some(visit))) || false;
   return visit(v.ops[0]);
+}
+
+/** True when a write from `prev` to `next` gives the variable `def` a value
+ * or takes its value away while a fact refines its type: the facts refine
+ * the type of a variable with no value only (`_typeWithFacts`), so its type
+ * changes. */
+export function valuePresenceRefinesType(
+  ce: ComputeEngine,
+  def: BoxedValueDefinition,
+  prev: Expression | null | undefined,
+  next: Expression | null | undefined
+): boolean {
+  // `null` is a value computed again from the declaration when it is read.
+  if ((prev === undefined) === (next === undefined)) return false;
+  if (contextAssumptions(ce).size === 0) return false;
+  if (def.isConstant) return false;
+  // The fact `x > y` refines the one of `x` and `y` that has no value: a
+  // value given to `y`, also a block local or a parameter, can change the
+  // type of `x`.
+  if (presenceCanChangeFactSubject(ce, def)) return true;
+  if (isActivatedDefinition(def) || isDeclaredTypeOnly(def)) return false;
+  // The contributions that `_typeWithFacts` merges, exclusions included.
+  const index = getFactIndex(ce);
+  return typeFor(index, def).length > 0 || exclusionsFor(index, def).length > 0;
+}
+
+/** True when `x` is, or holds as an operand, a `Function` literal. */
+function holdsFunctionLiteral(x0: Expression | null | undefined): boolean {
+  if (x0 == null) return false;
+  const x = x0 as {
+    operator?: string;
+    ops?: ReadonlyArray<{ operator?: string }> | null;
+    _numericStore?: readonly number[];
+  };
+  if (x.operator === 'Function') return true;
+  // A store-backed list (`ce.list()`) holds numbers only: no `Function`
+  // literal inside, and reading its `ops` would box every element.
+  if (x._numericStore !== undefined) return false;
+  return x.ops?.some((o) => o.operator === 'Function') ?? false;
 }

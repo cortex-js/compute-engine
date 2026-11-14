@@ -2488,13 +2488,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         const type = this.engine.type(t);
         symbolDef.value._setType(() => type);
         // An explicit retype through this public setter is a DECLARATION,
-        // not a guess: clear the inferred marker so nothing downstream —
-        // in particular the read-time revision of inferred types
-        // (`_reviseInferredType`, boxed-value-definition.ts) — treats the
-        // caller's stated type as revisable. Without this, a symbol whose
-        // type was first inferred from an assignment kept `inferredType`
-        // through an explicit `.type = …` write, and a later change to one
-        // of its value's dependencies silently replaced the explicit type.
+        // not a guess: clear the inferred marker so nothing downstream
+        // (the widening of an inferred type by an assignment) treats the
+        // caller's stated type as revisable.
         symbolDef.value.inferredType = false;
       }
     }
