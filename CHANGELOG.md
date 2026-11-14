@@ -33,6 +33,17 @@
   14 s to report that the code would have more than 50,000 nodes; it reports it
   in about 20 ms.
 
+### Resolved Issues
+
+- **`DigitsFrom` reads a `0x` or `0b` numeral past 2^53 exactly.**
+  `DigitsFrom("0x1fffffffffffffffff")` was `590295810358705700000`; it is
+  `590295810358705651711`.
+
+- **A compiled `Chop` of a complex value falls back to the interpreter.**
+  With `z` declared `complex`, the compiled `Chop(z)` at `3 + 10^{-12}i`
+  returned the value unchanged; the interpreter gives `3`, and the
+  compilation now declines.
+
 ## 0.189.0 _2026-11-14_
 
 ### Breaking Changes

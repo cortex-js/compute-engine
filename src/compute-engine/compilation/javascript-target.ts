@@ -4873,10 +4873,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // default (1e-10) and diverged from the interpreter's `Chop` at any
   // non-default `ce.tolerance`.
   // An explicit second operand is the tolerance.
-  Chop: (args, compile) =>
-    `_SYS.chop(${compile(args[0])}, ${
+  Chop: (args, compile) => {
+    // `_SYS.chop` reads a real; a complex value would be returned unchanged.
+    if (BaseCompiler.isComplexValued(args[0]))
+      throw new Error(
+        'Could not compile `Chop`: the operand can be complex, and the compiled `Chop` reads a real'
+      );
+    return `_SYS.chop(${compile(args[0])}, ${
       args[1] ? compile(args[1]) : (args[0]?.engine?.tolerance ?? 1e-10)
-    })`,
+    })`;
+  },
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ccos', compile(args[0]));

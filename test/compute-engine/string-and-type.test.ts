@@ -487,6 +487,15 @@ describe('DigitsFrom reads an integer past 2^53 exactly', () => {
     );
   });
 
+  test('a 0x or 0b numeral past 2^53 (CE-1294)', () => {
+    // 2^69 - 1 was 590295810358705700000.
+    expect(digits("'0x1fffffffffffffffff'")).toBe('590295810358705651711');
+    expect(digits(`'0b${'1'.repeat(69)}'`)).toBe('590295810358705651711');
+    // As with parseInt: the longest prefix of valid digits.
+    expect(digits("'0x1fg'")).toBe('31');
+    expect(digits("'0xff'")).toBe('255');
+  });
+
   test('small values are unchanged', () => {
     expect(digits("'ff'", 16)).toBe('255');
     expect(digits("'-101'", 2)).toBe('-5');

@@ -1292,6 +1292,21 @@ describe('COMPILE Equal/NotEqual is exact', () => {
     expect(r.run!({ x: 0.5 })).toBe(0.5);
     expect(ce.box(['Chop', 0.004, 0.01]).evaluate().isSame(0)).toBe(true);
   });
+
+  it('compiled Chop of a complex operand declines (CE-1291)', () => {
+    // `_SYS.chop` reads a real: `Chop(z)` at 3 + 1e-12i returned the value
+    // unchanged, where the interpreter gives 3.
+    const cx = new ComputeEngine();
+    cx.declare('z', 'complex');
+    for (const [expr, im] of [
+      [['Chop', 'z'], 1e-12],
+      [['Chop', 'z', 0.01], 0.002],
+    ] as const) {
+      const r = compile(cx.box(expr as any));
+      expect(r.success).toBe(false);
+      expect(r.run!({ z: { re: 3, im } })).toBe(3);
+    }
+  });
 });
 
 // CO-P1-3: a complex-typed argument into a real-only helper (`_SYS.erf`)

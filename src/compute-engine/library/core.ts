@@ -12393,11 +12393,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         op1str = op1str.trim();
 
-        if (op1str.startsWith('0x'))
-          return ce.number(parseInt(op1str.slice(2), 16));
+        // The digits are read as a bigint, so a numeral past 2^53 stays
+        // exact. As with `parseInt`, the longest prefix of valid digits is
+        // read, and a numeral with none is `NaN`.
+        if (op1str.startsWith('0x')) {
+          const digits = /^[0-9a-f]+/i.exec(op1str.slice(2));
+          return ce.number(digits ? BigInt('0x' + digits[0]) : NaN);
+        }
 
-        if (op1str.startsWith('0b'))
-          return ce.number(parseInt(op1str.slice(2), 2));
+        if (op1str.startsWith('0b')) {
+          const digits = /^[01]+/.exec(op1str.slice(2));
+          return ce.number(digits ? BigInt('0b' + digits[0]) : NaN);
+        }
 
         const op2 = ops[1] ?? ce.Nothing;
         if (sym(op2) === 'Nothing') {
