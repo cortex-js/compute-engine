@@ -37,12 +37,25 @@ import type {
   LibraryDefinition,
   ExpressionInput,
   Expression,
+  BoxedOperatorDefinition,
+  OperatorDefinition,
+  TaggedOperatorDefinition,
 } from '../global-types.js';
-import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition.js';
+import {
+  _BoxedOperatorDefinition,
+  buildDeferredLibraryOperator,
+  noteDeferredLibraryEntry,
+} from '../boxed-expression/boxed-operator-definition.js';
 import {
   commitKindRegistration,
+  deferKindValueGates,
   prepareKindRegistration,
 } from '../boxed-expression/value-kinds.js';
+import {
+  isInstallingStandardLibrary,
+  withStandardLibraryInstall,
+} from '../boxed-expression/host-handler-changes.js';
+import { inDeclaringScope } from '../boxed-expression/parameter-defaults.js';
 
 /**
  * A unit symbol (`m`, `J`, `K`, …) for the `Quantity` value of a physical
@@ -411,6 +424,161 @@ function validateDefinitionName(name: string): string {
 }
 
 /**
+ * True if the definition of `name` in a library table can be built at the
+ * first read of its binding instead of when the table is installed: the
+ * table is a standard library table, and making the definition changes no
+ * state of the engine beyond the binding. A definition with an `arithmetic`
+ * field registers a value kind, and a definition of `Add` or `Multiply` can
+ * mark the engine as one with ordered arithmetic
+ * (`noteArithmeticDefinition()`): these are built at once.
+ */
+function isDeferrableLibraryOperator(
+  name: string,
+  entry: OperatorDefinition
+): boolean {
+  return (
+    isInstallingStandardLibrary() &&
+    entry.arithmetic === undefined &&
+    name !== 'Add' &&
+    name !== 'Multiply'
+  );
+}
+
+/**
+ * The binding of the operator `name` of a standard library table, whose
+ * definition is built at the first read of its `operator` property. An
+ * engine reads a small part of the library, and building every definition
+ * was most of the time of `new ComputeEngine()` (CE-1289).
+ *
+ * The binding is in the scope from the start, so `has()`, `size` and the
+ * iteration of the bindings are unchanged, and `'operator' in binding` is
+ * true. The first read replaces the accessor with a data property that holds
+ * the definition; a write before the first read replaces it with the value
+ * written, and the definition is never built.
+ *
+ * The definition is built with the state the engine had when it installed
+ * the table: the scope of the table (and the declaring scope that the
+ * parameter defaults are boxed in), no facts, the mark of a standard library
+ * install, `strict`, the kind value gates held, and `undefined` placeholders
+ * for the `operands` probes (`buildDeferredLibraryOperator()`). The type
+ * registry is not saved: a type name that a library signature resolves is a
+ * registry record that is never replaced, and a name it does not resolve
+ * would have made the install fail.
+ *
+ * The definition is built from a copy of the table entry, made when the
+ * binding is installed, at the depth that the build reads each field (see
+ * the comment above the copy): the tables are public
+ * (`ComputeEngine.getStandardLibrary()`), and a host that replaces a field of
+ * an entry after the engine is built must not change the engine, as with a
+ * definition built at install.
+ *
+ * A definition that fails to build is reported at its first read, as an
+ * eager install reports it: the error is logged once, the binding is
+ * removed from the scope of the table (and from the library provenance), and
+ * the error is thrown to the reader. The binding object then has no
+ * `operator`, so a reader that kept it does not build it again.
+ */
+function deferredOperatorBinding(
+  engine: ComputeEngine,
+  name: string,
+  tableEntry: OperatorDefinition
+): TaggedOperatorDefinition {
+  // Copied at the depth the eager build reads them: `examples` (list), `collection` (handlers), `invokes` (map), `discharges` (map and label lists), `effects` (labels); every other field is kept by reference, as by an eager definition.
+  const snapshot = { ...tableEntry } as Record<string, unknown>;
+  if (Array.isArray(tableEntry.examples))
+    snapshot.examples = [...tableEntry.examples];
+  if (tableEntry.collection !== undefined)
+    snapshot.collection = { ...tableEntry.collection };
+  if (typeof tableEntry.invokes === 'object' && tableEntry.invokes !== null)
+    snapshot.invokes = { ...tableEntry.invokes };
+  if (tableEntry.discharges !== undefined)
+    snapshot.discharges = Object.fromEntries(
+      Object.entries(tableEntry.discharges).map(([k, labels]) => [
+        k,
+        [...labels],
+      ])
+    );
+  if (
+    tableEntry.effects !== undefined &&
+    typeof tableEntry.effects !== 'string'
+  )
+    snapshot.effects = [...tableEntry.effects];
+  const entry = snapshot as OperatorDefinition;
+  const scope = engine.context.lexicalScope;
+  const strict = engine.strict;
+  const binding = {} as TaggedOperatorDefinition;
+  const settle = (operator: BoxedOperatorDefinition) =>
+    Object.defineProperty(binding, 'operator', {
+      value: operator,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  const build = (): BoxedOperatorDefinition => {
+    let operator: BoxedOperatorDefinition | undefined;
+    const previousStrict = engine.strict;
+    engine.strict = strict;
+    try {
+      withStandardLibraryInstall(() =>
+        deferKindValueGates(engine, () =>
+          engine._inScope(
+            scope === engine.context.lexicalScope ? undefined : scope,
+            () =>
+              inDeclaringScope(engine, name, scope, () =>
+                engine._withoutFacts(() => {
+                  operator = buildDeferredLibraryOperator(engine, name, entry);
+                })
+              )
+          )
+        )
+      );
+    } finally {
+      engine.strict = previousStrict;
+    }
+    return operator!;
+  };
+  let building = false;
+  Object.defineProperty(binding, 'operator', {
+    enumerable: true,
+    configurable: true,
+    get(): BoxedOperatorDefinition {
+      if (building)
+        throw new Error(
+          `The library definition of "${name}" was read while it was built`
+        );
+      building = true;
+      let operator: BoxedOperatorDefinition;
+      try {
+        operator = build();
+      } catch (e) {
+        delete (binding as { operator?: unknown }).operator;
+        if (scope.bindings.get(name) === binding) scope.bindings.delete(name);
+        if (engine._libraryProvenance.get(name)?.binding === binding)
+          engine._libraryProvenance.delete(name);
+        console.error(
+          [
+            `\nError in operator definition`,
+            JSON.stringify(entry, undefined, 4),
+            '',
+            e instanceof Error ? e.message : String(e),
+          ].join('\n|   ') + '\n'
+        );
+        throw e;
+      } finally {
+        building = false;
+      }
+      settle(operator);
+      return operator;
+    },
+    set(operator: BoxedOperatorDefinition) {
+      settle(operator);
+    },
+  });
+  noteDeferredLibraryEntry(binding, entry);
+  return binding;
+}
+
+/**
  * Set the symbol table of the current context (`engine.context`) to `table`
  *
  * `table` can be an array of symbol tables, in order to deal with circular
@@ -447,6 +615,11 @@ export function setSymbolDefinitions(
                 4
               )}\n`
             );
+
+          if (isDeferrableLibraryOperator(name, entry)) {
+            bindings.set(name, deferredOperatorBinding(engine, name, entry));
+            continue;
+          }
 
           const operator = new _BoxedOperatorDefinition(engine, name, entry);
           // A library value kind (the `arithmetic` field): checked before the

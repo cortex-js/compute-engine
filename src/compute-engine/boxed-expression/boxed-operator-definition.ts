@@ -372,6 +372,49 @@ function parameterTypeAt(signature: Type, i: number): Type | undefined {
   return signature.variadicArg?.type;
 }
 
+/** The table entry of each library binding whose definition is not built
+ * yet (`deferredOperatorBinding()`, `library.ts`). */
+const DEFERRED_LIBRARY_ENTRIES = new WeakMap<object, OperatorDefinition>();
+
+/** Record that `binding` builds its definition from `entry` at the first
+ * read of its `operator` accessor. */
+export function noteDeferredLibraryEntry(
+  binding: object,
+  entry: OperatorDefinition
+): void {
+  DEFERRED_LIBRARY_ENTRIES.set(binding, entry);
+}
+
+/** The table entry of `binding` while its `operator` is still the accessor
+ * that builds the library definition. The `canonical` and `evaluate`
+ * handlers of the entry are those that the definition will hold, so a reader
+ * of the handlers need not build it. */
+export function deferredLibraryEntry(
+  binding: unknown
+): OperatorDefinition | undefined {
+  if (typeof binding !== 'object' || binding === null) return undefined;
+  const entry = DEFERRED_LIBRARY_ENTRIES.get(binding);
+  if (entry === undefined) return undefined;
+  if (Object.getOwnPropertyDescriptor(binding, 'operator')?.get === undefined)
+    return undefined;
+  return entry;
+}
+
+/** Build the definition `name` of a standard library table as the engine
+ * would have built it when it installed the table: the `operands` probes of
+ * its construction get `undefined` placeholders, as they do while the engine
+ * loads its libraries and `Nothing` does not exist yet. The caller restores
+ * the rest of the install-time state (`deferredOperatorBinding()`). */
+export function buildDeferredLibraryOperator(
+  ce: ComputeEngine,
+  name: string,
+  def: OperatorDefinition
+): _BoxedOperatorDefinition {
+  return new _BoxedOperatorDefinition(ce, name, def, {
+    installTimeProbes: true,
+  });
+}
+
 export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   engine: ComputeEngine;
 
@@ -1194,7 +1237,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._writeVersion += 1;
   }
 
-  constructor(ce: ComputeEngine, name: string, def: OperatorDefinition) {
+  /** True while the constructor of a deferred library definition runs
+   * `_update()`: the `operands` probes then get `undefined` placeholders
+   * (`buildDeferredLibraryOperator()`). A later update of the definition
+   * probes with `Nothing`, as an update of an eager definition does. */
+  private _installTimeProbes = false;
+
+  constructor(
+    ce: ComputeEngine,
+    name: string,
+    def: OperatorDefinition,
+    options?: { installTimeProbes?: boolean }
+  ) {
     Object.defineProperty(
       this,
       'signature',
@@ -1222,7 +1276,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       this._setSignature(() => signature);
     }
 
+    this._installTimeProbes = options?.installTimeProbes === true;
     this._update(def);
+    this._installTimeProbes = false;
   }
 
   /** For debugging */
@@ -2289,7 +2345,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // node binds.
     let binder = false;
     if (this.operands !== undefined) {
-      const placeholder = this.engine.Nothing as Expression | undefined;
+      const placeholder = this._installTimeProbes
+        ? undefined
+        : (this.engine.Nothing as Expression | undefined);
       const probes: ReadonlyArray<OperandRole | undefined>[] = [];
       for (let n = 0; n <= 3; n++) {
         let roles: unknown;

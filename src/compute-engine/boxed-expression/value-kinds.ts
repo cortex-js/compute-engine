@@ -714,6 +714,14 @@ export function deferKindValueGates(
   load: () => void
 ): ReadonlySet<string> {
   const registry = registryOf(ce);
+  // A library definition built at its first read while the libraries load
+  // (`deferredOperatorBinding()`, `library.ts`) runs inside the outer call:
+  // its values are recorded in the outer set, which stays in place.
+  const outer = DEFERRED_GATES.get(registry);
+  if (outer !== undefined) {
+    load();
+    return outer;
+  }
   const deferred = new Set<string>();
   DEFERRED_GATES.set(registry, deferred);
   try {

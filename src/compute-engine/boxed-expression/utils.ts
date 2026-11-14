@@ -34,7 +34,10 @@ import { containsSignatureArm } from '../../common/type/utils.js';
 import { DICTIONARY_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
-import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
+import {
+  _BoxedOperatorDefinition,
+  deferredLibraryEntry,
+} from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
@@ -2128,6 +2131,15 @@ function libraryHandlers(bindings: {
   for (const binding of bindings.values()) {
     const def = binding as Parameters<typeof isOperatorDef>[0];
     if (!isOperatorDef(def)) continue;
+    // A library definition that is not built yet: the handlers of its table
+    // entry, which the definition will hold. Reading `def.operator` would
+    // build every library definition of the engine.
+    const entry = deferredLibraryEntry(def);
+    if (entry !== undefined) {
+      if (typeof entry.canonical === 'function') handlers.add(entry.canonical);
+      if (typeof entry.evaluate === 'function') handlers.add(entry.evaluate);
+      continue;
+    }
     if (def.operator.canonical) handlers.add(def.operator.canonical);
     if (def.operator.evaluate) handlers.add(def.operator.evaluate);
   }
