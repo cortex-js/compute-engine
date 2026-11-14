@@ -14,6 +14,13 @@
 
 ### New Features
 
+- **`UniformDistribution` takes Wolfram's other two forms.**
+  `UniformDistribution([1, 3])` is `UniformDistribution(1, 3)` and
+  `UniformDistribution()` is `UniformDistribution(0, 1)`;
+  `Mean(UniformDistribution([1, 3]))` was a `missing` error and is `2`.
+  (PR #569, contributed by [enumeratio](https://github.com/enumeratio),
+  fixes [#568](https://github.com/cortex-js/compute-engine/issues/568))
+
 - **`Chop` takes a tolerance.** `Chop(0.004, 0.01)` was an
   `unexpected-argument` error; the second operand is now the tolerance, as
   in Wolfram's `Chop[x, tol]`: a real or imaginary part whose magnitude is at
@@ -84,6 +91,22 @@
   A name of `inputs` that a called function reads as a constant declines.
 
 ### Resolved Issues
+
+- **A float parameter or point of a distribution gives a float under
+  `evaluate()`.** `PDF(NormalDistribution(0, 1), 0.5)` was
+  `0.6240… / √π`, exact on one side and a float on the other, and
+  `PDF(NormalDistribution(0.0, 1), 1/2)` was exact; both are now
+  `0.3520653267642995`. The rule applies to `PDF`, `CDF` and `Quantile` of
+  the continuous distributions, to `Mean`, `Variance` and
+  `StandardDeviation` of a distribution (`Mean(UniformDistribution(0.0, 4))`
+  was `2` and is `2.0`), and to `PDF` of a discrete distribution at an
+  integer-valued point (`PDF(PoissonDistribution(2), 3.0)` is
+  `0.1804470443154836`). As in Wolfram, a discrete `CDF` reads a float point
+  as its floor and stays exact (`CDF(PoissonDistribution(2), 2.5)` is
+  `5 / e^2`), and the mass at a non-integer point is the exact `0`. The
+  variance of `NormalDistribution(0.0, 1)` is `1`: it does not depend on the
+  mean. (PR #569, contributed by [enumeratio](https://github.com/enumeratio),
+  fixes [#568](https://github.com/cortex-js/compute-engine/issues/568))
 
 - **`Tabulate` takes any number of dimensions.** `Tabulate(Add, 2, 2, 2)`
   was boxed as `Tabulate(Add, 2, 2)`, which dropped the third dimension; it

@@ -9318,7 +9318,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Continuous uniform distribution on the interval [a, b]."
+      "description": "Continuous uniform distribution on the interval [a, b]. `UniformDistribution([a, b])` is the same, and `UniformDistribution()` is on [0, 1]."
     },
     {
       "name": "Union",
