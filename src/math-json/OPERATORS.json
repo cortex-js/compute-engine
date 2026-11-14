@@ -9589,7 +9589,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
+      "description": "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
       "wikidata": "Q187235",
       "examples": [
         "[Zeta(2), Zeta(-1), N(Zeta(3))]"

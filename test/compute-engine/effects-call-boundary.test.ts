@@ -232,7 +232,7 @@ describe('blast radius: which library parameters carry an effect bound', () => {
       'All', 'Any', 'ArgMax', 'ArgMin', 'ChunkBy', 'CountIf', 'DropWhile',
       'Filter', 'Find', 'FlatMap', 'Fold', 'GroupBy', 'IndexWhere', 'Map',
       'MaxBy', 'MinBy', 'Ordering', 'Partition', 'Position', 'Reduce',
-      'Scan', 'Sort', 'TakeWhile',
+      'Scan', 'Sort', 'TakeWhile', 'Unique',
     ]);
     for (const name of new Set(bounded)) {
       const opDef = (scope.bindings as Map<string, any>).get(name)!.operator;

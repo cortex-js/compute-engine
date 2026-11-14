@@ -593,7 +593,7 @@ Digamma function, the logarithmic derivative of the gamma function
 
 ```epsil
 [digamma(1), N(digamma(1))]
-// ➔ [Digamma(1),-0.577215664901532860607]
+// ➔ [-"EulerGamma",-0.577215664901532860607]
 ```
 
 ### dirichletBeta
@@ -790,7 +790,7 @@ Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = 
 
 ```epsil
 [gamma(1/2), N(gamma(1/2)), N(gamma(5))]
-// ➔ [Gamma(1/2),1.7724538509055160273,24]
+// ➔ [sqrt(pi),1.7724538509055160273,24]
 ```
 
 ```epsil
@@ -1486,7 +1486,7 @@ Rounds a number towards zero (removes the fractional part), or with a step to th
 
 MathJSON `Zeta` · `(complex | infinity, (complex | infinity)?) -> number`
 
-Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ |n+a|^&#123;-s&#125; (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a &gt; 0; for a complex a, the Hurwitz sum.
+Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ |n+a|^&#123;-s&#125; (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a &gt; 0; for a complex a, the Hurwitz sum.
 
 ```epsil
 [zeta(2), zeta(-1), N(zeta(3))]

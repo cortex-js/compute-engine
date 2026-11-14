@@ -326,6 +326,12 @@ const ALLOWED: Record<string, string> = {
  */
 const FUNCTION_SECOND: Set<string> = new Set(['MaxBy', 'MinBy', 'GroupBy']);
 
+/**
+ * Operators whose second operand is a default, read only when the first
+ * operand is empty: `First([1, 2, 3], xs)` is `1` without a walk of `xs`.
+ */
+const DEFAULT_SECOND: Set<string> = new Set(['First', 'Last']);
+
 describe('sweep: no operator reads these collections as empty', () => {
   const ce = new ComputeEngine();
   const names = new Set<string>();
@@ -376,6 +382,7 @@ describe('sweep: no operator reads these collections as empty', () => {
           }
           if (ALLOWED[op] !== undefined) continue;
           if (args[0] !== xs && FUNCTION_SECOND.has(op)) continue;
+          if (args[0] !== xs && DEFAULT_SECOND.has(op)) continue;
           if (isConcreteAnswer(result))
             failures.push(`${expr.toString()} → ${result.toString()}`);
         }
