@@ -156,6 +156,15 @@
 
 ### Resolved Issues
 
+- **`Integrate` of a product of powers of `sin` and `cos` of a linear
+  argument is a closed form.** `∫ sin³x dx`, `∫ cos⁵x dx`,
+  `∫ sin³x cos²x dx` and `∫ sin⁴x dx` stayed `Integrate`. `∫ sin³x dx` is
+  now `cos³x/3 − cos x`, and `∫ sin⁴x dx` is
+  `3x/8 − 3 sin(2x)/16 − cos x·sin³x/4`. A constant factor and an argument
+  `a·x + b` are read (`∫ 3 sin³(2x + 1) dx`), for powers up to 40. (PR #579,
+  contributed by [enumeratio](https://github.com/enumeratio), fixes
+  [#578](https://github.com/cortex-js/compute-engine/issues/578))
+
 - **`Zeta(0, a)` is `1/2 - a` for every `a`.** The two-argument `Zeta` omits
   the term where `n + a = 0`, but at `s = 0` every term is 1 and the omitted
   term counts, as in Mathematica: `Zeta(0, -1)` is `3/2` (was `1/2`) and

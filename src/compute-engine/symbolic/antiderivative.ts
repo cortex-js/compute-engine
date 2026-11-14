@@ -2793,6 +2793,125 @@ function integrateTanCotPower(
 }
 
 /**
+ * ∫ sinᵐu·cosⁿu du for even m, n ≥ 0, by the reduction formulas (A&S 4.3.127,
+ * 4.3.128 and Gradshteyn–Ryzhik 2.510):
+ *   n ≥ 2:  sinᵐ⁺¹u·cosⁿ⁻¹u/(m + n) + (n − 1)/(m + n)·∫ sinᵐu·cosⁿ⁻²u du
+ *   n = 0:  −sinᵐ⁻¹u·cosu/m + (m − 1)/m·∫ sinᵐ⁻²u du,  and ∫ du = u.
+ * (∫sin⁴u du = 3u/8 − sin 2u/4 + sin 4u/32 in the other spelling.)
+ */
+function sinCosEvenPower(
+  u: Expression,
+  m: number,
+  n: number,
+  ce: Expression['engine']
+): Expression {
+  const sin = ce.function('Sin', [u]);
+  const cos = ce.function('Cos', [u]);
+  const terms: Expression[] = [];
+  let scale: Expression = ce.One; // the product of the coefficients so far
+  for (; n >= 2; n -= 2) {
+    terms.push(
+      scale
+        .mul(ce.number([1, m + n]))
+        .mul(sin.pow(ce.number(m + 1)))
+        .mul(cos.pow(ce.number(n - 1)))
+    );
+    scale = scale.mul(ce.number([n - 1, m + n]));
+  }
+  for (; m >= 2; m -= 2) {
+    terms.push(
+      scale
+        .mul(ce.number([-1, m]))
+        .mul(sin.pow(ce.number(m - 1)))
+        .mul(cos)
+    );
+    scale = scale.mul(ce.number([m - 1, m]));
+  }
+  terms.push(scale.mul(u));
+  return add(...terms);
+}
+
+/** Largest power of sin or cos that `integrateSinCosPower()` expands. */
+const SIN_COS_POWER_LIMIT = 40;
+
+/**
+ * ∫ c·sinᵐ(u)·cosⁿ(u) dx for a linear `u = a·x + b` and integers m, n ≥ 0.
+ * When m or n is odd, that factor gives up one power as `du` and the rest is a
+ * polynomial in the other function through sin² + cos² = 1:
+ *   m = 2k + 1:  −Σⱼ C(k, j)(−1)ʲ cosⁿ⁺²ʲ⁺¹u / (n + 2j + 1)
+ *   n = 2k + 1:   Σⱼ C(k, j)(−1)ʲ sinᵐ⁺²ʲ⁺¹u / (m + 2j + 1)
+ * each divided by `a` (∫sin³x dx = −cos x + cos³x/3). When both are even it is
+ * the reduction `sinCosEvenPower()`. Returns null when the integrand is not of
+ * that shape.
+ */
+function integrateSinCosPower(
+  fn: Expression,
+  index: string
+): Expression | null {
+  const ce = fn.engine;
+
+  // The integrand as constant · sinᵐ(u) · cosⁿ(u), the constants collected.
+  const constants: Expression[] = [];
+  let u: Expression | undefined;
+  let m = 0;
+  let n = 0;
+  const read = (f: Expression, inDen: boolean): boolean => {
+    if (!f.has(index)) {
+      constants.push(inDen ? ce.One.div(f) : f);
+      return true;
+    }
+    if (isFunction(f, 'Negate')) {
+      constants.push(ce.NegativeOne);
+      return read(f.op1, inDen);
+    }
+    if (isFunction(f, 'Multiply')) return f.ops.every((g) => read(g, inDen));
+    if (isFunction(f, 'Divide'))
+      return read(f.op1, inDen) && read(f.op2, !inDen);
+    if (inDen) return false;
+    let base = f;
+    let power = 1;
+    if (isFunction(f, 'Power')) {
+      const e = f.op2.re;
+      if (f.op2.isInteger !== true || e < 1 || e > SIN_COS_POWER_LIMIT)
+        return false;
+      base = f.op1;
+      power = e;
+    }
+    if (!isFunction(base, 'Sin') && !isFunction(base, 'Cos')) return false;
+    if (u === undefined) u = base.op1;
+    else if (!u.isSame(base.op1)) return false;
+    if (isFunction(base, 'Sin')) m += power;
+    else n += power;
+    return true;
+  };
+  if (!read(fn, false) || u === undefined) return null;
+  const a = linearIndexCoefficient(u, index);
+  if (!a) return null;
+
+  if (m % 2 === 0 && n % 2 === 0) {
+    if (m + n < 4) return null; // sin², cos² and 1 are table entries
+    return mul(...constants, sinCosEvenPower(u, m, n, ce))
+      .div(a)
+      .evaluate();
+  }
+
+  const sineOdd = m % 2 === 1;
+  const [k, other] = sineOdd ? [(m - 1) / 2, n] : [(n - 1) / 2, m];
+  const f = ce.function(sineOdd ? 'Cos' : 'Sin', [u]);
+  const terms: Expression[] = [];
+  let binomial = 1;
+  for (let j = 0; j <= k; j++) {
+    const e = other + 2 * j + 1;
+    const sign = (j % 2 === 0 ? 1 : -1) * (sineOdd ? -1 : 1);
+    terms.push(ce.number([sign * binomial, e]).mul(f.pow(ce.number(e))));
+    binomial = (binomial * (k - j)) / (j + 1);
+  }
+  return mul(...constants, add(...terms))
+    .div(a)
+    .evaluate();
+}
+
+/**
  * Reverse power-chain rule: ∫ c·u'(x)·u(x)ⁿ dx = c·u(x)ⁿ⁺¹/(n+1) for a
  * constant `c` and exponent n ≠ −1 (the n = −1 case is ∫u'/u = ln|u|, handled
  * separately). Recognizes the pattern by decomposing the integrand into
@@ -3405,6 +3524,8 @@ function antiderivativeCandidate(fn: Expression, index: string): Expression {
   // inputs. Only a still-unresolved expression enters the bounded new searches.
   const established = establishedAntiderivativeInRadians(fn, index);
   if (!established.has('Integrate')) return established;
+  const trigPower = integrateSinCosPower(fn, index);
+  if (trigPower) return trigPower;
   const logarithmic = logarithmicPrimitive(fn, index);
   if (logarithmic) return logarithmic;
   const composed = integrateComposition(fn, index, (body, variable) =>
