@@ -590,12 +590,7 @@ export function compileBlock(
     }
     const spellLocal = (name: string): string => spelled.get(name) ?? name;
     // The `Declare` of such a local declares its fresh name.
-    unnoteReserved = noteReservedDeclares(
-      args,
-      target,
-      spellLocal,
-      outerReads
-    );
+    unnoteReserved = noteReservedDeclares(args, target, spellLocal, outerReads);
     const localTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => {
@@ -1213,10 +1208,7 @@ function outerReadTarget(
     var: (id) => (id === name ? enclosing.var(id) : t.var(id)),
     boundVars,
     declaredVarTypes,
-    localFunctions: withOuterEntry(
-      t.localFunctions,
-      enclosing.localFunctions
-    ),
+    localFunctions: withOuterEntry(t.localFunctions, enclosing.localFunctions),
     lexicalFunctions: withOuterEntry(
       t.lexicalFunctions,
       enclosing.lexicalFunctions

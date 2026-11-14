@@ -4040,7 +4040,11 @@ function pipeStageErrors(
             index: at < topicAt ? at + 1 : at,
           };
       }
-      result.push({ error, frame, boxed: twins.get(JSON.stringify(error))?.[0] });
+      result.push({
+        error,
+        frame,
+        boxed: twins.get(JSON.stringify(error))?.[0],
+      });
     }
   };
 

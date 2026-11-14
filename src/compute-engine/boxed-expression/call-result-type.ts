@@ -597,8 +597,7 @@ function callsUserFunctionOrReturns(body: Expression): boolean {
     if (!isFunction(e) || seen.has(e)) return false;
     seen.add(e);
     if (e.operatorDefinition?.holdClass === 'quote') return false;
-    if (e.operator === 'Return' || e.valueDefinition !== undefined)
-      return true;
+    if (e.operator === 'Return' || e.valueDefinition !== undefined) return true;
     if (
       (e.operatorDefinition as { _lambdaLiteral?: Expression } | undefined)
         ?._lambdaLiteral !== undefined

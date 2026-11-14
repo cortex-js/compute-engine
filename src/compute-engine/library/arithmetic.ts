@@ -6568,8 +6568,7 @@ function evaluateHurwitzZeta(
       return engine.function('Zeta', [s]).evaluate({ numericApproximation });
     if (exactRoute) {
       if (m > HURWITZ_PEEL_LIMIT) return undefined; // stay symbolic
-      if (isNumber(s) && s.re > 1 && zetaPeelCancels(s.re, m))
-        return undefined;
+      if (isNumber(s) && s.re > 1 && zetaPeelCancels(s.re, m)) return undefined;
       let tail = engine.number(1).pow(engine.function('Negate', [s]));
       for (let k = 2; k < m; k++)
         tail = tail.add(engine.number(k).pow(engine.function('Negate', [s])));
