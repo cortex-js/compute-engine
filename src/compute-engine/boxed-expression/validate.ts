@@ -137,7 +137,7 @@ import type {
   ParameterRequirement,
   ParameterRecord,
 } from '../global-types.js';
-import { recordTypeProvenance, currentBoxingEpoch } from './type-provenance.js';
+import { recordTypeProvenance } from './type-provenance.js';
 import {
   activeRollbackFrame,
   repairsForbiddenByRollbackFrame,
@@ -6399,7 +6399,6 @@ function repairFreshMatrixInference(
       kind: 'inferred',
       axis: 'type',
       cause: op,
-      epoch: currentBoxingEpoch(ce),
     });
     if (
       wasUnknown &&

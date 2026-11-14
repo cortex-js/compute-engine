@@ -2495,26 +2495,8 @@ export type TypeProvenanceEntry = {
    * binding-divergence fix, Tycho item 178). Containment, not identity: an
    * auto-declare cause is a symbol OCCURRENCE, so identity against the root
    * being canonicalized is always false — the discriminating test is "is
-   * the cause a node within that tree". For an O(1) answer to the same
-   * question, compare {@link epoch} instead. */
+   * the cause a node within that tree". */
   cause?: Expression;
-  /** The outermost-boxing epoch (`ce._boxingEpoch`) during which this entry
-   * was recorded — the O(1) form of the "written by the pass running now?"
-   * question: inside a boxing pass, `entry.epoch === ce._boxingEpoch` iff
-   * the entry was recorded by that same pass. `undefined` when the write
-   * happened outside any boxing operation (e.g. an assumption made between
-   * evaluations, or a route that does not open an inference transaction);
-   * consumers needing a verdict then fall back to the containment test on
-   * {@link cause}.
-   *
-   * Pass granularity is a CONTRACT, not an implementation accident: within
-   * one outermost pass every entry reads the same epoch, deliberately not
-   * distinguishing "created a moment ago" from "created earlier in this
-   * pass". The first-boxing binding-divergence fix (Tycho item 178) treats
-   * same-pass bindings as shareable and relies on them comparing equal — a
-   * finer-grained stamp would break that consumer, so do not "improve" the
-   * resolution. */
-  epoch?: number;
   /** Original-input span of the cause, when the parse that produced it
    * stamped one. Composed by the caller that knows the base offset — the
    * type parser only ever reports offsets local to the string it was

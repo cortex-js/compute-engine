@@ -9,10 +9,7 @@ import type {
 import { definitionHome, unitEnvironmentsOf } from './binding-unit.js';
 import { BoxedSymbol } from './boxed-expression/boxed-symbol.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
-import {
-  currentBoxingEpoch,
-  recordTypeProvenance,
-} from './boxed-expression/type-provenance.js';
+import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 
 /** The requirements on one name in its home scope: `type` is the meet of the
  * type entries, `undefined` when the name has only a reading as a variable
@@ -224,7 +221,6 @@ export function inferFn(
           type: written.type,
           kind: 'inferred',
           axis: 'type',
-          epoch: currentBoxingEpoch(ce),
         });
     }
     const def = scope.bindings.get(name);

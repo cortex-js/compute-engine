@@ -97,7 +97,6 @@ export type StateEvent =
    * event without it is a true narrowing. */
   | {
       kind: 'inference';
-      symbolSignature?: boolean;
       valueType?: boolean;
       widening?: boolean;
       /** The inferred binding lives under a registered scratch scope
@@ -407,7 +406,6 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       // `inference-settled` event. Any other SCRATCH inference advances `any`
       // at once, and not `semantic` or `world` (see "Scratch events" above).
       if (e.scratch) return { any: true, semantic: false, world: false };
-      if (e.symbolSignature) return { any: true, semantic: true, world: true };
       return { any: true, semantic: true, world: true };
     case 'config':
       return { any: true, semantic: true, world: true };

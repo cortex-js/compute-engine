@@ -1446,12 +1446,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
-   * For a free name: the definition that its name resolves to in the current
-   * context (`freeNameBindingInContext()`). The resolution skips a library
+   * For a free name: the definition that its name resolves to from its home
+   * scope (`freeNameBindingInContext()`). The resolution skips a library
    * operator when the unit of the occurrence reads the name as a variable
-   * (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`). In the
-   * evaluation of a stored value, it skips the local of a block that is not
-   * around the home scope.
+   * (`N` in `N + 1`, `UnitEnvironment.readsAsVariable()`).
    */
   private _freeNameBinding(): BoxedDefinition | undefined {
     const home = this._homeScope!;
@@ -1468,8 +1466,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           this.engine,
           this._id,
           home,
-          variable,
-          home
+          variable
         );
         // A declaration of the name in flight can install its binding
         // before it sends its state event: the resolution is then
@@ -1485,8 +1482,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       this.engine,
       this._id,
       home,
-      variable,
-      home
+      variable
     );
     this._resolution = {
       version,
@@ -1552,13 +1548,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   _freeNameBindingFrom(scope: Scope): BoxedDefinition | undefined {
     const variable = this._readsAsVariable(this._homeScope ?? scope);
-    return freeNameBindingAndScope(
-      this.engine,
-      this._id,
-      scope,
-      variable,
-      scope
-    )?.def;
+    return freeNameBindingAndScope(this.engine, this._id, scope, variable)?.def;
   }
 
   /**
@@ -2032,7 +2022,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // semantic change other expressions may depend on.
         this.engine._noteStateEvent({
           kind: 'inference',
-          symbolSignature: true,
           ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
         });
         this.engine._noteInferenceWrite({

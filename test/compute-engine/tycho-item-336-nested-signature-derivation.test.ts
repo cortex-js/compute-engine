@@ -215,7 +215,6 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
     const scratchEvents: StateEvent[] = [
       { kind: 'binding-repair', scratch: true },
       { kind: 'inference', scratch: true },
-      { kind: 'inference', symbolSignature: true, scratch: true },
       { kind: 'inference', valueType: true, widening: true, scratch: true },
     ];
     for (const e of scratchEvents) {
@@ -237,7 +236,7 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
     // The same events without `scratch` advance the definition version.
     for (const e of [
       { kind: 'binding-repair' },
-      { kind: 'inference', symbolSignature: true },
+      { kind: 'inference' },
       { kind: 'inference', valueType: true, widening: true },
     ] as StateEvent[]) {
       const lifecycle = new EngineConfigurationLifecycle();
@@ -356,7 +355,7 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     const matrixInference = (events: StateEvent[]) =>
       events.filter(
         (e) =>
-          e.kind === 'inference' && e.valueType !== true && !e.symbolSignature
+          e.kind === 'inference' && e.valueType !== true
       );
     const check = (
       ce: ComputeEngine,

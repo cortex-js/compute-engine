@@ -15,7 +15,7 @@ import type { EffectSet } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { signatureEffects } from '../../common/type/utils.js';
 import { sameEffectSetSpelling } from '../../common/type/effects.js';
-import { currentBoxingEpoch, recordTypeProvenance } from './type-provenance.js';
+import { recordTypeProvenance } from './type-provenance.js';
 
 import type { Expression, TypeProvenanceEntry } from '../global-types.js';
 import type { InferenceRollbackFrame } from '../inference-rollback.js';
@@ -85,7 +85,6 @@ export function recordEffectsTransition(
   ce: {
     _rollbackFrames: ReadonlyArray<InferenceRollbackFrame>;
     _inferenceTxDepth: number;
-    _boxingEpoch: number;
   },
   target: { _typeProvenance: TypeProvenanceEntry[] | undefined },
   before: EffectsContractState,
@@ -103,6 +102,5 @@ export function recordEffectsTransition(
     kind: bitMoved || after.declared ? 'declared' : 'inferred',
     axis: 'effects',
     cause,
-    epoch: currentBoxingEpoch(ce),
   });
 }

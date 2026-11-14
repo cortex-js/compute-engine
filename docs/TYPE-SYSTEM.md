@@ -1698,8 +1698,10 @@ invalidates no cached type: the type version (`typeVersion`,
   also after the sign of `x + 1` was read outside a type computation. The
   key of a type that depends on the derivations in progress
   (`_typeCacheFallbackGeneration()`) is not one of them: a type does not
-  depend on a value, and only the frame of an application in progress gives
-  it a key of its own (`activationViewDiverges()`).
+  depend on a value, and a free name is read from its home chain, on which
+  the static view maps the frame of an application in progress to the body
+  of its literal and skips the parameter activations, so the view has no key
+  of its own there.
 - An assumption refines the type of a variable with no value only, so a
   write that gives a variable a value, or takes it away, while assumptions
   are in force moves the type version (the `typeRead` flag of the

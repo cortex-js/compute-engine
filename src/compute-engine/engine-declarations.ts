@@ -51,10 +51,7 @@ import {
   provablyDisjoint,
 } from '../common/type/subtype.js';
 import { isEffectSubset } from '../common/type/effects.js';
-import {
-  recordTypeProvenance,
-  currentBoxingEpoch,
-} from './boxed-expression/type-provenance.js';
+import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 import {
   freeTypeVariables,
   hasFreeTypeVariables,
@@ -4763,7 +4760,6 @@ function deriveAndWriteAssignedType(
         kind: 'value-derived',
         axis: 'type',
         cause: value,
-        epoch: currentBoxingEpoch(ce),
       });
   }
 

@@ -1804,9 +1804,7 @@ export function updateDef(
       if (inherited !== undefined && inherited.length > 0) {
         // A copy: the superseded object's own array stays untouched, so a
         // rollback frame's restore-by-identity of that object is exact.
-        // Transferred entries keep their original `epoch`/`cause`, so
-        // nothing inherited can masquerade as "recorded by the pass
-        // running now" (the first-boxing predicate compares those).
+        // Transferred entries keep their original `cause`.
         installedHalf._typeProvenance = [
           ...inherited,
           ...(installedHalf._typeProvenance ?? []),

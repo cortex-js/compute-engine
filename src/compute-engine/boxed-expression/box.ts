@@ -340,15 +340,15 @@ export function _setBoxingDevolveThreshold(depth: number): number {
  * Two savings. (1) When this construction is already inside a root boxing
  * pass — the inference transaction is open (`_inferenceTxDepth > 0`) AND a
  * root repair is active — both brackets that `box()` puts around
- * `boxInternal()` are no-ops (a nested `beginInferenceTransaction` neither
- * bumps the epoch nor, on end, clears `_freshlyInferred`; `withDevolveRepair`
- * with the root active just calls its builder), so `boxInternal()` is called
- * directly. When either bracket is not open — a construction that started at
- * `ce.function()` boxes its first operand with no transaction open — the
- * operand goes through `box()` exactly as before, so the transaction's epoch
- * and clearing semantics are unchanged. (2) A `for` loop replaces
- * `Array.prototype.map` and its callback, two frames per level — which is why
- * this is not written as `ops.map(...)`. The choice between `boxInternal` and
+ * `boxInternal()` are no-ops (a nested `beginInferenceTransaction` does not
+ * clear `_freshlyInferred` at its end; `withDevolveRepair` with the root
+ * active just calls its builder), so `boxInternal()` is called directly. When
+ * either bracket is not open — a construction that started at `ce.function()`
+ * boxes its first operand with no transaction open — the operand goes through
+ * `box()` exactly as before, so the transaction's clearing semantics are
+ * unchanged. (2) A `for` loop replaces `Array.prototype.map` and its
+ * callback, two frames per level — which is why this is not written as
+ * `ops.map(...)`. The choice between `boxInternal` and
  * `box` is made once, before the loop.
  *
  * The two hottest sites (`boxFunctionInternal`'s non-canonical tail and
@@ -1567,10 +1567,6 @@ function preboxDeepOperands(
  */
 export function beginInferenceTransaction(ce: ComputeEngine): void {
   ce._inferenceTxDepth += 1;
-  // A new OUTERMOST pass gets a new epoch; nested begins share the outer
-  // pass's. Provenance entries stamp the current epoch so consumers can ask
-  // "recorded by the pass running now?" in O(1) (`TypeProvenanceEntry.epoch`).
-  if (ce._inferenceTxDepth === 1) ce._boxingEpoch += 1;
 }
 
 export function endInferenceTransaction(ce: ComputeEngine): void {

@@ -920,12 +920,11 @@ export interface IComputeEngine {
 
   /**
    * Run `fn` inside one boxing-pass window (the `_inferenceTxDepth` /
-   * `_boxingEpoch` / `_freshlyInferred` lifecycle that `box()` and
-   * `parse()` open around themselves). For callers — the Epsil static
-   * checking pass — that need a rollback frame to span several `box()`
-   * calls: a rollback frame must nest strictly inside ONE window, so the
-   * caller opens this window first and the per-statement `box()` windows
-   * nest inside it.
+   * `_freshlyInferred` lifecycle that `box()` and `parse()` open around
+   * themselves). For callers — the Epsil static checking pass — that need a
+   * rollback frame to span several `box()` calls: a rollback frame must nest
+   * strictly inside ONE window, so the caller opens this window first and
+   * the per-statement `box()` windows nest inside it.
    * @internal */
   _withBoxingPassWindow<T>(fn: () => T): T;
 
@@ -1533,15 +1532,6 @@ export interface IComputeEngine {
    * that walk (`awaitAsyncOnlyDescendants`, `boxed-function.ts`).
    * @internal */
   _hasAsyncOnlyOperator: boolean;
-
-  /** Monotonically increasing count of OUTERMOST boxing operations —
-   * incremented when `_inferenceTxDepth` transitions 0 → 1, constant for
-   * the duration of that pass. Stamped onto provenance entries
-   * (`TypeProvenanceEntry.epoch`) so "was this entry recorded by the pass
-   * running now?" is one integer comparison instead of a containment walk
-   * over the tree being canonicalized.
-   * @internal */
-  _boxingEpoch: number;
 
   /** Per-engine state for construction-local boxing repairs.
    * @internal */

@@ -13,10 +13,7 @@ import {
   canonicalNumber,
 } from './boxed-expression/boxed-number.js';
 import { isValueDef } from './boxed-expression/utils.js';
-import {
-  recordTypeProvenance,
-  currentBoxingEpoch,
-} from './boxed-expression/type-provenance.js';
+import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 import { NumericValue } from './numeric-value/types.js';
 import { isRational } from './numerics/rationals.js';
 import { freeNameHomeScope } from './binding-unit.js';
@@ -206,7 +203,6 @@ export function createSymbolExpression(
           kind: 'auto-declared',
           axis: 'type',
           cause: typedParamSym,
-          epoch: currentBoxingEpoch(engine),
         });
       return typedParamSym;
     }
@@ -294,7 +290,6 @@ export function createSymbolExpression(
         kind: 'auto-declared',
         axis: 'type',
         cause: bareParamSym,
-        epoch: currentBoxingEpoch(engine),
       });
     return bareParamSym;
   }

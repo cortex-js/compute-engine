@@ -173,22 +173,16 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
     ],
     // assumption: G+M+E (assume/forget).
     ['assumption', { kind: 'assumption' }, mask(true, true, true)],
-    // inference: default G+M+E; the BoxedSymbol operator branch M+E; the
-    // value branch zero-mask (§2b).
+    // inference: default G+M+E (also an operator signature written by
+    // inference); the value branch zero-mask (§2b).
     ['inference (default)', { kind: 'inference' }, mask(true, true, true)],
-    // R5 (amended): symbolSignature advances `any` (twin-consistent);
-    // a valueType narrowing stays zero-mask: its advance is deferred to the
-    // end of the outermost cached computation. A late narrowing can only
+    // R5 (amended): a valueType narrowing stays zero-mask: its advance is
+    // deferred to the end of the outermost cached computation. A late narrowing can only
     // leave a cached type wider than it could be, never wrong. Narrowings are
     // made by a canonicalization, which a cached computation can reach.
     // Advancing at once on every narrowing caused a stack overflow when this
     // row was written (2026-08-11); on 2026-11-01 it caused no overflow but
     // changed inferred types in `parameter-index-read-inference.test.ts`.
-    [
-      'inference (symbol signature)',
-      { kind: 'inference', symbolSignature: true },
-      mask(true, true, true),
-    ],
     [
       'inference (value type)',
       { kind: 'inference', valueType: true },

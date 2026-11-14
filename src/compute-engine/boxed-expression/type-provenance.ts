@@ -65,16 +65,3 @@ export function recordTypeProvenance(
 }
 
 const MAX_TYPE_PROVENANCE = 8;
-
-/**
- * The epoch to stamp on a provenance entry recorded right now: the current
- * outermost-boxing epoch while a boxing pass is in progress, `undefined`
- * outside one (an entry with no epoch tells consumers to fall back to the
- * containment test on `cause` — see `TypeProvenanceEntry.epoch`).
- */
-export function currentBoxingEpoch(ce: {
-  _inferenceTxDepth: number;
-  _boxingEpoch: number;
-}): number | undefined {
-  return ce._inferenceTxDepth > 0 ? ce._boxingEpoch : undefined;
-}

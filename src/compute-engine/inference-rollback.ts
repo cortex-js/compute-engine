@@ -13,7 +13,7 @@
  *
  * Naming: a rollback frame is NOT the `_inferenceTxDepth` /
  * `beginInferenceTransaction` machinery — that is a boxing-pass *window
- * counter* (it drives `_boxingEpoch` and the `_freshlyInferred` lifecycle)
+ * counter* (it drives the `_freshlyInferred` lifecycle)
  * with no undo semantics. A rollback frame always nests strictly inside one
  * boxing-pass window; `_withRolledBackInference` asserts that.
  *

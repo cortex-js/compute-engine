@@ -41,25 +41,30 @@ have their own record.
 
 ## Part 1: the cleanup pass
 
-From the inventory (a read-only audit; its "est." figures are estimates).
-Each item is its own small change, with the tests the inventory names.
+DONE 2026-11-14 (session compute-engine-62), source −187 lines net (+62 −249). Items
+1, 2, 4 and 5 landed; item 3 was undone.
 
-Deletable now, verified by reference search (about 48 lines):
+1. The boxing epoch is removed (CHANGELOG: `TypeProvenanceEntry.epoch`).
+2. The `symbolSignature` flag of an inference event is removed.
+3. UNDONE: a trial validation that runs `devolveUnappliedOperator` leaves
+   a variable reading in the unit environment of the boxing
+   (`_asFreeVariable()` calls `setReadsAsVariable()`), which neither the
+   rollback frame nor the trial environment undoes; `ce.infer()` then
+   reports a library letter that the winning arm did not devolve. Found by
+   both reviewers. It waits for a trial that writes its unit readings in
+   the trial environment.
+4. `activationViewDiverges()` and the applied-body-scope count are removed.
+5. A free name of a stored value is read from its home scope. The
+   stored-value block-local skip of `freeNameBindingAndScope` could then
+   no longer fire, and is removed with its `home` parameter,
+   `storedValueScopes` and the `hidesLocal` empty-scope push. Probe: 525
+   reads in 370 test files, the same definition.
 
-1. The boxing epoch: `_boxingEpoch`, `currentBoxingEpoch()` and its 9
-   writers, `TypeProvenanceEntry.epoch`. `TypeProvenanceEntry` is a public
-   type (`src/api.md`), so the removal is a CHANGELOG entry; two tests of
-   `boxing-depth-headroom.test.ts` count `_boxingEpoch` and are rewritten.
-2. The `symbolSignature` branch of `axisMaskOf`
-   (`engine-configuration-lifecycle.ts`, near line 410), a no-op.
-
-Probably redundant, NOT tested (about 55 to 75 lines): show each with a
-probe before removing it.
-
-3. The devolve half of `forbidsRepairs` (`validate.ts`, near 1070 and 1167).
-4. `activationViewDiverges()` inside `_typeCacheFallbackGeneration()`.
-5. `storedValueFreeNameRead()` (`binders.ts`), which reads a stored value's
-   free name from the current scope.
+Checks on the final head: typecheck, `check:deps`, the full suite
+(93,872 passed), `CE_TYPE_PARANOID` over the 834 files (31,870 tests, 0
+failed), two rounds of dual review. Not run: Tycho's gates (no value or
+type is meant to change). `src/api.md` still lists the removed field: it
+is regenerated at release.
 
 What waits, and what unlocks it (about 3,300 lines, estimated):
 

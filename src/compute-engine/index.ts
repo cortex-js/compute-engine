@@ -11,10 +11,7 @@ import {
 } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import { isMacroDef } from './boxed-expression/macro.js';
-import {
-  activationViewDiverges,
-  staticViewDiverges,
-} from './static-typing-view.js';
+import { staticViewDiverges } from './static-typing-view.js';
 import { dropSpacingOperands } from './latex-syntax/drop-spacing-operands.js';
 import { isValidPrimitiveType } from '../common/type/primitive.js';
 
@@ -102,10 +99,7 @@ import {
 } from './boxed-expression/host-handler-changes.js';
 import { isInferredDefinition } from './boxed-expression/definition-guards.js';
 import { markExternalFact } from './boxed-expression/forward-call-reference.js';
-import {
-  recordTypeProvenance,
-  currentBoxingEpoch,
-} from './boxed-expression/type-provenance.js';
+import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 import {
   adoptsForeignEngineObject,
   isFunction,
@@ -1049,11 +1043,10 @@ export class ComputeEngine implements IComputeEngine {
     options?: { forbidsRepairs?: boolean }
   ): T {
     // A rollback frame nests strictly inside ONE boxing-pass window: the
-    // journal records `_freshlyInferred` membership (a per-window set) and
-    // epoch-stamped provenance, both of which the window lifecycle resets —
-    // a frame straddling a window boundary would replay undo entries
-    // against discarded state. Callers outside `box()`/`parse()` open a
-    // window with `_withBoxingPassWindow` first.
+    // journal records `_freshlyInferred` membership, a per-window set that the
+    // window lifecycle resets, so a frame straddling a window boundary would
+    // replay undo entries against discarded state. Callers outside
+    // `box()`/`parse()` open a window with `_withBoxingPassWindow` first.
     console.assert(
       this._inferenceTxDepth > 0,
       'A rollback frame must be opened inside a boxing-pass window (see _withBoxingPassWindow)'
@@ -1446,10 +1439,13 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._typeCacheFallbackGeneration()`.
    * @internal */
   _typeCacheFallbackGeneration(): number {
-    // A type does not depend on a value: only the frame of an application
-    // in progress gives the view a key of its own here
-    // (`activationViewDiverges()`).
-    const generation = this._viewKeyedGeneration(activationViewDiverges(this));
+    // A type does not depend on a value, and a free name is read from its
+    // home chain, on which the static view maps the frame of an application
+    // to the body scope of its literal (`staticBindingIn()`,
+    // `staticParentOf()`) and skips the parameter activations: a type
+    // computed inside an application is the one computed outside it, so the
+    // view has no key of its own here.
+    const generation = this._baseCacheGeneration();
     // A minted key (negative) is unique. A key of the `any` axis is moved
     // out of the values of `_typeCacheGeneration()`: four times the axis,
     // plus two, plus the facts bit.
@@ -1593,11 +1589,6 @@ export class ComputeEngine implements IComputeEngine {
   _inferenceTxDepth = 0;
   _hasAsyncOnlyOperator = false;
 
-  /** Outermost-boxing counter — see `IComputeEngine._boxingEpoch`.
-   * @internal
-   */
-  _boxingEpoch = 0;
-
   /** See `IComputeEngine._jsProfile`.
    * @internal
    */
@@ -1737,7 +1728,6 @@ export class ComputeEngine implements IComputeEngine {
       kind: event.kind,
       axis: 'type',
       cause: ctx?.expr,
-      epoch: currentBoxingEpoch(this),
     });
 
     if (

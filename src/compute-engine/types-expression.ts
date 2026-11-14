@@ -157,7 +157,6 @@ type TypeProvenanceEntryMirror = {
   kind: 'declared' | 'auto-declared' | 'inferred' | 'value-derived';
   axis: 'type' | 'effects';
   cause?: Expression;
-  epoch?: number;
   span?: { start: number; end: number };
 };
 

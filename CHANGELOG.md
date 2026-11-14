@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The field `epoch` of `TypeProvenanceEntry` is removed. No part of the
+  engine read it. The entries are reached through the internal field
+  `_typeProvenance` of a definition.
+
 ### Improvements
 
 - **The code of the experimental profile `'ir'` can be stored, loaded and

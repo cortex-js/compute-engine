@@ -233,10 +233,7 @@ import {
 } from '../common/type/utils.js';
 import { kindTypeNames } from './boxed-expression/value-kinds.js';
 import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
-import {
-  currentBoxingEpoch,
-  recordTypeProvenance,
-} from './boxed-expression/type-provenance.js';
+import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import { enterFunctionBody, exitFunctionBody } from './statement-position.js';
 
@@ -1509,7 +1506,6 @@ export function canonicalFunctionLiteralArguments(
         kind: 'inferred',
         axis: 'type',
         cause: cause.expr,
-        epoch: currentBoxingEpoch(ce),
       });
     }
   }

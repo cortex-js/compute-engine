@@ -57,16 +57,6 @@ const frameBodyScopes = new WeakMap<object, object>();
  * also while an application is suspended at an `await`. */
 const appliedBodyScopes = new WeakMap<object, ViewEngine>();
 
-/** For each engine, the number of body scopes that have an entry in
- * `appliedBodyScopes`: the static view of the engine can differ from the
- * bindings of an application while it is not 0 (`activationViewDiverges()`
- * has the other case). An exception thrown by an application after
- * `noteBodyScopeApplied()` and before its `try` leaves the count above 0.
- * The view is then counted as different for every later type computation of
- * the engine: a type that depends on the derivations in progress is kept
- * under a key of its own, which costs cache hits, not correctness. */
-const appliedBodyScopeCount = new WeakMap<ViewEngine, number>();
-
 /** The engine of the applications of the body scope `bodyScope` that are in
  * progress, or `undefined`. */
 function applyingEngine(bodyScope: object): ViewEngine | undefined {
@@ -84,16 +74,12 @@ export function noteCallFrame(frame: object, bodyScope: object): void {
 export function noteBodyScopeApplied(ce: ViewEngine, bodyScope: object): void {
   if (appliedBodyScopes.has(bodyScope)) return;
   appliedBodyScopes.set(bodyScope, ce);
-  appliedBodyScopeCount.set(ce, (appliedBodyScopeCount.get(ce) ?? 0) + 1);
 }
 
 /** The last application of the literal whose body scope is `bodyScope`
  * ended. */
 export function forgetBodyScopeApplied(bodyScope: object): void {
-  const ce = appliedBodyScopes.get(bodyScope);
-  if (ce === undefined) return;
   appliedBodyScopes.delete(bodyScope);
-  appliedBodyScopeCount.set(ce, (appliedBodyScopeCount.get(ce) ?? 1) - 1);
 }
 
 /** For each evaluation-context stack, the result of the last scan of
@@ -164,24 +150,6 @@ export function inStaticTypingView(ce: ViewEngine): boolean {
  */
 export function staticViewDiverges(ce: ViewEngine): boolean {
   return viewEngine === ce;
-}
-
-/**
- * Is a type computation of `ce` running while an application of a function
- * literal by `ce` is in progress (or suspended at an `await`, or its frame is
- * on the current stack)? The static view then also reads no value of the
- * frame of that application.
- *
- * Only the key of a type that depends on the derivations in progress reads
- * this (`_typeCacheFallbackGeneration()`): a type does not depend on a value,
- * so outside an application one key serves a type computed in the view and
- * read outside it, and a provisional answer is retired by the same key the
- * reader outside the view uses.
- */
-export function activationViewDiverges(ce: ViewEngine): boolean {
-  if (viewEngine !== ce) return false;
-  if ((appliedBodyScopeCount.get(ce) ?? 0) > 0) return true;
-  return innermostFrame(ce._evalContextStack) !== undefined;
 }
 
 /**

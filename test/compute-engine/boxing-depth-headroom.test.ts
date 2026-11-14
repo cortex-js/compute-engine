@@ -100,33 +100,45 @@ describe('boxing stack frames per nesting level', () => {
   // skipping `box()`'s inference-transaction bracket. That is only a no-op
   // when a transaction is already open: `ce.box()` opens one at the root, but
   // `ce.function()` roots a construction WITHOUT opening one, so each of its
-  // top-level operands must still get its own bracket (one boxing epoch per
-  // operand — provenance entries stamp the epoch so a consumer can ask
-  // "recorded by the pass running now?"). Both are pinned by counting epoch
-  // bumps; a guard that only checked `isRootActive` would make the
-  // `ce.function()` counts 0.
-  test('a ce.box() root opens exactly one boxing epoch for the whole tree', () => {
+  // top-level operands must still get its own bracket. Both are pinned by
+  // counting the outermost openings of the transaction (`_inferenceTxDepth`
+  // going from 0 to 1); a guard that only checked `isRootActive` would make
+  // the `ce.function()` counts 0.
+  function countOutermostBrackets(ce: ComputeEngine): () => number {
+    let depth = (ce as any)._inferenceTxDepth as number;
+    let opened = 0;
+    Object.defineProperty(ce, '_inferenceTxDepth', {
+      configurable: true,
+      get: () => depth,
+      set: (v: number) => {
+        if (depth === 0 && v === 1) opened += 1;
+        depth = v;
+      },
+    });
+    return () => opened;
+  }
+
+  test('a ce.box() root opens exactly one boxing bracket for the whole tree', () => {
     const ce = new ComputeEngine();
     let d: any = 'x';
     for (let i = 0; i < 30; i++) d = ['Sin', d];
-    const before = ce._boxingEpoch;
+    const opened = countOutermostBrackets(ce);
     ce.box(d);
-    expect(ce._boxingEpoch - before).toBe(1);
+    expect(opened()).toBe(1);
   });
 
-  test('a ce.function() root still opens one boxing epoch per top-level operand', () => {
+  test('a ce.function() root still opens one boxing bracket per top-level operand', () => {
     const ce = new ComputeEngine();
     const deep = () => {
       let d: any = 'x';
       for (let i = 0; i < 30; i++) d = ['Sin', d];
       return d;
     };
-    let before = ce._boxingEpoch;
+    const opened = countOutermostBrackets(ce);
     ce.function('Sin', [deep()]);
-    expect(ce._boxingEpoch - before).toBe(1);
-    before = ce._boxingEpoch;
+    expect(opened()).toBe(1);
     ce.function('Tuple', [deep(), deep(), deep()]);
-    expect(ce._boxingEpoch - before).toBe(3);
+    expect(opened()).toBe(4);
   });
 
   test('a 300-deep Sin nest boxes canonically', () => {
