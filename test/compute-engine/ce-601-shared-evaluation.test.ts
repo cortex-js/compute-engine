@@ -662,7 +662,11 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
   test('A custom library that defines a standard name does not make the standard operator host code', () => {
     // The custom `Sin` is refused (the standard library keeps the name): the
     // standard `Sin` stays library code, and a shared `Sin` is evaluated once.
+    // The refusal is reported with `console.error`: it is caught here and
+    // checked, so that it does not reach the log of the run.
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
     let ce: ComputeEngine | undefined;
+    let messages = '';
     try {
       ce = new ComputeEngine({
         libraries: [
@@ -686,7 +690,12 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
       // The refusal can be reported as an error: the engine is built anyway
       // below with the standard libraries only, which keeps the test about
       // the classification.
+    } finally {
+      // Read the calls before `mockRestore()`, which clears them.
+      messages = errors.mock.calls.map((args) => String(args[0])).join('\n');
+      errors.mockRestore();
     }
+    expect(messages).toMatch('Duplicate operator definition: "Sin"');
     ce ??= new ComputeEngine();
     ce.assign('x', 0.5);
     const sin = ce.function('Sin', [ce.symbol('x')]);
