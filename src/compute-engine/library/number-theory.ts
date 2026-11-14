@@ -10,6 +10,7 @@ import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import type { Type } from '../../common/type/types.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import { broadcastOperandType, operandSgn } from './type-handlers.js';
+import { parseType } from '../../common/type/parse.js';
 import { checkTypes } from '../boxed-expression/validate.js';
 import { rationalize } from '../numerics/rationals.js';
 import {
@@ -350,6 +351,64 @@ function bigintDigitSum(
     x /= base;
   }
   return sum;
+}
+
+/** The operand types of `PowerMod` and `PowerModList`: base, exponent, modulus, or a list of each. */
+const POWER_MOD_OPERAND_TYPES: Type[] = [
+  parseType('rational | list<rational>'),
+  parseType('rational | list<rational>'),
+  parseType('integer | list<integer>'),
+];
+const POWER_MOD_SIGNATURE =
+  '(rational | list<rational>, rational | list<rational>, integer | list<integer>) -> integer | list<integer>';
+const POWER_MOD_SIGNATURE_LIST =
+  '(rational | list<rational>, rational | list<rational>, integer | list<integer>) -> list<integer> | list<list<integer>>';
+
+/** Does one of the operands of a `PowerMod` call hold a list? */
+function powerModHasList(...ops: (OperandDescriptor | undefined)[]): boolean {
+  return ops.some((x) => x !== undefined && isSubtype(x.type, 'list'));
+}
+
+/**
+ * The residue of the base `a` modulo `m > 0`: an integer as it is, a rational
+ * `p/q` as `p` times the inverse of `q`; `null` when `a` is neither, or `q` has
+ * no inverse modulo `m` (`PowerMod(1/2, 2, 4)`).
+ */
+function baseResidue(a: Expression, m: bigint): bigint | null {
+  if (a.isInteger === true) return toBigint(a);
+  const q = asRational(a);
+  if (q === undefined || m < 1n) return null;
+  const inverse = modularInverse(BigInt(q[1]), m);
+  if (inverse === null) return null;
+  const p = ((BigInt(q[0]) % m) + m) % m;
+  return (p * inverse) % m;
+}
+
+/**
+ * A `PowerMod` or `PowerModList` call with a list among its evaluated
+ * operands, threaded over them: the lists must have one length, a scalar
+ * is held fixed, and the call stays unevaluated when the lengths differ.
+ */
+function threadPowerMod(
+  ce: ComputeEngine,
+  head: 'PowerMod' | 'PowerModList',
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  const lists = ops.filter((x) => isFunction(x, 'List'));
+  if (lists.length === 0) return undefined;
+  const length = lists[0].nops;
+  if (lists.some((x) => x.nops !== length)) return undefined;
+  return ce.function(
+    'List',
+    Array.from({ length }, (_, i) =>
+      ce
+        .function(
+          head,
+          ops.map((x) => (isFunction(x, 'List') ? x.ops[i] : x))
+        )
+        .evaluate()
+    )
+  );
 }
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
@@ -756,9 +815,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     PowerMod: {
       description:
-        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000.',
-      signature: '(integer, rational, integer) -> integer',
-      examples: ['PowerMod(2, 10, 1000)  // 24', 'PowerMod(4, 1/2, 7)  // 2'],
+        'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational base `p/q` is `p` times the modular inverse of `q`, so `PowerMod(1/2, 2, 7)` is 2. A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000. A list operand threads: `PowerMod([2, 3], 2, 7)` is `[4, 2]`.',
+      signature: POWER_MOD_SIGNATURE,
+      type: ([a, b, m], context) =>
+        BoxedType.forResult(
+          powerModHasList(a, b, m) ? 'list<integer>' : 'integer',
+          context.engine._typeResolver
+        ),
+      examples: [
+        'PowerMod(2, 10, 1000)  // 24',
+        'PowerMod(4, 1/2, 7)  // 2',
+        'PowerMod(1/2, 2, 7)  // 2',
+      ],
       // Lazy so that `.N()` leaves an exact rational exponent exact: the
       // operands are evaluated here, without the numeric approximation that
       // would turn `1/2` into `0.5`. A lazy head canonicalizes and checks its
@@ -770,7 +838,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           checkTypes(
             ce,
             ops.map((x) => x.canonical),
-            ['integer', 'rational', 'integer']
+            POWER_MOD_OPERAND_TYPES
           )
         ),
       // All three operands are evaluated, and nothing else is read of them.
@@ -778,6 +846,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const evaluated = ops.map((x) => x.evaluate());
         const [aOp, bOp, mOp] = evaluated;
+        const threaded = threadPowerMod(ce, 'PowerMod', evaluated);
+        if (threaded !== undefined) return threaded;
         // The result is a float when an evaluated operand is a float. The
         // held operands are not used for that test: a symbol whose value is
         // `2.0` is a float only once it is evaluated.
@@ -786,8 +856,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (bOp.isInteger !== true) {
           // The signature admits a rational exponent; `toBigint` would round it.
           const exponent = asRational(bOp);
-          const a = aOp.isInteger === true ? toBigint(aOp) : null;
           const m = mOp.isInteger === true ? toBigint(mOp) : null;
+          const a = m === null ? null : baseResidue(aOp, m);
           if (exponent === undefined || a === null || m === null)
             return undefined;
           const root = leastPowerModRoot(
@@ -800,13 +870,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           return root === undefined ? undefined : result(root);
         }
         // `toBigint` rounds a non-integer, so integrality is checked first.
-        if (aOp.isInteger === false || mOp.isInteger === false)
-          return undefined;
-        const a = toBigint(aOp);
+        if (mOp.isInteger !== true) return undefined;
         const b = toBigint(bOp);
         const m = toBigint(mOp);
-        if (a === null || b === null || m === null) return undefined;
+        if (b === null || m === null) return undefined;
         if (m <= 0n) return undefined; // modulus must be positive
+        const a = baseResidue(aOp, m);
+        if (a === null) return undefined;
         if (m === 1n) return result(0);
         if (b >= 0n) return result(modPow(a, b, m));
         // Negative exponent: invert `a` modulo `m`, then raise to `-b`.
@@ -820,8 +890,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     PowerModList: {
       description:
-        'Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.',
-      signature: '(integer, rational, integer) -> list<integer>',
+        'Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. A rational base is read as `p` times the inverse of `q`. A list operand threads: `PowerModList([2, 3], 2, 7)` is `[[4], [2]]`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.',
+      signature: POWER_MOD_SIGNATURE_LIST,
+      type: ([a, s, m], context) =>
+        BoxedType.forResult(
+          powerModHasList(a, s, m) ? 'list<list<integer>>' : 'list<integer>',
+          context.engine._typeResolver
+        ),
       examples: [
         'PowerModList(3, 1/2, 11)  // [5, 6]',
         'PowerModList(1, 1/3, 7)  // [1, 2, 4]',
@@ -834,7 +909,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           checkTypes(
             ce,
             ops.map((x) => x.canonical),
-            ['integer', 'rational', 'integer']
+            POWER_MOD_OPERAND_TYPES
           )
         ),
       // All three operands are evaluated, and nothing else is read of them.
@@ -842,9 +917,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const evaluated = ops.map((x) => x.evaluate());
         const [aOp, sOp, mOp] = evaluated;
+        const threaded = threadPowerMod(ce, 'PowerModList', evaluated);
+        if (threaded !== undefined) return threaded;
         const exponent = asRational(sOp);
-        const a = aOp.isInteger === true ? toBigint(aOp) : null;
         const m = mOp.isInteger === true ? toBigint(mOp) : null;
+        const a = m === null || m < 1n ? null : baseResidue(aOp, m);
         if (exponent === undefined || a === null || m === null)
           return undefined;
         const roots = powerModList(
@@ -949,10 +1026,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ChineseRemainder: {
       description:
-        'Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. Undefined if the system is inconsistent or the two lists differ in length.',
-      signature: '(collection<any>, collection<any>) -> integer',
-      examples: ['ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23'],
-      evaluate: ([residuesOp, moduliOp], { engine: ce }) => {
+        'Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. With a third argument `d`, return the smallest solution `x ≥ d`. Undefined if the system is inconsistent or the two lists differ in length.',
+      signature: '(collection<any>, collection<any>, integer?) -> integer',
+      examples: [
+        'ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23',
+        'ChineseRemainder([2, 3, 2], [3, 5, 7], 100)  // 128',
+      ],
+      evaluate: ([residuesOp, moduliOp, offsetOp], { engine: ce }) => {
         const residueOps = finiteElements(residuesOp);
         const moduliOps = finiteElements(moduliOp);
         if (residueOps === undefined || moduliOps === undefined)
@@ -968,8 +1048,23 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (residues.includes(null) || moduli.includes(null)) return undefined;
         const x = chineseRemainder(residues as bigint[], moduli as bigint[]);
         if (x === null) return undefined;
+        let result = x;
+        if (offsetOp !== undefined) {
+          // The solutions are `x + k·lcm(moduli)`: the smallest one that
+          // is at least `d`.
+          const d = offsetOp.isInteger === true ? toBigint(offsetOp) : null;
+          if (d === null) return undefined;
+          const period = (moduli as bigint[]).reduce(lcm, 1n);
+          const gap = d - x;
+          const steps =
+            gap >= 0n ? (gap + period - 1n) / period : -(-gap / period);
+          result = x + steps * period;
+        }
         // A float element (`2.0`) makes the result a float.
-        return floatIfFloatOperand([...residueOps, ...moduliOps], ce.number(x));
+        return floatIfFloatOperand(
+          [...residueOps, ...moduliOps],
+          ce.number(result)
+        );
       },
     },
 

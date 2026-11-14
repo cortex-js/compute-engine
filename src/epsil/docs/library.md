@@ -684,7 +684,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `bernoulliB` | `BernoulliB` | `(integer) -> rational` | Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. |
 | `carmichaelLambda` | `CarmichaelLambda` | `(integer) -> integer` | Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. |
 | `catalanNumber` | `CatalanNumber` | `(real) -> number` | Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. |
-| `chineseRemainder` | `ChineseRemainder` | `(collection<any>, collection<any>) -> integer` | Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. |
+| `chineseRemainder` | `ChineseRemainder` | `(collection<any>, collection<any>, integer?) -> integer` | Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. |
 | `continuedFraction` | `ContinuedFraction` | `(real, integer?) -> list<integer>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
 | `digitCount` | `DigitCount` | `(integer, integer?, integer?, integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
 | `digitSum` | `DigitSum` | `(integer, integer?, integer?) -> integer` | Return the sum of the digits of `n` in the given `base` (default 10). |
@@ -722,8 +722,8 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
 | `partitionsP` | `PartitionsP` | `(integer) -> integer` | `PartitionsP` is an alias for `NPartition`, which is the preferred name. |
-| `powerMod` | `PowerMod` | `(integer, rational, integer) -> integer` | Return `a^b mod m` (modular exponentiation). |
-| `powerModList` | `PowerModList` | `(integer, rational, integer) -> list<integer>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
+| `powerMod` | `PowerMod` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> integer \| list<integer>` | Return `a^b mod m` (modular exponentiation). |
+| `powerModList` | `PowerModList` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> list<integer> \| list<list<integer>>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
 | `primeFactors` | `PrimeFactors` | `(integer) -> list<integer>` | Return the sorted list of distinct prime factors of an integer `n`. |
 | `primeNu` | `PrimeNu` | `(integer) -> integer` | Return ω(n), the number of distinct prime factors of `n`. |
 | `primeNumber` | `PrimeNumber` | `(integer) -> integer` | The nth prime number. |

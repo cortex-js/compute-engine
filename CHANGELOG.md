@@ -31,6 +31,19 @@
 
 ### Resolved Issues
 
+- **`PowerMod` and `PowerModList` take a rational base and a list, and
+  `ChineseRemainder` takes a lower bound.** `PowerMod(1/2, 2, 7)` was an
+  `incompatible-type` error and is now `2`: the base `p/q` is `p` times the
+  inverse of `q` modulo `m`, and a base whose denominator has no inverse
+  stays unevaluated (`PowerMod(1/2, 2, 4)`). `PowerMod([2, 3], 2, 7)` is
+  `[4, 2]` and `PowerModList([2, 3], 2, 7)` is `[[4], [2]]`: a list operand
+  threads, a scalar is held fixed, and lists of different lengths stay
+  unevaluated. `ChineseRemainder([2, 3, 2], [3, 5, 7], 100)` is `128`, the
+  smallest solution that is at least `100` (it was an `unexpected-argument`
+  error). (PR #547, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#546](https://github.com/cortex-js/compute-engine/issues/546))
+
 - **`NextPrime`, `DivisorSigma`, `FactorInteger`, `IsSquareFree`,
   `CatalanNumber` and `IsPerfect` take a rational or a non-positive
   operand.** `NextPrime(7/2)` was an `incompatible-type` error and is now

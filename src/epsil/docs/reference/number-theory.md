@@ -61,13 +61,18 @@ catalanNumber(1/2)
 
 ### chineseRemainder
 
-MathJSON `ChineseRemainder` · `(collection<any>, collection<any>) -> integer`
+MathJSON `ChineseRemainder` · `(collection<any>, collection<any>, integer?) -> integer`
 
-Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. Undefined if the system is inconsistent or the two lists differ in length.
+Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. With a third argument `d`, return the smallest solution `x ≥ d`. Undefined if the system is inconsistent or the two lists differ in length.
 
 ```epsil
 chineseRemainder([2, 3, 2], [3, 5, 7])
 // ➔ 23
+```
+
+```epsil
+chineseRemainder([2, 3, 2], [3, 5, 7], 100)
+// ➔ 128
 ```
 
 ### continuedFraction
@@ -499,9 +504,9 @@ partitionsP(5)
 
 ### powerMod
 
-MathJSON `PowerMod` · `(integer, rational, integer) -> integer`
+MathJSON `PowerMod` · `(list<rational> | rational, list<rational> | rational, integer | list<integer>) -> integer | list<integer>`
 
-Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000.
+Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational base `p/q` is `p` times the modular inverse of `q`, so `PowerMod(1/2, 2, 7)` is 2. A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000. A list operand threads: `PowerMod([2, 3], 2, 7)` is `[4, 2]`.
 
 ```epsil
 powerMod(2, 10, 1000)
@@ -513,11 +518,16 @@ powerMod(4, 1/2, 7)
 // ➔ 2
 ```
 
+```epsil
+powerMod(1/2, 2, 7)
+// ➔ 2
+```
+
 ### powerModList
 
-MathJSON `PowerModList` · `(integer, rational, integer) -> list<integer>`
+MathJSON `PowerModList` · `(list<rational> | rational, list<rational> | rational, integer | list<integer>) -> list<integer> | list<list<integer>>`
 
-Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.
+Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. A rational base is read as `p` times the inverse of `q`. A list operand threads: `PowerModList([2, 3], 2, 7)` is `[[4], [2]]`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.
 
 ```epsil
 powerModList(3, 1/2, 11)

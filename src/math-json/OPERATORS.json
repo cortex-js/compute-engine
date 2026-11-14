@@ -1222,16 +1222,17 @@
     {
       "name": "ChineseRemainder",
       "category": "Number Theory",
-      "arity": "2",
-      "signature": "(collection<any>, collection<any>) -> integer",
+      "arity": "optional",
+      "signature": "(collection<any>, collection<any>, integer?) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. Undefined if the system is inconsistent or the two lists differ in length.",
+      "description": "Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. With a third argument `d`, return the smallest solution `x ≥ d`. Undefined if the system is inconsistent or the two lists differ in length.",
       "examples": [
-        "ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23"
+        "ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23",
+        "ChineseRemainder([2, 3, 2], [3, 5, 7], 100)  // 128"
       ]
     },
     {
@@ -6706,29 +6707,30 @@
       "name": "PowerMod",
       "category": "Number Theory",
       "arity": "3",
-      "signature": "(integer, rational, integer) -> integer",
+      "signature": "(rational | list<rational>, rational | list<rational>, integer | list<integer>) -> integer | list<integer>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000.",
+      "description": "Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m). A rational base `p/q` is `p` times the modular inverse of `q`, so `PowerMod(1/2, 2, 7)` is 2. A rational exponent `s/r` gives the least `x` with `x^r ≡ a^s (mod m)`, the first entry of `PowerModList(a, s/r, m)`. It is undefined when there is none, when `m` cannot be factored, or when there are too many roots to list and none of them is less than 100000. A list operand threads: `PowerMod([2, 3], 2, 7)` is `[4, 2]`.",
       "examples": [
         "PowerMod(2, 10, 1000)  // 24",
-        "PowerMod(4, 1/2, 7)  // 2"
+        "PowerMod(4, 1/2, 7)  // 2",
+        "PowerMod(1/2, 2, 7)  // 2"
       ]
     },
     {
       "name": "PowerModList",
       "category": "Number Theory",
       "arity": "3",
-      "signature": "(integer, rational, integer) -> list<integer>",
+      "signature": "(rational | list<rational>, rational | list<rational>, integer | list<integer>) -> list<integer> | list<list<integer>>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.",
+      "description": "Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. An integer exponent gives the single value `a^s mod m`, a negative one using the modular inverse of `a`. A rational base is read as `p` times the inverse of `q`. A list operand threads: `PowerModList([2, 3], 2, 7)` is `[[4], [2]]`. The list is empty when `a^s` is not an `r`-th power mod `m`. Undefined for a modulus `m < 1`, when the inverse of `a` does not exist, or when `m` cannot be factored or there are too many roots to list.",
       "examples": [
         "PowerModList(3, 1/2, 11)  // [5, 6]",
         "PowerModList(1, 1/3, 7)  // [1, 2, 4]"
