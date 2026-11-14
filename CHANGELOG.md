@@ -77,14 +77,6 @@
 
 ### Resolved Issues
 
-- **`.N()` of an exact sum whose terms cancel gives the correct digits.**
-  When the terms of a sum are exact (`\pi`, `e^{20}`, `\sqrt{2}`, a large
-  integer) and their sum is much smaller than the largest term, the sum is
-  computed again at a higher precision. The exact value of
-  `\int_0^{20} x^{100} e^{-x}\,dx`, `100! - c/e^{20}`, had the numeric value
-  `0`; it is `6.43215797205551260137e+120`. `\pi\cdot10^{30} - 3141592653589793238462643383279`
-  was `2643000000`; it is `0.502884197169399375106`.
-
 - **A copy of a compile result can be given to `runtime.load()` in
   TypeScript again.** Since 0.188.0, `{ ...result }` passed to `load()` or
   `loadBroadcast()` of `createJavaScriptRuntime()` was a type error

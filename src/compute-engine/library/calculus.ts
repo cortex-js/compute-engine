@@ -156,7 +156,10 @@ import {
 } from '../collection-utils.js';
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
-import { antiderivative } from '../symbolic/antiderivative.js';
+import {
+  antiderivative,
+  unstableClosedForms,
+} from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
 import {
   withRadianConvention,
@@ -9043,6 +9046,9 @@ volumes
                 ]);
               continue;
             }
+            // Read before the antiderivative search: see the arm below that
+            // keeps a definite integral inert when the count changes.
+            const unstableBefore = unstableClosedForms.count;
             // Expensive exact reductions are fallbacks, not a new default path.
             // Check the original integrand before accepting a transformed answer.
             const definiteFallback = (): Expression | undefined => {
@@ -9424,6 +9430,29 @@ volumes
               // `∫₀¹⁰ ∫₃⁴ (y − x)⁻² dx dy` stays unevaluated (the pole `x = y`
               // is in `[3, 4]` for some `y`), so the outer one does too, while
               // `∫₅¹⁰ ∫₃⁴ (y − x)⁻² dx dy` is evaluated.
+              isIndefinite = false;
+              expr = ce.function('Integrate', [
+                expr,
+                ce.function('Limits', [ce.symbol(variable), lower, upper]),
+              ]);
+            } else if (
+              unstableClosedForms.count !== unstableBefore &&
+              ![lower, upper].every(
+                (bound) =>
+                  (isNumber(bound) && bound.isSame(0)) ||
+                  bound.isInfinity === true
+              )
+            ) {
+              // The closed form of a polynomial of degree above 8 times exp,
+              // sin or cos (`unstableClosedForms`) is exact, but its terms at
+              // a bound other than 0 or ±∞ reach about `n!/|a|ⁿ⁺¹` and cancel
+              // under `.N()`: `∫₀²⁰ x¹⁰⁰·e⁻ˣ dx` gave 0 for about 6.43e120
+              // (CE-1311). Keep the integral inert, as before the closed form
+              // existed; `.N()` takes the quadrature. The count also changes
+              // when a closed form is computed and then not kept (a provider
+              // alternative, an attempt inside `antiderivative()`): the
+              // integral is then inert too, which gives no wrong value. The
+              // pole arms above come first: they do not use the closed form.
               isIndefinite = false;
               expr = ce.function('Integrate', [
                 expr,

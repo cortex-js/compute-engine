@@ -160,3 +160,33 @@ describe('an integrand that is a product overflowing against itself', () => {
     expect(Math.abs(nested.run() / (gamma / 2) - 1)).toBeLessThan(1e-9);
   });
 });
+
+describe('the exact value of ∫₀^y x¹⁰⁰·e⁻ˣ dx at a finite y (CE-1311)', () => {
+  // The closed form n! − e⁻ʸ·Σ n!/k!·yᵏ is exact, but `.N()` of it subtracts
+  // two terms of about 9.3·10¹⁵⁷ at 21 digits and gave 0. Above degree 8 a
+  // definite integral with a bound other than 0 or ±∞ stays unevaluated, so
+  // `.N()` takes the quadrature.
+  const I = (n: number, upper: unknown) =>
+    ce.box(['Integrate', integrand(n), ['Limits', 'x', 0, upper]] as any);
+
+  test('degree 100 to 20 stays unevaluated, and its numeric value is right', () => {
+    const exact = I(100, 20).evaluate();
+    expect(exact.operator).toBe('Integrate');
+    expect(Math.abs(exact.N().re / 6.4321579720555e120 - 1)).toBeLessThan(
+      1e-9
+    );
+  });
+
+  test('a small exact bound is not taken as 0', () => {
+    const tiny = ['Divide', 1, ['Power', 10, 12]];
+    expect(I(10, tiny).evaluate().operator).toBe('Integrate');
+  });
+
+  test('degree 8 to 2 keeps its closed form', () => {
+    expect(I(8, 2).evaluate().has('Integrate')).toBe(false);
+  });
+
+  test('degree 10 to ∞ is still 10!', () => {
+    expect(I(10, 'PositiveInfinity').evaluate().toString()).toBe('3628800');
+  });
+});
