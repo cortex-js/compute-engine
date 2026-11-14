@@ -8,15 +8,30 @@ module.exports = {
   // comment in the file.
   testEnvironment: '<rootDir>/jest-environment.cjs',
   // Twelve workers on the 18-core development machine (Apple M5 Max, 6 + 12
-  // cores with no efficiency cores). Measured full-suite times: 163 s with
-  // 6 workers, 88 s with 12, 84 s with 16, 89 s with 18. More than 12 workers
-  // gives almost nothing, because the slowest test files take 45–52 s alone
+  // cores with no efficiency cores). Measured full-suite times, on a smaller
+  // suite: 163 s with 6 workers, 88 s with 12, 84 s with 16, 89 s with 18;
+  // the suite of 2026-11-13 takes 197–199 s with 12. More than 12 workers
+  // gave almost nothing, because the slowest test files take 45–52 s alone
   // and 75–83 s under contention, and they set the minimum run time. Twelve
   // also leaves 6 cores for the other sessions that share the machine.
   // A continuous-integration runner has 4 cores: six workers there made
   // tests with a time limit run about eight times slower than alone and
   // fail. `CI` is set by GitHub Actions; `'100%'` is one worker per core.
   maxWorkers: process.env.CI ? '100%' : 12,
+  // A worker is replaced, between two test files, when its heap holds more
+  // than 1.5 GB. The heap of a worker grows with the files it has run (up to
+  // 4 GB); without a limit the 12 workers held 30–32 GB, and with the memory
+  // of the other sessions the 64 GB machine ran out: macOS compressed memory,
+  // and a worker that read a compressed page stopped, up to 270 times the
+  // time of the file alone, which failed tests with a time limit. Measured on
+  // the full suite, two runs each: 292–332 s with 30–40 such stalls without
+  // the limit, 197–199 s with none with it (about 40 worker replacements).
+  // The limit applies to a run of the whole suite only (`CI`, or
+  // `CE_FULL_SUITE`, see `testTimeout` below): with a limit, Jest never runs
+  // a test file in its own process, so a run of one file would start a
+  // worker and a `debugger` statement would not stop without `-i`.
+  workerIdleMemoryLimit:
+    process.env.CI || process.env.CE_FULL_SUITE ? '1500MB' : undefined,
   // The time limit of an asynchronous test that does not name its own. Jest's
   // default is 5 s. The full suite takes 88 s on the development machine and
   // 1,700 to 2,600 s on a CI runner, so an asynchronous test that takes a
