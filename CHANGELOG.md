@@ -154,7 +154,35 @@
   [enumeratio](https://github.com/enumeratio), fixes
   [#564](https://github.com/cortex-js/compute-engine/issues/564)).
 
+### Behavior Changes
+
+- **`Series` of a library function whose derivatives the engine cannot
+  evaluate stays unevaluated.** `Series(Hypergeometric2F1(1, 1, 3, x), x, 1,
+  3)` was a sum of `Apply(Derivative(Hypergeometric2F1, …), 1, 1, 3, 1)`
+  terms, which are not the coefficients: the function has a logarithmic
+  branch point at `x = 1`. The same holds at a regular point:
+  `Series(Zeta(x), x, 0, 3)`, which was `−1/2 + x·Apply(Derivative(Zeta,
+  1), 0) + …`, and the series of `LambertW`, `PolyLog` and `Hypergeometric2F1`
+  at 0 stay unevaluated. A function the engine does not define (`f`) keeps
+  its symbolic Taylor form `f(0) + f′(0)·x + …`. (PR #573, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ### Resolved Issues
+
+- **`Series` at `DirectedInfinity` and `ComplexInfinity` expands in `1/x`
+  or stays unevaluated.** `Series(sin(x)/x, x, DirectedInfinity(1), 3)`
+  was a Taylor sum with `sin(DirectedInfinity(1))` in its coefficients; it
+  stays unevaluated, as at `+∞`. `DirectedInfinity(1)` is read as `+∞` and
+  `DirectedInfinity(-1)` as `−∞`: `Series(1/(x + 1), x,
+  DirectedInfinity(1), 3)` stayed unevaluated and is
+  `1/x − 1/x² + 1/x³ + O(x⁻⁴)`. At `ComplexInfinity` or
+  `DirectedInfinity(i)`, the expansion is given only when it is the same at
+  `+∞` and `−∞` and the function is analytic (`1/(x + 1)`).
+  `Series(arctan(x), x, ComplexInfinity, 3)` was the expansion at `+∞`,
+  `π/2 − 1/x + …`, which is wrong in the other directions; it stays
+  unevaluated, as do `exp(x)` and `√x`. (PR #573, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#572](https://github.com/cortex-js/compute-engine/issues/572))
 
 - **`MatrixRank` of a matrix of symbols is its full rank when the rank at
   one integer point is full.** `MatrixRank([[a, b], [c, d]])` and

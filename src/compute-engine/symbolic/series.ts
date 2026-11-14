@@ -11,7 +11,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { asSmallInteger, asRational } from '../boxed-expression/numerics.js';
 import { bernoulliRational } from '../numerics/bernoulli.js';
-import { differentiate } from './derivative.js';
+import { differentiate, isEngineAuthoredDefinition } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 import { exactComplexParts, exactZeroVerdict } from './contour.js';
@@ -440,6 +440,21 @@ function holdsSum(e: Expression): boolean {
 }
 
 /**
+ * Whether `val` holds a `Derivative` of a library function that the table of
+ * derivatives does not know. `Apply(Derivative(₂F₁, 0, 0, 0, 1), 1, 1, 3, 1)`
+ * is not the coefficient of `(x − 1)` in `₂F₁(1, 1; 3; x)`: the series about
+ * `x = 1` runs in `(1 − x)^(c − a − b)` and logarithms, so that derivative is a
+ * pole, and the engine cannot tell a pole from a value it has no rule for.
+ * The Taylor engines decline. A function the engine does not define (`f`)
+ * keeps its symbolic coefficients `f(0) + f′(0) x + …`.
+ */
+function holdsInertLibraryDerivative(val: Expression): boolean {
+  return val
+    .getSubexpressions('Derivative')
+    .some((d) => isFunction(d) && isEngineAuthoredDefinition(d.op1));
+}
+
+/**
  * Whether the constant value `val` (the value of a function or of one of its
  * derivatives at the expansion point) divides by a value that is not proved
  * to be not 0 (`zeroVerdict()`), or applies a function with a branch point
@@ -610,7 +625,8 @@ function unaryTaylor(
       val.isNaN === true ||
       val.isInfinity === true ||
       hasIndeterminateZeroPower(val) ||
-      hasHiddenSingularity(val)
+      hasHiddenSingularity(val) ||
+      holdsInertLibraryDerivative(val)
     )
       return null;
     coeffs.push(ce.function('Divide', [val, ce.number(factorialBig(k))]));
@@ -851,7 +867,8 @@ function expandByDerivative(
       val.isNaN === true ||
       val.isInfinity === true ||
       hasIndeterminateZeroPower(val) ||
-      hasHiddenSingularity(val)
+      hasHiddenSingularity(val) ||
+      holdsInertLibraryDerivative(val)
     ) {
       val = resolve ? (resolve(g, k) ?? undefined) : undefined;
       if (!val) return null;
@@ -2156,11 +2173,22 @@ function computeSeriesInCall(
   const W = Math.min(n + BIGO_LOOKAHEAD, MAX_SERIES_ORDER);
 
   // Expansion at ±∞: substitute x = 1/s and expand at s = 0⁺ (or 0⁻).
-  if (x0.isInfinity) {
-    const re = x0.re;
-    if (!(re === Infinity || re === -Infinity)) return undefined; // ~∞ unsigned
-    return seriesAtInfinity(f, x, re > 0 ? 1 : -1, n, W, ce, resolveLimit);
+  // `DirectedInfinity(±1)` is ±∞ written as a call. `ComplexInfinity` reports
+  // a real part of ∞ too, so the sign is read from the point itself.
+  const direction = infinityDirection(x0, ce);
+  if (direction === 'complex') {
+    // ~∞, i∞: the expansion in 1/x is the one at +∞ and at −∞ when they are
+    // the same (`1/(x + 1)`); `exp(x)` has none, and `√x` and `ln x` have a
+    // branch point there. `|x|²` is `x²` on the real axis only, so `f` must
+    // be built from analytic operations of `x`.
+    if (!isAnalyticIn(f, x)) return undefined;
+    const up = seriesAtInfinity(f, x, 1, n, W, ce, resolveLimit);
+    if (up === undefined || holdsBranch(up)) return undefined;
+    const down = seriesAtInfinity(f, x, -1, n, W, ce, resolveLimit);
+    return down !== undefined && down.isSame(up) ? up : undefined;
   }
+  if (direction !== undefined)
+    return seriesAtInfinity(f, x, direction, n, W, ce, resolveLimit);
 
   // A non-finite, non-±∞ point (NaN, unsigned ∞): cannot expand.
   if (x0.isNaN) return undefined;
@@ -2194,6 +2222,71 @@ function computeSeriesInCall(
   const laurent = expandLaurent(f, x, x0, ce, W);
   if (!laurent) return undefined;
   return assembleLaurent(ce, laurent, n, power, f);
+}
+
+/** Whether `e` holds a root, a logarithm or a power with an exponent that is
+ * not an integer: a branch point at ∞, whose value depends on the direction. */
+function holdsBranch(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (['Sqrt', 'Root', 'Ln', 'Log'].includes(e.operator)) return true;
+  if (e.operator === 'Power' && asSmallInteger(e.op2) === null) return true;
+  return e.ops.some(holdsBranch);
+}
+
+/** Operators that are analytic off the real axis, where they are defined. */
+const ANALYTIC_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Square',
+  'Power',
+  'Exp',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+]);
+
+/** Whether every operation of `e` that depends on `x` is in
+ * `ANALYTIC_OPERATORS`: not `Abs`, `Re`, `Floor` or `Sign`, whose expansion at
+ * ±∞ does not hold in the other directions. */
+function isAnalyticIn(e: Expression, x: string): boolean {
+  if (!isFunction(e) || !e.has(x)) return true;
+  if (!ANALYTIC_OPERATORS.has(e.operator)) return false;
+  return e.ops.every((op) => isAnalyticIn(op, x));
+}
+
+/**
+ * `1` or `-1` when `x0` is `PositiveInfinity`, `NegativeInfinity` or a
+ * `DirectedInfinity` of a real direction, `'complex'` for any other infinity
+ * (`ComplexInfinity`, `DirectedInfinity(i)`) and `undefined` for a point at a
+ * finite distance. `Series(f, x, DirectedInfinity(1))` would otherwise be
+ * expanded as a Taylor series with `f(∞)` for its coefficients.
+ */
+function infinityDirection(
+  x0: Expression,
+  ce: ComputeEngine
+): 1 | -1 | 'complex' | undefined {
+  if (isFunction(x0, 'DirectedInfinity')) {
+    const d = x0.op1;
+    if (x0.nops === 1 && d?.isSame(1)) return 1;
+    if (x0.nops === 1 && d?.isSame(-1)) return -1;
+    return 'complex';
+  }
+  if (!x0.isInfinity) return undefined;
+  if (x0.isSame(ce.PositiveInfinity)) return 1;
+  if (x0.isSame(ce.NegativeInfinity)) return -1;
+  return 'complex';
 }
 
 /** True when `f` applies a pole-carrying special function to an argument that

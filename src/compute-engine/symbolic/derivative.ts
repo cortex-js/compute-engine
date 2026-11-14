@@ -300,7 +300,7 @@ export function derivativeKeyUseCount(): number {
  * (`engine._customLibraryOperators`), which is installed in the system scope
  * too?
  */
-function isEngineAuthoredDefinition(opSym: Expression): boolean {
+export function isEngineAuthoredDefinition(opSym: Expression): boolean {
   if (!isSymbol(opSym)) return false;
   const ce = opSym.engine;
   if (ce._customLibraryOperators.has(opSym.symbol)) return false;
