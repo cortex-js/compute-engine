@@ -14,6 +14,21 @@
 
 ### New Features
 
+- **`IntegerPartitions(n, kspec, parts, m)` lists the partitions of an
+  integer.** As in Mathematica, each partition is a list of positive parts in
+  non-increasing order, and the partitions are in reverse lexicographic order:
+  `IntegerPartitions(4)` is `[[4], [3, 1], [2, 2], [2, 1, 1], [1, 1, 1, 1]]`.
+  `kspec` is a largest number of parts (`k`), an exact one (`[k]`) or a range
+  (`[kmin, kmax]`, `[kmin, kmax, step]`, with `Infinity` or `All` for no
+  limit); `parts` limits the sizes to a list of positive integers; `m` keeps
+  the first `m` partitions. It is a lazy collection like `Combinations`:
+  `Count(IntegerPartitions(n))` is `NPartition(n)` with no walk, and `At`
+  reads a position from a table of counts. A count that needs more than a
+  bounded amount of work is unknown. Parts that are not positive integers,
+  and the `[m]` and `[m1, m2]` forms of `m`, are not supported: the call stays
+  unevaluated. (PR #520, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`PartitionsQ(n)` is the number of partitions of `n` into distinct
   parts.** It is the Wolfram Language `PartitionsQ` and, by Euler's theorem,
   also the number of partitions into odd parts. Like `NPartition`, it is 0 for a

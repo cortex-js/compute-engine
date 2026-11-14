@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 721 functions and constants of the standard library, by category.
+The 722 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -34,7 +34,7 @@ To search the library by concept rather than by name, use
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 18 definitions · [full reference](/epsil/reference/polynomials/)
-- [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
+- [Combinatorics](#combinatorics) — 12 definitions · [full reference](/epsil/reference/combinatorics/)
 - [Number theory](#number-theory) — 61 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
 - [Linear algebra](#linear-algebra) — 46 definitions · [full reference](/epsil/reference/linear-algebra/)
@@ -669,6 +669,7 @@ The [Combinatorics reference](/epsil/reference/combinatorics/) has the full desc
 | `choose` | `Choose` | `(n: complex \| infinity, m: complex \| infinity) -> number` | Binomial coefficient: number of ways to choose k items from n. |
 | `combinations` | `Combinations` | `((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)` | Return all k-element combinations of a collection. |
 | `fibonacci` | `Fibonacci` | `(integer, number?) -> number` | Compute the nth Fibonacci number. |
+| `integerPartitions` | `IntegerPartitions` | `(integer, any?, list<integer>?, integer?) -> list<list<integer>>` | Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. |
 | `multinomial` | `Multinomial` | `(integer+) -> integer` | Compute the multinomial coefficient for multiple integers. |
 | `permutations` | `Permutations` | `((S, integer?) -> list<string> where S: string) & ((collection, integer?) -> list<list>)` | Return all permutations of length k (default full length) of a collection. |
 | `pochhammer` | `Pochhammer` | `(complex \| infinity, complex \| infinity) -> number` | Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1). |
