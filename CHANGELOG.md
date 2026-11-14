@@ -169,6 +169,23 @@
 
 ### Resolved Issues
 
+- **`EllipticF(φ, m)`, `EllipticE(φ, m)`, `EllipticPi(n, φ, m)` and
+  `EllipticPi(n, m)` give `N()` at the working precision for real operands
+  with a real value.** At a precision of 30, `EllipticE(0.5, 0.3).N()` was
+  the double `0.4939911447289684`; it is
+  `0.493991144728968428148069987960`. `EllipticPi` where `1 - n sin²φ < 0`
+  (`n > 1` for the complete form) is the Cauchy principal value, as at
+  machine precision. A call stays unevaluated when the digits asked cannot
+  be computed, for example `EllipticE(φ, 1)` at a precision of 100 with `φ`
+  the first 420 digits of `π/2`, and when `m = 1` and `|φ| > π/2`, where the
+  value is not finite. A value that is not real, such as
+  `EllipticF(2, 2)`, is still a double complex number. Exact operands are
+  read with guard digits under `N()`, as for `EllipticE(φ, m)` before;
+  `evaluate()` of an exact operand is unchanged, and so are the values at
+  machine precision. (PR #557, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#550](https://github.com/cortex-js/compute-engine/issues/550))
+
 - **`Series` at `DirectedInfinity` and `ComplexInfinity` expands in `1/x`
   or stays unevaluated.** `Series(sin(x)/x, x, DirectedInfinity(1), 3)`
   was a Taylor sum with `sin(DirectedInfinity(1))` in its coefficients; it

@@ -49,6 +49,12 @@ import {
   type RealDomain,
 } from './type-handlers.js';
 import { bigClausen, clausen } from '../numerics/clausen.js';
+import {
+  bigEllipticF,
+  bigEllipticEIncomplete,
+  bigEllipticPiComplete,
+  bigEllipticPiIncomplete,
+} from '../numerics/elliptic-big.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -551,7 +557,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             ? applyN(
                 [phi, m],
                 ellipticEIncomplete,
-                undefined,
+                (phi, m) => bigEllipticEIncomplete(engine, phi, m),
                 ellipticEIncompleteComplex
               )
             : undefined;
@@ -608,16 +614,21 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // even for operands that are themselves finite.
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: ([phi, m], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
         if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
           return engine.Zero;
         const held = symbolicAtInfinity([phi, m]);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, phi, m)
-          ? applyN([phi, m], ellipticF, undefined, ellipticFComplex)
+          ? applyN(
+              [phi, m],
+              ellipticF,
+              (phi, m) => bigEllipticF(engine, phi, m),
+              ellipticFComplex
+            )
           : undefined;
-      },
+      }),
     },
 
     EllipticPi: {
@@ -643,7 +654,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // several operands), so no real claim is sound either.
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         if (ops.length === 3) {
           const [n, phi, m] = ops;
           // Π(n; 0|m) = 0 exactly
@@ -655,7 +666,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             ? applyN(
                 [n, phi, m],
                 ellipticPiIncomplete,
-                undefined,
+                (n, phi, m) => bigEllipticPiIncomplete(engine, n, phi, m),
                 ellipticPiIncompleteComplex
               )
             : undefined;
@@ -666,11 +677,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           ? applyN(
               ops,
               ellipticPiComplete,
-              undefined,
+              (n, m) => bigEllipticPiComplete(engine, n, m),
               ellipticPiCompleteComplex
             )
           : undefined;
-      },
+      }),
     },
 
     AGM: {

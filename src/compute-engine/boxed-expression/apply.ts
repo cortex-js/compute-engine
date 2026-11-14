@@ -324,7 +324,8 @@ export function applyOnImaginaryAxis(
  *
  * Routing:
  * - any complex operand → `complexFn`
- * - bignum preferred and `bigFn` available → `bigFn`
+ * - bignum preferred and `bigFn` available → `bigFn` (`null` declines: no
+ *   fallback to the machine kernel)
  * - otherwise → machine `fn`; if `fn` returns NaN on finite inputs and a
  *   `complexFn` is available, retry it (the value may be complex for real
  *   inputs, e.g. EllipticK(m) for m > 1).
@@ -336,7 +337,7 @@ export function applyOnImaginaryAxis(
 export function applyN(
   ops: ReadonlyArray<Expression>,
   fn: (...xs: number[]) => number | Complex,
-  bigFn?: (...xs: BigDecimal[]) => BigDecimal | Complex | number,
+  bigFn?: (...xs: BigDecimal[]) => BigDecimal | Complex | number | null,
   complexFn?: (...xs: Complex[]) => Complex
 ): Expression | undefined {
   if (!ops.every((op) => isNumber(op))) return undefined;
@@ -364,8 +365,13 @@ export function applyN(
     // Cascade: bignum (if preferred) → machine → complex. A NaN from a
     // kernel means "outside this kernel's implemented domain", so a
     // lower-precision or complex-valued answer is better than none.
-    if (bignumPreferred(ce) && bigFn)
-      result = bigFn(...ops.map((op) => op.bignumRe ?? ce.bignum(op.re)));
+    if (bignumPreferred(ce) && bigFn) {
+      const big = bigFn(...ops.map((op) => op.bignumRe ?? ce.bignum(op.re)));
+      // `null`: the kernel cannot vouch for the digits asked. The machine
+      // kernel would answer in doubles, so the call stays symbolic.
+      if (big === null) return undefined;
+      result = big;
+    }
     if (isNaNResult(result)) result = fn(...ops.map((op) => op.re));
     if (
       isNaNResult(result) &&
