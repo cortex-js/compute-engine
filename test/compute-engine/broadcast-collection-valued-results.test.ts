@@ -155,7 +155,11 @@ describe('the integer functions with a collection result map over a list', () =>
       ],
       'list<tuple<integer, integer, integer>^2>',
     ],
-    ['ContinuedFraction', [[['Rational', 3, 7], 2.5]], 'list<list<integer>>'],
+    [
+      'ContinuedFraction',
+      [[['Rational', 3, 7], 2.5]],
+      'list<list<integer | list<integer>>>',
+    ],
     [
       'IntegerDigits',
       [

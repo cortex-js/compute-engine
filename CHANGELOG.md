@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **`ContinuedFraction` of a quadratic irrational is its periodic form, and
+  every term it gives for an exact real is correct.**
+  `ContinuedFraction(Sqrt(2))` was twenty terms `[1, 2, 2, …]`; it is
+  `[1, [2]]`, where the last list is the period, as
+  `ContinuedFraction((3 + Sqrt(7))/5)` is `[1, 7, [1, 2, 1, 8, 13, 8]]`.
+  The result type is `list<integer | list<integer>>`. With a count `n`, the
+  result is exactly `n` terms: `ContinuedFraction(ExponentialE, 40)` was 19
+  terms ending in a wrong `…, 12, 2`, and `ContinuedFraction(Sqrt(23))`
+  ended in a wrong `…, 1, 4`. Another exact real is expanded at a
+  precision that is doubled to check its terms, or stays unevaluated.
+  `FromContinuedFraction([1, [2]])` reads the period back and is `Sqrt(2)`.
+  (PR #571, contributed by [enumeratio](https://github.com/enumeratio),
+  fixes [#570](https://github.com/cortex-js/compute-engine/issues/570))
+
 ## 0.189.0 _2026-11-14_
 
 ### Breaking Changes

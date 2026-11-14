@@ -77,13 +77,18 @@ chineseRemainder([2, 3, 2], [3, 5, 7], 100)
 
 ### continuedFraction
 
-MathJSON `ContinuedFraction` · `(real, integer?) -> list<integer>`
+MathJSON `ContinuedFraction` · `(real, integer?) -> list<integer | list<integer>>`
 
-Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; an inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to the optional `n` terms (default 20).
+Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully. An exact quadratic irrational (`Sqrt(2)`) is expanded to its periodic form `[a0, …, [period]]` (`[1, [2]]`), or to the optional `n` terms. Another exact real (`ExponentialE`) is expanded to `n` terms (default 20), each computed at a precision that vouches for it. An inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to `n` terms (default 20).
 
 ```epsil
 continuedFraction(43/19)
 // ➔ [2,3,1,4]
+```
+
+```epsil
+continuedFraction(sqrt(2))
+// ➔ [1,[2]]
 ```
 
 ### digitCount
@@ -262,11 +267,16 @@ factorInteger(12/35)
 
 MathJSON `FromContinuedFraction` · `(collection<any>) -> number`
 
-Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`.
+Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. A last element that is a list is the repeating period, `[1, [2]]`: the quadratic irrational `Sqrt(2)`.
 
 ```epsil
 fromContinuedFraction([2, 3, 1, 4])
 // ➔ 43/19
+```
+
+```epsil
+fromContinuedFraction([1, [2]])
+// ➔ sqrt(2)
 ```
 
 ### fromDigits

@@ -687,7 +687,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `carmichaelLambda` | `CarmichaelLambda` | `(integer) -> integer` | Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. |
 | `catalanNumber` | `CatalanNumber` | `(real) -> number` | Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. |
 | `chineseRemainder` | `ChineseRemainder` | `(collection<any>, collection<any>, integer?) -> integer` | Solve a system of simultaneous congruences: return the smallest non-negative integer `x` such that `x ≡ residues[i] (mod moduli[i])` for every `i`. |
-| `continuedFraction` | `ContinuedFraction` | `(real, integer?) -> list<integer>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
+| `continuedFraction` | `ContinuedFraction` | `(real, integer?) -> list<integer \| list<integer>>` | Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. |
 | `digitCount` | `DigitCount` | `(integer, integer?, integer?, integer?) -> integer \| list<integer>` | Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. |
 | `digitSum` | `DigitSum` | `(integer, integer?, integer?) -> integer` | Return the sum of the digits of `n` in the given `base` (default 10). |
 | `dirichletCharacter` | `DirichletCharacter` | `(integer, integer, integer) -> number` | The Dirichlet character χ_j(n) modulo `k`, the `j`-th of the φ(k) characters (Wolfram's indexing, `j = 1` the principal character). |
@@ -700,7 +700,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `eulerian` | `Eulerian` | `(integer, integer) -> integer` | Eulerian number A(n, m): number of permutations of &#123;1..n&#125; with exactly m ascents. |
 | `extendedGCD` | `ExtendedGCD` | `(integer, integer, integer*) -> tuple` | Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients). |
 | `factorInteger` | `FactorInteger` | `(rational) -> list<tuple<integer, integer>>` | Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. |
-| `fromContinuedFraction` | `FromContinuedFraction` | `(collection<any>) -> number` | Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`. |
+| `fromContinuedFraction` | `FromContinuedFraction` | `(collection<any>) -> number` | Reconstruct the value of a continued fraction given its list of integer terms `[a0, a1, …]`. |
 | `fromDigits` | `FromDigits` | `(collection<any>, number?) -> number` | Reconstruct a number from its digits (most-significant first) in the given `base` (default 10). |
 | `integerDigits` | `IntegerDigits` | `(integer, integer?, integer?) -> list<integer>` | Return the digits of `n` in the given `base` (default 10), most-significant first. |
 | `integerSqrt` | `IntegerSqrt` | `(integer) -> integer` | Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. |
