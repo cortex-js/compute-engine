@@ -1,9 +1,6 @@
 # Binding workstream: handoff after the cleanup pass
 
-Written 2026-11-14 by session `compute-engine-62` for the session that
-continues the "bound once" workstream. It replaces
-`2026-11-14-binding-cleanup-handoff.md` (session `ce-desk`). Delete this
-file when parts 2 and 3 are done or have their own record.
+Delete this file when parts 2 and 3 are done or have their own record.
 
 ## Prompt to paste in the new session
 
@@ -14,7 +11,7 @@ file when parts 2 and 3 are done or have their own record.
 > workstream; (3) the issues collected on the way. Start with part 2, item
 > 1 (CE-1270). The user's goal for the workstream is that types are settled
 > before a run and that machinery is deleted: report the lines that each
-> change adds and removes under `src/`. Ask the user before you commit.
+> change adds and removes under `src/`. Commit when ready.
 
 ## State on 2026-11-14
 
@@ -26,6 +23,8 @@ file when parts 2 and 3 are done or have their own record.
   `activationViewDiverges()`, and the stored-value block-local skip of
   `freeNameBindingAndScope` are removed. A free name of a stored value is
   read from its home scope.
+- Issue CE-1210 notes performance regression that needs to be investigated and
+  resolved.
 - Removed from part 1 and NOT landed: a trial validation that runs
   `devolveUnappliedOperator`. `_asFreeVariable()` writes a variable reading
   into the unit environment of the boxing (`setReadsAsVariable()`). Neither
