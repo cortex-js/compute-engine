@@ -8,8 +8,7 @@ import { opsReads } from '../utils';
 // `2ⁿ` paths from the root to `x`. Two parts of the canonicalization of the
 // literal went along every path: the canonical form of a raw node was made
 // once for each path that reached it, so the canonical body was a tree of
-// `2ⁿ` nodes, and the search for the names that the body assigns
-// (`nestedAssignmentNames()`, `library/control-structures.ts`) read each
+// `2ⁿ` nodes, and the search for the names that the body assigns read each
 // path. At depth 24, the canonicalization took about 5 seconds or more.
 
 const ce = new ComputeEngine();
