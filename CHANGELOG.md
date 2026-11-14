@@ -14,6 +14,14 @@
 
 ### New Features
 
+- **`PartitionsQ(n)` is the number of partitions of `n` into distinct
+  parts.** It is the Wolfram Language `PartitionsQ` and, by Euler's theorem,
+  also the number of partitions into odd parts. Like `NPartition`, it is 0 for a
+  negative integer, applies to each element of a list, gives a float for a
+  float operand and stays unevaluated for an `n` too large to compute.
+  `PartitionsQ(10)` is `10`. (PR #521, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **The compile option `inputs` gives the types of the inputs at the call.**
   `compile(expr, { inputs: { x: 'real', P: 'tuple<real, real>' } })` reads
   `x` and `P` as inputs of these types, whatever the scopes declare for them

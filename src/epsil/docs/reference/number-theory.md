@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 60 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 61 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -500,6 +500,17 @@ MathJSON `PartitionsP` · `(integer) -> integer`
 ```epsil
 partitionsP(5)
 // ➔ 7
+```
+
+### partitionsQ
+
+MathJSON `PartitionsQ` · `(integer) -> integer`
+
+Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. The Wolfram Language `PartitionsQ`.
+
+```epsil
+partitionsQ(10)
+// ➔ 10
 ```
 
 ### powerMod

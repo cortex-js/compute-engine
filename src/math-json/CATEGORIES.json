@@ -598,6 +598,7 @@
       "NPartition",
       "NthPrime",
       "PartitionsP",
+      "PartitionsQ",
       "PowerMod",
       "PowerModList",
       "PrimeFactors",

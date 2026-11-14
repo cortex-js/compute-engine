@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 720 functions and constants of the standard library, by category.
+The 721 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -35,7 +35,7 @@ To search the library by concept rather than by name, use
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 18 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
-- [Number theory](#number-theory) — 60 definitions · [full reference](/epsil/reference/number-theory/)
+- [Number theory](#number-theory) — 61 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
 - [Linear algebra](#linear-algebra) — 46 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
@@ -722,6 +722,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
 | `partitionsP` | `PartitionsP` | `(integer) -> integer` | `PartitionsP` is an alias for `NPartition`, which is the preferred name. |
+| `partitionsQ` | `PartitionsQ` | `(integer) -> integer` | Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. |
 | `powerMod` | `PowerMod` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> integer \| list<integer>` | Return `a^b mod m` (modular exponentiation). |
 | `powerModList` | `PowerModList` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> list<integer> \| list<list<integer>>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
 | `primeFactors` | `PrimeFactors` | `(integer) -> list<integer>` | Return the sorted list of distinct prime factors of an integer `n`. |
