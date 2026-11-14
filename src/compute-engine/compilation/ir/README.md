@@ -57,7 +57,9 @@ reads a symbol that is not a call. Any other value declines, also a closed one
 declares `a = 10`). The program lists the name in `captures` (`symbolDeps`),
 unless its binding is the library's. A name with a value read in the body of a
 user function declines: the interpreter reads the binding of the body, which
-need not be the one of the name where the call is compiled. `Pi` and
+need not be the one of the name where the call is compiled. A name with no value
+there (an input, also one of `symbolic` or `inputs`) is an input of the program
+(see "User functions"). `Pi` and
 `ExponentialE` decline when the innermost binding of the name is not the library
 constant. A reassignment after the compilation does not change the code, and the
 inputs object is not read for that name (the existing compiler also writes
@@ -111,8 +113,11 @@ below about -171 is a known limitation, `docs/COMPILATION-MODEL.md`); a pole is
 row has a spelling only where GLSL ES 3.00 has a builtin defined on every real
 (`atan`, `asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
 
-Inputs: a scalar with no declared type, or of type `unknown` or `number`, is a
-real in the `strict` mode (a deliberate difference from the existing compiler)
+Inputs: a union whose every member is a real type (ranged or not), `nan` or an
+infinity (`nan | real | signed_infinity`, `integer | nan`) is a real, also as
+the element of a list: a double holds each of its values (a `NaN` or infinite
+value gives an unspecified result). A scalar with no declared type, or of type
+`unknown` or `number`, is a real in the `strict` mode (a deliberate difference from the existing compiler)
 and a complex in the `complex` mode; a scalar `complex` input is on the complex
 lane, and a number given for a complex input is lifted to `{re, im: 0}`, also
 with `entryChecks: false`. A list of complex elements declines: an entry of such
@@ -128,8 +133,10 @@ A `Declare` in a `Block` has a value, positional or in its attributes
 (`Declare(t, {value: 0})`; a declaration with no value is an error of the
 canonical form), and a type `real`, `integer` or `boolean`, as a string or a
 symbol; with the type `unknown`, or none, the local is a real (a boolean for a
-boolean value), as the interpreter admits a real write to `let t = 0`. Another
-attribute (`constant`) declines.
+boolean value), as the interpreter admits a real write to `let t = 0`. The
+attribute `constant` (`Declare(K, {value: 240, constant: True})`) makes a local
+that an `Assign` does not write: such an `Assign` declines, as the interpreter
+refuses it. Another attribute declines.
 
 ## The complex lane
 
@@ -346,9 +353,23 @@ chooses its samples), as do two variables and the option
 A user function is lowered once per compilation, keyed by its definition: the
 parameter types from the signature of its binding (`real` when unknown), the
 result from the signature or the body. A recursive one needs a result type
-(declared, or inferred by the engine). A capture, a function value other than
-the literal of a `Map` or `Filter` or the root, a list argument, and a list
-parameter decline.
+(declared, or inferred by the engine). An input of the compilation that the body
+reads (a free name with no value, or a name of `symbolic` or `inputs`) is a
+parameter after the function's own, in the order of its first read in the body
+(lambda lifting): each call passes the caller's value of the name, an input of
+the entry or, in another function, a parameter of the same kind, so the input is
+in `freeSymbols` and a chain of calls passes it down. At the entry the input has
+the type that the scope of the compilation gives the name, whichever occurrence
+reads it first, and the call checks it against the parameter: with
+`f(t) := a·t` and `inputs: {a: 'complex'}`, `f(2)` declines (an integer input
+for a real parameter is admitted). An occurrence of an input of another type
+than the input's declines. Declined: a recursive call of a function that reads
+an input, also through a cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
+`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
+parameter, or has a value; an input of a list type; a name with a value read in
+the body; a `vars` name. A recursive function that reads no input compiles. A
+function value other than the literal of a `Map` or `Filter` or the root, a list
+argument, and a list parameter decline.
 
 ## How to add
 

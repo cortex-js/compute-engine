@@ -1270,6 +1270,52 @@ batch, for both compilers: the loops of profile code check the deadline, and
 a timeout was written as a NaN cell (review finding). `broadcastStrideOfType`
 moved to `compiler-type-facts.ts`.
 
+Seventh batch, 2026-11-14 (four causes of Tycho's list). An input whose type
+is a union of real types, `nan` and infinity types (`nan | real |
+signed_infinity`), scalar or the element of a list, is on the real lane. A
+`Declare` with `constant` is admitted and an `Assign` to a constant local
+declines. An input of the compilation that the body of a called function
+reads is passed to the function as an extra parameter at each call,
+transitively; its type is the one the scope of the compilation gives the
+name, an occurrence of another type declines, and a recursive function that
+reads an input declines (review findings). `Degrees` (radians only) and `Cot`
+(real and complex) are rows. Measured on batches 6 and 7 together, in a
+worktree at `06801243de79925cd9b0804d45404aa26fea2a8a` plus the two patches;
+5,362 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,394 of 10,855 (95.8%) |
+| Every JavaScript compile | 23,352 of 38,934 (60.0%) |
+| Public `compile()` calls | 12,949 of 28,069 (46.1%) |
+
+No test fails in the shadow run; with the switch on, the one test of CE-1267
+fails as before.
+
+Tycho's second run (2026-11-14, on a build of these two batches): CORE audit
+428 of 997 JavaScript compilations admitted (43%), no `compile-error`, 2,996
+calls compared with no difference; the seeded-random tests 694 of 696 (the
+two failures are budget tests whose loop result is not read, which the
+profile removes), 200,287 calls compared with no difference; all 314 files
+of its plot tests with the profile first: 1,354 of 1,943 compilations
+admitted. A 400 × 400 batch: a shared-list read 1.11 and 1.33 ms on the
+profile against 1.60 ms on the existing compiler, arithmetic 2.08 against
+2.11 ms (load 2.0). Largest causes of a decline in the audit: `Tuple` 213,
+`Comprehension` 88, `PointList` 86, `AsOklab` 54, a list parameter or list
+result of a function 49, an element-wise sum of lists of different run-time
+lengths 15, a `vars` name in a function 18, `ElementMax` 8, `Break` 5. Its
+findings, taken into a batch of fixes: an internal error of the verifier
+(`Min(Map(k ↦ Sum(k, k = 1..3), [10, 20]))` with `iterationBudget`); a wrong
+value for Tycho, whose in-place `compile` handler on the definitions of `At`
+and `Which` (the Desmos index floor) the profile did not call, so a head
+whose definition has a `compile` handler or `compileHelpers` must decline;
+`Sqrt(-x² - 1)` in the strict mode was NaN where the interpreter gives `i`.
+
+Open with the user: how a host changes the lowering of an operator when the
+existing compiler is deleted (a definition's `compile` handler returns text
+for it); whether a loop whose result is not read may be removed, counting no
+pass of `iterationBudget`.
+
 Order of the coverage from this list: (6) `broadcast: true` and the batch and
 asynchronous members of the result; (7) the extended-real input types,
 `Declare` with `constant`, a function that reads an input of the compilation

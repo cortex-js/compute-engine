@@ -5,6 +5,7 @@
  */
 
 import type { Expression, FunctionInterface } from '../../global-types.js';
+import type { Type } from '../../../common/type/types.js';
 import { isFunction } from '../../boxed-expression/type-guards.js';
 import type { Builder, IRType, Lane, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
@@ -40,8 +41,13 @@ export function decline(e: Expression, cause: string): never {
   throw new Decline(text(e), cause, isFunction(e) ? e.operator : undefined);
 }
 
-/** The binding of a name. `lane` is the declared lane of a local. */
-export type Binding = { v: V; lane?: Lane; role: 'input' | 'local' | 'index' };
+/** The binding of a name. `lane` is the declared lane of a local. A
+ *  `constant` is a local that no `Assign` writes. */
+export type Binding = {
+  v: V;
+  lane?: Lane;
+  role: 'input' | 'local' | 'constant' | 'index';
+};
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };
 
@@ -82,6 +88,9 @@ export type Lowering = {
   /** `e` is a call of the library operator of its name (not a user
    *  function, not a shadowed name). */
   isLibrary(e: Fn): boolean;
+  /** The input `name` of the engine type `t`, which a function that the
+   *  call `e` calls reads, read at the call. */
+  free(e: Fn, name: string, t: Type): V;
   /** `v` where a value of `lane` is read (a real converted to complex). */
   widen(v: V, lane: Lane): V;
   /** The lane of an input of type `number`, `unknown` or none: complex in

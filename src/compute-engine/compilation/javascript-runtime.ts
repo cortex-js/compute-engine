@@ -7128,7 +7128,7 @@ export const REAL_FUNCTIONS = Object.freeze({
 });
 
 // prettier-ignore
-const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'catan',
+const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'ccot', 'catan',
   'casin', 'cacos', 'cacot', 'casec', 'cacsc', 'ccoth', 'casinh', 'cacosh', 'catanh', 'cacoth',
   'casech', 'cacsch', 'cconj', 'cabs', 'carg'] as const;
 

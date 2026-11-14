@@ -197,6 +197,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Sin',          1,          rc('sin', 1),                  { fold: Math.sin, ...angle }),
   row('Cos',          1,          rc('cos', 1),                  { fold: Math.cos, ...angle }),
   row('Tan',          1,          rc('tan', 1),                  { fold: Math.tan, ...angle }),
+  row('Cot',          1,          rc('cot', 1),                  { fold: (x: number) => 1 / Math.tan(x), ...angle }),
+  row('Degrees',      1,          [[[R], R, 'deg']],             { fold: (x: number) => (x * Math.PI) / 180, ...angle }),
   row('Real',         1,          [[[C], R, 'cre']],             {}),
   row('Imaginary',    1,          [[[C], R, 'cim']],             {}),
   row('Conjugate',    1,          [[[C], C, 'cconj']],           {}),

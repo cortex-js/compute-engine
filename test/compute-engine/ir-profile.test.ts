@@ -20,6 +20,7 @@ import {
   type StoredJavaScript,
 } from '../../src/compute-engine/compilation/javascript-runtime';
 import { JS } from '../../src/compute-engine/compilation/ir/print-js';
+import { compileSlice } from '../../src/compute-engine/compilation/ir';
 import { rangeCount } from '../../src/compute-engine/numerics/range-count';
 import {
   agrees,
@@ -724,5 +725,451 @@ describe('the default route', () => {
       const r = quiet(() => compile(box(json)));
       expect(r.profile).toBeUndefined();
     }
+  });
+});
+
+//
+// Coverage from Tycho's corpus audit: inputs of an extended-real type, a
+// constant local, a user function that reads an input, Degrees and Cot
+//
+
+/** Compile `json` with the profile and `options`, and compare its value
+ *  with the interpreter's (within 1e-12) at each point, where the
+ *  interpreter gives a number. */
+function againstInterpreter(
+  engine: ComputeEngine,
+  json: Json,
+  points: Record<string, number | number[]>[],
+  options: Record<string, unknown> = {}
+): CompilationResult<'javascript'> {
+  const expr = box(json, engine);
+  const r = compile(expr, {
+    ...IR,
+    ...options,
+    fallback: false,
+  } as never) as CompilationResult<'javascript'>;
+  expect(r.profile).toBe('ir');
+  for (const point of points) {
+    const expected = interpret(engine, expr, point);
+    expect(typeof expected === 'number' || Array.isArray(expected)).toBe(true);
+    const v = (r.run as (x: unknown) => unknown)(point);
+    expect([point, agrees(v, expected)]).toEqual([point, true]);
+  }
+  return r;
+}
+
+describe('an input of an extended-real type is on the real lane', () => {
+  test('a list and a scalar of nan | real | signed_infinity (the witnesses)', () => {
+    const engine = new ComputeEngine();
+    engine.declare('S', 'list<nan | real | signed_infinity>');
+    engine.declare('J', 'integer');
+    engine.declare('L', 'real');
+    engine.declare('sigma', 'nan | real | signed_infinity');
+    const points = [
+      { S: [0.5, 2, -1.25], J: 2, L: 3 },
+      { S: [1.5, -0.75, 4], J: 3, L: 0.7 },
+    ];
+    againstInterpreter(
+      engine,
+      ['Cos', ['Divide', ['Multiply', 2, 'Pi', ['At', 'S', 'J']], 'L']],
+      points
+    );
+    againstInterpreter(
+      engine,
+      [
+        'List',
+        ['Multiply', 'sigma', ['Subtract', ['At', 'S', 2], ['At', 'S', 1]]],
+        ['Multiply', 'sigma', ['Subtract', ['At', 'S', 3], ['At', 'S', 2]]],
+      ],
+      points.map((p, i) => ({ ...p, sigma: [10, -2.5][i] }))
+    );
+  });
+  test('the option inputs, real | signed_infinity | ~oo, and an integer union with nan', () => {
+    const engine = new ComputeEngine();
+    const r = compile(box(['Add', ['Multiply', 'w', 'k'], 'q'], engine), {
+      ...IR,
+      fallback: false,
+      inputs: {
+        w: 'real | signed_infinity | ~oo',
+        k: 'integer | nan',
+        q: 'nan | real<0..1>',
+      },
+    } as never) as CompilationResult<'javascript'>;
+    expect([...r.freeSymbols!].sort()).toEqual(['k', 'q', 'w']);
+    expect((r.run as (x: unknown) => number)({ w: 1.5, k: 3, q: 0.25 })).toBe(
+      4.75
+    );
+    engine.declare('k2', 'integer | nan');
+    // On the real lane, not the integer lane: a real Mod, and k2 / 2 is real.
+    againstInterpreter(
+      engine,
+      ['Add', ['Mod', 'k2', 3], ['Divide', 'k2', 2]],
+      [{ k2: 7 }, { k2: -4 }]
+    );
+  });
+  test('the GLSL target reads the type by the same rule', () => {
+    const engine = new ComputeEngine();
+    engine.declare('sigma', 'nan | real | signed_infinity');
+    engine.declare('S', 'list<(real | signed_infinity)^3>');
+    const code = compileSlice(
+      box(['Multiply', 'sigma', ['At', 'S', 2]], engine),
+      { target: 'glsl' }
+    ).code;
+    expect(code).toMatch(/float in0_sigma/);
+    expect(code).toMatch(/float in1_S\[3\]/);
+  });
+});
+
+describe('a Declare with the attribute constant', () => {
+  test('a constant local read twice; constant: False is a local', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const constant = (c: boolean, value: number) => ({
+      dict: { value, constant: c },
+    });
+    againstInterpreter(
+      engine,
+      [
+        'Block',
+        ['Declare', 'K', constant(true, 240)],
+        ['Add', ['Multiply', 'K', 'x'], ['Divide', 'K', 7]],
+      ],
+      [{ x: 0.5 }, { x: -3.25 }]
+    );
+    againstInterpreter(
+      engine,
+      [
+        'Block',
+        ['Declare', 't', constant(false, 1)],
+        ['Assign', 't', ['Add', 't', 'x']],
+        't',
+      ],
+      [{ x: 2.5 }, { x: -1 }]
+    );
+  });
+  test('an Assign to a constant local declines (the interpreter refuses it)', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const o = outcome(
+      box(
+        [
+          'Block',
+          ['Declare', 'K', { dict: { value: 240, constant: true } }],
+          ['Assign', 'K', 'x'],
+          'K',
+        ],
+        engine
+      )
+    );
+    expect('message' in o && o.message).toMatch(/a write to a constant/);
+  });
+});
+
+describe('a user function that reads an input of the compilation', () => {
+  /** An engine with `x`, `y`, `n` and `m_s` declared real (`m_s` holds
+   *  3), and the functions of the witnesses. */
+  const engine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    for (const name of ['x', 'y', 'n', 'm_s', 'N', 'h', 'r', 't', 'u', 'v'])
+      e.declare(name, 'real');
+    e.assign('m_s', 3);
+    e.assign(
+      'TychoCertificate55',
+      box(['Function', ['Multiply', 'n', 2.5]], e)
+    );
+    e.assign(
+      'F_s',
+      box(['Function', ['Add', ['Multiply', 'a', 'm_s'], 'b'], 'a', 'b'], e)
+    );
+    return e;
+  };
+  const symbolic = ['x', 'y', 'N', 'n', 'h', 'r', 't', 'u', 'v'];
+
+  test('the witnesses: TychoCertificate55() reads n, F_s reads m_s', () => {
+    const e = engine();
+    const r = againstInterpreter(
+      e,
+      ['TychoCertificate55'],
+      [{ n: 2 }, { n: -0.3 }],
+      {
+        symbolic,
+      }
+    );
+    expect(r.freeSymbols).toEqual(['n']);
+    const s = againstInterpreter(
+      e,
+      ['Floor', ['Divide', ['F_s', 'x', 'y'], 6.3]],
+      [
+        { x: 2, y: 5, m_s: 7 },
+        { x: -1.5, y: 40, m_s: 2.25 },
+      ],
+      { symbolic: [...symbolic, 'm_s'] }
+    );
+    expect(s.freeSymbols).toEqual(['x', 'y', 'm_s']);
+  });
+  test('through two levels of calls, and one definition called twice', () => {
+    const e = engine();
+    e.assign('G', box(['Function', ['Multiply', 2, ['F_s', 'c', 1]], 'c'], e));
+    const r = againstInterpreter(
+      e,
+      ['Add', ['G', 'x'], ['F_s', 'y', 'x'], ['F_s', 1, 2]],
+      [
+        { x: 2, y: 0.5, m_s: 4 },
+        { x: -3, y: 7, m_s: 0.5 },
+      ],
+      { symbolic: ['m_s'] }
+    );
+    expect(r.freeSymbols).toEqual(['x', 'm_s', 'y']);
+    // One function per definition, and each call passes m_s.
+    expect(r.preambleOnce.match(/const u\d+_Fs =/g)).toHaveLength(1);
+    expect(r.code.match(/_Fs\([^)]*_\.m_s\)/g)).toHaveLength(2);
+  });
+  test('a recursive function that reads an input declines; with no input it compiles', () => {
+    const e = engine();
+    e.declare('k', 'integer');
+    const recursive = (name: string, base: Json, step: Json) => {
+      e.declare(name, '(integer) -> real');
+      e.assign(
+        name,
+        box(
+          [
+            'Function',
+            [
+              'If',
+              ['LessEqual', 'j', 0],
+              base,
+              ['Add', step, ['Multiply', 0.5, [name, ['Subtract', 'j', 1]]]],
+            ],
+            'j',
+          ],
+          e
+        )
+      );
+    };
+    recursive('R', 'n', 'n');
+    const o = outcome(box(['R', 'k'], e));
+    expect('message' in o && o.message).toMatch(
+      /a recursive call of R, which reads the input n/
+    );
+    recursive('R0', 1.5, 2);
+    againstInterpreter(e, ['R0', 'k'], [{ k: 4 }, { k: 0 }]);
+  });
+  test('a cycle whose input is read after the recursive call declines', () => {
+    const e = engine();
+    e.declare('k', 'integer');
+    e.declare('P', '(integer) -> real');
+    e.declare('Q', '(integer) -> real');
+    // The arm of P that calls Q, which calls P, is lowered before P reads n.
+    const step = (other: string, base: Json) =>
+      box(
+        [
+          'Function',
+          ['If', ['Greater', 'j', 0], [other, ['Subtract', 'j', 1]], base],
+          'j',
+        ],
+        e
+      );
+    e.assign('P', step('Q', 'n'));
+    e.assign('Q', step('P', 1));
+    const o = outcome(box(['P', 'k'], e));
+    expect('message' in o && o.message).toMatch(
+      /a recursive call of P, which reads the input n/
+    );
+  });
+  test('a name that holds a value in a body declines, as a local of the name at the call', () => {
+    const e = engine();
+    const value = outcome(box(['F_s', 'x', 'y'], e));
+    expect('message' in value && value.message).toMatch(
+      /F_s reads m_s, which is not a parameter \(a capture\)/
+    );
+    const local = outcome(
+      box(['Block', ['Declare', 'n', 'real', 5], ['TychoCertificate55']], e),
+      { symbolic: ['n'] }
+    );
+    expect('message' in local && local.message).toMatch(
+      /reads the input n, where n is a local or a parameter/
+    );
+  });
+});
+
+describe('Degrees and Cot', () => {
+  test('Degrees on both targets (the witness Sin(Degrees(h_0)))', () => {
+    const engine = new ComputeEngine();
+    engine.declare('h_0', 'real');
+    const json = ['Sin', ['Degrees', 'h_0']];
+    againstInterpreter(engine, json, [
+      { h_0: 30 },
+      { h_0: -127.5 },
+      { h_0: 1e3 },
+    ]);
+    expect(compileSlice(box(json, engine), { target: 'glsl' }).code).toMatch(
+      /sin\(radians\(/
+    );
+    // Under grad or turn the row declines (Degrees(h) is in that unit).
+    for (const unit of ['grad', 'turn'] as const) {
+      const other = new ComputeEngine();
+      other.angularUnit = unit;
+      other.declare('h', 'real');
+      const o = outcome(box(['Degrees', 'h'], other));
+      expect([unit, 'message' in o && o.message]).toEqual([
+        unit,
+        expect.stringMatching(
+          /Degrees with a angularUnit other than the default/
+        ),
+      ]);
+    }
+  });
+  test('Cot on the real lane and the complex lane', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    engine.declare('z', 'complex');
+    againstInterpreter(engine, ['Cot', 'x'], [{ x: 0.7 }, { x: -2.3 }]);
+    const r = compile(box(['Tan', ['Cot', 'z']], engine), {
+      ...IR,
+      fallback: false,
+      mode: 'complex',
+    } as never) as CompilationResult<'javascript'>;
+    const z = { re: 0.4, im: -0.9 };
+    const expected = interpret(engine, box(['Tan', ['Cot', 'z']], engine), {
+      z: z as never,
+    });
+    expect(expected).toMatchObject({
+      re: expect.any(Number),
+      im: expect.any(Number),
+    });
+    expect(agrees((r.run as (x: unknown) => unknown)({ z }), expected)).toBe(
+      true
+    );
+  });
+});
+
+describe('a lifted input: its type, the other modes and targets', () => {
+  /** `f(t) := a t` with `a` not declared. */
+  const engine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.assign('f', box(['Function', ['Multiply', 'a', 't'], 't'], e));
+    return e;
+  };
+  test('the type of the input is the one the scope of the compilation gives: each order agrees or declines', () => {
+    const cases: [Json, Record<string, string>, Record<string, unknown>][] = [
+      [
+        ['List', ['f', 2], ['Multiply', 'a', 'a']],
+        { a: 'complex' },
+        { a: { re: 1, im: 2 } },
+      ],
+      [
+        ['List', ['Multiply', 'a', 'a'], ['f', 2]],
+        { a: 'complex' },
+        { a: { re: 1, im: 2 } },
+      ],
+      [['f', 2], { a: 'complex' }, { a: { re: 1, im: 2 } }],
+      [
+        ['List', ['f', 2], ['Add', 'a', 1]],
+        { a: 'list<real^3>' },
+        { a: [1, 2, 3] },
+      ],
+      [
+        ['List', ['Add', 'a', 1], ['f', 2]],
+        { a: 'list<real^3>' },
+        { a: [1, 2, 3] },
+      ],
+    ];
+    for (const [json, inputs, point] of cases) {
+      const o = outcome(box(json, engine()), { inputs });
+      if ('message' in o) {
+        expect([json, o.diagnostic.code]).toEqual([json, 'outside-profile']);
+        continue;
+      }
+      const e = engine();
+      for (const [k, t] of Object.entries(inputs)) e.declare(k, t);
+      const expected = interpret(e, box(json, e), point as never);
+      expect([json, agrees(o.result.run!(point), expected)]).toEqual([
+        json,
+        true,
+      ]);
+    }
+    // An integer input for a real parameter compiles.
+    const r = outcome(box(['f', 2], engine()), { inputs: { a: 'integer' } });
+    expect('result' in r && r.result.run!({ a: 3 })).toBe(6);
+  });
+  test('an occurrence of another type than the input declines', () => {
+    // A is boxed where a is not declared, B where a is complex.
+    const e = new ComputeEngine();
+    e.assign('A', box(['Function', ['Multiply', 'a', 't'], 't'], e));
+    e.pushScope();
+    e.declare('a', 'complex');
+    e.assign(
+      'B',
+      box(['Function', ['Divide', ['A', 't'], ['Multiply', 'a', 'a']], 't'], e)
+    );
+    // compile() refuses the two definitions of a; compileSlice() reads
+    // the bodies as they are.
+    const o = outcome(box(['B', 2], e));
+    expect('message' in o && o.message).toMatch(/different definitions/);
+    expect(() =>
+      compileSlice(box(['B', 2], e), { target: 'javascript' })
+    ).toThrow(/a read with two types/);
+    e.popScope();
+  });
+  test('in mode bigint a lifted input is exact at 10^20', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'integer');
+    e.declare('k', 'integer');
+    e.declare('g', '(integer) -> integer');
+    e.assign(
+      'g',
+      box(['Function', ['Add', ['Multiply', 'n', 'j'], 1], 'j'], e)
+    );
+    const r = compile(box(['g', 'k'], e), {
+      ...IR,
+      mode: 'bigint',
+      fallback: false,
+    } as never) as CompilationResult<'javascript'>;
+    expect(r.freeSymbols).toEqual(['k', 'n']);
+    expect(r.run!({ k: 3n, n: 10n ** 20n })).toBe(3n * 10n ** 20n + 1n);
+  });
+  test('stored code with a lifted call loads after a JSON round trip; the entry check refuses a complex value', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'real');
+    e.declare('x', 'real');
+    e.assign(
+      'g',
+      box(['Function', ['Add', ['Multiply', 'n', 'j'], 1], 'j'], e)
+    );
+    const r = compile(box(['Add', ['g', 'x'], ['g', 2]], e), {
+      ...IR,
+      fallback: false,
+    }) as CompilationResult<'javascript'>;
+    const copy = JSON.parse(
+      JSON.stringify({
+        code: r.code,
+        preamble: r.preamble,
+        preambleOnce: r.preambleOnce,
+        callCode: r.callCode,
+        reconstructionDigits: r.reconstructionDigits,
+        calling: r.calling,
+        entryPlan: r.entryPlan,
+        mode: r.mode,
+        runtimeVersion: r.runtimeVersion,
+        shippable: r.shippable,
+        profile: r.profile,
+      })
+    ) as StoredJavaScript;
+    const f = createJavaScriptRuntime().load(copy);
+    expect(f({ x: 1.5, n: 4 })).toBe(r.run!({ x: 1.5, n: 4 }));
+    expect(r.run!({ x: 1.5, n: 4 })).toBe(16);
+    expect(() => r.run!({ x: 1.5, n: { re: 1, im: 2 } })).toThrow(TypeError);
+  });
+  test('the GLSL text of a function with a lifted parameter', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'real');
+    e.declare('x', 'real');
+    e.assign(
+      'g',
+      box(['Function', ['Add', ['Multiply', 'n', 'j'], 1], 'j'], e)
+    );
+    const code = compileSlice(box(['g', 'x'], e), { target: 'glsl' }).code;
+    expect(code).toMatch(/float u0_g\(float \w+, float \w+\)/);
+    expect(code).toMatch(/u0_g\(in0_x, in1_n\)/);
   });
 });

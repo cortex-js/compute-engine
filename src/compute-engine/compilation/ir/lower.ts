@@ -38,6 +38,7 @@
  */
 
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
+import type { Type } from '../../../common/type/types.js';
 import type { Expression } from '../../global-types.js';
 import {
   isDictionary,
@@ -684,6 +685,16 @@ export function lower(
       return undefined;
     }
     const known = lookup(name);
+    // An input has one type: an occurrence of another type (a body boxed
+    // where the name had another declaration) declines.
+    if (
+      known?.binding.role === 'input' &&
+      !sameInput(type(known.binding.v), e.type.type)
+    )
+      decline(
+        e,
+        `${name} read with two types, ${typeToString(type(known.binding.v))} and ${engineTypeToString(e.type.type)}`
+      );
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
@@ -709,17 +720,66 @@ export function lower(
         decline(e, `${name} is not the library constant here`);
       return b.constant(c, 'real');
     }
+    const h = held(name);
+    if (cx.inFunction === undefined)
+      return h?.value !== undefined
+        ? captured(e, name, h.value)
+        : input(e, name, e.type.type);
     // In a function body the interpreter reads the binding of the body,
-    // which need not be the binding of the name where the call is: a
-    // capture there declines, as a read of an input does.
-    const h = cx.inFunction === undefined ? held(name) : undefined;
-    if (h?.value !== undefined) return captured(e, name, h.value);
-    if (cx.inFunction !== undefined)
+    // which need not be the binding of the name where the call is: a name
+    // with a value declines; an input is a parameter that each call passes.
+    if (
+      h?.value !== undefined ||
+      resolvedValueDefinition(e)?.value !== undefined
+    )
       decline(
         e,
         `the function ${cx.inFunction} reads ${name}, which is not a parameter (a capture)`
       );
-    return input(e, name, e.type.type);
+    return fns.capture(e, name, e.type.type);
+  };
+
+  /** The input `name` of the type `t`, which a function that `e` calls
+   *  reads: its binding when it is an input here, or a new input (of the
+   *  entry, or of the function whose body has the call). A local, a
+   *  parameter or a name with a value of that name here declines. */
+  const free = (e: Fn, name: string, t: Type): V => {
+    const known = lookup(name);
+    if (known !== undefined && known.binding.role !== 'input')
+      decline(
+        e,
+        `a call of ${e.operator}, which reads the input ${name}, where ${name} is a local or a parameter`
+      );
+    if (known !== undefined) return known.binding.v;
+    if (held(name)?.value !== undefined)
+      decline(
+        e,
+        `a call of ${e.operator}, which reads the input ${name}, where ${name} has a value`
+      );
+    // At the entry the input has the type that the scope of the
+    // compilation gives the name, which a call checks against the
+    // parameter.
+    const def = ce.lookupDefinition(name);
+    return cx.inFunction === undefined
+      ? input(
+          e,
+          name,
+          def !== undefined && 'value' in def ? def.value.type.type : t
+        )
+      : fns.capture(e, name, t);
+  };
+
+  /** `ir`, the type of an input, is the IR type of the engine type `t`. */
+  const sameInput = (ir: IRType, t: Type): boolean => {
+    const x = inputType(t, cx.wide);
+    return (
+      x !== undefined &&
+      x.lane === ir.lane &&
+      x.shape.length === ir.shape.length &&
+      x.shape.every((n, i) =>
+        n === 'run-time' ? typeof ir.shape[i] === 'object' : n === ir.shape[i]
+      )
+    );
   };
 
   /** The input `name` of the engine type `t`: a parameter of the entry (a
@@ -925,10 +985,18 @@ export function lower(
           const attributes = isDictionary(last) ? last : undefined;
           const [declared, init] = attributes ? rest.slice(0, -1) : rest;
           const value = init ?? attributes?.get('value');
+          // `constant: True` makes a local that no `Assign` writes.
+          const constant = attributes?.get('constant');
           if (
             !isSymbol(name) ||
             value === undefined ||
-            attributes?.keys.some((k) => k !== 'value') === true
+            attributes?.keys.some((k) => k !== 'value' && k !== 'constant') ===
+              true ||
+            !(
+              constant === undefined ||
+              isSymbol(constant, 'True') ||
+              isSymbol(constant, 'False')
+            )
           )
             decline(s, 'a declaration with no value, or with attributes');
           const typeName = isString(declared)
@@ -955,7 +1023,11 @@ export function lower(
                 ? type(v).lane
                 : 'real';
           result = local(s, v, lane);
-          frame.names.set(name.symbol, { v: result, lane, role: 'local' });
+          frame.names.set(name.symbol, {
+            v: result,
+            lane,
+            role: isSymbol(constant, 'True') ? 'constant' : 'local',
+          });
         } else result = value(s, want && i === e.nops - 1);
       });
       if (want && result === undefined) decline(e, 'a block with no value');
@@ -1064,6 +1136,8 @@ export function lower(
     const name = e.ops[0];
     if (!isSymbol(name)) decline(e, 'a write that is not to a name');
     const known = lookup(name.symbol);
+    if (known?.binding.role === 'constant')
+      decline(e, 'a write to a constant (the interpreter refuses it)');
     if (known?.binding.role !== 'local')
       decline(e, 'a write to a name that is not a local');
     if (known.outer)
@@ -1088,6 +1162,7 @@ export function lower(
     withFrame,
     region,
     isLibrary,
+    free,
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     budget: options.iterationBudget,

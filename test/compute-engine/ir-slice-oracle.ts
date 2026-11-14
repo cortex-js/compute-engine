@@ -39,7 +39,7 @@ export type Expected =
  *  `any`: both decline. The user functions: `f(a, b) = ab + 1` declared
  *  `(real, real) -> real`; `g(a) = 2a` not declared; `fact` (declared
  *  `(integer) -> integer`, recursive); `h2(a) = g(a) + f(a, a)`, which
- *  calls the others; and two that decline: `cap(a) = a + x` (a capture)
+ *  calls the others; and two that decline: `cap(a) = a + h` (a capture)
  *  and `rec2`, recursive with no result type. `rnd(a) = a·Random()`
  *  draws; `ev` and `od` (declared `(integer) -> integer`) call each
  *  other. */
@@ -106,7 +106,7 @@ export function makeEngine(): ComputeEngine {
       'k',
     ])
   );
-  ce.assign('cap', fn(['Function', ['Add', 'a', 'x'], 'a']));
+  ce.assign('cap', fn(['Function', ['Add', 'a', 'h'], 'a']));
   ce.assign(
     'rec2',
     fn([

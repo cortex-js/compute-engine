@@ -1,11 +1,11 @@
 /**
  * The lowering of user functions: a call of a user function is a call of
  * an IR function, which is lowered once per binding (the definition that
- * the call's head resolves to, not its name), with its parameters as its
- * only names (a capture declines). The parameter and result types come
- * from the binding's signature; the effects of the functions are their
- * least fixed point (`functionEffects()`), settled when no function is
- * being lowered.
+ * the call's head resolves to, not its name), with its parameters and the
+ * inputs that its body reads (`capture()`) as its only names. The
+ * parameter and result types come from the binding's signature; the
+ * effects of the functions are their least fixed point
+ * (`functionEffects()`), settled when no function is being lowered.
  */
 
 import { isForwardCallReference } from '../../boxed-expression/forward-call-reference.js';
@@ -20,6 +20,7 @@ import {
   type IRFunction,
   type IRType,
   type Lane,
+  type V,
 } from './ir.js';
 import { functionEffects, type Effect } from './effects.js';
 import {
@@ -49,7 +50,7 @@ export function inputType(
       return !element ? wide : wide === 'complex' ? undefined : 'real';
     if (t === 'unknown' || t === 'any') return undefined;
     if (isSubtype(t, 'integer')) return 'integer';
-    if (isSubtype(t, 'real')) return 'real';
+    if (isSubtype(t, 'real') || extendedReal(t)) return 'real';
     // A list entry of a complex list can be a number or a `{re, im}`
     // object (docs/COMPILATION-MODEL.md, the ABI): only a run-time test
     // tells them apart, so such a list declines.
@@ -68,6 +69,17 @@ export function inputType(
   }
   const l = lane(t, shape.length > 0);
   return l === undefined ? undefined : { lane: l, shape };
+}
+
+/** `t` is a union whose every member is a real type, `nan` or an infinity
+ *  (`nan | real | signed_infinity`): a double holds each of its values, so
+ *  it is on the real lane, also when the finite members are integers. */
+function extendedReal(t: Type): boolean {
+  const member = (u: Type): boolean =>
+    typeof u === 'object' && u.kind === 'union'
+      ? u.types.every(member)
+      : u === 'nan' || isSubtype(u, 'real') || isSubtype(u, 'infinity');
+  return typeof t === 'object' && t.kind === 'union' && member(t);
 }
 
 /** The scalar IR type of `t`, or a decline that names `what`. */
@@ -124,12 +136,17 @@ function signatureTypes(e: Fn, literal: Fn) {
 }
 
 /** A user function: the IR function, its parameter types and its result
- *  type (absent while its body is lowered, when it is not declared). */
+ *  type (absent while its body is lowered, when it is not declared). The
+ *  inputs of the compilation that its body reads are parameters after
+ *  `params` (`capture()`), in the order of their first read; `called` when
+ *  a call of it was made while its body is lowered. */
 type UserFunction = {
-  name: string;
   key: object;
   params: IRType[];
   result?: IRType;
+  ir: IRFunction;
+  inputs: Type[];
+  called: boolean;
 };
 
 export function functionLowering(cx: Lowering) {
@@ -144,23 +161,25 @@ export function functionLowering(cx: Lowering) {
   /** The IR function of the user function of `key`, lowered once. */
   const define = (e: Fn, key: object, literal: Fn): UserFunction => {
     const { names, params, result } = signatureTypes(e, literal);
-    const fn: UserFunction = {
-      name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
-      key,
-      params,
-      result,
-    };
-    functions.set(key, fn);
-    pending.set(e.operator, fn);
     const values = params.map((t) => b.newValue(t));
     const ir: IRFunction = {
-      name: fn.name,
+      name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
-      paramNames: names,
+      paramNames: [...names],
       lengthOf: names.map(() => false),
       body: { params: values, body: [], yields: [] },
       results: [],
     };
+    const fn: UserFunction = {
+      key,
+      params,
+      result,
+      ir,
+      inputs: [],
+      called: false,
+    };
+    functions.set(key, fn);
+    pending.set(e.operator, fn);
     const own = names.map((p, i): [string, Binding] => [
       p,
       { v: values[i], role: 'index' },
@@ -219,13 +238,66 @@ export function functionLowering(cx: Lowering) {
         e,
         `a recursive call of ${e.operator}, which has no declared result type (declare it, as (real) -> real)`
       );
+    // A call of a function being lowered (recursive) passes no input: it
+    // declines when the function reads one (`capture()`).
+    if (pending.get(e.operator) === fn) {
+      if (fn.inputs.length > 0)
+        decline(
+          e,
+          `a recursive call of ${e.operator}, which reads the input ${fn.ir.paramNames[fn.params.length]} (a function on a cycle of calls reads no input)`
+        );
+      fn.called = true;
+    }
+    // The inputs that the body reads, read here (`free()`).
+    const inputs = fn.inputs.map((t, j) => {
+      const k = fn.params.length + j;
+      const p = type(fn.ir.body.params[k]);
+      const v = cx.widen(cx.free(e, fn.ir.paramNames[k], t), p.lane);
+      if (!isSubType(type(v), p))
+        decline(
+          e,
+          `the input ${fn.ir.paramNames[k]} that ${e.operator} reads is not ${typeToString(p)} here`
+        );
+      return v;
+    });
     const out = b.newValue(fn.result);
-    b.emit({ k: 'call', outs: [out], fn: fn.name, args });
+    b.emit({
+      k: 'call',
+      outs: [out],
+      fn: fn.ir.name,
+      args: [...args, ...inputs],
+    });
     return out;
+  };
+
+  /** The input `name` of the engine type `t` that the body of the function
+   *  being lowered reads: a parameter after its own, which each call
+   *  passes. */
+  const capture = (e: Expression, name: string, t: Type): V => {
+    const fn = pending.get(cx.inFunction!)!;
+    if (fn.called)
+      decline(
+        e,
+        `a recursive call of ${fn.ir.source}, which reads the input ${name} (a function on a cycle of calls reads no input)`
+      );
+    const ir = inputType(t, cx.wide);
+    if (ir === undefined || ir.shape.length > 0)
+      decline(
+        e,
+        `the function ${fn.ir.source} reads the input ${name} of type ${engineTypeToString(t)}, which is not a scalar`
+      );
+    const v = b.newValue({ lane: ir.lane, shape: [] });
+    fn.ir.body.params.push(v);
+    fn.ir.paramNames.push(name);
+    fn.ir.lengthOf.push(false);
+    fn.inputs.push(t);
+    cx.frames[0].names.set(name, { v, role: 'input' });
+    return v;
   };
 
   return {
     call,
+    capture,
     /** Whether `e`, which has no user binding of its own, is a recursive
      *  call of a function being lowered: its head is bound to the
      *  definition of that function, or to the placeholder of a call made

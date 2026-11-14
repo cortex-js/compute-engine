@@ -96,6 +96,8 @@ export const JS: Syntax = Object.freeze({
     sin: 'Math.sin($0)',
     cos: 'Math.cos($0)',
     tan: 'Math.tan($0)',
+    cot: '(1 / Math.tan($0))',
+    deg: '(($0 * Math.PI) / 180)',
     floor: 'Math.floor($0)',
     ceil: 'Math.ceil($0)',
     round: { text: '_round($0)', helpers: ['_round'] },

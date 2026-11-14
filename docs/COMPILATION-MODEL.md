@@ -156,6 +156,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
     gives `0`.
   - `Arcsch(x)` at `x = 1e-309` gives `Infinity` (`Math.asinh(1 / x)`); the
     interpreter gives `712.19194091572`.
+- `javascript` (crafted), `z: complex`, both routes, also the profile `ir`:
+  the complex `Cot` kernel loses precision near 0, off the pole: `Cot(z)` at
+  `z = 1e-8 + 2e-8i` gives `1.8014e7 − 3.6029e7i`; the interpreter gives
+  `2e7 − 4e7i` (relative error 8e-8 at `|z|` about 1e-5, 5e-12 at 1e-3,
+  below 2e-15 from 0.03 up).
 - `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.

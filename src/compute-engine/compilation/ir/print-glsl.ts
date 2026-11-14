@@ -65,6 +65,8 @@ export const GLSL: Syntax = Object.freeze({
     'sin': 'sin($0)',
     'cos': 'cos($0)',
     'tan': 'tan($0)',
+    'cot': '(1.0 / tan($0))',
+    'deg': 'radians($0)',
     'floor': 'floor($0)',
     'ceil': 'ceil($0)',
     'round': { text: '_round($0)', helpers: ['_round'] },
