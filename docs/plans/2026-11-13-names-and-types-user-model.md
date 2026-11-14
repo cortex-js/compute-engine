@@ -5,45 +5,158 @@ written for a user of the Compute Engine and of Epsil, and it states the
 model that the binding work aims at
 (`2026-11-11-bound-once-spec.md`, section 11). It is not a guide page yet.
 
-Every example was run on release 0.188.0 (`bd05d91fbc5c`), and the result
-shown is the one it gave, with two changes of form: a list is printed with
-spaces, and a type is printed by its name (`type(x)` gives a type value,
-which prints as `TypeFrom("number")`); an error is shown as a comment.
-The script that runs them is
-`~/dev/compute-engine-recovery/fc-guide/guide.mts` (`npx tsx <script>` from
-the repository root). Where the model says something else than 0.188.0 does, the text says
-"**Not yet**" and gives both. Section 7 lists these places and the points
-that are not decided.
+Every example was run, and the result shown is the one it gave, with two
+changes of form: a list is printed with spaces, and a type is printed by
+its name (`type(x)` gives a type value, which prints as
+`TypeFrom("number")`); an error is shown as a comment. The examples of
+sections 1 to 6 were run on release 0.188.0 (`bd05d91fbc5c`) with
+`~/dev/compute-engine-recovery/fc-guide/guide.mts`; the examples of "The
+model" were run on main at `1acef6a0eb641e2c18b7e1f2008e46f226b30d4a`
+(0.188.1 and later commits) with `guide2.mts` and `guide3.mts` of the same
+directory (`npx tsx <script>` from the repository root). Where the model
+says something else than the engine does, the text says "**Not yet**" and
+gives both. Section 7 lists these places and the points that are not
+decided.
 
-## The model in eight rules
+## The model
 
-1. **A name means what it meant where you wrote it.** An expression reads
-   each name from the place it was written in. A declaration or an
-   assignment made later in that place is seen. A declaration made
-   somewhere else is not.
-2. **Nothing is declared for you.** A name you never declared is an
-   unknown: it stays a symbol. A variable exists because you declared it
-   (`let`), and an assignment writes a variable that exists.
-3. **A name with no type is a number, until something says otherwise.**
-   The engine notes what each use requires of it (`x + 1` requires a
-   number, `length(x)` a collection). It uses these notes to type the
-   expression and to report a conflict. It does not write them on the name.
-4. **Types flow forward.** A type comes from a declaration, from the value a
-   variable starts with, and from the argument of a call. You rarely write
-   one.
-5. **A parameter with no type takes one element at a time, unless the body
-   uses it as a collection.** `f(x) = x^2` called with a list is applied to
-   each element. `g(xs) = sum(xs)` takes the list whole.
-6. **An operator applied to lists works element by element, and the lengths
-   must agree.**
-7. **A type you wrote is a promise that the engine enforces. A type the
-   engine worked out is not.**
-8. **A type does not depend on a value.** The type of an expression comes
-   from the types of its names, never from what they hold at the moment.
+### Four words
+
+- **Name.** An identifier in an expression: `x`, `total`, `f`.
+- **Declared, undeclared.** A name is declared when the program introduces
+  it: `let total = 0` makes a variable, and `f(x) = x^2` makes a function
+  `f` and its parameter `x`. The engine declares some names itself (`pi`).
+  Every other name is undeclared. An undeclared name is not an error: it
+  stands for itself, as a letter does in algebra, and `x + 1` stays `x + 1`.
+- **Scope.** The part of a program that a declaration belongs to: the whole
+  program, the body of a function, a block `{ … }`. A scope inside another
+  one reads the names of the outer one. The outer one does not read the
+  names of the inner one. (A host application opens a scope with
+  `ce.pushScope()`.)
+- **Written type, worked-out type.** A type is written when you wrote it:
+  `let n: integer = 3`, `f(x: real) = …`. When you wrote none, the engine
+  works one out.
+
+### Names
+
+1. **An expression reads its names from the scope it was written in, and
+   from the scopes around that one.** It reads the value that a name has
+   when the expression is evaluated, so it sees an assignment made after it
+   was written. It reads no other scope: not the body of another function,
+   and not a scope that a host application opens later.
+
+   ```epsil
+   let rate = 2
+   function cost(n) {
+     rate * n        // `rate` is read from the program, the scope around `cost`
+   }
+   cost(3)
+   // ➔ 6
+   rate = 5
+   cost(3)
+   // ➔ 15           (the assignment made later is seen)
+
+   function area(r) {
+     let k = r^2
+     pi * k
+   }
+   area(3)
+   // ➔ 9pi
+   k
+   // ➔ k            (the program does not read the scope of `area`)
+   ```
+
+2. **Only a declaration makes a variable.** Using a name declares nothing:
+   a name that you only use stays undeclared. Assigning to a name that was
+   never declared is an error.
+
+### Types
+
+3. **The type of a name comes from its declaration.**
+
+   | The name is | Its type is |
+   |---|---|
+   | declared with a written type | the written type |
+   | a variable with no written type | the type of the value last assigned to it |
+   | a function | worked out from its body: `f(x) = x^2 + 1` is `(x: unknown) -> number` |
+   | a parameter with no written type | what the body requires of it (`collection` in `g(xs) = sum(xs)`), or none |
+   | undeclared | none |
+
+   "None" prints as `unknown`: `type(x)` is `unknown` for an undeclared `x`
+   that nothing has used yet.
+
+4. **Where a name has no type, the operator applied to it decides how it is
+   read.** Arithmetic reads it as a number, so `x + 1` is a `number`.
+   `length(x)` reads it as a collection. The reading is not a declaration:
+   the name stays undeclared. How long the reading holds depends on who
+   gave the expression:
+
+   - In an Epsil program, it holds for the rest of the program. A later use
+     that the reading does not allow is an error.
+   - For a host application, it holds for that one expression. `ce.infer()`
+     records it on the name when the host wants that (section 6).
+   - For a parameter, it holds for the body of its function.
+
+   ```epsil
+   x + 1
+   type(x)
+   // ➔ number       (read as a number by `+`)
+   length(x)
+   // error: expected `collection`, got `number` at `x`
+   ```
+
+   ```js
+   ce.parse('x + 1').type;    // number
+   ce.box('x').type;          // unknown: the reading belongs to that expression
+   ```
+
+5. **A written type is enforced. A worked-out type is not.** A value that
+   does not fit a written type is refused. A worked-out type only says what
+   the engine found, and a variable with no written type accepts a value of
+   another type.
+
+   ```epsil
+   let n: integer = 3
+   n = 2.5
+   // error: expected `integer`, got `2.5`; `n` is still 3
+
+   let a = 1
+   type(a)
+   // ➔ integer
+   a = "hello"
+   type(a)
+   // ➔ string       (no type was written: the type follows the assignment)
+   ```
+
+6. **A type changes only when you declare the name or assign to it.**
+   Evaluating an expression changes values and never a type. Assigning to
+   one variable does not change the type of another. Rule 3 says that the
+   type of a variable comes from the value assigned to it; this rule says
+   that it is fixed at that assignment and that nothing else moves it.
+   **Not yet** for a variable that holds an expression of other
+   variables: see section 5.
+
+### Lists
+
+7. **A function called with a list is applied to each element, unless it
+   takes the list whole.** `f(x) = x^2` called with `[1, 2, 3]` is called
+   three times and gives the list of the three results. A function takes
+   the list whole when its parameter has a written collection type, or when
+   its body uses the parameter as a collection: `g(xs) = sum(xs)` gives one
+   number. Section 3 has the exact rule. The type of a function describes
+   ONE application: with `f` of type `(x: unknown) -> number`, `f(3)` is a
+   `number` and `f([1, 2, 3])` is a list of three numbers.
+
+8. **An operator between two lists pairs their elements, so the two lists
+   must have the same length.** `[1, 2, 3] + [10, 20, 30]` is
+   `[11, 22, 33]`, and `[1, 2, 3] + [10, 20]` is an error. Between a list
+   and a number, the number is used with each element: `[1, 2, 3] + 10` is
+   `[11, 12, 13]`.
 
 ## 1. Names
 
-A name with no definition is an unknown. It computes symbolically.
+An undeclared name stands for itself, and the engine computes with it as
+algebra does (rules 2 and 4):
 
 ```epsil
 x + 1
@@ -77,8 +190,8 @@ let q = 2
 // error: `q` is used before the statement that declares it in this block
 ```
 
-A local of a function is local. A function that a call returns keeps the
-values of that call:
+A variable declared inside a function exists only inside that function
+(rule 1). A function that a call returns keeps the values of that call:
 
 ```epsil
 function area(r) {
@@ -121,8 +234,12 @@ f([1, 2, 3])
 // ➔ [2, 5, 10]
 ```
 
+The type of `f` describes one application of it: `f(3)` is a `number`. A
+list argument is rule 7: `f` is applied to each element, and
+`type(f([1, 2, 3]))` is `vector<3>`, a list of three numbers.
+
 A function that uses its parameter as a collection takes a list whole
-(rule 5):
+(rule 7):
 
 ```epsil
 g(xs) = sum(xs)
@@ -220,10 +337,10 @@ p([1, 2, 3])
 
 | Situation | Write | Why |
 |---|---|---|
-| The function takes a list or a matrix whole and the body does not show it | `(A: matrix)`, `(xs: list)` | Rule 5 reads the body; `A^2`, `[t, 2t]` and a constant body say nothing |
+| The function takes a list or a matrix whole and the body does not show it | `(A: matrix)`, `(xs: list)` | Rule 7 reads the body; `A^2`, `[t, 2t]` and a constant body say nothing |
 | The function should work on one element at a time although the body indexes or reduces | `(v: tuple<number, number>)`, `(x: real)` | The same rule, the other way |
 | The argument can be anything (a number, a list, a nested list) and you handle it yourself | `(t: any)` | `any` is never mapped |
-| A variable will hold values of a known kind and you want mistakes caught | `let n: integer = 3` | Rule 7: only a written type is enforced |
+| A variable will hold values of a known kind and you want mistakes caught | `let n: integer = 3` | Rule 5: only a written type is enforced |
 | You compile an expression whose input is not used in a way that types it | declare the input, or give its type to `compile()` | Compiled code needs the shape of every input |
 | You compile a function as a value | annotate its parameters | The body alone does not settle a shape |
 | You want an error at the call, before anything runs | annotate the parameters | A written type is checked when the call is written |
@@ -309,7 +426,7 @@ and `(A * B - B * A, determinant(A), determinant(B))` gives zeros.
 **The same expression written directly and through a function can
 differ.** `max([1, 2, 3], 2)` is `3`; `low(x) = max(x, 2)` with the same
 list is `[2, 2, 3]`. Written directly, the list is an operand of `max`.
-Through the function, `x` is one number at a time. This is rule 5. Write
+Through the function, `x` is one number at a time. This is rule 7. Write
 `(x: list)` to get the direct reading.
 
 **A point and a list of points.**
@@ -325,7 +442,7 @@ h([(1, 2), (3, 4)])
 // 0.188.0: [3, 7]    (one call for each point)
 ```
 
-The model's rule is rule 5: an indexed parameter takes its argument whole.
+The model's rule is rule 7: an indexed parameter takes its argument whole.
 To get one call for each point, say that the parameter is a point:
 
 ```epsil
@@ -381,15 +498,15 @@ declared `scope` effect").
 imaginary unit (`i^2` is `-1`), `pi` is π. You can use the name for
 yourself with a declaration: `let i = 3`, then `i + 1` is `4`.
 
-**The type of an expression does not follow the value of its names**
-(rule 8). **Not yet**: 0.188.0 revises it.
+**Assigning to one variable does not change the type of another** (rule
+6). **Not yet**: the engine revises the type of `y` when `x` changes.
 
 ```js
 ce.assign('y', ce.parse('x + 1'));
 ce.box('y').type;          // number
 ce.assign('x', ce.parse('[1, 2]'));
 ce.box('y').evaluate();    // [2, 3]
-ce.box('y').type;          // model: number.  0.188.0: vector<integer^2>
+ce.box('y').type;          // model: number.  today: vector<integer^2>
 ```
 
 When a variable can hold values of several shapes, declare it with the type
@@ -414,7 +531,7 @@ ce.box('w').type;          // number
 In an Epsil program the statements are one unit: a later statement sees
 what an earlier one required (`x + 1`, then `type(x)` is `number`).
 
-**An expression keeps the place it was written in** (rule 1).
+**An expression keeps the scope it was written in** (rule 1).
 
 ```js
 const e = ce.parse('x + 1');
@@ -467,13 +584,13 @@ runs, so every input needs a type before.
 | `compile(s)`, the function as a value | refused: an element can be a number or a list |
 | `s2 := (xs: list<real>) ↦ Sum(xs)`; `compile(s2)` | compiles |
 
-Give the type with `ce.declare()`. A name that holds a value is folded
-into the code; to keep it as an input, name it:
-`compile(expr, { symbolic: ['a'] })` (in the release after 0.188.0). The
-name is then an input wherever the compilation reads it, also inside the
-functions that the expression calls. **Not yet**: the model also takes the
-types at the call, `compile(expr, { inputs: { w: 'real' } })`, with no
-declaration and no scope.
+Give the type with `ce.declare()`, or at the call:
+`compile(expr, { inputs: { w: 'real' } })` needs no declaration and no
+scope (on main since `ccd2f604697ac643c7a052389a921d353e066abb`, not yet
+released). A name that holds a value is folded into the code; to keep it as
+an input, name it: `compile(expr, { symbolic: ['a'] })` (since 0.188.1), or
+give it in `inputs`. The name is then an input wherever the compilation
+reads it, also inside the functions that the expression calls.
 
 ## 7. Where 0.188.0 differs, and what is not decided
 
@@ -481,18 +598,18 @@ Differences between this document and 0.188.0:
 
 | Topic | This document | 0.188.0 | State |
 |---|---|---|---|
-| Rule 5 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | proposed, not decided |
-| Rule 5 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | proposed (box the body after the uses are known), not decided |
-| Rule 5 | An indexed parameter with no type takes a list of points whole | One call for each point | proposed, not decided; it changes results |
-| Rule 8 | A type does not follow a value | It is revised from the value | decided (D16); built, not landed |
-| Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); not built |
+| Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | proposed, not decided |
+| Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | proposed (box the body after the uses are known), not decided |
+| Rule 7 | An indexed parameter with no type takes a list of points whole | One call for each point | proposed, not decided; it changes results |
+| Rule 6 | Assigning to one variable does not change the type of another | The type is revised from the value | decided (D16); built, not landed |
+| Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); built, on main, not released |
 
 Not decided, each with the choice:
 
-1. **Rule 5, "copied to a local".** 0.188.0 follows `let q = s`. Keeping it
+1. **Rule 7, "copied to a local".** 0.188.0 follows `let q = s`. Keeping it
    makes Epsil functions with a local copy work with no annotation; dropping
    it makes the rule shorter. Tycho does not need it.
-2. **Rule 5 for a tuple of two numbers.** Today `h(v) = v[1] + v[2]` types
+2. **Rule 7 for a tuple of two numbers.** Today `h(v) = v[1] + v[2]` types
    `v` as a point, and a list of points is then mapped. In the model the
    parameter is "indexed, so whole", and a user who wants the mapping writes
    the point type. The model is simpler; 10 tests of the yardstick change
@@ -501,7 +618,7 @@ Not decided, each with the choice:
    (the `tuple<number, number>` above, `collection`, `matrix`). The model
    keeps these types for what they are good for: the printed signature, an
    error in a body, compilation. They decide no value other than through
-   rule 5 and the matrix case.
+   rule 7 and the matrix case.
 4. **A function that ignores its parameter** (`five(s) = 5` gives
    `[5, 5]`). Desmos gives `5` (measured by Tycho, 2026-11-13). The model
    keeps the engine's answer, because one rule covers it.
