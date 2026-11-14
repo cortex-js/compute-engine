@@ -139,6 +139,21 @@
   `g(t) := …` was silently left as a function. The compilation now declines
   with the name in `binding`, as for a name that holds a function literal.
 
+- **`IntegerString` and `DigitsFrom` keep an integer past 2^53 exact.**
+  `IntegerString` read its operand as a double, so a large integer lost
+  digits and, in base 10, came out in exponent notation:
+  `IntegerString(Factorial(30))` was `"2.65252859812191058636e+32"` and is
+  now `"265252859812191058636308480000000"`, and
+  `IntegerString(Factorial(50), 16)` was
+  `"49eebc961ed2780000000000000000000000000000000000000000"` and is now
+  `"49eebc961ed279b02b1ef4f28d19a84f5973a1d2c7800000000000"`. `DigitsFrom`
+  summed the digits in a double too:
+  `DigitsFrom(IntegerString(Factorial(50), 16), 16)` was
+  `3.0414093201713376e+64` and is now 50! exactly. Small and negative values
+  are unchanged. (PR #528, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#523](https://github.com/cortex-js/compute-engine/issues/523))
+
 ## 0.188.1 _2026-11-13_
 
 ### New Features

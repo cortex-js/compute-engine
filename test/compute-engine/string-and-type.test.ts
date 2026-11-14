@@ -425,6 +425,75 @@ describe('IntegerString preserves the sign', () => {
   });
 });
 
+describe('IntegerString prints an integer past 2^53 exactly', () => {
+  const ce = new ComputeEngine();
+  const cases: [any[], string][] = [
+    [
+      [{ num: '123456789012345678901234567890' }, 10],
+      '123456789012345678901234567890',
+    ],
+    [
+      [{ num: '123456789012345678901234567890' }],
+      '123456789012345678901234567890',
+    ],
+    [
+      [{ num: '-123456789012345678901234567890' }, 10],
+      '-123456789012345678901234567890',
+    ],
+    [[['Factorial', 30]], '265252859812191058636308480000000'],
+    [[['Factorial', 25], 16], 'cd4a0619fb0907bc00000'],
+    [
+      [['Factorial', 50], 16],
+      '49eebc961ed279b02b1ef4f28d19a84f5973a1d2c7800000000000',
+    ],
+    [[['Power', 2, 100], 16], '10000000000000000000000000'],
+    [[255, 16], 'ff'],
+    [[-255, 2], '-11111111'],
+    [[0, 36], '0'],
+  ];
+  for (const [ops, expected] of cases)
+    test(`IntegerString(${JSON.stringify(ops)}) = ${expected}`, () => {
+      expect(ce.box(['IntegerString', ...ops]).evaluate().string).toBe(
+        expected
+      );
+    });
+
+  test('the base range is still checked', () => {
+    const r = ce.box(['IntegerString', ['Factorial', 30], 37]).evaluate();
+    expect(r.string).toBeUndefined();
+    expect(JSON.stringify(r.json)).toContain('out-of-range');
+  });
+});
+
+describe('DigitsFrom reads an integer past 2^53 exactly', () => {
+  const ce = new ComputeEngine();
+  const digits = (...ops: any[]) =>
+    ce
+      .box(['DigitsFrom', ...ops])
+      .evaluate()
+      .toString();
+
+  test('DigitsFrom(IntegerString(Factorial(50), 16), 16) is 50!', () => {
+    const s = ce.box(['IntegerString', ['Factorial', 50], 16]).evaluate();
+    expect(digits(s, 16)).toBe(ce.box(['Factorial', 50]).evaluate().toString());
+  });
+
+  test('a big decimal string, with and without a base', () => {
+    expect(digits("'123456789012345678901234567890'")).toBe(
+      '123456789012345678901234567890'
+    );
+    expect(digits("'-123456789012345678901234567890'", 10)).toBe(
+      '-123456789012345678901234567890'
+    );
+  });
+
+  test('small values are unchanged', () => {
+    expect(digits("'ff'", 16)).toBe('255');
+    expect(digits("'-101'", 2)).toBe('-5');
+    expect(digits("'42'")).toBe('42');
+  });
+});
+
 describe('DigitsFrom honours its base argument', () => {
   // Regression: the range check read the base from `op2.re` while the parse
   // was handed `op2.string ?? sym(op2) ?? 10`. An INTEGER base matched neither

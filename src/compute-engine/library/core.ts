@@ -66,7 +66,11 @@ import {
 import { canonicalForm } from '../boxed-expression/canonical.js';
 import { canonicalArbitrary } from '../boxed-expression/arbitrary-constants.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
+import {
+  asBigint,
+  asSmallInteger,
+  toInteger,
+} from '../boxed-expression/numerics.js';
 import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
 import type { BigNum } from '../numerics/types.js';
 import {
@@ -417,6 +421,14 @@ import { reduceType } from '../../common/type/reduce.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import { isEngineSubscriptHandler } from '../boxed-expression/host-handler-changes.js';
 import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluation-memo.js';
+
+// The exact integer when the double `value` is past 2^53 and cannot hold it.
+function exactInteger(
+  value: number,
+  exact: bigint | undefined
+): number | bigint {
+  return exact !== undefined && !Number.isSafeInteger(value) ? exact : value;
+}
 
 /**
  * Literal narrowing at a typed declaration or assignment: the character a
@@ -11095,11 +11107,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (isString(op1)) {
           const base = asSmallInteger(op2.canonical);
           if (base !== null && base > 1 && base <= 36) {
-            const [value, rest] = fromDigits(op1.string, base);
+            const [value, rest, exact] = fromDigits(op1.string, base);
             if (rest) {
               return ce.error(['unexpected-digit', rest[0]], op1.toString());
             }
-            return ce.number(value);
+            return ce.number(exactInteger(value, exact));
           }
           return ce._fn('Baseform', [
             op1,
@@ -12381,8 +12393,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce.number(parseInt(op1str.slice(2), 2));
 
         const op2 = ops[1] ?? ce.Nothing;
-        if (sym(op2) === 'Nothing')
+        if (sym(op2) === 'Nothing') {
+          // A plain decimal integer keeps its digits past 2^53.
+          if (/^[+-]?\d+$/.test(op1str)) return ce.number(BigInt(op1str));
           return ce.number(Number.parseInt(op1str, 10));
+        }
 
         // The declared signature admits the base as an INTEGER
         // (`DigitsFrom("101", 2)`) or as a numeric STRING
@@ -12405,11 +12420,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce.error(['unexpected-base', shown], op2.toString());
         }
 
-        const [value, rest] = fromDigits(op1str, base);
+        const [value, rest, exact] = fromDigits(op1str, base);
 
         if (rest) return ce.error(['unexpected-digit', rest[0]], rest);
 
-        return ce.number(value);
+        return ce.number(exactInteger(value, exact));
       },
     },
 
@@ -12524,18 +12539,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const op1 = ops[0];
         if (!op1.isInteger) return ce.typeError('integer', op1.type, op1);
 
-        const val = op1.re;
-        if (!Number.isFinite(val))
-          return ce.typeError('integer', op1.type, op1);
+        // The exact integer, as `Factorial` and `GCD` read it: a double
+        // prints `IntegerString(30!)` as "2.65e+32" and loses digits past 2^53.
+        const val = asBigint(op1);
+        if (val === null) return ce.typeError('integer', op1.type, op1);
 
         // The sign is preserved (`IntegerString(-42)` is `"-42"`), so
         // `DigitsFrom(IntegerString(n))` round-trips for negative integers.
         const op2 = ops[1] ?? ce.Nothing;
-        if (sym(op2) === 'Nothing') {
-          if (op1.bignumRe !== undefined)
-            return ce.string(op1.bignumRe.toString());
-          return ce.string(val.toString());
-        }
+        if (sym(op2) === 'Nothing') return ce.string(val.toString());
 
         const base = asSmallInteger(op2);
         if (base === null) return ce.typeError('integer', op2.type, op2);
