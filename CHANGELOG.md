@@ -14,6 +14,12 @@
 
 ### New Features
 
+- **`Zeta(s, -k)` evaluates exactly for an integer `s > 1` and a negative
+  integer `-k`.** It is `ζ(s)` plus the `k` terms before the omitted one:
+  `Zeta(2, -1)` is `1 + π²/6` and `Zeta(3, -1)` is `1 + ζ(3)`; past
+  `k = 1000` the call stays unevaluated (PR #529, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 - **`Beta`, `BetaRegularized`, `Erf`, `ErfInv`, `Gamma` and
   `GammaRegularized` take the incomplete and generalized call forms, and
   `PolyGamma(z)` is `PolyGamma(0, z)`.** `Beta(1/2, 2, 3)` was an
@@ -118,6 +124,15 @@
   [#564](https://github.com/cortex-js/compute-engine/issues/564)).
 
 ### Resolved Issues
+
+- **`Zeta(0, a)` is `1/2 - a` for every `a`.** The two-argument `Zeta` omits
+  the term where `n + a = 0`, but at `s = 0` every term is 1 and the omitted
+  term counts, as in Mathematica: `Zeta(0, -1)` is `3/2` (was `1/2`) and
+  `Zeta(0, 0)` is `1/2` (was `-1/2`). `.N()` and the compiled `Zeta`
+  (JavaScript and GLSL) give the same value. For `s ≠ 0` the term stays
+  omitted (PR #529, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#524](https://github.com/cortex-js/compute-engine/issues/524)).
 
 - **The hyperbolic functions of `Ln(q)` for an exact rational `q`, and
   `Arsech` of a rational above 1, evaluate exactly.** `Sinh(Ln(2))` stayed

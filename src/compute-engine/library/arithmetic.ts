@@ -6057,6 +6057,12 @@ const HURWITZ_PEEL_LIMIT = 20;
 const HURWITZ_NEGATIVE_ORDER_LIMIT = 100;
 
 /**
+ * The most terms `Zeta(s, −k)` adds to ζ(s) in exact form: the sum is k
+ * rational terms, so past this k the expression stays unevaluated.
+ */
+const ZETA_NEGATIVE_INTEGER_BASE_LIMIT = 1000;
+
+/**
  * The largest order n for which ζ(−n, a) with a SYMBOLIC `a` (a free
  * variable, or an irrational constant such as `Pi`) is rewritten as the
  * Bernoulli polynomial in `a`. The polynomial has n + 2 terms whose
@@ -6562,6 +6568,19 @@ function evaluateGeneralizedZeta(
   const sInt = asSmallInteger(s);
   if (sInt === 1) return engine.ComplexInfinity;
 
+  // At s = 0 every term is 1 and the omitted one counts: 1/2 − a for every
+  // base point, as `HurwitzZeta(0, a)`. No correction for the omission, which
+  // would make `Zeta(0, 0)` −1/2 and `Zeta(0, −1)` 1/2.
+  if (
+    sInt === 0 &&
+    !(isNumber(s) && s.isComplex) &&
+    isNumber(a) &&
+    isFiniteNumberLiteral(a)
+  ) {
+    const value = engine.number([1, 2]).sub(a);
+    return numericApproximation ? value.N() : value;
+  }
+
   // A symbolic `a` gets the Bernoulli polynomial of `evaluateHurwitzZeta`
   // only when `a` is known to be positive: for a negative `a` the terms with
   // k + a < 0 are |k + a|^(−s) here, so at a = −5/2 Zeta(−1, a) is 109/24,
@@ -6577,6 +6596,37 @@ function evaluateGeneralizedZeta(
 
   if (!a.isComplex && a.re === 0)
     return engine.function('Zeta', [s]).evaluate({ numericApproximation });
+
+  // Exact integer s > 1 and a = −k: the terms n < k are j^(−s) for j = k − n
+  // from 1 to k, the term n = k is omitted and n > k sums to ζ(s), so
+  // Zeta(2, −1) is 1 + ζ(2).
+  const aInt = asSmallInteger(a);
+  if (
+    !numericApproximation &&
+    sInt !== null &&
+    sInt > 1 &&
+    aInt !== null &&
+    aInt < 0 &&
+    -aInt <= ZETA_NEGATIVE_INTEGER_BASE_LIMIT &&
+    isNumber(s) &&
+    s.isExact &&
+    isNumber(a) &&
+    a.isExact
+  ) {
+    // Σ_{j=1..k} j^(−s) as a reduced fraction
+    let num = 0n;
+    let den = 1n;
+    for (let j = 1n; j <= BigInt(-aInt); j++) {
+      const d = j ** BigInt(sInt);
+      num = num * d + den;
+      den *= d;
+      const g = bigintGcd(num, den);
+      num /= g;
+      den /= g;
+    }
+    const head = engine.function('Zeta', [s]).evaluate();
+    return head.add(engine.number([num, den]));
+  }
 
   const atInfinity = zetaAtInfiniteOperand(engine, s, a);
   if (atInfinity !== undefined) return atInfinity ?? undefined;
@@ -9040,7 +9090,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Converges for Re(s) > 1, analytically continued elsewhere
     Zeta: {
       description:
-        "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
+        "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted, except at s = 0, where ζ(0,a) = 1/2 - a), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
       wikidata: 'Q187235',
       complexity: 8500,
       broadcastable: true,

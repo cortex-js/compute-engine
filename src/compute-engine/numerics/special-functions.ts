@@ -4483,6 +4483,8 @@ export function hurwitzZeta(s: number, a: number): number {
 export function zetaGeneralized(s: number, a: number): number {
   if (Number.isNaN(s) || Number.isNaN(a)) return NaN;
   if (s === 1) return Infinity;
+  // At s = 0 every term is 1 and the omitted one counts: 1/2 − a for every a.
+  if (s === 0 && Number.isFinite(a)) return 0.5 - a;
   if (a > 0) return hurwitzZeta(s, a);
   if (a === 0) return zeta(s);
   if (!Number.isFinite(s) || !Number.isFinite(a)) return NaN;

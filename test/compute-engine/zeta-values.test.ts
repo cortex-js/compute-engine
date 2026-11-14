@@ -693,6 +693,136 @@ describe('Zeta(0, a) = 1/2 − a exactly', () => {
   });
 });
 
+describe('Zeta(0, a) keeps the term n + a = 0 (1/2 − a for every a)', () => {
+  const cases: [any, any][] = [
+    [0, ['Rational', 1, 2]],
+    [-1, ['Rational', 3, 2]],
+    [-2, ['Rational', 5, 2]],
+    [-10, ['Rational', 21, 2]],
+    [['Rational', 1, 2], 0],
+    [['Rational', -1, 2], 1],
+    [['Rational', -5, 2], 3],
+    [
+      ['Rational', 1, 3],
+      ['Rational', 1, 6],
+    ],
+  ];
+  for (const [a, expected] of cases) {
+    test(`Zeta(0, ${JSON.stringify(a)}) = ${JSON.stringify(expected)} (evaluate)`, () => {
+      expect(ce.expr(['Zeta', 0, a]).evaluate().json).toEqual(expected);
+    });
+    test(`Zeta(0, ${JSON.stringify(a)}) = ${JSON.stringify(expected)} (N)`, () => {
+      const want = ce.expr(expected).N().re;
+      expect(ce.expr(['Zeta', 0, a]).N().re).toBeCloseTo(want, 12);
+    });
+  }
+
+  test('a float base point gives a float', () => {
+    expect(ce.expr(['Zeta', 0, -2.5]).evaluate().re).toBeCloseTo(3, 12);
+    expect(ce.expr(['Zeta', 0, -2]).N().re).toBeCloseTo(2.5, 12);
+  });
+
+  test('the parse route', () => {
+    expect(ce.parse('\\zeta(0, -1)').N().re).toBeCloseTo(1.5, 12);
+  });
+
+  test('the compiled route', () => {
+    const run = compile(ce.box(['Zeta', 'zs_s', 'zs_a']))?.run;
+    for (const [a, v] of [
+      [0, 0.5],
+      [-1, 1.5],
+      [-2, 2.5],
+      [0.5, 0],
+      [-0.5, 1],
+    ])
+      expect(run?.({ zs_s: 0, zs_a: a })).toBeCloseTo(v, 12);
+  });
+
+  test('the omission stays for s ≠ 0', () => {
+    expect(ce.expr(['Zeta', 2, -1]).N().re).toBeCloseTo(
+      1 + Math.PI ** 2 / 6,
+      12
+    );
+    expect(ce.expr(['Zeta', -1, -2]).evaluate().json).toEqual([
+      'Rational',
+      35,
+      12,
+    ]);
+    expect(
+      ce
+        .expr(['Zeta', 2, 0])
+        .evaluate()
+        .isSame(ce.expr(['Zeta', 2]).evaluate())
+    ).toBe(true);
+  });
+});
+
+describe('Zeta(s, −k) for an integer s > 1 is ζ(s) + Σ_{j=1..k} j^(−s)', () => {
+  const cases: [number, number, any, number][] = [
+    [
+      2,
+      -1,
+      ['Add', 1, ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]]],
+      1 + Math.PI ** 2 / 6,
+    ],
+    [
+      2,
+      -2,
+      [
+        'Add',
+        ['Rational', 5, 4],
+        ['Multiply', ['Rational', 1, 6], ['Power', 'Pi', 2]],
+      ],
+      1.25 + Math.PI ** 2 / 6,
+    ],
+    [3, -1, ['Add', 1, ['Zeta', 3]], 1 + 1.2020569031595942],
+    [
+      4,
+      -3,
+      [
+        'Add',
+        ['Rational', 1393, 1296],
+        ['Multiply', ['Rational', 1, 90], ['Power', 'Pi', 4]],
+      ],
+      1393 / 1296 + Math.PI ** 4 / 90,
+    ],
+  ];
+  for (const [s, a, expected, value] of cases) {
+    test(`Zeta(${s}, ${a}) = ${JSON.stringify(expected)} (evaluate)`, () => {
+      expect(new ComputeEngine().expr(['Zeta', s, a]).evaluate().json).toEqual(
+        expected
+      );
+    });
+    test(`Zeta(${s}, ${a}) = ${value} (N)`, () => {
+      expect(new ComputeEngine().expr(['Zeta', s, a]).N().re).toBeCloseTo(
+        value,
+        12
+      );
+    });
+  }
+
+  test('the parse route', () => {
+    const e = new ComputeEngine();
+    expect(e.parse('\\zeta(2,-1)').evaluate().json).toEqual(cases[0][2]);
+    expect(e.parse('\\zeta(2,-1)').N().re).toBeCloseTo(cases[0][3], 12);
+  });
+
+  test('a base point past the cap stays unevaluated, and s <= 1 is unchanged', () => {
+    const e = new ComputeEngine();
+    expect(e.expr(['Zeta', 2, -1001]).evaluate().json).toEqual([
+      'Zeta',
+      2,
+      -1001,
+    ]);
+    expect(e.expr(['Zeta', 1, -1]).evaluate().json).toEqual('ComplexInfinity');
+    expect(e.expr(['Zeta', -1, -2]).evaluate().json).toEqual([
+      'Rational',
+      35,
+      12,
+    ]);
+  });
+});
+
 describe('Two-operand Zeta at edge operands', () => {
   test('a non-finite base point does not hang', () => {
     expect(ce.expr(['Zeta', 2, 'NegativeInfinity']).N().isNumberLiteral).toBe(
@@ -888,6 +1018,14 @@ describe('GPU Zeta / HurwitzZeta preamble', () => {
   test('the two-operand Zeta lowers to the generalized helper', () => {
     const r = new GLSLTarget().compile(ce.box(['Zeta', 'gz_s', 'gz_a']));
     expect(r.code).toBe('_gpu_zeta_generalized(gz_s, gz_a)');
+  });
+
+  test('the generalized helper returns 1/2 - a at s = 0, before the base-point walk', () => {
+    const r = new GLSLTarget().compile(ce.box(['Zeta', 'gz_s', 'gz_a']));
+    const body = (r.preamble ?? '').split('float _gpu_zeta_generalized(')[1];
+    const at0 = body.indexOf('if (s == 0.0) return 0.5 - a;');
+    expect(at0).toBeGreaterThan(-1);
+    expect(at0).toBeLessThan(body.indexOf('_gpu_hurwitz_zeta(s, a)'));
   });
 });
 
