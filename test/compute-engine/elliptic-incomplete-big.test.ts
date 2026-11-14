@@ -646,13 +646,37 @@ describe('incomplete elliptic integrals at the precision asked', () => {
 
   test('an amplitude just past π/2 at m = 1 is not read as its double', () => {
     // φ = π/2 + 1e-30: the double nearest φ is below π/2, where F(φ|1) is
-    // finite, so the machine kernel would answer 38.718… at another point
+    // finite, so the machine kernel would answer 38.025… at another point
     const ce = engineAt(30);
     const phi = num('1.5707963267948966192313216916407514420985847');
     expect(ce.expr(['EllipticF', phi, 1]).N().operator).toBe('EllipticF');
     expect(ce.expr(['EllipticPi', num('0.5'), phi, 1]).N().operator).toBe(
       'EllipticPi'
     );
+  });
+
+  test('F and Π near φ = π/2 with m near 1 in doubles (CE-1302)', () => {
+    // 1 − m·sin²φ cancelled as sin φ rounds to 1: F(1.57079632679|1) was
+    // 27.4287…, off by ln 2. References: mpmath ellipf/ellippi at 40 digits
+    // of the double operands; F(φ|1) = artanh(sin φ).
+    const cases: [string, number[], number][] = [
+      ['EllipticF', [1.57079632679, 1], 26.735629484787989],
+      ['EllipticF', [1.5707963, 1], 18.128201574054633],
+      ['EllipticF', [1.5707963, 1 - 1e-12], 15.175023992482723],
+      ['EllipticF', [1.57079632679, 1 - 1e-12], 15.201811083427099],
+      ['EllipticF', [1.5707963267948966, 1], 38.02500337382921],
+      ['EllipticPi', [0.3, 1.5707963, 1 - 1e-12], 21.19729684988243],
+    ];
+    const machine = engineAt('machine');
+    for (const [head, args, want] of cases) {
+      const got = machine.box([head, ...args]).N().re;
+      expect(Math.abs(got - want) / want).toBeLessThan(1e-13);
+    }
+    const f = compile(machine.box(['EllipticF', 'x', 1]));
+    const got = f.run!({ x: 1.57079632679 }) as number;
+    expect(
+      Math.abs(got - 26.735629484787989) / 26.735629484787989
+    ).toBeLessThan(1e-13);
   });
 
   test('the poles are infinite', () => {

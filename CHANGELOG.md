@@ -35,6 +35,17 @@
 
 ### Resolved Issues
 
+- **`EllipticF` and the incomplete `EllipticPi` are accurate at machine
+  precision for an amplitude near `π/2` and a parameter near 1.** At
+  `ce.precision = 'machine'`, `EllipticF(1.57079632679, 1)` was
+  `27.428776665347943`, off by about `ln 2`; it is `26.73562948478799`
+  (`artanh(sin φ)`). At `m = 1 - 10^{-12}`, `EllipticF(1.5707963, m)` was
+  `15.175049215835525` and is `15.175023992482723` (a relative error of
+  `1.7·10^{-6}`, now under `10^{-15}`). `EllipticPi(n, φ, m)` had the same
+  error at the same operands. Compiled JavaScript gives the corrected values.
+  At other operands a value changes at most in its last digit; precision above
+  machine precision is unchanged.
+
 - **`HurwitzZeta(s, m)` at a large order no longer evaluates to a closed form
   whose numeric value is 0.** `HurwitzZeta(21, 15).evaluate().N()` was `0`; it
   is `2.73172211187533517712e-25`, the value of `HurwitzZeta(21, 15).N()`.

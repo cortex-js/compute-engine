@@ -6612,9 +6612,13 @@ export function ellipticF(phi: number, m: number): number {
     return 2 * k * K + ellipticF(phi - k * Math.PI, m);
   }
   const s = Math.sin(phi);
-  const y = 1 - m * s * s;
-  if (y < 0) return NaN; // complex value
   const c = Math.cos(phi);
+  // For m ≤ 1, 1 − m·sin²φ is written cos²φ + (1 − m)·sin²φ, a sum of
+  // two non-negative terms: near φ = ±π/2, sin φ rounds to 1 and
+  // 1 − m·sin²φ loses every digit (F(φ|1) was off by ln 2). For m > 1 both
+  // forms cancel near the branch point, and the direct one gives 0 there.
+  const y = m <= 1 ? c * c + (1 - m) * s * s : 1 - m * s * s;
+  if (y < 0) return NaN; // complex value
   return s * carlsonRF(c * c, y, 1);
 }
 
@@ -6660,9 +6664,10 @@ export function ellipticPiIncomplete(
     return 2 * k * P + ellipticPiIncomplete(n, phi - k * Math.PI, m);
   }
   const s = Math.sin(phi);
-  const y = 1 - m * s * s;
-  if (y < 0) return NaN; // complex value
   const c = Math.cos(phi);
+  // The form of 1 − m·sin²φ without cancellation for m ≤ 1 (see ellipticF)
+  const y = m <= 1 ? c * c + (1 - m) * s * s : 1 - m * s * s;
+  if (y < 0) return NaN; // complex value
   const s3 = s * s * s;
   // 1 − n sin²φ < 0 → R_J returns the Cauchy principal value; = 0 → pole
   const p = 1 - n * s * s;
