@@ -143,6 +143,14 @@ export function compilationScope(
       const free = (e as unknown as { _isFreeName?: boolean })._isFreeName;
       if (!isInput(e.symbol))
         found.push({ kind: free ? 'free' : 'bound', symbol: e, scope });
+      // The definition that the occurrence reads: a name that had none when
+      // it was boxed reads a declaration made later (`_readDefinition()`).
+      const read = (
+        e as unknown as { _readDefinition?(): BoxedDefinition | undefined }
+      )._readDefinition?.();
+      // Its own definition is followed too (a constant keeps reading it).
+      if (read !== undefined && 'value' in read)
+        followValue(e.symbol, read.value);
       followValue(e.symbol, e.valueDefinition);
       continue;
     }

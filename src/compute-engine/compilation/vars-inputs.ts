@@ -131,7 +131,14 @@ function reachedInputDefinitions(
     if (value === undefined || value.isConstant || seen.has(value)) return;
     seen.add(value);
     const stored = value.storedValue;
-    if (names.has(name) && stored?.operator !== 'Function') return;
+    // The value of an input is hidden, and not read, when its type is
+    // declared and it is not a function literal (`withVarsValuesHidden()`).
+    if (
+      names.has(name) &&
+      !value.inferredType &&
+      stored?.operator !== 'Function'
+    )
+      return;
     push(stored);
   };
   while (stack.length > 0) {
@@ -146,11 +153,23 @@ function reachedInputDefinitions(
         (
           e as unknown as { _resolutionScope?(): unknown }
         )._resolutionScope?.() === undefined;
-      const value = e.valueDefinition;
       if (local) continue;
-      if (value !== undefined && names.has(e.symbol) && !result.has(value))
-        result.set(value, e.symbol);
-      followValue(e.symbol, value);
+      // The definition that the occurrence reads, which is not its own for a
+      // name that had none when it was boxed (`_readDefinition()`).
+      const read = (
+        e as unknown as { _readDefinition?(): unknown }
+      )._readDefinition?.();
+      // Its own definition counts too: a constant keeps reading it when a
+      // later declaration of its home chain has its name.
+      const own = e.valueDefinition;
+      const value = isValueDef(read as never)
+        ? (read as { value: BoxedValueDefinition }).value
+        : own;
+      for (const v of [value, own]) {
+        if (v === undefined) continue;
+        if (names.has(e.symbol) && !result.has(v)) result.set(v, e.symbol);
+        followValue(e.symbol, v);
+      }
       continue;
     }
     if (isDictionary(e)) {
@@ -207,6 +226,19 @@ export function withSymbolicInputs<T>(
   fn: () => T
 ): T | CompileDeclineError {
   if (symbolic === undefined || symbolic.length === 0) return fn();
+  // A name that is a function (`f(x) := …`) is not an input.
+  for (const name of symbolic) {
+    const def = expr.engine.lookupDefinition(name);
+    if (def !== undefined && !isValueDef(def))
+      return new CompileDeclineError({
+        code: 'compile-error',
+        kind: 'correctness',
+        binding: name,
+        message:
+          `Could not compile: the name "${name}" of the \`symbolic\` option ` +
+          `is a function, which compiled code cannot take as an input.`,
+      });
+  }
   for (const [v, name] of inputDefinitions(expr, symbolic)) {
     const stored = v.isConstant ? undefined : v.storedValue;
     const holdsFunction = stored?.operator === 'Function';
@@ -231,6 +263,27 @@ export function withSymbolicInputs<T>(
   const names: Record<string, unknown> = {};
   for (const name of symbolic) names[name] = true;
   return withVarsValuesHidden(expr, names, fn);
+}
+
+/**
+ * Run `fn` (the compilation of one target) with the inputs that its options
+ * name read as inputs: the names of `vars` (`withVarsValuesHidden()`) and
+ * the names of `symbolic` (`withSymbolicInputs()`). A name of `symbolic`
+ * whose value cannot be left out throws its `CompileDeclineError`.
+ */
+export function withInputValuesHidden<T>(
+  expr: Expression,
+  options: {
+    vars?: Readonly<Record<string, unknown>>;
+    symbolic?: readonly string[];
+  },
+  fn: () => T
+): T {
+  const result = withSymbolicInputs(expr, options.symbolic, () =>
+    withVarsValuesHidden(expr, options.vars, fn)
+  );
+  if (result instanceof CompileDeclineError) throw result;
+  return result;
 }
 
 /**

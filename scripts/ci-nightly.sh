@@ -21,7 +21,9 @@
 # landed since the last passing run
 # (`node ~/.claude/scripts/suite-status.mjs train` says when), and the
 # `prepublishOnly` check refuses a release unless the full suite passed at
-# HEAD (`suite-status.mjs release-check`). The rules are in
+# HEAD (`suite-status.mjs release-check`), or the test files that failed
+# pass when they are run alone, or the release is forced
+# (`npm run release force`; scripts/prepublish-check.sh). The rules are in
 # `~/.claude/SHARED-BOX-PROTOCOL.md`, section 5.7.
 #
 # `run`:

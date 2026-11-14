@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 
 // The `symbolic` compile option: a symbol named in it is an input of the
 // compiled code wherever the compilation reads its name (the expression, the
@@ -189,6 +190,77 @@ describe('COMPILE the symbolic option', () => {
         );
     }
   );
+
+  test.each([
+    ['symbolic', { symbolic: ['a'] }],
+    ['vars', { vars: { a: '_.a' } }],
+  ] as const)(
+    'the value is hidden in a body that was boxed before the name was declared (%s)',
+    (_, option) => {
+      // The `a` of the body had no definition when the body was boxed: it
+      // reads the declaration made later, which holds 4.
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.parse('f(x) := |a| x').evaluate();
+      ce.declare('a', 'real');
+      ce.assign('a', 4);
+      const outer = ce.parse('f(x)');
+      ce.pushScope();
+      ce.declare('a', { type: 'real' });
+      const result = compile(ce.rebind(outer), { fallback: false, ...option });
+      expect(result.preamble).toContain('x * Math.abs(_.a)');
+      expect(run(result, { x: 2, a: -3 })).toBe(6);
+      ce.popScope();
+      expect(ce.box('a').evaluate().re).toBe(4);
+    }
+  );
+
+  test('a target called directly reads the option', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('a', 'real');
+    ce.assign('a', 4);
+    const expr = ce.parse('|a| x');
+    const folded = new JavaScriptTarget().compile(expr, {});
+    expect(folded.code).not.toContain('_.a');
+    const result = new JavaScriptTarget().compile(expr, { symbolic: ['a'] });
+    expect(result.code).toContain('Math.abs(_.a)');
+  });
+
+  test('a name that is a function defined with a signature declines', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.parse('g(t) := 2t').evaluate();
+    expect(() =>
+      compile(ce.parse('g(x)'), { fallback: false, symbolic: ['g'] })
+    ).toThrow(/"g" of the `symbolic` option is a function/);
+  });
+
+  test('a constant that an occurrence reads declines, also when a later declaration has its name', () => {
+    // The occurrence keeps reading the library constant; the declaration
+    // made after the boxing has the same name.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.pushScope();
+    const expr = ce.box(['Multiply', 'GoldenRatio', 'x']);
+    ce.declare('GoldenRatio', 'real');
+    expect(() =>
+      compile(expr, { fallback: false, symbolic: ['GoldenRatio'] })
+    ).toThrow(/"GoldenRatio" of the `symbolic` option is a constant/);
+    ce.popScope();
+  });
+
+  test('canCompile() of the shader target reads the option', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('u', 4);
+    const expr = ce.parse('u x');
+    const target = ce._getCompilationTarget('glsl') as unknown as {
+      canCompile(e: unknown, o: object): { ok: boolean };
+    };
+    expect(target.canCompile(expr, {}).ok).toBe(true);
+    expect(target.canCompile(expr, { symbolic: ['u'] }).ok).toBe(false);
+  });
 
   test('a name that holds a function declines', () => {
     const ce = new ComputeEngine();

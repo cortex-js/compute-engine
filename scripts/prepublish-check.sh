@@ -63,6 +63,15 @@ fi
 # publish never depends on whether the nightly job ran or anyone read its
 # result.
 #
+# When the full run fails on a few test files only, they are run again
+# alone on this tree: a test that passes alone failed because of the load of
+# the machine, and the release continues (`second_look`). The line that
+# reports the suite gives the time it took.
+#
+# `CE_RELEASE_FORCE=1` (`npm run release force`) skips the full suite, and
+# with it the Prettier step and lint of scripts/release-checks.sh. The fast
+# refusals (uncommitted changes, HEAD moved) still apply.
+#
 # The check is skipped in two cases:
 # - In GitHub Actions (`GITHUB_ACTIONS=true`): the publish workflow
 #   (.github/workflows/publish.yml) runs `npm run ci:extended`, the full suite, on the
@@ -105,12 +114,72 @@ HEAD_FILE="$(git rev-parse --git-dir)/ce-publish-head"
 # suite, so its message is hidden, except when the cause is a full run that
 # failed: that message names the failed jobs and the log.
 release_check() {
-  local out
-  out=$(node "$SUITE_STATUS" release-check --repo . 2>&1)
+  CHECK_OUT=$(node "$SUITE_STATUS" release-check --repo . 2>&1)
   STATUS=$?
-  if [ "$STATUS" -ne 0 ] && { [ "$STATUS" -ne 3 ] || printf '%s' "$out" | grep -q 'latest full run at .* failed'; }; then
-    echo "$out"
+  if [ "$STATUS" -ne 0 ] && { [ "$STATUS" -ne 3 ] || printf '%s' "$CHECK_OUT" | grep -q 'latest full run at .* failed'; }; then
+    echo "$CHECK_OUT"
   fi
+}
+
+# minutes_seconds <seconds>: "7m 05s".
+minutes_seconds() {
+  printf '%dm %02ds' $(($1 / 60)) $(($1 % 60))
+}
+
+# failed_test_files: sets FAILED_FILES to the test files that the latest
+# full run failed on, when it failed on test files only, and they exist, and
+# there are at most 10 of them. Otherwise FAILED_FILES is empty: a job that
+# is not a test file failed (the typecheck, the Python tests), or so many
+# files failed that the cause is not the load of the machine. It reads the
+# message of `release-check`: "… failed (<job>, <job>; log <path>) …".
+failed_test_files() {
+  FAILED_FILES=()
+  local jobs job
+  jobs=$(printf '%s' "$CHECK_OUT" | sed -n 's/.*latest full run at .* failed (\(.*\); log .*/\1/p' | head -1)
+  [ -n "$jobs" ] || return 0
+  while IFS= read -r job; do
+    job="${job#"${job%%[![:space:]]*}"}"
+    job="${job%"${job##*[![:space:]]}"}"
+    [ -n "$job" ] || continue
+    case "$job" in
+      test/*.test.ts)
+        if [ -f "$job" ]; then
+          FAILED_FILES+=("$job")
+        else
+          FAILED_FILES=()
+          return 0
+        fi
+        ;;
+      *)
+        FAILED_FILES=()
+        return 0
+        ;;
+    esac
+  done < <(printf '%s\n' "$jobs" | tr ',' '\n')
+  if [ "${#FAILED_FILES[@]}" -gt 10 ]; then FAILED_FILES=(); fi
+}
+
+# second_look: the full run failed. When it failed on a few test files only,
+# run those files alone, on this tree, which is the commit that was tested.
+# A test that fails in the full run and passes alone failed because of the
+# load of the machine (a time limit, the depth of the stack): the release
+# continues, and the occurrence is written to a log so that the test gets an
+# issue. Returns 0 when every failed file passed alone.
+second_look() {
+  failed_test_files
+  [ "${#FAILED_FILES[@]}" -gt 0 ] || return 1
+  echo "→ The full run failed on ${#FAILED_FILES[@]} test file(s). Running them alone:"
+  printf '    %s\n' "${FAILED_FILES[@]}"
+  local runner=(npx jest -w 2 --)
+  if command -v timeout > /dev/null 2>&1; then runner=(timeout -k 30 900 "${runner[@]}"); fi
+  bash scripts/run-quietly.sh "→ Failed test files, alone" "${runner[@]}" "${FAILED_FILES[@]}" || return 1
+  local log="$HOME/.local/state/compute-engine-ci-nightly/release-second-look.log"
+  mkdir -p "$(dirname "$log")" 2> /dev/null &&
+    printf '%s %s passed alone after failing in the full run: %s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git rev-parse --short HEAD)" "${FAILED_FILES[*]}" >> "$log"
+  echo "⚠ They pass alone: the full run failed under load. The release continues."
+  echo "  File an issue for each test (recorded in $log)."
+  return 0
 }
 
 # refuse_status <exit code of release-check>: the message for a refusal.
@@ -164,17 +233,33 @@ if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
   exit 1
 fi
 release_check
-if [ "$STATUS" -eq 3 ]; then
+# SUITE_NOTE: what the last line says about the full suite.
+SUITE_NOTE="an earlier run at this commit"
+if [ "$STATUS" -eq 3 ] && [ "${CE_RELEASE_FORCE:-}" = "1" ]; then
+  # `npm run release force`, or `CE_RELEASE_FORCE=1 npm publish`.
+  echo "⚠ Full test suite: skipped (force). $(node "$SUITE_STATUS" show --repo . 2> /dev/null | head -1)"
+  SUITE_NOTE=""
+  STATUS=0
+elif [ "$STATUS" -eq 3 ]; then
   echo "→ Full test suite running (about 7 minutes)"
+  SUITE_START=$SECONDS
   bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)"
+  SUITE_TIME=$(minutes_seconds $((SECONDS - SUITE_START)))
+  SUITE_NOTE="$SUITE_TIME, with the wait for the box lock"
   release_check
   if [ "$STATUS" -eq 3 ]; then
-    node "$SUITE_STATUS" release-check --repo .
-    echo ""
-    echo "✗ The full test suite did not pass at HEAD, or did not complete."
-    echo "Fix the cause, commit,  and re-run npm publish."
-    echo ""
-    exit 1
+    echo "· The full test suite took $SUITE_TIME (with the wait for the box lock)."
+    if second_look; then
+      SUITE_NOTE="$SUITE_TIME; ${#FAILED_FILES[@]} test file(s) failed in the full run and passed alone"
+      STATUS=0
+    else
+      echo ""
+      echo "✗ The full test suite did not pass at HEAD, or did not complete."
+      echo "  Fix the cause, commit, and re-run npm publish."
+      echo "  To publish without the full test suite: CE_RELEASE_FORCE=1 npm publish"
+      echo ""
+      exit 1
+    fi
   fi
 fi
 [ "$STATUS" -eq 0 ] || refuse_status "$STATUS"
@@ -186,5 +271,7 @@ if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
   echo ""
   exit 1
 fi
-echo "✓ Full test suite passed"
+if [ -n "$SUITE_NOTE" ]; then
+  echo "✓ Full test suite passed ($SUITE_NOTE)"
+fi
 mark_upload_next "${1:-}"

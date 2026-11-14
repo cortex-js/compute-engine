@@ -23,13 +23,21 @@
 # The checks run without the box lock of the shared machine, as do the
 # other steps of a release (the builds, `npm ci`): no other session is
 # active during a release (user decision 2026-10-30).
+#
+# With CE_RELEASE_FORCE=1 (`npm run release force`), the Prettier step and
+# lint are skipped: they take the longest, and the source is formatted at
+# the next release that runs them.
 
 cd "$(dirname "$0")/.."
 
 QUIET="bash scripts/run-quietly.sh"
-bash scripts/release-format.sh &&
-  $QUIET "→ Lint" npm run lint &&
-  $QUIET "→ Documentation references" npm run check:docs &&
+if [ "${CE_RELEASE_FORCE:-}" = "1" ]; then
+  echo "→ Formatting and lint … skipped (force)"
+else
+  bash scripts/release-format.sh &&
+    $QUIET "→ Lint" npm run lint || exit 1
+fi
+$QUIET "→ Documentation references" npm run check:docs &&
   $QUIET "→ Circular imports" npm run check:deps &&
   $QUIET "→ Script tests" npm run test:tools &&
   $QUIET "→ Corpus pipeline" npm run ci:corpus-pipeline

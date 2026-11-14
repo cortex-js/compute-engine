@@ -1,3 +1,23 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The value of a `vars` or `symbolic` input is hidden in a function body
+  that was written before the input was declared.** With `f(x) := |a| x`
+  defined first, then `a: real` holding 4, then a scope that declares `a`
+  again with no value, `compile(f(x), { symbolic: ['a'] })` emitted
+  `x * _.a` for the function: the name had no definition when the body was
+  boxed, and the declaration it reads now was not among those whose value
+  the compilation hides. It emits `x * Math.abs(_.a)`.
+- **A compilation target called directly reads the `symbolic` option.**
+  `new JavaScriptTarget().compile(expr, { symbolic: ['a'] })`, and the same
+  call on the shader targets and the Python target, ignored the option and
+  folded the value of `a`. Only `compile()` and the interval target read
+  it.
+- **A `symbolic` name that is a function declines.** A name defined with
+  `g(t) := …` was silently left as a function. The compilation now declines
+  with the name in `binding`, as for a name that holds a function literal.
+
 ## 0.188.1 _2026-11-13_
 
 ### New Features

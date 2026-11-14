@@ -234,7 +234,13 @@ One command makes a release:
 ```sh
 npm run release # a minor release; or: npm run release -- patch (major, or an explicit version)
                 # --yes skips the confirmation question
+npm run release force # the same, without the Prettier step, lint and the full test suite
 ```
+
+`force` skips the three steps that take the longest. Use it when the content
+was tested before the release commit: the other checks and the build still run
+(about 20 seconds for the checks), and the nightly full run tests the released
+commit afterwards. It combines with a version: `npm run release -- patch force`.
 
 `scripts/release.sh` does these steps, in this order:
 
@@ -293,6 +299,19 @@ with consumer smoke tests, runs the full test suite at HEAD when no passing run
 covers it, uploads the package, and packages the VS Code extension. When you run
 `npm publish` without `npm run release`, generate the documentation first and
 include it in the release commit.
+
+The line that reports the full suite gives the time it took, with the wait for
+the box lock. When the full run fails on at most ten test files and on nothing
+else, the publish check runs those files again alone, on the same commit. When
+they pass alone, the failure came from the load of the machine (a time limit, a
+stack depth): the release continues, and the occurrence is written to
+`~/.local/state/compute-engine-ci-nightly/release-second-look.log`, so that each
+test gets an issue. When a file still fails, or another job failed (the
+typecheck, the Python tests), the publish stops.
+
+`CE_RELEASE_FORCE=1 npm publish` publishes without the full suite, the Prettier
+step and lint. It is what `npm run release force` sets, and it resumes a publish
+that stopped on the full suite.
 
 <details>
 <summary>Local release guard and previously completed validation</summary>

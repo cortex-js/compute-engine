@@ -6,7 +6,7 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
-import { withVarsValuesHidden } from './vars-inputs.js';
+import { withInputValuesHidden, withVarsValuesHidden } from './vars-inputs.js';
 import { resolveStorageHints } from './storage-hints.js';
 
 import type {
@@ -7655,7 +7655,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // `compileOrThrow` throws on a decline, so the decline reaches the
       // fallback built below. A `vars`-mapped symbol is compiled as the
       // valueless input of its declared type (`withVarsValuesHidden`).
-      return withVarsValuesHidden(expr, options.vars, () =>
+      return withInputValuesHidden(expr, options, () =>
         this.compileOrThrow(expr, options)
       );
     } catch (e) {

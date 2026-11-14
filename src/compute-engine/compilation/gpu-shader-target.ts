@@ -8,7 +8,7 @@ import {
   isOpaqueVarsSource,
 } from './cse.js';
 import { CompilerState } from './compiler-state.js';
-import { withVarsValuesHidden } from './vars-inputs.js';
+import { withInputValuesHidden } from './vars-inputs.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import {
@@ -1753,7 +1753,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // declared type (`withVarsValuesHidden`). A call of a user function
       // that shadows a library operator is compiled under a private name
       // (`withShadowingCallsRenamed`).
-      return withVarsValuesHidden(expr, options.vars, () =>
+      return withInputValuesHidden(expr, options, () =>
         withShadowingCallsRenamed(expr, options, (renamed) =>
           this.compileOrThrow(renamed, options, storage)
         )
@@ -1914,8 +1914,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
   /**
    * The steps of `canCompile()` before its own checks: the `storage` hints,
-   * the wrappers of `compile()` (a `vars`-mapped symbol is read as the
-   * valueless input of its declared type, and a call of a user function that
+   * the wrappers of `compile()` (a symbol that `vars` or `symbolic` names is
+   * read as the valueless input of its declared type, and a call of a user
+   * function that
    * shadows a library operator has a private name), the prepare stage and
    * the typing pass. `check` reads the result inside the wrappers.
    */
@@ -1931,7 +1932,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             vars: options.vars,
             functions: options.functions,
           });
-    return withVarsValuesHidden(expr, options.vars, () =>
+    return withInputValuesHidden(expr, options, () =>
       withShadowingCallsRenamed(expr, options, (renamed) =>
         check(this.prepareAndType(renamed, options, storage))
       )

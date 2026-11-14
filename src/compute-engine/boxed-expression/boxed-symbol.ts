@@ -1525,6 +1525,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
+   * The definition whose type and stored value this occurrence reads, when
+   * it does not read an activation: for a symbol with a definition, the
+   * definition that its name resolves to from its home chain
+   * (`_homeBinding()`: a declaration made later on that chain is read); for a
+   * free name, the definition that its name resolves to (`_freeNameBinding()`:
+   * a name that had no definition when it was boxed reads a declaration made
+   * later). `undefined` for a parameter, the variable of a binder and the
+   * local of a block, for a free name with no definition, and for a symbol
+   * that is not canonical.
+   * @internal
+   */
+  _readDefinition(): BoxedDefinition | undefined {
+    const def = this._def;
+    if (def !== undefined)
+      return readsActivation(def) ? undefined : this._homeBinding(def);
+    if (!this._isFreeName) return undefined;
+    return this._freeNameBinding();
+  }
+
+  /**
    * The definition that this occurrence reads: its own definition, or, for a
    * free name, the definition that its name resolves to in the current
    * context (`freeNameBindingInContext()`). `undefined` for a free name whose

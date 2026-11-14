@@ -64,7 +64,7 @@ import {
   recordIntegerRange,
   recordScalarParams,
 } from './javascript-value-facts.js';
-import { withVarsValuesHidden } from './vars-inputs.js';
+import { withInputValuesHidden } from './vars-inputs.js';
 import {
   absentBaseReadIsNumeric,
   tupleSlotReadType,
@@ -11235,7 +11235,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // compiled under a private name (`withShadowingCallsRenamed`). A
       // compilation that starts while the asynchronous copy of another
       // program is emitted is an ordinary one (`withoutAsyncEmission()`).
-      return withVarsValuesHidden(expr, options.vars, () =>
+      return withInputValuesHidden(expr, options, () =>
         withShadowingCallsRenamed(expr, options, (renamed) =>
           withoutAsyncEmission(() => this.compileOrThrow(renamed, options))
         )

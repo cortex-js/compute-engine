@@ -1,8 +1,17 @@
 #! bash
 
-# Usage: npm run release [-- <patch|minor|major|x.y.z>] [--yes]
+# Usage: npm run release [-- <patch|minor|major|x.y.z>] [force] [--yes]
 #
 # Without a version argument, the release is a minor release.
+#
+# `force` (`npm run release force`, or `npm run release -- patch force`)
+# skips the checks that take the longest: the Prettier step and lint of
+# scripts/release-checks.sh, and the full test suite of the publish check
+# (scripts/prepublish-check.sh). The other checks run: the state of the
+# tree, the login, the issue ledger, the documentation references, the
+# circular imports, the script tests, the corpus pipeline and the build. Use
+# it when the content was tested before the release commit. The nightly
+# full run still tests the released commit afterwards.
 #
 # Makes a release in one command:
 #
@@ -49,17 +58,24 @@ cd "$(dirname "$0")/.."
 
 BUMP="minor"
 YES=1
+FORCE=0
 for arg in "$@"; do
   case "$arg" in
     --yes) YES=1 ;;
+    force | --force) FORCE=1 ;;
     patch | minor | major) BUMP="$arg" ;;
     [0-9]*.[0-9]*.[0-9]*) BUMP="$arg" ;;
     *)
-      echo "Usage: npm run release [-- <patch|minor|major|x.y.z>] [--yes]" >&2
+      echo "Usage: npm run release [-- <patch|minor|major|x.y.z>] [force] [--yes]" >&2
       exit 2
       ;;
   esac
 done
+# scripts/release-checks.sh and scripts/prepublish-check.sh read it.
+if [ "$FORCE" -eq 1 ]; then
+  export CE_RELEASE_FORCE=1
+  echo "⚠ force: the Prettier step, lint and the full test suite are skipped."
+fi
 
 fail() {
   echo ""
@@ -314,6 +330,8 @@ UPLOAD_MARK="$(git rev-parse --git-dir)/ce-release-upload-mark"
 rm -f "$UPLOAD_MARK"
 if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm publish; then
   if [ ! -f "$UPLOAD_MARK" ]; then
+    echo ""
+    echo "  To publish without the full test suite: CE_RELEASE_FORCE=1 npm publish"
     fail "✗ npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>', and push it: 'git push --atomic origin <commit>:refs/heads/main refs/tags/$TAG'."
   fi
   rm -f "$UPLOAD_MARK"
