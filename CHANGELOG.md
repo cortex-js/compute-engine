@@ -18,6 +18,13 @@
 
 ### Improvements
 
+- **`canCompile()` is exported by the main package.** A program that loads
+  `@cortex-js/compute-engine` can ask whether an expression compiles to GLSL
+  before it compiles it, without the `@cortex-js/compute-engine/compile`
+  sub-path. It takes a LaTeX string, a MathJSON expression or an expression,
+  as the free function `compile()` does. It is also on the object that the
+  main bundle stores under `Symbol.for('io.cortexjs.compute-engine')`.
+
 - **A call of a function with a declared scalar result keeps that result when
   the body ends after a loop.** With the Epsil function
   `f(B: list<integer>, k: integer) -> integer` that counts in a loop and

@@ -39,6 +39,7 @@ ComputeEngineImpl._latexSyntaxFactory = () => new LatexSyntax();
 
 import {
   _setDefaultEngineFactory,
+  canCompile,
   compile,
 } from './compute-engine/free-functions.js';
 
@@ -175,6 +176,7 @@ export {
   factorDetailed,
   solve,
   compile,
+  canCompile,
   getDefaultEngine,
 } from './compute-engine/free-functions.js';
 export type { FreeFunctionOptions } from './compute-engine/free-functions.js';
@@ -272,6 +274,7 @@ const COMPUTE_ENGINE_GLOBAL: ComputeEngineGlobal = {
   // route). Same category as `LatexSyntax`: a value export a bundle-external
   // consumer must discover at runtime.
   compile,
+  canCompile,
 };
 
 /**
@@ -319,6 +322,7 @@ export interface ComputeEngineGlobal {
   numericValue: typeof numericValue;
   sym: typeof sym;
   compile: typeof compile;
+  canCompile: typeof canCompile;
 }
 
 (globalThis as Record<symbol, unknown>)[

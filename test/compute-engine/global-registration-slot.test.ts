@@ -37,6 +37,7 @@ describe('global registration slot', () => {
       numericValue: 'function',
       sym: 'function',
       compile: 'function',
+      canCompile: 'function',
     };
     for (const [name, type] of Object.entries(contract))
       expect(`${name}: ${typeof slot[name]}`).toBe(`${name}: ${type}`);
@@ -50,5 +51,21 @@ describe('global registration slot', () => {
     const result = compile('x + 1');
     expect(result.success).toBe(true);
     expect(result.run({ x: 2 })).toBe(3);
+  });
+
+  it('slot canCompile answers for a string, usable without an engine', () => {
+    const canCompile = slot.canCompile as (
+      expr: unknown,
+      options?: unknown
+    ) => { ok: boolean };
+    expect(canCompile('x + 1', { to: 'glsl' }).ok).toBe(true);
+  });
+});
+
+describe('main entry exports', () => {
+  it('exports canCompile beside compile', async () => {
+    const mod = await import('../../src/compute-engine');
+    expect(typeof mod.canCompile).toBe('function');
+    expect(mod.canCompile('x + 1', { to: 'glsl' }).ok).toBe(true);
   });
 });

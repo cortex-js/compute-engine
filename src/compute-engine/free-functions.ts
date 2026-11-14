@@ -25,7 +25,9 @@ import {
 import type { FactorOptions, FactorizationResult } from './factoring-types.js';
 import { isValidSymbol } from '../math-json/symbols.js';
 import {
+  canCompile as canCompileExpr,
   compile as compileExpr,
+  type CanCompileResult,
   type CompileExpressionOptions,
 } from './compilation/compile-expression.js';
 import type {
@@ -300,4 +302,16 @@ export function compile<
   options?: CompileExpressionOptions<T> & FreeFunctionOptions
 ): CompilationResult<T, R> {
   return compileExpr<T, R>(toExpression(expr, options), options);
+}
+
+/**
+ * Tell whether an expression compiles, without keeping the result. Same
+ * input forms as {@linkcode compile}; the answer is that of `canCompile()` of
+ * the `@cortex-js/compute-engine/compile` sub-path.
+ */
+export function canCompile(
+  expr: LatexString | ExpressionInput,
+  options?: CompileExpressionOptions & FreeFunctionOptions
+): CanCompileResult {
+  return canCompileExpr(toExpression(expr, options), options);
 }
