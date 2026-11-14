@@ -59,6 +59,7 @@ import {
   bigExpIntegralEi,
   bigLogIntegral,
 } from '../numerics/exponential-integral-big.js';
+import { bigDedekindEta } from '../numerics/dedekind-eta-big.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -1242,14 +1243,36 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(tau);
         if (point === '~oo') return engine.Zero;
         if (point !== undefined) return undefined;
-        return shouldNumericize(numericApproximation, tau)
-          ? applyN(
-              [tau],
-              (t) => dedekindEta(engine.complex(t, 0)),
-              undefined,
-              dedekindEta
-            )
-          : undefined;
+        if (!shouldNumericize(numericApproximation, tau)) return undefined;
+        // Above machine precision a τ in the upper half-plane has both parts
+        // of η(τ) at the digits asked for, or the head stays unevaluated
+        // (`bigDedekindEta` declines where it cannot reach them).
+        if (
+          bignumPreferred(engine) &&
+          isNumber(tau) &&
+          tau.isComplex &&
+          tau.im > 0 &&
+          Number.isFinite(tau.re) &&
+          Number.isFinite(tau.im)
+        ) {
+          const nv = tau.numericValue;
+          const value = (
+            typeof nv === 'number' ? engine._numericValue(nv) : nv
+          ).N();
+          const big = bigDedekindEta(
+            engine,
+            value.bignumRe ?? engine.bignum(value.re),
+            value.bignumIm ?? engine.bignum(value.im)
+          );
+          if (big === undefined) return undefined;
+          return engine.number(engine._inexactNumericValue(big));
+        }
+        return applyN(
+          [tau],
+          (t) => dedekindEta(engine.complex(t, 0)),
+          undefined,
+          dedekindEta
+        );
       },
     },
 

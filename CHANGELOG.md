@@ -192,6 +192,18 @@
 
 ### Resolved Issues
 
+- **`DedekindEta` of a complex `τ` carries the precision asked for.** At
+  `ce.precision = 40`, `DedekindEta(0.3 + i)` was `0.7678448651091705 +
+  0.05906109778250378i`, a double's digits; it is
+  `0.7678448651091705567421299051799721144743 +
+  0.05906109778250378247292565345689206690519i`. Above machine precision a
+  `τ` with `Im τ < 0.001` stays unevaluated instead of returning a double:
+  `DedekindEta(0.3 + 0.0005i)` at 30 digits was `0.0750263045067908 +
+  0.005904698221439741i` and is `DedekindEta(0.3 + 0.0005i)`. Machine
+  precision is unchanged. (PR #561, contributed by
+  [enumeratio](https://github.com/enumeratio); fixes
+  [#555](https://github.com/cortex-js/compute-engine/issues/555)).
+
 - **`AiryAi`, `AiryBi`, `ExpIntegralEi` and `LogIntegral` of a real argument
   carry the precision asked for.** At `ce.precision = 30`,
   `ExpIntegralEi(2)` was the double `4.95423435600189`; it is
