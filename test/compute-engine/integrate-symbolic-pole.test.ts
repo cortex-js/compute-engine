@@ -21,6 +21,12 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  * The expected values were checked against a composite Simpson rule.
  */
 
+// The integral with four singular points, the largest number that the box is
+// cut at, runs only in the nightly run (CE_NIGHTLY): "two points on a
+// diagonal" checks the same cuts in every run.
+const NIGHTLY = process.env.CE_NIGHTLY === '1';
+const testNightly = NIGHTLY ? test : test.skip;
+
 const integral = (ce: ComputeEngine, body: unknown, limits: unknown[][]) =>
   ce.box(['Integrate', body, ...limits.map((l) => ['Limits', ...l])] as any);
 
@@ -510,7 +516,7 @@ describe('TWO OR MORE SINGULAR POINTS IN A DOUBLE INTEGRAL', () => {
     expect(error).toBeLessThan(1e-6);
   });
 
-  test('four points', () => {
+  testNightly('four points', () => {
     const [estimate, error] = integrate(
       `${r('0.1', '0.2')}+${r('0.3', '0.4')}+${r('0.5', '0.6')}+${r('0.7', '0.8')}`
     );

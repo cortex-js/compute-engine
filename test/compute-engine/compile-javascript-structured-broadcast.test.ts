@@ -237,14 +237,27 @@ function profileOf(
   }
 }
 
+/** One engine per mode for the programs of `check()`: a program is a
+ *  function literal whose names are its parameters, so boxing and
+ *  evaluating it declare and assign nothing in the engine. */
+const ENGINES = new Map<Mode, ComputeEngine>();
+function engineFor(mode: Mode): ComputeEngine {
+  let ce = ENGINES.get(mode);
+  if (ce === undefined) {
+    ce = new ComputeEngine();
+    ce.precision = 'machine';
+    ENGINES.set(mode, ce);
+  }
+  return ce;
+}
+
 /** Each program, compiled with the profile and with the existing compiler,
  *  and run on each list of arguments. In the `strict` mode the profile
  *  admits the program; in the `complex` mode it gives the same value or
  *  declines. */
 function check(program: Program): void {
   for (const mode of MODES) {
-    const ce = new ComputeEngine();
-    ce.precision = 'machine';
+    const ce = engineFor(mode);
     const expr = ce.expr(program.json);
     const result = profileOf(expr, mode);
     if (result === 'declined') {

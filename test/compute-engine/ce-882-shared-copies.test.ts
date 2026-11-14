@@ -189,7 +189,11 @@ describe('CE-882: COPIES OF A SUB-EXPRESSION ARE EVALUATED ONCE', () => {
   test('A held expression deeper than the call stack evaluates', () => {
     const ce = new ComputeEngine();
     let t = ce.box('x');
-    for (let i = 0; i < 20_000; i++) t = ce.function('Sin', [t]);
+    // The chain is not canonical: a canonical chain takes a time quadratic
+    // in its depth to build (CE-1200). `Hold` is canonical, and the hash of
+    // its structure walks the 20,000 levels.
+    for (let i = 0; i < 20_000; i++)
+      t = ce.function('Sin', [t], { canonical: false });
     const held = ce.function('Hold', [t]);
     // The look-up of a copy reads the structure hash of the held expression.
     // The result is not printed: a failed `expect` would print the

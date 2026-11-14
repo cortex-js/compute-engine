@@ -26,6 +26,14 @@ const RADICAL = [
   'x',
 ];
 
+/** Its orders 1 to 4 take the reuse path that those of `RADICAL` take, in
+ *  less time. */
+const SMALL_RADICAL = [
+  'Function',
+  ['Sqrt', ['Add', 'x', ['Sqrt', ['Add', 'x', 1]]]],
+  'x',
+];
+
 const SIN_EXP = ['Function', ['Multiply', ['Sin', 'x'], ['Exp', 'x']], 'x'];
 
 function engineWith(fn: unknown): ComputeEngine {
@@ -52,7 +60,7 @@ function simplifyCalls(run: () => void): number {
 
 describe('CE-1052: a derivative continues from a lower order of an earlier request', () => {
   test.each([
-    ['a nested radical', RADICAL],
+    ['a nested radical', SMALL_RADICAL],
     ['sin(x)·exp(x)', SIN_EXP],
   ])('the orders 2 to 4 of %s equal those of a new engine', (_, fn) => {
     const warm = engineWith(fn);

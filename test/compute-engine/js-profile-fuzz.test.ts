@@ -52,13 +52,18 @@ const KNOWN: readonly Known[] = [
   },
 ];
 
+// The number of programs of each seed: 150 runs only in the nightly run
+// (CE_NIGHTLY).
+const COUNT = process.env.CE_NIGHTLY === '1' ? 150 : 50;
+const SEEDS = [1, 2, 3];
+
 let result: FuzzResult;
 
 beforeAll(async () => {
   result = await runFuzz({
     ...DEFAULT_OPTIONS,
-    seeds: [1, 2, 3],
-    count: 150,
+    seeds: SEEDS,
+    count: COUNT,
     interp: 0,
   });
 }, 300_000);
@@ -77,9 +82,10 @@ const checked = (f: Finding) =>
   f.class === 'profile-failure';
 
 test('the generator gives programs that both compilers compile', () => {
-  expect(result.programs).toBe(450);
-  expect(result.classes['both compile']).toBeGreaterThan(300);
-  expect(result.points.inType).toBeGreaterThan(30_000);
+  const programs = SEEDS.length * COUNT;
+  expect(result.programs).toBe(programs);
+  expect(result.classes['both compile']).toBeGreaterThan((2 * programs) / 3);
+  expect(result.points.inType).toBeGreaterThan((200 * programs) / 3);
 });
 
 test('the generator writes the functions of lists and the function operands', () => {

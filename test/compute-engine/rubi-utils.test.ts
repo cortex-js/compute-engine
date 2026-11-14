@@ -67,6 +67,18 @@ beforeAll(() => {
   };
 });
 
+// The end-to-end describes share one engine with the integration rules
+// loaded, since loading them takes about a second: an integral computed by
+// one describe changes no result of another.
+let rulesCE: ComputeEngine | undefined;
+const rulesEngine = (): ComputeEngine => {
+  if (rulesCE === undefined) {
+    rulesCE = new ComputeEngine();
+    loadIntegrationRules(rulesCE);
+  }
+  return rulesCE;
+};
+
 const bind = (name: string, expr: Json): void => {
   ctx.env.set(name, ce.expr(expr as any));
 };
@@ -783,8 +795,7 @@ describe('cofunction deactivation shift (Sec → csc[·+π/2], R11)', () => {
 describe('cofunction shift — end-to-end secant integrals (shipped bundle)', () => {
   let engine: ComputeEngine;
   beforeAll(() => {
-    engine = new ComputeEngine();
-    loadIntegrationRules(engine);
+    engine = rulesEngine();
   });
 
   const closes = (latex: string): boolean => {
@@ -870,8 +881,7 @@ describe('reciprocalToPower — reflected-csc binomial carve-out (R13)', () => {
 describe('R13 end-to-end secant binomials (shipped bundle)', () => {
   let engine: ComputeEngine;
   beforeAll(() => {
-    engine = new ComputeEngine();
-    loadIntegrationRules(engine);
+    engine = rulesEngine();
   });
 
   // D-verify: differentiate the antiderivative and compare to the integrand.
@@ -1059,8 +1069,7 @@ describe('linear-only trig deactivation (DeactivateTrigAux, R14)', () => {
 describe('R14 end-to-end Si/Ci-routing (shipped bundle)', () => {
   let eng: ComputeEngine;
   beforeAll(() => {
-    eng = new ComputeEngine();
-    loadIntegrationRules(eng);
+    eng = rulesEngine();
   });
   const closesLatex = (latex: string, subs: Record<string, number>): boolean => {
     const integ = eng.parse(latex);
@@ -1093,8 +1102,7 @@ describe('R14 end-to-end Si/Ci-routing (shipped bundle)', () => {
 describe('R9 end-to-end (shipped bundle)', () => {
   let engine: ComputeEngine;
   beforeAll(() => {
-    engine = new ComputeEngine();
-    loadIntegrationRules(engine);
+    engine = rulesEngine();
   });
   const closes = (latex: string): boolean => {
     const integ = engine.parse(latex);
@@ -1198,8 +1206,7 @@ describe('expandRationalOverComplexLinears (R18 quadratic split)', () => {
 describe('R15 end-to-end Si/Ci partial-fraction routing (shipped bundle)', () => {
   let eng: ComputeEngine;
   beforeAll(() => {
-    eng = new ComputeEngine();
-    loadIntegrationRules(eng);
+    eng = rulesEngine();
   });
   const closesLatex = (latex: string): boolean => {
     const integ = eng.parse(latex);
@@ -1234,8 +1241,7 @@ describe('R15 end-to-end Si/Ci partial-fraction routing (shipped bundle)', () =>
 describe('R18 end-to-end complex-Si / reciprocal-arg closure (shipped bundle)', () => {
   let eng: ComputeEngine;
   beforeAll(() => {
-    eng = new ComputeEngine();
-    loadIntegrationRules(eng);
+    eng = rulesEngine();
   });
   const closesLatex = (latex: string): boolean => {
     const integ = eng.parse(latex);
@@ -1312,8 +1318,7 @@ describe('inverseSquareTrigFactor (R16 structural matcher)', () => {
 describe('R16 end-to-end poly×csc²/sec² by-parts (shipped bundle)', () => {
   let eng: ComputeEngine;
   beforeAll(() => {
-    eng = new ComputeEngine();
-    loadIntegrationRules(eng);
+    eng = rulesEngine();
   });
   const closesLatex = (latex: string): boolean => {
     const integ = eng.parse(latex);

@@ -236,8 +236,11 @@ describe('Power and Root of two number literals', () => {
    * the target, a caveat of compiled code. The program is then compared
    * with the existing compiler only.
    */
-  const foldIsExact = (json: MathJsonExpression, mode: Mode): boolean => {
-    const ce = engine();
+  const foldIsExact = (
+    json: MathJsonExpression,
+    mode: Mode,
+    ce: ComputeEngine
+  ): boolean => {
     const literal = (
       (json as unknown[])[0] === 'Power' || (json as unknown[])[0] === 'Root'
         ? json
@@ -272,14 +275,18 @@ describe('Power and Root of two number literals', () => {
   const NAN_FOLD =
     /of number literals is folded to NaN by the existing emitter, and its value is the finite number/;
   /** Whether the literal of `json` declines as a `NaN` fold. */
-  const nanFold = (json: MathJsonExpression, mode: Mode): boolean => {
+  const nanFold = (
+    json: MathJsonExpression,
+    mode: Mode,
+    ce: ComputeEngine
+  ): boolean => {
     const literal = (
       (json as unknown[])[0] === 'Power' || (json as unknown[])[0] === 'Root'
         ? json
         : (json as unknown[])[2]
     ) as MathJsonExpression;
     try {
-      structured().compile(engine().expr(literal), { ...OPTIONS, mode });
+      structured().compile(ce.expr(literal), { ...OPTIONS, mode });
       return false;
     } catch (e) {
       if (NAN_FOLD.test((e as Error).message)) return true;
@@ -288,19 +295,22 @@ describe('Power and Root of two number literals', () => {
   };
   for (const mode of MODES)
     describe(`${mode} mode`, () => {
+      // One engine for the programs of a mode: they declare and assign
+      // nothing.
+      const ce = engine();
       test.each(programs)('%s', (_name, json) => {
         // A literal that the existing emitter folds to `NaN` where the
         // interpreter has a finite value declines (the canonical form of
         // `b^(-1/4)` is `Root(b, -4)`: `NaN` for a negative `b`, where the
         // interpreter gives the principal complex value).
-        if (nanFold(json, mode)) {
+        if (nanFold(json, mode, ce)) {
           expect(() =>
-            structured().compile(engine().expr(json), { ...OPTIONS, mode })
+            structured().compile(ce.expr(json), { ...OPTIONS, mode })
           ).toThrow(NAN_FOLD);
           return;
         }
-        const exact = foldIsExact(json, mode);
-        checkProgram(json, mode, overX, engine(), () => exact);
+        const exact = foldIsExact(json, mode, ce);
+        checkProgram(json, mode, overX, ce, () => exact);
       });
     });
 

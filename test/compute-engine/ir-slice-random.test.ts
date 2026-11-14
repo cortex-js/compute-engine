@@ -44,7 +44,10 @@ import {
   type Point,
 } from './ir-slice-oracle';
 
-const COUNT = 5000;
+// The full breadth (5,000 programs) runs nightly (CE_NIGHTLY); every run
+// compares 1,000.
+const NIGHTLY = process.env.CE_NIGHTLY === '1';
+const COUNT = NIGHTLY ? 5000 : 1000;
 
 /**
  * The kind of a disagreement, each a case of the caveats of compiled code
@@ -461,15 +464,37 @@ describe('IR slice: random programs against the interpreter', () => {
       )
     );
     expect(compiled).toBeGreaterThan(COUNT / 2);
-    for (const [c, n] of reached) expect([c, n > 10]).toEqual([c, true]);
+    // Each construct is reached by more than 10 programs in 5,000.
+    for (const [c, n] of reached)
+      expect([c, n > (10 * COUNT) / 5000]).toEqual([c, true]);
     expect(compiledDeclines).toEqual([]);
     expect(missingWarnings).toEqual([]);
     expect(changedInputs).toEqual([]);
-    expect(warned).toBeGreaterThan(10);
-    for (const name of Object.keys(DECLINES))
-      expect([name, expectedDeclines.has(name)]).toEqual([name, true]);
+    expect(warned).toBeGreaterThan((10 * COUNT) / 5000);
+    // A smaller sample need not embed each program of `DECLINES`: the next
+    // test checks each one.
+    if (NIGHTLY)
+      for (const name of Object.keys(DECLINES))
+        expect([name, expectedDeclines.has(name)]).toEqual([name, true]);
     expect(bitDifferences).toEqual([]);
     expect(unclassified).toEqual([]);
+  });
+
+  test('each program of DECLINES declines, added to a program', () => {
+    const ce = makeEngine();
+    const compiled: string[] = [];
+    for (const [name, program] of Object.entries(DECLINES)) {
+      // As the generator embeds it: added to a real program.
+      const expr = ce.box(['Add', 'x', program] as never);
+      try {
+        sliceProgram(expr, { target: 'javascript' });
+        compiled.push(name);
+      } catch (e) {
+        if (!(e instanceof Decline)) throw e;
+        expect([name, e.message.includes(name)]).toEqual([name, true]);
+      }
+    }
+    expect(compiled).toEqual([]);
   });
 });
 

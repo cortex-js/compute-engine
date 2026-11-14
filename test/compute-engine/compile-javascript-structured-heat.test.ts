@@ -92,6 +92,11 @@ function heatpaint(H: list<real>, p: real, q: real, obstacle: real) -> list<real
 const OPTIONS = { cse: false, constantFold: false } as const;
 /** The interpreter of a step of 1024 cells takes about 3 s. */
 const SLOW = 60_000;
+// The uniform field and the three steps in sequence are compared with the
+// interpreter nightly (CE_NIGHTLY); in every run, "every field" compares the
+// uniform field and three steps in sequence with the existing emitter.
+const NIGHTLY = process.env.CE_NIGHTLY === '1';
+const testNightly = NIGHTLY ? test : test.skip;
 
 /** An engine that has executed `source` with `executeEpsil()`, with
  *  machine numbers. */
@@ -269,7 +274,7 @@ describe('heatstep: the interpreter decides, the existing emitter checks', () =>
     SLOW
   );
 
-  test(
+  testNightly(
     'uniform field, wall on, cooled, diffusivity 10 (clamped to 0.25)',
     () => {
       expect(step(UNIFORM, 10, 1, 1)).toEqual(interpret(HEAT, 'heatstep', [UNIFORM, 10, 1, 1]));
@@ -277,7 +282,7 @@ describe('heatstep: the interpreter decides, the existing emitter checks', () =>
     SLOW
   );
 
-  test(
+  testNightly(
     'three steps in sequence',
     () => {
       let compiled: readonly number[] = SPOT;

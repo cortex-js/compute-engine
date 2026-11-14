@@ -589,9 +589,12 @@ describe('scalar heads: the doubles of the existing compiler', () => {
   for (const head of HEADS)
     for (const mode of MODES)
       test(`${head} (${mode})`, () => {
+        // One engine for the programs of a test: they declare and assign
+        // nothing.
+        const ce = engine();
         let admitted = 0;
         for (const [, json] of programs(head)) {
-          const outcome = compileWith(engine().box(json), mode, true);
+          const outcome = compileWith(ce.box(json), mode, true);
           if ('message' in outcome) {
             // Declined only for a node whose type is not real in the
             // `complex` mode (the existing compiler wraps the real call).
@@ -599,7 +602,7 @@ describe('scalar heads: the doubles of the existing compiler', () => {
             continue;
           }
           admitted++;
-          expectSameDoubles(json, mode);
+          expectSameDoubles(json, mode, ce);
         }
         expect(admitted).toBeGreaterThan(0);
       });
@@ -617,7 +620,8 @@ describe('scalar heads: the doubles of the existing compiler', () => {
     ['Arccsc of a real operand on the complex lane', ['Arccsc', 'x']],
     ['Arcoth of a real operand on the complex lane', ['Add', 'x', ['Arcoth', 'x']]],
   ] as [string, MathJsonExpression][])('%s of a complex operand', (_name, json) => {
-    for (const mode of MODES) expectSameDoubles(json, mode);
+    const ce = engine();
+    for (const mode of MODES) expectSameDoubles(json, mode, ce);
   });
 
   test.each([
@@ -626,7 +630,8 @@ describe('scalar heads: the doubles of the existing compiler', () => {
     ['1 / Hypot(x, 2)', ['Divide', 1, ['Hypot', 'x', 2]]],
     ['Hypot(3, p)', ['Hypot', 3, 'p']],
   ] as [string, MathJsonExpression][])('%s', (_name, json) => {
-    for (const mode of MODES) expectSameDoubles(json, mode);
+    const ce = engine();
+    for (const mode of MODES) expectSameDoubles(json, mode, ce);
   });
 });
 

@@ -89,9 +89,14 @@ function interpreted(expr: BoxedExpression, vars: Vars): number {
  * by the same routines with an integrand that records each abscissa and
  * the value there, in the order of the calls. The compiled `_SYS.integrate`
  * calls them through their module, so the replacement reaches it
- * (`countIntegrandEvals()` in `compile-integrate.test.ts`).
+ * (`countIntegrandEvals()` in `compile-integrate.test.ts`). With
+ * `monteCarloSamples`, a Monte Carlo estimate draws at most that many
+ * samples.
  */
-function recorded<T>(fn: () => T): { value: T; samples: number[] } {
+function recorded<T>(
+  fn: () => T,
+  monteCarloSamples = Infinity
+): { value: T; samples: number[] } {
   const gk = GaussKronrodModule as {
     adaptiveQuadrature: typeof GaussKronrodModule.adaptiveQuadrature;
   };
@@ -109,7 +114,8 @@ function recorded<T>(fn: () => T): { value: T; samples: number[] } {
       return y;
     };
   gk.adaptiveQuadrature = (f, ...rest) => quadrature(record(f), ...rest);
-  mc.monteCarloEstimate = (f, ...rest) => monteCarlo(record(f), ...rest);
+  mc.monteCarloEstimate = (f, a, b, n, ...rest) =>
+    monteCarlo(record(f), a, b, Math.min(n ?? 1e5, monteCarloSamples), ...rest);
   try {
     return { value: fn(), samples };
   } finally {
@@ -423,6 +429,7 @@ describe('STRUCTURED CALCULUS: an integral that does not converge, a deadline', 
     const ce = engine();
     // `∫₀¹ sin(1/t)/t dt` does not converge to the tolerance: the outermost
     // integral samples 10⁷ points from the entropy source of the engine.
+    // Both routes draw the same sequence: 10⁴ of the samples show it.
     let state = 1;
     const reset = () => {
       state = 1;
@@ -440,9 +447,9 @@ describe('STRUCTURED CALCULUS: an integral that does not converge, a deadline', 
     const existing = compile(expr, EXISTING);
     const profile = compile(expr, PROFILE);
     reset();
-    const a = recorded(() => run(existing, {}));
+    const a = recorded(() => run(existing, {}), 1e4);
     reset();
-    const b = recorded(() => run(profile, {}));
+    const b = recorded(() => run(profile, {}), 1e4);
     expect(Object.is(a.value, b.value)).toBe(true);
     expect(b.samples.length).toBe(a.samples.length);
     expect(b.samples).toEqual(a.samples);

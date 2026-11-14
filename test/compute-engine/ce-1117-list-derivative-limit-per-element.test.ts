@@ -91,9 +91,10 @@ describe('CE-1117: the derivative size limit applies to each list element', () =
   });
 
   test('one element over the limit still makes the list decline', () => {
+    // An element under the limit would make the list and the Join be
+    // differentiated, so these checks also show that the derivative of
+    // `nestedQuotient(6)` passes the limit.
     const ce = new ComputeEngine();
-    const alone = ce.box(['D', nestedQuotient(6), 'x'] as never).evaluate();
-    expect(alone.operator).toBe('D');
     const inList = ce
       .box(['D', ['List', 'x', nestedQuotient(6)], 'x'] as never)
       .evaluate();

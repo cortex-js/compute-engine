@@ -107,14 +107,25 @@ function redeclared(name: string): ComputeEngine {
   return ce;
 }
 
+/** What a new engine observes of `input`, computed once for each input,
+ * each on an engine of its own. */
+const baselines = new Map<string, string>();
+function baseline(input: any): string {
+  const key = JSON.stringify(input);
+  let observed = baselines.get(key);
+  if (observed === undefined) {
+    observed = observe(new ComputeEngine(), input);
+    baselines.set(key, observed);
+  }
+  return observed;
+}
+
 describe('an unchanged copy of an arithmetic operator definition', () => {
   describe.each(NAMES)('%s', (name) => {
     test.each([...INPUTS, ...LATEX].map((x) => [JSON.stringify(x), x]))(
       '%s',
       (_label, input) => {
-        expect(observe(redeclared(name), input)).toBe(
-          observe(new ComputeEngine(), input)
-        );
+        expect(observe(redeclared(name), input)).toBe(baseline(input));
       }
     );
   });

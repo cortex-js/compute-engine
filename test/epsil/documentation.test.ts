@@ -129,9 +129,11 @@ describe('EPSIL DOCUMENTATION', () => {
 
   test('all Epsil code fences parse unless marked as diagnostic examples', () => {
     const failures: string[] = [];
+    // Parsing a block leaves nothing in the engine that changes the parse of
+    // another block, so the blocks share one engine.
+    const ce = new ComputeEngine();
 
     for (const block of blocks) {
-      const ce = new ComputeEngine();
       let diagnostics: ReturnType<typeof parseEpsil>[1];
       try {
         [, diagnostics] = parseEpsil(block.source, displayBlock(block), {

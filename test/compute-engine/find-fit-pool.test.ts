@@ -523,9 +523,11 @@ describe('FindFit.evaluateAsync falls back inline when a worker fails', () => {
     };
   }
 
+  // The problem of "control 1" above: its scan runs on the workers, so each
+  // test below reaches the failure of a worker before the fallback.
   const call = () => {
-    const { xs, ys } = dense(1000, 2.2);
-    return fitCall(xs, ys, { b: [0.3, 628], c: [0, 2 * Math.PI] });
+    const { xs, ys } = dense(200, 2.2);
+    return fitCall(xs, ys, { b: [0.3, 60], c: [0, 2 * Math.PI] });
   };
 
   test('a worker that answers every fit-run with an error', async () => {

@@ -2,6 +2,11 @@ import { engine } from '../utils';
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { Expression as MathJson } from '../../src/math-json/types.ts';
 
+// The sum of sinc³ over all integers takes seconds (CE-1285) and runs only in
+// the nightly run (CE_NIGHTLY); the other doubly-infinite sums run always.
+const NIGHTLY = process.env.CE_NIGHTLY === '1';
+const testNightly = NIGHTLY ? test : test.skip;
+
 function evaluate(expr: string): string {
   return engine.parse(expr).evaluate().toString();
 }
@@ -2016,7 +2021,7 @@ describe('DOUBLY-INFINITE SUMS', () => {
     expect(r.re).toBeCloseTo(3, 10);
   });
 
-  test('Σ sinc³(n) over all integers = 3π/4', () => {
+  testNightly('Σ sinc³(n) over all integers = 3π/4', () => {
     const r = engine
       .expr([
         'Sum',

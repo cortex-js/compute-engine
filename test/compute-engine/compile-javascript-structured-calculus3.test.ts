@@ -688,7 +688,8 @@ describe('STRUCTURED CALCULUS 3: the code and the facts', () => {
 describe('STRUCTURED CALCULUS 3: the Monte Carlo estimator', () => {
   // `_SYS.integrateMC` draws 10⁷ points from the entropy source of the
   // engine: a seeded source, reset before each call, gives both compilers
-  // the same stream.
+  // the same stream. Each run takes about a second, so one value of `a` is
+  // checked.
   for (const [name, json] of [
     ['an integral with no closed form', Int(['Sqrt', ['Add', 1, Pow('t', 4)]], 0, 'a')],
     ['an integral in log space', Int(['Multiply', Pow('t', ['Add', 'b', 3]), ['Exp', ['Negate', 't']]], 0, 'a')],
@@ -701,18 +702,17 @@ describe('STRUCTURED CALCULUS 3: the Monte Carlo estimator', () => {
       const profile = compile(expr, { ...PROFILE, ...options });
       expect(existing.code).toContain('_SYS.integrateMC(');
       expect(profile.code).toContain('_SYS.integrateMC(');
-      for (const a of [0.5, 2]) {
-        expect(Number.isFinite(run(existing, { a, b: 1 }))).toBe(true);
-        reseed();
-        const e = recorded(() => run(existing, { a, b: 1 }));
-        reseed();
-        const p = recorded(() => run(profile, { a, b: 1 }));
-        expect(Object.is(e.value, p.value)).toBe(true);
-        expect(p.samples.count).toBe(e.samples.count);
-        expect(p.samples.digest).toBe(e.samples.digest);
-        const value = interpreted(expr, { a, b: 1 });
-        expect(close(p.value, value!, 1e-2)).toBe(true);
-      }
+      const a = 2;
+      reseed();
+      const e = recorded(() => run(existing, { a, b: 1 }));
+      expect(Number.isFinite(e.value)).toBe(true);
+      reseed();
+      const p = recorded(() => run(profile, { a, b: 1 }));
+      expect(Object.is(e.value, p.value)).toBe(true);
+      expect(p.samples.count).toBe(e.samples.count);
+      expect(p.samples.digest).toBe(e.samples.digest);
+      const value = interpreted(expr, { a, b: 1 });
+      expect(close(p.value, value!, 1e-2)).toBe(true);
       expect(profile.pure).toBe(false);
       expect(profile.shippable).toBe(false);
     }, 60000);

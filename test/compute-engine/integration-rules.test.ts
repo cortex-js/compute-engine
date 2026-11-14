@@ -11,8 +11,8 @@ import { CancellationError } from '../../src/common/interruptible';
 // symbol, changes the precision, or uses a symbol as a Boolean. The symbol
 // types that the engine infers in one test stay for the later tests; that is
 // the only state the tests share. The tests that examine the load itself
-// (the report, the cache, the state before the load) keep a new engine each.
-// A block must get a shared engine from this function and must not call
+// (the report, the cache, the state before the load) share another engine,
+// which `loadedTwice()` loads. A block must get a shared engine from this function and must not call
 // `loadIntegrationRules` on it: describe bodies run before the tests, so a
 // second load would replace the driver (and its time limit) for all the
 // blocks that share the engine.
@@ -42,18 +42,39 @@ function rubiEngine(timeLimitMs = HANG_GUARD_MS): ComputeEngine {
   return ce;
 }
 
+// The tests of the load itself share one engine, loaded twice: the state
+// before the first load is recorded, and the second load is served from the
+// cache. No test integrates with that engine or changes it.
+let loaded:
+  | {
+      ce: ComputeEngine;
+      ruleIdsBefore: unknown[];
+      providerBefore: unknown;
+      first: ReturnType<typeof loadIntegrationRules>;
+      second: ReturnType<typeof loadIntegrationRules>;
+    }
+  | undefined;
+function loadedTwice(): NonNullable<typeof loaded> {
+  if (!loaded) {
+    const ce = new ComputeEngine();
+    const ruleIdsBefore = ce.simplificationRules.map((r) => r.id);
+    const providerBefore = (ce as any)._integrationProvider;
+    const first = loadIntegrationRules(ce);
+    const second = loadIntegrationRules(ce);
+    loaded = { ce, ruleIdsBefore, providerBefore, first, second };
+  }
+  return loaded;
+}
+
 describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   test('loads the bundled Chapter-1 corpus', () => {
-    const ce = new ComputeEngine();
-    const report = loadIntegrationRules(ce);
+    const report = loadedTwice().first;
     expect(report.ruleCount).toBeGreaterThan(2000);
     expect(report.skipped).toBe(0);
   });
 
   test('is idempotent per engine', () => {
-    const ce = new ComputeEngine();
-    const a = loadIntegrationRules(ce);
-    const b = loadIntegrationRules(ce);
+    const { first: a, second: b } = loadedTwice();
     expect(b.ruleCount).toBe(a.ruleCount);
   });
 
@@ -61,19 +82,16 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // provider; it must never leak into the simplify() rule set. ──
   describe('Rubi/simplify separation (structural, not just by convention)', () => {
     test('loading the pack does not change the simplify rule set', () => {
-      const ce = new ComputeEngine();
-      const before = ce.simplificationRules.length;
-      const beforeIds = ce.simplificationRules.map((r) => r.id);
-      loadIntegrationRules(ce);
+      const { ce, ruleIdsBefore: beforeIds } = loadedTwice();
+      const before = beforeIds.length;
       expect(ce.simplificationRules.length).toBe(before);
       // and the same rules, in the same order — no Rubi rule appended
       expect(ce.simplificationRules.map((r) => r.id)).toEqual(beforeIds);
     });
 
     test('the driver is reachable only via the integration provider', () => {
-      const ce = new ComputeEngine();
-      expect((ce as any)._integrationProvider).toBeUndefined();
-      loadIntegrationRules(ce);
+      const { ce, providerBefore } = loadedTwice();
+      expect(providerBefore).toBeUndefined();
       expect(typeof (ce as any)._integrationProvider).toBe('function');
       // No compiled Rubi rule id (`<file>#<index>`) shows up as a simplify
       // rule — the two rule populations are disjoint.
@@ -124,9 +142,8 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
 
     test('report carries skippedRules and cached re-load stays honest', () => {
-      const ce = new ComputeEngine();
-      const first = loadIntegrationRules(ce);
-      const cached = loadIntegrationRules(ce); // served from the WeakMap cache
+      // The second load is served from the WeakMap cache.
+      const { first, second: cached } = loadedTwice();
       // The field exists and is internally consistent (pre-fix the report
       // had no skippedRules and the cached call hardcoded skipped: 0).
       expect(Array.isArray(first.skippedRules)).toBe(true);

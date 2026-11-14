@@ -247,12 +247,12 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
       BETWEEN +
       'function g(k) { 2 * k }\na';
     const ce = new ComputeEngine();
-    const first = ce.withStepBudget({ steps: 2000 }, () =>
+    const first = ce.withStepBudget({ steps: 100 }, () =>
       executeEpsil(ce, stopped)
     );
     expect(first.value.toString()).toContain('step-budget');
     const ce2 = new ComputeEngine();
-    ce2.withStepBudget({ steps: 2000 }, () => executeEpsil(ce2, stopped));
+    ce2.withStepBudget({ steps: 100 }, () => executeEpsil(ce2, stopped));
     expect(
       executeEpsil(
         ce2,

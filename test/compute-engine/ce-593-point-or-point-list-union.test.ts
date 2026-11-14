@@ -712,19 +712,22 @@ describe('CE-593: the substituted value is checked', () => {
   // path. `compileShader()` measured its statements before the
   // substitution, and `compileToSource()` did not measure them: with
   // `constantFold: false`, 18 levels wrote 3.5 million characters.
-  function deepValue(): ComputeEngine {
+  function deepValue(depth = 24): ComputeEngine {
     const ce = engine();
     ce.declare('a', 'real');
     ce.assign('a', 0.5);
     let u = ce.box('a');
-    for (let i = 0; i < 24; i++)
+    for (let i = 0; i < depth; i++)
       u = ce.function('Add', [u, ce.function('Sin', [u])]);
     ce.assign('P', ce.function('Tuple', [u, 0]));
     return ce;
   }
 
+  // 16 levels: `compileShader()` walks the shared graph as a tree before
+  // its size check, a time that doubles per level (CE-1284). 16 levels are
+  // already over the limit.
   test('compileShader()', () => {
-    const ce = deepValue();
+    const ce = deepValue(16);
     expect(() =>
       new GLSLTarget().compileShader({
         type: 'fragment',
@@ -763,13 +766,13 @@ describe('CE-593: degree mode keeps a shared value shared', () => {
   // shader size checks ran (18 levels: 6.8 s; 20 levels ran out of memory).
   // A shared node is now rewritten once. The bound is on the size of the
   // result, which does not depend on the machine.
-  function deepValue(): { ce: ComputeEngine; value: Expression } {
+  function deepValue(depth = 24): { ce: ComputeEngine; value: Expression } {
     const ce = engine();
     ce.angularUnit = 'deg';
     ce.declare('a', 'real');
     ce.assign('a', 0.5);
     let u = ce.box('a');
-    for (let i = 0; i < 24; i++)
+    for (let i = 0; i < depth; i++)
       u = ce.function('Add', [u, ce.function('Sin', [u])]);
     const value = ce.function('Tuple', [u, 0]);
     ce.assign('P', value);
@@ -793,6 +796,9 @@ describe('CE-593: degree mode keeps a shared value shared', () => {
     expect(distinctNodes(rewritten)).toBeLessThan(500);
   });
 
+  // `compileShader()` reads a value of 16 levels: it walks the shared graph
+  // as a tree before its size check, a time that doubles per level
+  // (CE-1284). 16 levels are already over the limit.
   test('glsl: compile() and compileShader()', () => {
     const { ce } = deepValue();
     expect(
@@ -802,12 +808,13 @@ describe('CE-593: degree mode keeps a shared value shared', () => {
         constantFold: false,
       }).success
     ).toBe(true);
+    const shallow = deepValue(16).ce;
     expect(() =>
       new GLSLTarget().compileShader({
         type: 'fragment',
         inputs: [{ name: 'x', type: 'float' }],
         outputs: [{ name: 'o', type: 'float' }],
-        body: [{ variable: 'o', expression: ce.parse('P.x') }],
+        body: [{ variable: 'o', expression: shallow.parse('P.x') }],
         constantFold: false,
       })
     ).toThrow(/body statements would have more than 50,000 nodes/);

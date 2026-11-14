@@ -1,6 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { logSpaceProduct } from '../../src/compute-engine/symbolic/log-space-product';
+import {
+  ANTIDERIVATIVE_STEP_BUDGET,
+  antiderivativeBudget,
+} from '../../src/compute-engine/symbolic/antiderivative';
 
 // ROADMAP CE-394. `∫₀^∞ xⁿ·e⁻ˣ dx = n!`. The integrand `xⁿ·e⁻ˣ` is
 // `∞·0 = NaN` in double precision past `x ≈ 1200` (n = 100), the quadrature
@@ -9,6 +13,17 @@ import { logSpaceProduct } from '../../src/compute-engine/symbolic/log-space-pro
 // log space, `exp(n·ln x − x)`, on the interpreter and in compiled code.
 
 const ce = new ComputeEngine();
+
+// The symbolic antiderivative of xⁿ·e⁻ˣ (n ≥ 10) is not found: each
+// `evaluate()` and `compile()` of the integral spends the whole step budget
+// before the numeric route (CE-1282). A small budget gives the same results
+// sooner. Remove this override when CE-1282 is fixed.
+beforeAll(() => {
+  antiderivativeBudget.steps = 2000;
+});
+afterAll(() => {
+  antiderivativeBudget.steps = ANTIDERIVATIVE_STEP_BUDGET;
+});
 
 function factorial(n: number): number {
   let r = 1;

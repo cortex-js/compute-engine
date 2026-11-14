@@ -974,9 +974,22 @@ describe('solve routing', () => {
 // ===========================================================================
 
 describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
+  // The equations are solved with one engine: a solve declares nothing and
+  // assumes nothing, and no test reads an inferred type.
+  let solveEngine: ComputeEngine;
+  beforeAll(() => {
+    solveEngine = new ComputeEngine();
+    loadIdentities(solveEngine, { solve: true });
+  });
+
+  /** The real roots of `eq` in x; with `opts`, with a new engine loaded
+   *  with them. */
   function solved(eq: string, opts?: { solve: boolean }): number[] {
-    const ce = new ComputeEngine();
-    loadIdentities(ce, opts ?? { solve: true });
+    let ce = solveEngine;
+    if (opts) {
+      ce = new ComputeEngine();
+      loadIdentities(ce, opts);
+    }
     const roots = ce.parse(eq).solve('x') as ReturnType<
       ComputeEngine['box']
     >[];
@@ -1006,8 +1019,7 @@ describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
     // product-inner template `Add(Multiply(_x, Exp(_x)), __b)` intact. Exact
     // input ⇒ exact (symbolic LambertW) roots per the exactness contract; assert
     // numerically via .N().
-    const ce = new ComputeEngine();
-    loadIdentities(ce, { solve: true });
+    const ce = solveEngine;
     const roots = (ce.parse('x e^x = -\\frac1{10}').solve('x') ??
       []) as ReturnType<ComputeEngine['box']>[];
     // Exact symbolic roots (not floats): the operator head is LambertW.
@@ -1993,21 +2005,23 @@ describe('Phase 3: complex-guard rules under a real declaration (SYM P1-21)', ()
   // whose only guard is a `type:complex` on the single wildcard) must fire
   // for a real/integer/rational-declared subject, exactly as it does for a
   // complex one — the pack treats RR/ZZ/QQ as finite-domain like CC.
-  const fires = (decl: string): boolean => {
-    const ce = new ComputeEngine();
-    loadIdentities(ce);
-    ce.declare('z', decl as Parameters<ComputeEngine['declare']>[1]);
+  // One engine, with one subject declared for each type.
+  const fires = (ce: ComputeEngine, z: string): boolean => {
     const all = ce.rules(ce.simplificationRules);
-    const out = ce.expr(['Arctan', ['Multiply', 'ImaginaryUnit', 'z']]).replace(all);
+    const out = ce.expr(['Arctan', ['Multiply', 'ImaginaryUnit', z]]).replace(all);
     return (
       out !== null &&
-      out.isSame(ce.expr(['Multiply', 'ImaginaryUnit', ['Artanh', 'z']]))
+      out.isSame(ce.expr(['Multiply', 'ImaginaryUnit', ['Artanh', z]]))
     );
   };
 
   it('fires for complex, real, integer and rational subjects  [fungrim:072166]', () => {
-    for (const d of ['complex', 'real', 'integer', 'rational'])
-      expect(fires(d)).toBe(true);
+    const ce = new ComputeEngine();
+    loadIdentities(ce);
+    const types = ['complex', 'real', 'integer', 'rational'] as const;
+    types.forEach((t, i) => ce.declare(`z${i + 1}`, t));
+    for (const [i, t] of types.entries())
+      expect([t, fires(ce, `z${i + 1}`)]).toEqual([t, true]);
   });
 
   it('NO wrong result: a genuinely-non-real guard (Im(τ) > 0 / HH) still blocks a real τ', () => {

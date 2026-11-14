@@ -6,24 +6,38 @@ import { CancellationError } from '../../src/common/interruptible';
 
 // Loading the rule pack takes about one second for each engine, because it
 // boxes every rule pattern in canonical form. So the describe blocks share
-// one engine for each driver time limit, instead of one engine each. This is
-// safe because no test assigns or declares a symbol in the global scope of
-// the engine, changes its precision, or uses a symbol as a Boolean. The
-// symbol types that the engine infers in one test stay for the later tests;
-// that is the only state the tests share. A block must get its engine from
-// this function and must not call `loadIntegrationRules` itself: describe
-// bodies run before the tests, so a second load would replace the driver (and
-// its time limit) for all the blocks that share the engine.
-const engines = new Map<number, ComputeEngine>();
-function rubiEngine(timeLimitMs = 10_000): ComputeEngine {
-  let ce = engines.get(timeLimitMs);
-  if (!ce) {
-    ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs });
-    engines.set(timeLimitMs, ce);
+// one engine, instead of one engine each. This is safe because no test
+// assigns or declares a symbol in the global scope of the engine, changes its
+// precision, or uses a symbol as a Boolean. The symbol types that the engine
+// infers in one test stay for the later tests; that is the only state the
+// tests share. A block must get its engine from this function and must not
+// call `loadIntegrationRules` itself: describe bodies run before the tests,
+// so a second load would replace the driver for all the blocks that share
+// the engine.
+//
+// The step budget of the driver decides when it gives up on an integral; the
+// wall-clock limit (`timeLimitMs`) is only a guard against a hang, as in
+// `integration-rules.test.ts`, which explains its value.
+const HANG_GUARD_MS = 600_000;
+let engine: ComputeEngine | undefined;
+function rubiEngine(): ComputeEngine {
+  if (!engine) {
+    engine = new ComputeEngine();
+    loadIntegrationRules(engine, { timeLimitMs: HANG_GUARD_MS });
   }
-  return ce;
+  return engine;
 }
+
+/** The indefinite integral of `latex` over x stays inert. */
+function expectInert(ce: ComputeEngine, latex: string): void {
+  expect(ce.parse(`\\int ${latex} \\, dx`).evaluate().has('Integrate')).toBe(
+    true
+  );
+}
+
+// The full breadth (the #233-shape integral) runs nightly (CE_NIGHTLY).
+const NIGHTLY = process.env.CE_NIGHTLY === '1';
+const testNightly = NIGHTLY ? test : test.skip;
 
 // Second half of the Rubi rule-driver suite — the reduction and
 // substitution families (R22 and later). Split from
@@ -103,7 +117,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // Sin→SinIntegral) via the R15 Si/Ci fallback. Verified by finite-
   // differencing F.N() (sampled inside |x|<1, the arcsin real domain).
   describe('the InvTrig^n multiple-angle → CosIntegral reduction (Chapter-5, R23)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
     const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -156,7 +170,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // finite-differencing F.N(). Concrete integer params (a=2,b=3,c=1) avoid the
   // reserved `e`/`i`; the |x|<1 arcsin domain sets the sample points.
   describe('poly × same-angle trig-product reduction (Chapter-5, R27)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -176,10 +190,18 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     // 5.1.4a #410: ∫x³/(√(1−x²)·(a+b·arcsin)²) — reciprocal-square by-parts to
     // ∫x²/(a+b·arcsin), whose Subst inner is ∫x⁻¹·sin²·cos (R27 reduces the
     // sin²·cos product). The antiderivative carries Sin/CosIntegral.
+    // The rung is gated: `RUBI_NO_R27` is read at module load, so the default
+    // suite proves the closure, and a `RUBI_NO_R27=1` run proves the integral
+    // goes inert without the rung (R23's pure-power rule cannot close the
+    // sin²·cos product).
     test('∫x³/(√(1−x²)·(2+3·arcsin x)²) dx (#410) → Sin/CosIntegral', () => {
       const F = ce
         .parse('\\int \\frac{x^3}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2} \\, dx')
         .evaluate();
+      if (process.env.RUBI_NO_R27 !== undefined) {
+        expect(F.has('Integrate')).toBe(true);
+        return;
+      }
       expect(F.has('Integrate')).toBe(false);
       expect(F.toString()).toMatch(/SinIntegral|CosIntegral/);
       verify('\\frac{x^3}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2}');
@@ -191,18 +213,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     // ∫x⁻¹·sin³·cos⁶ (5.1.4 #45, cos power 2p+1=6), a degree-9 trig product.
     test('∫x³·(1−x²)^{5/2}/(2+3·arcsin x) dx (#336)', () =>
       verify('\\frac{x^3(1-x^2)^{5/2}}{2+3\\arcsin(x)}'));
-    // Toggle meaningfulness: `NO_R27` is captured at module load, so this
-    // branches on the env var present at process start — the default suite
-    // proves the closure, a `RUBI_NO_R27=1` run proves it goes inert without
-    // the rung (R23's pure-power rule cannot close the sin²·cos product).
-    test('∫x³/(√(1−x²)·(2+3·arcsin x)²) is gated by RUBI_NO_R27', () => {
-      const F = ce
-        .parse('\\int \\frac{x^3}{\\sqrt{1-x^2}(2+3\\arcsin(x))^2} \\, dx')
-        .evaluate();
-      if (process.env.RUBI_NO_R27 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
-    });
   });
 
   // R28a: mixed-parity poly-numerator × binomial-radical linearity split
@@ -216,7 +226,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // forms, so these are D-verified by central-differencing F.N() (with symbolic
   // parameters fixed to numeric values keeping the radicand positive).
   describe('mixed-parity poly-numerator × binomial-radical split (1.1.3, R28a)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
     // several sample points, substituting `params` (fixed so a+b·xⁿ > 0).
@@ -249,8 +259,14 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     // fully-numeric mixed-parity numerator (odd x¹ + even x⁰) over √(1+x⁴):
     // neither piece is grouped by residue mod n/2=2, so the combined integrand
     // fires no bundled rule; the split closes ∫1/√(1+x⁴)=EllipticF and
-    // ∫x/√(1+x⁴)=½arcsinh(x²).
-    test('∫(1+x)/√(1+x⁴) dx', () => verify('\\frac{1+x}{\\sqrt{1+x^4}}'));
+    // ∫x/√(1+x⁴)=½arcsinh(x²). The rung is gated: `RUBI_NO_R28` is read at
+    // module load, so the default suite proves the closure, and a
+    // `RUBI_NO_R28=1` run proves the integral goes inert without the rung.
+    test('∫(1+x)/√(1+x⁴) dx', () => {
+      if (process.env.RUBI_NO_R28 !== undefined)
+        expectInert(ce, '\\frac{1+x}{\\sqrt{1+x^4}}');
+      else verify('\\frac{1+x}{\\sqrt{1+x^4}}');
+    });
 
     // #213-shape: (c+d·x)/√(−a−b·x⁴) — NEGATIVE radicand (a,b>0), so the answer
     // is complex; the central-difference check runs on Re. Fixed so −a−b·x⁴<0.
@@ -286,17 +302,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
         f: 0.6,
         g: 0.4,
       }));
-
-    // Toggle meaningfulness: `NO_R28` is captured at module load, so this
-    // branches on the env var present at process start — the default suite
-    // proves the closure, a `RUBI_NO_R28=1` run proves it goes inert without
-    // the rung.
-    test('∫(1+x)/√(1+x⁴) is gated by RUBI_NO_R28', () => {
-      const F = ce.parse('\\int \\frac{1+x}{\\sqrt{1+x^4}} \\, dx').evaluate();
-      if (process.env.RUBI_NO_R28 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
-    });
   });
 
   // R29: algebraic-in-hyperbolic substitution plumbing (RUBI.md §5, Phase R29;
@@ -310,7 +315,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // (complex principal value — R28b), so they are D-verified on Re of a
   // central-differenced F.N() with symbolic parameters fixed positive.
   describe('algebraic-in-hyperbolic substitution (Chapter-6, R29)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     // Integrate `latex` over x and central-difference Re(F.N()) == integrand at
     // several sample points, substituting `params` (fixed so the radicands are
@@ -338,8 +343,14 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     };
 
     // #471-shape: Coth·(a+b·Sinh²)^{3/2} — u=Sinh gives ∫(a+b·u²)^{3/2}/u du.
-    test('∫Coth(x)·(a+b·Sinh(x)²)^{3/2} dx (#471)', () =>
-      verify('\\coth(x)(a+b\\sinh(x)^2)^{3/2}'));
+    // The rung is gated: `RUBI_NO_R29` is read at module load, so the default
+    // suite proves the closure, and a `RUBI_NO_R29=1` run proves the integral
+    // goes inert.
+    test('∫Coth(x)·(a+b·Sinh(x)²)^{3/2} dx (#471)', () => {
+      if (process.env.RUBI_NO_R29 !== undefined)
+        expectInert(ce, '\\coth(x)(a+b\\sinh(x)^2)^{3/2}');
+      else verify('\\coth(x)(a+b\\sinh(x)^2)^{3/2}');
+    });
 
     // #109-shape: Csch/(a+b·Sinh²)^{3/2} — net odd Sinh power, u=Cosh.
     test('∫Csch(x)/(a+b·Sinh(x)²)^{3/2} dx (#109)', () =>
@@ -353,16 +364,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     // #11-shape: √(a+b·Csch²) — a bare hyperbolic radical.
     test('∫√(a+b·Csch(x)²) dx (#11)', () =>
       verify('(a+b\\csch(x)^2)^{1/2}'));
-
-    // Toggle meaningfulness: `NO_R29` is captured at module load, so this
-    // branches on the env var present at process start — the default suite
-    // proves the closure, a `RUBI_NO_R29=1` run proves it goes inert.
-    test('∫Coth(x)·(a+b·Sinh(x)²)^{3/2} is gated by RUBI_NO_R29', () => {
-      const F = ce.parse('\\int \\coth(x)(a+b\\sinh(x)^2)^{3/2} \\, dx').evaluate();
-      if (process.env.RUBI_NO_R29 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
-    });
   });
 
   // R30: rational-in-hyperbolic cyclotomic-factored substitution (RUBI.md §5,
@@ -377,7 +378,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // (complex principal value off one branch — R28b), so they are D-verified on
   // Re of a central-differenced F.N() with symbolic parameters fixed.
   describe('rational-in-hyperbolic cyclotomic-factored substitution (Chapter-6, R30)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     const verify = (
       latex: string,
@@ -401,8 +402,14 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     };
 
     // #136-shape: tanh²/(a+b·tanh) — denominator x·(x²+1)²·((a+b)x²+(a−b)).
-    test('∫Tanh(x)²/(a+b·Tanh(x)) dx (#136)', () =>
-      verify('\\frac{\\tanh(x)^2}{a+b\\tanh(x)}'));
+    // The rung is gated: `RUBI_NO_R30` is read at module load, so the default
+    // suite proves the closure, and a `RUBI_NO_R30=1` run proves the integral
+    // goes inert.
+    test('∫Tanh(x)²/(a+b·Tanh(x)) dx (#136)', () => {
+      if (process.env.RUBI_NO_R30 !== undefined)
+        expectInert(ce, '\\frac{\\tanh(x)^2}{a+b\\tanh(x)}');
+      else verify('\\frac{\\tanh(x)^2}{a+b\\tanh(x)}');
+    });
 
     // #231-shape: tanh/(a+b·sinh) — residual (x²+1)·(symbolic quadratic).
     test('∫Tanh(x)/(a+b·Sinh(x)) dx (#231)', () =>
@@ -416,16 +423,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     // denominator is PURE cyclotomic (x^m·(x²−1)^k, no parameter residual).
     test('∫(a+b·Tanh(x)²)³·Tanh(x)⁴ dx (#156)', () =>
       verify('(a+b\\tanh(x)^2)^3\\tanh(x)^4'));
-
-    // Toggle meaningfulness: `NO_R30` is captured at module load, so this branches
-    // on the env var present at process start — the default suite proves the
-    // closure, a `RUBI_NO_R30=1` run proves it goes inert.
-    test('∫Tanh(x)²/(a+b·Tanh(x)) is gated by RUBI_NO_R30', () => {
-      const F = ce.parse('\\int \\frac{\\tanh(x)^2}{a+b\\tanh(x)} \\, dx').evaluate();
-      if (process.env.RUBI_NO_R30 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
-    });
   });
 
   // R8: poly × single-angle-hyperbolic → single-exponential PolyLog fallback
@@ -443,10 +440,10 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // check does not rely on their derivative rules). NOTE: the sinh additive-denominator rows keep
   // their `√(a²+b²)` root cleanest with SYMBOLIC parameters, while the coth
   // reciprocal rows are fastest with concrete numeric coefficients — chosen per
-  // case accordingly. Heavy PolyLog family: both budgets raised (see R30 above),
-  // and each test carries an explicit generous jest timeout.
+  // case accordingly. Heavy PolyLog family: each test carries an explicit
+  // generous jest timeout.
   describe('poly × single-angle-hyperbolic → single-exponential (Chapter-6, R8)', () => {
-    const ce = rubiEngine(60_000);
+    const ce = rubiEngine();
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
     // several sample points, substituting `params` (fixed so the radicands are
@@ -482,8 +479,9 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
       ), 120_000);
 
     // 6.1.1 #233-shape: (e+f·x)³·Sinh³/(a+b·Sinh) — cubic poly → PolyLog[3]. The
-    // heavy .N() is capped at two sample points.
-    test('∫(e+f·x)³·Sinh(c+d·x)³/(a+b·Sinh(c+d·x)) dx (#233-shape)', () =>
+    // heavy .N() is capped at two sample points. Nightly only: #230 and #47
+    // exercise the rung in every run.
+    testNightly('∫(e+f·x)³·Sinh(c+d·x)³/(a+b·Sinh(c+d·x)) dx (#233-shape)', () =>
       verify(
         '\\frac{(e+f x)^3\\sinh(c+d x)^3}{a+b\\sinh(c+d x)}',
         P,
@@ -493,22 +491,14 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
     // 6.4.1 #47-shape: (c+d·x)·(a+b·Coth)² — a POSITIVE-power reciprocal head,
     // whose intrinsic `y²−1` denominator (roots ±1) needs the PolyLog route even
     // without a syntactic `Add^{negative}`. Concrete numeric coefficients (the exact
-    // #47 cube×cube closes+D-verifies too but is far too slow for CI).
-    test('∫(3+2x)·(3+2·Coth(1+2x))² dx (#47-shape, positive-power reciprocal)', () =>
-      verify(
-        '(3+2 x)(3+2\\coth(1+2 x))^2',
-        {},
-        [0.4, 0.9, 1.3]
-      ), 120_000);
-
-    // Toggle meaningfulness: `NO_R8` is captured at module load, so this branches
-    // on the env var present at process start — the default suite proves the
-    // closure, a `RUBI_NO_R8=1` run proves it goes inert.
-    test('∫(3+2x)·(3+2·Coth(1+2x))² is gated by RUBI_NO_R8', () => {
-      const F = ce.parse('\\int (3+2 x)(3+2\\coth(1+2 x))^2 \\, dx').evaluate();
-      if (process.env.RUBI_NO_R8 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
+    // #47 cube×cube closes+D-verifies too but is far too slow for CI). The rung
+    // is gated: `RUBI_NO_R8` is read at module load, so the default suite
+    // proves the closure, and a `RUBI_NO_R8=1` run proves the integral goes
+    // inert.
+    test('∫(3+2x)·(3+2·Coth(1+2x))² dx (#47-shape, positive-power reciprocal)', () => {
+      if (process.env.RUBI_NO_R8 !== undefined)
+        expectInert(ce, '(3+2 x)(3+2\\coth(1+2 x))^2');
+      else verify('(3+2 x)(3+2\\coth(1+2 x))^2', {}, [0.4, 0.9, 1.3]);
     }, 120_000);
   });
 
@@ -521,17 +511,14 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // the sum-of-two-radicals power. The Bondarenko nested-radical family (#2, #10,
   // #11, #12, #15, #17, #18). D-verified by finite-differencing F.N() (the
   // antiderivatives carry artanh/arctan of radicals that can exceed 1 → a complex
-  // constant that a symbolic derivative would strand). Heavy: the loader budget
-  // `timeLimitMs` is raised (there is no engine-level budget any more — the
-  // ambient `ce.timeLimit` was retired, so an evaluation with no enclosing
-  // `withTimeLimit` span is unbounded); every case goes INERT under
-  // `RUBI_NO_R31=1`.
+  // constant that a symbolic derivative would strand). Every case goes INERT
+  // under `RUBI_NO_R31=1`.
   describe('nested-radical substitution fallback (Bondarenko, R31)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     // `NO_R31` is captured at module load. Under `RUBI_NO_R31=1` the rung is
-    // disabled and none of these close, so skip the closure tests (the gate test
-    // below proves each goes inert). In the DEFAULT config they run and must
+    // disabled and none of these close, so skip the closure tests (#17 proves
+    // its integral goes inert). In the DEFAULT config they run and must
     // close — keeping this describe A/B-clean in both configurations.
     const NO_R31 = process.env.RUBI_NO_R31 !== undefined;
     const closureTest = NO_R31 ? test.skip : test;
@@ -559,8 +546,11 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
 
     // #17: √(x+√(x+1))/x² — one Lever A substitution `u=√(x+1)` leaves a single
     // quadratic radical `2u·√(u²+u−1)/(u²−1)²` the bundled 1.1.2 rules close.
-    closureTest('∫√(x+√(x+1))/x² dx (#17)', () =>
-      verify('\\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2}', [0.3, 0.5, 0.7]), 30_000);
+    // Under `RUBI_NO_R31=1` it goes inert.
+    test('∫√(x+√(x+1))/x² dx (#17)', () => {
+      if (NO_R31) expectInert(ce, '\\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2}');
+      else verify('\\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2}', [0.3, 0.5, 0.7]);
+    }, 30_000);
 
     // #18: √(1/x+√(1/x+1)) — the Laurent substitution `u=√(1/x+1)`.
     closureTest('∫√(1/x+√(1/x+1)) dx (#18)', () =>
@@ -605,16 +595,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
         .evaluate();
       expect(F.has('Integrate')).toBe(true);
     }, 30_000);
-
-    // Toggle meaningfulness: `NO_R31` is captured at module load, so this branches
-    // on the env var present at process start — the default suite proves the
-    // closure, a `RUBI_NO_R31=1` run proves each goes inert.
-    test('∫√(x+√(x+1))/x² is gated by RUBI_NO_R31', () => {
-      const F = ce.parse('\\int \\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2} \\, dx').evaluate();
-      if (process.env.RUBI_NO_R31 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
-    }, 30_000);
   });
 
   // ── R32 — Euler-substitution lever ("Lever C") for √(quadratic)-nested
@@ -625,19 +605,24 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // radical to a √-of-linear the existing Lever A then removes. Gated by
   // `RUBI_NO_R32` for a clean A/B toggle.
   describe('Euler-substitution lever (Bondarenko #9, R32)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     const NO_R32 = process.env.RUBI_NO_R32 !== undefined;
-    const closureTest = NO_R32 ? test.skip : test;
 
     // #9: 1/(√(x+√(x²+1))+1). The Euler I substitution `t=x+√(x²+1)` collapses
     // the outer radical to √t = √x (Lever A then substitutes s=√x), closing to
     // s+ln(s)+1/s−1/(2s²)−2ln(s+1), s=√(x+√(x²+1)). Valid for all real x
-    // (x+√(x²+1)>0 always). Central-difference D-verify.
-    closureTest('∫1/(√(x+√(x²+1))+1) dx (#9)', () => {
+    // (x+√(x²+1)>0 always). Central-difference D-verify. `NO_R32` is read at
+    // module load: the default suite proves the closure; a `RUBI_NO_R32=1` run
+    // proves #9 goes inert.
+    test('∫1/(√(x+√(x²+1))+1) dx (#9)', () => {
       const latex = '\\frac{1}{\\sqrt{x+\\sqrt{x^2+1}}+1}';
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      if (NO_R32) {
+        expect(F.has('Integrate')).toBe(true);
+        return;
+      }
       expect(F.has('Integrate')).toBe(false); // a closed form, not inert
       const h = 1e-5;
       const fp = (v: number) => F.subs({ x: v }).N().re as number;
@@ -651,17 +636,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
       }
       expect(checked).toBeGreaterThan(0);
     }, 30_000);
-
-    // Toggle meaningfulness: `NO_R32` is captured at module load. The default
-    // suite proves the closure; a `RUBI_NO_R32=1` run proves #9 goes inert.
-    test('∫1/(√(x+√(x²+1))+1) is gated by RUBI_NO_R32', () => {
-      const F = ce
-        .parse('\\int \\frac{1}{\\sqrt{x+\\sqrt{x^2+1}}+1} \\, dx')
-        .evaluate();
-      if (process.env.RUBI_NO_R32 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
-    }, 30_000);
   });
 
   // ── Integration variable other than `x` (R26A). ──
@@ -673,7 +647,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // respect to any variable not literally named `x`. The driver now binds
   // `env['x']` to the real integration variable before RHS construction.
   describe('integration variable other than x (R26A)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     // Integrate `latex` (parsed over variable `v`) and numerically D-verify
     // F'(v) == integrand at several sample points, substituting any extra
@@ -770,7 +744,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // D-verified at concrete (a,b) — the corpus grader mis-scores some
   // symbolic-parameter antiderivatives, so we differentiate F back here.
   describe('symbolic-coefficient reciprocal-hyperbolic closure (Chapter-6, R26B)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
 
     // Close ∫1/(a+b·F(v)) symbolically, then D-verify F'(v) == integrand at
     // concrete (a,b) over several sample points.
@@ -802,7 +776,14 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
       expect(sampled).toBeGreaterThan(2);
     };
 
-    test('∫1/(a+b·sinh x) dx', () => dVerifyHyp('\\frac{1}{a+b\\sinh x}'));
+    // The symbolic sinh closure is R26B's, and it is gated: `RUBI_NO_R26` is
+    // read at module load, so the default suite proves the closure, and a
+    // `RUBI_NO_R26=1` run proves it goes inert without the rung.
+    test('∫1/(a+b·sinh x) dx', () => {
+      if (process.env.RUBI_NO_R26 !== undefined)
+        expectInert(ce, '\\frac{1}{a+b\\sinh x}');
+      else dVerifyHyp('\\frac{1}{a+b\\sinh x}');
+    });
     test('∫1/(a+b·cosh x) dx', () => dVerifyHyp('\\frac{1}{a+b\\cosh x}'));
     test('∫1/(a+b·tanh x) dx', () => dVerifyHyp('\\frac{1}{a+b\\tanh x}'));
 
@@ -818,22 +799,6 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
         ])
         .evaluate();
       expect(F.has('Integrate')).toBe(false);
-    });
-
-    // Toggle meaningfulness: the symbolic sinh closure is R26B's. `NO_R26` is
-    // captured at module load, so this branches on the env var present at
-    // process start — the default suite proves the closure, a `RUBI_NO_R26=1`
-    // run proves it goes inert without the rung.
-    test('∫1/(a+b·sinh x) is gated by RUBI_NO_R26', () => {
-      const F = ce
-        .function('Integrate', [
-          ce.parse('\\frac{1}{a+b\\sinh x}'),
-          ce.symbol('x'),
-        ])
-        .evaluate();
-      if (process.env.RUBI_NO_R26 === undefined)
-        expect(F.has('Integrate')).toBe(false);
-      else expect(F.has('Integrate')).toBe(true);
     });
   });
 

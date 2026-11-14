@@ -157,6 +157,27 @@ function interpret(ce: ComputeEngine, json: MathJsonExpression, args: readonly A
   );
 }
 
+/**
+ * The engine of the programs of the current `describe`, with the machine
+ * precision. A describe that calls `shareOneEngine()` runs its programs on
+ * one engine, made before its first test: each program is a `Function`
+ * literal whose names are its parameters and its locals, so boxing, compiling
+ * and evaluating it leaves nothing in the engine that changes another.
+ */
+let describeCE: ComputeEngine | undefined;
+function describeEngine(): ComputeEngine {
+  if (describeCE === undefined) {
+    describeCE = new ComputeEngine();
+    describeCE.precision = 'machine';
+  }
+  return describeCE;
+}
+function shareOneEngine(): void {
+  beforeAll(() => {
+    describeCE = undefined;
+  });
+}
+
 type Program = {
   readonly name: string;
   /** The program, or the name of a function of `epsil`. */
@@ -174,13 +195,15 @@ type Program = {
 };
 
 function programOf(program: Program): { ce: ComputeEngine; expr: Expression; json: MathJsonExpression } {
-  const ce = new ComputeEngine();
-  ce.precision = 'machine';
   if (program.epsil !== undefined) {
+    // An Epsil program declares its functions: it has an engine of its own.
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
     expect(executeEpsil(ce, program.epsil).diagnostics).toEqual([]);
     const literal = (ce.lookupDefinition(program.entry!) as { operator: { _lambdaLiteral: Expression } }).operator._lambdaLiteral;
     return { ce, expr: literal, json: literal.json as MathJsonExpression };
   }
+  const ce = describeEngine();
   return { ce, expr: ce.expr(program.json!), json: program.json! };
 }
 
@@ -408,6 +431,7 @@ describe.each([
   ['functions over rows', ROWS],
   ['products by type', PRODUCTS],
 ] as const)('%s', (_label, programs) => {
+  shareOneEngine();
   test.each(programs.map((p) => [p.name, p] as const))('%s', (_name, program) => check(program));
 });
 
@@ -622,9 +646,7 @@ function admittedMatches(
   json: MathJsonExpression,
   args: readonly (readonly Arg[])[]
 ): boolean {
-  const ce = new ComputeEngine();
-  ce.precision = 'machine';
-  const expr = ce.expr(json);
+  const expr = describeEngine().expr(json);
   let result: CompilationResult<'javascript'>;
   try {
     result = compile(expr, { ...PROFILE, mode: 'strict' } as never) as CompilationResult<'javascript'>;
@@ -645,6 +667,7 @@ function admittedMatches(
 }
 
 describe('the shapes of the operands of an element-wise operation (review)', () => {
+  shareOneEngine();
   const A2: [string, string] = ['A', 'matrix<2x2>'];
   const B2: [string, string] = ['B', 'matrix<2x3>'];
   const C2: [string, string] = ['C', 'matrix<3x2>'];
@@ -700,6 +723,7 @@ describe('the shapes of the operands of an element-wise operation (review)', () 
 });
 
 describe('a matrix that can have no value, in each carrier (review)', () => {
+  shareOneEngine();
   const A2: [string, string] = ['A', 'matrix<2x2>'];
   const c: [string, string] = ['c', 'boolean'];
   type Wrap = (m: MathJsonExpression) => MathJsonExpression;
@@ -754,6 +778,7 @@ describe('the rows of a matrix of a stated count of no row (review)', () => {
 });
 
 describe('a write into the result of a matrix function (review)', () => {
+  shareOneEngine();
   // The input `[]` makes `_SYS.transpose` give its operand; `[[2]]` and a
   // rectangular matrix make the other helpers copy (`M^1`; a matrix that is
   // not square throws for the exponent 2 on both compilers).
@@ -834,6 +859,7 @@ describe('a local function called in the argument of a helper (review)', () => {
 });
 
 describe('a matrix function in a term of a Sum and in an integrand', () => {
+  shareOneEngine();
   const A2: [string, string] = ['A', 'matrix<2x2>'];
   const AM: [string, string] = ['A', 'matrix'];
   const sum = (term: MathJsonExpression): MathJsonExpression => ['Sum', term, ['Limits', 'k', 1, 4]];
@@ -861,6 +887,7 @@ describe('a matrix function in a term of a Sum and in an integrand', () => {
 });
 
 describe('the result of a matrix function carried through a loop', () => {
+  shareOneEngine();
   // The inputs that make a helper give its operand or share rows: `[]`
   // (`_SYS.transpose([])` is `[]`), `[[2]]`, a rectangular matrix (`M^1`
   // and `Inverse` throw or copy), and the exponent 1.
@@ -900,9 +927,7 @@ describe('the result of a matrix function carried through a loop', () => {
    *  second call, the host writes into the result, then a third call), and
    *  the code of the profile; `undefined` when it declines. */
   const runAll = (json: MathJsonExpression): string | undefined => {
-    const ce = new ComputeEngine();
-    ce.precision = 'machine';
-    const expr = ce.expr(json);
+    const expr = describeEngine().expr(json);
     let result: CompilationResult<'javascript'>;
     try {
       result = compile(expr, { ...PROFILE, mode: 'strict' } as never) as CompilationResult<'javascript'>;
@@ -975,6 +1000,7 @@ describe('the result of a matrix function carried through a loop', () => {
 });
 
 describe('lists of lists with the scalar heads and the decided selections', () => {
+  shareOneEngine();
   const AM: [string, string] = ['A', 'matrix'];
   const BM: [string, string] = ['B', 'matrix'];
   const AI: [string, string] = ['A', 'matrix<integer>'];
@@ -1021,6 +1047,7 @@ describe('lists of lists with the scalar heads and the decided selections', () =
 });
 
 describe('a matrix function of a list that can hold an absent row (review)', () => {
+  shareOneEngine();
   const MR: [string, string] = ['M', 'list<list<real>>'];
   const AM: [string, string] = ['A', 'matrix'];
   const c: [string, string] = ['c', 'boolean'];

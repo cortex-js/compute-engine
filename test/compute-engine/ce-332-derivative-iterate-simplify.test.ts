@@ -25,6 +25,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 const ce = new ComputeEngine();
 
 const RADICAL = '\\sqrt{x+\\sqrt{x+\\sqrt{x+\\sqrt{x+x}}}}';
+const SMALL_RADICAL = '\\sqrt{x+\\sqrt{x+\\sqrt{x}}}';
 const POINTS = [0.7, 1.3, 2.3];
 
 function valueAt(fn: Expression, x: number): number {
@@ -195,9 +196,11 @@ describe('CE-332: a cached derivative and the state of the engine', () => {
     // a fold does not read an assigned value, so `f'''(0.7)` with `f`
     // assigned is not folded. Inside the fold the intermediate derivatives
     // are not simplified. A derivative computed after the fold, of the same
-    // function literal, has the form it has in a fresh engine.
+    // function literal, has the form it has in a fresh engine. A radical of
+    // three levels is enough: its third derivative computed inside a fold
+    // has another form than in a fresh engine (2,942 and 2,395 characters).
     const e = new ComputeEngine();
-    const lit = e.parse(`x \\mapsto ${RADICAL}`);
+    const lit = e.parse(`x \\mapsto ${SMALL_RADICAL}`);
     const folded = e
       .box(['Add', 1, ['Apply', ['Derivative', lit, 3], 0.7]])
       .simplify();
@@ -208,7 +211,7 @@ describe('CE-332: a cached derivative and the state of the engine', () => {
 
     const fresh = new ComputeEngine();
     const expected = fresh
-      .box(['Derivative', fresh.parse(`x \\mapsto ${RADICAL}`), 3])
+      .box(['Derivative', fresh.parse(`x \\mapsto ${SMALL_RADICAL}`), 3])
       .evaluate()
       .toString();
     expect(after).toBe(expected);
