@@ -43,7 +43,13 @@ export function negatedArgument(
     arg.isPure === true &&
     arg.isFinite === true &&
     arg.isNegative === true
-  )
-    return { inner: arg.neg(), literal: true };
+  ) {
+    // The negation of a call (`Sin(4)`, whose value is negative) is written
+    // `Negate(Sin(4))`, which the first case reads back as `Sin(4)`: the
+    // rewrite would run in a circle.
+    const inner = arg.neg();
+    if (isFunction(inner, 'Negate')) return undefined;
+    return { inner, literal: true };
+  }
   return undefined;
 }

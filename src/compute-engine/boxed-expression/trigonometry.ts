@@ -2787,3 +2787,225 @@ function hyperbolicOfImaginaryAngle(
   if (result === 'pole') return ce.ComplexInfinity;
   return boxParts(ce, result[0], result[1]);
 }
+
+//
+// Compositions of the circular and hyperbolic functions with their inverses.
+//
+// Every rule below is an identity on the principal branches (DLMF 4.23.1-4.23.5
+// and 4.37.1-4.37.3, Table 4.16.3 / 4.22.2), so it holds for a complex operand,
+// not only for the reals. `evaluate()`, `.N()` (the evaluate handlers of
+// `library/trigonometry.ts`) and `simplify()` (`symbolic/simplify-trig.ts`,
+// `symbolic/simplify-hyperbolic.ts`) all call these, so the three agree.
+//
+
+/** Each function and its inverse. */
+const INVERSE_OF: Readonly<Record<string, string>> = {
+  Sin: 'Arcsin',
+  Cos: 'Arccos',
+  Tan: 'Arctan',
+  Cot: 'Arccot',
+  Sec: 'Arcsec',
+  Csc: 'Arccsc',
+  Sinh: 'Arsinh',
+  Cosh: 'Arcosh',
+  Tanh: 'Artanh',
+  Coth: 'Arcoth',
+  Sech: 'Arsech',
+  Csch: 'Arcsch',
+};
+
+/**
+ * `f(f⁻¹(x)) = x`, as an expression `x`, when `operand` is `f⁻¹(x)`.
+ *
+ * An operand where the inverse has no finite value, or the composition is not
+ * `x`, is left alone: an infinity (`Cosh(Arcosh(−∞))` is `+∞`, not `−∞`), and
+ * the points where `f⁻¹(x)` is a pole of `f`: `Tan(Arctan(±i))`,
+ * `Cot(Arccot(±i))`, and `Sec`, `Csc` and `Csch` of their inverse at 0.
+ * Without the rule, `Sin(Arcsin(5))` answers `5 − 3·10⁻¹⁶i` under `.N()`.
+ */
+export function inverseCompositionValue(
+  operator: string,
+  operand: Expression
+): Expression | undefined {
+  const inverse = INVERSE_OF[operator];
+  if (inverse === undefined || !isFunction(operand, inverse)) return undefined;
+  if (operand.nops !== 1) return undefined;
+  const x = operand.op1;
+  if (x.isFinite === false) return undefined;
+  if (isNumber(x)) {
+    if (
+      (operator === 'Tan' || operator === 'Cot') &&
+      (x.isSame(x.engine.I) || x.isSame(x.engine.I.neg()))
+    )
+      return undefined;
+    if (
+      (operator === 'Sec' || operator === 'Csc' || operator === 'Csch') &&
+      x.isSame(0)
+    )
+      return undefined;
+  }
+  return x;
+}
+
+/**
+ * The Pythagorean compositions of a circular function with the inverse of
+ * another (DLMF 4.23.4-4.23.8):
+ *
+ * - `Cos(Arcsin(x)) = Sin(Arccos(x)) = √(1 − x²)`
+ * - `Cos(Arctan(x)) = 1/√(1 + x²)`
+ * - `Sin(Arctan(x)) = x/√(1 + x²)`
+ * - `Tan(Arcsin(x)) = x/√(1 − x²)`
+ *
+ * The square root is the principal one: the real part of the cosine of
+ * `Arcsin(x)` and of the sine of `Arccos(x)` is not negative.
+ */
+export function crossCompositionValue(
+  operator: string,
+  operand: Expression
+): Expression | undefined {
+  if (!isFunction(operand) || operand.nops !== 1) return undefined;
+  const x = operand.op1;
+  if (x.isFinite === false) return undefined;
+  const inner = operand.operator;
+  const oneMinusSquare = () => x.engine.One.sub(x.pow(2)).sqrt();
+  const onePlusSquare = () => x.pow(2).add(1).sqrt();
+  if (
+    (operator === 'Cos' && inner === 'Arcsin') ||
+    (operator === 'Sin' && inner === 'Arccos')
+  )
+    return oneMinusSquare();
+  if (operator === 'Cos' && inner === 'Arctan') return onePlusSquare().inv();
+  if (operator === 'Sin' && inner === 'Arctan') return x.div(onePlusSquare());
+  if (operator === 'Tan' && inner === 'Arcsin') return x.div(oneMinusSquare());
+  return undefined;
+}
+
+/** The farthest an argument is reduced by whole half-turns. Past it, the
+ * rounding of `y/π` can pick the wrong multiple near a half-turn. */
+const MAX_REDUCED_HALF_TURNS = 1e6;
+
+/** The forward function inverted by each head of `principalBranchValue`. */
+const FORWARD_OF: Readonly<Record<string, string>> = {
+  Arcsin: 'Sin',
+  Arccos: 'Cos',
+  Arctan: 'Tan',
+};
+
+/**
+ * `Arcsin(Sin(y))`, `Arccos(Cos(y))` and `Arctan(Tan(y))` for an exact real
+ * constant `y`: the value of the principal branch (DLMF 4.23.1 on the real
+ * line), `y` moved into the range of the inverse by whole half-turns.
+ *
+ * With `k` the nearest integer to `y/π` (`y/2π` for `Cos`):
+ * - `Arcsin(Sin(y)) = (−1)ᵏ·(y − kπ)`
+ * - `Arccos(Cos(y)) = |y − 2kπ|`
+ * - `Arctan(Tan(y)) = y − kπ`
+ *
+ * `Arcsin(Sin(x))` for a symbolic `x` is not `x`, and stays. A float `y` is
+ * left to the numeric kernel. `y` further than `MAX_REDUCED_HALF_TURNS`
+ * half-turns from 0 stays, as does a `y` within 10⁻⁹ half-turn of a point
+ * where the reduction changes branch (a pole of the tangent for `Arctan`).
+ * The half-turn is `π` rad, `180` deg, ... in the current angular unit.
+ */
+export function principalBranchValue(
+  operator: string,
+  operand: Expression
+): Expression | undefined {
+  const forward = FORWARD_OF[operator];
+  if (forward === undefined || !isFunction(operand, forward)) return undefined;
+  if (operand.nops !== 1) return undefined;
+  const y = operand.op1;
+  if (!isNumber(y) || y.isExact === false) return undefined;
+  if (!y.type.matches('real') || y.isFinite !== true) return undefined;
+  const ce = y.engine;
+  const half = halfTurnAngle(ce);
+  const halfValue = half.N().re;
+  const t = y.N().re / halfValue;
+  if (!Number.isFinite(t) || Math.abs(t) > MAX_REDUCED_HALF_TURNS)
+    return undefined;
+
+  const period = operator === 'Arccos' ? 2 : 1;
+  const k = Math.round(t / period) * period;
+  const rest = t - k;
+  // `t` is a double. Within 1e-9 of a point where the choice of `k`, or for
+  // `Arccos` the sign of `rest`, changes the result, its rounding can pick
+  // the wrong one, and the result leaves the range of the inverse: a
+  // rational `y` that differs from π/2 in its 26th digit. The tangent also
+  // has a pole half-way between two multiples of π.
+  const edge = operator === 'Arccos' ? 1 : 0.5;
+  if (Math.abs(Math.abs(rest) - edge) < 1e-9) return undefined;
+  if (operator === 'Arccos' && k !== 0 && Math.abs(rest) < 1e-9)
+    return undefined;
+  if (k === 0 && (operator !== 'Arccos' || rest >= 0)) return y;
+  // The reduced value holds π: not returned when a user value shadows `Pi`.
+  if (k !== 0 && ce.angularUnit === 'rad' && isPiShadowed(ce)) return undefined;
+  const reduced = k === 0 ? y : y.sub(half.mul(ce.number(k)));
+  const negate =
+    operator === 'Arcsin'
+      ? Math.abs(k) % 2 === 1
+      : operator === 'Arccos' && rest < 0;
+  return negate ? reduced.neg() : reduced;
+}
+
+/**
+ * `f(i·t)` for a circular or hyperbolic function `f`, as the function of the
+ * other family at `t` (DLMF 4.28.8-4.28.10, 4.28.1-4.28.3): `Sin(it) =
+ * i·Sinh(t)`, `Cos(it) = Cosh(t)`, `Tan(it) = i·Tanh(t)`, and the three
+ * hyperbolic counterparts `Sinh(it) = i·Sin(t)`, `Cosh(it) = Cos(t)`,
+ * `Tanh(it) = i·Tan(t)`. They hold for every complex `t`.
+ *
+ * `operand` is a product with exactly one imaginary factor, a literal `i`
+ * or `bi`; the rest of the product is `t`.
+ */
+export function imaginaryArgumentValue(
+  operator: string,
+  operand: Expression
+): Expression | undefined {
+  const other: Record<string, [string, boolean]> = {
+    Sin: ['Sinh', true],
+    Cos: ['Cosh', false],
+    Tan: ['Tanh', true],
+    Sinh: ['Sin', true],
+    Cosh: ['Cos', false],
+    Tanh: ['Tan', true],
+  };
+  const [target, timesI] = other[operator] ?? [];
+  if (target === undefined || !isFunction(operand, 'Multiply'))
+    return undefined;
+  const ce = operand.engine;
+  let imaginary: Expression | undefined;
+  const rest: Expression[] = [];
+  for (const op of operand.ops) {
+    const factor = isSymbol(op, 'ImaginaryUnit')
+      ? ce.One
+      : isNumber(op) && op.isFinite === true && op.re === 0 && op.im !== 0
+        ? ce.number(op.im)
+        : undefined;
+    if (factor === undefined) rest.push(op);
+    else if (imaginary !== undefined) return undefined;
+    else imaginary = factor;
+  }
+  if (imaginary === undefined || rest.length === 0) return undefined;
+  const t = rest.reduce((a, b) => a.mul(b), imaginary);
+  const value = ce._fn(target, [t]);
+  return timesI ? ce.I.mul(value) : value;
+}
+
+/**
+ * The value of `operator(operand)` when `operand` is an inverse function or a
+ * forward function it cancels with: the evaluate handlers of the circular and
+ * hyperbolic functions and their inverses call this ahead of the numeric
+ * kernel. `expression` is the call before its operand is evaluated, because
+ * `.N()` has already turned `Arcsin(5)` into a complex number by then.
+ */
+export function compositionValue(
+  operator: string,
+  expression: Expression | undefined
+): Expression | undefined {
+  if (!isFunction(expression) || expression.nops !== 1) return undefined;
+  const operand = expression.op1;
+  return (
+    inverseCompositionValue(operator, operand) ??
+    principalBranchValue(operator, operand)
+  );
+}

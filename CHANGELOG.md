@@ -103,6 +103,20 @@
   box the expression in a scope that declares the name with the wider type.
   A name of `inputs` that a called function reads as a constant declines.
 
+### Improvements
+
+- **A circular or hyperbolic function of its own inverse folds under
+  `evaluate()`, `.N()` and `simplify()`.** `Sin(Arcsin(x))` is `x` for the
+  twelve pairs, and `N(Sin(Arcsin(5)))` was `5 - 3.0e-16i` and is `5`. For an
+  exact real `y`, `Arcsin(Sin(3))` is `π - 3` and `Arccos(Cos(5))` is
+  `2π - 5`; `Arcsin(Sin(x))` stays. `simplify()` also gives
+  `Arccos(-x) = π - Arccos(x)`, `Cos(Arcsin(x)) = √(1 - x²)`,
+  `Cos(i·t) = Cosh(t)`, `Sin(x)/Cos(x) = Tan(x)` and
+  `Cosh(x)² - Sinh(x)² = 1`, and `Arcsin(Sin(4)).simplify()` no longer
+  overflows the stack (PR #565, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#564](https://github.com/cortex-js/compute-engine/issues/564)).
+
 ### Resolved Issues
 
 - **The hyperbolic functions of `Ln(q)` for an exact rational `q`, and

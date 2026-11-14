@@ -6,7 +6,13 @@ import type {
 import { checkDeadline } from '../../common/interruptible.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
-import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
+import {
+  crossCompositionValue,
+  halfTurnAngle,
+  imaginaryArgumentValue,
+  inverseCompositionValue,
+  principalBranchValue,
+} from '../boxed-expression/trigonometry.js';
 import { negatedArgument } from '../boxed-expression/negated-argument.js';
 import { isMergeable } from '../boxed-expression/effects-of.js';
 
@@ -38,6 +44,13 @@ const EVEN_TRIG = new Set(['Cos', 'Sec']);
 // Odd inverse trig functions: f(-x) = -f(x). This is true on the principal
 // branches for every complex x, also on the branch cuts of Arcsin and Arccsc.
 const ODD_INVERSE_TRIG = new Set(['Arcsin', 'Arctan', 'Arccsc']);
+
+// Inverse trig functions with values in [0, π]: f(-x) = π - f(x). The
+// principal value of Arccos is π/2 - Arcsin, and Arcsin is odd for every
+// complex x, so Arccos is reflected for every complex x as well; Arcsec(x) is
+// Arccos(1/x). Arccot is not here: its numeric kernel is odd off the real
+// axis (`Arccot(-3 - 2i)` is `-Arccot(3 + 2i)`) and reflects on it.
+const REFLECTED_INVERSE_TRIG = new Set(['Arccos', 'Arcsec']);
 
 // `negatedArgument()` lives in `boxed-expression/negated-argument.ts`, so that
 // `boxed-expression/simplify.ts` (a lower layer) can use it too. It is
@@ -301,6 +314,28 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       if (EVEN_TRIG.has(op)) return oddEvenStep(op, negated, false, ce);
     }
 
+    // f(f⁻¹(x)) = x, the Pythagorean compositions (`Cos(Arcsin(x))`), and
+    // the imaginary argument (`Cos(i·t) = Cosh(t)`). Each is an identity on
+    // the principal branches, and keeps the cost-gate exempt `transform`
+    // purpose: it removes a composition or a family change, not a node.
+    const composed = inverseCompositionValue(op, arg);
+    if (composed)
+      return { value: composed, because: `${op}(${arg.operator}(x)) -> x` };
+    const cross = crossCompositionValue(op, arg);
+    if (cross)
+      return {
+        value: cross,
+        because: `${op}(${arg.operator}(x)) -> algebraic`,
+        purpose: 'transform',
+      };
+    const imaginary = imaginaryArgumentValue(op, arg);
+    if (imaginary)
+      return {
+        value: imaginary,
+        because: `${op}(i·t) -> hyperbolic`,
+        purpose: 'transform',
+      };
+
     // π - x transformations
     //
     // These and the π + x transformations below are cost-gate exempt
@@ -472,6 +507,29 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       const negated = negatedArgument(arg);
       if (negated) return oddEvenStep(op, negated, true, ce);
     }
+
+    // arccos(-x) = π - arccos(x), and likewise arcsec: these inverses take
+    // values in [0, π], so the reflection is the symmetry (DLMF 4.23.5).
+    if (REFLECTED_INVERSE_TRIG.has(op)) {
+      const negated = negatedArgument(arg);
+      if (negated) {
+        const half = halfTurnAngle(ce);
+        return {
+          value: half.sub(ce._fn(op, [negated.inner])),
+          because: `${op}(-x) -> π - ${op}(x)`,
+          purpose: 'transform',
+        };
+      }
+    }
+
+    // Arcsin(Sin(y)), Arccos(Cos(y)) and Arctan(Tan(y)) for an exact real y.
+    const reduced = principalBranchValue(op, arg);
+    if (reduced)
+      return {
+        value: reduced,
+        because: `${op}(${arg.operator}(y)) -> principal value`,
+        purpose: 'transform',
+      };
 
     // No Arcsin/Arccos infinity arm on purpose: both declare the FINITE
     // `complex` carrier (they diverge toward every infinity), so an
@@ -681,6 +739,26 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
           };
         }
       }
+    }
+  }
+
+  // sin(u)/cos(u) -> tan(u) and cos(u)/sin(u) -> cot(u). At a zero of the
+  // denominator both sides are `~oo`.
+  if (op === 'Divide' && isFunction(x)) {
+    const num = x.op1;
+    const den = x.op2;
+    if (isFunction(num) && isFunction(den) && num.op1 && den.op1) {
+      const to =
+        num.operator === 'Sin' && den.operator === 'Cos'
+          ? 'Tan'
+          : num.operator === 'Cos' && den.operator === 'Sin'
+            ? 'Cot'
+            : undefined;
+      if (to && num.op1.isSame(den.op1) && isMergeable(num.op1))
+        return {
+          value: ce._fn(to, [num.op1]),
+          because: `${num.operator.toLowerCase()}(x)/${den.operator.toLowerCase()}(x) -> ${to.toLowerCase()}(x)`,
+        };
     }
   }
 
