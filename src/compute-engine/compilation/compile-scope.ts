@@ -98,6 +98,9 @@ export function compilationScope(
   // only when it reads each such name as the current scope does.
   const isInput = (name: string): boolean =>
     inputs !== undefined && Object.prototype.hasOwnProperty.call(inputs, name);
+  // The names of `inputs` that an occurrence reads. A name that the
+  // compilation does not read plays no part in the choice.
+  const inputsRead = new Set<string>();
   // The value of a name: not followed for a name that `inputs` (the `vars`
   // option) makes an input, whose stored value the compilation hides
   // (`withVarsValuesHidden()`), unless the value is a function literal.
@@ -127,7 +130,8 @@ export function compilationScope(
       // A held name that a binder on its path binds reads the binder's
       // variable when it is evaluated.
       if (!e.isCanonical) {
-        if (!bound?.has(e.symbol) && !isInput(e.symbol))
+        if (isInput(e.symbol)) inputsRead.add(e.symbol);
+        else if (!bound?.has(e.symbol))
           found.push({ kind: 'held', symbol: e, scope: current });
         continue;
       }
@@ -141,8 +145,8 @@ export function compilationScope(
       if (def !== undefined && halfOf(library?.bindings.get(e.symbol)) === def)
         continue;
       const free = (e as unknown as { _isFreeName?: boolean })._isFreeName;
-      if (!isInput(e.symbol))
-        found.push({ kind: free ? 'free' : 'bound', symbol: e, scope });
+      if (isInput(e.symbol)) inputsRead.add(e.symbol);
+      else found.push({ kind: free ? 'free' : 'bound', symbol: e, scope });
       // The definition that the occurrence reads: a name that had none when
       // it was boxed reads a declaration made later (`_readDefinition()`).
       const read = (
@@ -252,8 +256,7 @@ export function compilationScope(
   };
 
   const readsInputs = (scope: Scope): boolean => {
-    if (inputs === undefined) return true;
-    for (const name of Object.keys(inputs))
+    for (const name of inputsRead)
       if (lookup(name, scope) !== lookup(name, current)) return false;
     return true;
   };

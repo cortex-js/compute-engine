@@ -14,6 +14,14 @@
   call on the shader targets and the Python target, ignored the option and
   folded the value of `a`. Only `compile()` and the interval target read
   it.
+- **A name of `symbolic` or `vars` that the compilation does not read has no
+  effect.** A name that the expression, the functions it calls and the
+  values it reads never use is no longer refused (a constant, a function, a
+  name with an inferred type), and it no longer keeps the compilation from
+  running in the scope of the expression: with `a` holding 10, `a + x`
+  boxed, and a pushed scope that declares `a` again and `b`,
+  `compile(expr, { symbolic: ['b'] })` declined, and is `10 + _.x`. A host
+  can list every name that its scopes declare with no value.
 - **A `symbolic` name that is a function declines.** A name defined with
   `g(t) := …` was silently left as a function. The compilation now declines
   with the name in `binding`, as for a name that holds a function literal.

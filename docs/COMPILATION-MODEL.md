@@ -825,9 +825,13 @@ declares for the name, so a host that declares an axis or a kernel
 parameter in a scope pushed around the compilation names it in `symbolic`:
 a function defined outside that scope, whose body reads the name as a free
 name or as a library operator of the same name, then reads the input. A
-name whose value cannot be hidden (a constant, a type inferred from an
-assigned value) makes the compilation decline (`withSymbolicInputs()`,
-`compilation/vars-inputs.ts`). The option `inputs` of the bound-once spec
+name whose value cannot be hidden (a constant, a function, a type inferred
+from an assigned value) makes the compilation decline
+(`withSymbolicInputs()`, `compilation/vars-inputs.ts`). A name of the
+option that the compilation does not read (in the expression, in the bodies
+it calls, in the values it reads) has no effect: it is not refused, and it
+takes no part in the choice of the scope. A host can list every name that
+its scopes declare with no value. The option `inputs` of the bound-once spec
 (a type given at the call, with no scope) is not built.
 
 `compileShader()` does not make this choice: it reads the current scope,

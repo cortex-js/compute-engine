@@ -262,6 +262,35 @@ describe('COMPILE the symbolic option', () => {
     expect(target.canCompile(expr, { symbolic: ['u'] }).ok).toBe(false);
   });
 
+  // A host can list every name of its scopes: a name that the compilation
+  // does not read (in the expression, in the bodies it calls, in the values
+  // it reads) has no effect.
+  test('a listed name that the compilation does not read does not change the choice of the scope', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('a', { type: 'real', value: 10 });
+    const expr = ce.parse('a + x');
+    ce.pushScope();
+    ce.declare('a', { type: 'real', value: 1 });
+    ce.declare('b', 'real');
+    const result = compile(expr, { fallback: false, symbolic: ['b'] });
+    expect(result.code).toBe('10 + _.x');
+    expect(run(result, { x: 1 })).toBe(11);
+    ce.popScope();
+  });
+
+  test('a listed name that cannot be an input and that the compilation does not read is not refused', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('u', 4);
+    ce.parse('g(t) := 2t').evaluate();
+    const result = compile(ce.parse('x + 1'), {
+      fallback: false,
+      symbolic: ['u', 'Pi', 'g', 'x'],
+    });
+    expect(result.code).toBe('_.x + 1');
+  });
+
   test('a name that holds a function declines', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<real>');

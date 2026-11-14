@@ -116,7 +116,8 @@ export function withVarsValuesHidden<T>(
  */
 function reachedInputDefinitions(
   expr: Expression,
-  names: ReadonlySet<string>
+  names: ReadonlySet<string>,
+  namesRead?: Set<string>
 ): Map<BoxedValueDefinition, string> {
   const result = new Map<BoxedValueDefinition, string>();
   const seen = new Set<object>();
@@ -146,6 +147,12 @@ function reachedInputDefinitions(
     if (seen.has(e)) continue;
     seen.add(e);
     if (isSymbol(e)) {
+      // A held (not canonical) name is bound when it is evaluated: it counts
+      // as read by its name.
+      if (!e.isCanonical) {
+        if (names.has(e.symbol)) namesRead?.add(e.symbol);
+        continue;
+      }
       // An occurrence that reads a parameter, the variable of a binder or
       // the local of a block is not the name of the option: it is bound
       // inside the expression or the body (`_resolutionScope()`).
@@ -154,6 +161,7 @@ function reachedInputDefinitions(
           e as unknown as { _resolutionScope?(): unknown }
         )._resolutionScope?.() === undefined;
       if (local) continue;
+      if (names.has(e.symbol)) namesRead?.add(e.symbol);
       // The definition that the occurrence reads, which is not its own for a
       // name that had none when it was boxed (`_readDefinition()`).
       const read = (
@@ -181,6 +189,7 @@ function reachedInputDefinitions(
       continue;
     }
     if (!isFunction(e)) continue;
+    if (names.has(e.operator)) namesRead?.add(e.operator);
     const op = e.operatorDefinition;
     if (op !== undefined && !seen.has(op)) {
       seen.add(op);
@@ -226,8 +235,20 @@ export function withSymbolicInputs<T>(
   fn: () => T
 ): T | CompileDeclineError {
   if (symbolic === undefined || symbolic.length === 0) return fn();
+  // A name of the option that the compilation does not read (in `expr`, in
+  // the bodies it calls, in the values it reads) has no effect: a host can
+  // list the names of its scopes without a refusal for one of them.
+  const read = new Set<string>();
+  const definitions = reachedInputDefinitions(expr, new Set(symbolic), read);
+  const names = symbolic.filter((name) => read.has(name));
+  if (names.length === 0) return fn();
+  for (const name of names) {
+    const def = expr.engine.lookupDefinition(name);
+    if (isValueDef(def) && !definitions.has(def.value))
+      definitions.set(def.value, name);
+  }
   // A name that is a function (`f(x) := …`) is not an input.
-  for (const name of symbolic) {
+  for (const name of names) {
     const def = expr.engine.lookupDefinition(name);
     if (def !== undefined && !isValueDef(def))
       return new CompileDeclineError({
@@ -239,7 +260,8 @@ export function withSymbolicInputs<T>(
           `is a function, which compiled code cannot take as an input.`,
       });
   }
-  for (const [v, name] of inputDefinitions(expr, symbolic)) {
+  for (const [v, name] of definitions) {
+    if (!read.has(name)) continue;
     const stored = v.isConstant ? undefined : v.storedValue;
     const holdsFunction = stored?.operator === 'Function';
     if (!v.isConstant && !holdsFunction) {
@@ -260,9 +282,9 @@ export function withSymbolicInputs<T>(
               `\`ce.declare("${name}", "real")\`.`),
     });
   }
-  const names: Record<string, unknown> = {};
-  for (const name of symbolic) names[name] = true;
-  return withVarsValuesHidden(expr, names, fn);
+  const hidden: Record<string, unknown> = {};
+  for (const name of names) hidden[name] = true;
+  return withVarsValuesHidden(expr, hidden, fn);
 }
 
 /**
