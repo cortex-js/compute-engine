@@ -35,6 +35,15 @@
 
 ### Resolved Issues
 
+- **A compiled function literal reads a number passed to a parameter whose
+  uses make it `complex`.** The compiled `t ↦ LerchPhi(0.3, t, 2)` gave
+  `Φ(0.3, 0, 2) ≈ 1.4286` at every `t`, so the compiled
+  `D(LerchPhi(0.3, x, 2), x)` and `ND(t ↦ LerchPhi(0.3, t, 2), 2)` were
+  about `0`; they are `-0.219975`. A literal compiled with
+  `entryChecks: false` now also lifts a number passed to a parameter
+  declared `complex`, and in `mode: 'complex'` a parameter whose uses make
+  it `real` (`t ↦ Mod(t, 1)`) receives a number, where it gave `NaN`.
+
 - **`EllipticF` and the incomplete `EllipticPi` are accurate at machine
   precision for an amplitude near `π/2` and a parameter near 1.** At
   `ce.precision = 'machine'`, `EllipticF(1.57079632679, 1)` was

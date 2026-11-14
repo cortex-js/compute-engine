@@ -68,3 +68,113 @@ describe('item 177: numeric-derivative fallback (shared budget, both routes)', (
     120_000
   );
 });
+
+// CE-1292: an unannotated parameter whose uses infer the type `complex`
+// (`t` at the order of `LerchPhi`) was read as a `{ re, im }` object by the
+// body while the caller passed a number, so the literal answered
+// `Φ(0.3, 0, 2)` at every point and its numeric derivative was about 0.
+describe('CE-1292: a parameter inferred `complex` reads the number it receives', () => {
+  const ce = new ComputeEngine();
+  // Φ(0.3, s, 2) and its derivative in s at s = 2, by the interpreter: the
+  // value, and a central difference with step 1e-5.
+  const phi = (s: number) => ce.box(['LerchPhi', 0.3, s, 2]).N().re;
+  const slope = (phi(2 + 1e-5) - phi(2 - 1e-5)) / 2e-5;
+
+  test('the compiled literal follows its argument', () => {
+    const r = compile(
+      ce.box(['Function', ['LerchPhi', 0.3, 't', 2], 't']) as never
+    );
+    expect(r.success).toBe(true);
+    const run = r.run as unknown as (t: number) => number;
+    expect(run(2)).toBeCloseTo(phi(2), 12);
+    expect(run(2.5)).toBeCloseTo(phi(2.5), 12);
+  });
+
+  test('the compiled numeric derivative of D', () => {
+    const r = compile(ce.box(['D', ['LerchPhi', 0.3, 'x', 2], 'x']) as never);
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.nd(');
+    expect(r.run!({ x: 2 }) as number).toBeCloseTo(slope, 8);
+  });
+
+  test('the interpreted and the compiled ND agree', () => {
+    const fn = ['Function', ['LerchPhi', 0.3, 't', 2], 't'];
+    const interpreted = ce.box(['ND', fn, 2]).N().re;
+    expect(interpreted).toBeCloseTo(slope, 8);
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    const r = compile(ce2.box(['ND', fn, 'x']) as never);
+    expect(r.success).toBe(true);
+    expect(Object.is(r.run!({ x: 2 }), interpreted)).toBe(true);
+  });
+
+  test('without entry checks, a number argument is lifted', () => {
+    for (const param of ['t', ['Typed', 't', "'complex'"]]) {
+      const r = compile(
+        ce.box(['Function', ['LerchPhi', 0.3, 't', 2], param]) as never,
+        { entryChecks: false }
+      );
+      expect(r.success).toBe(true);
+      const run = r.run as unknown as (t: number) => number;
+      expect(run(2.5)).toBeCloseTo(phi(2.5), 12);
+    }
+  });
+
+  test('a complex argument in mode complex keeps its value', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('u', 'complex');
+    const expected = ce2.box(['LerchPhi', 0.3, ce2.parse('2+0.5i'), 2]).N();
+    for (const mode of ['complex', undefined] as const) {
+      const r = compile(
+        ce2.box([
+          'Apply',
+          ['Function', ['LerchPhi', 0.3, 't', 2], 't'],
+          'u',
+        ]) as never,
+        mode === undefined ? undefined : { mode }
+      );
+      expect(r.success).toBe(true);
+      const v = r.run!({ u: { re: 2, im: 0.5 } }) as {
+        re: number;
+        im: number;
+      };
+      expect(v.re).toBeCloseTo(expected.re, 12);
+      expect(v.im).toBeCloseTo(expected.im, 12);
+    }
+  });
+
+  test('a parameter inferred `real` is not lifted in mode complex', () => {
+    for (const entryChecks of [true, false]) {
+      const r = compile(ce.box(['Function', ['Mod', 't', 1], 't']) as never, {
+        mode: 'complex',
+        entryChecks,
+      });
+      expect(r.success).toBe(true);
+      const run = r.run as unknown as (t: number) => number;
+      expect(run(2.5)).toBe(0.5);
+    }
+  });
+
+  test('a wide sibling parameter keeps the complex lane in mode complex', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('u', 'complex');
+    ce2.declare('w', 'complex');
+    const r = compile(
+      ce2.box([
+        'Apply',
+        ['Function', ['Add', ['LerchPhi', 0.3, 't', 2], 'z'], 't', 'z'],
+        'u',
+        'w',
+      ]) as never,
+      { mode: 'complex' }
+    );
+    expect(r.success).toBe(true);
+    const v = r.run!({ u: { re: 2, im: 0.5 }, w: { re: 1, im: 1 } }) as {
+      re: number;
+      im: number;
+    };
+    const phi = ce2.box(['LerchPhi', 0.3, ce2.parse('2+0.5i'), 2]).N();
+    expect(v.re).toBeCloseTo(phi.re + 1, 12);
+    expect(v.im).toBeCloseTo(phi.im + 1, 12);
+  });
+});

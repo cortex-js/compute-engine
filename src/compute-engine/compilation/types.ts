@@ -2536,7 +2536,10 @@ export interface CompilationOptions<Expr = unknown> {
    * path — whose callers own their argument contract and validate the result
    * themselves (a `NaN` or malformed result re-runs the element through the
    * interpreter); a thrown entry check would turn that self-healing fallback
-   * into an evaluation error. `implicitCompile` passes it.
+   * into an evaluation error. `implicitCompile` passes it. A compiled
+   * lambda still lifts a plain number passed to a parameter on the complex
+   * lane, because its body reads `.re` and `.im`; a free symbol has no
+   * such lift.
    */
   entryChecks?: boolean;
 

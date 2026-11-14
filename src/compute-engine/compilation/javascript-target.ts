@@ -98,6 +98,7 @@ import {
   functionLiteralParameterType,
   freeAnonymousSlots,
   optionalParameterDefault,
+  optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import {
   canonicalFunctionLiteral,
@@ -12235,13 +12236,16 @@ function lambdaEntryPlan(
     // applies to it.
     if (t !== undefined && isTextEntryType(t)) return;
     if (t !== undefined && isKeyedEntryType(t)) return;
-    // Under the complex discipline an unannotated (wide) parameter is
-    // complex-shaped too — a number is lifted at entry, an object accepted.
+    // Under the complex discipline a wide parameter is complex-shaped too — a
+    // number is lifted at entry, an object accepted. An unannotated
+    // parameter is judged by the type its uses inferred, as the body reads
+    // it: `t` in `t ↦ LerchPhi(0.3, t, 2)` is `complex`, so the body reads
+    // `{ re, im }` (`hasInferredComplexType()`), and `t` in `t ↦ Mod(t, 1)`
+    // is `real`, so the body reads a number also in `mode: 'complex'`.
+    const read = t ?? optionalParameterTarget(p).type.type;
     const isComplex =
-      t !== undefined
-        ? isNonRealNumber(t) ||
-          (mode === 'complex' && BaseCompiler.wideNumericType(t))
-        : mode === 'complex';
+      isNonRealNumber(read) ||
+      (mode === 'complex' && BaseCompiler.wideNumericType(read));
     (isComplex ? complex : real).push(i);
   });
   return {
@@ -12776,9 +12780,22 @@ function compileToTarget(
     const statementBody =
       emitted?.statementBody ??
       (statements?.has(body) ? statements.functionBody(body) : undefined);
-    const entryPlan = entryChecks
-      ? lambdaEntryPlan(args.slice(1), mode)
-      : undefined;
+    // Without the entry checks the entry still lifts a number passed to a
+    // complex-lane parameter: the body reads `.re` and `.im` off it, and an
+    // implicit caller passes a number (the numeric derivative of
+    // `t ↦ LerchPhi(0.3, t, 2)` was about 0 at every point).
+    const fullPlan = lambdaEntryPlan(args.slice(1), mode);
+    const entryPlan: EntryPlan | undefined = entryChecks
+      ? fullPlan
+      : fullPlan.kind === 'args' && fullPlan.complex.length > 0
+        ? {
+            kind: 'args',
+            real: [],
+            complex: fullPlan.complex,
+            lists: [],
+            strings: new Map(),
+          }
+        : undefined;
     const reconstructionDigits = realPowerReconstructionDigits();
     const fn = new ComputeEngineFunctionLiteral(
       expr.engine,

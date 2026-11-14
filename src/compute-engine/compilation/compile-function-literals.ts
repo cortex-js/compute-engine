@@ -210,6 +210,22 @@ function readsParameterOnRealLane(
 }
 
 /**
+ * Whether the function-literal parameter `param` has no annotation and has
+ * a non-real number type that its uses inferred. A use at an operand of
+ * type `complex` infers exactly `complex` (`t` in `t ↦ LerchPhi(0.3, t, 2)`),
+ * and the body then reads the parameter as a `{ re, im }` object
+ * (`isComplexValued()` answers from the symbol's type). Such a parameter is
+ * on the complex lane, so that the entry of a compiled lambda and the
+ * coercing wrapper of a nested literal lift a number passed to it: without
+ * this, `t ↦ LerchPhi(0.3, t, 2)` answered `Φ(0.3, 0, 2)` at every `t`.
+ */
+export function hasInferredComplexType(param: Expression): boolean {
+  if (functionLiteralParameterType(param) !== undefined) return false;
+  const symbol = optionalParameterTarget(param);
+  return isSymbol(symbol) && isNonRealNumber(symbol.type.type);
+}
+
+/**
  * A `Function` literal. A case of `compileExpr`: it returns the code, or
  * `undefined` when `compileExpr` continues with its next case.
  */
@@ -413,8 +429,14 @@ export function compileExprFunctionLiteral(
     const declaredType = annotated.map(
       (own, i) => own ?? signatureParamType(ground, i)
     );
-    const complexParam = declaredType.map(
-      (pt) => pt !== undefined && isNonRealNumber(pt)
+    // An unannotated parameter whose uses inferred a non-real number type is
+    // read by the body as a `{ re, im }` object, so it is on the complex lane
+    // too, and the coercing wrapper lifts a number passed to it
+    // (`hasInferredComplexType()`).
+    const complexParam = declaredType.map((pt, i) =>
+      pt !== undefined
+        ? isNonRealNumber(pt)
+        : hasInferredComplexType(ops[i + 1])
     );
 
     // A consumer that knows every value this literal will receive is a
@@ -506,8 +528,13 @@ export function compileExprFunctionLiteral(
     const framedComplex = new Map<string, boolean>();
     const framedVector = new Map<string, number>();
     if (target.language === 'javascript') {
+      // A parameter on the complex lane by its inferred type needs no frame:
+      // the body reads it as complex from that type.
       const boundDerived = complexParam.some(
-        (isComplex, i) => isComplex && annotated[i] === undefined
+        (isComplex, i) =>
+          isComplex &&
+          annotated[i] === undefined &&
+          declaredType[i] !== undefined
       );
       const leaked = params.some((name) => isFramedByForeignScope(name, node));
       // A frame already pushed FOR this literal describes every one of its
