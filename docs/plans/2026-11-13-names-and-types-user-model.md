@@ -134,8 +134,7 @@ decided.
    the type of a variable (`x = [1, 2]` after `x = 1`) changes the type of
    that variable, and of each variable whose value is a formula that reads
    it: a formula has the type that the types of its names give it, never
-   the type that their values give it. On main since
-   `ed611a362935da6c409793ba6093a9df0fbacf67`, not released.
+   the type that their values give it. Since 0.189.0.
 
 ### Lists
 
@@ -500,7 +499,7 @@ imaginary unit (`i^2` is `-1`), `pi` is π. You can use the name for
 yourself with a declaration: `let i = 3`, then `i + 1` is `4`.
 
 **A variable that holds a formula follows the types of the names it
-reads, not their values** (rule 6). On main, not released; 0.188.1 reads
+reads, not their values** (rule 6). Since 0.189.0; 0.188.1 reads
 the values.
 
 ```js
@@ -596,8 +595,7 @@ runs, so every input needs a type before.
 
 Give the type with `ce.declare()`, or at the call:
 `compile(expr, { inputs: { w: 'real' } })` needs no declaration and no
-scope (on main since `ccd2f604697ac643c7a052389a921d353e066abb`, not yet
-released). A name that holds a value is folded into the code; to keep it as
+scope (since 0.189.0). A name that holds a value is folded into the code; to keep it as
 an input, name it: `compile(expr, { symbolic: ['a'] })` (since 0.188.1), or
 give it in `inputs`. The name is then an input wherever the compilation
 reads it, also inside the functions that the expression calls.
@@ -611,8 +609,8 @@ Differences between this document and 0.188.0:
 | Rule 7 | The whole-or-element choice does not depend on the order of the uses | It does: `p(x) = (x + x, length(x))` gives errors | proposed, not decided |
 | Rule 7 | A parameter used as a matrix after another use is still a matrix | Only when the matrix use comes first | proposed (box the body after the uses are known), not decided |
 | Rule 7 | An indexed parameter with no type takes a list of points whole | One call for each point | proposed, not decided; it changes results |
-| Rule 6 | A type follows the types of the names, never their values | The type of an expression is revised from the values its names hold | decided (D16); on main since `ed611a362935da6c409793ba6093a9df0fbacf67`, not released |
-| Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); built, on main, not released |
+| Rule 6 | A type follows the types of the names, never their values | The type of an expression is revised from the values its names hold | decided (D16); since 0.189.0 |
+| Compiling | `compile()` takes the types of its inputs | Declarations only | decided (C6); since 0.189.0 |
 
 Not decided, each with the choice:
 
