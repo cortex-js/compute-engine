@@ -596,7 +596,7 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
     const source =
       'function f() scope -> integer { c = 2; let c = 0; 0 }\nconst c = 1\nf()\n4';
     const expected = [
-      ['static-type-error', 'read-before-declaration', 1, 'c = 2'],
+      ['static-type-error', 'read-before-declaration', 1, 'c'],
     ];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source).diagnostics).toEqual(expected);

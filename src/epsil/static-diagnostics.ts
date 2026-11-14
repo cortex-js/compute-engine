@@ -1334,6 +1334,7 @@ function canonicalizationDiagnostics(
           snippet,
           'incompatible-type',
         ],
+        code: 'incompatible-type',
         range: [start, end, start],
       });
     // One diagnostic per distinct problem: every error in a statement shares
@@ -1347,17 +1348,34 @@ function canonicalizationDiagnostics(
       // as at the top level, where each assignment is a statement: in
       // `for k in 1..3 { t = 1; t = 1 }` the second `t = 1` gives the same
       // error as the first. The source range of its own boxed twin names the
-      // assignment, and the dedup below keys on it.
-      const perSite = code === 'assignment-to-undeclared-variable';
+      // assignment, and the dedup below keys on it. A read of a local before
+      // its declaration is reported at each statement that reads it, at the
+      // name that is read: the `ErrorCode` operand of its twin has the range
+      // of that name, or of the call when the local is called
+      // (`useBeforeDeclarationCheck()`), and the range of a call `h(1)` is
+      // narrowed to the name `h` that starts it.
+      const isAssignment = code === 'assignment-to-undeclared-variable';
+      const perSite = isAssignment || code === 'read-before-declaration';
       let siteRange: [number, number] | undefined;
       if (perSite) {
         const jsonKey = JSON.stringify(error);
         const n = occurrences.get(jsonKey) ?? 0;
         occurrences.set(jsonKey, n + 1);
-        siteRange = sourceOffsetsOfBoxed(boxedErrorsByJson.get(jsonKey)?.[n]);
+        const twin = boxedErrorsByJson.get(jsonKey)?.[n];
+        siteRange = sourceOffsetsOfBoxed(
+          isAssignment || !isFunction(twin) ? twin : twin.op1
+        );
+        const name = stringValue(operand(operand(error, 1), 2));
+        if (
+          !isAssignment &&
+          siteRange !== undefined &&
+          name &&
+          source.startsWith(name, siteRange[0])
+        )
+          siteRange = [siteRange[0], siteRange[0] + name.length];
       }
       if (
-        perSite &&
+        isAssignment &&
         declaredByEarlierStatement(
           statements,
           stringValue(operand(operand(error, 1), 2)) ?? '',
@@ -1463,6 +1481,7 @@ function canonicalizationDiagnostics(
               ),
           code,
         ],
+        code,
         range: [from, to, from],
       };
       const notes = signatureNotes(ce, error, {
@@ -2887,6 +2906,7 @@ function constantClauseDiagnostic(
       epsilSnippet(statement),
       'invalid-clause-definition',
     ],
+    code: 'invalid-clause-definition',
     range: [start, end, start],
     notes: [
       { message: `\`${name}\` is declared constant here`, range: declared },
@@ -3064,6 +3084,7 @@ function registerConstant(
         epsilSnippet(assignment),
         'constant-assignment',
       ],
+      code: 'constant-assignment',
       range: [start, end, start],
       notes: [
         {

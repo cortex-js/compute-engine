@@ -51,18 +51,15 @@ describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
     ['let z = t', 'let n = z'],
   ])('`%s`, then `let t = [1]`', (use, read) => {
     const source = `function f() { ${use}; ${read}; let t = [1]; n }\nf()`;
-    expect(run(source).diagnostics).toEqual([
-      ['read-before-declaration', use],
-    ]);
+    // The diagnostic has the range of the name that is read.
+    expect(run(source).diagnostics).toEqual([['read-before-declaration', 't']]);
   });
 
   test('an assignment in a `do` block of a `let` initializer', () => {
     // `let t = 2` at the own level of the function body declares `t`. The
     // assignment in the `do` block, before it, is a use of that local.
     const source = 'function g() { let z = do { t = 1 }; let t = 2; t }\ng()';
-    expect(run(source).diagnostics).toEqual([
-      ['read-before-declaration', 'let z = do { t = 1 }'],
-    ]);
+    expect(run(source).diagnostics).toEqual([['read-before-declaration', 't']]);
   });
 });
 

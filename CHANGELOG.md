@@ -27,6 +27,16 @@
 
 ### Behavior Changes
 
+- **A static error of an Epsil program has its engine error code in a `code`
+  field, and a read before a declaration has the range of the name.** A
+  `static-type-error` diagnostic of `checkEpsil()` and `executeEpsil()` has
+  the field `code`, for example `assignment-to-undeclared-variable` or
+  `read-before-declaration`, so a host does not read the message to tell
+  which error it has. For `let a = b1 + 1` then `let b1 = 2`, the range of
+  the `read-before-declaration` diagnostic was the whole statement
+  `let a = b1 + 1`; it is the name `b1`, and each statement that reads the
+  name before its declaration gets a diagnostic.
+
 - **In an Epsil program, each assignment to an undeclared name is reported, in
   a block as at the top level.** `checkEpsil()` and `executeEpsil()` reported
   only the first assignment of each name in a block, a loop body or a function

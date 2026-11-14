@@ -153,6 +153,15 @@ export type ParsingDiagnostic = {
   // An `error` is something that will prevent the code from being parsed.
   severity: 'warning' | 'error';
   message: DiagnosticMessage;
+  /**
+   * The engine error code of a `static-type-error` diagnostic, for example
+   * `assignment-to-undeclared-variable` or `read-before-declaration`: a host
+   * reads it to tell one static error from another without reading the
+   * message. It is the same as the last element of `message`. The other
+   * diagnostics do not have it: their code is the first element of
+   * `message`.
+   */
+  code?: string;
   range: [start: number, end: number, position?: number];
   // "Fixits" is a suggestion in the form of a series of operations
   // to modify the source in a way that could address the warning or error.

@@ -121,7 +121,14 @@ import { ComputeEngine, checkEpsil } from "@cortex-js/compute-engine/epsil";
 const ce = new ComputeEngine();
 const { diagnostics } = checkEpsil(ce, 'let b = "x" + 1');
 console.log(diagnostics[0].message[0]); // static-type-error
+console.log(diagnostics[0].code); // incompatible-type
 ```
+
+A static type error has the engine error code in its `code` field, so a host
+can tell one static error from another without reading the message. The
+`range` of a diagnostic is the `[start, end)` offsets of the source it is
+about: for a name that a statement reads before its `let`, the range of that
+name.
 
 An error that only a run finds, such as a division by zero in a loop, is not in
 these diagnostics.
