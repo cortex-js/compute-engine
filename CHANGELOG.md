@@ -192,6 +192,17 @@
 
 ### Resolved Issues
 
+- **`AiryAi`, `AiryBi`, `ExpIntegralEi` and `LogIntegral` of a real argument
+  carry the precision asked for.** At `ce.precision = 30`,
+  `ExpIntegralEi(2)` was the double `4.95423435600189`; it is
+  `4.95423435600189016337950513023`. `AiryAi(1/3)` was `0.2706826474593453`
+  and is `0.270682647459345282887346318096`. A value the engine cannot compute
+  to the digits asked for stays unevaluated: `ExpIntegralEi(5000)` and
+  `AiryBi(200)` were `+∞`. Complex arguments, the Airy derivatives and machine
+  precision are unchanged. (PR #562, contributed by
+  [enumeratio](https://github.com/enumeratio); fixes
+  [#554](https://github.com/cortex-js/compute-engine/issues/554)).
+
 - **`BesselJ`, `BesselY`, `BesselI` and `BesselK` of a real argument carry
   the precision asked for, and a real non-integer order has a value.** At
   `ce.precision = 30`, `BesselJ(1, 1/3)` was the double `0.16436254381427073`;

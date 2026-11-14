@@ -55,6 +55,10 @@ import {
   bigEllipticPiComplete,
   bigEllipticPiIncomplete,
 } from '../numerics/elliptic-big.js';
+import {
+  bigExpIntegralEi,
+  bigLogIntegral,
+} from '../numerics/exponential-integral-big.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -1344,6 +1348,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (point !== undefined) return ce.NaN;
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // Above machine precision a real argument has the digits asked for or
+        // the head stays unevaluated; complex arguments use the E₁-based
+        // double kernel.
+        if (bignumPreferred(ce) && !x.isComplex && !Number.isNaN(x.re)) {
+          const value = bigExpIntegralEi(ce, bigRealOperand(ce, x));
+          return value === undefined ? undefined : boxBignumApprox(ce, value);
+        }
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return applyN([x], expIntegralEi, undefined, expIntegralEiComplex);
       },
@@ -1419,6 +1430,10 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (x.isSame(0)) return floatIfFloatOperand([x], ce.Zero);
         if (x.isSame(1)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        if (bignumPreferred(ce) && !Number.isNaN(x.re)) {
+          const value = bigLogIntegral(ce, bigRealOperand(ce, x));
+          return value === undefined ? undefined : boxBignumApprox(ce, value);
+        }
         return applyN([x], logIntegral);
       },
     },

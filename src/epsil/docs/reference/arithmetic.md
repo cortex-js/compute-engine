@@ -342,7 +342,7 @@ Airy function of the first kind
 
 ```epsil
 N(airyAi(1))
-// ➔ 0.13529241631288141
+// ➔ 0.135292416312881415524
 ```
 
 ### airyAiPrime
@@ -364,7 +364,7 @@ Airy function of the second kind
 
 ```epsil
 N(airyBi(0))
-// ➔ 0.6149266274460007
+// ➔ 0.614926627446000735151
 ```
 
 ### airyBiPrime
