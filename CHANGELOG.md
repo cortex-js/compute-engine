@@ -18,6 +18,14 @@
 
 ### Improvements
 
+- **A call of a function with a declared scalar result keeps that result when
+  the body ends after a loop.** With the Epsil function
+  `f(B: list<integer>, k: integer) -> integer` that counts in a loop and
+  returns the count, `f(L, 3)` with `L` declared `list<integer>` had the type
+  `integer | list<any>`, and `if f(B, k) > 0 { out = 1 }` did not compile.
+  The call is now `integer`, and the condition compiles, when each argument
+  is a value of the type annotated on its parameter.
+
 - **`Integrate` gives a closed form for a polynomial of degree up to 200
   times `e^{ax+b}`, `\sin(ax+b)` or `\cos(ax+b)`.** `\int x^{10} e^{-x}\,dx`
   was left unevaluated after about 1.5 s; it is

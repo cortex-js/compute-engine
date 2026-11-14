@@ -299,12 +299,17 @@ describe('the values of the existing compiler and of the interpreter', () => {
 
 describe('declines that stay', () => {
   const ce = new ComputeEngine();
-  // A user function with a list parameter and a real result; the engine
+  // A user function with a list parameter and a real result, whose body can
+  // return the list (the result check admits a list of reals); the engine
   // types its call `list<any> | real`.
   ce.declare('fm', '(list<real>) -> real');
   ce.assign(
     'fm',
-    ce.expr(['Function', ['Add', ['Sum', 'Q'], ['Max', 'Q']], typed('Q', 'list<real>')])
+    ce.expr([
+      'Function',
+      ['If', ['Greater', ['Max', 'Q'], 0], ['Add', ['Sum', 'Q'], ['Max', 'Q']], 'Q'],
+      typed('Q', 'list<real>'),
+    ])
   );
   const declines: [string, MathJsonExpression, RegExp][] = [
     [

@@ -523,8 +523,90 @@ function callResultTypeOfBinding(
   // replace it: in a `Block` body the ascription holds only the last
   // statement, and the walk gives no type when that statement does not give
   // the value (an early `Return`, a loop).
-  if (listWhole) return listAtWholeParameterResult(t, scalar!);
+  if (listWhole)
+    return listAtWholeParameterResult(
+      t === undefined || t === 'unknown' || t === 'any'
+        ? boxedBodyResultType(literal, args)
+        : t,
+      scalar!
+    );
   return scalar === undefined ? t : outsideScalarResult(t, scalar);
+}
+
+/**
+ * The type of the value of the body of `literal` as it was boxed: the type
+ * of the operand of its return marker. The body was boxed with each
+ * parameter of its annotated type, so this type holds the value of a call
+ * only when each argument is a value of the type annotated on its
+ * parameter. `undefined` when an argument is not, when a parameter has no
+ * annotation, is a rest or a destructuring parameter, when the body reads a
+ * captured name whose type is inferred or that has no definition, when the
+ * body has a `Return` or calls a user function
+ * (`callsUserFunctionOrReturns`), or when the literal has no return marker.
+ *
+ * It is read when the walk of the body gives no type (a loop): with
+ * `f(B: list<integer>, k: integer) -> integer` whose body counts in a loop
+ * and returns the count, `f(L, 3)` with `L` declared `list<integer>` is
+ * `integer`, not `integer | list<any>`.
+ */
+function boxedBodyResultType(
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[]
+): Type | undefined {
+  const marker = functionLiteralReturnMarker(literal);
+  if (marker === undefined) return undefined;
+  const params = literal.ops.slice(1);
+  for (let i = 0; i < args.length; i++) {
+    const p = params[i];
+    if (p === undefined || isRestParameter(p) || isDestructuringParameter(p))
+      return undefined;
+    const annotated = functionLiteralParameterType(p);
+    if (annotated === undefined || !isSubtype(args[i].type, annotated))
+      return undefined;
+  }
+  // The types in the body were derived with the type that each captured
+  // name had when the body was boxed. An inferred type can widen later
+  // (`let X = 1`, then `X = [1, 2]`), and a local assigned from `X` in a
+  // loop keeps its scalar type, so only a captured name with a declared
+  // type is admitted.
+  if (
+    capturedSymbols(literal).some((c) => {
+      const def = c.occurrence.valueDefinition;
+      return def === undefined || def.inferredType;
+    })
+  )
+    return undefined;
+  if (callsUserFunctionOrReturns(literal.ops[0])) return undefined;
+  return marker.op1.type.type;
+}
+
+/**
+ * True when `body` holds, outside the operand of a quoting operator
+ * (`holdClass: 'quote'`), a `Return`, or a call whose head is bound to a
+ * value definition (a function value, or a name with no definition yet) or
+ * to an operator definition made from a function literal (a user function).
+ *
+ * The value of a `Return` is not the value of the return marker. The type
+ * of a call of a user function was derived from that function as it was
+ * when the body was boxed: its body can read a name whose inferred type
+ * widens later, and its name can be assigned another function.
+ */
+function callsUserFunctionOrReturns(body: Expression): boolean {
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (!isFunction(e) || seen.has(e)) return false;
+    seen.add(e);
+    if (e.operatorDefinition?.holdClass === 'quote') return false;
+    if (e.operator === 'Return' || e.valueDefinition !== undefined)
+      return true;
+    if (
+      (e.operatorDefinition as { _lambdaLiteral?: Expression } | undefined)
+        ?._lambdaLiteral !== undefined
+    )
+      return true;
+    return e.ops.some(visit);
+  };
+  return visit(body);
 }
 
 /** `list<any>`: a list with any contents, nested lists included. */
