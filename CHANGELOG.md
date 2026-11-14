@@ -31,6 +31,15 @@
 
 ### Resolved Issues
 
+- **`A \setminus B \setminus C` is `SetMinus(A, B, C)`, the difference read
+  from left to right.** It was read as `SetMinus(A, SetMinus(B, C))`, a
+  different set: `\{1,2,3,4\} \setminus \{2\} \setminus \{4\}` evaluated to
+  `{1, 3, 4}`; it is `{1, 3}`. `SetMinus(A, B, C)` was already written as
+  that chain, and it now reads back. `\backslash` reads the same way, and a
+  parenthesized operand stays nested: `A \setminus (B \setminus C)` (PR #585,
+  contributed by [enumeratio](https://github.com/enumeratio), fixes
+  [#584](https://github.com/cortex-js/compute-engine/issues/584)).
+
 - **`\triangle` (`SymmetricDifference`) binds as tightly as `\cup` and
   `\cap`.** It had the precedence of `=`, so `a \triangle b = c` was read as
   `a \triangle (b = c)`, an `incompatible-type` error once canonical. It is

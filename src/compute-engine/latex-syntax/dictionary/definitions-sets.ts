@@ -428,8 +428,8 @@ function serializeSetOperator(
  * right operand is then read one precedence level up, so the next `\subset`
  * is left to the caller's infix loop and `_appendAssociativeOperand()`
  * extends the chain in place. The other modes parse the right operand at the
- * operator's own precedence (associativity `none`), so `A \setminus B
- * \setminus C` nests to the right as before.
+ * operator's own precedence (associativity `none`), so those nest to the
+ * right.
  */
 function parseSetOperator(
   name: string,
@@ -466,8 +466,17 @@ function parseSetOperator(
     const rhs = ambiguousRhs ? parsedIntervalOperand(rawRhs)! : rawRhs!;
     if (ambiguousRhs && (name === 'Element' || name === 'NotElement'))
       emitIntervalAmbiguity(parser, openIndex, rawRhs);
-    if (sides === 'chain')
+    if (sides === 'chain') {
+      // Only the infix operator extends the chain. A right operand with the
+      // same head is a call, `A \setminus \operatorname{SetMinus}(B, C)`,
+      // and stays one operand: `A \setminus (B \setminus C)` is not
+      // `(A \setminus B) \setminus C`.
+      if (operator(rhs) === name)
+        return operator(newLhs) === name
+          ? [name, ...operands(newLhs), rhs]
+          : [name, newLhs, rhs];
       return parser._appendAssociativeOperand(name, newLhs, rhs);
+    }
     return [name, newLhs, rhs];
   };
 }
@@ -1529,7 +1538,9 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\setminus'],
     kind: 'infix',
     precedence: 650,
-    parse: parseSetOperator('SetMinus', 650, 'both'),
+    // A chain is one call: `A \setminus B \setminus C` is `SetMinus(A, B, C)`,
+    // `(A \setminus B) \setminus C`, not `A \setminus (B \setminus C)`.
+    parse: parseSetOperator('SetMinus', 650, 'chain'),
     serialize: serializeSetOperator('\\setminus', 650, 'both'),
   },
   {
@@ -1541,7 +1552,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['\\backslash'],
     kind: 'infix',
     precedence: 650,
-    parse: parseSetOperator('SetMinus', 650, 'both'),
+    parse: parseSetOperator('SetMinus', 650, 'chain'),
   },
   {
     name: 'SymmetricDifference',

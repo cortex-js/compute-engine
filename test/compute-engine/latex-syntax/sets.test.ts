@@ -1030,3 +1030,45 @@ describe('A BAR AS THE SET-BUILDER SEPARATOR', () => {
     });
   }
 });
+
+describe('A CHAIN OF \\setminus IS ONE SetMinus', () => {
+  // `A \setminus B \setminus C` removes B and then C; read as
+  // `A \setminus (B \setminus C)` it gave `{1, 3, 4}` for `{1, 2, 3, 4}`
+  // minus `{2}` minus `{4}`.
+  const cases: [string, any][] = [
+    ['A\\setminus B\\setminus C', ['SetMinus', 'A', 'B', 'C']],
+    ['A\\backslash B\\backslash C', ['SetMinus', 'A', 'B', 'C']],
+    ['A\\setminus B\\setminus C\\setminus D', ['SetMinus', 'A', 'B', 'C', 'D']],
+    ['A\\setminus(B\\setminus C)', ['SetMinus', 'A', ['SetMinus', 'B', 'C']]],
+    ['(A\\setminus B)\\setminus C', ['SetMinus', ['SetMinus', 'A', 'B'], 'C']],
+  ];
+  for (const [src, json] of cases)
+    test(`${src} parses as ${JSON.stringify(json)}`, () => {
+      expect(ce.parse(src).json).toEqual(json);
+      // The written form reads back as the same call.
+      expect(ce.parse(ce.box(json).latex).json).toEqual(json);
+    });
+
+  test('{1,2,3,4} \\setminus {2} \\setminus {4} evaluates to {1, 3}', () => {
+    expect(
+      ce.parse('\\{1,2,3,4\\}\\setminus\\{2\\}\\setminus\\{4\\}').evaluate().json
+    ).toEqual(['Set', 1, 3]);
+  });
+
+  test('a right operand spelled as a SetMinus call stays one operand', () => {
+    expect(
+      ce.parse('A\\setminus B\\setminus\\operatorname{SetMinus}(C, D)').json
+    ).toEqual(['SetMinus', 'A', 'B', ['SetMinus', 'C', 'D']]);
+    expect(
+      ce
+        .parse('\\{1,2,3,4\\}\\setminus\\operatorname{SetMinus}(\\{2,4\\},\\{4\\})')
+        .evaluate().json
+    ).toEqual(['Set', 1, 3, 4]);
+  });
+
+  test('a chain written from SetMinus(A, B, C) reads back as SetMinus(A, B, C)', () => {
+    const expr = ce.box(['SetMinus', 'A', 'B', 'C']);
+    expect(expr.latex).toBe('A\\setminus B\\setminus C');
+    expect(ce.parse(expr.latex).json).toEqual(['SetMinus', 'A', 'B', 'C']);
+  });
+});
