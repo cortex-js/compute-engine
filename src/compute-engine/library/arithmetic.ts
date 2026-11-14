@@ -9619,8 +9619,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (point !== undefined) return engine.NaN;
           if (!x.isComplex && x.isSame(1)) return engine.ComplexInfinity;
         }
-        if (shouldNumericize(numericApproximation, x))
+        if (shouldNumericize(numericApproximation, x)) {
+          // A complex s takes the Hurwitz kernel at a = 1, which estimates
+          // its own rounding error, runs in double-double when that error
+          // is large and declines when it still is (ζ(1/2 + 10⁶i) is 1.6e-9
+          // off from the Euler-Maclaurin sum alone, which `zetaComplex` is).
+          if (isFiniteNumberLiteral(x) && x.isComplex) {
+            const z = hurwitzZetaComplexWithError(
+              new Complex(x.re, x.im),
+              new Complex(1, 0)
+            );
+            return z === undefined || z.value.isNaN()
+              ? undefined
+              : boxComplexResult(engine, z.value, false);
+          }
           return apply(x, zeta, (x) => bigZeta(engine, x), zetaComplex);
+        }
 
         // Exact values at integer literals (via exact Bernoulli rationals):
         // - ζ(2k) = (−1)^{k+1}·B₂ₖ·(2π)^{2k}/(2·(2k)!) → rational · π^{2k}

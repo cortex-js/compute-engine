@@ -169,6 +169,20 @@
 
 ### Resolved Issues
 
+- **`Zeta(s)` at a complex `s` gives its value to the precision of a
+  double, or stays unevaluated.** `Zeta(0.5 + 1000i).N()` was
+  `0.35633436719464573 - 0.9319978312332674i`, 3.7e-13 off, and
+  `Zeta(0.5 + 10⁶i).N()` was 1.6e-9 off, both printed with sixteen digits.
+  The first is now `0.35633436719439365 - 0.9319978312329936i` (2.4e-15
+  off); measured against mpmath, the relative error is at most 3e-13 for
+  `|Im s|` up to about 12 868.
+  Above that `Zeta(s)` stays unevaluated, as `HurwitzZeta(s, 1)` does, also
+  where the value was correct: `Zeta(20 + 15000i).N()` had sixteen correct
+  digits. The result is a double at every precision, as for the other
+  complex special functions. (PR #559, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#552](https://github.com/cortex-js/compute-engine/issues/552))
+
 - **`BetaRegularized(x, a, b)` has a value at a real `x` outside `[0, 1]`
   where that value is real and a finite sum.** `BetaRegularized(2, 2, 3).N()`
   stayed unevaluated; it is `8`. For positive integers `a` and `b` the
