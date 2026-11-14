@@ -412,11 +412,11 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   in and the names whose value the code holds, `captures`) and `varsObjectRefs`
   (the inputs read from the inputs object, filled also when a literal declines
   for a free name). Admitted with no effect: `storage` (the JavaScript target
-  ignores it, `CompilationOptions.storage`), `mode: 'strict'`,
-  `broadcast: false` (the result has no `broadcast()`), and an empty
-  `functions`, `operators`, `imports` or blank `preamble`. Declined by name:
-  `functions`, `operators` (both forms), `imports`, `preamble`,
-  `broadcast: true`, `strictTypes: true`, and `vars` in the `bigint` mode.
+  ignores it, `CompilationOptions.storage`), `mode: 'strict'`, `broadcast`
+  (`true` builds no batch body; the batch members below exist either way), and
+  an empty `functions`, `operators`, `imports` or blank `preamble`. Declined by
+  name: `functions`, `operators` (both forms), `imports`, `preamble`,
+  `strictTypes: true`, and `vars` in the `bigint` mode.
 - **`vars`.** A mapped name is read as the host's text at each use, in program
   order (an effectful operation, so `w - w` with `w: '_.draw()'` calls `draw`
   twice), in the scope of the entry, where `_` is the inputs object. The mapping
@@ -453,8 +453,20 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   same entry plan (`checkEntry()`) and the same result convention
   (`normalizeRunResult()`), so `run()` and loaded code agree by construction.
   `shippable` is the rule of the existing compiler: false for code that draws or
-  integrates (`isShippableCode()`) and for a `vars` name (the host's text).
-  There is no `pure`, `freeSymbolTypes`, `broadcast()` or `runAsync()`.
+  integrates (`isShippableCode()`) and for a `vars` text that is not a read of
+  the inputs object (`readsVarsObject()`: `_.E` is shippable). There is no
+  `pure` or `freeSymbolTypes`.
+- **Batches and `runAsync()`.** The result of an expression (not of a literal)
+  has `broadcast()`, `broadcastAsync()`, `willUsePool()`, `runAsync()` and
+  `willParallelize()`, and `broadcastOutputs` for a type of more than one value
+  per cell, built by the generic functions of the existing compiler
+  (`broadcastNumbers()`, `broadcastNumbersSlice()`, `makeBroadcastAsync()`,
+  `makeWillUsePool()`, `makeRunAsync()`, `makeWillParallelize()`) over the raw
+  call of the code, its entry plan and the result as stored code, which a worker
+  loads. Each cell is the value of `run()` at that cell. There is no batch body
+  (CE-410) and no asynchronous copy (`parallelCode`): `runAsync()` runs `run()`,
+  and `willParallelize()` is false. In the `bigint` mode a batch is refused with
+  the error of the existing compiler.
 - **The measures.** `CE_JS_PROFILE=ir` makes the engine's own compilations
   (`implicitCompile()`) try the profile first and fall back to the existing
   compiler; `CE_JS_PROFILE_SHADOW=ir` also compiles every JavaScript `compile()`

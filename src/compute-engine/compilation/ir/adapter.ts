@@ -14,14 +14,29 @@
 import type { Expression } from '../../global-types.js';
 import type { CompilationResult, CompileDiagnostic } from '../types.js';
 import {
+  bigintBroadcastError,
   checkEntry,
   normalizeRunResult,
+  setReconstructionDigits,
   storeEntryPlan,
   type EntryPlan,
 } from '../javascript-runtime.js';
 import { CompileDeclineError } from '../diagnostics.js';
 import { RUNTIME_VERSION } from '../../../common/runtime-versions.js';
-import { isShippableCode } from '../../kernel-pool.js';
+import {
+  isShippableCode,
+  makeBroadcastAsync,
+  makeWillUsePool,
+  type BroadcastAsyncSpec,
+} from '../../kernel-pool.js';
+import { broadcastNumbers, broadcastNumbersSlice } from '../broadcast.js';
+import {
+  makeRunAsync,
+  makeWillParallelize,
+  type RunAsyncSpec,
+} from '../run-async.js';
+import { broadcastStrideOfType } from '../compiler-type-facts.js';
+import { readsVarsObject } from '../vars-inputs.js';
 import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
 import { Decline } from './lower-context.js';
@@ -60,7 +75,7 @@ export const IR_OPTIONS = {
   operators: 'declined',
   imports: 'declined',
   preamble: 'declined',
-  broadcast: 'declined',
+  broadcast: 'no-op',
   strictTypes: 'declined',
 } as const;
 
@@ -111,7 +126,6 @@ function given(x: unknown): boolean {
  *  with the value `value`, or `undefined` when the value is admitted. */
 function refusal(name: IrOptionName, value: unknown): string | undefined {
   switch (name) {
-    case 'broadcast':
     case 'strictTypes':
       return value === true ? `the option \`${name}\`` : undefined;
     default:
@@ -289,12 +303,14 @@ export function compileWithIrProfile(
     kind: 'correctness',
     message: w.message,
   }));
-  // A name of `vars` is read as the host's text, which a worker does not
-  // have (`CompileTarget.hostNames` of the existing compiler).
+  // A name of `vars` is read as the host's text, which a worker has only
+  // when it reads the inputs object (`CompileTarget.hostNames` of the
+  // existing compiler).
   const code = [slice.preambleOnce, slice.code].join('\n');
-  const shippable = Object.keys(vars).length === 0 && isShippableCode(code);
+  const shippable =
+    Object.values(vars).every(readsVarsObject) && isShippableCode(code);
   const once = slice.preambleOnce;
-  return {
+  const result: CompilationResult<'javascript'> = {
     target: 'javascript',
     success: true,
     runtimeVersion: RUNTIME_VERSION,
@@ -321,4 +337,69 @@ export function compileWithIrProfile(
     shippable,
     ...(warnings.length > 0 ? { warnings } : {}),
   };
+  if (literal) return result;
+
+  // The batch and asynchronous members of an expression, built by the
+  // generic functions of the existing compiler over the raw call `f` (the
+  // batch applies the entry plan and reads the value itself) and the stored
+  // result, which a worker loads. There is no batch body (CE-410) and no
+  // asynchronous copy (`parallelCode`): `runAsync()` runs `run()`. A batch
+  // runs in one reconstruction-digit frame, as a loader runs each call.
+  const outputs = broadcastStrideOfType(expr.type.type);
+  if (outputs > 1) result.broadcastOutputs = outputs;
+  const inFrame = <T>(g: () => T): T => {
+    if (bigint) throw bigintBroadcastError();
+    const previous = setReconstructionDigits(result.reconstructionDigits);
+    try {
+      return g();
+    } finally {
+      setReconstructionDigits(previous);
+    }
+  };
+  result.broadcast = (inputs, opts) =>
+    inFrame(() =>
+      broadcastNumbers(f, entryPlan, inputs, opts, result.broadcastOutputs)
+    );
+  const engine = expr.engine;
+  const asyncSpec: BroadcastAsyncSpec = {
+    kind: 'javascript',
+    stored: result,
+    lists: plan.lists as string[],
+    booleans: plan.booleans as string[],
+    shippable,
+    iterationLimit: () => engine.iterationLimit,
+    slice: (inputs, opts, out, cells) =>
+      inFrame(() =>
+        broadcastNumbersSlice(
+          f,
+          entryPlan,
+          inputs,
+          opts,
+          out,
+          cells,
+          result.broadcastOutputs
+        )
+      ),
+    workers: () => engine.workers,
+  };
+  result.broadcastAsync = bigint
+    ? () => Promise.reject(bigintBroadcastError())
+    : makeBroadcastAsync(asyncSpec);
+  result.willUsePool = bigint ? () => false : makeWillUsePool(asyncSpec);
+  // `sys`, `check`, `finish` and `error` are read only with an asynchronous
+  // copy, which the profile does not make.
+  const runAsyncSpec: RunAsyncSpec = {
+    result,
+    sys: undefined,
+    check: (args) => args,
+    finish: (value) => value,
+    error: (_, error) => error,
+    digits: result.reconstructionDigits,
+    run: run as (inputs: unknown) => unknown,
+    workers: () => engine.workers,
+    iterationLimit: () => engine.iterationLimit,
+  };
+  result.runAsync = makeRunAsync(runAsyncSpec);
+  result.willParallelize = makeWillParallelize(runAsyncSpec);
+  return result;
 }

@@ -2797,14 +2797,16 @@ export interface CompilationOptions<Expr = unknown> {
    * `src/compute-engine/compilation/ir` ("Selecting the pipeline" in its
    * `README.md`). It declines with `'outside-profile'` what it does not
    * compile, and by name the options `functions`, `operators`, `imports`,
-   * `preamble`, `broadcast: true`, `strictTypes: true`, and `vars` in the
-   * mode `'bigint'`. It maps `vars`, `iterationBudget` and the modes
+   * `preamble`, `strictTypes: true`, and `vars` in the mode `'bigint'`. It maps `vars`, `iterationBudget` and the modes
    * `'strict'`, `'complex'` and `'bigint'` (every integer is a `bigint`,
    * and a program with a real value declines); an internal error is a
    * `'compile-error'`. The result reports
    * `profile: 'ir'`, the fields of stored code (`runtimeVersion`,
    * `preambleOnce`, `entryPlan`) and `shippable` (false for code that
-   * draws or integrates), and no `pure`.
+   * draws or integrates), and no `pure`. The result of an expression has
+   * `broadcast()`, `broadcastAsync()`, `willUsePool()`, `runAsync()` and
+   * `willParallelize()`, with or without `broadcast: true`; `runAsync()`
+   * runs `run()`, and in the mode `'bigint'` a batch is refused.
    */
   profile?: 'numeric-kernel' | 'ir';
 }

@@ -15,6 +15,17 @@ import {
 } from '../boxed-expression/constraint-subject.js';
 
 /**
+ * Whether the `vars` text `text` is a read of the vars object (`_.name` or
+ * `_[...]`), which code that runs on a worker can make: any other text names
+ * an identifier of the host (`CompileTarget.hostNames`).
+ */
+export function readsVarsObject(text: unknown): boolean {
+  return (
+    typeof text === 'string' && /^_(\.[A-Za-z_$][\w$]*|\[.*\])$/.test(text)
+  );
+}
+
+/**
  * Run `fn` (one compilation) with the stored value of every DECLARED symbol
  * named in `vars` hidden, and restore the values when `fn` returns or throws.
  *

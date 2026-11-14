@@ -2573,7 +2573,11 @@ has the fields of stored code (`runtimeVersion`, `preambleOnce`,
 `entryPlan`): `createJavaScriptRuntime().load()` and a worker of the kernel
 pool load it, and `run()` is built by the same loader. `shippable` follows
 the rule of the default route: `false` for code that draws or integrates.
-With `mode: 'bigint'` it computes every integer as a `bigint`, with the
+The result of an expression has `broadcast()`, `broadcastAsync()`,
+`willUsePool()`, `runAsync()` and `willParallelize()`, with or without
+`broadcast: true`, built by the functions of the default route: each cell of
+a batch is the value of `run()` at that cell, a batch has no batch body, and
+`runAsync()` runs `run()` (no loop goes to the pool). With `mode: 'bigint'` it computes every integer as a `bigint`, with the
 helpers, the inputs, the results and the pole of "The `bigint` mode"; a
 program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `n < 7/2`, a real input), and the option `vars`, decline with

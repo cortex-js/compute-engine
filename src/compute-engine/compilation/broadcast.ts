@@ -12,7 +12,8 @@
  * thread receives when the host gives the engine a pool (design:
  * `docs/plans/2026-10-20-worker-kernel-pool.md`, section 5.4).
  *
- * This module is a leaf: it imports types only. The main thread and the
+ * This module is a leaf: it imports types and `isTimeoutCancellation()`
+ * only. The main thread and the
  * kernel worker run the same functions, so a result computed on a worker is
  * the result the main thread would have computed.
  *
@@ -66,7 +67,10 @@
  * `[outputs·c, outputs·c + outputs)`. A value is
  * converted as `run()` reports it: a boolean is `1` or `0`, a
  * complex value with a zero imaginary part is its real part, and a cell whose
- * evaluation throws or gives any other non-number is `NaN`. With more than
+ * evaluation throws or gives any other non-number is `NaN`, except a throw
+ * of a timeout or a spent step budget, which stops the batch: `broadcast()`
+ * throws it, and a slice returns the count of cells written before that
+ * cell (`BatchTimeout`). With more than
  * one output per cell, an array answer gives one value per element (an
  * element past the end of the array is `NaN`), and any other answer, or a
  * throw, gives `NaN` in every slot. With one output per cell, an array answer
@@ -108,6 +112,7 @@ import type {
   BroadcastOptions,
   StoredBatchBody,
 } from './types.js';
+import { isTimeoutCancellation } from '../../common/interruptible.js';
 
 export type { BroadcastInputs, BroadcastOptions } from './types.js';
 
@@ -611,19 +616,45 @@ export function broadcastNumbers(
   );
   const stride = broadcastStride(options, defaultOutputs);
   const out = outputArray(options?.out, stride * shape.count);
-  broadcastNumbersRange(
-    call,
-    entry,
-    shape,
-    out,
-    0,
-    shape.count,
-    stride,
-    undefined,
-    undefined,
-    batch
-  );
+  try {
+    broadcastNumbersRange(
+      call,
+      entry,
+      shape,
+      out,
+      0,
+      shape.count,
+      stride,
+      undefined,
+      undefined,
+      batch
+    );
+  } catch (e) {
+    throw e instanceof BatchTimeout ? e.error : e;
+  }
   return out;
+}
+
+/**
+ * The throw of the cell loops when a cell throws a timeout or a spent step
+ * budget (`isTimeoutCancellation()`): it is not a failure of the cell, so
+ * the batch stops. `done` is the count of cells written before that cell.
+ * `broadcastNumbers` throws `error` again; `broadcastNumbersSlice` returns
+ * `done`, as for a deadline of the slice. A budget overrun
+ * (`iteration-limit-exceeded`) stays a failure of the cell.
+ */
+class BatchTimeout {
+  constructor(
+    readonly done: number,
+    readonly error: unknown
+  ) {}
+}
+
+/** The throw of a cell loop for the error `e` of the cell `done` cells
+ * after the first cell of the loop: a `BatchTimeout`, or `undefined` when
+ * `e` is a failure of the cell. Read only on the catch path. */
+function batchStop(e: unknown, done: number): BatchTimeout | undefined {
+  return isTimeoutCancellation(e) ? new BatchTimeout(done, e) : undefined;
 }
 
 /** The variables an entry plan declares `boolean`. */
@@ -722,19 +753,24 @@ export function broadcastNumbersSlice(
     slice.validated
   );
   rescanBooleanSlice(shape, slice);
-  return broadcastNumbersRange(
-    call,
-    entry,
-    shape,
-    out,
-    slice.from,
-    slice.to,
-    broadcastStride(options, defaultOutputs),
-    slice.deadline,
-    slice.stop,
-    batch,
-    slice.failures
-  );
+  try {
+    return broadcastNumbersRange(
+      call,
+      entry,
+      shape,
+      out,
+      slice.from,
+      slice.to,
+      broadcastStride(options, defaultOutputs),
+      slice.deadline,
+      slice.stop,
+      batch,
+      slice.failures
+    );
+  } catch (e) {
+    if (e instanceof BatchTimeout) return e.done;
+    throw e;
+  }
 }
 
 /**
@@ -974,7 +1010,9 @@ return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args,
       try {
         const r = ${callCode};
         ${write}
-      } catch {
+      } catch (e) {
+        const stopped = batchStop(e, i - from);
+        if (stopped !== undefined) throw stopped;
         ${nanSlots}
         if (failures !== undefined) failures.count++;
       }
@@ -984,7 +1022,11 @@ return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args,
 };`;
   let loop: CellLoop;
   try {
-    loop = new Function('call', 'numberOf', source)(call, numberOf) as CellLoop;
+    loop = new Function('call', 'numberOf', 'batchStop', source)(
+      call,
+      numberOf,
+      batchStop
+    ) as CellLoop;
   } catch {
     cellLoopsAvailable = false;
     return undefined;
@@ -1177,7 +1219,9 @@ function broadcastNumbersRange(
     if (stride === 1) {
       try {
         out[i - from] = numberOf(call(vars));
-      } catch {
+      } catch (e) {
+        const stopped = batchStop(e, i - from);
+        if (stopped !== undefined) throw stopped;
         out[i - from] = NaN;
         if (failures !== undefined) failures.count++;
       }
@@ -1187,7 +1231,9 @@ function broadcastNumbersRange(
     let r: unknown;
     try {
       r = call(vars);
-    } catch {
+    } catch (e) {
+      const stopped = batchStop(e, i - from);
+      if (stopped !== undefined) throw stopped;
       r = undefined;
       if (failures !== undefined) failures.count++;
     }

@@ -153,7 +153,6 @@ describe('a decline', () => {
     ['imports', { imports: [() => 1] }],
     ['preamble', { preamble: 'const k = 1;' }],
     ['quadrature', { quadrature: 'monte-carlo' }],
-    ['broadcast', { broadcast: true }],
     ['strictTypes', { strictTypes: true }],
   ];
   test.each(OPTIONS)('of the option %s names it', (name, options) => {
@@ -193,6 +192,7 @@ describe('a decline', () => {
       { mode: 'strict' },
       { mode: 'complex' },
       { broadcast: false },
+      { broadcast: true },
       { entryChecks: false },
       { quadrature: 'adaptive' },
       // The JavaScript target ignores `storage` (`CompilationOptions.storage`).

@@ -1224,9 +1224,58 @@ mapped. Its four hot JavaScript plot paths pass `broadcast: true` and call
 and has neither method: this is the next batch. The profile is not wired for
 GLSL in `compile()`.
 
-Next step: `broadcast: true`, `broadcast()`, `broadcastAsync()` and
-`runAsync()` on the result of the profile, through the generic functions the
-existing target uses; then a second build for Tycho.
+Tycho's first audit (session `tycho-desk`, 2026-11-14; build of
+`0101917df900b4e44a3600d5070f96f94186b3e7`, Tycho `1fdc91e95` with a scratch
+patch that tries `profile: 'ir', fallback: false` first at its one JavaScript
+compile seam and compares every call of an admitted `run` with the existing
+compiler's, 1e-12 relative). CORE codegen audit (24 Desmos states and the
+showcase entries): 997 JavaScript compilations, 130 admitted (13%), 867
+declined, no `compile-error`, 106 calls compared, no difference. The 16
+seeded-random test files and `seeded-random-list-fan`: 696 of 696 pass, 640
+compilations of which 22 admitted, 4,113 calls compared, no difference, no
+`seeded-draw-order` warning. The audit took 33.5 s without the profile and
+33.3 s with it (box lock held, load 2.6 to 2.9). Causes of a decline in the
+audit:
+
+| Declines | Cause | Witness |
+| --- | --- | --- |
+| 177 | `Tuple` | `Tuple(Cos(t), Sin(t))` |
+| 171 | the option `broadcast` | `At(H, Floor(x) + N·Floor(y) + 1)` with `broadcast: true` |
+| 100 | a function that reads an input (a capture) | `TychoCertificate55()` reads `n`, with `symbolic: [..., 'n']` |
+| 86 | `PointList` | `PointList(xs(t), ys(t))` |
+| 70 | an input of type `list<nan \| real \| signed_infinity>` | `Cos(2·Pi·At(S, J)/L)` |
+| 68 | `Comprehension` | a list of `Tuple`s over `k` |
+| 54 | `AsOklab` | `AsOklab(Which(…, Oklch(…), …))` |
+| 53 | `Declare` with `constant` | `Block(Declare(L, {value: 240, constant: True}), Tuple(L))`, every Prelude statement |
+| 40 | a list parameter of a user function | `legal(B, At(B, 65))` |
+| 20 | an input of type `nan \| real \| signed_infinity` | `sigma·(At(S, 2) − At(S, 1))` |
+| 16 | `Degrees` | `Sin(Degrees(h_0))` |
+| 12 | others | `Polygon`, `Segment`, `Cot` of a complex, `ListJoin`, `GCD`, a `vars` name in a function, a `list<tuple>` input |
+
+In the seeded tests the largest causes are list inputs (196), `Comprehension`
+(175) and `broadcast` (95). `runAsync` is reached by the Prelude statement of
+buddhabrot, `Block(Declare(H_1, {value: step(H_0, 1200000), constant: True}),
+Tuple(H_1))` with `symbolic: ['H_0']`, whose `parallel for` is in the body of
+`step`; it declines at the `Declare` today.
+
+Sixth batch, 2026-11-14 (the batch and asynchronous members). An expression
+result of the profile has `broadcast()`, `broadcastAsync()`, `willUsePool()`,
+`runAsync()` and `willParallelize()`, built by the generic functions that the
+existing target calls, over the profile's raw per-cell call and its entry
+plan; `broadcast: true` is admitted and builds no batch body; there is no
+asynchronous copy of a program, so `runAsync()` resolves to `run()`. A `vars`
+text of the form `_.name` keeps the code shippable. In the shared batch code
+(`broadcast.ts`) a timeout or a spent step budget inside a cell now stops the
+batch, for both compilers: the loops of profile code check the deadline, and
+a timeout was written as a NaN cell (review finding). `broadcastStrideOfType`
+moved to `compiler-type-facts.ts`.
+
+Order of the coverage from this list: (6) `broadcast: true` and the batch and
+asynchronous members of the result; (7) the extended-real input types,
+`Declare` with `constant`, a function that reads an input of the compilation
+(passed as an extra parameter), `Degrees`; (8) `Tuple`, `PointList`,
+`Comprehension`, list parameters of functions; then a second build for Tycho
+after (6) and (7). `AsOklab` waits for a look at what a color value is.
 
 Definition of done (user, 2026-11-12): the profile is the default for
 JavaScript and GLSL with a decline falling back to the interpreter; Tycho's

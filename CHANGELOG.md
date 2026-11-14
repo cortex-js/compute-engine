@@ -29,9 +29,28 @@
   `Floor(n/3)`, `Floor(Sqrt(n))`, `n < 7/2`, `n^m` (the exponent can be
   negative), `Floor(n)`, `If` with no else, `Max` of a list, and the option
   `vars`.
+- **A result of the experimental profile `'ir'` runs batches and
+  `runAsync()`.** A result of `compile(expr, { profile: 'ir' })` has
+  `broadcast()`, `broadcastAsync()`, `willUsePool()`, `runAsync()` and
+  `willParallelize()`, as a result of the default compiler has, and the
+  option `broadcast: true` no longer declines. Each cell of a batch is the
+  value of `run()` at that cell, with the layouts, `out` and shared lists of
+  the default compiler, and `broadcastAsync()` sends a large batch of
+  shippable code to the engine's worker pool. `runAsync()` runs `run()`:
+  the profile sends no loop to the pool. In `mode: 'bigint'` a batch is
+  refused, as with the default compiler. A result with a `vars` text that
+  reads the inputs object (`vars: { E: '_.E' }`) is now shippable, as with
+  the default compiler.
 
 ### Resolved Issues
 
+- **A timeout inside a cell of a batch stops the batch.** When the time limit
+  of `ce.withTimeLimit()`, or the `deadline` of a task on a worker, expired
+  inside a cell of `broadcast()` or `broadcastAsync()` (an integral, a long
+  sum), the cell was `NaN` and the batch went on, so `done` counted cells
+  with no value. `broadcast()` now throws the `CancellationError`, as
+  `run()` does, and a slice stops at that cell: the cells before `done` are
+  all valid. A cell over its `iterationBudget` is still `NaN`.
 - **A variable that held a list and is given a number has the type
   `integer`.** After `L := [1, 2]` and then `L := 7`, the type of `L` was the
   literal type `7`, so `L = 7` was typed `true` and code compiled in that
