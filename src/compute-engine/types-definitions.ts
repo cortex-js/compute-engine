@@ -3973,8 +3973,8 @@ export interface BoxedOperatorDefinition
 
   /** Opaque snapshot of every field a provisional re-derivation
    * (`installRebuiltLiteral` calling `_update({ evaluate })` on a
-   * pre-existing definition) can mutate, for an exact restore by an
-   * inference rollback frame — see
+   * pre-existing definition) can mutate, for an exact restore (the
+   * failure leg of a repair, `DefinitionRestorePoint`) — see
    * {@link _restoreRederivationSnapshot}. The result captures private
    * fields, so peeking or constructing one outside the implementation is
    * meaningless.

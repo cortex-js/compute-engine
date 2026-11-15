@@ -1,6 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import type { Expression as MathJson } from '../../src/math-json/types';
+import { parseSource } from '../../src/cli/check';
+import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 
 // Slice 1 of binding units
 // (`docs/plans/2026-11-09-binding-units-slice-1-spec.md`): boxing declares
@@ -209,15 +211,12 @@ describe('AN INFERRED TYPE DOES NOT REFUSE AN ASSIGNMENT', () => {
 });
 
 describe('ROLLBACK', () => {
-  test('a rollback frame leaves no requirement and no declaration', () => {
+  test('a static check leaves no requirement and no declaration', () => {
     const ce = engine();
     const a = ce.parse('x + 1');
-    ce._withBoxingPassWindow(() =>
-      ce._withRolledBackInference(() => {
-        ce.parse('x(3)');
-        expect(typeOf(a, 'x')).toBe('number');
-      })
-    );
+    const source = 'x(3)';
+    const { ast } = parseSource(source, undefined, ce);
+    staticDiagnostics(ce, ast!, source);
     expect(typeOf(a, 'x')).toBe('number');
     expect(ce.lookupDefinition('x')).toBeUndefined();
     expect(typeOf(ce.parse('2x'), 'x')).toBe('number');

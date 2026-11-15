@@ -60,9 +60,9 @@ function typesAroundWidening(options: {
 
 describe('CE-36: a widening of a scratch binding inside a cached computation', () => {
   test('control: outside a computation, the widening is seen at once', () => {
-    expect(typesAroundWidening({ inComputation: false, scratch: true })).toEqual(
-      { before: 'integer', after: 'real', x: 'real' }
-    );
+    expect(
+      typesAroundWidening({ inComputation: false, scratch: true })
+    ).toEqual({ before: 'integer', after: 'real', x: 'real' });
   });
 
   test('inside a computation, a type cached before the widening is computed again', () => {
@@ -81,9 +81,9 @@ describe('CE-36: a widening of a scratch binding inside a cached computation', (
     // A widening of any binding advances the `any` cache axis at once, not
     // only when the outermost computation ends: before, `x + 1` stayed
     // `integer` here after `x` became `real`.
-    expect(typesAroundWidening({ inComputation: true, scratch: false })).toEqual(
-      { before: 'integer', after: 'real', x: 'real' }
-    );
+    expect(
+      typesAroundWidening({ inComputation: true, scratch: false })
+    ).toEqual({ before: 'integer', after: 'real', x: 'real' });
   });
 
   test('inside a computation, a narrowing still waits for the computation to end', () => {
@@ -137,27 +137,6 @@ describe('CE-36: a widening of a scratch binding inside a cached computation', (
     // Two runs: the second widening is a no-op because `'real'` is an
     // interned primitive type, so `_infer` sees the same type object.
     expect(runs).toBe(2);
-  });
-
-  test('the rollback of a narrowing inside a computation is seen at once', () => {
-    // The undo of a narrowing puts the wider type back and sends a widening
-    // event. `x` is `number`, narrowed to `integer` inside a rollback frame,
-    // and `x + 1` is typed while the narrowing is in force.
-    const result = asComputation(() =>
-      inScope(true, ({ ce, x, sum }) => {
-        x._infer(() => 'real', 'widen');
-        x._infer(() => 'number', 'widen');
-        const engine = ce as any;
-        const inside = engine._withBoxingPassWindow(() =>
-          engine._withRolledBackInference(() => {
-            x._infer(() => 'integer', 'narrow');
-            return sum.type.toString();
-          })
-        );
-        return { inside, x: x.type.toString(), after: sum.type.toString() };
-      })
-    );
-    expect(result).toEqual({ inside: 'integer', x: 'number', after: 'number' });
   });
 
   test.each(['widen', 'replace'] as const)(

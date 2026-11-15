@@ -18,7 +18,6 @@ import { sameEffectSetSpelling } from '../../common/type/effects.js';
 import { recordTypeProvenance } from './type-provenance.js';
 
 import type { Expression, TypeProvenanceEntry } from '../global-types.js';
-import type { InferenceRollbackFrame } from '../inference-rollback.js';
 
 /**
  * The site that STATED a definition half's current effects contract: the
@@ -82,10 +81,6 @@ export function effectsContractStateOf(
  *   provenance).
  */
 export function recordEffectsTransition(
-  ce: {
-    _rollbackFrames: ReadonlyArray<InferenceRollbackFrame>;
-    _inferenceTxDepth: number;
-  },
   target: { _typeProvenance: TypeProvenanceEntry[] | undefined },
   before: EffectsContractState,
   after: EffectsContractState,
@@ -97,7 +92,7 @@ export function recordEffectsTransition(
   const bitMoved = before.declared !== after.declared;
   const spellingMoved = !sameEffectSetSpelling(before.effects, after.effects);
   if (!bitMoved && !spellingMoved) return;
-  recordTypeProvenance(ce, target, {
+  recordTypeProvenance(target, {
     type: typeAfter,
     kind: bitMoved || after.declared ? 'declared' : 'inferred',
     axis: 'effects',

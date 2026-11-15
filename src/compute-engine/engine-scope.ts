@@ -26,6 +26,7 @@ import {
 } from './boxed-expression/ambient-chain.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
 import { notePushedScope } from './pending-call-scopes.js';
+import { setHolderCounting } from './boxed-expression/definition-restore-point.js';
 
 export function pushScope(
   ce: IComputeEngine,
@@ -653,3 +654,5 @@ export function uncountHolders(ce: IComputeEngine, context: EvalContext): void {
     if (holderCount(def) === 0) settleKeptDefinition(ce, def, context.name);
   }
 }
+
+setHolderCounting(countDeclaredHolder, uncountRemovedHolder);

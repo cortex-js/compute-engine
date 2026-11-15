@@ -362,9 +362,9 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       //   block evidence sites, the repair of a juxtaposition head, the
       //   validation of a function literal, the inference cause of a
       //   narrowing), not by a type handler, so computing a type again does
-      //   not make them again. The undo of a rollback frame runs once. This
-      //   is the bound. Canonicalization can itself run inside a cached
-      //   computation (a type handler that reads a canonical form), but a
+      //   not make them again. This is the bound. Canonicalization can
+      //   itself run inside a cached computation (a type handler that reads
+      //   a canonical form), but a
       //   second canonicalization of the same expression makes the same
       //   write again, and `_infer` (`boxed-symbol.ts`) sends no event for a
       //   write of a type equal to the recorded type: the same object, or a

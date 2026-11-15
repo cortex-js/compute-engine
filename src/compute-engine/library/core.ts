@@ -11,7 +11,6 @@ import type { MathJsonExpression } from '../../math-json/types.js';
 import { coalesceResultType, presentType } from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
-import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   callbackArity,
   declaresPhrase,
@@ -418,6 +417,10 @@ import { reduceType } from '../../common/type/reduce.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import { isEngineSubscriptHandler } from '../boxed-expression/host-handler-changes.js';
 import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluation-memo.js';
+import {
+  beforeDefinitionWrite,
+  registerDefinitionSideTable,
+} from '../boxed-expression/definition-restore-point.js';
 
 // The exact integer when the double `value` is past 2^53 and cannot hold it.
 function exactInteger(
@@ -4340,14 +4343,6 @@ function typeFunctionTarget(ce: ComputeEngine, name: string): void {
     def.value.type.matches('function')
   )
     return;
-  // The binding may be older than the rollback frame (an inferred symbol of
-  // an outer scope): the static check must be able to undo the write.
-  const frame = activeRollbackFrame(ce);
-  if (frame !== undefined) {
-    const target = def.value;
-    const slots = target._typeSlotSnapshot();
-    frame.record({ undo: () => target._restoreTypeSlots(slots) });
-  }
   const wasCallable = containsSignatureArm(def.value.type.type);
   def.value._setType(() => ce.type('function'));
   // The `_type` caches of expressions key on the engine's `any` axis, which
@@ -4624,20 +4619,12 @@ function joinEvidenceOnBinding(
   return true;
 }
 
-/** Write the type `next` on the binding `target`, journaled for rollback. */
+/** Write the type `next` on the binding `target`. */
 function writeEvidenceType(
   ce: ComputeEngine,
   target: BoxedValueDefinition,
   next: Type
 ): void {
-  // Rollback journal (family 1), as in the `Function` branch of the `Assign`
-  // canonical handler: the binding may pre-exist the rollback frame, and the
-  // static checking pass must be able to undo the write.
-  const frame = activeRollbackFrame(ce);
-  if (frame !== undefined) {
-    const slots = target._typeSlotSnapshot();
-    frame.record({ undo: () => target._restoreTypeSlots(slots) });
-  }
   const wasCallable = containsSignatureArm(target.type.type);
   target._setType(() => ce.type(next));
   // From now on, the type of the binding is the join of its assignment
@@ -4929,6 +4916,7 @@ const CLAUSE_INSTALLED_AHEAD = new WeakMap<
   object,
   ReadonlyArray<ClauseInstalledAhead>
 >();
+registerDefinitionSideTable(CLAUSE_INSTALLED_AHEAD);
 
 /**
  * One install of a clause that the `DefineFunction` canonical handler made
@@ -4955,6 +4943,7 @@ function setClauseInstalledAhead(
 ): void {
   const was = CLAUSE_INSTALLED_AHEAD.get(record);
   if (was === installs) return;
+  beforeDefinitionWrite(record);
   if (installs !== undefined) CLAUSE_INSTALLED_AHEAD.set(record, installs);
   else CLAUSE_INSTALLED_AHEAD.delete(record);
 }
@@ -7875,17 +7864,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             ce.declare(symbolName, 'function');
           const def = ce.lookupDefinition(symbolName);
           if (def && isValueDef(def) && def.value.inferredType) {
-            // Rollback journal (family 1): this canonical-time recursion-knot
-            // retype can land on a PRE-EXISTING inferred binding from an
-            // enclosing scope (a previous cell's auto-declared symbol), so a
-            // rollback frame — the Epsil static checking pass — must be able
-            // to undo it, like every other inference-driven type write.
-            const frame = activeRollbackFrame(ce);
-            if (frame !== undefined) {
-              const target = def.value;
-              const slots = target._typeSlotSnapshot();
-              frame.record({ undo: () => target._restoreTypeSlots(slots) });
-            }
             const wasCallable = containsSignatureArm(def.value.type.type);
             def.value._setType(() => ce.type('function'));
             // Report the write, as the same retype on the `Assign` route
@@ -15261,9 +15239,8 @@ function* declareSteps(
       // reads the definition the scope holds when it is evaluated,
       // which is the clause installed again under this declaration,
       // and not the clause that was installed without it. Unlike
-      // `ce.undeclare()`, the removal of the binding from the scope
-      // records no undo step on a rollback frame of an inference
-      // trial, as for the statement-scoped binding dropped above.
+      // `ce.undeclare()`, the removal does not retire the record, as
+      // for the statement-scoped binding dropped above.
       // Without this, `let g: (integer) -> integer`, then
       // `function g(k) { 2k }`, then `g(1.5)` in one block answered
       // `3`: the call ran the clause of the dropped record, which had
@@ -15333,7 +15310,6 @@ function* declareSteps(
         existingValueDef.value.inferredType = false;
         existingValueDef.value.effectsDeclared = effectsDeclared;
         recordEffectsTransition(
-          ce,
           existingValueDef.value,
           effectsBefore,
           effectsContractStateOf(existingValueDef.value),

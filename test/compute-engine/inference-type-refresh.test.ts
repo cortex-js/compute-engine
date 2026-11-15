@@ -1,4 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { parseSource } from '../../src/cli/check';
+import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 
 //
 // AN EXPRESSION BOXED BEFORE A NARROWING READS THE NARROWED TYPE
@@ -39,20 +41,15 @@ describe('a narrowing reaches the types of expressions boxed before it', () => {
     expect(typeBefore).not.toBe(q.type.toString());
   });
 
-  test('a rolled-back narrowing restores the old types', () => {
+  test('a static check that assigns an outer symbol restores the old types', () => {
     const ce = new ComputeEngine();
+    ce.declare('z', 'unknown');
     const l = ce.box(['List', 'z']);
     expect(l.type.toString()).toBe('vector<1>');
-    ce._withBoxingPassWindow(() =>
-      ce._withRolledBackInference(() => {
-        ce.infer([ce.box(['Mod', 'z', 2])]);
-        expect(ce.symbol('z').type.toString()).toBe('real');
-        // Cached with the narrowed type, inside the frame.
-        expect(l.type.toString()).toBe('vector<real^1>');
-      })
-    );
-    // The literal list does not infer its free symbol `z` (CE-663), so the
-    // rollback restores `unknown`.
+    // The check gives `z` the type of the assigned value while it runs.
+    const source = 'z = 2.5\nz';
+    const { ast } = parseSource(source, undefined, ce);
+    staticDiagnostics(ce, ast!, source);
     expect(ce.symbol('z').type.toString()).toBe('unknown');
     expect(l.type.toString()).toBe(ce.box(['List', 'z']).type.toString());
   });

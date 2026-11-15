@@ -61,7 +61,6 @@ import type {
   ParameterRecord,
 } from '../global-types.js';
 
-import { activeRollbackFrame } from '../inference-rollback.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
 import {
   UnitEnvironment,
@@ -182,6 +181,10 @@ import {
   isTestedAtRead,
   overlapReadError,
 } from './store-admission.js';
+import {
+  beforeDefinitionWrite,
+  registerDefinitionSideTable,
+} from './definition-restore-point.js';
 
 /** With `CE_TYPE_PARANOID` set, a cached name resolution (`_resolution`) is
  * compared with a new resolution, and a difference is reported. */
@@ -280,6 +283,7 @@ function valueOfBinding(
  * `narrowInferredType` reads it.
  */
 const SCALAR_USES_MAP = new WeakMap<object, boolean>();
+registerDefinitionSideTable(SCALAR_USES_MAP);
 
 /**
  * The type that a narrow write stores on a binding whose type is inferred,
@@ -418,8 +422,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   };
 
   /** The cached resolution, when it was found under the type version
-   * `version` and its scope still holds it (an inference rollback removes a
-   * declaration and does not move the type version). */
+   * `version` and its scope still holds it (the end of the Epsil static
+   * check puts back a scope entry, and need not move the type version). */
   private _cachedResolution(
     version: number,
     variable: boolean
@@ -1821,6 +1825,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // (`_typeOfDefinitionInUnit()`). It is thrown away with the trial.
         if (this.engine._boxingState.trialEnvironment() !== undefined)
           return this._inferInEnvironment(def.value, t, inferenceMode);
+        beforeDefinitionWrite(def.value);
         const previousType = def.value.type;
         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
         // to apply the type effect of a top-level assignment, whose runtime
@@ -1903,30 +1908,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           inferred.toString() === def.value.type.toString() &&
           isSubtype(inferred.type, def.value.type.type) &&
           isSubtype(def.value.type.type, inferred.type);
-        // Rollback journal (family 1): snapshot the coupled type/value
-        // slots BEFORE the write — the post-write channel below carries
-        // only from/to types and cannot capture them. Restore is verbatim
-        // and setter-bypassing (`_restoreTypeSlots`).
-        const rollbackFrame = activeRollbackFrame(this.engine);
-        if (rollbackFrame !== undefined) {
-          const target = def.value;
-          const slots = target._typeSlotSnapshot();
-          rollbackFrame.record({
-            undo: () => {
-              target._restoreTypeSlots(slots);
-              // The wider type is back: the types cached while the narrowed
-              // one was in force are outdated, as after the write itself.
-              this.engine._noteStateEvent({
-                kind: 'inference',
-                valueType: true,
-                widening: true,
-                ...(isScratchBinding(this.engine, def)
-                  ? { scratch: true }
-                  : {}),
-              });
-            },
-          });
-        }
         def.value._setType(() => inferred);
         // A type this method writes is INFERRED, never a contract. Without
         // this the `type.isUnknown` arm of the guard above turned a guess
@@ -2003,20 +1984,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // engine-wide on every use of the symbol.
       if (newType.type === def.operator.signature.type) return true;
       if (newType.matches('function')) {
-        // Rollback journal (family 2): the previous signature `BoxedType`
-        // is restored by identity, and `_resyncEffects()` keeps the arrow
-        // and the cached effect set in lockstep across the restore.
-        const rollbackFrame = activeRollbackFrame(this.engine);
-        if (rollbackFrame !== undefined) {
-          const target = def.operator;
-          const signature = target.signature;
-          rollbackFrame.record({
-            undo: () => {
-              target._setSignature(() => signature);
-              target._resyncEffects();
-            },
-          });
-        }
         // The function signature was modified
         def.operator._setSignature(() => newType);
         // Signature inference mutates a SHARED operator definition in place: a

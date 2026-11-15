@@ -411,7 +411,6 @@ import {
   nearJumpTolerance,
 } from './numerics.js';
 import { gcd } from '../numerics/numeric.js';
-import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   _BoxedExpression,
   blockOuterAssignTargets,
@@ -2256,25 +2255,8 @@ export class BoxedFunction
   ): boolean {
     const previousSignature = def.signature;
 
-    // Rollback journal (family 2): capture the signature `BoxedType` for an
-    // identity-preserving restore before either branch below replaces it;
-    // `_resyncEffects()` re-attaches the cached effect set so the arrow and
-    // the derived `pure`/`drawsRandom` getters stay in lockstep.
-    const journalSignature = (): void => {
-      const rollbackFrame = activeRollbackFrame(this.engine);
-      if (rollbackFrame === undefined) return;
-      const signature = def.signature;
-      rollbackFrame.record({
-        undo: () => {
-          def._setSignature(() => signature);
-          def._resyncEffects();
-        },
-      });
-    };
-
     // If the signature was inferred, refine it by narrowing the result
     if (def.signature.is('function')) {
-      journalSignature();
       const next = new BoxedType(
         { kind: 'signature', result: t },
         this.engine._typeResolver
@@ -2327,7 +2309,6 @@ export class BoxedFunction
       if (oldSig.effects !== undefined) nextSig.effects = oldSig.effects;
       if (oldSig.typeParams !== undefined)
         nextSig.typeParams = oldSig.typeParams;
-      journalSignature();
       const next = new BoxedType(nextSig, this.engine._typeResolver);
       def._setSignature(() => next);
     }

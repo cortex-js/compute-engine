@@ -64,9 +64,7 @@ describe('a scalar function over a list of points keeps the point shape in its t
   });
 
   test('a list of scalars is untouched', () => {
-    expect(ce.box(['Sqrt', 'L'] as never).type.toString()).toBe(
-      'list<number>'
-    );
+    expect(ce.box(['Sqrt', 'L'] as never).type.toString()).toBe('list<number>');
   });
 
   test('a point list zipped with a list of scalars is a list of points', () => {
@@ -180,9 +178,7 @@ describe('a comprehension binder is typed by its binding site, authoritatively',
       ['Element', 'q', 'P'],
     ] as never);
     expect(point.isValid).toBe(true);
-    expect(point.ops![1].ops![0].type.toString()).toBe(
-      'tuple<number, number>'
-    );
+    expect(point.ops![1].ops![0].type.toString()).toBe('tuple<number, number>');
   });
 
   test('the evaluated form agrees with the static verdict', () => {
@@ -196,30 +192,19 @@ describe('a comprehension binder is typed by its binding site, authoritatively',
     ).toEqual(['List', 6, 8]);
   });
 
-  test('the removal from the fresh-inference set composes with a rollback frame', () => {
-    // A rollback frame journals every inference-driven engine mutation and
-    // undoes them all, last write first, when it closes. Inside the frame the
-    // element-type write adds the binder to the fresh-inference set and the
-    // binding-site rule removes it again; each records its own undo. After
-    // the rollback the set is as it was before the frame — the binder was
-    // created inside it, so it is absent — which holds only if the removal's
-    // undo (re-add) ran before the write's undo (delete). An unjournaled
-    // removal would leave the same final state here by accident, so the
-    // in-frame state is pinned too.
+  test('the binding-site rule removes the binder from the fresh-inference set', () => {
+    // Inside one boxing-pass window, the element-type write adds the binder
+    // to the fresh-inference set and the binding-site rule removes it again.
     const ce2 = new ComputeEngine();
     ce2.declare('L', 'list<number>');
     ce2._withBoxingPassWindow(() => {
-      let def: unknown;
-      ce2._withRolledBackInference(() => {
-        const e = ce2.box([
-          'Comprehension',
-          ['Add', 'q', 1],
-          ['Element', 'q', 'L'],
-        ] as never);
-        def = e.ops![1].ops![0].valueDefinition;
-        expect(def).toBeDefined();
-        expect(ce2._freshlyInferred?.has(def as never)).toBe(false);
-      });
+      const e = ce2.box([
+        'Comprehension',
+        ['Add', 'q', 1],
+        ['Element', 'q', 'L'],
+      ] as never);
+      const def = e.ops![1].ops![0].valueDefinition;
+      expect(def).toBeDefined();
       expect(ce2._freshlyInferred?.has(def as never) ?? false).toBe(false);
     });
   });

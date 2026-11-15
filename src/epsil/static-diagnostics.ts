@@ -90,6 +90,9 @@ import {
   type BindingGroup,
 } from './occurrences.js';
 import { binderSitesOf } from './resolve-library-names.js';
+import { DefinitionRestorePoint } from '../compute-engine/boxed-expression/definition-restore-point.js';
+import { provisionalRegistryRollbackPoint } from '../compute-engine/boxed-expression/provisional-application.js';
+import { kindRegistryRollbackPoint } from '../compute-engine/boxed-expression/value-kinds.js';
 import { serializeEpsil } from './serialize-epsil.js';
 import { definitionSites } from './definition-sites.js';
 import {
@@ -514,13 +517,12 @@ function isCanonicalizationError(code: string): boolean {
  * canonicalization creates: boxing an expression auto-declares the symbols it
  * mentions, and leaving those behind would change how the program then
  * evaluates (a pre-declared `x` makes `let x = 2047` NARROW that existing
- * declaration instead of creating one). The pass additionally
- * runs under an inference ROLLBACK FRAME (see `staticDiagnostics` below),
- * which undoes what the scope never shielded: type inference written through
- * to definitions that already exist in an outer scope. Checking `u + 1`
+ * declaration instead of creating one). The pass additionally puts back
+ * what the scope never shielded (see `staticDiagnostics` below): writes on
+ * definitions that already exist in an outer scope. Checking `u + 1`
  * still narrows a previous cell's unknown-typed `u` to `number` *while the
  * pass runs* — later statements of the same program check against it — but
- * the write is rolled back when the pass ends, so a checked-but-never-run
+ * the definition is put back when the pass ends, so a checked-but-never-run
  * program leaves outer definitions untouched.
  *
  * **Prior declarations are mostly not modeled.** Each statement is
@@ -600,6 +602,14 @@ export function staticDiagnostics(
   // time so later statements of the same program check against them, and a
   // checked-but-never-run program must not mutate the engine's protocols.
   const rollbackProtocols = ce._protocolRegistryRollbackPoint();
+  // The registry of definitions to re-derive when a name gains a definition
+  // (`provisional-application.ts`) is engine-wide: it is put back too, and
+  // so is the registry of value kinds.
+  const rollbackRegistry = provisionalRegistryRollbackPoint(ce);
+  const rollbackKinds = kindRegistryRollbackPoint(ce);
+  const freshlyInferred =
+    ce._freshlyInferred === null ? null : new Set(ce._freshlyInferred);
+  const typeVersion = ce._typeVersion;
   // The engine requires the depth counter IN ADDITION to the frame name (so a
   // host `pushScope(undefined, 'epsil:static-check')` cannot forge the
   // surrogate and smuggle a nested `DeclareType` past the top-level rule).
@@ -615,6 +625,17 @@ export function staticDiagnostics(
   // and the `try` can leave it raised: a leaked depth would silently hide
   // the assumptions from every later read on this engine.
   ce.pushScope(undefined, 'epsil:static-check');
+  // A statement can redefine or narrow a definition that outlives the check
+  // (a definition of an enclosing scope, a parameter of a host function):
+  // each writer records the definition before its first write, and the
+  // check puts it back when it ends. A narrowing is reported to no sink.
+  const outerDefinitions = new DefinitionRestorePoint(
+    ce,
+    ce.context.lexicalScope
+  );
+  outerDefinitions.open();
+  const narrowingSink = ce._narrowingSink;
+  ce._narrowingSink = undefined;
   // Assignment EVIDENCE for this pass (see `applyAssignmentTypeEffect`):
   // maps a symbol's value-definition record to the RAW type of the last
   // top-level assignment's right-hand side, so the evidence-beats-requirement
@@ -631,50 +652,78 @@ export function staticDiagnostics(
   const enclosingPinnedCallees = ce._staticPinnedCallees;
   ce._staticPinnedCallees = new Map();
   ce._factSuppressionDepth += 1;
+  let bodyFailed = false;
   try {
-    // One INFERENCE ROLLBACK FRAME spans the whole pass (phase 2b of
-    // `docs/TYPE-SYSTEM.md`). It journals — and
-    // rolls back on the way out — every inference-driven mutation the
-    // checking makes: the FORWARD-REFERENCE registry entries a checked
-    // `function` definition registers (that registry is keyed by ENGINE,
-    // not by scope, so popping this pass's scope does not remove them — and
-    // the program's real definition of the same function would be a second
-    // entry waiting on the same callee), the declarations canonicalization
-    // installs, and the type inference the checking writes onto
-    // PRE-EXISTING outer definitions (which the pushed scope never
-    // shielded: checking `u + 1` used to permanently narrow a previous
-    // cell's `u` to `number`). The frame replaces the snapshot-based
-    // `_provisionalRegistryRollbackPoint`, whose restore re-installed the
-    // snapshot's own `Set` objects — a second pass over the same engine
-    // restored already-mutated state. Definitions still visible ACROSS the
-    // pass's own statements (a `function` defined by statement 1 checks
-    // statement 2's call) — the rollback happens once, when the whole pass
-    // is done. Its outputs are decision-shaped (`ParsingDiagnostic`:
-    // strings and ranges), so nothing created inside the frame escapes it.
-    //
-    // The frame must nest inside ONE boxing-pass window; the per-statement
-    // `ce.box()` windows then nest inside it.
+    // Nothing that the check writes outlives it: what it declares is in
+    // the scope it pushed, which it pops; what it writes on a definition of
+    // an enclosing scope, and in the registries of the engine, is put back
+    // below. Definitions stay visible ACROSS the pass's own statements (a
+    // `function` defined by statement 1 checks statement 2's call). Its
+    // outputs are decision-shaped (`ParsingDiagnostic`: strings and ranges).
     //
     // The check has one program
     // environment, as a run has (rule 10 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): each statement
     // is boxed in it, so a later statement reads what an earlier one
-    // required. It is discarded when the check ends.
+    // required. It is discarded when the check ends. Its boxing-pass window
+    // spans the per-statement `ce.box()` windows; when the check runs
+    // inside another window, the fresh inferences of that window are put
+    // back as they were.
     return ce._withProgramEnvironment(() =>
       ce._withBoxingPassWindow(() =>
-        ce._withRolledBackInference(() =>
-          canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
-        )
+        canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
       )
     );
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
+    outerDefinitions.close();
+    // Each step runs even when an earlier one throws; the first error is
+    // thrown after them, unless the body threw.
+    let failure: { error: unknown } | undefined;
+    const run = (step: () => void): void => {
+      try {
+        step();
+      } catch (error) {
+        failure ??= { error };
+      }
+    };
     ce._staticAssignmentEvidence = enclosingEvidence;
     ce._staticPinnedCallees = enclosingPinnedCallees;
-    ce.popScope();
+    ce._narrowingSink = narrowingSink;
+    run(() => ce.popScope());
     ce._factSuppressionDepth -= 1;
     ce._staticTypeCheckDepth -= 1;
-    rollbackTypes();
-    rollbackProtocols();
+    if (ce._inferenceTxDepth > 0) ce._freshlyInferred = freshlyInferred;
+    run(rollbackTypes);
+    run(rollbackProtocols);
+    run(rollbackRegistry);
+    run(rollbackKinds);
+    const restored = outerDefinitions.recorded;
+    run(() => outerDefinitions.restore());
+    // A definition put back can have a wider type than the one written
+    // during the check: the event of a widening makes a type cached since
+    // then be computed again. When the check only declared, its
+    // declarations are gone: the type version moves, as for a declaration.
+    // A check that wrote nothing sends nothing.
+    if (restored)
+      run(() =>
+        ce._noteStateEvent({
+          kind: 'inference',
+          valueType: true,
+          widening: true,
+        })
+      );
+    else if (ce._typeVersion !== typeVersion)
+      run(() =>
+        ce._noteStateEvent({
+          kind: 'declare',
+          callable: false,
+          shadowsCallable: false,
+        })
+      );
+    if (failure !== undefined && !bodyFailed) throw failure.error;
   }
 }
 
@@ -876,8 +925,7 @@ function applyAssignmentTypeEffect(
   // this same pass) refines exactly as the runtime assignment will (Phase 1
   // rulings, 2026-08-18) — its definition lives in the pass scope, so the
   // direct type write dies with it. Skeleton-declared OUTER symbols are
-  // left alone (their runtime refinement needs no help from the pass, and
-  // a direct write here would bypass the rollback journal).
+  // left alone (their runtime refinement needs no help from the pass).
   if (
     def._placeholderSkeleton !== undefined &&
     effectDeclared.has(target.symbol)
@@ -2437,9 +2485,9 @@ function clauseRedefinitionDiagnostic(
  *   cell's binding — wins for the same mirror-the-runtime reason.
  *
  * The write goes through `_infer()` on a bound symbol — the `Assign`/`Declare`
- * operands hold their target structurally, unbound — inside the pass's
- * inference rollback frame, so it is journaled and undone when the pass ends:
- * checking still mutates nothing (`test/epsil/static-check-rollback.test.ts`).
+ * operands hold their target structurally, unbound; the pass puts the
+ * definition back when it ends (`DefinitionRestorePoint`), so checking
+ * still mutates nothing (`test/epsil/static-check-rollback.test.ts`).
  * A name that was not yet declared auto-declares into the pass's own scope,
  * which pops with it.
  */

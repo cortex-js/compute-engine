@@ -4,6 +4,10 @@ import type {
   Type,
 } from '../common/type/types.js';
 import { isSubtype } from '../common/type/subtype.js';
+import {
+  beforeDefinitionWrite,
+  registerDefinitionSideTable,
+} from './boxed-expression/definition-restore-point.js';
 
 /**
  * CLAUSE IDENTITY — when two clauses of a multi-clause function are the SAME
@@ -48,9 +52,12 @@ import { isSubtype } from '../common/type/subtype.js';
  * re-exports both functions from `multi-clause.ts`.
  */
 const CANON_INSTALL_SKIPPED = new WeakSet<object>();
+registerDefinitionSideTable(CANON_INSTALL_SKIPPED);
 
 export function noteCanonInstallSkipped(def: object | undefined): void {
-  if (def !== undefined) CANON_INSTALL_SKIPPED.add(def);
+  if (def === undefined) return;
+  beforeDefinitionWrite(def);
+  CANON_INSTALL_SKIPPED.add(def);
 }
 
 export function canonInstallSkipped(def: object | undefined): boolean {
@@ -102,12 +109,15 @@ export function canonInstallSkippedName(scope: object, name: string): boolean {
  */
 const SINGLE_CLAUSE_ORIGIN = new WeakMap<object, DeclarationOrigin>();
 const SINGLE_CLAUSE_DECLARED = new WeakMap<object, FunctionSignature>();
+registerDefinitionSideTable(SINGLE_CLAUSE_ORIGIN);
+registerDefinitionSideTable(SINGLE_CLAUSE_DECLARED);
 
 export function noteSingleClauseOrigin(
   def: object | undefined,
   origin: DeclarationOrigin | undefined
 ): void {
   if (def === undefined) return;
+  beforeDefinitionWrite(def);
   if (origin === undefined) SINGLE_CLAUSE_ORIGIN.delete(def);
   else SINGLE_CLAUSE_ORIGIN.set(def, origin);
 }
@@ -123,6 +133,7 @@ export function noteSingleClauseDeclared(
   declared: FunctionSignature | undefined
 ): void {
   if (def === undefined) return;
+  beforeDefinitionWrite(def);
   if (declared === undefined) SINGLE_CLAUSE_DECLARED.delete(def);
   else SINGLE_CLAUSE_DECLARED.set(def, declared);
 }
@@ -160,6 +171,7 @@ export function singleClauseDeclared(
  */
 export function clearClauseProvenance(def: object | undefined): void {
   if (def === undefined) return;
+  beforeDefinitionWrite(def);
   SINGLE_CLAUSE_ORIGIN.delete(def);
   SINGLE_CLAUSE_DECLARED.delete(def);
   CANON_INSTALL_SKIPPED.delete(def);

@@ -4,6 +4,8 @@ import {
   resolveOverload,
 } from '../../src/compute-engine/boxed-expression/overload';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { parseSource } from '../../src/cli/check';
+import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 
 /** Counts the trials of overload arms on `ce`, and those after which the
  * type cache key moved (a write on a definition moves it). */
@@ -304,23 +306,19 @@ describe('OVERLOAD TRIALS — result typing reads the validated resolution', () 
   });
 });
 
-describe('OVERLOAD TRIALS — inside an enclosing rollback frame', () => {
-  test('an overload call canonicalized inside a rollback frame resolves normally and rolls back cleanly', () => {
+describe('OVERLOAD TRIALS — inside the Epsil static check', () => {
+  test('an overload call checked statically resolves and leaves no declaration', () => {
     const ce = new ComputeEngine();
     ce.declare(
       'g',
       '((set<real>, integer) -> real) & ((collection, integer) -> any)'
     );
-    ce._withBoxingPassWindow(() =>
-      ce._withRolledBackInference(() => {
-        const call = ce.box(['g', 'S2', 'n2']);
-        expect(call.isValid).toBe(true);
-        expect(call.ops[0].type.toString()).toBe('collection');
-      })
-    );
-    // The enclosing frame (the static checking pass's shape) undoes the
-    // call's OWN inference too — including the trial-era join writes.
+    const source = 'let r = g(S2, n2)\nr';
+    const { ast } = parseSource(source, undefined, ce);
+    const diagnostics = staticDiagnostics(ce, ast!, source);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     expect(ce.lookupDefinition('S2')).toBeUndefined();
     expect(ce.lookupDefinition('n2')).toBeUndefined();
+    expect(ce.lookupDefinition('r')).toBeUndefined();
   });
 });

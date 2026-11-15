@@ -6,6 +6,10 @@ import {
   recordObjectRead,
 } from './boxed-expression/object-deps.js';
 import type { Scope } from './types-kernel-evaluation.js';
+import {
+  beforeDefinitionWrite,
+  registerDefinitionSideTable,
+} from './boxed-expression/definition-restore-point.js';
 
 /**
  * The environment of a binding unit.
@@ -912,10 +916,12 @@ const firstEnvironments = new WeakMap<object, UnitEnvironment>();
  * environment: the scope that held it when the first entry was written
  * (`BoxedSymbol._unitWriteScope()`). */
 const definitionHomes = new WeakMap<object, object>();
+registerDefinitionSideTable(definitionHomes);
 
 /** Record that `scope` holds the value definition `def`, the key of an entry
  * of a unit environment. */
 export function noteDefinitionHome(def: object, scope: object): void {
+  beforeDefinitionWrite(def);
   definitionHomes.set(def, scope);
 }
 

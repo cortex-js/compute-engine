@@ -5017,13 +5017,11 @@ function derivedDispatcherEffects(
  * direct contributions has already been unioned in by the time the cycle
  * closes.
  *
- * While an inference ROLLBACK FRAME is open (`inference-rollback.ts`) the
- * closure computes but does NOT stamp: a frame's undo restores definitions
- * through raw slot writes and advances no version counter, so a memo stamped
- * inside the frame would keep serving a union derived from the discarded
- * trial world after the rollback. The first read after the frame closes
- * recomputes against the restored world. (Same rule as
- * `_BoxedOperatorDefinition._makeLiteralEffectsDeriver`.)
+ * While a result may be discarded (`_resultMayBeDiscarded()`: the Epsil
+ * static check, or the trial of an overload arm) the closure computes but
+ * does NOT stamp: a memo stamped then would keep serving a union derived
+ * from a discarded world afterwards. The first read afterwards recomputes.
+ * (Same rule as `_BoxedOperatorDefinition._makeLiteralEffectsDeriver`.)
  */
 function makeDispatcherDeriver(
   ce: IComputeEngine,

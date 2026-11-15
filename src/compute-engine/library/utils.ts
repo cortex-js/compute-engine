@@ -23,7 +23,6 @@ import {
   numericMissingSlot,
   resolveTypeForCompilation,
 } from '../../common/type/utils.js';
-import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { asFloat } from '../boxed-expression/float-result.js';
 import {
@@ -4119,10 +4118,7 @@ function boundMayNotBeNumber(bound: Expression): boolean {
  * repair: `[q.x + 1 for q in L]` over `L: list<number>` boxed VALID with
  * `q: matrix`, while `PointX(q)` over a `number`-typed `q` is a type error
  * anywhere else. Removing the binding from the set makes a body use that
- * contradicts the element type an error. Membership of that set is journaled
- * state: an open rollback frame (the Epsil static-checking pass wraps a whole
- * canonicalization in one) must be able to undo this removal exactly as it
- * undoes the repair's own add, so the undo re-adds the definition.
+ * contradicts the element type an error.
  *
  * Callers: `canonicalIndexingSet` below (a `Sum`/`Product` `Element` clause)
  * and `canonicalLoopLike` (`library/control-structures.ts`, a `Loop` or
@@ -4145,11 +4141,7 @@ export function bindIndexAuthoritatively(
   binding._infer(() => type, 'narrow');
   const def = binding.valueDefinition;
   const fresh = ce._freshlyInferred;
-  if (def !== undefined && fresh?.has(def)) {
-    const frame = activeRollbackFrame(ce);
-    if (frame !== undefined) frame.record({ undo: () => void fresh.add(def) });
-    fresh.delete(def);
-  }
+  if (def !== undefined) fresh?.delete(def);
 }
 
 /**

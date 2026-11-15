@@ -1617,29 +1617,15 @@ function deletePending(ce: ComputeEngine, scope: Scope, name: string): void {
  * complete a sequence with the base cases of the removed declaration. The
  * pending definition of a binding of `name` in an enclosing scope is not
  * changed.
- *
- * Return a function that puts the pending definition back, for the rollback
- * frame of an inference trial, or `undefined` when the binding has no
- * pending definition.
  * @internal
  */
 export function _removePendingSequence(
   ce: ComputeEngine,
   name: string,
   scope: Scope
-): (() => void) | undefined {
-  const map = pendingSequences.get(ce);
-  const entry = map?.get(scope)?.get(name);
-  if (map === undefined || entry === undefined) return undefined;
-  deletePending(ce, scope, name);
-  return () => {
-    let byName = map.get(scope);
-    if (byName === undefined) {
-      byName = new Map();
-      map.set(scope, byName);
-    }
-    byName.set(name, entry);
-  };
+): void {
+  if (pendingSequences.get(ce)?.get(scope)?.has(name) === true)
+    deletePending(ce, scope, name);
 }
 
 /**

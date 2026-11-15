@@ -1,3 +1,8 @@
+import {
+  beforeDefinitionWrite,
+  registerDefinitionSideTable,
+} from './definition-restore-point.js';
+
 /**
  * The block locals whose hoisted binding carries a DECLARED type
  * (`Declare(v, "list<real>")`, `let v: list<real>`). The declared type is
@@ -56,11 +61,13 @@ export function isLocalBinding(def: object): boolean {
 
 /** The bindings that `markAssignedLocal()` recorded. */
 const ASSIGNED_LOCALS = new WeakSet<object>();
+registerDefinitionSideTable(ASSIGNED_LOCALS);
 
 /** Record that an `Assign` writes the binding `target`: an `Assign` to
  * the name was canonicalized against it, at any depth of the block that
  * declares it (a loop body, a nested function). */
 export function markAssignedLocal(target: object): void {
+  beforeDefinitionWrite(target);
   ASSIGNED_LOCALS.add(target);
 }
 
@@ -74,6 +81,8 @@ const FIRST_VALUE_SEEN = new WeakSet<object>();
 /** The bindings whose first value had the type `unknown` when
  * `isFirstValue()` was called for it. */
 const UNKNOWN_FIRST_VALUES = new WeakSet<object>();
+registerDefinitionSideTable(FIRST_VALUE_SEEN);
+registerDefinitionSideTable(UNKNOWN_FIRST_VALUES);
 /** The bindings that `markOpenLocal()` recorded. */
 const OPEN_LOCALS = new WeakSet<object>();
 
@@ -86,6 +95,7 @@ const OPEN_LOCALS = new WeakSet<object>();
  */
 export function isFirstValue(target: object, valueIsUnknown: boolean): boolean {
   if (FIRST_VALUE_SEEN.has(target)) return false;
+  beforeDefinitionWrite(target);
   FIRST_VALUE_SEEN.add(target);
   if (valueIsUnknown) UNKNOWN_FIRST_VALUES.add(target);
   return true;

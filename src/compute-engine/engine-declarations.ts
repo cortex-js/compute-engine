@@ -7,7 +7,6 @@ import {
   arithmeticOf,
   commitKindRegistration,
   isRegisteredKindTypeRecord,
-  kindRegistryRollbackPoint,
   prepareKindRegistration,
   unregisterKind,
 } from './boxed-expression/value-kinds.js';
@@ -131,11 +130,6 @@ import {
   refineConstructorPlaceholder,
   valuePresenceRefinesType,
 } from './boxed-expression/boxed-value-definition.js';
-import {
-  activeRollbackFrame,
-  type InferenceRollbackFrame,
-} from './inference-rollback.js';
-import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
 import { countDeclaredHolder, uncountRemovedHolder } from './engine-scope.js';
 import {
   binderBindingOf,
@@ -219,6 +213,7 @@ import {
 } from './boxed-expression/macro.js';
 import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
 import { hostCollectionSource } from './boxed-expression/shared-evaluation-memo.js';
+import { beforeScopeWrite } from './boxed-expression/definition-restore-point.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -532,46 +527,6 @@ export function suggestOperatorName(
   return undefined;
 }
 
-/**
- * Rollback journal (family 4, declarations): the declare routes below
- * unconditionally overwrite `scope.bindings[name]`, so the entry captures
- * the binding REPLACED by the declare (or its absence) and restores it by
- * identity — a name-only delete would destroy a binding the frame merely
- * shadowed, and repeated redeclarations of one name unwind correctly
- * because entries replay strictly LIFO. Disposal of the installed record
- * happens only here, at rollback time, never during the frame — every
- * journal entry recorded after this one (and so replayed before it) sees
- * the record intact. By replay time the `updateDef` swap entry (family 3)
- * has restored the record's halves to the placeholder this route installed,
- * which is frame-created by construction and safe to dispose; in debug
- * builds it is also tombstoned so a use after the rollback throws with both
- * stacks (the escape rule).
- */
-function journalDeclaration(
-  ce: IComputeEngine,
-  frame: InferenceRollbackFrame,
-  scope: Scope,
-  name: string,
-  previousBinding: BoxedDefinition | undefined,
-  installedBinding: BoxedDefinition
-): void {
-  frame.record({
-    undo: () => {
-      if (previousBinding !== undefined)
-        scope.bindings.set(name, previousBinding);
-      else scope.bindings.delete(name);
-      if (isValueDef(installedBinding)) {
-        if (ce._debugBindings)
-          tombstoneBinding(
-            installedBinding.value,
-            'rolled-back inference frame'
-          );
-        installedBinding.value.dispose();
-      }
-    },
-  });
-}
-
 /** Record the binding record `boxedDef` and the placeholder half that the
  * declaration constructed as scratch bindings, when `scope` is a registered
  * scratch scope or a scope created under one. Later writes to the binding
@@ -611,12 +566,9 @@ export function declareSymbolValue(
     (visibleBefore !== undefined || def.value !== undefined) &&
     changesFrameBinding(scope);
 
-  const rollbackFrame = activeRollbackFrame(ce);
-  const previousBinding =
-    rollbackFrame === undefined ? undefined : scope.bindings.get(name);
-
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
+  beforeScopeWrite(ce, scope, name);
   const fresh = !scope.bindings.has(name);
   const replaced = scope.bindings.get(name);
 
@@ -630,15 +582,6 @@ export function declareSymbolValue(
   });
 
   const boxedDef = scope.bindings.get(name)!;
-  if (rollbackFrame !== undefined)
-    journalDeclaration(
-      ce,
-      rollbackFrame,
-      scope,
-      name,
-      previousBinding,
-      boxedDef
-    );
   noteScratchDeclaration(ce, scope, boxedDef);
   // When the value or its type is refused (the value throws, or does not
   // match the declared type), put back the binding that the placeholder
@@ -810,12 +753,9 @@ export function declareSymbolOperator(
   // frame on the stack can read changes what that name resolves to.
   const changesBinding =
     visibleBefore !== undefined && changesFrameBinding(scope);
-  const rollbackFrame = activeRollbackFrame(ce);
-  const previousBinding =
-    rollbackFrame === undefined ? undefined : scope.bindings.get(name);
-
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
+  beforeScopeWrite(ce, scope, name);
   const fresh = !scope.bindings.has(name);
   const replaced = scope.bindings.get(name);
 
@@ -826,15 +766,6 @@ export function declareSymbolOperator(
   });
 
   const boxedDef = scope.bindings.get(name)!;
-  if (rollbackFrame !== undefined)
-    journalDeclaration(
-      ce,
-      rollbackFrame,
-      scope,
-      name,
-      previousBinding,
-      boxedDef
-    );
   noteScratchDeclaration(ce, scope, boxedDef);
   // When the operator definition constructor refuses the definition (for
   // example a `canonical` handler with the `commutative` flag), put back the
@@ -867,25 +798,12 @@ export function declareSymbolOperator(
     noteKindTypeDeclaration(ce, boxedDef.operator.signature.type);
 
   // The value kind, checked above, is recorded now that its definition is
-  // installed. Inside an inference rollback frame, the registry is captured
-  // first, and the frame puts it back on rollback together with the previous
-  // binding (`journalDeclaration` above). Otherwise a rolled-back
-  // redeclaration leaves its own dispatch entry registered, and the restored
-  // definition without its entry.
+  // installed.
   if (isOperatorDef(boxedDef)) {
-    const restoreKinds =
-      rollbackFrame !== undefined &&
-      (kindRegistration !== undefined ||
-        (supersededOperator !== undefined &&
-          arithmeticOf(ce, supersededOperator) !== undefined))
-        ? kindRegistryRollbackPoint(ce)
-        : undefined;
     if (kindRegistration !== undefined)
       commitKindRegistration(ce, boxedDef.operator, kindRegistration);
     else if (supersededOperator !== undefined)
       unregisterKind(ce, supersededOperator);
-    if (restoreKinds !== undefined)
-      rollbackFrame!.record({ undo: restoreKinds });
   }
 
   noteScopeDeclaration(scope);
@@ -3159,9 +3077,7 @@ function assertUndeclarable(
 function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   const binding = scope.bindings.get(name)!;
 
-  activeRollbackFrame(ce)?.record({
-    undo: () => scope.bindings.set(name, binding),
-  });
+  beforeScopeWrite(ce, scope, name);
   scope.bindings.delete(name);
   // A live frame that counted the removed definition stops counting it
   // (`uncountRemovedHolder`, `engine-scope.ts`).
@@ -3171,26 +3087,18 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   // sequence definition is complete (`F_0 := 10` without `F_n := …`) are
   // removed with the binding. Otherwise a later declaration of the name
   // completes a sequence with the base cases of the removed declaration.
-  const restorePending = _removePendingSequence(ce, name, scope);
-  if (restorePending !== undefined)
-    activeRollbackFrame(ce)?.record({ undo: restorePending });
+  _removePendingSequence(ce, name, scope);
 
   // A head that declares a value kind (the `arithmetic` field) loses its
   // dispatch entry: its values boxed before this call have no hooks any
   // more. The kind TYPE stays a kind type, with its fields, so its values
   // and its symbols stay protected from the number rules
-  // (`unregisterKind()`, `value-kinds.ts`). A rollback frame restores the
-  // entry here. The registry is captured only when the definition has an entry.
+  // (`unregisterKind()`, `value-kinds.ts`).
   if (
     isOperatorDef(binding) &&
     arithmeticOf(ce, binding.operator) !== undefined
-  ) {
-    const frame = activeRollbackFrame(ce);
-    const restoreKinds =
-      frame !== undefined ? kindRegistryRollbackPoint(ce) : undefined;
+  )
     unregisterKind(ce, binding.operator);
-    if (restoreKinds !== undefined) frame!.record({ undo: restoreKinds });
-  }
 
   retireBindingRecord(ce, scope, name, binding);
 }
@@ -3214,8 +3122,7 @@ export function retireBindingRecord(
   // definition, so that such an expression no longer reads the removed
   // definition: a call `f(2)` stays unevaluated, and reads the definition
   // of `f` that the scope chain holds at the time it is evaluated, as a call
-  // boxed after this one does. `updateDef` journals the exchange of the
-  // definition for rollback frames. When the removed
+  // boxed after this one does. When the removed
   // definition is a constant, `updateDef` also makes it stop listening to
   // configuration changes.
   updateDef(ce, name, binding, { type: 'unknown', inferred: true }, scope);
@@ -4755,7 +4662,7 @@ function deriveAndWriteAssignedType(
     // (engine-construction cost — `inferredType === true` with a value is
     // its marker).
     if (previousType.type !== valueDef.type.type)
-      recordTypeProvenance(ce, valueDef, {
+      recordTypeProvenance(valueDef, {
         type: valueDef.type,
         kind: 'value-derived',
         axis: 'type',

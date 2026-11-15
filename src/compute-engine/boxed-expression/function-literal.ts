@@ -23,6 +23,7 @@ import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isFunction, isString, isSymbol, sym } from './type-guards.js';
 import { tuplePatternNames } from './tuple-pattern.js';
 import { literalParameterDefault } from './parameter-defaults.js';
+import { registerDefinitionSideTable } from './definition-restore-point.js';
 
 /**
  * Shared accessors for the shape of a `Function` literal so that no call site
@@ -1043,6 +1044,7 @@ const DEFINITION_CAPTURED_TYPES = new WeakMap<
   object,
   ReadonlyArray<CapturedTypeEntry>
 >();
+registerDefinitionSideTable(DEFINITION_CAPTURED_TYPES);
 
 /**
  * Record, for the definition `def` whose type the engine infers from the

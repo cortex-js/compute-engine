@@ -20,10 +20,12 @@ import {
   engineHasKindValuesAssigned,
   isKindType,
   kindGeneration,
+  kindRegistryRollbackPoint,
   kindTypeHasHook,
   kindTypeInfo,
   kindTypesOf,
   noteKindValueAssigned,
+  unregisterKind,
 } from '../../src/compute-engine/boxed-expression/value-kinds';
 import {
   holdsKindValue,
@@ -442,62 +444,27 @@ describe('VALUE KINDS: the generation counter', () => {
     expect(g3).toBeGreaterThan(g2);
   });
 
-  // A redeclaration inside an inference rollback frame is undone with the
-  // frame: the previous binding AND its dispatch entry come back, so a sum of
-  // the head's values uses the previous hooks.
-  describe('a redeclaration rolled back by an inference rollback frame', () => {
-    function tracedEngine(calls: string[]): ComputeEngine {
-      return gf8EngineWithHead({
-        add: () => {
-          calls.push('original');
-          return undefined;
-        },
-      });
-    }
-
-    function rolledBack(ce: ComputeEngine, fn: () => void): void {
-      ce._withBoxingPassWindow(() => ce._withRolledBackInference(fn));
-    }
-
-    test('with other hooks', () => {
-      const calls: string[] = [];
-      const ce = tracedEngine(calls);
-      const original = arithmeticOf(ce, operatorDef(ce, 'GF8'));
-      rolledBack(ce, () => {
-        ce.declare(
-          'GF8',
-          {
-            signature: '(integer) -> gf8',
-            arithmetic: gf8Arithmetic({
-              admittedAs: 'real',
-              add: () => {
-                calls.push('replacement');
-                return undefined;
-              },
-            }),
-          },
-          { extend: true }
-        );
-      });
-      expect(arithmeticOf(ce, operatorDef(ce, 'GF8'))).toBe(original);
-      expect(kindTypeInfo(ce, 'gf8')?.admittedAs).not.toBe('real');
-      expect(kindTypeInfo(ce, 'gf8')?.heads.size).toBe(1);
-      ce.box(['Add', ['GF8', 1], ['GF8', 2]]).evaluate();
-      expect(calls).toEqual(['original']);
+  // The Epsil static check puts back the kind registry
+  // (`kindRegistryRollbackPoint`): a dispatch entry removed while it runs
+  // comes back, so a sum of the head's values uses its hooks again.
+  test('the kind registry rollback point puts back a dispatch entry', () => {
+    const calls: string[] = [];
+    const ce = gf8EngineWithHead({
+      add: () => {
+        calls.push('original');
+        return undefined;
+      },
     });
-
-    test('without `arithmetic`', () => {
-      const calls: string[] = [];
-      const ce = tracedEngine(calls);
-      const original = arithmeticOf(ce, operatorDef(ce, 'GF8'));
-      rolledBack(ce, () => {
-        ce.declare('GF8', { arithmetic: undefined }, { extend: true });
-      });
-      expect(arithmeticOf(ce, operatorDef(ce, 'GF8'))).toBe(original);
-      expect(kindTypeInfo(ce, 'gf8')?.heads.size).toBe(1);
-      ce.box(['Add', ['GF8', 1], ['GF8', 2]]).evaluate();
-      expect(calls).toEqual(['original']);
-    });
+    const def = operatorDef(ce, 'GF8');
+    const original = arithmeticOf(ce, def);
+    const restore = kindRegistryRollbackPoint(ce);
+    unregisterKind(ce, def);
+    expect(arithmeticOf(ce, def)).toBeUndefined();
+    restore();
+    expect(arithmeticOf(ce, def)).toBe(original);
+    expect(kindTypeInfo(ce, 'gf8')?.heads.size).toBe(1);
+    ce.box(['Add', ['GF8', 1], ['GF8', 2]]).evaluate();
+    expect(calls).toEqual(['original']);
   });
 });
 

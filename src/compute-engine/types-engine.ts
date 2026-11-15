@@ -40,7 +40,6 @@ import type {
 } from './types-effects.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { UnitEnvironment } from './binding-unit.js';
-import type { InferenceRollbackFrame } from './inference-rollback.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -745,21 +744,12 @@ export interface IComputeEngine {
    * @internal */
   _noteConformanceRegistryChange(): void;
 
-  /** The stack of open inference **rollback frames**
-   * (`inference-rollback.ts`; phase 2b of
-   * `docs/TYPE-SYSTEM.md`). While a frame is open,
-   * every inference-driven mutation site journals an undo entry into the
-   * innermost frame; `_withRolledBackInference` replays them (strict LIFO)
-   * when the frame closes. Empty on the fast path — every journaling hook
-   * is one length check.
-   * @internal */
-  _rollbackFrames: InferenceRollbackFrame[];
-
-  /** True while a result computed now may be thrown away: a rollback frame
-   * is open (its undo writes raw slots and moves no version), or the trial
-   * of an overload arm is in progress (a read takes the entry of the trial
-   * environment first, `EngineBoxingState.withTrial()`). A cache does not
-   * store a result then.
+  /** True while a result computed now may be thrown away: the Epsil static
+   * check runs (it reads its own declarations, and puts back the
+   * definitions it wrote without moving every version a cache keys on), or
+   * the trial of an overload arm is in progress (a read takes the entry of
+   * the trial environment first, `EngineBoxingState.withTrial()`). A cache
+   * does not store a result then.
    * @internal */
   _resultMayBeDiscarded(): boolean;
 
@@ -911,29 +901,11 @@ export interface IComputeEngine {
     | undefined;
 
   /**
-   * Run `fn` with a rollback frame open and ALWAYS roll the frame back — on
-   * normal return AND on throw (the body's error is rethrown after the
-   * undo). Returns `fn`'s value. Always-rollback by design: the Epsil static
-   * checking pass, its one user, checks and then discards — there is no
-   * commit form.
-   *
-   * Must be called inside a boxing-pass window (`_inferenceTxDepth > 0`);
-   * open one with {@link _withBoxingPassWindow} when the caller is not
-   * already inside `box()`/`parse()`.
-   *
-   * An expression or definition created inside the frame must not be
-   * evaluated, canonicalized against, or resolved for symbol lookup after
-   * the rollback; retention for *rendering* (`toString()`) is permitted.
-   * @internal */
-  _withRolledBackInference<T>(fn: () => T): T;
-
-  /**
    * Run `fn` inside one boxing-pass window (the `_inferenceTxDepth` /
    * `_freshlyInferred` lifecycle that `box()` and `parse()` open around
-   * themselves). For callers — the Epsil static checking pass — that need a
-   * rollback frame to span several `box()` calls: a rollback frame must nest
-   * strictly inside ONE window, so the caller opens this window first and
-   * the per-statement `box()` windows nest inside it.
+   * themselves). For a caller — the Epsil static checking pass — whose
+   * boxing spans several `box()` calls: the per-statement `box()` windows
+   * nest inside it.
    * @internal */
   _withBoxingPassWindow<T>(fn: () => T): T;
 

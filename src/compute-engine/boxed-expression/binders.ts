@@ -43,6 +43,10 @@ import {
   staticBindingIn,
   staticParentOf,
 } from '../static-typing-view.js';
+import {
+  beforeDefinitionWrite,
+  registerDefinitionSideTable,
+} from './definition-restore-point.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -144,13 +148,16 @@ export function sameBindingDef(
 // Static block locals can change representation from a value placeholder to
 // an operator at runtime. Their lexical home still identifies the same slot.
 const callableHomes = new WeakMap<BoxedBaseDefinition, Scope>();
+registerDefinitionSideTable(callableHomes as WeakMap<object, unknown>);
 const callableFrames = new WeakMap<Scope, Scope>();
 export function hasCallableHome(def: BoxedDefinition): boolean {
   return callableHomes.has('value' in def ? def.value : def.operator);
 }
 export function markCallableHome(def: BoxedDefinition, scope: Scope): void {
   const half = 'value' in def ? def.value : def.operator;
-  if (!callableHomes.has(half)) callableHomes.set(half, scope);
+  if (callableHomes.has(half)) return;
+  beforeDefinitionWrite(half);
+  callableHomes.set(half, scope);
 }
 export function markCallableFrame(frame: Scope, template: Scope): void {
   callableFrames.set(frame, template);

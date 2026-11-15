@@ -98,6 +98,10 @@ import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
 import { noteSymbolValue } from './residue-class-value-hook.js';
+import {
+  beforeDefinitionWrite,
+  noteDefinitionCreated,
+} from './definition-restore-point.js';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -455,6 +459,7 @@ export class _BoxedValueDefinition
       trustedLibraryDefinition?: boolean;
     }
   ) {
+    noteDefinitionCreated(ce, this);
     this._engine = ce;
     this.name = name;
     // A definition made during a boxing is narrowed by the uses of that
@@ -847,6 +852,7 @@ export class _BoxedValueDefinition
         ? (record.get(this) as Expression | undefined)
         : this._value;
     if (v !== undefined && v === prev) return;
+    beforeDefinitionWrite(this);
     // The static type of an inferred variable that holds a formula is the
     // type of the formula (`declaredType`): compared before and after the
     // write.
@@ -1475,9 +1481,9 @@ export class _BoxedValueDefinition
         ? recorded
         : new BoxedType(refined, this._engine._typeResolver);
     // Not stored while a result may be discarded (`_resultMayBeDiscarded()`):
-    // a rollback frame's undo restores declarations and types by raw writes
-    // that advance no counter of the key, and a trial reads its own
-    // environment first, so a result computed then would still match after.
+    // the static check puts back the definitions it wrote by raw writes that
+    // advance no counter of the key, and a trial reads its own environment
+    // first, so a result computed then would still match after.
     // Nor while a list-hypothesis pass of any definition runs: this
     // derivation may have read a hypothesis that is then refuted
     // (`inListHypothesisPass`). Nor when it read the provisional signature
@@ -1731,6 +1737,7 @@ export class _BoxedValueDefinition
    * and must do so inside its own bracket or inside this thunk.
    * @internal */
   _setType(thunk: () => Type | TypeString | BoxedType): void {
+    beforeDefinitionWrite(this);
     this._engine._withoutFacts(() => this._writeType(thunk()));
   }
 
@@ -1777,6 +1784,7 @@ export class _BoxedValueDefinition
    * `_placeholderSkeleton`, unlike the public `type` setter above.
    * @internal */
   _setElementRefinement(t: BoxedType): void {
+    beforeDefinitionWrite(this);
     // Fact-blind like every other type write, so that a refinement derived
     // from an assigned value keeps standing after the assumptions change. The
     // DECISION that produced `t` belongs to the caller's own bracket.
@@ -1816,10 +1824,9 @@ export class _BoxedValueDefinition
    * tracker holds each listener strongly and would otherwise keep the
    * replaced definition in memory for the engine's lifetime.
    *
-   * Return `true` when a subscription was released. The caller then records
-   * an undo that calls {@link _resubscribeConfigurationChange}, because
-   * an inference rollback can put this definition back
-   * in its binding.
+   * Return `true` when a subscription was released. A restore point that
+   * puts this definition back in its binding calls
+   * {@link _resubscribeConfigurationChange} (`DefinitionRestorePoint`).
    * @internal */
   _releaseConfigurationChange(): boolean {
     const unsubscribe = this._unsubscribeFromConfigurationChange;

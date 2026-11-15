@@ -138,7 +138,6 @@ import type {
   ParameterRecord,
 } from '../global-types.js';
 import { recordTypeProvenance } from './type-provenance.js';
-import { activeRollbackFrame } from '../inference-rollback.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isWildcard } from './pattern-utils.js';
@@ -1109,9 +1108,9 @@ function devolveUnappliedOperator(
   if (!isSymbol(op)) return null;
   // Must never execute in the trial of an overload arm (phase 2c), which
   // admits a repairable operand by `isRepairableOperatorSymbol` without
-  // running the repair. A rollback frame (the Epsil static checking pass)
-  // legitimately reaches this: the repair declares nothing, so there is
-  // nothing to roll back.
+  // running the repair. The Epsil static checking pass legitimately
+  // reaches this: the repair declares nothing, so there is nothing to put
+  // back.
   console.assert(
     !inTrial(ce),
     'devolveUnappliedOperator must not run in trial (repair-free) validation'
@@ -1190,8 +1189,8 @@ function devolveUnappliedOperator(
  * type error. A position that takes a FUNCTION (the reducer of `Reduce`)
  * must not call this: there the operator binding is correct.
  *
- * Returns `op` unchanged when the repair does not apply, and in a rollback
- * frame that forbids repairs.
+ * Returns `op` unchanged when the repair does not apply, and in the trial of
+ * an overload arm.
  */
 export function canonicalValueOperand(
   ce: ComputeEngine,
@@ -2719,8 +2718,8 @@ function armParamAt(
  * does not mask the correctly-sized arm's remaining positions. Only when NO
  * eligible arm accepts is the error minted, against the union of the arms'
  * parameters at the first universally-refuted position (§4.4:
- * "incompatible-type against the declared union"). No rollback frame and no
- * boxing-pass window — nothing here writes.
+ * "incompatible-type against the declared union"). No boxing-pass window:
+ * nothing here writes.
  *
  * Arity is deliberately not re-checked as such: boxing normalizes it, and a
  * `Spread` call re-boxes after splicing (`_spliceSpreadOps`), which re-runs
@@ -6341,18 +6340,16 @@ function repairFreshMatrixInference(
   //   pass), removed again on failure so a rolled-back repair leaves no
   //   phantom repair eligibility.
   // The narrowing sink is notified only on the SUCCESS path (below): sink
-  // retraction machinery is a phase-2b journal family, so an entry recorded
-  // at write time for a repair the failure leg then undoes would report a
+  // retraction would be needed otherwise: an entry recorded at write time for a repair the failure leg then undoes would report a
   // narrowing that never took effect — but a SUCCESSFUL repair permanently
   // narrows an (possibly enclosing) definition, and a contained parse's
   // `scope.narrowings()` must see that.
   // The repair must never execute in the trial of an overload arm (phase
   // 2c), which admits repairs by their write-free precondition
   // (`couldRepairFreshMatrixInference`) without running them; the winning
-  // arm re-validates for real, outside the trial. A rollback frame (the
-  // Epsil static checking pass wraps full canonicalization in one)
-  // legitimately reaches this repair, and every write below is journaled so
-  // the frame rolls it back.
+  // arm re-validates for real, outside the trial. The Epsil static checking
+  // pass legitimately reaches this repair: it puts back the definitions of
+  // enclosing scopes that it wrote (`DefinitionRestorePoint`).
   console.assert(
     !inTrial(ce),
     'repairFreshMatrixInference must not run in trial (repair-free) validation'
@@ -6362,7 +6359,6 @@ function repairFreshMatrixInference(
   const histories = new Map<string, TypeProvenanceEntry[] | undefined>();
   const beforeTypes = new Map<string, BoxedType>();
   const freshlyAdded: BoxedValueDefinition[] = [];
-  const frame = activeRollbackFrame(ce);
   // True while every repaired definition is a binding under a registered
   // scratch scope (`scratch-scopes.ts`). The inference events below are then
   // flagged `scratch`: no cache that outlives the computation owning that
@@ -6426,23 +6422,6 @@ function repairFreshMatrixInference(
     histories.set(name, def.value._typeProvenance?.slice());
     beforeTypes.set(name, def.value.type);
     const wasUnknown = def.value.type.isUnknown;
-    // Rollback journal (family 1): the repair-local records above serve the
-    // repair's own FAILURE leg; the journal entry is what reverses a
-    // SUCCESSFUL repair when an enclosing rollback frame aborts. On a failed
-    // repair the frame's entries replay over already-restored state, and
-    // every family involved composes with that: `_restoreTypeSlots` writes
-    // the same slots again (idempotent); the family-6 undo deletes a set
-    // member the failure leg already removed (`Set.delete` no-op); and the
-    // family-7 undo pops the array object `recordTypeProvenance` pushed to —
-    // which the failure leg's `_typeProvenance = histories.get(name)` has
-    // DETACHED from the definition, so the pop touches nothing live.
-    // (Pinned by the "failure leg inside an open rollback frame" tests in
-    // `test/compute-engine/inference-rollback.test.ts`.)
-    if (frame !== undefined) {
-      const target = def.value;
-      const slots = target._typeSlotSnapshot();
-      frame.record({ undo: () => target._restoreTypeSlots(slots) });
-    }
     def.value._setType(() => ce.type(targetType));
     // Freeze the contextual assignment during re-canonicalization so the
     // numeric fast path cannot immediately narrow it back to `real`.
@@ -6450,7 +6429,7 @@ function repairFreshMatrixInference(
     // The write is now channel-visible where it matters: provenance (the
     // matrix inference is evidence, with the operand as its cause) and the
     // fresh-inference set (matching `_noteInferenceWrite`'s condition).
-    recordTypeProvenance(ce, def.value, {
+    recordTypeProvenance(def.value, {
       type: def.value.type,
       kind: 'inferred',
       axis: 'type',
@@ -6462,12 +6441,6 @@ function repairFreshMatrixInference(
       !ce._freshlyInferred?.has(def.value)
     ) {
       const set = (ce._freshlyInferred ??= new Set());
-      // Rollback journal (family 6): this add is guarded by the `!has`
-      // check above, so the prior-presence bit is always "absent" here.
-      if (frame !== undefined) {
-        const added = def.value;
-        frame.record({ undo: () => set.delete(added) });
-      }
       set.add(def.value);
       freshlyAdded.push(def.value);
     }

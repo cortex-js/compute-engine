@@ -715,8 +715,8 @@ are typed `list<number>`, not `nums`.
 ## Declarations and the global registry
 
 Type and protocol declarations are engine-global and top-level only. The Epsil
-static pre-pass acts as a top-level surrogate and runs registry mutations in a
-rollback frame so later statements can be checked without leaking provisional
+static pre-pass acts as a top-level surrogate and puts the registries back when
+it ends so later statements can be checked without leaking provisional
 state into real evaluation.
 
 Within one Epsil batch, duplicate type/protocol/sum declarations and duplicate
@@ -1614,8 +1614,7 @@ definition once, marked as inferred, with the use that last changed it as
 its provenance: `a ↦ a[1] + a[2]` is typed
 `(a: tuple<number, number>) -> number`. This tuple is not a point
 parameter: a list argument is bound whole, not mapped point by point
-(`BROADCAST-MODEL.md`). The write on the definition has no rollback record:
-the definition was made by this boxing. When it changes a type, one state
+(`BROADCAST-MODEL.md`). The definition was made by this boxing. When it changes a type, one state
 event follows it, because a type cached on another node during the boxing
 can depend on the type of the parameter before the literal was complete
 (the cache keys do not hold the definitions they read). After that, the
@@ -1648,8 +1647,7 @@ the provisional captures, which do not reach the enclosing literal. It does
 not put back a narrowing written directly on a definition that the root
 construction made outside the literal (the index of an enclosing `Sum`, a
 local of an enclosing block), with its `SCALAR_USES_MAP` entry and its
-membership of `_freshlyInferred`, nor the undo records that an open rollback
-frame keeps for writes of the discarded boxing. No program is known where
+membership of `_freshlyInferred`. No program is known where
 one of these changes a type or a value.
 
 A parameter of a literal being boxed whose number type came only from uses
@@ -1823,24 +1821,45 @@ invalidates no cached type: the type version (`typeVersion`,
   `c2 + 1`), or whose stored value a change of the configuration cleared, is
   read as a constant with a closed value.
 
-## Inference provenance and rollback
+## Inference provenance and the static check
 
 Provenance belongs to definitions, not `Type` objects. Every inference write
-can record its source expression and axis. A rollback frame journals all
-inference-visible state changed while it is open, including type/effect writes,
-fresh-inference bookkeeping, and provisional registry changes. Its one user is
-the Epsil static check, which boxes a whole program in a frame and undoes it.
-Frames nest; rollback is unconditional and must restore both values and
-invalidation metadata. A cache does not store a result while a frame is open
-or a trial is in progress (`_resultMayBeDiscarded()`). A write in the
-environment of a unit or an operation is not journaled: the static check runs
-in a program environment, and the trial of an arm of an overloaded operator in
-a trial environment, each thrown away when it ends. A trial opens no frame: it
-writes on no definition ("Functions, overloads, and callbacks").
+can record its source expression and axis.
 
-The current implementation entry points are the definition provenance journal,
-the engine inference transaction helpers, and the state-event funnel described
-in `EFFECTS-MODEL.md`.
+The Epsil static check (`epsil/static-diagnostics.ts`) boxes a whole program
+and leaves the engine as it found it. Its declarations go to a scope of its
+own, popped when it ends, and its writes in the environment of a unit go to a
+program environment, thrown away when it ends. What it writes on a definition
+that outlives it is put back by restore points opened when the check starts:
+
+- `DefinitionRestorePoint` (`boxed-expression/definition-restore-point.ts`)
+  records a definition just before its first write during the check. Each
+  writer calls `beforeDefinitionWrite()` (the type, value and signature
+  setters of the two definition classes, `_update()`, `updateDef()`, the
+  narrow write of `BoxedSymbol`, the provenance history, the writers of the
+  side tables keyed on a definition) or `beforeScopeWrite()` (a declaration
+  or a removal in a scope that encloses the check). A definition made during
+  the check, and a scope that the check pushed, are not recorded. A record
+  is the binding record with its halves by identity, and each half's type
+  slots, re-derivation fields, provenance and entries in the registered side
+  tables (`registerDefinitionSideTable()`). `restore()` puts them back,
+  newest first; an entry that throws does not stop the others.
+- `provisionalRegistryRollbackPoint()` and `kindRegistryRollbackPoint()` put
+  back the registry of provisional applications and the value-kind registry;
+  the type and protocol registries have points of their own.
+
+When the restore put a definition back, a widening state event follows it,
+so a type cached during the check under a narrower type is computed again,
+also inside a computation; when the check only declared and moved the type
+version, a declaration event follows. While the check runs, or
+the trial of an arm of an overloaded operator, a cache does not store a
+result (`_resultMayBeDiscarded()`). A trial writes on no definition: it reads
+and writes a trial environment, thrown away when it ends ("Functions,
+overloads, and callbacks").
+
+The current implementation entry points are the definition provenance
+history, the restore points above, and the state-event funnel described in
+`EFFECTS-MODEL.md`.
 
 Writing the type `unknown` to a value definition clears its value: the type
 setter of `boxed-value-definition.ts` treats `unknown` as a reset. An

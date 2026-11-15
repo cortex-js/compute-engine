@@ -146,7 +146,6 @@ import {
   type ProvisionalCapture,
   type ProvisionalDependent,
 } from './boxed-expression/provisional-application.js';
-import { activeRollbackFrame } from './inference-rollback.js';
 import { isShadowOf } from './library-shadowing.js';
 import { isScratchBinding } from './scratch-scopes.js';
 import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
@@ -236,6 +235,7 @@ import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition
 import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import { enterFunctionBody, exitFunctionBody } from './statement-position.js';
+import { beforeDefinitionWrite } from './boxed-expression/definition-restore-point.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -1570,10 +1570,7 @@ export function canonicalFunctionLiteralArguments(
         cause.ops.map((o: ExpressionInput) => ce.expr(o, { form: 'raw' })),
         { canonical: false }
       );
-      // The provenance history is journaled as a whole while a rollback
-      // frame is open (family 7, `recordTypeProvenance()`): the entry of the
-      // creation of the definition is in it, and the undo pops in order.
-      recordTypeProvenance(ce, value, {
+      recordTypeProvenance(value, {
         type,
         kind: 'inferred',
         axis: 'type',
@@ -1697,23 +1694,15 @@ function dependentLiteral(def: ProvisionalDependent): Expression | undefined {
 
 /** Install a re-derived literal on a dependent, whichever kind it is.
  *
- * Rollback journal: this is the ONE site that mutates a pre-existing
- * definition IN PLACE during the provisional-repair cascade — it does NOT
- * route through `updateDef`, whose half-swap journaling therefore cannot
- * capture it (`docs/TYPE-SYSTEM.md`, family 3 "As
- * implemented" note). While a rollback frame is open, each kind snapshots
- * exactly what its install mutates: the operator kind the
- * `_update({evaluate})`-reachable fields (`_rederivationSnapshot`), the
- * value kind the coupled type/value slots (`_typeSlotSnapshot` — the value
- * setter recomputes `_isSelfReferential`, which rides in the tuple). The
- * registry re-registrations are journaled by the registry's own hooks
- * (family 5). */
+ * This is the one site that mutates a pre-existing definition IN PLACE
+ * during the provisional-repair cascade: it does not route through
+ * `updateDef`. The Epsil static check records a definition handed to this
+ * repair before it runs (`provisionalRegistryRollbackPoint()`). */
 function installRebuiltLiteral(
   ce: ComputeEngine,
   def: ProvisionalDependent,
   rebuilt: Expression
 ): void {
-  const frame = activeRollbackFrame(ce);
   // Effects-axis provenance (W2 of
   // `docs/EFFECTS-MODEL.md`): the re-derivation
   // re-stamps the inferred effect set from the rebuilt body, and a change
@@ -1724,12 +1713,6 @@ function installRebuiltLiteral(
   // `_update()` re-registers the definition for whatever names the rebuilt body
   // still reads provisionally.
   if ('signature' in def) {
-    if (frame !== undefined) {
-      const snapshot = def._rederivationSnapshot();
-      frame.record({
-        undo: () => def._restoreRederivationSnapshot(snapshot),
-      });
-    }
     // A re-derivation keeps the mark of a local (`_bindsLocal`). A declared
     // contract that was trusted at install stays trusted
     // (`_contractTrusted`).
@@ -1745,7 +1728,6 @@ function installRebuiltLiteral(
       op._rederiving = false;
     }
     recordEffectsTransition(
-      ce,
       def,
       effectsBefore,
       effectsContractStateOf(def),
@@ -1779,10 +1761,6 @@ function installRebuiltLiteral(
           latestDeclaredEffectsSite(def)
         );
     }
-    if (frame !== undefined) {
-      const snapshot = def._typeSlotSnapshot();
-      frame.record({ undo: () => def._restoreTypeSlots(snapshot) });
-    }
     def.value = rebuilt;
     registerProvisionalDependents(ce, rebuilt, def);
     // No effects-provenance recording on this branch — deliberately. The
@@ -1814,7 +1792,6 @@ function installRebuiltLiteral(
  * replaces these handlers.
  *
  * This is an in-place change of a definition, as in `installRebuiltLiteral`:
- * it is recorded for an open rollback frame,
  * it advances the version of the definition, and it is reported as a repair
  * event, so that a memoized result of an application of `def` is not used.
  */
@@ -1822,13 +1799,7 @@ function holdDependentWithInvalidBody(
   ce: ComputeEngine,
   def: BoxedOperatorDefinition
 ): void {
-  const frame = activeRollbackFrame(ce);
-  if (frame !== undefined) {
-    const snapshot = def._rederivationSnapshot();
-    frame.record({
-      undo: () => def._restoreRederivationSnapshot(snapshot),
-    });
-  }
+  beforeDefinitionWrite(def);
   def._writeVersion += 1;
   def.evaluate = () => undefined;
   def.evaluateAsync = undefined;

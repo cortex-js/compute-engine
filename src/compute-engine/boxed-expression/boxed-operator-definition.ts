@@ -127,6 +127,10 @@ import {
   numericCanonicalHandlerName,
   numericCanonicalProfile,
 } from './numeric-canonical-registry.js';
+import {
+  beforeDefinitionWrite,
+  noteDefinitionCreated,
+} from './definition-restore-point.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base
@@ -1110,10 +1114,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       );
     }
     // Not stored while a result may be discarded (`_resultMayBeDiscarded()`):
-    // a rollback frame's undo restores declarations and types by raw writes
-    // that advance no counter of the key, and a trial reads its own
-    // environment first, so a result computed then would still match after
-    // (the effects memo below refuses to stamp there for the same reason).
+    // the static check puts back the definitions it wrote by raw writes that
+    // advance no counter of the key, and a trial reads its own environment
+    // first, so a result computed then would still match after (the effects
+    // memo below refuses to stamp there for the same reason).
     // Nor while a list-hypothesis pass of any definition runs: this
     // derivation may have read a hypothesis that is then refuted
     // (`inListHypothesisPass`). Nor when it read the provisional signature
@@ -1241,6 +1245,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * event.
    * @internal */
   _setSignature(thunk: () => BoxedType): void {
+    beforeDefinitionWrite(this);
     this.engine._withoutFacts(() => {
       this._signature = thunk();
     });
@@ -1259,6 +1264,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     def: OperatorDefinition,
     options?: { installTimeProbes?: boolean }
   ) {
+    noteDefinitionCreated(ce, this);
     Object.defineProperty(
       this,
       'signature',
@@ -1788,6 +1794,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * @internal
    */
   private _setEffects(effects: EffectSet | undefined): void {
+    beforeDefinitionWrite(this);
     this._effects = effects;
     // Read the BACKING field, not the `signature` accessor: `_setEffects` runs
     // inside `_refreshDerivedEffects`, and the accessor's getter starts by
@@ -1841,8 +1848,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * undefined` gate.
    *
    * The refresh may run while a result may be discarded
-   * (`_resultMayBeDiscarded()`): inside an inference rollback frame, whose
-   * undo restores definitions through raw slot writes and advances no
+   * (`_resultMayBeDiscarded()`): in the Epsil static check, which puts back
+   * the definitions it wrote through raw slot writes that advance no
    * version counter, or in the trial of an overload arm, which reads its
    * own environment first. A refresh that stamped its memo there would keep
    * serving a set inferred from the discarded world afterwards — the stamps
@@ -1865,6 +1872,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         stampedCallable === ce._callableVersion
       )
         return this._effects;
+      beforeDefinitionWrite(this);
       inFlight = true;
       try {
         const reInferred = inferFunctionLiteralEffects(ce, literal, {
@@ -1887,18 +1895,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** Snapshot every field that a provisional re-derivation —
    * `installRebuiltLiteral` calling `_update({ evaluate: rebuilt })` on a
    * PRE-EXISTING definition (`function-utils.ts`) — can mutate, for an
-   * exact later restore by an inference rollback frame. The result is
+   * exact later restore (`DefinitionRestorePoint`). The result is
    * OPAQUE to callers (typed `unknown` on the public interface): it
    * captures private fields (`_effects`, `_inferredDraws`), so constructing
    * or peeking at one outside this class is meaningless. Only the fields an
-   * `{ evaluate }`-only update can touch are captured; a full-definition
-   * `_update()` on a pre-existing object never happens inside a rollback
-   * frame (redefinition routes go through `updateDef`, whose half-swap the
-   * frame journals separately).
+   * `{ evaluate }`-only update can touch are captured: a redefinition goes
+   * through `updateDef`, which replaces the halves of the binding record,
+   * and the restore point records the record with its halves.
    * @internal */
   _rederivationSnapshot(): unknown {
     return {
-      signature: this.signature,
+      signature: this._signature,
       inferredSignature: this.inferredSignature,
       _isLambda: this._isLambda,
       _lambdaLiteral: this._lambdaLiteral,
@@ -2003,6 +2010,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   }
 
   _update(def: OperatorDefinition): void {
+    beforeDefinitionWrite(this);
     this._writeVersion += 1;
     this._bindsLocal = isLocalBinding(def);
 

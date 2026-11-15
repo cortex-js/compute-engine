@@ -205,16 +205,14 @@ describe('EFFECTS PROVENANCE — the re-derivation cascade (W2)', () => {
     expect(effectsEntries(ce, 'g')).toEqual(entries);
   });
 
-  test('an enclosing rollback frame leaves the pre-frame history byte-identical', () => {
+  test('a static check that rebuilds a definition leaves its history byte-identical', () => {
     const ce = new ComputeEngine();
     ce.parse('g(t)\\coloneq 2a(t)').evaluate();
     const before = historyOf(ce, 'g');
-    ce._withBoxingPassWindow(() =>
-      ce._withRolledBackInference(() => {
-        ce.parse('a(t)\\coloneq t^2').evaluate(); // any → pure
-        expect(effectsEntries(ce, 'g')).toHaveLength(2);
-      })
-    );
+    // The check defines `a`, which rebuilds `g` (any → pure) while it runs.
+    const source = 'function a(t) { t^2 }';
+    const { ast } = parseSource(source, undefined, ce);
+    staticDiagnostics(ce, ast!, source);
     expect(historyOf(ce, 'g')).toEqual(before);
   });
 });
@@ -435,27 +433,24 @@ describe('EFFECTS PROVENANCE — a redefinition does not change the previous ope
   test.each([
     ['no effects', 'function g(x: integer) -> integer { x }'],
     ['`pure`', 'function g(x: integer) pure -> integer { x }'],
-  ])(
-    'a redefinition can add `random` to a function with %s',
-    (_, first) => {
-      const ce = new ComputeEngine();
-      executeEpsil(ce, first);
-      const before = operatorOf(ce, 'g');
-      const beforeState = [before.effectsDeclared, String(before.signature)];
+  ])('a redefinition can add `random` to a function with %s', (_, first) => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, first);
+    const before = operatorOf(ce, 'g');
+    const beforeState = [before.effectsDeclared, String(before.signature)];
 
-      const r = executeEpsil(
-        ce,
-        'function g(x: integer) random -> integer { 7 }'
-      );
-      expect(r.value.toString()).not.toContain('Error');
-      const after = operatorOf(ce, 'g');
-      expect(after).not.toBe(before);
-      expect(after.effectsDeclared).toBe(true);
-      expect(String(after.signature)).toBe('(x: integer) random -> integer');
-      expect(executeEpsil(ce, 'g(3)').value.toString()).toBe('7');
-      expect([before.effectsDeclared, String(before.signature)]).toEqual(
-        beforeState
-      );
-    }
-  );
+    const r = executeEpsil(
+      ce,
+      'function g(x: integer) random -> integer { 7 }'
+    );
+    expect(r.value.toString()).not.toContain('Error');
+    const after = operatorOf(ce, 'g');
+    expect(after).not.toBe(before);
+    expect(after.effectsDeclared).toBe(true);
+    expect(String(after.signature)).toBe('(x: integer) random -> integer');
+    expect(executeEpsil(ce, 'g(3)').value.toString()).toBe('7');
+    expect([before.effectsDeclared, String(before.signature)]).toEqual(
+      beforeState
+    );
+  });
 });

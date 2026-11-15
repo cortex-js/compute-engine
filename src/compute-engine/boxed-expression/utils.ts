@@ -18,13 +18,11 @@ import type {
 
 import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
 import { BigDecimal } from '../../big-decimal/index.js';
-import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   noteScratchBinding,
   scratchRootOf,
   scratchRootOfBinding,
 } from '../scratch-scopes.js';
-import { tombstoneBinding } from './binding-tombstone.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -67,6 +65,7 @@ import {
   ownIndexClauseAt,
 } from './binding-sites.js';
 import { sameSyntactic } from './compare.js';
+import { beforeDefinitionWrite } from './definition-restore-point.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -1720,6 +1719,7 @@ export function updateDef(
    * `binding-repair` event below. */
   fresh?: boolean
 ): void {
+  beforeDefinitionWrite(def);
   const mutableDef = def as {
     value?: BoxedValueDefinition;
     operator?: BoxedOperatorDefinition;
@@ -1733,14 +1733,9 @@ export function updateDef(
   const supersededValue = mutableDef.value;
   const supersededOperator = mutableDef.operator;
 
-  // A value definition CONSTRUCTED by this call (as opposed to one the
-  // caller passed in already boxed). Only such a half is disposed by the
-  // rollback journal below: it is frame-created by construction, so
-  // releasing its resources (a constant's configuration-change
-  // subscription) cannot affect anything that outlives the frame — whereas
-  // a caller-supplied definition object may pre-exist the frame and be
-  // shared. The same constructed-vs-supplied discriminator gates the
-  // provenance-history transfer below, for the same non-ownership reason.
+  // A definition CONSTRUCTED by this call (as opposed to one the caller
+  // passed in already boxed). Only such a half receives the provenance
+  // history below: a caller-supplied definition object may be shared.
   let constructedValueHalf: _BoxedValueDefinition | undefined;
   let constructedOperatorHalf: _BoxedOperatorDefinition | undefined;
 
@@ -1790,10 +1785,8 @@ export function updateDef(
   // redefinition. The installed half ADOPTS the superseded half's history
   // by copy, and an effects-contract transition appends its entry, ONLY
   // when this call constructed the installed half: a caller-supplied,
-  // already-boxed half is never written to (it may pre-exist a rollback
-  // frame and be shared — mutating it would clobber history it legitimately
-  // carries and escape the frame, which restores the record's pointer, not
-  // fields on the orphaned instance). Ordered BEFORE the registry calls and
+  // already-boxed half is never written to (it may be shared — mutating it
+  // would clobber history it legitimately carries). Ordered BEFORE the registry calls and
   // the repair cascade below: the cascade can throw with the swap already
   // committed, and the history must not be lost in that case.
   {
@@ -1802,8 +1795,7 @@ export function updateDef(
     if (supersededHalf !== undefined && installedHalf !== undefined) {
       const inherited = supersededHalf._typeProvenance;
       if (inherited !== undefined && inherited.length > 0) {
-        // A copy: the superseded object's own array stays untouched, so a
-        // rollback frame's restore-by-identity of that object is exact.
+        // A copy: the superseded object's own array stays untouched.
         // Transferred entries keep their original `cause`.
         installedHalf._typeProvenance = [
           ...inherited,
@@ -1811,17 +1803,12 @@ export function updateDef(
         ];
       }
       recordEffectsTransition(
-        ce,
         installedHalf,
         effectsContractStateOf(supersededHalf),
         effectsContractStateOf(installedHalf),
         'signature' in installedHalf
           ? installedHalf.signature
           : installedHalf.type,
-        // The assigned function literal when the installed half carries
-        // one; else the ambient canonicalization cause, when a write
-        // already materialized it; else absent (the phase-1 "absent cause
-        // is honest" rule).
         ('signature' in installedHalf
           ? installedHalf._lambdaLiteral
           : installedHalf.type.matches('function')
@@ -1837,61 +1824,17 @@ export function updateDef(
   // depend on the precision, and the configuration tracker of the engine
   // holds each listener strongly. The superseded value half stops listening,
   // so that it is not kept in memory and notified for the engine's lifetime.
-  // The rollback of an inference trial puts the
-  // superseded half back in the record, so it also makes it listen
-  // again: the undo is recorded after the undo of the swap below, and the
-  // undo entries run newest first.
-  const releasedValue =
+  // A restore point that puts the half back makes it listen again
+  // (`DefinitionRestorePoint`).
+  if (
     supersededValue instanceof _BoxedValueDefinition &&
-    supersededValue !== mutableDef.value &&
-    supersededValue._releaseConfigurationChange()
-      ? supersededValue
-      : undefined;
-  const resubscribe =
-    releasedValue === undefined
-      ? undefined
-      : () => releasedValue._resubscribeConfigurationChange();
-
-  // Rollback journal (family 3, binding-half swaps): re-install the
-  // previous half objects on the SAME record, by identity, via the same
-  // delete/assign mechanism the swap above used — `sameBindingDef` is
-  // object identity, so restoring fields on
-  // the same object is the only identity-safe rollback. Recorded AFTER the
-  // swap so a throwing definition constructor journals nothing (a failed
-  // update leaves the previous definition in place on its own). The
-  // forward-reference registry effects of this update (the unregister/
-  // register calls below and in the definition constructors) are journaled
-  // by the registry's own hooks (family 5); replaying strictly LIFO keeps
-  // the two consistent. The previous half objects still exist — nothing
-  // disposes them mid-frame. The installed half is dropped; only a value
-  // half this call itself constructed is disposed (see
-  // `constructedValueHalf` above), and in debug builds it is tombstoned so
-  // a use after the rollback throws with both stacks (the escape rule of
-  // `docs/TYPE-SYSTEM.md`).
-  const rollbackFrame = activeRollbackFrame(ce);
-  if (rollbackFrame !== undefined) {
-    const disposable = constructedValueHalf;
-    rollbackFrame.record({
-      undo: () => {
-        if (supersededValue !== undefined) mutableDef.value = supersededValue;
-        else delete mutableDef.value;
-        if (supersededOperator !== undefined)
-          mutableDef.operator = supersededOperator;
-        else delete mutableDef.operator;
-        if (disposable !== undefined) {
-          if (ce._debugBindings)
-            tombstoneBinding(disposable, 'rolled-back inference frame');
-          disposable.dispose();
-        }
-      },
-    });
-    if (resubscribe !== undefined) rollbackFrame.record({ undo: resubscribe });
-  }
+    supersededValue !== mutableDef.value
+  )
+    supersededValue._releaseConfigurationChange();
 
   // The inferred signature of a self-recursive function literal is refined
   // now that the record holds the new half: its recursive calls must
-  // resolve to it (`_refineRecursiveListResult`). The half is new, so the
-  // journals above need no entry for the write.
+  // resolve to it (`_refineRecursiveListResult`).
   constructedOperatorHalf?._refineRecursiveListResult();
   // The other functions of its cycle of calls, installed before it, were
   // not recursive when they were installed: their inferred signatures are

@@ -5699,7 +5699,7 @@ function canonicalLoopLike(
     // type is evidence from the collection, not a guess. The helper also
     // takes the binding out of the fresh-inference set, so a body use that
     // contradicts the element type is an error (`bindIndexAuthoritatively`,
-    // `library/utils.ts`, says why and how the removal is journaled).
+    // `library/utils.ts`).
     ce._withoutFacts(() =>
       bindFromElement(currentElementType(), (binding, type) =>
         bindIndexAuthoritatively(ce, binding, type)

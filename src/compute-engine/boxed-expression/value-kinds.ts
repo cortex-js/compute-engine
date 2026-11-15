@@ -827,9 +827,8 @@ export function engineHasKindDeclarations(
  * records are copied, because a registration changes them in place. The
  * gates are not captured: they only open, and an open gate is safe.
  *
- * Used by an inference rollback frame (`removeBinding` in
- * `engine-declarations.ts`): a rollback puts the registry back together with
- * the definitions it refers to.
+ * Used by the Epsil static check (`epsil/static-diagnostics.ts`), which
+ * puts the registry back with the definitions it refers to.
  */
 export function kindRegistryRollbackPoint(ce: ComputeEngine): () => void {
   const registry = registryOf(ce);

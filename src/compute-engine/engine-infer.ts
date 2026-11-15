@@ -217,7 +217,7 @@ export function inferFn(
           ? { half: def.operator, type: def.operator.signature }
           : undefined;
       if (written !== undefined)
-        recordTypeProvenance(ce, written.half, {
+        recordTypeProvenance(written.half, {
           type: written.type,
           kind: 'inferred',
           axis: 'type',
