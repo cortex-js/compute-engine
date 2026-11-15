@@ -7125,10 +7125,13 @@ export const REAL_FUNCTIONS = Object.freeze({
   coth: (x: number): number => 1 / Math.tanh(x),
   fract: (x: number): number => x - Math.floor(x),
   hav: (x: number): number => Math.sin(x / 2) ** 2,
+  // The interpreter's `GCD` (`GCD(-12, 18)` is 6).
+  gcd: (a: number, b: number): number => gcd(a, b),
 });
 
 // prettier-ignore
-const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'ccot', 'catan',
+const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'ctan', 'ccot', 'csec', 'ccsc',
+  'csinh', 'ccosh', 'ctanh', 'csech', 'ccsch', 'catan',
   'casin', 'cacos', 'cacot', 'casec', 'cacsc', 'ccoth', 'casinh', 'cacosh', 'catanh', 'cacoth',
   'casech', 'cacsch', 'cconj', 'cabs', 'carg'] as const;
 

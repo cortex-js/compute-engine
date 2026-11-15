@@ -132,21 +132,21 @@ describe('the option selects the IR compiler', () => {
 
 describe('a decline', () => {
   test('falls back to the interpreter with the diagnostic', () => {
-    const r = quiet(() => compile(box(['Sinh', 'x']), IR));
+    const r = quiet(() => compile(box(['Sinc', 'x']), IR));
     expect(r.success).toBe(false);
     expect(r.diagnostic).toMatchObject({
       code: 'outside-profile',
       kind: 'capability',
-      operator: 'Sinh',
-      value: 'Sinh(x)',
+      operator: 'Sinc',
+      value: 'Sinc(x)',
     });
-    expect(r.run!({ x: 3 })).toBeCloseTo(Math.sinh(3), 12);
+    expect(r.run!({ x: 3 })).toBeCloseTo(Math.sin(3) / 3, 12);
   });
   test('with fallback: false is thrown', () => {
-    const o = outcome(box(['Sinh', 'x']));
+    const o = outcome(box(['Sinc', 'x']));
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toMatch(
-      /^Could not compile with the profile 'ir': Sinh\(x\)/
+      /^Could not compile with the profile 'ir': Sinc\(x\)/
     );
   });
 
@@ -413,7 +413,7 @@ describe('an internal error', () => {
       {
         rows: [
           {
-            head: 'Sinh',
+            head: 'Sinc',
             arity: 1,
             signatures: [[['real'], 'real', 'broken']],
             threads: false,
@@ -426,28 +426,28 @@ describe('an internal error', () => {
     );
 
   test('is a compile-error and falls back', () => {
-    const r = broken(() => quiet(() => compile(box(['Sinh', 'x']), IR)));
+    const r = broken(() => quiet(() => compile(box(['Sinc', 'x']), IR)));
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('compile-error');
     expect(r.diagnostic?.message).toMatch(/internal error/);
-    expect(r.run!({ x: 0 })).toBe(0);
+    expect(r.run!({ x: Math.PI / 2 })).toBeCloseTo(2 / Math.PI, 12);
   });
   test('with fallback: false is thrown as a compile-error', () => {
-    const o = broken(() => outcome(box(['Sinh', 'x'])));
+    const o = broken(() => outcome(box(['Sinc', 'x'])));
     expect('diagnostic' in o && o.diagnostic.code).toBe('compile-error');
   });
 });
 
 describe('a cancellation', () => {
   // A row whose fold is cancelled: `Length(L)` is the constant 3, so the
-  // `fold` pass folds `Sinh(3)` with the row.
+  // `fold` pass folds `Sinc(3)` with the row.
   test('propagates, with fallback', () => {
     const cancelled = {
       rows: [
         {
-          head: 'Sinh',
+          head: 'Sinc',
           arity: 1,
-          signatures: [[['real'], 'real', 'sinh']],
+          signatures: [[['real'], 'real', 'sinc']],
           threads: false,
           effect: 'pure',
           fold: () => {
@@ -455,12 +455,12 @@ describe('a cancellation', () => {
           },
         },
       ],
-      spellings: { sinh: 'Math.sinh($0)' },
+      spellings: { sinc: '(Math.sin($0) / $0)' },
     } as const;
     let error: unknown;
     try {
       _withIrProfileTestExtension(cancelled, () =>
-        quiet(() => compile(box(['Sinh', ['Length', 'L']]), IR))
+        quiet(() => compile(box(['Sinc', ['Length', 'L']]), IR))
       );
     } catch (e) {
       error = e;
@@ -708,7 +708,7 @@ describe('the switch of the engine', () => {
     // A decline: the existing compiler compiles it.
     const declined = implicitCompile(
       engine,
-      engine.box(['Function', ['Sinh', 'u'], 'u']),
+      engine.box(['Function', ['Sinc', 'u'], 'u']),
       'nd'
     );
     expect(declined?.success).toBe(true);
@@ -981,12 +981,21 @@ describe('a user function that reads an input of the compilation', () => {
       /a recursive call of P, which reads the input n/
     );
   });
-  test('a name that holds a value in a body declines, as a local of the name at the call', () => {
+  test('a name that holds a value in a body is that value; a local of the name at the call declines', () => {
     const e = engine();
-    const value = outcome(box(['F_s', 'x', 'y'], e));
-    expect('message' in value && value.message).toMatch(
-      /F_s reads m_s, which is not a parameter \(a capture\)/
+    // The value of the binding of the body, as at the entry (batch G6).
+    const symbolDeps = new Set<string>();
+    const value = againstInterpreter(
+      e,
+      ['F_s', 'x', 'y'],
+      [
+        { x: 2, y: 5 },
+        { x: -1.5, y: 0.25 },
+      ],
+      { symbolDeps }
     );
+    expect(value.freeSymbols).toEqual(['x', 'y']);
+    expect([...symbolDeps].sort()).toEqual(['F_s', 'm_s']);
     const local = outcome(
       box(['Block', ['Declare', 'n', 'real', 5], ['TychoCertificate55']], e),
       { symbolic: ['n'] }
@@ -1586,5 +1595,101 @@ describe('trigonometric rows under an angular unit other than radians', () => {
         } as never) as CompilationResult<'javascript'>
       ).code
     );
+  });
+});
+
+describe('a literal value is read with no N() (CE-1065)', () => {
+  /** The calls of `N()` on `value` and on every node under it while `run`
+   *  runs (as `countEvaluations()` of `ce-1065-literal-fold-work.test.ts`). */
+  function countEvaluations(value: Expression, run: () => void): number {
+    let calls = 0;
+    const nodes: Expression[] = [];
+    const visit = (x: Expression) => {
+      nodes.push(x);
+      for (const op of x.ops ?? []) visit(op);
+    };
+    visit(value);
+    for (const node of nodes) {
+      const N = node.N.bind(node);
+      Object.defineProperty(node, 'N', {
+        configurable: true,
+        value: () => {
+          calls += 1;
+          return N();
+        },
+      });
+    }
+    try {
+      run();
+      return calls;
+    } finally {
+      for (const node of nodes) delete (node as { N?: unknown }).N;
+    }
+  }
+
+  const thousand = Array.from({ length: 1000 }, (_, k) => k / 8);
+  test.each([
+    [
+      'a list of tuples',
+      ['List', ['Tuple', 2, 0.5], ['Tuple', 3, -0.25]],
+      [
+        [2, 0.5],
+        [3, -0.25],
+      ],
+    ],
+    ['a tuple', ['Tuple', 2.64, 17], [2.64, 17]],
+    ['a list of 1,000 numbers', ['List', ...thousand], thousand],
+    [
+      'a matrix',
+      ['List', ['List', 1, 2.5], ['List', -3, 4]],
+      [
+        [1, 2.5],
+        [-3, 4],
+      ],
+    ],
+  ] as const)('%s', (_, json, expected) => {
+    const ce = new ComputeEngine();
+    ce.assign('pts', ce.box(json as never));
+    const stored = ce._getSymbolValue('pts')!;
+    let result: CompilationResult<'javascript'> | undefined;
+    const calls = countEvaluations(stored, () => {
+      result = compile(ce.box('pts'), {
+        ...IR,
+        fallback: false,
+      } as never) as CompilationResult<'javascript'>;
+    });
+    expect(calls).toBe(0);
+    expect(result!.profile).toBe('ir');
+    expect((result!.run as (x: object) => unknown)({})).toEqual(expected);
+  });
+
+  test('a point value on GLSL, and a literal list written in the program', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'real');
+    ce.assign('P', ce.box(['Tuple', 2.64, 17]));
+    const stored = ce._getSymbolValue('P')!;
+    let code = '';
+    expect(
+      countEvaluations(stored, () => {
+        code = compile(ce.box(['Multiply', 't', 'P']), {
+          to: 'glsl',
+          profile: 'ir',
+          fallback: false,
+        }).code;
+      })
+    ).toBe(0);
+    expect(code).toMatch(/^vec2\(/);
+    const literal = ce.box(['Add', 't', ['List', 1.5, 2, 3]]);
+    const list = literal.ops![1];
+    let r: CompilationResult<'javascript'> | undefined;
+    expect(
+      countEvaluations(list, () => {
+        r = compile(literal, {
+          ...IR,
+          fallback: false,
+        } as never) as CompilationResult<'javascript'>;
+      })
+    ).toBe(0);
+    expect((r!.run as (x: object) => unknown)({ t: 1 })).toEqual([2.5, 3, 4]);
   });
 });

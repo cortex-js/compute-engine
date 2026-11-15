@@ -74,11 +74,40 @@ export const GLSL: Syntax = Object.freeze({
     'sqrt': 'sqrt($0)',
     'abs': 'abs($0)',
     'exp': 'exp($0)',
-    'ln': 'log($0)',
+    // A builtin that GLSL ES 3.00 leaves undefined at some reals is spelled
+    // with its domain: NaN outside it, where the interpreter's real value
+    // is not real (or is a pole), so no value depends on the driver.
+    'ln': `($0 > 0.0 ? log($0) : ${NAN})`,
+    'log10': `($0 > 0.0 ? log($0) * 0.4342944819032518 : ${NAN})`,
+    'log2': `($0 > 0.0 ? log2($0) : ${NAN})`,
     'sin': 'sin($0)',
     'cos': 'cos($0)',
     'tan': 'tan($0)',
     'cot': '(1.0 / tan($0))',
+    'sec': '(1.0 / cos($0))',
+    'csc': '(1.0 / sin($0))',
+    'sinh': 'sinh($0)',
+    'cosh': 'cosh($0)',
+    // A renderer can compute `tanh` as a quotient of exponentials, NaN
+    // from |x| = 89: it is ±1 to float precision from |x| = 20.
+    'tanh': '(abs($0) > 20.0 ? sign($0) : tanh($0))',
+    'coth': '(1.0 / (abs($0) > 20.0 ? sign($0) : tanh($0)))',
+    'sech': '(1.0 / cosh($0))',
+    'csch': '(1.0 / sinh($0))',
+    'asin': `(abs($0) <= 1.0 ? asin($0) : ${NAN})`,
+    'acos': `(abs($0) <= 1.0 ? acos($0) : ${NAN})`,
+    'acosh': `($0 >= 1.0 ? acosh($0) : ${NAN})`,
+    'atanh': `(abs($0) < 1.0 ? atanh($0) : ${NAN})`,
+    // `Arctan2(y, x)`; the interpreter's value at (0, 0) is 0.
+    'atan2': '($0 == 0.0 && $1 == 0.0 ? 0.0 : atan($0, $1))',
+    'hypot': 'length(vec2($0, $1))',
+    'root': { text: '_gpu_ir_root($0, $1)', helpers: ['_gpu_ir_root'] },
+    // A real operand declines (no `factorial` spelling): `Gamma(x + 1)`.
+    'factorial.int': {
+      text: '_gpu_ir_factorial($0)',
+      helpers: ['_gpu_ir_factorial'],
+    },
+    'gcd': { text: '_gpu_ir_gcd($0, $1)', helpers: ['_gpu_ir_gcd'] },
     'deg': 'radians($0)',
     'floor': 'floor($0)',
     'ceil': 'ceil($0)',
@@ -117,9 +146,6 @@ export const GLSL: Syntax = Object.freeze({
       helpers: ['_gpu_ir_texel'],
     },
     'rangestep': '($1 >= $0 ? 1.0 : -1.0)',
-    // Only the builtins defined on every real: `asin`, `acos`, `acosh`,
-    // `atanh` and `atan(y, x)` are undefined at some reals in GLSL ES 3.00,
-    // and their rows decline on this target.
     'trunc': 'trunc($0)',
     'sign': 'sign($0)',
     'fract': 'fract($0)',
@@ -161,6 +187,36 @@ export const GLSL: Syntax = Object.freeze({
       '  int r = ia - ib * (ia / ib);',
       '  if (r != 0 && (r < 0) != (ib < 0)) r += ib;',
       '  return float(r);',
+      '}',
+    ].join('\n'),
+    // `Root(x, n)`: the real root of a negative radicand for an odd
+    // integer index, as `root` of `REAL_FUNCTIONS`; NaN for another index of
+    // a negative radicand (the interpreter's real root of an odd
+    // denominator, `Root(-8, 2.5)`, is not computed).
+    _gpu_ir_root: [
+      'float _gpu_ir_root(float x, float n) {',
+      '  if (x == 0.0 && n > 0.0) return 0.0;',
+      `  if (n == 0.0) return ${NAN};`,
+      '  if (x >= 0.0) return pow(x, 1.0 / n);',
+      `  return n == floor(n) && mod(n, 2.0) == 1.0 ? -pow(-x, 1.0 / n) : ${NAN};`,
+      '}',
+    ].join('\n'),
+    // `n!` of an integer: +∞ for a negative operand (a pole) and over 34
+    // (35! is over the largest float).
+    _gpu_ir_factorial: [
+      'float _gpu_ir_factorial(float n) {',
+      '  if (n < 0.0 || n > 34.0) return uintBitsToFloat(0x7f800000u);',
+      '  float r = 1.0;',
+      '  for (int i = 2; i <= 34; i++) if (float(i) <= n) r *= float(i);',
+      '  return r;',
+      '}',
+    ].join('\n'),
+    // The greatest common divisor of two integers, on `int`s.
+    _gpu_ir_gcd: [
+      'float _gpu_ir_gcd(float a, float b) {',
+      '  int x = abs(int(a)), y = abs(int(b));',
+      '  for (int i = 0; i < 64 && y != 0; i++) { int t = x % y; x = y; y = t; }',
+      '  return float(x);',
       '}',
     ].join('\n'),
     // The element `k` (from 0) of a list in a sampler (README, `storage`).

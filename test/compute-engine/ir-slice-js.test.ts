@@ -127,7 +127,7 @@ describe('IR slice: the real functions at edge inputs', () => {
   const UNARY = ['Erf', 'Erfc', 'Gamma', 'GammaLn', 'Factorial', 'Factorial2', 'Zeta',
     'Arctan', 'Arcsin', 'Arccos', 'Arccot', 'Arcsec', 'Arccsc', 'Haversine', 'Coth',
     'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch', 'Sign', 'Truncate',
-    'Fract', 'Log'];
+    'Fract', 'Log', 'Sinh', 'Cosh', 'Tanh', 'Sec', 'Csc', 'Sech', 'Csch'];
   // Values of the interpreter that are not the function's: CE-1256
   // (`Root(x, n)` with a negative integer n given as a value is 0 at
   // x = 0, 1.333e-100 at x = 1e300 and ±∞ at x = ±1e-300, n = -3); CE-1257 (`Zeta(s)` is -∞
@@ -518,13 +518,13 @@ describe('IR slice: declines', () => {
 });
 
 describe('IR slice: effects', () => {
-  // A test row, for these compilations only: `Sinh` as an effectful
+  // A test row, for these compilations only: `Sinc` as an effectful
   // operation that records its operand.
   const log: number[] = [];
   const TICK: Extension = {
     rows: [
       {
-        head: 'Sinh',
+        head: 'Sinc',
         arity: 1,
         signatures: [[['real'], 'real', 'tick']],
         threads: false,
@@ -544,30 +544,30 @@ describe('IR slice: effects', () => {
   beforeEach(() => (log.length = 0));
 
   test('not merged', () => {
-    tick(['List', ['Sinh', 'x'], ['Sinh', 'x']]).run({ x: 1 });
+    tick(['List', ['Sinc', 'x'], ['Sinc', 'x']]).run({ x: 1 });
     expect(log).toEqual([1, 1]);
   });
   test('not removed', () => {
-    expect(tick(['Block', ['Sinh', 'x'], 7]).run({ x: 2 })).toBe(7);
+    expect(tick(['Block', ['Sinc', 'x'], 7]).run({ x: 2 })).toBe(7);
     expect(log).toEqual([2]);
   });
   test('not reordered', () => {
-    tick(['List', ['Sinh', 'x'], ['Sinh', 'y'], ['Sinh', 'x']]).run({
+    tick(['List', ['Sinc', 'x'], ['Sinc', 'y'], ['Sinc', 'x']]).run({
       x: 1,
       y: 2,
     });
     expect(log).toEqual([1, 2, 1]);
   });
   test('not folded, closed or not', () => {
-    expect(tick(['Add', ['Sinh', 2], 1]).run({})).toBe(3);
+    expect(tick(['Add', ['Sinc', 2], 1]).run({})).toBe(3);
     expect(log).toEqual([2]);
   });
   test('the table is not changed by a compilation', () => {
-    expect(OPERATORS.some((r) => r.head === 'Sinh')).toBe(false);
+    expect(OPERATORS.some((r) => r.head === 'Sinc')).toBe(false);
     expect(Object.isFrozen(OPERATORS) && Object.isFrozen(JS.ops)).toBe(true);
   });
   test('a shared node with an effect is evaluated at each occurrence', () => {
-    const e = ce.box(['Sinh', 'x'] as never);
+    const e = ce.box(['Sinc', 'x'] as never);
     const program = ce.function('Add', [e, e]);
     expect(
       compileSlice(program, { target: 'javascript', extend: TICK }).run({
@@ -577,7 +577,7 @@ describe('IR slice: effects', () => {
     expect(log).toEqual([3, 3]);
   });
   test('the right operand of Or is evaluated only when needed', () => {
-    const r = tick(['Or', 'p', ['Greater', ['Sinh', 'x'], 0]]);
+    const r = tick(['Or', 'p', ['Greater', ['Sinc', 'x'], 0]]);
     expect(r.run({ p: true, x: 5 })).toBe(true);
     expect(log).toEqual([]);
     expect(r.run({ p: false, x: 5 })).toBe(true);
@@ -670,34 +670,34 @@ describe('IR slice: the memo of the lowering', () => {
 });
 
 describe('IR slice: an operator is one row', () => {
-  test('Tanh: one row and one spelling per printer', () => {
+  test('Sinc: one row and one spelling per printer', () => {
     const rows: Extension['rows'] = [
       {
-        head: 'Tanh',
+        head: 'Sinc',
         arity: 1,
-        signatures: [[['real'], 'real', 'tanh']],
+        signatures: [[['real'], 'real', 'sinc']],
         threads: true,
         effect: 'pure',
-        fold: Math.tanh,
+        fold: (x: number) => Math.sin(x) / x,
       },
     ];
-    const expr = ce.box(['Add', ['Tanh', 'x'], ['Tanh', 'L']] as never);
+    const expr = ce.box(['Add', ['Sinc', 'x'], ['Sinc', 'L']] as never);
     const point = { x: 0.3, L: [1, -2, 0.5] };
     for (const passes of [false, true])
       expect(
         agrees(
           runSlice(expr, point, passes, {
             rows,
-            spellings: { tanh: 'Math.tanh($0)' },
+            spellings: { sinc: '(Math.sin($0) / $0)' },
           }),
           interpret(ce, expr, point)
         )
       ).toBe(true);
-    const glsl = { rows, spellings: { tanh: 'tanh($0)' } };
+    const glsl = { rows, spellings: { sinc: '(sin($0) / $0)' } };
     expect(compileSlice(expr, { target: 'glsl', extend: glsl }).code).toMatch(
-      /tanh\(in\d_x\)/
+      /sin\(in\d_x\) \/ in\d_x/
     );
-    expect(GLSL.ops.tanh).toBeUndefined();
+    expect(GLSL.ops.sinc).toBeUndefined();
   });
 });
 
@@ -1415,8 +1415,8 @@ describe('IR slice: runtime', () => {
     expect(g.head).toBe('Random');
   });
   test('a closed sub-expression of a head out of the slice is not evaluated', () => {
-    expect(declineOf(() => js(['Add', 'x', ['Sinh', 3]])).cause).toMatch(
-      /Sinh/
+    expect(declineOf(() => js(['Add', 'x', ['Sinc', 3]])).cause).toMatch(
+      /Sinc/
     );
   });
 });

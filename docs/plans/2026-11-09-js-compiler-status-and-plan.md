@@ -1614,6 +1614,41 @@ text is the same). Measured in a worktree at
 No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267.
 
+Batch G6, 2026-11-14 (the causes of Tycho's G4 run). GLSL spellings for
+`Arctan2`, `Arcsin`, `Arccos`, `Arcosh`, `Artanh`, `Ln`, `Log`, `Hypot`,
+`Root`, an integer `Factorial` and an integer `GCD`; new rows on both
+targets: `Sec`, `Csc`, `Sinh`, `Cosh`, `Tanh`, `Sech`, `Csch`. The rule of
+the GLSL spellings as it is: the inverse trigonometric and hyperbolic
+functions and the logarithms write NaN outside their domain and `tanh` is
+clamped; `sqrt`, a division and `mod` are the bare GLSL operations, whose
+result outside the domain is the driver's (no NaN-safe helper is carried
+over, and Tycho's render audit showed no picture change). `Log(x, 2)` and
+`Log(x, 10)` use `log2` and `log10` (the quotient `Ln(x)/Ln(b)` was off by
+one under `Floor` at exact powers: review finding); another base is the
+quotient. A name that holds a number, a list of numbers or a tuple of
+numbers and is read in the body of a called function is the literal of its
+value when the occurrence resolves to the definition that the scope of the
+compilation gives the name, which `compile()` ensures; a name whose value is
+an expression of other names still declines. `PointX`, `PointY`, `PointZ`
+are element reads of a tuple. The float32 warning does not fire for a `Mod`
+or `Fract` that is closed when the fold is on. The fold of the lowering no
+longer calls `N()` on a literal list or tuple (the shadow run failed a test
+of CE-1065, which requires that a compilation evaluates no element of a
+literal value). Measured in a worktree at
+`34160118aa8987af0030624165bcb67053a15113` plus the patch; 6,581 lines in
+`ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,509 of 10,854 (96.8%) |
+| Every JavaScript compile | 24,439 of 38,924 (62.8%) |
+| Public JavaScript `compile()` calls | 13,920 of 28,061 (49.6%) |
+| GLSL `compile()` calls | 870 of 2,371 (36.7%); 808 of the 1,574 that the existing target compiles (51.3%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267. The largest cause of a GLSL decline in
+the suite is the complex lane (187), then the option `functions` (21).
+
 Batch G4, 2026-11-14: Tycho's run with the profile on both seams (session
 `tycho-desk`; build of `613d42af80582b5dff622714410fff969cccb6f2`).
 

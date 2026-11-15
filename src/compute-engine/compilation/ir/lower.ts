@@ -29,8 +29,9 @@
  *   values before them do not decide. The `hoist` pass moves a pure one
  *   out of its arm.
  * - A free name with a value in the engine is that value, a literal of the
- *   program (`Program.captures`), when it is a number or a list of numbers,
- *   or an expression with no free name and no effect.
+ *   program (`Program.captures`), when it is a number, or a list or a
+ *   tuple of numbers, also in a function body whose occurrence reads the
+ *   same binding.
  * - A real read where a complex is read is converted there (`widen()`).
  *
  * Nothing persists between two calls of `lower()`: every cache is made per
@@ -610,6 +611,37 @@ export function lower(
           );
         return apply(e, row('At'), [l, i]);
       }
+      case 'PointX':
+      case 'PointY':
+      case 'PointZ': {
+        // The coordinate of a point, an `At` of a tuple of scalars (a
+        // coordinate past the last one is an `incompatible-dimensions`
+        // error of the canonical form, which declines first).
+        const p = value(e.ops[0])!;
+        if (e.nops !== 1 || tuples.get(p) !== 0 || type(p).shape.length !== 1)
+          decline(e, `${e.operator} of a value that is not a point`);
+        const k = ['PointX', 'PointY', 'PointZ'].indexOf(e.operator) + 1;
+        return apply(e, row('At'), [p, b.constant(k, 'integer')]);
+      }
+      case 'Log': {
+        // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
+        // power of the base, as the interpreter: `Floor(Log(1000, 10))` is
+        // 3); another base is `Ln(x) / Ln(b)`.
+        if (e.nops !== 2) break;
+        const [x, base] = e.ops.map((op) => value(op)!);
+        if (constant(base) === 10) return apply(e, row('Log'), [x]);
+        if (
+          constant(base) === 2 &&
+          type(x).lane !== 'complex' &&
+          options.mode !== 'complex'
+        )
+          return apply(e, rowOfOp(rows, 'log2')!.row, [x]);
+        return apply(
+          e,
+          row('Divide'),
+          [x, base].map((v) => apply(e, row('Ln'), [v]))
+        );
+      }
       case 'Length':
         return lists.source(e.ops[0], false, true).length;
       case 'Range':
@@ -724,8 +756,13 @@ export function lower(
    *  cancellation, which propagates): the walk lowers it then. */
   const closedValue = (e: Fn): V | undefined => {
     const f = facts(e);
+    // A `List` or a `Tuple` is not a number: its elements are folded one by
+    // one, and a literal is read as it is, with no `N()` (CE-1065: the cost
+    // of a large literal list).
     if (
       options.fold === false ||
+      e.operator === 'List' ||
+      e.operator === 'Tuple' ||
       !f.slice ||
       f.loop ||
       f.size > CLOSED_SIZE ||
@@ -789,18 +826,20 @@ export function lower(
   };
 
   /** The value of the free name `e`, which holds `v` in the engine: a
-   *  literal when `v` is a number or a list of numbers (no symbol, no
+   *  literal when `v` is a number, a list or a tuple of numbers (no symbol, no
    *  other application); any other value declines, as its names have
    *  bindings of their own. The name is a capture (`symbolDeps`) unless its
    *  binding is the library's. */
   const captured = (e: Expression, name: string, v: Expression): V => {
     const numbers = (x: Expression): boolean =>
       isNumber(x) ||
-      (isFunction(x, 'List') && x.nops > 0 && x.ops.every(numbers));
+      ((isFunction(x, 'List') || isFunction(x, 'Tuple')) &&
+        x.nops > 0 &&
+        x.ops.every(numbers));
     if (!numbers(v))
       decline(
         e,
-        'a symbol with a value that is not a number or a list of numbers'
+        'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers)'
       );
     if (!held(name)!.library) b.captures.add(name);
     return value(v)!;
@@ -866,7 +905,18 @@ export function lower(
         : input(e, name, e.type.type);
     // In a function body the interpreter reads the binding of the body,
     // which need not be the binding of the name where the call is: a name
-    // with a value declines; an input is a parameter that each call passes.
+    // whose binding here is the body's is its value, as at the entry
+    // (`compile()` chooses a scope where it is, `compilationScope()`);
+    // another name with a value declines; an input is a parameter that
+    // each call passes.
+    const def = ce.lookupDefinition(name);
+    if (
+      h?.value !== undefined &&
+      def !== undefined &&
+      'value' in def &&
+      def.value === resolvedValueDefinition(e)
+    )
+      return captured(e, name, h.value);
     if (
       h?.value !== undefined ||
       resolvedValueDefinition(e)?.value !== undefined

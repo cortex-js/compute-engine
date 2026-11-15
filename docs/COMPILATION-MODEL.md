@@ -169,6 +169,15 @@ interpreter's value. A line is removed when the case declines or is fixed.
   undefined there in GLSL ES 3.00), also where the interpreter has a real
   value: at `x = -8`, `y = 2/3` the interpreter gives `4`. A single-float
   exponent cannot be read as a rational of odd denominator.
+- `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Hypot(x, y)` is
+  `length(vec2(x, y))`, which squares its operands: `Hypot(1e20, 1e20)` gives
+  `Infinity` and `Hypot(1e-25, 1e-25)` gives `0`.
+- `plausible?` — `glsl`, profile `ir`, `x: real`: `Arsinh(x)` at `x = -5000`
+  gives `-88.03` in the software renderer (SwiftShader), where the value is
+  `-9.21`: the builtin `asinh`, not checked on a GPU.
+- `javascript` and `glsl`, profile `ir` (crafted), `x: real`: `Log(x, b)` with
+  a base other than 2 and 10 is `Ln(x)/Ln(b)`: `Ceil(Log(x, 5))` at `x = 125`
+  gives `4`, as the existing compiler does; the interpreter gives `3`.
 - `plausible?` — `javascript`, profile `ir`, `k: integer`:
   `Comprehension(2k, Element(k, Range(1, k)))`, whose index shadows a name
   that its own range reads, gives `[2, 4, 6]` at `k = 3`; the interpreter

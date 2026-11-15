@@ -422,10 +422,10 @@ describe('IR slice: names with a value', () => {
     // fixed at compile time is used (the existing compiler emits `10 + _.x`).
     expect(r.run({ x: 1, v: 99 })).toBe(11);
   });
-  test('a value that is a draw, an expression with a free name, a tuple or a function declines', () => {
+  test('a value that is a draw, an expression with a free name, a tuple with a name or a function declines', () => {
     const engine = makeEngine();
     engine.assign('r', engine.box(['Random'] as never));
-    engine.assign('tp', engine.box(['Tuple', 1, 2] as never));
+    engine.assign('tp', engine.box(['Tuple', 1, 'y'] as never));
     for (const json of [
       ['Add', 'r', 1],
       ['Add', 'hx', 1],

@@ -27,7 +27,9 @@ import { _withIrProfileTestExtension } from '../../src/compute-engine/compilatio
 import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
 import { _jsProfileShadowStats } from '../../src/compute-engine/js-profile-switch';
 import { GlslDriver } from '../../scripts/glsl-check/glsl-driver';
-import { interpret, makeEngine, type Point } from './ir-slice-oracle';
+import { compileSlice } from '../../src/compute-engine/compilation/ir';
+import type { CompilationResult } from '../../src/compute-engine/compilation/types';
+import { agrees, interpret, makeEngine, type Point } from './ir-slice-oracle';
 import type { Expression } from '../../src/compute-engine/global-types';
 import {
   isFunction,
@@ -772,10 +774,25 @@ describe('IR profile on GLSL: the float32-unsafe warning', () => {
     expect(codes(glsl(['fh', 'x']))).toEqual(WARNED);
   });
 
-  test('a closed operand warns too: with constantFold: false it stays shader arithmetic', () => {
-    const json = ['Mod', ['Multiply', 10000, ['Sin', 1]], 2];
-    expect(codes(glsl(json, { constantFold: false }))).toEqual(WARNED);
-    expect(codes(glsl(json))).toEqual(WARNED);
+  test('a closed operand warns only with constantFold: false, where it stays shader arithmetic', () => {
+    // Tycho's witness: a fixed pseudo-random number per curve, which the
+    // lowering folds in doubles.
+    for (const json of [
+      ['Mod', ['Multiply', 10000, ['Sin', 1]], 2],
+      ['Mod', ['Multiply', 10000, ['Sin', 100000]], 1],
+      ['Fract', ['Multiply', 43758.5, ['Sin', ['Multiply', 12.9898, 'Pi']]]],
+    ]) {
+      expect(codes(glsl(json, { constantFold: false }))).toEqual(WARNED);
+      expect(glsl(json).warnings).toBeUndefined();
+    }
+    // A closed operand under a call or an operator out of the rows warns,
+    // and so does a closed dividend of a `Mod` by an input, which is not
+    // folded (it is the float32 literal 8414710.0).
+    for (const json of [
+      ['Mod', ['Multiply', 10000, ['Sin', ['h2', 1]]], 1],
+      ['Mod', ['Multiply', 10000000, ['Sin', 1]], 'x'],
+    ])
+      expect(codes(glsl(json))).toEqual(WARNED);
   });
 
   test('a shared graph of depth 40 (CE-584) is walked once per node', () => {
@@ -1341,7 +1358,7 @@ describe('IR profile on GLSL: declines', () => {
     const broken = {
       rows: [
         {
-          head: 'Sinh',
+          head: 'Sinc',
           arity: 1 as const,
           signatures: [[['real'], 'real', 'broken']] as never,
           threads: false,
@@ -1351,10 +1368,10 @@ describe('IR profile on GLSL: declines', () => {
       spellings: { broken: { text: 'x', helpers: 1 as never } },
     };
     _withIrProfileTestExtension(broken, () => {
-      expect(declined(['Sinh', 'x'])?.code).toBe('compile-error');
+      expect(declined(['Sinc', 'x'])?.code).toBe('compile-error');
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const r = compile(ce.box(['Sinh', 'x']), { to: 'glsl', profile: 'ir' });
+        const r = compile(ce.box(['Sinc', 'x']), { to: 'glsl', profile: 'ir' });
         expect([r.success, r.profile]).toEqual([true, undefined]);
       } finally {
         warn.mockRestore();
@@ -1452,5 +1469,392 @@ describe('IR profile on GLSL: declines', () => {
     expect(() =>
       compile(ce.box(['Sin', 'x']), { to: 'glsl', profile: 'numeric-kernel' })
     ).toThrow(/defined for the target "javascript" only/);
+  });
+});
+
+//
+// Batch G6: the real functions on GLSL, the hyperbolic and reciprocal rows,
+// a valued name read in a function body, `PointX`, a tuple value
+//
+
+/** An engine for batch G6: `x`, `y`, `t`, `u` real, `n` integer; `av`
+ *  holds 2, `lv` a list, `P0` a point; `Xa(u, t)` reads `av` (Tycho's
+ *  shape), `Ls(s)` reads `lv`, `Pt(s)` returns a point. */
+function g6Engine(): ComputeEngine {
+  const e = new ComputeEngine();
+  for (const name of ['x', 'y', 't', 'u']) e.declare(name, 'real');
+  e.declare('n', 'integer');
+  e.declare('av', 'real');
+  e.assign('av', 2);
+  e.assign('lv', e.box(['List', 1, 2.5, -4]));
+  e.assign('P0', e.box(['Tuple', 2.64, 17]));
+  e.assign(
+    'Xa',
+    e.box(['Function', ['Add', 'u', ['Multiply', 'av', 't']], 'u', 't'])
+  );
+  e.assign('Ls', e.box(['Function', ['Multiply', 's', ['At', 'lv', 2]], 's']));
+  e.declare('Pt', '(real) -> tuple<real, real>');
+  e.assign(
+    'Pt',
+    e.box(['Function', ['Tuple', ['Cos', 's'], ['Sin', 's']], 's'])
+  );
+  return e;
+}
+const e6 = g6Engine();
+const TYCHO_G6 = { symbolic: ['t', 'x', 'y'] };
+
+// The rows on both targets: three ordinary points each, and for a GLSL
+// spelling with a domain one point outside it, where it writes NaN.
+// prettier-ignore
+const G6_ROWS: [json: Json, points: Point[], outside?: Point][] = [
+  [['Arcsin', 'x'], [{ x: 0.5 }, { x: -0.3 }, { x: 0.9 }], { x: 1.5 }],
+  [['Arccos', 'x'], [{ x: 0.5 }, { x: -0.3 }, { x: 0.9 }], { x: -2 }],
+  [['Arctan2', 'y', 'x'], [{ y: 1, x: 2 }, { y: -1, x: -1 }, { y: 0.5, x: -2 }, { y: 0, x: 0 }]],
+  [['Arcosh', 'x'], [{ x: 1.5 }, { x: 3 }, { x: 10 }], { x: 0.5 }],
+  [['Artanh', 'x'], [{ x: 0.5 }, { x: -0.3 }, { x: 0.9 }], { x: 2 }],
+  [['Log', 'x'], [{ x: 2 }, { x: 100 }, { x: 0.5 }], { x: -1 }],
+  [['Log', 'x', 2], [{ x: 8 }, { x: 3 }, { x: 0.25 }], { x: -1 }],
+  [['Log', 'x', 'y'], [{ x: 8, y: 3 }, { x: 0.5, y: 10 }, { x: 7, y: 0.5 }]],
+  [['Log', 'x', 10], [{ x: 1000 }, { x: 1e6 }, { x: 0.01 }], { x: -1 }],
+  [['Log', 'x', 2], [{ x: 1024 }, { x: 2 ** 20 }, { x: 0.125 }]],
+  [['Tanh', ['Multiply', 100, 'x']], [{ x: 1 }, { x: -1 }, { x: 0.005 }]],
+  [['Coth', ['Multiply', 100, 'x']], [{ x: 1 }, { x: -1 }, { x: 0.005 }]],
+  [['Root', 'x', 20], [{ x: 0 }, { x: 1 }, { x: 5 }]],
+  [['Ln', 'x'], [{ x: 2 }, { x: 0.1 }, { x: 50 }], { x: -2 }],
+  [['Root', 'x', 3], [{ x: -8 }, { x: 27 }, { x: 0.5 }]],
+  [['Root', 'x', 'y'], [{ x: -8, y: 3 }, { x: 16, y: 4 }, { x: 2, y: 0.5 }], { x: -8, y: 2 }],
+  [['Hypot', 'x', 'y'], [{ x: 3, y: 4 }, { x: -1, y: 2 }, { x: 0.5, y: 0.25 }]],
+  [['Sinh', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Cosh', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Tanh', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Sec', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Csc', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Coth', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Sech', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Csch', 'x'], [{ x: 0.5 }, { x: -1.25 }, { x: 2 }]],
+  [['Factorial', ['Floor', 'x']], [{ x: 5.5 }, { x: 0 }, { x: 10.2 }]],
+  [['GCD', ['Round', 'x'], ['Round', 'y']], [{ x: 12.4, y: 18.2 }, { x: -12, y: 8 }, { x: 0, y: 5 }]],
+  [['PointX', ['Tuple', ['Cos', 'x'], ['Sin', 'x']]], [{ x: 0.5 }, { x: -2 }, { x: 3 }]],
+  [['PointY', ['Pt', 'x']], [{ x: 0.5 }, { x: -2 }, { x: 3 }]],
+  [['PointZ', ['Tuple', 'x', 'y', ['Multiply', 2, 'x']]], [{ x: 0.5, y: 1 }, { x: -2, y: 3 }, { x: 3, y: 0 }]],
+  [['Multiply', 't', ['PointY', 'P0']], [{ t: 2 }, { t: -0.5 }, { t: 3 }]],
+  [['Xa', 0, 't'], [{ t: 2 }, { t: -0.5 }, { t: 3 }]],
+  [['Ls', 'x'], [{ x: 2 }, { x: -0.5 }, { x: 3 }]],
+];
+// The angular unit in degrees, for the trigonometric rows.
+// prettier-ignore
+const G6_DEGREES: [json: Json, points: Point[]][] = [
+  [['Sec', 'x'], [{ x: 60 }, { x: -30 }, { x: 100 }]],
+  [['Csc', 'x'], [{ x: 30 }, { x: -45 }, { x: 100 }]],
+  [['Arcsin', 'x'], [{ x: 0.5 }, { x: -0.3 }, { x: 0.9 }]],
+  [['Arctan2', 'y', 'x'], [{ y: 1, x: 1 }, { y: -1, x: -1 }, { y: 0.5, x: -2 }]],
+];
+
+/** The compilation of `json` in the engine of batch G6, on `to`. */
+const g6 = (json: Json, to: 'glsl' | 'javascript', options: object = {}) =>
+  compile(e6.box(json as never), {
+    to,
+    profile: 'ir',
+    fallback: false,
+    ...TYCHO_G6,
+    ...options,
+  } as never) as CompilationResult<'javascript'>;
+
+/** `f()` with the angular unit of `e6` in degrees. */
+function inDegrees<T>(f: () => T): T {
+  e6.angularUnit = 'deg';
+  try {
+    return f();
+  } finally {
+    e6.angularUnit = 'rad';
+  }
+}
+
+/** The diagnostic of a compilation that throws, or `undefined`. */
+function thrown(
+  f: () => unknown
+): { code: string; message: string } | undefined {
+  try {
+    f();
+  } catch (x) {
+    return (x as { diagnostic?: { code: string; message: string } }).diagnostic;
+  }
+  return undefined;
+}
+
+describe('IR profile, batch G6: the rows on JavaScript', () => {
+  const check = (json: Json, points: Point[]) => {
+    const r = g6(json, 'javascript');
+    for (const p of points) {
+      const expected = interpret(e6, e6.box(json as never), p);
+      expect([p, agrees(r.run!(p as never), expected)]).toEqual([p, true]);
+    }
+  };
+  test.each(
+    G6_ROWS.map(
+      ([json, points]) => [JSON.stringify(json), json, points] as const
+    )
+  )('%s', (_, json, points) => check(json, points));
+  test.each(
+    G6_DEGREES.map(
+      ([json, points]) => [JSON.stringify(json), json, points] as const
+    )
+  )('%s in degrees', (_, json, points) => inDegrees(() => check(json, points)));
+  test('Log of base 2 and 10 is exact at a power of the base', () => {
+    // `Ln(x)/Ln(b)` gave 30 for `Ceil(Log(2^29, 2))` and 2 for
+    // `Floor(Log(1000, 10))`.
+    const cases: [Json, Point[]][] = [
+      [['Ceil', ['Log', 'x', 2]], [29, 31, 39, 47, 51].map((k) => ({ x: 2 ** k }))],
+      [['Floor', ['Log', 'x', 10]], [{ x: 1000 }, { x: 1e6 }, { x: 1e15 }]],
+      [['Equal', ['Log', 'x', 10], 3], [{ x: 1000 }]],
+    ];
+    for (const [json, points] of cases) check(json, points);
+    expect(g6(['Ceil', ['Log', 'x', 2]], 'javascript').run!({ x: 2 ** 29 } as never)).toBe(29);
+    expect(g6(['Equal', ['Log', 'x', 10], 3], 'javascript').run!({ x: 1000 } as never)).toBe(true);
+  });
+  test('the complex lane of the hyperbolic and reciprocal rows', () => {
+    const engine = new ComputeEngine();
+    engine.declare('z', 'complex');
+    for (const head of ['Sinh', 'Cosh', 'Tanh', 'Sec', 'Csc', 'Sech', 'Csch']) {
+      const expr = engine.box([head, 'z']);
+      const r = compile(expr, { profile: 'ir', fallback: false });
+      const p = { z: { re: 0.5, im: -0.75 } } as never;
+      expect([head, agrees(r.run!(p), interpret(engine, expr, p))]).toEqual([
+        head,
+        true,
+      ]);
+    }
+  });
+});
+
+describe('IR profile, batch G6: GLSL', () => {
+  test('each row has a GLSL form', () => {
+    for (const [json] of G6_ROWS)
+      expect([json, g6(json, 'glsl').success]).toEqual([json, true]);
+  });
+  test('a domain is written in the spelling; Arctan2 at (0, 0) is 0', () => {
+    expect(g6(['Arcsin', 'x'], 'glsl').code).toBe(
+      '(abs(x) <= 1.0 ? asin(x) : uintBitsToFloat(0x7fc00000u))'
+    );
+    expect(g6(['Arctan2', 'y', 'x'], 'glsl').code).toBe(
+      '(y == 0.0 && x == 0.0 ? 0.0 : atan(y, x))'
+    );
+    // An operand read twice is named, not computed twice.
+    const r = g6(['Arcsin', ['Sin', ['Multiply', 3, 'x']]], 'glsl');
+    expect(r.code.match(/\bsin\(/g)).toHaveLength(1);
+  });
+  test('declined: the factorial of a real, a coordinate of a list', () => {
+    for (const json of [
+      ['Factorial', 'x'],
+      ['PointX', ['List', 'x', 'y']],
+      ['PointX', ['List', ['Tuple', 'x', 'y'], ['Tuple', 'y', 'x']]],
+    ])
+      expect([json, thrown(() => g6(json, 'glsl'))?.code]).toEqual([
+        json,
+        'outside-profile',
+      ]);
+    // On JavaScript, the factorial of a real is the Gamma function.
+    expect(
+      g6(['Factorial', 'x'], 'javascript').run!({ x: 2.5 } as never)
+    ).toBeCloseTo(3.3233509704478426, 12);
+  });
+});
+
+(chromiumAvailable() ? describe : describe.skip)(
+  'IR profile, batch G6: the values in WebGL2',
+  () => {
+    let driver: GlslDriver;
+    beforeAll(async () => {
+      driver = await GlslDriver.start();
+    }, 60_000);
+    afterAll(async () => driver?.stop());
+
+    const items = (
+      json: Json,
+      points: Point[],
+      expected: (p: Point) => number
+    ) => {
+      const r = g6(json, 'glsl') as unknown as ReturnType<typeof glsl>;
+      const source = shader(r, 'float');
+      return points.map((p) => ({
+        name: `${JSON.stringify(json)} at ${JSON.stringify(p)}`,
+        source,
+        uniforms: Object.fromEntries(
+          r.freeSymbols!.map((n) => [`u_${n}`, Number(p[n])])
+        ),
+        expected: expected(p),
+      }));
+    };
+    const number = (json: Json) => (p: Point) => {
+      const v = interpret(e6, e6.box(json as never), p);
+      return typeof v === 'number' ? v : NaN;
+    };
+
+    test('each row against the interpreter, and NaN outside its domain', async () => {
+      const all = [
+        ...G6_ROWS.flatMap(([json, points, outside]) => [
+          ...items(json, points, number(json)),
+          ...(outside === undefined ? [] : items(json, [outside], () => NaN)),
+        ]),
+        ...inDegrees(() =>
+          G6_DEGREES.flatMap(([json, points]) =>
+            items(json, points, number(json))
+          )
+        ),
+      ];
+      const values = await driver.evaluate(all);
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = all[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        if (Number.isNaN(expected)) {
+          if (!Number.isNaN(v.value))
+            failures.push(`${name}: ${v.value} vs NaN`);
+          return;
+        }
+        // The trigonometric builtins of a software renderer are
+        // approximate (as in the tests above); 1e-4 elsewhere, since its
+        // `acos` and reciprocal trigonometric functions are off by up to
+        // 8e-5 relative.
+        const tolerance = /\b(sin|cos|tan)\(/.test(all[k].source) ? 1e-3 : 1e-4;
+        if (
+          !(
+            Math.abs(v.value - expected) <=
+            tolerance * Math.max(1, Math.abs(expected))
+          )
+        )
+          failures.push(`${name}: ${v.value} vs ${expected}`);
+      });
+      expect(failures).toEqual([]);
+      expect(all.length).toBeGreaterThanOrEqual(90);
+    }, 120_000);
+  }
+);
+
+describe('IR profile, batch G6: a valued name read in a function body', () => {
+  test("Tycho's shape: X(0, t) whose body reads a document value av, on both targets", () => {
+    for (const to of ['glsl', 'javascript'] as const) {
+      const symbolDeps = new Set<string>();
+      const r = g6(['Xa', 0, 't'], to, { symbolDeps });
+      expect(r.freeSymbols).toEqual(['t']);
+      expect([...symbolDeps].sort()).toEqual(['Xa', 'av']);
+      if (to === 'javascript') expect(r.run!({ t: 3 } as never)).toBe(6);
+    }
+    // A list value.
+    expect(g6(['Ls', 'x'], 'javascript').run!({ x: 2 } as never)).toBe(5);
+  });
+
+  test('the README witness: a value that is an expression of another name declines', () => {
+    const e = g6Engine();
+    e.assign('a2', 2);
+    e.assign('v2', e.box(['Add', 'a2', 1]));
+    e.assign('fv', e.box(['Function', ['Multiply', 's', 'v2'], 's']));
+    e.pushScope();
+    e.declare('a2', 'real');
+    e.assign('a2', 10);
+    for (const json of [
+      ['fv', 'x'],
+      ['Multiply', 'x', 'v2'],
+    ]) {
+      const expr = e.box(json as never);
+      expect(interpret(e, expr, { x: 1 })).toBe(3);
+      for (const to of ['glsl', 'javascript'] as const)
+        expect(
+          thrown(() => compile(expr, { to, profile: 'ir', fallback: false }))
+            ?.message
+        ).toMatch(/a symbol with a value that is not/);
+    }
+    e.popScope();
+  });
+
+  test('a function defined outside a pushed scope that declares the name again reads its own binding', () => {
+    const e = g6Engine();
+    e.pushScope();
+    e.declare('av', 'real');
+    e.assign('av', 100);
+    const expr = e.box(['Xa', 0, 't']);
+    expect(interpret(e, expr, { t: 3 })).toBe(6);
+    // `compile()` runs in the scope of the body's binding
+    // (`compilationScope()`).
+    const js = compile(expr, { profile: 'ir', fallback: false });
+    expect(js.run!({ t: 3 } as never)).toBe(6);
+    const gl = compile(expr, { to: 'glsl', profile: 'ir', fallback: false });
+    expect(`${gl.code}\n${gl.preamble}`).not.toMatch(/100/);
+    // The direct compilation reads the name where it runs: it declines.
+    let cause = '';
+    try {
+      compileSlice(expr, { target: 'javascript' });
+    } catch (x) {
+      cause = (x as Error).message;
+    }
+    expect(cause).toMatch(/reads av, which is not a parameter/);
+    e.popScope();
+  });
+
+  test('a value changed after the compilation: the code keeps the old one', () => {
+    const e = g6Engine();
+    const r = compile(e.box(['Xa', 0, 't']), {
+      profile: 'ir',
+      fallback: false,
+    });
+    e.assign('av', 5);
+    expect(r.run!({ t: 3 } as never)).toBe(6);
+  });
+
+  test('a name of symbolic keeps its treatment: an input that each call passes', () => {
+    const r = g6(['Xa', 0, 't'], 'javascript', { symbolic: ['t', 'av'] });
+    expect([...r.freeSymbols!].sort()).toEqual(['av', 't']);
+    expect(r.run!({ t: 3, av: 4 } as never)).toBe(12);
+  });
+});
+
+describe('IR profile, batch G6: robustness', () => {
+  test('a shared graph of depth 20 through Sinh compiles in bounded text, on both targets', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    let e = engine.symbol('x') as Expression;
+    for (let i = 0; i < 20; i++)
+      e = engine.function('Add', [e, engine.function('Sinh', [e])]);
+    for (const to of ['glsl', 'javascript'] as const) {
+      const start = performance.now();
+      const r = compile(e, { to, profile: 'ir', fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.code.length + (r.preamble ?? '').length).toBeLessThan(20_000);
+      expect(performance.now() - start).toBeLessThan(10_000);
+    }
+  });
+
+  test('Add of 1,000 Arctan2(x, k) compiles or declines with outside-profile', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const e = engine.function(
+      'Add',
+      Array.from({ length: 1_000 }, (_, k) =>
+        engine.function('Arctan2', [engine.symbol('x'), engine.number(k + 1)])
+      )
+    );
+    for (const to of ['glsl', 'javascript'] as const) {
+      const d = thrown(() => {
+        const r = compile(e, { to, profile: 'ir', fallback: false });
+        if (to === 'javascript') {
+          let sum = 0;
+          for (let k = 1; k <= 1000; k++) sum += Math.atan2(0.5, k);
+          expect(r.run!({ x: 0.5 } as never)).toBeCloseTo(sum, 9);
+        }
+      });
+      expect([to, d?.code ?? 'compiled']).not.toEqual([to, 'compile-error']);
+      expect(['compiled', 'outside-profile']).toContain(d?.code ?? 'compiled');
+    }
+  });
+
+  test('a function that reads a valued name, called in a nested loop within the pass bound', () => {
+    const json = [
+      'Sum',
+      ['Sum', ['Xa', 'j', 'k'], ['Limits', 'k', 1, 10]],
+      ['Limits', 'j', 1, 10],
+    ];
+    expect(interpret(e6, e6.box(json as never), {})).toBe(1650);
+    expect(g6(json, 'javascript').run!({} as never)).toBe(1650);
+    expect(g6(json, 'glsl').success).toBe(true);
   });
 });

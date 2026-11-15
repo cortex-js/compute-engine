@@ -18,7 +18,16 @@ import { userBinding } from './lower-functions.js';
 import { analyzeReferences, freeSymbolTypes } from '../compile-references.js';
 import { gpuIsReservedWord } from '../gpu-reserved.js';
 import { isAmplifiedTrig } from '../gpu-exact-trig.js';
-import { isFunction, isSymbol } from '../../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
+import {
+  isLibraryOperator,
+  isShadowedSymbol,
+} from '../../library-shadowing.js';
+import { CONSTANTS, OPERATORS, rowOfHead } from './operators.js';
 import { ALL_PASSES } from './passes.js';
 import { compileSlice } from './index.js';
 import { typeName } from './print-glsl.js';
@@ -106,16 +115,41 @@ function loopPasses(p: Program, budget: number): number {
  *  operand of a `Mod` or a `Fract` in which a constant of magnitude 1000
  *  or more amplifies a trigonometric value (`isAmplifiedTrig()`), in `expr`
  *  and in the bodies of the user functions it calls, each node visited
- *  once. There is no exact sine hash: such an operand always warns, also a
- *  closed one (which the lowering folds unless `constantFold` is false). */
-function float32Warnings(expr: Expression): CompileDiagnostic[] {
+ *  once. There is no exact sine hash: such an operand always warns, except
+ *  in a `Mod` or a `Fract` that is closed as a whole when `fold` (numbers
+ *  and library constants under library rows that are not effectful, which
+ *  the lowering and the `fold` pass compute in doubles; a closed dividend
+ *  of a `Mod` by an input is not folded). */
+function float32Warnings(expr: Expression, fold: boolean): CompileDiagnostic[] {
   const found = new Map<string, CompileDiagnostic>();
   const seen = new Set<object>();
+  const memo = new Map<Expression, boolean>();
+  const closed = (x: Expression): boolean => {
+    const known = memo.get(x);
+    if (known !== undefined) return known;
+    const c =
+      isNumber(x) ||
+      (isSymbol(x) &&
+        CONSTANTS.has(x.symbol) &&
+        !isShadowedSymbol(x as never)) ||
+      (isFunction(x) &&
+        userBinding(x as Fn) === undefined &&
+        isLibraryOperator(x as never, x.operator) &&
+        (rowOfHead(OPERATORS, x.operator)?.effect ?? 'effectful') !==
+          'effectful' &&
+        x.ops.every(closed));
+    memo.set(x, c);
+    return c;
+  };
   const walk = (e: Expression): void => {
     if (!isFunction(e) || seen.has(e)) return;
     seen.add(e);
     const u = e.ops[0];
-    if ((e.operator === 'Mod' || e.operator === 'Fract') && isAmplifiedTrig(u))
+    if (
+      (e.operator === 'Mod' || e.operator === 'Fract') &&
+      isAmplifiedTrig(u) &&
+      !(fold && closed(e))
+    )
       found.set(u.toString(), {
         code: 'float32-unsafe-argument',
         kind: 'correctness',
@@ -250,7 +284,7 @@ export function compileWithIrProfileGlsl(
     });
     const occurrences = new Map<string, Expression>();
     analyzeReferences(expr, target, new Set(Object.keys(vars)), occurrences);
-    const warnings = float32Warnings(expr);
+    const warnings = float32Warnings(expr, options?.constantFold !== false);
     return {
       target: 'glsl',
       success: true,

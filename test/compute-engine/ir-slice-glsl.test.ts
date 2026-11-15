@@ -52,12 +52,12 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a function with no builtin defined on every real, and the complex lane)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a real function with no GLSL form, the factorial of a real, and the complex lane)', () => {
     // prettier-ignore
-    const jsOnly = new Set(['draw', 'rangecount', 'log10', 'hypot', 'asin', 'acos',
-      'acosh', 'atanh', ...Object.keys(REAL_FUNCTIONS).filter((f) => f !== 'fract'),
+    const jsOnly = new Set(['draw', 'rangecount', 'factorial',
+      ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd'].includes(f)),
       ...Object.keys(COMPLEX_FUNCTIONS)]);
-    const bigintOnly = new Set(['binomial', 'gcd', 'lcm']);
+    const bigintOnly = new Set(['binomial', 'lcm']);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
         if (bigintOnly.has(op)) {
@@ -67,8 +67,7 @@ describe('IR slice: GLSL text', () => {
           continue;
         }
         expect(spellingOf(JS, op)).toBeDefined();
-        if (!jsOnly.has(op.split('.')[0]))
-          expect(spellingOf(GLSL, op)).toBeDefined();
+        if (!jsOnly.has(op)) expect(spellingOf(GLSL, op)).toBeDefined();
         else expect(spellingOf(GLSL, op)).toBeUndefined();
       }
   });
@@ -278,7 +277,16 @@ const INTEGER_PROGRAMS: [unknown, Point[]][] = [
           if (e instanceof Decline) return [];
           throw e;
         }
-        const points = pointsFor(expr);
+        // GLSL gives NaN for the root of a negative radicand of an index
+        // that is not an odd integer (`_gpu_ir_root`; README, the real
+        // functions), where JavaScript gives the real root of an odd
+        // denominator: its points with x < 0 are not compared.
+        const points = pointsFor(expr).filter(
+          (p) =>
+            !(
+              JSON.stringify(json) === '["Root","x",2.5]' && (p.x as number) < 0
+            )
+        );
         const { run: js } = compileSlice(expr, { target: 'javascript' });
         const expected = points.map(
           (p) => [js(p)].flat(2) as (number | boolean)[]

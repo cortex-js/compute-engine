@@ -45,14 +45,14 @@ row of `At` would give the stock value. The standard handler of `PointList` is
 not such a change (the identity of the function in the library table). Then a
 sub-expression that the slice would lower and that has no free name, no name
 bound by the walk, no effectful operation and no loop is evaluated once with
-`N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Sinh(3)` is
-not folded, because `Sinh` is not in the slice. A sub-expression whose static
+`N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed `Sinc(3)` is
+not folded, because `Sinc` is not in the slice. A sub-expression whose static
 type is `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A
 throw of `N()` means "not folded": the node is lowered as written, except a
 `CancellationError`, which propagates. A row that depends on an engine setting
 declines when the setting is not the default, except the angular unit: under
 `'deg'`, `'grad'` or `'turn'` the lowering multiplies each operand of a direct
-trigonometric row (`Sin`, `Cos`, `Tan`, `Cot`, `Haversine`) by the radians of
+trigonometric row (`Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Haversine`) by the radians of
 one unit, and the result of an inverse row (`Arcsin`, ..., `Arctan2`,
 `Argument`, `Degrees`) by the units of one radian, on both lanes and both
 targets, as the interpreter converts them (`ANGLE_FACTORS`, the row field
@@ -64,16 +64,25 @@ the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
 
 A free name that has a value in the engine (a constant, or a variable) is that
 value, lowered at compile time as a literal, only when the value is a number of
-the engine (an integer, a rational, a radical such as `Sqrt(2)`, a complex) or a
-list of such numbers: no symbol and no other application. The value is read from
+the engine (an integer, a rational, a radical such as `Sqrt(2)`, a complex), a
+list of such numbers or a tuple of them (a point, `P = (2.64, 17)`): no symbol
+and no other application. The value is read from
 the innermost binding of the name (`ce.lookupDefinition`), as the interpreter
 reads a symbol that is not a call. Any other value declines, also a closed one
 (`Pi + 1`), since the names in a stored expression have bindings of their own
 (an outer `a = 2` and `v := a + 1` give 3 in the interpreter under a scope that
 declares `a = 10`). The program lists the name in `captures` (`symbolDeps`),
 unless its binding is the library's. A name with a value read in the body of a
-user function declines: the interpreter reads the binding of the body, which
-need not be the one of the name where the call is compiled. A name with no value
+user function is that value, as at the entry, when the innermost binding of the
+name is the definition that the occurrence in the body reads
+(`resolvedValueDefinition()`): the interpreter reads the binding of the body,
+which need not be the one of the name where the call is compiled, and such a
+name declines (a function defined outside a scope that declares `a` again).
+`compile()` runs a compilation in a scope where each name of the bodies it
+calls has the binding of its occurrence (`compilationScope()`), so through
+`compile()` that case compiles too, with the body's value; a direct
+`compileSlice()` in the scope that declares the name again declines. A name
+with no value
 there (an input, also one of `symbolic` or `inputs`) is an input of the program
 (see "User functions"). `Pi` and
 `ExponentialE` decline when the innermost binding of the name is not the library
@@ -125,9 +134,30 @@ hyperbolic functions, ...) are rows whose operation the JavaScript code calls by
 name from `REAL_FUNCTIONS` (`_SYS.ir`), which the fold of the row calls too.
 Each gives the interpreter's real value within the precision of a double (`Zeta`
 below about -171 is a known limitation, `docs/COMPILATION-MODEL.md`); a pole is
-±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). On GLSL a
-row has a spelling only where GLSL ES 3.00 has a builtin defined on every real
-(`atan`, `asinh`, `sign`, `trunc`, `fract`); the other rows decline there.
+±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). `Log(x, 10)`
+is the row `Log`, a real `Log(x, 2)` the operation `log2` (both exact at a power
+of the base, as the interpreter: `Floor(Log(1000, 10))` is 3), and `Log(x, b)` of
+another base `Ln(x) / Ln(b)`. On GLSL the inverse trigonometric and hyperbolic
+functions and the logarithms write NaN outside their domain, and `tanh` (also in
+`Coth`) is ±1 for |x| > 20; `sqrt`, a division and `mod` are the bare GLSL
+operations, whose result outside the domain is the driver's (no NaN-safe helper
+is carried over: a user decision; Tycho's render audit showed no picture
+change). The domains: `Ln` and `Log` (`log`, `log2`) of an operand `<= 0` (the
+interpreter gives a complex value, or `-∞` at 0), `Arcsin` and `Arccos` outside
+[-1, 1], `Arcosh` below 1, `Artanh` outside (-1, 1) (also at ±1, where the
+interpreter gives ±∞); `Arctan2(y, x)` is `atan(y, x)`, and 0 at (0, 0) as in
+the interpreter. `Root(x, n)` is the helper `_gpu_ir_root`: 0 at x = 0 for a
+positive index, the real root of a negative radicand for an odd integer index
+(`Root(-8, 3)` is -2), NaN for another index of a negative radicand, where
+JavaScript gives the real root of an odd denominator (`Root(-8, 2.5)` is
+2.297...), as for `pow`. `Factorial` of an integer is the helper
+`_gpu_ir_factorial` (a loop of 33 passes, +∞ for a negative operand and over
+34); of a real it declines (the Gamma function).
+`GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on `int`s.
+`Hypot` is `length(vec2(x, y))`; `Sinh`, `Cosh`, `Tanh`, `Arsinh`, `Arctan`
+and the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or
+their reciprocals. The other real functions (`Erf`, `Gamma`, `Zeta`,
+`Arccot`, `Arcsec`, ...) decline there.
 
 Inputs: a union whose every member is a real type (ranged or not), `nan` or an
 infinity (`nan | real | signed_infinity`) is a real, also as the element of a
@@ -362,7 +392,11 @@ probed in the interpreter (`TUPLE_RULES`): a threading row of one operand other
 than `Abs` (`Sin(Tuple(1, 2))`), `Power`, `Mod`, `Root` and `Arctan2` element by
 element; `Add` of tuples only (a difference is an `Add` of a negated tuple);
 `Multiply` of one tuple and scalars (`2·Tuple(x, 1)`) and `Divide` of a tuple
-by a scalar; `At`; and `Length`, `Sum`, `Max` and `Min`. Any other reader
+by a scalar; `At`; and `Length`, `Sum`, `Max` and `Min`. `PointX`, `PointY`
+and `PointZ` of a tuple of scalars are `At` of index 1, 2 and 3 (`PointZ` of a
+point of 2 coordinates is an `incompatible-dimensions` error of the canonical
+form, and declines); of a list, or of a list of points,
+they decline. Any other reader
 declines a tuple
 operand: `Abs(Tuple(3, 4))` is the norm 5, `Equal(Tuple(1, 2), List(1, 2))` is
 `False`, a comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`,
@@ -488,8 +522,9 @@ entry reads the text. Declined: a recursive call of a function that reads an
 input, also through a cycle of calls (`P(j) = If(j > 0, Q(j - 1), n)` and
 `Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
 parameter, or has a value; an input of a list of a run-time length or of
-booleans; a name with a value read in
-the body; another `vars` name. A recursive function that reads no input
+booleans; a name with a value read in the body whose binding where the call is
+compiled is not the body's (see the values of free names above); another
+`vars` name. A recursive function that reads no input
 compiles. A function value other than the literal of a `Map` or `Filter` or the
 root, and a list argument for a scalar parameter (the interpreter maps the
 function over the list) decline. A declared result `complex` of a real body is
@@ -688,10 +723,13 @@ existing target's for each input it compiles); `warnings` holds the
 `Fract` in which a constant of magnitude 1000 or more amplifies a
 trigonometric value (`isAmplifiedTrig()` of `gpu-exact-trig.ts`), in the
 expression and the bodies of the user functions it calls (each node once);
-there is no exact sine hash and no `float32Bounds`, so such an operand always
-warns, also a closed one (folded unless `constantFold: false`) and where
-the existing target emits an exact form (a host that sends a flagged curve to
-its CPU lane does so for these too); `unsupported` is empty,
+there is no exact sine hash and no `float32Bounds`, so such an operand warns
+also where the existing target emits an exact form (a host that sends a
+flagged curve to its CPU lane does so for these too), except in a `Mod` or a
+`Fract` that is closed as a whole (numbers and library constants under library
+rows that are not effectful, `Mod(10000·Sin(100000), 1)`), which the lowering
+folds in doubles: it warns only with `constantFold: false`. A closed operand
+of a `Mod` by an input is not folded and warns (`Mod(10000000·Sin(1), x)`); `unsupported` is empty,
 `mode` is `'strict'`, `profile` is `'ir'`. A name of `vars` is an input whose
 read is the host's text (`x + y` with `vars: {x: 'u_x'}` is `(u_x + y)`, and
 `x` stays in `freeSymbols` with its type): a name, a member or an element of

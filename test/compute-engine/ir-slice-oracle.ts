@@ -39,8 +39,9 @@ export type Expected =
  *  `any`: both decline. The user functions: `f(a, b) = ab + 1` declared
  *  `(real, real) -> real`; `g(a) = 2a` not declared; `fact` (declared
  *  `(integer) -> integer`, recursive); `h2(a) = g(a) + f(a, a)`, which
- *  calls the others; and two that decline: `cap(a) = a + h` (a capture)
- *  and `rec2`, recursive with no result type. `rnd(a) = a·Random()`
+ *  calls the others; `cap2(a) = a + h`, which reads the value of `h`; and
+ *  two that decline: `cap(a) = a + hc`, whose `hc` is a name of a popped
+ *  scope (a capture), and `rec2`, recursive with no result type. `rnd(a) = a·Random()`
  *  draws; `ev` and `od` (declared `(integer) -> integer`) call each
  *  other. */
 export function makeEngine(): ComputeEngine {
@@ -106,7 +107,17 @@ export function makeEngine(): ComputeEngine {
       'k',
     ])
   );
-  ce.assign('cap', fn(['Function', ['Add', 'a', 'h'], 'a']));
+  // `cap` reads `hc` of a scope that is popped: where it is compiled, the
+  // name has no definition with that value, and a direct compilation
+  // declines (`compile()` would choose that scope, `compilationScope()`).
+  ce.pushScope();
+  ce.declare('hc', 'real');
+  ce.assign('hc', 2.5);
+  const capLiteral = fn(['Function', ['Add', 'a', 'hc'], 'a']);
+  ce.popScope();
+  ce.assign('cap', capLiteral);
+  // `cap2` reads `h` of the scope it is compiled in: its value (batch G6).
+  ce.assign('cap2', fn(['Function', ['Add', 'a', 'h'], 'a']));
   ce.assign(
     'rec2',
     fn([
@@ -598,6 +609,10 @@ export const PROGRAMS: Json[] = [
   ['Zeta', 'y'], ['Sign', 'x'], ['Truncate', 'x'], ['Fract', 'x'], ['Log', 'x'], ['Hypot', 'x', 'y'],
   ['Add', ['Truncate', ['Multiply', 'x', 7]], 'n'], ['Mod', ['Truncate', ['Multiply', 'x', 7]], 3],
   ['Multiply', ['Sign', 'y'], 'n'], ['Erf', 'L'], ['Gamma', 'D'], ['Arctan2', 'L', 'M'],
+  ['Sinh', 'x'], ['Cosh', 'y'], ['Tanh', 'L'], ['Sec', 'x'], ['Csc', 'y'], ['Sech', 'x'], ['Csch', 'y'],
+  ['Log', 'y', 2], ['Log', 'L', ['Add', ['Abs', 'y'], 2]], ['GCD', 'n', 'm', 12], ['GCD', ['Round', 'x'], ['Round', 'y']],
+  ['Factorial', ['Mod', 'n', 7]], ['PointX', ['Tuple', 'x', 'y']], ['PointY', ['Tuple', ['Sin', 'x'], 'y']],
+  ['cap2', 'x'],
   // User functions
   ['f', 'x', 2], ['f', 'n', 'y'], ['g', 'x'], ['g', 'n'], ['h2', 'x'], ['Add', ['g', 'x'], ['g', 'y']],
   ['fact', ['Mod', 'n', 7]], ['fact', 0], ['Sum', ['g', 'k'], ['Limits', 'k', 1, 'n']],
@@ -624,7 +639,7 @@ export const DECLINES: Record<string, Json> = {
   'not a literal': ['Map', 'g', 'D'],
   'in a loop': ['Block', ['Declare', 't', 'real', 0], ['Sum', ['Block', ['Assign', 't', 'k'], 'k'], ['Limits', 'k', 1, 3]], 't'],
   'symbol with a value that is not': ['Add', 'hx', 1],
-  'Sinh': ['Sinh', 'x'],
+  'LambertW': ['LambertW', 'x'],
   'Equal of a list': ['If', ['Equal', 'L', 'M'], 1, 2],
   'canonical form': ['Add', 'p', 1],
   'two types': ['If', ['Less', 'x', 0], 'L', 1],
