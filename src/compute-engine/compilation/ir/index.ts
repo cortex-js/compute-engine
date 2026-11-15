@@ -460,6 +460,7 @@ export function sliceProgram(
     fold: options.constantFold,
     mode: options.mode,
     iterationBudget: options.iterationBudget,
+    runtimeLengths: profile.runtimeLengths,
     vars: Object.keys(options.vars ?? {}),
     objectVars: Object.keys(options.vars ?? {}).filter((n) =>
       readsVarsObject(options.vars![n])

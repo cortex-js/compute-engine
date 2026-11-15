@@ -135,6 +135,8 @@ export type Lowering = {
   inFunction?: string;
   /** The `iterationBudget`: a `Sum` or a `Product` of more passes is NaN. */
   readonly budget?: number;
+  /** The target holds a list of a run-time length (`LowerOptions`). */
+  readonly runtimeLengths: boolean;
   /** The values that are a tuple, or hold tuples: the index in the shape
    *  of the axis that is a tuple (0 for a `Tuple`, 1 for a list of them).
    *  An operator whose value on a tuple differs from its value on a list

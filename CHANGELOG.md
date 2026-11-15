@@ -48,7 +48,10 @@
   result declared `tuple<real, real>`; a result declared `list<real^3>` is a
   `vec3`. A user function can read an input that is a point, a list in
   storage, or a list of at most 4 elements (GLSL would copy a longer array
-  at each call). An element-wise operation over a list of more than 64
+  at each call). A list parameter of a user function declared with no length
+  (`H: list<integer>`) takes on GLSL the stated length of its argument: with
+  `H_1: list<integer^90001>`, `c(H_1, x)` compiles, and a second call of `c`
+  with a list of another length declines. An element-wise operation over a list of more than 64
   elements declines. With `storage: { S: 'sampler2D' }`, the list input `S`
   is read from a texture that the host uploads as for the existing GLSL
   target (one value per texel of a single-channel float texture, row-major

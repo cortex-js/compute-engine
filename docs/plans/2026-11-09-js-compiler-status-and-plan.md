@@ -1778,6 +1778,65 @@ No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267. The largest GLSL declines left in the
 suite: the option `functions` 21, `Root` of a complex 21, `Break` 20.
 
+Tycho's run of the build of `c8b8ff6033810afb30c299c66e81534eaf79e720` (G8
+and G9; session `tycho-desk`, 2026-11-15), the profile on both seams:
+
+- JavaScript: CORE 679 of 989 admitted (638 before); every Desmos state
+  9,655 of 11,617 (83%; 9,521 before). 43,761 runs with no difference.
+- GLSL: CORE 157 of 267 (152 before); every Desmos state 3,904 of 4,376
+  (3,895 before). Every admitted shader valid in WebGL 2. The same 8 float32
+  warnings. No internal error on either seam.
+- Colours: 134 admitted JavaScript compilations with a colour operator, run
+  by the profile and by the existing compiler at 3 points each (402 runs),
+  the space and the three channels equal within 1e-9.
+- Render audit of CORE: 21 states rendered on both arms, no difference of
+  outcome, series or pixels, no shader compile failure. No new GLSL row
+  reaches the CORE pages: their colour rows hold a value that reads other
+  names. The audit has no domain-colouring row, so it says nothing about the
+  complex lane in a picture; a picture check of the showcase entries
+  `domain-coloring` and `kepler-orbit` is asked for on the next build.
+- Colour declines left: a name whose colour value reads other names or is a
+  list of colours (JavaScript about 125, GLSL 41), until Tycho's macros.
+- `c` of buddhabrot at Tycho's GLSL site: the input is declared
+  `list<(real | signed_infinity | nan)^90001>` in `storage`, and `c` declares
+  `H: list<integer>`. With batch G10 the call compiles for an input declared
+  `list<integer^90001>`, and declines for the list of reals: a declaration
+  for Tycho, which declares `vector<integer^90001>` on JavaScript. Tycho
+  agreed: at the switch it declares `list<integer^N>` on the sampler site
+  when the engine's type of the name is a list of integers and the name
+  cannot change its element type without a recompile.
+- Two more of Tycho's GLSL tests fail, on a captured complex name that is
+  not in `freeSymbolTypes` (it is in `symbolDeps`): Tycho's work at the
+  switch.
+
+Batch G10, 2026-11-15 (a list parameter of no stated length on GLSL; the
+witness is `c` of Tycho's showcase `buddhabrot`). On a target without
+run-time lengths, a list parameter of a user function whose declared type
+states no length takes the stated length of its argument at the function's
+first call: the arguments of that call are lowered before the function. A
+later call with a list of another length declines, and the cause names the
+function and the parameter; there is one function per binding, never a copy
+per length. JavaScript is unchanged (one function with a hidden length; the
+emitted code of 76 programs is byte-identical). The lowering now reads one
+property of the target, `runtimeLengths`. Both reviews found the same
+defect, fixed: a first call nested in an argument of itself
+(`g(H, g(H, g(H, x)))`) defined the function again, which gave a shader that
+WebGL refuses, and an internal error with three lengths. The Claude reviewer
+ran 213 shaders over 91 cases with no value difference, and found the GLSL
+text of the 32 programs that the base compiles unchanged. Measured in the
+main tree at `c8b8ff6033810afb30c299c66e81534eaf79e720` plus the patch;
+7,030 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,514 of 10,859 (96.8%) |
+| Every JavaScript compile | 24,640 of 38,943 (63.3%) |
+| Public JavaScript `compile()` calls | 14,127 of 28,086 (50.3%) |
+| GLSL `compile()` calls | 1,085 of 2,392 (45.4%); 1,018 of the 1,595 that the existing target compiles (63.8%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267.
+
 Tycho's run of the build of `511a446b8c4dc43b50c9fac75c6735861b6be580` (G5
 and G6; session `tycho-desk`, 2026-11-14), the profile on both seams:
 

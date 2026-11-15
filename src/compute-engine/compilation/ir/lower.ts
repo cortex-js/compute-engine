@@ -174,6 +174,9 @@ export type LowerOptions = {
   /** The names of `vars` whose text reads the inputs object
    *  (`readsVarsObject()`): a function body reads one as an input. */
   readonly objectVars?: readonly string[];
+  /** `false` (GLSL): a list parameter of a user function of no stated
+   *  length takes the stated length of its argument at the first call. */
+  readonly runtimeLengths?: boolean;
 };
 
 /** The IR operation of the read of the `vars` name of index `k` on the
@@ -1456,6 +1459,7 @@ export function lower(
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     budget: options.iterationBudget,
+    runtimeLengths: options.runtimeLengths ?? true,
     tuples,
   };
   const lists = listLowering(cx);

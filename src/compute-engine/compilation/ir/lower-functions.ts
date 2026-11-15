@@ -208,6 +208,9 @@ type UserFunction = {
     lane: Lane;
     shape: readonly (number | 'run-time')[];
     tuple?: boolean;
+    /** The name of a list parameter of a run-time length that took the
+     *  stated length of its first argument. */
+    taken?: string;
   }[];
   /** The number of parameters of `ir` for `params` (with the lengths). */
   own: number;
@@ -228,12 +231,23 @@ export function functionLowering(cx: Lowering) {
   const pending = new Map<string, UserFunction>();
   let settled = new Map<string, Effect>();
 
-  /** The IR function of the user function of `key`, lowered once. */
-  const define = (e: Fn, key: object, literal: Fn): UserFunction => {
-    const { names, params, result, list, tuple, r } = signatureTypes(
-      e,
-      literal
-    );
+  /** The IR function of the user function of `key`, lowered once. `args`:
+   *  the arguments of the first call, whose stated lengths a list parameter
+   *  of a run-time length takes (a target without run-time lengths). */
+  const define = (
+    e: Fn,
+    key: object,
+    literal: Fn,
+    sig: ReturnType<typeof signatureTypes>,
+    args?: V[]
+  ): UserFunction => {
+    const { names, result, list, tuple, r } = sig;
+    const params = sig.params.map((p, i) => {
+      const n = args?.[i] === undefined ? undefined : type(args[i]).shape[0];
+      return p.shape[0] === 'run-time' && typeof n === 'number'
+        ? { ...p, shape: [n], taken: names[i] }
+        : p;
+    });
     const ir: IRFunction = {
       name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
@@ -327,15 +341,37 @@ export function functionLowering(cx: Lowering) {
   /** A call of the user function that the head of `e` resolves to, or of
    *  the function of that name being lowered. */
   const call = (e: Fn, binding?: { key: object; literal: Fn }): number => {
-    const fn = binding
-      ? (functions.get(binding.key) ?? define(e, binding.key, binding.literal))
-      : pending.get(e.operator)!;
+    let fn = binding ? functions.get(binding.key) : pending.get(e.operator)!;
+    // Without run-time lengths, the arguments of the first call are lowered
+    // before the function, which takes their stated lengths.
+    let early: V[] | undefined;
+    if (fn === undefined) {
+      const sig = signatureTypes(e, binding!.literal);
+      if (
+        !cx.runtimeLengths &&
+        sig.params.some((p) => p.shape[0] === 'run-time')
+      )
+        early = e.ops.map((op) => cx.value(op)!);
+      // An argument can hold the first call of the same function.
+      fn =
+        functions.get(binding!.key) ??
+        define(e, binding!.key, binding!.literal, sig, early);
+    }
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
     const args = e.ops.flatMap((op, i) => {
       const p = fn.params[i];
-      const v = cx.widen(cx.value(op)!, p.lane);
+      const v = cx.widen(early?.[i] ?? cx.value(op)!, p.lane);
       const t = type(v);
+      if (
+        p.taken !== undefined &&
+        t.shape.length > 0 &&
+        t.shape[0] !== p.shape[0]
+      )
+        decline(
+          op,
+          `an argument of ${e.operator} of another length than at its first call: the list parameter ${p.taken} has the length ${p.shape[0]} of that call (${typeof t.shape[0] === 'number' ? typeToString(t) : 'a list of no stated length'} here; a target without run-time lengths)`
+        );
       // A list parameter of a run-time length reads the argument's length.
       const n = t.shape[0];
       const length =

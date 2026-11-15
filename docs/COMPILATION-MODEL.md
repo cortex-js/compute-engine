@@ -2668,7 +2668,9 @@ of `Mod` or `Fract` that the existing target flags has the warning
 A user function can return a point or a list of a stated length, and read
 an input that is a point, a list in storage or a list of at most 4
 elements; an element-wise operation over a list of more than 64 elements
-declines. With `storage: { S: 'sampler2D' }` the list input `S`
+declines. A list parameter declared with no length (`list<integer>`) takes
+the stated length of the argument of the first call of its function; a call
+whose argument has another length, or no stated length, declines. With `storage: { S: 'sampler2D' }` the list input `S`
 is read from the host's texture with the addressing of the existing target
 (`_gpu_ir_texel`), by `At`, by a reduction or an element-wise operation, and
 in a user function, which takes a `sampler2D` parameter; `S` as a value

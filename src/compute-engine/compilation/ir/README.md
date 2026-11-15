@@ -628,8 +628,19 @@ and 2. A parameter declared a tuple of reals or integers
 and takes a tuple argument only (`pf(P)`, `pf(Tuple(x, Sin(x)))`). A tuple
 argument for a list parameter, a list of lists, of booleans or of complex numbers
 decline. On GLSL a parameter of stated length is a vector of 2 to 4
-elements (`vec3 B`) or an array parameter (`float B[5]`); one of run-time
-length declines with the target's rule.
+elements (`vec3 B`) or an array parameter (`float B[5]`), or a `sampler2D`
+when its argument is a list in storage. For a function with a list parameter
+of no stated length, on a target without run-time lengths
+(`runtimeLengths: false`, GLSL), the arguments of the first call are lowered
+before the function (any other function is defined before its arguments are
+lowered): the parameter takes the stated length of its argument there (`c(H_1, x)` with `H_1: list<integer^90001>`
+defines `c` with `H` of 90001 elements), and a later call whose argument has
+another length declines, naming the function and the parameter (one function
+per binding, not one per length). An argument of a run-time length leaves the
+parameter of a run-time length, which declines with the target's rule. A
+recursive call uses the parameter types of the function being defined. This
+is the one property of the target that the lowering reads (`LowerOptions`):
+for such a function the IR out of the lowering differs between the targets.
 
 A result declared a list of reals, integers or booleans (`list<integer>`,
 `list<real^3>`) has the type of the body, a list of rank 1 of a sub-lane of the

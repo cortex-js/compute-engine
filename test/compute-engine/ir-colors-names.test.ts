@@ -78,8 +78,9 @@ ce.assign(
     ['Typed', 'z', { str: 'real' }],
   ])
 );
-// Tycho's `c: (H: list<integer>, x, y, z) -> color`, and the same body with
-// a list of a stated length (GLSL has no run-time length).
+// Tycho's `c: (H: list<integer>, x, y, z) -> color` (on GLSL, `H` takes the
+// stated length of its argument), and the same body with a list of a stated
+// length.
 const TYCHO_C = [
   'Function',
   [
@@ -217,6 +218,7 @@ const PROGRAMS: [label: string, json: Json, points: object[]][] = [
   ["Tycho's shade", ['AsOklab', ['shade', 'x']], [{ x: 0.3 }, { x: 1.7 }, { x: -0.4 }]],
   ["Tycho's shade in sRGB", ['AsRgb', ['shade', 'x']], [{ x: 0.3 }, { x: 1.7 }]],
   ["Tycho's c, of a list of a stated length", ['AsOklab', ['c3', ['List', 1, 2, 3], 'x', 'y', 'z']], [{ x: 0.7, y: 0.3, z: 0.4 }, { x: -1, y: 0.3, z: 0.4 }]],
+  ["Tycho's c, whose list parameter takes the length of its argument on GLSL", ['AsOklab', ['c', ['List', 1, 2, 3], 'x', 'y', 'z']], [{ x: 0.7, y: 0.3, z: 0.4 }, { x: -1, y: 0.3, z: 0.4 }]],
   ['Hsv of a product (Tycho)', ['AsOklab', ['Hsv', ['Multiply', 'x', 'y'], 1, 1]], [{ x: 3, y: 50 }, { x: -2, y: 17 }, { x: 10, y: 41 }]],
   ['Hsv of three inputs, in OKLCh', ['Hsv', 'x', 'y', 'z'], [{ x: 200, y: 0.3, z: 0.9 }]],
   ['Hsl of three inputs, in sRGB', ['AsRgb', ['Hsl', 'x', 'y', 'z']], [{ x: 200, y: 0.3, z: 0.4 }, { x: -30, y: 1, z: 0.7 }]],
@@ -225,7 +227,6 @@ const PROGRAMS: [label: string, json: Json, points: object[]][] = [
 // Programs that compile on JavaScript only, with the cause on GLSL.
 // prettier-ignore
 const JS_ONLY: [label: string, json: Json, points: object[], glsl: RegExp][] = [
-  ["Tycho's c, of a list of a run-time length", ['AsOklab', ['c', ['List', 1, 2, 3], 'x', 'y', 'z']], [{ x: 0.7, y: 0.3, z: 0.4 }, { x: -1, y: 0.3, z: 0.4 }], /the list parameter H of c has a run-time length/],
   ['a conversion in a function body', ['AsOklab', ['fz', 'x']], [{ x: 0.4 }], /AsOklab other than as the result/],
 ];
 
@@ -338,17 +339,16 @@ describe('IR profile, batch G9: colours on GLSL, the text', () => {
     );
   });
 
-  test("Tycho's c of an input list of a stated length names the parameter", () => {
+  test("Tycho's c of an input list of a stated length takes that length", () => {
     for (const storage of [undefined, { H: 'sampler2D' }]) {
-      const d = failure(() =>
-        glsl(['AsOklab', ['c', 'H', 'x', 'y', 'z']], {
-          inputs: { H: 'list<integer^5>' },
-          ...(storage ? { storage } : {}),
-        })
-      );
-      expect(d?.code).toBe('outside-profile');
-      expect(d?.message).toMatch(
-        /the list parameter H of c has a run-time length/
+      const r = glsl(['AsOklab', ['c', 'H', 'x', 'y', 'z']], {
+        inputs: { H: 'list<integer^5>' },
+        ...(storage ? { storage } : {}),
+      });
+      expect(r.preamble).toMatch(
+        storage
+          ? /^vec3 _fn_ir_u\d+_c\(sampler2D v\d+, float/m
+          : /^vec3 _fn_ir_u\d+_c\(float v\d+\[5\], float/m
       );
     }
   });
