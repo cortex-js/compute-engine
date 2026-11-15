@@ -3094,6 +3094,58 @@ describe('EISENSTEIN SERIES', () => {
     expectApprox(ce.expr(['EisensteinE', 8, 'ImaginaryUnit']), e4 * e4, 1e-11);
   });
 
+  // A high weight at a small Im(τ) (CE-1338). Reference values: mpmath at
+  // 120 digits, by the q-series summed to its tail.
+  test.each([
+    [50, 0.4, 0.87, 8.8805290714079037, -3.8151192202071446],
+    [100, 0.4, 0.87, 49.328125681986543, -59.350788486044932],
+    [400, 0.4, 0.87, -31507089.946111971, 13619148.946208531],
+    [24, -0.3, 0.2, 1078185760.1809248, 42908345672.083844],
+    [30, 0.01, 0.05, -5.5771430751424036e38, 2.107652100613507e38],
+    [22, 0.3, 0.4, 83339.221402008891, -4193589.2945230135],
+    [20, 0.3, 1.0, 1.3970588771991511, -0.1789098579943892],
+    [18, 0.3, 1.0, 0.76588207047006724, 0.36883087421092693],
+    [12, 0.1, 0.3, -752192.46448556698, -658944.40690405878],
+    [1000, 0.25, 1.2, 1, 0],
+  ])('E_%s(%s + %si)', (k, a, b, re, im) => {
+    const r = ce.expr(['EisensteinE', k, ['Complex', a, b]]).N();
+    const err = Math.hypot(r.re - re, (r.im ?? 0) - im);
+    expect(err).toBeLessThan(1e-11 * Math.hypot(re, im));
+  });
+
+  test('a high weight at a huge Im(τ) is 1', () => {
+    for (const b of [1e300, 1e308, Infinity]) {
+      const r = ce.expr(['EisensteinE', 20, ['Complex', 0.3, b]]).N();
+      expect(r.re).toBe(1);
+    }
+  });
+
+  test('a value near the largest double is a number', () => {
+    // E₂₀(4·10⁻¹⁶ i) = (4·10⁻¹⁶)⁻²⁰ E₂₀(2.5·10¹⁵ i) ≈ 9.094947·10³⁰⁷
+    const r = ce.expr(['EisensteinE', 20, ['Complex', 0, 4e-16]]).N();
+    expect(r.re / 9.094947017729282e307).toBeCloseTo(1, 12);
+    expect(r.im).toBe(0);
+  });
+
+  test('a value at a real q is real', () => {
+    for (const [k, a] of [
+      [20, 0],
+      [100, 0.5],
+      [6, 0],
+      [400, -1.5],
+    ]) {
+      const r = ce.expr(['EisensteinE', k, ['Complex', a, 0.3]]).N();
+      expect(r.im).toBe(0);
+      expect(Number.isFinite(r.re)).toBe(true);
+    }
+  });
+
+  test('a value too large for a double stays symbolic', () => {
+    // |E₄₀₀(0.01i)| ≈ 100⁴⁰⁰
+    const r = ce.expr(['EisensteinE', 400, ['Complex', 0, 0.01]]).N();
+    expect(r.operator).toBe('EisensteinE');
+  });
+
   test('real τ stays symbolic (needs Im(τ) > 0)', () => {
     const r = ce.expr(['EisensteinE', 4, 0.5]).N();
     expect(r.operator).toBe('EisensteinE');

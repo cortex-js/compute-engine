@@ -6144,14 +6144,126 @@ export function dedekindEta(tau: Complex): Complex {
  * divisor-sum q-expansion, e.g. Fungrim 10cdf4/f8dfaf/e20db0). The coefficient
  * `2s/Bₛ` evaluates to the familiar 24, 240, 504, … for s = 2, 4, 6, …
  *
- * Returns NaN outside the upper half-plane, for non-even s, or when |q| is too
- * close to 1 to converge at machine precision.
+ * For `s ≥ 4`, τ is first moved into the fundamental domain
+ * (|Re τ| ≤ 1/2, |τ| ≥ 1) with `Eₛ(τ) = (cτ + d)^{−s} Eₛ(γτ)`, so that
+ * |q| ≤ e^{−π√3}. There the q-series has terms of at most about 10 times the
+ * value for `s < 20`. For `s ≥ 20` its terms m^{s−1}|q|ᵐ peak at
+ * m ≈ (s − 1)/(2π Im τ) far above the value (about 10²³ times for s = 400 at
+ * τ = 0.4 + 0.87i), so the lattice sum
+ * `Eₛ(τ) = 1 + ζ(s)⁻¹ Σ_{c≥1} Σ_{d∈ℤ} (cτ + d)^{−s}` is used instead: in the
+ * fundamental domain every |cτ + d| ≥ 1, and the terms decrease as
+ * |cτ + d|^{−s}.
+ *
+ * Returns NaN outside the upper half-plane, for non-even s, when |q| is too
+ * close to 1 to converge at machine precision, or when the value is too
+ * large for a double.
  */
 export function eisensteinE(s: number, tau: Complex): Complex {
+  const value = eisensteinValue(s, tau);
+  // When 2·Re τ is an integer, q = e^{2πiτ} is real and so is Eₛ(τ): an
+  // imaginary part comes only from the rounding of the phases.
+  if (value.im !== 0 && !value.isNaN() && Number.isInteger(2 * tau.re))
+    return new Complex(value.re, 0);
+  return value;
+}
+
+function eisensteinValue(s: number, tau: Complex): Complex {
   if (tau.isNaN()) return C_NAN;
   if (!Number.isInteger(s) || s < 2 || s % 2 !== 0) return C_NAN;
   if (tau.im <= 0) return C_NAN;
 
+  // E₂ is only quasi-modular: no reduction.
+  if (s === 2) return eisensteinQSeries(s, tau);
+
+  // Reduce τ to the fundamental domain. Each inversion τ ↦ −1/τ multiplies
+  // the automorphy factor cτ + d by the current τ; its logarithm is kept as
+  // a modulus and an argument, since (cτ + d)^{−s} can be far out of the
+  // range of a double before it multiplies a small Eₛ(γτ).
+  let t = tau;
+  let logAbsJ = 0;
+  let argJ = 0;
+  for (let i = 0; ; i++) {
+    if (i === 1000) return C_NAN;
+    const n = Math.round(t.re);
+    if (n !== 0) t = new Complex(t.re - n, t.im);
+    const r2 = t.re * t.re + t.im * t.im;
+    if (!(r2 < 1)) break;
+    logAbsJ += 0.5 * Math.log(r2);
+    argJ += Math.atan2(t.im, t.re);
+    t = new Complex(-t.re / r2, t.im / r2);
+  }
+
+  const value =
+    s < 20 ? eisensteinQSeries(s, t) : eisensteinLatticeSum(s, t);
+  if (value.isNaN() || logAbsJ === 0) return value;
+
+  // Eₛ(τ) = J^{−s} Eₛ(t), with J = cτ + d
+  const absV = value.abs();
+  if (absV === 0) return C_ZERO;
+  const logAbs = Math.log(absV) - s * logAbsJ;
+  if (!(logAbs <= Math.log(Number.MAX_VALUE))) return C_NAN; // overflows a double
+  const arg = Math.atan2(value.im, value.re) - s * argJ;
+  const mag = Math.exp(logAbs);
+  return new Complex(mag * Math.cos(arg), mag * Math.sin(arg));
+}
+
+/**
+ * The lattice sum `Eₛ(τ) = 1 + ζ(s)⁻¹ Σ_{c≥1} Σ_{d∈ℤ} (cτ + d)^{−s}` for an
+ * even `s ≥ 20` and τ in the fundamental domain, where every term has a
+ * modulus of at most 1. A row c stops when its terms fall below 10⁻¹⁸ on
+ * both sides of its largest term: the terms of a row decrease on each side
+ * of it, as fast as |cτ + d|^{−s}, so the part left out is of the order of
+ * 10⁻¹⁸. The rows stop when the bound (c·Im τ)^{−s}·(1 + 2c·Im τ) of a row
+ * sum falls below 10⁻¹⁸; at an infinite Im τ no row is summed.
+ */
+function eisensteinLatticeSum(s: number, tau: Complex): Complex {
+  const x = tau.re;
+  const y = tau.im;
+  const tol = 1e-18;
+  const logTol = Math.log(tol);
+
+  // ζ(s) for s ≥ 20: n^{−s} < 10⁻¹⁸ from n = 9 on
+  let zeta = 1;
+  for (let n = 2; ; n++) {
+    const t = Math.pow(n, -s);
+    zeta += t;
+    if (t < tol) break;
+  }
+
+  let re = 0;
+  let im = 0;
+  // (cτ + d)^{−s}, accumulated into re and im; returns its modulus
+  const addTerm = (c: number, d: number): number => {
+    const u = c * x + d;
+    const v = c * y;
+    const mag = Math.pow(u * u + v * v, -s / 2);
+    if (mag === 0) return 0;
+    const theta = -s * Math.atan2(v, u);
+    re += mag * Math.cos(theta);
+    im += mag * Math.sin(theta);
+    return mag;
+  };
+
+  for (let c = 1; ; c++) {
+    if (c === 10_000) return C_NAN;
+    // log of (c·y)^{−s}·(1 + 2c·y), written so that it does not overflow for
+    // a finite c·y; it is NaN for an infinite c·y, which also stops
+    const logCy = Math.log(c * y);
+    const logBound = -s * logCy + logCy + Math.log(2 + 1 / (c * y));
+    if (!(logBound >= logTol)) break;
+    const d0 = -Math.round(c * x);
+    addTerm(c, d0);
+    for (let d = d0 + 1; addTerm(c, d) >= tol; d++);
+    for (let d = d0 - 1; addTerm(c, d) >= tol; d--);
+  }
+
+  return new Complex(1 + re / zeta, im / zeta);
+}
+
+/**
+ * The Lambert series `1 − (2s/Bₛ) Σ_{m≥1} m^{s−1} qᵐ/(1 − qᵐ)` of `Eₛ(τ)`.
+ */
+function eisensteinQSeries(s: number, tau: Complex): Complex {
   const q = tau.mul(new Complex(0, 2 * Math.PI)).exp(); // e^{2πiτ}
   const absQ = q.abs();
   if (absQ >= 1) return C_NAN;

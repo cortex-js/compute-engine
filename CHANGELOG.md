@@ -39,6 +39,13 @@
 
 ### Bug Fixes
 
+- **`EisensteinE` of a high weight is correct when the imaginary part of τ
+  is small.** `EisensteinE(100, 0.4 + 0.87i)` gave `80080.27 + 104512.03i`
+  (the value is `49.3281 − 59.3508i`), and `EisensteinE(400, 0.4 + 0.87i)`
+  gave `ComplexInfinity` (the value is `−31507089.95 + 13619148.95i`). For a
+  weight of 4 or more, τ is now first moved into the fundamental domain, and
+  a weight of 20 or more is computed by the lattice sum. A value too large
+  for a double stays unevaluated.
 - **A function returned by another function no longer gets a `scope` effect
   in its type for a loop that assigns its own index.** With
   `mk := y ↦ (x ↦ Block(Loop(Assign(i, i + 1), Element(i, [1, 2])), x + y))`,
