@@ -68,6 +68,11 @@ Delete this file when parts 2 and 3 are done or have their own record.
     item 4, first step): a call head with no definition in a body is a free
     head; the forward-call reference mechanism is deleted; source +273 −404.
     Tycho's gates passed on a build that holds CE-1303 and step 1 too.
+  - `e99922f1e38b63d5919cdb6c43832198336f79be`, the inference rollback frame
+    is deleted (part 2, item 3): the Epsil static check restores through
+    `boxed-expression/definition-restore-point.ts`, which records a
+    definition or a scope entry before its first write during a check;
+    source +591 −843. Tycho's gates passed.
 - CE-1317 is closed by the user's decision (documented; `issues/CLOSED.md`).
 - `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
   release.
@@ -104,17 +109,11 @@ not confirmed it item by item.
      a binder has no frame, and the Epsil static check keeps the rollback
      record of the direct-write branch).
    - By its USERS (user decision 2026-11-14; census and plan in
-     `~/dev/compute-engine-recovery/rollback-users/report.md`). Step 1, the
-     overload trial, is done (state above). Left, the Epsil static check
-     (8,113 frames and 116,240 records in one suite; all but 344 records
-     target a scope that the check pushes itself): step 2, the check copies
-     into its own scope each outer definition that a statement redefines or
-     narrows (169 records; about +100 to 200 lines); step 3, a copy-based
-     rollback point for the provisional registry around the check (175
-     records; about +30 to 50); step 4, the check runs with no frame; step
-     5, delete the frame, its 25 hooks and their bookkeeping (about 650 to
-     700 lines, estimated). Steps 2 and 3 add code before step 5 removes it:
-     ask the user before building them.
+     `~/dev/compute-engine-recovery/rollback-users/report.md`): DONE (state
+     above). The frame, its hooks and `journalDeclaration` are gone. What
+     the next lines list was the earlier plan by writers and no longer
+     applies to the frame; `provisional-application.ts` still keeps its own
+     rollback point for the static check.
    - the three sites of `library/core.ts`;
    - operator-signature inference moved out of host definitions;
    - then the provisional registry (below).
