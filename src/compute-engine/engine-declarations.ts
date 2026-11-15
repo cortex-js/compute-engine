@@ -5561,11 +5561,11 @@ function rawBodyForRebox(
  * body, then its parameters), canonicalized in the scope where `literal` was
  * defined, so that the new body reads the bindings that the old body reads.
  *
- * A literal that a call evaluated and returned is a closure: its body
- * `Block` holds the scope of that call (`captureNestedLocals()`,
+ * A literal that a call evaluated and returned is a function value: it
+ * keeps the activation of that call (`captureNestedLocals()`,
  * `function-utils.ts`), and a symbol
  * of the body that the call bound, a parameter or a local of the call, is
- * found through that scope. The MathJSON of the body has no scope,
+ * found through that activation. The MathJSON of the body has no scope,
  * so a literal built from it in the current scope would read those symbols
  * in the scope of the declaration that stores it. With
  * `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `Declare(q, "(real) -> real",

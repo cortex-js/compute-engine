@@ -2653,11 +2653,12 @@ exposed through `ce.effects`. Both halves are revised:
   precisions keep this sound against the engine's known scope
   behaviors:
   1. The handler belongs to the **dynamic activation**, never to the
-     lexical scope object or its bindings — escaping closures copy and
-     re-root scope objects (`captureClosures`,
-     `src/compute-engine/function-utils.ts`), and a copied `with`
-     scope must NOT carry the finalizer, or `finish` runs twice or at
-     capture time.
+     lexical scope object or its bindings — an escaping closure keeps
+     the activation it was made in (`captureNestedLocals`,
+     `src/compute-engine/function-utils.ts`) and shares the scope
+     objects nested in the body of its literal, so a finalizer on a `with`
+     scope object
+     would run for every closure of the literal, or at capture time.
   2. Async is correct by construction: async evaluation already
      removes its context **by identity** (`ce._removeEvalContext`),
      not by popping the top, precisely so interleaved frames unwind
@@ -2928,9 +2929,9 @@ genuine resources get named handles.**
 - A per-resource-type deny/mock surface — or ratify
   constructor-shadowing plus underlying-capability denial as the
   answer ("The mechanism", third bullet).
-- The `captureClosures` interaction: a copied `with` scope must not
-  carry the finalization handler ("The mechanism", precision 1) —
-  needs a pin test when built.
+- The closure interaction: a `with` scope object that closures share
+  must not carry the finalization handler ("The mechanism", precision
+  1) — needs a pin test when built.
 - Box-route representation: `with` is a scoped binder and belongs on
   the `scoped:` binding-site-selector framework, never an improvised
   binding.

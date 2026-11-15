@@ -896,10 +896,13 @@ Not in it, each its own change: the compile options `inputs` and
 the program runner (ROADMAP CE-1255); the macro kind; the design pass on
 held arguments (ROADMAP CE-1258; `issues/CE-1259.md` and `CE-1260.md` are
 two regressions of hold functions that step 1 landed with, by user
-decision). Still in the code and expected to go: the rebuild of closures
-at the end of a call (`captureClosures`; disabling it breaks 162 tests, the
-reason is not understood yet) and the automatic listing of a finite lazy
-list at an assignment (`listedAssignedValue()`).
+decision). The rebuild of closures at the end of a call and at the
+evaluation of a function literal (`captureClosures`) is deleted since
+2026-11-15: a function value shares the body of its literal. The automatic
+listing of a finite lazy list at an assignment (`listedAssignedValue()`)
+STAYS (user decision 2026-11-15): without it 31 tests move, and the
+interpreter differs from compiled code, which makes the list at the
+assignment (`let t = map(x => x + k, 1..4); k = 10; t` is `[4, 5, 6, 7]`).
 
 Acceptance still open (C8): Tycho's `othello` instrument and codegen audit
 on the scratch build

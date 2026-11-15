@@ -357,10 +357,9 @@ describe('the result of a call keeps its sharing', () => {
       nodes.push(distinctNodes(e));
     }
     // Measured 2026-10-17 on this chain at depths 1 to 6: 39, 60, 95, 144,
-    // 207, 284 nodes once the capture memo keeps its entries and the
-    // capture keeps a literal that the re-rooting would not change
-    // (`rerootingIsNoop`), against 54, 168, 483, 1229, 2870, 6334 before (a
-    // doubling per level, each mention of `v` its own copy). The previous
+    // 207, 284 nodes when the result of a call keeps its sharing, against
+    // 54, 168, 483, 1229, 2870, 6334 when each mention of `v` was its own
+    // copy (a doubling per level). The previous
     // level is shared; the growth that remains (14 more nodes per level at
     // each level) is the inert evaluation memo retired by the `any` advance
     // of each call's parameter activation, so that each level walks the

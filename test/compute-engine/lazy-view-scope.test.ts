@@ -179,7 +179,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
   });
 
   test('a view nested in a view made with a literal callback', () => {
-    // The end of the call rebuilds the result to re-root the closure; the
+    // The end of the call substitutes the parameters in the result; the
     // rebuilt views keep their record.
     const ce = engine([
       [
@@ -679,7 +679,7 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
   test('a view in the body of a function literal that host code builds and the call returns', () => {
     // `Wrap(v)` returns the literal `(y) => ListFrom(v)`. The frame of `g`
     // is retained (the walk goes into the body of the literal), and the
-    // re-rooting of the literal keeps the record of its view.
+    // view in the body keeps its record.
     const ce = engine([]);
     ce._debugBindings = true;
     let spied: any = undefined;

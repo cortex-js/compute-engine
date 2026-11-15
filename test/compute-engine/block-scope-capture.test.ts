@@ -336,16 +336,11 @@ describe('annotated parameter read from a nested Block', () => {
 //
 // NESTED SCOPED BLOCK inside an escaping closure (2026-08-06).
 //
-// `captureClosures` rebinds a returned `Function` literal so its body Block
-// closes over the call's fresh scope — but it reused the body's ops verbatim,
-// so a scoped `Block` NESTED in that body (an `If` branch, a loop body) kept
-// its canonicalization-time parent chain and reached the stale copies of the
-// same lexical levels instead of the captured ones.
-//
-// Invisible for an arithmetic body, whose symbols live directly in the body
-// Block that IS rebuilt; visible the moment a held operand introduces a scope.
-// `If`'s branches are the common case, and Epsil compiles every `if` branch
-// to a Block, so `(x) => if x > 1 { k } else { 0 }` lost `k`.
+// A function value keeps the activation it was made in, and a scoped `Block`
+// NESTED in its body (an `If` branch, a loop body) reads the variables of
+// that activation too. `If`'s branches are the common case, and Epsil
+// compiles every `if` branch to a Block: `(x) => if x > 1 { k } else { 0 }`
+// reads the `k` of the call that made it.
 //
 describe('nested scoped Block in an escaping closure', () => {
   /** `s = k => (x => body)`; returns `s(100)(2)`. */
@@ -431,17 +426,14 @@ describe('nested scoped Block in an escaping closure', () => {
 });
 
 //
-// REVIEW FINDINGS (2026-08-06 dual review of the closure-capture change).
+// A scoped node in the body of a closure (a `Block`, a `Sum`, a loop): each
+// run of it writes its locals in its own activation, and it reads the
+// variables of the activation the closure was made in.
 //
-// The scoped-expression branch of `captureClosures` has to do BOTH things:
-// re-root the scope onto the captured chain, and COPY its bindings. Each half
-// was got wrong once and each has its own failure mode.
-//
-describe('captureClosures: scoped-expression re-rooting', () => {
-  // COPY: `expr` is the canonicalization template shared by every closure made
-  // from this literal, and the scope is mutated at evaluation. Aliasing the
-  // Map gave overlapping activations one frame, so a nested call clobbered an
-  // outer call's local before it was read back.
+describe('a scoped node in the body of a closure', () => {
+  // The scopes nested in the body are shared by every closure made from
+  // this literal. Two activations that overlap (a nested call) keep their
+  // locals apart.
   test('recursion through an escaping closure keeps each frame’s locals', () => {
     const ce = new ComputeEngine();
     // make = k ↦ (n ↦ if n > 0 { let y = k; y + make(k+1)(n-1) } else { k })

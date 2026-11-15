@@ -1,4 +1,9 @@
-import { activationOnLinks, scopeActivationTemplate } from './ambient-chain.js';
+import {
+  activationOnLinks,
+  callFrameBodyOf,
+  functionValueTemplateOf,
+  scopeActivationTemplate,
+} from './ambient-chain.js';
 import {
   externalFactScope,
   retiredBindingScope,
@@ -36,13 +41,8 @@ import {
 } from './binding-sites.js';
 import { isInvalidNonCollection } from './error-value.js';
 import { copyContextStack } from './evaluation-epoch.js';
-import { isPendingCallScope } from '../pending-call-scopes.js';
 import { isQualifiedName } from '../library-shadowing.js';
-import {
-  noteCallFrame,
-  staticBindingIn,
-  staticParentOf,
-} from '../static-typing-view.js';
+import { staticBindingIn, staticParentOf } from '../static-typing-view.js';
 import {
   beforeDefinitionWrite,
   registerDefinitionSideTable,
@@ -149,7 +149,6 @@ export function sameBindingDef(
 // an operator at runtime. Their lexical home still identifies the same slot.
 const callableHomes = new WeakMap<BoxedBaseDefinition, Scope>();
 registerDefinitionSideTable(callableHomes as WeakMap<object, unknown>);
-const callableFrames = new WeakMap<Scope, Scope>();
 export function hasCallableHome(def: BoxedDefinition): boolean {
   return callableHomes.has('value' in def ? def.value : def.operator);
 }
@@ -159,35 +158,19 @@ export function markCallableHome(def: BoxedDefinition, scope: Scope): void {
   beforeDefinitionWrite(half);
   callableHomes.set(half, scope);
 }
-export function markCallableFrame(frame: Scope, template: Scope): void {
-  callableFrames.set(frame, template);
-  // A call frame of a function literal, made for this call and not pushed
-  // yet: the static view of the bindings (`static-typing-view.ts`) reads
-  // the body scope in its place.
-  if (isPendingCallScope(frame)) noteCallFrame(frame, template);
-}
-
 /**
- * Whether `scope` is `home`, or a runtime copy of it: a call frame of a
- * function body (`markCallableFrame`), an activation of a scoped node
- * (`registerScopeActivation`), or a scope that a closure captured in place
- * of a nested block scope (`captureNestedLocals`, `function-utils.ts`).
- * A copy can stand for another copy (a closure captures the call frame of
- * the function that creates it, and that frame stands for the body scope
- * of a closure), so the links are followed to their end.
- * Each link goes from a new scope to a scope that exists already, so they
- * do not make a cycle; the set of visited scopes is a guard only.
+ * Whether `scope` is `home`, or stands for it: a call frame of a function
+ * body (`callFrameBodyOf`), an activation of a scoped node
+ * (`scopeActivationTemplate`), or the body scope of a function value made
+ * from the literal whose body scope is `home` (`functionValueTemplateOf`).
  */
 function scopeStandsFor(scope: Scope, home: Scope): boolean {
-  if (scope === home) return true;
-  const visited = new Set<Scope>();
-  let current: Scope | undefined = scope;
-  while (current !== undefined && !visited.has(current)) {
-    if (current === home) return true;
-    visited.add(current);
-    current = callableFrames.get(current) ?? scopeActivationTemplate(current);
-  }
-  return false;
+  return (
+    scope === home ||
+    (callFrameBodyOf(scope) ??
+      scopeActivationTemplate(scope) ??
+      functionValueTemplateOf(scope)) === home
+  );
 }
 
 /**

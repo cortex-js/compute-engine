@@ -2,24 +2,20 @@
  * A closure returned from an applied function literal keeps the bindings of
  * the block in the body of that literal.
  *
- * Two defects, with two causes:
+ * Two cases:
  *
- * - A function literal kept in a local of the call (`f := z ↦ z + k`) read
- *   the other locals of the call (`k`) through the body scope of the
- *   function, whose parent is the call frame only while the call runs. The
- *   returned closure called `f` after the call, and `f` read a free `k`. Now
- *   the evaluation of a function literal in the body of a function that is
- *   being applied re-roots the literal on the call frame
- *   (`captureAtCreation`, `function-utils.ts`).
+ * - A function literal kept in a local of the call (`f := z ↦ z + k`) reads
+ *   the other locals of the call (`k`). The evaluation of a function
+ *   literal in the body of a function that is being applied gives a
+ *   function value that keeps the call frame (`captureAtCreation`,
+ *   `function-utils.ts`), so a returned closure that calls `f` after the
+ *   call still reads `k`.
  * - A returned literal whose body declares a local function (`g := z ↦ 3`)
- *   and calls it is rebuilt on a new body scope when it is evaluated
- *   (`captureClosures`). The call `g(0)` finds its callee by the scope that
- *   holds its binding, and the frame of a later application stood for the
- *   new scope only, not for the scope the call was bound in. Now the new
- *   scope stands for the old one (`markCallableFrame`). The same holds for
- *   the scope of a nested block of the literal (a branch of an `If`) that
- *   declares a local function (`Declare(g, "unknown", z ↦ 3)`), which
- *   `captureClosures` also rebuilds on a new scope.
+ *   and calls it: the call `g(0)` finds its callee by the scope that holds
+ *   its binding, and the frame of a later application stands for that
+ *   scope (`scopeStandsFor`, `boxed-expression/binders.ts`). The same holds
+ *   for the scope of a nested block of the literal (a branch of an `If`)
+ *   that declares a local function (`Declare(g, "unknown", z ↦ 3)`).
  *
  * A closure keeps the binding of a local, not its value when the closure is
  * created (`docs/SCOPING-MODEL.md`, "Callable resolution": "Capturing a
@@ -335,10 +331,9 @@ const declaredInBranch = (value: unknown, body: unknown) => [
 ];
 
 describe('a returned closure that declares a local function in a nested block', () => {
-  // A nested block of the returned literal is rebuilt on a new scope when
-  // the literal is evaluated (`captureClosures`). The call `g(0)` is bound to the `g`
-  // that the `Declare` makes, whose home is the old scope: the new scope must
-  // stand for it. (CE-794.)
+  // The call `g(0)` in a nested block of the returned literal is bound to
+  // the `g` that the `Declare` makes, whose home is the scope of that
+  // block: an activation of the block stands for it. (CE-794.)
   const witness = declaredInBranch(['Function', 3, 'z'], [
     'Add',
     'x',

@@ -1067,10 +1067,11 @@ function evaluatedAsBlock(source: string): unknown {
 }
 
 describe('A CLOSURE MADE IN A NESTED BLOCK KEEPS THE LOCALS OF ITS BODY', () => {
-  // A closure created in a branch or a loop body is rebuilt on the scopes it
-  // captures (`captureClosures()`, `src/compute-engine/function-utils.ts`).
-  // The rebuilt body keeps its locals, so a `let` in it is a local of the
-  // closure, as for the same closure written as a statement of the body.
+  // A closure created in a branch or a loop body keeps the activation it
+  // was made in (`captureNestedLocals()`,
+  // `src/compute-engine/function-utils.ts`). A `let` in its body is a local
+  // of the closure, as for the same closure written as a statement of the
+  // body.
   test.each([
     // The names that a branch assigns are declared with a value before the
     // branch.

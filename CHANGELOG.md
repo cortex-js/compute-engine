@@ -2,6 +2,11 @@
 
 ### Bug Fixes
 
+- **A function returned by another function no longer gets a `scope` effect
+  in its type for a loop that assigns its own index.** With
+  `mk := y ↦ (x ↦ Block(Loop(Assign(i, i + 1), Element(i, [1, 2])), x + y))`,
+  the type of `mk(q)` was `(x: unknown) scope -> number`, as if the loop
+  wrote a variable outside the function. It is `(x: unknown) -> number`.
 - **In the experimental profile `'ir'`, `Floor(x/49)` at `x = 49` gave 0.**
   A product by a rational constant was compiled as a product by the double
   of the constant (`0.0204… · x`), so a `Floor`, `Ceil`, `Round`, `Mod` or a

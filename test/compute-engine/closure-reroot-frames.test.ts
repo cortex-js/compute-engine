@@ -2,30 +2,21 @@
  * A closure returned through two or more call frames keeps the frame of the
  * call that created it.
  *
- * When a call ends, `captureClosures` (`function-utils.ts`) rebuilds each
- * closure of the result on the frame of the call. It replaced the whole
- * chain of every closure, also of a closure that an inner call had already
- * captured on its own frame. The closure then read the frame of the outer
- * call, and the parameters and locals of the inner call were lost: with
- * `mk = n ↦ (() ↦ Block(n := n + 1, n))` and `wrap = m ↦ mk(m)`,
- * `wrap(5)()` gave `n + 1`, not `6`. Now a capture replaces only a chain
- * that reaches the body scope of the literal that is applied, or its frame,
- * before it reaches the frame of another call (`rerootKind`). When the
- * frame of another call chains to that body scope (a local function that
- * `DefineFunction` installs), the capture keeps that frame and replaces
- * only the end of the chain (`copyChainToLeaving`), with a snapshot of the
- * locals of a nested block that is in use. And the substitution of
- * the parameters in the result of a call leaves alone a closure that
- * another call captured, also one that a recursive call of the same literal
- * made (`bindingKeyedSubs`).
+ * A closure keeps the activation it was made in (`captureNestedLocals`,
+ * `function-utils.ts`), and an outer call that returns it does not change
+ * that: with `mk = n ↦ (() ↦ Block(n := n + 1, n))` and `wrap = m ↦ mk(m)`,
+ * `wrap(5)()` is `6`. The same holds when the frame of the inner call
+ * chains to the body of the outer one (a local function that
+ * `DefineFunction` installs). The substitution of the parameters in the
+ * result of a call leaves alone a closure that another call made, also one
+ * that a recursive call of the same literal made (`bindingKeyedSubs`,
+ * `recordNodesOfOtherCalls`).
  * This is lexical scoping: a closure keeps the scope chain where it was
  * created (`docs/SCOPING-MODEL.md`).
  *
- * A second defect showed once the first was fixed: the application memo
- * kept the closure that `wrap(5)` returned, and a second evaluation of
- * `wrap(5)()` used the same closure, thus the same counter, and gave `7`.
- * A result that reads a frame made by the call is now not memoized
- * (`holdsFrameSince`).
+ * A result that reads a frame made by the call is not kept by the
+ * application memo (`holdsFrameSince`): a second evaluation of `wrap(5)()`
+ * makes a new closure, with its own counter, and gives `6` again.
  *
  * Each case is evaluated twice on the same engine: the second evaluation
  * must give the same value (no state of the first call leaks into it).

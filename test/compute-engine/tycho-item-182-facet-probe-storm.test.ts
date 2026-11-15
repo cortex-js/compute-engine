@@ -23,7 +23,8 @@
  * unresolved (`resolved: undefined`), invalidated the moment a binding
  * for that name first becomes reachable. (Resolving such occurrences
  * through the lambda body's own scope chain was tried and REFUTED —
- * closures re-root at evaluation, so the walk reads the ambient chain.)
+ * a closure reads the activation it was made in, so the walk reads the
+ * ambient chain.)
  *
  * Test doctrine (lazy-collection rounds): budgets are pinned on the
  * `facetComputeCount()` module counter — never wall-clock, never prototype

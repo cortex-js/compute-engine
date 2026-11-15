@@ -69,6 +69,30 @@ export function callFrameBodyOf(scope: Scope): Scope | undefined {
   return frameBodies.get(scope);
 }
 
+// The body scope of the function literal that the scope of the body of each
+// function value stands for (`registerFunctionValueScope()`).
+const valueBodyTemplates = new WeakMap<Scope, Scope>();
+
+/**
+ * Record that `scope`, the scope of the body `Block` of a function value,
+ * stands for `template`, the body scope of the literal the value was made
+ * from. Its parent is the activation that the value keeps; its operands,
+ * and the scopes nested in them, are those of the literal.
+ */
+export function registerFunctionValueScope(
+  scope: Scope,
+  template: Scope
+): void {
+  valueBodyTemplates.set(scope, template);
+}
+
+/** The body scope of the literal that the function value whose body scope is
+ * `scope` was made from, or `undefined` when `scope` is not the body scope
+ * of a function value. */
+export function functionValueTemplateOf(scope: Scope): Scope | undefined {
+  return valueBodyTemplates.get(scope);
+}
+
 /** True when the chain of parents of `scope` holds an activation. */
 export function holdsActivation(scope: Scope | null | undefined): boolean {
   for (let s = scope; s != null; s = s.parent)

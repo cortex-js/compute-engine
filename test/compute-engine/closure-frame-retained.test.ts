@@ -2,31 +2,17 @@
  * A closure that a call returns keeps the definitions of the frame of that
  * call alive.
  *
- * At the end of a call, `captureClosures` (`function-utils.ts`) rebuilds each
- * closure of the result on the frame of the call, and the closure reads the
- * definitions of the frame after the call has returned. The pop of the frame
- * disposed these definitions, and with `ce._debugBindings` it also marked
- * them as dead. The end of the call substitutes the value of a parameter
- * into the body of a closure (`bindingKeyedSubs`), but a closure can hold a
- * nested function literal that reads a name of the frame:
- * `o1 := d => (xs => ListFrom(Map(x => x * d, xs)))`. With the debug flag, a
- * read of a disposed definition of the frame threw 'The binding of "d"
- * belongs to the discarded scope "call"'. Without the flag the value was
- * correct, because a disposed definition keeps its value.
- *
- * Before 2026-11-02, most cases read `d` through the symbol default of a
- * function `f := (x, k = d) => x * k` applied in the closure, which was read
- * where the call was made. A default is now a constant, so the cases read
- * `d` in a nested function literal of the closure.
- *
- * Now the frame is marked as retained when the call makes a closure whose
- * chain reaches the frame (`rerootOnCreatingFrame`, `function-utils.ts`),
- * which also covers a closure that leaves the call by an assignment to an
- * outer variable, and when the capture at the end of the call met a node of
- * the result whose chain reads the frame (`nodesReadingLeftCall`). Both call
- * `retainScope` (`boxed-expression/lazy-view-context.ts`), and
- * the pop of a retained frame does not dispose its definitions
- * (`discardEvalContext`, `engine-scope.ts`).
+ * A closure keeps the activation it was made in (`captureNestedLocals`,
+ * `function-utils.ts`), and reads the definitions of the frame after the
+ * call has returned. The end of the call substitutes the value of a
+ * parameter into the body of a closure (`bindingKeyedSubs`), but a closure
+ * can hold a nested function literal that reads a name of the frame:
+ * `o1 := d => (xs => ListFrom(Map(x => x * d, xs)))`. A call frame is an
+ * activation of the body scope: its pop neither disposes nor marks as dead
+ * the definitions of that scope (`discardEvalContext`, `engine-scope.ts`),
+ * so with `ce._debugBindings` a read through the closure does not throw
+ * 'The binding of "d" belongs to the discarded scope "call"'. This covers
+ * a closure that leaves the call by an assignment to an outer variable.
  *
  * Each case runs with the debug flag on and off, and must give the same
  * value.

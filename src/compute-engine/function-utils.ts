@@ -12,7 +12,6 @@ import {
   unresolvedFreeHome,
   evaluateInOwnBindings,
   isParameterActivation,
-  markCallableFrame,
   rebindToBindings,
   rewriteWithBinders,
   sameBindingDef,
@@ -108,7 +107,9 @@ import {
   callFrameBodyOf,
   chainContains,
   activationOnLinks,
+  functionValueTemplateOf,
   registerCallFrame,
+  registerFunctionValueScope,
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
 import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
@@ -191,6 +192,7 @@ import { notePendingCallScope } from './pending-call-scopes.js';
 import {
   forgetBodyScopeApplied,
   noteBodyScopeApplied,
+  noteCallFrame,
   staticBindingIn,
   staticParentOf,
   staticViewDiverges,
@@ -4408,10 +4410,9 @@ export function callFrameReceivedCollection(ce: ComputeEngine): boolean {
  * The call frames of the applications of function literals (`makeLambda`):
  * the scope that holds the parameters and the locals of the body of one
  * application, with the serial number of its creation. A frame stays in
- * this map after its call ends, because a closure that the call returned
- * keeps the frame in its chain. `rerootKind` tells a chain that reaches the
- * frame of another call from one that reads the scope being captured.
- * `holdsFrameSince` reads the serial numbers.
+ * this map after its call ends, because a function value that the call
+ * returned keeps the frame in its chain. `holdsFrameSince` reads the serial
+ * numbers.
  */
 const CALL_FRAMES = new WeakMap<Scope, number>();
 
@@ -4460,119 +4461,10 @@ function holdsFrameSince(result: Expression, first: number): boolean {
 }
 
 /**
- * What a capture does with a node (a function literal or another scoped
- * node) whose own scope has the parent `scope`:
- * - `'reroot'`: the chain reaches `leaving` (the scope that
- *   `closureParent` stands for), or reaches `closureParent` itself before
- *   it reaches the frame of another call. The node is rebuilt on
- *   `closureParent`. A frame of another call that the chain held before
- *   `leaving` is not kept: a function value made in that call keeps its
- *   activation, and its node is not rebuilt (`keepsActivation()`).
- * - `'keep-current'`: the chain reaches the frame of another call, and
- *   then `closureParent`. The node keeps its chain, which reads the frame
- *   of this call through the other frame: a closure that a local function
- *   of this call made.
- * - `'keep'`: the chain reaches neither `leaving` nor `closureParent`. The
- *   node keeps its chain, and does not read this call at all.
- *
- * A closure keeps the scope chain where it was created (lexical scoping). A
- * capture replaces only the part of a chain that reads `leaving`. A chain
- * that reaches the frame of another call first belongs to a closure that
- * this other call made, and replacing all of it would lose the frame of
- * that call: with `mk = n ↦ (() ↦ Block(n := n + 1, n))` and
- * `wrap = m ↦ mk(m)`, `wrap(5)()` is `6`.
- *
- * The frame of another call can itself chain to `leaving`: the frame of a
- * call of a function that `DefineFunction` installs in a body chains to the
- * body scope of the enclosing literal. A closure that this call returns
- * keeps that frame, and also the frame of the enclosing call: with
- * `f(n) = Block(k := n, DefineFunction(g, b ↦ (x ↦ k + x)), g(0))`,
- * `f(5)(1)` is `6`.
- *
- * A chain that reaches neither `leaving` nor a frame (a literal
- * canonicalized at the top level, a held literal that was never evaluated
- * in a call) does not read this call, and is kept as it is.
- *
- * `recordNodesOfOtherCalls` asks the same question at the end of a call,
- * with the frame of the call for `closureParent` and the body scope of the
- * applied literal for `leaving`.
- */
-function rerootKind(
-  scope: Scope | null | undefined,
-  closureParent: Scope,
-  leaving: Scope
-): 'reroot' | 'keep-current' | 'keep' {
-  let frame = false;
-  for (let s = scope; s != null; s = s.parent) {
-    if (s === leaving) return 'reroot';
-    if (s === closureParent) return frame ? 'keep-current' : 'reroot';
-    if (CALL_FRAMES.has(s)) frame = true;
-  }
-  return 'keep';
-}
-
-/**
- * The function value that the function literal `expr` gives when it is
- * evaluated in the activation `closureParent`: the literal rebuilt with the
- * scope of its body, and the scopes of the scoped nodes of its body, on
- * `closureParent`. `captureNestedLocals()` is its one caller; the result of
- * a call is not walked when the call ends.
- *
- * Each rebuilt scope is a new scope object that copies the bindings it
- * keeps; changing the parent of the original scope is not sufficient. The
- * original scope belongs to the expression that every closure of the literal
- * shares, and evaluation writes to it (`evaluateBlock`, `Declare`), so two
- * activations that shared it would overwrite each other's locals (see the
- * comment on the scoped-expression case in `captureClosuresUncached`).
- */
-function captureClosures(
-  ce: ComputeEngine,
-  expr: Expression,
-  closureParent: Scope,
-  // The scope that `closureParent` stands for in the rebuilt chains: the
-  // scope the literal is written in, or the old scope of a node that this
-  // capture rebuilds. Only a chain that reads it is replaced (see
-  // `rerootKind`).
-  leaving: Scope,
-  // The capture of each node under a given parent scope, for one capture.
-  // A body that shares its operands is captured once per node, so the
-  // rebuilt value keeps that sharing. Keyed on the parent scope as well: a
-  // scoped node reached under two different captured chains is two
-  // different closures. The capture also depends on `leaving`, which the
-  // key leaves out: each parent scope is used with one `leaving` scope
-  // only, so the key is still exact.
-  memo: Map<Scope, Map<Expression, Expression>> = new Map()
-): Expression {
-  if (!isFunction(expr) && !isDictionary(expr)) return expr;
-  // A function value or a lazy collection that keeps the activation it was
-  // made in is not rebuilt: it reads through that activation.
-  if (lazyViewActivationOf(expr) !== undefined || keepsActivation(expr))
-    return expr;
-  const hit = memo.get(closureParent)?.get(expr);
-  if (hit !== undefined) return hit;
-  const captured = captureClosuresUncached(
-    ce,
-    expr,
-    closureParent,
-    leaving,
-    memo
-  );
-  // Recursion may create this parent's map. Read it after capturing children
-  // so their entries survive and shared subtrees stay shared.
-  let byNode = memo.get(closureParent);
-  if (byNode === undefined) {
-    byNode = new Map();
-    memo.set(closureParent, byNode);
-  }
-  byNode.set(expr, captured);
-  return captured;
-}
-
-/**
  * Record in `kept` each function value, lazy collection or other scoped
  * node of `expr` that does not read the call with the frame `closureParent`
  * and the body scope `leaving`: its activation does not reach the frame, or
- * its chain reads neither scope (`rerootKind` is `'keep'`). The operands of
+ * its chain reads neither scope. The operands of
  * a recorded node are not visited. The substitution of the parameters at
  * the end of the call leaves these nodes alone (`bindingKeyedSubs`).
  *
@@ -4616,162 +4508,18 @@ function recordNodesOfOtherCalls(
     kept.add(expr);
     return;
   }
-  if (scope && rerootKind(scope.parent, closureParent, leaving) === 'keep') {
+  // A node whose chain reads neither the body scope of the applied literal
+  // nor the frame of the call does not read this call.
+  if (
+    scope &&
+    !chainContains(scope.parent, leaving) &&
+    !chainContains(scope.parent, closureParent)
+  ) {
     kept.add(expr);
     return;
   }
   for (const op of expr.ops)
     recordNodesOfOtherCalls(op, closureParent, leaving, kept, seen);
-}
-
-/** The body of {@link captureClosures}: one node's capture. */
-function captureClosuresUncached(
-  ce: ComputeEngine,
-  expr: Expression,
-  closureParent: Scope,
-  leaving: Scope,
-  memo: Map<Scope, Map<Expression, Expression>>
-): Expression {
-  if (isDictionary(expr)) {
-    let changed = false;
-    const entries = expr.entries.map(([key, value]) => {
-      const next = captureClosures(ce, value, closureParent, leaving, memo);
-      changed ||= next !== value;
-      return ce._fn('KeyValuePair', [ce.string(key), next]);
-    });
-    return changed ? ce.function('Dictionary', entries) : expr;
-  }
-  if (expr.operator === 'Function' && isFunction(expr)) {
-    const innerBlock = expr.op1;
-    if (innerBlock && isFunction(innerBlock) && innerBlock.localScope) {
-      // A literal whose chain does not read the frame being left keeps its
-      // chain, and so does every literal nested in its body.
-      const kind = rerootKind(
-        innerBlock.localScope.parent,
-        closureParent,
-        leaving
-      );
-      if (kind === 'keep' || kind === 'keep-current') return expr;
-      // Only copy bindings for the inner function's own parameters and the
-      // locals of its body (their static definitions, whose values a call
-      // holds in its frame). Other entries (auto-declared free variables)
-      // must NOT be copied — they would shadow the closureParent chain
-      // where the outer call's parameter values live.
-      const innerParamNames = new Set(
-        functionLiteralBoundNames(expr.ops.slice(1))
-      );
-      const closureBindings: Map<string, BoxedDefinition> = new Map();
-      for (const [key, val] of innerBlock.localScope.bindings) {
-        if (
-          innerParamNames.has(key) ||
-          (isValueDefinitionHalf(val) && val.value._blockLocal === true)
-        )
-          closureBindings.set(key, val);
-      }
-      const closureScope: Scope = {
-        parent: closureParent,
-        bindings: closureBindings,
-      };
-      // The new scope stands for the body scope of the literal. A call in
-      // the body finds its callee by the scope that holds the binding of the
-      // callee (`callableBindingInContext`, `binders.ts`), and the value of
-      // a local of the body (`g` in `let g = z ↦ 3`) is written at each
-      // application, in the frame that stands for the body scope. With this
-      // link, the frame of an application of the rebuilt literal stands for
-      // the body scope too, and the call `g(0)` finds `g` there.
-      markCallableFrame(closureScope, innerBlock.localScope);
-      // Rebuild the body's own ops against the NEW scope: a scoped `Block`
-      // nested inside the body (an `If` branch, a loop body) keeps its
-      // canonicalization-time parent chain otherwise, which reaches the stale
-      // copies of these same lexical levels instead of the captured ones. That
-      // is invisible for an arithmetic body — its symbols live directly in the
-      // body Block, which IS rebuilt here — and shows up the moment a held
-      // operand introduces a scope: `k ↦ (x ↦ If(x > 1, {k}, {0}))` applied at
-      // `k = 100` returned the symbol `k`, while the same body without the
-      // branch Blocks, or a plain `do { k }`, returned `100`.
-      // `metadata` on the rebuilds: a debugger maps statements back to
-      // source through `sourceOffsets`, and this copy is the body the hook
-      // sees at application time — dropping them here silently disables
-      // body breakpoints for the rebuilt statements.
-      const closedBlock = ce._fn(
-        'Block',
-        innerBlock.ops.map((op) =>
-          captureClosures(ce, op, closureScope, innerBlock.localScope!, memo)
-        ),
-        {
-          scope: closureScope,
-          metadata: { sourceOffsets: innerBlock.sourceOffsets },
-        }
-      );
-      return ce._fn('Function', [closedBlock, ...expr.ops.slice(1)], {
-        metadata: { sourceOffsets: expr.sourceOffsets },
-      });
-    }
-    return expr;
-  }
-
-  // A scoped `Block` re-roots onto the captured chain, keeping its OWN
-  // bindings (its block locals).
-  // ANY scoped expression — a `Block`, or a binder such as
-  // `Sum`/`Product`/`Loop`/`Comprehension` — re-roots its own scope onto the
-  // captured chain and recurses through its operands against that new scope.
-  //
-  // Both halves are load-bearing:
-  // - RE-ROOT, because the expression's canonicalization-time scope chains to
-  //   the stale copies of these same lexical levels; leaving it in place is
-  //   what made a captured variable read as unbound from an `If` branch, and
-  //   preserving it verbatim on a `Loop` silently zeroed the loop body.
-  // - COPY the bindings, because `expr` is the template shared by every closure
-  //   derived from this literal, and a closure must not share its scope
-  //   object with the template: `make = k ↦ (n ↦ if n > 0 { let y = k;
-  //   y + make(k+1)(n-1) } else { k })` gives 6 for `make(0)(3)`.
-  //
-  // Dropping the scope instead re-resolves a binder's index against the
-  // enclosing chain — `Sum(If(i > 0, {i·k}, {0}), i, 1, n)` in an escaping
-  // closure threw `Cannot assign a value to the constant "i"`, `i` having
-  // fallen through to the imaginary unit.
-  if (isFunction(expr) && expr.localScope) {
-    const kind = rerootKind(expr.localScope.parent, closureParent, leaving);
-    if (kind === 'keep' || kind === 'keep-current') return expr;
-    const scope: Scope = {
-      parent: closureParent,
-      bindings: new Map(expr.localScope.bindings),
-    };
-    // The new scope stands for the scope of `expr` (`markCallableFrame`): a
-    // lookup that accepts a binding of the old scope accepts a binding of
-    // this copy too. A run of a `Block` gives each `Declare` local a new
-    // binding in the scope it runs in, and a call in the block finds its
-    // callee by the scope that holds that binding
-    // (`callableBindingInContext`, `binders.ts`): the call `g(0)` is bound
-    // to the hoisted `g`, whose home is the old scope. Without this
-    // link, `w ↦ (x ↦ If(x > 0, Block(Declare(g, "unknown", z ↦ 3),
-    // x + g(0)), 0))` applied to `1` and then to `5` gave `5 + g(0)`, not
-    // `8`. (CE-794.)
-    markCallableFrame(scope, expr.localScope);
-    return ce._fn(
-      expr.operator!,
-      expr.ops.map((op) =>
-        captureClosures(ce, op, scope, expr.localScope!, memo)
-      ),
-      { scope, metadata: { sourceOffsets: expr.sourceOffsets } }
-    );
-  }
-
-  // Recurse into unscoped compound expressions (List, Tuple, Pair, etc.)
-  if (isFunction(expr) && expr.ops.length > 0) {
-    let changed = false;
-    const newOps = expr.ops.map((op) => {
-      const captured = captureClosures(ce, op, closureParent, leaving, memo);
-      if (captured !== op) changed = true;
-      return captured;
-    });
-    if (changed)
-      return ce._fn(expr.operator!, newOps, {
-        metadata: { sourceOffsets: expr.sourceOffsets },
-      });
-  }
-
-  return expr;
 }
 
 /** One parameter's post-evaluation substitution: the literal's OWN binding for
@@ -5892,9 +5640,14 @@ function renameBoundVariables(
   const locals = blockLocals(holder);
   const parameters = new Set(isLiteral ? boundVariableNames(node) : []);
   const newScope: Scope = {
-    parent: scope.parent,
+    ...scope,
     bindings: new Map(scope.bindings),
   };
+  // The variables of the binder, under their fresh names.
+  if (scope.binderNames !== undefined)
+    newScope.binderNames = new Set(
+      [...scope.binderNames].map((name) => fresh.get(name) ?? name)
+    );
   const targets = new Map<
     string,
     {
@@ -6034,8 +5787,14 @@ function renameBoundVariables(
       if (entry !== undefined) bindings.set(id, entry);
     }
   };
+  // The scopes nested in the body of a function value have the body scope
+  // of its literal as their parent (`captureNestedLocals()`), not `scope`.
+  // The renamed value has its own copies of them, on `newScope`.
+  const template = bodyScopeTemplate(scope);
+  if (functionValueTemplateOf(scope) !== undefined)
+    registerFunctionValueScope(newScope, newScope);
   const reroot = (e: Expression) =>
-    rerootScopes(e, newScope, rerootMemo, rebind, scope);
+    rerootScopes(e, newScope, rerootMemo, rebind, template);
 
   return ce._inScope(newScope, () => {
     if (isLiteral) {
@@ -6337,6 +6096,7 @@ function rerootScopes(
   ) {
     const own = expr.localScope;
     const scope: Scope = {
+      ...own,
       parent,
       bindings: new Map(own.bindings),
     };
@@ -6894,20 +6654,21 @@ export function captureAtCreation(
 }
 
 /**
- * The activations that a function value keeps (`captureNestedLocals()`).
- */
-const KEPT_ACTIVATIONS = new WeakSet<Scope>();
-
-/**
  * True when `expr` is a function value that keeps the activation it was
- * made in: the parent of the scope of its body is that activation. Such a
- * value evaluates to itself, and the end of a call does not rebuild it
- * (`captureClosures()`).
+ * made in: the scope of its body stands for the body scope of a literal
+ * (`registerFunctionValueScope()`), and its parent is that activation. Such
+ * a value evaluates to itself.
  */
 function keepsActivation(expr: Expression): boolean {
   if (!isFunction(expr, 'Function')) return false;
-  const parent = expr.op1.localScope?.parent;
-  return parent != null && KEPT_ACTIVATIONS.has(parent);
+  const scope = expr.op1.localScope;
+  return scope !== undefined && functionValueTemplateOf(scope) !== undefined;
+}
+
+/** The body scope of the literal that `scope` stands for: the body scope
+ * of the literal a function value was made from, or `scope` itself. */
+function bodyScopeTemplate(scope: Scope): Scope {
+  return functionValueTemplateOf(scope) ?? scope;
 }
 
 /**
@@ -6919,13 +6680,22 @@ function keepsActivation(expr: Expression): boolean {
  * variables of this iteration of a binder (`renewIterationActivation()`),
  * also after the run ends. Two closures made by the same run share its
  * locals, and a write that follows the creation is visible to both.
+ *
+ * The value is the literal with a new body `Block`: the same operands, on a
+ * new scope whose parent is the activation and that stands for the body
+ * scope of the literal (`registerFunctionValueScope()`). The operands and
+ * the scoped nodes nested in them are those of the literal. A rebuild of
+ * the value (`subs()`, `simplify()`) keeps the scope of its body, so it
+ * keeps the activation.
  */
 export function captureNestedLocals(
   ce: ComputeEngine,
   fn: Expression | undefined
 ): Expression | undefined {
   if (fn === undefined || !isFunction(fn, 'Function')) return undefined;
-  const scope = isFunction(fn.op1) ? fn.op1.localScope : undefined;
+  const block = fn.op1;
+  if (!isFunction(block)) return undefined;
+  const scope = block.localScope;
   if (!scope?.parent) return undefined;
   const live = activationOnLinks(ce.context.lexicalScope, scope.parent);
   if (
@@ -6933,8 +6703,15 @@ export function captureNestedLocals(
     callFrameBodyOf(live) === undefined
   )
     return undefined;
-  KEPT_ACTIVATIONS.add(live);
-  return captureClosures(ce, fn, live, scope.parent);
+  const valueScope: Scope = { ...scope, parent: live };
+  registerFunctionValueScope(valueScope, scope);
+  const body = ce._fn('Block', block.ops, {
+    scope: valueScope,
+    metadata: { sourceOffsets: block.sourceOffsets },
+  });
+  return ce._fn('Function', [body, ...fn.ops.slice(1)], {
+    metadata: { sourceOffsets: fn.sourceOffsets },
+  });
 }
 
 /**
@@ -7582,9 +7359,9 @@ function makeLambda(
     //     arity-checked, preserving the nullary contract.
     const nullaryBody = onlyBody as Expression & FunctionInterface;
     return wrapRecursion(ce, (_args, options) => {
-      const bodyScope = nullaryBody.localScope!;
+      const bodyScope = bodyScopeTemplate(nullaryBody.localScope!);
       const capturedScope =
-        definingScopeOf(ce, bodyScope) ?? ce.context.lexicalScope;
+        definingScopeOf(ce, nullaryBody.localScope!) ?? ce.context.lexicalScope;
       const mismatch = capturedValueMismatch(ce, fnExpr, capturedScope);
       if (mismatch !== undefined) return mismatch;
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
@@ -7597,7 +7374,7 @@ function makeLambda(
       // statements of the body write the values of its locals there, as on
       // the parameterized `invoke` path.
       holdBodyLocals(freshScope, bodyScope);
-      markCallableFrame(freshScope, bodyScope);
+      noteCallFrame(freshScope, bodyScope);
       // Named 'call': a function-application activation frame. The debugger's
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
@@ -7642,6 +7419,10 @@ function makeLambda(
 
   // body is a Block (scoped) — safe to access .ops and .localScope
   const bodyFn = body as Expression & FunctionInterface;
+  // The body scope of the literal, also for a function value, whose own body
+  // scope stands for it and is read only for its parent: a call frame
+  // applies it, and the scopes nested in the body have it as their parent.
+  const bodyScope = bodyScopeTemplate(bodyFn.localScope!);
 
   // Apply-time enforcement (§6.4) is a strict-mode feature gated on the literal
   // carrying at least one annotated parameter — untyped literals skip it
@@ -8896,10 +8677,10 @@ function makeLambda(
         leaf.site,
         leaf.value,
         freshScope,
-        bodyFn.localScope,
+        bodyScope,
         parameterValues
       );
-    holdBodyLocals(freshScope, bodyFn.localScope!, parameterValues);
+    holdBodyLocals(freshScope, bodyScope, parameterValues);
     // The written argument behind a plain parameter's activation, for the
     // exact re-read of a jump in the body (`ApplyOptions.exactSources`,
     // `exact-argument-source.ts`). A destructured leaf has no argument of
@@ -8916,12 +8697,11 @@ function makeLambda(
           setExactArgumentSource(freshScope, activation.value, source);
       }
 
-    // The body scope is being applied: the static view and the copies of
-    // scopes read that (`appliedBodyScopes`).
-    const bodyScope = bodyFn.localScope!;
+    // The body scope is being applied: the static view reads that
+    // (`appliedBodyScopes`).
     enterAppliedBodyScope(bodyScope);
     noteBodyScopeApplied(ce, bodyScope);
-    markCallableFrame(freshScope, bodyScope);
+    noteCallFrame(freshScope, bodyScope);
 
     // Are the statements awaited (`awaitStatements`)? An argument can have
     // a free symbol: a recursive application in the body finds the frame of
@@ -8935,7 +8715,7 @@ function makeLambda(
       options._effects !== undefined &&
       iterationStatements === undefined &&
       blockingAsyncApplication(
-        bodyScope,
+        bodyFn.localScope!,
         options._contextStack ?? ce._evalContextStack
       ) === undefined;
     // An application whose statements are awaited puts its call frame on
@@ -9148,10 +8928,10 @@ function makeLambda(
         done: new Promise<void>((resolve) => (finish = resolve)),
         finish: () => finish(),
       };
-      let inFlight = asyncInFlight.get(bodyScope);
+      let inFlight = asyncInFlight.get(bodyFn.localScope!);
       if (inFlight === undefined) {
         inFlight = [];
-        asyncInFlight.set(bodyScope, inFlight);
+        asyncInFlight.set(bodyFn.localScope!, inFlight);
       }
       inFlight.push(application);
       const applications = inFlight;
@@ -9189,7 +8969,8 @@ function makeLambda(
         } finally {
           const index = applications.lastIndexOf(application);
           if (index >= 0) applications.splice(index, 1);
-          if (applications.length === 0) asyncInFlight.delete(bodyScope);
+          if (applications.length === 0)
+            asyncInFlight.delete(bodyFn.localScope!);
           awaitedFrames.delete(freshScope);
           const count = (awaitedApplicationCount.get(literal) ?? 1) - 1;
           if (count > 0) awaitedApplicationCount.set(literal, count);

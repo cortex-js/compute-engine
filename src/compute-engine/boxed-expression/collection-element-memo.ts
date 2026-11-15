@@ -308,12 +308,12 @@ export const ELEMENT_MEMO_CAP = 100_000;
  * while the walk is inside the node that binds them (see `visit`). The same
  * static binding can occur elsewhere in the tree and mean something else
  * there. A call substitutes each parameter's value into its result
- * (`bindingKeyedSubs`, `function-utils.ts`), and a closure copy made by
- * `captureClosures` keeps the template's parameter operands, so a `Fold`
+ * (`bindingKeyedSubs`, `function-utils.ts`), and a function value shares
+ * the operands of its literal, so a `Fold`
  * whose step returns a lazy `Map` over its own state embeds, in each step's
- * literal, the previous step's copy of the SAME `Map` lambda. The free `i`
- * in the step body and the parameter `i` of that embedded copy carry one
- * binding: inside the copy it is the copy's parameter; outside it, it
+ * literal, the previous step's value of the SAME `Map` lambda. The free `i`
+ * in the step body and the parameter `i` of that embedded value carry one
+ * binding: inside the value it is its parameter; outside it, it
  * denotes the enclosing call's activation — a dependency that changes with
  * every element of the `Map`. Excluding it for the whole tree let the
  * application memo serve one element's result for all of them (issue #438,
@@ -554,8 +554,8 @@ function snapshotDepsUnderChain(
    * re-resolves the name and compares the INNER operator identity (see
    * `ElementMemoDep.resolvedOperator`).
    * The body's free names are resolved against the INSTANCE's chain, like
-   * every other occurrence: closures re-root at evaluation
-   * (`captureClosures`), so that is the chain the walk actually reads —
+   * every other occurrence: a call of a function value runs on the chain of
+   * its activation, so that is the chain the walk actually reads —
    * see the resolution note on `visitValueDef`. */
   const visitLambdaBody = (
     occurrence: Expression,
@@ -609,8 +609,9 @@ function snapshotDepsUnderChain(
     // A valueless, non-constant binding needs the resolution chain's
     // testimony before it is trackable. Resolution here is deliberately the
     // INSTANCE's chain even for an occurrence deep inside a walked lambda
-    // body: closures re-root at evaluation (`captureClosures`), so a body's
-    // free names resolve through the chain current at WALK time, not
+    // body: a call of a function value runs on the chain of its
+    // activation, so a body's free names resolve through the chain current
+    // at WALK time, not
     // through the canonicalization-time body scope — a dependency recorded
     // against the body's own chain would keep validating while an ambient
     // `assign` changed what the walk computes (measured: the Map

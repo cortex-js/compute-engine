@@ -695,8 +695,8 @@ describe('Map fusion — laziness and impurity', () => {
 //   f(k) = Map(x ↦ x + k, [1,2]);  f(100)   ⇒  [k + 1, k + 2]   (was)
 //                                            ⇒  [101, 102]      (now)
 //
-// The closure chain itself was always intact (`captureClosures` rebinds the
-// literal to the fresh scope); it was the drain that did not evaluate inside
+// The closure chain itself was always intact (the callback keeps the
+// activation it was made in); it was the drain that did not evaluate inside
 // it. A level whose operands are all LITERALS — the shape this fusion was
 // built for — records no scope and keeps the original zero-scope-work path.
 //

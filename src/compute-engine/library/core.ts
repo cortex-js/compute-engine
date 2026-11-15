@@ -10006,14 +10006,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // arguments to it.
         // See `function apply()` for that.
         //
-        // Evaluating the literal creates a closure. When the literal is
-        // written in a nested block of a running function or loop, the
-        // closure captures the bindings of that block now: a later
-        // application or iteration writes to the same nested scopes (see
-        // `captureNestedLocals`). When the literal is written in the body of
-        // a function that is being applied, the closure also keeps the call
-        // frame of that application (`captureAtCreation`). Otherwise the
-        // literal is its own value.
+        // Evaluating the literal makes a function value when the scope it
+        // is written in has an activation in progress: the body of a
+        // function that is being applied, a block, a loop or a binder that
+        // is being evaluated. The value keeps that activation, so its body
+        // reads the parameters and locals of this run, also after the run
+        // ends (`captureNestedLocals`). A function value evaluates to
+        // itself, and so does a literal with no activation in progress.
         return captureAtCreation(engine, expression);
       },
     },
