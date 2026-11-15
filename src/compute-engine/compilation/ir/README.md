@@ -65,8 +65,11 @@ the inputs object for its free names: `run(3, 4, { x: 1.5 })`.
 A free name that has a value in the engine (a constant, or a variable) is that
 value, lowered at compile time as a literal, only when the value is a number of
 the engine (an integer, a rational, a radical such as `Sqrt(2)`, a complex), a
-list of such numbers or a tuple of them (a point, `P = (2.64, 17)`): no symbol
-and no other application. The value is read from
+list of such numbers or a tuple of them (a point, `P = (2.64, 17)`), or a
+colour constructor (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`) of three real
+numbers (`C = Hsv(270, 0.4, 0.95)`, which is lowered as that application on the
+colour lane): no symbol and no other application; a constructor with an alpha or
+a channel that is not a number declines with its own cause. The value is read from
 the innermost binding of the name (`ce.lookupDefinition`), as the interpreter
 reads a symbol that is not a call. Any other value declines, also a closed one
 (`Pi + 1`), since the names in a stored expression have bindings of their own
@@ -154,7 +157,8 @@ JavaScript gives the real root of an odd denominator (`Root(-8, 2.5)` is
 `_gpu_ir_factorial` (a loop of 33 passes, +∞ for a negative operand and over
 34); of a real it declines (the Gamma function).
 `GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on `int`s.
-`Hypot` is `length(vec2(x, y))`; `Sinh`, `Cosh`, `Tanh`, `Arsinh`, `Arctan`
+`Hypot` is `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the builtin
+is wrong for a large negative argument); `Sinh`, `Cosh`, `Tanh`, `Arctan`
 and the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or
 their reciprocals. The other real functions (`Erf`, `Gamma`, `Zeta`,
 `Arccot`, `Arcsec`, ...) decline there.
@@ -212,7 +216,7 @@ complex signature; another row (a comparison, `Floor`, `Mod`, `Max`, ...)
 declines a complex operand. The JavaScript code calls `COMPLEX_FUNCTIONS`
 (`_SYS.ir`), which the fold calls too: the engine's machine complex functions
 (`SYS_HELPERS` of the existing runtime), and the ring operations part by part.
-GLSL declines the lane. The result of `compile()` follows the result convention
+The result of `compile()` follows the result convention
 of every stored kernel (`normalizeRunResult()`), in both modes: a complex value
 of imaginary part exactly 0 is returned as the number, at the root and in the
 cells of a list; another complex value is a `{re, im}` object. A program whose
@@ -251,6 +255,34 @@ comparison other than `Equal` and `NotEqual`, the real functions (`Gamma`,
 `Erf`, `Zeta`, ...) of a complex, a complex `Max` or `Min` reduction, and
 `ComplexInfinity` as a literal; a real pole (`Gamma(-2)`) stays a real infinity.
 
+On GLSL a complex value is a `vec2` (re, im): a scalar input declared
+`complex` is a `vec2` parameter (`freeSymbolTypes[name].lowered` is `vec2`),
+a complex result a `vec2`, a complex constant `vec2(re, im)`, a real read as
+a complex `vec2(x, 0.0)`. `Add`, `Subtract`, `Negate`, `Real` (`z.x`),
+`Imaginary` (`z.y`), `Conjugate`, `Abs` (`length`), `Equal` and `NotEqual`
+are the operations of GLSL's vectors. The argument, of `Argument`, `Ln` and
+`Power`, is the helper `_gpu_ir_carg`: on an axis it is written (π on the
+negative real axis, ±π/2 on the imaginary axis, 0 at 0, as the interpreter),
+since a part that `Negate`, `Conjugate` or a product makes -0 is ordinary,
+and a renderer's `atan(y, x)` is wrong there (SwiftShader gives `atan(-0, 3)`
+as π). `Multiply`, `Divide`, `Exp`, `Ln`, `Sqrt`,
+`Power` (a real or a complex exponent, as `exp(b·ln a)`; an exponent that is
+an integer from 1 to 16 at run time is a product, as `_gpu_ir_pow` on the
+real lane, so `z^2 + c` at `z = 0` is `c`), `Sin`, `Cos`,
+`Tan`, `Sinh`, `Cosh` and `Tanh` are one helper each (`_gpu_ir_cmul`, …),
+written only when used: the textbook formulas of the principal branch, with
+no guard (no fidelity at a pole, a branch point or cut, a signed zero, or on
+overflow of an intermediate such as `|b|^2` in a division). `If`, `Which`, a
+local, a loop's carried value, a `Sum` or a `Product`, and a parameter or the
+result of a user function hold a complex `vec2`. The other complex rows
+decline with the operation they lack (`Arcsin (the operation casin) on
+glsl`): the inverse trigonometric and hyperbolic functions, `Root`, `Log`,
+`Cot`, `Sec`, `Csc`, `Coth`, `Sech`, `Csch`; and so does a list or a tuple of
+complex numbers (`a list of complex numbers`, `Profile.scalarLanes`), also an
+input one or the result of a user function. `mode: 'complex'` is admitted:
+an input of no declared type, or of type `number` or `unknown`, is then a
+`vec2`, and the result's `mode` is `'complex'`.
+
 Ill-conditioned points (docs/plans/2026-11-12-js-route-course-correction.md,
 rule 1): near a branch point, a pole or a cancellation the lane gives the
 function's value at an argument within a few ulps of the given one, which can
@@ -284,7 +316,11 @@ expression (`compileWithIrProfileGlsl()`): `AsOklab(Which(…, Oklch(…), …,
 Rgb(…)))`, Tycho's form, and `Block(…, AsOklab(c))` compile;
 `AsOklab(AsRgb(c))`, a conversion in an arm of an `If` or a `Which`, and a
 local that holds `AsOklab(c)` and is the result
-(`Block(Declare(k, AsOklab(c)), k)`) decline on GLSL. `Hsl`, `Hsv`, `AsHsl` and `AsHsv` have no GLSL spelling and
+(`Block(Declare(k, AsOklab(c)), k)`) decline on GLSL, and so does a
+conversion in the body of a user function. `Hsv` and `Hsl` convert their
+channels to sRGB with `_gpu_ir_hsv` and `_gpu_ir_hsl` (the hue in degrees,
+wrapped; the other two channels clamped into [0, 1], as the interpreter
+reads them), then as `Rgb`. `AsHsl` and `AsHsv` have no GLSL spelling and
 decline there. No space is tracked at compile time and no code tests one.
 
 The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a
@@ -294,9 +330,13 @@ interpreter maps (`Rgb(List(1, 2), 0, 0)`). A conditional between colours
 joins on the lane (`If`, `Which` with a `True` clause; with none, its value
 can be `Missing` and it declines), and a `Block` local, also one that a
 `Loop` assigns, holds a colour (a local declared with the type `color`
-declines; one of no stated type, or `unknown`, holds it). Declined: a list of colours (`admits()`),
+declines; one of no stated type, or `unknown`, holds it). A name whose value
+is a constructor of three numbers is that colour (see the values of free names
+above). A user function may return a colour, declared (`(real) -> color`,
+also through `Typed(…, 'color')` in the body) or inferred from the body: an
+object on JavaScript, a `vec3` on GLSL. Declined: a list of colours (`admits()`),
 a colour input, a colour string, a tuple of components (`AsRgb((r, g, b))`),
-a parameter or a result of a user function that is a colour, arithmetic on
+a parameter of a user function that is a colour, arithmetic on
 a colour (an `error` of the canonical form), every other colour operator
 (`ColorMix`, `ColorContrast`, …), and `mode: 'bigint'`. The colour of
 non-finite channels follows the existing JavaScript runtime (its `NaN`
@@ -575,7 +615,8 @@ compiled is not the body's (see the values of free names above); another
 compiles. A function value other than the literal of a `Map` or `Filter` or the
 root, and a list argument for a scalar parameter (the interpreter maps the
 function over the list) decline. A declared result `complex` of a real body is
-the body converted to the complex lane.
+the body converted to the complex lane. A declared result `color` takes a body
+on the colour lane ("The colour lane"); a parameter `color` declines.
 
 A parameter declared a list of reals or integers
 (`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
@@ -751,7 +792,8 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
 `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with this pipeline too
 (`adapter-glsl.ts`, batch G1 of
 `docs/plans/2026-11-09-js-compiler-status-and-plan.md`), for a scalar result
-(real, integer or boolean) or a list of stated length (batch G2: a point, as
+(real, integer, boolean, or complex, a `vec2`: batch G8, "The complex lane")
+or a list of stated length (batch G2: a point, as
 `vec2(cos(t), sin(t))`, or a `float[n]`) of inputs that are scalars or lists
 of a stated length (`tuple<real, real>`, `list<real^3>`; batch G3:
 `list<real^6>` is a `float[6]`; by a rule of the profile, `At` with a
@@ -770,10 +812,15 @@ statements that end in `return …;`, in which an input is its bare name (the op
 holds the helpers and the user functions, named `_gpu_ir_…` and `_fn_ir_…` in
 the GLSL syntax (a host that joins two compilations renames by `_gpu_` and
 `_fn_`; `ir_` keeps them apart from the names of the existing GLSL target);
+a float literal is the shortest decimal that reads back as the same float32
+and is not above the largest float (`0.1`, `250.0`, `1.1754944e-38`; the
+largest float is `3.4028234663852886e+38`, since `3.4028235e+38` is above it
+and a compiler can read it as Infinity), so a table of 1,024 numbers in [0, 1)
+takes about 12 characters per element;
 `freeSymbols` are the inputs; `freeSymbolTypes` has the `type` and `provenance`
 of the existing target (`freeSymbolTypes()` of `compile-references.ts`) and the
 `lowered` type that the code reads (`float`, `bool`, `vec2`, `bvec3`, `float[6]`: the
-existing target's for each input it compiles); `warnings` holds the
+existing target's for each input it compiles; `vec2` for a complex input); `warnings` holds the
 `float32-unsafe-argument` warning of the existing target (`kind:
 'correctness'`, `value` the operand), once per operand of a `Mod` or a
 `Fract` in which a constant of magnitude 1000 or more amplifies a
@@ -787,7 +834,7 @@ flagged curve to its CPU lane does so for these too), except in a `Mod` or a
 rows that are not effectful, `Mod(10000·Sin(100000), 1)`), which the lowering
 folds in doubles: it warns only with `constantFold: false`. A closed operand
 of a `Mod` by an input is not folded and warns (`Mod(10000000·Sin(1), x)`); `unsupported` is empty,
-`mode` is `'strict'`, `profile` is `'ir'`. A name of `vars` is an input whose
+`mode` is `'strict'` (`'complex'` in the complex mode), `profile` is `'ir'`. A name of `vars` is an input whose
 read is the host's text (`x + y` with `vars: {x: 'u_x'}` is `(u_x + y)`, and
 `x` stays in `freeSymbols` with its type): a name, a member or an element of
 one (`u_x`, `u.P`, `u[0]`), which calls nothing and is spliced at each read;
@@ -815,8 +862,7 @@ always takes the inputs that its body reads as parameters ("User
 functions"); a call under a binder of the input's name declines. Declined with
 `'outside-profile'`: a list result of a user function of a run-time length, a root `Function` literal,
 the options `functions`, `operators`, `imports`, `preamble`,
-`strictTypes: true`, `broadcast: true`, a `mode` other than
-`'strict'`, loops whose passes can exceed the budget ("Loops and the
+`strictTypes: true`, `broadcast: true`, `mode: 'bigint'`, loops whose passes can exceed the budget ("Loops and the
 runtime"), and an input name that is not a plain GLSL
 identifier, is a reserved word (`gpu-reserved.ts`), can be a name of the printer
 (`v<digits>…`, `_gpu_…`, `_fn_…`) or is the name of a function that the code

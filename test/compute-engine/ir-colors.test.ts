@@ -48,6 +48,8 @@ ce.assign(
 );
 ce.assign('Pz', ce.box(['Function', ['Fract', 'a'], 'a']));
 ce.assign('fc', ce.box(['Function', ['Oklch', 'a', 0.1, 250], 'a']));
+ce.declare('fk', '(color) -> color');
+ce.assign('fk', ce.box(['Function', 'q', 'q']));
 
 const IR = { profile: 'ir', fallback: false } as const;
 const js = (json: Json, options: object = {}) =>
@@ -136,6 +138,8 @@ const PROGRAMS: [label: string, json: Json, points: object[]][] = [
   ['AsRgb of a primary', ['AsRgb', ['Rgb', 0, 0, 1]], [{}]],
   ['AsRgb of primaries with a channel at 0', ['AsRgb', ['Rgb', 'x', 0, ['Subtract', 1, 'x']]], [{ x: 0 }, { x: 1 }]],
   ['AsOklab of a primary', ['AsOklab', ['Rgb', 1, 0, 0]], [{}]],
+  ['Hsl', ['Hsl', 200, 'x', 0.4], [{ x: 0.3 }]],
+  ['Hsv', ['Hsv', 200, 'x', 0.4], [{ x: 0.3 }]],
   ['AsOklab as the last operand of a Block', ['Block', ['Declare', 'k', { str: 'unknown' }, ['Oklch', 'x', 0.1, 250]], ['AsOklab', 'k']], [{ x: 0.4 }]],
   ["Tycho's witness", WITNESS, [{ n: 7, x: 0.5 }, { n: 7, x: 2 }, { n: 1, x: 0.5 }, { n: 3, x: 0.25 }, { n: 0, x: 0.3 }]],
 ];
@@ -143,8 +147,6 @@ const PROGRAMS: [label: string, json: Json, points: object[]][] = [
 // The operators that JavaScript compiles and GLSL declines.
 // prettier-ignore
 const JS_ONLY: [label: string, json: Json, points: object[]][] = [
-  ['Hsl', ['Hsl', 200, 'x', 0.4], [{ x: 0.3 }]],
-  ['Hsv', ['Hsv', 200, 'x', 0.4], [{ x: 0.3 }]],
   ['AsHsl', ['AsHsl', ['Rgb', 'x', 0.4, 0.6]], [{ x: 0.3 }]],
   ['AsHsv', ['AsHsv', ['Oklch', 'x', 0.1, 250]], [{ x: 0.6 }]],
   ['AsOklab of AsRgb', ['AsOklab', ['AsRgb', ['Oklch', 'x', 0.1, 250]]], [{ x: 0.6 }]],
@@ -319,8 +321,6 @@ function shader(r: ReturnType<typeof glsl>, k: number): string {
 
 // prettier-ignore
 const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], cause: RegExp][] = [
-  ['Hsl on GLSL', ['Hsl', 200, 'x', 0.4], ['glsl'], /Hsl/],
-  ['Hsv on GLSL', ['Hsv', 200, 'x', 0.4], ['glsl'], /Hsv/],
   ['AsHsl on GLSL', ['AsHsl', ['Rgb', 'x', 0.4, 0.6]], ['glsl'], /AsHsl/],
   ['AsHsv on GLSL', ['AsHsv', ['Rgb', 'x', 0.4, 0.6]], ['glsl'], /AsHsv/],
   ['a conversion read by a colour operator on GLSL', ['AsOklab', ['AsRgb', ['Oklch', 'x', 0.1, 250]]], ['glsl'], /AsRgb other than as the result/],
@@ -333,7 +333,7 @@ const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], 
   ['a tuple of components', ['AsOklab', ['Tuple', 'x', 0.2, 0.3]], ['javascript', 'glsl'], /AsOklab of a tuple/],
   ['a colour string', ['AsOklab', { str: 'red' }], ['javascript', 'glsl'], /./],
   ['a colour input', ['AsOklab', 'c'], ['javascript', 'glsl'], /./],
-  ['a colour result of a user function', ['AsOklab', ['fc', 'x']], ['javascript', 'glsl'], /not a scalar \(color\)/],
+  ['a colour parameter of a user function', ['AsOklab', ['fk', ['fc', 'x']]], ['javascript', 'glsl'], /the parameter q of fk is not a scalar \(color\)/],
   ['a Which with no True clause', ['Which', ['Less', 'x', 0], ['Rgb', 'x', 0, 0], ['Less', 'x', 1], ['Oklch', 'x', 0.1, 250]], ['javascript', 'glsl'], /arms of two types/],
   ['an operator of colours not in the slice', ['ColorMix', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250], 0.5], ['javascript', 'glsl'], /ColorMix/],
 ];
@@ -411,7 +411,7 @@ describe('IR profile, colours: robustness', () => {
     // The OKLCh `vec3`, under copies that the printer names (a nest of
     // inlined values is named every 64 levels), then its conversion.
     const GLSL_CHAIN =
-      /^(vec3 v\d+ = vec3\(x, 0\.10000000149011612, 250\.0\);\n(vec3 v\d+ = v\d+;\n)*return )?_gpu_ir_lab\((v\d+|vec3\(x, 0\.10000000149011612, 250\.0\))\);?$/;
+      /^(vec3 v\d+ = vec3\(x, 0\.1, 250\.0\);\n(vec3 v\d+ = v\d+;\n)*return )?_gpu_ir_lab\((v\d+|vec3\(x, 0\.1, 250\.0\))\);?$/;
     for (const to of ['javascript', 'glsl'] as const) {
       let r: ReturnType<typeof compile> | undefined;
       const d = failure(() => (r = compile(chain, { ...IR, to })));

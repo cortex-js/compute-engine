@@ -83,6 +83,9 @@ export type Profile = {
   readonly recursion: boolean;
   /** Element-wise operations on lists; without, `scalarize` runs first. */
   readonly elementwise: boolean;
+  /** The lanes of which no list is held: a list of colours, and on GLSL
+   *  of complex numbers (a `vec2` has no array of its own here). */
+  readonly scalarLanes: readonly Lane[];
   /** The operations whose value is admitted only as the result of the
    *  entry: on GLSL a colour is an OKLCh `vec3` with no tag of its space,
    *  so a conversion to another space is the program's result only. */
@@ -100,16 +103,18 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     frames: true,
     recursion: true,
     elementwise: true,
+    scalarLanes: ['color'],
     syntax: JS,
   },
   glsl: {
-    lanes: ['real', 'integer', 'boolean', 'color'],
+    lanes: ['real', 'integer', 'boolean', 'complex', 'color'],
     rank: 1,
     runtimeLengths: false,
     draws: false,
     frames: false,
     recursion: false,
     elementwise: false,
+    scalarLanes: ['color', 'complex'],
     resultOnly: ['asoklab', 'asrgb'],
     syntax: GLSL,
   },
@@ -135,17 +140,23 @@ export function admits(
   const type = (t: IRType, what: string): Refusal | undefined => {
     if (!profile.lanes.includes(t.lane))
       return { cause: `${what}: the lane ${t.lane}` };
-    if (t.lane === 'color' && t.shape.length > 0)
-      return { cause: `${what}: a list of colours` };
+    if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
+      return {
+        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : 'complex numbers'}`,
+      };
     if (t.shape.length > profile.rank)
       return { cause: `${what}: a list of rank ${t.shape.length}` };
     const n = lengthValues(t)[0];
     if (n !== undefined && !profile.runtimeLengths) {
       const k = entry.body.params.indexOf(n);
+      // A length parameter has the name of its list.
+      const f = p.functions.find((f) => f.body.params.includes(n));
       const list =
         k >= 0
           ? entry.paramNames[k]
-          : 'made by the program (a Range or a Filter)';
+          : f !== undefined
+            ? `parameter ${f.paramNames[f.body.params.indexOf(n)]} of ${f.source ?? f.name}`
+            : 'made by the program (a Range or a Filter)';
       return {
         cause: `the list ${list} has a run-time length: it needs a stated length (an input declared list<real^n>)`,
       };
@@ -366,7 +377,10 @@ function holdStorage(p: Program, names: readonly string[]): string | undefined {
       argsOf(i).forEach((a, k) => {
         if (i.k === 'call') {
           const param = fns.get(i.fn)!.body.params[k];
-          if (held.has(a) && !held.has(param)) (changed = true), hold(param);
+          if (held.has(a) && !held.has(param)) {
+            changed = true;
+            hold(param);
+          }
           if (last && held.has(param) && !held.has(a))
             refusal ??= `a call of ${i.fn} with a list in storage and one not`;
         } else if (

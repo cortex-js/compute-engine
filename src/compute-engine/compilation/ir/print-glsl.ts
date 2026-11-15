@@ -3,9 +3,10 @@
  * parameters are the inputs, in the order of the entry's parameters.
  *
  * Both numeric lanes are `float`: an integer is exact up to 2^24 on this
- * target. `pow` of a negative base and a non-integer exponent is what the
- * driver gives (GLSL leaves it undefined; NaN is inside the caveats). The
- * driver may reorder and round: no bits are promised. A boolean is `bool`; a list is
+ * target. A complex value is a `vec2` (re, im), a colour an OKLCh `vec3`.
+ * `pow` of a negative base and a non-integer exponent is what the driver
+ * gives (GLSL leaves it undefined; NaN is inside the caveats). The driver
+ * may reorder and round: no bits are promised. A boolean is `bool`; a list is
  * a vector of 2 to 4 elements, `vec3`, or an array, `float[5]` (GLSL ES 3.00
  * has no array of arrays, and the target declines a nested list). A loop
  * counts with an `int`. The target has no element-wise operations: the
@@ -24,6 +25,7 @@ const NAN = 'uintBitsToFloat(0x7fc00000u)';
 export function typeName(t: IRType): string {
   if (t.storage !== undefined) return t.storage;
   if (t.lane === 'color' && t.shape.length === 0) return 'vec3';
+  if (t.lane === 'complex' && t.shape.length === 0) return 'vec2';
   const scalar = t.lane === 'boolean' ? 'bool' : 'float';
   const n = t.shape[0];
   if (t.shape.length > 1 || typeof n === 'object')
@@ -48,7 +50,19 @@ function float(x: number): string {
     return f > 0
       ? 'uintBitsToFloat(0x7f800000u)'
       : 'uintBitsToFloat(0xff800000u)';
-  const s = Object.is(f, -0) ? '-0.0' : String(f);
+  // The shortest decimal that reads back as the same float32 (`0.1`, not
+  // `0.10000000149011612`); `String()` of its double drops the exponent of
+  // `toPrecision()` where it can (`250`, not `2.5e+2`).
+  let s = Object.is(f, -0) ? '-0.0' : String(f);
+  for (let p = 1; p <= 9 && !Object.is(f, -0); p++) {
+    const d = Number(f.toPrecision(p));
+    // Not a decimal above the largest float (`3.4028235e+38`), which a
+    // compiler can read as Infinity.
+    if (Math.fround(d) === f && Math.abs(d) <= 3.4028234663852886e38) {
+      s = String(d);
+      break;
+    }
+  }
   const literal = /[.e]/.test(s) ? s : `${s}.0`;
   return f < 0 || Object.is(f, -0) ? `(${literal})` : literal;
 }
@@ -58,6 +72,41 @@ function float(x: number): string {
 export function glslParameterName(name: string, index: number): string {
   return `in${index}_${name.replace(/[^A-Za-z0-9]/g, '')}`;
 }
+
+/** The complex functions of a `vec2` (re, im) that GLSL's vectors do not
+ *  have, one helper `_gpu_ir_c<name>` each: whether it has a second operand
+ *  `b`, and its body over `a` (and `b`). The textbook formulas of the
+ *  principal branch, with no guard (README, "The complex lane"). A body
+ *  that reads the argument calls `_gpu_ir_carg`. */
+// prettier-ignore
+const COMPLEX: Record<string, [binary: boolean, ...body: string[]]> = {
+  mul: [true, 'return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);'],
+  div: [true, 'return vec2(a.x * b.x + a.y * b.y, a.y * b.x - a.x * b.y) / dot(b, b);'],
+  // A product for an integer exponent from 1 to 16, as `_gpu_ir_pow` (no
+  // `ln` of the base: `z^2 + c` at `z = 0`); otherwise `exp(b·ln(a))`.
+  pow: [true,
+    'if (b.y == 0.0 && b.x == floor(b.x) && b.x >= 1.0 && b.x <= 16.0) {',
+    '  vec2 r = a;',
+    '  for (int i = 1; i < int(b.x); i++) r = vec2(r.x * a.x - r.y * a.y, r.x * a.y + r.y * a.x);',
+    '  return r;',
+    '}',
+    'vec2 l = vec2(log(length(a)), _gpu_ir_carg(a));',
+    'vec2 w = vec2(b.x * l.x - b.y * l.y, b.x * l.y + b.y * l.x);',
+    'return exp(w.x) * vec2(cos(w.y), sin(w.y));'],
+  exp: [false, 'return exp(a.x) * vec2(cos(a.y), sin(a.y));'],
+  ln: [false, 'return vec2(log(length(a)), _gpu_ir_carg(a));'],
+  // The form with no cancellation of `|a| - |re a|`.
+  sqrt: [false,
+    'float t = sqrt(0.5 * (length(a) + abs(a.x)));',
+    'if (a.x >= 0.0) return vec2(t, 0.5 * a.y / t);',
+    'return vec2(0.5 * abs(a.y) / t, a.y < 0.0 ? -t : t);'],
+  sin: [false, 'return vec2(sin(a.x) * cosh(a.y), cos(a.x) * sinh(a.y));'],
+  cos: [false, 'return vec2(cos(a.x) * cosh(a.y), -sin(a.x) * sinh(a.y));'],
+  tan: [false, 'return vec2(sin(2.0 * a.x), sinh(2.0 * a.y)) / (cos(2.0 * a.x) + cosh(2.0 * a.y));'],
+  sinh: [false, 'return vec2(sinh(a.x) * cos(a.y), cosh(a.x) * sin(a.y));'],
+  cosh: [false, 'return vec2(cosh(a.x) * cos(a.y), sinh(a.x) * sin(a.y));'],
+  tanh: [false, 'return vec2(sinh(2.0 * a.x), sin(2.0 * a.y)) / (cosh(2.0 * a.x) + cos(2.0 * a.y));'],
+};
 
 /** `At`: the element read by `read` of its index from 0 in range, NaN
  *  outside. */
@@ -151,15 +200,58 @@ export const GLSL: Syntax = Object.freeze({
     'sign': 'sign($0)',
     'fract': 'fract($0)',
     'atan': 'atan($0)',
-    'asinh': 'asinh($0)',
+    // Odd: the builtin loses `x + sqrt(x^2 + 1)` for a negative `x`.
+    'asinh': '(sign($0) * asinh(abs($0)))',
     // A colour is an OKLCh `vec3`; `asoklab` and `asrgb` give the channels
     // of their space, only as the result of the program (`resultOnly`).
     'oklch': 'vec3($0, $1, $2)',
-    'oklab': { text: '_gpu_ir_lch(vec3($0, $1, $2))', helpers: ['_gpu_ir_lch'] },
+    'oklab': {
+      text: '_gpu_ir_lch(vec3($0, $1, $2))',
+      helpers: ['_gpu_ir_lch'],
+    },
     'rgb': {
       text: '_gpu_ir_lch(_gpu_ir_srgb_lab(vec3($0, $1, $2)))',
       helpers: ['_gpu_ir_lch', '_gpu_ir_srgb_lab'],
     },
+    'hsv': {
+      text: '_gpu_ir_lch(_gpu_ir_srgb_lab(_gpu_ir_hsv(vec3($0, $1, $2))))',
+      helpers: ['_gpu_ir_lch', '_gpu_ir_srgb_lab', '_gpu_ir_hsv'],
+    },
+    'hsl': {
+      text: '_gpu_ir_lch(_gpu_ir_srgb_lab(_gpu_ir_hsl(vec3($0, $1, $2))))',
+      helpers: ['_gpu_ir_lch', '_gpu_ir_srgb_lab', '_gpu_ir_hsl'],
+    },
+    // A complex value is a `vec2` (re, im): the ring operations of GLSL's
+    // vectors where they are the complex ones, a helper for the others
+    // (the textbook formulas; no fidelity at a pole, a branch point or cut,
+    // or on overflow of an intermediate).
+    'cplx': 'vec2($0, 0.0)',
+    'cadd': '($0 + $1)',
+    'csub': '($0 - $1)',
+    'cneg': '(-$0)',
+    'cre': '$0.x',
+    'cim': '$0.y',
+    'cconj': '($0 * vec2(1.0, -1.0))',
+    'cabs': 'length($0)',
+    'carg': { text: '_gpu_ir_carg($0)', helpers: ['_gpu_ir_carg'] },
+    'ceq': '($0 == $1)',
+    'cne': '($0 != $1)',
+    // A helper that calls `_gpu_ir_carg` lists it first, so that it is
+    // defined before.
+    ...Object.fromEntries(
+      Object.entries(COMPLEX).map(([f, [b, ...body]]) => [
+        `c${f}`,
+        {
+          text: `_gpu_ir_c${f}($0${b ? ', $1' : ''})`,
+          helpers: [
+            ...(body.some((s) => s.includes('_gpu_ir_carg('))
+              ? ['_gpu_ir_carg']
+              : []),
+            `_gpu_ir_c${f}`,
+          ],
+        },
+      ])
+    ),
     'asoklch': '$0',
     'asoklab': { text: '_gpu_ir_lab($0)', helpers: ['_gpu_ir_lab'] },
     'asrgb': {
@@ -259,6 +351,22 @@ export const GLSL: Syntax = Object.freeze({
       '  return mat3(0.2104542553, 1.9779984951, 0.0259040371, 0.793617785, -2.428592205, 0.7827717662, -0.0040720468, 0.4505937099, -0.808675766) * m;',
       '}',
     ].join('\n'),
+    // HSV and HSL (hue in degrees, wrapped; saturation, value and lightness
+    // clamped into [0, 1]) to sRGB, the piecewise-linear formulas of the
+    // interpreter (`hsvToRgb`, `hslToRgb255`) in closed form.
+    _gpu_ir_hsv: [
+      'vec3 _gpu_ir_hsv(vec3 c) {',
+      '  vec3 k = clamp(abs(mod(c.x / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);',
+      '  return clamp(c.z, 0.0, 1.0) * mix(vec3(1.0), k, clamp(c.y, 0.0, 1.0));',
+      '}',
+    ].join('\n'),
+    _gpu_ir_hsl: [
+      'vec3 _gpu_ir_hsl(vec3 c) {',
+      '  vec3 k = clamp(abs(mod(c.x / 60.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);',
+      '  float l = clamp(c.z, 0.0, 1.0);',
+      '  return l + clamp(c.y, 0.0, 1.0) * (k - 0.5) * (1.0 - abs(2.0 * l - 1.0));',
+      '}',
+    ].join('\n'),
     _gpu_ir_lab_srgb: [
       'vec3 _gpu_ir_lab_srgb(vec3 c) {',
       '  vec3 m = mat3(1.0, 1.0, 1.0, 0.3963377774, -0.1055613458, -0.0894841775, 0.2158037573, -0.0638541728, -1.291485548) * c;',
@@ -267,6 +375,33 @@ export const GLSL: Syntax = Object.freeze({
       '  return sign(l) * mix(1.055 * pow(a, vec3(1.0 / 2.4)) - 0.055, 12.92 * a, lessThanEqual(a, vec3(0.0031308)));',
       '}',
     ].join('\n'),
+    // The argument of a complex, in (-π, π]: on an axis it is written,
+    // since a renderer's `atan(y, x)` with a zero part computed as -0 is
+    // wrong there (SwiftShader: `atan(-0, 3)` is π; a GPU: the sign of
+    // `atan(2, -0)`). `Argument(0)` is 0, as in the interpreter.
+    _gpu_ir_carg: [
+      'float _gpu_ir_carg(vec2 a) {',
+      '  if (a.y == 0.0) {',
+      '    if (a.x < 0.0) return 3.1415927;',
+      '    return 0.0;',
+      '  }',
+      '  if (a.x == 0.0) {',
+      '    if (a.y < 0.0) return -1.5707964;',
+      '    return 1.5707964;',
+      '  }',
+      '  return atan(a.y, a.x);',
+      '}',
+    ].join('\n'),
+    ...Object.fromEntries(
+      Object.entries(COMPLEX).map(([f, [b, ...body]]) => [
+        `_gpu_ir_c${f}`,
+        [
+          `vec2 _gpu_ir_c${f}(vec2 a${b ? ', vec2 b' : ''}) {`,
+          ...body.map((s) => `  ${s}`),
+          '}',
+        ].join('\n'),
+      ])
+    ),
     // The element `k` (from 0) of a list in a sampler (README, `storage`).
     _gpu_ir_texel: [
       'float _gpu_ir_texel(sampler2D v, int k) {',
@@ -276,8 +411,13 @@ export const GLSL: Syntax = Object.freeze({
     ].join('\n'),
   },
   regions: {},
-  // The profile has no complex lane (`TARGETS.glsl.lanes`).
-  constant: ({ value: x }) => (typeof x === 'number' ? float(x) : String(x)),
+  // A complex constant is a `vec2` (re, im).
+  constant: ({ value: x }) =>
+    typeof x === 'number'
+      ? float(x)
+      : typeof x === 'object'
+        ? `vec2(${float(x.re)}, ${float(x.im)})`
+        : String(x),
   input: glslParameterName,
   positional: glslParameterName,
   length: () => {

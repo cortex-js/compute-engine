@@ -31,8 +31,8 @@
 
 - **The experimental profile `'ir'` compiles to GLSL.**
   `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with the new
-  compiler a real, integer or boolean result, or a list of stated length, of
-  scalar inputs and of inputs that are tuples or lists of a stated length,
+  compiler a real, integer, boolean, complex or colour result, or a list of
+  stated length, of scalar inputs and of inputs that are tuples or lists of a stated length,
   and gives a GLSL result. A point, or a list of 2 to 4 numbers, is a `vec2`,
   `vec3` or `vec4`, as a result and as an input: `Tuple(Cos(t), Sin(t))` is
   `vec2(cos(t), sin(t))`, and an input `P: tuple<real, real>` has
@@ -71,11 +71,30 @@
   with complex elements, a `Function` literal, a `vars`
   text of another form or a `vars` name that has a value, and the options
   `functions`, `operators`, `imports`, `preamble`, `strictTypes`,
-  `broadcast` and a mode other than `'strict'`; with `fallback`, the existing
+  `broadcast` and the mode `'bigint'`; with `fallback`, the existing
   GLSL target then compiles the expression. On JavaScript the profile now
   compiles an input of a tuple type such as `tuple<real, real>`, given as an
   array (`run({ P: [1, 2] })`), a user function that returns a point or a
   list of a stated length, and one that reads a list or point input.
+- **The experimental profile `'ir'` compiles complex numbers and colours to
+  GLSL.** A complex value is a `vec2` (real part, imaginary part), as an
+  input, a result, a local, and a parameter or a result of a user function:
+  with `z: complex`, `Sqrt(z)·x` is `_gpu_ir_cmul(vec2(x, 0.0),
+  _gpu_ir_csqrt(z))` and `freeSymbolTypes.z.lowered` is `vec2`. The
+  arithmetic, `Real`, `Imaginary`, `Conjugate`, `Abs`, `Argument`, `Exp`,
+  `Ln`, `Sqrt`, `Power`, the six trigonometric and hyperbolic functions
+  `Sin` to `Tanh`, a `Sum` and a `Product` compile, and `mode: 'complex'` is
+  accepted; the inverse functions, `Root`, `Log`, the reciprocal functions
+  and a list of complex numbers decline. A colour is an OKLCh `vec3`:
+  `Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch` and `AsOklch` compile, and `AsOklab`
+  or `AsRgb` when it is the result of the expression, so
+  `AsOklab(Hsv(h, 1, 1))` compiles; on JavaScript a colour is the object
+  `{ space, c0, c1, c2, alpha }` of the default compiler. On both targets a
+  name that holds a colour of three numbers (`C` with the value
+  `Hsv(270, 0.4, 0.95)`) compiles as that colour, and a user function can
+  return a colour. An alpha, a colour input or parameter and a list of
+  colours decline. A GLSL number is now written with the fewest digits that
+  give the same single float (`0.1`, where it was `0.10000000149011612`).
 - **The code of the experimental profile `'ir'` can be stored, loaded and
   sent to a worker.** A result of `compile(expr, { profile: 'ir' })` now has
   `runtimeVersion`, `preambleOnce` and `entryPlan`, as a result of the

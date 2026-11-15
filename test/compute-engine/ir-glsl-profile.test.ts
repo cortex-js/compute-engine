@@ -1299,7 +1299,7 @@ describe('IR profile on GLSL: declines', () => {
     ['preamble', ['Add', 'x', 1], { preamble: 'float q;' }, /`preamble`/],
     ['strictTypes', ['Add', 'x', 1], { strictTypes: true }, /`strictTypes`/],
     ['broadcast', ['Add', 'x', 1], { broadcast: true }, /`broadcast`/],
-    ['mode', ['Add', 'x', 1], { mode: 'complex' }, /`mode` with the value 'complex'/],
+    ['mode', ['Add', 'x', 1], { mode: 'bigint' }, /the bigint mode on glsl/],
     ['a Loop of more passes than the iterationBudget', ['Block', ['Declare', 's', 'real', 0],
       ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'],
       { iterationBudget: 4 }, /more passes than the iterationBudget \(4\)/],
@@ -1527,6 +1527,9 @@ const G6_ROWS: [json: Json, points: Point[], outside?: Point][] = [
   [['Arccos', 'x'], [{ x: 0.5 }, { x: -0.3 }, { x: 0.9 }], { x: -2 }],
   [['Arctan2', 'y', 'x'], [{ y: 1, x: 2 }, { y: -1, x: -1 }, { y: 0.5, x: -2 }, { y: 0, x: 0 }]],
   [['Arcosh', 'x'], [{ x: 1.5 }, { x: 3 }, { x: 10 }], { x: 0.5 }],
+  // The builtin `asinh` is wrong for a large negative argument (NaN at -5000
+  // on a GPU, -88 in the software renderer): the spelling is the odd form.
+  [['Arsinh', 'x'], [{ x: 3 }, { x: -3 }, { x: -50 }, { x: -5000 }, { x: 5000 }]],
   [['Artanh', 'x'], [{ x: 0.5 }, { x: -0.3 }, { x: 0.9 }], { x: 2 }],
   [['Log', 'x'], [{ x: 2 }, { x: 100 }, { x: 0.5 }], { x: -1 }],
   [['Log', 'x', 2], [{ x: 8 }, { x: 3 }, { x: 0.25 }], { x: -1 }],

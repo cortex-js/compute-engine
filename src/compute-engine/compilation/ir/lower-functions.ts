@@ -183,14 +183,17 @@ function signatureTypes(e: Fn, literal: Fn) {
   const ir = r === undefined ? undefined : tupleOrInputType(r);
   const list = ir?.shape.length === 1 ? ir : undefined;
   const tuple = typeof r === 'object' && r.kind === 'tuple';
-  const result =
+  // A colour result is on the colour lane; a colour parameter declines.
+  const result: IRType | undefined =
     r === undefined ||
     r === 'unknown' ||
     r === 'number' ||
     r === 'any' ||
     list !== undefined
       ? undefined
-      : scalarOf(literal, r, `the result of ${e.operator}`);
+      : r === 'color'
+        ? { lane: 'color', shape: [] }
+        : scalarOf(literal, r, `the result of ${e.operator}`);
   return { names, params, result, list, tuple, r };
 }
 

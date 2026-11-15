@@ -349,11 +349,15 @@ describe('IR slice: the complex mode', () => {
         declineOf(() => sliceProgram(box(json), { target: 'javascript' })).cause
       ).toMatch(cause);
   });
-  test('GLSL declines the complex lane', () => {
+  test('GLSL declines a complex row with no GLSL form, and a list of complex numbers', () => {
     const d = declineOf(() =>
-      compileSlice(box(['Add', 'Z', 1]), { target: 'glsl' })
+      compileSlice(box(['Arcsin', 'Z']), { target: 'glsl' })
     );
-    expect(d.cause).toMatch(/the lane complex on glsl/);
+    expect(d.cause).toMatch(/the operation casin\) on glsl/);
+    const l = declineOf(() =>
+      compileSlice(box(['List', 'Z', 'W']), { target: 'glsl' })
+    );
+    expect(l.cause).toMatch(/a list of complex numbers on glsl/);
   });
   test('random programs of the complex lane agree with the interpreter', () => {
     let s = 20261113;

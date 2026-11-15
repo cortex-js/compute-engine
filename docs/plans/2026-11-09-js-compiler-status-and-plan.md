@@ -1681,6 +1681,103 @@ No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267. The full suite takes 164 s with the
 shadow switch.
 
+Tycho's run of the build of `86ed657fc3530f444fada0cce0e888ef339cf9b0` (G7;
+session `tycho-desk`, 2026-11-15), the profile on both seams: every count
+equals the run before. No internal error, every admitted shader valid in
+WebGL 2 (3,895 of 3,895), 43,761 JavaScript runs with no difference, the
+same 8 float32 warnings. The test that hung runs to its end (the decline of
+a constant index out of range). The colour batch admits no new row of the
+corpus, because each colour row declines on another cause first:
+
+- A name whose value is a colour, read by a style (`AsOklab(C_olor)` where
+  a row defines `C_olor = rgb(…)`): JavaScript 44 in CORE and 259 over every
+  state, GLSL 10 and 48. The largest group; the remedy is to bake a colour
+  value as a literal colour, as a number is baked.
+- Tycho's `Which` handler (until Tycho's rewrite): JavaScript 149 in CORE,
+  GLSL 63.
+- A user function that returns a colour (`AsOklab(c(H_1, x, y, z))`):
+  JavaScript 10 in CORE and 20 over every state, GLSL 5 and 12.
+
+No render audit was run: the page admits the same rows.
+
+What a colour name holds at the compile site (a probe of `tycho-desk` over
+every Desmos state and the showcase, 283 JavaScript reads): the Desmos
+importer writes `Hsv`, with the hue in degrees. `Hsv` of three numbers, 132
+reads in 10 documents; `Hsv` or `Oklab` of expressions that read the axes or
+other names, 56 reads, which Tycho's macros expand before the compilation;
+a value that is a list of colours, about 90 reads, which stays declined; a
+helper function that returns a colour, 3. On GLSL: 46 reads of `Hsv` of
+expressions and none of `Hsv` of numbers. The functions that return a colour
+are `c` of the showcase `buddhabrot` (`(H: list<integer>, x: real, y: real,
+z: real) -> color`, an `If` of two `Block`s that end in `Rgb(…)`) and `shade`
+of `julia-set`. Batch G9 follows from this: a name that holds a colour
+constructor of three numbers is that literal, `Hsv` on GLSL, and a user
+function that returns a colour.
+
+Batches G8 and G9, 2026-11-15, made side by side and landed together.
+
+G8, the complex lane on GLSL: a complex value is a `vec2` (re, im), as an
+input, a result, a local, a constant, and a parameter or a result of a user
+function. Inline: add, subtract, negate, `Real`, `Imaginary`, `Conjugate`,
+`Abs`, equality. One helper each, written when used: multiply, divide,
+power, `Exp`, `Ln`, `Sqrt`, `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh`, `Tanh`, and
+the argument. `Sum`, `Product`, `If` and `Which` of complex values and
+`mode: 'complex'` came with no code. Declined: the inverse functions,
+`Root`, `Log`, the reciprocal functions, a list or a tuple of complex
+numbers (the profile field `scalarLanes`). The GLSL printer writes a float
+with the fewest digits that read back as the same float32 (a table of 1,024
+numbers averages 11.65 characters per element; it was about 18), except the
+largest float, which ANGLE reads as infinity in its short form.
+
+G9, colours that Tycho's corpus reads: a name whose value is a colour
+constructor of three real numbers is that constructor of literals, on both
+targets, under the rule of a number; `Hsv` and `Hsl` on GLSL; a user function
+may return a colour (a colour parameter declines). Tycho's `shade` compiles
+on both targets and its `c` on JavaScript; on GLSL `c` declines, because its
+list parameter has no stated length (the next batch).
+
+What the reviews found, fixed: `atan(y, x)` with a part computed as `-0` is
+wrong on the axes on both renderers (the software renderer and an Apple GPU
+through ANGLE Metal), so `Power(Negate(z), 17)` at `z = 3` had the wrong
+sign: the argument is one helper that compares the parts with 0 first, and
+`Argument(0)` is 0. The short literal of the largest float read as infinity.
+A stale paragraph of `docs/COMPILATION-MODEL.md`, the space of a JavaScript
+colour not pinned by the new tests, no test point for the clamps of the HSV
+helpers, a constructor test in `captured()` that did not read the operand
+lanes, a decline cause that named the wrong list. The Claude reviewer of G8
+ran about 6,300 shaders in the software renderer and 8,600 on the GPU;
+Codex found nothing in G9 and the largest float in G8.
+
+Choices taken (reversible): the comparison with 0 before `atan` is a guard
+against a renderer defect at ordinary real operands, not fidelity at a
+signed zero; a real times a complex goes through the multiply helper (a pass
+rule that printed `x * z` was removed: no measured need); the integer
+exponents 1 to 16 of a complex power are a product at run time, as for the
+real `pow` (`z^2 + c` at `z = 0`); complex `Sqrt` of exactly 0 is NaN on
+GLSL (a branch point); `Hsl` on GLSL came with `Hsv`. Added by the session
+after the reviews, checked on both renderers and not reviewed: `Arsinh` on
+GLSL is `sign(x)·asinh(|x|)` (the builtin gave NaN at -5000 on the GPU and
+-88 in the software renderer). Known limitations recorded: a `Which` of 126
+clauses or more and an array parameter of 90,001 elements give a shader that
+WebGL refuses (both crafted); a negative base with a fractional exponent in
+the complex mode; complex `Tan` and `Tanh` overflow from about 44; the real
+`Arctan2` with a computed `-0`. Filed: CE-1326 (`2.5i - 2.5i` throws a
+`TypeError` in the interpreter).
+
+Measured in the main tree at `86ed657fc3530f444fada0cce0e888ef339cf9b0` plus
+the two patches; 6,987 lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,505 of 10,850 (96.8%) |
+| Every JavaScript compile | 24,645 of 38,948 (63.3%) |
+| Public JavaScript `compile()` calls | 14,127 of 28,086 (50.3%) |
+| GLSL `compile()` calls | 1,080 of 2,392 (45.2%); 1,013 of the 1,595 that the existing target compiles (63.5%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267. The largest GLSL declines left in the
+suite: the option `functions` 21, `Root` of a complex 21, `Break` 20.
+
 Tycho's run of the build of `511a446b8c4dc43b50c9fac75c6735861b6be580` (G5
 and G6; session `tycho-desk`, 2026-11-14), the profile on both seams:
 
@@ -1799,6 +1896,24 @@ User decisions of 2026-11-14:
   globalThis.__tychoColormap(h, v))", pure: true }` for JavaScript and a GLSL
   function text for GLSL. It passes no `operators`, `imports` or `preamble`.
   So the first thing that breaks is the colormap of a colour expression.
+  Recommended by this session and by `tycho-desk` (2026-11-15), and waiting
+  for the user's word: the option `functions` does not come back, and Tycho
+  rewrites `colormap(h, v)` in MathJSON before it compiles. The palette
+  handle `h` is always a literal at compile time, so the rewrite is three
+  literal lists, a clamped index, a linear interpolation between two `At`
+  reads, and `Oklab(…)` or `Rgb(…)`. No row of Tycho's corpus calls
+  `colormap` (`tycho-desk`). Measured at
+  `86ed657fc3530f444fada0cce0e888ef339cf9b0` with the profile: on GLSL each
+  list is one local `float[n]` read with a computed index (text 17,079
+  characters for three lists of 256 numbers, 63,796 for three of 1,024); both
+  shaders compile and link in WebGL 2, and 24 values each agree with the
+  JavaScript value within 2.5e-7 relative. Tycho refuses a GLSL result of
+  more than 65,536 characters, so three lists of 1,024 leave no room; the
+  printer writes a float as the 17-digit decimal of its float32 value, and
+  the shortest form (9 digits at most) would cut such a list by about 40%.
+  Tycho asked for that change (it uses a list of 1,024 when the 256-entry
+  table of a stop list is not accurate enough): it goes in the next GLSL
+  batch.
 - **A loop whose result is not read is removed** and counts no pass of
   `iterationBudget`. Tycho changed the two tests that used such a loop
   (Tycho `d064b9f4d`).

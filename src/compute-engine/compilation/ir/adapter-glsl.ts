@@ -1,7 +1,8 @@
 /**
  * The profile `'ir'` of `compile()` for the `glsl` target (experimental):
  * the result of the existing GLSL target from the slice compiler, for a
- * scalar or list result (real, integer or boolean; a point is a `vec2`) of
+ * scalar or list result (real, integer or boolean; a point is a `vec2`; a
+ * complex scalar is a `vec2` too, and a colour an OKLCh `vec3`) of
  * inputs that are scalars or lists of a stated length (`vec3`,
  * `float[6]`), and the warning `float32-unsafe-argument`. `code` is a GLSL
  * expression, or statements that end in `return …;`, in which an input is
@@ -64,7 +65,7 @@ const IR_GLSL_OPTIONS = {
   varsObjectRefs: 'no-op',
   cse: 'mapped',
   constantFold: 'mapped',
-  mode: 'declined',
+  mode: 'mapped',
   storage: 'mapped',
   quadrature: 'no-op',
   functions: 'declined',
@@ -294,6 +295,8 @@ export function compileWithIrProfileGlsl(
       },
       constantFold: options?.constantFold !== false,
       iterationBudget: budget,
+      // `'bigint'` declines in `compileSlice()` (JavaScript only).
+      mode: options?.mode as 'strict' | 'complex' | 'bigint' | undefined,
       extend: irTestExtension(),
     });
     const p = s.program;
@@ -402,7 +405,7 @@ export function compileWithIrProfileGlsl(
       freeSymbols: [...inputs],
       freeSymbolTypes: freeSymbolTypes(expr, target, inputs, occurrences),
       unsupported: [],
-      mode: 'strict',
+      mode: options?.mode === 'complex' ? 'complex' : 'strict',
       profile: 'ir',
     };
   } catch (e) {

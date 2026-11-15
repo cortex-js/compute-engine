@@ -826,7 +826,8 @@ export function lower(
   };
 
   /** The value of the free name `e`, which holds `v` in the engine: a
-   *  literal when `v` is a number, a list or a tuple of numbers (no symbol, no
+   *  literal when `v` is a number, a list or a tuple of numbers, or a colour
+   *  constructor of three real numbers (`Hsv(270, 0.4, 0.95)`; no symbol, no
    *  other application); any other value declines, as its names have
    *  bindings of their own. The name is a capture (`symbolDeps`) unless its
    *  binding is the library's. */
@@ -836,10 +837,25 @@ export function lower(
       ((isFunction(x, 'List') || isFunction(x, 'Tuple')) &&
         x.nops > 0 &&
         x.ops.every(numbers));
-    if (!numbers(v))
+    // A constructor of the colour lane (a row of three real channels).
+    const r = isFunction(v) ? rowOfHead(rows, v.operator) : undefined;
+    const color =
+      r?.arity === 3 &&
+      r.signatures[0][1] === 'color' &&
+      r.signatures[0][0].every((a) => a === 'real');
+    if (
+      color &&
+      isFunction(v) &&
+      (v.nops !== 3 || !v.ops.every((x) => isNumber(x) && x.im === 0))
+    )
       decline(
         e,
-        'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers)'
+        `a symbol whose colour value is not ${r.head} of three real numbers`
+      );
+    if (!color && !numbers(v))
+      decline(
+        e,
+        'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers'
       );
     if (!held(name)!.library) b.captures.add(name);
     return value(v)!;

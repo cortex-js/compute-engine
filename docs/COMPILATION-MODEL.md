@@ -172,9 +172,25 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Hypot(x, y)` is
   `length(vec2(x, y))`, which squares its operands: `Hypot(1e20, 1e20)` gives
   `Infinity` and `Hypot(1e-25, 1e-25)` gives `0`.
-- `plausible?` — `glsl`, profile `ir`, `x: real`: `Arsinh(x)` at `x = -5000`
-  gives `-88.03` in the software renderer (SwiftShader), where the value is
-  `-9.21`: the builtin `asinh`, not checked on a GPU.
+- `glsl`, profile `ir` (crafted): a `Which` of 126 clauses or more compiles
+  to a shader that WebGL 2 refuses ("Expression too complex"; 124 clauses
+  pass), where the interpreter has the value.
+- `glsl`, profile `ir` (crafted): a user function with a list parameter of
+  a stated length of 90,001 and no `storage` compiles to an array parameter
+  that WebGL 2 refuses ("Size of declared private variable exceeds
+  implementation-defined limit"). With `storage` the parameter is a
+  `sampler2D` and the shader is valid.
+- `plausible?` — `glsl`, profile `ir`, `mode: 'complex'`, `x: real`:
+  `Power(x, 0.2)` at `x = -8` gives the principal value `1.226 + 0.891i`;
+  the interpreter and the `javascript` target give the real root `-1.5157`.
+- `plausible?` — `glsl`, profile `ir`, `z: complex`: `Tanh(z)` is NaN from
+  `|Re(z)|` about 44.4 and `Tan(z)` from `|Im(z)|` about 44.4 (`cosh` of
+  twice the part overflows a single float), where the value is close to
+  `±1` and `±i`.
+- `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Arctan2(y, x)` with
+  an operand that is a zero computed as `-0` (`Arctan2(Negate(0·x), y)`) is
+  off by π in the software renderer, and has the other sign on a GPU for
+  `x = -0`. The complex lane compares its parts with 0 first.
 - `javascript` (crafted), both routes, also the profile `ir`: at the
   threshold of the sRGB transfer function, `AsRgb(Rgb(0.04045, 0.04, 0.05))`
   gives `c0 = 0.040449970408` (the round trip through OKLCh crosses to the
@@ -2658,10 +2674,14 @@ is read from the host's texture with the addressing of the existing target
 in a user function, which takes a `sampler2D` parameter; `S` as a value
 declines. `callerLocals` changes nothing: a user function takes every input
 that its body reads as a parameter.
-A colour result (`Rgb`, `Oklab`, `Oklch`, `AsOklch`) is an OKLCh `vec3`, as
-on the existing target; `AsOklab` and `AsRgb` give the `vec3` of their
-space and are admitted only as the result of the program; `Hsl`, `Hsv`,
-`AsHsl`, `AsHsv` and an alpha decline.
+A colour result (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`, `AsOklch`) is an
+OKLCh `vec3`, as on the existing target; `AsOklab` and `AsRgb` give the
+`vec3` of their space and are admitted only as the result of the program;
+`AsHsl`, `AsHsv` and an alpha decline. A name whose value is a colour
+constructor of three real numbers (`Hsv(270, 0.4, 0.95)`) is that
+constructor of literals, on both targets, as a name that holds a number. A
+user function may return a colour (declared `color` or inferred); a colour
+parameter declines.
 Anything else, and the options it does
 not map (the README lists them), decline with `outside-profile`; with
 `fallback`, the existing GLSL target then compiles the expression.
