@@ -120,11 +120,11 @@ import {
   appellF1Complex,
   jacobiTheta,
   dedekindEta,
-  eisensteinE,
   agmComplex,
   polylogComplex,
   expIntegralEiComplex,
 } from '../numerics/numeric-complex.js';
+import { eisensteinE } from '../numerics/eisenstein.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
 
@@ -1310,9 +1310,10 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (!shouldNumericize(numericApproximation, ops[1])) return undefined;
         return applyN(
           [ops[1]],
-          (tau) => eisensteinE(s, engine.complex(tau, 0)),
+          (tau) =>
+            eisensteinE(s, engine.complex(tau, 0), engine._deadlineFrame),
           undefined,
-          (tau) => eisensteinE(s, tau)
+          (tau) => eisensteinE(s, tau, engine._deadlineFrame)
         );
       },
     },

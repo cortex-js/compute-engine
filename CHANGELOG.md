@@ -1,3 +1,28 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`EisensteinE(k, τ)` is correct for a large weight.** The q-series was
+  cut off from `|q|^m` alone, but its terms `m^(k−1)·|q|^m` rise until
+  `m ≈ (k − 1)/(2π Im τ)`, so from about `k = 50` at `Im τ` below about 1.5 the
+  sum stopped while the terms were still growing: `EisensteinE(100,
+  0.4 + 0.87i)` was `80080 + 104512i` and is `49.3281 − 59.3508i`, and
+  `EisensteinE(400, 0.4 + 0.87i)` was `ComplexInfinity` and is
+  `−3.1507·10⁷ + 1.3619·10⁷i`. The sum now stops on a tail bound (the ratio of
+  the terms decreases, so the tail is a geometric series) once the terms have
+  fallen. The terms of a large weight are far above the value (10²⁴ for a
+  value of 3·10⁷ at `k = 400`), and exceed the double range near `k = 150`, so
+  a sum that cancels more than doubles allow is repeated in big decimals at
+  the precision that its own terms ask for. A point or a weight (above 1000)
+  that would need more than 800 digits, or more terms than the caps, stays
+  unevaluated instead of returning a partial sum. Against mpmath, weights from
+  2 to 1000 at points inside and outside the fundamental domain agree to
+  6·10⁻¹⁵ relative or better (a value below 10⁻³⁰, as at the zeros of E₄ and
+  E₆, is resolved to that absolute error), in under 100 ms (a first weight
+  of 1000 also builds its Bernoulli number); `EisensteinE(4, i)` is
+  unchanged.
+  (#595, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes
