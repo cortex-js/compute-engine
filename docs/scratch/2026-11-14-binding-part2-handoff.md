@@ -114,9 +114,17 @@ Delete this file when parts 2 and 3 are done or have their own record.
   covers that program. CE-1333 was filed from the probe.
 - THE WORKSTREAM IS PAUSED BY THE USER (2026-11-15: "we don't seem to have
   accomplished any of the goals and performance has decreased"). Measured
-  that day: `src/compute-engine` and `src/common` without `compilation/`
-  and `rubi/` have 576,306 lines against 568,845 at 0.186.0 (+7,461); the
-  benchmark cases run at 1.245 times 0.186.0 (ce-desk, `issues/CE-1210.md`).
+  that day: the 15 files of the binding core (`binding-unit`,
+  `engine-boxing-state`, `engine-infer`, `ambient-chain`,
+  `static-typing-view`, `function-utils`, `boxed-symbol`, `boxed-function`,
+  `boxed-value-definition`, `binders`, `object-deps`, `function-literal`,
+  `validate`, `definition-restore-point`, `static-fact`) have 53,608 lines
+  against 53,089 at 0.186.0 and 56,851 at 0.187.0: about zero net, not a
+  deletion. (The whole source outside `compilation/` and `rubi/` grew by
+  7,461 lines since 0.186.0, most of it library and symbolic work, not
+  binding.) The benchmark cases run at 1.245 times 0.186.0 (ce-desk,
+  `issues/CE-1210.md`); a return to 0.186.0 is costed in
+  `~/dev/compute-engine-recovery/ce1210/return-to-0186-costing-report.md`.
   The user is deciding between a return to 0.186.0 and a repair on main;
   `ce-desk` holds the measurements that decide it (the option (d) build, the
   split of the 0.187.0 units flag by mechanism, the costing of a return;
