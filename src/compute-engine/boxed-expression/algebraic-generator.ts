@@ -28,7 +28,7 @@ function rational(e: Expression): RationalCoefficient | undefined {
 }
 
 /**
- * The power α^k of an `AlgebraicGenerator` α, reduced modulo its defining
+ * The power α^k of an abstract root α = `PolynomialRoot(p, x)`, reduced modulo its defining
  * polynomial m when k is an integer with deg m ≤ k ≤ 128.
  *
  * The generator is a root of m, so m(α) = 0, and α^k is the remainder of t^k
@@ -38,7 +38,7 @@ function rational(e: Expression): RationalCoefficient | undefined {
  * is 2, and it is exact in every mode, `.N()` included: the result keeps the
  * generator, which has no numeric value.
  *
- * Only a generator that `AlgebraicGenerator` accepts is reduced: its
+ * Only a root that `PolynomialRoot(p, x)` accepts is reduced: its
  * polynomial must be proved irreducible (`certifiedGeneratorField()`, cached).
  * A malformed or reducible descriptor stays as it is, so that its
  * `invalid-algebraic-generator` error is not folded away (the square of a
@@ -53,7 +53,7 @@ export function reduceAlgebraicGeneratorPower(
   base: Expression,
   exponent: Expression | number
 ): Expression | undefined {
-  if (!isFunction(base, 'AlgebraicGenerator') || base.ops.length !== 1)
+  if (!isFunction(base, 'PolynomialRoot') || base.ops.length !== 2)
     return undefined;
   let k: number;
   if (typeof exponent === 'number') k = exponent;

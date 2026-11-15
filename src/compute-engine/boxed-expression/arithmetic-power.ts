@@ -367,10 +367,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // `holdsKindValue()`).
   if (holdsKindValue(a) || holdsKindValue(b)) return unchanged();
 
-  // A power of an `AlgebraicGenerator` at or above the degree of its defining
+  // A power of an abstract root `PolynomialRoot(p, x)` at or above the degree of its defining
   // polynomial is reduced modulo that polynomial: for a root of t² - 2, α² is
   // 2, as (√2)² is 2 (`reduceAlgebraicGeneratorPower()`).
-  if (a.operator === 'AlgebraicGenerator') {
+  if (a.operator === 'PolynomialRoot') {
     const reduced = reduceAlgebraicGeneratorPower(a, b);
     if (reduced) return reduced;
   }
@@ -1494,9 +1494,9 @@ export function pow(
   )
     return x.engine._fn('Power', [x, x.engine.expr(exp)], { canonical: false });
 
-  // See `canonicalPower()`: a power of an `AlgebraicGenerator` is reduced
+  // See `canonicalPower()`: a power of an abstract root `PolynomialRoot(p, x)` is reduced
   // modulo its defining polynomial.
-  if (x.operator === 'AlgebraicGenerator') {
+  if (x.operator === 'PolynomialRoot') {
     const reduced = reduceAlgebraicGeneratorPower(x, exp);
     if (reduced) return reduced;
   }

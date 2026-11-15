@@ -9,6 +9,7 @@ import { distribute } from '../symbolic/distribute.js';
 import { checkArity, checkType } from '../boxed-expression/validate.js';
 import {
   factorNumberFieldExpression,
+  rootOfGeneratorList,
   validateAlgebraicGenerator,
 } from '../polynomial/boxed-number-field.js';
 import { expand, expandAll } from '../boxed-expression/expand.js';
@@ -178,27 +179,28 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     AlgebraicGenerator: {
       description:
-        'An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. No complex embedding is selected.',
+        'Deprecated: `AlgebraicGenerator(List(c₀, …, cₙ))` is `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root of an irreducible polynomial with no complex embedding selected.',
       lazy: true,
       signature: '(list<number>) -> number',
       // The canonical list of coefficients is exact. It is also the form
       // without parse sugar: `AlgebraicGenerator([-2, 0, 1])` parses to
-      // `AlgebraicGenerator(Delimiter(List(…)))`, and the generator is
-      // printed as written in each factor of a `Factor` result. A custom
-      // `canonical` handler bypasses the signature check, so the arity and
-      // the list operand are checked here: `AlgebraicGenerator(5)` is
-      // invalid at once, not a valid-looking `number`.
-      canonical: (ops, { engine }) =>
-        engine._fn('AlgebraicGenerator', [
+      // `AlgebraicGenerator(Delimiter(List(…)))`. A custom `canonical`
+      // handler bypasses the signature check, so the arity and the list
+      // operand are checked here: `AlgebraicGenerator(5)` is invalid at
+      // once, not a valid-looking `number`. A list of rationals becomes the
+      // `PolynomialRoot` it stands for; any other list stays, and its
+      // `evaluate` reports it.
+      canonical: (ops, { engine }) => {
+        const generator = engine._fn('AlgebraicGenerator', [
           ...checkArity(
             engine,
             ops.map((op) => op.canonical),
             1
           ).map((op) => checkType(engine, op, 'list')),
-        ]),
+        ]);
+        return rootOfGeneratorList(generator) ?? generator;
+      },
       evaluate: (ops, { engine: ce, expression }) => {
-        // The defining relation is exact data, even under N(). The generic
-        // numeric operand walk may already have approximated list entries.
         const generator = expression ?? ce.function('AlgebraicGenerator', ops);
         return validateAlgebraicGenerator(generator) ?? generator;
       },
