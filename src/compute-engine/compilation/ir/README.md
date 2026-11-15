@@ -304,7 +304,9 @@ parameter before it, the count of a `Filter` and of a `Range` an instruction.
 Two lists with the same length value have one length (`D + Map(f, D)`,
 `Range(1, n) + Range(1, n)`, after `cse`); the verifier checks that a length
 value is visible where a type names it. `elem` reads an element from 0; `At` is
-the interpreter's rule (from 1, from the end when negative, NaN outside), and
+the interpreter's rule (from 1, from the end when negative, NaN outside; on
+GLSL a conditional that reads the element only in range, with the length as a
+literal, `$#0` in the spelling), and
 the fold turns an `At` of a constant index in range into an `elem`. A boolean or
 nested list that can be out of range declines. `build` and `filter` are region
 rows. A `Length`, a reduction, a `Map` or a `Filter` of a `Range` reads its
@@ -377,7 +379,8 @@ interpreter gives `Missing` there. A tuple result of the root has
 of one lane (`tuple<real, real>`; an integer among reals is a real) is the
 list of its elements, marked a tuple, so the rule above reads it: on
 JavaScript its value is the array of its elements (`P: [1, 2]`), on GLSL a
-`vecN`. A tuple of booleans and numbers, and an input of a type with a
+`vecN`; so is a parameter of a user function declared such a tuple (see
+"User functions"). A tuple of booleans and numbers, and an input of a type with a
 tuple inside (`list<tuple<real, real>>`), decline.
 
 ## Effects
@@ -430,7 +433,16 @@ with `Limits` whose count of passes is more than the budget is NaN
 that test as an `if`. A `Loop` in an integrand counts its passes once per sample
 of the quadrature, whose number of samples is unspecified. A build, a `Filter`
 and a reduction of a list count no pass. GLSL has no deadline and counts no
-`Loop` pass.
+`Loop` pass at run time: its budget is the option or 10,000 (the existing GLSL
+target's default), a `Sum` or a `Product` over it is NaN as above, and the
+adapter bounds the passes of every loop (`Loop`, `Sum`, `Product`, a
+reduction) at compile time (`loopPasses()`): a constant count is itself, a
+run-time count is the budget (the test above ensures it), multiplied down
+the nesting and through the calls, both arms of an `if` added. A program
+whose bound is over the budget declines: two nested `Sum`s of 10,000 passes,
+a loop nested in a `Sum` of a run-time count (`Sum(Max(L6)·j, j = 1..n)`),
+a `Loop` of 10,000 passes around such a `Sum`. A single `Sum` of a run-time
+count compiles. With `iterationBudget: Infinity` there is no bound.
 
 `Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
 counted loop per clause over the source of `L` (an input list, a list, a
@@ -484,7 +496,10 @@ A parameter declared a list of reals or integers
 argument must have, or of a run-time length, a hidden integer parameter before
 it that each call passes (the length of the argument), as the root function
 literal does: `f(D) + f([1, 2])` calls one function with lengths `D.length`
-and 2. A tuple argument, a list of lists, of booleans or of complex numbers
+and 2. A parameter declared a tuple of reals or integers
+(`(tuple<real, real>) -> real`) is the list of its elements, marked a tuple,
+and takes a tuple argument only (`pf(P)`, `pf(Tuple(x, Sin(x)))`). A tuple
+argument for a list parameter, a list of lists, of booleans or of complex numbers
 decline. On GLSL a parameter of stated length is a vector of 2 to 4
 elements (`vec3 B`) or an array parameter (`float B[5]`); one of run-time
 length declines with the target's rule.
@@ -523,6 +538,11 @@ type is the body's), a list of lists, and a list result on GLSL.
   (`NODE_LIMIT`, `lower.ts`). A shared node is lowered once per region, so the
   two arms of an `If` that both read a shared graph lower it once each: a
   chain of such `If`s (CE-584) would otherwise grow exponentially.
+- The printer names a value whose text would nest more than 64 inlined
+  values (`INLINE_DEPTH`, `print.ts`): it writes an inlined value by
+  recursion, and `Max` of 1,000 operands is a chain of 1,000 `max`. A
+  program on which a walk of the pipeline still exceeds the call stack (a
+  tree of depth 20,000) declines: "an expression too deep to compile".
 - A loop or a build of 2^32 iterations or more throws on JavaScript; GLSL clamps
   its `int` bounds to ±2^30. GLSL has no run-time length, region, draw, frame or
   recursion.
@@ -580,7 +600,7 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
   real). A read in a root function literal (no such scope), or in a user
   function of a text other than a read of the inputs object (see "User
   functions"), a call of a mapped name, a list or complex type, and a text with
-  `$` and a digit decline. A mapped name is not an input (`freeSymbols`).
+  `$` or `$#` and a digit (a placeholder of a spelling) decline. A mapped name is not an input (`freeSymbols`).
 - **Calling convention.** The result is `calling: 'expression'`, `run(inputs)`,
   or, for a root `Function` literal, `calling: 'lambda'`, `run(a0, a1, …)`, as
   the existing compiler's result is called by `implicitCompile()`; a literal of
@@ -636,7 +656,8 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
 `docs/plans/2026-11-09-js-compiler-status-and-plan.md`), for a scalar result
 (real, integer or boolean) or a list of stated length (batch G2: a point, as
 `vec2(cos(t), sin(t))`, or a `float[n]`) of inputs that are scalars or lists
-of 2 to 4 elements (`tuple<real, real>`, `list<real^3>`), and gives the
+of a stated length (`tuple<real, real>`, `list<real^3>`; batch G3:
+`list<real^6>` is a `float[6]`), and gives the
 result of the existing GLSL target: no `run`; `code` is an expression, or
 statements that end in `return …;`, in which an input is its bare name (the option `bareInputs` of
 `compileSlice()`; the host declares the uniform or the parameter); `preamble`
@@ -645,8 +666,17 @@ the GLSL syntax (a host that joins two compilations renames by `_gpu_` and
 `_fn_`; `ir_` keeps them apart from the names of the existing GLSL target);
 `freeSymbols` are the inputs; `freeSymbolTypes` has the `type` and `provenance`
 of the existing target (`freeSymbolTypes()` of `compile-references.ts`) and the
-`lowered` type that the code reads (`float`, `bool`, `vec2`, `bvec3`: the
-existing target's for each input it compiles); `unsupported` is empty,
+`lowered` type that the code reads (`float`, `bool`, `vec2`, `bvec3`, `float[6]`: the
+existing target's for each input it compiles); `warnings` holds the
+`float32-unsafe-argument` warning of the existing target (`kind:
+'correctness'`, `value` the operand), once per operand of a `Mod` or a
+`Fract` in which a constant of magnitude 1000 or more amplifies a
+trigonometric value (`isAmplifiedTrig()` of `gpu-exact-trig.ts`), in the
+expression and the bodies of the user functions it calls (each node once);
+there is no exact sine hash and no `float32Bounds`, so such an operand always
+warns, also a closed one (folded unless `constantFold: false`) and where
+the existing target emits an exact form (a host that sends a flagged curve to
+its CPU lane does so for these too); `unsupported` is empty,
 `mode` is `'strict'`, `profile` is `'ir'`. A name of `vars` is an input whose
 read is the host's text (`x + y` with `vars: {x: 'u_x'}` is `(u_x + y)`, and
 `x` stays in `freeSymbols` with its type): a name, a member or an element of
@@ -655,12 +685,11 @@ a read in a user function is passed as any input (see "User functions").
 Another text, a text with a name that is a GLSL word or holds `__` or a
 `gl_` prefix (`u.sample`, `u.gl_x`), a text whose first name could not be an
 input name (below), and a name that has a value in the engine decline. Declined with
-`'outside-profile'`: a list input of another length (`At` on a uniform array
-is batch G3), a list result of a user function, a root `Function` literal,
+`'outside-profile'`: a list or tuple result of a user function, a root `Function` literal,
 the options `functions`, `operators`, `imports`, `preamble`, `storage`,
 `callerLocals`, `strictTypes: true`, `broadcast: true`, a `mode` other than
-`'strict'`, an `iterationBudget` with a `Loop` (GLSL counts no `Loop` pass; a `Sum` or a
-`Product` over the budget is NaN), and an input name that is not a plain GLSL
+`'strict'`, loops whose passes can exceed the budget ("Loops and the
+runtime"), and an input name that is not a plain GLSL
 identifier, is a reserved word (`gpu-reserved.ts`), can be a name of the printer
 (`v<digits>…`, `_gpu_…`, `_fn_…`) or is the name of a function that the code
 calls. `fallback: true` then compiles with the existing GLSL target and logs a

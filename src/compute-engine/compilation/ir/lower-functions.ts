@@ -79,6 +79,28 @@ export function inputType(
   return l === undefined ? undefined : { lane: l, shape };
 }
 
+/** `inputType()`, and a tuple of scalars of one lane (an integer among
+ *  reals is a real) as the list of its elements (`shape: [n]`). */
+export function tupleOrInputType(t: Type, wide: 'real' | 'complex' = 'real') {
+  if (typeof t !== 'object' || t.kind !== 'tuple') return inputType(t, wide);
+  const lanes = new Set(
+    t.elements.map((x) => {
+      // An element of type `unknown` declines, as in a list.
+      const ir = x.type === 'unknown' ? undefined : inputType(x.type, wide);
+      return ir?.shape.length === 0 ? ir.lane : 'none';
+    })
+  );
+  const lane =
+    lanes.size === 1
+      ? [...lanes][0]
+      : lanes.size === 2 && lanes.has('real') && lanes.has('integer')
+        ? 'real'
+        : 'none';
+  return lane === 'none' || lane === 'complex'
+    ? undefined
+    : { lane, shape: [t.elements.length] };
+}
+
 /** A union of one type and `nan` or `missing` members is that type
  *  (`missing | rational`, `integer | nan` is an integer, `nan | number`,
  *  `complex | nan`): the compiled
@@ -140,14 +162,14 @@ function signatureTypes(e: Fn, literal: Fn) {
     return n;
   });
   // A list of reals or integers, of a stated or a run-time length (`'run-time'`,
-  // a hidden length parameter before it).
+  // a hidden length parameter before it), or a tuple of them (`tuple`).
   const params = names.map((p, i) => {
     const t = signature?.args?.[i]?.type ?? 'unknown';
-    const list = inputType(t);
+    const list = tupleOrInputType(t);
     return list !== undefined &&
       list.shape.length === 1 &&
       (list.lane === 'real' || list.lane === 'integer')
-      ? list
+      ? { ...list, tuple: typeof t === 'object' && t.kind === 'tuple' }
       : {
           lane: scalarOf(literal, t, `the parameter ${p} of ${e.operator}`)
             .lane,
@@ -177,7 +199,11 @@ function signatureTypes(e: Fn, literal: Fn) {
  *  a call of it was made while its body is lowered. */
 type UserFunction = {
   key: object;
-  params: { lane: Lane; shape: readonly (number | 'run-time')[] }[];
+  params: {
+    lane: Lane;
+    shape: readonly (number | 'run-time')[];
+    tuple?: boolean;
+  }[];
   /** The number of parameters of `ir` for `params` (with the lengths). */
   own: number;
   result?: IRType;
@@ -219,7 +245,9 @@ export function functionLowering(cx: Lowering) {
           ? { v: param(names[i], { lane: 'integer', shape: [] }, true) }
           : n
       );
-      return param(names[i], { lane: t.lane, shape });
+      const v = param(names[i], { lane: t.lane, shape });
+      if ('tuple' in t && t.tuple) cx.tuples.set(v, 0);
+      return v;
     });
     const fn: UserFunction = {
       key,
@@ -312,7 +340,11 @@ export function functionLowering(cx: Lowering) {
           op,
           `a list argument of ${e.operator} (the interpreter maps the function over the list)`
         );
-      if (cx.tuples.has(v) || !isSubType(t, declared, cx.constant))
+      // A tuple argument for a tuple parameter only.
+      if (
+        cx.tuples.has(v) !== (p.tuple === true) ||
+        !isSubType(t, declared, cx.constant)
+      )
         decline(
           op,
           `an argument of ${e.operator} that is not ${typeToString(declared)}`

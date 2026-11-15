@@ -92,6 +92,13 @@ export const GLSL: Syntax = Object.freeze({
     'or': '($0 || $1)',
     'not': '(!$0)',
     'elem': '$0[int($1)]',
+    // `At`: from 1, from the end when negative, NaN for an index that is 0,
+    // not an integer or out of range; the arm that reads is taken only in
+    // range. `$#0` is the length of the list (an `int` literal). The index
+    // is clamped too: a compiler folds a constant index and rejects one out
+    // of range, also in an arm that is not taken (`At(L, 7)` of a
+    // `float[6]`).
+    'at': `($1 == floor($1) && $1 != 0.0 && abs($1) <= float($#0) ? $0[clamp($1 > 0.0 ? int($1) - 1 : $#0 + int($1), 0, $#0 - 1)] : ${NAN})`,
     'rangestep': '($1 >= $0 ? 1.0 : -1.0)',
     // Only the builtins defined on every real: `asin`, `acos`, `acosh`,
     // `atanh` and `atan(y, x)` are undefined at some reals in GLSL ES 3.00,

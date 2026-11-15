@@ -32,20 +32,30 @@
 - **The experimental profile `'ir'` compiles to GLSL.**
   `compile(expr, { to: 'glsl', profile: 'ir' })` compiles with the new
   compiler a real, integer or boolean result, or a list of stated length, of
-  scalar inputs and of inputs that are tuples or lists of 2 to 4 numbers,
+  scalar inputs and of inputs that are tuples or lists of a stated length,
   and gives a GLSL result. A point, or a list of 2 to 4 numbers, is a `vec2`,
   `vec3` or `vec4`, as a result and as an input: `Tuple(Cos(t), Sin(t))` is
   `vec2(cos(t), sin(t))`, and an input `P: tuple<real, real>` has
   `freeSymbolTypes.P.lowered` equal to `vec2`, as with the existing GLSL
-  target; a list of another length is a `float[n]` result. `code` is an
-  expression, or statements that end in `return`, in which an input is its
-  name; `preamble` holds the helpers, named `_gpu_ir_…`, and the user
+  target; a list of another length is a `float[n]`, as a result and as an
+  input (`L: list<real^6>` is `float[6]`). `At(L, k)` with an index known
+  only at run time reads the element from 1, from the end when `k` is
+  negative, and is NaN for an index that is 0, not an integer or out of
+  range. A `Sum` or a `Product` of more passes than `iterationBudget`
+  (10,000 by default, as on the existing GLSL target) is NaN; a program
+  whose loops, nested ones included, can run more passes in all declines. A parameter of a user function declared
+  `tuple<real, real>` is a `vec2` (an array on JavaScript). A `Mod` or
+  `Fract` of a trigonometric value amplified by a constant of magnitude 1000
+  or more (a sine hash) has the warning `float32-unsafe-argument` in
+  `warnings`, also where the existing target compiles an exact form. `code`
+  is an expression, or statements that end in `return`, in which an input is
+  its name; `preamble` holds the helpers, named `_gpu_ir_…`, and the user
   functions, named `_fn_ir_…`; `freeSymbols` and `freeSymbolTypes` list the
   inputs. With `vars`, a name is read as the host's text, which must be a
   name, or a member or an element of one (`u_x`, `u.P`, `u[0]`), and the
-  name stays in `freeSymbols`. Declined: a list input of another length, a
-  list result of a user function, a `Function` literal, a `vars` text of
-  another form or a `vars` name that has a value, and the options
+  name stays in `freeSymbols`. Declined: a list input of a run-time length,
+  a list or tuple result of a user function, a `Function` literal, a `vars`
+  text of another form or a `vars` name that has a value, and the options
   `functions`, `operators`, `imports`, `preamble`, `storage`, `strictTypes`,
   `broadcast` and a mode other than `'strict'`; with `fallback`, the existing
   GLSL target then compiles the expression. On JavaScript the profile now

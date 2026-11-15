@@ -92,7 +92,12 @@ import {
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
 import { listLowering, parameterName } from './lower-lists.js';
-import { functionLowering, inputType, userBinding } from './lower-functions.js';
+import {
+  functionLowering,
+  inputType,
+  tupleOrInputType,
+  userBinding,
+} from './lower-functions.js';
 
 export { Decline } from './lower-context.js';
 
@@ -910,30 +915,9 @@ export function lower(
       : fns.capture(e, name, t);
   };
 
-  /** The IR type of an input of the engine type `t`; a tuple of scalars of
-   *  one lane (an integer among reals is a real) is the list of its
-   *  elements, which `input()` marks a tuple. */
-  const inputIR = (t: Type) => {
-    if (typeof t !== 'object' || t.kind !== 'tuple')
-      return inputType(t, cx.wide);
-    const lanes = new Set(
-      t.elements.map((x) => {
-        // An element of type `unknown` declines, as in a list.
-        const ir =
-          x.type === 'unknown' ? undefined : inputType(x.type, cx.wide);
-        return ir?.shape.length === 0 ? ir.lane : 'none';
-      })
-    );
-    const lane =
-      lanes.size === 1
-        ? [...lanes][0]
-        : lanes.size === 2 && lanes.has('real') && lanes.has('integer')
-          ? 'real'
-          : 'none';
-    return lane === 'none' || lane === 'complex'
-      ? undefined
-      : { lane, shape: [t.elements.length] };
-  };
+  /** The IR type of an input of the engine type `t`; a tuple is the list of
+   *  its elements, which `input()` marks a tuple. */
+  const inputIR = (t: Type) => tupleOrInputType(t, cx.wide);
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {

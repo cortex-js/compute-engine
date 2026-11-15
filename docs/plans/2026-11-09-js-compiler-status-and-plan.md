@@ -1548,6 +1548,44 @@ No test fails in the shadow run; with the switch on, the one test of CE-1267.
 Largest causes of a GLSL decline: the complex lane 169; the option
 `functions` 21 and other options 29.
 
+Batch G3, 2026-11-14. A list input of any stated length is a uniform array
+on GLSL, and `At` with a run-time index is one inline conditional that reads
+the clamped element in range and is NaN outside (a constant index out of
+range made a shader that no compiler accepts: review finding). The cap on
+loop passes: the adapter passes `iterationBudget ?? 10000`; a `Sum` or
+`Product` of a run-time count is NaN over it; a bound of the passes of the
+whole program (`loopPasses()`: every loop, a run-time count as the budget,
+multiplied down the nesting and through calls) must be within the budget, or
+the program declines (two nested sums of 10,000 passes ran 10^8 passes per
+fragment: review finding). The warning `float32-unsafe-argument` follows the
+rule of the existing target, which was measured: it fires for an operand of
+`Mod` or `Fract` in which a constant of magnitude 1000 or more multiplies a
+trigonometric call, not for a large trigonometric argument; the profile has
+no exact form, so it also warns where the existing target computes the sine
+hash exactly, and Tycho's curve lane then takes the CPU. `isAmplifiedTrig()`
+of `gpu-exact-trig.ts` is imported and has to move into `ir/` before that
+file is deleted. A parameter of a user function may be a tuple of numbers,
+on both targets; a tuple result of a user function declines.
+
+Two defects of the printer and the walks, found by the reviews and by the
+shadow run: the warning walk visited a shared node once per path; a value
+whose text nests more than 64 inlined values is now given a name (a `Max` of
+1,000 operands overflowed the stack on both targets), and a stack overflow
+anywhere in the pipeline is a decline, not an internal error. Measured in a
+worktree at `c2937c6dfd41ea74817aa2efd5f0cd115ec35df7` plus the patch; 6,252
+lines in `ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,475 of 10,848 (96.6%) |
+| Every JavaScript compile | 23,928 of 38,923 (61.5%) |
+| Public JavaScript `compile()` calls | 13,442 of 28,061 (47.9%) |
+| GLSL `compile()` calls | 776 of 2,356 (32.9%); 727 of the 1,562 that the existing target compiles (46.5%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267. The largest cause of a GLSL decline is
+the complex lane (169).
+
 User decisions of 2026-11-14 on GLSL:
 
 - **The existing GLSL target is to be deleted too** (about 25,500 lines of

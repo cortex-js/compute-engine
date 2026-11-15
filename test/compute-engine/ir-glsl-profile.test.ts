@@ -1,8 +1,10 @@
 /**
- * The profile `ir` of `compile()` on the `glsl` target (batches G1 and G2,
+ * The profile `ir` of `compile()` on the `glsl` target (batches G1 to G3,
  * `src/compute-engine/compilation/ir/adapter-glsl.ts`): a scalar or list
- * result of scalar inputs and of inputs that are tuples or lists of 2 to 4
- * elements (a `vecN`), and the option `vars`.
+ * result of scalar inputs and of inputs that are tuples or lists of a
+ * stated length (a `vecN` or a `float[n]`), `At` with a run-time index, the
+ * cap on passes, a point parameter of a user function, the
+ * `float32-unsafe-argument` warning, and the option `vars`.
  *
  * - The fields of the result: `code` is an expression or statements that end
  *   in `return`, an input is its bare name, every helper and function of
@@ -54,6 +56,18 @@ ce.assign(
 ce.assign(
   'pr',
   ce.box(['Function', ['Tuple', ['Cos', 'a'], ['Sin', 'a']], 'a'])
+);
+// Batch G3: an array input and a run-time index.
+ce.declare('L6', 'list<real^6>');
+ce.declare('ix', 'real');
+// A sine hash in the body of a user function.
+ce.assign(
+  'fh',
+  ce.box([
+    'Function',
+    ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, 't']]], 1],
+    't',
+  ])
 );
 
 type Json = unknown;
@@ -294,7 +308,7 @@ function interpretPoint(json: Json, point: PointValue): unknown {
       k,
       Array.isArray(v)
         ? ce.function(
-            /^(L|V4|BL2)$/.test(k) ? 'List' : 'Tuple',
+            /^(L|L6|V4|BL2)$/.test(k) ? 'List' : 'Tuple',
             v.map((n) =>
               /^B/.test(k) ? (n ? ce.True : ce.False) : ce.number(n)
             )
@@ -322,9 +336,12 @@ function pointShaders(
   expected: unknown
 ): string[] {
   const type = (n: string) => r.freeSymbolTypes![n].lowered!;
-  const size = (n: string) => Number(/^b?vec(\d)$/.exec(type(n))?.[1] ?? 1);
+  const size = (n: string) =>
+    Number(
+      /^b?vec(\d)$|\[(\d+)\]$/.exec(type(n))?.find((x, k) => k > 0 && x) ?? 1
+    );
   const value = (n: string) =>
-    size(n) === 1
+    !/vec|\[/.test(type(n))
       ? `u_${n}_0`
       : `${type(n)}(${Array.from({ length: size(n) }, (_, k) => `u_${n}_${k}`).join(', ')})`;
   const params = r.freeSymbols!.filter((n) => vars[n] === undefined);
@@ -468,6 +485,269 @@ describe('IR profile on GLSL: points', () => {
 );
 
 //
+// Batch G3: an array input of another stated length, `At` with a run-time
+// index, the cap on passes, a point parameter of a user function
+//
+
+const L6 = [1.5, 2, 3, 4, 5, 6.5];
+const SUM_N = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'n']];
+// prettier-ignore
+const G3: [label: string, json: Json, options: object, points: PointValue[]][] = [
+  ['At(L6, ix)', ['At', 'L6', 'ix'], {}, [1, 6, -1, -6, 0, 7, -7, 2.5].map((ix) => ({ L6, ix }))],
+  ['At(P3, ix)', ['At', 'P3', 'ix'], {}, [1, 3, -2, 0, 4, 1.5].map((ix) => ({ P3: [0.5, 1, -2], ix }))],
+  ['Sum(L6)', ['Sum', 'L6'], {}, [{ L6 }]],
+  ['Max(L6)', ['Max', 'L6'], {}, [{ L6 }, { L6: [-1, -2, -3, -4, -5, -0.5] }]],
+  ['2·L6', ['Multiply', 2, 'L6'], {}, [{ L6 }]],
+  ['Length(L6) + x', ['Add', ['Length', 'L6'], 'x'], {}, [{ x: 0.5, L6 }]],
+  ['a Sum under and over the default cap', SUM_N, {}, [{ n: 100, x: 0.5 }, { n: 10000, x: 1 }, { n: 10001, x: 1 }, { n: 20000, x: 1 }]],
+  ['a Sum under and over an iterationBudget', SUM_N, { iterationBudget: 50 }, [{ n: 50, x: 0.5 }, { n: 51, x: 0.5 }]],
+  ['a Loop within the budget', ['Block', ['Declare', 's', 'real', 0], ['Loop', ['Assign', 's', ['Add', 's', ['Multiply', 'j', 'x']]], ['Element', 'j', ['Range', 1, 5]]], 's'], { iterationBudget: 5 }, [{ x: 0.5 }]],
+  ['a point parameter', ['pf', 'P'], {}, [{ P: [1, 2] }, { P: [-3, 0.25] }]],
+  ['a point argument', ['pf', ['Tuple', 'x', ['Sin', 'x']]], {}, [{ x: 0.5 }, { x: -2 }]],
+  ['a nest of 220 passes', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 10]], ['Limits', 'i', 1, 20]], {}, [{ x: 0.5 }]],
+];
+
+/** `At` with an index that the compiler can fold, outside the list: NaN,
+ *  in code that a GLSL compiler accepts (the index is clamped). */
+// prettier-ignore
+const AT_OUTSIDE: [label: string, json: Json, options: object][] = [
+  ['At(L6, 0)', ['At', 'L6', 0], {}],
+  ['At(L6, 7)', ['At', 'L6', 7], {}],
+  ['At(L6, -7)', ['At', 'L6', -7], {}],
+  ['At(P3, 5)', ['At', 'P3', 5], {}],
+  ['At(P3, 0)', ['At', 'P3', 0], {}],
+  ['At(List(x, y, 3), 4)', ['At', ['List', 'x', 'y', 3], 4], {}],
+  ['At(L6, k) with k a local of value 7', ['Block', ['Declare', 'k', 'integer', 7], ['At', 'L6', 'k']], {}],
+  ['At(L6, Length(L6) + 1)', ['At', 'L6', ['Add', ['Length', 'L6'], 1]], {}],
+  ['At(L6, 7) with constantFold: false', ['At', 'L6', 7], { constantFold: false }],
+];
+
+/** The interpreter's value at `point`; a `Sum` of more passes than the cap
+ *  (`iterationBudget`, 10,000 by default) is NaN, as on the existing
+ *  target. */
+function interpretG3(json: Json, options: object, point: PointValue): unknown {
+  const budget = (options as { iterationBudget?: number }).iterationBudget;
+  if (json === SUM_N && (point.n as number) > (budget ?? 10_000)) return NaN;
+  return interpretPoint(json, point);
+}
+
+describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
+  test.each(G3.map(([label, json, options]) => [label, json, options]))(
+    '%s: the fields of the existing target',
+    (label, json, options) => {
+      const r = glsl(json, options as object);
+      expect(r.profile).toBe('ir');
+      // A Sum, a Max and an element-wise operation of a `float[6]` decline
+      // on the existing target.
+      if (/^(Sum|Max)\(L6\)$|2·L6/.test(label as string)) return;
+      const existing = compile(ce.box(json as never), {
+        to: 'glsl',
+        fallback: false,
+        ...(options as object),
+      });
+      expect(r.freeSymbolTypes).toEqual(existing.freeSymbolTypes);
+    }
+  );
+
+  test('an array input is a float[6], as on the existing target; At with a run-time index reads the array in range only', () => {
+    const r = glsl(['At', 'L6', 'ix']);
+    const existing = compile(ce.box(['At', 'L6', 'ix']), { to: 'glsl' });
+    expect(r.freeSymbolTypes).toEqual(existing.freeSymbolTypes);
+    expect(r.freeSymbolTypes!.L6.lowered).toBe('float[6]');
+    expect(r.code).toMatch(/\? L6\[.*\] : uintBitsToFloat\(0x7fc00000u\)\)$/);
+    expect(glsl(['At', 'P3', 'ix']).code).toMatch(
+      /abs\(ix\) <= float\(3\) \? P3\[clamp\(ix > 0\.0 \? int\(ix\) - 1 : 3 \+ int\(ix\), 0, 3 - 1\)\]/
+    );
+    expect(glsl(['Multiply', 2, 'L6']).code).toMatch(/^float\[6\]\(/);
+  });
+
+  test('the cap: a Sum of a run-time count tests its count, a Loop over the cap declines', () => {
+    expect(glsl(SUM_N).code).toMatch(
+      /^float v\d+;\nif \(\(\(n - 1\.0\) < 10000\.0\)\) \{/
+    );
+    expect(glsl(SUM_N, { iterationBudget: 50 }).code).toMatch(/< 50\.0/);
+    // `Infinity`: no cap (`compile()` refuses `NaN` and 0 before any
+    // target).
+    expect(glsl(SUM_N, { iterationBudget: Infinity }).code).not.toMatch(
+      /10000/
+    );
+  });
+
+  test('a point parameter on JavaScript: the same function, an array', () => {
+    for (const json of [
+      ['pf', 'P'],
+      ['pf', ['Tuple', 'x', ['Sin', 'x']]],
+    ]) {
+      const r = compile(ce.box(json as never), {
+        profile: 'ir',
+        fallback: false,
+      });
+      expect(r.profile).toBe('ir');
+      for (const p of [
+        { P: [1, 2], x: 0.5 },
+        { P: [-3, 0.25], x: -2 },
+      ])
+        expect(r.run!(p as never)).toBeCloseTo(
+          interpretPoint(json, p) as number,
+          12
+        );
+    }
+  });
+});
+
+(chromiumAvailable() ? describe : describe.skip)(
+  'IR profile on GLSL: arrays, At, the cap, point parameters in WebGL2',
+  () => {
+    let driver: GlslDriver;
+    beforeAll(async () => {
+      driver = await GlslDriver.start();
+    }, 60_000);
+    afterAll(async () => driver?.stop());
+
+    test('each component gives the interpreter value (NaN where it is NaN)', async () => {
+      const items = G3.flatMap(([label, json, options, points]) => {
+        const r = glsl(json, options);
+        const sources = pointShaders(r, {}, interpretPoint(json, points[0]));
+        return points.flatMap((p) => {
+          const expected = [interpretG3(json, options, p)].flat();
+          expect(expected.length).toBe(sources.length);
+          const uniforms = Object.fromEntries(
+            r.freeSymbols!.flatMap((n) =>
+              [p[n]].flat().map((x, j) => [`u_${n}_${j}`, x])
+            )
+          );
+          return sources.map((source, k) => ({
+            name: `${label} [${k}] at ${JSON.stringify(p)}`,
+            source,
+            uniforms,
+            expected: expected[k],
+          }));
+        });
+      });
+      const point = { L6, P3: [0.5, 1, -2], x: 0.5, y: 2 } as PointValue;
+      for (const [label, json, options] of AT_OUTSIDE) {
+        const r = glsl(json, options);
+        items.push({
+          name: label,
+          source: pointShaders(r, {}, NaN)[0],
+          uniforms: Object.fromEntries(
+            r.freeSymbols!.flatMap((n) =>
+              [point[n]].flat().map((x, j) => [`u_${n}_${j}`, x])
+            )
+          ),
+          expected: NaN,
+        });
+      }
+      const values = await driver.evaluate(items);
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = items[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        // A float32 sum of 10,000 terms is off by about 4e-5, and the `sin`
+        // of SwiftShader by about 3e-5 (`2·sin(-2)`), as in the first test.
+        const tolerance = /default cap|point argument/.test(name) ? 1e-3 : 1e-5;
+        if (typeof expected !== 'number')
+          return failures.push(`${name}: interpreter ${String(expected)}`);
+        if (Number.isNaN(expected) !== Number.isNaN(v.value))
+          return failures.push(`${name}: ${v.value} vs ${expected}`);
+        if (
+          !Number.isNaN(expected) &&
+          !(
+            Math.abs(v.value - expected) <=
+            tolerance * Math.max(1, Math.abs(expected))
+          )
+        )
+          failures.push(`${name}: ${v.value} vs ${expected}`);
+      });
+      expect(failures).toEqual([]);
+      expect(items.length).toBeGreaterThanOrEqual(45);
+    }, 120_000);
+  }
+);
+
+//
+// The float32-unsafe warning (`gpu-exact-trig.ts`, `isAmplifiedTrig()`)
+//
+
+describe('IR profile on GLSL: the float32-unsafe warning', () => {
+  const codes = (r: ReturnType<typeof glsl>) =>
+    r.warnings?.map((w) => [w.code, w.kind]);
+  const existing = (json: Json) =>
+    compile(typeof json === 'string' ? ce.parse(json) : ce.box(json as never), {
+      to: 'glsl',
+    });
+  const ir = (json: Json) =>
+    typeof json === 'string' ? compile(ce.parse(json), IR) : glsl(json);
+  const WARNED = [['float32-unsafe-argument', 'correctness']];
+
+  // From `compile-glsl-exact-trig.test.ts`.
+  test.each([
+    '\\operatorname{mod}(10^4\\tan(x),1)',
+    '\\operatorname{mod}(10^4\\sin(10^4x),2)',
+    '\\operatorname{mod}(10^4y\\sin(x),1)',
+    '\\operatorname{mod}(43758.5453\\sin(12.9898x^2),1)',
+  ])('%s: warned, as on the existing target', (latex) => {
+    expect(codes(existing(latex))).toEqual(WARNED);
+    expect(codes(ir(latex))).toEqual(WARNED);
+  });
+
+  test('an operand with an exact form on the existing target warns on the profile, which has none', () => {
+    const latex = '\\operatorname{mod}(10^4\\sin(10^4x),1)';
+    expect(existing(latex).float32Bounds).toEqual([
+      { operand: 'x', maxAbs: 2600 },
+    ]);
+    const r = ir(latex);
+    expect(codes(r)).toEqual(WARNED);
+    expect(r.float32Bounds).toBeUndefined();
+    expect(codes(glsl(['Fract', ['Multiply', 1e4, ['Sin', 'x']]]))).toEqual(
+      WARNED
+    );
+  });
+
+  test('one warning per operand, also in the body of a user function', () => {
+    const r = ir(
+      '\\operatorname{mod}(43758.5453\\tan(y),1)+\\operatorname{mod}(43758.5453\\sin(x^2),1)+\\operatorname{mod}(43758.5453\\tan(y),1)'
+    );
+    expect(r.warnings?.map((w) => w.value).sort()).toEqual(
+      existing(
+        '\\operatorname{mod}(43758.5453\\tan(y),1)+\\operatorname{mod}(43758.5453\\sin(x^2),1)+\\operatorname{mod}(43758.5453\\tan(y),1)'
+      )
+        .warnings?.map((w) => w.value)
+        .sort()
+    );
+    expect(codes(glsl(['fh', 'x']))).toEqual(WARNED);
+  });
+
+  test('a closed operand warns too: with constantFold: false it stays shader arithmetic', () => {
+    const json = ['Mod', ['Multiply', 10000, ['Sin', 1]], 2];
+    expect(codes(glsl(json, { constantFold: false }))).toEqual(WARNED);
+    expect(codes(glsl(json))).toEqual(WARNED);
+  });
+
+  test('a shared graph of depth 40 (CE-584) is walked once per node', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    let e = engine.symbol('x') as Expression;
+    for (let i = 0; i < 40; i++)
+      e = engine.function('Add', [e, engine.function('Sin', [e])]);
+    const start = performance.now();
+    const r = compile(e, IR);
+    expect(r.success).toBe(true);
+    expect(performance.now() - start).toBeLessThan(5_000);
+  });
+
+  test('no warning: an operand that is not amplified, no Mod, no trigonometric function', () => {
+    for (const json of [
+      '\\operatorname{mod}(\\sin(x)+1,1)',
+      '\\operatorname{mod}(1000x+\\sin(y),1)',
+      ['Sin', ['Multiply', 1e4, 'x']],
+      ['Add', ['Multiply', 'x', 'x'], 1],
+    ])
+      expect(ir(json).warnings).toBeUndefined();
+  });
+});
+
+//
 // Declines, fallback, canCompile()
 //
 
@@ -486,8 +766,6 @@ describe('IR profile on GLSL: declines', () => {
   test.each([
     ['a tuple of several shapes', ['Tuple', 'x', 'L'], {}, /a Tuple of elements of several shapes/],
     ['a list input of run-time length', ['Sum', 'D'], {}, /the list D has a run-time length/],
-    ['a list input of 5 elements', ['At', 'L5', 1], {}, /the list input `L5`/],
-    ['a tuple argument of a user function', ['pf', 'P'], {}, /the parameter a of pf is not a scalar/],
     ['a tuple result of a user function', ['At', ['pr', 'x'], 1], {}, /the result of pr is not a scalar/],
     ['a vars text that is an expression', ['Add', 'x', 1], { vars: { x: '(u_x + 1.0)' } }, /the vars entry of x/],
     ['a vars text that calls', ['Add', 'x', 1], { vars: { x: 'f(u)' } }, /the vars entry of x/],
@@ -506,9 +784,24 @@ describe('IR profile on GLSL: declines', () => {
     ['strictTypes', ['Add', 'x', 1], { strictTypes: true }, /`strictTypes`/],
     ['broadcast', ['Add', 'x', 1], { broadcast: true }, /`broadcast`/],
     ['mode', ['Add', 'x', 1], { mode: 'complex' }, /`mode` with the value 'complex'/],
-    ['an iterationBudget with a Loop', ['Block', ['Declare', 's', 'real', 0],
+    ['a Loop of more passes than the iterationBudget', ['Block', ['Declare', 's', 'real', 0],
       ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'],
-      { iterationBudget: 100 }, /`iterationBudget` with a Loop/],
+      { iterationBudget: 4 }, /more passes than the iterationBudget \(4\)/],
+    ['a Loop of more passes than the default cap', ['Block', ['Declare', 's', 'real', 0],
+      ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 20000]]], 's'],
+      {}, /more passes than the iterationBudget \(10000\)/],
+    ['a Loop in a Sum of a run-time count', ['Sum', ['Block', ['Declare', 's', 'real', 0],
+      ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'], ['Limits', 'j', 1, 'n']],
+      {}, /more passes than the iterationBudget \(10000\)/],
+    ['two nested Sums of 10,000 passes', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 10000]], ['Limits', 'i', 1, 10000]],
+      {}, /more passes than the iterationBudget \(10000\)/],
+    ['two nested Sums of run-time counts', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 'm']], ['Limits', 'i', 1, 'n']],
+      {}, /more passes than the iterationBudget \(10000\)/],
+    ['a Loop of 10,000 passes around a Sum of a run-time count', ['Block', ['Declare', 's', 'real', 0],
+      ['Loop', ['Assign', 's', ['Add', 's', ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'n']]]], ['Element', 'k', ['Range', 1, 10000]]], 's'],
+      {}, /more passes than the iterationBudget \(10000\)/],
+    ['a reduction in a Sum of a run-time count', ['Sum', ['Multiply', ['Max', 'L6'], 'j'], ['Limits', 'j', 1, 'n']],
+      {}, /more passes than the iterationBudget \(10000\)/],
     ['an input named v8', ['Add', 'v8', 1], {}, /the input name `v8`/],
     ['an input named float', ['Add', 'float', 1], {}, /the input name `float`/],
     ['an input named as a function the code calls', ['Add', 'sin', ['Sin', 'x']], {}, /the input name `sin`/],
@@ -628,6 +921,39 @@ describe('IR profile on GLSL: declines', () => {
       expect(d?.code).toBe('outside-profile');
       expect(d?.message).toMatch(/more than 50000 nodes to lower/);
       expect(performance.now() - start).toBeLessThan(30_000);
+    }
+  });
+
+  test('a chain of 1,000 inlined values (CE-584: Max of 1,000 copies of x under two Ifs) compiles; a tree too deep declines, on both targets', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const x = engine.symbol('x');
+    let e = engine.function(
+      'Max',
+      Array.from({ length: 1_000 }, () => x)
+    );
+    for (let i = 0; i < 2; i++)
+      e = engine.function('If', [
+        engine.function('Greater', [x, engine.number(i)]),
+        e,
+        engine.function('Sin', [e]),
+      ]);
+    let deep = x as Expression;
+    for (let i = 0; i < 20_000; i++) deep = engine.function('Sin', [deep]);
+    for (const to of ['glsl', 'javascript'] as const) {
+      const r = compile(e, { to, profile: 'ir', fallback: false });
+      expect(r.success).toBe(true);
+      if (to === 'javascript')
+        expect(r.run!({ x: 0.5 } as never)).toBeCloseTo(Math.sin(0.5), 12);
+      let d: { code: string; message: string } | undefined;
+      try {
+        compile(deep, { to, profile: 'ir', fallback: false });
+      } catch (x) {
+        d = (x as { diagnostic?: { code: string; message: string } })
+          .diagnostic;
+      }
+      expect(d?.code).toBe('outside-profile');
+      expect(d?.message).toMatch(/too deep to compile/);
     }
   });
 

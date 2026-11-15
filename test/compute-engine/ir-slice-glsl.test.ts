@@ -54,7 +54,7 @@ const PINNED: [rule: string, program: unknown][] = [
 describe('IR slice: GLSL text', () => {
   test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a function with no builtin defined on every real, and the complex lane)', () => {
     // prettier-ignore
-    const jsOnly = new Set(['draw', 'rangecount', 'at', 'log10', 'hypot', 'asin', 'acos',
+    const jsOnly = new Set(['draw', 'rangecount', 'log10', 'hypot', 'asin', 'acos',
       'acosh', 'atanh', ...Object.keys(REAL_FUNCTIONS).filter((f) => f !== 'fract'),
       ...Object.keys(COMPLEX_FUNCTIONS)]);
     const bigintOnly = new Set(['binomial', 'gcd', 'lcm']);

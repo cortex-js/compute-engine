@@ -284,7 +284,7 @@ export type SliceOptions = {
   readonly iterationBudget?: number;
   /** A name read as the host's text, in the scope of the entry, at each
    *  use (an effectful operation): `compile()`'s `vars`. The text has no
-   *  `$` followed by a digit. */
+   *  `$` or `$#` followed by a digit (a placeholder of a spelling). */
   readonly vars?: Readonly<Record<string, string>>;
   /** GLSL: an input is spelled by its name, which the host declares
    *  (`compile()`'s profile), or by its text in the map (`compile()`'s

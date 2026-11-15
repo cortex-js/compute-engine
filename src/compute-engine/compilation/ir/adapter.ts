@@ -187,6 +187,9 @@ export function sliceError(e: unknown): unknown {
       ...(e.head === undefined ? {} : { operator: e.head }),
       value: e.node,
     });
+  // A stack overflow of a walk of the pipeline: a program too deep for it.
+  if (e instanceof RangeError && /call stack/.test(e.message))
+    return decline('an expression too deep to compile');
   const message = e instanceof Error ? e.message : String(e);
   return new CompileDeclineError({
     code: 'compile-error',
@@ -220,7 +223,7 @@ export function compileWithIrProfile(
   // No prototype: an entry named `__proto__` is an entry.
   const vars: Record<string, string> = Object.create(null);
   for (const [name, text] of Object.entries(options?.vars ?? {})) {
-    if (typeof text !== 'string' || text.trim() === '' || /\$\d/.test(text))
+    if (typeof text !== 'string' || text.trim() === '' || /\$#?\d/.test(text))
       throw decline(`the vars entry of ${name} is not a source text`);
     vars[name] = text;
   }

@@ -2617,14 +2617,22 @@ program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 With `to: 'glsl'`, `profile: 'ir'` (experimental too) compiles a scalar
 or a list result of stated length (a point `vec2(cos(t), sin(t))`; a list of
 2 to 4 numbers is a `vecN`, another length a `float[n]`) of real, integer or
-boolean inputs and of inputs that are tuples or lists of 2 to 4 numbers, to
+boolean inputs and of inputs that are tuples or lists of a stated length
+(`At(L, k)` with a run-time index is NaN outside the list), to
 the result of the GLSL target: `code` is an expression, or statements that
 end in `return`, in which an input is its bare name, or its `vars` text (a
 name, a member or an element of one, such as `u_x`, `u.P` or `u[0]`; the
 name stays in `freeSymbols`); `preamble` holds the helpers (`_gpu_ir_…`) and
 the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
-`bool` or `vecN`, as the existing GLSL target reports it. It has no NaN-safe helpers, no exact sine hash (no
-`float32Bounds`) and no cap on the passes of a `Loop`. Anything else, and the options it does
+`bool`, `vecN` or `float[n]`, as the existing GLSL target reports it. The
+pass cap is the target's (`iterationBudget`, 10,000 by default), counted
+by loop: a `Sum` or a `Product` of more passes is `NaN`, and a program
+whose loops can run more passes in all, bounded at compile time (a run-time
+count as the cap, multiplied down the nesting), declines. It has no
+NaN-safe helpers and no exact sine hash (no `float32Bounds`): an operand
+of `Mod` or `Fract` that the existing target flags has the warning
+`float32-unsafe-argument`, also where that target emits an exact form.
+Anything else, and the options it does
 not map (the README lists them), decline with `outside-profile`; with
 `fallback`, the existing GLSL target then compiles the expression.
 

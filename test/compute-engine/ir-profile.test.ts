@@ -254,6 +254,8 @@ describe('a decline', () => {
       [['Function', ['Add', 'a', 't'], 't'], { a: '2' }, /in a function/],
       [['g', 'x'], { g: '((t) => t)' }, /a call of the vars name g/],
       [['Add', 'q', 1], { q: '$1' }, /not a source text/],
+      // `$#0` is a placeholder of a spelling too (the length of a list).
+      [['Add', 'q', 1], { q: "_['$#0']" }, /not a source text/],
     ] as [Json, Record<string, string>, RegExp][]) {
       const o = outcome(box(json), { vars });
       expect('message' in o && o.message).toMatch(cause);

@@ -27,8 +27,8 @@ import {
   type V,
 } from './ir.js';
 
-/** The text of an operation, with `$0`, `$1` for its operands, and the
- *  helpers that the text calls. */
+/** The text of an operation, with `$0`, `$1` for its operands (`$#0`: the
+ *  length of the list operand 0), and the helpers that the text calls. */
 export type Spelling =
   string | { readonly text: string; readonly helpers: readonly string[] };
 
@@ -118,13 +118,18 @@ export function spellingOf(
   return typeof s === 'string' ? { text: s, helpers: [] } : s;
 }
 
+const INLINE_DEPTH = 64;
+
 /**
  * The values that a printer writes at their single use, not bound to a
  * name: a constant at any number of uses; a pure `op` or `list` read once,
  * by an instruction or a yield of its own region, when the use reads its
  * operand once (its spelling names the operand once), is not an
  * element-wise operation (whose operands are read once per element), and
- * no instruction between the definition and the use is effectful.
+ * no instruction between the definition and the use is effectful. A value
+ * whose text would nest more than `INLINE_DEPTH` inlined values is named:
+ * the printer writes an inlined value by recursion (`Max` of 1,000
+ * operands is a chain of 1,000 `max`).
  */
 export function inlinedValues(
   p: Program,
@@ -134,6 +139,7 @@ export function inlinedValues(
   index: UseIndex = useIndex(p)
 ): Set<V> {
   const inlined = new Set<V>();
+  const depth = new Map<V, number>();
   const readsOnce = (user: Instr, v: V): boolean => {
     if (user.k !== 'op') return true;
     if (threads(rows, p, user)) return false;
@@ -154,6 +160,9 @@ export function inlinedValues(
       const between = user < 0 ? later : later.slice(0, user);
       if (!between.every((u) => fx.crossable(u))) return;
       if (user >= 0 && !readsOnce(later[user], i.out)) return;
+      const d = 1 + Math.max(0, ...argsOf(i).map((a) => depth.get(a) ?? 0));
+      if (d > INLINE_DEPTH) return;
+      depth.set(i.out, d);
       inlined.add(i.out);
     });
   };
@@ -235,13 +244,23 @@ export function printProgram(
   const use = (v: V): string =>
     inlined.has(v) ? text(index.def.get(v)!) : name(v);
 
-  /** The text of `op` applied to the texts of `operands`. */
-  const spell = (op: string, operands: (k: number) => string): string => {
+  /** The text of `op` applied to the texts of `operands`; `$#k` is the
+   *  length of the list operand `k` of `i`. */
+  const spell = (
+    op: string,
+    operands: (k: number) => string,
+    i?: Instr & { k: 'op' }
+  ): string => {
     const spelling = spellingOf(syntax, op);
     if (spelling === undefined)
       throw new Error(`slice printer: no spelling for the operation ${op}`);
     for (const h of spelling.helpers) helpers.add(syntax.helpers[h]);
-    return spelling.text.replace(/\$(\d)/g, (_, k) => operands(Number(k)));
+    return spelling.text
+      .replace(/\$#(\d)/g, (_, k) => {
+        const n = type(i!.args[Number(k)]).shape[0]!;
+        return typeof n === 'number' ? String(n) : use(n.v);
+      })
+      .replace(/\$(\d)/g, (_, k) => operands(Number(k)));
   };
 
   /** The text of an instruction that defines one value. */
@@ -255,7 +274,7 @@ export function printProgram(
         return syntax.call(i.fn, i.args.map(use));
       case 'op': {
         const shape = type(i.out);
-        if (!threads(rows, p, i)) return spell(i.op, (k) => use(i.args[k]));
+        if (!threads(rows, p, i)) return spell(i.op, (k) => use(i.args[k]), i);
         if (syntax.map === undefined)
           throw new Error(
             `slice printer: an element-wise ${i.op} on a target without them`
