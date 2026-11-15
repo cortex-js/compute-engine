@@ -96,21 +96,28 @@ Delete this file when parts 2 and 3 are done or have their own record.
   type or code difference (codegen audit 1,295 records unchanged, census
   230 rows unchanged, node tests equal but for one load-sensitive
   deadline test, timings equal within noise).
-- IN PROGRESS 2026-11-15 (session `compute-engine-3f`, approved by the user
-  as the next item): the SPEC for stored function bodies as units (part 2,
-  item 4; slice 2 of the model). Records in
+- STOPPED 2026-11-15 (session `compute-engine-3f`): the spec for stored
+  function bodies as units (part 2, item 4; slice 2 of the model). No spec
+  was written and nothing landed. Records in
   `~/dev/compute-engine-recovery/stored-bodies/`: `census.md` (the registry
-  and the repair as they stand, 1,321 + 155 lines; calls of a stored body
-  are already bound again at use, what stays fixed at store time is the
-  juxtaposition reading, the inferred signature and the effects; no
-  per-name counter exists) and, when its agent ends, `probe-report.md` (a
-  counter per name, a stamp per waiting definition, a check on use, behind
-  `CE_STORED_UNITS=1` in the worktree `/tmp/wt-ce-3f-units`). Tycho's
-  deletion inventory on 0.192.0 is
-  `~/dev/compute-engine-recovery/2026-11-15-tycho-deletion-inventory-ce-0.192.0.md`:
-  slice 2 deletes 150 to 350 lines in Tycho by itself and is the gate of
-  its inliner (2,711 lines), for which Tycho lists five needs. The spec is
-  shown to the user before any code lands.
+  and the repair, 1,321 + 155 lines), `probe-report.md` (two rounds of a
+  check on use with counters and stamps, patch
+  `probe-b75ed3b4a-on-5951741d4.patch`): re-derivation is rare (450 of
+  54,432 stored definitions in the suite; 20 change the body, 154 the
+  signature, 117 the effects); the design nets about −515 lines and still
+  makes events at a read and changes the identity of the free names of a
+  re-bound body. `deriveCallerSignatures` (157 lines) installed nothing in
+  the whole suite and can be deleted alone. CE-1333 was filed from it.
+- THE WORKSTREAM IS PAUSED BY THE USER (2026-11-15: "we don't seem to have
+  accomplished any of the goals and performance has decreased"). Measured
+  that day: `src/compute-engine` and `src/common` without `compilation/`
+  and `rubi/` have 576,306 lines against 568,845 at 0.186.0 (+7,461); the
+  benchmark cases run at 1.245 times 0.186.0 (ce-desk, `issues/CE-1210.md`).
+  The user is deciding between a return to 0.186.0 and a repair on main;
+  `ce-desk` holds the measurements that decide it (the option (d) build, the
+  split of the 0.187.0 units flag by mechanism, the costing of a return;
+  `~/dev/compute-engine-recovery/ce1210/`). Land nothing in the binding
+  area and start none of the items below until the user decides.
 - CE-1317 is closed by the user's decision (documented; `issues/CLOSED.md`).
 - `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
   release.
