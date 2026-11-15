@@ -91,9 +91,11 @@ Delete this file when parts 2 and 3 are done or have their own record.
   copied. A record of the activation on the `Function` node was built
   first and REJECTED by the dual review (a rebuild by `subs`, `map` or
   `simplify` drops it with no error). Full suite and stale-answer check
-  green; Tycho's gates were asked of `tycho-desk` and had NOT run at the
-  commit (builds in `~/dev/compute-engine-recovery/closure-capture/`): read
-  its report before the next release.
+  green. Tycho's gates ran after the commit (tycho-desk, 2026-11-15, the
+  builds in `~/dev/compute-engine-recovery/closure-capture/`): no value,
+  type or code difference (codegen audit 1,295 records unchanged, census
+  230 rows unchanged, node tests equal but for one load-sensitive
+  deadline test, timings equal within noise).
 - IN PROGRESS 2026-11-15 (session `compute-engine-3f`, approved by the user
   as the next item): the SPEC for stored function bodies as units (part 2,
   item 4; slice 2 of the model). Records in
