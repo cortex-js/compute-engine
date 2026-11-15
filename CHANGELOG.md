@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **`Beta(a, b)` is 0 where Γ(a + b) is a pole and a, b are not.**
+  `Beta(-2.5, 0.5)`, `Beta(0.5, -0.5)` and `Beta(1.5, -2.5)` were `NaN`, as
+  was the compiled function, and `Beta(-5/2, 1/2)` stayed unevaluated; they
+  are 0 under `evaluate()`, `.N()` and compiled JavaScript, at machine and at
+  working precision. Only a sum that is exactly an integer ≤ 0 is on the
+  pole: a float pair whose double sum is not exactly an integer keeps the
+  quotient (`Beta(-2.3, 0.3)` is about -1.4e-15). The compiled `Beta(x, y)`
+  of a positive integer and a negative integer with x + y ≤ 0 is the finite
+  value, `Beta(2, -3)` is 1/6 and `Beta(3, -3)` is -1/3, where it was `NaN`
+  (#590, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.191.0 _2026-11-15_
 
 ### Breaking Changes

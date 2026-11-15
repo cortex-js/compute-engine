@@ -10152,6 +10152,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // other combinations fell through to the kernel).
         const infinite = betaValueAtInfinity(a, b, engine);
         if (infinite !== undefined) return infinite;
+        // Non-integer exact rationals whose sum is an integer ≤ 0: Γ(a + b)
+        // is a pole and Γ(a), Γ(b) are not, so B(a, b) = 0.
+        // Decided on the operands as written: `.N()` has already rounded
+        // `-7/3` and `1/3`, whose rounded sum is not an integer.
+        const written = options.expression;
+        const [wa, wb] =
+          written !== undefined && isFunction(written) && written.nops === 2
+            ? written.ops
+            : [a, b];
+        if (betaAtGammaPole(wa, wb)) return engine.Zero;
         // Exact reductions and Γ-pole handling for real (im === 0) arguments.
         // The naive B(a,b) = Γ(a)Γ(b)/Γ(a+b) formula turns the Γ-pole at a
         // non-positive integer into silent overflow garbage (e.g. B(−1, 2)
@@ -16392,6 +16402,24 @@ function flattenSameHeadChain(json: MathJsonExpression): MathJsonExpression {
   if (!Array.isArray(first) || first[0] !== head) return json;
   const inner = flattenSameHeadChain(first) as unknown as MathJsonExpression[];
   return [head, ...inner.slice(1), ...rest] as MathJsonExpression;
+}
+
+/**
+ * True when `a` and `b` are exact rationals, neither an integer, with a sum
+ * that is exactly an integer ≤ 0 (decided on the exact fractions): Γ(a + b)
+ * is a pole and Γ(a), Γ(b) are finite, so B(a, b) = 0.
+ */
+function betaAtGammaPole(a: Expression, b: Expression): boolean {
+  if (!isNumber(a) || !isNumber(b) || !a.isExact || !b.isExact) return false;
+  if (a.isComplex || b.isComplex) return false;
+  const ra = asRational(a);
+  const rb = asRational(b);
+  if (ra === undefined || rb === undefined) return false;
+  const [an, ad, bn, bd] = [ra[0], ra[1], rb[0], rb[1]].map(BigInt);
+  if (ad === 1n || bd === 1n) return false;
+  const numerator = an * bd + bn * ad;
+  const denominator = ad * bd;
+  return numerator <= 0n && numerator % denominator === 0n;
 }
 
 /**

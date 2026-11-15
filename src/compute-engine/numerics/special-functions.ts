@@ -1951,11 +1951,47 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
  * Uses bigGamma directly.
  */
 export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
-  return withGuardDigits(SPECIAL_FN_GUARD, () =>
-    gammaCore(ce, a)
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    // Γ(a + b) is a pole and Γ(a), Γ(b) are not: B(a, b) = 0.
+    if (a.isFinite() && b.isFinite()) {
+      if (!a.isInteger() && !b.isInteger()) {
+        const sum = a.add(b);
+        if (sum.isInteger() && !sum.isPositive()) return BigDecimal.ZERO;
+      }
+      const k = betaIntegerOrder(a, b) ?? betaIntegerOrder(b, a);
+      if (k !== undefined) {
+        const [m, x] = k;
+        let denominator = BigDecimal.ONE;
+        let numerator = BigDecimal.ONE;
+        for (let j = 0; j < m; j++) {
+          denominator = denominator.mul(x.add(j));
+          if (j >= 2) numerator = numerator.mul(j);
+        }
+        return numerator.div(denominator);
+      }
+    }
+    return gammaCore(ce, a)
       .mul(gammaCore(ce, b))
-      .div(gammaCore(ce, a.add(b)))
-  );
+      .div(gammaCore(ce, a.add(b)));
+  });
+}
+
+/** Largest positive integer order whose Beta product is formed directly. */
+const BETA_INTEGER_ORDER_MAX = 100;
+
+/**
+ * For a positive integer `m` and an integer `x ≤ −m` (so a + b ≤ 0 and Γ(x)
+ * and Γ(m + x) are both poles), `B(m, x) = (m−1)!/(x(x+1)…(x+m−1))` is
+ * finite and has no zero factor. Returns `[m, x]`, or `undefined` elsewhere.
+ */
+function betaIntegerOrder(
+  m: BigNum,
+  x: BigNum
+): [number, BigNum] | undefined {
+  if (!m.isInteger() || !m.isPositive() || m.gt(BETA_INTEGER_ORDER_MAX))
+    return undefined;
+  if (!x.isInteger() || x.gt(m.neg())) return undefined;
+  return [m.toNumber(), x];
 }
 
 // ---------------------------------------------------------------------------
@@ -4345,6 +4381,38 @@ function factorial(n: number): number {
  * Uses gamma directly for small args (more accurate) and gammaln for large.
  */
 export function beta(a: number, b: number): number {
+  if (Number.isFinite(a) && Number.isFinite(b)) {
+    // Γ(a + b) is a pole and Γ(a), Γ(b) are not: B(a, b) = 0. Only a sum
+    // that is exactly an integer is on the pole (TwoSum error of the sum).
+    if (!Number.isInteger(a) && !Number.isInteger(b)) {
+      const sum = a + b;
+      const bv = sum - a;
+      if (
+        Number.isInteger(sum) &&
+        sum <= 0 &&
+        a - (sum - bv) + (b - bv) === 0
+      )
+        return 0;
+    }
+    // B(m, x) = (m−1)!/(x(x+1)…(x+m−1)) for a positive integer m and an
+    // integer x ≤ −m, where Γ(x) and Γ(m + x) are both poles.
+    for (const [m, x] of [
+      [a, b],
+      [b, a],
+    ]) {
+      if (
+        Number.isInteger(m) &&
+        Number.isInteger(x) &&
+        m >= 1 &&
+        m <= BETA_INTEGER_ORDER_MAX &&
+        x <= -m
+      ) {
+        let denominator = 1;
+        for (let j = 0; j < m; j++) denominator *= x + j;
+        return factorial(m - 1) / denominator;
+      }
+    }
+  }
   // For large arguments, use gammaln to avoid overflow
   if (a > 100 || b > 100 || a + b > 100) {
     return Math.exp(gammaln(a) + gammaln(b) - gammaln(a + b));
