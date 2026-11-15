@@ -106,8 +106,12 @@ Delete this file when parts 2 and 3 are done or have their own record.
   54,432 stored definitions in the suite; 20 change the body, 154 the
   signature, 117 the effects); the design nets about −515 lines and still
   makes events at a read and changes the identity of the free names of a
-  re-bound body. `deriveCallerSignatures` (157 lines) installed nothing in
-  the whole suite and can be deleted alone. CE-1333 was filed from it.
+  re-bound body. `deriveCallerSignatures` (157 lines) is NOT dead, although
+  the probe counted no install of it in the whole suite: with `q` and `h`
+  already defined, `Block(Assign(q, a ↦ h(a)), Assign(h, t ↦ Count(t)),
+  q([1, 2]))` gives `2` with it and a list of two errors without it
+  (`dcs.mts`, `dcs-base.out`, `dcs-new.out` in the same folder). No test
+  covers that program. CE-1333 was filed from the probe.
 - THE WORKSTREAM IS PAUSED BY THE USER (2026-11-15: "we don't seem to have
   accomplished any of the goals and performance has decreased"). Measured
   that day: `src/compute-engine` and `src/common` without `compilation/`
