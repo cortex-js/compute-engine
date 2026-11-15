@@ -43,8 +43,10 @@ type read under binding units. Options for the board:
    validation and the recording of reads, an estimated 25 to 30% of what is
    left (from the profile). A missed invalidation site gives a stale type;
    `CE_TYPE_PARANOID=1` is the check.
-2. A cheaper type read of a symbol (`_unitType()`, about a third of what is
-   left). It needs a design.
+2. A cheaper type read of a symbol (`_unitType()`). It needs a design. Its
+   577 ms is the whole inclusive time of the read on main, not the added
+   time and not what a design would remove: an upper bound of about a third
+   of what is left. See "The two options compared" below.
 3. Accept about 1.3 times on these cases and close this part.
 
 Not built, about 1 to 3% each (estimates): activation values as a field of
@@ -82,3 +84,29 @@ Left: the purity test (about 84% of the remaining computations, mostly on
 determined) and the element-wise test of a connective (about 15%; no form
 that keeps every value was found). The invalidation is D16 and D17 of
 `docs/plans/2026-11-11-bound-once-spec.md`.
+
+## The two options compared
+
+The two estimates of the options are not like for like. Added SELF time by
+source file, 0.186.0 to main before the four fixes (+2,069 ms in all):
+`binding-unit.ts` +439, `object-deps.ts` +215, `boxed-symbol.ts` +207,
+`boxed-function.ts` +185, `ambient-chain.ts` +160, `function-literal.ts`
++113, `type-guards.ts` +74, the garbage collector and `(program)` +105.
+
+- Option 1 (the counter) removes the validation of a cached compound type
+  (`object-deps.ts`, 317 ms inclusive, less what the first fix already took)
+  and the recording part of a read (the token and `collect`, about 90 ms of
+  the 230 ms of `readUnitEntry`; the lookup of the entry stays, a read needs
+  it). All of that goes if the counter is right: the 25 to 30% of what is
+  left is an estimate of removable time.
+- Option 2 targets the read of a symbol: the lookup of its entry in the
+  trial, operation and unit environments, the resolution in the static view
+  and the meet (most of the added time of `binding-unit.ts`, `boxed-symbol.ts`
+  and `ambient-chain.ts`, about 700 ms before the fixes, which also took part
+  of it). That is the largest block of added time, larger than what option 1
+  removes. How much of it a design can remove is not known: the read must
+  still find the entry of the unit. The two options overlap on the recording
+  of the read.
+
+Neither brings the cases back to 0.186.0: about 45% of the added time has
+no function above about 60 ms.
