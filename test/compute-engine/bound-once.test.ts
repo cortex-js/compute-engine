@@ -897,3 +897,22 @@ describe('a held argument of a hold function with a bound variable', () => {
     expect(run('let k = 5\nmySum(k*j, j, 3)')).toBe(30);
   });
 });
+
+describe('a name declared by a statement and a later declaration', () => {
+  test('the type and the value of an occurrence read the same definition', () => {
+    // `x` is declared by a `Declare` statement at the top; the occurrence
+    // is boxed in a pushed scope, which then declares another `x`. The
+    // type read and the value read both give the declaration of that scope.
+    const ce = new ComputeEngine();
+    ce.box(['Declare', 'x', "'integer'"]).evaluate();
+    ce.box(['Assign', 'x', 5]).evaluate();
+    ce.pushScope();
+    const e = ce.box(['Add', 'x', 1]) as any;
+    expect(e.op1.type.toString()).toBe('integer');
+    expect(e.evaluate().json).toBe(6);
+    ce.declare('x', 'string');
+    expect(e.op1.type.toString()).toBe('string');
+    expect(e.evaluate().operator).toBe('Error');
+    ce.popScope();
+  });
+});

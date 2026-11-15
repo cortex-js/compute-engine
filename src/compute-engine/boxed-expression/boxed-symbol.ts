@@ -143,8 +143,6 @@ import {
   freeNameBindingAndScope,
   homeChainBinding,
   readsActivation,
-  isBlockLocalBinding,
-  sameBindingDef,
   ownBindingRewriteCount,
   assertLiveRead,
 } from './binders.js';
@@ -152,11 +150,6 @@ import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { beginStoreGuard } from './store-guard.js';
-import {
-  staticBindingIn,
-  staticParentOf,
-  withStaticTypingView,
-} from '../static-typing-view.js';
 import {
   asyncEvaluationOf,
   beginAsyncEvaluation,
@@ -1252,23 +1245,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * it reads the environment of its unit, or `undefined` when it reads the
    * type of its definition (`binding-unit.ts`).
    *
-   * - A free name reads the definition that its name resolves to in the
-   *   current context (`freeNameBindingInContext()`, in the static view of
-   *   the bindings, as below), met with the entry of its unit (`_typeOfDefinitionInUnit()`). With no definition, it reads
-   *   the entry, or `unknown`.
-   * - An occurrence with a value definition reads the definition that it
-   *   resolves to in the current context (`_contextBinding()`, which skips
-   *   the variable of a binder that is not its own). The lookup runs in the
-   *   static view of the bindings (`withStaticTypingView()`), as a type
-   *   computation reads them: outside that view, a parameter of a function
-   *   literal can resolve to a global definition of the same name. When the
-   *   result is another definition (a declaration of the name in a pushed
-   *   scope), the occurrence reads that definition, met with the entry of
-   *   its unit. A constant, or a definition with an explicit type, also
-   *   needs the walk: a declaration in a pushed scope can hide it. This is
-   *   true of a constant of the library too (a declaration shadows a
-   *   definition of the library, it does not replace it), so no constant is
-   *   exempt.
+   * - A free name reads the definition that its name resolves to from its
+   *   home scope (`_freeNameBinding()`), met with the entry of its unit
+   *   (`_typeOfDefinitionInUnit()`). With no definition, it reads the
+   *   entry, or `unknown`.
+   * - A parameter, a binder variable or a block local reads its own
+   *   definition. Any other occurrence with a value definition reads the
+   *   definition that its name resolves to from its home chain
+   *   (`_homeBinding()`): a declaration made later on that chain hides its
+   *   own, also for a constant or a definition with an explicit type. When
+   *   that is another definition, the occurrence reads it, met with the
+   *   entry of its unit.
    * - An occurrence whose own definition has an inferred type, or the type
    *   `unknown`, reads the meet of that type and the entry of its unit.
    * - Any other occurrence reads the type of its definition.
@@ -1300,9 +1287,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         fromCollector = record.collectorDepth;
       }
     }
+    // A parameter, a binder variable and a block local mean the definition
+    // that the boxing bound them to (rule 1 of
+    // `docs/plans/2026-11-11-bound-once-spec.md`, C1): only their value is
+    // read in an activation. Any other definition is read from its home
+    // chain, where a later declaration can hide it (`_homeBinding()`).
     if (!readsActivation(def)) {
-      // A declaration made after the boxing on the home chain hides the
-      // definition of the occurrence (`_homeBinding()`).
       const found = this._homeBinding(def);
       if (found !== undefined && found !== def) {
         if (isOperatorDef(found)) return found.operator.signature;
@@ -1311,39 +1301,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           this._unitEntry(v, entryEnv, fromCollector)
         );
       }
-      if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
-      const entry = this._unitEntry(v, entryEnv, fromCollector);
-      if (entry === undefined) return undefined;
-      return this._typeOfDefinitionInUnit(v, entry);
-    }
-    const resolved = withStaticTypingView(this.engine, () =>
-      this._contextBinding()
-    );
-    if (
-      resolved !== undefined &&
-      !(isValueDef(resolved) && sameBindingDef(resolved.value, v)) &&
-      // Another definition is read only when it hides the definition of
-      // this occurrence: a declaration in a scope pushed under the scope
-      // that holds it. When the definition of the occurrence is not on the
-      // chain of the current scope (the variable of a binder whose scope
-      // is not current, a definition of a popped scope), a definition of
-      // the same name is another variable, and the occurrence reads its
-      // own: the variable `a` of `D(a^2, a)` in the
-      // body of `(a: real) ↦ …` is not the parameter, and the `i` of the
-      // closed form of `∫₀¹ i·x dx`, declared in a scope that was popped,
-      // is not the constant `i`.
-      this._ownDefinitionOnChain(v) &&
-      // A local of a block, when the definition of the occurrence is not
-      // one, is the local of a block that the occurrence was not written in
-      // (the type of the body of a function read at a call in the block):
-      // the occurrence reads its own definition.
-      !(v._blockLocal !== true && isBlockLocalBinding(resolved))
-    ) {
-      if (isOperatorDef(resolved)) return resolved.operator.signature;
-      return this._typeOfDefinitionInUnit(
-        resolved.value,
-        this._unitEntry(v, entryEnv, fromCollector)
-      );
     }
     if (!v.inferredType && !v.declaredType.isUnknown) return undefined;
     // With no environment and no operation in progress, `_unitEntry()` is
@@ -1352,31 +1309,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const entry = this._unitEntry(v, entryEnv, fromCollector);
     if (entry === undefined) return undefined;
     return this._typeOfDefinitionInUnit(v, entry);
-  }
-
-  /**
-   * True when a scope of the chain of the current scope holds the value
-   * definition `v` of this occurrence. The walk is that of the resolution
-   * of `_unitType()`: in the static view of the bindings
-   * (`withStaticTypingView()`), where a parameter that an application took
-   * out of the scope of its body is still read, and with the definitions
-   * compared as `bindingInContext()` compares them (`sameBindingDef()`).
-   */
-  private _ownDefinitionOnChain(v: BoxedValueDefinition): boolean {
-    const name = this._id;
-    return withStaticTypingView(this.engine, () => {
-      const start: Scope | null = this.engine.context?.lexicalScope ?? null;
-      for (let s: Scope | null = start; s; s = staticParentOf(s)) {
-        const found = staticBindingIn(s, name, s === start);
-        if (
-          found !== undefined &&
-          isValueDef(found) &&
-          sameBindingDef(found.value, v)
-        )
-          return true;
-      }
-      return false;
-    });
   }
 
   /**
