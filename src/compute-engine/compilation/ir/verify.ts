@@ -70,7 +70,7 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
     const scope = new Set(visible);
     const define = (v: V) => {
       const t = type(v);
-      if (!['real', 'integer', 'boolean', 'complex'].includes(t.lane))
+      if (!['real', 'integer', 'boolean', 'complex', 'color'].includes(t.lane))
         fail(`v${v}: lane ${t.lane}`);
       for (const n of t.shape)
         if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)

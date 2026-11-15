@@ -3,7 +3,7 @@
  *
  * A program is a list of functions; the entry function's parameters are the
  * inputs. Every value is defined once and has one type: a scalar lane
- * (`real`, `integer`, `boolean`, `complex`) and a shape (the lengths of the nested
+ * (`real`, `integer`, `boolean`, `complex`, `color`) and a shape (the lengths of the nested
  * lists around the scalars: `[]` for a scalar, `[3]` for a list of three).
  * A length is a number, or an integer VALUE of the program that holds a
  * length known only at run time (`{ v }`): the length parameter of an input,
@@ -23,7 +23,7 @@
  * The representation names no target.
  */
 
-export type Lane = 'real' | 'integer' | 'boolean' | 'complex';
+export type Lane = 'real' | 'integer' | 'boolean' | 'complex' | 'color';
 
 /** The value of a constant of the `complex` lane. */
 export type Cx = { readonly re: number; readonly im: number };
@@ -205,7 +205,7 @@ export function isSubLane(a: Lane, b: Lane): boolean {
 /** A value of the lane `a` stands where `b` is read, converted to the
  *  complex lane when `b` is complex. */
 export function widensTo(a: Lane, b: Lane): boolean {
-  return isSubLane(a, b) || (b === 'complex' && a !== 'boolean');
+  return isSubLane(a, b) || (b === 'complex' && isSubLane(a, 'real'));
 }
 
 /** Two shapes are one shape: the same numbers and the same length values

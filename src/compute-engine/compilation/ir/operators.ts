@@ -128,6 +128,7 @@ const C: Lane = 'complex';
 const R: Lane = 'real';
 const I: Lane = 'integer';
 const B: Lane = 'boolean';
+const K: Lane = 'color';
 
 type Options = Partial<Omit<OperatorRow, 'arity' | 'signatures'>>;
 
@@ -287,6 +288,18 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      3,          [[[I, R, I], I, 'rangecount']], { ...list, fold: rangeCount }),
   // The step of `Range(a, b)`: 1, or -1 when `b < a`.
   row(undefined,      2,          [[[I, R], I, 'rangestep']],    { ...list, fold: (a: number, b: number) => (b >= a ? 1 : -1) }),
+  // Colours (README, "The colour lane"): a constructor of its channels, and
+  // a conversion to the space it names. A list operand declines.
+  row('Rgb',          3,          [[[R, R, R], K, 'rgb']],       list),
+  row('Hsl',          3,          [[[R, R, R], K, 'hsl']],       list),
+  row('Hsv',          3,          [[[R, R, R], K, 'hsv']],       list),
+  row('Oklab',        3,          [[[R, R, R], K, 'oklab']],     list),
+  row('Oklch',        3,          [[[R, R, R], K, 'oklch']],     list),
+  row('AsRgb',        1,          [[[K], K, 'asrgb']],           list),
+  row('AsHsl',        1,          [[[K], K, 'ashsl']],           list),
+  row('AsHsv',        1,          [[[K], K, 'ashsv']],           list),
+  row('AsOklab',      1,          [[[K], K, 'asoklab']],         list),
+  row('AsOklch',      1,          [[[K], K, 'asoklch']],         list),
 ].map((r) => deepFreeze(r)));
 
 /**
@@ -414,15 +427,27 @@ export function rowOfHead(
   return rows.find((r) => r.head === head);
 }
 
+/** The row and the signature of each IR operation, by table: the first
+ *  row and signature that names it. */
+const BY_OP = new WeakMap<
+  readonly OperatorRow[],
+  Map<string, { row: OperatorRow; signature: Signature }>
+>();
+
 /** The row and the signature of the IR operation `op`. */
 export function rowOfOp(
   rows: readonly OperatorRow[],
   op: string
 ): { row: OperatorRow; signature: Signature } | undefined {
-  for (const row of rows)
-    for (const signature of row.signatures)
-      if (signature[2] === op) return { row, signature };
-  return undefined;
+  let index = BY_OP.get(rows);
+  if (index === undefined) {
+    index = new Map();
+    for (const row of rows)
+      for (const signature of row.signatures)
+        if (!index.has(signature[2])) index.set(signature[2], { row, signature });
+    BY_OP.set(rows, index);
+  }
+  return index.get(op);
 }
 
 export function regionRow(op: string): RegionRow | undefined {

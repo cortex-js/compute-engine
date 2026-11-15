@@ -312,7 +312,10 @@ export function printProgram(
 
   const body = (r: Region, depth: number): string[] => {
     const lines: string[] = [];
-    const line = (s: string, d = depth) => lines.push('  '.repeat(d) + s);
+    // The indentation stops at 16 levels: the text of a nest of depth d
+    // would otherwise grow as d^2.
+    const line = (s: string, d = depth) =>
+      lines.push('  '.repeat(Math.min(d, 16)) + s);
     const nested = (inner: Region, targets: string[], carried: boolean) => {
       lines.push(...body(inner, depth + 1));
       // A loop body's yield can read a carried variable that an earlier

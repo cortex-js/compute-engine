@@ -486,7 +486,7 @@ export function lower(
     const effects = b.effects;
     const v = node(e, want);
     const lane = v === undefined ? undefined : type(v).lane;
-    if (bigint && (lane === 'real' || lane === 'complex'))
+    if (bigint && (lane === 'real' || lane === 'complex' || lane === 'color'))
       decline(
         e,
         `a ${lane} value: the bigint mode computes integers and booleans only`
@@ -1289,6 +1289,7 @@ export function lower(
               ? (typeName as Lane)
               : type(v).lane === 'boolean' ||
                   type(v).lane === 'complex' ||
+                  type(v).lane === 'color' ||
                   bigint
                 ? type(v).lane
                 : 'real';

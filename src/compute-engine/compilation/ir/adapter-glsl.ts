@@ -17,7 +17,7 @@ import type { Fn } from './lower-context.js';
 import { userBinding } from './lower-functions.js';
 import { analyzeReferences, freeSymbolTypes } from '../compile-references.js';
 import { gpuIsReservedWord } from '../gpu-reserved.js';
-import { isAmplifiedTrig } from '../gpu-exact-trig.js';
+import { gpuExactConstant } from '../gpu-exact-trig.js';
 import {
   isFunction,
   isNumber,
@@ -35,6 +35,7 @@ import {
   entryOf,
   regionsOf,
   useIndex,
+  type Instr,
   type Program,
   type Region,
 } from './ir.js';
@@ -86,8 +87,11 @@ const IR_GLSL_OPTIONS = {
  *  `Sum` or a `Product`, which the lowering tests against it), multiplied
  *  down the nesting and through the calls (both arms of an `if` are
  *  added). GLSL counts no pass at run time. */
-function loopPasses(p: Program, budget: number): number {
-  const def = useIndex(p).def;
+function loopPasses(
+  p: Program,
+  budget: number,
+  def: ReadonlyMap<number, Instr>
+): number {
   const memo = new Map<Region, number>();
   const passes = (r: Region): number => {
     const known = memo.get(r);
@@ -111,9 +115,71 @@ function loopPasses(p: Program, budget: number): number {
   return passes(entryOf(p).body);
 }
 
+const TRIG_HEADS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
+
+/** `isAmplifiedTrig()` of `gpu-exact-trig.ts` (the existing target's rule,
+ *  its walk by paths), with a memo per node and state: linear in the nodes
+ *  of a shared graph. Whether a trigonometric call is under a factor of
+ *  magnitude 1000 or more on the chain of `Multiply`, `Negate`, `Add`,
+ *  `Subtract`, `Abs` and numerators from `u`, or its argument has one. */
+function amplifiedTrigMemo(): (u: Expression) => boolean {
+  const value = (e: Expression) => gpuExactConstant(e)?.re;
+  const large = (e: Expression) => {
+    const c = value(e);
+    return c !== undefined && Math.abs(c) >= 1000;
+  };
+  const small = (e: Expression | undefined) => {
+    const d = e === undefined ? undefined : value(e);
+    return d !== undefined && d !== 0 && Math.abs(d) <= 1e-3;
+  };
+  const factors = new Map<Expression, boolean>();
+  const hasLargeFactor = (e: Expression): boolean => {
+    if (!isFunction(e)) return false;
+    let r = factors.get(e);
+    if (r !== undefined) return r;
+    r =
+      (e.operator === 'Multiply' && e.ops.some(large)) ||
+      (e.operator === 'Divide' && small(e.ops[1])) ||
+      (e.operator === 'Dot' &&
+        e.ops.some(
+          (op) =>
+            (isFunction(op, 'List') || isFunction(op, 'Tuple')) &&
+            op.ops.some(large)
+        )) ||
+      e.ops.some(hasLargeFactor);
+    factors.set(e, r);
+    return r;
+  };
+  const memo = new Map<Expression, (boolean | undefined)[]>();
+  const walk = (e: Expression, chain: boolean, amp: boolean): boolean => {
+    if (!isFunction(e)) return false;
+    const slots = memo.get(e) ?? [];
+    memo.set(e, slots);
+    const k = (chain ? 2 : 0) + (amp ? 1 : 0);
+    if (slots[k] !== undefined) return slots[k]!;
+    const off = (op: Expression) => walk(op, false, false);
+    let r: boolean;
+    if (TRIG_HEADS.has(e.operator))
+      r = amp || e.ops.some(hasLargeFactor) || e.ops.some(off);
+    else if (!chain) r = e.ops.some(off);
+    else if (e.operator === 'Multiply')
+      r = e.ops.some((op) => walk(op, true, amp || e.ops.some(large)));
+    else if (e.operator === 'Divide')
+      r =
+        walk(e.ops[0], true, amp || small(e.ops[1])) ||
+        (e.ops[1] !== undefined && off(e.ops[1]));
+    else if (['Negate', 'Add', 'Subtract', 'Abs'].includes(e.operator))
+      r = e.ops.some((op) => walk(op, true, amp));
+    else r = e.ops.some(off);
+    slots[k] = r;
+    return r;
+  };
+  return (u) => walk(u, true, false);
+}
+
 /** The warning `float32-unsafe-argument` of the existing target, once per
  *  operand of a `Mod` or a `Fract` in which a constant of magnitude 1000
- *  or more amplifies a trigonometric value (`isAmplifiedTrig()`), in `expr`
+ *  or more amplifies a trigonometric value (`amplifiedTrigMemo()`), in `expr`
  *  and in the bodies of the user functions it calls, each node visited
  *  once. There is no exact sine hash: such an operand always warns, except
  *  in a `Mod` or a `Fract` that is closed as a whole when `fold` (numbers
@@ -124,6 +190,7 @@ function float32Warnings(expr: Expression, fold: boolean): CompileDiagnostic[] {
   const found = new Map<string, CompileDiagnostic>();
   const seen = new Set<object>();
   const memo = new Map<Expression, boolean>();
+  const isAmplifiedTrig = amplifiedTrigMemo();
   const closed = (x: Expression): boolean => {
     const known = memo.get(x);
     if (known !== undefined) return known;
@@ -244,7 +311,48 @@ export function compileWithIrProfileGlsl(
             `the function ${f.source} reads the input ${f.paramNames[f.lifted! + k]}, a list of ${n} elements, which glsl would copy at each call`
           );
       });
-    if (!(loopPasses(p, budget) <= budget))
+    // The rule of the profile: `At` with a constant index (after the
+    // passes, so a folded index counts) that is 0, not an integer or past
+    // the stated length of its list declines, in the entry and in every
+    // user function (each region once), where JavaScript gives NaN: a host
+    // keys a retry on the refusal. A run-time index keeps the read that is
+    // NaN outside. `def` is also read by the result check below.
+    const def = useIndex(p).def;
+    const walk = (r: Region): void =>
+      r.body.forEach((i) => {
+        regionsOf(i).forEach(walk);
+        if (i.k !== 'op' || i.op !== 'at') return;
+        const [list, index] = i.args;
+        const k = def.get(index);
+        const n = p.types[list].shape[0];
+        if (k?.k !== 'const' || typeof n !== 'number') return;
+        const x = Number(k.value.value);
+        if (!Number.isInteger(x) || x === 0 || Math.abs(x) > n)
+          throw decline(
+            `the index ${x} of At is outside the ${n} elements of its list on glsl`,
+            { operator: 'At' }
+          );
+      });
+    p.functions.forEach((f) => walk(f.body));
+    // A colour result in another space than OKLCh (`asoklab`, `asrgb`,
+    // which `admits()` allows only as the result of the entry) must be the
+    // result position of the expression itself (the root, or the last
+    // operand of a root `Block`), so that a host reads the space from the
+    // expression: a local that holds `AsOklab(c)` and is the result
+    // declines, as does an `If` or a `Which` of such arms.
+    let last = expr;
+    while (isFunction(last, 'Block') && last.nops > 0) last = last.ops.at(-1)!;
+    const at = isFunction(last) ? last.operator : '';
+    const yielded = def.get(entry.body.yields[0]);
+    if (
+      yielded?.k === 'op' &&
+      ['asoklab', 'asrgb'].includes(yielded.op) &&
+      yielded.op !== { AsOklab: 'asoklab', AsRgb: 'asrgb' }[at]
+    )
+      throw decline(
+        'a colour in OKLab or sRGB that is not the result position of the expression on glsl (an AsOklab or an AsRgb there)'
+      );
+    if (!(loopPasses(p, budget, def) <= budget))
       throw decline(
         `loops that can run more passes than the iterationBudget (${budget}) on glsl`
       );

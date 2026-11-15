@@ -138,6 +138,18 @@ export const JS: Syntax = Object.freeze({
     asinh: 'Math.asinh($0)',
     acosh: 'Math.acosh($0)',
     atanh: 'Math.atanh($0)',
+    // A colour is the existing compiler's object (`CompiledColor`): a
+    // constructor gives it in OKLCh, a conversion in the space it names.
+    rgb: '_SYS.rgb($0, $1, $2)',
+    hsl: '_SYS.hsl($0, $1, $2)',
+    hsv: '_SYS.hsv($0, $1, $2)',
+    oklab: '_SYS.oklab($0, $1, $2)',
+    oklch: '_SYS.oklch($0, $1, $2)',
+    asrgb: '_SYS.asRgb($0)',
+    ashsl: '_SYS.asHsl($0)',
+    ashsv: '_SYS.asHsv($0)',
+    asoklab: '_SYS.asOklab($0)',
+    asoklch: '_SYS.asOklch($0)',
     // The functions of `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS`, by name.
     ...Object.fromEntries(
       Object.entries({ ...REAL_FUNCTIONS, ...COMPLEX_FUNCTIONS }).map(

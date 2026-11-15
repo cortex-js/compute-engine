@@ -52,10 +52,11 @@ export function maxEffect(a: Effect, b: Effect): Effect {
 export function instrEffect(
   rows: readonly OperatorRow[],
   i: Instr,
-  fn: (name: string) => Effect
+  fn: (name: string) => Effect,
+  memo?: RegionMemo
 ): Effect {
   const inner = regionsOf(i).reduce<Effect>(
-    (e, r) => maxEffect(e, regionEffect(rows, r, fn)),
+    (e, r) => maxEffect(e, regionEffect(rows, r, fn, memo)),
     'pure'
   );
   switch (i.k) {
@@ -73,15 +74,28 @@ export function instrEffect(
   }
 }
 
+/** The effect of each region of one `effects()` query, with the body it
+ *  was computed from: a region whose body changed is computed again. */
+type RegionMemo = Map<
+  Region,
+  { body: Instr[]; length: number; effect: Effect }
+>;
+
 function regionEffect(
   rows: readonly OperatorRow[],
   r: Region,
-  fn: (name: string) => Effect
+  fn: (name: string) => Effect,
+  memo?: RegionMemo
 ): Effect {
-  return r.body.reduce<Effect>(
-    (e, i) => maxEffect(e, instrEffect(rows, i, fn)),
+  const known = memo?.get(r);
+  if (known?.body === r.body && known.length === r.body.length)
+    return known.effect;
+  const effect = r.body.reduce<Effect>(
+    (e, i) => maxEffect(e, instrEffect(rows, i, fn, memo)),
     'pure'
   );
+  memo?.set(r, { body: r.body, length: r.body.length, effect });
+  return effect;
 }
 
 /** The effect of each function of `functions`: the least fixed point, at
@@ -126,8 +140,9 @@ export type Effects = {
 
 export function effects(p: Program, rows: readonly OperatorRow[]): Effects {
   const fns = functionEffects(rows, p.functions);
+  const memo: RegionMemo = new Map();
   const of = (i: Instr) =>
-    instrEffect(rows, i, (name) => fns.get(name) ?? 'effectful');
+    instrEffect(rows, i, (name) => fns.get(name) ?? 'effectful', memo);
   return {
     of,
     mergeable: (i) => of(i) === 'pure',

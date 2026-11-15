@@ -46,6 +46,7 @@ import {
   recursiveFunctions,
   regionsOf,
   typeToString,
+  useIndex,
   type IRType,
   type Lane,
   type Program,
@@ -82,13 +83,17 @@ export type Profile = {
   readonly recursion: boolean;
   /** Element-wise operations on lists; without, `scalarize` runs first. */
   readonly elementwise: boolean;
+  /** The operations whose value is admitted only as the result of the
+   *  entry: on GLSL a colour is an OKLCh `vec3` with no tag of its space,
+   *  so a conversion to another space is the program's result only. */
+  readonly resultOnly?: readonly string[];
   /** The spellings of the IR operations and of the region rows. */
   readonly syntax: Syntax;
 };
 
 export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
   javascript: {
-    lanes: ['real', 'integer', 'boolean', 'complex'],
+    lanes: ['real', 'integer', 'boolean', 'complex', 'color'],
     rank: Infinity,
     runtimeLengths: true,
     draws: true,
@@ -98,13 +103,14 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     syntax: JS,
   },
   glsl: {
-    lanes: ['real', 'integer', 'boolean'],
+    lanes: ['real', 'integer', 'boolean', 'color'],
     rank: 1,
     runtimeLengths: false,
     draws: false,
     frames: false,
     recursion: false,
     elementwise: false,
+    resultOnly: ['asoklab', 'asrgb'],
     syntax: GLSL,
   },
 });
@@ -124,9 +130,13 @@ export function admits(
   rows: readonly OperatorRow[] = OPERATORS
 ): Refusal | undefined {
   const entry = entryOf(p);
+  // Read by the `resultOnly` check only.
+  const uses = profile.resultOnly === undefined ? undefined : useIndex(p).uses;
   const type = (t: IRType, what: string): Refusal | undefined => {
     if (!profile.lanes.includes(t.lane))
       return { cause: `${what}: the lane ${t.lane}` };
+    if (t.lane === 'color' && t.shape.length > 0)
+      return { cause: `${what}: a list of colours` };
     if (t.shape.length > profile.rank)
       return { cause: `${what}: a list of rank ${t.shape.length}` };
     const n = lengthValues(t)[0];
@@ -160,6 +170,14 @@ export function admits(
         };
       if (spellingOf(profile.syntax, i.op) === undefined)
         return { head, cause: `${head ?? i.op} (the operation ${i.op})` };
+      if (
+        profile.resultOnly?.includes(i.op) === true &&
+        !(entry.body.yields.includes(i.out) && uses?.get(i.out) === 1)
+      )
+        return {
+          head,
+          cause: `${head} other than as the result of the program (a colour is an OKLCh value with no tag of its space)`,
+        };
     }
     if (i.k === 'region') {
       if (i.op === 'seeded' && !profile.frames)

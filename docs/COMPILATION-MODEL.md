@@ -175,6 +175,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `plausible?` — `glsl`, profile `ir`, `x: real`: `Arsinh(x)` at `x = -5000`
   gives `-88.03` in the software renderer (SwiftShader), where the value is
   `-9.21`: the builtin `asinh`, not checked on a GPU.
+- `javascript` (crafted), both routes, also the profile `ir`: at the
+  threshold of the sRGB transfer function, `AsRgb(Rgb(0.04045, 0.04, 0.05))`
+  gives `c0 = 0.040449970408` (the round trip through OKLCh crosses to the
+  other branch of the transfer); the interpreter gives `0.04045`.
 - `javascript` and `glsl`, profile `ir` (crafted), `x: real`: `Log(x, b)` with
   a base other than 2 and 10 is `Ln(x)/Ln(b)`: `Ceil(Log(x, 5))` at `x = 125`
   gives `4`, as the existing compiler does; the interpreter gives `3`.
@@ -2621,7 +2625,11 @@ a batch is the value of `run()` at that cell, a batch has no batch body, and
 helpers, the inputs, the results and the pole of "The `bigint` mode"; a
 program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `n < 7/2`, a real input), and the option `vars`, decline with
-`outside-profile`, not `bigint-lane`.
+`outside-profile`, not `bigint-lane`. A colour (`Rgb`, `Hsl`, `Hsv`,
+`Oklab`, `Oklch` of three channels, and the five `As*` conversions of a
+colour) is the `CompiledColor` object of the default route; an alpha, a
+list of colours, a colour input or string, and the other colour operators
+decline.
 
 With `to: 'glsl'`, `profile: 'ir'` (experimental too) compiles a scalar
 or a list result of stated length (a point `vec2(cos(t), sin(t))`; a list of
@@ -2650,6 +2658,10 @@ is read from the host's texture with the addressing of the existing target
 in a user function, which takes a `sampler2D` parameter; `S` as a value
 declines. `callerLocals` changes nothing: a user function takes every input
 that its body reads as a parameter.
+A colour result (`Rgb`, `Oklab`, `Oklch`, `AsOklch`) is an OKLCh `vec3`, as
+on the existing target; `AsOklab` and `AsRgb` give the `vec3` of their
+space and are admitted only as the result of the program; `Hsl`, `Hsv`,
+`AsHsl`, `AsHsv` and an alpha decline.
 Anything else, and the options it does
 not map (the README lists them), decline with `outside-profile`; with
 `fallback`, the existing GLSL target then compiles the expression.

@@ -563,20 +563,50 @@ const G3: [label: string, json: Json, options: object, points: PointValue[]][] =
   ['a nest of 220 passes', ['Sum', ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 10]], ['Limits', 'i', 1, 20]], {}, [{ x: 0.5 }]],
 ];
 
-/** `At` with an index that the compiler can fold, outside the list: NaN,
- *  in code that a GLSL compiler accepts (the index is clamped). */
+// A user function that reads the point input `P3` at a constant index.
+ce.assign(
+  'gAt',
+  ce.box(['Function', ['If', ['Greater', 't', 0], ['At', 'P3', 0], 0.5], 't'])
+);
+
+/** `At` with a constant index (also one that the passes fold) that is 0,
+ *  not an integer or past the stated length of its list: declined, a rule
+ *  of the profile (README, "Selecting the pipeline"), in the entry and in a
+ *  user function. */
 // prettier-ignore
-const AT_OUTSIDE: [label: string, json: Json, options: object][] = [
-  ['At(L6, 0)', ['At', 'L6', 0], {}],
-  ['At(L6, 7)', ['At', 'L6', 7], {}],
-  ['At(L6, -7)', ['At', 'L6', -7], {}],
-  ['At(P3, 5)', ['At', 'P3', 5], {}],
-  ['At(P3, 0)', ['At', 'P3', 0], {}],
-  ['At(List(x, y, 3), 4)', ['At', ['List', 'x', 'y', 3], 4], {}],
-  ['At(L6, k) with k a local of value 7', ['Block', ['Declare', 'k', 'integer', 7], ['At', 'L6', 'k']], {}],
-  ['At(L6, Length(L6) + 1)', ['At', 'L6', ['Add', ['Length', 'L6'], 1]], {}],
-  ['At(L6, 7) with constantFold: false', ['At', 'L6', 7], { constantFold: false }],
+const AT_OUTSIDE_INPUT: [label: string, json: Json, options: object, cause: string][] = [
+  ['At(L6, 0)', ['At', 'L6', 0], {}, 'the index 0 of At is outside the 6 elements of its list'],
+  ['At(L6, 7)', ['At', 'L6', 7], {}, 'the index 7 of At is outside the 6 elements of its list'],
+  ['At(L6, -7)', ['At', 'L6', -7], {}, 'the index -7 of At'],
+  ['At(L6, 1.5)', ['At', 'L6', 1.5], {}, 'the index 1.5 of At'],
+  ['At(P3, 5)', ['At', 'P3', 5], {}, 'the index 5 of At is outside the 3 elements of its list'],
+  ['At(P3, 0)', ['At', 'P3', 0], {}, 'the index 0 of At'],
+  ['At(L6, k) with k a local of value 7', ['Block', ['Declare', 'k', 'integer', 7], ['At', 'L6', 'k']], {}, 'the index 7 of At'],
+  ['At(L6, Length(L6) + 1)', ['At', 'L6', ['Add', ['Length', 'L6'], 1]], {}, 'the index 7 of At'],
+  ['At(L6, 7) with constantFold: false', ['At', 'L6', 7], { constantFold: false }, 'the index 7 of At'],
+  ['At(S, 8) of a list in storage', ['Multiply', 'x', ['At', 'S', 8]], { storage: { S: 'sampler2D' } }, 'the index 8 of At is outside the 7 elements of its list'],
+  ['At(P3, 0) in a user function', ['gAt', 'x'], {}, 'the index 0 of At is outside the 3 elements of its list'],
+  ['At(List(x, y, 3), 4) of a literal list', ['At', ['List', 'x', 'y', 3], 4], {}, 'the index 4 of At is outside the 3 elements of its list'],
 ];
+
+describe('IR profile on GLSL: At with a constant index outside its list', () => {
+  test.each(AT_OUTSIDE_INPUT)('%s declines', (_, json, options, cause) => {
+    let d: { code: string; message: string } | undefined;
+    try {
+      glsl(json, options);
+    } catch (x) {
+      d = (x as { diagnostic?: { code: string; message: string } }).diagnostic;
+    }
+    expect(d?.code).toBe('outside-profile');
+    expect(d?.message).toContain(cause);
+  });
+
+  test('an index in range, from the end, or at run time compiles', () => {
+    expect(glsl(['At', 'L6', -6]).code).toBe('L6[int(0.0)]');
+    expect(glsl(['At', 'L6', 6]).code).toBe('L6[int(5.0)]');
+    expect(glsl(['At', 'L6', 'ix']).success).toBe(true);
+  });
+});
 
 /** The interpreter's value at `point`; a `Sum` of more passes than the cap
  *  (`iterationBudget`, 10,000 by default) is NaN, as on the existing
@@ -680,20 +710,6 @@ describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
           }));
         });
       });
-      const point = { L6, P3: [0.5, 1, -2], x: 0.5, y: 2 } as PointValue;
-      for (const [label, json, options] of AT_OUTSIDE) {
-        const r = glsl(json, options);
-        items.push({
-          name: label,
-          source: pointShaders(r, {}, NaN)[0],
-          uniforms: Object.fromEntries(
-            r.freeSymbols!.flatMap((n) =>
-              [point[n]].flat().map((x, j) => [`u_${n}_${j}`, x])
-            )
-          ),
-          expected: NaN,
-        });
-      }
       const values = await driver.evaluate(items);
       const failures: string[] = [];
       values.forEach((v, k) => {
@@ -716,7 +732,7 @@ describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
           failures.push(`${name}: ${v.value} vs ${expected}`);
       });
       expect(failures).toEqual([]);
-      expect(items.length).toBeGreaterThanOrEqual(45);
+      expect(items.length).toBeGreaterThanOrEqual(36);
     }, 120_000);
   }
 );

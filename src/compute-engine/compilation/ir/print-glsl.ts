@@ -23,6 +23,7 @@ const NAN = 'uintBitsToFloat(0x7fc00000u)';
  *  list in storage the kind of the storage (`sampler2D`). */
 export function typeName(t: IRType): string {
   if (t.storage !== undefined) return t.storage;
+  if (t.lane === 'color' && t.shape.length === 0) return 'vec3';
   const scalar = t.lane === 'boolean' ? 'bool' : 'float';
   const n = t.shape[0];
   if (t.shape.length > 1 || typeof n === 'object')
@@ -151,6 +152,20 @@ export const GLSL: Syntax = Object.freeze({
     'fract': 'fract($0)',
     'atan': 'atan($0)',
     'asinh': 'asinh($0)',
+    // A colour is an OKLCh `vec3`; `asoklab` and `asrgb` give the channels
+    // of their space, only as the result of the program (`resultOnly`).
+    'oklch': 'vec3($0, $1, $2)',
+    'oklab': { text: '_gpu_ir_lch(vec3($0, $1, $2))', helpers: ['_gpu_ir_lch'] },
+    'rgb': {
+      text: '_gpu_ir_lch(_gpu_ir_srgb_lab(vec3($0, $1, $2)))',
+      helpers: ['_gpu_ir_lch', '_gpu_ir_srgb_lab'],
+    },
+    'asoklch': '$0',
+    'asoklab': { text: '_gpu_ir_lab($0)', helpers: ['_gpu_ir_lab'] },
+    'asrgb': {
+      text: '_gpu_ir_lab_srgb(_gpu_ir_lab($0))',
+      helpers: ['_gpu_ir_lab', '_gpu_ir_lab_srgb'],
+    },
   },
   helpers: {
     _gpu_ir_pow: [
@@ -217,6 +232,39 @@ export const GLSL: Syntax = Object.freeze({
       '  int x = abs(int(a)), y = abs(int(b));',
       '  for (int i = 0; i < 64 && y != 0; i++) { int t = x % y; x = y; y = t; }',
       '  return float(x);',
+      '}',
+    ].join('\n'),
+    // The colour conversions of the interpreter (`@arnog/colors`): OKLab to
+    // OKLCh (hue in degrees, in [0, 360)) and back; extended sRGB (a
+    // channel outside [0, 1] keeps the sign of the transfer) to OKLab and
+    // back, with no clamp and no gamut mapping.
+    _gpu_ir_lch: [
+      'vec3 _gpu_ir_lch(vec3 c) {',
+      '  float h = c.y == 0.0 && c.z == 0.0 ? 0.0 : degrees(atan(c.z, c.y));',
+      '  return vec3(c.x, length(c.yz), h < 0.0 ? h + 360.0 : h);',
+      '}',
+    ].join('\n'),
+    _gpu_ir_lab: [
+      'vec3 _gpu_ir_lab(vec3 c) {',
+      '  float h = radians(c.z);',
+      '  return vec3(c.x, c.y * cos(h), c.y * sin(h));',
+      '}',
+    ].join('\n'),
+    _gpu_ir_srgb_lab: [
+      'vec3 _gpu_ir_srgb_lab(vec3 c) {',
+      '  vec3 a = abs(c);',
+      '  vec3 l = sign(c) * mix(pow((a + 0.055) / 1.055, vec3(2.4)), a / 12.92, lessThanEqual(a, vec3(0.04045)));',
+      '  vec3 m = mat3(0.4122214708, 0.2119034982, 0.0883024619, 0.5363325363, 0.6806995451, 0.2817188376, 0.0514459929, 0.1073969566, 0.6299787005) * l;',
+      '  m = sign(m) * pow(abs(m), vec3(1.0 / 3.0));',
+      '  return mat3(0.2104542553, 1.9779984951, 0.0259040371, 0.793617785, -2.428592205, 0.7827717662, -0.0040720468, 0.4505937099, -0.808675766) * m;',
+      '}',
+    ].join('\n'),
+    _gpu_ir_lab_srgb: [
+      'vec3 _gpu_ir_lab_srgb(vec3 c) {',
+      '  vec3 m = mat3(1.0, 1.0, 1.0, 0.3963377774, -0.1055613458, -0.0894841775, 0.2158037573, -0.0638541728, -1.291485548) * c;',
+      '  vec3 l = mat3(4.0767416621, -1.2684380046, -0.0041960863, -3.3077115913, 2.6097574011, -0.7034186147, 0.2309699292, -0.3413193965, 1.707614701) * (m * m * m);',
+      '  vec3 a = abs(l);',
+      '  return sign(l) * mix(1.055 * pow(a, vec3(1.0 / 2.4)) - 0.055, 12.92 * a, lessThanEqual(a, vec3(0.0031308)));',
       '}',
     ].join('\n'),
     // The element `k` (from 0) of a list in a sampler (README, `storage`).

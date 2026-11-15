@@ -52,9 +52,9 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a real function with no GLSL form, the factorial of a real, and the complex lane)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a real function with no GLSL form, the factorial of a real, the complex lane, and the HSL and HSV colours)', () => {
     // prettier-ignore
-    const jsOnly = new Set(['draw', 'rangecount', 'factorial',
+    const jsOnly = new Set(['draw', 'rangecount', 'factorial', 'hsl', 'hsv', 'ashsl', 'ashsv',
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd'].includes(f)),
       ...Object.keys(COMPLEX_FUNCTIONS)]);
     const bigintOnly = new Set(['binomial', 'lcm']);

@@ -1649,6 +1649,71 @@ No test fails in the shadow run and no internal error is counted; with the
 switch on, the one test of CE-1267. The largest cause of a GLSL decline in
 the suite is the complex lane (187), then the option `functions` (21).
 
+Batch G7, 2026-11-14 (colours). One lane, `color`: on JavaScript the object
+of the existing compiler (`{space, c0, c1, c2, alpha}`, made by the existing
+`_SYS` members), on GLSL an OKLCh `vec3`, so no space is tracked. Rows `Rgb`,
+`Hsl`, `Hsv`, `Oklab`, `Oklch` and the five `As*` conversions on JavaScript;
+`Rgb`, `Oklab`, `Oklch`, `AsOklch` on GLSL, and `AsOklab`/`AsRgb` only when
+the result position of the expression is that application (Tycho's form).
+Declined: an alpha, a colour input, a list of colours, the other colour
+operators, a conversion that is not the result on GLSL. On JavaScript the
+objects equal the existing compiler's exactly; the GLSL helpers match the
+standard formulas. Also in the batch: on GLSL an `At` with a constant index
+that is 0, not an integer or beyond the stated length of its list declines
+(Tycho's retry of a row is keyed on that refusal); the lookup of a row by
+operation and the effect of a region are memoized and the printer's
+indentation is capped at 16 levels (a `Which` of 1,000 clauses took 14 to 28 s
+and 6 MB of text, now about 170 ms and 280 KB); the float32 warning walk is
+memoized per node (a shared graph took 1.7 s on GLSL, now 4 ms). Filed:
+CE-1325 (the depth at which a deep expression declines depends on the host's
+stack). Measured in a worktree at
+`511a446b8c4dc43b50c9fac75c6735861b6be580` plus the patch; 6,811 lines in
+`ir/`:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,503 of 10,845 (96.8%) |
+| Every JavaScript compile | 24,641 of 38,944 (63.3%) |
+| Public JavaScript `compile()` calls | 14,127 of 28,086 (50.3%) |
+| GLSL `compile()` calls | 905 of 2,390 (37.9%); 843 of the 1,593 that the existing target compiles (52.9%) |
+
+No test fails in the shadow run and no internal error is counted; with the
+switch on, the one test of CE-1267. The full suite takes 164 s with the
+shadow switch.
+
+Tycho's run of the build of `511a446b8c4dc43b50c9fac75c6735861b6be580` (G5
+and G6; session `tycho-desk`, 2026-11-14), the profile on both seams:
+
+- GLSL: CORE 152 of 267 compilations admitted (114 on the build before);
+  every Desmos state 3,895 of 4,376 (89%; 3,466 before). No internal error.
+  Every admitted result compiles in WebGL 2 (152 of 152, 3,895 of 3,895),
+  the sampler inputs declared as Tycho declares them.
+- JavaScript: CORE 638 of 989 admitted; every Desmos state 9,521 of 11,617
+  (82%). 43,761 runs compared with the existing compiler with no difference,
+  the rows that read a baked document value in a function body included.
+- The float32 warning: 8 calls warn on the profile only, the exact-hash rows;
+  the 41 warnings on constant operands are gone.
+- The profile's sampler read does not run in a Tycho page yet: every `At`
+  declines there while Tycho's handler is installed.
+- Declines left on GLSL over every state: Tycho's handlers; colours;
+  `Block` 30 (two documents); `Add` 8; `Function` 7; a bound that is not an
+  integer 5; the pass bound 4; `PointX` 4; `Tuple` 2; a real `Factorial` 2.
+- One Tycho test hangs after an unexpected success: `x·At(S, 3)` with `S` a
+  sampler list of 2 elements compiled on the profile (a guarded read that is
+  always NaN) where the existing target declines, and Tycho's retry of a row
+  when its list grows is keyed on that decline. Decision: on GLSL a constant
+  index outside the stated length of a list input declines, as the existing
+  target does.
+- Render audit of that build (CORE, WebGL on, the profile on both seams
+  against the same build without it): no picture change. 21 states rendered
+  and the same 3 did not paint on both arms, no shader compile failure in
+  the page, 109 GLSL compilations admitted in the page; the one state that
+  differs is the animated one, within its own variation. So the document
+  values baked in function bodies show no wrong picture.
+- Tycho reads `freeSymbolTypes[name]` of a captured name in two tests; a
+  baked name is not an input of the profile's code and is reported through
+  `symbolDeps`: Tycho's work at the switch.
+
 Batch G4, 2026-11-14: Tycho's run with the profile on both seams (session
 `tycho-desk`; build of `613d42af80582b5dff622714410fff969cccb6f2`).
 

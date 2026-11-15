@@ -260,6 +260,53 @@ interpreter is finite (`Arctan(Ln(x))` at `x = 0` is NaN, the interpreter gives
 the sign of the zero part, IEEE style (`Argument(-Z)` at `Z = 0` is π), also for
 a `-0` part of a complex input (no fidelity is owed at a signed zero).
 
+## The colour lane
+
+A fourth lane, `color`, holds a colour as the existing targets do, so a host
+reads the result unchanged. On JavaScript a colour is the existing
+compiler's object (`CompiledColor`: `{ space, c0, c1, c2, alpha }`), made by
+the members of `_SYS` that the existing compiler calls: the constructors
+`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch` (`_SYS.rgb`, …) give it in OKLCh, and
+the conversions `AsRgb`, `AsHsl`, `AsHsv`, `AsOklab`, `AsOklch`
+(`_SYS.asRgb`, …) in the space they name; every member reads the space
+that the object carries. On GLSL a colour is an OKLCh `vec3`, as on the
+existing target: `Oklch(l, c, h)` is `vec3(l, c, h)`, `Oklab` and `Rgb`
+convert their channels with the helpers `_gpu_ir_lch` and
+`_gpu_ir_srgb_lab` (the interpreter's formulas: extended sRGB, with the sign
+kept through the transfer function, no clamp and no gamut mapping), and
+`AsOklch` is its operand. A `vec3` has no tag of its space, so `AsOklab`
+(`_gpu_ir_lab`) and `AsRgb` (`_gpu_ir_lab_srgb(_gpu_ir_lab(…))`), which
+give the channels of their space, are admitted only as the result of the
+program (`Profile.resultOnly`), and only when the result position of the
+expression (the root, or the last operand of a root `Block`) is that
+`AsOklab` or `AsRgb` itself, so that a host reads the space from the
+expression (`compileWithIrProfileGlsl()`): `AsOklab(Which(…, Oklch(…), …,
+Rgb(…)))`, Tycho's form, and `Block(…, AsOklab(c))` compile;
+`AsOklab(AsRgb(c))`, a conversion in an arm of an `If` or a `Which`, and a
+local that holds `AsOklab(c)` and is the result
+(`Block(Declare(k, AsOklab(c)), k)`) decline on GLSL. `Hsl`, `Hsv`, `AsHsl` and `AsHsv` have no GLSL spelling and
+decline there. No space is tracked at compile time and no code tests one.
+
+The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a
+fourth operand (alpha) declines on both targets (GLSL has no alpha channel,
+and a row has at most three operands), and so does a list operand, which the
+interpreter maps (`Rgb(List(1, 2), 0, 0)`). A conditional between colours
+joins on the lane (`If`, `Which` with a `True` clause; with none, its value
+can be `Missing` and it declines), and a `Block` local, also one that a
+`Loop` assigns, holds a colour (a local declared with the type `color`
+declines; one of no stated type, or `unknown`, holds it). Declined: a list of colours (`admits()`),
+a colour input, a colour string, a tuple of components (`AsRgb((r, g, b))`),
+a parameter or a result of a user function that is a colour, arithmetic on
+a colour (an `error` of the canonical form), every other colour operator
+(`ColorMix`, `ColorContrast`, …), and `mode: 'bigint'`. The colour of
+non-finite channels follows the existing JavaScript runtime (its `NaN`
+colour); on GLSL no fidelity is owed there (the existing target's
+`_gpu_finite_color` check is not carried over). The hue of a colour whose
+two chromatic components are 0 is 0 on both targets, as in the interpreter
+(`_gpu_ir_lch` does not call `atan(0, 0)`, which GLSL leaves undefined). A colour result has
+`broadcastOutputs` and `broadcast()` of the existing compiler (one number
+per cell, `NaN`).
+
 ## The `bigint` mode
 
 `mode: 'bigint'` (JavaScript only) computes every integer as a JavaScript
@@ -707,7 +754,16 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it next to the
 (real, integer or boolean) or a list of stated length (batch G2: a point, as
 `vec2(cos(t), sin(t))`, or a `float[n]`) of inputs that are scalars or lists
 of a stated length (`tuple<real, real>`, `list<real^3>`; batch G3:
-`list<real^6>` is a `float[6]`), and gives the
+`list<real^6>` is a `float[6]`; by a rule of the profile, `At` with a
+constant index after the passes (a folded one too) that is 0, not an
+integer or past the stated length of its list (an input, a list in
+storage, a literal, in the entry or in a user function) declines, where
+JavaScript gives NaN, so that a host can key a retry on the refusal; a
+run-time index keeps the read that is NaN outside; this is not the
+existing target's rule, which compiles `At(L6, 1.5)` to NaN and
+`At(L6, 3 + Length(List(x, y, x, y)))` to a helper call), or a colour (batch G7: an OKLCh `vec3`, or
+the channels of the space of an `AsOklab` or `AsRgb` at the root; "The
+colour lane"), and gives the
 result of the existing GLSL target: no `run`; `code` is an expression, or
 statements that end in `return …;`, in which an input is its bare name (the option `bareInputs` of
 `compileSlice()`; the host declares the uniform or the parameter); `preamble`
@@ -721,7 +777,8 @@ existing target's for each input it compiles); `warnings` holds the
 `float32-unsafe-argument` warning of the existing target (`kind:
 'correctness'`, `value` the operand), once per operand of a `Mod` or a
 `Fract` in which a constant of magnitude 1000 or more amplifies a
-trigonometric value (`isAmplifiedTrig()` of `gpu-exact-trig.ts`), in the
+trigonometric value (the rule of `isAmplifiedTrig()` of `gpu-exact-trig.ts`,
+with a memo per node: `amplifiedTrigMemo()`, linear in a shared graph), in the
 expression and the bodies of the user functions it calls (each node once);
 there is no exact sine hash and no `float32Bounds`, so such an operand warns
 also where the existing target emits an exact form (a host that sends a
