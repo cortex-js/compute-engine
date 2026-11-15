@@ -444,7 +444,8 @@ export function rowOfOp(
     index = new Map();
     for (const row of rows)
       for (const signature of row.signatures)
-        if (!index.has(signature[2])) index.set(signature[2], { row, signature });
+        if (!index.has(signature[2]))
+          index.set(signature[2], { row, signature });
     BY_OP.set(rows, index);
   }
   return index.get(op);

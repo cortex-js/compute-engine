@@ -1352,8 +1352,7 @@ function cancelledSumAtRaisedPrecision(
   sum: Expression | undefined,
   numericApproximation: boolean | undefined
 ): Expression | undefined {
-  if (!numericApproximation || sum === undefined || ops.length < 2)
-    return sum;
+  if (!numericApproximation || sum === undefined || ops.length < 2) return sum;
   if (!isNumber(sum) || sum.isComplex || sum.isFinite !== true) return sum;
   // A step of `N(x, [p, a])` (`evaluateToGoal()`, `library/core.ts`) is the
   // one evaluation whose requested digits equal the working precision
@@ -1410,10 +1409,7 @@ function cancelledSumAtRaisedPrecision(
     digits - result.lost >= CANCELLATION_DIGITS &&
     digits < limit
   ) {
-    digits = Math.min(
-      limit,
-      working + result.lost + CANCELLATION_GUARD_DIGITS
-    );
+    digits = Math.min(limit, working + result.lost + CANCELLATION_GUARD_DIGITS);
     result = sumAt(digits);
     if (result === undefined || result.lost === undefined) return sum;
   }

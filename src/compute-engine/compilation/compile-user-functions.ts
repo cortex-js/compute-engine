@@ -1708,8 +1708,7 @@ export function tryCompileUserFunction(
       const pt =
         userFunctionParamType(engine, h, i) ??
         signatureParamType(literal.type.type, i);
-      if (pt === undefined || !isIndexReadTuple(pt) || isTuple(a))
-        return false;
+      if (pt === undefined || !isIndexReadTuple(pt) || isTuple(a)) return false;
       const e = collectionElementType(a.type.type);
       return e !== undefined && e !== 'unknown' && !isSubtype(e, 'number');
     });
