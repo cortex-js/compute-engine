@@ -59,8 +59,15 @@ Delete this file when parts 2 and 3 are done or have their own record.
   - `df1a175d66b43913af343da5f27726b0477d9e0d`, CE-1303 (part 3): an Epsil
     `while` with an undecided condition ends with an error; source +84 −15.
   - `2e09c2d140eef80c8c26fdb04c2b6ae10c3e78a9`, the rollback frame, step 1:
-    an overload trial opens no frame; source +158 −179. Tycho's gates were
-    not run on these two.
+    an overload trial opens no frame; source +158 −179.
+  - `49785b4a1de9fa5a4d4f2d7e2bb1763c5df8525c`, CE-1210: four small fixes
+    of the cost of a type read (0.952 of the time on the benchmark cases);
+    source +39 −34. The issue holds what is left and three options for the
+    board.
+  - `a552c29cd098597f027bc777ce6603b7677bd11d`, leftover 2 removed (part 2,
+    item 4, first step): a call head with no definition in a body is a free
+    head; the forward-call reference mechanism is deleted; source +273 −404.
+    Tycho's gates passed on a build that holds CE-1303 and step 1 too.
 - CE-1317 is closed by the user's decision (documented; `issues/CLOSED.md`).
 - `src/api.md` still lists `TypeProvenanceEntry.epoch` and is regenerated at
   release.
@@ -116,16 +123,12 @@ not confirmed it item by item.
    declaration entries all land in the scope that it pushes and pops
    itself.
 4. **The provisional registry and forward-call references** (about 1,300
-   lines, estimated). FIRST STEP BUILT, NOT LANDED (2026-11-14): leftover 2
-   is removed and the forward-call reference mechanism deleted in the
-   worktree `/tmp/wt-ce-desk-l2` (patch and report in
-   `~/dev/compute-engine-recovery/leftover2/`; source about −150 net). It
-   waits for its review rounds and for one decision of the user: a function
-   that calls, with no argument, a function defined later has its inferred
-   effects derived again when the callee is defined (`effects-contracts`
-   test 10 pins that they stay `any`; EFFECTS-MODEL item 10). A declared
-   contract stays trusted. `provisional-application.ts` itself stays: every
-   free-head call is now noted in it for re-derivation.
+   lines, estimated). FIRST STEP DONE (state above): leftover 2 is
+   removed and the forward-call references are deleted. The provisional
+   registry (`provisional-application.ts`, 593 lines) stays and has more
+   work than before: every free-head call is noted in it for the
+   re-derivation of its function when the head gets a definition. It goes
+   only with "stored function bodies as units".
    The earlier text: They wait for stored function bodies as units, and
    for the decision on leftover 2. Cheapest first step: remove leftover 2
    again and rerun `tycho-item-182`, which hung before (`6dbc33b11`
@@ -170,7 +173,8 @@ Open:
 - CE-1210 (P2, `needs-design`): the `turing-patterns` run step is 8 to 9%
   slower than 0.187.1. Narrow the issue to that, or close it with the
   board.
-- CE-1277 (P4): `Map` over a `Composition` reads the current scope.
+- CE-1277 (P4): `Map` over a `Composition` reads the current scope (still
+  `[100, 100]` after leftover 2: the step `f` has a definition at boxing).
 - CE-1290 (P4): one signature line left.
 
 Seen and NOT filed. No program reaches them yet: file each with its witness,
