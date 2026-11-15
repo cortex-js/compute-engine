@@ -113,6 +113,7 @@ import { addArray } from './arithmetic-add.js';
 import { holdsKindValue } from './residue-class.js';
 import { kindArithmetic } from './kind-dispatch.js';
 import { isMergeable } from './effects-of.js';
+import { staticFact, staticallyTrue } from './static-fact.js';
 
 /** The operand types a product accepts: a number, an indexed collection of
  * numbers (broadcast), or an absent operand. A factor whose type is disjoint
@@ -1832,9 +1833,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     return hasFloatOperand([op2]) ? asFloat(ce.Zero) : ce.Zero;
   }
 
-  // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
-  if (op2.isInfinity) {
-    if (op1.isInfinity) return ce.NaN;
+  // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule). The infinities and the
+  // signs below are read from what an assignment cannot change
+  // (`staticFact()`): with `a := ∞`, `2/a` is not boxed as `0`.
+  // A numerator that is infinite only by the value it holds blocks both
+  // folds: the quotient is kept, and its evaluation reads the value.
+  if (staticallyTrue(op2, (x) => x.isInfinity)) {
+    if (staticallyTrue(op1, (x) => x.isInfinity)) return ce.NaN;
+    if (op1.isInfinity) return ce._fn('Divide', [op1, op2]);
     // Same shape exemption as the a/0 rule above: [1,2]/∞ broadcasts to
     // [0, 0] at evaluation rather than collapsing to the scalar 0.
     if (typeMayCarryQuotientShape(op1.type.type))
@@ -1857,12 +1863,15 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // form does not fold) has no finiteness flag but the type
   // `nan | signed_infinity`, and `∞/(∞ + ∞)` has no value; it was `+∞`, and
   // the evaluation of `∞ − (−∞)` as a denominator gave the same answer.
-  if (
-    op1.isInfinity &&
-    (op2.isFinite === true || op2.type.matches('finite_number')) &&
-    (op2.isPositive === true || op2.isNegative === true)
-  )
-    return op2.isPositive === true ? op1 : op1.neg();
+  const op2Positive = staticallyTrue(op1, (x) => x.isInfinity)
+    ? staticFact(op2, (x) =>
+        (x.isFinite === true || x.type.matches('finite_number')) &&
+        (x.isPositive === true || x.isNegative === true)
+          ? x.isPositive === true
+          : undefined
+      )
+    : undefined;
+  if (op2Positive !== undefined) return op2Positive ? op1 : op1.neg();
 
   // a/a = 1 (if a ≠ 0 and a is finite). Not for a float literal: `2.0/2.0`
   // is a float quotient, computed when it is evaluated. Not for an operand

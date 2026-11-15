@@ -86,6 +86,20 @@
   `indexed_collection<any>` or `collection<any>`, where it was `matrix`. A
   use that requires one number and does not map (`Range(n)`) still makes the
   parameter a number.
+- **A fold of an arithmetic canonical form reads only the declared facts of
+  a variable.** The folds of `Power` (an integer exponent, a base that is not
+  negative, a finite base) and of `Divide` (an infinity, the sign of a
+  divisor) read, of a variable that is not a constant, its declared type and
+  the assumptions, not the value it holds or a type inferred from that
+  value. With `ce.assign('k', 4)` and no declaration, `(x^2)^k` is no longer
+  boxed as `x^(2k)`, also in `subs()` and `simplify()`; with `p` holding 2,
+  `(p^2)^{1/2}` is `Sqrt(p^2)`, not `p`; with `a` holding `∞`, `2/a` is not
+  `0`; with `z` undeclared and holding 0, `z^0` stays `z^0`, whose value is
+  that of `0^0`. A declared type keeps the folds: with `k: integer`,
+  `(x^2)^k` is `x^(2k)`; with `p: real<0..>`, `(p^2)^{1/2}` is `p`; with
+  `z: real`, `z^0` is `1`. A variable whose type was inferred gives no fact
+  to a fold, also after its value is cleared, and so does a constant whose
+  value reads a variable.
 
 ### Resolved Issues
 
@@ -128,6 +142,15 @@
   `~oo`; it is `200000000000000000000`. `\lfloor x \rfloor`, `\lceil x \rceil`,
   `\operatorname{sign}(x)` and the other functions whose result jumps still use
   the exact value of `x` under `.N()`.
+
+- **A form boxed while a variable holds a value stays right after the value
+  changes.** After `ce.assign('k', 4)`, `(x^2)^k` was boxed as `x^(2k)`, so
+  after `k := 0.5` it gave `-3` at `x = -3` where `(x^2)^k` is `3`; a
+  function `f(x) := (x^2)^k` defined then, and the compiled code of the
+  expression, gave the same wrong value. With `p := 2`, `(p^2)^{1/2}` was
+  boxed as `p` and gave `-2` after `p := -2`, also for `p` declared `real`
+  and for an Epsil `let p: real = 2`. The form is now `(x^2)^k` and
+  `Sqrt(p^2)` (CE-1280).
 
 ## 0.190.0 _2026-11-14_
 

@@ -39,6 +39,7 @@ import {
   complexNumericValueRoute,
 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { staticFact, staticallyTrue } from './static-fact.js';
 import {
   isLibraryOperator,
   isShadowedSymbol,
@@ -387,8 +388,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // phase factor e^{-2πi·m·k} != 1 unless m is an integer. Concretely
     // (x^3)^{1/2} = √(x^3) (= 8i at x=-4), not x^{3/2} (= -8i) — combining
     // here is unsound and breaks confluence with the Sqrt(x^3) form.
-    const outerIsInteger = b.isInteger === true;
-    const baseNonNeg = base.isNonNegative === true;
+    // Read from what an assignment cannot change (`staticFact()`).
+    const outerIsInteger = staticallyTrue(b, (x) => x.isInteger);
+    const baseNonNeg = staticallyTrue(base, (x) => x.isNonNegative);
 
     // Not for a matrix `a` with a non-integer inner exponent (`e^A`, `A^x`,
     // `√A`): that power is element-wise, but an integer power of a matrix
@@ -418,8 +420,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // Only distribute when exponent is integer or both operands are non-negative
     // (distributing non-integer exponents over negative operands changes sign)
     if (
-      b.isInteger === true ||
-      (num.isNonNegative === true && denom.isNonNegative === true)
+      staticallyTrue(b, (x) => x.isInteger) ||
+      (staticallyTrue(num, (x) => x.isNonNegative) &&
+        staticallyTrue(denom, (x) => x.isNonNegative))
     ) {
       return pow(num, b, { numericApproximation: false }).div(
         pow(denom, b, { numericApproximation: false })
@@ -556,14 +559,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // A symbol whose value is `NaN` is left to `evaluate()`, which
     // substitutes the value first (see `canonicalDivide`).
     if (a.isNaN === true && !isNumber(a)) return unchanged();
-    if (
-      aIsNum &&
-      a.isFinite !== undefined &&
-      (a.isFinite === false || isExactLiteral(b, 0))
-    )
+    const finite = aIsNum ? staticFact(a, (x) => x.isFinite) : undefined;
+    if (finite !== undefined && (finite === false || isExactLiteral(b, 0)))
       // A `NaN`-valued base gives `NaN`; an infinite base is the
       // indeterminate form `∞^0`, also `NaN`.
-      return a.isFinite ? ce.One : ce.NaN;
+      return finite ? ce.One : ce.NaN;
     return unchanged();
   }
 

@@ -1758,6 +1758,52 @@ invalidates no cached type: the type version (`typeVersion`,
   does not hold. The same holds for a parameter: with
   `h: (real) -> unknown := t ↦ Tan(t)`, `h(π/2)` is `real` and its value is
   `~oo`. `Tan(π/2)` written with the constant is `number`.
+- A fold of an arithmetic canonical form decides from what an assignment
+  cannot change (`staticFact()`, `boxed-expression/static-fact.ts`, CE-1280).
+  The folds of `canonicalPower()` that read an integer exponent, a base that
+  is not negative or a finite base, and the folds of `canonicalDivide()` that
+  read an infinity or the sign of a divisor, read a variable that is not a
+  constant and has a stored value with that value hidden (the value shield,
+  under a cache key of its own): its declared type (a ranged type included)
+  and the assumptions answer. A variable whose type was inferred (with or
+  without a value: an inferred type widens at the next assignment, so it is
+  no promise, also after `ce.assign('k', undefined)`) answers nothing, and
+  the fold does not fire; an assumption is not an inferred type. A constant
+  whose value reads a variable (`c` with the value `p`) answers nothing
+  either; a constant with a closed value (`Pi`, a host constant `2`) is read
+  as before. A name that was free when it was boxed is read through the
+  definition it resolves to, so an expression parsed before the assignment
+  and given to `subs()` or `simplify()` after it follows the rule. So the
+  form boxed while
+  a variable holds a value is the form boxed while it has none. With `k`
+  undeclared and holding 4, `(x^2)^k` stays `(x^2)^k`, where it was boxed as
+  `x^(2k)` and gave `-3` at `x = -3` after `k := 0.5`; with `p: real` holding
+  2, `(p^2)^{1/2}` is `Sqrt(p^2)`, not `p`; with `k: integer` holding 4,
+  `(x^2)^k` is `x^(2k)`. The rule holds wherever a form is made, in
+  `subs()` and `simplify()` too. Where the line falls, for `(p^2)^{1/2}`:
+
+  | The variable                                   | Boxed form  | Why                                                       |
+  | ---------------------------------------------- | ----------- | --------------------------------------------------------- |
+  | a constant (`isConstant: true`, Epsil `const`) | `p`         | its value cannot change                                   |
+  | declared `real<0..>`, holding 2                | `p`         | the sign is in the declared type                          |
+  | `ce.assume(p > 0)`                             | `p`         | an assignment that contradicts the assumption is refused  |
+  | declared `real`, or undeclared, holding 2      | `Sqrt(p^2)` | the sign is in the value only                             |
+  | holding 2 inside `ce.withValues({ p: 2 }, …)`  | `Sqrt(p^2)` | a temporary value is a stored value                       |
+  | an Epsil `let` at the top level, holding 2     | `Sqrt(p^2)` | each statement is boxed after the earlier ones ran        |
+  | a parameter, a block local, a `let` in a body  | `Sqrt(p^2)` | the body is boxed before it runs, with no value           |
+
+  A parameter or a local holds its value in an activation, not as a stored
+  value, so a form made during a call reads the argument. A form boxed under
+  an assumption assumes it: `forget()` does not box it again, so after
+  `forget('p')` and `p := -2` the form `p` gives `-2`. The shape and kind
+  readings of these rewrites (a matrix base, a collection numerator, a point
+  divisor, a residue class) and the validation of operands read the held
+  value. A held value that would decide a fold the other way keeps the form:
+  with `a := ∞`, `a/∞` stays `Divide(a, ∞)`, which evaluates to `NaN`, and to
+  `0` after `a := 2`. Known limitation: a constant that reads a variable
+  through another constant (`c2` with the value `p`, `c1` with the value
+  `c2 + 1`), or whose stored value a change of the configuration cleared, is
+  read as a constant with a closed value.
 
 ## Inference provenance and rollback
 
