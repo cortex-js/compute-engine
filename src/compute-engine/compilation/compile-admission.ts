@@ -481,7 +481,7 @@ function namesReadIn(
  * names of `value`, and those that `untypedInputsOf()` finds (also when
  * another reason declines first).
  */
-function throwUntypedInputs(names: ReadonlyArray<string>): never {
+export function throwUntypedInputs(names: ReadonlyArray<string>): never {
   const list = names.map((name) => `\`${name}\``).join(', ');
   throw new CompileDeclineError({
     code: UNTYPED_INPUT_CODE,

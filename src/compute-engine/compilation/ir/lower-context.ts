@@ -6,6 +6,7 @@
 
 import type { Expression, FunctionInterface } from '../../global-types.js';
 import type { Type } from '../../../common/type/types.js';
+import { resolveTypeAlias } from '../../../common/type/utils.js';
 import { isFunction } from '../../boxed-expression/type-guards.js';
 import type { Builder, IRType, Lane, V } from './ir.js';
 import type { OperatorRow } from './operators.js';
@@ -24,6 +25,27 @@ export class Decline extends Error {
     super(`${node}: ${cause}`);
     this.name = 'Decline';
   }
+}
+
+/** A program whose inputs `names` have the type `unknown` or `any`: the
+ *  adapters refuse it with the diagnostic of the existing compiler
+ *  (`untyped-input`, `sliceError()`). */
+export class UntypedInputs extends Decline {
+  constructor(readonly names: string[]) {
+    super(
+      'program',
+      names.length === 1
+        ? `the input ${names[0]} has no type`
+        : `the inputs ${names.join(', ')} have no type`
+    );
+  }
+}
+
+/** Whether `t` is `unknown` or `any`, after the transparent aliases that
+ *  name it (`resolveTypeAlias()`). */
+export function isUntyped(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  return r === 'unknown' || r === 'any';
 }
 
 /** The definition `def` of the operator `name` has a lowering of its own,

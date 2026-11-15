@@ -92,8 +92,10 @@ import {
 import {
   decline,
   hasOwnLowering,
+  isUntyped,
   text,
   TUPLE_RULES,
+  UntypedInputs,
   type Fn,
   type Frame,
   type Lowering,
@@ -215,6 +217,15 @@ export function lower(
   >();
   const known = new WeakMap<Expression, Facts>();
   const inputLengths = new Set<V>();
+  // The names read as inputs of the compilation (of the entry, lifted into
+  // a body, `vars`), in the order the lowering reads them, and those that an
+  // occurrence or a declaration types (`program()`).
+  const seen = new Set<string>();
+  const typed = new Set<string>();
+  const note = (name: string, t: Type) => {
+    seen.add(name);
+    if (!isUntyped(t)) typed.add(name);
+  };
   // The root `Tuple`, or the last operand of a root `Block` that is one.
   let rootTuple: Expression | undefined = root;
   while (isFunction(rootTuple, 'Block')) rootTuple = rootTuple.ops.at(-1);
@@ -1200,9 +1211,11 @@ export function lower(
         e,
         `${name} read with two types, ${typeToString(type(known.binding.v))} and ${engineTypeToString(e.type.type)}`
       );
+    if (known?.binding.role === 'input') note(name, e.type.type);
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
+      note(name, e.type.type);
       // The host's text, in the scope of the entry, read at each use.
       // A function body and a root function literal have no such scope:
       // a read of the inputs object there is an input that each call
@@ -1213,15 +1226,15 @@ export function lower(
         options.objectVars?.includes(name) === true;
       if ((cx.inFunction !== undefined || b.literal) && !read)
         decline(e, `the vars name ${name} in a function`);
-      // A wide type (an assigned name is `any`) is a real.
-      const engineType = e.type.type === 'any' ? 'real' : e.type.type;
-      const t = inputType(engineType);
+      // A name of type `any` is read as a real until the end refuses it
+      // (`program()`); a capture records the occurrence's own type.
+      const t = inputType(e.type.type === 'any' ? 'real' : e.type.type);
       if (t === undefined || t.lane === 'complex' || t.shape.length > 0)
         decline(
           e,
           `the vars name ${name} of type ${engineTypeToString(e.type.type)}`
         );
-      if (read) return fns.capture(e, name, engineType);
+      if (read) return fns.capture(e, name, e.type.type);
       return b.op(hostVarOp(k, t.lane), [], scalarType(t.lane));
     }
     if (name === 'True' || name === 'False')
@@ -1260,6 +1273,7 @@ export function lower(
         e,
         `the function ${cx.inFunction} reads ${name}, which is not a parameter (a capture)`
       );
+    note(name, e.type.type);
     return fns.capture(e, name, e.type.type);
   };
 
@@ -1274,12 +1288,13 @@ export function lower(
         e,
         `a call of ${e.operator}, which reads the input ${name}, where ${name} is a local or a parameter`
       );
+    note(name, t);
     if (known !== undefined) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     // A `vars` name (`symbol()`): its text, read here at the entry.
     if (k >= 0) {
       if (cx.inFunction !== undefined) return fns.capture(e, name, t);
-      const lane = inputType(t)!.lane;
+      const lane = inputType(isUntyped(t) ? 'real' : t)!.lane;
       return b.op(hostVarOp(k, lane), [], scalarType(lane));
     }
     if (held(name)?.value !== undefined)
@@ -1301,8 +1316,10 @@ export function lower(
   };
 
   /** The IR type of an input of the engine type `t`; a tuple is the list of
-   *  its elements, which `input()` marks a tuple. */
-  const inputIR = (t: Type) => tupleOrInputType(t, cx.wide);
+   *  its elements, which `input()` marks a tuple. `any` is read as
+   *  `unknown`: such an input is refused at the end (`program()`). */
+  const inputIR = (t: Type) =>
+    tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
@@ -1319,14 +1336,17 @@ export function lower(
 
   /** The input `name` of the engine type `t`: a parameter of the entry (a
    *  positional one: of a root function literal). A list of run-time length
-   *  has its length as a parameter before it. */
+   *  has its length as a parameter before it. A positional one of no
+   *  declared type is a real; one declared `any` declines (it is not an
+   *  input that `program()` refuses). */
   const input = (
     e: Expression,
     name: string,
     t: Parameters<typeof inputType>[0],
     positional = false
   ): V => {
-    const ir = inputIR(t);
+    if (!positional) note(name, t);
+    const ir = positional ? tupleOrInputType(t, cx.wide) : inputIR(t);
     if (ir === undefined)
       decline(e, `the input ${name} of type ${engineTypeToString(t)}`);
     const shape = ir.shape.map((n) => {
@@ -1779,10 +1799,19 @@ export function lower(
   const lists = listLowering(cx);
   const fns = functionLowering(cx);
 
+  /** The program of the entry `f`, refused when an input that it reads has
+   *  no type at any occurrence (`seen`, `typed`). A decline of the lowering
+   *  is thrown as it is. */
+  const program = (f: () => V | V[]): Program => {
+    const p = b.program(f);
+    const names = [...seen].filter((name) => !typed.has(name));
+    if (names.length > 0) throw new UntypedInputs(names);
+    return p;
+  };
   // A root function literal: its parameters, by position, come first.
   if (isFunction(root, 'Function') && isLibrary(root)) {
     b.literal = true;
-    return b.program(() => {
+    return program(() => {
       root.ops.slice(1).forEach((p) => {
         const name = parameterName(p);
         if (name === undefined) decline(root, 'a parameter that is not a name');
@@ -1795,7 +1824,7 @@ export function lower(
       return value(root.ops[0])!;
     });
   }
-  return b.program(() => {
+  return program(() => {
     const v = value(root)!;
     return rootParts ?? v;
   });

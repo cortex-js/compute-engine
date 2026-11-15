@@ -514,13 +514,14 @@ describe('IR profile, batch G12: robustness', () => {
 
   test('nested loops with real bounds', () => {
     // Six Sums, each bound a real input: JavaScript compiles one loop per
-    // Sum; GLSL declines (the passes multiply past the budget).
+    // Sum (a loop of blocks and a loop in a block); GLSL declines (the passes
+    // multiply past the budget).
     let e: Json = ['Multiply', 'x', 'k0'];
     for (let i = 0; i < 6; i++)
       e = ['Sum', e, ['Limits', `k${i}`, 0.5, ['Add', 'r', i]]];
     const start = performance.now();
     const r = js(e);
-    expect(r.code.match(/for \(/g)?.length).toBe(6);
+    expect(r.code.match(/for \(/g)?.length).toBe(12);
     expect(failure(() => glsl(e))?.message).toMatch(/iterationBudget/);
     expect(performance.now() - start).toBeLessThan(30_000);
     check(e, [

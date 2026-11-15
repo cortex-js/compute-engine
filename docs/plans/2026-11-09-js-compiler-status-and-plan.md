@@ -1904,6 +1904,25 @@ User decisions of 2026-11-15:
 With JavaScript, GLSL, interval and Python off the shared layer, that layer
 can be deleted too.
 
+Four more user decisions of 2026-11-15 ("1: (a), 2: (a), 3: (a) 4: (a)"):
+
+- Colormap: Tycho rewrites `colormap(h, v)` in MathJSON before it compiles
+  (literal tables, a clamped index, a linear interpolation, `Oklab(…)`); the
+  option `functions` does not come back.
+- In the `strict` mode a function of real operands is computed on the reals
+  and gives NaN outside its domain, also where the static type of the node
+  is complex: `Arcsin(u)` with `u: real` at `u = 2` is NaN (the interpreter
+  and the existing compiler give `1.5708 − 1.3170i`). A host that wants the
+  complex value asks for `mode: 'complex'`. This is D5 of the census: its 36
+  tests change at the default.
+- The comparison of the parts with 0 before `atan` on the complex lane of
+  GLSL stays: it is not the signed-zero case of the edge-point rule, since
+  ordinary real operands gave a wrong finite value.
+- An integral that the quadrature cannot settle keeps the estimate of the
+  Monte-Carlo fallback, as the interpreter and the existing compiler give
+  it (it changes a little at each run), and is NaN only when the integrand
+  has given a value that is not finite.
+
 The two removals, 2026-11-15, landed together on
 `926016f4ce9fcd4dc07e74541046e7d46a461020` (which holds the first batch of
 the interval mode, by session `ce-interval`).
@@ -1944,6 +1963,90 @@ the interval mode, by session `ce-interval`).
   of 10,767 admitted (97.1%); every JavaScript compile 17,369 of 28,594
   (60.7%); public JavaScript 6,904 of 17,815 (38.8%); GLSL 1,157 of 2,395
   (48.3%; 1,078 of the 1,596 that the existing target compiles, 67.5%).
+
+An undeclared input (2026-11-15). The pipeline read a scalar input typed
+`unknown` or `any` as a real, a difference from the existing compilers that
+its README called deliberate; `AGENTS.md` says such an input is refused, and
+115 tests of the census expect the refusal. `tycho-desk` measured what Tycho
+relies on (codegen audit on 0.192.0): it declares every input (CORE has no
+record with an untyped free name; over every state 7 of 9,031 JavaScript
+records, none of which the existing compiler compiles), and one of its
+checks reads the refusal (`untyped-input` and its `value`, the names) to
+find a body that reads a name outside its inputs. So the pipeline follows
+the rule: batch G16 refuses an untyped input with the existing diagnostic,
+in every mode and on both targets. A parameter of a user function with no
+declared type is not an input and keeps its rule.
+
+Batches G15 and G16, 2026-11-15, landed together on
+`bbc28d9ca` (which holds three batches of the interval mode).
+
+G15, the JavaScript printer. A build is a preallocated array filled by a
+loop (it was `Array.from({length}, fn)`: 30.8 µs per 1,000 elements against
+0.68 µs); an element-wise operation that is pure, used once and of the shape
+of its element-wise user is printed inside that user's loop (`2L + 1` is one
+loop). An index loop counts its passes (`n = Math.floor(hi - lo) + 1`, the
+index is `lo + i`), so it ends for any bounds: with `v++` a loop from 2^53
+never returned, which hung
+`test/compute-engine/compile-big-op-unsafe-bounds.test.ts` under the public
+switch. A constant bound beyond 2^53 − 1 declines. The deadline: passes run
+in blocks of at most 1,024 with no call inside a block, and after each block
+`_SYS.tick(passes)` adds them to a count kept on the deadline frame, modulo
+1,024; `tick()` with no argument is one pass, so code stored before the
+batch behaves as before. Three review rounds (Codex and Claude): a counter
+in the compiled code, reset at each entry, let repeated short calls and a
+re-entrant call never reach the deadline (`withTimeLimit` around a batch of
+2e5 cells ran to the end), and cost 2 times on nested loops; a test of the
+index with a call inside the loop made a list reduction in a loop 5 times
+slower; an unbounded count stopped advancing at 2^53. The block form
+answers all three. Values: 84,269 runs with no bit of difference against
+the base; the count of passes exact in 215 cases. Not changed: a bound
+declared `integer` that holds a non-integer at run time can run one pass
+more (a value outside its type). Per call, old compiler / profile before /
+profile now: `2L + 1` over 1,000 elements 6.1 µs / 41 µs / 0.85 µs;
+`Sum(Sin(L)·x)` over 1,000 6.0 / 47 / 5.6 µs; `Sum(k·x, k = 1..200)` 155 /
+240 / 126 ns; `Filter(L > 5)` over 1,000 1.2 / 1.9 / 1.2 µs. Noted for a
+later batch, with no code yet: on a closed nest (`Sum(Max(Max(L), k))`) the
+existing compiler is 30 times faster than the profile (work that does not
+depend on the loop index is not moved out of the loop); `Square(z)` of a
+complex is a general power (28 ns against 3 ns for a product).
+
+G16, an input with no type is refused. Two sets for the whole lowering,
+the entry and every function body: the names read as inputs, and those with
+a type at some occurrence; the difference is refused at the end of a
+lowering that completed, with the diagnostic of the existing compiler
+(`untyped-input`, `value` = the names), on the three targets and in every
+mode; a decline of the lowering is reported as itself; a `vars` name follows
+the rule; the statistics class the refusal as a decline. Reviews, two
+rounds: a first form that added and removed names from one set compiled an
+untyped `vars` name as a scalar, refused an input typed in another body,
+and masked other declines; then a `vars` name typed `any` read in a called
+body. AFTER both reviews passed, the suite measure found a wrong admission:
+`any` was read as `unknown` for a parameter of a root function literal too,
+so `Function(Add(p, q), p: any, q: any)` compiled and gave `"1,23"` for a
+list (223 programs of the suite that the existing compiler declines and
+the profile admitted). Fixed: only a free input is read so. The measure
+that found it is now part of every landing: the programs that the existing
+compiler declines and the profile admits, compared message by message with
+the run before; no class may grow without a reason.
+
+Measured in a worktree at `bbc28d9ca` plus the two patches; 8,699 lines in
+`ir/`, the interval mode included:
+
+| Measure | Admitted |
+| --- | --- |
+| Engine compilations | 10,451 of 10,777 (97.0%) |
+| Every JavaScript compile | 17,303 of 28,606 (60.5%) |
+| Public JavaScript `compile()` calls | 6,851 of 17,830 (38.4%) |
+| GLSL `compile()` calls | 1,139 of 2,400 (47.5%); 1,076 of the 1,596 that the existing target compiles (67.4%) |
+
+Both runs green (2,044 suites, 84,972 tests). Programs that the existing
+compiler declines and the profile admits: JavaScript 76 (121 before), GLSL 63
+(79 before); no class grows.
+
+Builds for Tycho (user, 2026-11-15): few. No build follows this landing;
+the next one is shared with session `ce-interval`, on a commit that holds
+several batches of both, with one request for one audit over the three
+seams.
 
 Found after the review, to settle before the default:
 
@@ -2295,8 +2398,8 @@ User decisions of 2026-11-14:
   globalThis.__tychoColormap(h, v))", pure: true }` for JavaScript and a GLSL
   function text for GLSL. It passes no `operators`, `imports` or `preamble`.
   So the first thing that breaks is the colormap of a colour expression.
-  Recommended by this session and by `tycho-desk` (2026-11-15), and waiting
-  for the user's word: the option `functions` does not come back, and Tycho
+  Decided by the user on 2026-11-15, as this session and `tycho-desk`
+  recommended: the option `functions` does not come back, and Tycho
   rewrites `colormap(h, v)` in MathJSON before it compiles. The palette
   handle `h` is always a literal at compile time, so the rewrite is three
   literal lists, a clamped index, a linear interpolation between two `At`

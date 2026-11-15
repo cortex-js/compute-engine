@@ -644,7 +644,7 @@ export const DECLINES: Record<string, Json> = {
   'canonical form': ['Add', 'p', 1],
   'two types': ['If', ['Less', 'x', 0], 'L', 1],
   'not integer': ['Block', ['Declare', 't', 'integer', 0], ['Assign', 't', 'x'], 't'],
-  'of type any': ['Add', 'a', 1],
+  'no type': ['Add', 'a', 1],
 };
 
 /** A seeded generator of random programs, as MathJSON: in-scope programs,

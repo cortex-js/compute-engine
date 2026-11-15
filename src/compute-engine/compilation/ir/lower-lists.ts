@@ -150,6 +150,9 @@ export function listLowering(cx: Lowering) {
       const c = cx.constant(v);
       if (c !== undefined && !Number.isFinite(c))
         decline(x, 'a bound that is a constant infinity or NaN');
+      // The interpreter gives `out-of-range` where the range is not empty.
+      if (c !== undefined && Math.abs(c) > Number.MAX_SAFE_INTEGER)
+        decline(x, 'a bound that is a constant beyond 2^53 - 1');
       if (type(v).lane === 'real') return cx.apply(x, cx.row('Floor'), [v]);
       if (type(v).lane !== 'integer')
         decline(x, 'a bound that is not a real number');

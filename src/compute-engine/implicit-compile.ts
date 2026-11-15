@@ -20,6 +20,7 @@ import {
 import {
   markImplicitCompileOptions,
   recordJsProfileAttempt,
+  refusalOutcome,
   type JsProfileSwitch,
 } from './js-profile-switch.js';
 
@@ -173,9 +174,7 @@ function tryProfile(
     recordJsProfileAttempt(
       ce,
       consumer,
-      isCompileDeclineError(e) && diagnostic.code === 'outside-profile'
-        ? 'declined'
-        : 'failed',
+      isCompileDeclineError(e) ? refusalOutcome(diagnostic.code) : 'failed',
       diagnostic.message
     );
     return undefined;
@@ -185,7 +184,7 @@ function tryProfile(
     recordJsProfileAttempt(
       ce,
       consumer,
-      diagnostic?.code === 'outside-profile' ? 'declined' : 'failed',
+      refusalOutcome(diagnostic?.code),
       diagnostic?.message ?? result.error
     );
     return undefined;

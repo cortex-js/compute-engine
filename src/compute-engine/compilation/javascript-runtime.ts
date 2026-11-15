@@ -187,7 +187,6 @@ import {
 } from '../numerics/linear-algebra.js';
 import {
   checkDeadline,
-  checkDeadlineEvery,
   DEFAULT_ITERATION_LIMIT,
   makeLoopPassCounter,
   type DeadlineFrame,
@@ -6610,7 +6609,7 @@ export type SysHelpers = typeof SYS_HELPERS &
     ir: typeof IR_FUNCTIONS;
     /** The integral of the profile `ir` (`integrateFinite()`). */
     irIntegrate: (fn: (x: number) => number, a: number, b: number) => number;
-    tick: () => void;
+    tick: (n?: number) => void;
   };
 
 /**
@@ -7249,14 +7248,19 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
     ...makeLazyStreamHelpers(source),
     ...makeLoopPassCounter(),
     ir: IR_FUNCTIONS,
-    // The start of each pass of a loop of the profile `ir`: the deadline is
-    // checked every 1024 passes, counted on the deadline frame when there
-    // is one, so the steps charged to a step budget do not depend on
-    // earlier calls.
-    tick: (): void => {
+    // `n` passes of a loop or a build of the profile `ir` (one when not
+    // given): the deadline is checked, and one step charged, each time the
+    // count crosses a multiple of 1024 (once for `n` above 1024). The count
+    // is on the deadline frame when there is one, so the steps charged to a
+    // step budget do not depend on earlier calls; it is kept modulo 1024, so
+    // it never stops advancing.
+    tick: (n = 1): void => {
       const d = source.deadline();
-      if (typeof d === 'object') checkDeadlineEvery(d, 0x3ff);
-      else if (d !== undefined && (++ticks & 0x3ff) === 0) checkDeadline(d);
+      if (d === undefined || !(n > 0)) return;
+      const r = ((typeof d === 'object' ? (d.tick ?? 0) : ticks) & 1023) + n;
+      if (typeof d === 'object') d.tick = r & 1023;
+      else ticks = r & 1023;
+      if (r >= 1024) checkDeadline(d);
     },
     integrate: (fn, a, b, initialPanels) =>
       SYS_HELPERS.integrate(fn, a, b, initialPanels, draw),

@@ -72,7 +72,11 @@ when it compiles. A difference that this list does not name is a defect.
   is the model of the shader targets, applied to every target. The host
   gets the complex value with `mode: 'complex'` or by declaring the input
   `complex`. A complex value passed at an input or a parameter declared
-  real is a value outside its declared type (next item).
+  real is a value outside its declared type (next item). With the profile
+  `ir` this also holds where the static type of the node is complex:
+  `Arcsin(u)` with `u: real` at `u = 2` is `NaN` (user decision of
+  2026-11-15); the existing JavaScript compiler computes such a node on the
+  complex lane and gives `1.5708 − 1.3170i`, as the interpreter does.
 - **In `strict`, a value of type `number` must be real.** The type
   `number` admits a complex value, but the `strict` mode compiles a binding
   typed `number` (an input, a parameter, a `number` element of a
@@ -2233,7 +2237,10 @@ option `profile: 'ir'`, `compile()` to `javascript` uses the IR compiler of
 under "Selecting the pipeline", the options it maps or declines). A program
 or an option outside it declines with `outside-profile`, and `fallback`
 applies as for any other decline; an internal error is a
-`compile-error`. It reads an undeclared scalar input as a `real`. It has no
+`compile-error`. An input of type `unknown` or `any` is refused, on
+`javascript`, `glsl` and `interval-js`, with the `untyped-input` diagnostic of the
+existing JavaScript target (all such names in `value`); an input of type
+`number` is a `real`, or a `complex` in `mode: 'complex'`. It has no
 guard for an integer of 2^53 or more: its `Mod` of such an operand is the
 remainder of the double, an unspecified value, where the existing compiler
 throws a `RangeError` ("Integer operations beyond the safe integer range").

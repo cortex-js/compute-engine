@@ -193,18 +193,39 @@ type (`integer | nan` is an integer, also in the `bigint` mode; `nan | number`
 is a wide input, `complex | nan` a complex one). The same rule types the
 parameters and the result of a user function, where a `missing` member is also
 removed (`missing | rational` is a real): where the interpreter gives `Missing`,
-the compiled code gives NaN. A scalar with no declared type, or of type
-`unknown` or `number`, is a real in the `strict` mode (a deliberate difference
-from the existing compiler) and a complex in the `complex` mode; a scalar
-`complex` input is on the complex lane, and a number given for a complex input
-is lifted to `{re, im: 0}`, also with `entryChecks: false`. A list of complex
-elements declines: an entry of such a list can be a number or a `{re, im}`
-object (the ABI of `docs/COMPILATION-MODEL.md`), and only a run-time test tells
-them apart. An outer list of no stated length (`list<real>`, `vector`,
-`list<list<real^2>>`) has a run-time length (JavaScript only), also as a
-parameter of a root function literal: the length is a positional parameter
-before the list, read from the argument. `any` and a list element of type
-`unknown` or `any` decline with the input's name.
+the compiled code gives NaN. An input of the entry whose type is `unknown` or
+`any` (no declaration, no entry of `inputs`, no type from its occurrences) is
+refused, in every mode and on every target (`javascript`, `glsl`,
+`interval-js`). `lower()` notes each name that it reads as an input of the
+compilation (of the entry, lifted into a body, or a `vars` name), and those that
+an occurrence or a declaration types (an occurrence takes the type of its
+binding unit). A lowering that completes with a name that no occurrence types
+throws an `UntypedInputs` with all such names, in the order the lowering reads
+them (not always the order of the text: `Sum(w, Limits(k, v, u))` gives `v,u,w`,
+the existing compiler `w,v,u`), which `sliceError()` turns into the
+`untyped-input` decline of the existing compiler (`throwUntypedInputs()` of
+`compile-admission.ts`: the same code, kind, message and `value`, the names
+separated by commas). A decline of the lowering is reported as it is; a refusal
+of the target after a completed lowering (recursion, a list of run-time length
+on GLSL) comes after the refusal of the input. Until the end such an input is
+read as a real. It is not `outside-profile`: with `fallback`, the interpreter
+fallback names them in `unsupported`, and the statistics of the switch count it
+`declined`. A name with a value, a local, an index, a parameter of a user
+function and a parameter of a root function literal are not inputs: a parameter
+of no declared type is a real, and one declared `any` or `value` declines, as an
+argument of type `any` does. A name that only a branch dropped at compile time
+reads is an input too (`If(2 < 3, 0, z)` with `z` undeclared is refused; the
+existing compiler compiles it). A scalar of type `number` is a real in the
+`strict` mode and a complex in the `complex` mode; a scalar `complex` input is
+on the complex lane, and a number given for a complex input is lifted to
+`{re, im: 0}`, also with `entryChecks: false`. A list of complex elements
+declines: an entry of such a list can be a number or a `{re, im}` object (the
+ABI of `docs/COMPILATION-MODEL.md`), and only a run-time test tells them apart.
+An outer list of no stated length (`list<real>`, `vector`, `list<list<real^2>>`)
+has a run-time length (JavaScript only), also as a parameter of a root function
+literal: the length is a positional parameter before the list, read from the
+argument. A list element of type `unknown` or `any` declines with the input's
+name.
 
 A `Declare` in a `Block` has a value, positional or in its attributes
 (`Declare(t, {value: 0})`; a declaration with no value is an error of the
@@ -267,10 +288,9 @@ value of `Abs`, `Exp`, an even power, or a sum or a product of such values
 (`assume(s >= 0)` makes it `real<0..>`) and `forget()` widens it again after the
 compilation. `Sqrt(x)` at `x = -4` is then `{re: 0, im: 2}`.
 
-Inputs in the complex mode: an input of type `number`, `unknown` or no declared
-type is complex (`CompileMode`), so a comparison of it declines; an input
-declared `real` or `integer` stays real. The strict mode reads such an input as
-a real.
+Inputs in the complex mode: an input of type `number` is complex
+(`CompileMode`), so a comparison of it declines; an input declared `real` or
+`integer` stays real. The strict mode reads such an input as a real.
 
 Declined: `Max`, `Min`, `Floor` and the other integer rows of a complex, a
 comparison other than `Equal` and `NotEqual`, the real functions (`Gamma`,
@@ -301,9 +321,8 @@ complex rows decline with the operation they lack
 hyperbolic functions, `Root`, `Log`, `Cot`, `Sec`, `Csc`, `Coth`, `Sech`,
 `Csch`; and so does a list or a tuple of complex numbers
 (`a list of complex numbers`, `Profile.scalarLanes`), also an input one or the
-result of a user function. `mode: 'complex'` is admitted: an input of no
-declared type, or of type `number` or `unknown`, is then a `vec2`, and the
-result's `mode` is `'complex'`.
+result of a user function. `mode: 'complex'` is admitted: an input of type
+`number` is then a `vec2`, and the result's `mode` is `'complex'`.
 
 Ill-conditioned points (docs/plans/2026-11-12-js-route-course-correction.md,
 rule 1): near a branch point, a pole or a cancellation the lane gives the
@@ -390,7 +409,7 @@ written, so its helper throws the pole where it is evaluated.
 Every value is an integer or a boolean, also a loop index, a list index and a
 length: a loop counts with a `bigint` counter, and the code converts with
 `Number()` where JavaScript reads a number (an element, `$0[Number($1)]`, the
-length of `Array.from`) and with `BigInt()` where it gives one (the length of an
+length of a build) and with `BigInt()` where it gives one (the length of an
 array, `BigInt(L.length)`). The mode runs with the passes `fold` and `hoist`
 off, also with `cse: false` or `constantFold: false`: a helper throws at a pole
 (`Mod`, `At`, `Factorial`, `Power`, `Binomial`, and so a call), so no operation
@@ -790,10 +809,25 @@ its member `ir` (`IR_FUNCTIONS`: `REAL_FUNCTIONS`, `COMPLEX_FUNCTIONS`, `pow`,
 `mod`), under one name so that no IR name meets a member of another meaning; a
 draw, a random frame, an integral and the length of a `Range` are its members
 `drawNextRandomNumber`, `withRandomSeed`, `irIntegrate` (which reads the
-engine's live draw, as `integrate` does) and `rangeCount`. Each pass of a loop
-or a build begins with `_SYS.tick()`, which checks the deadline
-(`ce.withTimeLimit()`, or the `deadline` of a runtime without an engine) every
-1024 passes. The `iterationBudget` option follows the rule of `compile()`
+engine's live draw, as `integrate` does) and `rangeCount`. A loop counts its
+passes from 0 and computes its index as `lo + i`, so it ends for any bounds
+(from 2^53, `k++` would not advance; the value there is unspecified); a `bigint`
+index is exact. A build is an array of its length filled by a `for` loop in
+index order (a `Filter` pushes), and a chain of element-wise operations of one
+shape, each value read once and pure, is one such loop (`2·L + 1`). A build of
+more than about 2^25 elements is slower: V8 keeps such a `new Array(n)` as a
+dictionary. A loop or a build adds its passes to the deadline count of the
+runtime with `_SYS.tick(n)`: it runs its passes in blocks of at most 1024, an
+inner `for` in an outer one whose update adds the passes of the block, so no
+pass makes a call and a nest of short loops counts every pass. The count is on
+the deadline frame (on the runtime when the deadline is a number), so it holds
+across calls and re-entrant calls, and the steps charged to a step budget do not
+depend on calls made before the frame; it is kept modulo 1024. Each time it
+crosses a multiple of 1024 (once for a call of more than 1024 passes), `tick`
+checks the deadline (`ce.withTimeLimit()`, or the `deadline` of a runtime
+without an engine) and charges one step. `_SYS.tick()` with no argument counts
+one pass, the spelling of code stored before. A block left by a throw is not
+counted. The `iterationBudget` option follows the rule of `compile()`
 (`CompilationOptions.iterationBudget`): a pass of a `Loop` (a `loop` instruction
 with `passes`) also calls `_SYS.countLoopPass(budget)`, which adds one to one
 count for a call, nested loops and the loops of user functions included; over
@@ -804,26 +838,29 @@ passes"). A bound of a `Sum` or a `Product` with `Limits` of a real type is its
 `Sum(k, Limits(k, 0.5, 3.7))` is 0 + 1 + 2 + 3, and `Limits(k, 1, -0.5)` is
 empty (the identity); a complex bound declines, and in the `bigint` mode a real
 one, and so does a bound that is a constant infinity or NaN (the interpreter
-sums a window of an infinite range: `Sum(x^k/k!, Limits(k, 0, +∞))`). An operand
-of a `Range` that is such a constant declines too. A bound that assigns a name
-declared outside it (`Limits(i, 1, Block(p := 4, 2))`) declines: the interpreter
-does not evaluate a `Sum` or a `Product` over a bound with an effect, and `p`
-keeps its value (rule R3 of `docs/COMPILATION-MODEL.md`). The count is in the
-runtime; the entry starts with `_SYS.resetLoopPasses()` when the code counts
-passes. A `Sum` or a `Product` with `Limits` whose count of passes is more than
-the budget is NaN (`hi - lo < budget` is false), each loop by its own count: the
-lowering writes that test as an `if`. A `Loop` in an integrand counts its passes
-once per sample of the quadrature, whose number of samples is unspecified. A
-build, a `Filter` and a reduction of a list count no pass. GLSL has no deadline
-and counts no `Loop` pass at run time: its budget is the option or 10,000 (the
-existing GLSL target's default), a `Sum` or a `Product` over it is NaN as above,
-and the adapter bounds the passes of every loop (`Loop`, `Sum`, `Product`, a
-reduction) at compile time (`loopPasses()`): a constant count is itself, a
-run-time count is the budget (the test above ensures it), multiplied down the
-nesting and through the calls, both arms of an `if` added. A program whose bound
-is over the budget declines: two nested `Sum`s of 10,000 passes, a loop nested
-in a `Sum` of a run-time count (`Sum(Max(L6)·j, j = 1..n)`), a `Loop` of 10,000
-passes around such a `Sum`. A single `Sum` of a run-time count compiles. With
+sums a window of an infinite range: `Sum(x^k/k!, Limits(k, 0, +∞))`), or a
+constant beyond 2^53 − 1 in magnitude in the number modes (the interpreter gives
+`out-of-range` for such a bound of a range that is not empty); the `bigint` mode
+counts such bounds exactly. An operand of a `Range` that is a constant infinity
+or NaN declines too. A bound that assigns a name declared outside it
+(`Limits(i, 1, Block(p := 4, 2))`) declines: the interpreter does not evaluate a
+`Sum` or a `Product` over a bound with an effect, and `p` keeps its value (rule
+R3 of `docs/COMPILATION-MODEL.md`). The count is in the runtime; the entry
+starts with `_SYS.resetLoopPasses()` when the code counts passes. A `Sum` or a
+`Product` with `Limits` whose count of passes is more than the budget is NaN
+(`hi - lo < budget` is false), each loop by its own count: the lowering writes
+that test as an `if`. A `Loop` in an integrand counts its passes once per sample
+of the quadrature, whose number of samples is unspecified. A build, a `Filter`
+and a reduction of a list count no pass. GLSL has no deadline and counts no
+`Loop` pass at run time: its budget is the option or 10,000 (the existing GLSL
+target's default), a `Sum` or a `Product` over it is NaN as above, and the
+adapter bounds the passes of every loop (`Loop`, `Sum`, `Product`, a reduction)
+at compile time (`loopPasses()`): a constant count is itself, a run-time count
+is the budget (the test above ensures it), multiplied down the nesting and
+through the calls, both arms of an `if` added. A program whose bound is over the
+budget declines: two nested `Sum`s of 10,000 passes, a loop nested in a `Sum` of
+a run-time count (`Sum(Max(L6)·j, j = 1..n)`), a `Loop` of 10,000 passes around
+such a `Sum`. A single `Sum` of a run-time count compiles. With
 `iterationBudget: Infinity` there is no bound.
 
 `Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
@@ -1023,9 +1060,11 @@ glue is in `adapter.ts`; `compile-expression.ts` dispatches to it.
 
 - **A decline** (`Decline`, also a refusal of the target) is the public
   diagnostic `'outside-profile'`, with the head in `operator` and the node in
-  `value`; any other error of the pipeline (`SliceInternalError`, a printer
-  error) is a `'compile-error'`. Both follow `fallback`: the interpreter, or a
-  throw with `fallback: false`. A `CancellationError` is thrown as it is.
+  `value`, except an input with no type (`UntypedInputs`), which is
+  `'untyped-input'` ("Inputs" above); any other error of the pipeline
+  (`SliceInternalError`, a printer error) is a `'compile-error'`. Both follow
+  `fallback`: the interpreter, or a throw with `fallback: false`. A
+  `CancellationError` is thrown as it is.
 - **Options.** One table classifies every option of `compile()` (`IR_OPTIONS` in
   `adapter.ts`; `compile-expression.ts` fails the type check when an option has
   no class). Mapped: `iterationBudget` ("Loops and the runtime"), `vars`

@@ -61,6 +61,16 @@ export type JsProfileConsumerStats = {
 
 export type JsProfileOutcome = 'admitted' | 'declined' | 'failed';
 
+/** The outcome of an attempt of the profile that gave no code, by the code
+ * of its diagnostic: `declined` for a program outside the profile
+ * (`outside-profile`) and for an input with no type (`untyped-input`, a
+ * refusal by rule that the existing compiler shares), `failed` otherwise. */
+export function refusalOutcome(code: string | undefined): JsProfileOutcome {
+  return code === 'outside-profile' || code === 'untyped-input'
+    ? 'declined'
+    : 'failed';
+}
+
 /** The counters of one consumer of the shadow measure. `attempts`,
  * `admitted`, `declined` and `failed` count the compilations that the
  * existing compiler compiled; `baselineDeclined` counts those that it

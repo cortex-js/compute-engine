@@ -47,6 +47,7 @@ import {
   jsProfileShadowConsumer,
   recordJsProfileAttempt,
   recordJsProfileShadow,
+  refusalOutcome,
 } from '../js-profile-switch.js';
 
 export type { CanCompileResult } from './fragment.js';
@@ -322,7 +323,7 @@ function measureProfile(
         ce,
         consumer,
         baselineSucceeded,
-        diagnostic?.code === 'outside-profile' ? 'declined' : 'failed',
+        refusalOutcome(diagnostic?.code),
         diagnostic === undefined
           ? result.error
           : profileMessage(diagnostic.code, diagnostic.message),
@@ -335,9 +336,7 @@ function measureProfile(
       ce,
       consumer,
       baselineSucceeded,
-      isCompileDeclineError(e) && diagnostic.code === 'outside-profile'
-        ? 'declined'
-        : 'failed',
+      isCompileDeclineError(e) ? refusalOutcome(diagnostic.code) : 'failed',
       profileMessage(diagnostic.code, diagnostic.message),
       baselineMessage
     );
@@ -386,7 +385,7 @@ function compileWithPublicSwitch<T extends string, R>(
     recordJsProfileAttempt(
       ce,
       consumer,
-      diagnostic.code === 'outside-profile' ? 'declined' : 'failed',
+      refusalOutcome(diagnostic.code),
       profileMessage(diagnostic.code, diagnostic.message)
     );
     return undefined;

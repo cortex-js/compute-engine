@@ -4,10 +4,12 @@
  * of this directory (`compileSlice()`), for the `javascript` target.
  *
  * Every option of `compile()` is mapped or declined by name
- * (`optionDecline()`); a `Decline` of the slice is the public decline
- * `'outside-profile'`, any other error a `'compile-error'`, and a
- * cancellation is thrown as it is. `compile()` applies `fallback` to both
- * declines. See "Selecting the pipeline" in `README.md`.
+ * (`optionDecline()`); an input with no type is the decline
+ * `'untyped-input'` of the existing compiler, another `Decline` of the
+ * slice the public decline `'outside-profile'`, any other error a
+ * `'compile-error'`, and a cancellation is thrown as it is. `compile()`
+ * applies `fallback` to every decline. See "Selecting the pipeline" in
+ * `README.md`.
  */
 
 import type { Expression } from '../../global-types.js';
@@ -38,7 +40,8 @@ import { broadcastStrideOfType } from '../compiler-type-facts.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
-import { Decline } from './lower-context.js';
+import { throwUntypedInputs } from '../compile-admission.js';
+import { Decline, UntypedInputs } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
 import type { JavaScriptResult } from './print-js.js';
 import { argumentIndex, entryOf, type Program } from './ir.js';
@@ -176,11 +179,13 @@ export function addSymbolDeps(p: Program, deps: Set<string> | undefined) {
 }
 
 /** The error of `compile()` for the error `e` of the slice or the adapter:
- *  a cancellation or a decline of `compile()` as it is, a `Decline` as
- *  `'outside-profile'`, any other error as `'compile-error'`. */
+ *  a cancellation or a decline of `compile()` as it is, an input with no
+ *  type thrown as the existing compiler refuses it (`'untyped-input'`), a
+ *  `Decline` as `'outside-profile'`, any other error as `'compile-error'`. */
 export function sliceError(e: unknown): unknown {
   if ((e as Error | undefined)?.name === 'CancellationError') return e;
   if (e instanceof CompileDeclineError) return e;
+  if (e instanceof UntypedInputs) throwUntypedInputs(e.names);
   if (e instanceof Decline)
     return decline(e.message, {
       ...(e.head === undefined ? {} : { operator: e.head }),

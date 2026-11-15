@@ -273,8 +273,9 @@ describe('IR profile, batch G13: a rational factor is a division (D2)', () => {
       ['Multiply', ['Rational', -2, 3], 'x', 'L'],
       [{ x: 1.5, L: [3, -6] }]
     );
-    // One build for the product, one for the division.
-    expect(r.code.match(/Array\.from/g)?.length).toBe(2);
+    // One build: the product, then the division, of each element.
+    expect(r.code.match(/new Array\(/g)?.length).toBe(1);
+    expect(r.code).toMatch(/\/ 3\)/);
   });
 
   test('a power of two as the denominator stays a product by its double', () => {

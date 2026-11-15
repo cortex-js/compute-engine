@@ -886,7 +886,10 @@ describe('the causes of the third corpus run', () => {
     expect(declined(['Which', ['Less', 'x', 0], ['Tuple', 'x', 1]])).toMatch(
       /arms of two types/
     );
+    ce.pushScope();
+    ce.declare('W', 'real<-10..10>');
     const glsl = compileSlice(box(json), { target: 'glsl' }).code;
+    ce.popScope();
     expect(glsl).toMatch(/vec2\(/);
   });
   test('a Range of real operands: its elements are lo + k·step', () => {

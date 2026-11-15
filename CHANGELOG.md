@@ -32,6 +32,21 @@
 
 ### Behavior Changes
 
+- **The experimental profile `'ir'` refuses an input that has no type.** An
+  input typed `unknown` or `any` was read as a real number. It is now
+  refused, on every target and in every mode, with the diagnostic of the
+  default compiler: `compile(List(w, v), { profile: 'ir' })` with `w` and `v`
+  undeclared answers `untyped-input` ("the inputs `w`, `v` have no type…"),
+  with the names in `value`. A name read through `vars` follows the same
+  rule. A name whose use gives it a type (`x` in `x + 1`), a parameter of a
+  function with no declared type, and an input typed by the option `inputs`
+  compile as before.
+- **In the experimental profile `'ir'`, a `Sum` or a `Product` with a
+  constant bound beyond 2^53 − 1 declines**, as the default compiler does
+  (the interpreter gives `out-of-range`). An element-wise operation on a
+  list now counts its passes for a step budget and checks a deadline, as a
+  loop does: `2L + 1` over 100,000 elements inside
+  `ce.withStepBudget({ steps: 3 }, …)` stops with `step-budget`.
 - **Compiled JavaScript: a `_` position of a loop pattern no longer takes a
   temporary name**, so the temporaries after it in such a loop
   (`Comprehension(…, Element(Tuple(_, j), Q))`) have other names. The values
@@ -56,6 +71,10 @@
   `mk := y ↦ (x ↦ Block(Loop(Assign(i, i + 1), Element(i, [1, 2])), x + y))`,
   the type of `mk(q)` was `(x: unknown) scope -> number`, as if the loop
   wrote a variable outside the function. It is `(x: unknown) -> number`.
+- **In the experimental profile `'ir'`, a sum whose bounds reach 2^53 at run
+  time never returned.** `Sum(Sin(x + k), k = n..n + 2)` at `n = 2^53` ran
+  forever: the index could not advance. A loop now counts its passes and
+  always ends; its value for such bounds is not specified.
 - **In the experimental profile `'ir'`, `Floor(x/49)` at `x = 49` gave 0.**
   A product by a rational constant was compiled as a product by the double
   of the constant (`0.0204… · x`), so a `Floor`, `Ceil`, `Round`, `Mod` or a
@@ -80,6 +99,13 @@
 
 ### Improvements
 
+- **Code of the experimental profile `'ir'` runs lists and loops faster.**
+  A list is built in one preallocated array, two element-wise operations
+  in a row are one loop, and a loop checks its deadline once per 1,024
+  passes, not at each pass. Measured per call: `2L + 1` over 1,000 elements
+  41 µs before, 0.85 µs now (the default compiler: 6.1 µs);
+  `Sum(Sin(L)·x)` over 1,000 elements 47 µs, 5.6 µs (6.0 µs);
+  `Sum(k·x, k = 1..200)` 240 ns, 126 ns (155 ns). The values are the same.
 - **The experimental profile `'ir'` compiles an input that is a list of
   points on JavaScript.** An input of type `list<tuple<real, real>>` (or of
   three or more numbers per tuple, with a stated or a run-time length) is

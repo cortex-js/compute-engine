@@ -32,6 +32,7 @@ import {
 import { functionEffects, type Effect } from './effects.js';
 import {
   decline,
+  isUntyped,
   type Binding,
   type Fn,
   type Lowering,
@@ -617,7 +618,7 @@ export function functionLowering(cx: Lowering) {
       );
     // A scalar, or a list or a tuple (a point) of reals or integers of a
     // stated length.
-    const ir = tupleOrInputType(t, cx.wide);
+    const ir = tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
     if (
       ir === undefined ||
       ir.shape.length > 1 ||

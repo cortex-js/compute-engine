@@ -10,8 +10,9 @@
  * the code that a worker or another page loads.
  *
  * Each operation is spelled with the double arithmetic that the `fold` of
- * its row computes. An element-wise operation is an `Array.from()` over the
- * elements. A list result that can be (or hold) an input is a copy, so that
+ * its row computes. An element-wise operation is an array of its length
+ * filled by a `for` loop, one loop for a chain of such operations of one
+ * shape. A list result that can be (or hold) an input is a copy, so that
  * the host cannot change the input through it.
  *
  * A power, a `Mod` and the functions of `REAL_FUNCTIONS` and
@@ -22,10 +23,12 @@
  * interpreter's by construction. An integral calls `_SYS.irIntegrate`, the
  * existing quadrature and its Monte-Carlo fallback, NaN when that fallback
  * samples an integrand that gave a value that is not finite. Code that
- * draws or integrates is not shippable (`isShippableCode()`). Each loop and
- * build checks the deadline every 1024 iterations (`_SYS.tick()`); with an
- * `iterationBudget`, each pass of a `Loop` also counts one pass of the call
- * (`_SYS.countLoopPass()`), and the entry starts the count again.
+ * draws or integrates is not shippable (`isShippableCode()`). A loop counts
+ * its passes, so it ends for any bounds. A loop or a build adds its passes to
+ * the deadline count of the runtime (`_SYS.tick(n)`), which checks the
+ * deadline every 1024 passes; with an `iterationBudget`, each pass of a
+ * `Loop` also counts one pass of the call (`_SYS.countLoopPass()`), and the
+ * entry starts that count again.
  */
 
 import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
@@ -50,30 +53,75 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const guard = (n: string, what: string) =>
   `if (!(${n} < 4294967296)) throw new RangeError('${what} of more than 2^32 iterations');`;
 
-const tick = '  _SYS.tick();';
+/** The integers of a mode: `zero`, the literal `c` (`5` or `5n`), the
+ *  number of an integer (`toNumber()`), the least of two (`min()`) and the
+ *  integer part of a difference of bounds (`floor()`). */
+type Ints = {
+  zero: string;
+  c: (x: number) => string;
+  toNumber: Wrap;
+  min: (a: string, b: string) => string;
+  floor: Wrap;
+};
+type Wrap = (n: string) => string;
+const NUMBERS: Ints = {
+  zero: '0',
+  c: String,
+  toNumber: (n) => n,
+  min: (a, b) => `Math.min(${a}, ${b})`,
+  floor: (x) => `Math.floor(${x})`,
+};
+const BIGINTS: Ints = {
+  zero: '0n',
+  c: (x) => `${x}n`,
+  toNumber: (n) => `Number(${n})`,
+  min: (a, b) => `(${a} < ${b} ? ${a} : ${b})`,
+  floor: (x) => x,
+};
+
+/** The head of a loop of `n` passes of the index `i` from 0, run in blocks
+ *  `[i_b, i_e)` of at most 1024 passes: the inner `for` (whose brace the
+ *  printer closes) runs a block, and the update of the outer one adds the
+ *  passes of the block to the deadline count of the runtime
+ *  (`_SYS.tick(passes)`, on the deadline frame), so no pass makes a call. A
+ *  block left by a throw is not counted. */
+const blocks = (z: Ints, i: string, n: string): string =>
+  `for (let ${i}_b = ${z.zero}, ${i}_e = ${z.min(z.c(1024), n)}; ${i}_b < ${n}; _SYS.tick(${z.toNumber(`${i}_e - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (let ${i} = ${i}_b; ${i} < ${i}_e; ${i}++) {`;
+
+/** A counted loop of `n` passes, from `lo` while the index is at most `hi`
+ *  (a bound can be a real: `Floor(hi - lo) + 1` passes): the index is
+ *  `lo + i` for a count `i` of the passes, so that the loop ends also where
+ *  `k++` would not advance (from 2^53). */
+const loopOpen =
+  (z: Ints): Syntax['loopOpen'] =>
+  (k, lo, hi) => [
+    `const ${k}_lo = ${lo}, ${k}_n = ${z.floor(`${hi} - ${k}_lo`)} + ${z.c(1)};`,
+    guard(`${k}_n - ${z.c(1)}`, 'a loop'),
+    blocks(z, `${k}_i`, `${k}_n`),
+    `  const ${k} = ${k}_lo + ${k}_i;`,
+  ];
 
 const number = (x: number) =>
   Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
 
-/** The regions `build` and `filter`, whose index starts at `zero`, and
- *  whose count of the list `out` is `count(out)`. */
-const builds = (
-  zero: string,
-  count: (out: string) => string
-): Syntax['regions'] => {
-  const open = (out: string, n: string, k: string) => [
-    `const ${out} = [], ${out}_n = ${n};`,
+/** The regions `build` and `filter` of the integers `z`, whose count of
+ *  the list `out` is `count(out)`. A build fills an array of its length; a
+ *  filter pushes. */
+const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
+  const toNumber = z.toNumber;
+  const open = (out: string, n: string, k: string, filter: boolean) => [
+    `const ${out}_n = ${n};`,
     guard(`${out}_n`, 'a list'),
-    `for (let ${k} = ${zero}; ${k} < ${out}_n; ${k}++) {`,
-    tick,
+    `const ${out} = ${filter ? '[]' : `new Array(${toNumber(`${out}_n`)})`};`,
+    blocks(z, k, `${out}_n`),
   ];
   return {
     build: ({ outs: [out], args: [n], params: [k] }) => ({
-      open: open(out, n, k),
-      close: ([y]) => [`  ${out}.push(${y});`, '}'],
+      open: open(out, n, k, false),
+      close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
     }),
     filter: ({ outs: [c, out], args: [n], params: [k] }) => ({
-      open: open(out, n, k),
+      open: open(out, n, k, true),
       close: ([keep, y]) => [
         `  if (${keep}) ${out}.push(${y});`,
         '}',
@@ -160,7 +208,7 @@ export const JS: Syntax = Object.freeze({
     ),
   },
   regions: {
-    ...builds('0', (out) => `${out}.length`),
+    ...builds(NUMBERS, (out) => `${out}.length`),
     integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
@@ -189,10 +237,13 @@ export const JS: Syntax = Object.freeze({
   positional: (_name, k) => `a${k}`,
   length: (list) => `${list}.length`,
   list: (elements) => `[${elements.join(', ')}]`,
+  // An array of the length, filled in index order by a `for` loop: an
+  // expression, so a function called at once.
   map: (lengths, body) => {
     const index = lengths.map((_, d) => `i${d}`);
     return lengths.reduceRight<string>(
-      (s, n, d) => `Array.from({ length: ${n} }, (_e, ${index[d]}) => ${s})`,
+      (s, n, d) =>
+        `((_n) => { const _r = new Array(_n); ${blocks(NUMBERS, index[d], '_n')} _r[${index[d]}] = ${s}; } return _r; })(${n})`,
       body(index)
     );
   },
@@ -201,12 +252,7 @@ export const JS: Syntax = Object.freeze({
   assign: (name, value) => `${name} = ${value};`,
   ifOpen: (cond) => `if (${cond}) {`,
   elseOpen: '} else {',
-  loopOpen: (k, lo, hi) => [
-    `const ${k}_lo = ${lo}, ${k}_hi = ${hi};`,
-    guard(`${k}_hi - ${k}_lo`, 'a loop'),
-    `for (let ${k} = ${k}_lo; ${k} <= ${k}_hi; ${k}++) {`,
-    tick,
-  ],
+  loopOpen: loopOpen(NUMBERS),
   close: '}',
   ret: (value, _type, copy) =>
     `return ${copy ? `structuredClone(${value})` : value};`,
@@ -264,7 +310,8 @@ export const JS_BIGINT: Syntax = Object.freeze({
     'rangecount': '_SYS.brangeCount($0, $1, $2)',
     'rangestep': '($1 >= $0 ? 1n : -1n)',
   },
-  regions: builds('0n', (out) => `BigInt(${out}.length)`),
+  regions: builds(BIGINTS, (out) => `BigInt(${out}.length)`),
+  loopOpen: loopOpen(BIGINTS),
   constant: (l) =>
     l.lane !== 'integer'
       ? JS.constant(l)

@@ -212,13 +212,14 @@ describe('a decline', () => {
   });
   test('a vars name is the host text, read at each use, never folded', () => {
     const engine = makeEngine();
-    engine.assign('a', 5);
-    const r = compile(box(['Add', ['Multiply', 'a', 'a'], 'x'], engine), {
+    // `av`, not the `a` of the engine, which is declared `any`.
+    engine.assign('av', 5);
+    const r = compile(box(['Add', ['Multiply', 'av', 'av'], 'x'], engine), {
       ...IR,
-      vars: { a: '_.b' },
+      vars: { av: '_.b' },
       fallback: false,
     });
-    // The engine value of `a` is not read; `_.b` is.
+    // The engine value of `av` is not read; `_.b` is.
     expect(r.run!({ x: 1, b: 3 } as never)).toBe(10);
     expect(r.freeSymbols).toEqual(['x']);
     const n = compile(box(['Add', 'y', 1]), {

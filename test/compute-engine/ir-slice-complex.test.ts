@@ -623,10 +623,11 @@ describe('IR slice: the fixes of the review of cov2', () => {
       })
     ).toBe(-1);
     // A comparison of a wide input declines in the complex mode.
+    const wide = { inputs: { u: 'number' } };
     expect(() =>
-      pub(['If', ['Less', 'u', 0], 1, 2], { mode: 'complex' })
+      pub(['If', ['Less', 'u', 0], 1, 2], { mode: 'complex', ...wide })
     ).toThrow(/Less of complex/);
-    expect(pub(['If', ['Less', 'u', 0], 1, 2]).run({ u: -1 })).toBe(1);
+    expect(pub(['If', ['Less', 'u', 0], 1, 2], wide).run({ u: -1 })).toBe(1);
     expect(pub(['Add', 'x', 1], { mode: 'complex' }).run({ x: 1 })).toBe(2);
   });
   test('in the complex mode a complex root of imaginary part 0 is a number', () => {

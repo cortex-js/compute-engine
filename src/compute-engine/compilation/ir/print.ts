@@ -135,8 +135,10 @@ const INLINE_DEPTH = 64;
  * name: a constant at any number of uses; a pure `op` or `list` read once,
  * by an instruction or a yield of its own region, when the use reads its
  * operand once (its spelling names the operand once), is not an
- * element-wise operation (whose operands are read once per element), and
- * no instruction between the definition and the use is effectful. A value
+ * element-wise operation (whose operands are read once per element) unless
+ * the value is an element-wise operation of the same shape (the two are one
+ * build, which computes each element once), and no instruction between the
+ * definition and the use is effectful. A value
  * whose text would nest more than `INLINE_DEPTH` inlined values is named:
  * the printer writes an inlined value by recursion (`Max` of 1,000
  * operands is a chain of 1,000 `max`).
@@ -152,7 +154,8 @@ export function inlinedValues(
   const depth = new Map<V, number>();
   const readsOnce = (user: Instr, v: V): boolean => {
     if (user.k !== 'op') return true;
-    if (threads(rows, p, user)) return false;
+    if (threads(rows, p, user) && !fuses(rows, p, index.def.get(v)!, user))
+      return false;
     const text = spellingOf(syntax, user.op)?.text ?? '';
     return user.args.every(
       (a, k) => a !== v || text.split(`$${k}`).length - 1 <= 1
@@ -192,6 +195,19 @@ const threads = (rows: readonly OperatorRow[], p: Program, i: Instr) =>
   i.k === 'op' &&
   p.types[i.out].shape.length > 0 &&
   rowOfOp(rows, i.op)?.row.threads === true;
+
+/** Whether the element-wise operations `i` and its user `user` have one
+ *  shape, so that an element of `user` reads the element of `i` at its own
+ *  index. */
+const fuses = (
+  rows: readonly OperatorRow[],
+  p: Program,
+  i: Instr,
+  user: Instr
+): boolean =>
+  threads(rows, p, i) &&
+  JSON.stringify(p.types[outsOf(i)[0]].shape) ===
+    JSON.stringify(p.types[outsOf(user)[0]].shape);
 
 /**
  * Whether the list value `v` can be an input of the entry or share an
@@ -304,21 +320,25 @@ export function printProgram(
         const lengths = shape.shape.map((n) =>
           typeof n === 'number' ? String(n) : use(n.v)
         );
-        return syntax.map(lengths, (ix) =>
-          spell(i.op, (k) => {
-            const a = i.args[k];
-            return type(a).shape.length === 0
-              ? use(a)
-              : ix.reduce(
-                  (l, j) => spell('elem', (m) => (m === 0 ? l : j)),
-                  use(a)
-                );
-          })
-        );
+        return syntax.map(lengths, (ix) => element(i, ix));
       }
     }
     throw new Error(`slice printer: ${i.k} is not a value`);
   };
+
+  /** The text of the element at the indices `ix` of the element-wise
+   *  operation `i`; an inlined operand is such an operation (`fuses()`). */
+  const element = (i: Instr & { k: 'op' }, ix: string[]): string =>
+    spell(i.op, (k) => {
+      const a = i.args[k];
+      if (type(a).shape.length === 0) return use(a);
+      if (inlined.has(a))
+        return element(index.def.get(a) as Instr & { k: 'op' }, ix);
+      return ix.reduce(
+        (l, j) => spell('elem', (m) => (m === 0 ? l : j)),
+        use(a)
+      );
+    });
 
   const body = (r: Region, depth: number): string[] => {
     const lines: string[] = [];
