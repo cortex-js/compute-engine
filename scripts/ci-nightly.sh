@@ -6,12 +6,16 @@
 #   bash scripts/ci-nightly.sh install     start it every night at 02:30 (launchd)
 #   bash scripts/ci-nightly.sh uninstall   stop it
 #   bash scripts/ci-nightly.sh run         one run now (what launchd starts)
-#   bash scripts/ci-nightly.sh run [--force] [--commit <sha>]
+#   bash scripts/ci-nightly.sh run [--force] [--commit <sha>] [--priority]
 #                                          --force: run even when the commit
 #                                          already passed; --commit: test that
 #                                          commit, not the main tree's HEAD
 #                                          (the publish check passes the HEAD
-#                                          of the tree it publishes from)
+#                                          of the tree it publishes from);
+#                                          --priority: wait for the box lock
+#                                          in front of every queued session
+#                                          without priority (only the publish
+#                                          check passes it)
 #   bash scripts/ci-nightly.sh status      print the last recorded result
 #
 # Why (user decision 2026-10-28): a session no longer runs the full suite
@@ -325,10 +329,11 @@ on_interrupt() {
 }
 
 cmd_run() {
-  local force="" commit="" sha started log rc result depth_hint="" failed=()
+  local force="" commit="" priority=() sha started log rc result depth_hint="" failed=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --force) force="--force" ;;
+      --priority) priority=(--priority) ;;
       --commit) commit="$2"; shift ;;
       *) echo "ci-nightly: unknown option $1" >&2; return 2 ;;
     esac
@@ -368,7 +373,7 @@ cmd_run() {
   # The wait runs in the background, so that a signal reaches on_interrupt
   # at once (bash runs a trap only after a foreground command ends), and
   # on_interrupt stops it, which removes this run from the lock's queue.
-  node "$BOX_LOCK" acquire "$OWNER" "$HOLD_MINUTES" "compute-engine nightly full suite" --pid="$$" --wait="$WAIT_MINUTES" >> "$log" 2>&1 &
+  node "$BOX_LOCK" acquire "$OWNER" "$HOLD_MINUTES" "compute-engine nightly full suite" --pid="$$" --wait="$WAIT_MINUTES" ${priority[@]+"${priority[@]}"} >> "$log" 2>&1 &
   RUN_CHILD=$!
   wait "$RUN_CHILD"
   rc=$?

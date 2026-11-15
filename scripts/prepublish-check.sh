@@ -243,7 +243,9 @@ if [ "$STATUS" -eq 3 ] && [ "${CE_RELEASE_FORCE:-}" = "1" ]; then
 elif [ "$STATUS" -eq 3 ]; then
   echo "→ Full test suite running (about 7 minutes)"
   SUITE_START=$SECONDS
-  bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)"
+  # --priority: the run waits for the box lock in front of every session
+  # without priority; it does not take the box from its holder.
+  bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)" --priority
   SUITE_TIME=$(minutes_seconds $((SECONDS - SUITE_START)))
   SUITE_NOTE="$SUITE_TIME, with the wait for the box lock"
   release_check

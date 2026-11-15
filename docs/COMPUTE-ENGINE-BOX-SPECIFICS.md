@@ -72,7 +72,9 @@ Exception: a local release (`npm run release`, or `npm publish`) takes no lock
 for its checks and builds (`scripts/release-checks.sh`, `npm run doc`, the
 production build, the VS Code extension), because the user releases only when
 no other session is active. The full test suite of a
-release runs through `scripts/ci-nightly.sh`, which still takes the lock.
+release runs through `scripts/ci-nightly.sh`, which still takes the lock,
+with `--priority`: it waits in front of every queued session without
+priority, and it does not take the box from its holder.
 
 ## §3 Checking for running tests
 

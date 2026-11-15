@@ -289,8 +289,9 @@ script prints. When only step 8 fails, fix the cause and run
 `bash scripts/package-vsix.sh`.
 
 A local release takes no box lock, except for the full test suite, which
-`scripts/ci-nightly.sh` runs under the lock: no other session is active during a
-release. Agents leave commits and publishing to the user unless explicitly
+`scripts/ci-nightly.sh run --priority` runs under the lock: it waits only for the
+current holder and for earlier priority entries, not for the other sessions in
+the queue. Agents leave commits and publishing to the user unless explicitly
 instructed otherwise.
 
 `npm publish` checks release eligibility, runs `scripts/release-checks.sh`

@@ -509,7 +509,9 @@ describeMaybe('PYTHON EXECUTION PARITY (venv)', () => {
       for (const inp of c.inputs) {
         ce.pushScope();
         for (const [k, v] of Object.entries(inp)) {
-          ce.declare(k, 'number');
+          // The type of the compiled function's parameters: a fold reads the
+          // declared type, not the assigned value (`x^0` is 1 for `real`).
+          ce.declare(k, 'real');
           ce.assign(k, v);
         }
         const iv = ce.box(c.expr).N();
